@@ -211,6 +211,27 @@ Channel types: `text`, `voice`, `announcement`
 
 ---
 
+## Server Restart
+
+### Server → Client
+
+```json
+{
+  "type": "server_restart",
+  "payload": {
+    "reason": "update",
+    "delay_seconds": 5
+  }
+}
+```
+
+- `reason` (string): Why the server is restarting. Currently only `"update"`.
+- `delay_seconds` (integer): How many seconds until the server shuts down.
+
+Client behavior: Display a banner/notification ("Server restarting for update..."), then auto-reconnect using existing reconnection logic after the delay expires.
+
+---
+
 ## Initial State (sent after auth_ok)
 
 ### Server → Client

@@ -169,6 +169,52 @@ Query params: `q` (search query), `channel_id` (optional filter), `limit` (defau
 | GET | `/api/admin/settings` | Admin | Get server settings |
 | PATCH | `/api/admin/settings` | Admin | Update server settings |
 | GET | `/api/admin/update-check` | Admin | Check for new server version |
+| GET | `/api/admin/updates` | Admin | Check for available server updates |
+| POST | `/api/admin/updates/apply` | Owner | Download and apply a server update |
+
+### GET /api/admin/updates
+
+Check for available server updates.
+
+Authentication: Bearer token (ADMINISTRATOR permission required)
+
+```json
+// Response 200
+{
+  "current": "v1.0.0",
+  "latest": "v1.2.0",
+  "update_available": true,
+  "release_url": "https://github.com/J3vb/OwnCord/releases/tag/v1.2.0",
+  "download_url": "https://github.com/J3vb/OwnCord/releases/download/v1.2.0/chatserver.exe",
+  "checksum_url": "https://github.com/J3vb/OwnCord/releases/download/v1.2.0/checksums.sha256",
+  "release_notes": "## What's Changed\n..."
+}
+```
+
+Error responses:
+- 401: Unauthorized (missing/invalid token)
+- 403: Forbidden (not an administrator)
+- 502: Bad Gateway (GitHub API unreachable or returned error)
+
+### POST /api/admin/updates/apply
+
+Download and apply a server update. Downloads the new binary, verifies its SHA256 checksum, broadcasts a `server_restart` WebSocket message, then restarts the server with the new binary.
+
+Authentication: Bearer token (Owner role required)
+
+```json
+// Response 200
+{
+  "status": "applying",
+  "version": "v1.2.0"
+}
+```
+
+Error responses:
+- 401: Unauthorized
+- 403: Forbidden (not Owner)
+- 409: Conflict (server is already up to date)
+- 502: Bad Gateway (download failed, checksum mismatch, or missing release assets)
 
 ---
 
