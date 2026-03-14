@@ -2,6 +2,8 @@ package admin
 
 import (
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -207,11 +209,16 @@ func handlePatchUser(database *db.DB) http.HandlerFunc {
 			return
 		}
 
+		actor := actorID(database, r)
+
 		if req.RoleID != nil {
 			if err := database.UpdateUserRole(id, *req.RoleID); err != nil {
 				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update role")
 				return
 			}
+			slog.Info("role changed", "actor_id", actor, "target_user", user.Username, "new_role_id", *req.RoleID)
+			_ = database.LogAudit(actor, "role_change", "user", id,
+				fmt.Sprintf("changed %s role to %d", user.Username, *req.RoleID))
 		}
 
 		if req.Banned != nil {
@@ -224,11 +231,17 @@ func handlePatchUser(database *db.DB) http.HandlerFunc {
 					writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to ban user")
 					return
 				}
+				slog.Warn("user banned", "actor_id", actor, "target_user", user.Username, "reason", reason)
+				_ = database.LogAudit(actor, "user_ban", "user", id,
+					fmt.Sprintf("banned %s: %s", user.Username, reason))
 			} else {
 				if err := database.UnbanUser(id); err != nil {
 					writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to unban user")
 					return
 				}
+				slog.Info("user unbanned", "actor_id", actor, "target_user", user.Username)
+				_ = database.LogAudit(actor, "user_unban", "user", id,
+					fmt.Sprintf("unbanned %s", user.Username))
 			}
 		}
 
@@ -253,6 +266,9 @@ func handleForceLogout(database *db.DB) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to logout user")
 			return
 		}
+		actor := actorID(database, r)
+		slog.Info("force logout", "actor_id", actor, "target_user_id", id)
+		_ = database.LogAudit(actor, "force_logout", "user", id, "all sessions terminated")
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -304,6 +320,10 @@ func handleCreateChannel(database *db.DB) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch created channel")
 			return
 		}
+		actor := actorID(database, r)
+		slog.Info("channel created", "actor_id", actor, "channel", req.Name, "type", req.Type)
+		_ = database.LogAudit(actor, "channel_create", "channel", id,
+			fmt.Sprintf("created #%s (%s)", req.Name, req.Type))
 		writeJSON(w, http.StatusCreated, ch)
 	}
 }
@@ -353,6 +373,11 @@ func handlePatchChannel(database *db.DB) http.HandlerFunc {
 			return
 		}
 
+		actor := actorID(database, r)
+		slog.Info("channel updated", "actor_id", actor, "channel_id", id, "name", req.Name)
+		_ = database.LogAudit(actor, "channel_update", "channel", id,
+			fmt.Sprintf("updated #%s", req.Name))
+
 		updated, _ := database.GetChannel(id)
 		writeJSON(w, http.StatusOK, updated)
 	}
@@ -380,6 +405,10 @@ func handleDeleteChannel(database *db.DB) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete channel")
 			return
 		}
+		actor := actorID(database, r)
+		slog.Warn("channel deleted", "actor_id", actor, "channel_id", id, "name", existing.Name)
+		_ = database.LogAudit(actor, "channel_delete", "channel", id,
+			fmt.Sprintf("deleted #%s", existing.Name))
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -417,11 +446,15 @@ func handlePatchSettings(database *db.DB) http.HandlerFunc {
 			return
 		}
 
+		actor := actorID(database, r)
 		for key, value := range updates {
 			if err := database.SetSetting(key, value); err != nil {
 				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update setting: "+key)
 				return
 			}
+			slog.Info("setting changed", "actor_id", actor, "key", key)
+			_ = database.LogAudit(actor, "setting_change", "setting", 0,
+				fmt.Sprintf("%s updated", key))
 		}
 
 		settings, err := database.GetAllSettings()
@@ -448,6 +481,11 @@ func handleBackup(database *db.DB) http.Handler {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "backup failed")
 			return
 		}
+
+		actor := actorID(database, r)
+		slog.Info("database backup created", "actor_id", actor, "path", backupPath)
+		_ = database.LogAudit(actor, "backup_create", "server", 0,
+			fmt.Sprintf("backup saved to %s", backupPath))
 
 		writeJSON(w, http.StatusOK, map[string]string{
 			"path":    backupPath,
@@ -500,6 +538,20 @@ func queryInt(r *http.Request, key string, defaultVal int) int {
 		return defaultVal
 	}
 	return n
+}
+
+// actorID extracts the authenticated user's ID from the request token.
+// Returns 0 if the actor cannot be determined (should not happen behind auth middleware).
+func actorID(database *db.DB, r *http.Request) int64 {
+	token, ok := extractBearer(r)
+	if !ok {
+		return 0
+	}
+	sess, err := database.GetSessionByTokenHash(auth.HashToken(token))
+	if err != nil || sess == nil {
+		return 0
+	}
+	return sess.UserID
 }
 
 func isExpired(expiresAt string) bool {

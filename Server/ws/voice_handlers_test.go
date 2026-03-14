@@ -290,8 +290,8 @@ func TestVoice_Join_NoPermission_SendsError(t *testing.T) {
 	hub, database := newVoiceHub(t)
 	chanID := seedVoiceChan(t, database, "vc-noperm")
 
-	// Member role (id=4) has permissions 1049089. Bit 9 (0x200 = 512) for CONNECT_VOICE.
-	// Check if member has it: 1049089 & 512 = 512, so member DOES have it.
+	// Member role (id=4) has permissions 1635 (0x663). Bit 9 (0x200 = 512) for CONNECT_VOICE.
+	// Check if member has it: 1635 & 512 = 512, so member DOES have it.
 	// We need a role without it. We'll set a custom role using direct DB exec.
 	// For simplicity, use a user with nil user (no role) to fail perm check.
 	send := make(chan []byte, 16)

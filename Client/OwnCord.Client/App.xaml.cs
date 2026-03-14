@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
 using OwnCord.Client.Services;
@@ -18,11 +18,13 @@ public partial class App : Application
         var profileService = new ProfileService(dataDir);
         var credentialService = new CredentialService();
         var wsService = new WebSocketService();
+        var apiClient = ApiClient.CreateWithSelfSignedTls();
+        var chatService = new ChatService(apiClient, wsService);
 
-        var connectVm = new ConnectViewModel(profileService);
+        var connectVm = new ConnectViewModel(profileService, credentialService);
         var mainVm = new MainViewModel();
 
-        var mainWindow = new MainWindow(connectVm, mainVm, credentialService, wsService);
+        var mainWindow = new MainWindow(connectVm, mainVm, chatService);
         mainWindow.Show();
 
         // Clean up old binary from previous update
@@ -45,4 +47,3 @@ public partial class App : Application
         });
     }
 }
-

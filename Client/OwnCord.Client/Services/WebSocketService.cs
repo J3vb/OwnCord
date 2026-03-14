@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net.WebSockets;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -10,10 +11,19 @@ public sealed class WebSocketService : IWebSocketService, IDisposable
     private ClientWebSocket? _ws;
 
     public bool IsConnected => _ws?.State == WebSocketState.Open;
+    public WebSocketState State => _ws?.State ?? WebSocketState.None;
+
+    public event Action<string>? MessageReceived;
+    public event Action? Disconnected;
 
     public async Task ConnectAsync(string uri, string token, CancellationToken ct = default)
     {
+        _ws?.Dispose();
         _ws = new ClientWebSocket();
+
+        // Accept self-signed TLS certificates (server generates self-signed by default).
+        _ws.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;
+
         await _ws.ConnectAsync(new Uri(uri), ct);
         var auth = JsonSerializer.Serialize(new { type = "auth", payload = new { token } });
         await SendRawAsync(auth, ct);
@@ -25,13 +35,49 @@ public sealed class WebSocketService : IWebSocketService, IDisposable
         await SendRawAsync(json, ct);
     }
 
+    public async Task RunReceiveLoopAsync(CancellationToken ct)
+    {
+        if (_ws is null) return;
+        var buf = new byte[8192];
+
+        try
+        {
+            while (_ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
+            {
+                using var ms = new MemoryStream();
+                WebSocketReceiveResult result;
+                do
+                {
+                    result = await _ws.ReceiveAsync(buf, ct);
+                    if (result.MessageType == WebSocketMessageType.Close)
+                    {
+                        Disconnected?.Invoke();
+                        return;
+                    }
+                    ms.Write(buf, 0, result.Count);
+                } while (!result.EndOfMessage);
+
+                var text = Encoding.UTF8.GetString(ms.ToArray());
+                MessageReceived?.Invoke(text);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown via cancellation.
+        }
+        catch (WebSocketException)
+        {
+            Disconnected?.Invoke();
+        }
+    }
+
     public async IAsyncEnumerable<string> ReceiveAsync([EnumeratorCancellation] CancellationToken ct)
     {
         if (_ws is null) yield break;
         var buf = new byte[8192];
         while (_ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
         {
-            using var ms = new System.IO.MemoryStream();
+            using var ms = new MemoryStream();
             WebSocketReceiveResult result;
             do
             {

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -107,12 +108,19 @@ func handleSetup(database *db.DB) http.HandlerFunc {
 			return
 		}
 
+		// Create default "general" text channel.
+		_, _ = database.CreateChannel("general", "text", "Chat", "Welcome to the server!", 0)
+
 		// Generate a bootstrap invite code so the owner can invite others.
 		inviteCode, err := database.CreateInvite(uid, 0, nil) // unlimited uses, no expiry
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to generate invite code")
 			return
 		}
+
+		slog.Info("server setup completed", "owner", req.Username, "user_id", uid)
+		_ = database.LogAudit(uid, "server_setup", "server", 0,
+			"initial setup: owner account created, default channel and invite generated")
 
 		writeJSON(w, http.StatusCreated, setupResponse{
 			Token:      token,

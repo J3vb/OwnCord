@@ -6,5 +6,8 @@
     <Application.Resources>
         <conv:BoolToVisibilityConverter x:Key="BoolToVisibility"/>
         <conv:IntToVisibilityConverter x:Key="IntToVisibility"/>
+        <conv:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility"/>
+        <conv:NullToVisibilityConverter x:Key="NullToVisibility"/>
+        <conv:InverseBoolConverter x:Key="InverseBool"/>
     </Application.Resources>
 </Application>

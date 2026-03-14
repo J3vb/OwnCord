@@ -57,7 +57,7 @@ CREATE TABLE roles (
 -- Owner:     permissions = 0x7FFFFFFF (all bits set)
 -- Admin:     permissions = 0x3FFFFFFF
 -- Moderator: permissions = 0x000FFFFF
--- Member:    permissions = 0x00100601
+-- Member:    permissions = 0x00000663
 ```
 
 ### Permission Bitfield

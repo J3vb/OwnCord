@@ -46,6 +46,24 @@ func buildPresenceMsg(userID int64, status string) []byte {
 	})
 }
 
+// buildMemberJoin constructs a member_join broadcast for when a user comes online.
+func buildMemberJoin(user *db.User) []byte {
+	var avatarVal interface{}
+	if user.Avatar != nil {
+		avatarVal = *user.Avatar
+	}
+	return buildJSON(map[string]interface{}{
+		"type": "member_join",
+		"payload": map[string]interface{}{
+			"id":       user.ID,
+			"username": user.Username,
+			"avatar":   avatarVal,
+			"status":   "online",
+			"role_id":  user.RoleID,
+		},
+	})
+}
+
 // buildChatMessage constructs a chat_message broadcast envelope.
 func buildChatMessage(msgID, channelID, userID int64, username string, avatar *string, content string, timestamp string, replyTo *int64) []byte {
 	avatarVal := interface{}(nil)

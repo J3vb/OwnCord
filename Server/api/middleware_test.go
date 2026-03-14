@@ -143,7 +143,7 @@ func TestAuthMiddleware_MalformedAuthHeader(t *testing.T) {
 
 func TestRequirePermission_Allowed(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser("carol", "hash", 4) // Member role = 0x00100601
+	uid, _ := database.CreateUser("carol", "hash", 4) // Member role = 0x663
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
 	database.CreateSession(uid, hash, "test", "127.0.0.1")
@@ -165,7 +165,7 @@ func TestRequirePermission_Allowed(t *testing.T) {
 
 func TestRequirePermission_Forbidden(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser("dave", "hash", 4) // Member role = 0x00100601
+	uid, _ := database.CreateUser("dave", "hash", 4) // Member role = 0x663
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
 	database.CreateSession(uid, hash, "test", "127.0.0.1")
@@ -315,7 +315,7 @@ INSERT OR IGNORE INTO roles (id, name, color, permissions, position, is_default)
     (1, 'Owner',     '#E74C3C', 2147483647, 100, 0),
     (2, 'Admin',     '#F39C12', 1073741823,  80, 0),
     (3, 'Moderator', '#3498DB', 1048575,     60, 0),
-    (4, 'Member',    NULL,      1049089,     40, 1);
+    (4, 'Member',    NULL,      1635,     40, 1);
 
 CREATE TABLE IF NOT EXISTS users (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

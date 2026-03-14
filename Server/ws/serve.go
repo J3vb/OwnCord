@@ -40,6 +40,10 @@ func ServeWS(hub *Hub, database *db.DB) http.HandlerFunc {
 		c := newClient(hub, conn, user)
 		hub.Register(c)
 
+		slog.Info("websocket connected", "username", user.Username, "user_id", user.ID, "remote", r.RemoteAddr)
+		_ = database.LogAudit(user.ID, "ws_connect", "user", user.ID,
+			"WebSocket connected from "+r.RemoteAddr)
+
 		if updateErr := database.UpdateUserStatus(user.ID, "online"); updateErr != nil {
 			slog.Warn("ws UpdateUserStatus", "err", updateErr)
 		}
@@ -51,6 +55,7 @@ func ServeWS(hub *Hub, database *db.DB) http.HandlerFunc {
 			_ = conn.Write(ctx, websocket.MessageText, ready)
 		}
 
+		hub.BroadcastToAll(buildMemberJoin(user))
 		hub.BroadcastToAll(buildPresenceMsg(user.ID, "online"))
 
 		// writePump runs in background; readPump blocks.
@@ -89,6 +94,7 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 		hub.Unregister(c)
 		hub.handleVoiceLeave(c)
 		if c.user != nil {
+			slog.Info("websocket disconnected", "username", c.user.Username, "user_id", c.userID)
 			_ = hub.db.UpdateUserStatus(c.userID, "offline")
 			hub.BroadcastToAll(buildPresenceMsg(c.userID, "offline"))
 		}
@@ -190,6 +196,12 @@ func buildReady(database *db.DB) ([]byte, error) {
 		return nil, fmt.Errorf("buildReady ListRoles: %w", err)
 	}
 
+	members, err := database.ListMembers()
+	if err != nil {
+		slog.Warn("buildReady ListMembers", "err", err)
+		members = []db.MemberSummary{}
+	}
+
 	// Collect all active voice states across every voice channel.
 	voiceStates, err := collectAllVoiceStates(database, channels)
 	if err != nil {
@@ -202,7 +214,7 @@ func buildReady(database *db.DB) ([]byte, error) {
 		"type": "ready",
 		"payload": map[string]interface{}{
 			"channels":     channels,
-			"members":      []interface{}{},
+			"members":      members,
 			"voice_states": voiceStates,
 			"roles":        roles,
 		},

@@ -2,52 +2,425 @@
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       Title="Connect">
-    <Grid Background="#1e1f22">
-        <Border VerticalAlignment="Center" HorizontalAlignment="Center"
-                Width="380" Background="#2b2d31" CornerRadius="8" Padding="32">
-            <StackPanel>
-                <TextBlock Text="OwnCord" FontSize="24" FontWeight="Bold"
-                           Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,24"/>
 
-                <!-- Server profile selector -->
-                <TextBlock Text="Saved Servers" Foreground="#b5bac1" Margin="0,0,0,4"/>
-                <ComboBox x:Name="ProfileCombo" DisplayMemberPath="Name"
-                          ItemsSource="{Binding Profiles}"
-                          SelectedItem="{Binding SelectedProfile}"
-                          HorizontalAlignment="Stretch" Margin="0,0,0,16"/>
+    <Page.Resources>
+        <!-- Styled TextBox -->
+        <Style x:Key="ModernTextBox" TargetType="TextBox">
+            <Setter Property="Background" Value="#1e1f22"/>
+            <Setter Property="Foreground" Value="#dbdee1"/>
+            <Setter Property="BorderBrush" Value="#3f4147"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="12,10"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="CaretBrush" Value="#dbdee1"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsFocused" Value="True">
+                                <Setter Property="BorderBrush" Value="#5865f2"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="BorderBrush" Value="#4e5058"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
 
-                <TextBlock Text="Server Address" Foreground="#b5bac1" Margin="0,0,0,4"/>
-                <TextBox Text="{Binding Host, UpdateSourceTrigger=PropertyChanged}"
-                         Margin="0,0,0,12"/>
+        <!-- Styled PasswordBox -->
+        <Style x:Key="ModernPasswordBox" TargetType="PasswordBox">
+            <Setter Property="Background" Value="#1e1f22"/>
+            <Setter Property="Foreground" Value="#dbdee1"/>
+            <Setter Property="BorderBrush" Value="#3f4147"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="12,10"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="CaretBrush" Value="#dbdee1"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="PasswordBox">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsFocused" Value="True">
+                                <Setter Property="BorderBrush" Value="#5865f2"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="BorderBrush" Value="#4e5058"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
 
-                <TextBlock Text="Username" Foreground="#b5bac1" Margin="0,0,0,4"/>
-                <TextBox Text="{Binding Username, UpdateSourceTrigger=PropertyChanged}"
-                         Margin="0,0,0,12"/>
+        <!-- Primary Button -->
+        <Style x:Key="PrimaryButton" TargetType="Button">
+            <Setter Property="Background" Value="#5865f2"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                CornerRadius="4" Padding="16,12">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#4752c4"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#3c45a5"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Background" Value="#4e5058"/>
+                                <Setter Property="Foreground" Value="#80848e"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
 
-                <TextBlock Text="Password" Foreground="#b5bac1" Margin="0,0,0,4"/>
-                <PasswordBox x:Name="PasswordBox" Margin="0,0,0,12"/>
+        <!-- Ghost / secondary Button -->
+        <Style x:Key="GhostButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#b5bac1"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                CornerRadius="4" Padding="10,6">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2b2d31"/>
+                                <Setter Property="Foreground" Value="#dbdee1"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#4e5058"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
 
-                <!-- Invite code (register mode only) -->
-                <StackPanel Visibility="{Binding IsRegisterMode, Converter={StaticResource BoolToVisibility}}">
-                    <TextBlock Text="Invite Code" Foreground="#b5bac1" Margin="0,0,0,4"/>
-                    <TextBox Text="{Binding InviteCode, UpdateSourceTrigger=PropertyChanged}"
-                             Margin="0,0,0,12"/>
+        <!-- Danger Button (for delete) -->
+        <Style x:Key="DangerButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#80848e"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="ToolTip" Value="Delete this server"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                CornerRadius="4" Padding="6,4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#da373c"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Modern CheckBox -->
+        <Style x:Key="ModernCheckBox" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="#b5bac1"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <StackPanel Orientation="Horizontal">
+                            <Border x:Name="CheckBorder" Width="18" Height="18"
+                                    CornerRadius="4" BorderThickness="2"
+                                    BorderBrush="#4e5058" Background="Transparent"
+                                    VerticalAlignment="Center" Margin="0,0,8,0">
+                                <TextBlock x:Name="CheckMark" Text="&#x2713;"
+                                           FontSize="12" FontWeight="Bold"
+                                           Foreground="White" HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" Visibility="Collapsed"/>
+                            </Border>
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="CheckBorder" Property="Background" Value="#5865f2"/>
+                                <Setter TargetName="CheckBorder" Property="BorderBrush" Value="#5865f2"/>
+                                <Setter TargetName="CheckMark" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="CheckBorder" Property="BorderBrush" Value="#5865f2"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Link-style button -->
+        <Style x:Key="LinkButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#00a8fc"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <TextBlock x:Name="Tb" Text="{TemplateBinding Content}"
+                                   Foreground="{TemplateBinding Foreground}"/>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Tb" Property="TextDecorations" Value="Underline"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Page.Resources>
+
+    <Grid Background="#313338">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- ═══ Left panel: Saved servers ═══ -->
+        <Border Grid.Column="0" Background="#2b2d31" Margin="0" Padding="0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- Header -->
+                <Border Grid.Row="0" Padding="20,20,20,12" BorderBrush="#3f4147" BorderThickness="0,0,0,1">
+                    <StackPanel>
+                        <TextBlock Text="YOUR SERVERS" FontSize="11" FontWeight="Bold"
+                                   Foreground="#80848e"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Server list -->
+                <ListBox Grid.Row="1" x:Name="ProfileList"
+                         ItemsSource="{Binding Profiles}"
+                         SelectedItem="{Binding SelectedProfile}"
+                         Background="Transparent" BorderThickness="0"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         Padding="8,8,8,0">
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ListBoxItem">
+                                        <Border x:Name="Bd" Background="Transparent"
+                                                CornerRadius="6" Margin="0,1" Padding="12,10">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+
+                                                <!-- Server icon circle -->
+                                                <Border Grid.Column="0" Width="36" Height="36"
+                                                        CornerRadius="18" Background="#5865f2"
+                                                        Margin="0,0,12,0">
+                                                    <TextBlock Text="S" FontSize="15" FontWeight="Bold"
+                                                               Foreground="White"
+                                                               HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center"/>
+                                                </Border>
+
+                                                <!-- Server name + host -->
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Name}" FontSize="14"
+                                                               FontWeight="SemiBold" Foreground="#dbdee1"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding LastUsername}" FontSize="12"
+                                                               Foreground="#80848e" Margin="0,2,0,0"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                </StackPanel>
+
+                                                <!-- Delete button -->
+                                                <Button Grid.Column="2" Content="X"
+                                                        Style="{StaticResource DangerButton}"
+                                                        VerticalAlignment="Center"
+                                                        x:Name="DeleteBtn" Visibility="Collapsed"
+                                                        Click="DeleteProfile_Click"
+                                                        Tag="{Binding}"/>
+                                            </Grid>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="#35373c"/>
+                                                <Setter TargetName="DeleteBtn" Property="Visibility" Value="Visible"/>
+                                            </Trigger>
+                                            <Trigger Property="IsSelected" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="#404249"/>
+                                            </Trigger>
+                                            <MultiTrigger>
+                                                <MultiTrigger.Conditions>
+                                                    <Condition Property="IsSelected" Value="True"/>
+                                                    <Condition Property="IsMouseOver" Value="True"/>
+                                                </MultiTrigger.Conditions>
+                                                <Setter TargetName="DeleteBtn" Property="Visibility" Value="Visible"/>
+                                            </MultiTrigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
+                </ListBox>
+
+                <!-- Empty state -->
+                <StackPanel Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center"
+                            Visibility="{Binding HasNoProfiles, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock Text="No saved servers" FontSize="14" Foreground="#4e5058"
+                               HorizontalAlignment="Center"/>
+                    <TextBlock Text="Connect to a server and save it" FontSize="12"
+                               Foreground="#3f4147" HorizontalAlignment="Center" Margin="0,4,0,0"/>
                 </StackPanel>
 
-                <!-- Login / Register toggle -->
-                <ToggleButton Content="Register mode"
-                              IsChecked="{Binding IsRegisterMode}"
-                              HorizontalAlignment="Left" Margin="0,0,0,16"/>
-
-                <Button Content="Connect" Command="{Binding ConnectCommand}"
-                        HorizontalAlignment="Stretch" Padding="0,10"
-                        Background="#5865f2" Foreground="White" Click="ConnectButton_Click"/>
-
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-                    <Button Content="Save Profile" Command="{Binding SaveProfileCommand}" Margin="0,0,8,0"/>
-                    <Button Content="Delete" Command="{Binding DeleteProfileCommand}"/>
-                </StackPanel>
-            </StackPanel>
+                <!-- Save current as profile -->
+                <Border Grid.Row="2" Padding="12" BorderBrush="#3f4147" BorderThickness="0,1,0,0">
+                    <Button Content="+ Save Current Server"
+                            Style="{StaticResource GhostButton}"
+                            Command="{Binding SaveProfileCommand}"
+                            HorizontalAlignment="Stretch"/>
+                </Border>
+            </Grid>
         </Border>
+
+        <!-- Divider line -->
+        <Rectangle Grid.Column="1" Width="1" Fill="#1e1f22"/>
+
+        <!-- ═══ Right panel: Login form ═══ -->
+        <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
+            <Border VerticalAlignment="Center" HorizontalAlignment="Center"
+                    Width="340" Padding="0,40">
+                <StackPanel>
+                    <!-- Logo / Title -->
+                    <TextBlock Text="OwnCord" FontSize="28" FontWeight="Bold"
+                               Foreground="White" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Welcome back!" FontSize="14"
+                               Foreground="#b5bac1" HorizontalAlignment="Center"
+                               Margin="0,4,0,32"
+                               Visibility="{Binding IsRegisterMode, Converter={StaticResource InverseBoolToVisibility}}"/>
+                    <TextBlock Text="Create an account" FontSize="14"
+                               Foreground="#b5bac1" HorizontalAlignment="Center"
+                               Margin="0,4,0,32"
+                               Visibility="{Binding IsRegisterMode, Converter={StaticResource BoolToVisibility}}"/>
+
+                    <!-- Error message -->
+                    <Border Visibility="{Binding ErrorMessage, Converter={StaticResource NullToVisibility}}"
+                            Background="#2d1214" CornerRadius="4" Padding="12,10" Margin="0,0,0,16">
+                        <TextBlock Text="{Binding ErrorMessage}" Foreground="#f38688"
+                                   TextWrapping="Wrap" FontSize="13"/>
+                    </Border>
+
+                    <!-- Server Address -->
+                    <TextBlock Text="SERVER ADDRESS" FontSize="11" FontWeight="Bold"
+                               Foreground="#b5bac1" Margin="0,0,0,6"/>
+                    <TextBox Text="{Binding Host, UpdateSourceTrigger=PropertyChanged}"
+                             Style="{StaticResource ModernTextBox}" Margin="0,0,0,16"/>
+
+                    <!-- Username -->
+                    <TextBlock Text="USERNAME" FontSize="11" FontWeight="Bold"
+                               Foreground="#b5bac1" Margin="0,0,0,6"/>
+                    <TextBox Text="{Binding Username, UpdateSourceTrigger=PropertyChanged}"
+                             Style="{StaticResource ModernTextBox}" Margin="0,0,0,16"/>
+
+                    <!-- Password -->
+                    <TextBlock Text="PASSWORD" FontSize="11" FontWeight="Bold"
+                               Foreground="#b5bac1" Margin="0,0,0,6"/>
+                    <PasswordBox x:Name="PasswordBox"
+                                 Style="{StaticResource ModernPasswordBox}" Margin="0,0,0,10"/>
+
+                    <!-- Save password -->
+                    <CheckBox Content="Remember my password" Style="{StaticResource ModernCheckBox}"
+                              IsChecked="{Binding SavePassword}" Margin="0,0,0,16"/>
+
+                    <!-- Invite code (register mode only) -->
+                    <StackPanel Visibility="{Binding IsRegisterMode, Converter={StaticResource BoolToVisibility}}"
+                                Margin="0,0,0,16">
+                        <TextBlock Text="INVITE CODE" FontSize="11" FontWeight="Bold"
+                                   Foreground="#b5bac1" Margin="0,0,0,6"/>
+                        <TextBox Text="{Binding InviteCode, UpdateSourceTrigger=PropertyChanged}"
+                                 Style="{StaticResource ModernTextBox}"/>
+                    </StackPanel>
+
+                    <!-- Connect button -->
+                    <Button Style="{StaticResource PrimaryButton}"
+                            HorizontalAlignment="Stretch" Margin="0,0,0,8"
+                            Click="ConnectButton_Click">
+                        <Button.Content>
+                            <TextBlock>
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Text" Value="Log In"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsRegisterMode}" Value="True">
+                                                <Setter Property="Text" Value="Register"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsLoading}" Value="True">
+                                                <Setter Property="Text" Value="Connecting..."/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Button.Content>
+                    </Button>
+
+                    <!-- Switch to Register -->
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
+                                Visibility="{Binding IsRegisterMode, Converter={StaticResource InverseBoolToVisibility}}">
+                        <TextBlock Text="Need an account? " FontSize="13" Foreground="#80848e"/>
+                        <Button Content="Register" Style="{StaticResource LinkButton}"
+                                Click="SwitchToRegister_Click"/>
+                    </StackPanel>
+
+                    <!-- Switch to Login -->
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
+                                Visibility="{Binding IsRegisterMode, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="Already have an account? " FontSize="13" Foreground="#80848e"/>
+                        <Button Content="Log In" Style="{StaticResource LinkButton}"
+                                Click="SwitchToLogin_Click"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </ScrollViewer>
     </Grid>
 </Page>

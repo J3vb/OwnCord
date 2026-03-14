@@ -11,11 +11,11 @@ import (
 
 // Permission bits (from SCHEMA.md).
 const (
-	permReadMessages    = int64(0x0400)
-	permSendMessages    = int64(0x0800)
-	permManageMessages  = int64(0x2000)
-	permAddReactions    = int64(0x0040)
-	permAdministrator   = int64(0x40000000)
+	permSendMessages   = int64(0x0001) // bit 0
+	permReadMessages   = int64(0x0002) // bit 1
+	permAddReactions   = int64(0x0040) // bit 6
+	permManageMessages = int64(0x10000) // bit 16
+	permAdministrator  = int64(0x40000000) // bit 30
 )
 
 // Rate limit windows.
@@ -62,6 +62,8 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		h.handleTyping(c, env.Payload)
 	case "presence_update":
 		h.handlePresence(c, env.Payload)
+	case "channel_focus":
+		h.handleChannelFocus(c, env.Payload)
 	case "voice_join":
 		h.handleVoiceJoin(c, env.Payload)
 	case "voice_leave":
@@ -148,6 +150,8 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 		avatar = c.user.Avatar
 	}
 
+	slog.Info("message sent", "user", username, "channel_id", channelID, "msg_id", msgID)
+
 	// Ack sender.
 	c.sendMsg(buildChatSendOK(reqID, msgID, msg.Timestamp))
 
@@ -194,6 +198,7 @@ func (h *Hub) handleChatEdit(c *Client, _ string, payload json.RawMessage) {
 	if msg.EditedAt != nil {
 		editedAt = *msg.EditedAt
 	}
+	slog.Info("message edited", "user_id", c.userID, "msg_id", msgID, "channel_id", msg.ChannelID)
 	h.BroadcastToChannel(msg.ChannelID, buildChatEdited(msgID, msg.ChannelID, content, editedAt))
 }
 
@@ -224,6 +229,9 @@ func (h *Hub) handleChatDelete(c *Client, _ string, payload json.RawMessage) {
 		return
 	}
 
+	slog.Info("message deleted", "user_id", c.userID, "msg_id", msgID, "channel_id", msg.ChannelID, "is_mod", isMod)
+	_ = h.db.LogAudit(c.userID, "message_delete", "message", msgID,
+		fmt.Sprintf("channel %d, mod_action=%v", msg.ChannelID, isMod))
 	h.BroadcastToChannel(msg.ChannelID, buildChatDeleted(msgID, msg.ChannelID))
 }
 
@@ -367,4 +375,16 @@ func (h *Hub) broadcastExclude(channelID, excludeUserID int64, msg []byte) {
 		default:
 		}
 	}
+}
+
+// handleChannelFocus sets which channel the client is currently viewing,
+// so channel-scoped broadcasts (chat messages, typing) reach them.
+func (h *Hub) handleChannelFocus(c *Client, payload json.RawMessage) {
+	chID, err := parseChannelID(payload)
+	if err != nil || chID <= 0 {
+		return
+	}
+	c.mu.Lock()
+	c.channelID = chID
+	c.mu.Unlock()
 }

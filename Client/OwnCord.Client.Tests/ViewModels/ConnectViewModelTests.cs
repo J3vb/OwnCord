@@ -6,8 +6,8 @@ namespace OwnCord.Client.Tests.ViewModels;
 
 public sealed class ConnectViewModelTests
 {
-    private static ConnectViewModel MakeVm(IProfileService? svc = null)
-        => new(svc ?? new FakeProfileService());
+    private static ConnectViewModel MakeVm(IProfileService? svc = null, ICredentialService? creds = null)
+        => new(svc ?? new FakeProfileService(), creds ?? new FakeCredentialService());
 
     [Fact]
     public void DefaultMode_IsLogin()
@@ -59,8 +59,9 @@ public sealed class ConnectViewModelTests
         var vm = MakeVm();
         vm.Host = "localhost:8443";
         vm.Username = "alice";
+        vm.Password = "pass123";
         (string host, string user, string? invite, bool isReg) captured = default;
-        vm.ConnectRequested += (h, u, i, r) => captured = (h, u, i, r);
+        vm.ConnectRequested += (h, u, _, i, r) => captured = (h, u, i, r);
         vm.ConnectCommand.Execute(null);
         Assert.Equal("localhost:8443", captured.host);
         Assert.Equal("alice", captured.user);
@@ -74,10 +75,11 @@ public sealed class ConnectViewModelTests
         var vm = MakeVm();
         vm.Host = "localhost:8443";
         vm.Username = "alice";
+        vm.Password = "pass123";
         vm.IsRegisterMode = true;
         vm.InviteCode = "abc123";
         string? capturedInvite = null;
-        vm.ConnectRequested += (_, _, i, _) => capturedInvite = i;
+        vm.ConnectRequested += (_, _, _, i, _) => capturedInvite = i;
         vm.ConnectCommand.Execute(null);
         Assert.Equal("abc123", capturedInvite);
     }
@@ -125,6 +127,128 @@ public sealed class ConnectViewModelTests
         vm.DeleteProfileCommand.Execute(null);
         Assert.Empty(vm.Profiles);
     }
+
+    [Fact]
+    public void Password_PropertyNotifiesChange()
+    {
+        var vm = MakeVm();
+        string? changed = null;
+        vm.PropertyChanged += (_, e) => changed = e.PropertyName;
+        vm.Password = "secret";
+        Assert.Equal("Password", changed);
+        Assert.Equal("secret", vm.Password);
+    }
+
+    [Fact]
+    public void ErrorMessage_PropertyNotifiesChange()
+    {
+        var vm = MakeVm();
+        string? changed = null;
+        vm.PropertyChanged += (_, e) => changed = e.PropertyName;
+        vm.ErrorMessage = "Login failed";
+        Assert.Equal("ErrorMessage", changed);
+        Assert.Equal("Login failed", vm.ErrorMessage);
+    }
+
+    [Fact]
+    public void IsLoading_PropertyNotifiesChange()
+    {
+        var vm = MakeVm();
+        string? changed = null;
+        vm.PropertyChanged += (_, e) => changed = e.PropertyName;
+        vm.IsLoading = true;
+        Assert.Equal("IsLoading", changed);
+        Assert.True(vm.IsLoading);
+    }
+
+    [Fact]
+    public void ConnectCommand_IncludesPasswordInEvent()
+    {
+        var vm = MakeVm();
+        vm.Host = "localhost:8443";
+        vm.Username = "alice";
+        vm.Password = "secret123";
+        string? capturedPassword = null;
+        vm.ConnectRequested += (_, _, password, _, _) => capturedPassword = password;
+        vm.ConnectCommand.Execute(null);
+        Assert.Equal("secret123", capturedPassword);
+    }
+
+    [Fact]
+    public void ConnectCommand_DisabledWhenLoading()
+    {
+        var vm = MakeVm();
+        vm.Host = "localhost:8443";
+        vm.Username = "alice";
+        vm.IsLoading = true;
+        Assert.False(vm.ConnectCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void PersistPassword_SavesWhenChecked()
+    {
+        var creds = new FakeCredentialService();
+        var vm = MakeVm(creds: creds);
+        vm.SavePassword = true;
+        vm.PersistPasswordIfRequested("localhost:8443", "alice", "secret");
+        Assert.Equal("secret", creds.LoadPassword("localhost:8443", "alice"));
+    }
+
+    [Fact]
+    public void PersistPassword_DeletesWhenUnchecked()
+    {
+        var creds = new FakeCredentialService();
+        creds.SavePassword("localhost:8443", "alice", "secret");
+        var vm = MakeVm(creds: creds);
+        vm.SavePassword = false;
+        vm.PersistPasswordIfRequested("localhost:8443", "alice", "secret");
+        Assert.Null(creds.LoadPassword("localhost:8443", "alice"));
+    }
+
+    [Fact]
+    public void SelectProfile_LoadsSavedPassword()
+    {
+        var creds = new FakeCredentialService();
+        creds.SavePassword("192.168.1.10:8443", "bob", "pass123");
+        var svc = new FakeProfileService();
+        var profile = ServerProfile.Create("Home", "192.168.1.10:8443", "bob");
+        svc.Saved = [profile];
+        var vm = MakeVm(svc, creds);
+        vm.SelectedProfile = profile;
+        Assert.Equal("pass123", vm.Password);
+        Assert.True(vm.SavePassword);
+    }
+
+    [Fact]
+    public void SelectProfile_ClearsPasswordWhenNoneSaved()
+    {
+        var creds = new FakeCredentialService();
+        var svc = new FakeProfileService();
+        var profile = ServerProfile.Create("Home", "192.168.1.10:8443", "bob");
+        svc.Saved = [profile];
+        var vm = MakeVm(svc, creds);
+        vm.Password = "old";
+        vm.SavePassword = true;
+        vm.SelectedProfile = profile;
+        Assert.Equal(string.Empty, vm.Password);
+        Assert.False(vm.SavePassword);
+    }
+}
+
+internal sealed class FakeCredentialService : ICredentialService
+{
+    private readonly Dictionary<string, string> _tokens = new();
+    private readonly Dictionary<string, string> _passwords = new();
+
+    private static string Key(string host, string username) => $"{host}:{username}";
+
+    public void SaveToken(string host, string username, string token) => _tokens[Key(host, username)] = token;
+    public string? LoadToken(string host, string username) => _tokens.GetValueOrDefault(Key(host, username));
+    public void DeleteToken(string host, string username) => _tokens.Remove(Key(host, username));
+
+    public void SavePassword(string host, string username, string password) => _passwords[Key(host, username)] = password;
+    public string? LoadPassword(string host, string username) => _passwords.GetValueOrDefault(Key(host, username));
+    public void DeletePassword(string host, string username) => _passwords.Remove(Key(host, username));
 }
 
 internal sealed class FakeProfileService : IProfileService

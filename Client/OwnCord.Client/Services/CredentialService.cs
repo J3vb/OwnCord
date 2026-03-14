@@ -23,12 +23,12 @@ public sealed class CredentialService : ICredentialService
         Directory.CreateDirectory(_dir);
         var plain = Encoding.UTF8.GetBytes(token);
         var encrypted = ProtectedData.Protect(plain, GetEntropy(host, username), DataProtectionScope.CurrentUser);
-        File.WriteAllBytes(CredPath(host, username), encrypted);
+        File.WriteAllBytes(CredPath(host, username, "tok"), encrypted);
     }
 
     public string? LoadToken(string host, string username)
     {
-        var path = CredPath(host, username);
+        var path = CredPath(host, username, "tok");
         if (!File.Exists(path)) return null;
         try
         {
@@ -41,14 +41,41 @@ public sealed class CredentialService : ICredentialService
 
     public void DeleteToken(string host, string username)
     {
-        var path = CredPath(host, username);
+        var path = CredPath(host, username, "tok");
         if (File.Exists(path)) File.Delete(path);
     }
 
-    private string CredPath(string host, string username)
+    public void SavePassword(string host, string username, string password)
+    {
+        Directory.CreateDirectory(_dir);
+        var plain = Encoding.UTF8.GetBytes(password);
+        var encrypted = ProtectedData.Protect(plain, GetEntropy(host, username), DataProtectionScope.CurrentUser);
+        File.WriteAllBytes(CredPath(host, username, "pwd"), encrypted);
+    }
+
+    public string? LoadPassword(string host, string username)
+    {
+        var path = CredPath(host, username, "pwd");
+        if (!File.Exists(path)) return null;
+        try
+        {
+            var encrypted = File.ReadAllBytes(path);
+            var plain = ProtectedData.Unprotect(encrypted, GetEntropy(host, username), DataProtectionScope.CurrentUser);
+            return Encoding.UTF8.GetString(plain);
+        }
+        catch { return null; }
+    }
+
+    public void DeletePassword(string host, string username)
+    {
+        var path = CredPath(host, username, "pwd");
+        if (File.Exists(path)) File.Delete(path);
+    }
+
+    private string CredPath(string host, string username, string prefix = "tok")
     {
         var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{host}:{username}")));
-        return Path.Combine(_dir, key + ".dat");
+        return Path.Combine(_dir, $"{prefix}_{key}.dat");
     }
 
     private static byte[] GetEntropy(string host, string username)

@@ -136,6 +136,11 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 			return
 		}
 
+		ip := clientIP(r)
+		slog.Info("user registered", "username", req.Username, "user_id", uid, "ip", ip)
+		_ = database.LogAudit(uid, "user_register", "user", uid,
+			"new account created via invite")
+
 		// Issue session.
 		token, err := auth.GenerateToken()
 		if err != nil {
@@ -147,7 +152,6 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 		}
 
 		device := r.Header.Get("User-Agent")
-		ip := clientIP(r)
 		if _, err := database.CreateSession(uid, auth.HashToken(token), device, ip); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "SERVER_ERROR",
@@ -221,6 +225,9 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter) http.HandlerFunc {
 		limiter.Reset(failKey)
 
 		if user.Banned {
+			slog.Warn("banned user login attempt", "username", user.Username, "user_id", user.ID, "ip", ip)
+			_ = database.LogAudit(user.ID, "login_blocked_banned", "user", user.ID,
+				"banned user attempted login from "+ip)
 			writeJSON(w, http.StatusForbidden, errorResponse{
 				Error:   "FORBIDDEN",
 				Message: "your account has been suspended",
@@ -248,6 +255,9 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter) http.HandlerFunc {
 		}
 
 		_ = database.UpdateUserStatus(user.ID, "online")
+		slog.Info("user logged in", "username", user.Username, "user_id", user.ID, "ip", ip)
+		_ = database.LogAudit(user.ID, "user_login", "user", user.ID,
+			"logged in from "+ip)
 		writeJSON(w, http.StatusOK, authSuccessResponse{
 			Token: token,
 			User:  toUserResponse(user),
@@ -274,6 +284,9 @@ func handleLogout(database *db.DB) http.HandlerFunc {
 			})
 			return
 		}
+
+		slog.Info("user logged out", "user_id", sess.UserID)
+		_ = database.LogAudit(sess.UserID, "user_logout", "user", sess.UserID, "")
 
 		w.WriteHeader(http.StatusNoContent)
 	}

@@ -287,6 +287,39 @@ func (d *DB) RevokeInvite(code string) error {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// MemberSummary is a lightweight user shape for the ready payload.
+type MemberSummary struct {
+	ID       int64   `json:"id"`
+	Username string  `json:"username"`
+	Avatar   *string `json:"avatar"`
+	Status   string  `json:"status"`
+	RoleID   int64   `json:"role_id"`
+}
+
+// ListMembers returns all non-banned users as lightweight summaries.
+func (d *DB) ListMembers() ([]MemberSummary, error) {
+	rows, err := d.sqlDB.Query(
+		`SELECT id, username, avatar, status, role_id FROM users WHERE banned = 0 ORDER BY username ASC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ListMembers: %w", err)
+	}
+	defer rows.Close()
+
+	var members []MemberSummary
+	for rows.Next() {
+		var m MemberSummary
+		if err := rows.Scan(&m.ID, &m.Username, &m.Avatar, &m.Status, &m.RoleID); err != nil {
+			return nil, fmt.Errorf("ListMembers scan: %w", err)
+		}
+		members = append(members, m)
+	}
+	if members == nil {
+		members = []MemberSummary{}
+	}
+	return members, nil
+}
+
 // generateInviteCode produces a random 8-byte (16-char hex) code.
 func generateInviteCode() (string, error) {
 	b := make([]byte, 8)

@@ -17,7 +17,7 @@ VALUES
     (1, 'Owner',     '#E74C3C', 0x7FFFFFFF, 100, 0),
     (2, 'Admin',     '#F39C12', 0x3FFFFFFF,  80, 0),
     (3, 'Moderator', '#3498DB', 0x000FFFFF,  60, 0),
-    (4, 'Member',    NULL,      0x00100601,  40, 1);
+    (4, 'Member',    NULL,      0x00000663,  40, 1);
 
 CREATE TABLE IF NOT EXISTS users (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -3,6 +3,19 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       Title="OwnCord">
     <Grid Background="#313338">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Connection status bar (visible when disconnected) -->
+        <Border Grid.Row="0" Background="#f0b232" Padding="8,4"
+                Visibility="{Binding HasConnectionIssue, Converter={StaticResource BoolToVisibility}}">
+            <TextBlock Text="{Binding ConnectionStatus}" Foreground="#1e1f22"
+                       HorizontalAlignment="Center" FontSize="12"/>
+        </Border>
+
+        <Grid Grid.Row="1">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="200"/>
             <ColumnDefinition Width="*"/>
@@ -140,6 +153,7 @@
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>
+        </Grid>
         </Grid>
     </Grid>
 </Page>
