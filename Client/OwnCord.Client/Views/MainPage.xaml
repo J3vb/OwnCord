@@ -1,0 +1,145 @@
+<Page x:Class="OwnCord.Client.Views.MainPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      Title="OwnCord">
+    <Grid Background="#313338">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="200"/>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="180"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- Channel sidebar -->
+        <Grid Grid.Column="0" Background="#2b2d31">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="48"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <Border Grid.Row="0" Background="#1e1f22" BorderThickness="0,0,0,1" BorderBrush="#1e1f22">
+                <TextBlock Text="OwnCord" Foreground="White" FontWeight="SemiBold"
+                           VerticalAlignment="Center" Margin="16,0"/>
+            </Border>
+            <ListBox Grid.Row="1" ItemsSource="{Binding Channels}"
+                     SelectedItem="{Binding SelectedChannel}"
+                     Background="Transparent" BorderThickness="0">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Orientation="Horizontal" Margin="8,2">
+                            <TextBlock Text="# " Foreground="#6d6f78" FontSize="14"/>
+                            <TextBlock Text="{Binding Name}" Foreground="#949ba4" FontSize="14"/>
+                            <Border Visibility="{Binding UnreadCount, Converter={StaticResource IntToVisibility}}"
+                                    Background="#5865f2" CornerRadius="8" Margin="8,0,0,0" Padding="6,1">
+                                <TextBlock Text="{Binding UnreadCount}" Foreground="White" FontSize="10"/>
+                            </Border>
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Grid>
+
+        <!-- Message area -->
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="48"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="72"/>
+            </Grid.RowDefinitions>
+
+            <!-- Channel header -->
+            <Border Grid.Row="0" BorderThickness="0,0,0,1" BorderBrush="#1e1f22">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0">
+                    <TextBlock Text="# " Foreground="#6d6f78" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding SelectedChannel.Name}" Foreground="White" FontWeight="SemiBold"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Messages -->
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <ItemsControl ItemsSource="{Binding Messages}" Padding="16">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Horizontal" Margin="0,4">
+                                <!-- Avatar circle -->
+                                <Ellipse Width="36" Height="36" Margin="0,0,12,0" Fill="#5865f2"/>
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding Author.Username}"
+                                                   Foreground="White" FontWeight="SemiBold" Margin="0,0,8,0"/>
+                                        <TextBlock Text="{Binding Timestamp, StringFormat={}{0:HH:mm}}"
+                                                   Foreground="#6d6f78" FontSize="11" VerticalAlignment="Bottom"/>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding Content}" Foreground="#dbdee1"
+                                               TextWrapping="Wrap" MaxWidth="600"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <!-- Typing indicator -->
+            <TextBlock Grid.Row="2"
+                       Text="{Binding TypingText}"
+                       Visibility="{Binding IsTyping, Converter={StaticResource BoolToVisibility}}"
+                       Foreground="#b5bac1" FontSize="12" Margin="16,2" FontStyle="Italic"/>
+
+            <!-- Message input -->
+            <Border Grid.Row="3" Background="#383a40" CornerRadius="8" Margin="16,0,16,16" Padding="12,8">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBox Grid.Column="0"
+                             Text="{Binding MessageInput, UpdateSourceTrigger=PropertyChanged}"
+                             Background="Transparent" BorderThickness="0"
+                             Foreground="White" VerticalAlignment="Center"
+                             AcceptsReturn="False"/>
+                    <Button Grid.Column="1" Content="Send"
+                            Command="{Binding SendMessageCommand}"
+                            Background="#5865f2" Foreground="White"
+                            Margin="8,0,0,0"/>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Member list -->
+        <Grid Grid.Column="2" Background="#2b2d31">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="48"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <TextBlock Grid.Row="0" Text="Members" Foreground="#b5bac1" FontWeight="SemiBold"
+                       VerticalAlignment="Center" Margin="16,0"/>
+            <ListBox Grid.Row="1" ItemsSource="{Binding Members}"
+                     Background="Transparent" BorderThickness="0">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Orientation="Horizontal" Margin="8,3">
+                            <Ellipse Width="8" Height="8" Margin="0,0,8,0">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="#6d6f78"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Status}" Value="Online">
+                                                <Setter Property="Fill" Value="#23a55a"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding Status}" Value="Idle">
+                                                <Setter Property="Fill" Value="#f0b232"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding Status}" Value="Dnd">
+                                                <Setter Property="Fill" Value="#f23f43"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Text="{Binding Username}" Foreground="#949ba4" FontSize="13"/>
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Grid>
+    </Grid>
+</Page>

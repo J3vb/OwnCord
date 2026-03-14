@@ -1,0 +1,54 @@
+{
+  "version": 2,
+  "dgSpecHash": "K+dtNnOVYHM=",
+  "success": false,
+  "projectFilePath": "D:\\Local-Lab\\Coding\\Repos\\OwnCord\\Client\\OwnCord.Client.Tests\\OwnCord.Client.Tests.csproj",
+  "expectedPackageFiles": [],
+  "logs": [
+    {
+      "code": "NU1100",
+      "level": "Error",
+      "message": "Unable to resolve 'coverlet.collector (>= 6.0.2)' for 'net8.0-windows7.0'.",
+      "libraryId": "coverlet.collector",
+      "targetGraphs": [
+        "net8.0-windows7.0"
+      ]
+    },
+    {
+      "code": "NU1100",
+      "level": "Error",
+      "message": "Unable to resolve 'Microsoft.NET.Test.Sdk (>= 17.12.0)' for 'net8.0-windows7.0'.",
+      "libraryId": "Microsoft.NET.Test.Sdk",
+      "targetGraphs": [
+        "net8.0-windows7.0"
+      ]
+    },
+    {
+      "code": "NU1100",
+      "level": "Error",
+      "message": "Unable to resolve 'xunit (>= 2.9.3)' for 'net8.0-windows7.0'.",
+      "libraryId": "xunit",
+      "targetGraphs": [
+        "net8.0-windows7.0"
+      ]
+    },
+    {
+      "code": "NU1100",
+      "level": "Error",
+      "message": "Unable to resolve 'xunit.runner.visualstudio (>= 2.8.2)' for 'net8.0-windows7.0'.",
+      "libraryId": "xunit.runner.visualstudio",
+      "targetGraphs": [
+        "net8.0-windows7.0"
+      ]
+    },
+    {
+      "code": "NU1100",
+      "level": "Error",
+      "message": "Unable to resolve 'Moq (>= 4.20.72)' for 'net8.0-windows7.0'.",
+      "libraryId": "Moq",
+      "targetGraphs": [
+        "net8.0-windows7.0"
+      ]
+    }
+  ]
+}
