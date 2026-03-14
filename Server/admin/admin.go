@@ -27,8 +27,10 @@ func NewHandler(database *db.DB) http.Handler {
 	// Admin REST API mounted at /api
 	r.Mount("/api", NewAdminAPI(database))
 
-	// Static files — serve from the embedded FS sub-tree.
-	staticFS, err := fs.Sub(staticFiles, "admin/static")
+	// Static files — serve from the "static" sub-tree of the embedded FS.
+	// The //go:embed static directive in this package embeds as "static/…",
+	// not "admin/static/…", so we strip just "static".
+	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
 		// This is a programming error (wrong embed path) and should never
 		// happen in production. Panic so it surfaces immediately in tests.
