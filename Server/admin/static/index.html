@@ -237,6 +237,15 @@
     <!-- Dashboard -->
     <section id="section-dashboard">
       <h1>Dashboard</h1>
+      <div id="update-banner" style="display:none; background:#fff3cd; border:1px solid #ffc107; border-radius:8px; padding:16px; margin-bottom:20px; align-items:center; justify-content:space-between;">
+        <div>
+          <strong>Update Available!</strong>
+          <span id="update-version-text"></span>
+        </div>
+        <div>
+          <button onclick="applyUpdate()" style="background:#28a745; color:#fff; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:bold;">Apply Update</button>
+        </div>
+      </div>
       <div class="card-grid" id="stats-cards">
         <div class="card"><div class="label">Total Users</div><div class="value" id="stat-users">-</div></div>
         <div class="card"><div class="label">Total Messages</div><div class="value" id="stat-messages">-</div></div>
@@ -437,6 +446,55 @@ async function loadDashboard() {
     document.getElementById('stat-db').textContent = fmtBytes(s.db_size_bytes);
   } catch (e) {
     console.error('stats:', e);
+  }
+  checkForUpdate();
+}
+
+async function checkForUpdate() {
+  try {
+    const resp = await fetch('/admin/api/updates', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data.update_available) {
+      document.getElementById('update-version-text').textContent =
+        ' Version ' + data.latest + ' is available (current: ' + data.current + ')';
+      document.getElementById('update-banner').style.display = 'flex';
+    }
+  } catch (e) {
+    console.error('Update check failed:', e);
+  }
+}
+
+async function applyUpdate() {
+  if (!confirm('This will restart the server. All connected users will be briefly disconnected. Continue?')) {
+    return;
+  }
+
+  const banner = document.getElementById('update-banner');
+  banner.innerHTML = '<div><strong>Applying update...</strong> Downloading and restarting server.</div>';
+
+  try {
+    const resp = await fetch('/admin/api/updates/apply', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (resp.ok) {
+      banner.innerHTML = '<div><strong>Update applied!</strong> Server is restarting. This page will reload in 10 seconds.</div>';
+      banner.style.background = '#d4edda';
+      banner.style.borderColor = '#28a745';
+      setTimeout(() => location.reload(), 10000);
+    } else {
+      const err = await resp.json();
+      banner.innerHTML = '<div><strong>Update failed:</strong> ' + (err.message || 'Unknown error') + '</div>';
+      banner.style.background = '#f8d7da';
+      banner.style.borderColor = '#dc3545';
+    }
+  } catch (e) {
+    banner.innerHTML = '<div><strong>Update failed:</strong> ' + e.message + '</div>';
+    banner.style.background = '#f8d7da';
+    banner.style.borderColor = '#dc3545';
   }
 }
 
