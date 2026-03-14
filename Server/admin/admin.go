@@ -1,16 +1,47 @@
-// Package admin provides the embedded admin panel static file server.
-// Full admin API implementation follows in Phase 6.
+// Package admin provides the embedded admin panel static file server and the
+// admin REST API for the OwnCord server.
 package admin
 
 import (
 	"embed"
+	"io/fs"
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/owncord/server/db"
 )
 
 //go:embed static
 var staticFiles embed.FS
 
-// Handler returns an http.Handler that serves the embedded admin panel static files.
+// NewHandler returns an http.Handler that serves both the admin REST API and
+// the embedded admin panel static files.
+//
+// Routes:
+//
+//	/api/*  — admin REST API (all require ADMINISTRATOR permission)
+//	/*      — embedded static files (SPA; index.html for unknown paths)
+func NewHandler(database *db.DB) http.Handler {
+	r := chi.NewRouter()
+
+	// Admin REST API mounted at /api
+	r.Mount("/api", NewAdminAPI(database))
+
+	// Static files — serve from the embedded FS sub-tree.
+	staticFS, err := fs.Sub(staticFiles, "admin/static")
+	if err != nil {
+		// This is a programming error (wrong embed path) and should never
+		// happen in production. Panic so it surfaces immediately in tests.
+		panic("admin: failed to create static sub-FS: " + err.Error())
+	}
+	r.Handle("/*", http.FileServer(http.FS(staticFS)))
+
+	return r
+}
+
+// Handler returns the admin panel http.Handler using a nil database.
+// Deprecated: use NewHandler instead. Kept for backwards-compat with any
+// caller that already imported this symbol before Phase 6.
 func Handler() http.Handler {
 	return http.FileServer(http.FS(staticFiles))
 }

@@ -1,18 +1,684 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OwnCord Admin Panel</title>
-    <style>
-        body { font-family: sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
-        h1 { color: #2c3e50; }
-        p { color: #7f8c8d; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OwnCord Admin</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:         #1e1f22;
+      --sidebar-bg: #2b2d31;
+      --card-bg:    #313338;
+      --border:     #3f4147;
+      --text:       #dbdee1;
+      --muted:      #949ba4;
+      --accent:     #5865f2;
+      --accent-h:   #4752c4;
+      --danger:     #ed4245;
+      --success:    #23a55a;
+      --warning:    #f0b232;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ── */
+    #sidebar {
+      width: 220px;
+      min-width: 220px;
+      background: var(--sidebar-bg);
+      display: flex;
+      flex-direction: column;
+      padding: 16px 0;
+      border-right: 1px solid var(--border);
+    }
+
+    #sidebar h2 {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--muted);
+      padding: 8px 16px 4px;
+    }
+
+    #sidebar nav a {
+      display: block;
+      padding: 8px 16px;
+      color: var(--text);
+      text-decoration: none;
+      border-radius: 4px;
+      margin: 2px 8px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    #sidebar nav a:hover,
+    #sidebar nav a.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    /* ── Main content ── */
+    #main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+    }
+
+    h1 { font-size: 22px; margin-bottom: 20px; }
+
+    /* ── Cards ── */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+    }
+
+    .card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+    .card .value { font-size: 28px; font-weight: 700; margin-top: 6px; }
+
+    /* ── Tables ── */
+    .table-wrap { overflow-x: auto; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th {
+      text-align: left;
+      padding: 10px 12px;
+      background: var(--card-bg);
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      border-bottom: 1px solid var(--border);
+    }
+
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    tr:hover td { background: rgba(255,255,255,.03); }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-block;
+      padding: 6px 14px;
+      border: none;
+      border-radius: 4px;
+      font-size: 13px;
+      cursor: pointer;
+      font-weight: 500;
+      background: var(--accent);
+      color: #fff;
+      text-decoration: none;
+    }
+
+    .btn:hover { background: var(--accent-h); }
+    .btn-danger { background: var(--danger); }
+    .btn-danger:hover { background: #c03537; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .btn-secondary { background: var(--card-bg); border: 1px solid var(--border); }
+    .btn-secondary:hover { background: var(--border); }
+
+    /* ── Forms ── */
+    .form-group { margin-bottom: 16px; }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; font-weight: 600; letter-spacing: .05em; }
+    input, select, textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      padding: 8px 12px;
+      font-size: 14px;
+    }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+
+    /* ── Login overlay ── */
+    #login-overlay {
+      position: fixed; inset: 0;
+      background: var(--bg);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 100;
+    }
+
+    #login-box {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 32px;
+      width: 360px;
+    }
+
+    #login-box h2 { margin-bottom: 20px; font-size: 20px; }
+    #login-error { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 20px; }
+
+    /* ── Pagination ── */
+    .pagination { display: flex; gap: 8px; margin-top: 16px; align-items: center; }
+    .pagination .page-info { color: var(--muted); font-size: 13px; }
+
+    /* ── Alerts ── */
+    .alert {
+      padding: 10px 16px;
+      border-radius: 6px;
+      margin-bottom: 16px;
+      font-size: 14px;
+    }
+    .alert-success { background: rgba(35, 165, 90, .15); border: 1px solid var(--success); color: var(--success); }
+    .alert-danger { background: rgba(237, 66, 69, .15); border: 1px solid var(--danger); color: var(--danger); }
+
+    /* ── Section heading ── */
+    .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+
+    /* ── Hidden ── */
+    .hidden { display: none !important; }
+
+    /* ── Inline form row ── */
+    .form-row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .form-row .form-group { flex: 1; min-width: 140px; }
+  </style>
 </head>
 <body>
-    <h1>OwnCord Admin Panel</h1>
-    <p>Admin panel frontend — coming in Phase 6.</p>
-    <p>For now, use the REST API endpoints under <code>/api/admin/</code> directly.</p>
+
+<!-- Login overlay -->
+<div id="login-overlay">
+  <div id="login-box">
+    <h2>OwnCord Admin</h2>
+    <div class="form-group">
+      <label for="login-username">Username</label>
+      <input id="login-username" type="text" autocomplete="username" placeholder="admin">
+    </div>
+    <div class="form-group">
+      <label for="login-password">Password</label>
+      <input id="login-password" type="password" autocomplete="current-password" placeholder="••••••••">
+    </div>
+    <button class="btn" id="login-btn" style="width:100%">Sign In</button>
+    <div id="login-error"></div>
+  </div>
+</div>
+
+<!-- Admin shell -->
+<div id="app" class="hidden" style="display:flex;width:100%">
+  <div id="sidebar">
+    <h2>OwnCord</h2>
+    <nav id="nav">
+      <a href="#" data-section="dashboard" class="active">Dashboard</a>
+      <a href="#" data-section="users">Users</a>
+      <a href="#" data-section="channels">Channels</a>
+      <a href="#" data-section="audit-log">Audit Log</a>
+      <a href="#" data-section="settings">Settings</a>
+    </nav>
+  </div>
+
+  <div id="main">
+    <!-- Dashboard -->
+    <section id="section-dashboard">
+      <h1>Dashboard</h1>
+      <div class="card-grid" id="stats-cards">
+        <div class="card"><div class="label">Total Users</div><div class="value" id="stat-users">-</div></div>
+        <div class="card"><div class="label">Total Messages</div><div class="value" id="stat-messages">-</div></div>
+        <div class="card"><div class="label">Total Channels</div><div class="value" id="stat-channels">-</div></div>
+        <div class="card"><div class="label">DB Size</div><div class="value" id="stat-db">-</div></div>
+      </div>
+    </section>
+
+    <!-- Users -->
+    <section id="section-users" class="hidden">
+      <div class="section-header">
+        <h1>Users</h1>
+      </div>
+      <div id="users-alert"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>ID</th><th>Username</th><th>Role</th><th>Status</th><th>Banned</th><th>Actions</th></tr>
+          </thead>
+          <tbody id="users-tbody"></tbody>
+        </table>
+      </div>
+      <div class="pagination">
+        <button class="btn btn-secondary btn-sm" id="users-prev">Prev</button>
+        <span class="page-info" id="users-page-info"></span>
+        <button class="btn btn-secondary btn-sm" id="users-next">Next</button>
+      </div>
+    </section>
+
+    <!-- Channels -->
+    <section id="section-channels" class="hidden">
+      <div class="section-header">
+        <h1>Channels</h1>
+        <button class="btn btn-sm" id="show-create-channel">+ New Channel</button>
+      </div>
+      <div id="create-channel-form" class="card hidden" style="margin-bottom:20px;padding:20px">
+        <h2 style="font-size:16px;margin-bottom:16px">Create Channel</h2>
+        <div class="form-row">
+          <div class="form-group"><label>Name</label><input id="ch-name" type="text" placeholder="general"></div>
+          <div class="form-group"><label>Type</label>
+            <select id="ch-type">
+              <option value="text">Text</option>
+              <option value="voice">Voice</option>
+              <option value="announcement">Announcement</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Category</label><input id="ch-category" type="text" placeholder="General"></div>
+          <div class="form-group"><label>Topic</label><input id="ch-topic" type="text"></div>
+          <div class="form-group"><label>Position</label><input id="ch-position" type="number" value="0"></div>
+        </div>
+        <button class="btn btn-sm" id="create-channel-btn">Create</button>
+        <button class="btn btn-secondary btn-sm" id="cancel-create-channel">Cancel</button>
+      </div>
+      <div id="channels-alert"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>ID</th><th>Name</th><th>Type</th><th>Category</th><th>Archived</th><th>Actions</th></tr>
+          </thead>
+          <tbody id="channels-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Audit Log -->
+    <section id="section-audit-log" class="hidden">
+      <h1>Audit Log</h1>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th></tr>
+          </thead>
+          <tbody id="audit-tbody"></tbody>
+        </table>
+      </div>
+      <div class="pagination">
+        <button class="btn btn-secondary btn-sm" id="audit-prev">Prev</button>
+        <span class="page-info" id="audit-page-info"></span>
+        <button class="btn btn-secondary btn-sm" id="audit-next">Next</button>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="section-settings" class="hidden">
+      <h1>Settings</h1>
+      <div id="settings-alert"></div>
+      <div class="card" style="max-width:600px;padding:24px">
+        <div class="form-group">
+          <label>Server Name</label>
+          <input id="setting-server_name" type="text">
+        </div>
+        <div class="form-group">
+          <label>Message of the Day (MOTD)</label>
+          <textarea id="setting-motd" rows="3"></textarea>
+        </div>
+        <button class="btn" id="save-settings-btn">Save Settings</button>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+const PAGE_SIZE = 50;
+let token = localStorage.getItem('admin_token') || '';
+let usersPage = 0;
+let auditPage = 0;
+
+// ─── API ──────────────────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  const opts = {
+    method,
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+  };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch('/admin/api' + path, opts);
+  if (res.status === 204) return null;
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || res.statusText);
+  return data;
+}
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+async function checkAuth() {
+  if (!token) { showLogin(); return; }
+  try {
+    await api('GET', '/stats');
+    showApp();
+    loadSection('dashboard');
+  } catch (e) {
+    showLogin();
+  }
+}
+
+function showLogin() {
+  document.getElementById('login-overlay').classList.remove('hidden');
+  document.getElementById('app').classList.add('hidden');
+}
+
+function showApp() {
+  document.getElementById('login-overlay').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('app').style.display = 'flex';
+}
+
+document.getElementById('login-btn').onclick = async () => {
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = '';
+  try {
+    const res = await fetch('/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'Login failed');
+    token = data.token;
+    localStorage.setItem('admin_token', token);
+    showApp();
+    loadSection('dashboard');
+  } catch (e) {
+    errEl.textContent = e.message;
+  }
+};
+
+// ─── Navigation ───────────────────────────────────────────────────────────────
+document.querySelectorAll('#nav a').forEach(link => {
+  link.onclick = e => {
+    e.preventDefault();
+    document.querySelectorAll('#nav a').forEach(a => a.classList.remove('active'));
+    link.classList.add('active');
+    loadSection(link.dataset.section);
+  };
+});
+
+function loadSection(name) {
+  document.querySelectorAll('#main section').forEach(s => s.classList.add('hidden'));
+  const el = document.getElementById('section-' + name);
+  if (el) el.classList.remove('hidden');
+  switch (name) {
+    case 'dashboard': loadDashboard(); break;
+    case 'users': usersPage = 0; loadUsers(); break;
+    case 'channels': loadChannels(); break;
+    case 'audit-log': auditPage = 0; loadAuditLog(); break;
+    case 'settings': loadSettings(); break;
+  }
+}
+
+// ─── Dashboard ────────────────────────────────────────────────────────────────
+async function loadDashboard() {
+  try {
+    const s = await api('GET', '/stats');
+    document.getElementById('stat-users').textContent = s.user_count;
+    document.getElementById('stat-messages').textContent = s.message_count;
+    document.getElementById('stat-channels').textContent = s.channel_count;
+    document.getElementById('stat-db').textContent = fmtBytes(s.db_size_bytes);
+  } catch (e) {
+    console.error('stats:', e);
+  }
+}
+
+function fmtBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+  return (b / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+// ─── Users ────────────────────────────────────────────────────────────────────
+async function loadUsers() {
+  const offset = usersPage * PAGE_SIZE;
+  try {
+    const users = await api('GET', '/users?limit=' + PAGE_SIZE + '&offset=' + offset);
+    const tbody = document.getElementById('users-tbody');
+    tbody.innerHTML = '';
+    users.forEach(u => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${esc(u.id)}</td>
+        <td>${esc(u.Username || u.username)}</td>
+        <td>
+          <select data-uid="${esc(u.id)}" class="role-select" style="width:auto">
+            <option value="1" ${u.role_id === 1 || u.RoleID === 1 ? 'selected' : ''}>Owner</option>
+            <option value="2" ${u.role_id === 2 || u.RoleID === 2 ? 'selected' : ''}>Admin</option>
+            <option value="3" ${u.role_id === 3 || u.RoleID === 3 ? 'selected' : ''}>Moderator</option>
+            <option value="4" ${u.role_id === 4 || u.RoleID === 4 ? 'selected' : ''}>Member</option>
+          </select>
+        </td>
+        <td>${esc(u.Status || u.status || 'offline')}</td>
+        <td>${(u.Banned || u.banned) ? '<span style="color:var(--danger)">Yes</span>' : 'No'}</td>
+        <td>
+          <button class="btn btn-sm btn-secondary" onclick="forceLogout(${u.id})">Logout</button>
+          ${(u.Banned || u.banned)
+            ? '<button class="btn btn-sm" onclick="unbanUser(' + u.id + ')">Unban</button>'
+            : '<button class="btn btn-sm btn-danger" onclick="banUser(' + u.id + ')">Ban</button>'}
+        </td>`;
+      tbody.appendChild(tr);
+    });
+
+    tbody.querySelectorAll('.role-select').forEach(sel => {
+      sel.onchange = () => changeRole(parseInt(sel.dataset.uid), parseInt(sel.value));
+    });
+
+    document.getElementById('users-page-info').textContent =
+      `Page ${usersPage + 1} (${users.length} results)`;
+    document.getElementById('users-prev').disabled = usersPage === 0;
+    document.getElementById('users-next').disabled = users.length < PAGE_SIZE;
+  } catch (e) {
+    showAlert('users-alert', 'danger', e.message);
+  }
+}
+
+async function changeRole(uid, roleId) {
+  try {
+    await api('PATCH', '/users/' + uid, { role_id: roleId });
+    showAlert('users-alert', 'success', 'Role updated');
+  } catch (e) {
+    showAlert('users-alert', 'danger', e.message);
+  }
+}
+
+async function banUser(uid) {
+  const reason = prompt('Ban reason:') || '';
+  try {
+    await api('PATCH', '/users/' + uid, { banned: true, ban_reason: reason });
+    loadUsers();
+  } catch (e) {
+    showAlert('users-alert', 'danger', e.message);
+  }
+}
+
+async function unbanUser(uid) {
+  try {
+    await api('PATCH', '/users/' + uid, { banned: false });
+    loadUsers();
+  } catch (e) {
+    showAlert('users-alert', 'danger', e.message);
+  }
+}
+
+async function forceLogout(uid) {
+  if (!confirm('Force logout all sessions for this user?')) return;
+  try {
+    await api('DELETE', '/users/' + uid + '/sessions');
+    showAlert('users-alert', 'success', 'User sessions terminated');
+  } catch (e) {
+    showAlert('users-alert', 'danger', e.message);
+  }
+}
+
+document.getElementById('users-prev').onclick = () => { if (usersPage > 0) { usersPage--; loadUsers(); } };
+document.getElementById('users-next').onclick = () => { usersPage++; loadUsers(); };
+
+// ─── Channels ─────────────────────────────────────────────────────────────────
+async function loadChannels() {
+  try {
+    const channels = await api('GET', '/channels');
+    const tbody = document.getElementById('channels-tbody');
+    tbody.innerHTML = '';
+    channels.forEach(ch => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${esc(ch.id || ch.ID)}</td>
+        <td><input class="ch-name-input" value="${esc(ch.name || ch.Name)}" data-chid="${esc(ch.id || ch.ID)}"></td>
+        <td>${esc(ch.type || ch.Type)}</td>
+        <td>${esc(ch.category || ch.Category || '')}</td>
+        <td>${(ch.archived || ch.Archived) ? 'Yes' : 'No'}</td>
+        <td>
+          <button class="btn btn-sm" onclick="saveChannel(${ch.id || ch.ID})">Save</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteChannel(${ch.id || ch.ID})">Delete</button>
+        </td>`;
+      tbody.appendChild(tr);
+    });
+  } catch (e) {
+    showAlert('channels-alert', 'danger', e.message);
+  }
+}
+
+async function saveChannel(id) {
+  const nameEl = document.querySelector(`.ch-name-input[data-chid="${id}"]`);
+  const name = nameEl ? nameEl.value.trim() : '';
+  try {
+    await api('PATCH', '/channels/' + id, { name });
+    showAlert('channels-alert', 'success', 'Channel updated');
+    loadChannels();
+  } catch (e) {
+    showAlert('channels-alert', 'danger', e.message);
+  }
+}
+
+async function deleteChannel(id) {
+  if (!confirm('Delete this channel?')) return;
+  try {
+    await api('DELETE', '/channels/' + id);
+    loadChannels();
+  } catch (e) {
+    showAlert('channels-alert', 'danger', e.message);
+  }
+}
+
+document.getElementById('show-create-channel').onclick = () => {
+  document.getElementById('create-channel-form').classList.toggle('hidden');
+};
+
+document.getElementById('cancel-create-channel').onclick = () => {
+  document.getElementById('create-channel-form').classList.add('hidden');
+};
+
+document.getElementById('create-channel-btn').onclick = async () => {
+  const body = {
+    name: document.getElementById('ch-name').value.trim(),
+    type: document.getElementById('ch-type').value,
+    category: document.getElementById('ch-category').value.trim(),
+    topic: document.getElementById('ch-topic').value.trim(),
+    position: parseInt(document.getElementById('ch-position').value) || 0,
+  };
+  try {
+    await api('POST', '/channels', body);
+    document.getElementById('create-channel-form').classList.add('hidden');
+    showAlert('channels-alert', 'success', 'Channel created');
+    loadChannels();
+  } catch (e) {
+    showAlert('channels-alert', 'danger', e.message);
+  }
+};
+
+// ─── Audit Log ────────────────────────────────────────────────────────────────
+async function loadAuditLog() {
+  const offset = auditPage * PAGE_SIZE;
+  try {
+    const entries = await api('GET', '/audit-log?limit=' + PAGE_SIZE + '&offset=' + offset);
+    const tbody = document.getElementById('audit-tbody');
+    tbody.innerHTML = '';
+    entries.forEach(e => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${esc(e.created_at)}</td>
+        <td>${esc(e.actor_name || e.actor_id)}</td>
+        <td>${esc(e.action)}</td>
+        <td>${esc(e.target_type)} ${e.target_id ? '#' + e.target_id : ''}</td>
+        <td>${esc(e.detail)}</td>`;
+      tbody.appendChild(tr);
+    });
+    document.getElementById('audit-page-info').textContent =
+      `Page ${auditPage + 1} (${entries.length} results)`;
+    document.getElementById('audit-prev').disabled = auditPage === 0;
+    document.getElementById('audit-next').disabled = entries.length < PAGE_SIZE;
+  } catch (e) {
+    console.error('audit-log:', e);
+  }
+}
+
+document.getElementById('audit-prev').onclick = () => { if (auditPage > 0) { auditPage--; loadAuditLog(); } };
+document.getElementById('audit-next').onclick = () => { auditPage++; loadAuditLog(); };
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+async function loadSettings() {
+  try {
+    const settings = await api('GET', '/settings');
+    for (const [key, val] of Object.entries(settings)) {
+      const el = document.getElementById('setting-' + key);
+      if (el) el.value = val;
+    }
+  } catch (e) {
+    showAlert('settings-alert', 'danger', e.message);
+  }
+}
+
+document.getElementById('save-settings-btn').onclick = async () => {
+  const body = {};
+  document.querySelectorAll('[id^="setting-"]').forEach(el => {
+    const key = el.id.replace('setting-', '');
+    body[key] = el.value;
+  });
+  try {
+    await api('PATCH', '/settings', body);
+    showAlert('settings-alert', 'success', 'Settings saved');
+  } catch (e) {
+    showAlert('settings-alert', 'danger', e.message);
+  }
+};
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function showAlert(containerId, type, message) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = `<div class="alert alert-${type}">${esc(message)}</div>`;
+  setTimeout(() => { el.innerHTML = ''; }, 4000);
+}
+
+// ─── Bootstrap ────────────────────────────────────────────────────────────────
+checkAuth();
+</script>
 </body>
 </html>

@@ -20,6 +20,15 @@ type Config struct {
 	Database DatabaseConfig `koanf:"database"`
 	TLS      TLSConfig      `koanf:"tls"`
 	Upload   UploadConfig   `koanf:"upload"`
+	Voice    VoiceConfig    `koanf:"voice"`
+}
+
+// VoiceConfig holds STUN/TURN server settings for WebRTC signaling.
+type VoiceConfig struct {
+	TURNSecret  string `koanf:"turn_secret"`  // HMAC-SHA1 secret; auto-generated if empty
+	STUNPort    int    `koanf:"stun_port"`    // default 3478
+	TURNPort    int    `koanf:"turn_port"`    // default 3478
+	TURNEnabled bool   `koanf:"turn_enabled"` // default true
 }
 
 // ServerConfig holds HTTP server settings.
@@ -65,6 +74,11 @@ func defaults() Config {
 		Upload: UploadConfig{
 			MaxSizeMB:  100,
 			StorageDir: "data/uploads",
+		},
+		Voice: VoiceConfig{
+			STUNPort:    3478,
+			TURNPort:    3478,
+			TURNEnabled: true,
 		},
 	}
 }

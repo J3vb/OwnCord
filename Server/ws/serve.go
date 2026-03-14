@@ -87,6 +87,7 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 	defer func() {
 		hub.Unregister(c)
+		hub.handleVoiceLeave(c)
 		if c.user != nil {
 			_ = hub.db.UpdateUserStatus(c.userID, "offline")
 			hub.BroadcastToAll(buildPresenceMsg(c.userID, "offline"))
@@ -188,13 +189,41 @@ func buildReady(database *db.DB) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("buildReady ListRoles: %w", err)
 	}
+
+	// Collect all active voice states across every voice channel.
+	voiceStates, err := collectAllVoiceStates(database, channels)
+	if err != nil {
+		// Non-fatal: send empty list rather than failing the whole ready payload.
+		slog.Warn("buildReady collectAllVoiceStates", "err", err)
+		voiceStates = []db.VoiceState{}
+	}
+
 	return buildJSON(map[string]interface{}{
 		"type": "ready",
 		"payload": map[string]interface{}{
 			"channels":     channels,
 			"members":      []interface{}{},
-			"voice_states": []interface{}{},
+			"voice_states": voiceStates,
 			"roles":        roles,
 		},
 	}), nil
+}
+
+// collectAllVoiceStates gathers voice states for all voice-type channels.
+func collectAllVoiceStates(database *db.DB, channels []db.Channel) ([]db.VoiceState, error) {
+	var all []db.VoiceState
+	for _, ch := range channels {
+		if ch.Type != "voice" {
+			continue
+		}
+		states, err := database.GetChannelVoiceStates(ch.ID)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, states...)
+	}
+	if all == nil {
+		all = []db.VoiceState{}
+	}
+	return all, nil
 }

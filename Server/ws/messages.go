@@ -3,6 +3,8 @@ package ws
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/owncord/server/db"
 )
 
 // envelope is the common wrapper for all WebSocket messages.
@@ -125,6 +127,53 @@ func buildTypingMsg(channelID, userID int64, username string) []byte {
 			"channel_id": channelID,
 			"user_id":    userID,
 			"username":   username,
+		},
+	})
+}
+
+// buildVoiceState constructs a voice_state server→client broadcast.
+func buildVoiceState(state db.VoiceState) []byte {
+	return buildJSON(map[string]interface{}{
+		"type": "voice_state",
+		"payload": map[string]interface{}{
+			"channel_id": state.ChannelID,
+			"user_id":    state.UserID,
+			"username":   state.Username,
+			"muted":      state.Muted,
+			"deafened":   state.Deafened,
+			"speaking":   state.Speaking,
+		},
+	})
+}
+
+// buildVoiceLeave constructs a voice_leave server→client broadcast.
+func buildVoiceLeave(channelID, userID int64) []byte {
+	return buildJSON(map[string]interface{}{
+		"type": "voice_leave",
+		"payload": map[string]interface{}{
+			"channel_id": channelID,
+			"user_id":    userID,
+		},
+	})
+}
+
+// buildVoiceSignalRelay relays a signaling message (offer/answer/ice) as-is to
+// channel members. The original payload is embedded unchanged.
+// channelID is provided for future filtering logic.
+func buildVoiceSignalRelay(msgType string, _ int64, data json.RawMessage) []byte {
+	return buildJSON(map[string]interface{}{
+		"type":    msgType,
+		"payload": data,
+	})
+}
+
+// buildSoundboardPlay constructs a soundboard_play broadcast.
+func buildSoundboardPlay(soundID string, userID int64) []byte {
+	return buildJSON(map[string]interface{}{
+		"type": "soundboard_play",
+		"payload": map[string]interface{}{
+			"sound_id": soundID,
+			"user_id":  userID,
 		},
 	})
 }

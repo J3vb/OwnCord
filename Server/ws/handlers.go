@@ -62,6 +62,18 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		h.handleTyping(c, env.Payload)
 	case "presence_update":
 		h.handlePresence(c, env.Payload)
+	case "voice_join":
+		h.handleVoiceJoin(c, env.Payload)
+	case "voice_leave":
+		h.handleVoiceLeave(c)
+	case "voice_mute":
+		h.handleVoiceMute(c, env.Payload)
+	case "voice_deafen":
+		h.handleVoiceDeafen(c, env.Payload)
+	case "voice_offer", "voice_answer", "voice_ice":
+		h.handleVoiceSignal(c, env.Type, env.Payload)
+	case "soundboard_play":
+		h.handleSoundboard(c, env.Payload)
 	default:
 		slog.Warn("ws handleMessage unknown type", "type", env.Type, "user_id", c.userID)
 		c.sendMsg(buildErrorMsg("UNKNOWN_TYPE", fmt.Sprintf("unknown message type: %s", env.Type)))

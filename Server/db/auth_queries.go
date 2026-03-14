@@ -96,6 +96,18 @@ func (d *DB) BanUser(id int64, reason string, expires *time.Time) error {
 	return nil
 }
 
+// UnbanUser removes the ban from a user.
+func (d *DB) UnbanUser(id int64) error {
+	_, err := d.sqlDB.Exec(
+		`UPDATE users SET banned = 0, ban_reason = NULL, ban_expires = NULL WHERE id = ?`,
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("UnbanUser: %w", err)
+	}
+	return nil
+}
+
 // ─── Session Operations ───────────────────────────────────────────────────────
 
 // CreateSession inserts a new session and returns the session ID.

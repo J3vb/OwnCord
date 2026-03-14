@@ -54,15 +54,15 @@ type Role struct {
 
 // Channel represents a row in the channels table.
 type Channel struct {
-	ID        int64
-	Name      string
-	Type      string
-	Category  string
-	Topic     string
-	Position  int
-	SlowMode  int
-	Archived  bool
-	CreatedAt string
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	Category  string `json:"category"`
+	Topic     string `json:"topic"`
+	Position  int    `json:"position"`
+	SlowMode  int    `json:"slow_mode"`
+	Archived  bool   `json:"archived"`
+	CreatedAt string `json:"created_at"`
 }
 
 // Message represents a row in the messages table.
@@ -100,6 +100,45 @@ type MessageSearchResult struct {
 	Username    string
 	Content     string
 	Timestamp   string
+}
+
+// VoiceState represents a row in the voice_states table.
+// It tracks which voice channel a user is in and their current audio state.
+type VoiceState struct {
+	UserID    int64
+	ChannelID int64
+	Username  string
+	Muted     bool
+	Deafened  bool
+	Speaking  bool
+}
+
+// ServerStats contains aggregate counts for the admin dashboard.
+type ServerStats struct {
+	UserCount    int64 `json:"user_count"`
+	MessageCount int64 `json:"message_count"`
+	ChannelCount int64 `json:"channel_count"`
+	InviteCount  int64 `json:"invite_count"`
+	DBSizeBytes  int64 `json:"db_size_bytes"`
+}
+
+// UserWithRole extends User with the name of the user's role.
+type UserWithRole struct {
+	User
+	RoleName string `json:"role_name"`
+}
+
+// AuditEntry represents a single row from the audit_log table joined with the
+// actor's username.
+type AuditEntry struct {
+	ID         int64  `json:"id"`
+	ActorID    int64  `json:"actor_id"`
+	ActorName  string `json:"actor_name"`
+	Action     string `json:"action"`
+	TargetType string `json:"target_type"`
+	TargetID   int64  `json:"target_id"`
+	Detail     string `json:"detail"`
+	CreatedAt  string `json:"created_at"`
 }
 
 // sessionTTL is the duration a session remains valid after creation.

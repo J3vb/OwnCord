@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/owncord/server/admin"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
@@ -46,10 +47,16 @@ func NewRouter(cfg *config.Config, database *db.DB) http.Handler {
 	// Channel and message REST routes.
 	MountChannelRoutes(r, database)
 
+	// Voice credentials REST route.
+	MountVoiceRoutes(r, cfg, database)
+
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
 	hub := ws.NewHub(database, limiter)
 	go hub.Run()
 	r.Get("/api/v1/ws", ws.ServeWS(hub, database))
+
+	// Admin panel: static files + REST API (Phase 6).
+	r.Mount("/admin", admin.NewHandler(database))
 
 	return r
 }
