@@ -1,1 +1,6 @@
 .claude/settings.local.json
+
+# Server runtime artifacts
+Server/chatserver.exe
+Server/config.yaml
+Server/data/
