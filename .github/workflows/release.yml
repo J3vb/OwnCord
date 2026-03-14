@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    name: Build & Release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Extract version from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Build server
+        shell: bash
+        run: cd Server && go build -o chatserver.exe -ldflags "-s -w -X main.version=$VERSION" .
+
+      - name: Build client single-file
+        run: >-
+          dotnet publish Client/OwnCord.Client/OwnCord.Client.csproj
+          -c Release -r win-x64 --self-contained
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o dist/client
+
+      - name: Generate SHA256 checksums
+        shell: pwsh
+        run: |
+          $serverHash = (Get-FileHash -Path Server/chatserver.exe -Algorithm SHA256).Hash.ToLower()
+          $clientHash = (Get-FileHash -Path dist/client/OwnCord.Client.exe -Algorithm SHA256).Hash.ToLower()
+          "$serverHash  chatserver.exe" | Out-File -FilePath checksums.sha256 -Encoding utf8 -NoNewline
+          "`n$clientHash  OwnCord.Client.exe" | Out-File -FilePath checksums.sha256 -Encoding utf8 -Append -NoNewline
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh release create ${{ github.ref_name }}
+          --generate-notes
+          Server/chatserver.exe
+          dist/client/OwnCord.Client.exe
+          checksums.sha256
