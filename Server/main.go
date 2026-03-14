@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -35,6 +36,18 @@ func main() {
 
 // run is the real entrypoint — separated for testability.
 func run(log *slog.Logger) error {
+	// Clean up old binary from a previous update.
+	if exePath, err := os.Executable(); err == nil {
+		oldPath := exePath + ".old"
+		if _, statErr := os.Stat(oldPath); statErr == nil {
+			if rmErr := os.Remove(oldPath); rmErr != nil {
+				log.Warn("failed to remove old binary", "path", oldPath, "error", rmErr)
+			} else {
+				log.Info("removed old binary from previous update", "path", oldPath)
+			}
+		}
+	}
+
 	// ── 1. Load configuration ──────────────────────────────────────────────
 	cfg, err := config.Load("config.yaml")
 	if err != nil {
@@ -70,7 +83,7 @@ func run(log *slog.Logger) error {
 	}
 
 	// ── 5. Build HTTP router ───────────────────────────────────────────────
-	router := api.NewRouter(cfg, database)
+	router := api.NewRouter(cfg, database, version)
 
 	// ── 6. Start server ────────────────────────────────────────────────────
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
@@ -93,12 +106,23 @@ func run(log *slog.Logger) error {
 		log.Info("server starting", "addr", addr, "tls", tlsCfg != nil, "version", version)
 
 		var listenErr error
-		if tlsCfg != nil {
-			listenErr = srv.ListenAndServeTLS("", "")
-		} else {
-			listenErr = srv.ListenAndServe()
+		for attempt := 0; attempt < 20; attempt++ {
+			if tlsCfg != nil {
+				listenErr = srv.ListenAndServeTLS("", "")
+			} else {
+				listenErr = srv.ListenAndServe()
+			}
+			if listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
+				// Check if it's an "address already in use" error (port not released yet from old process)
+				if attempt < 19 && isAddrInUse(listenErr) {
+					log.Warn("port in use, retrying...", "attempt", attempt+1, "error", listenErr)
+					time.Sleep(500 * time.Millisecond)
+					continue
+				}
+				serveErr <- listenErr
+			}
+			break
 		}
-
 		if listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
 			serveErr <- listenErr
 		}
@@ -125,5 +149,10 @@ func run(log *slog.Logger) error {
 
 	log.Info("server stopped cleanly")
 	return nil
+}
+
+// isAddrInUse checks if an error is an "address already in use" error.
+func isAddrInUse(err error) bool {
+	return err != nil && (strings.Contains(err.Error(), "address already in use") || strings.Contains(err.Error(), "Only one usage of each socket address"))
 }
 

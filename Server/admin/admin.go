@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/updater"
 )
 
 //go:embed static
@@ -21,11 +22,11 @@ var staticFiles embed.FS
 //
 //	/api/*  — admin REST API (all require ADMINISTRATOR permission)
 //	/*      — embedded static files (SPA; index.html for unknown paths)
-func NewHandler(database *db.DB) http.Handler {
+func NewHandler(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater) http.Handler {
 	r := chi.NewRouter()
 
 	// Admin REST API mounted at /api
-	r.Mount("/api", NewAdminAPI(database))
+	r.Mount("/api", NewAdminAPI(database, version, hub, u))
 
 	// Static files — serve from the "static" sub-tree of the embedded FS.
 	// The //go:embed static directive in this package embeds as "static/…",

@@ -11,14 +11,15 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/updater"
 	"github.com/owncord/server/ws"
 )
 
-// version is the server version string, overridden at build time via ldflags.
+// version is the server version string, set by NewRouter from the caller.
 var version = "dev"
 
 // NewRouter builds and returns the fully configured HTTP handler.
-func NewRouter(cfg *config.Config, database *db.DB) http.Handler {
+func NewRouter(cfg *config.Config, database *db.DB, ver string) http.Handler {
 	r := chi.NewRouter()
 
 	// Middleware stack.
@@ -26,6 +27,8 @@ func NewRouter(cfg *config.Config, database *db.DB) http.Handler {
 	r.Use(setRequestIDHeader) // echo request ID into response header
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
+
+	version = ver
 
 	// Health check — unauthenticated, no versioning prefix.
 	r.Get("/health", handleHealth)
@@ -56,7 +59,8 @@ func NewRouter(cfg *config.Config, database *db.DB) http.Handler {
 	r.Get("/api/v1/ws", ws.ServeWS(hub, database))
 
 	// Admin panel: static files + REST API (Phase 6).
-	r.Mount("/admin", admin.NewHandler(database))
+	u := updater.NewUpdater(ver, cfg.GitHub.Token, "J3vb", "OwnCord")
+	r.Mount("/admin", admin.NewHandler(database, ver, hub, u))
 
 	return r
 }

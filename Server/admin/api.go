@@ -12,7 +12,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/updater"
 )
+
+// HubBroadcaster is the subset of ws.Hub needed by the admin package.
+type HubBroadcaster interface {
+	BroadcastServerRestart(reason string, delaySeconds int)
+}
 
 // ─── Permission constants ─────────────────────────────────────────────────────
 
@@ -25,7 +31,7 @@ const (
 
 // NewAdminAPI returns a chi router with all /admin/api/* routes. All routes
 // are protected by adminAuthMiddleware which requires the ADMINISTRATOR bit.
-func NewAdminAPI(database *db.DB) http.Handler {
+func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater) http.Handler {
 	r := chi.NewRouter()
 
 	// All routes require authentication and ADMINISTRATOR permission.
@@ -44,6 +50,10 @@ func NewAdminAPI(database *db.DB) http.Handler {
 	r.Patch("/settings", handlePatchSettings(database))
 	r.Post("/backup", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		ownerOnlyMiddleware(database, handleBackup(database)).ServeHTTP(w, req)
+	}))
+	r.Get("/updates", handleCheckUpdate(u))
+	r.Post("/updates/apply", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		ownerOnlyMiddleware(database, handleApplyUpdate(u, hub, version)).ServeHTTP(w, req)
 	}))
 
 	return r

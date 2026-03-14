@@ -32,7 +32,7 @@ func setupRouter(t *testing.T) http.Handler {
 		},
 	}
 
-	return api.NewRouter(cfg, database)
+	return api.NewRouter(cfg, database, "test")
 }
 
 func TestHealthEndpointReturns200(t *testing.T) {

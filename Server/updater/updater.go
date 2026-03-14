@@ -76,6 +76,11 @@ func NewUpdater(currentVersion, githubToken, repoOwner, repoName string) *Update
 	}
 }
 
+// SetBaseURL overrides the GitHub API base URL (for testing).
+func (u *Updater) SetBaseURL(url string) {
+	u.baseURL = url
+}
+
 // ensureVPrefix returns the version string with a "v" prefix for semver
 // comparison. If it already has one, it is returned unchanged.
 func ensureVPrefix(v string) string {

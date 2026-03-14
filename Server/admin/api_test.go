@@ -191,7 +191,7 @@ func doRequest(t *testing.T, handler http.Handler, method, path, token string, b
 
 func TestAdminAPI_Stats_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", token, nil)
@@ -214,7 +214,7 @@ func TestAdminAPI_Stats_OK(t *testing.T) {
 
 func TestAdminAPI_Stats_Unauthenticated(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", "", nil)
 
@@ -225,7 +225,7 @@ func TestAdminAPI_Stats_Unauthenticated(t *testing.T) {
 
 func TestAdminAPI_Stats_Forbidden(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createMemberUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", token, nil)
@@ -239,7 +239,7 @@ func TestAdminAPI_Stats_Forbidden(t *testing.T) {
 
 func TestAdminAPI_ListUsers_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/users?limit=50&offset=0", token, nil)
@@ -260,7 +260,7 @@ func TestAdminAPI_ListUsers_OK(t *testing.T) {
 
 func TestAdminAPI_ListUsers_DefaultPagination(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	// No query params — should use defaults
@@ -273,7 +273,7 @@ func TestAdminAPI_ListUsers_DefaultPagination(t *testing.T) {
 
 func TestAdminAPI_ListUsers_Unauthenticated(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 
 	w := doRequest(t, handler, http.MethodGet, "/users", "", nil)
 
@@ -286,7 +286,7 @@ func TestAdminAPI_ListUsers_Unauthenticated(t *testing.T) {
 
 func TestAdminAPI_PatchUser_BanUser(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	// Create a target user
@@ -314,7 +314,7 @@ func TestAdminAPI_PatchUser_BanUser(t *testing.T) {
 
 func TestAdminAPI_PatchUser_ChangeRole(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	targetUID, _ := database.CreateUser("rolechange", "hash", 3)
@@ -336,7 +336,7 @@ func TestAdminAPI_PatchUser_ChangeRole(t *testing.T) {
 
 func TestAdminAPI_PatchUser_NotFound(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	body := map[string]interface{}{"banned": true}
@@ -349,7 +349,7 @@ func TestAdminAPI_PatchUser_NotFound(t *testing.T) {
 
 func TestAdminAPI_PatchUser_InvalidID(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPatch, "/users/abc", token, nil)
@@ -363,7 +363,7 @@ func TestAdminAPI_PatchUser_InvalidID(t *testing.T) {
 
 func TestAdminAPI_ForceLogout_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	targetUID, _ := database.CreateUser("logoutme", "hash", 3)
@@ -383,7 +383,7 @@ func TestAdminAPI_ForceLogout_OK(t *testing.T) {
 
 func TestAdminAPI_ForceLogout_Unauthenticated(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 
 	w := doRequest(t, handler, http.MethodDelete, "/users/1/sessions", "", nil)
 
@@ -396,7 +396,7 @@ func TestAdminAPI_ForceLogout_Unauthenticated(t *testing.T) {
 
 func TestAdminAPI_ListChannels_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	database.AdminCreateChannel("general", "text", "", "", 0)
@@ -420,7 +420,7 @@ func TestAdminAPI_ListChannels_OK(t *testing.T) {
 
 func TestAdminAPI_CreateChannel_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	body := map[string]interface{}{
@@ -447,7 +447,7 @@ func TestAdminAPI_CreateChannel_OK(t *testing.T) {
 
 func TestAdminAPI_CreateChannel_MissingName(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	body := map[string]interface{}{
@@ -464,7 +464,7 @@ func TestAdminAPI_CreateChannel_MissingName(t *testing.T) {
 
 func TestAdminAPI_UpdateChannel_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	chID, _ := database.AdminCreateChannel("old", "text", "", "", 0)
@@ -485,7 +485,7 @@ func TestAdminAPI_UpdateChannel_OK(t *testing.T) {
 
 func TestAdminAPI_UpdateChannel_NotFound(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	body := map[string]interface{}{"name": "x"}
@@ -500,7 +500,7 @@ func TestAdminAPI_UpdateChannel_NotFound(t *testing.T) {
 
 func TestAdminAPI_DeleteChannel_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	chID, _ := database.AdminCreateChannel("del-me", "text", "", "", 0)
@@ -514,7 +514,7 @@ func TestAdminAPI_DeleteChannel_OK(t *testing.T) {
 
 func TestAdminAPI_DeleteChannel_NotFound(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodDelete, "/channels/99999", token, nil)
@@ -528,7 +528,7 @@ func TestAdminAPI_DeleteChannel_NotFound(t *testing.T) {
 
 func TestAdminAPI_AuditLog_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	uid, _ := database.CreateUser("actor", "hash", 1)
@@ -551,7 +551,7 @@ func TestAdminAPI_AuditLog_OK(t *testing.T) {
 
 func TestAdminAPI_AuditLog_Empty(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/audit-log", token, nil)
@@ -571,7 +571,7 @@ func TestAdminAPI_AuditLog_Empty(t *testing.T) {
 
 func TestAdminAPI_GetSettings_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/settings", token, nil)
@@ -593,7 +593,7 @@ func TestAdminAPI_GetSettings_OK(t *testing.T) {
 
 func TestAdminAPI_PatchSettings_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	body := map[string]string{
@@ -618,7 +618,7 @@ func TestAdminAPI_PatchSettings_OK(t *testing.T) {
 
 func TestAdminAPI_PatchSettings_InvalidBody(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	req := httptest.NewRequest(http.MethodPatch, "/settings", bytes.NewReader([]byte("not-json")))
@@ -635,7 +635,7 @@ func TestAdminAPI_PatchSettings_InvalidBody(t *testing.T) {
 
 func TestAdminAPI_Backup_RequiresOwner(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 
 	// Admin (role 2) can authenticate but is not Owner (role 1, position 100)
 	adminUID, _ := database.CreateUser("adminonly", "hash", 2)
@@ -652,7 +652,7 @@ func TestAdminAPI_Backup_RequiresOwner(t *testing.T) {
 
 func TestAdminAPI_Backup_Unauthenticated(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 
 	w := doRequest(t, handler, http.MethodPost, "/backup", "", nil)
 
