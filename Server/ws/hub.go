@@ -98,6 +98,13 @@ func (h *Hub) BroadcastToAll(msg []byte) {
 	h.broadcast <- broadcastMsg{channelID: 0, msg: msg}
 }
 
+// BroadcastServerRestart sends a server_restart message to all connected clients.
+// reason describes why the server is restarting (e.g., "update").
+// delaySeconds tells clients how long until the server actually shuts down.
+func (h *Hub) BroadcastServerRestart(reason string, delaySeconds int) {
+	h.BroadcastToAll(buildServerRestartMsg(reason, delaySeconds))
+}
+
 // SendToUser delivers msg directly to the client identified by userID.
 // Returns true if the client was found and the message was queued.
 func (h *Hub) SendToUser(userID int64, msg []byte) bool {

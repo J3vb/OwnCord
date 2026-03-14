@@ -178,6 +178,17 @@ func buildSoundboardPlay(soundID string, userID int64) []byte {
 	})
 }
 
+// buildServerRestartMsg constructs a server_restart broadcast.
+func buildServerRestartMsg(reason string, delaySeconds int) []byte {
+	return buildJSON(map[string]interface{}{
+		"type": "server_restart",
+		"payload": map[string]interface{}{
+			"reason":        reason,
+			"delay_seconds": delaySeconds,
+		},
+	})
+}
+
 // parseChannelID safely extracts channel_id from a raw payload map.
 func parseChannelID(payload json.RawMessage) (int64, error) {
 	var p struct {
