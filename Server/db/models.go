@@ -52,5 +52,55 @@ type Role struct {
 	IsDefault   bool
 }
 
+// Channel represents a row in the channels table.
+type Channel struct {
+	ID        int64
+	Name      string
+	Type      string
+	Category  string
+	Topic     string
+	Position  int
+	SlowMode  int
+	Archived  bool
+	CreatedAt string
+}
+
+// Message represents a row in the messages table.
+type Message struct {
+	ID        int64
+	ChannelID int64
+	UserID    int64
+	Content   string
+	ReplyTo   *int64
+	EditedAt  *string
+	Deleted   bool
+	Pinned    bool
+	Timestamp string
+}
+
+// MessageWithUser joins a Message with the author's public fields.
+type MessageWithUser struct {
+	Message
+	Username string
+	Avatar   *string
+}
+
+// ReactionCount is an aggregated reaction count for a single emoji.
+type ReactionCount struct {
+	Emoji     string
+	Count     int
+	MeReacted bool
+}
+
+// MessageSearchResult is a row returned by the FTS5 message search.
+type MessageSearchResult struct {
+	MessageID   int64
+	ChannelID   int64
+	ChannelName string
+	Username    string
+	Content     string
+	Timestamp   string
+}
+
 // sessionTTL is the duration a session remains valid after creation.
 const sessionTTL = 30 * 24 * time.Hour

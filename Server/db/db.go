@@ -32,6 +32,12 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("pinging sqlite db: %w", err)
 	}
 
+	// In-memory databases are per-connection in SQLite; pin to one connection
+	// so all callers share the same in-memory state.
+	if path == ":memory:" {
+		sqlDB.SetMaxOpenConns(1)
+	}
+
 	// Enable WAL mode for better concurrent read performance.
 	if _, err := sqlDB.Exec("PRAGMA journal_mode=WAL;"); err != nil {
 		sqlDB.Close()

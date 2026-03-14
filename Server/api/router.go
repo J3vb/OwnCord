@@ -10,6 +10,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/ws"
 )
 
 // version is the server version string, overridden at build time via ldflags.
@@ -41,6 +42,14 @@ func NewRouter(cfg *config.Config, database *db.DB) http.Handler {
 
 	// Invite management routes (require MANAGE_INVITES permission).
 	MountInviteRoutes(r, database)
+
+	// Channel and message REST routes.
+	MountChannelRoutes(r, database)
+
+	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
+	hub := ws.NewHub(database, limiter)
+	go hub.Run()
+	r.Get("/api/v1/ws", ws.ServeWS(hub, database))
 
 	return r
 }

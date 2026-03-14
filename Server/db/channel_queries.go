@@ -1,0 +1,136 @@
+package db
+
+import (
+	"database/sql"
+	"errors"
+	"fmt"
+)
+
+// ListChannels returns all channels ordered by position.
+func (d *DB) ListChannels() ([]Channel, error) {
+	rows, err := d.sqlDB.Query(
+		`SELECT id, name, type, COALESCE(category,''), COALESCE(topic,''),
+		        position, slow_mode, archived, created_at
+		 FROM channels ORDER BY position ASC, id ASC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ListChannels: %w", err)
+	}
+	defer rows.Close()
+
+	var channels []Channel
+	for rows.Next() {
+		ch, scanErr := scanChannel(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("ListChannels scan: %w", scanErr)
+		}
+		channels = append(channels, ch)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("ListChannels rows: %w", rows.Err())
+	}
+	if channels == nil {
+		channels = []Channel{}
+	}
+	return channels, nil
+}
+
+// GetChannel returns the channel with the given id, or nil if not found.
+func (d *DB) GetChannel(id int64) (*Channel, error) {
+	row := d.sqlDB.QueryRow(
+		`SELECT id, name, type, COALESCE(category,''), COALESCE(topic,''),
+		        position, slow_mode, archived, created_at
+		 FROM channels WHERE id = ?`,
+		id,
+	)
+	ch := &Channel{}
+	var archived int
+	err := row.Scan(
+		&ch.ID, &ch.Name, &ch.Type, &ch.Category, &ch.Topic,
+		&ch.Position, &ch.SlowMode, &archived, &ch.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("GetChannel: %w", err)
+	}
+	ch.Archived = archived != 0
+	return ch, nil
+}
+
+// CreateChannel inserts a new channel and returns the assigned ID.
+func (d *DB) CreateChannel(name, chanType, category, topic string, position int) (int64, error) {
+	res, err := d.sqlDB.Exec(
+		`INSERT INTO channels (name, type, category, topic, position) VALUES (?, ?, ?, ?, ?)`,
+		name, chanType, nullableString(category), nullableString(topic), position,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("CreateChannel: %w", err)
+	}
+	return res.LastInsertId()
+}
+
+// UpdateChannel modifies name, topic, and slow_mode for the given channel.
+func (d *DB) UpdateChannel(id int64, name, topic string, slowMode int) error {
+	_, err := d.sqlDB.Exec(
+		`UPDATE channels SET name = ?, topic = ?, slow_mode = ? WHERE id = ?`,
+		name, nullableString(topic), slowMode, id,
+	)
+	if err != nil {
+		return fmt.Errorf("UpdateChannel: %w", err)
+	}
+	return nil
+}
+
+// DeleteChannel removes the channel row (cascades to messages, overrides, etc.).
+func (d *DB) DeleteChannel(id int64) error {
+	_, err := d.sqlDB.Exec(`DELETE FROM channels WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("DeleteChannel: %w", err)
+	}
+	return nil
+}
+
+// GetChannelPermissions returns the allow/deny override bits for a role on a
+// channel. Returns (0, 0, nil) when no override exists.
+func (d *DB) GetChannelPermissions(channelID, roleID int64) (allow, deny int64, err error) {
+	row := d.sqlDB.QueryRow(
+		`SELECT allow, deny FROM channel_overrides WHERE channel_id = ? AND role_id = ?`,
+		channelID, roleID,
+	)
+	scanErr := row.Scan(&allow, &deny)
+	if errors.Is(scanErr, sql.ErrNoRows) {
+		return 0, 0, nil
+	}
+	if scanErr != nil {
+		return 0, 0, fmt.Errorf("GetChannelPermissions: %w", scanErr)
+	}
+	return allow, deny, nil
+}
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+// scanChannel scans a single channel row from *sql.Rows.
+func scanChannel(rows *sql.Rows) (Channel, error) {
+	var ch Channel
+	var archived int
+	err := rows.Scan(
+		&ch.ID, &ch.Name, &ch.Type, &ch.Category, &ch.Topic,
+		&ch.Position, &ch.SlowMode, &archived, &ch.CreatedAt,
+	)
+	if err != nil {
+		return Channel{}, err
+	}
+	ch.Archived = archived != 0
+	return ch, nil
+}
+
+// nullableString returns nil when s is empty, otherwise a pointer to s.
+// Used so empty strings are stored as NULL in optional TEXT columns.
+func nullableString(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
+}
