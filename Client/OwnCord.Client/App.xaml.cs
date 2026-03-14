@@ -1,7 +1,9 @@
 ﻿using System.IO;
+using System.Threading.Tasks;
 using System.Windows;
 using OwnCord.Client.Services;
 using OwnCord.Client.ViewModels;
+using OwnCord.Client.Views;
 
 namespace OwnCord.Client;
 
@@ -22,6 +24,25 @@ public partial class App : Application
 
         var mainWindow = new MainWindow(connectVm, mainVm, credentialService, wsService);
         mainWindow.Show();
+
+        // Clean up old binary from previous update
+        var updateService = new UpdateService();
+        updateService.CleanupOldVersion();
+
+        // Check for updates (non-blocking)
+        _ = Task.Run(async () =>
+        {
+            var info = await updateService.CheckForUpdateAsync();
+            if (info?.UpdateAvailable == true)
+            {
+                await Current.Dispatcher.InvokeAsync(() =>
+                {
+                    var vm = new UpdateViewModel(updateService, info);
+                    var dialog = new UpdateDialog(vm);
+                    dialog.ShowDialog();
+                });
+            }
+        });
     }
 }
 
