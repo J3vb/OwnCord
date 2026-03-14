@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
 )
@@ -27,10 +28,19 @@ func NewRouter(cfg *config.Config, database *db.DB) http.Handler {
 	// Health check — unauthenticated, no versioning prefix.
 	r.Get("/health", handleHealth)
 
+	// Shared rate limiter for auth endpoints.
+	limiter := auth.NewRateLimiter()
+
 	// Versioned API routes.
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/info", handleInfo(cfg))
 	})
+
+	// Auth routes: register, login, logout, me.
+	MountAuthRoutes(r, database, limiter)
+
+	// Invite management routes (require MANAGE_INVITES permission).
+	MountInviteRoutes(r, database)
 
 	return r
 }
