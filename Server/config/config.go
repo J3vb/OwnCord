@@ -21,6 +21,12 @@ type Config struct {
 	TLS      TLSConfig      `koanf:"tls"`
 	Upload   UploadConfig   `koanf:"upload"`
 	Voice    VoiceConfig    `koanf:"voice"`
+	GitHub   GitHubConfig   `koanf:"github"`
+}
+
+// GitHubConfig holds GitHub API settings for update checking.
+type GitHubConfig struct {
+	Token string `koanf:"token"`
 }
 
 // VoiceConfig holds STUN/TURN server settings for WebRTC signaling.
@@ -80,6 +86,7 @@ func defaults() Config {
 			TURNPort:    3478,
 			TURNEnabled: true,
 		},
+		GitHub: GitHubConfig{},
 	}
 }
 
@@ -102,6 +109,9 @@ tls:
 upload:
   max_size_mb: 100
   storage_dir: "data/uploads"
+
+# github:
+#   token: ""  # optional: GitHub API token for higher rate limits (5000 req/hr vs 60)
 `
 
 // Load reads configuration from the given YAML file path, merging with
