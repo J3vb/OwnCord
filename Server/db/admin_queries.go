@@ -14,6 +14,17 @@ const (
 	permViewAuditLog  = int64(0x8000000)
 )
 
+// ─── Setup ───────────────────────────────────────────────────────────────────
+
+// UserCount returns the total number of registered users.
+func (d *DB) UserCount() (int64, error) {
+	var count int64
+	if err := d.sqlDB.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("UserCount: %w", err)
+	}
+	return count, nil
+}
+
 // ─── Server Stats ─────────────────────────────────────────────────────────────
 
 // GetServerStats returns aggregate counts for the admin dashboard.

@@ -30,31 +30,38 @@ const (
 // ─── NewAdminAPI ──────────────────────────────────────────────────────────────
 
 // NewAdminAPI returns a chi router with all /admin/api/* routes. All routes
-// are protected by adminAuthMiddleware which requires the ADMINISTRATOR bit.
+// are protected by adminAuthMiddleware which requires the ADMINISTRATOR bit,
+// except for the setup endpoints which are unauthenticated.
 func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater) http.Handler {
 	r := chi.NewRouter()
 
-	// All routes require authentication and ADMINISTRATOR permission.
-	r.Use(adminAuthMiddleware(database))
+	// Setup endpoints — unauthenticated, only functional when no users exist.
+	r.Get("/setup/status", handleSetupStatus(database))
+	r.Post("/setup", handleSetup(database))
 
-	r.Get("/stats", handleGetStats(database))
-	r.Get("/users", handleListUsers(database))
-	r.Patch("/users/{id}", handlePatchUser(database))
-	r.Delete("/users/{id}/sessions", handleForceLogout(database))
-	r.Get("/channels", handleListChannels(database))
-	r.Post("/channels", handleCreateChannel(database))
-	r.Patch("/channels/{id}", handlePatchChannel(database))
-	r.Delete("/channels/{id}", handleDeleteChannel(database))
-	r.Get("/audit-log", handleGetAuditLog(database))
-	r.Get("/settings", handleGetSettings(database))
-	r.Patch("/settings", handlePatchSettings(database))
-	r.Post("/backup", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		ownerOnlyMiddleware(database, handleBackup(database)).ServeHTTP(w, req)
-	}))
-	r.Get("/updates", handleCheckUpdate(u))
-	r.Post("/updates/apply", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		ownerOnlyMiddleware(database, handleApplyUpdate(u, hub, version)).ServeHTTP(w, req)
-	}))
+	// All remaining routes require authentication and ADMINISTRATOR permission.
+	r.Group(func(r chi.Router) {
+		r.Use(adminAuthMiddleware(database))
+
+		r.Get("/stats", handleGetStats(database))
+		r.Get("/users", handleListUsers(database))
+		r.Patch("/users/{id}", handlePatchUser(database))
+		r.Delete("/users/{id}/sessions", handleForceLogout(database))
+		r.Get("/channels", handleListChannels(database))
+		r.Post("/channels", handleCreateChannel(database))
+		r.Patch("/channels/{id}", handlePatchChannel(database))
+		r.Delete("/channels/{id}", handleDeleteChannel(database))
+		r.Get("/audit-log", handleGetAuditLog(database))
+		r.Get("/settings", handleGetSettings(database))
+		r.Patch("/settings", handlePatchSettings(database))
+		r.Post("/backup", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			ownerOnlyMiddleware(database, handleBackup(database)).ServeHTTP(w, req)
+		}))
+		r.Get("/updates", handleCheckUpdate(u))
+		r.Post("/updates/apply", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			ownerOnlyMiddleware(database, handleApplyUpdate(u, hub, version)).ServeHTTP(w, req)
+		}))
+	})
 
 	return r
 }

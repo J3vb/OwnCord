@@ -37,6 +37,18 @@ func NewHandler(database *db.DB, version string, hub HubBroadcaster, u *updater.
 		// happen in production. Panic so it surfaces immediately in tests.
 		panic("admin: failed to create static sub-FS: " + err.Error())
 	}
+
+	// Serve index.html directly for the root path. We read it once at
+	// startup instead of using http.FileServer, which has redirect
+	// behaviour that conflicts with chi's Mount prefix stripping.
+	indexHTML, err := fs.ReadFile(staticFS, "index.html")
+	if err != nil {
+		panic("admin: failed to read index.html: " + err.Error())
+	}
+	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(indexHTML)
+	})
 	r.Handle("/*", http.FileServer(http.FS(staticFS)))
 
 	return r

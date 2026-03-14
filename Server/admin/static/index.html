@@ -203,8 +203,41 @@
 </head>
 <body>
 
+<!-- Setup wizard overlay (first-time setup) -->
+<div id="setup-overlay" class="hidden">
+  <div id="login-box">
+    <h2>Welcome to OwnCord</h2>
+    <p style="color:var(--muted);font-size:14px;margin-bottom:20px">No accounts exist yet. Create the owner account to get started.</p>
+    <div class="form-group">
+      <label for="setup-username">Username</label>
+      <input id="setup-username" type="text" autocomplete="username" placeholder="Choose a username">
+    </div>
+    <div class="form-group">
+      <label for="setup-password">Password</label>
+      <input id="setup-password" type="password" autocomplete="new-password" placeholder="Min 8 characters">
+    </div>
+    <div class="form-group">
+      <label for="setup-confirm">Confirm Password</label>
+      <input id="setup-confirm" type="password" autocomplete="new-password" placeholder="Re-enter password">
+    </div>
+    <button class="btn" id="setup-btn" style="width:100%">Create Owner Account</button>
+    <div id="setup-error" style="color:var(--danger);font-size:13px;margin-top:10px;min-height:20px"></div>
+  </div>
+</div>
+
+<!-- Setup success overlay (shows invite code) -->
+<div id="setup-success-overlay" class="hidden">
+  <div id="login-box">
+    <h2>Setup Complete!</h2>
+    <p style="color:var(--muted);font-size:14px;margin-bottom:16px">Your owner account has been created. Here's your invite code for adding other users:</p>
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:12px;font-family:monospace;font-size:16px;text-align:center;margin-bottom:16px;user-select:all;letter-spacing:.05em" id="setup-invite-code"></div>
+    <p style="color:var(--warning);font-size:13px;margin-bottom:20px">Save this code! Share it with people you want to invite. It has unlimited uses.</p>
+    <button class="btn" id="setup-continue-btn" style="width:100%">Continue to Admin Panel</button>
+  </div>
+</div>
+
 <!-- Login overlay -->
-<div id="login-overlay">
+<div id="login-overlay" class="hidden">
   <div id="login-box">
     <h2>OwnCord Admin</h2>
     <div class="form-group">
@@ -370,6 +403,18 @@ async function api(method, path, body) {
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 async function checkAuth() {
+  // First check if initial setup is needed.
+  try {
+    const res = await fetch('/admin/api/setup/status');
+    const data = await res.json();
+    if (data.needs_setup) {
+      showSetup();
+      return;
+    }
+  } catch (e) {
+    console.error('setup status check failed:', e);
+  }
+
   if (!token) { showLogin(); return; }
   try {
     await api('GET', '/stats');
@@ -380,17 +425,81 @@ async function checkAuth() {
   }
 }
 
-function showLogin() {
-  document.getElementById('login-overlay').classList.remove('hidden');
+function hideAllOverlays() {
+  document.getElementById('setup-overlay').classList.add('hidden');
+  document.getElementById('setup-success-overlay').classList.add('hidden');
+  document.getElementById('login-overlay').classList.add('hidden');
   document.getElementById('app').classList.add('hidden');
 }
 
+function showSetup() {
+  hideAllOverlays();
+  document.getElementById('setup-overlay').classList.remove('hidden');
+}
+
+function showLogin() {
+  hideAllOverlays();
+  document.getElementById('login-overlay').classList.remove('hidden');
+}
+
 function showApp() {
-  document.getElementById('login-overlay').classList.add('hidden');
+  hideAllOverlays();
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('app').style.display = 'flex';
 }
 
+// ─── Setup wizard ─────────────────────────────────────────────────────────────
+document.getElementById('setup-btn').onclick = async () => {
+  const username = document.getElementById('setup-username').value.trim();
+  const password = document.getElementById('setup-password').value;
+  const confirm = document.getElementById('setup-confirm').value;
+  const errEl = document.getElementById('setup-error');
+  errEl.textContent = '';
+
+  if (!username || !password) {
+    errEl.textContent = 'Username and password are required.';
+    return;
+  }
+  if (password !== confirm) {
+    errEl.textContent = 'Passwords do not match.';
+    return;
+  }
+
+  try {
+    const res = await fetch('/admin/api/setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'Setup failed');
+
+    // Store the session token.
+    token = data.token;
+    localStorage.setItem('admin_token', token);
+
+    // Show the invite code before continuing.
+    hideAllOverlays();
+    document.getElementById('setup-invite-code').textContent = data.invite_code;
+    document.getElementById('setup-success-overlay').classList.remove('hidden');
+  } catch (e) {
+    errEl.textContent = e.message;
+  }
+};
+
+document.getElementById('setup-continue-btn').onclick = () => {
+  showApp();
+  loadSection('dashboard');
+};
+
+// Allow Enter key to submit setup form.
+['setup-username', 'setup-password', 'setup-confirm'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('setup-btn').click();
+  });
+});
+
+// ─── Login ────────────────────────────────────────────────────────────────────
 document.getElementById('login-btn').onclick = async () => {
   const username = document.getElementById('login-username').value.trim();
   const password = document.getElementById('login-password').value;
@@ -412,6 +521,13 @@ document.getElementById('login-btn').onclick = async () => {
     errEl.textContent = e.message;
   }
 };
+
+// Allow Enter key to submit login form.
+['login-username', 'login-password'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('login-btn').click();
+  });
+});
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 document.querySelectorAll('#nav a').forEach(link => {

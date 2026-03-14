@@ -1,0 +1,124 @@
+package admin
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+
+	"github.com/microcosm-cc/bluemonday"
+	"github.com/owncord/server/auth"
+	"github.com/owncord/server/db"
+)
+
+// setupSanitizer strips all HTML from user input during setup.
+var setupSanitizer = bluemonday.StrictPolicy()
+
+// ownerRoleID is the role ID assigned to the first user (Owner).
+const ownerRoleID = 1
+
+// setupStatusResponse is the JSON shape returned by GET /api/setup/status.
+type setupStatusResponse struct {
+	NeedsSetup bool `json:"needs_setup"`
+}
+
+// setupRequest is the JSON body for POST /api/setup.
+type setupRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// setupResponse is the JSON shape returned on successful setup.
+type setupResponse struct {
+	Token      string `json:"token"`
+	UserID     int64  `json:"user_id"`
+	Username   string `json:"username"`
+	InviteCode string `json:"invite_code"`
+}
+
+// handleSetupStatus returns whether initial setup is needed (no users exist).
+func handleSetupStatus(database *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		count, err := database.UserCount()
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check user count")
+			return
+		}
+		writeJSON(w, http.StatusOK, setupStatusResponse{NeedsSetup: count == 0})
+	}
+}
+
+// handleSetup creates the first owner account. It only works when no users
+// exist in the database, preventing abuse after initial setup.
+func handleSetup(database *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Gate: only allow when no users exist.
+		count, err := database.UserCount()
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check user count")
+			return
+		}
+		if count > 0 {
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", "setup has already been completed")
+			return
+		}
+
+		var req setupRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+			return
+		}
+
+		req.Username = strings.TrimSpace(setupSanitizer.Sanitize(req.Username))
+		if req.Username == "" || req.Password == "" {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "username and password are required")
+			return
+		}
+
+		if err := auth.ValidatePasswordStrength(req.Password); err != nil {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			return
+		}
+
+		// Hash the password.
+		hash, err := auth.HashPassword(req.Password)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to hash password")
+			return
+		}
+
+		// Create the owner account (role_id=1 is Owner).
+		uid, err := database.CreateUser(req.Username, hash, ownerRoleID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create user")
+			return
+		}
+
+		// Issue a session token so the user is immediately logged in.
+		token, err := auth.GenerateToken()
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to generate session token")
+			return
+		}
+
+		device := r.Header.Get("User-Agent")
+		ip := r.RemoteAddr
+		if _, err := database.CreateSession(uid, auth.HashToken(token), device, ip); err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create session")
+			return
+		}
+
+		// Generate a bootstrap invite code so the owner can invite others.
+		inviteCode, err := database.CreateInvite(uid, 0, nil) // unlimited uses, no expiry
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to generate invite code")
+			return
+		}
+
+		writeJSON(w, http.StatusCreated, setupResponse{
+			Token:      token,
+			UserID:     uid,
+			Username:   req.Username,
+			InviteCode: inviteCode,
+		})
+	}
+}
