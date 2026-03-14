@@ -75,7 +75,9 @@ func defaults() Config {
 			Path: "data/chatserver.db",
 		},
 		TLS: TLSConfig{
-			Mode: "self_signed",
+			Mode:     "self_signed",
+			CertFile: "data/cert.pem",
+			KeyFile:  "data/key.pem",
 		},
 		Upload: UploadConfig{
 			MaxSizeMB:  100,
@@ -102,8 +104,8 @@ database:
 
 tls:
   mode: "self_signed"  # self_signed, acme, manual, off
-  cert_file: ""
-  key_file: ""
+  cert_file: "data/cert.pem"
+  key_file: "data/key.pem"
   domain: ""
 
 upload:
