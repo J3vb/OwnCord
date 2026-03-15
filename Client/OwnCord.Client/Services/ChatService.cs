@@ -18,6 +18,7 @@ public sealed class ChatService : IChatService
 
     public bool IsConnected => _ws.IsConnected;
     public string? CurrentToken { get; private set; }
+    public string? CurrentHost => _host;
     public ApiUser? CurrentUser { get; private set; }
 
     // ── Events ──────────────────────────────────────────────────────────────

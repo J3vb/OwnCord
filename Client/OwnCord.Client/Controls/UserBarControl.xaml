@@ -123,7 +123,8 @@
                         </TextBlock.Style>
                     </TextBlock>
                 </Button>
-                <Button Style="{StaticResource UserBarButton}" ToolTip="Settings">
+                <Button Command="{Binding OpenSettingsCommand}"
+                        Style="{StaticResource UserBarButton}" ToolTip="Settings">
                     <TextBlock Text="&#x2699;" FontSize="16" Foreground="#b5bac1"/>
                 </Button>
             </StackPanel>

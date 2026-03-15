@@ -43,6 +43,11 @@
             CornerRadius="4"
             Padding="2">
         <StackPanel Orientation="Horizontal">
+            <!-- React button (always visible, placeholder) -->
+            <Button Style="{StaticResource ActionButton}" ToolTip="Add Reaction">
+                <TextBlock Text="&#x1F600;" FontSize="14"/>
+            </Button>
+
             <!-- Reply button (always visible) -->
             <Button Command="{Binding ReplyCommand, ElementName=Root}"
                     CommandParameter="{Binding CommandParameter, ElementName=Root}"
@@ -67,6 +72,11 @@
                     Visibility="{Binding IsOwnMessage, ElementName=Root, Converter={StaticResource BoolToVis}}"
                     ToolTip="Delete">
                 <TextBlock Text="&#x1F5D1;" FontSize="13"/>
+            </Button>
+
+            <!-- More button (always visible, placeholder) -->
+            <Button Style="{StaticResource ActionButton}" ToolTip="More">
+                <TextBlock Text="&#x22EF;" FontSize="16" FontWeight="Bold"/>
             </Button>
         </StackPanel>
     </Border>

@@ -11,7 +11,7 @@
             <Setter Property="Padding" Value="10,16,10,4"/>
         </Style>
 
-        <!-- Sidebar nav button -->
+        <!-- Sidebar nav button with active state -->
         <Style x:Key="SidebarButton" TargetType="Button">
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Height" Value="32"/>
@@ -35,11 +35,50 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+            <Style.Triggers>
+                <!-- Active state: highlight when Tag matches SelectedSection -->
+                <DataTrigger Value="True">
+                    <DataTrigger.Binding>
+                        <MultiBinding Converter="{StaticResource EqualityConverter}">
+                            <Binding Path="Tag" RelativeSource="{RelativeSource Self}"/>
+                            <Binding Path="SelectedSection" RelativeSource="{RelativeSource AncestorType=UserControl}"/>
+                        </MultiBinding>
+                    </DataTrigger.Binding>
+                    <Setter Property="Foreground" Value="White"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="Button">
+                                <Border Background="#404249" CornerRadius="4" Padding="10,0" Margin="0,1">
+                                    <ContentPresenter VerticalAlignment="Center"/>
+                                </Border>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
 
         <!-- Logout button (red text) -->
-        <Style x:Key="LogoutButton" TargetType="Button" BasedOn="{StaticResource SidebarButton}">
+        <Style x:Key="LogoutButton" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="FontSize" Value="13"/>
             <Setter Property="Foreground" Value="{StaticResource Red}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="4" Padding="10,0" Margin="0,1">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#1Af23f43"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <!-- Close button -->
@@ -60,15 +99,111 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Foreground"
-                                        Value="{StaticResource TextNormal}"/>
-                                <Setter TargetName="Bd" Property="BorderBrush"
-                                        Value="{StaticResource TextNormal}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextNormal}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource TextNormal}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+        </Style>
+
+        <!-- Toggle switch (pill-shaped CheckBox) -->
+        <Style x:Key="ToggleSwitch" TargetType="CheckBox">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Border x:Name="Track" Width="40" Height="24" CornerRadius="12"
+                                Background="#80848e">
+                            <Border x:Name="Thumb" Width="18" Height="18" CornerRadius="9"
+                                    Background="White" HorizontalAlignment="Left" Margin="3,3,0,3"
+                                    VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Track" Property="Background" Value="{StaticResource Green}"/>
+                                <Setter TargetName="Thumb" Property="Margin" Value="19,3,0,3"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Settings slider -->
+        <Style x:Key="SettingsSlider" TargetType="Slider">
+            <Setter Property="Height" Value="20"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+
+        <!-- Kbd tag border -->
+        <Style x:Key="KbdTag" TargetType="Border">
+            <Setter Property="Background" Value="#1e1f22"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="6,2"/>
+        </Style>
+
+        <!-- Setting row -->
+        <Style x:Key="SettingRow" TargetType="Border">
+            <Setter Property="Padding" Value="0,14"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+        </Style>
+
+        <!-- Section sub-header -->
+        <Style x:Key="SectionSubHeader" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="{StaticResource TextFaint}"/>
+            <Setter Property="Margin" Value="0,24,0,8"/>
+        </Style>
+
+        <!-- Action button (Edit Profile, Change, etc.) -->
+        <Style x:Key="ActionBtn" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Background" Value="{StaticResource Accent}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                CornerRadius="4" Padding="14,6">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#4752c4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Theme option box -->
+        <Style x:Key="ThemeOption" TargetType="Border">
+            <Setter Property="Width" Value="80"/>
+            <Setter Property="Height" Value="56"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="BorderThickness" Value="2"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+
+        <!-- ComboBox dark style -->
+        <Style x:Key="SettingsCombo" TargetType="ComboBox">
+            <Setter Property="Background" Value="#1e1f22"/>
+            <Setter Property="Foreground" Value="{StaticResource TextNormal}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Width" Value="240"/>
         </Style>
     </UserControl.Resources>
 
@@ -93,30 +228,33 @@
                         <TextBlock Text="USER SETTINGS" Style="{StaticResource CategoryHeader}"/>
                         <Button Style="{StaticResource SidebarButton}" Content="My Account"
                                 Click="OnSidebarClick" Tag="My Account"/>
-                        <Button Style="{StaticResource SidebarButton}" Content="Profile"
-                                Click="OnSidebarClick" Tag="Profile"/>
-                        <Button Style="{StaticResource SidebarButton}" Content="Privacy"
-                                Click="OnSidebarClick" Tag="Privacy"/>
+                        <Button Style="{StaticResource SidebarButton}" Content="Appearance"
+                                Click="OnSidebarClick" Tag="Appearance"/>
+                        <Button Style="{StaticResource SidebarButton}" Content="Notifications"
+                                Click="OnSidebarClick" Tag="Notifications"/>
 
                         <!-- Separator -->
                         <Border Height="1" Background="{StaticResource BorderBrush}" Margin="10,8"/>
 
                         <!-- App Settings -->
                         <TextBlock Text="APP SETTINGS" Style="{StaticResource CategoryHeader}"/>
-                        <Button Style="{StaticResource SidebarButton}" Content="Appearance"
-                                Click="OnSidebarClick" Tag="Appearance"/>
-                        <Button Style="{StaticResource SidebarButton}" Content="Notifications"
-                                Click="OnSidebarClick" Tag="Notifications"/>
+                        <Button Style="{StaticResource SidebarButton}" Content="Voice &amp; Audio"
+                                Click="OnSidebarClick" Tag="Voice &amp; Audio"/>
                         <Button Style="{StaticResource SidebarButton}" Content="Keybinds"
                                 Click="OnSidebarClick" Tag="Keybinds"/>
-                        <Button Style="{StaticResource SidebarButton}" Content="Language"
-                                Click="OnSidebarClick" Tag="Language"/>
 
                         <!-- Separator -->
                         <Border Height="1" Background="{StaticResource BorderBrush}" Margin="10,8"/>
 
-                        <!-- Danger Zone -->
-                        <TextBlock Text="DANGER ZONE" Style="{StaticResource CategoryHeader}"/>
+                        <!-- About -->
+                        <TextBlock Text="ABOUT" Style="{StaticResource CategoryHeader}"/>
+                        <Button Style="{StaticResource SidebarButton}" Content="Info"
+                                Click="OnSidebarClick" Tag="Info"/>
+
+                        <!-- Separator -->
+                        <Border Height="1" Background="{StaticResource BorderBrush}" Margin="10,8"/>
+
+                        <!-- Log Out -->
                         <Button Style="{StaticResource LogoutButton}" Content="Log Out"
                                 Command="{Binding LogoutCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
 
@@ -125,34 +263,448 @@
             </Border>
 
             <!-- ══ Content Area ══ -->
-            <Grid Margin="40,16,60,16">
-                <DockPanel>
-                    <!-- Section header -->
-                    <TextBlock DockPanel.Dock="Top"
-                               Text="{Binding SelectedSection, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                               FontSize="20" FontWeight="Bold"
-                               Foreground="White"
-                               Margin="0,0,0,20"/>
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <Grid Margin="40,16,60,16" MaxWidth="660">
+                    <DockPanel>
+                        <!-- Section header -->
+                        <TextBlock DockPanel.Dock="Top"
+                                   Text="{Binding SelectedSection, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                   FontSize="20" FontWeight="Bold"
+                                   Foreground="White"
+                                   Margin="0,0,0,20"/>
 
-                    <!-- Placeholder content -->
-                    <Border>
-                        <TextBlock Foreground="{StaticResource TextMuted}"
-                                   FontSize="14" VerticalAlignment="Top">
-                            <TextBlock.Style>
-                                <Style TargetType="TextBlock">
-                                    <Setter Property="Text">
-                                        <Setter.Value>
-                                            <Binding Path="SelectedSection"
-                                                     RelativeSource="{RelativeSource AncestorType=UserControl}"
-                                                     StringFormat="Settings for {0} will appear here."/>
-                                        </Setter.Value>
-                                    </Setter>
-                                </Style>
-                            </TextBlock.Style>
-                        </TextBlock>
-                    </Border>
-                </DockPanel>
-            </Grid>
+                        <Grid>
+                            <!-- ═══ My Account ═══ -->
+                            <StackPanel>
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedSection, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                         Value="My Account">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+
+                                <!-- Profile card -->
+                                <Border Background="{StaticResource BgSecondary}" CornerRadius="8" Padding="16" Margin="0,0,0,16">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Border Grid.Column="0" Width="64" Height="64" CornerRadius="32" Background="#5865f2" Margin="0,0,16,0">
+                                            <TextBlock Text="{Binding Username, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource FirstLetter}}"
+                                                       Foreground="White" FontWeight="Bold" FontSize="24"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Username, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                       Foreground="White" FontSize="18" FontWeight="Bold"/>
+                                            <TextBlock Text="{Binding UserStatus, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                       Foreground="{StaticResource TextMuted}" FontSize="12" Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                        <Button Grid.Column="2" Style="{StaticResource ActionBtn}" Content="Edit Profile"
+                                                VerticalAlignment="Center" Click="OnPlaceholderClick" Tag="Edit profile dialog would open"/>
+                                    </Grid>
+                                </Border>
+
+                                <!-- Password -->
+                                <TextBlock Text="PASSWORD" Style="{StaticResource SectionSubHeader}"/>
+                                <Border Style="{StaticResource SettingRow}">
+                                    <Grid>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Change Password" Foreground="{StaticResource TextNormal}" FontSize="14"/>
+                                            <TextBlock Text="You'll need your current password to set a new one." Foreground="{StaticResource TextMuted}" FontSize="13" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <Button Style="{StaticResource ActionBtn}" Content="Change" HorizontalAlignment="Right"
+                                                VerticalAlignment="Center" FontSize="12" Click="OnPlaceholderClick" Tag="Change password dialog would open"/>
+                                    </Grid>
+                                </Border>
+
+                                <!-- 2FA -->
+                                <TextBlock Text="TWO-FACTOR AUTHENTICATION" Style="{StaticResource SectionSubHeader}"/>
+                                <Border Style="{StaticResource SettingRow}">
+                                    <Grid>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Enable 2FA" Foreground="{StaticResource TextNormal}" FontSize="14"/>
+                                            <TextBlock Text="Add an extra layer of security with TOTP." Foreground="{StaticResource TextMuted}" FontSize="13" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                  Click="OnToggleClick" Tag="2FA"/>
+                                    </Grid>
+                                </Border>
+
+                                <!-- Sessions -->
+                                <TextBlock Text="SESSIONS" Style="{StaticResource SectionSubHeader}"/>
+                                <Border Style="{StaticResource SettingRow}" BorderThickness="0">
+                                    <Grid>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Active Sessions" Foreground="{StaticResource TextNormal}" FontSize="14"/>
+                                            <TextBlock Text="1 active session (this device)." Foreground="{StaticResource TextMuted}" FontSize="13" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <Button Style="{StaticResource ActionBtn}" Content="Revoke All" Background="{StaticResource Red}"
+                                                HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="12"
+                                                Click="OnPlaceholderClick" Tag="Would revoke all other sessions"/>
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+
+                            <!-- ═══ Appearance ═══ -->
+                            <StackPanel>
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedSection, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                         Value="Appearance">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+
+                                <TextBlock Text="THEME" Style="{StaticResource SectionSubHeader}" Margin="0,0,0,8"/>
+                                <TextBlock Text="Color Theme" Foreground="{StaticResource TextNormal}" FontSize="14" Margin="0,0,0,8"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                                    <Border Style="{StaticResource ThemeOption}" Background="#313338" BorderBrush="{StaticResource Accent}" Margin="0,0,12,0">
+                                        <TextBlock Text="Dark" Foreground="White" FontSize="12" FontWeight="SemiBold"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <Border Style="{StaticResource ThemeOption}" Background="#0d0d0d" Margin="0,0,12,0">
+                                        <TextBlock Text="Midnight" Foreground="#b5bac1" FontSize="12" FontWeight="SemiBold"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <Border Style="{StaticResource ThemeOption}" Background="#f2f3f5">
+                                        <TextBlock Text="Light" Foreground="#313338" FontSize="12" FontWeight="SemiBold"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                </StackPanel>
+
+                                <TextBlock Text="CHAT" Style="{StaticResource SectionSubHeader}"/>
+                                <Border Style="{StaticResource SettingRow}">
+                                    <Grid>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Compact Mode" Foreground="{StaticResource TextNormal}" FontSize="14"/>
+                                            <TextBlock Text="Reduce spacing between messages." Foreground="{StaticResource TextMuted}" FontSize="13" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRow}" BorderThickness="0">
+                                    <StackPanel>
+                                        <TextBlock Text="Font Size" Foreground="{StaticResource TextNormal}" FontSize="14" Margin="0,0,0,8"/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="50"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Slider Grid.Column="0" Minimum="12" Maximum="20" Value="14"
+                                                    Style="{StaticResource SettingsSlider}" TickFrequency="1" IsSnapToTickEnabled="True"
+                                                    x:Name="FontSizeSlider"/>
+                                            <TextBlock Grid.Column="1" Foreground="{StaticResource TextMuted}" FontSize="13"
+                                                       HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                       Text="{Binding Value, ElementName=FontSizeSlider, StringFormat={}{0:0}px}"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+
+                            <!-- ═══ Notifications ═══ -->
+                            <StackPanel>
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedSection, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                         Value="Notifications">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+
+                                <TextBlock Text="DESKTOP NOTIFICATIONS" Style="{StaticResource SectionSubHeader}"/>
+                                <Border Style="{StaticResource SettingRow}">
+                                    <Grid>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Enable Desktop Notifications" Foreground="{StaticResource TextNormal}" FontSize="14"/>
+                                            <TextBlock Text="Show Windows toast notifications for new messages." Foreground="{StaticResource TextMuted}" FontSize="13" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <CheckBox Style="{StaticResource ToggleSwitch}" IsChecked="True" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRow}">
+                                    <Grid>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Notification Sounds" Foreground="{StaticResource TextNormal}" FontSize="14"/>
+                                            <TextBlock Text="Play a sound when you receive a notification." Foreground="{StaticResource TextMuted}" FontSize="13" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <CheckBox Style="{StaticResource ToggleSwitch}" IsChecked="True" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRow}">
+                                    <Grid>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Flash Taskbar" Foreground="{StaticResource TextNormal}" FontSize="14"/>
+                                            <TextBlock Text="Flash the taskbar icon for unread messages." Foreground="{StaticResource TextMuted}" FontSize="13" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <CheckBox Style="{StaticResource ToggleSwitch}" IsChecked="True" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+                                <TextBlock Text="MUTING" Style="{StaticResource SectionSubHeader}"/>
+                                <Border Style="{StaticResource SettingRow}" BorderThickness="0">
+                                    <Grid>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Suppress @everyone" Foreground="{StaticResource TextNormal}" FontSize="14"/>
+                                            <TextBlock Text="Don't notify for @everyone mentions." Foreground="{StaticResource TextMuted}" FontSize="13" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <CheckBox Style="{StaticResource ToggleSwitch}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+
+                            <!-- ═══ Voice & Audio ═══ -->
+                            <StackPanel>
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedSection, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                         Value="Voice &amp; Audio">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+
+                                <TextBlock Text="INPUT" Style="{StaticResource SectionSubHeader}"/>
+                                <Border Style="{StaticResource SettingRow}">
+                                    <Grid>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Input Device" Foreground="{StaticResource TextNormal}" FontSize="14"/>
+                                            <TextBlock Text="Microphone for voice chat." Foreground="{StaticResource TextMuted}" FontSize="13" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <ComboBox Style="{StaticResource SettingsCombo}" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                            <ComboBoxItem Content="Default - Microphone" IsSelected="True"/>
+                                        </ComboBox>
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRow}">
+                                    <StackPanel>
+                                        <TextBlock Text="Input Volume" Foreground="{StaticResource TextNormal}" FontSize="14" Margin="0,0,0,8"/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="50"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Slider Grid.Column="0" Minimum="0" Maximum="100" Value="80"
+                                                    Style="{StaticResource SettingsSlider}" x:Name="InputVolSlider"/>
+                                            <TextBlock Grid.Column="1" Foreground="{StaticResource TextMuted}" FontSize="13"
+                                                       HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                       Text="{Binding Value, ElementName=InputVolSlider, StringFormat={}{0:0}%}"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Text="OUTPUT" Style="{StaticResource SectionSubHeader}"/>
+                                <Border Style="{StaticResource SettingRow}">
+                                    <Grid>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Output Device" Foreground="{StaticResource TextNormal}" FontSize="14"/>
+                                            <TextBlock Text="Speakers or headphones." Foreground="{StaticResource TextMuted}" FontSize="13" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <ComboBox Style="{StaticResource SettingsCombo}" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                            <ComboBoxItem Content="Default - Speakers" IsSelected="True"/>
+                                        </ComboBox>
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRow}">
+                                    <StackPanel>
+                                        <TextBlock Text="Output Volume" Foreground="{StaticResource TextNormal}" FontSize="14" Margin="0,0,0,8"/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="50"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Slider Grid.Column="0" Minimum="0" Maximum="100" Value="100"
+                                                    Style="{StaticResource SettingsSlider}" x:Name="OutputVolSlider"/>
+                                            <TextBlock Grid.Column="1" Foreground="{StaticResource TextMuted}" FontSize="13"
+                                                       HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                       Text="{Binding Value, ElementName=OutputVolSlider, StringFormat={}{0:0}%}"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Text="PROCESSING" Style="{StaticResource SectionSubHeader}"/>
+                                <Border Style="{StaticResource SettingRow}">
+                                    <Grid>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Noise Suppression" Foreground="{StaticResource TextNormal}" FontSize="14"/>
+                                            <TextBlock Text="Reduce background noise (RNNoise)." Foreground="{StaticResource TextMuted}" FontSize="13" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <CheckBox Style="{StaticResource ToggleSwitch}" IsChecked="True" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRow}">
+                                    <Grid>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Voice Activity Detection" Foreground="{StaticResource TextNormal}" FontSize="14"/>
+                                            <TextBlock Text="Automatically detect when you're speaking." Foreground="{StaticResource TextMuted}" FontSize="13" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <CheckBox Style="{StaticResource ToggleSwitch}" IsChecked="True" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRow}">
+                                    <StackPanel>
+                                        <TextBlock Text="VAD Sensitivity" Foreground="{StaticResource TextNormal}" FontSize="14" Margin="0,0,0,8"/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="50"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Slider Grid.Column="0" Minimum="0" Maximum="100" Value="60"
+                                                    Style="{StaticResource SettingsSlider}" x:Name="VadSlider"/>
+                                            <TextBlock Grid.Column="1" Foreground="{StaticResource TextMuted}" FontSize="13"
+                                                       HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                       Text="{Binding Value, ElementName=VadSlider, StringFormat={}{0:0}%}"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource SettingRow}" BorderThickness="0">
+                                    <Grid>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Echo Cancellation" Foreground="{StaticResource TextNormal}" FontSize="14"/>
+                                            <TextBlock Text="Prevent feedback loops from speakers." Foreground="{StaticResource TextMuted}" FontSize="13" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <CheckBox Style="{StaticResource ToggleSwitch}" IsChecked="True" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+
+                            <!-- ═══ Keybinds ═══ -->
+                            <StackPanel>
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedSection, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                         Value="Keybinds">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+
+                                <TextBlock Text="Click a keybind to change it. Press Escape to cancel."
+                                           Foreground="{StaticResource TextMuted}" FontSize="13" Margin="0,0,0,16"/>
+
+                                <!-- Push to Talk -->
+                                <Border Style="{StaticResource SettingRow}">
+                                    <Grid>
+                                        <TextBlock Text="Push to Talk" Foreground="{StaticResource TextNormal}" FontSize="14" VerticalAlignment="Center"/>
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                            <Border Style="{StaticResource KbdTag}">
+                                                <TextBlock Text="V" FontFamily="Cascadia Code,Consolas,monospace" FontSize="12" Foreground="{StaticResource TextNormal}"/>
+                                            </Border>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <!-- Toggle Mute -->
+                                <Border Style="{StaticResource SettingRow}">
+                                    <Grid>
+                                        <TextBlock Text="Toggle Mute" Foreground="{StaticResource TextNormal}" FontSize="14" VerticalAlignment="Center"/>
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                            <Border Style="{StaticResource KbdTag}"><TextBlock Text="Ctrl" FontFamily="Cascadia Code,Consolas,monospace" FontSize="12" Foreground="{StaticResource TextNormal}"/></Border>
+                                            <TextBlock Text=" + " Foreground="{StaticResource TextFaint}" VerticalAlignment="Center" Margin="4,0"/>
+                                            <Border Style="{StaticResource KbdTag}"><TextBlock Text="Shift" FontFamily="Cascadia Code,Consolas,monospace" FontSize="12" Foreground="{StaticResource TextNormal}"/></Border>
+                                            <TextBlock Text=" + " Foreground="{StaticResource TextFaint}" VerticalAlignment="Center" Margin="4,0"/>
+                                            <Border Style="{StaticResource KbdTag}"><TextBlock Text="M" FontFamily="Cascadia Code,Consolas,monospace" FontSize="12" Foreground="{StaticResource TextNormal}"/></Border>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <!-- Toggle Deafen -->
+                                <Border Style="{StaticResource SettingRow}">
+                                    <Grid>
+                                        <TextBlock Text="Toggle Deafen" Foreground="{StaticResource TextNormal}" FontSize="14" VerticalAlignment="Center"/>
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                            <Border Style="{StaticResource KbdTag}"><TextBlock Text="Ctrl" FontFamily="Cascadia Code,Consolas,monospace" FontSize="12" Foreground="{StaticResource TextNormal}"/></Border>
+                                            <TextBlock Text=" + " Foreground="{StaticResource TextFaint}" VerticalAlignment="Center" Margin="4,0"/>
+                                            <Border Style="{StaticResource KbdTag}"><TextBlock Text="Shift" FontFamily="Cascadia Code,Consolas,monospace" FontSize="12" Foreground="{StaticResource TextNormal}"/></Border>
+                                            <TextBlock Text=" + " Foreground="{StaticResource TextFaint}" VerticalAlignment="Center" Margin="4,0"/>
+                                            <Border Style="{StaticResource KbdTag}"><TextBlock Text="D" FontFamily="Cascadia Code,Consolas,monospace" FontSize="12" Foreground="{StaticResource TextNormal}"/></Border>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <!-- Quick Switcher -->
+                                <Border Style="{StaticResource SettingRow}">
+                                    <Grid>
+                                        <TextBlock Text="Quick Switcher" Foreground="{StaticResource TextNormal}" FontSize="14" VerticalAlignment="Center"/>
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                            <Border Style="{StaticResource KbdTag}"><TextBlock Text="Ctrl" FontFamily="Cascadia Code,Consolas,monospace" FontSize="12" Foreground="{StaticResource TextNormal}"/></Border>
+                                            <TextBlock Text=" + " Foreground="{StaticResource TextFaint}" VerticalAlignment="Center" Margin="4,0"/>
+                                            <Border Style="{StaticResource KbdTag}"><TextBlock Text="K" FontFamily="Cascadia Code,Consolas,monospace" FontSize="12" Foreground="{StaticResource TextNormal}"/></Border>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <!-- Edit Last Message -->
+                                <Border Style="{StaticResource SettingRow}">
+                                    <Grid>
+                                        <TextBlock Text="Edit Last Message" Foreground="{StaticResource TextNormal}" FontSize="14" VerticalAlignment="Center"/>
+                                        <Border Style="{StaticResource KbdTag}" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                            <TextBlock Text="&#x2191;" FontFamily="Cascadia Code,Consolas,monospace" FontSize="12" Foreground="{StaticResource TextNormal}"/>
+                                        </Border>
+                                    </Grid>
+                                </Border>
+
+                                <!-- Close Panel -->
+                                <Border Style="{StaticResource SettingRow}" BorderThickness="0">
+                                    <Grid>
+                                        <TextBlock Text="Close Panel" Foreground="{StaticResource TextNormal}" FontSize="14" VerticalAlignment="Center"/>
+                                        <Border Style="{StaticResource KbdTag}" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                            <TextBlock Text="Esc" FontFamily="Cascadia Code,Consolas,monospace" FontSize="12" Foreground="{StaticResource TextNormal}"/>
+                                        </Border>
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+
+                            <!-- ═══ Info ═══ -->
+                            <StackPanel>
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedSection, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                         Value="Info">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+
+                                <Border Background="{StaticResource BgSecondary}" CornerRadius="8" Padding="16">
+                                    <StackPanel>
+                                        <TextBlock Text="OwnCord" Foreground="White" FontSize="24" FontWeight="Bold"/>
+                                        <TextBlock Text="Version 1.0.0" Foreground="{StaticResource TextMuted}" FontSize="14" Margin="0,4,0,16"/>
+                                        <TextBlock Foreground="{StaticResource TextMuted}" FontSize="14" LineHeight="22" TextWrapping="Wrap">
+                                            Self-hosted chat platform for friends.<LineBreak/>
+                                            Server: Go + SQLite + Pion WebRTC<LineBreak/>
+                                            Client: Native Windows (WPF)
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Grid>
+                    </DockPanel>
+                </Grid>
+            </ScrollViewer>
         </DockPanel>
     </Grid>
 </UserControl>

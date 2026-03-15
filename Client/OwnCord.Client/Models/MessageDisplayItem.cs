@@ -1,3 +1,5 @@
+using System.Linq;
+
 namespace OwnCord.Client.Models;
 
 /// <summary>
@@ -38,12 +40,22 @@ public sealed class MessageDisplayItem
     public bool IsReply => ReplyToId is not null && ReplyToMessage is not null;
     public bool IsSystemMessage => Message.Author.Username == "System";
 
+    /// <summary>Parsed content segments (text and code blocks).</summary>
+    public IReadOnlyList<ContentPart> ContentParts { get; }
+
+    /// <summary>True if the message contains at least one code block.</summary>
+    public bool HasCodeBlocks => ContentParts.Any(p => p.IsCode);
+
     /// <summary>True when the current user authored this message (for showing edit/delete actions).</summary>
     public bool IsOwnMessage { get; init; }
+
+    /// <summary>Hex color for the author's role, e.g. "#e74c3c". Null falls back to white.</summary>
+    public string? AuthorRoleColor { get; init; }
 
     public MessageDisplayItem(Message message, Message? previousMessage)
     {
         Message = message;
+        ContentParts = ContentPart.Parse(message.Content);
 
         // Day divider logic
         if (previousMessage is null ||

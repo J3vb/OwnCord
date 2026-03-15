@@ -12,6 +12,7 @@ public interface IChatService
 
     bool IsConnected { get; }
     string? CurrentToken { get; }
+    string? CurrentHost { get; }
     ApiUser? CurrentUser { get; }
 
     // ── Auth ────────────────────────────────────────────────────────────────

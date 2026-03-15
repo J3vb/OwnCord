@@ -28,6 +28,7 @@
         <conv:BoolToArrowConverter x:Key="BoolToArrow"/>
         <conv:HealthStatusToBrushConverter x:Key="HealthStatusToBrush"/>
         <conv:StringEqualsConverter x:Key="StringEquals"/>
+        <conv:EqualityConverter x:Key="EqualityConverter"/>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

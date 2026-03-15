@@ -3,6 +3,7 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:controls="clr-namespace:OwnCord.Client.Controls"
       xmlns:models="clr-namespace:OwnCord.Client.Models"
+      xmlns:converters="clr-namespace:OwnCord.Client.Converters"
       Title="OwnCord">
 
     <Page.Resources>
@@ -143,7 +144,8 @@
                 SelectedServer="{Binding ActiveServer}"
                 SelectServerCommand="{Binding SelectServerCommand}"
                 AddServerCommand="{Binding AddServerCommand}"
-                HomeCommand="{Binding HomeCommand}"/>
+                HomeCommand="{Binding HomeCommand}"
+                IsHomeView="{Binding IsHomeView}"/>
 
             <!-- ═══════════════════════════════════════════════════════════════ -->
             <!-- DM sidebar (shown in Home view)                                -->
@@ -151,6 +153,8 @@
             <controls:DmSidebarControl Grid.Column="1"
                 DirectMessages="{Binding Members}"
                 FriendsCommand="{Binding HomeCommand}"
+                SelectDmCommand="{Binding SelectDmCommand}"
+                CloseDmCommand="{Binding CloseDmCommand}"
                 Visibility="{Binding IsHomeView, Converter={StaticResource BoolToVisibility}}"/>
 
             <!-- ═══════════════════════════════════════════════════════════════ -->
@@ -168,7 +172,7 @@
                 <!-- Server name header -->
                 <Border Grid.Row="0" BorderThickness="0,0,0,1" BorderBrush="#1e1f22" Cursor="Hand">
                     <Grid Margin="16,0">
-                        <TextBlock Text="OwnCord" Foreground="White" FontWeight="Bold" FontSize="15"
+                        <TextBlock Text="{Binding ActiveServer.Name, FallbackValue='OwnCord'}" Foreground="White" FontWeight="Bold" FontSize="15"
                                    VerticalAlignment="Center"/>
                     </Grid>
                 </Border>
@@ -327,11 +331,198 @@
             <!-- ═══════════════════════════════════════════════════════════════ -->
             <controls:FriendsViewControl Grid.Column="2"
                 SelectedTab="{Binding SelectedFriendsTab}"
-                Friends="{Binding Members}"
+                Friends="{Binding FilteredFriends}"
                 FriendSearchText="{Binding FriendSearchText, Mode=TwoWay}"
                 SelectTabCommand="{Binding SelectFriendsTabCommand}"
-                MessageFriendCommand="{Binding MessageFriendCommand}"
-                Visibility="{Binding IsHomeView, Converter={StaticResource BoolToVisibility}}"/>
+                MessageFriendCommand="{Binding MessageFriendCommand}">
+                <controls:FriendsViewControl.Style>
+                    <Style TargetType="controls:FriendsViewControl">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsHomeView}" Value="True"/>
+                                    <Condition Binding="{Binding IsDmView}" Value="False"/>
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </controls:FriendsViewControl.Style>
+            </controls:FriendsViewControl>
+
+            <!-- ═══════════════════════════════════════════════════════════════ -->
+            <!-- DM Chat area (shown in Home view when a DM is selected)       -->
+            <!-- ═══════════════════════════════════════════════════════════════ -->
+            <Grid Grid.Column="2" Grid.ColumnSpan="2">
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsHomeView}" Value="True"/>
+                                    <Condition Binding="{Binding IsDmView}" Value="True"/>
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
+
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="340"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- DM Chat column -->
+                <Grid Grid.Column="0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="48"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- DM Chat header -->
+                    <Border Grid.Row="0" BorderThickness="0,0,0,1" BorderBrush="#1e1f22">
+                        <StackPanel Orientation="Horizontal" Margin="16,0" VerticalAlignment="Center">
+                            <TextBlock Text="@" Foreground="{StaticResource TextMuted}" FontSize="20"
+                                       FontWeight="Bold" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding ActiveDmUser.Username, FallbackValue='User'}"
+                                       Foreground="White" FontWeight="Bold" FontSize="15"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- DM Messages area (empty for now) -->
+                    <Grid Grid.Row="1">
+                        <!-- Welcome banner -->
+                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                            <!-- Avatar -->
+                            <Border Width="80" Height="80" CornerRadius="40" Background="#5865f2"
+                                    HorizontalAlignment="Center" Margin="0,0,0,16">
+                                <TextBlock Text="{Binding ActiveDmUser.Username, Converter={StaticResource FirstLetter}}"
+                                           Foreground="White" FontWeight="Bold" FontSize="32"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <TextBlock Text="{Binding ActiveDmUser.Username, FallbackValue='User'}"
+                                       Foreground="White" FontSize="24" FontWeight="Bold"
+                                       HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                            <TextBlock Foreground="{StaticResource TextMuted}" FontSize="14"
+                                       HorizontalAlignment="Center">
+                                <Run Text="This is the beginning of your direct message history with "/>
+                                <Run Text="{Binding ActiveDmUser.Username, Mode=OneWay, FallbackValue='this user'}" FontWeight="Bold"/>
+                                <Run Text="."/>
+                            </TextBlock>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- DM Message input -->
+                    <Border Grid.Row="2" Margin="16,0,16,20">
+                        <Border Background="#383a40" CornerRadius="8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Button Grid.Column="0" Style="{StaticResource InputButton}" ToolTip="Attach File">
+                                    <TextBlock Text="&#x1F4CE;" FontSize="18" Foreground="#949ba4"/>
+                                </Button>
+                                <Grid Grid.Column="1">
+                                    <TextBlock IsHitTestVisible="False" Foreground="#72767d" FontSize="14"
+                                               VerticalAlignment="Center" Margin="12,0,0,0">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding ActiveDmUser}" Value="{x:Null}">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                        <Run Text="Message @"/><Run Text="{Binding ActiveDmUser.Username, Mode=OneWay, FallbackValue='User'}"/>
+                                    </TextBlock>
+                                    <TextBox Background="Transparent" BorderThickness="0"
+                                             Foreground="#dbdee1" FontSize="14" CaretBrush="#dbdee1"
+                                             VerticalAlignment="Center" Padding="12,10"
+                                             AcceptsReturn="False"/>
+                                </Grid>
+                                <Button Grid.Column="2" Style="{StaticResource InputButton}" ToolTip="Emoji">
+                                    <TextBlock Text="&#x1F642;" FontSize="18" Foreground="#949ba4"/>
+                                </Button>
+                            </Grid>
+                        </Border>
+                    </Border>
+                </Grid>
+
+                <!-- DM Profile sidebar -->
+                <Border Grid.Column="1" Background="{StaticResource BgSecondary}"
+                        BorderThickness="1,0,0,0" BorderBrush="#1e1f22">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="16,16,16,16">
+                            <!-- Profile banner area -->
+                            <Border Height="60" CornerRadius="8,8,0,0" Margin="-16,-16,-16,0">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <GradientStop Color="#5865f2" Offset="0"/>
+                                        <GradientStop Color="#eb459e" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+
+                            <!-- Avatar overlapping banner -->
+                            <Border Width="80" Height="80" CornerRadius="40" Background="#5865f2"
+                                    BorderBrush="{StaticResource BgSecondary}" BorderThickness="6"
+                                    HorizontalAlignment="Left" Margin="8,-40,0,0">
+                                <TextBlock Text="{Binding ActiveDmUser.Username, Converter={StaticResource FirstLetter}}"
+                                           Foreground="White" FontWeight="Bold" FontSize="28"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+
+                            <!-- Username -->
+                            <TextBlock Text="{Binding ActiveDmUser.Username, FallbackValue='User'}"
+                                       Foreground="White" FontSize="20" FontWeight="Bold"
+                                       Margin="0,12,0,4"/>
+
+                            <!-- Status -->
+                            <TextBlock Foreground="{StaticResource TextMuted}" FontSize="13" Margin="0,0,0,16">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Text" Value="Offline"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding ActiveDmUser.Status}" Value="Online">
+                                                <Setter Property="Text" Value="Online"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding ActiveDmUser.Status}" Value="Idle">
+                                                <Setter Property="Text" Value="Idle"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding ActiveDmUser.Status}" Value="Dnd">
+                                                <Setter Property="Text" Value="Do Not Disturb"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+
+                            <!-- Divider -->
+                            <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,0,0,12"/>
+
+                            <!-- About Me section -->
+                            <TextBlock Text="ABOUT ME" Foreground="{StaticResource TextMuted}" FontSize="11"
+                                       FontWeight="Bold" Margin="0,0,0,8"/>
+                            <TextBlock Text="No bio set." Foreground="{StaticResource TextMuted}" FontSize="13"
+                                       TextWrapping="Wrap" Margin="0,0,0,16"/>
+
+                            <!-- Member Since -->
+                            <TextBlock Text="MEMBER SINCE" Foreground="{StaticResource TextMuted}" FontSize="11"
+                                       FontWeight="Bold" Margin="0,0,0,8"/>
+                            <TextBlock Text="Unknown" Foreground="{StaticResource TextMuted}" FontSize="13"/>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+            </Grid>
 
             <!-- ═══════════════════════════════════════════════════════════════ -->
             <!-- Chat area (shown in Server view)                               -->
@@ -379,22 +570,33 @@
 
                         <!-- Spacer is column 4 -->
 
-                        <!-- Search input -->
+                        <!-- Search input with watermark -->
                         <Border Grid.Column="5" CornerRadius="4" Background="#1e1f22" Padding="8,4" Margin="4,0"
                                 VerticalAlignment="Center">
-                            <TextBox Text="" Background="Transparent" BorderThickness="0"
-                                     Foreground="#dbdee1" FontSize="12" Width="140"
-                                     CaretBrush="#dbdee1">
-                                <TextBox.Style>
-                                    <Style TargetType="TextBox">
-                                        <Setter Property="Tag" Value="Search"/>
-                                    </Style>
-                                </TextBox.Style>
-                            </TextBox>
+                            <Grid>
+                                <TextBlock Text="Search" Foreground="#72767d" FontSize="12" VerticalAlignment="Center"
+                                           IsHitTestVisible="False">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding SearchText}" Value="">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <TextBox Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         Background="Transparent" BorderThickness="0"
+                                         Foreground="#dbdee1" FontSize="12" Width="140"
+                                         CaretBrush="#dbdee1"/>
+                            </Grid>
                         </Border>
 
                         <!-- Pinned button -->
                         <Button Grid.Column="6" Style="{StaticResource HeaderToolButton}"
+                                Command="{Binding ShowPinnedCommand}"
                                 VerticalAlignment="Center" Margin="4,0" ToolTip="Pinned Messages">
                             <TextBlock Text="&#x1F4CC;" FontSize="16" Foreground="#b5bac1"/>
                         </Button>
@@ -530,43 +732,48 @@
                                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,2"
                                                                 Visibility="{Binding IsGrouped, Converter={StaticResource InverseBoolToVisibility}}">
                                                         <TextBlock Text="{Binding Author.Username}"
-                                                                   Foreground="White" FontWeight="SemiBold"
+                                                                   Foreground="{Binding AuthorRoleColor, Converter={StaticResource HexColorToBrush}, FallbackValue=White, TargetNullValue=White}"
+                                                                   FontWeight="SemiBold"
                                                                    FontSize="14" Cursor="Hand" Margin="0,0,8,0"/>
                                                         <TextBlock Text="{Binding Timestamp, StringFormat={}{0:HH:mm}}"
                                                                    Foreground="#6d6f78" FontSize="11"
                                                                    VerticalAlignment="Bottom" Margin="0,0,0,1"/>
                                                     </StackPanel>
 
-                                                    <!-- Message text -->
+                                                    <!-- Message content: deleted message (simple text) -->
                                                     <TextBlock TextWrapping="Wrap" MaxWidth="700"
-                                                               HorizontalAlignment="Left"
-                                                               LineHeight="20">
-                                                        <TextBlock.Style>
-                                                            <Style TargetType="TextBlock">
-                                                                <Setter Property="Foreground" Value="#dbdee1"/>
-                                                                <Style.Triggers>
-                                                                    <DataTrigger Binding="{Binding Deleted}" Value="True">
-                                                                        <Setter Property="Foreground" Value="#6d6f78"/>
-                                                                        <Setter Property="FontStyle" Value="Italic"/>
-                                                                    </DataTrigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </TextBlock.Style>
-                                                        <Run Text="{Binding Content, Mode=OneWay}"/>
-                                                        <!-- Edited tag -->
-                                                        <Run Text=" (edited)" FontSize="10" Foreground="#6d6f78"
-                                                             BaselineAlignment="Baseline">
-                                                            <Run.Style>
-                                                                <Style TargetType="Run">
-                                                                    <Style.Triggers>
-                                                                        <DataTrigger Binding="{Binding IsEdited}" Value="False">
-                                                                            <Setter Property="Text" Value=""/>
-                                                                        </DataTrigger>
-                                                                    </Style.Triggers>
-                                                                </Style>
-                                                            </Run.Style>
-                                                        </Run>
-                                                    </TextBlock>
+                                                               HorizontalAlignment="Left" LineHeight="20"
+                                                               Foreground="#6d6f78" FontStyle="Italic"
+                                                               Text="{Binding Content}"
+                                                               Visibility="{Binding Deleted, Converter={StaticResource BoolToVisibility}}"/>
+
+                                                    <!-- Message content: normal message (text + code blocks) -->
+                                                    <StackPanel Visibility="{Binding Deleted, Converter={StaticResource InverseBoolToVisibility}}">
+                                                        <ItemsControl ItemsSource="{Binding ContentParts}" HorizontalAlignment="Left" MaxWidth="700">
+                                                            <ItemsControl.Resources>
+                                                                <DataTemplate x:Key="TextPartTpl">
+                                                                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
+                                                                               LineHeight="20" Foreground="#dbdee1"/>
+                                                                </DataTemplate>
+                                                                <DataTemplate x:Key="CodePartTpl">
+                                                                    <controls:CodeBlockControl
+                                                                        Code="{Binding Text}"
+                                                                        CodeLanguage="{Binding Language}"
+                                                                        Margin="0,4,0,4"/>
+                                                                </DataTemplate>
+                                                            </ItemsControl.Resources>
+                                                            <ItemsControl.ItemTemplateSelector>
+                                                                <converters:ContentPartTemplateSelector
+                                                                    TextTemplate="{StaticResource TextPartTpl}"
+                                                                    CodeTemplate="{StaticResource CodePartTpl}"/>
+                                                            </ItemsControl.ItemTemplateSelector>
+                                                        </ItemsControl>
+                                                        <!-- Edited indicator -->
+                                                        <TextBlock FontSize="10" Foreground="#6d6f78" Margin="0,2,0,0"
+                                                                   Visibility="{Binding IsEdited, Converter={StaticResource BoolToVisibility}}">
+                                                            <Run Text="(edited)"/>
+                                                        </TextBlock>
+                                                    </StackPanel>
 
                                                     <!-- Attachments -->
                                                     <ItemsControl ItemsSource="{Binding Attachments}" Margin="0,4,0,0"
@@ -593,7 +800,9 @@
                                                         </ItemsControl.ItemsPanel>
                                                         <ItemsControl.ItemTemplate>
                                                             <DataTemplate DataType="{x:Type models:Reaction}">
-                                                                <Button Style="{StaticResource ReactionChip}" Margin="0,0,4,0">
+                                                                <Button Style="{StaticResource ReactionChip}" Margin="0,0,4,0"
+                                                                        Command="{Binding DataContext.ToggleReactionCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                                                        CommandParameter="{Binding}">
                                                                     <StackPanel Orientation="Horizontal">
                                                                         <TextBlock Text="{Binding Emoji}" FontSize="14" Margin="0,0,4,0"/>
                                                                         <TextBlock Text="{Binding Count}" FontSize="12" Foreground="#dbdee1"/>
@@ -616,12 +825,54 @@
                 <Border Grid.Row="2" Height="24" Padding="16,0"
                         Visibility="{Binding IsTyping, Converter={StaticResource BoolToVisibility}}">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <!-- Animated typing dots -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,6,0">
+                            <Ellipse x:Name="Dot1" Width="6" Height="6" Fill="#b5bac1" Margin="0,0,3,0" Opacity="0.4">
+                                <Ellipse.Triggers>
+                                    <EventTrigger RoutedEvent="Loaded">
+                                        <BeginStoryboard>
+                                            <Storyboard RepeatBehavior="Forever">
+                                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                 From="0.4" To="1" Duration="0:0:0.3"
+                                                                 BeginTime="0:0:0" AutoReverse="True"/>
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </EventTrigger>
+                                </Ellipse.Triggers>
+                            </Ellipse>
+                            <Ellipse Width="6" Height="6" Fill="#b5bac1" Margin="0,0,3,0" Opacity="0.4">
+                                <Ellipse.Triggers>
+                                    <EventTrigger RoutedEvent="Loaded">
+                                        <BeginStoryboard>
+                                            <Storyboard RepeatBehavior="Forever">
+                                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                 From="0.4" To="1" Duration="0:0:0.3"
+                                                                 BeginTime="0:0:0.15" AutoReverse="True"/>
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </EventTrigger>
+                                </Ellipse.Triggers>
+                            </Ellipse>
+                            <Ellipse Width="6" Height="6" Fill="#b5bac1" Opacity="0.4">
+                                <Ellipse.Triggers>
+                                    <EventTrigger RoutedEvent="Loaded">
+                                        <BeginStoryboard>
+                                            <Storyboard RepeatBehavior="Forever">
+                                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                 From="0.4" To="1" Duration="0:0:0.3"
+                                                                 BeginTime="0:0:0.3" AutoReverse="True"/>
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </EventTrigger>
+                                </Ellipse.Triggers>
+                            </Ellipse>
+                        </StackPanel>
                         <TextBlock Text="{Binding TypingText}" Foreground="#b5bac1" FontSize="12" FontStyle="Italic"/>
                     </StackPanel>
                 </Border>
 
                 <!-- Message input area -->
-                <Border Grid.Row="3" Margin="16,0,16,20">
+                <Border x:Name="MessageInputArea" Grid.Row="3" Margin="16,0,16,20">
                     <StackPanel>
                         <!-- Reply compose bar (shown when replying) -->
                         <controls:ReplyComposeBar
@@ -639,17 +890,37 @@
                             </Grid.ColumnDefinitions>
 
                             <!-- Attach file button -->
-                            <Button Grid.Column="0" Style="{StaticResource InputButton}" ToolTip="Attach File">
+                            <Button Grid.Column="0" Style="{StaticResource InputButton}" ToolTip="Attach File"
+                                    Command="{Binding AttachFileCommand}">
                                 <TextBlock Text="&#x1F4CE;" FontSize="18" Foreground="#949ba4"/>
                             </Button>
 
-                            <!-- Message text input -->
-                            <TextBox Grid.Column="1"
-                                     Text="{Binding MessageInput, UpdateSourceTrigger=PropertyChanged}"
-                                     Style="{StaticResource ChatTextBox}"/>
+                            <!-- Message text input with watermark -->
+                            <Grid Grid.Column="1">
+                                <TextBlock IsHitTestVisible="False"
+                                           Foreground="#72767d" FontSize="14" VerticalAlignment="Center" Margin="12,0,0,0">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding MessageInput}" Value="">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding MessageInput}" Value="{x:Null}">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                    <Run Text="Message #"/><Run Text="{Binding SelectedChannel.Name, Mode=OneWay, FallbackValue='channel'}"/>
+                                </TextBlock>
+                                <TextBox Text="{Binding MessageInput, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource ChatTextBox}"/>
+                            </Grid>
 
                             <!-- Emoji button -->
-                            <Button Grid.Column="2" Style="{StaticResource InputButton}" ToolTip="Emoji">
+                            <Button Grid.Column="2" Style="{StaticResource InputButton}" ToolTip="Emoji"
+                                    Command="{Binding ToggleEmojiPickerCommand}">
                                 <TextBlock Text="&#x1F642;" FontSize="18" Foreground="#949ba4"/>
                             </Button>
 
@@ -705,6 +976,15 @@
                                                         </ControlTemplate>
                                                     </Button.Template>
                                                     <StackPanel Orientation="Horizontal">
+                                                        <StackPanel.Style>
+                                                            <Style TargetType="StackPanel">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding Status}" Value="Offline">
+                                                                        <Setter Property="Opacity" Value="0.4"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </StackPanel.Style>
                                                         <!-- Avatar with status dot -->
                                                         <Grid Width="32" Height="32" Margin="0,0,8,0">
                                                             <Border Width="32" Height="32" CornerRadius="16" Background="#5865f2">
@@ -760,6 +1040,31 @@
                 JoinedDate="Unknown"
                 CloseCommand="{Binding CloseUserPopupCommand}"/>
         </Popup>
+
+        <!-- Emoji picker popup (anchored near message input) -->
+        <Popup IsOpen="{Binding ShowEmojiPicker}"
+               Placement="Top"
+               PlacementTarget="{Binding ElementName=MessageInputArea}"
+               StaysOpen="False"
+               AllowsTransparency="True"
+               PopupAnimation="Fade"
+               HorizontalOffset="-40"
+               VerticalOffset="-4">
+            <controls:EmojiPickerControl
+                EmojiSelectedCommand="{Binding InsertEmojiCommand}"/>
+        </Popup>
+
+        <!-- Settings overlay (full-screen, spans entire window) -->
+        <Grid Grid.Row="0" Grid.RowSpan="2"
+              Visibility="{Binding ShowSettings, Converter={StaticResource BoolToVisibility}}"
+              Panel.ZIndex="200">
+            <controls:SettingsOverlayControl
+                CloseCommand="{Binding CloseSettingsCommand}"
+                LogoutCommand="{Binding LogoutCommand}"
+                Username="{Binding CurrentUsername}"
+                UserStatus="{Binding CurrentUserStatus}"
+                ServerName="{Binding ActiveServer.Name, FallbackValue='Not connected'}"/>
+        </Grid>
 
         <!-- Toast notification overlay -->
         <controls:ToastControl

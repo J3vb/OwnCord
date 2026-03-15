@@ -1,6 +1,7 @@
 using System;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media.Imaging;
 
 namespace OwnCord.Client.Controls;
 
@@ -79,10 +80,51 @@ public partial class AttachmentControl : UserControl
         ImagePanel.Visibility = isImage ? Visibility.Visible : Visibility.Collapsed;
         FilePanel.Visibility = isImage ? Visibility.Collapsed : Visibility.Visible;
 
-        if (!isImage)
+        if (isImage)
+        {
+            LoadImage();
+        }
+        else
         {
             FilenameText.Text = Filename;
             FileSizeText.Text = FormatFileSize(FileSize);
+        }
+    }
+
+    private void LoadImage()
+    {
+        if (string.IsNullOrEmpty(FileUrl)) return;
+
+        try
+        {
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.UriSource = new Uri(FileUrl, UriKind.RelativeOrAbsolute);
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.DecodePixelWidth = 400; // Limit decode size for performance
+            bitmap.EndInit();
+
+            if (bitmap.IsDownloading)
+            {
+                bitmap.DownloadCompleted += (_, _) =>
+                {
+                    AttachmentImage.Source = bitmap;
+                    ImagePlaceholder.Visibility = Visibility.Collapsed;
+                };
+                bitmap.DownloadFailed += (_, _) =>
+                {
+                    // Keep placeholder visible on failure
+                };
+            }
+            else
+            {
+                AttachmentImage.Source = bitmap;
+                ImagePlaceholder.Visibility = Visibility.Collapsed;
+            }
+        }
+        catch
+        {
+            // Keep placeholder visible on error
         }
     }
 

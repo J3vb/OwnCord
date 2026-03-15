@@ -1,13 +1,21 @@
 # Claude Code local config
-.claude/hooks/
-.claude/settings.json
-.claude/settings.local.json
-.claude/subprocess-settings.json
+.claude/
+Client/.claude/
 Server/.claude/
 
-# Research / personal notes
+# Claude Code skills
+skills/
+
+# AI-specific / internal planning docs
 IMPROVEMENTS.md
 STOAT-RESEARCH.md
+PROMPTS.md
+SKILL.md
+AUDIT.md
+LANGUAGE-REVIEW.md
+MIGRATION-PLAN.md
+TESTING-STRATEGY.md
+CLIENT-ARCHITECTURE.md
 docs/superpowers/
 
 # Server runtime artifacts
@@ -16,7 +24,18 @@ Server/config.yaml
 Server/data/
 
 # Test coverage artifacts
+*.out
 Server/cov.out
 Server/cover.out
 Server/coverage.out
 Server/ws_cover.out
+Server/ws_cov.out
+
+# Client build artifacts
+Client/publish/
+Client/publish-single/
+Client/publish-release/
+
+# HTML mockups (large design reference files)
+Client/login-mockup.html
+Client/ui-mockup.html

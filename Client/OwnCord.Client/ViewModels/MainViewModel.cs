@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading;
 using System.Windows;
 using System.Windows.Input;
@@ -35,8 +36,17 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     private double _userPopupX;
     private double _userPopupY;
     private bool _isHomeView;
+    private User? _activeDmUser;
+    private bool _isDmView;
     private string _selectedFriendsTab = "online";
     private string _friendSearchText = string.Empty;
+    private ObservableCollection<User> _filteredFriends = [];
+    private string _searchText = string.Empty;
+    private string _currentUserStatusText = "Offline";
+    private Timer? _errorClearTimer;
+    private bool _isTransientError;
+    private Timer? _statusDebounceTimer;
+    private string? _pendingStatus;
 
     public MainViewModel()
     {
@@ -61,7 +71,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         CancelReplyCommand = new RelayCommand(OnCancelReply);
         DeleteMessageCommand = new RelayCommand<Message>(OnDeleteMessage);
         StartEditCommand = new RelayCommand<Message>(OnStartEdit);
-        SelectServerCommand = new RelayCommand<ServerProfile>(p => { ActiveServer = p; IsHomeView = false; });
+        SelectServerCommand = new RelayCommand<ServerProfile>(p => { ActiveServer = p; IsHomeView = false; IsDmView = false; ActiveDmUser = null; });
         AddServerCommand = new RelayCommand(() => { /* placeholder for future dialog */ });
         ToggleStatusPickerCommand = new RelayCommand(() => ShowStatusPicker = !ShowStatusPicker);
         ChangeStatusCommand = new RelayCommand<string>(OnChangeStatus);
@@ -71,9 +81,15 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         InsertEmojiCommand = new RelayCommand<string>(OnInsertEmoji);
         ShowUserPopupCommand = new RelayCommand<object>(OnShowUserPopup);
         CloseUserPopupCommand = new RelayCommand(OnCloseUserPopup);
+        AttachFileCommand = new RelayCommand(OnAttachFile);
+        LogoutCommand = new RelayCommand(OnLogout);
+        ShowPinnedCommand = new RelayCommand(() => ShowToastMessage("Pinned messages coming soon"));
+        ToggleReactionCommand = new RelayCommand<object>(OnToggleReaction);
         HomeCommand = new RelayCommand(OnHome);
         SelectFriendsTabCommand = new RelayCommand<string>(OnSelectFriendsTab);
         MessageFriendCommand = new RelayCommand<object>(OnMessageFriend);
+        SelectDmCommand = new RelayCommand<object>(OnSelectDm);
+        CloseDmCommand = new RelayCommand(OnCloseDm);
     }
 
     /// <summary>Wire up ChatService events. Called once after login succeeds.</summary>
@@ -81,6 +97,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     {
         _chat = chat;
 
+        chat.AuthOk += p => RunOnUI(() => OnAuthOk(p));
         chat.Ready += p => RunOnUI(() => OnReady(p));
         chat.ChatMessageReceived += p => RunOnUI(() => OnChatMessage(p));
         chat.TypingReceived += p => RunOnUI(() => OnTyping(p));
@@ -130,6 +147,14 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ChannelGroup> ChannelGroups { get; }
     public ObservableCollection<MemberGroup> MemberGroups { get; }
     public ObservableCollection<VoiceStateInfo> VoiceStates { get; }
+
+    public ObservableCollection<User> FilteredFriends
+    {
+        get => _filteredFriends;
+        private set => SetField(ref _filteredFriends, value);
+    }
+
+    public int FilteredFriendsCount => FilteredFriends.Count;
 
     // ── Selected channel ─────────────────────────────────────────────────────
 
@@ -219,13 +244,25 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     // ── Current user info (for user bar) ─────────────────────────────────────
 
     public string CurrentUsername => _chat?.CurrentUser?.Username ?? "Unknown";
-    public string CurrentUserStatus => _chat?.CurrentUser?.Status ?? "offline";
 
-    public UserStatus CurrentUserStatusEnum => CurrentUserStatus switch
+    public string CurrentUserStatus
     {
-        "online" => UserStatus.Online,
-        "idle" => UserStatus.Idle,
-        "dnd" => UserStatus.Dnd,
+        get => _currentUserStatusText;
+        private set
+        {
+            if (SetField(ref _currentUserStatusText, value))
+            {
+                OnPropertyChanged(nameof(CurrentUserStatusEnum));
+            }
+        }
+    }
+
+    public UserStatus CurrentUserStatusEnum => _currentUserStatusText switch
+    {
+        "Online" => UserStatus.Online,
+        "Idle" => UserStatus.Idle,
+        "Do Not Disturb" => UserStatus.Dnd,
+        "Invisible" => UserStatus.Offline,
         _ => UserStatus.Offline
     };
 
@@ -237,6 +274,18 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         set => SetField(ref _isHomeView, value);
     }
 
+    public User? ActiveDmUser
+    {
+        get => _activeDmUser;
+        set => SetField(ref _activeDmUser, value);
+    }
+
+    public bool IsDmView
+    {
+        get => _isDmView;
+        set => SetField(ref _isDmView, value);
+    }
+
     public string SelectedFriendsTab
     {
         get => _selectedFriendsTab;
@@ -246,7 +295,17 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     public string FriendSearchText
     {
         get => _friendSearchText;
-        set => SetField(ref _friendSearchText, value);
+        set
+        {
+            if (SetField(ref _friendSearchText, value))
+                RebuildFilteredFriends();
+        }
+    }
+
+    public string SearchText
+    {
+        get => _searchText;
+        set => SetField(ref _searchText, value);
     }
 
     // ── Settings overlay ──────────────────────────────────────────────────
@@ -317,9 +376,15 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     public ICommand InsertEmojiCommand { get; }
     public ICommand ShowUserPopupCommand { get; }
     public ICommand CloseUserPopupCommand { get; }
+    public ICommand AttachFileCommand { get; }
+    public ICommand LogoutCommand { get; }
+    public ICommand ShowPinnedCommand { get; }
     public ICommand HomeCommand { get; }
     public ICommand SelectFriendsTabCommand { get; }
     public ICommand MessageFriendCommand { get; }
+    public ICommand SelectDmCommand { get; }
+    public ICommand CloseDmCommand { get; }
+    public ICommand ToggleReactionCommand { get; }
 
     // ── User popup state ────────────────────────────────────────────────────
 
@@ -500,9 +565,19 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     {
         if (string.IsNullOrWhiteSpace(status)) return;
         ShowStatusPicker = false;
-        _ = _chat?.SendStatusChangeAsync(status);
-        OnPropertyChanged(nameof(CurrentUserStatus));
-        OnPropertyChanged(nameof(CurrentUserStatusEnum));
+
+        // Update UI immediately (optimistic)
+        CurrentUserStatus = CapitalizeStatus(status);
+
+        // Debounce the actual server call (1 second) to avoid rate limits
+        _pendingStatus = status;
+        _statusDebounceTimer?.Dispose();
+        _statusDebounceTimer = new Timer(_ =>
+        {
+            var pending = _pendingStatus;
+            if (pending is not null && _chat is not null)
+                _ = _chat.SendStatusChangeAsync(pending);
+        }, null, 1000, Timeout.Infinite);
     }
 
     private void OnSendMessage()
@@ -527,6 +602,9 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
 
     private void OnSelectChannel(object? param)
     {
+        IsDmView = false;
+        ActiveDmUser = null;
+
         var channel = param switch
         {
             Channel ch => ch,
@@ -622,8 +700,40 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         PopupUser = null;
     }
 
+    private void OnAttachFile()
+    {
+        ShowToastMessage("File upload is not yet implemented.");
+    }
+
+    private void OnLogout()
+    {
+        ShowSettings = false;
+        _ = LogoutAndReturnToConnectAsync();
+    }
+
+    private async Task LogoutAndReturnToConnectAsync()
+    {
+        if (_chat is null) return;
+        try
+        {
+            await _chat.LogoutAsync();
+        }
+        catch
+        {
+            // Best-effort logout
+        }
+
+        RunOnUI(() =>
+        {
+            if (Application.Current?.MainWindow is MainWindow mainWindow)
+                mainWindow.NavigateToConnect();
+        });
+    }
+
     private void OnHome()
     {
+        IsDmView = false;
+        ActiveDmUser = null;
         IsHomeView = true;
     }
 
@@ -631,11 +741,42 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     {
         if (string.IsNullOrWhiteSpace(tab)) return;
         SelectedFriendsTab = tab;
+        RebuildFilteredFriends();
     }
 
     private void OnMessageFriend(object? param)
     {
-        // Placeholder: in the future, open or create a DM conversation with the friend
+        if (param is User user)
+        {
+            ActiveDmUser = user;
+            IsDmView = true;
+            Messages.Clear();
+            DisplayMessages.Clear();
+        }
+    }
+
+    private void OnSelectDm(object? param)
+    {
+        if (param is User user)
+        {
+            ActiveDmUser = user;
+            IsDmView = true;
+            // In future: load DM messages from server
+            Messages.Clear();
+            DisplayMessages.Clear();
+        }
+    }
+
+    private void OnCloseDm()
+    {
+        ActiveDmUser = null;
+        IsDmView = false;
+    }
+
+    private void OnToggleReaction(object? parameter)
+    {
+        // Placeholder — server reaction API not yet implemented
+        ShowToastMessage("Reactions coming soon");
     }
 
     // ── Message display items ──────────────────────────────────────────────────
@@ -651,7 +792,8 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
                 ReplyToMessage = msg.ReplyToId is not null
                     ? Messages.FirstOrDefault(m => m.Id == msg.ReplyToId)
                     : null,
-                IsOwnMessage = _chat?.CurrentUser is { } u && msg.Author.Id == u.Id
+                IsOwnMessage = _chat?.CurrentUser is { } u && msg.Author.Id == u.Id,
+                AuthorRoleColor = Roles.FirstOrDefault(r => r.Id == msg.Author.RoleId)?.Color
             };
             DisplayMessages.Add(item);
             prev = msg;
@@ -666,7 +808,8 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             ReplyToMessage = message.ReplyToId is not null
                 ? Messages.FirstOrDefault(m => m.Id == message.ReplyToId)
                 : null,
-            IsOwnMessage = _chat?.CurrentUser is { } u && message.Author.Id == u.Id
+            IsOwnMessage = _chat?.CurrentUser is { } u && message.Author.Id == u.Id,
+            AuthorRoleColor = Roles.FirstOrDefault(r => r.Id == message.Author.RoleId)?.Color
         };
         DisplayMessages.Add(item);
     }
@@ -744,6 +887,25 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // ── Filtered friends list ────────────────────────────────────────────────
+
+    private void RebuildFilteredFriends()
+    {
+        var filtered = Members.AsEnumerable();
+
+        if (SelectedFriendsTab == "online")
+            filtered = filtered.Where(m => m.Status != UserStatus.Offline);
+
+        if (!string.IsNullOrWhiteSpace(FriendSearchText))
+            filtered = filtered.Where(m => m.Username.Contains(FriendSearchText, StringComparison.OrdinalIgnoreCase));
+
+        FilteredFriends.Clear();
+        foreach (var m in filtered)
+            FilteredFriends.Add(m);
+
+        OnPropertyChanged(nameof(FilteredFriendsCount));
+    }
+
     // ── Message loading ──────────────────────────────────────────────────────
 
     private async Task LoadMessagesForChannelAsync(long channelId)
@@ -781,6 +943,30 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     }
 
     // ── ChatService event handlers ──────────────────────────────────────────
+
+    private void OnAuthOk(AuthOkPayload payload)
+    {
+        // Add the connected server to the server strip
+        var host = _chat?.CurrentHost ?? "unknown";
+        var serverName = payload.ServerName ?? host;
+
+        // Only add if not already in the strip
+        var existing = ServerProfiles.FirstOrDefault(p =>
+            string.Equals(p.Host, host, StringComparison.OrdinalIgnoreCase));
+
+        if (existing is null)
+        {
+            var profile = ServerProfile.Create(serverName, host);
+            ServerProfiles.Add(profile);
+            ActiveServer = profile;
+        }
+        else
+        {
+            ActiveServer = existing;
+        }
+
+        IsHomeView = false;
+    }
 
     private void OnReady(ReadyPayload payload)
     {
@@ -836,10 +1022,18 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         // Rebuild channel groups now that voice states are loaded
         RebuildChannelGroups();
 
+        // Set current user status from the member list
+        if (_chat?.CurrentUser is { } cu)
+        {
+            var self = payload.Members.FirstOrDefault(m => m.Id == cu.Id);
+            CurrentUserStatus = CapitalizeStatus(self?.Status ?? "online");
+        }
+
         // Notify user bar
         OnPropertyChanged(nameof(CurrentUsername));
-        OnPropertyChanged(nameof(CurrentUserStatus));
-        OnPropertyChanged(nameof(CurrentUserStatusEnum));
+
+        // Build filtered friends list
+        RebuildFilteredFriends();
 
         // Select first text channel
         var firstText = Channels.FirstOrDefault(c => c.Type == ChannelType.Text);
@@ -901,9 +1095,14 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
             {
                 Members[i] = Members[i] with { Status = status };
                 RebuildMemberGroups();
+                RebuildFilteredFriends();
                 break;
             }
         }
+
+        // Update user bar if this is the current user
+        if (_chat?.CurrentUser is { } cu && payload.UserId == cu.Id)
+            CurrentUserStatus = CapitalizeStatus(payload.Status);
     }
 
     private void OnChatEdited(ChatEditedPayload payload)
@@ -946,6 +1145,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         };
         Members.Add(new User(payload.Id, payload.Username, payload.Avatar, payload.RoleId, status));
         RebuildMemberGroups();
+        RebuildFilteredFriends();
     }
 
     private void OnChannelCreated(ChannelEventPayload payload)
@@ -999,12 +1199,23 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
 
     private void OnConnectionLost(string reason)
     {
+        _isTransientError = false;
+        _errorClearTimer?.Dispose();
         ConnectionStatus = $"Disconnected \u2014 {reason}";
     }
 
     private void OnWsError(WsErrorPayload error)
     {
+        _isTransientError = true;
         ConnectionStatus = $"Server error: {error.Message}";
+
+        // Auto-clear transient errors after 5 seconds
+        _errorClearTimer?.Dispose();
+        _errorClearTimer = new Timer(_ => RunOnUI(() =>
+        {
+            if (_isTransientError)
+                ConnectionStatus = null;
+        }), null, 5000, Timeout.Infinite);
     }
 
     // ── Voice event handlers ─────────────────────────────────────────────────
@@ -1072,6 +1283,16 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private static string CapitalizeStatus(string status) => status switch
+    {
+        "online" => "Online",
+        "idle" => "Idle",
+        "dnd" => "Do Not Disturb",
+        "invisible" => "Invisible",
+        "offline" => "Offline",
+        _ => status
+    };
+
     private int GetUnreadCount(long channelId)
     {
         var ch = Channels.FirstOrDefault(c => c.Id == channelId);
@@ -1084,5 +1305,9 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     {
         _typingTimer?.Dispose();
         _typingTimer = null;
+        _errorClearTimer?.Dispose();
+        _errorClearTimer = null;
+        _statusDebounceTimer?.Dispose();
+        _statusDebounceTimer = null;
     }
 }

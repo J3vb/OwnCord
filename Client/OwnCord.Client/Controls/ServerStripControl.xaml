@@ -108,10 +108,12 @@
                     Command="{Binding HomeCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                     ToolTip="Direct Messages"
                     Margin="0,0,0,8">
-                <TextBlock Text="O"
-                           Foreground="White"
-                           FontSize="18"
-                           FontWeight="Bold"/>
+                <Grid>
+                    <Path Data="M12,4 C13.66,4 15,5.34 15,7 C15,8.66 13.66,10 12,10 C10.34,10 9,8.66 9,7 C9,5.34 10.34,4 12,4 M12,12 C14.21,12 18,13.1 18,15.33 L18,17 L6,17 L6,15.33 C6,13.1 9.79,12 12,12"
+                          Fill="White"
+                          Stretch="Uniform"
+                          Width="22" Height="22"/>
+                </Grid>
             </Button>
 
             <!-- Separator -->

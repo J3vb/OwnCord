@@ -8,21 +8,29 @@
         <Border x:Name="ImagePanel"
                 Visibility="Collapsed"
                 CornerRadius="8"
-                Height="200"
-                ClipToBounds="True">
-            <Border.Background>
-                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                    <GradientStop Color="{StaticResource BgSecondaryColor}" Offset="0"/>
-                    <GradientStop Color="{StaticResource BgActiveColor}" Offset="1"/>
-                </LinearGradientBrush>
-            </Border.Background>
+                ClipToBounds="True"
+                Cursor="Hand">
+            <Grid>
+                <!-- Gradient placeholder (shown while loading) -->
+                <Border x:Name="ImagePlaceholder" CornerRadius="8">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                            <GradientStop Color="{StaticResource BgSecondaryColor}" Offset="0"/>
+                            <GradientStop Color="{StaticResource BgActiveColor}" Offset="1"/>
+                        </LinearGradientBrush>
+                    </Border.Background>
+                    <TextBlock Text="&#x1F5BC;" FontSize="36"
+                               Foreground="{StaticResource TextMuted}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
 
-            <!-- Placeholder icon centered -->
-            <TextBlock Text="&#x1F5BC;"
-                       FontSize="36"
-                       Foreground="{StaticResource TextMuted}"
-                       HorizontalAlignment="Center"
-                       VerticalAlignment="Center"/>
+                <!-- Actual image -->
+                <Image x:Name="AttachmentImage"
+                       MaxWidth="400" MaxHeight="300"
+                       Stretch="Uniform"
+                       HorizontalAlignment="Left"
+                       RenderOptions.BitmapScalingMode="HighQuality"/>
+            </Grid>
         </Border>
 
         <!-- File attachment: shown for non-image mimes -->

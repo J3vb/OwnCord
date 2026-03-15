@@ -114,6 +114,14 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Navigate back to the connect/login page (called after logout).</summary>
+    public void NavigateToConnect()
+    {
+        _connectVm.ErrorMessage = null;
+        _connectVm.IsLoading = false;
+        RootFrame.Navigate(new ConnectPage(_connectVm));
+    }
+
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
         base.OnClosing(e);

@@ -170,10 +170,22 @@
                                                TextTrimming="CharacterEllipsis"/>
 
                                     <!-- Close button (shows on hover) -->
-                                    <Button x:Name="CloseBtn" Grid.Column="2" Style="{StaticResource CloseDmButton}"
+                                    <Button Grid.Column="2"
                                             Command="{Binding DataContext.CloseDmCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                             CommandParameter="{Binding}"
-                                            VerticalAlignment="Center"/>
+                                            VerticalAlignment="Center"
+                                            Width="16" Height="16" Cursor="Hand">
+                                        <Button.Style>
+                                            <Style TargetType="Button" BasedOn="{StaticResource CloseDmButton}">
+                                                <Setter Property="Visibility" Value="Hidden"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Button, AncestorLevel=2}}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
                                 </Grid>
                             </Button>
                         </DataTemplate>
