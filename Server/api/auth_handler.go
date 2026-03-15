@@ -251,7 +251,10 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter) http.HandlerFunc {
 			return
 		}
 
-		_ = database.UpdateUserStatus(user.ID, "online")
+		// Don't set status to "online" here — the WebSocket connection in
+		// serve.go does that when the user actually connects. Setting it here
+		// would leave the user permanently "online" if they never open a WS
+		// connection or if the client crashes before connecting.
 		slog.Info("user logged in", "username", user.Username, "user_id", user.ID, "ip", ip)
 		_ = database.LogAudit(user.ID, "user_login", "user", user.ID,
 			"logged in from "+ip)

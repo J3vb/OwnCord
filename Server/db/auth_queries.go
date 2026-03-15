@@ -78,6 +78,16 @@ func (d *DB) UpdateUserStatus(id int64, status string) error {
 	return nil
 }
 
+// ResetAllUserStatuses sets all users to "offline". Called on server startup
+// to clear stale statuses from a previous run or crash.
+func (d *DB) ResetAllUserStatuses() error {
+	_, err := d.sqlDB.Exec(`UPDATE users SET status = 'offline' WHERE status != 'offline'`)
+	if err != nil {
+		return fmt.Errorf("ResetAllUserStatuses: %w", err)
+	}
+	return nil
+}
+
 // BanUser marks a user as banned with an optional expiry. Pass nil for a
 // permanent ban.
 func (d *DB) BanUser(id int64, reason string, expires *time.Time) error {

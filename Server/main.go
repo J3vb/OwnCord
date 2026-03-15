@@ -75,7 +75,12 @@ func run(log *slog.Logger) error {
 		return fmt.Errorf("running migrations: %w", err)
 	}
 
-	// Clear stale voice states from a previous run.
+	// Clear stale state from a previous run or crash.
+	if err := database.ResetAllUserStatuses(); err != nil {
+		log.Warn("failed to reset stale user statuses", "error", err)
+	} else {
+		log.Info("reset all user statuses to offline")
+	}
 	if err := database.ClearAllVoiceStates(); err != nil {
 		log.Warn("failed to clear stale voice states", "error", err)
 	} else {
