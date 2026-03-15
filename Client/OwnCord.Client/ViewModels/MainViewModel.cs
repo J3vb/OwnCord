@@ -752,9 +752,9 @@ public sealed class MainViewModel : ViewModelBase
             }
             RebuildDisplayMessages();
         }
-        catch
+        catch (Exception ex)
         {
-            // Channel message load failed — don't crash
+            ConnectionStatus = $"Failed to load messages: {ex.Message}";
         }
     }
 
@@ -847,7 +847,7 @@ public sealed class MainViewModel : ViewModelBase
                 [],
                 attachments
             );
-            Messages.Add(msg);
+            AddMessage(msg);
         }
         else
         {

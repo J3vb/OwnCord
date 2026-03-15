@@ -343,6 +343,13 @@ public sealed class ConnectViewModel : ViewModelBase
 
         try
         {
+            var fileInfo = new FileInfo(dlg.FileName);
+            if (fileInfo.Length > 1_048_576) // 1 MB limit
+            {
+                ErrorMessage = "Import file is too large (max 1 MB).";
+                return;
+            }
+
             var json = File.ReadAllText(dlg.FileName);
             var imported = JsonSerializer.Deserialize<List<ServerProfile>>(json);
             if (imported is null || imported.Count == 0) return;

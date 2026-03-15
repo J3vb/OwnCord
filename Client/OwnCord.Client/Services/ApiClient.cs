@@ -35,18 +35,18 @@ public sealed class ApiClient : IApiClient
     {
         var handler = new HttpClientHandler
         {
-            ServerCertificateCustomValidationCallback = (_, cert, _, _) =>
+            ServerCertificateCustomValidationCallback = (request, cert, chain, errors) =>
             {
                 if (cert == null) return false;
                 var fingerprint = cert.GetCertHashString(HashAlgorithmName.SHA256);
-                // Extract host:port from the request — the cert object has no request URL,
-                // but the HttpClient passes the request URI via the first argument (HttpRequestMessage).
-                // Unfortunately the standard callback signature does not expose it directly,
-                // so we store it as an ambient value set before each request.
-                // Fail closed: if the host context is missing, reject the connection.
+                // Extract host:port directly from the request URI.
+                // Fail closed: if the URI is missing, reject the connection.
                 // Never fall back to cert.Subject — an attacker controls that value.
-                var host = TofuHostContext.CurrentHost;
-                if (host == null) return false;
+                var uri = request.RequestUri;
+                if (uri == null) return false;
+                var host = uri.IsDefaultPort
+                    ? uri.Host
+                    : $"{uri.Host}:{uri.Port}";
                 return trustService.IsTrusted(host, fingerprint);
             }
         };
@@ -71,19 +71,11 @@ public sealed class ApiClient : IApiClient
 
     public async Task LogoutAsync(string host, string token, CancellationToken ct = default)
     {
-        TofuHostContext.CurrentHost = NormalizeHost(host);
-        try
-        {
-            var request = new HttpRequestMessage(HttpMethod.Post, BuildUrl(host, "/api/v1/auth/logout"));
-            request.Headers.Add("Authorization", $"Bearer {token}");
-            var response = await _http.SendAsync(request, ct);
-            if (!response.IsSuccessStatusCode)
-                await ThrowApiExceptionAsync(response, ct);
-        }
-        finally
-        {
-            TofuHostContext.CurrentHost = null;
-        }
+        var request = new HttpRequestMessage(HttpMethod.Post, BuildUrl(host, "/api/v1/auth/logout"));
+        request.Headers.Add("Authorization", $"Bearer {token}");
+        var response = await _http.SendAsync(request, ct);
+        if (!response.IsSuccessStatusCode)
+            await ThrowApiExceptionAsync(response, ct);
     }
 
     public async Task<ApiUser> GetMeAsync(string host, string token, CancellationToken ct = default)
@@ -117,16 +109,8 @@ public sealed class ApiClient : IApiClient
 
     public async Task<HealthResponse> HealthCheckAsync(string host, CancellationToken ct = default)
     {
-        TofuHostContext.CurrentHost = NormalizeHost(host);
-        try
-        {
-            var response = await _http.GetAsync(BuildUrl(host, "/health"), ct);
-            return await ReadOrThrowAsync<HealthResponse>(response, ct);
-        }
-        finally
-        {
-            TofuHostContext.CurrentHost = null;
-        }
+        var response = await _http.GetAsync(BuildUrl(host, "/health"), ct);
+        return await ReadOrThrowAsync<HealthResponse>(response, ct);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -153,32 +137,16 @@ public sealed class ApiClient : IApiClient
 
     private async Task<HttpResponseMessage> PostJsonAsync(string host, string path, object body, CancellationToken ct)
     {
-        TofuHostContext.CurrentHost = NormalizeHost(host);
-        try
-        {
-            var json = JsonSerializer.Serialize(body, JsonOpts);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            return await _http.PostAsync(BuildUrl(host, path), content, ct);
-        }
-        finally
-        {
-            TofuHostContext.CurrentHost = null;
-        }
+        var json = JsonSerializer.Serialize(body, JsonOpts);
+        var content = new StringContent(json, Encoding.UTF8, "application/json");
+        return await _http.PostAsync(BuildUrl(host, path), content, ct);
     }
 
     private async Task<HttpResponseMessage> GetAuthenticatedAsync(string host, string path, string token, CancellationToken ct)
     {
-        TofuHostContext.CurrentHost = NormalizeHost(host);
-        try
-        {
-            var request = new HttpRequestMessage(HttpMethod.Get, BuildUrl(host, path));
-            request.Headers.Add("Authorization", $"Bearer {token}");
-            return await _http.SendAsync(request, ct);
-        }
-        finally
-        {
-            TofuHostContext.CurrentHost = null;
-        }
+        var request = new HttpRequestMessage(HttpMethod.Get, BuildUrl(host, path));
+        request.Headers.Add("Authorization", $"Bearer {token}");
+        return await _http.SendAsync(request, ct);
     }
 
     private static async Task<T> ReadOrThrowAsync<T>(HttpResponseMessage response, CancellationToken ct)

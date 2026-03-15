@@ -36,7 +36,7 @@ public sealed class MessageDisplayItem
     public bool HasReactions => Reactions.Count > 0;
     public bool HasAttachments => Attachments.Count > 0;
     public bool IsReply => ReplyToId is not null && ReplyToMessage is not null;
-    public bool IsSystemMessage => Message.Author.Username == "System" || Content.StartsWith("[");
+    public bool IsSystemMessage => Message.Author.Username == "System";
 
     /// <summary>True when the current user authored this message (for showing edit/delete actions).</summary>
     public bool IsOwnMessage { get; init; }

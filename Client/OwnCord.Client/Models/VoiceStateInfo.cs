@@ -12,9 +12,14 @@ public sealed class VoiceStateInfo : INotifyPropertyChanged
     private bool _muted;
     private bool _deafened;
     private bool _speaking;
+    private long _channelId;
 
     public long UserId { get; init; }
-    public long ChannelId { get; set; }
+    public long ChannelId
+    {
+        get => _channelId;
+        set { if (_channelId != value) { _channelId = value; OnPropertyChanged(); } }
+    }
     public string Username { get; init; } = string.Empty;
 
     public bool Muted
