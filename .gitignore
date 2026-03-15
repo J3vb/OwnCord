@@ -1,4 +1,14 @@
+# Claude Code local config
+.claude/hooks/
+.claude/settings.json
 .claude/settings.local.json
+.claude/subprocess-settings.json
+Server/.claude/
+
+# Research / personal notes
+IMPROVEMENTS.md
+STOAT-RESEARCH.md
+docs/superpowers/
 
 # Server runtime artifacts
 Server/chatserver.exe
