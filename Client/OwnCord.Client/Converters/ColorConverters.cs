@@ -15,7 +15,9 @@ public sealed class HexColorToBrushConverter : IValueConverter
             try
             {
                 var color = (Color)ColorConverter.ConvertFromString(hex);
-                return new SolidColorBrush(color);
+                var brush = new SolidColorBrush(color);
+                brush.Freeze();
+                return brush;
             }
             catch
             {
@@ -24,7 +26,9 @@ public sealed class HexColorToBrushConverter : IValueConverter
         }
 
         // Default fallback color (muted text)
-        return new SolidColorBrush((Color)ColorConverter.ConvertFromString("#949ba4"));
+        var fallback = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#949ba4"));
+        fallback.Freeze();
+        return fallback;
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
@@ -35,10 +39,17 @@ public sealed class HexColorToBrushConverter : IValueConverter
 [ValueConversion(typeof(string), typeof(SolidColorBrush))]
 public sealed class StatusToBrushConverter : IValueConverter
 {
-    private static readonly SolidColorBrush Online = new((Color)ColorConverter.ConvertFromString("#23a55a"));
-    private static readonly SolidColorBrush Idle = new((Color)ColorConverter.ConvertFromString("#f0b232"));
-    private static readonly SolidColorBrush Dnd = new((Color)ColorConverter.ConvertFromString("#f23f43"));
-    private static readonly SolidColorBrush Offline = new((Color)ColorConverter.ConvertFromString("#6d6f78"));
+    private static readonly SolidColorBrush Online = CreateFrozen("#23a55a");
+    private static readonly SolidColorBrush Idle = CreateFrozen("#f0b232");
+    private static readonly SolidColorBrush Dnd = CreateFrozen("#f23f43");
+    private static readonly SolidColorBrush Offline = CreateFrozen("#6d6f78");
+
+    private static SolidColorBrush CreateFrozen(string hex)
+    {
+        var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
+        brush.Freeze();
+        return brush;
+    }
 
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
     {
@@ -70,8 +81,15 @@ public sealed class FirstLetterConverter : IValueConverter
 [ValueConversion(typeof(bool), typeof(SolidColorBrush))]
 public sealed class BoolToRedBrushConverter : IValueConverter
 {
-    private static readonly SolidColorBrush Red = new((Color)ColorConverter.ConvertFromString("#f23f43"));
-    private static readonly SolidColorBrush Normal = new((Color)ColorConverter.ConvertFromString("#b5bac1"));
+    private static readonly SolidColorBrush Red = CreateFrozen("#f23f43");
+    private static readonly SolidColorBrush Normal = CreateFrozen("#b5bac1");
+
+    private static SolidColorBrush CreateFrozen(string hex)
+    {
+        var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
+        brush.Freeze();
+        return brush;
+    }
 
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         => value is true ? Red : Normal;
@@ -84,8 +102,15 @@ public sealed class BoolToRedBrushConverter : IValueConverter
 [ValueConversion(typeof(bool), typeof(SolidColorBrush))]
 public sealed class SpeakingToStrokeBrushConverter : IValueConverter
 {
-    private static readonly SolidColorBrush Speaking = new((Color)ColorConverter.ConvertFromString("#23a55a"));
-    private static readonly SolidColorBrush Silent = new(Colors.Transparent);
+    private static readonly SolidColorBrush Speaking = CreateFrozen((Color)ColorConverter.ConvertFromString("#23a55a"));
+    private static readonly SolidColorBrush Silent = CreateFrozen(Colors.Transparent);
+
+    private static SolidColorBrush CreateFrozen(Color color)
+    {
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
+    }
 
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         => value is true ? Speaking : Silent;

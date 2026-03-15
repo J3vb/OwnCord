@@ -50,7 +50,7 @@ public record ApiMessage(
     [property: JsonPropertyName("deleted")] bool Deleted,
     [property: JsonPropertyName("pinned")] bool Pinned,
     [property: JsonPropertyName("timestamp")] string Timestamp,
-    [property: JsonPropertyName("username")] string Username,
+    [property: JsonPropertyName("username")] string? Username,
     [property: JsonPropertyName("avatar")] string? Avatar,
     [property: JsonPropertyName("attachments")] IReadOnlyList<ApiAttachment>? Attachments = null
 );

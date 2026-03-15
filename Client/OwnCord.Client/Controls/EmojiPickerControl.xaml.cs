@@ -59,8 +59,6 @@ public partial class EmojiPickerControl : UserControl
             .Where(c => c.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        CategoryList.ItemsSource = filtered.Count > 0
-            ? filtered
-            : EmojiData.Categories;
+        CategoryList.ItemsSource = filtered;
     }
 }

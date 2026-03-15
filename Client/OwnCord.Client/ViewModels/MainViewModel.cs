@@ -7,7 +7,7 @@ using OwnCord.Client.Services;
 
 namespace OwnCord.Client.ViewModels;
 
-public sealed class MainViewModel : ViewModelBase
+public sealed class MainViewModel : ViewModelBase, IDisposable
 {
     private IChatService? _chat;
     private Channel? _selectedChannel;
@@ -444,11 +444,28 @@ public sealed class MainViewModel : ViewModelBase
 
     public void UpdateUnreadCount(long channelId, int count)
     {
-        var idx = Channels.ToList().FindIndex(c => c.Id == channelId);
-        if (idx < 0) return;
-        var updated = Channels[idx] with { UnreadCount = count };
-        Channels[idx] = updated;
-        RebuildChannelGroups();
+        for (var i = 0; i < Channels.Count; i++)
+        {
+            if (Channels[i].Id == channelId)
+            {
+                if (Channels[i].UnreadCount == count) return;
+                Channels[i] = Channels[i] with { UnreadCount = count };
+
+                // Update the specific ChannelItem in-place instead of rebuilding all groups
+                foreach (var group in ChannelGroups)
+                {
+                    for (var j = 0; j < group.Items.Count; j++)
+                    {
+                        if (group.Items[j].Channel.Id == channelId)
+                        {
+                            group.Items[j] = new ChannelItem { Channel = Channels[i] };
+                            return;
+                        }
+                    }
+                }
+                return;
+            }
+        }
     }
 
     public void ShowTyping(string username)
@@ -780,7 +797,6 @@ public sealed class MainViewModel : ViewModelBase
             };
             Channels.Add(new Channel(ch.Id, ch.Name, type, ch.Category, ch.Position, 0, null, ch.Topic));
         }
-        RebuildChannelGroups();
 
         // Load members
         Members.Clear();
@@ -867,8 +883,6 @@ public sealed class MainViewModel : ViewModelBase
 
     private void OnPresence(PresencePayload payload)
     {
-        var idx = Members.ToList().FindIndex(m => m.Id == payload.UserId);
-        if (idx < 0) return;
         var status = payload.Status switch
         {
             "online" => UserStatus.Online,
@@ -876,24 +890,41 @@ public sealed class MainViewModel : ViewModelBase
             "dnd" => UserStatus.Dnd,
             _ => UserStatus.Offline
         };
-        Members[idx] = Members[idx] with { Status = status };
-        RebuildMemberGroups();
+        for (var i = 0; i < Members.Count; i++)
+        {
+            if (Members[i].Id == payload.UserId)
+            {
+                Members[i] = Members[i] with { Status = status };
+                RebuildMemberGroups();
+                break;
+            }
+        }
     }
 
     private void OnChatEdited(ChatEditedPayload payload)
     {
-        var idx = Messages.ToList().FindIndex(m => m.Id == payload.MessageId);
-        if (idx < 0) return;
-        Messages[idx] = Messages[idx] with { Content = payload.Content, EditedAt = payload.EditedAt };
-        RebuildDisplayMessages();
+        for (var i = 0; i < Messages.Count; i++)
+        {
+            if (Messages[i].Id == payload.MessageId)
+            {
+                Messages[i] = Messages[i] with { Content = payload.Content, EditedAt = payload.EditedAt };
+                RebuildDisplayMessages();
+                break;
+            }
+        }
     }
 
     private void OnChatDeleted(ChatDeletedPayload payload)
     {
-        var idx = Messages.ToList().FindIndex(m => m.Id == payload.MessageId);
-        if (idx < 0) return;
-        Messages[idx] = Messages[idx] with { Deleted = true, Content = "[deleted]" };
-        RebuildDisplayMessages();
+        for (var i = 0; i < Messages.Count; i++)
+        {
+            if (Messages[i].Id == payload.MessageId)
+            {
+                Messages[i] = Messages[i] with { Deleted = true, Content = "[deleted]" };
+                RebuildDisplayMessages();
+                break;
+            }
+        }
     }
 
     private void OnMemberJoined(WsMember payload)
@@ -927,7 +958,15 @@ public sealed class MainViewModel : ViewModelBase
 
     private void OnChannelUpdated(ChannelEventPayload payload)
     {
-        var idx = Channels.ToList().FindIndex(c => c.Id == payload.Id);
+        var idx = -1;
+        for (var i = 0; i < Channels.Count; i++)
+        {
+            if (Channels[i].Id == payload.Id)
+            {
+                idx = i;
+                break;
+            }
+        }
         if (idx < 0) return;
         var type = payload.Type switch
         {
@@ -1027,5 +1066,13 @@ public sealed class MainViewModel : ViewModelBase
     {
         var ch = Channels.FirstOrDefault(c => c.Id == channelId);
         return ch?.UnreadCount ?? 0;
+    }
+
+    // ── IDisposable ──────────────────────────────────────────────────────────
+
+    public void Dispose()
+    {
+        _typingTimer?.Dispose();
+        _typingTimer = null;
     }
 }
