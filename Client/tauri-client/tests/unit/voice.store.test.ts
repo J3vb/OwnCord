@@ -20,6 +20,7 @@ function resetStore(): void {
   voiceStore.setState(() => ({
     currentChannelId: null,
     voiceUsers: new Map(),
+    voiceConfigs: new Map(),
     localMuted: false,
     localDeafened: false,
   }));

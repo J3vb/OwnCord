@@ -10,6 +10,7 @@ import {
   appendChildren,
 } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
+import type { Attachment } from "@lib/types";
 import { messagesStore, getChannelMessages } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
@@ -32,6 +33,8 @@ const GROUP_THRESHOLD_MS = 5 * 60 * 1000;
 const SCROLL_TOP_THRESHOLD = 50;
 const SCROLL_BOTTOM_THRESHOLD = 100;
 const MENTION_REGEX = /@(\w+)/g;
+const CODE_BLOCK_REGEX = /```([\s\S]*?)```/g;
+const INLINE_CODE_REGEX = /`([^`]+)`/g;
 
 // -- Formatting helpers -------------------------------------------------------
 
@@ -78,9 +81,30 @@ function roleColorVar(role: string): string {
   }
 }
 
-// -- @mention parsing (XSS-safe, no innerHTML) --------------------------------
+// -- Content parsing (XSS-safe, no innerHTML) ---------------------------------
 
-function renderMentionContent(text: string): DocumentFragment {
+function renderInlineContent(text: string): DocumentFragment {
+  // First handle inline code, then mentions in non-code parts
+  const fragment = document.createDocumentFragment();
+  let lastIndex = 0;
+  for (const match of text.matchAll(INLINE_CODE_REGEX)) {
+    const idx = match.index;
+    if (idx === undefined) continue;
+    if (idx > lastIndex) {
+      fragment.appendChild(renderMentions(text.slice(lastIndex, idx)));
+    }
+    const code = createElement("code", {});
+    setText(code, match[1]!);
+    fragment.appendChild(code);
+    lastIndex = idx + match[0].length;
+  }
+  if (lastIndex < text.length) {
+    fragment.appendChild(renderMentions(text.slice(lastIndex)));
+  }
+  return fragment;
+}
+
+function renderMentions(text: string): DocumentFragment {
   const fragment = document.createDocumentFragment();
   let lastIndex = 0;
   for (const match of text.matchAll(MENTION_REGEX)) {
@@ -98,6 +122,100 @@ function renderMentionContent(text: string): DocumentFragment {
     fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
   }
   return fragment;
+}
+
+function renderMessageContent(content: string): DocumentFragment {
+  const fragment = document.createDocumentFragment();
+  // Split on code blocks first
+  let lastIndex = 0;
+  for (const match of content.matchAll(CODE_BLOCK_REGEX)) {
+    const idx = match.index;
+    if (idx === undefined) continue;
+    // Render text before code block
+    if (idx > lastIndex) {
+      const text = createElement("div", { class: "msg-text" });
+      text.appendChild(renderInlineContent(content.slice(lastIndex, idx)));
+      fragment.appendChild(text);
+    }
+    // Render code block
+    const codeBlock = createElement("div", { class: "msg-codeblock" });
+    setText(codeBlock, match[1]!.trim());
+    fragment.appendChild(codeBlock);
+    lastIndex = idx + match[0].length;
+  }
+  if (lastIndex === 0) {
+    // No code blocks — render as single text node
+    const text = createElement("div", { class: "msg-text" });
+    text.appendChild(renderInlineContent(content));
+    fragment.appendChild(text);
+  } else if (lastIndex < content.length) {
+    // Remaining text after last code block
+    const remaining = content.slice(lastIndex).trim();
+    if (remaining.length > 0) {
+      const text = createElement("div", { class: "msg-text" });
+      text.appendChild(renderInlineContent(remaining));
+      fragment.appendChild(text);
+    }
+  }
+  return fragment;
+}
+
+// -- Attachment rendering -----------------------------------------------------
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isImageMime(mime: string): boolean {
+  return mime.startsWith("image/");
+}
+
+function renderAttachment(att: Attachment): HTMLDivElement {
+  if (isImageMime(att.mime)) {
+    const wrap = createElement("div", { class: "msg-image" });
+    const placeholder = createElement("div", { class: "placeholder-img" }, att.filename);
+    wrap.appendChild(placeholder);
+    return wrap;
+  }
+  // File attachment
+  const wrap = createElement("div", { class: "msg-file" });
+  const inner = createElement("div", { class: "msg-file-inner" });
+  const icon = createElement("div", { class: "msg-file-icon" }, "\uD83D\uDCC4");
+  const nameEl = createElement("div", { class: "msg-file-name" }, att.filename);
+  const sizeEl = createElement("div", { class: "msg-file-size" }, formatFileSize(att.size));
+  const info = createElement("div", {});
+  appendChildren(info, nameEl, sizeEl);
+  appendChildren(inner, icon, info);
+  wrap.appendChild(inner);
+  return wrap;
+}
+
+// -- Reaction rendering -------------------------------------------------------
+
+function renderReactions(
+  msg: Message,
+  opts: MessageListOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const container = createElement("div", { class: "msg-reactions" });
+  for (const reaction of msg.reactions) {
+    const chip = createElement("span", {
+      class: reaction.me ? "reaction-chip me" : "reaction-chip",
+    });
+    const emoji = document.createTextNode(reaction.emoji);
+    const count = createElement("span", { class: "rc-count" }, String(reaction.count));
+    chip.appendChild(emoji);
+    chip.appendChild(count);
+    chip.addEventListener("click", () => opts.onReactionClick(msg.id, reaction.emoji), { signal });
+    container.appendChild(chip);
+  }
+  // Add reaction button
+  const addBtn = createElement("span", { class: "reaction-chip add-reaction" }, "+");
+  addBtn.addEventListener("click", () => opts.onReactionClick(msg.id, ""), { signal });
+  container.appendChild(addBtn);
+  return container;
 }
 
 // -- DOM rendering (matches ui-mockup.html structure) -------------------------
@@ -136,7 +254,7 @@ function renderSystemMessage(msg: Message): HTMLDivElement {
   const el = createElement("div", { class: "system-msg" });
   const icon = createElement("span", { class: "sm-icon" }, "\u2192");
   const text = createElement("span", { class: "sm-text" });
-  text.appendChild(renderMentionContent(msg.content));
+  text.appendChild(renderMentions(msg.content));
   const time = createElement("span", { class: "sm-time" }, formatTime(msg.timestamp));
   appendChildren(el, icon, text, time);
   return el;
@@ -190,7 +308,7 @@ function renderMessage(
   appendChildren(header, author, time);
   el.appendChild(header);
 
-  // Message text
+  // Message content
   if (msg.deleted) {
     const text = createElement("div", { class: "msg-text" });
     text.style.fontStyle = "italic";
@@ -198,17 +316,31 @@ function renderMessage(
     setText(text, "[message deleted]");
     el.appendChild(text);
   } else {
-    const text = createElement("div", { class: "msg-text" });
-    text.appendChild(renderMentionContent(msg.content));
-    el.appendChild(text);
+    el.appendChild(renderMessageContent(msg.content));
     if (msg.editedAt !== null) {
       el.appendChild(createElement("span", { class: "msg-edited" }, "(edited)"));
     }
+
+    // Attachments
+    for (const att of msg.attachments) {
+      el.appendChild(renderAttachment(att));
+    }
+
+    // Reactions
+    if (msg.reactions.length > 0) {
+      el.appendChild(renderReactions(msg, opts, signal));
+    }
   }
 
-  // Hover actions bar
+  // Hover actions bar (mockup: React, Reply, Edit, More)
   if (!msg.deleted) {
     const actionsBar = createElement("div", { class: "msg-actions-bar" });
+
+    const reactBtn = createElement("button", {}, "\uD83D\uDE04");
+    reactBtn.title = "React";
+    reactBtn.addEventListener("click", () => opts.onReactionClick(msg.id, ""), { signal });
+    actionsBar.appendChild(reactBtn);
+
     const replyBtn = createElement("button", {}, "\u21A9");
     replyBtn.title = "Reply";
     replyBtn.addEventListener("click", () => opts.onReplyClick(msg.id), { signal });
@@ -218,11 +350,16 @@ function renderMessage(
       const editBtn = createElement("button", {}, "\u270E");
       editBtn.title = "Edit";
       editBtn.addEventListener("click", () => opts.onEditClick(msg.id), { signal });
-      const delBtn = createElement("button", {}, "\uD83D\uDDD1");
-      delBtn.title = "Delete";
-      delBtn.addEventListener("click", () => opts.onDeleteClick(msg.id), { signal });
-      appendChildren(actionsBar, editBtn, delBtn);
+      actionsBar.appendChild(editBtn);
     }
+
+    if (msg.user.id === opts.currentUserId) {
+      const deleteBtn = createElement("button", {}, "\uD83D\uDDD1");
+      deleteBtn.title = "Delete";
+      deleteBtn.addEventListener("click", () => opts.onDeleteClick(msg.id), { signal });
+      actionsBar.appendChild(deleteBtn);
+    }
+
     el.appendChild(actionsBar);
   }
 
@@ -276,10 +413,15 @@ export function createMessageList(options: MessageListOptions): MountableCompone
     if (wasAtBottom) { scrollToBottom(); }
   }
 
+  let loadingOlder = false;
+
   function handleScroll(): void {
     if (messagesContainer === null) return;
-    if (messagesContainer.scrollTop < SCROLL_TOP_THRESHOLD) {
+    if (messagesContainer.scrollTop < SCROLL_TOP_THRESHOLD && !loadingOlder) {
+      loadingOlder = true;
       options.onScrollTop();
+      // Reset after a short delay to allow the fetch to land
+      setTimeout(() => { loadingOlder = false; }, 500);
     }
   }
 
@@ -293,7 +435,15 @@ export function createMessageList(options: MessageListOptions): MountableCompone
     parentContainer.appendChild(root);
     renderAll();
     unsubscribers.push(messagesStore.subscribe(() => { renderAll(); }));
-    unsubscribers.push(membersStore.subscribe(() => { renderAll(); }));
+
+    // Only re-render when member roles change, not on typing updates
+    let prevMembers = membersStore.getState().members;
+    unsubscribers.push(membersStore.subscribe((state) => {
+      if (state.members !== prevMembers) {
+        prevMembers = state.members;
+        renderAll();
+      }
+    }));
   }
 
   function destroy(): void {

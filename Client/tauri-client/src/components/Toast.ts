@@ -32,9 +32,24 @@ export function createToastContainer(): ToastContainer {
     clearTimeout(entry.timer);
     toasts.splice(idx, 1);
 
-    if (entry.el.parentNode !== null) {
-      entry.el.remove();
-    }
+    // Remove .show first and wait for the CSS opacity transition to finish
+    entry.el.classList.remove("show");
+    entry.el.addEventListener(
+      "transitionend",
+      () => {
+        if (entry.el.parentNode !== null) {
+          entry.el.remove();
+        }
+      },
+      { once: true },
+    );
+
+    // Fallback removal in case transitionend never fires
+    setTimeout(() => {
+      if (entry.el.parentNode !== null) {
+        entry.el.remove();
+      }
+    }, 400);
   }
 
   function show(
@@ -67,6 +82,13 @@ export function createToastContainer(): ToastContainer {
     const entry: ToastEntry = { el, timer };
     toasts.push(entry);
     root.appendChild(el);
+
+    // Trigger .show on the next frame so the CSS opacity transition plays
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        el.classList.add("show");
+      });
+    });
   }
 
   function clear(): void {

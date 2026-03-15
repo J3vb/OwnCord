@@ -213,6 +213,39 @@ describe('channels store', () => {
 
       expect(channelsStore.getState().activeChannelId).toBeNull();
     });
+
+    it('clears unread count for the activated channel', () => {
+      setChannels(readyChannels);
+      // channel 1 starts with unreadCount: 3
+      expect(channelsStore.getState().channels.get(1)?.unreadCount).toBe(3);
+
+      setActiveChannel(1);
+
+      expect(channelsStore.getState().channels.get(1)?.unreadCount).toBe(0);
+    });
+
+    it('does not mutate channels map when clearing unread', () => {
+      setChannels(readyChannels);
+      const before = channelsStore.getState().channels;
+
+      setActiveChannel(1);
+
+      const after = channelsStore.getState().channels;
+      expect(before).not.toBe(after);
+      // other channels unchanged
+      expect(after.get(2)).toBe(before.get(2));
+    });
+
+    it('skips channels map update when unread is already 0', () => {
+      setChannels(readyChannels);
+      // channel 2 has unreadCount: 0
+      const before = channelsStore.getState().channels;
+
+      setActiveChannel(2);
+
+      const after = channelsStore.getState().channels;
+      expect(before).toBe(after);
+    });
   });
 
   describe('getActiveChannel', () => {
@@ -231,7 +264,7 @@ describe('channels store', () => {
         type: 'text',
         category: 'Text',
         position: 0,
-        unreadCount: 3,
+        unreadCount: 0,
         lastMessageId: 100,
       });
     });
@@ -290,11 +323,13 @@ describe('channels store', () => {
     it('skips increment for the active channel', () => {
       setChannels(readyChannels);
       setActiveChannel(1);
+      // setActiveChannel clears unread, so it's now 0
+      expect(channelsStore.getState().channels.get(1)?.unreadCount).toBe(0);
 
       incrementUnread(1);
 
       const ch = channelsStore.getState().channels.get(1);
-      expect(ch?.unreadCount).toBe(3); // unchanged
+      expect(ch?.unreadCount).toBe(0); // unchanged — active channel skips increment
     });
 
     it('is a no-op for unknown channel id', () => {

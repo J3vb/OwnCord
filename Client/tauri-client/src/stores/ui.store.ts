@@ -10,7 +10,10 @@ export interface UiState {
   readonly memberListVisible: boolean;
   readonly settingsOpen: boolean;
   readonly activeModal: string | null;
-  readonly theme: "dark" | "light";
+  readonly theme: "dark" | "midnight" | "light";
+  readonly connectionStatus: "connected" | "reconnecting" | "disconnected";
+  readonly transientError: string | null;
+  readonly persistentError: string | null;
   readonly collapsedCategories: ReadonlySet<string>;
 }
 
@@ -20,6 +23,9 @@ const INITIAL_STATE: UiState = {
   settingsOpen: false,
   activeModal: null,
   theme: "dark",
+  connectionStatus: "disconnected",
+  transientError: null,
+  persistentError: null,
   collapsedCategories: new Set(),
 };
 
@@ -74,10 +80,36 @@ export function closeModal(): void {
 }
 
 /** Set the UI theme. */
-export function setTheme(theme: "dark" | "light"): void {
+export function setTheme(theme: "dark" | "midnight" | "light"): void {
   uiStore.setState((prev) => ({
     ...prev,
     theme,
+  }));
+}
+
+/** Set the WebSocket connection status. */
+export function setConnectionStatus(
+  status: "connected" | "reconnecting" | "disconnected",
+): void {
+  uiStore.setState((prev) => ({
+    ...prev,
+    connectionStatus: status,
+  }));
+}
+
+/** Set a transient (auto-dismissable) error message. */
+export function setTransientError(msg: string | null): void {
+  uiStore.setState((prev) => ({
+    ...prev,
+    transientError: msg,
+  }));
+}
+
+/** Set a persistent error message that requires user action. */
+export function setPersistentError(msg: string | null): void {
+  uiStore.setState((prev) => ({
+    ...prev,
+    persistentError: msg,
   }));
 }
 

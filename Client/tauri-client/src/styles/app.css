@@ -663,6 +663,9 @@
   pointer-events: none;
 }
 .toast.show { opacity: 1; }
+.toast-info { border-left: 4px solid var(--accent); }
+.toast-error { border-left: 4px solid var(--red); }
+.toast-success { border-left: 4px solid var(--green); }
 
 /* ── Reconnecting Banner ── */
 .reconnecting-banner {

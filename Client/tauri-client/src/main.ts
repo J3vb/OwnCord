@@ -83,7 +83,7 @@ function renderPage(pageId: "connect" | "main"): void {
     safeMount(connectPage, appEl!);
     currentPage = connectPage;
   } else {
-    const mainPage = createMainPage();
+    const mainPage = createMainPage({ ws, api });
     safeMount(mainPage, appEl!);
     currentPage = mainPage;
   }

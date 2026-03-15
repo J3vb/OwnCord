@@ -4,7 +4,7 @@
  * Step 6.51
  */
 
-import { createElement, appendChildren, setText, clearChildren } from "@lib/dom";
+import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { voiceStore } from "@stores/voice.store";
 import type { VoiceUser } from "@stores/voice.store";
 import { membersStore } from "@stores/members.store";
@@ -21,42 +21,56 @@ export interface VoiceChannelResult {
   destroy(): void;
 }
 
+const AVATAR_COLORS = ["#5865f2", "#57f287", "#fee75c", "#eb459e", "#ed4245"];
+
+function pickAvatarColor(username: string): string {
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) {
+    hash = (hash * 31 + username.charCodeAt(i)) | 0;
+  }
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? "#5865f2";
+}
+
 export function createVoiceChannel(options: VoiceChannelOptions): VoiceChannelResult {
   const ac = new AbortController();
   const unsubs: Array<() => void> = [];
 
-  const root = createElement("div", { class: "voice-channel-item" });
+  // Wrapper div to hold the channel-item and voice-users-list as siblings
+  const root = createElement("div");
 
-  // Header
-  const header = createElement("div", { class: "voice-channel-header" });
-  const icon = createElement("span", { class: "voice-icon" }, "\uD83D\uDD0A");
-  const nameEl = createElement("span", { class: "voice-channel-name" }, options.channelName);
-  appendChildren(header, icon, nameEl);
+  // Channel item row (same structure as text channels)
+  const channelItem = createElement("div", { class: "channel-item voice" });
+  const icon = createElement("span", { class: "ch-icon" }, "\uD83D\uDD0A");
+  const nameEl = createElement("span", { class: "ch-name" }, options.channelName);
+  appendChildren(channelItem, icon, nameEl);
 
   // Users container
-  const usersContainer = createElement("div", { class: "voice-channel-users" });
+  const usersContainer = createElement("div", { class: "voice-users-list" });
 
-  appendChildren(root, header, usersContainer);
+  appendChildren(root, channelItem, usersContainer);
 
   // Click to join
-  root.addEventListener("click", options.onJoin, { signal: ac.signal });
+  channelItem.addEventListener("click", options.onJoin, { signal: ac.signal });
 
   function createUserRow(user: VoiceUser, username: string): HTMLDivElement {
     const classes = user.speaking
-      ? "voice-user voice-user--speaking"
-      : "voice-user";
+      ? "voice-user-item speaking"
+      : "voice-user-item";
     const row = createElement("div", { class: classes });
 
-    const name = createElement("span", { class: "voice-user__name" }, username);
+    const initial = username.length > 0 ? username.charAt(0).toUpperCase() : "?";
+    const color = pickAvatarColor(username);
+    const avatar = createElement("div", { class: "vu-avatar" }, initial);
+    avatar.style.background = color;
+    row.appendChild(avatar);
+
+    const name = createElement("span", { class: "vu-name" }, username);
     row.appendChild(name);
 
-    const icons: string[] = [];
-    if (user.muted) icons.push("\uD83D\uDD07");
-    if (user.deafened) icons.push("\uD83D\uDD08");
-
-    if (icons.length > 0) {
-      const iconsEl = createElement("span", { class: "voice-user__icons" }, icons.join(""));
-      row.appendChild(iconsEl);
+    if (user.muted || user.deafened) {
+      const mutedIcon = user.deafened ? "\uD83D\uDD08" : "\uD83D\uDD07";
+      const mutedEl = createElement("span", { class: "vu-muted" }, mutedIcon);
+      row.appendChild(mutedEl);
     }
 
     return row;
@@ -75,6 +89,13 @@ export function createVoiceChannel(options: VoiceChannelOptions): VoiceChannelRe
       const username = member?.username ?? "Unknown";
       const row = createUserRow(user, username);
       usersContainer.appendChild(row);
+    }
+
+    // Mark channel-item active if there are users
+    if (channelUsers.size > 0) {
+      channelItem.classList.add("active");
+    } else {
+      channelItem.classList.remove("active");
     }
   }
 

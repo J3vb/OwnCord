@@ -1,4 +1,4 @@
-// EmojiPicker — grid-based emoji selector with search and custom server emoji.
+// EmojiPicker — grid-based emoji selector with search and scrollable categories.
 // Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
 
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
@@ -127,23 +127,25 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
 
   let searchQuery = "";
 
-  // Build DOM
-  const root = createElement("div", { class: "emoji-picker" });
+  // Build DOM — matches mockup structure:
+  // .emoji-picker.open > .ep-header > input.ep-search
+  //   then repeating: .ep-category-label + .ep-grid > span.ep-emoji
+  const root = createElement("div", { class: "emoji-picker open" });
 
-  // Search bar
+  const header = createElement("div", { class: "ep-header" });
   const searchInput = createElement("input", {
-    class: "emoji-picker__search",
+    class: "ep-search",
     type: "text",
     placeholder: "Search emoji...",
   });
+  header.appendChild(searchInput);
+  root.appendChild(header);
 
-  // Category tabs
-  const tabBar = createElement("div", { class: "emoji-picker__tabs" });
-
-  // Grid area
-  const gridArea = createElement("div", { class: "emoji-picker__grid-area" });
-
-  appendChildren(root, searchInput, tabBar, gridArea);
+  // Scrollable content area (holds category labels + grids)
+  const scrollArea = createElement("div", {
+    style: "overflow-y: auto; max-height: 320px;",
+  });
+  root.appendChild(scrollArea);
 
   // Build categories with recent + custom
   function getAllCategories(): readonly EmojiCategory[] {
@@ -169,118 +171,63 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     return cats;
   }
 
-  function renderTabs(categories: readonly EmojiCategory[], activeIndex: number): void {
-    clearChildren(tabBar);
-    categories.forEach((cat, i) => {
-      if (cat.name === "Recent" && cat.emoji.length === 0) return;
-      const tab = createElement("button", {
-        class: i === activeIndex ? "emoji-tab emoji-tab--active" : "emoji-tab",
-        type: "button",
-      });
-      // Use first emoji of category as tab icon, or name
-      const label = cat.emoji[0] ?? cat.name.charAt(0);
-      setText(tab, label);
-      tab.title = cat.name;
-      tab.addEventListener("click", () => renderGrid(categories, i), { signal });
-      tabBar.appendChild(tab);
+  function handleEmojiClick(emoji: string): void {
+    addRecentEmoji(emoji);
+    options.onSelect(emoji);
+  }
+
+  function buildEmojiSpan(emoji: string): HTMLSpanElement {
+    const span = createElement("span", {
+      class: "ep-emoji",
+      title: emoji,
     });
+    setText(span, emoji);
+    span.addEventListener("click", () => handleEmojiClick(emoji), { signal });
+    return span;
   }
 
-  function renderGrid(categories: readonly EmojiCategory[], activeIndex: number): void {
-    clearChildren(gridArea);
-    renderTabs(categories, activeIndex);
+  function renderAllCategories(categories: readonly EmojiCategory[]): void {
+    clearChildren(scrollArea);
 
-    const cat = categories[activeIndex];
-    if (!cat) return;
-
-    const filtered = searchQuery
-      ? cat.emoji.filter((e) => e.toLowerCase().includes(searchQuery.toLowerCase()))
-      : cat.emoji;
-
-    if (filtered.length === 0) {
-      const empty = createElement("div", { class: "emoji-picker__empty" }, "No emoji found");
-      gridArea.appendChild(empty);
-      return;
-    }
-
-    const grid = createElement("div", { class: "emoji-grid" });
-    for (const emoji of filtered) {
-      const btn = createElement("button", {
-        class: "emoji-cell",
-        type: "button",
-        "aria-label": emoji,
-      });
-      setText(btn, emoji);
-      btn.addEventListener("click", () => {
-        addRecentEmoji(emoji);
-        options.onSelect(emoji);
-      }, { signal });
-      grid.appendChild(btn);
-    }
-    gridArea.appendChild(grid);
-  }
-
-  function renderSearchResults(categories: readonly EmojiCategory[]): void {
-    clearChildren(gridArea);
-    // Flatten all emoji matching search
-    const allEmoji: string[] = [];
     for (const cat of categories) {
-      for (const e of cat.emoji) {
-        if (e.toLowerCase().includes(searchQuery.toLowerCase())) {
-          allEmoji.push(e);
-        }
+      if (cat.emoji.length === 0) continue;
+
+      const filtered = searchQuery
+        ? cat.emoji.filter((e) => e.toLowerCase().includes(searchQuery.toLowerCase()))
+        : cat.emoji;
+
+      if (filtered.length === 0) continue;
+
+      const label = createElement("div", { class: "ep-category-label" });
+      setText(label, cat.name);
+      scrollArea.appendChild(label);
+
+      const grid = createElement("div", { class: "ep-grid" });
+      for (const emoji of filtered) {
+        grid.appendChild(buildEmojiSpan(emoji));
       }
-    }
-    // Deduplicate
-    const unique = [...new Set(allEmoji)];
-
-    if (unique.length === 0) {
-      const empty = createElement("div", { class: "emoji-picker__empty" }, "No emoji found");
-      gridArea.appendChild(empty);
-      return;
+      scrollArea.appendChild(grid);
     }
 
-    const grid = createElement("div", { class: "emoji-grid" });
-    for (const emoji of unique) {
-      const btn = createElement("button", {
-        class: "emoji-cell",
-        type: "button",
-        "aria-label": emoji,
-      });
-      setText(btn, emoji);
-      btn.addEventListener("click", () => {
-        addRecentEmoji(emoji);
-        options.onSelect(emoji);
-      }, { signal });
-      grid.appendChild(btn);
+    // If nothing rendered at all, show empty state
+    if (scrollArea.children.length === 0) {
+      const empty = createElement("div", {
+        style: "padding: 24px; text-align: center; color: var(--text-faint); font-size: 13px;",
+      }, "No emoji found");
+      scrollArea.appendChild(empty);
     }
-    gridArea.appendChild(grid);
   }
 
   // Initial render
-  const categories = getAllCategories();
-  const startIndex = categories[0]?.emoji.length ? 0 : 1; // skip empty Recent
-  renderGrid(categories, startIndex);
+  renderAllCategories(getAllCategories());
 
   // Search handler
   searchInput.addEventListener("input", () => {
     searchQuery = searchInput.value.trim();
-    const cats = getAllCategories();
-    if (searchQuery) {
-      renderSearchResults(cats);
-    } else {
-      renderGrid(cats, startIndex);
-    }
+    renderAllCategories(getAllCategories());
   }, { signal });
 
   // Close on Escape
-  searchInput.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      options.onClose();
-    }
-  }, { signal });
-
-  // Close on click outside (handled by parent, but support Escape here)
   root.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       options.onClose();

@@ -41,11 +41,11 @@ function createMockWs() {
     _getWs: vi.fn(() => null),
   };
 
-  function dispatch(type: string, payload: unknown): void {
+  function dispatch(type: string, payload: unknown, id?: string): void {
     const set = listeners.get(type);
     if (set) {
       for (const listener of set) {
-        (listener as (p: unknown) => void)(payload);
+        (listener as (p: unknown, id?: string) => void)(payload, id);
       }
     }
   }
@@ -84,6 +84,7 @@ describe("WS Dispatcher", () => {
     voiceStore.setState(() => ({
       currentChannelId: null,
       voiceUsers: new Map(),
+      voiceConfigs: new Map(),
       localMuted: false,
       localDeafened: false,
     }));
@@ -235,6 +236,36 @@ describe("WS Dispatcher", () => {
       user: { id: 99, username: "newuser", avatar: null, role: "member" },
     });
     expect(membersStore.getState().members.has(99)).toBe(true);
+  });
+
+  it("wires chat_send_ok to confirmSend in messages store", () => {
+    // Add a pending send (correlationId -> channelId)
+    messagesStore.setState((prev) => {
+      const pending = new Map(prev.pendingSends);
+      pending.set("corr-123", 1);
+      return { ...prev, pendingSends: pending };
+    });
+
+    expect(messagesStore.getState().pendingSends.has("corr-123")).toBe(true);
+
+    mock.dispatch(
+      "chat_send_ok",
+      { message_id: 500, timestamp: "2026-03-15T10:00:00Z" },
+      "corr-123",
+    );
+
+    expect(messagesStore.getState().pendingSends.has("corr-123")).toBe(false);
+  });
+
+  it("wires member_ban to remove member from members store", () => {
+    membersStore.setState((prev) => {
+      const m = new Map(prev.members);
+      m.set(77, { id: 77, username: "banned-user", avatar: null, role: "member", status: "online" as const });
+      return { ...prev, members: m };
+    });
+
+    mock.dispatch("member_ban", { user_id: 77 });
+    expect(membersStore.getState().members.has(77)).toBe(false);
   });
 
   it("wires member_leave to members store", () => {

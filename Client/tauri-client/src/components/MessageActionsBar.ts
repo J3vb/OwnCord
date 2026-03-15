@@ -15,6 +15,7 @@ export interface MessageActionsBarOptions {
   readonly onDelete: () => void;
   readonly onReact: () => void;
   readonly onPin: () => void;
+  readonly onMore: () => void;
 }
 
 interface ActionDef {
@@ -25,8 +26,8 @@ interface ActionDef {
 
 function buildActions(options: MessageActionsBarOptions): readonly ActionDef[] {
   const actions: ActionDef[] = [
+    { label: "React", icon: "\uD83D\uDE04", handler: options.onReact },
     { label: "Reply", icon: "\u21A9", handler: options.onReply },
-    { label: "React", icon: "\uD83D\uDE00", handler: options.onReact },
   ];
 
   if (options.isOwn) {
@@ -53,6 +54,8 @@ function buildActions(options: MessageActionsBarOptions): readonly ActionDef[] {
     });
   }
 
+  actions.push({ label: "More", icon: "\u22EF", handler: options.onMore });
+
   return actions;
 }
 
@@ -68,7 +71,7 @@ export function createMessageActionsBar(
   for (const action of actions) {
     const btn = createElement(
       "button",
-      { class: "msg-action", "aria-label": action.label },
+      { title: action.label, "aria-label": action.label },
       action.icon,
     );
 

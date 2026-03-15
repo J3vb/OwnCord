@@ -8,6 +8,8 @@ import type {
   ReadyVoiceState,
   VoiceStatePayload,
   VoiceLeavePayload,
+  VoiceConfigPayload,
+  VoiceSpeakersPayload,
 } from "@lib/types";
 
 export interface VoiceUser {
@@ -20,9 +22,19 @@ export interface VoiceUser {
   readonly screenshare: boolean;
 }
 
+export interface VoiceConfig {
+  readonly quality: string;
+  readonly bitrate: number;
+  readonly threshold_mode: string;
+  readonly mixing_threshold: number;
+  readonly top_speakers: number;
+  readonly max_users: number;
+}
+
 export interface VoiceState {
   readonly currentChannelId: number | null;
   readonly voiceUsers: ReadonlyMap<number, ReadonlyMap<number, VoiceUser>>; // channelId -> userId -> VoiceUser
+  readonly voiceConfigs: ReadonlyMap<number, VoiceConfig>; // channelId -> VoiceConfig
   readonly localMuted: boolean;
   readonly localDeafened: boolean;
 }
@@ -30,6 +42,7 @@ export interface VoiceState {
 const INITIAL_STATE: VoiceState = {
   currentChannelId: null,
   voiceUsers: new Map(),
+  voiceConfigs: new Map(),
   localMuted: false,
   localDeafened: false,
 };
@@ -135,6 +148,46 @@ export function setLocalDeafened(deafened: boolean): void {
     ...prev,
     localDeafened: deafened,
   }));
+}
+
+/** Store voice config for a channel from a voice_config event. */
+export function setVoiceConfig(payload: VoiceConfigPayload): void {
+  voiceStore.setState((prev) => {
+    const nextConfigs = new Map(prev.voiceConfigs);
+    nextConfigs.set(payload.channel_id, {
+      quality: payload.quality,
+      bitrate: payload.bitrate,
+      threshold_mode: payload.threshold_mode,
+      mixing_threshold: payload.mixing_threshold,
+      top_speakers: payload.top_speakers,
+      max_users: payload.max_users,
+    });
+    return { ...prev, voiceConfigs: nextConfigs };
+  });
+}
+
+/** Update speaking state for users from a voice_speakers event. */
+export function setSpeakers(payload: VoiceSpeakersPayload): void {
+  voiceStore.setState((prev) => {
+    const existingChannel = prev.voiceUsers.get(payload.channel_id);
+    if (!existingChannel) return prev;
+
+    const speakerSet = new Set(payload.speakers);
+    const nextUsers = new Map<number, VoiceUser>();
+
+    for (const [userId, user] of existingChannel) {
+      const isSpeaking = speakerSet.has(userId);
+      if (user.speaking !== isSpeaking) {
+        nextUsers.set(userId, { ...user, speaking: isSpeaking });
+      } else {
+        nextUsers.set(userId, user);
+      }
+    }
+
+    const nextChannels = new Map(prev.voiceUsers);
+    nextChannels.set(payload.channel_id, nextUsers);
+    return { ...prev, voiceUsers: nextChannels };
+  });
 }
 
 /** Selector: get all voice users in a specific channel. */

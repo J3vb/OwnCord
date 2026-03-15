@@ -33,7 +33,8 @@ describe("ToastContainer", () => {
 
     expect(container.querySelectorAll(".toast").length).toBe(1);
 
-    vi.advanceTimersByTime(3000);
+    // Advance past dismiss timer (3000ms) + transition fallback (400ms)
+    vi.advanceTimersByTime(3400);
 
     expect(container.querySelectorAll(".toast").length).toBe(0);
   });
@@ -42,6 +43,9 @@ describe("ToastContainer", () => {
     for (let i = 0; i < 6; i++) {
       toast.show(`Toast ${i}`);
     }
+
+    // Advance past the transition fallback so evicted toasts are removed from DOM
+    vi.advanceTimersByTime(400);
 
     const toasts = container.querySelectorAll(".toast");
     expect(toasts.length).toBe(5);
@@ -59,6 +63,8 @@ describe("ToastContainer", () => {
     expect(container.querySelectorAll(".toast").length).toBe(3);
 
     toast.clear();
+    // Advance past transition fallback so DOM elements are removed
+    vi.advanceTimersByTime(400);
 
     expect(container.querySelectorAll(".toast").length).toBe(0);
   });
@@ -86,7 +92,8 @@ describe("ToastContainer", () => {
     vi.advanceTimersByTime(4999);
     expect(container.querySelectorAll(".toast").length).toBe(1);
 
-    vi.advanceTimersByTime(1);
+    // Advance past dismiss timer (1ms remaining) + transition fallback (400ms)
+    vi.advanceTimersByTime(401);
     expect(container.querySelectorAll(".toast").length).toBe(0);
   });
 

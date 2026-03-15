@@ -23,19 +23,19 @@ function createReactionPill(
   signal: AbortSignal,
 ): HTMLButtonElement {
   const classes = reaction.me
-    ? "reaction-pill reaction--me"
-    : "reaction-pill";
+    ? "reaction-chip me"
+    : "reaction-chip";
 
   const btn = createElement("button", { class: classes });
 
   const emojiSpan = createElement(
     "span",
-    { class: "reaction-pill__emoji" },
+    {},
     reaction.emoji,
   );
   const countSpan = createElement(
     "span",
-    { class: "reaction-pill__count" },
+    { class: "rc-count" },
     String(reaction.count),
   );
 
@@ -56,7 +56,7 @@ export function createReactionBar(
   options: ReactionBarOptions,
 ): HTMLDivElement {
   const ac = new AbortController();
-  const bar = createElement("div", { class: "reaction-bar" });
+  const bar = createElement("div", { class: "msg-reactions" });
 
   for (const reaction of options.reactions) {
     const pill = createReactionPill(reaction, options.onToggle, ac.signal);
@@ -65,7 +65,7 @@ export function createReactionBar(
 
   const addBtn = createElement(
     "button",
-    { class: "reaction-add", "aria-label": "Add reaction" },
+    { class: "reaction-chip add-reaction", "aria-label": "Add reaction" },
     "+",
   );
 

@@ -3,11 +3,7 @@
  * countdown and reconnecting state.
  */
 
-import { createElement, setText, appendChildren } from "@lib/dom";
-
-export interface ServerBannerOptions {
-  readonly onDismiss: () => void;
-}
+import { createElement, setText } from "@lib/dom";
 
 export interface ServerBannerControl {
   readonly element: HTMLDivElement;
@@ -17,18 +13,10 @@ export interface ServerBannerControl {
   destroy(): void;
 }
 
-export function createServerBanner(
-  options: ServerBannerOptions,
-): ServerBannerControl {
-  const ac = new AbortController();
+export function createServerBanner(): ServerBannerControl {
   let intervalId: ReturnType<typeof setInterval> | null = null;
 
-  const root = createElement("div", { class: "server-banner server-banner--hidden" });
-  const textEl = createElement("span", { class: "server-banner__text" });
-  const dismissBtn = createElement("button", { class: "server-banner__dismiss" }, "\u00D7");
-
-  dismissBtn.addEventListener("click", () => options.onDismiss(), { signal: ac.signal });
-  appendChildren(root, textEl, dismissBtn);
+  const root = createElement("div", { class: "reconnecting-banner" });
 
   function clearCountdown(): void {
     if (intervalId !== null) {
@@ -40,8 +28,8 @@ export function createServerBanner(
   function showRestart(seconds: number): void {
     clearCountdown();
     let remaining = seconds;
-    root.classList.remove("server-banner--hidden");
-    setText(textEl, `Server restarting in ${remaining} seconds...`);
+    root.classList.add("visible");
+    setText(root, `Server restarting in ${remaining} seconds...`);
 
     intervalId = setInterval(() => {
       remaining -= 1;
@@ -50,24 +38,23 @@ export function createServerBanner(
         showReconnecting();
         return;
       }
-      setText(textEl, `Server restarting in ${remaining} seconds...`);
+      setText(root, `Server restarting in ${remaining} seconds...`);
     }, 1000);
   }
 
   function showReconnecting(): void {
     clearCountdown();
-    root.classList.remove("server-banner--hidden");
-    setText(textEl, "Reconnecting...");
+    root.classList.add("visible");
+    setText(root, "Reconnecting...");
   }
 
   function hide(): void {
     clearCountdown();
-    root.classList.add("server-banner--hidden");
+    root.classList.remove("visible");
   }
 
   function destroy(): void {
     clearCountdown();
-    ac.abort();
     root.remove();
   }
 

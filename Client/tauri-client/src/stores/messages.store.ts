@@ -9,8 +9,10 @@ import type {
   ChatMessagePayload,
   ChatEditedPayload,
   ChatDeletedPayload,
+  ReactionUpdatePayload,
   MessageUser,
   Attachment,
+  ReactionSummary,
   MessageResponse,
 } from "@lib/types";
 
@@ -25,6 +27,7 @@ export interface Message {
   readonly content: string;
   readonly replyTo: number | null;
   readonly attachments: readonly Attachment[];
+  readonly reactions: readonly ReactionSummary[];
   readonly editedAt: string | null;
   readonly deleted: boolean;
   readonly timestamp: string;
@@ -53,6 +56,7 @@ function chatPayloadToMessage(payload: ChatMessagePayload): Message {
     content: payload.content,
     replyTo: payload.reply_to,
     attachments: payload.attachments,
+    reactions: [],
     editedAt: null,
     deleted: false,
     timestamp: payload.timestamp,
@@ -67,6 +71,7 @@ function messageResponseToMessage(response: MessageResponse): Message {
     content: response.content,
     replyTo: response.reply_to,
     attachments: response.attachments,
+    reactions: response.reactions,
     editedAt: response.edited_at,
     deleted: response.deleted,
     timestamp: response.timestamp,
@@ -232,6 +237,54 @@ export function clearChannelMessages(channelId: number): void {
       loadedChannels: updatedLoaded,
       hasMore: updatedHasMore,
     };
+  });
+}
+
+/** Update reactions on a message from a reaction_update WS event. */
+export function updateReaction(
+  payload: ReactionUpdatePayload,
+  currentUserId: number,
+): void {
+  messagesStore.setState((prev) => {
+    const channelMessages = prev.messagesByChannel.get(payload.channel_id);
+    if (!channelMessages) return prev;
+
+    const updatedList = channelMessages.map((msg) => {
+      if (msg.id !== payload.message_id) return msg;
+
+      const isMe = payload.user_id === currentUserId;
+      const existing = msg.reactions;
+
+      if (payload.action === "add") {
+        const found = existing.find((r) => r.emoji === payload.emoji);
+        if (found !== undefined) {
+          const updatedReactions = existing.map((r) =>
+            r.emoji === payload.emoji
+              ? { ...r, count: r.count + 1, me: r.me || isMe }
+              : r,
+          );
+          return { ...msg, reactions: updatedReactions };
+        }
+        return {
+          ...msg,
+          reactions: [...existing, { emoji: payload.emoji, count: 1, me: isMe }],
+        };
+      }
+
+      // action === "remove"
+      const updatedReactions = existing
+        .map((r) =>
+          r.emoji === payload.emoji
+            ? { ...r, count: r.count - 1, me: isMe ? false : r.me }
+            : r,
+        )
+        .filter((r) => r.count > 0);
+      return { ...msg, reactions: updatedReactions };
+    });
+
+    const updatedMessages = new Map(prev.messagesByChannel);
+    updatedMessages.set(payload.channel_id, updatedList);
+    return { ...prev, messagesByChannel: updatedMessages };
   });
 }
 

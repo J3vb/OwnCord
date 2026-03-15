@@ -101,12 +101,21 @@ export function removeChannel(id: number): void {
   });
 }
 
-/** Set the active channel by id (or null to deselect). */
+/** Set the active channel by id (or null to deselect). Clears unread count for the activated channel. */
 export function setActiveChannel(id: number | null): void {
-  channelsStore.setState((prev) => ({
-    ...prev,
-    activeChannelId: id,
-  }));
+  channelsStore.setState((prev) => {
+    if (id === null) {
+      return { ...prev, activeChannelId: null };
+    }
+    const existing = prev.channels.get(id);
+    if (existing === undefined || existing.unreadCount === 0) {
+      return { ...prev, activeChannelId: id };
+    }
+    const updated: Channel = { ...existing, unreadCount: 0 };
+    const next = new Map(prev.channels);
+    next.set(id, updated);
+    return { ...prev, activeChannelId: id, channels: next };
+  });
 }
 
 /** Get the currently active Channel object, or null. */

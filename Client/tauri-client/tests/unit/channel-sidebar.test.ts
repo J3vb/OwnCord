@@ -27,6 +27,9 @@ function resetStores(): void {
     settingsOpen: false,
     activeModal: null,
     theme: "dark" as const,
+    connectionStatus: "disconnected" as const,
+    transientError: null,
+    persistentError: null,
     collapsedCategories: new Set<string>(),
   }));
 }

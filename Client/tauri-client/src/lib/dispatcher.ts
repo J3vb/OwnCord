@@ -16,6 +16,8 @@ import {
   addMessage,
   editMessage,
   deleteMessage,
+  updateReaction,
+  confirmSend,
 } from "@stores/messages.store";
 import {
   setMembers,
@@ -29,6 +31,8 @@ import {
   setVoiceStates,
   updateVoiceState,
   removeVoiceUser,
+  setVoiceConfig,
+  setSpeakers,
 } from "@stores/voice.store";
 import { createLogger } from "./logger";
 
@@ -106,6 +110,23 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
     }),
   );
 
+  unsubs.push(
+    ws.on("chat_send_ok", (payload, id) => {
+      if (id) {
+        confirmSend(id, payload.message_id, payload.timestamp);
+      }
+    }),
+  );
+
+  // ── Reactions ───────────────────────────────────────────
+
+  unsubs.push(
+    ws.on("reaction_update", (payload) => {
+      const userId = authStore.getState().user?.id ?? 0;
+      updateReaction(payload, userId);
+    }),
+  );
+
   // ── Typing ────────────────────────────────────────────
 
   unsubs.push(
@@ -157,6 +178,12 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   );
 
   unsubs.push(
+    ws.on("member_ban", (payload) => {
+      removeMember(payload.user_id);
+    }),
+  );
+
+  unsubs.push(
     ws.on("member_update", (payload) => {
       updateMemberRole(payload.user_id, payload.role);
     }),
@@ -173,6 +200,18 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   unsubs.push(
     ws.on("voice_leave", (payload) => {
       removeVoiceUser(payload);
+    }),
+  );
+
+  unsubs.push(
+    ws.on("voice_config", (payload) => {
+      setVoiceConfig(payload);
+    }),
+  );
+
+  unsubs.push(
+    ws.on("voice_speakers", (payload) => {
+      setSpeakers(payload);
     }),
   );
 

@@ -489,9 +489,9 @@ describe("ReactionBar", () => {
       onToggle: vi.fn(),
     });
 
-    const pills = bar.querySelectorAll(".reaction-pill");
+    const pills = bar.querySelectorAll(".reaction-chip:not(.add-reaction)");
     expect(pills.length).toBe(2);
-    expect(bar.querySelector(".reaction-add")).not.toBeNull();
+    expect(bar.querySelector(".add-reaction")).not.toBeNull();
   });
 
   it("highlights current user reactions", () => {
@@ -503,7 +503,7 @@ describe("ReactionBar", () => {
       onToggle: vi.fn(),
     });
 
-    const meReactions = bar.querySelectorAll(".reaction--me");
+    const meReactions = bar.querySelectorAll(".reaction-chip.me");
     expect(meReactions.length).toBe(1);
   });
 
@@ -514,7 +514,7 @@ describe("ReactionBar", () => {
       onToggle,
     });
 
-    const pill = bar.querySelector(".reaction-pill") as HTMLButtonElement;
+    const pill = bar.querySelector(".reaction-chip:not(.add-reaction)") as HTMLButtonElement;
     pill.click();
     expect(onToggle).toHaveBeenCalledWith("👍");
   });
@@ -527,7 +527,7 @@ describe("ReactionBar", () => {
     });
 
     bar.addEventListener("add-reaction", handler);
-    const addBtn = bar.querySelector(".reaction-add") as HTMLButtonElement;
+    const addBtn = bar.querySelector(".add-reaction") as HTMLButtonElement;
     addBtn.click();
     expect(handler).toHaveBeenCalled();
   });
@@ -550,10 +550,11 @@ describe("MessageActionsBar", () => {
       onDelete: vi.fn(),
       onReact: vi.fn(),
       onPin: vi.fn(),
+      onMore: vi.fn(),
     });
 
-    const buttons = bar.querySelectorAll(".msg-action");
-    expect(buttons.length).toBe(2); // Reply + React
+    const buttons = bar.querySelectorAll("button");
+    expect(buttons.length).toBe(3); // React + Reply + More
   });
 
   it("shows Edit and Delete for own messages", () => {
@@ -566,10 +567,11 @@ describe("MessageActionsBar", () => {
       onDelete: vi.fn(),
       onReact: vi.fn(),
       onPin: vi.fn(),
+      onMore: vi.fn(),
     });
 
-    const buttons = bar.querySelectorAll(".msg-action");
-    expect(buttons.length).toBe(4); // Reply + React + Edit + Delete
+    const buttons = bar.querySelectorAll("button");
+    expect(buttons.length).toBe(5); // React + Reply + Edit + Delete + More
   });
 
   it("shows Delete and Pin for moderators on others' messages", () => {
@@ -582,10 +584,11 @@ describe("MessageActionsBar", () => {
       onDelete: vi.fn(),
       onReact: vi.fn(),
       onPin: vi.fn(),
+      onMore: vi.fn(),
     });
 
-    const buttons = bar.querySelectorAll(".msg-action");
-    expect(buttons.length).toBe(4); // Reply + React + Delete + Pin
+    const buttons = bar.querySelectorAll("button");
+    expect(buttons.length).toBe(5); // React + Reply + Delete + Pin + More
   });
 
   it("calls onReply when Reply button is clicked", () => {
@@ -599,9 +602,10 @@ describe("MessageActionsBar", () => {
       onDelete: vi.fn(),
       onReact: vi.fn(),
       onPin: vi.fn(),
+      onMore: vi.fn(),
     });
 
-    const replyBtn = bar.querySelector("[aria-label='Reply']") as HTMLButtonElement;
+    const replyBtn = bar.querySelector("[title='Reply']") as HTMLButtonElement;
     replyBtn.click();
     expect(onReply).toHaveBeenCalled();
   });

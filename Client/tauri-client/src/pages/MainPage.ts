@@ -1,163 +1,138 @@
 // MainPage — primary app layout after login.
-// Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
+// Composes standalone components; never sets innerHTML with user content.
 
-import { createElement, appendChildren } from "@lib/dom";
+import { createElement, appendChildren, setText, clearChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
+import type { WsClient } from "@lib/ws";
+import type { ApiClient } from "@lib/api";
+import { createLogger } from "@lib/logger";
+import { createServerStrip } from "@components/ServerStrip";
+import { createChannelSidebar } from "@components/ChannelSidebar";
+import { createUserBar } from "@components/UserBar";
+import { createVoiceWidget } from "@components/VoiceWidget";
+import { createMemberList } from "@components/MemberList";
+import { createMessageList } from "@components/MessageList";
+import { createMessageInput } from "@components/MessageInput";
+import type { MessageInputComponent } from "@components/MessageInput";
+import { createTypingIndicator } from "@components/TypingIndicator";
+import { createServerBanner } from "@components/ServerBanner";
+import type { ServerBannerControl } from "@components/ServerBanner";
+import { authStore } from "@stores/auth.store";
+import { channelsStore, getActiveChannel } from "@stores/channels.store";
+import {
+  voiceStore,
+  leaveVoiceChannel,
+  setLocalMuted,
+  setLocalDeafened,
+} from "@stores/voice.store";
+import {
+  setMessages,
+  prependMessages,
+  isChannelLoaded,
+  getChannelMessages,
+} from "@stores/messages.store";
+
+const log = createLogger("main-page");
+
+// ---------------------------------------------------------------------------
+// Options
+// ---------------------------------------------------------------------------
+
+export interface MainPageOptions {
+  readonly ws: WsClient;
+  readonly api: ApiClient;
+}
 
 // ---------------------------------------------------------------------------
 // MainPage
 // ---------------------------------------------------------------------------
 
-export function createMainPage(): MountableComponent {
+export function createMainPage(options: MainPageOptions): MountableComponent {
+  const { ws, api } = options;
+
   let container: Element | null = null;
-  let root: HTMLDivElement;
+  let root: HTMLDivElement | null = null;
 
-  const abortController = new AbortController();
-  const signal = abortController.signal;
+  // Child components tracked for cleanup
+  const children: MountableComponent[] = [];
+  const unsubscribers: Array<() => void> = [];
+
+  // Refs we need to update reactively
+  let banner: ServerBannerControl | null = null;
+  let messageList: MountableComponent | null = null;
+  let messageInput: MessageInputComponent | null = null;
+  let typingIndicator: MountableComponent | null = null;
+  let chatHeaderName: HTMLSpanElement | null = null;
+  let chatHeaderTopic: HTMLSpanElement | null = null;
+
+  // Containers for swappable sub-components
+  let messagesSlot: HTMLDivElement | null = null;
+  let typingSlot: HTMLDivElement | null = null;
+  let inputSlot: HTMLDivElement | null = null;
+
+  // Track currently mounted channel to avoid redundant rebuilds
+  let currentChannelId: number | null = null;
+
+  // Abort controller for channel-scoped async operations (e.g. message fetch)
+  let channelAbort: AbortController | null = null;
 
   // ---------------------------------------------------------------------------
-  // DOM construction
+  // Helpers
   // ---------------------------------------------------------------------------
 
-  function buildRoot(): HTMLDivElement {
-    const reconnectBanner = buildReconnectBanner();
-    const serverStrip = buildServerStrip();
-    const channelSidebar = buildChannelSidebar();
-    const chatArea = buildChatArea();
-    const memberList = buildMemberList();
-
-    // Outer wrapper holds the reconnect banner above the main flex row
-    const wrapper = createElement("div", {
-      style: "display:flex;flex-direction:column;height:100vh;width:100%",
-    });
-    wrapper.appendChild(reconnectBanner);
-
-    // .app is the main flex row matching the mockup layout
-    const app = createElement("div", { class: "app" });
-    appendChildren(app, serverStrip, channelSidebar, chatArea, memberList);
-    wrapper.appendChild(app);
-
-    root = wrapper;
-    return root;
+  function getCurrentUserId(): number {
+    return authStore.getState().user?.id ?? 0;
   }
 
-  function buildReconnectBanner(): HTMLDivElement {
-    const banner = createElement("div", {
-      class: "reconnecting-banner",
-      "aria-live": "polite",
-    }, "Reconnecting...");
-    return banner;
+  // ---------------------------------------------------------------------------
+  // Message loading (REST)
+  // ---------------------------------------------------------------------------
+
+  async function loadMessages(channelId: number, signal: AbortSignal): Promise<void> {
+    if (isChannelLoaded(channelId)) return;
+    try {
+      const resp = await api.getMessages(channelId, { limit: 50 }, signal);
+      if (!signal.aborted) {
+        setMessages(channelId, resp.messages, resp.has_more);
+      }
+    } catch (err) {
+      if (!signal.aborted) {
+        log.error("Failed to load messages", { channelId, error: String(err) });
+      }
+    }
   }
 
-  function buildServerStrip(): HTMLDivElement {
-    const strip = createElement("div", { class: "server-strip" });
-
-    // Home button placeholder
-    const homeBtn = createElement("div", {
-      class: "server-icon active",
-      style: "background: var(--accent)",
-      "aria-label": "Home",
-    });
-    homeBtn.textContent = "H";
-    homeBtn.addEventListener("click", () => {
-      // placeholder: home navigation
-    }, { signal });
-
-    const separator = createElement("div", { class: "server-separator" });
-
-    // Add server button placeholder
-    const addBtn = createElement("div", {
-      class: "server-icon add",
-      "aria-label": "Add Server",
-    });
-    addBtn.textContent = "+";
-
-    appendChildren(strip, homeBtn, separator, addBtn);
-    return strip;
+  async function loadOlderMessages(channelId: number, signal: AbortSignal): Promise<void> {
+    const messages = getChannelMessages(channelId);
+    if (messages.length === 0) return;
+    const oldest = messages[0];
+    if (oldest === undefined) return;
+    try {
+      const resp = await api.getMessages(
+        channelId,
+        { before: oldest.id, limit: 50 },
+        signal,
+      );
+      if (!signal.aborted) {
+        prependMessages(channelId, resp.messages, resp.has_more);
+      }
+    } catch (err) {
+      if (!signal.aborted) {
+        log.error("Failed to load older messages", { channelId, error: String(err) });
+      }
+    }
   }
 
-  function buildChannelSidebar(): HTMLDivElement {
-    const sidebar = createElement("div", { class: "channel-sidebar" });
+  // ---------------------------------------------------------------------------
+  // Chat header (no standalone component — built inline)
+  // ---------------------------------------------------------------------------
 
-    // Sidebar header (server name)
-    const header = createElement("div", { class: "channel-sidebar-header" });
-    const serverName = createElement("h2", {}, "Server Name");
-    header.appendChild(serverName);
-
-    // Channel list
-    const channelList = createElement("div", { class: "channel-list" });
-
-    // Placeholder category
-    const category = createElement("div", { class: "category" });
-    const arrow = createElement("span", { class: "category-arrow" }, "\u25BC");
-    const catName = createElement("span", { class: "category-name" }, "Text Channels");
-    appendChildren(category, arrow, catName);
-
-    const categoryChannels = createElement("div", { class: "category-channels" });
-    const placeholderChannel = createElement("div", { class: "channel-item active" });
-    const chIcon = createElement("span", { class: "ch-icon" }, "#");
-    const chName = createElement("span", { class: "ch-name" }, "general");
-    appendChildren(placeholderChannel, chIcon, chName);
-    categoryChannels.appendChild(placeholderChannel);
-
-    appendChildren(channelList, category, categoryChannels);
-
-    // Voice widget placeholder (hidden by default)
-    const voiceWidget = createElement("div", { class: "voice-widget" });
-
-    // User bar
-    const userBar = buildUserBar();
-
-    appendChildren(sidebar, header, channelList, voiceWidget, userBar);
-    return sidebar;
-  }
-
-  function buildUserBar(): HTMLDivElement {
-    const bar = createElement("div", { class: "user-bar" });
-
-    const avatar = createElement("div", {
-      class: "ub-avatar",
-      style: "background: var(--accent)",
-    }, "U");
-    const statusDot = createElement("div", {
-      class: "status-dot",
-      style: "background: var(--green)",
-    });
-    avatar.appendChild(statusDot);
-
-    const info = createElement("div", { class: "ub-info" });
-    const name = createElement("div", { class: "ub-name" }, "Username");
-    const status = createElement("div", { class: "ub-status" }, "Online");
-    appendChildren(info, name, status);
-
-    const controls = createElement("div", { class: "ub-controls" });
-    const muteBtn = createElement("button", {
-      type: "button",
-      "aria-label": "Mute",
-    }, "\uD83C\uDFA4");
-    const deafenBtn = createElement("button", {
-      type: "button",
-      "aria-label": "Deafen",
-    }, "\uD83C\uDFA7");
-    const settingsBtn = createElement("button", {
-      type: "button",
-      "aria-label": "Settings",
-    }, "\u2699");
-    appendChildren(controls, muteBtn, deafenBtn, settingsBtn);
-
-    appendChildren(bar, avatar, info, controls);
-    return bar;
-  }
-
-  function buildChatArea(): HTMLDivElement {
-    const area = createElement("div", { class: "chat-area" });
-
-    // Chat header
+  function buildChatHeader(): HTMLDivElement {
     const header = createElement("div", { class: "chat-header" });
     const hash = createElement("span", { class: "ch-hash" }, "#");
-    const channelName = createElement("span", { class: "ch-name" }, "general");
+    chatHeaderName = createElement("span", { class: "ch-name" }, "general");
     const divider = createElement("div", { class: "ch-divider" });
-    const topic = createElement("span", { class: "ch-topic" }, "General discussion");
+    chatHeaderTopic = createElement("span", { class: "ch-topic" }, "");
 
     const tools = createElement("div", { class: "ch-tools" });
     const searchInput = createElement("input", {
@@ -171,83 +146,311 @@ export function createMainPage(): MountableComponent {
     }, "\uD83D\uDC65");
     appendChildren(tools, searchInput, membersToggle);
 
-    appendChildren(header, hash, channelName, divider, topic, tools);
-
-    // Messages container
-    const messagesContainer = createElement("div", { class: "messages-container" });
-
-    // Typing indicator
-    const typingBar = createElement("div", { class: "typing-bar" });
-
-    // Chat input area
-    const inputWrap = createElement("div", { class: "message-input-wrap" });
-    const inputBox = createElement("div", { class: "message-input-box" });
-
-    const attachBtn = createElement("button", {
-      class: "input-btn",
-      type: "button",
-      "aria-label": "Attach file",
-    }, "+");
-
-    const textarea = createElement("textarea", {
-      class: "msg-textarea",
-      placeholder: "Message #general",
-      rows: "1",
-    });
-    textarea.addEventListener("input", () => {
-      // Auto-resize textarea
-      textarea.style.height = "auto";
-      textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
-    }, { signal });
-
-    const sendBtn = createElement("button", {
-      class: "input-btn",
-      type: "button",
-      "aria-label": "Send message",
-    }, "\u27A4");
-
-    appendChildren(inputBox, attachBtn, textarea, sendBtn);
-    inputWrap.appendChild(inputBox);
-
-    appendChildren(area, header, messagesContainer, typingBar, inputWrap);
-    return area;
-  }
-
-  function buildMemberList(): HTMLDivElement {
-    const list = createElement("div", { class: "member-list" });
-
-    // Placeholder role group
-    const roleGroup = createElement("div", {
-      class: "member-role-group",
-    }, "Online \u2014 0");
-
-    list.appendChild(roleGroup);
-    return list;
+    appendChildren(header, hash, chatHeaderName, divider, chatHeaderTopic, tools);
+    return header;
   }
 
   // ---------------------------------------------------------------------------
-  // MountableComponent
+  // Channel switching — rebuild channel-dependent components
+  // ---------------------------------------------------------------------------
+
+  function mountChannelComponents(channelId: number, channelName: string): void {
+    // Skip if already mounted for this channel
+    if (currentChannelId === channelId) return;
+    currentChannelId = channelId;
+
+    // Tear down previous instances
+    destroyChannelComponents();
+
+    // New abort controller for this channel's async work
+    channelAbort = new AbortController();
+    const signal = channelAbort.signal;
+
+    const userId = getCurrentUserId();
+
+    // Load messages from REST
+    void loadMessages(channelId, signal);
+
+    // MessageList
+    messageList = createMessageList({
+      channelId,
+      currentUserId: userId,
+      onScrollTop: () => {
+        if (channelAbort !== null) {
+          void loadOlderMessages(channelId, channelAbort.signal);
+        }
+      },
+      onReplyClick: (msgId: number) => {
+        const msgs = getChannelMessages(channelId);
+        const msg = msgs.find((m) => m.id === msgId);
+        messageInput?.setReplyTo(msgId, msg?.user.username ?? "");
+      },
+      onEditClick: (msgId: number) => {
+        const msgs = getChannelMessages(channelId);
+        const msg = msgs.find((m) => m.id === msgId);
+        if (msg !== undefined) {
+          messageInput?.startEdit(msgId, msg.content);
+        }
+      },
+      onDeleteClick: (msgId: number) => {
+        ws.send({
+          type: "chat_delete",
+          payload: { message_id: msgId },
+        });
+      },
+      onReactionClick: (msgId: number, emoji: string) => {
+        if (emoji === "") return; // empty = open picker (future)
+        ws.send({
+          type: "reaction_add",
+          payload: { message_id: msgId, emoji },
+        });
+      },
+    });
+    if (messagesSlot !== null) {
+      messageList.mount(messagesSlot);
+    }
+    children.push(messageList);
+
+    // TypingIndicator
+    typingIndicator = createTypingIndicator({
+      channelId,
+      currentUserId: userId,
+    });
+    if (typingSlot !== null) {
+      typingIndicator.mount(typingSlot);
+    }
+    children.push(typingIndicator);
+
+    // MessageInput
+    messageInput = createMessageInput({
+      channelId,
+      channelName,
+      onSend: (content: string, replyTo: number | null) => {
+        ws.send({
+          type: "chat_send",
+          payload: {
+            channel_id: channelId,
+            content,
+            reply_to: replyTo,
+            attachments: [],
+          },
+        });
+      },
+      onTyping: () => {
+        ws.send({
+          type: "typing_start",
+          payload: { channel_id: channelId },
+        });
+      },
+      onEditMessage: (messageId: number, content: string) => {
+        ws.send({
+          type: "chat_edit",
+          payload: { message_id: messageId, content },
+        });
+      },
+    });
+    if (inputSlot !== null) {
+      messageInput.mount(inputSlot);
+    }
+    children.push(messageInput);
+
+    // Update header
+    if (chatHeaderName !== null) {
+      setText(chatHeaderName, channelName);
+    }
+    // Topic not yet in Channel store — will be wired when available
+  }
+
+  function destroyChannelComponents(): void {
+    // Abort any in-flight fetches
+    if (channelAbort !== null) {
+      channelAbort.abort();
+      channelAbort = null;
+    }
+
+    if (messageList !== null) {
+      messageList.destroy?.();
+      const idx = children.indexOf(messageList);
+      if (idx !== -1) children.splice(idx, 1);
+      messageList = null;
+    }
+    if (typingIndicator !== null) {
+      typingIndicator.destroy?.();
+      const idx = children.indexOf(typingIndicator);
+      if (idx !== -1) children.splice(idx, 1);
+      typingIndicator = null;
+    }
+    if (messageInput !== null) {
+      messageInput.destroy?.();
+      const idx = children.indexOf(messageInput as MountableComponent);
+      if (idx !== -1) children.splice(idx, 1);
+      messageInput = null;
+    }
+    // Clear slots
+    if (messagesSlot !== null) { clearChildren(messagesSlot); }
+    if (typingSlot !== null) { clearChildren(typingSlot); }
+    if (inputSlot !== null) { clearChildren(inputSlot); }
+
+    currentChannelId = null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Mount / Destroy
   // ---------------------------------------------------------------------------
 
   function mount(target: Element): void {
     container = target;
-    const rootEl = buildRoot();
-    container.appendChild(rootEl);
+
+    // Outer wrapper
+    root = createElement("div", {
+      style: "display:flex;flex-direction:column;height:100vh;width:100%",
+    });
+
+    // --- Reconnect banner ---
+    banner = createServerBanner();
+    root.appendChild(banner.element);
+
+    // Wire banner to WS state
+    unsubscribers.push(
+      ws.onStateChange((wsState) => {
+        if (banner === null) return;
+        if (wsState === "reconnecting") {
+          banner.showReconnecting();
+        } else if (wsState === "connected") {
+          banner.hide();
+        }
+      }),
+    );
+
+    // Wire banner to server_restart events
+    unsubscribers.push(
+      ws.on("server_restart", (payload) => {
+        if (banner !== null) {
+          banner.showRestart(payload.delay_seconds);
+        }
+      }),
+    );
+
+    // --- Main .app row ---
+    const app = createElement("div", { class: "app" });
+
+    // Server strip
+    const serverStripSlot = createElement("div", {});
+    const serverStrip = createServerStrip();
+    serverStrip.mount(serverStripSlot);
+    children.push(serverStrip);
+
+    // Channel sidebar (composed: sidebar + voice widget + user bar)
+    const sidebarWrapper = createElement("div", { class: "channel-sidebar" });
+
+    const channelSidebarSlot = createElement("div", {});
+    const channelSidebar = createChannelSidebar();
+    channelSidebar.mount(channelSidebarSlot);
+    children.push(channelSidebar);
+
+    // Move the ChannelSidebar's inner elements into our wrapper
+    const mountedSidebar = channelSidebarSlot.firstElementChild;
+    if (mountedSidebar !== null) {
+      while (mountedSidebar.firstChild !== null) {
+        sidebarWrapper.appendChild(mountedSidebar.firstChild);
+      }
+    }
+
+    // Voice widget (hidden when not in voice)
+    const voiceWidgetSlot = createElement("div", {});
+    const voiceWidget = createVoiceWidget({
+      onDisconnect: () => {
+        leaveVoiceChannel();
+      },
+      onMuteToggle: () => {
+        const next = !voiceStore.getState().localMuted;
+        setLocalMuted(next);
+        ws.send({ type: "voice_mute", payload: { muted: next } });
+      },
+      onDeafenToggle: () => {
+        const next = !voiceStore.getState().localDeafened;
+        setLocalDeafened(next);
+        ws.send({ type: "voice_deafen", payload: { deafened: next } });
+      },
+      onCameraToggle: () => {
+        ws.send({ type: "voice_camera", payload: { enabled: false } });
+      },
+      onScreenshareToggle: () => {
+        // TODO: screenshare not yet in protocol
+      },
+    });
+    voiceWidget.mount(voiceWidgetSlot);
+    children.push(voiceWidget);
+    sidebarWrapper.appendChild(voiceWidgetSlot);
+
+    // User bar
+    const userBarSlot = createElement("div", {});
+    const userBar = createUserBar();
+    userBar.mount(userBarSlot);
+    children.push(userBar);
+    sidebarWrapper.appendChild(userBarSlot);
+
+    // Chat area
+    const chatArea = createElement("div", { class: "chat-area" });
+    chatArea.appendChild(buildChatHeader());
+
+    messagesSlot = createElement("div", { class: "messages-slot" });
+    typingSlot = createElement("div", { class: "typing-slot" });
+    inputSlot = createElement("div", { class: "input-slot" });
+    appendChildren(chatArea, messagesSlot, typingSlot, inputSlot);
+
+    // Member list
+    const memberListSlot = createElement("div", {});
+    const memberList = createMemberList();
+    memberList.mount(memberListSlot);
+    children.push(memberList);
+
+    appendChildren(app, serverStripSlot, sidebarWrapper, chatArea, memberListSlot);
+    root.appendChild(app);
+    container.appendChild(root);
+
+    // --- Subscribe to channel changes ---
+    const unsubChannels = channelsStore.subscribe(() => {
+      const active = getActiveChannel();
+      if (active !== null) {
+        mountChannelComponents(active.id, active.name);
+      }
+    });
+    unsubscribers.push(unsubChannels);
+
+    // Mount for current active channel if any
+    const active = getActiveChannel();
+    if (active !== null) {
+      mountChannelComponents(active.id, active.name);
+    }
   }
 
   function destroy(): void {
-    abortController.abort();
+    destroyChannelComponents();
 
-    if (container && root) {
-      container.removeChild(root);
+    for (const child of children) {
+      child.destroy?.();
+    }
+    children.length = 0;
+
+    for (const unsub of unsubscribers) {
+      unsub();
+    }
+    unsubscribers.length = 0;
+
+    if (banner !== null) {
+      banner.destroy();
+      banner = null;
+    }
+
+    if (root !== null) {
+      root.remove();
+      root = null;
     }
     container = null;
   }
 
-  return {
-    mount,
-    destroy,
-  };
+  return { mount, destroy };
 }
 
 export type MainPage = ReturnType<typeof createMainPage>;
