@@ -22,7 +22,7 @@ public partial class App : Application
         var apiClient = ApiClient.CreateWithTofuTls(trustService);
         var chatService = new ChatService(apiClient, wsService);
 
-        var connectVm = new ConnectViewModel(profileService, credentialService);
+        var connectVm = new ConnectViewModel(profileService, credentialService, apiClient);
         var mainVm = new MainViewModel();
 
         var mainWindow = new MainWindow(connectVm, mainVm, chatService);

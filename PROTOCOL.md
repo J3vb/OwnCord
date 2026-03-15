@@ -1,6 +1,8 @@
 # WebSocket Protocol Spec
 
-All client-server communication (except file uploads and admin panel) happens over a single WebSocket connection. Messages are JSON with a `type` and `payload`.
+All client-server communication (except file uploads and
+admin panel) happens over a single WebSocket connection.
+Messages are JSON with a `type` and `payload`.
 
 ## Message Format
 
@@ -31,7 +33,17 @@ Server responses to client requests include the same `id` for correlation.
 ### Server → Client (success)
 
 ```json
-{ "type": "auth_ok", "payload": { "user": { "id": 1, "username": "alex", "avatar": "uuid.png", "role": "admin" }, "server_name": "My Server", "motd": "Welcome!" } }
+{
+  "type": "auth_ok",
+  "payload": {
+    "user": {
+      "id": 1, "username": "alex",
+      "avatar": "uuid.png", "role": "admin"
+    },
+    "server_name": "My Server",
+    "motd": "Welcome!"
+  }
+}
 ```
 
 ### Server → Client (failure)
@@ -49,31 +61,81 @@ Connection is closed by server after auth_error.
 ### Send Message (Client → Server)
 
 ```json
-{ "type": "chat_send", "id": "req-uuid", "payload": { "channel_id": 5, "content": "Hello everyone!", "reply_to": null, "attachments": ["upload-uuid-1"] } }
+{
+  "type": "chat_send",
+  "id": "req-uuid",
+  "payload": {
+    "channel_id": 5,
+    "content": "Hello everyone!",
+    "reply_to": null,
+    "attachments": ["upload-uuid-1"]
+  }
+}
 ```
 
 ### Message Broadcast (Server → Client)
 
 ```json
-{ "type": "chat_message", "payload": { "id": 1042, "channel_id": 5, "user": { "id": 1, "username": "alex", "avatar": "uuid.png" }, "content": "Hello everyone!", "reply_to": null, "attachments": [{ "id": "upload-uuid-1", "filename": "photo.jpg", "size": 204800, "mime": "image/jpeg", "url": "/files/upload-uuid-1" }], "timestamp": "2026-03-14T10:30:00Z" } }
+{
+  "type": "chat_message",
+  "payload": {
+    "id": 1042, "channel_id": 5,
+    "user": {
+      "id": 1, "username": "alex",
+      "avatar": "uuid.png"
+    },
+    "content": "Hello everyone!",
+    "reply_to": null,
+    "attachments": [{
+      "id": "upload-uuid-1",
+      "filename": "photo.jpg",
+      "size": 204800,
+      "mime": "image/jpeg",
+      "url": "/files/upload-uuid-1"
+    }],
+    "timestamp": "2026-03-14T10:30:00Z"
+  }
+}
 ```
 
 ### Send Ack (Server → Client)
 
 ```json
-{ "type": "chat_send_ok", "id": "req-uuid", "payload": { "message_id": 1042, "timestamp": "2026-03-14T10:30:00Z" } }
+{
+  "type": "chat_send_ok",
+  "id": "req-uuid",
+  "payload": {
+    "message_id": 1042,
+    "timestamp": "2026-03-14T10:30:00Z"
+  }
+}
 ```
 
 ### Edit Message (Client → Server)
 
 ```json
-{ "type": "chat_edit", "id": "req-uuid", "payload": { "message_id": 1042, "content": "Hello everyone! (edited)" } }
+{
+  "type": "chat_edit",
+  "id": "req-uuid",
+  "payload": {
+    "message_id": 1042,
+    "content": "Hello everyone! (edited)"
+  }
+}
 ```
 
 ### Edit Broadcast (Server → Client)
 
 ```json
-{ "type": "chat_edited", "payload": { "message_id": 1042, "channel_id": 5, "content": "Hello everyone! (edited)", "edited_at": "2026-03-14T10:31:00Z" } }
+{
+  "type": "chat_edited",
+  "payload": {
+    "message_id": 1042,
+    "channel_id": 5,
+    "content": "Hello everyone! (edited)",
+    "edited_at": "2026-03-14T10:31:00Z"
+  }
+}
 ```
 
 ### Delete Message (Client → Server)
@@ -98,7 +160,16 @@ Connection is closed by server after auth_error.
 ### Reaction Broadcast (Server → Client)
 
 ```json
-{ "type": "reaction_update", "payload": { "message_id": 1042, "channel_id": 5, "emoji": "👍", "user_id": 1, "action": "add" } }
+{
+  "type": "reaction_update",
+  "payload": {
+    "message_id": 1042,
+    "channel_id": 5,
+    "emoji": "👍",
+    "user_id": 1,
+    "action": "add"
+  }
+}
 ```
 
 ---
@@ -114,7 +185,14 @@ Connection is closed by server after auth_error.
 ### Server → Client (broadcast to channel members)
 
 ```json
-{ "type": "typing", "payload": { "channel_id": 5, "user_id": 1, "username": "alex" } }
+{
+  "type": "typing",
+  "payload": {
+    "channel_id": 5,
+    "user_id": 1,
+    "username": "alex"
+  }
+}
 ```
 
 Client-side: show indicator for 5 seconds, reset on new typing event from same user.
@@ -123,7 +201,7 @@ Client-side: show indicator for 5 seconds, reset on new typing event from same u
 
 ## Presence
 
-### Client → Server
+### Presence Client → Server
 
 ```json
 { "type": "presence_update", "payload": { "status": "online" } }
@@ -131,7 +209,7 @@ Client-side: show indicator for 5 seconds, reset on new typing event from same u
 
 Status values: `online`, `idle`, `dnd`, `offline`
 
-### Server → Client (broadcast)
+### Presence Server → Client (broadcast)
 
 ```json
 { "type": "presence", "payload": { "user_id": 1, "status": "online" } }
@@ -146,8 +224,21 @@ Server auto-sets `idle` after 10 minutes of no WebSocket activity.
 ### Server → Client (on channel created/edited/deleted/reordered)
 
 ```json
-{ "type": "channel_create", "payload": { "id": 8, "name": "gaming", "type": "text", "category": "Hangout", "position": 3 } }
-{ "type": "channel_update", "payload": { "id": 8, "name": "gaming-talk", "position": 4 } }
+{
+  "type": "channel_create",
+  "payload": {
+    "id": 8, "name": "gaming",
+    "type": "text",
+    "category": "Hangout", "position": 3
+  }
+}
+{
+  "type": "channel_update",
+  "payload": {
+    "id": 8, "name": "gaming-talk",
+    "position": 4
+  }
+}
 { "type": "channel_delete", "payload": { "id": 8 } }
 ```
 
@@ -166,7 +257,16 @@ Channel types: `text`, `voice`, `announcement`
 ### Server → Client (voice state updates, broadcast to channel)
 
 ```json
-{ "type": "voice_state", "payload": { "channel_id": 10, "user_id": 1, "username": "alex", "muted": false, "deafened": false, "speaking": false } }
+{
+  "type": "voice_state",
+  "payload": {
+    "channel_id": 10, "user_id": 1,
+    "username": "alex",
+    "muted": false, "deafened": false,
+    "speaking": false,
+    "camera": false, "screenshare": false
+  }
+}
 ```
 
 ### Voice User Left (Server → Client)
@@ -175,7 +275,29 @@ Channel types: `text`, `voice`, `announcement`
 { "type": "voice_leave", "payload": { "channel_id": 10, "user_id": 1 } }
 ```
 
-### WebRTC Signaling (bidirectional)
+### Voice Config (Server → Client, sent after voice_join acceptance)
+
+```json
+{
+  "type": "voice_config",
+  "payload": {
+    "channel_id": 10, "quality": "medium", "bitrate": 64000,
+    "threshold_mode": "forwarding", "mixing_threshold": 10,
+    "top_speakers": 3, "max_users": 50
+  }
+}
+```
+
+Client uses `bitrate` to configure the Opus encoder. Other fields are
+informational for UI.
+
+### WebRTC Signaling (Client ↔ Server SFU)
+
+**Note:** As of the SFU migration, `voice_offer`/`voice_answer`/`voice_ice`
+are exchanged between each client and the **server** (not relayed between
+clients). The server is the WebRTC peer.
+
+Clients must include RFC 6464 `ssrc-audio-level` RTP header extension in SDP offers.
 
 ```json
 { "type": "voice_offer", "payload": { "channel_id": 10, "sdp": "..." } }
@@ -190,6 +312,33 @@ Channel types: `text`, `voice`, `announcement`
 { "type": "voice_deafen", "payload": { "deafened": true } }
 ```
 
+### Voice Camera / Screenshare (Client → Server)
+
+```json
+{ "type": "voice_camera", "payload": { "enabled": true } }
+{ "type": "voice_screenshare", "payload": { "enabled": true } }
+```
+
+Requires `USE_VIDEO` (bit 11) or `SHARE_SCREEN` (bit 12) permission.
+Rate limit: 2/sec per user.
+
+### Active Speakers (Server → Client)
+
+```json
+{
+  "type": "voice_speakers",
+  "payload": {
+    "channel_id": 10, "speakers": [1, 5, 12],
+    "threshold_mode": "forwarding"
+  }
+}
+```
+
+- `speakers`: Active speaker user IDs (up to top-N)
+- `threshold_mode`: `"forwarding"` or `"selective"`
+- Sent on speaker list changes or mode transitions
+- Rate: at most once per 200ms per channel
+
 ### Soundboard (Client → Server)
 
 ```json
@@ -203,7 +352,15 @@ Channel types: `text`, `voice`, `announcement`
 ### Server → Client
 
 ```json
-{ "type": "member_join", "payload": { "user": { "id": 5, "username": "newuser", "avatar": null, "role": "member" } } }
+{
+  "type": "member_join",
+  "payload": {
+    "user": {
+      "id": 5, "username": "newuser",
+      "avatar": null, "role": "member"
+    }
+  }
+}
 { "type": "member_leave", "payload": { "user_id": 5 } }
 { "type": "member_update", "payload": { "user_id": 5, "role": "moderator" } }
 { "type": "member_ban", "payload": { "user_id": 5 } }
@@ -213,7 +370,7 @@ Channel types: `text`, `voice`, `announcement`
 
 ## Server Restart
 
-### Server → Client
+### Restart Server → Client
 
 ```json
 {
@@ -228,32 +385,58 @@ Channel types: `text`, `voice`, `announcement`
 - `reason` (string): Why the server is restarting. Currently only `"update"`.
 - `delay_seconds` (integer): How many seconds until the server shuts down.
 
-Client behavior: Display a banner/notification ("Server restarting for update..."), then auto-reconnect using existing reconnection logic after the delay expires.
+Client behavior: Display a banner ("Server restarting..."),
+then auto-reconnect after the delay expires.
 
 ---
 
 ## Initial State (sent after auth_ok)
 
-### Server → Client
+### Ready Server → Client
 
 ```json
 {
   "type": "ready",
   "payload": {
     "channels": [
-      { "id": 1, "name": "general", "type": "text", "category": "Main", "position": 0, "unread_count": 3, "last_message_id": 1040 },
-      { "id": 10, "name": "voice-chat", "type": "voice", "category": "Main", "position": 1 }
+      {
+        "id": 1, "name": "general",
+        "type": "text", "category": "Main",
+        "position": 0, "unread_count": 3,
+        "last_message_id": 1040
+      },
+      {
+        "id": 10, "name": "voice-chat",
+        "type": "voice", "category": "Main",
+        "position": 1
+      }
     ],
     "members": [
-      { "id": 1, "username": "alex", "avatar": "uuid.png", "role": "admin", "status": "online" },
-      { "id": 2, "username": "jordan", "avatar": null, "role": "member", "status": "idle" }
+      {
+        "id": 1, "username": "alex",
+        "avatar": "uuid.png",
+        "role": "admin", "status": "online"
+      },
+      {
+        "id": 2, "username": "jordan",
+        "avatar": null,
+        "role": "member", "status": "idle"
+      }
     ],
     "voice_states": [
       { "channel_id": 10, "user_id": 2, "muted": false, "deafened": false }
     ],
     "roles": [
-      { "id": 1, "name": "Owner", "color": "#E74C3C", "permissions": 2147483647 },
-      { "id": 2, "name": "Admin", "color": "#F39C12", "permissions": 1073741823 },
+      {
+        "id": 1, "name": "Owner",
+        "color": "#E74C3C",
+        "permissions": 2147483647
+      },
+      {
+        "id": 2, "name": "Admin",
+        "color": "#F39C12",
+        "permissions": 1073741823
+      },
       { "id": 3, "name": "Member", "color": null, "permissions": 1049601 }
     ]
   }
@@ -266,8 +449,8 @@ Client behavior: Display a banner/notification ("Server restarting for update...
 
 Fetched via REST API, not WebSocket, to keep the WS connection lean.
 
-```
-GET /api/channels/{id}/messages?before={message_id}&limit=50
+```text
+GET /api/channels/{id}/messages?before={msg_id}&limit=50
 ```
 
 ---
@@ -277,10 +460,18 @@ GET /api/channels/{id}/messages?before={message_id}&limit=50
 Any request that fails returns:
 
 ```json
-{ "type": "error", "id": "original-req-uuid", "payload": { "code": "FORBIDDEN", "message": "You don't have permission to post in this channel" } }
+{
+  "type": "error",
+  "id": "original-req-uuid",
+  "payload": {
+    "code": "FORBIDDEN",
+    "message": "No permission to post here"
+  }
+}
 ```
 
-Error codes: `FORBIDDEN`, `NOT_FOUND`, `RATE_LIMITED`, `INVALID_INPUT`, `SERVER_ERROR`
+Error codes: `FORBIDDEN`, `NOT_FOUND`, `RATE_LIMITED`, `INVALID_INPUT`,
+`SERVER_ERROR`, `CHANNEL_FULL`, `INVALID_SDP`, `VOICE_ERROR`, `VIDEO_LIMIT`
 
 ---
 
@@ -291,6 +482,7 @@ Error codes: `FORBIDDEN`, `NOT_FOUND`, `RATE_LIMITED`, `INVALID_INPUT`, `SERVER_
 - Presence updates: 1/10sec per user
 - Reactions: 5/sec per user
 - Voice signaling: 20/sec per user
+- Voice camera/screenshare: 2/sec per user
 - Soundboard: 1/3sec per user
 
 Server sends `rate_limited` error with `retry_after` in seconds.

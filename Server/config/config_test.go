@@ -226,6 +226,82 @@ tls:
 	}
 }
 
+func TestLoadVoiceConfigDefaults(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		got  interface{}
+		want interface{}
+	}{
+		{"Voice.Quality", cfg.Voice.Quality, "medium"},
+		{"Voice.MixingThreshold", cfg.Voice.MixingThreshold, 10},
+		{"Voice.TopSpeakers", cfg.Voice.TopSpeakers, 3},
+		{"Voice.ExternalIP", cfg.Voice.ExternalIP, ""},
+		{"Voice.MediaPortMin", cfg.Voice.MediaPortMin, 10000},
+		{"Voice.MediaPortMax", cfg.Voice.MediaPortMax, 10100},
+		{"Voice.STUNPort", cfg.Voice.STUNPort, 3478},
+		{"Voice.TURNPort", cfg.Voice.TURNPort, 3478},
+		{"Voice.TURNEnabled", cfg.Voice.TURNEnabled, true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.got != tc.want {
+				t.Errorf("got %v, want %v", tc.got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadVoiceConfigFromYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	yaml := `
+voice:
+  quality: high
+  mixing_threshold: 5
+  top_speakers: 4
+  external_ip: "1.2.3.4"
+  media_port_min: 20000
+  media_port_max: 20500
+`
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
+		t.Fatalf("failed to write yaml: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+
+	if cfg.Voice.Quality != "high" {
+		t.Errorf("Voice.Quality = %q, want 'high'", cfg.Voice.Quality)
+	}
+	if cfg.Voice.MixingThreshold != 5 {
+		t.Errorf("Voice.MixingThreshold = %d, want 5", cfg.Voice.MixingThreshold)
+	}
+	if cfg.Voice.TopSpeakers != 4 {
+		t.Errorf("Voice.TopSpeakers = %d, want 4", cfg.Voice.TopSpeakers)
+	}
+	if cfg.Voice.ExternalIP != "1.2.3.4" {
+		t.Errorf("Voice.ExternalIP = %q, want '1.2.3.4'", cfg.Voice.ExternalIP)
+	}
+	if cfg.Voice.MediaPortMin != 20000 {
+		t.Errorf("Voice.MediaPortMin = %d, want 20000", cfg.Voice.MediaPortMin)
+	}
+	if cfg.Voice.MediaPortMax != 20500 {
+		t.Errorf("Voice.MediaPortMax = %d, want 20500", cfg.Voice.MediaPortMax)
+	}
+}
+
 func TestLoadUploadBoundaryValues(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")

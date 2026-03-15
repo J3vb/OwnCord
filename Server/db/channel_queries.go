@@ -39,7 +39,11 @@ func (d *DB) ListChannels() ([]Channel, error) {
 func (d *DB) GetChannel(id int64) (*Channel, error) {
 	row := d.sqlDB.QueryRow(
 		`SELECT id, name, type, COALESCE(category,''), COALESCE(topic,''),
-		        position, slow_mode, archived, created_at
+		        position, slow_mode, archived, created_at,
+		        COALESCE(voice_max_users, 0),
+		        voice_quality,
+		        mixing_threshold,
+		        COALESCE(voice_max_video, 0)
 		 FROM channels WHERE id = ?`,
 		id,
 	)
@@ -48,6 +52,7 @@ func (d *DB) GetChannel(id int64) (*Channel, error) {
 	err := row.Scan(
 		&ch.ID, &ch.Name, &ch.Type, &ch.Category, &ch.Topic,
 		&ch.Position, &ch.SlowMode, &archived, &ch.CreatedAt,
+		&ch.VoiceMaxUsers, &ch.VoiceQuality, &ch.MixingThreshold, &ch.VoiceMaxVideo,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -91,6 +96,15 @@ func (d *DB) SetChannelSlowMode(id int64, slowMode int) error {
 	)
 	if err != nil {
 		return fmt.Errorf("SetChannelSlowMode: %w", err)
+	}
+	return nil
+}
+
+// SetChannelVoiceMaxUsers updates the voice_max_users field for the given channel.
+func (d *DB) SetChannelVoiceMaxUsers(id int64, maxUsers int) error {
+	_, err := d.sqlDB.Exec(`UPDATE channels SET voice_max_users = ? WHERE id = ?`, maxUsers, id)
+	if err != nil {
+		return fmt.Errorf("SetChannelVoiceMaxUsers: %w", err)
 	}
 	return nil
 }

@@ -74,6 +74,14 @@ func run(log *slog.Logger) error {
 	if err := db.Migrate(database); err != nil {
 		return fmt.Errorf("running migrations: %w", err)
 	}
+
+	// Clear stale voice states from a previous run.
+	if err := database.ClearAllVoiceStates(); err != nil {
+		log.Warn("failed to clear stale voice states", "error", err)
+	} else {
+		log.Info("cleared stale voice states")
+	}
+
 	// ── 4. TLS ─────────────────────────────────────────────────────────────
 	tlsResult, err := auth.LoadOrGenerate(cfg.TLS)
 	if err != nil {

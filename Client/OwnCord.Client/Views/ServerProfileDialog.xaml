@@ -1,0 +1,186 @@
+<Window x:Class="OwnCord.Client.Views.ServerProfileDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Server Profile"
+        Width="420" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="#313338"
+        WindowStyle="None"
+        AllowsTransparency="True">
+
+    <Window.Resources>
+        <!-- Reuse the same styles from the main theme -->
+        <Style x:Key="DialogTextBox" TargetType="TextBox">
+            <Setter Property="Background" Value="#1e1f22"/>
+            <Setter Property="Foreground" Value="#dbdee1"/>
+            <Setter Property="BorderBrush" Value="#3f4147"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="12,10"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="CaretBrush" Value="#dbdee1"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsFocused" Value="True">
+                                <Setter Property="BorderBrush" Value="#5865f2"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="BorderBrush" Value="#4e5058"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="DialogCheckBox" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="#b5bac1"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <StackPanel Orientation="Horizontal">
+                            <Border x:Name="CheckBorder" Width="18" Height="18"
+                                    CornerRadius="4" BorderThickness="2"
+                                    BorderBrush="#4e5058" Background="Transparent"
+                                    VerticalAlignment="Center" Margin="0,0,8,0">
+                                <TextBlock x:Name="CheckMark" Text="&#x2713;"
+                                           FontSize="12" FontWeight="Bold"
+                                           Foreground="White" HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" Visibility="Collapsed"/>
+                            </Border>
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="CheckBorder" Property="Background" Value="#5865f2"/>
+                                <Setter TargetName="CheckBorder" Property="BorderBrush" Value="#5865f2"/>
+                                <Setter TargetName="CheckMark" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="CheckBorder" Property="BorderBrush" Value="#5865f2"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border BorderBrush="#3f4147" BorderThickness="1" CornerRadius="8" Background="#313338">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Title bar -->
+            <Border Grid.Row="0" Padding="20,16" BorderBrush="#3f4147" BorderThickness="0,0,0,1"
+                    MouseLeftButtonDown="TitleBar_MouseDown">
+                <Grid>
+                    <TextBlock x:Name="TitleText" Text="Add Server" FontSize="16" FontWeight="SemiBold"
+                               Foreground="#dbdee1"/>
+                    <Button Content="&#x2715;" HorizontalAlignment="Right" VerticalAlignment="Center"
+                            FontSize="14" Foreground="#80848e" Background="Transparent"
+                            BorderThickness="0" Cursor="Hand" Click="Cancel_Click"
+                            Padding="4,2"/>
+                </Grid>
+            </Border>
+
+            <!-- Form -->
+            <StackPanel Grid.Row="1" Margin="20,16">
+                <!-- Name -->
+                <TextBlock Text="SERVER NAME" FontSize="11" FontWeight="Bold"
+                           Foreground="#b5bac1" Margin="0,0,0,6"/>
+                <TextBox x:Name="NameBox" Style="{StaticResource DialogTextBox}" Margin="0,0,0,16"/>
+
+                <!-- Host + Port row -->
+                <Grid Margin="0,0,0,16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="8"/>
+                        <ColumnDefinition Width="100"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Column="0" Grid.Row="0" Text="HOST" FontSize="11" FontWeight="Bold"
+                               Foreground="#b5bac1" Margin="0,0,0,6"/>
+                    <TextBox Grid.Column="0" Grid.Row="1" x:Name="HostBox"
+                             Style="{StaticResource DialogTextBox}"/>
+
+                    <TextBlock Grid.Column="2" Grid.Row="0" Text="PORT" FontSize="11" FontWeight="Bold"
+                               Foreground="#b5bac1" Margin="0,0,0,6"/>
+                    <TextBox Grid.Column="2" Grid.Row="1" x:Name="PortBox" Text="8443"
+                             Style="{StaticResource DialogTextBox}"/>
+                </Grid>
+
+                <!-- Color -->
+                <TextBlock Text="COLOR" FontSize="11" FontWeight="Bold"
+                           Foreground="#b5bac1" Margin="0,0,0,8"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                    <Border x:Name="Color1" Width="32" Height="32" CornerRadius="16" Background="#5865f2"
+                            Margin="0,0,8,0" Cursor="Hand" MouseLeftButtonDown="ColorPick_Click"
+                            BorderThickness="2" BorderBrush="Transparent" Tag="#5865f2"/>
+                    <Border x:Name="Color2" Width="32" Height="32" CornerRadius="16" Background="#23a55a"
+                            Margin="0,0,8,0" Cursor="Hand" MouseLeftButtonDown="ColorPick_Click"
+                            BorderThickness="2" BorderBrush="Transparent" Tag="#23a55a"/>
+                    <Border x:Name="Color3" Width="32" Height="32" CornerRadius="16" Background="#f0b232"
+                            Margin="0,0,8,0" Cursor="Hand" MouseLeftButtonDown="ColorPick_Click"
+                            BorderThickness="2" BorderBrush="Transparent" Tag="#f0b232"/>
+                    <Border x:Name="Color4" Width="32" Height="32" CornerRadius="16" Background="#f23f43"
+                            Margin="0,0,8,0" Cursor="Hand" MouseLeftButtonDown="ColorPick_Click"
+                            BorderThickness="2" BorderBrush="Transparent" Tag="#f23f43"/>
+                    <Border x:Name="Color5" Width="32" Height="32" CornerRadius="16" Background="#eb459e"
+                            Margin="0,0,8,0" Cursor="Hand" MouseLeftButtonDown="ColorPick_Click"
+                            BorderThickness="2" BorderBrush="Transparent" Tag="#eb459e"/>
+                    <Border x:Name="Color6" Width="32" Height="32" CornerRadius="16" Background="#00a8fc"
+                            Margin="0,0,0,0" Cursor="Hand" MouseLeftButtonDown="ColorPick_Click"
+                            BorderThickness="2" BorderBrush="Transparent" Tag="#00a8fc"/>
+                </StackPanel>
+
+                <!-- Auto-connect -->
+                <CheckBox x:Name="AutoConnectBox" Content="Auto-connect on startup"
+                          Style="{StaticResource DialogCheckBox}"/>
+            </StackPanel>
+
+            <!-- Footer buttons -->
+            <Border Grid.Row="2" Padding="20,12" Background="#2b2d31">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="Cancel" Click="Cancel_Click" Cursor="Hand"
+                            Background="Transparent" Foreground="#b5bac1" FontSize="14"
+                            BorderThickness="0" Padding="16,10" Margin="0,0,8,0"/>
+                    <Button x:Name="SaveButton" Content="Save" Click="Save_Click" Cursor="Hand"
+                            Foreground="White" FontSize="14" FontWeight="SemiBold"
+                            Padding="16,10" BorderThickness="0">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="Bd" Background="#5865f2" CornerRadius="4"
+                                        Padding="{TemplateBinding Padding}">
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="#4752c4"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

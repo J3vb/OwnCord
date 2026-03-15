@@ -154,12 +154,42 @@ func buildVoiceState(state db.VoiceState) []byte {
 	return buildJSON(map[string]any{
 		"type": "voice_state",
 		"payload": map[string]any{
-			"channel_id": state.ChannelID,
-			"user_id":    state.UserID,
-			"username":   state.Username,
-			"muted":      state.Muted,
-			"deafened":   state.Deafened,
-			"speaking":   state.Speaking,
+			"channel_id":  state.ChannelID,
+			"user_id":     state.UserID,
+			"username":    state.Username,
+			"muted":       state.Muted,
+			"deafened":    state.Deafened,
+			"speaking":    state.Speaking,
+			"camera":      state.Camera,
+			"screenshare": state.Screenshare,
+		},
+	})
+}
+
+// buildVoiceConfig constructs a voice_config message sent after voice_join acceptance.
+func buildVoiceConfig(channelID int64, quality string, bitrate int, mode string, threshold, topSpeakers, maxUsers int) []byte {
+	return buildJSON(map[string]any{
+		"type": "voice_config",
+		"payload": map[string]any{
+			"channel_id":       channelID,
+			"quality":          quality,
+			"bitrate":          bitrate,
+			"threshold_mode":   mode,
+			"mixing_threshold": threshold,
+			"top_speakers":     topSpeakers,
+			"max_users":        maxUsers,
+		},
+	})
+}
+
+// buildVoiceSpeakers constructs a voice_speakers broadcast.
+func buildVoiceSpeakers(channelID int64, speakers []int64, mode string) []byte {
+	return buildJSON(map[string]any{
+		"type": "voice_speakers",
+		"payload": map[string]any{
+			"channel_id":     channelID,
+			"speakers":       speakers,
+			"threshold_mode": mode,
 		},
 	})
 }
@@ -175,13 +205,26 @@ func buildVoiceLeave(channelID, userID int64) []byte {
 	})
 }
 
-// buildVoiceSignalRelay relays a signaling message (offer/answer/ice) as-is to
-// channel members. The original payload is embedded unchanged.
-// channelID is provided for future filtering logic.
-func buildVoiceSignalRelay(msgType string, _ int64, data json.RawMessage) []byte {
+// buildVoiceAnswer constructs a voice_answer message sent from server to client.
+func buildVoiceAnswer(channelID int64, sdp string) []byte {
 	return buildJSON(map[string]any{
-		"type":    msgType,
-		"payload": data,
+		"type": "voice_answer",
+		"payload": map[string]any{
+			"channel_id": channelID,
+			"sdp":        sdp,
+		},
+	})
+}
+
+// buildVoiceOffer constructs a voice_offer message sent from server to client
+// (used during renegotiation when server needs to send a new offer).
+func buildVoiceOffer(channelID int64, sdp string) []byte {
+	return buildJSON(map[string]any{
+		"type": "voice_offer",
+		"payload": map[string]any{
+			"channel_id": channelID,
+			"sdp":        sdp,
+		},
 	})
 }
 

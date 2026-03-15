@@ -1,6 +1,7 @@
 # Database Schema (SQLite)
 
-Single file: `data/chatserver.db`. WAL mode enabled. Migrations run automatically on server startup.
+Single file: `data/chatserver.db`. WAL mode enabled.
+Migrations run automatically on startup.
 
 ---
 
@@ -62,7 +63,7 @@ CREATE TABLE roles (
 
 ### Permission Bitfield
 
-```
+```text
 Bit 0:  SEND_MESSAGES        (0x1)
 Bit 1:  READ_MESSAGES         (0x2)
 Bit 5:  ATTACH_FILES          (0x20)
@@ -88,15 +89,19 @@ Bit 30: ADMINISTRATOR          (0x40000000) -- bypasses all checks
 
 ```sql
 CREATE TABLE channels (
-    id       INTEGER PRIMARY KEY AUTOINCREMENT,
-    name     TEXT    NOT NULL,
-    type     TEXT    NOT NULL DEFAULT 'text',  -- text, voice, announcement
-    category TEXT,                              -- category name for grouping
-    topic    TEXT,                              -- channel description
-    position INTEGER NOT NULL DEFAULT 0,
-    slow_mode INTEGER NOT NULL DEFAULT 0,      -- seconds between messages, 0 = off
-    archived INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    name             TEXT    NOT NULL,
+    type             TEXT    NOT NULL DEFAULT 'text',  -- text, voice, announcement
+    category         TEXT,                              -- category name for grouping
+    topic            TEXT,                              -- channel description
+    position         INTEGER NOT NULL DEFAULT 0,
+    slow_mode        INTEGER NOT NULL DEFAULT 0,  -- seconds, 0=off
+    archived         INTEGER NOT NULL DEFAULT 0,
+    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    voice_max_users  INTEGER NOT NULL DEFAULT 0,        -- 0 = unlimited
+    voice_quality    TEXT,                    -- low|medium|high; NULL=default
+    mixing_threshold INTEGER,                           -- NULL = server default
+    voice_max_video  INTEGER NOT NULL DEFAULT 10  -- max video streams
 );
 ```
 
@@ -147,11 +152,13 @@ CREATE TRIGGER messages_ai AFTER INSERT ON messages BEGIN
 END;
 
 CREATE TRIGGER messages_ad AFTER DELETE ON messages BEGIN
-    INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
+    INSERT INTO messages_fts(messages_fts, rowid, content)
+        VALUES('delete', old.id, old.content);
 END;
 
 CREATE TRIGGER messages_au AFTER UPDATE ON messages BEGIN
-    INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
+    INSERT INTO messages_fts(messages_fts, rowid, content)
+        VALUES('delete', old.id, old.content);
     INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
 END;
 ```
@@ -218,7 +225,7 @@ CREATE TABLE read_states (
 CREATE TABLE audit_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER REFERENCES users(id),
-    action     TEXT    NOT NULL,  -- e.g. user_ban, channel_create, message_delete, role_update
+    action     TEXT    NOT NULL,  -- e.g. user_ban, channel_create
     target_type TEXT,             -- user, channel, message, role, invite
     target_id   INTEGER,
     details    TEXT,              -- JSON with extra context
@@ -282,10 +289,31 @@ CREATE TABLE sounds (
 
 ---
 
+## Voice States
+
+```sql
+CREATE TABLE voice_states (
+    user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    channel_id  INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    muted       INTEGER NOT NULL DEFAULT 0,
+    deafened    INTEGER NOT NULL DEFAULT 0,
+    speaking    INTEGER NOT NULL DEFAULT 0,
+    camera      INTEGER NOT NULL DEFAULT 0,
+    screenshare INTEGER NOT NULL DEFAULT 0,
+    joined_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_voice_states_channel ON voice_states(channel_id);
+```
+
+On startup: `DELETE FROM voice_states;` clears stale state from previous run.
+
+---
+
 ## Notes
 
 - All datetimes stored as ISO 8601 UTC strings.
 - Enable WAL mode on connection: `PRAGMA journal_mode=WAL;`
 - Enable foreign keys: `PRAGMA foreign_keys=ON;`
 - Use `modernc.org/sqlite` (pure Go, no CGO needed).
-- Migrations: store schema version in `settings` table, apply incremental SQL on startup.
+- Migrations: schema version in `settings`, apply incremental SQL on startup.

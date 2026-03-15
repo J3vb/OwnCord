@@ -54,15 +54,19 @@ type Role struct {
 
 // Channel represents a row in the channels table.
 type Channel struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	Type      string `json:"type"`
-	Category  string `json:"category"`
-	Topic     string `json:"topic"`
-	Position  int    `json:"position"`
-	SlowMode  int    `json:"slow_mode"`
-	Archived  bool   `json:"archived"`
-	CreatedAt string `json:"created_at"`
+	ID              int64   `json:"id"`
+	Name            string  `json:"name"`
+	Type            string  `json:"type"`
+	Category        string  `json:"category"`
+	Topic           string  `json:"topic"`
+	Position        int     `json:"position"`
+	SlowMode        int     `json:"slow_mode"`
+	Archived        bool    `json:"archived"`
+	CreatedAt       string  `json:"created_at"`
+	VoiceMaxUsers   int     `json:"voice_max_users"`
+	VoiceQuality    *string `json:"voice_quality,omitempty"`
+	MixingThreshold *int    `json:"mixing_threshold,omitempty"`
+	VoiceMaxVideo   int     `json:"voice_max_video"`
 }
 
 // Message represents a row in the messages table.
@@ -105,12 +109,14 @@ type MessageSearchResult struct {
 // VoiceState represents a row in the voice_states table.
 // It tracks which voice channel a user is in and their current audio state.
 type VoiceState struct {
-	UserID    int64
-	ChannelID int64
-	Username  string
-	Muted     bool
-	Deafened  bool
-	Speaking  bool
+	UserID      int64
+	ChannelID   int64
+	Username    string
+	Muted       bool
+	Deafened    bool
+	Speaking    bool
+	Camera      bool
+	Screenshare bool
 }
 
 // ServerStats contains aggregate counts for the admin dashboard.

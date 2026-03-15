@@ -1,0 +1,110 @@
+<UserControl x:Class="OwnCord.Client.Controls.UserPopupControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Width="300">
+
+    <Border Background="{StaticResource BgPrimary}"
+            BorderBrush="{StaticResource BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="16" ShadowDepth="4" Opacity="0.4" Color="Black"/>
+        </Border.Effect>
+
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="60"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Banner -->
+            <Border Grid.Row="0" CornerRadius="8,8,0,0"
+                    Background="{Binding AvatarColor, RelativeSource={RelativeSource AncestorType=UserControl},
+                                 Converter={StaticResource HexColorToBrush}, FallbackValue=#5865f2}"/>
+
+            <!-- Body -->
+            <StackPanel Grid.Row="1" Margin="16,36,16,16">
+
+                <!-- Avatar (overlapping banner) -->
+                <Border Width="64" Height="64" CornerRadius="32"
+                        BorderThickness="4" BorderBrush="{StaticResource BgPrimary}"
+                        HorizontalAlignment="Left"
+                        Margin="0,-64,0,0">
+                    <Border CornerRadius="28"
+                            Background="{Binding AvatarColor, RelativeSource={RelativeSource AncestorType=UserControl},
+                                         Converter={StaticResource HexColorToBrush}, FallbackValue=#5865f2}">
+                        <TextBlock Text="{Binding Username, RelativeSource={RelativeSource AncestorType=UserControl},
+                                          Converter={StaticResource FirstLetter}}"
+                                   Foreground="White" FontWeight="Bold" FontSize="24"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                </Border>
+
+                <!-- Username -->
+                <TextBlock Text="{Binding Username, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                           Foreground="White" FontWeight="Bold" FontSize="18"
+                           Margin="0,8,0,0"/>
+
+                <!-- Role -->
+                <TextBlock Text="{Binding RoleName, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                           FontSize="12" Margin="0,2,0,0"
+                           Foreground="{Binding RoleColor, RelativeSource={RelativeSource AncestorType=UserControl},
+                                        Converter={StaticResource HexColorToBrush}, FallbackValue=#949ba4}"/>
+
+                <!-- Status -->
+                <TextBlock Text="{Binding StatusText, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                           FontSize="12" Foreground="{StaticResource TextMuted}" Margin="0,2,0,0"/>
+
+                <!-- Separator -->
+                <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,10,0,10"/>
+
+                <!-- Member Since section -->
+                <Border Background="{StaticResource BgSecondary}" CornerRadius="6" Padding="10,8">
+                    <StackPanel>
+                        <TextBlock Text="MEMBER SINCE" FontSize="11" FontWeight="Bold"
+                                   Foreground="{StaticResource TextFaint}"
+                                   Margin="0,0,0,4"/>
+                        <TextBlock Text="{Binding JoinedDate, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                   FontSize="13" Foreground="{StaticResource TextNormal}"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Role tags -->
+                <WrapPanel Margin="0,10,0,0" Orientation="Horizontal">
+                    <Border CornerRadius="10" Padding="6,3,8,3"
+                            Background="{StaticResource BgHover}">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="8" Height="8" Margin="0,0,5,0"
+                                     Fill="{Binding RoleColor, RelativeSource={RelativeSource AncestorType=UserControl},
+                                            Converter={StaticResource HexColorToBrush}, FallbackValue=#949ba4}"/>
+                            <TextBlock Text="{Binding RoleName, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                       FontSize="11" Foreground="{StaticResource TextNormal}"/>
+                        </StackPanel>
+                    </Border>
+                </WrapPanel>
+
+                <!-- Message button -->
+                <Button Margin="0,12,0,0" Cursor="Hand"
+                        Command="{Binding MessageCommand, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Bd" CornerRadius="4" Padding="0,8"
+                                    Background="{StaticResource Accent}">
+                                <TextBlock Text="Message" Foreground="White" FontSize="13" FontWeight="SemiBold"
+                                           HorizontalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentHover}"/>
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentActive}"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

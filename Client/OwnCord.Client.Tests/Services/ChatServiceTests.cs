@@ -49,6 +49,11 @@ public class FakeApiClient : IApiClient
 
     public Task<HealthResponse> HealthCheckAsync(string host, CancellationToken ct)
         => Task.FromResult(HealthResult ?? throw new InvalidOperationException("HealthResult not set"));
+
+    public AuthResponse? VerifyTotpResult { get; set; }
+
+    public Task<AuthResponse> VerifyTotpAsync(string host, string partialToken, string code, CancellationToken ct)
+        => Task.FromResult(VerifyTotpResult ?? throw new InvalidOperationException("VerifyTotpResult not set"));
 }
 
 public class FakeWebSocketService : IWebSocketService
@@ -130,7 +135,7 @@ public class ChatServiceTests
         var result = await svc.LoginAsync("localhost:8443", "alice", "password");
 
         Assert.Equal("tok_abc", result.Token);
-        Assert.Equal("alice", result.User.Username);
+        Assert.Equal("alice", result.User!.Username);
         Assert.Equal("tok_abc", svc.CurrentToken);
         Assert.Equal("alice", svc.CurrentUser?.Username);
         Assert.Equal("localhost:8443", _api.LastLoginHost);

@@ -3,6 +3,7 @@ package api
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -54,6 +55,15 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string) http.Handler {
 
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
 	hub := ws.NewHub(database, limiter)
+
+	// Create SFU if voice config is present; voice is disabled on failure.
+	sfu, sfuErr := ws.NewSFU(&cfg.Voice)
+	if sfuErr != nil {
+		slog.Warn("failed to create SFU, voice disabled", "error", sfuErr)
+	} else {
+		hub.SetSFU(sfu)
+	}
+
 	go hub.Run()
 	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins))
 

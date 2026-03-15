@@ -1,0 +1,42 @@
+<UserControl x:Class="OwnCord.Client.Controls.ReplyComposeBar"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Name="Root">
+
+    <Border Background="{StaticResource BgSecondary}"
+            BorderBrush="{StaticResource Accent}"
+            BorderThickness="0,2,0,0"
+            Padding="12,6"
+            CornerRadius="8,8,0,0">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Reply indicator text -->
+            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="Replying to "
+                           Foreground="{StaticResource TextMuted}"
+                           FontSize="13"
+                           FontFamily="{StaticResource FontBody}"
+                           VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding Username, ElementName=Root}"
+                           Foreground="{StaticResource TextNormal}"
+                           FontSize="13"
+                           FontWeight="SemiBold"
+                           FontFamily="{StaticResource FontBody}"
+                           VerticalAlignment="Center"/>
+            </StackPanel>
+
+            <!-- Cancel button -->
+            <Button Grid.Column="1"
+                    Command="{Binding CancelCommand, ElementName=Root}"
+                    Style="{StaticResource SmallIconButton}"
+                    ToolTip="Cancel reply"
+                    VerticalAlignment="Center">
+                <TextBlock Text="&#x2715;" FontSize="14" Foreground="{StaticResource TextMuted}"/>
+            </Button>
+        </Grid>
+    </Border>
+</UserControl>

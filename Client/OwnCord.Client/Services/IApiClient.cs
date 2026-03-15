@@ -12,4 +12,5 @@ public interface IApiClient
     Task<IReadOnlyList<ApiChannel>> GetChannelsAsync(string host, string token, CancellationToken ct = default);
     Task<MessagesResponse> GetMessagesAsync(string host, string token, long channelId, int limit = 50, long? before = null, CancellationToken ct = default);
     Task<HealthResponse> HealthCheckAsync(string host, CancellationToken ct = default);
+    Task<AuthResponse> VerifyTotpAsync(string host, string partialToken, string code, CancellationToken ct = default);
 }

@@ -11,14 +11,16 @@ import (
 // replaced. Muted, deafened, and speaking are reset to false on join.
 func (d *DB) JoinVoiceChannel(userID, channelID int64) error {
 	_, err := d.sqlDB.Exec(
-		`INSERT INTO voice_states (user_id, channel_id, muted, deafened, speaking)
-		 VALUES (?, ?, 0, 0, 0)
+		`INSERT INTO voice_states (user_id, channel_id, muted, deafened, speaking, camera, screenshare)
+		 VALUES (?, ?, 0, 0, 0, 0, 0)
 		 ON CONFLICT(user_id) DO UPDATE SET
-		     channel_id = excluded.channel_id,
-		     muted      = 0,
-		     deafened   = 0,
-		     speaking   = 0,
-		     joined_at  = datetime('now')`,
+		     channel_id  = excluded.channel_id,
+		     muted       = 0,
+		     deafened    = 0,
+		     speaking    = 0,
+		     camera      = 0,
+		     screenshare = 0,
+		     joined_at   = datetime('now')`,
 		userID, channelID,
 	)
 	if err != nil {
@@ -42,7 +44,8 @@ func (d *DB) LeaveVoiceChannel(userID int64) error {
 func (d *DB) GetVoiceState(userID int64) (*VoiceState, error) {
 	row := d.sqlDB.QueryRow(
 		`SELECT vs.user_id, vs.channel_id, u.username,
-		        vs.muted, vs.deafened, vs.speaking
+		        vs.muted, vs.deafened, vs.speaking,
+		        vs.camera, vs.screenshare
 		 FROM voice_states vs
 		 JOIN users u ON u.id = vs.user_id
 		 WHERE vs.user_id = ?`,
@@ -56,7 +59,8 @@ func (d *DB) GetVoiceState(userID int64) (*VoiceState, error) {
 func (d *DB) GetChannelVoiceStates(channelID int64) ([]VoiceState, error) {
 	rows, err := d.sqlDB.Query(
 		`SELECT vs.user_id, vs.channel_id, u.username,
-		        vs.muted, vs.deafened, vs.speaking
+		        vs.muted, vs.deafened, vs.speaking,
+		        vs.camera, vs.screenshare
 		 FROM voice_states vs
 		 JOIN users u ON u.id = vs.user_id
 		 WHERE vs.channel_id = ?
@@ -123,16 +127,65 @@ func (d *DB) ClearVoiceState(userID int64) error {
 	return nil
 }
 
+// ClearAllVoiceStates removes all voice state rows. Called on server startup
+// to clear stale state from a previous run.
+func (d *DB) ClearAllVoiceStates() error {
+	_, err := d.sqlDB.Exec(`DELETE FROM voice_states`)
+	if err != nil {
+		return fmt.Errorf("ClearAllVoiceStates: %w", err)
+	}
+	return nil
+}
+
+// UpdateVoiceCamera sets the camera field for the given user's voice state.
+func (d *DB) UpdateVoiceCamera(userID int64, camera bool) error {
+	_, err := d.sqlDB.Exec(
+		`UPDATE voice_states SET camera = ? WHERE user_id = ?`,
+		boolToInt(camera), userID,
+	)
+	if err != nil {
+		return fmt.Errorf("UpdateVoiceCamera: %w", err)
+	}
+	return nil
+}
+
+// UpdateVoiceScreenshare sets the screenshare field for the given user's voice state.
+func (d *DB) UpdateVoiceScreenshare(userID int64, screenshare bool) error {
+	_, err := d.sqlDB.Exec(
+		`UPDATE voice_states SET screenshare = ? WHERE user_id = ?`,
+		boolToInt(screenshare), userID,
+	)
+	if err != nil {
+		return fmt.Errorf("UpdateVoiceScreenshare: %w", err)
+	}
+	return nil
+}
+
+// CountChannelVoiceUsers returns the number of users currently in the given
+// voice channel.
+func (d *DB) CountChannelVoiceUsers(channelID int64) (int, error) {
+	var count int
+	err := d.sqlDB.QueryRow(
+		`SELECT COUNT(*) FROM voice_states WHERE channel_id = ?`,
+		channelID,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("CountChannelVoiceUsers: %w", err)
+	}
+	return count, nil
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 // scanVoiceState scans a single *sql.Row into a VoiceState.
 // Returns nil (not an error) when the row is not found.
 func scanVoiceState(row *sql.Row) (*VoiceState, error) {
 	vs := &VoiceState{}
-	var muted, deafened, speaking int
+	var muted, deafened, speaking, camera, screenshare int
 	err := row.Scan(
 		&vs.UserID, &vs.ChannelID, &vs.Username,
 		&muted, &deafened, &speaking,
+		&camera, &screenshare,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -143,16 +196,19 @@ func scanVoiceState(row *sql.Row) (*VoiceState, error) {
 	vs.Muted = muted != 0
 	vs.Deafened = deafened != 0
 	vs.Speaking = speaking != 0
+	vs.Camera = camera != 0
+	vs.Screenshare = screenshare != 0
 	return vs, nil
 }
 
 // scanVoiceStateRow scans a single row from *sql.Rows into a VoiceState.
 func scanVoiceStateRow(rows *sql.Rows) (VoiceState, error) {
 	vs := VoiceState{}
-	var muted, deafened, speaking int
+	var muted, deafened, speaking, camera, screenshare int
 	err := rows.Scan(
 		&vs.UserID, &vs.ChannelID, &vs.Username,
 		&muted, &deafened, &speaking,
+		&camera, &screenshare,
 	)
 	if err != nil {
 		return vs, fmt.Errorf("scanVoiceStateRow: %w", err)
@@ -160,6 +216,8 @@ func scanVoiceStateRow(rows *sql.Rows) (VoiceState, error) {
 	vs.Muted = muted != 0
 	vs.Deafened = deafened != 0
 	vs.Speaking = speaking != 0
+	vs.Camera = camera != 0
+	vs.Screenshare = screenshare != 0
 	return vs, nil
 }
 

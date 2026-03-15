@@ -1,0 +1,93 @@
+<UserControl x:Class="OwnCord.Client.Controls.EmojiPickerControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Width="320">
+
+    <UserControl.Resources>
+        <Style x:Key="EmojiButton" TargetType="Button">
+            <Setter Property="Width" Value="28"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" CornerRadius="4" Background="Transparent"
+                                HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{StaticResource BgHover}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <Border Background="{StaticResource BgPrimary}"
+            BorderBrush="{StaticResource BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="12" ShadowDepth="4" Opacity="0.4" Color="Black"/>
+        </Border.Effect>
+
+        <DockPanel>
+            <!-- Search header -->
+            <Border DockPanel.Dock="Top" Margin="8,8,8,4">
+                <TextBox x:Name="SearchBox"
+                         Text="{Binding SearchText, RelativeSource={RelativeSource AncestorType=UserControl}, UpdateSourceTrigger=PropertyChanged}"
+                         Background="{StaticResource BgTertiary}"
+                         Foreground="{StaticResource TextNormal}"
+                         FontSize="13"
+                         Padding="8,6"
+                         BorderThickness="0"
+                         Tag="Search emoji..."/>
+                <!-- Placeholder handled via style or code-behind -->
+            </Border>
+
+            <!-- Scrollable emoji categories -->
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          MaxHeight="320"
+                          Margin="4,0,4,4">
+                <ItemsControl x:Name="CategoryList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="4,4,4,0">
+                                <!-- Category label -->
+                                <TextBlock Text="{Binding Name}"
+                                           FontSize="11"
+                                           FontWeight="Bold"
+                                           Foreground="{StaticResource TextFaint}"
+                                           Margin="4,4,0,4">
+                                </TextBlock>
+
+                                <!-- Emoji grid -->
+                                <ItemsControl ItemsSource="{Binding Emojis}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Style="{StaticResource EmojiButton}"
+                                                    Content="{Binding}"
+                                                    Command="{Binding EmojiSelectedCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </DockPanel>
+    </Border>
+</UserControl>

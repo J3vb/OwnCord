@@ -1,0 +1,158 @@
+<UserControl x:Class="OwnCord.Client.Controls.SettingsOverlayControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <UserControl.Resources>
+        <!-- Sidebar category header -->
+        <Style x:Key="CategoryHeader" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="{StaticResource TextFaint}"/>
+            <Setter Property="Padding" Value="10,16,10,4"/>
+        </Style>
+
+        <!-- Sidebar nav button -->
+        <Style x:Key="SidebarButton" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="4" Padding="10,0" Margin="0,1">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{StaticResource BgHover}"/>
+                                <Setter Property="Foreground"
+                                        Value="{StaticResource TextNormal}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Logout button (red text) -->
+        <Style x:Key="LogoutButton" TargetType="Button" BasedOn="{StaticResource SidebarButton}">
+            <Setter Property="Foreground" Value="{StaticResource Red}"/>
+        </Style>
+
+        <!-- Close button -->
+        <Style x:Key="CloseButton" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Width" Value="40"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="20"
+                                BorderBrush="{StaticResource TextMuted}" BorderThickness="2"
+                                Width="40" Height="40">
+                            <TextBlock Text="X" FontSize="16" FontWeight="Bold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground"
+                                        Value="{StaticResource TextNormal}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush"
+                                        Value="{StaticResource TextNormal}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <!-- Full-screen overlay -->
+    <Grid Background="#F0313338">
+
+        <!-- Close button — top-right -->
+        <Button Style="{StaticResource CloseButton}"
+                HorizontalAlignment="Right" VerticalAlignment="Top"
+                Margin="0,16,16,0"
+                Command="{Binding CloseCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                Panel.ZIndex="10"/>
+
+        <DockPanel>
+            <!-- ══ Sidebar ══ -->
+            <Border DockPanel.Dock="Left" Width="218"
+                    Background="{StaticResource BgSecondary}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="8,12,8,12">
+
+                        <!-- User Settings -->
+                        <TextBlock Text="USER SETTINGS" Style="{StaticResource CategoryHeader}"/>
+                        <Button Style="{StaticResource SidebarButton}" Content="My Account"
+                                Click="OnSidebarClick" Tag="My Account"/>
+                        <Button Style="{StaticResource SidebarButton}" Content="Profile"
+                                Click="OnSidebarClick" Tag="Profile"/>
+                        <Button Style="{StaticResource SidebarButton}" Content="Privacy"
+                                Click="OnSidebarClick" Tag="Privacy"/>
+
+                        <!-- Separator -->
+                        <Border Height="1" Background="{StaticResource BorderBrush}" Margin="10,8"/>
+
+                        <!-- App Settings -->
+                        <TextBlock Text="APP SETTINGS" Style="{StaticResource CategoryHeader}"/>
+                        <Button Style="{StaticResource SidebarButton}" Content="Appearance"
+                                Click="OnSidebarClick" Tag="Appearance"/>
+                        <Button Style="{StaticResource SidebarButton}" Content="Notifications"
+                                Click="OnSidebarClick" Tag="Notifications"/>
+                        <Button Style="{StaticResource SidebarButton}" Content="Keybinds"
+                                Click="OnSidebarClick" Tag="Keybinds"/>
+                        <Button Style="{StaticResource SidebarButton}" Content="Language"
+                                Click="OnSidebarClick" Tag="Language"/>
+
+                        <!-- Separator -->
+                        <Border Height="1" Background="{StaticResource BorderBrush}" Margin="10,8"/>
+
+                        <!-- Danger Zone -->
+                        <TextBlock Text="DANGER ZONE" Style="{StaticResource CategoryHeader}"/>
+                        <Button Style="{StaticResource LogoutButton}" Content="Log Out"
+                                Command="{Binding LogoutCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <!-- ══ Content Area ══ -->
+            <Grid Margin="40,16,60,16">
+                <DockPanel>
+                    <!-- Section header -->
+                    <TextBlock DockPanel.Dock="Top"
+                               Text="{Binding SelectedSection, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                               FontSize="20" FontWeight="Bold"
+                               Foreground="White"
+                               Margin="0,0,0,20"/>
+
+                    <!-- Placeholder content -->
+                    <Border>
+                        <TextBlock Foreground="{StaticResource TextMuted}"
+                                   FontSize="14" VerticalAlignment="Top">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Text">
+                                        <Setter.Value>
+                                            <Binding Path="SelectedSection"
+                                                     RelativeSource="{RelativeSource AncestorType=UserControl}"
+                                                     StringFormat="Settings for {0} will appear here."/>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Border>
+                </DockPanel>
+            </Grid>
+        </DockPanel>
+    </Grid>
+</UserControl>

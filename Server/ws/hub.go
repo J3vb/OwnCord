@@ -18,14 +18,17 @@ type broadcastMsg struct {
 // Hub manages all active WebSocket clients and routes messages between them.
 // All exported methods are safe to call from multiple goroutines.
 type Hub struct {
-	clients    map[int64]*Client
-	mu         sync.RWMutex
-	db         *db.DB
-	limiter    *auth.RateLimiter
-	broadcast  chan broadcastMsg
-	register   chan *Client
-	unregister chan *Client
-	stop       chan struct{}
+	clients      map[int64]*Client
+	mu           sync.RWMutex
+	db           *db.DB
+	limiter      *auth.RateLimiter
+	broadcast    chan broadcastMsg
+	register     chan *Client
+	unregister   chan *Client
+	stop         chan struct{}
+	sfu          *SFU
+	voiceRooms   map[int64]*VoiceRoom
+	voiceRoomsMu sync.RWMutex
 }
 
 // NewHub creates a Hub ready to be started with Run.
@@ -38,12 +41,70 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
 		register:   make(chan *Client, 32),
 		unregister: make(chan *Client, 32),
 		stop:       make(chan struct{}),
+		voiceRooms: make(map[int64]*VoiceRoom),
+	}
+}
+
+// SetSFU sets the SFU engine on the hub. Must be called before Run.
+func (h *Hub) SetSFU(sfu *SFU) {
+	h.sfu = sfu
+}
+
+// GetOrCreateVoiceRoom returns the existing room for channelID or creates one.
+// cfg provides the room config (from channel settings and server defaults).
+func (h *Hub) GetOrCreateVoiceRoom(channelID int64, cfg VoiceRoomConfig) *VoiceRoom {
+	h.voiceRoomsMu.Lock()
+	defer h.voiceRoomsMu.Unlock()
+
+	if room, ok := h.voiceRooms[channelID]; ok {
+		return room
+	}
+	room := NewVoiceRoom(cfg)
+	h.voiceRooms[channelID] = room
+	return room
+}
+
+// GetVoiceRoom returns the room for channelID, or nil if none exists.
+func (h *Hub) GetVoiceRoom(channelID int64) *VoiceRoom {
+	h.voiceRoomsMu.RLock()
+	defer h.voiceRoomsMu.RUnlock()
+	return h.voiceRooms[channelID]
+}
+
+// RemoveVoiceRoom removes and closes the room for channelID. No-op if absent.
+func (h *Hub) RemoveVoiceRoom(channelID int64) {
+	h.voiceRoomsMu.Lock()
+	room, ok := h.voiceRooms[channelID]
+	if ok {
+		delete(h.voiceRooms, channelID)
+	}
+	h.voiceRoomsMu.Unlock()
+
+	if ok {
+		room.Close()
+	}
+}
+
+// CloseAllVoiceRooms closes all voice rooms. Called during shutdown.
+func (h *Hub) CloseAllVoiceRooms() {
+	h.voiceRoomsMu.Lock()
+	rooms := make([]*VoiceRoom, 0, len(h.voiceRooms))
+	for _, room := range h.voiceRooms {
+		rooms = append(rooms, room)
+	}
+	h.voiceRooms = make(map[int64]*VoiceRoom)
+	h.voiceRoomsMu.Unlock()
+
+	for _, room := range rooms {
+		room.Close()
 	}
 }
 
 // Run starts the hub's dispatch loop. It blocks until Stop is called.
 // Must be called in its own goroutine.
 func (h *Hub) Run() {
+	go h.runSpeakerBroadcast(h.stop)
+
 	for {
 		select {
 		case <-h.stop:
@@ -53,7 +114,23 @@ func (h *Hub) Run() {
 			h.mu.Lock()
 			// If an existing client has the same userID, close its send channel
 			// so writePump exits cleanly before the new client takes over.
+			// Also clean up any voice state the old client held.
 			if old, ok := h.clients[c.userID]; ok && old != c {
+				oldChID, oldPC := old.clearVoice()
+				if oldPC != nil {
+					_ = oldPC.Close()
+				}
+				if oldChID > 0 {
+					if room := h.GetVoiceRoom(oldChID); room != nil {
+						room.RemoveParticipant(old.userID)
+						if room.IsEmpty() {
+							h.voiceRoomsMu.Lock()
+							delete(h.voiceRooms, oldChID)
+							h.voiceRoomsMu.Unlock()
+						}
+					}
+					_ = h.db.LeaveVoiceChannel(old.userID)
+				}
 				old.closeSend()
 			}
 			h.clients[c.userID] = c
@@ -75,6 +152,55 @@ func (h *Hub) Run() {
 // Stop signals Run to exit.
 func (h *Hub) Stop() {
 	close(h.stop)
+}
+
+// GracefulStop closes all PeerConnections, voice rooms, and then stops the hub.
+func (h *Hub) GracefulStop() {
+	// Close all client PeerConnections first (CRIT-2 fix).
+	h.mu.RLock()
+	for _, c := range h.clients {
+		if _, oldPC := c.clearVoice(); oldPC != nil {
+			_ = oldPC.Close()
+		}
+	}
+	h.mu.RUnlock()
+
+	h.CloseAllVoiceRooms()
+	close(h.stop)
+}
+
+// CleanupVoiceForChannel removes the voice room for the given channel and
+// closes PeerConnections for all participants. Called when a channel is deleted.
+func (h *Hub) CleanupVoiceForChannel(channelID int64) {
+	room := h.GetVoiceRoom(channelID)
+	if room == nil {
+		return
+	}
+
+	// Get participant IDs before removing the room.
+	participantIDs := room.ParticipantIDs()
+
+	// Remove the room (this also calls room.Close() which clears participants).
+	h.RemoveVoiceRoom(channelID)
+
+	// Close PeerConnections and clean up DB state for all participants.
+	// Use RLock for client map read; voice fields are guarded by voiceMu (HIGH-3 fix).
+	h.mu.RLock()
+	for _, userID := range participantIDs {
+		if client, ok := h.clients[userID]; ok {
+			if _, oldPC := client.clearVoice(); oldPC != nil {
+				_ = oldPC.Close()
+			}
+		}
+		// Clean up DB voice state (best-effort; ignore error).
+		_ = h.db.LeaveVoiceChannel(userID)
+	}
+	h.mu.RUnlock()
+
+	// Broadcast voice_leave for each participant.
+	for _, userID := range participantIDs {
+		h.BroadcastToChannel(channelID, buildVoiceLeave(channelID, userID))
+	}
 }
 
 // Register queues a client for registration with the hub.

@@ -9,5 +9,6 @@ public record Channel(
     string? Category,
     int Position,
     int UnreadCount,
-    long? LastMessageId
+    long? LastMessageId,
+    string? Topic = null
 );

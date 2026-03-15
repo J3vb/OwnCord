@@ -65,7 +65,8 @@ public record ChatMessagePayload(
     [property: JsonPropertyName("user")] WsUser User,
     [property: JsonPropertyName("content")] string Content,
     [property: JsonPropertyName("reply_to")] long? ReplyTo,
-    [property: JsonPropertyName("timestamp")] string Timestamp
+    [property: JsonPropertyName("timestamp")] string Timestamp,
+    [property: JsonPropertyName("attachments")] IReadOnlyList<ApiAttachment>? Attachments = null
 );
 
 public record ChatSendOkPayload(
@@ -121,4 +122,32 @@ public record ChannelEventPayload(
     [property: JsonPropertyName("category")] string? Category,
     [property: JsonPropertyName("topic")] string? Topic,
     [property: JsonPropertyName("position")] int Position
+);
+
+// ── Voice payloads ───────────────────────────────────────────────────────────
+
+public record VoiceStatePayload(
+    [property: JsonPropertyName("user_id")] long UserId,
+    [property: JsonPropertyName("channel_id")] long ChannelId,
+    [property: JsonPropertyName("username")] string Username,
+    [property: JsonPropertyName("muted")] bool Muted,
+    [property: JsonPropertyName("deafened")] bool Deafened
+);
+
+public record VoiceLeavePayload(
+    [property: JsonPropertyName("user_id")] long UserId,
+    [property: JsonPropertyName("channel_id")] long ChannelId
+);
+
+public record VoiceConfigPayload(
+    [property: JsonPropertyName("channel_id")] long ChannelId,
+    [property: JsonPropertyName("quality")] string Quality,
+    [property: JsonPropertyName("bitrate")] int Bitrate,
+    [property: JsonPropertyName("mode")] string Mode
+);
+
+public record VoiceSpeakersPayload(
+    [property: JsonPropertyName("channel_id")] long ChannelId,
+    [property: JsonPropertyName("speakers")] IReadOnlyList<long> Speakers,
+    [property: JsonPropertyName("mode")] string Mode
 );

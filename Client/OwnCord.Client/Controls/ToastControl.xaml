@@ -1,0 +1,23 @@
+<UserControl x:Class="OwnCord.Client.Controls.ToastControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Name="Root"
+             Opacity="0"
+             IsHitTestVisible="False">
+
+    <Border Background="{StaticResource BgSecondary}"
+            BorderBrush="{StaticResource BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="20,12">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="16" ShadowDepth="4" Opacity="0.5" Color="Black"/>
+        </Border.Effect>
+
+        <TextBlock Text="{Binding Message, ElementName=Root}"
+                   FontSize="13"
+                   Foreground="{StaticResource TextNormal}"
+                   TextWrapping="Wrap"
+                   MaxWidth="400"/>
+    </Border>
+</UserControl>

@@ -2,10 +2,14 @@ package ws
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/pion/webrtc/v4"
+
+	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 )
 
@@ -15,13 +19,51 @@ const (
 	voiceSignalWindow       = time.Second
 	soundboardRateLimit     = 1
 	soundboardWindow        = 3 * time.Second
+	voiceCameraRateLimit    = 2
+	voiceCameraWindow       = time.Second
+	voiceScreenshareRateLimit = 2
+	voiceScreenshareWindow    = time.Second
 )
 
+// setupICEMonitor monitors ICE connection state changes on the client's
+// PeerConnection. On failure/disconnect, it cleans up voice state.
+func (h *Hub) setupICEMonitor(c *Client, channelID int64) {
+	pc := c.getPC()
+	if pc == nil {
+		return
+	}
+
+	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+		slog.Info("ICE state change", "user_id", c.userID, "channel_id", channelID, "state", state.String())
+
+		switch state {
+		case webrtc.ICEConnectionStateFailed:
+			slog.Warn("ICE connection failed, cleaning up voice", "user_id", c.userID, "channel_id", channelID)
+			h.handleVoiceLeave(c)
+		case webrtc.ICEConnectionStateDisconnected:
+			// Disconnected is transient — ICE may recover.
+			// Log but don't clean up immediately.
+			slog.Info("ICE disconnected (may recover)", "user_id", c.userID, "channel_id", channelID)
+		}
+	})
+}
+
+// SetupICEMonitorForTest exposes setupICEMonitor for tests.
+func (h *Hub) SetupICEMonitorForTest(c *Client, channelID int64) {
+	h.setupICEMonitor(c, channelID)
+}
+
 // handleVoiceJoin processes a voice_join message.
-// 1. Checks CONNECT_VOICE permission.
-// 2. Persists join in DB.
-// 3. Broadcasts voice_state to channel.
-// 4. Sends all current voice states in the channel back to the joiner.
+// 1. Parses channel_id.
+// 2. Checks CONNECT_VOICE permission.
+// 3. If already in a different voice channel, leaves it first.
+// 4. Gets or creates VoiceRoom with config from channel settings.
+// 5. Adds participant to VoiceRoom (checks capacity).
+// 6. Persists join in DB.
+// 7. Creates PeerConnection if SFU is available.
+// 8. Broadcasts voice_state to channel.
+// 9. Sends existing voice states to joiner.
+// 10. Sends voice_config to joiner.
 func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 	channelID, err := parseChannelID(payload)
 	if err != nil || channelID <= 0 {
@@ -34,10 +76,60 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 		return
 	}
 
+	currentChID := c.getVoiceChID()
+
+	// HIGH-2: If user is already in the same voice channel, no-op.
+	if currentChID == channelID {
+		c.sendMsg(buildErrorMsg("ALREADY_JOINED", "already in this voice channel"))
+		return
+	}
+
+	// If user is already in a different voice channel, leave it first.
+	if currentChID > 0 {
+		h.handleVoiceLeave(c)
+	}
+
+	ch, err := h.db.GetChannel(channelID)
+	if err != nil || ch == nil {
+		c.sendMsg(buildErrorMsg("NOT_FOUND", "channel not found"))
+		return
+	}
+
+	roomCfg := h.buildVoiceRoomConfig(ch)
+	room := h.GetOrCreateVoiceRoom(channelID, roomCfg)
+
+	if addErr := room.AddParticipant(c.userID); addErr != nil {
+		if errors.Is(addErr, ErrRoomFull) {
+			c.sendMsg(buildErrorMsg("CHANNEL_FULL", "voice channel is full"))
+		} else {
+			c.sendMsg(buildErrorMsg("VOICE_ERROR", "failed to join voice channel"))
+		}
+		return
+	}
+
 	if err := h.db.JoinVoiceChannel(c.userID, channelID); err != nil {
+		room.RemoveParticipant(c.userID)
 		slog.Error("ws handleVoiceJoin JoinVoiceChannel", "err", err, "user_id", c.userID)
 		c.sendMsg(buildErrorMsg("INTERNAL", "failed to join voice channel"))
 		return
+	}
+
+	// Create PeerConnection if SFU is available. Non-fatal on failure.
+	var pc *webrtc.PeerConnection
+	if h.sfu != nil {
+		var pcErr error
+		pc, pcErr = h.sfu.NewPeerConnection()
+		if pcErr != nil {
+			slog.Error("ws handleVoiceJoin NewPeerConnection", "err", pcErr, "user_id", c.userID)
+		}
+	}
+
+	// Track the voice channel and PC on the client atomically (CRIT-1 fix).
+	c.setVoice(channelID, pc)
+
+	if pc != nil {
+		h.setupOnTrack(c, channelID)
+		h.setupICEMonitor(c, channelID)
 	}
 
 	state, err := h.db.GetVoiceState(c.userID)
@@ -57,19 +149,72 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 	}
 	for _, vs := range existing {
 		if vs.UserID == c.userID {
-			continue // skip the joiner themselves
+			continue
 		}
 		c.sendMsg(buildVoiceState(vs))
 	}
+
+	// Send voice_config to the joiner with room settings.
+	quality := roomCfg.Quality
+	bitrate := 64000 // default medium
+	if h.sfu != nil {
+		bitrate = h.sfu.QualityBitrate()
+	}
+	c.sendMsg(buildVoiceConfig(channelID, quality, bitrate, room.Mode(), roomCfg.MixingThreshold, roomCfg.TopSpeakers, roomCfg.MaxUsers))
+
+	slog.Info("voice join", "user_id", c.userID, "channel_id", channelID, "participants", room.ParticipantCount(), "mode", room.Mode())
+}
+
+// buildVoiceRoomConfig constructs a VoiceRoomConfig from channel settings and server defaults.
+func (h *Hub) buildVoiceRoomConfig(ch *db.Channel) VoiceRoomConfig {
+	cfg := VoiceRoomConfig{
+		ChannelID:       ch.ID,
+		MaxUsers:        ch.VoiceMaxUsers,
+		Quality:         "medium",
+		MixingThreshold: 10,
+		TopSpeakers:     3,
+		MaxVideo:        ch.VoiceMaxVideo,
+	}
+	if ch.VoiceQuality != nil && *ch.VoiceQuality != "" {
+		cfg.Quality = *ch.VoiceQuality
+	}
+	if ch.MixingThreshold != nil {
+		cfg.MixingThreshold = *ch.MixingThreshold
+	}
+	return cfg
 }
 
 // handleVoiceLeave processes an explicit voice_leave message or a disconnect.
-// 1. Removes voice state from DB.
-// 2. Broadcasts voice_leave to the channel the user was in.
+// 1. Reads current voice state (for broadcast).
+// 2. Closes PeerConnection if active.
+// 3. Removes participant from VoiceRoom; removes room if empty.
+// 4. Removes voice state from DB.
+// 5. Broadcasts voice_leave to the channel the user was in.
 func (h *Hub) handleVoiceLeave(c *Client) {
 	state, err := h.db.GetVoiceState(c.userID)
 	if err != nil {
 		slog.Error("ws handleVoiceLeave GetVoiceState", "err", err, "user_id", c.userID)
+	}
+
+	// Atomically clear voice state and get old values for cleanup (CRIT-1 fix).
+	oldChID, oldPC := c.clearVoice()
+
+	// Close PeerConnection if active.
+	// This also causes any setupOnTrack goroutine to exit via track.Read error (HIGH-1).
+	if oldPC != nil {
+		if closeErr := oldPC.Close(); closeErr != nil {
+			slog.Error("ws handleVoiceLeave pc.Close", "err", closeErr, "user_id", c.userID)
+		}
+	}
+
+	// Remove from VoiceRoom and clean up empty rooms.
+	if oldChID > 0 {
+		if room := h.GetVoiceRoom(oldChID); room != nil {
+			room.RemoveParticipant(c.userID)
+			if room.IsEmpty() {
+				h.RemoveVoiceRoom(oldChID)
+			}
+		}
 	}
 
 	if leaveErr := h.db.LeaveVoiceChannel(c.userID); leaveErr != nil {
@@ -125,26 +270,214 @@ func (h *Hub) handleVoiceDeafen(c *Client, payload json.RawMessage) {
 	h.broadcastVoiceStateUpdate(c)
 }
 
-// handleVoiceSignal relays voice_offer, voice_answer, and voice_ice messages.
-// 1. Rate limits at 20/sec per user.
-// 2. Parses channel_id from payload.
-// 3. Relays the message (with original type) to all other channel members.
-// SDP/ICE content is not inspected or logged.
-func (h *Hub) handleVoiceSignal(c *Client, msgType string, payload json.RawMessage) {
+// handleVoiceCamera processes a voice_camera message.
+// 1. Rate limits at 2/sec per user.
+// 2. Checks USE_VIDEO permission.
+// 3. Parses enabled bool.
+// 4. Updates DB.
+// 5. Broadcasts voice_state update to channel.
+func (h *Hub) handleVoiceCamera(c *Client, payload json.RawMessage) {
+	ratKey := fmt.Sprintf("voice_camera:%d", c.userID)
+	if !h.limiter.Allow(ratKey, voiceCameraRateLimit, voiceCameraWindow) {
+		c.sendMsg(buildErrorMsg("RATE_LIMITED", "too many camera toggles"))
+		return
+	}
+
+	voiceChID := c.getVoiceChID()
+	if voiceChID == 0 {
+		c.sendMsg(buildErrorMsg("VOICE_ERROR", "not in a voice channel"))
+		return
+	}
+
+	if !h.hasChannelPerm(c, voiceChID, permissions.UseVideo) {
+		c.sendMsg(buildErrorMsg("FORBIDDEN", "missing USE_VIDEO permission"))
+		return
+	}
+
+	var p struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil {
+		c.sendMsg(buildErrorMsg("BAD_REQUEST", "invalid voice_camera payload"))
+		return
+	}
+
+	if err := h.db.UpdateVoiceCamera(c.userID, p.Enabled); err != nil {
+		slog.Error("ws handleVoiceCamera UpdateVoiceCamera", "err", err, "user_id", c.userID)
+		c.sendMsg(buildErrorMsg("INTERNAL", "failed to update camera state"))
+		return
+	}
+
+	h.broadcastVoiceStateUpdate(c)
+}
+
+// handleVoiceScreenshare processes a voice_screenshare message.
+// 1. Rate limits at 2/sec per user.
+// 2. Checks SHARE_SCREEN permission.
+// 3. Parses enabled bool.
+// 4. Updates DB.
+// 5. Broadcasts voice_state update to channel.
+func (h *Hub) handleVoiceScreenshare(c *Client, payload json.RawMessage) {
+	ratKey := fmt.Sprintf("voice_screenshare:%d", c.userID)
+	if !h.limiter.Allow(ratKey, voiceScreenshareRateLimit, voiceScreenshareWindow) {
+		c.sendMsg(buildErrorMsg("RATE_LIMITED", "too many screenshare toggles"))
+		return
+	}
+
+	voiceChID := c.getVoiceChID()
+	if voiceChID == 0 {
+		c.sendMsg(buildErrorMsg("VOICE_ERROR", "not in a voice channel"))
+		return
+	}
+
+	if !h.hasChannelPerm(c, voiceChID, permissions.ShareScreen) {
+		c.sendMsg(buildErrorMsg("FORBIDDEN", "missing SHARE_SCREEN permission"))
+		return
+	}
+
+	var p struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil {
+		c.sendMsg(buildErrorMsg("BAD_REQUEST", "invalid voice_screenshare payload"))
+		return
+	}
+
+	if err := h.db.UpdateVoiceScreenshare(c.userID, p.Enabled); err != nil {
+		slog.Error("ws handleVoiceScreenshare UpdateVoiceScreenshare", "err", err, "user_id", c.userID)
+		c.sendMsg(buildErrorMsg("INTERNAL", "failed to update screenshare state"))
+		return
+	}
+
+	h.broadcastVoiceStateUpdate(c)
+}
+
+// handleVoiceOffer processes a voice_offer from the client.
+// The client sends an SDP offer; the server sets it as remote description
+// on the client's PeerConnection, creates an answer, and sends it back.
+func (h *Hub) handleVoiceOffer(c *Client, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("voice_signal:%d", c.userID)
 	if !h.limiter.Allow(ratKey, voiceSignalRateLimit, voiceSignalWindow) {
 		c.sendMsg(buildErrorMsg("RATE_LIMITED", "too many signaling messages"))
 		return
 	}
 
-	channelID, err := parseChannelID(payload)
-	if err != nil || channelID <= 0 {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "channel_id must be a positive integer"))
+	pc := c.getPC()
+	if pc == nil {
+		c.sendMsg(buildErrorMsg("VOICE_ERROR", "not in a voice channel"))
 		return
 	}
 
-	relayed := buildVoiceSignalRelay(msgType, channelID, payload)
-	h.broadcastExclude(channelID, c.userID, relayed)
+	var p struct {
+		ChannelID json.Number `json:"channel_id"`
+		SDP       string      `json:"sdp"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil {
+		c.sendMsg(buildErrorMsg("BAD_REQUEST", "invalid voice_offer payload"))
+		return
+	}
+	if p.SDP == "" {
+		c.sendMsg(buildErrorMsg("INVALID_SDP", "SDP is required"))
+		return
+	}
+
+	offer := webrtc.SessionDescription{
+		Type: webrtc.SDPTypeOffer,
+		SDP:  p.SDP,
+	}
+
+	if err := pc.SetRemoteDescription(offer); err != nil {
+		slog.Error("ws handleVoiceOffer SetRemoteDescription", "err", err, "user_id", c.userID)
+		c.sendMsg(buildErrorMsg("INVALID_SDP", "failed to set remote description"))
+		return
+	}
+
+	answer, err := pc.CreateAnswer(nil)
+	if err != nil {
+		slog.Error("ws handleVoiceOffer CreateAnswer", "err", err, "user_id", c.userID)
+		c.sendMsg(buildErrorMsg("VOICE_ERROR", "failed to create answer"))
+		return
+	}
+
+	if err := pc.SetLocalDescription(answer); err != nil {
+		slog.Error("ws handleVoiceOffer SetLocalDescription", "err", err, "user_id", c.userID)
+		c.sendMsg(buildErrorMsg("VOICE_ERROR", "failed to set local description"))
+		return
+	}
+
+	// Send the answer back to the client.
+	c.sendMsg(buildVoiceAnswer(c.getVoiceChID(), answer.SDP))
+}
+
+// handleVoiceAnswer processes a voice_answer from the client.
+// This handles the case where the server sent an offer (e.g., renegotiation)
+// and the client responds with an answer.
+func (h *Hub) handleVoiceAnswer(c *Client, payload json.RawMessage) {
+	ratKey := fmt.Sprintf("voice_signal:%d", c.userID)
+	if !h.limiter.Allow(ratKey, voiceSignalRateLimit, voiceSignalWindow) {
+		c.sendMsg(buildErrorMsg("RATE_LIMITED", "too many signaling messages"))
+		return
+	}
+
+	pc := c.getPC()
+	if pc == nil {
+		c.sendMsg(buildErrorMsg("VOICE_ERROR", "not in a voice channel"))
+		return
+	}
+
+	var p struct {
+		ChannelID json.Number `json:"channel_id"`
+		SDP       string      `json:"sdp"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil {
+		c.sendMsg(buildErrorMsg("BAD_REQUEST", "invalid voice_answer payload"))
+		return
+	}
+	if p.SDP == "" {
+		c.sendMsg(buildErrorMsg("INVALID_SDP", "SDP is required"))
+		return
+	}
+
+	answer := webrtc.SessionDescription{
+		Type: webrtc.SDPTypeAnswer,
+		SDP:  p.SDP,
+	}
+
+	if err := pc.SetRemoteDescription(answer); err != nil {
+		slog.Error("ws handleVoiceAnswer SetRemoteDescription", "err", err, "user_id", c.userID)
+		c.sendMsg(buildErrorMsg("INVALID_SDP", "failed to set remote description"))
+		return
+	}
+}
+
+// handleVoiceICE processes a voice_ice (ICE candidate) from the client.
+func (h *Hub) handleVoiceICE(c *Client, payload json.RawMessage) {
+	ratKey := fmt.Sprintf("voice_signal:%d", c.userID)
+	if !h.limiter.Allow(ratKey, voiceSignalRateLimit, voiceSignalWindow) {
+		c.sendMsg(buildErrorMsg("RATE_LIMITED", "too many signaling messages"))
+		return
+	}
+
+	pc := c.getPC()
+	if pc == nil {
+		c.sendMsg(buildErrorMsg("VOICE_ERROR", "not in a voice channel"))
+		return
+	}
+
+	var p struct {
+		ChannelID json.Number             `json:"channel_id"`
+		Candidate webrtc.ICECandidateInit `json:"candidate"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil {
+		c.sendMsg(buildErrorMsg("BAD_REQUEST", "invalid voice_ice payload"))
+		return
+	}
+
+	if err := pc.AddICECandidate(p.Candidate); err != nil {
+		slog.Error("ws handleVoiceICE AddICECandidate", "err", err, "user_id", c.userID)
+		c.sendMsg(buildErrorMsg("VOICE_ERROR", "failed to add ICE candidate"))
+		return
+	}
 }
 
 // handleSoundboard processes a soundboard_play message.
@@ -172,6 +505,63 @@ func (h *Hub) handleSoundboard(c *Client, payload json.RawMessage) {
 	}
 
 	h.BroadcastToAll(buildSoundboardPlay(p.SoundID, c.userID))
+}
+
+// setupOnTrack configures the PeerConnection's OnTrack handler to:
+// 1. Read RTP packets from incoming audio tracks.
+// 2. Parse the ssrc-audio-level header extension (RFC 6464).
+// 3. Feed the audio levels into the VoiceRoom's SpeakerDetector.
+//
+// Must be called after c.pc is set and before SDP negotiation completes.
+func (h *Hub) setupOnTrack(c *Client, channelID int64) {
+	pc := c.getPC()
+	if pc == nil {
+		return
+	}
+
+	// audioLevelExtID is the negotiated extension ID for ssrc-audio-level.
+	// In a real deployment this is resolved via SDP; we use ID 1 as the
+	// conventional default matching the MediaEngine registration in sfu.go.
+	const audioLevelExtID = 1
+
+	// The goroutine spawned inside OnTrack exits when track.Read returns an
+	// error, which happens when the PeerConnection is closed (HIGH-1).
+	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		// Only process audio tracks for speaker detection.
+		if track.Kind() != webrtc.RTPCodecTypeAudio {
+			return
+		}
+
+		slog.Info("SFU OnTrack",
+			"user_id", c.userID,
+			"channel_id", channelID,
+			"kind", track.Kind(),
+			"codec", track.Codec().MimeType,
+		)
+
+		go func() {
+			buf := make([]byte, 1500)
+			for {
+				n, _, readErr := track.Read(buf)
+				if readErr != nil {
+					return // track closed or connection gone
+				}
+
+				// Parse audio level from RTP header extension.
+				level, _, found := ParseAudioLevel(buf[:n], audioLevelExtID)
+				if !found {
+					continue
+				}
+
+				room := h.GetVoiceRoom(channelID)
+				if room == nil {
+					return // room has been removed
+				}
+
+				room.UpdateSpeakerLevel(c.userID, level)
+			}
+		}()
+	})
 }
 
 // broadcastVoiceStateUpdate fetches the current voice state for the client

@@ -58,15 +58,19 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 
 CREATE TABLE IF NOT EXISTS channels (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    name       TEXT    NOT NULL,
-    type       TEXT    NOT NULL DEFAULT 'text',
-    category   TEXT,
-    topic      TEXT,
-    position   INTEGER NOT NULL DEFAULT 0,
-    slow_mode  INTEGER NOT NULL DEFAULT 0,
-    archived   INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    name             TEXT    NOT NULL,
+    type             TEXT    NOT NULL DEFAULT 'text',
+    category         TEXT,
+    topic            TEXT,
+    position         INTEGER NOT NULL DEFAULT 0,
+    slow_mode        INTEGER NOT NULL DEFAULT 0,
+    archived         INTEGER NOT NULL DEFAULT 0,
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+    voice_max_users  INTEGER NOT NULL DEFAULT 0,
+    voice_quality    TEXT,
+    mixing_threshold INTEGER,
+    voice_max_video  INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS channel_overrides (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -19,6 +19,7 @@ public interface IChatService
     Task<AuthResponse> LoginAsync(string host, string username, string password, CancellationToken ct = default);
     Task<AuthResponse> RegisterAsync(string host, string username, string password, string inviteCode, CancellationToken ct = default);
     Task LogoutAsync(CancellationToken ct = default);
+    Task<AuthResponse> VerifyTotpAsync(string host, string partialToken, string code, CancellationToken ct = default);
 
     // ── WebSocket lifecycle ─────────────────────────────────────────────────
 
@@ -33,8 +34,18 @@ public interface IChatService
     // ── Outbound actions (sent over WebSocket) ──────────────────────────────
 
     Task SendMessageAsync(long channelId, string content, long? replyTo = null, CancellationToken ct = default);
+    Task EditMessageAsync(long messageId, string content, CancellationToken ct = default);
+    Task DeleteMessageAsync(long messageId, CancellationToken ct = default);
     Task SendTypingAsync(long channelId, CancellationToken ct = default);
     Task SendChannelFocusAsync(long channelId, CancellationToken ct = default);
+    Task SendStatusChangeAsync(string status, CancellationToken ct = default);
+
+    // ── Voice outbound actions ──────────────────────────────────────────────
+
+    Task JoinVoiceAsync(long channelId, CancellationToken ct = default);
+    Task LeaveVoiceAsync(CancellationToken ct = default);
+    Task SendVoiceMuteAsync(bool muted, CancellationToken ct = default);
+    Task SendVoiceDeafenAsync(bool deafened, CancellationToken ct = default);
 
     // ── Events (server → client) ────────────────────────────────────────────
 
@@ -54,4 +65,11 @@ public interface IChatService
     event Action<ChannelEventPayload>? ChannelUpdated;
     event Action<long>? ChannelDeleted;
     event Action<string>? ConnectionLost;
+
+    // ── Voice events ────────────────────────────────────────────────────────
+
+    event Action<VoiceStatePayload>? VoiceStateReceived;
+    event Action<VoiceLeavePayload>? VoiceLeaveReceived;
+    event Action<VoiceConfigPayload>? VoiceConfigReceived;
+    event Action<VoiceSpeakersPayload>? VoiceSpeakersReceived;
 }

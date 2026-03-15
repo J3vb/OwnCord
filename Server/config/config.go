@@ -29,12 +29,18 @@ type GitHubConfig struct {
 	Token string `koanf:"token"`
 }
 
-// VoiceConfig holds STUN/TURN server settings for WebRTC signaling.
+// VoiceConfig holds STUN/TURN server settings and SFU configuration.
 type VoiceConfig struct {
-	TURNSecret  string `koanf:"turn_secret"`  // HMAC-SHA1 secret; auto-generated if empty
-	STUNPort    int    `koanf:"stun_port"`    // default 3478
-	TURNPort    int    `koanf:"turn_port"`    // default 3478
-	TURNEnabled bool   `koanf:"turn_enabled"` // default true
+	TURNSecret      string `koanf:"turn_secret"`      // HMAC-SHA1 secret; auto-generated if empty
+	STUNPort        int    `koanf:"stun_port"`         // default 3478
+	TURNPort        int    `koanf:"turn_port"`         // default 3478
+	TURNEnabled     bool   `koanf:"turn_enabled"`      // default true
+	Quality         string `koanf:"quality"`            // low | medium | high
+	MixingThreshold int    `koanf:"mixing_threshold"`   // selective forwarding threshold
+	TopSpeakers     int    `koanf:"top_speakers"`       // top-N speakers in selective mode
+	ExternalIP      string `koanf:"external_ip"`        // set if behind NAT
+	MediaPortMin    int    `koanf:"media_port_min"`     // UDP port range start for WebRTC media
+	MediaPortMax    int    `koanf:"media_port_max"`     // UDP port range end for WebRTC media
 }
 
 // ServerConfig holds HTTP server settings.
@@ -90,9 +96,14 @@ func defaults() Config {
 			StorageDir: "data/uploads",
 		},
 		Voice: VoiceConfig{
-			STUNPort:    3478,
-			TURNPort:    3478,
-			TURNEnabled: true,
+			STUNPort:        3478,
+			TURNPort:        3478,
+			TURNEnabled:     true,
+			Quality:         "medium",
+			MixingThreshold: 10,
+			TopSpeakers:     3,
+			MediaPortMin:    10000,
+			MediaPortMax:    10100,
 		},
 		GitHub: GitHubConfig{},
 	}

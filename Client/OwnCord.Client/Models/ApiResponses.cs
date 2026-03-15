@@ -5,7 +5,9 @@ namespace OwnCord.Client.Models;
 /// <summary>REST API response for login and register endpoints.</summary>
 public record AuthResponse(
     [property: JsonPropertyName("token")] string Token,
-    [property: JsonPropertyName("user")] ApiUser User
+    [property: JsonPropertyName("user")] ApiUser? User,
+    [property: JsonPropertyName("requires_2fa")] bool Requires2FA = false,
+    [property: JsonPropertyName("partial_token")] string? PartialToken = null
 );
 
 /// <summary>User shape returned by auth endpoints.</summary>
@@ -49,7 +51,17 @@ public record ApiMessage(
     [property: JsonPropertyName("pinned")] bool Pinned,
     [property: JsonPropertyName("timestamp")] string Timestamp,
     [property: JsonPropertyName("username")] string Username,
-    [property: JsonPropertyName("avatar")] string? Avatar
+    [property: JsonPropertyName("avatar")] string? Avatar,
+    [property: JsonPropertyName("attachments")] IReadOnlyList<ApiAttachment>? Attachments = null
+);
+
+/// <summary>Single attachment from the REST API.</summary>
+public record ApiAttachment(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("filename")] string Filename,
+    [property: JsonPropertyName("size")] long Size,
+    [property: JsonPropertyName("mime")] string Mime,
+    [property: JsonPropertyName("url")] string Url
 );
 
 /// <summary>Error response shape from all REST endpoints.</summary>

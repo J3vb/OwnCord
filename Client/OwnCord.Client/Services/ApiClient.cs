@@ -108,6 +108,13 @@ public sealed class ApiClient : IApiClient
         return await ReadOrThrowAsync<MessagesResponse>(response, ct);
     }
 
+    public async Task<AuthResponse> VerifyTotpAsync(string host, string partialToken, string code, CancellationToken ct = default)
+    {
+        var body = new { partial_token = partialToken, code };
+        var response = await PostJsonAsync(host, "/api/v1/auth/verify-totp", body, ct);
+        return await ReadOrThrowAsync<AuthResponse>(response, ct);
+    }
+
     public async Task<HealthResponse> HealthCheckAsync(string host, CancellationToken ct = default)
     {
         TofuHostContext.CurrentHost = NormalizeHost(host);

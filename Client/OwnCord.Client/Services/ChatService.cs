@@ -38,6 +38,10 @@ public sealed class ChatService : IChatService
     public event Action<ChannelEventPayload>? ChannelUpdated;
     public event Action<long>? ChannelDeleted;
     public event Action<string>? ConnectionLost;
+    public event Action<VoiceStatePayload>? VoiceStateReceived;
+    public event Action<VoiceLeavePayload>? VoiceLeaveReceived;
+    public event Action<VoiceConfigPayload>? VoiceConfigReceived;
+    public event Action<VoiceSpeakersPayload>? VoiceSpeakersReceived;
 
     public ChatService(IApiClient api, IWebSocketService ws)
     {
@@ -62,6 +66,15 @@ public sealed class ChatService : IChatService
     public async Task<AuthResponse> RegisterAsync(string host, string username, string password, string inviteCode, CancellationToken ct = default)
     {
         var result = await _api.RegisterAsync(host, username, password, inviteCode, ct);
+        _host = ApiClient.NormalizeHost(host);
+        CurrentToken = result.Token;
+        CurrentUser = result.User;
+        return result;
+    }
+
+    public async Task<AuthResponse> VerifyTotpAsync(string host, string partialToken, string code, CancellationToken ct = default)
+    {
+        var result = await _api.VerifyTotpAsync(host, partialToken, code, ct);
         _host = ApiClient.NormalizeHost(host);
         CurrentToken = result.Token;
         CurrentUser = result.User;
@@ -139,6 +152,28 @@ public sealed class ChatService : IChatService
         return _ws.SendAsync(envelope, ct);
     }
 
+    public Task EditMessageAsync(long messageId, string content, CancellationToken ct = default)
+    {
+        var envelope = new
+        {
+            type = "chat_edit",
+            id = Guid.NewGuid().ToString(),
+            payload = new { message_id = messageId, content }
+        };
+        return _ws.SendAsync(envelope, ct);
+    }
+
+    public Task DeleteMessageAsync(long messageId, CancellationToken ct = default)
+    {
+        var envelope = new
+        {
+            type = "chat_delete",
+            id = Guid.NewGuid().ToString(),
+            payload = new { message_id = messageId }
+        };
+        return _ws.SendAsync(envelope, ct);
+    }
+
     public Task SendTypingAsync(long channelId, CancellationToken ct = default)
     {
         var envelope = new
@@ -155,6 +190,54 @@ public sealed class ChatService : IChatService
         {
             type = "channel_focus",
             payload = new { channel_id = channelId }
+        };
+        return _ws.SendAsync(envelope, ct);
+    }
+
+    public Task SendStatusChangeAsync(string status, CancellationToken ct = default)
+    {
+        var envelope = new
+        {
+            type = "presence_update",
+            payload = new { status }
+        };
+        return _ws.SendAsync(envelope, ct);
+    }
+
+    // ── Voice outbound actions ─────────────────────────────────────────────
+
+    public Task JoinVoiceAsync(long channelId, CancellationToken ct = default)
+    {
+        var envelope = new
+        {
+            type = "voice_join",
+            payload = new { channel_id = channelId }
+        };
+        return _ws.SendAsync(envelope, ct);
+    }
+
+    public Task LeaveVoiceAsync(CancellationToken ct = default)
+    {
+        var envelope = new { type = "voice_leave" };
+        return _ws.SendAsync(envelope, ct);
+    }
+
+    public Task SendVoiceMuteAsync(bool muted, CancellationToken ct = default)
+    {
+        var envelope = new
+        {
+            type = "voice_mute",
+            payload = new { muted }
+        };
+        return _ws.SendAsync(envelope, ct);
+    }
+
+    public Task SendVoiceDeafenAsync(bool deafened, CancellationToken ct = default)
+    {
+        var envelope = new
+        {
+            type = "voice_deafen",
+            payload = new { deafened }
         };
         return _ws.SendAsync(envelope, ct);
     }
@@ -216,6 +299,18 @@ public sealed class ChatService : IChatService
                     var delPayload = envelope.Payload?.Deserialize<JsonElement>();
                     if (delPayload?.TryGetProperty("id", out var idEl) == true)
                         ChannelDeleted?.Invoke(idEl.GetInt64());
+                    break;
+                case "voice_state":
+                    VoiceStateReceived?.Invoke(Deserialize<VoiceStatePayload>(envelope));
+                    break;
+                case "voice_leave":
+                    VoiceLeaveReceived?.Invoke(Deserialize<VoiceLeavePayload>(envelope));
+                    break;
+                case "voice_config":
+                    VoiceConfigReceived?.Invoke(Deserialize<VoiceConfigPayload>(envelope));
+                    break;
+                case "voice_speakers":
+                    VoiceSpeakersReceived?.Invoke(Deserialize<VoiceSpeakersPayload>(envelope));
                     break;
                 // Unknown types silently ignored — forward compatibility
             }

@@ -31,6 +31,14 @@ func (h *Hub) HandleMessageForTest(c *Client, raw []byte) {
 	h.handleMessage(c, raw)
 }
 
+// HandleVoiceLeaveForTest calls handleVoiceLeave directly, simulating a
+// disconnect-triggered cleanup without an explicit voice_leave message.
+// Exported for ws_test package use only.
+func (h *Hub) HandleVoiceLeaveForTest(c *Client) {
+	h.handleVoiceLeave(c)
+}
+
+
 // handleMessage parses the envelope and dispatches to the appropriate handler.
 func (h *Hub) handleMessage(c *Client, raw []byte) {
 	// Periodic session expiry check: every SessionCheckInterval messages,
@@ -85,8 +93,16 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		h.handleVoiceMute(c, env.Payload)
 	case "voice_deafen":
 		h.handleVoiceDeafen(c, env.Payload)
-	case "voice_offer", "voice_answer", "voice_ice":
-		h.handleVoiceSignal(c, env.Type, env.Payload)
+	case "voice_camera":
+		h.handleVoiceCamera(c, env.Payload)
+	case "voice_screenshare":
+		h.handleVoiceScreenshare(c, env.Payload)
+	case "voice_offer":
+		h.handleVoiceOffer(c, env.Payload)
+	case "voice_answer":
+		h.handleVoiceAnswer(c, env.Payload)
+	case "voice_ice":
+		h.handleVoiceICE(c, env.Payload)
 	case "soundboard_play":
 		h.handleSoundboard(c, env.Payload)
 	default:

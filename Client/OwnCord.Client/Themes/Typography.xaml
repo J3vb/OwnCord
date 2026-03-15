@@ -1,0 +1,50 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ═══ Font Families ═══ -->
+    <FontFamily x:Key="FontDisplay">Segoe UI Variable Display, Segoe UI, Segoe UI Symbol</FontFamily>
+    <FontFamily x:Key="FontBody">Segoe UI Variable Text, Segoe UI, Segoe UI Symbol</FontFamily>
+    <FontFamily x:Key="FontMono">Cascadia Code, Consolas, Courier New</FontFamily>
+
+    <!-- ═══ Text Styles ═══ -->
+    <Style x:Key="HeadingLarge" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource FontDisplay}"/>
+        <Setter Property="FontSize" Value="20"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{StaticResource TextNormal}"/>
+    </Style>
+
+    <Style x:Key="HeadingMedium" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource FontDisplay}"/>
+        <Setter Property="FontSize" Value="15"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{StaticResource TextNormal}"/>
+    </Style>
+
+    <Style x:Key="BodyNormal" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource FontBody}"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Foreground" Value="{StaticResource TextNormal}"/>
+    </Style>
+
+    <Style x:Key="BodySmall" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource FontBody}"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+    </Style>
+
+    <!-- Note: WPF has no TextTransform — use CharacterCasing on TextBox or uppercase text in code -->
+    <Style x:Key="Caption" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource FontBody}"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+    </Style>
+
+    <Style x:Key="MonoText" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource FontMono}"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Foreground" Value="{StaticResource TextNormal}"/>
+    </Style>
+
+</ResourceDictionary>

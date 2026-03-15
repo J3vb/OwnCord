@@ -1,0 +1,71 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ═══ Background ═══ -->
+    <Color x:Key="BgTertiaryColor">#1e1f22</Color>
+    <Color x:Key="BgSecondaryColor">#2b2d31</Color>
+    <Color x:Key="BgPrimaryColor">#313338</Color>
+    <Color x:Key="BgInputColor">#383a40</Color>
+    <Color x:Key="BgHoverColor">#35373c</Color>
+    <Color x:Key="BgActiveColor">#404249</Color>
+    <Color x:Key="BgOverlayColor">#B3000000</Color>
+
+    <SolidColorBrush x:Key="BgTertiary" Color="{StaticResource BgTertiaryColor}"/>
+    <SolidColorBrush x:Key="BgSecondary" Color="{StaticResource BgSecondaryColor}"/>
+    <SolidColorBrush x:Key="BgPrimary" Color="{StaticResource BgPrimaryColor}"/>
+    <SolidColorBrush x:Key="BgInput" Color="{StaticResource BgInputColor}"/>
+    <SolidColorBrush x:Key="BgHover" Color="{StaticResource BgHoverColor}"/>
+    <SolidColorBrush x:Key="BgActive" Color="{StaticResource BgActiveColor}"/>
+    <SolidColorBrush x:Key="BgOverlay" Color="{StaticResource BgOverlayColor}"/>
+
+    <!-- ═══ Accent ═══ -->
+    <Color x:Key="AccentColor">#5865f2</Color>
+    <Color x:Key="AccentHoverColor">#4752c4</Color>
+    <Color x:Key="AccentActiveColor">#3c45a5</Color>
+
+    <SolidColorBrush x:Key="Accent" Color="{StaticResource AccentColor}"/>
+    <SolidColorBrush x:Key="AccentHover" Color="{StaticResource AccentHoverColor}"/>
+    <SolidColorBrush x:Key="AccentActive" Color="{StaticResource AccentActiveColor}"/>
+
+    <!-- ═══ Text ═══ -->
+    <Color x:Key="TextNormalColor">#dbdee1</Color>
+    <Color x:Key="TextMutedColor">#949ba4</Color>
+    <Color x:Key="TextFaintColor">#80848e</Color>
+    <Color x:Key="TextMicroColor">#6d6f78</Color>
+    <Color x:Key="TextLinkColor">#00a8fc</Color>
+
+    <SolidColorBrush x:Key="TextNormal" Color="{StaticResource TextNormalColor}"/>
+    <SolidColorBrush x:Key="TextMuted" Color="{StaticResource TextMutedColor}"/>
+    <SolidColorBrush x:Key="TextFaint" Color="{StaticResource TextFaintColor}"/>
+    <SolidColorBrush x:Key="TextMicro" Color="{StaticResource TextMicroColor}"/>
+    <SolidColorBrush x:Key="TextLink" Color="{StaticResource TextLinkColor}"/>
+
+    <!-- ═══ Semantic ═══ -->
+    <Color x:Key="GreenColor">#23a55a</Color>
+    <Color x:Key="YellowColor">#f0b232</Color>
+    <Color x:Key="RedColor">#f23f43</Color>
+
+    <SolidColorBrush x:Key="Green" Color="{StaticResource GreenColor}"/>
+    <SolidColorBrush x:Key="Yellow" Color="{StaticResource YellowColor}"/>
+    <SolidColorBrush x:Key="Red" Color="{StaticResource RedColor}"/>
+
+    <!-- ═══ Border ═══ -->
+    <Color x:Key="BorderColor">#3f4147</Color>
+    <Color x:Key="BorderStrongColor">#4e5058</Color>
+
+    <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource BorderColor}"/>
+    <SolidColorBrush x:Key="BorderStrong" Color="{StaticResource BorderStrongColor}"/>
+
+    <!-- ═══ Role Colors ═══ -->
+    <SolidColorBrush x:Key="RoleOwner" Color="#e74c3c"/>
+    <SolidColorBrush x:Key="RoleAdmin" Color="#f39c12"/>
+    <SolidColorBrush x:Key="RoleMod" Color="#2ecc71"/>
+    <SolidColorBrush x:Key="RoleMember" Color="#949ba4"/>
+
+    <!-- ═══ Status ═══ -->
+    <SolidColorBrush x:Key="StatusOnline" Color="{StaticResource GreenColor}"/>
+    <SolidColorBrush x:Key="StatusIdle" Color="{StaticResource YellowColor}"/>
+    <SolidColorBrush x:Key="StatusDnd" Color="{StaticResource RedColor}"/>
+    <SolidColorBrush x:Key="StatusOffline" Color="#6d6f78"/>
+
+</ResourceDictionary>

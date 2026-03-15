@@ -22,6 +22,7 @@ public partial class MainWindow : Window
         _mainVm = mainVm;
 
         connectVm.ConnectRequested += OnConnectRequested;
+        connectVm.TotpVerifyRequested += OnTotpVerifyRequested;
         RootFrame.Navigate(new ConnectPage(connectVm));
     }
 
@@ -32,12 +33,20 @@ public partial class MainWindow : Window
 
         try
         {
+            Models.AuthResponse result;
             if (isRegister)
-                await _chat.RegisterAsync(host, username, password, inviteCode ?? "");
+                result = await _chat.RegisterAsync(host, username, password, inviteCode ?? "");
             else
-                await _chat.LoginAsync(host, username, password);
+                result = await _chat.LoginAsync(host, username, password);
+
+            if (result.Requires2FA)
+            {
+                _connectVm.Enter2FAMode(result.PartialToken ?? "");
+                return;
+            }
 
             _connectVm.PersistPasswordIfRequested(host, username, password);
+            _connectVm.MarkProfileConnected(host);
 
             _mainVm.Initialize(_chat);
             RootFrame.Navigate(new MainPage(_mainVm));
@@ -51,6 +60,38 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             _connectVm.ErrorMessage = $"Connection failed: {ex.Message}";
+        }
+        finally
+        {
+            _connectVm.IsLoading = false;
+        }
+    }
+
+    private async void OnTotpVerifyRequested(string host, string partialToken, string code)
+    {
+        _connectVm.ErrorMessage = null;
+        _connectVm.IsLoading = true;
+
+        try
+        {
+            var result = await _chat.VerifyTotpAsync(host, partialToken, code);
+
+            _connectVm.PersistPasswordIfRequested(host, _connectVm.Username, _connectVm.Password);
+            _connectVm.MarkProfileConnected(host);
+            _connectVm.IsTotpRequired = false;
+
+            _mainVm.Initialize(_chat);
+            RootFrame.Navigate(new MainPage(_mainVm));
+
+            await _chat.ConnectWebSocketAsync(host, _chat.CurrentToken!);
+        }
+        catch (ApiException ex)
+        {
+            _connectVm.ErrorMessage = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            _connectVm.ErrorMessage = $"Verification failed: {ex.Message}";
         }
         finally
         {

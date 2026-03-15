@@ -3,6 +3,8 @@ package ws
 import (
 	"sync"
 
+	"github.com/pion/webrtc/v4"
+
 	"github.com/owncord/server/db"
 )
 
@@ -21,11 +23,14 @@ type Client struct {
 	userID     int64
 	user       *db.User
 	channelID  int64  // currently viewed channel for channel-scoped broadcasts
+	voiceChID  int64  // voice channel the user is in (0 = not in voice); guarded by voiceMu
+	pc         *webrtc.PeerConnection // SFU peer connection; nil when not in voice; guarded by voiceMu
 	tokenHash  string // SHA-256 hex of the session token; used for periodic revalidation
 	msgCount   int    // count of messages processed; resets after session check
 	sendClosed bool   // true after the send channel has been closed
 	send       chan []byte
-	mu         sync.Mutex
+	mu         sync.Mutex // guards sendClosed, msgCount, channelID
+	voiceMu    sync.Mutex // guards voiceChID and pc
 }
 
 // wsConn is the subset of nhooyr.io/websocket.Conn used by writePump/readPump.
@@ -85,6 +90,13 @@ func NewTestClientWithUser(hub *Hub, user *db.User, channelID int64, send chan [
 	}
 }
 
+// SetClientVoiceChID sets the voiceChID field on a client. For test use only.
+func SetClientVoiceChID(c *Client, channelID int64) {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	c.voiceChID = channelID
+}
+
 // NewTestClientWithTokenHash creates a test client that carries a session token
 // hash. Use this when tests need to exercise the periodic session-expiry check.
 func NewTestClientWithTokenHash(hub *Hub, user *db.User, tokenHash string, channelID int64, send chan []byte) *Client {
@@ -96,6 +108,40 @@ func NewTestClientWithTokenHash(hub *Hub, user *db.User, tokenHash string, chann
 		channelID: channelID,
 		send:      send,
 	}
+}
+
+// getVoiceChID returns the voice channel ID under voiceMu.
+func (c *Client) getVoiceChID() int64 {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	return c.voiceChID
+}
+
+// getPC returns the PeerConnection under voiceMu.
+func (c *Client) getPC() *webrtc.PeerConnection {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	return c.pc
+}
+
+// setVoice sets the voice channel and PeerConnection atomically.
+func (c *Client) setVoice(chID int64, pc *webrtc.PeerConnection) {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	c.voiceChID = chID
+	c.pc = pc
+}
+
+// clearVoice clears voice state and returns the old values for cleanup.
+// The caller is responsible for closing the returned PeerConnection.
+func (c *Client) clearVoice() (oldChID int64, oldPC *webrtc.PeerConnection) {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	oldChID = c.voiceChID
+	oldPC = c.pc
+	c.voiceChID = 0
+	c.pc = nil
+	return
 }
 
 // sendMsg queues a message to this client's send buffer without blocking.

@@ -4,10 +4,30 @@
              xmlns:conv="clr-namespace:OwnCord.Client.Converters"
              Startup="Application_Startup">
     <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/Colors.xaml"/>
+                <ResourceDictionary Source="Themes/Typography.xaml"/>
+                <ResourceDictionary Source="Themes/Controls.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+
         <conv:BoolToVisibilityConverter x:Key="BoolToVisibility"/>
         <conv:IntToVisibilityConverter x:Key="IntToVisibility"/>
         <conv:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility"/>
         <conv:NullToVisibilityConverter x:Key="NullToVisibility"/>
         <conv:InverseBoolConverter x:Key="InverseBool"/>
+        <conv:RelativeTimeConverter x:Key="RelativeTime"/>
+        <conv:FirstCharConverter x:Key="FirstChar"/>
+        <conv:ColorToBrushConverter x:Key="ColorToBrush"/>
+        <conv:HostPortConverter x:Key="HostPort"/>
+        <conv:HexColorToBrushConverter x:Key="HexColorToBrush"/>
+        <conv:StatusToBrushConverter x:Key="StatusToBrush"/>
+        <conv:FirstLetterConverter x:Key="FirstLetter"/>
+        <conv:BoolToRedBrushConverter x:Key="BoolToRedBrush"/>
+        <conv:SpeakingToStrokeBrushConverter x:Key="SpeakingToStroke"/>
+        <conv:BoolToArrowConverter x:Key="BoolToArrow"/>
+        <conv:HealthStatusToBrushConverter x:Key="HealthStatusToBrush"/>
+        <conv:StringEqualsConverter x:Key="StringEquals"/>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

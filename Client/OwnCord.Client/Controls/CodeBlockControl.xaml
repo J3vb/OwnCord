@@ -1,0 +1,34 @@
+<UserControl x:Class="OwnCord.Client.Controls.CodeBlockControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Name="Root">
+
+    <Border Background="{StaticResource BgTertiary}"
+            BorderBrush="{StaticResource BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="4"
+            Padding="12">
+        <Grid>
+            <!-- Language label in top-right corner -->
+            <TextBlock x:Name="LanguageLabel"
+                       HorizontalAlignment="Right"
+                       VerticalAlignment="Top"
+                       FontFamily="{StaticResource FontBody}"
+                       FontSize="11"
+                       Foreground="{StaticResource TextMuted}"
+                       Margin="0,-2,0,0"/>
+
+            <!-- Code content with horizontal scrolling -->
+            <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Disabled"
+                          Margin="0,14,0,0">
+                <TextBlock x:Name="CodeText"
+                           FontFamily="{StaticResource FontMono}"
+                           FontSize="13"
+                           Foreground="{StaticResource TextNormal}"
+                           TextWrapping="NoWrap"
+                           xml:space="preserve"/>
+            </ScrollViewer>
+        </Grid>
+    </Border>
+</UserControl>

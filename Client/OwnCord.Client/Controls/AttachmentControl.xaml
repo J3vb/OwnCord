@@ -1,0 +1,71 @@
+<UserControl x:Class="OwnCord.Client.Controls.AttachmentControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Name="Root">
+
+    <Grid MaxWidth="400">
+        <!-- Image attachment: shown when mime starts with "image/" -->
+        <Border x:Name="ImagePanel"
+                Visibility="Collapsed"
+                CornerRadius="8"
+                Height="200"
+                ClipToBounds="True">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="{StaticResource BgSecondaryColor}" Offset="0"/>
+                    <GradientStop Color="{StaticResource BgActiveColor}" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.Background>
+
+            <!-- Placeholder icon centered -->
+            <TextBlock Text="&#x1F5BC;"
+                       FontSize="36"
+                       Foreground="{StaticResource TextMuted}"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"/>
+        </Border>
+
+        <!-- File attachment: shown for non-image mimes -->
+        <Border x:Name="FilePanel"
+                Visibility="Collapsed"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                ClipToBounds="True">
+            <Border Background="{StaticResource BgSecondary}"
+                    Padding="12"
+                    CornerRadius="8">
+                <StackPanel Orientation="Horizontal">
+                    <!-- File icon -->
+                    <Border Width="36" Height="36"
+                            CornerRadius="6"
+                            Background="{StaticResource Accent}">
+                        <TextBlock Text="&#x1F4C4;"
+                                   FontSize="16"
+                                   Foreground="White"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"/>
+                    </Border>
+
+                    <!-- File info -->
+                    <StackPanel Margin="12,0,0,0"
+                                VerticalAlignment="Center">
+                        <TextBlock x:Name="FilenameText"
+                                   FontFamily="{StaticResource FontBody}"
+                                   FontSize="13"
+                                   Foreground="{StaticResource TextLink}"
+                                   Cursor="Hand"
+                                   TextTrimming="CharacterEllipsis"
+                                   MaxWidth="320"/>
+
+                        <TextBlock x:Name="FileSizeText"
+                                   FontFamily="{StaticResource FontBody}"
+                                   FontSize="11"
+                                   Foreground="{StaticResource TextMuted}"
+                                   Margin="0,2,0,0"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Border>
+    </Grid>
+</UserControl>

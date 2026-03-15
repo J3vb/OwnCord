@@ -6,8 +6,8 @@ namespace OwnCord.Client.Tests.ViewModels;
 
 public sealed class ConnectViewModelTests
 {
-    private static ConnectViewModel MakeVm(IProfileService? svc = null, ICredentialService? creds = null)
-        => new(svc ?? new FakeProfileService(), creds ?? new FakeCredentialService());
+    private static ConnectViewModel MakeVm(IProfileService? svc = null, ICredentialService? creds = null, IApiClient? api = null)
+        => new(svc ?? new FakeProfileService(), creds ?? new FakeCredentialService(), api ?? new StubApiClient());
 
     [Fact]
     public void DefaultMode_IsLogin()
@@ -249,6 +249,33 @@ internal sealed class FakeCredentialService : ICredentialService
     public void SavePassword(string host, string username, string password) => _passwords[Key(host, username)] = password;
     public string? LoadPassword(string host, string username) => _passwords.GetValueOrDefault(Key(host, username));
     public void DeletePassword(string host, string username) => _passwords.Remove(Key(host, username));
+}
+
+internal sealed class StubApiClient : IApiClient
+{
+    public HealthResponse? HealthResult { get; set; } = new("ok", "1.0.0");
+    public bool HealthThrows { get; set; }
+
+    public Task<AuthResponse> LoginAsync(string host, string username, string password, CancellationToken ct = default)
+        => throw new NotImplementedException();
+    public Task<AuthResponse> RegisterAsync(string host, string username, string password, string inviteCode, CancellationToken ct = default)
+        => throw new NotImplementedException();
+    public Task LogoutAsync(string host, string token, CancellationToken ct = default)
+        => throw new NotImplementedException();
+    public Task<ApiUser> GetMeAsync(string host, string token, CancellationToken ct = default)
+        => throw new NotImplementedException();
+    public Task<IReadOnlyList<ApiChannel>> GetChannelsAsync(string host, string token, CancellationToken ct = default)
+        => throw new NotImplementedException();
+    public Task<MessagesResponse> GetMessagesAsync(string host, string token, long channelId, int limit = 50, long? before = null, CancellationToken ct = default)
+        => throw new NotImplementedException();
+    public Task<AuthResponse> VerifyTotpAsync(string host, string partialToken, string code, CancellationToken ct = default)
+        => throw new NotImplementedException();
+
+    public Task<HealthResponse> HealthCheckAsync(string host, CancellationToken ct = default)
+    {
+        if (HealthThrows) throw new Exception("Connection refused");
+        return Task.FromResult(HealthResult ?? new HealthResponse("ok", "1.0.0"));
+    }
 }
 
 internal sealed class FakeProfileService : IProfileService

@@ -26,7 +26,7 @@ public sealed class MainViewModelTests
         => new(id, name, null, 4, UserStatus.Online);
 
     private static Message MakeMessage(long id, long channelId, string content)
-        => new(id, channelId, MakeUser(1, "alice"), content, DateTime.UtcNow, null, null, false, []);
+        => new(id, channelId, MakeUser(1, "alice"), content, DateTime.UtcNow, null, null, false, [], []);
 
     [Fact]
     public void SendCommand_DisabledWhenInputEmpty()
