@@ -15,9 +15,6 @@ import (
 	"github.com/owncord/server/ws"
 )
 
-// version is the server version string, set by NewRouter from the caller.
-var version = "dev"
-
 // NewRouter builds and returns the fully configured HTTP handler.
 func NewRouter(cfg *config.Config, database *db.DB, ver string) http.Handler {
 	r := chi.NewRouter()
@@ -25,20 +22,22 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string) http.Handler {
 	// Middleware stack.
 	r.Use(middleware.RequestID)
 	r.Use(setRequestIDHeader) // echo request ID into response header
-	r.Use(middleware.RealIP)
+	// NOTE: middleware.RealIP is intentionally omitted — trusting X-Real-IP from
+	// any source allows IP spoofing for rate-limit bypass. IP header trust is now
+	// handled explicitly in clientIPWithProxies using the trusted_proxies config.
 	r.Use(middleware.Recoverer)
-
-	version = ver
+	r.Use(SecurityHeaders)
+	r.Use(MaxBodySize(1 << 20)) // 1 MiB default; upload routes use their own limit
 
 	// Health check — unauthenticated, no versioning prefix.
-	r.Get("/health", handleHealth)
+	r.Get("/health", handleHealth(ver))
 
 	// Shared rate limiter for auth endpoints.
 	limiter := auth.NewRateLimiter()
 
 	// Versioned API routes.
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Get("/info", handleInfo(cfg))
+		r.Get("/info", handleInfo(cfg, ver))
 	})
 
 	// Auth routes: register, login, logout, me.
@@ -56,7 +55,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string) http.Handler {
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
 	hub := ws.NewHub(database, limiter)
 	go hub.Run()
-	r.Get("/api/v1/ws", ws.ServeWS(hub, database))
+	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins))
 
 	// Admin panel: static files + REST API (Phase 6).
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, "J3vb", "OwnCord")
@@ -77,18 +76,20 @@ type infoResponse struct {
 	Version string `json:"version"`
 }
 
-func handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, healthResponse{
-		Status:  "ok",
-		Version: version,
-	})
+func handleHealth(ver string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, healthResponse{
+			Status:  "ok",
+			Version: ver,
+		})
+	}
 }
 
-func handleInfo(cfg *config.Config) http.HandlerFunc {
+func handleInfo(cfg *config.Config, ver string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, infoResponse{
 			Name:    cfg.Server.Name,
-			Version: version,
+			Version: ver,
 		})
 	}
 }
@@ -105,7 +106,7 @@ func setRequestIDHeader(next http.Handler) http.Handler {
 }
 
 // writeJSON encodes v as JSON and writes it to w with the given status code.
-func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)

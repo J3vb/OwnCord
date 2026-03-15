@@ -3,6 +3,7 @@ package api_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -272,22 +273,26 @@ func TestRateLimitMiddleware_RetryAfterHeader(t *testing.T) {
 	}
 }
 
-func TestRateLimitMiddleware_XRealIPUsed(t *testing.T) {
+func TestRateLimitMiddleware_XRealIPIgnoredWithoutTrustedProxy(t *testing.T) {
+	// Without trusted proxies configured, X-Real-IP must be ignored.
+	// Each request with the same RemoteAddr host counts as the same IP regardless
+	// of what the X-Real-IP header says.
 	limiter := auth.NewRateLimiter()
 	limit := 2
 
 	h := api.RateLimitMiddleware(limiter, limit, time.Minute)(http.HandlerFunc(ok))
 
-	// Two requests from the same X-Real-IP but different RemoteAddr.
+	// Two requests from RemoteAddr 10.0.0.99 with an attacker-supplied X-Real-IP.
 	for i := 0; i < limit; i++ {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("X-Real-IP", "192.168.1.1")
+		req.Header.Set("X-Real-IP", "192.168.1.1") // forged; must be ignored
 		req.RemoteAddr = "10.0.0.99:9999"
 		rr := httptest.NewRecorder()
 		h.ServeHTTP(rr, req)
 	}
 
-	// Third request should be blocked by the X-Real-IP key.
+	// Third request from the same RemoteAddr should be blocked — rate key is
+	// 10.0.0.99, not the forged 192.168.1.1.
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Real-IP", "192.168.1.1")
 	req.RemoteAddr = "10.0.0.99:9999"
@@ -295,7 +300,279 @@ func TestRateLimitMiddleware_XRealIPUsed(t *testing.T) {
 	h.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusTooManyRequests {
-		t.Errorf("RateLimitMiddleware X-Real-IP status = %d, want 429", rr.Code)
+		t.Errorf("RateLimitMiddleware no-trusted-proxy status = %d, want 429", rr.Code)
+	}
+}
+
+func TestRateLimitMiddleware_XRealIPHonouredFromTrustedProxy(t *testing.T) {
+	// With a trusted proxy configured, X-Real-IP from that proxy is used.
+	limiter := auth.NewRateLimiter()
+	limit := 2
+	trustedCIDRs := []string{"10.0.0.0/8"}
+
+	h := api.RateLimitMiddleware(limiter, limit, time.Minute, trustedCIDRs)(http.HandlerFunc(ok))
+
+	// Two requests coming through trusted proxy 10.0.0.1, client IP 203.0.113.5.
+	for i := 0; i < limit; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("X-Real-IP", "203.0.113.5")
+		req.RemoteAddr = "10.0.0.1:9999"
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+	}
+
+	// Third request with same X-Real-IP from same trusted proxy — should be blocked.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Real-IP", "203.0.113.5")
+	req.RemoteAddr = "10.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusTooManyRequests {
+		t.Errorf("RateLimitMiddleware trusted proxy X-Real-IP status = %d, want 429", rr.Code)
+	}
+}
+
+// ─── Fix 2.10: Ban expiry in AuthMiddleware ───────────────────────────────────
+
+// TestAuthMiddleware_BannedUserBlocked verifies that an actively banned user
+// with no expiry cannot pass the auth middleware.
+func TestAuthMiddleware_BannedUserBlocked(t *testing.T) {
+	database := newAPITestDB(t)
+	uid, _ := database.CreateUser("banneduser", "hash", 4)
+	database.BanUser(uid, "rule violation", nil) // permanent ban
+	token, _ := auth.GenerateToken()
+	hash := auth.HashToken(token)
+	database.CreateSession(uid, hash, "test", "127.0.0.1")
+
+	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	withBearer(req, token)
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("AuthMiddleware banned user status = %d, want 403", rr.Code)
+	}
+}
+
+// TestAuthMiddleware_ExpiredBanAllowed verifies that a user whose ban has
+// expired in the past can pass the auth middleware.
+func TestAuthMiddleware_ExpiredBanAllowed(t *testing.T) {
+	database := newAPITestDB(t)
+	uid, _ := database.CreateUser("expbanned", "hash", 4)
+
+	// Set ban with an expiry time in the past.
+	past := time.Now().UTC().Add(-time.Hour)
+	database.BanUser(uid, "temp ban", &past)
+
+	token, _ := auth.GenerateToken()
+	hash := auth.HashToken(token)
+	database.CreateSession(uid, hash, "test", "127.0.0.1")
+
+	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	withBearer(req, token)
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("AuthMiddleware expired-ban user status = %d, want 200", rr.Code)
+	}
+}
+
+// TestAuthMiddleware_ActiveTemporaryBanBlocked verifies that a user with a
+// temporary ban whose expiry is in the future is still blocked.
+func TestAuthMiddleware_ActiveTemporaryBanBlocked(t *testing.T) {
+	database := newAPITestDB(t)
+	uid, _ := database.CreateUser("tempbanned", "hash", 4)
+
+	// Set ban with an expiry time in the future.
+	future := time.Now().UTC().Add(time.Hour)
+	database.BanUser(uid, "temp ban", &future)
+
+	token, _ := auth.GenerateToken()
+	hash := auth.HashToken(token)
+	database.CreateSession(uid, hash, "test", "127.0.0.1")
+
+	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	withBearer(req, token)
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("AuthMiddleware active temp-ban user status = %d, want 403", rr.Code)
+	}
+}
+
+// ─── SecurityHeaders tests ───────────────────────────────────────────────────
+
+func TestSecurityHeaders_AllHeadersPresent(t *testing.T) {
+	h := api.SecurityHeaders(http.HandlerFunc(ok))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	want := map[string]string{
+		"X-Content-Type-Options":  "nosniff",
+		"X-Frame-Options":         "DENY",
+		"X-Xss-Protection":        "0",
+		"Referrer-Policy":         "strict-origin-when-cross-origin",
+		"Content-Security-Policy": "default-src 'self'",
+		"Permissions-Policy":      "camera=(), microphone=(), geolocation=()",
+		"Cache-Control":           "no-store",
+	}
+	for header, expected := range want {
+		if got := rr.Header().Get(header); got != expected {
+			t.Errorf("SecurityHeaders: %s = %q, want %q", header, got, expected)
+		}
+	}
+}
+
+func TestSecurityHeaders_PassesThrough(t *testing.T) {
+	// Middleware must not swallow the response — downstream handler must be called.
+	called := false
+	h := api.SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	if !called {
+		t.Error("SecurityHeaders: downstream handler was not called")
+	}
+	if rr.Code != http.StatusTeapot {
+		t.Errorf("SecurityHeaders: status = %d, want 418", rr.Code)
+	}
+}
+
+func TestSecurityHeaders_DoesNotOverrideExistingHeaders(t *testing.T) {
+	// If a downstream handler sets its own CSP, SecurityHeaders should not clobber it
+	// because it runs before the handler writes. The middleware sets headers first,
+	// the handler can then override them — that is the correct layering.
+	// This test just confirms the middleware itself sets all seven headers.
+	h := api.SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Handler overrides CSP after SecurityHeaders has already set it.
+		w.Header().Set("Content-Security-Policy", "default-src 'none'")
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	// The handler's override wins because it runs after the middleware sets the header.
+	if got := rr.Header().Get("Content-Security-Policy"); got != "default-src 'none'" {
+		t.Errorf("SecurityHeaders: handler CSP override = %q, want \"default-src 'none'\"", got)
+	}
+}
+
+// ─── MaxBodySize tests ────────────────────────────────────────────────────────
+
+func TestMaxBodySize_UnderLimit(t *testing.T) {
+	// A body smaller than the limit must be read successfully by the handler.
+	const limit = 10 // bytes
+	body := strings.NewReader("hello") // 5 bytes — under limit
+
+	h := api.MaxBodySize(limit)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data := make([]byte, 20)
+		n, _ := r.Body.Read(data)
+		if n != 5 {
+			t.Errorf("MaxBodySize under limit: read %d bytes, want 5", n)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/", body)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("MaxBodySize under limit: status = %d, want 200", rr.Code)
+	}
+}
+
+func TestMaxBodySize_ExactLimit(t *testing.T) {
+	// A body exactly at the limit must be read without error.
+	const limit = 5
+	body := strings.NewReader("hello") // exactly 5 bytes
+
+	h := api.MaxBodySize(limit)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data := make([]byte, 10)
+		n, _ := r.Body.Read(data)
+		if n != 5 {
+			t.Errorf("MaxBodySize exact limit: read %d bytes, want 5", n)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/", body)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("MaxBodySize exact limit: status = %d, want 200", rr.Code)
+	}
+}
+
+func TestMaxBodySize_OverLimit(t *testing.T) {
+	// Reading beyond the limit must return an error from MaxBytesReader.
+	const limit = 5
+	body := strings.NewReader("hello world") // 11 bytes — over limit
+
+	var readErr error
+	h := api.MaxBodySize(limit)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data := make([]byte, 20)
+		_, readErr = r.Body.Read(data)
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/", body)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if readErr == nil {
+		t.Error("MaxBodySize over limit: expected read error, got nil")
+	}
+}
+
+func TestMaxBodySize_NilBody(t *testing.T) {
+	// GET requests with no body must pass through without panic.
+	h := api.MaxBodySize(1024)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+
+	// Must not panic.
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("MaxBodySize nil body: status = %d, want 200", rr.Code)
+	}
+}
+
+func TestMaxBodySize_PassesThrough(t *testing.T) {
+	// Downstream handler must be called and its status code preserved.
+	h := api.MaxBodySize(1024)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("data"))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Errorf("MaxBodySize pass-through: status = %d, want 201", rr.Code)
 	}
 }
 

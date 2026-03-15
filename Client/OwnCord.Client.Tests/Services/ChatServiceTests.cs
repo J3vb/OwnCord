@@ -340,7 +340,7 @@ public class ChatServiceTests
 
         Assert.Single(_ws.SentMessages);
         var sent = JsonDocument.Parse(_ws.SentMessages[0]);
-        Assert.Equal("typing", sent.RootElement.GetProperty("type").GetString());
+        Assert.Equal("typing_start", sent.RootElement.GetProperty("type").GetString());
         Assert.Equal(1, sent.RootElement.GetProperty("payload").GetProperty("channel_id").GetInt64());
     }
 

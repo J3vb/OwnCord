@@ -83,6 +83,18 @@ func (d *DB) UpdateChannel(id int64, name, topic string, slowMode int) error {
 	return nil
 }
 
+// SetChannelSlowMode updates only the slow_mode field for the given channel.
+func (d *DB) SetChannelSlowMode(id int64, slowMode int) error {
+	_, err := d.sqlDB.Exec(
+		`UPDATE channels SET slow_mode = ? WHERE id = ?`,
+		slowMode, id,
+	)
+	if err != nil {
+		return fmt.Errorf("SetChannelSlowMode: %w", err)
+	}
+	return nil
+}
+
 // DeleteChannel removes the channel row (cascades to messages, overrides, etc.).
 func (d *DB) DeleteChannel(id int64) error {
 	_, err := d.sqlDB.Exec(`DELETE FROM channels WHERE id = ?`, id)
@@ -128,7 +140,7 @@ func scanChannel(rows *sql.Rows) (Channel, error) {
 
 // nullableString returns nil when s is empty, otherwise a pointer to s.
 // Used so empty strings are stored as NULL in optional TEXT columns.
-func nullableString(s string) interface{} {
+func nullableString(s string) any {
 	if s == "" {
 		return nil
 	}

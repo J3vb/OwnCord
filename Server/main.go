@@ -6,10 +6,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	stdlog "log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -29,6 +33,7 @@ func main() {
 	}))
 
 	if err := run(log); err != nil {
+		fmt.Fprintf(os.Stderr, "\n  [ERROR] %v\n\n", err)
 		log.Error("server exited with error", "error", err)
 		os.Exit(1)
 	}
@@ -53,11 +58,6 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
-	log.Info("configuration loaded",
-		"server_name", cfg.Server.Name,
-		"port", cfg.Server.Port,
-		"tls_mode", cfg.TLS.Mode,
-	)
 
 	// ── 2. Ensure data directory exists ────────────────────────────────────
 	if mkdirErr := os.MkdirAll(cfg.Server.DataDir, 0o755); mkdirErr != nil {
@@ -74,13 +74,12 @@ func run(log *slog.Logger) error {
 	if err := db.Migrate(database); err != nil {
 		return fmt.Errorf("running migrations: %w", err)
 	}
-	log.Info("database ready", "path", cfg.Database.Path)
-
 	// ── 4. TLS ─────────────────────────────────────────────────────────────
-	tlsCfg, err := auth.LoadOrGenerate(cfg.TLS)
+	tlsResult, err := auth.LoadOrGenerate(cfg.TLS)
 	if err != nil {
 		return fmt.Errorf("configuring TLS: %w", err)
 	}
+	tlsCfg := tlsResult.TLSConfig
 
 	// ── 5. Build HTTP router ───────────────────────────────────────────────
 	router := api.NewRouter(cfg, database, version)
@@ -94,11 +93,52 @@ func run(log *slog.Logger) error {
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
+		ErrorLog:     stdlog.New(io.Discard, "", 0), // suppress TLS handshake noise
 	}
+
+	// ── 6b. ACME HTTP challenge server on :80 ─────────────────────────────
+	// When using Let's Encrypt (tls.mode: acme), an HTTP server on port 80
+	// is needed for HTTP-01 challenge validation and HTTP→HTTPS redirect.
+	var acmeSrv *http.Server
+	if tlsResult.HTTPHandler != nil {
+		acmeSrv = &http.Server{
+			Addr:         ":80",
+			Handler:      tlsResult.HTTPHandler,
+			ReadTimeout:  10 * time.Second,
+			WriteTimeout: 10 * time.Second,
+		}
+		go func() {
+			log.Info("ACME HTTP challenge server starting on :80")
+			if err := acmeSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("ACME HTTP server error", "error", err)
+			}
+		}()
+	}
+
+	// ── 7. Background maintenance ────────────────────────────────────────
+	// Periodically purge expired sessions to prevent unbounded growth.
+	stopMaintenance := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := database.DeleteExpiredSessions(); err != nil {
+					log.Warn("failed to delete expired sessions", "error", err)
+				}
+			case <-stopMaintenance:
+				return
+			}
+		}
+	}()
 
 	// Listen for OS signals for graceful shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Print startup banner.
+	printBanner(cfg, version, tlsCfg != nil)
 
 	// Start serving in a goroutine.
 	serveErr := make(chan error, 1)
@@ -143,10 +183,17 @@ func run(log *slog.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	if acmeSrv != nil {
+		if err := acmeSrv.Shutdown(shutdownCtx); err != nil {
+			log.Warn("ACME HTTP server shutdown error", "error", err)
+		}
+	}
+
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
 
+	close(stopMaintenance)
 	log.Info("server stopped cleanly")
 	return nil
 }
@@ -154,5 +201,71 @@ func run(log *slog.Logger) error {
 // isAddrInUse checks if an error is an "address already in use" error.
 func isAddrInUse(err error) bool {
 	return err != nil && (strings.Contains(err.Error(), "address already in use") || strings.Contains(err.Error(), "Only one usage of each socket address"))
+}
+
+// printBanner writes the startup banner to stderr (so it doesn't mix with
+// JSON-structured log output on stdout).
+func printBanner(cfg *config.Config, ver string, tls bool) {
+	scheme := "http"
+	if tls {
+		scheme = "https"
+	}
+
+	localIP := getOutboundIP()
+	port := cfg.Server.Port
+	baseURL := fmt.Sprintf("%s://%s:%d", scheme, localIP, port)
+	adminURL := baseURL + "/admin"
+
+	tlsStatus := "disabled"
+	if tls {
+		tlsStatus = "enabled"
+	}
+
+	banner := fmt.Sprintf(`
+
+     ___                  ____              _
+    / _ \__      ___ __  / ___|___  _ __ __| |
+   | | | \ \ /\ / / '_ \| |   / _ \| '__/ _`+"`"+` |
+   | |_| |\ V  V /| | | | |__| (_) | | | (_| |
+    \___/  \_/\_/ |_| |_|\____\___/|_|  \__,_|
+
+   ─────────────────────────────────────────────
+    Server   %s
+    Version  %s
+    TLS      %s
+    Platform %s/%s
+   ─────────────────────────────────────────────
+    API      %s/api/v1/info
+    WebSocket   %s/api/v1/ws
+    Admin    %s
+    Health   %s/health
+   ─────────────────────────────────────────────
+    Press Ctrl+C to stop the server.
+
+`, cfg.Server.Name, ver, tlsStatus, runtime.GOOS, runtime.GOARCH,
+		baseURL, wsURL(scheme, localIP, port), adminURL, baseURL)
+
+	fmt.Fprint(os.Stderr, banner)
+}
+
+// wsURL builds the WebSocket URL with the correct scheme.
+func wsURL(httpScheme, ip string, port int) string {
+	ws := "ws"
+	if httpScheme == "https" {
+		ws = "wss"
+	}
+	return fmt.Sprintf("%s://%s:%d", ws, ip, port)
+}
+
+// getOutboundIP returns the preferred outbound IP of this machine by dialing
+// a known external address (no actual connection is made with UDP).
+func getOutboundIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return "localhost"
+	}
+	defer conn.Close()
+	addr := conn.LocalAddr().(*net.UDPAddr)
+	return addr.IP.String()
 }
 

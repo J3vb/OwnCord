@@ -8,16 +8,24 @@ import (
 
 const sendBufSize = 256
 
+// SessionCheckInterval is the number of messages processed between periodic
+// session-expiry checks in readPump. Exported so tests can trigger the check
+// without waiting for a real ticker.
+const SessionCheckInterval = 10
+
 // Client represents a single authenticated WebSocket connection.
 // The underlying transport (conn) is set by ServeWS; in tests it remains nil.
 type Client struct {
-	hub       *Hub
-	conn      wsConn   // interface — nil in unit tests
-	userID    int64
-	user      *db.User
-	channelID int64 // currently viewed channel for channel-scoped broadcasts
-	send      chan []byte
-	mu        sync.Mutex
+	hub        *Hub
+	conn       wsConn   // interface — nil in unit tests
+	userID     int64
+	user       *db.User
+	channelID  int64  // currently viewed channel for channel-scoped broadcasts
+	tokenHash  string // SHA-256 hex of the session token; used for periodic revalidation
+	msgCount   int    // count of messages processed; resets after session check
+	sendClosed bool   // true after the send channel has been closed
+	send       chan []byte
+	mu         sync.Mutex
 }
 
 // wsConn is the subset of nhooyr.io/websocket.Conn used by writePump/readPump.
@@ -28,14 +36,21 @@ type wsConn interface {
 }
 
 // newClient creates a real client wrapping a WebSocket connection (set by serve.go).
-func newClient(hub *Hub, conn wsConn, user *db.User) *Client {
+func newClient(hub *Hub, conn wsConn, user *db.User, tokenHash string) *Client {
 	return &Client{
-		hub:    hub,
-		conn:   conn,
-		userID: user.ID,
-		user:   user,
-		send:   make(chan []byte, sendBufSize),
+		hub:       hub,
+		conn:      conn,
+		userID:    user.ID,
+		user:      user,
+		tokenHash: tokenHash,
+		send:      make(chan []byte, sendBufSize),
 	}
+}
+
+// GetTokenHash returns the session token hash stored on this client.
+// Exported for tests.
+func (c *Client) GetTokenHash() string {
+	return c.tokenHash
 }
 
 // NewTestClient creates a client with a caller-supplied send channel.
@@ -70,11 +85,41 @@ func NewTestClientWithUser(hub *Hub, user *db.User, channelID int64, send chan [
 	}
 }
 
+// NewTestClientWithTokenHash creates a test client that carries a session token
+// hash. Use this when tests need to exercise the periodic session-expiry check.
+func NewTestClientWithTokenHash(hub *Hub, user *db.User, tokenHash string, channelID int64, send chan []byte) *Client {
+	return &Client{
+		hub:       hub,
+		userID:    user.ID,
+		user:      user,
+		tokenHash: tokenHash,
+		channelID: channelID,
+		send:      send,
+	}
+}
+
 // sendMsg queues a message to this client's send buffer without blocking.
+// It is a no-op if the send channel has already been closed.
 func (c *Client) sendMsg(msg []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.sendClosed {
+		return
+	}
 	select {
 	case c.send <- msg:
 	default:
 		// Buffer full — drop rather than block the hub.
+	}
+}
+
+// closeSend marks the send channel closed and closes it exactly once.
+// Safe to call from any goroutine.
+func (c *Client) closeSend() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.sendClosed {
+		c.sendClosed = true
+		close(c.send)
 	}
 }

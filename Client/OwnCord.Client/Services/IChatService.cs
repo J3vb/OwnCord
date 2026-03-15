@@ -50,5 +50,8 @@ public interface IChatService
     event Action<WsErrorPayload>? ErrorReceived;
     event Action<ServerRestartPayload>? ServerRestarting;
     event Action<WsMember>? MemberJoined;
+    event Action<ChannelEventPayload>? ChannelCreated;
+    event Action<ChannelEventPayload>? ChannelUpdated;
+    event Action<long>? ChannelDeleted;
     event Action<string>? ConnectionLost;
 }

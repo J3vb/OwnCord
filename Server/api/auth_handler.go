@@ -11,6 +11,7 @@ import (
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 )
 
 // sanitizer strips all HTML from user-supplied strings before storage.
@@ -105,13 +106,8 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		// Validate invite.
-		inv, err := database.GetInvite(req.InviteCode)
-		if err != nil || inv == nil || inv.Revoked {
-			writeJSON(w, http.StatusBadRequest, genericAuthError)
-			return
-		}
-		if err := database.UseInvite(req.InviteCode); err != nil {
+		// Validate and consume invite atomically to prevent TOCTOU races.
+		if err := database.UseInviteAtomic(req.InviteCode); err != nil {
 			writeJSON(w, http.StatusBadRequest, genericAuthError)
 			return
 		}
@@ -126,8 +122,8 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		// Create user with default Member role (4).
-		uid, err := database.CreateUser(req.Username, hash, 4)
+		// Create user with default Member role.
+		uid, err := database.CreateUser(req.Username, hash, int(permissions.MemberRoleID))
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error:   "INVALID_INPUT",
@@ -181,7 +177,8 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter) http.HandlerFunc {
 		}
 
 		req.Username = strings.TrimSpace(req.Username)
-		req.Password = strings.TrimSpace(req.Password)
+		// Do NOT trim req.Password — passwords may intentionally contain
+		// leading/trailing whitespace. Bcrypt handles arbitrary bytes.
 
 		if req.Username == "" || req.Password == "" {
 			writeJSON(w, http.StatusBadRequest, errorResponse{
@@ -224,7 +221,7 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter) http.HandlerFunc {
 		// Reset failure counter on success.
 		limiter.Reset(failKey)
 
-		if user.Banned {
+		if auth.IsEffectivelyBanned(user) {
 			slog.Warn("banned user login attempt", "username", user.Username, "user_id", user.ID, "ip", ip)
 			_ = database.LogAudit(user.ID, "login_blocked_banned", "user", user.ID,
 				"banned user attempted login from "+ip)

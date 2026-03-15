@@ -54,7 +54,7 @@ func (h *Hub) Run() {
 			// If an existing client has the same userID, close its send channel
 			// so writePump exits cleanly before the new client takes over.
 			if old, ok := h.clients[c.userID]; ok && old != c {
-				close(old.send)
+				old.closeSend()
 			}
 			h.clients[c.userID] = c
 			h.mu.Unlock()
@@ -105,6 +105,21 @@ func (h *Hub) BroadcastServerRestart(reason string, delaySeconds int) {
 	h.BroadcastToAll(buildServerRestartMsg(reason, delaySeconds))
 }
 
+// BroadcastChannelCreate sends a channel_create message to all connected clients.
+func (h *Hub) BroadcastChannelCreate(ch *db.Channel) {
+	h.BroadcastToAll(buildChannelCreate(ch))
+}
+
+// BroadcastChannelUpdate sends a channel_update message to all connected clients.
+func (h *Hub) BroadcastChannelUpdate(ch *db.Channel) {
+	h.BroadcastToAll(buildChannelUpdate(ch))
+}
+
+// BroadcastChannelDelete sends a channel_delete message to all connected clients.
+func (h *Hub) BroadcastChannelDelete(channelID int64) {
+	h.BroadcastToAll(buildChannelDelete(channelID))
+}
+
 // SendToUser delivers msg directly to the client identified by userID.
 // Returns true if the client was found and the message was queued.
 func (h *Hub) SendToUser(userID int64, msg []byte) bool {
@@ -128,6 +143,18 @@ func (h *Hub) ClientCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.clients)
+}
+
+// kickClient forcibly removes a client from the hub and closes its send channel,
+// which causes writePump to exit and the WebSocket connection to close.
+// It is safe to call from any goroutine.
+func (h *Hub) kickClient(c *Client) {
+	h.mu.Lock()
+	if current, ok := h.clients[c.userID]; ok && current == c {
+		delete(h.clients, c.userID)
+	}
+	h.mu.Unlock()
+	c.closeSend()
 }
 
 // deliverBroadcast sends bm.msg to the appropriate clients.

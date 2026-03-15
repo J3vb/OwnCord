@@ -4,3 +4,9 @@
 Server/chatserver.exe
 Server/config.yaml
 Server/data/
+
+# Test coverage artifacts
+Server/cov.out
+Server/cover.out
+Server/coverage.out
+Server/ws_cover.out

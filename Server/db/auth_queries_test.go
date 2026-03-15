@@ -389,58 +389,6 @@ func TestGetInvite_NotFound(t *testing.T) {
 	}
 }
 
-func TestUseInvite_IncrementsUses(t *testing.T) {
-	database := newTestDB(t)
-	uid, _ := database.CreateUser("quinn", "hash", 4)
-	code, _ := database.CreateInvite(uid, 5, nil)
-
-	if err := database.UseInvite(code); err != nil {
-		t.Fatalf("UseInvite: %v", err)
-	}
-
-	inv, _ := database.GetInvite(code)
-	if inv.Uses != 1 {
-		t.Errorf("Uses = %d, want 1", inv.Uses)
-	}
-}
-
-func TestUseInvite_ExceedsMaxUses(t *testing.T) {
-	database := newTestDB(t)
-	uid, _ := database.CreateUser("rachel", "hash", 4)
-	code, _ := database.CreateInvite(uid, 1, nil)
-
-	if err := database.UseInvite(code); err != nil {
-		t.Fatalf("first UseInvite: %v", err)
-	}
-	// Second use should fail
-	if err := database.UseInvite(code); err == nil {
-		t.Error("UseInvite() returned nil error after exceeding max_uses")
-	}
-}
-
-func TestUseInvite_Revoked(t *testing.T) {
-	database := newTestDB(t)
-	uid, _ := database.CreateUser("sam", "hash", 4)
-	code, _ := database.CreateInvite(uid, 0, nil)
-
-	database.RevokeInvite(code)
-	if err := database.UseInvite(code); err == nil {
-		t.Error("UseInvite() returned nil error for revoked invite")
-	}
-}
-
-func TestUseInvite_Expired(t *testing.T) {
-	database := newTestDB(t)
-	uid, _ := database.CreateUser("tina", "hash", 4)
-
-	past := time.Now().Add(-time.Hour)
-	code, _ := database.CreateInvite(uid, 0, &past)
-
-	if err := database.UseInvite(code); err == nil {
-		t.Error("UseInvite() returned nil error for expired invite")
-	}
-}
-
 func TestRevokeInvite(t *testing.T) {
 	database := newTestDB(t)
 	uid, _ := database.CreateUser("uma", "hash", 4)
@@ -464,5 +412,134 @@ func TestCreateInvite_UnlimitedUses(t *testing.T) {
 	inv, _ := database.GetInvite(code)
 	if inv.MaxUses != nil {
 		t.Errorf("MaxUses = %v, want nil for unlimited", inv.MaxUses)
+	}
+}
+
+// ─── UseInviteAtomic tests ─────────────────────────────────────────────────────
+
+// TestUseInviteAtomic_Success verifies a valid unlimited invite is accepted and
+// its use_count incremented in one operation.
+func TestUseInviteAtomic_Success(t *testing.T) {
+	database := newTestDB(t)
+	uid, _ := database.CreateUser("atomic_user1", "hash", 4)
+	code, _ := database.CreateInvite(uid, 0, nil)
+
+	if err := database.UseInviteAtomic(code); err != nil {
+		t.Fatalf("UseInviteAtomic: %v", err)
+	}
+
+	inv, _ := database.GetInvite(code)
+	if inv.Uses != 1 {
+		t.Errorf("Uses = %d, want 1", inv.Uses)
+	}
+}
+
+// TestUseInviteAtomic_IncrementsUses verifies the count advances correctly over
+// multiple sequential calls.
+func TestUseInviteAtomic_IncrementsUses(t *testing.T) {
+	database := newTestDB(t)
+	uid, _ := database.CreateUser("atomic_user2", "hash", 4)
+	code, _ := database.CreateInvite(uid, 5, nil)
+
+	for i := 0; i < 3; i++ {
+		if err := database.UseInviteAtomic(code); err != nil {
+			t.Fatalf("UseInviteAtomic iteration %d: %v", i, err)
+		}
+	}
+
+	inv, _ := database.GetInvite(code)
+	if inv.Uses != 3 {
+		t.Errorf("Uses = %d, want 3", inv.Uses)
+	}
+}
+
+// TestUseInviteAtomic_Revoked returns an error for a revoked invite without
+// modifying the database.
+func TestUseInviteAtomic_Revoked(t *testing.T) {
+	database := newTestDB(t)
+	uid, _ := database.CreateUser("atomic_user3", "hash", 4)
+	code, _ := database.CreateInvite(uid, 0, nil)
+	database.RevokeInvite(code)
+
+	if err := database.UseInviteAtomic(code); err == nil {
+		t.Error("UseInviteAtomic returned nil error for revoked invite, want error")
+	}
+
+	// use_count must not have changed.
+	inv, _ := database.GetInvite(code)
+	if inv.Uses != 0 {
+		t.Errorf("Uses = %d after revoked attempt, want 0", inv.Uses)
+	}
+}
+
+// TestUseInviteAtomic_Expired returns an error for an expired invite.
+func TestUseInviteAtomic_Expired(t *testing.T) {
+	database := newTestDB(t)
+	uid, _ := database.CreateUser("atomic_user4", "hash", 4)
+
+	past := time.Now().Add(-time.Hour)
+	code, _ := database.CreateInvite(uid, 0, &past)
+
+	if err := database.UseInviteAtomic(code); err == nil {
+		t.Error("UseInviteAtomic returned nil error for expired invite, want error")
+	}
+}
+
+// TestUseInviteAtomic_ExceedsMaxUses returns an error when the invite has
+// reached its maximum use count.
+func TestUseInviteAtomic_ExceedsMaxUses(t *testing.T) {
+	database := newTestDB(t)
+	uid, _ := database.CreateUser("atomic_user5", "hash", 4)
+	code, _ := database.CreateInvite(uid, 1, nil)
+
+	if err := database.UseInviteAtomic(code); err != nil {
+		t.Fatalf("UseInviteAtomic first use: %v", err)
+	}
+	if err := database.UseInviteAtomic(code); err == nil {
+		t.Error("UseInviteAtomic returned nil error after exceeding max_uses, want error")
+	}
+}
+
+// TestUseInviteAtomic_NotFound returns an error for a completely unknown code.
+func TestUseInviteAtomic_NotFound(t *testing.T) {
+	database := newTestDB(t)
+
+	if err := database.UseInviteAtomic("doesnotexist"); err == nil {
+		t.Error("UseInviteAtomic returned nil error for unknown code, want error")
+	}
+}
+
+// TestUseInviteAtomic_ConcurrentSameCode simulates two goroutines racing to
+// redeem a single-use invite.  Exactly one must succeed and exactly one must
+// fail; the use_count must end up at 1.
+func TestUseInviteAtomic_ConcurrentSameCode(t *testing.T) {
+	database := newTestDB(t)
+	uid, _ := database.CreateUser("atomic_user6", "hash", 4)
+	code, _ := database.CreateInvite(uid, 1, nil)
+
+	type result struct{ err error }
+	results := make(chan result, 2)
+
+	for i := 0; i < 2; i++ {
+		go func() {
+			results <- result{err: database.UseInviteAtomic(code)}
+		}()
+	}
+
+	r1, r2 := <-results, <-results
+	successes := 0
+	if r1.err == nil {
+		successes++
+	}
+	if r2.err == nil {
+		successes++
+	}
+	if successes != 1 {
+		t.Errorf("concurrent redemptions: %d succeeded, want exactly 1", successes)
+	}
+
+	inv, _ := database.GetInvite(code)
+	if inv.Uses != 1 {
+		t.Errorf("use_count = %d after concurrent race, want 1", inv.Uses)
 	}
 }

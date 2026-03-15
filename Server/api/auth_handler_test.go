@@ -388,6 +388,94 @@ func TestMe_NoAuth(t *testing.T) {
 	}
 }
 
+// ─── Fix 2.5: Password trim fix ───────────────────────────────────────────────
+
+// TestLogin_PasswordWithLeadingSpaceIsPreserved verifies that a password with
+// leading whitespace is NOT trimmed, so a user who set " securePass1" can log
+// in with " securePass1" and NOT with "securePass1".
+func TestLogin_PasswordWithLeadingSpaceIsPreserved(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	// Hash the password WITH the leading space — this is what was registered.
+	hash, _ := auth.HashPassword(" securePass1")
+	database.CreateUser("spacepassuser", hash, 4)
+
+	// Login with the exact same password (including space) must succeed.
+	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
+		"username": "spacepassuser",
+		"password": " securePass1",
+	})
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Login space-prefixed password status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestLogin_PasswordWithLeadingSpaceTrimmedFails verifies that logging in with
+// the trimmed version of a space-prefixed password correctly fails.
+func TestLogin_PasswordWithLeadingSpaceTrimmedFails(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	// Register with password that has a leading space.
+	hash, _ := auth.HashPassword(" securePass1")
+	database.CreateUser("spacepassuser2", hash, 4)
+
+	// Login without the leading space must fail.
+	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
+		"username": "spacepassuser2",
+		"password": "securePass1",
+	})
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("Login trimmed space password status = %d, want 401; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestLogin_PasswordWithTrailingSpaceIsPreserved verifies that a password with
+// trailing whitespace is NOT trimmed.
+func TestLogin_PasswordWithTrailingSpaceIsPreserved(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("securePass1 ")
+	database.CreateUser("trailingspaceuser", hash, 4)
+
+	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
+		"username": "trailingspaceuser",
+		"password": "securePass1 ",
+	})
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Login trailing-space password status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestLogin_UsernameIsStillTrimmed verifies that the username IS still trimmed
+// (only the password trim was removed).
+func TestLogin_UsernameIsStillTrimmed(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	database.CreateUser("trimuser", hash, 4)
+
+	// Username with surrounding spaces should resolve to "trimuser".
+	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
+		"username": "  trimuser  ",
+		"password": "correctPass1",
+	})
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Login space-padded username status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
 // ─── Rate limiting integration test ──────────────────────────────────────────
 
 func TestRegister_RateLimit(t *testing.T) {

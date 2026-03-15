@@ -4,14 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-)
-
-// ─── Permission constants ─────────────────────────────────────────────────────
-
-const (
-	permAdministrator = int64(0x40000000)
-	permManageServer  = int64(0x2000000)
-	permViewAuditLog  = int64(0x8000000)
+	"path/filepath"
+	"strings"
 )
 
 // ─── Setup ───────────────────────────────────────────────────────────────────
@@ -305,14 +299,51 @@ func (d *DB) GetAllSettings() (map[string]string, error) {
 
 // ─── Backup ───────────────────────────────────────────────────────────────────
 
-// BackupTo creates an online backup of the database at the given path using
-// SQLite's VACUUM INTO statement. The destination path must not already exist.
-// This only works meaningfully for file-backed databases; in-memory databases
-// will produce a valid but potentially minimal backup file.
+// BackupTo creates an online backup of the database using SQLite's VACUUM INTO.
+// The destination path must not already exist.
+//
+// Security: VACUUM INTO does not support bind parameters, so the path is
+// interpolated into SQL. To prevent injection we enforce two structural guards:
+//  1. The path must resolve to a location under safeRoot (after filepath.Clean
+//     and filepath.Abs).
+//  2. After structural validation, any single-quote, semicolon, double-dash,
+//     or null byte in the cleaned path causes rejection as defence-in-depth.
+//
+// The caller in handleBackup constructs the path from a hardcoded directory
+// and a timestamp — no user input reaches this function.
 func (d *DB) BackupTo(path string) error {
-	_, err := d.sqlDB.Exec(fmt.Sprintf("VACUUM INTO '%s'", path))
+	return d.BackupToSafe(path, filepath.Join("data", "backups"))
+}
+
+// BackupToSafe is the internal implementation that accepts an explicit safe
+// root directory. Exported for testing with isolated directories.
+func (d *DB) BackupToSafe(path, safeRoot string) error {
+	clean := filepath.Clean(path)
+
+	absRoot, err := filepath.Abs(safeRoot)
 	if err != nil {
-		return fmt.Errorf("BackupTo: %w", err)
+		return fmt.Errorf("BackupToSafe: resolving safe root: %w", err)
+	}
+	absClean, err := filepath.Abs(clean)
+	if err != nil {
+		return fmt.Errorf("BackupToSafe: resolving path: %w", err)
+	}
+
+	// Structural guard: path must be under the safe root directory.
+	if !strings.HasPrefix(absClean, absRoot+string(filepath.Separator)) {
+		return fmt.Errorf("BackupToSafe: path %q is not under safe root %q", absClean, absRoot)
+	}
+
+	// Defence-in-depth: reject characters that could break SQL quoting.
+	for _, forbidden := range []string{"'", `"`, ";", "--", "\x00"} {
+		if strings.Contains(clean, forbidden) {
+			return fmt.Errorf("BackupToSafe: path contains forbidden sequence %q", forbidden)
+		}
+	}
+
+	_, err = d.sqlDB.Exec(fmt.Sprintf("VACUUM INTO '%s'", clean))
+	if err != nil {
+		return fmt.Errorf("BackupToSafe: %w", err)
 	}
 	return nil
 }

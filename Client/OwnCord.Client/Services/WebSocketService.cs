@@ -1,6 +1,7 @@
 using System.IO;
 using System.Net.WebSockets;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -8,7 +9,13 @@ namespace OwnCord.Client.Services;
 
 public sealed class WebSocketService : IWebSocketService, IDisposable
 {
+    private readonly ICertificateTrustService _trustService;
     private ClientWebSocket? _ws;
+
+    public WebSocketService(ICertificateTrustService trustService)
+    {
+        _trustService = trustService;
+    }
 
     public bool IsConnected => _ws?.State == WebSocketState.Open;
     public WebSocketState State => _ws?.State ?? WebSocketState.None;
@@ -21,8 +28,17 @@ public sealed class WebSocketService : IWebSocketService, IDisposable
         _ws?.Dispose();
         _ws = new ClientWebSocket();
 
-        // Accept self-signed TLS certificates (server generates self-signed by default).
-        _ws.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;
+        var host = ExtractHost(uri);
+
+        // Trust-On-First-Use (TOFU) certificate pinning.
+        // On first connection to a host, the certificate SHA-256 fingerprint is stored.
+        // On subsequent connections, the fingerprint must match the stored value.
+        _ws.Options.RemoteCertificateValidationCallback = (_, cert, _, _) =>
+        {
+            if (cert == null) return false;
+            var fingerprint = cert.GetCertHashString(HashAlgorithmName.SHA256);
+            return _trustService.IsTrusted(host, fingerprint);
+        };
 
         await _ws.ConnectAsync(new Uri(uri), ct);
         var auth = JsonSerializer.Serialize(new { type = "auth", payload = new { token } });
@@ -93,6 +109,23 @@ public sealed class WebSocketService : IWebSocketService, IDisposable
     {
         if (_ws?.State == WebSocketState.Open)
             await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Disconnect", default);
+    }
+
+    /// <summary>
+    /// Extracts "host:port" from a WebSocket URI for use as the trust store key.
+    /// e.g. "wss://server.local:8443/ws" → "server.local:8443"
+    /// </summary>
+    private static string ExtractHost(string uri)
+    {
+        try
+        {
+            var u = new Uri(uri);
+            return u.IsDefaultPort ? u.Host : $"{u.Host}:{u.Port}";
+        }
+        catch
+        {
+            return uri;
+        }
     }
 
     private async Task SendRawAsync(string text, CancellationToken ct)

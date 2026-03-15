@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -14,20 +15,45 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/updater"
 )
+
+// ─── Context keys ─────────────────────────────────────────────────────────────
+
+// adminContextKey is an unexported type for context keys in the admin package.
+type adminContextKey int
+
+const (
+	// adminUserKey is the context key for the authenticated *db.User.
+	adminUserKey adminContextKey = iota
+	// adminSessionKey is the context key for the authenticated *db.Session.
+	adminSessionKey
+)
+
+// ─── Allowed settings keys ────────────────────────────────────────────────────
+
+// allowedSettingKeys is the whitelist of keys that may be written via
+// PATCH /admin/api/settings. Derived from the settings table in SCHEMA.md.
+var allowedSettingKeys = map[string]struct{}{
+	"server_name":       {},
+	"server_icon":       {},
+	"motd":              {},
+	"max_upload_bytes":  {},
+	"voice_quality":     {},
+	"require_2fa":       {},
+	"registration_open": {},
+	"backup_schedule":   {},
+	"backup_retention":  {},
+}
 
 // HubBroadcaster is the subset of ws.Hub needed by the admin package.
 type HubBroadcaster interface {
 	BroadcastServerRestart(reason string, delaySeconds int)
+	BroadcastChannelCreate(ch *db.Channel)
+	BroadcastChannelUpdate(ch *db.Channel)
+	BroadcastChannelDelete(channelID int64)
 }
-
-// ─── Permission constants ─────────────────────────────────────────────────────
-
-const (
-	permAdministrator = int64(0x40000000)
-	ownerRolePosition = 100
-)
 
 // ─── NewAdminAPI ──────────────────────────────────────────────────────────────
 
@@ -50,9 +76,9 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.Patch("/users/{id}", handlePatchUser(database))
 		r.Delete("/users/{id}/sessions", handleForceLogout(database))
 		r.Get("/channels", handleListChannels(database))
-		r.Post("/channels", handleCreateChannel(database))
-		r.Patch("/channels/{id}", handlePatchChannel(database))
-		r.Delete("/channels/{id}", handleDeleteChannel(database))
+		r.Post("/channels", handleCreateChannel(database, hub))
+		r.Patch("/channels/{id}", handlePatchChannel(database, hub))
+		r.Delete("/channels/{id}", handleDeleteChannel(database, hub))
 		r.Get("/audit-log", handleGetAuditLog(database))
 		r.Get("/settings", handleGetSettings(database))
 		r.Patch("/settings", handlePatchSettings(database))
@@ -71,10 +97,12 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
 // adminAuthMiddleware validates the Bearer token and requires ADMINISTRATOR.
+// On success it stores the *db.User and *db.Session in the request context so
+// downstream handlers can retrieve them without re-querying the database.
 func adminAuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			token, ok := extractBearer(r)
+			token, ok := auth.ExtractBearerToken(r)
 			if !ok {
 				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid authorization header")
 				return
@@ -87,7 +115,7 @@ func adminAuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 				return
 			}
 
-			if isExpired(sess.ExpiresAt) {
+			if auth.IsSessionExpired(sess.ExpiresAt) {
 				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "session has expired")
 				return
 			}
@@ -104,35 +132,26 @@ func adminAuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 				return
 			}
 
-			if role.Permissions&permAdministrator == 0 {
+			if !permissions.HasAdmin(role.Permissions) {
 				writeErr(w, http.StatusForbidden, "FORBIDDEN", "administrator permission required")
 				return
 			}
 
-			next.ServeHTTP(w, r)
+			ctx := context.WithValue(r.Context(), adminUserKey, user)
+			ctx = context.WithValue(ctx, adminSessionKey, sess)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
 // ownerOnlyMiddleware wraps a handler to require Owner role (position == 100).
+// It reads the user from context (set by adminAuthMiddleware) rather than
+// re-authenticating, avoiding redundant DB queries and session-expiry gaps.
 func ownerOnlyMiddleware(database *db.DB, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token, ok := extractBearer(r)
-		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing authorization header")
-			return
-		}
-
-		hash := auth.HashToken(token)
-		sess, err := database.GetSessionByTokenHash(hash)
-		if err != nil || sess == nil {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid session")
-			return
-		}
-
-		user, err := database.GetUserByID(sess.UserID)
-		if err != nil || user == nil {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "user not found")
+		user, ok := r.Context().Value(adminUserKey).(*db.User)
+		if !ok || user == nil {
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 
@@ -142,7 +161,7 @@ func ownerOnlyMiddleware(database *db.DB, next http.Handler) http.Handler {
 			return
 		}
 
-		if role.Position < ownerRolePosition {
+		if role.Position < permissions.OwnerRolePosition {
 			writeErr(w, http.StatusForbidden, "FORBIDDEN", "owner role required")
 			return
 		}
@@ -174,7 +193,62 @@ func handleListUsers(database *db.DB) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list users")
 			return
 		}
-		writeJSON(w, http.StatusOK, users)
+
+		safe := make([]adminUserResponse, len(users))
+		for i, u := range users {
+			safe[i] = toAdminUserResponse(u)
+		}
+		writeJSON(w, http.StatusOK, safe)
+	}
+}
+
+// adminUserResponse is the safe public shape returned by user-listing and
+// user-patch endpoints. It deliberately excludes PasswordHash and TOTPSecret.
+type adminUserResponse struct {
+	ID        int64   `json:"id"`
+	Username  string  `json:"username"`
+	Avatar    *string `json:"avatar,omitempty"`
+	RoleID    int64   `json:"role_id"`
+	RoleName  string  `json:"role_name"`
+	Status    string  `json:"status"`
+	CreatedAt string  `json:"created_at"`
+	LastSeen  *string `json:"last_seen,omitempty"`
+	Banned    bool    `json:"banned"`
+	BanReason *string `json:"ban_reason,omitempty"`
+	BanExpires *string `json:"ban_expires,omitempty"`
+}
+
+// toAdminUserResponse converts a db.UserWithRole to the safe response shape.
+func toAdminUserResponse(u db.UserWithRole) adminUserResponse {
+	return adminUserResponse{
+		ID:        u.ID,
+		Username:  u.Username,
+		Avatar:    u.Avatar,
+		RoleID:    u.RoleID,
+		RoleName:  u.RoleName,
+		Status:    u.Status,
+		CreatedAt: u.CreatedAt,
+		LastSeen:  u.LastSeen,
+		Banned:    u.Banned,
+		BanReason: u.BanReason,
+		BanExpires: u.BanExpires,
+	}
+}
+
+// toAdminUserResponseFromUser converts a plain db.User to the safe response
+// shape, leaving RoleName empty (it is unknown without a join).
+func toAdminUserResponseFromUser(u *db.User) adminUserResponse {
+	return adminUserResponse{
+		ID:        u.ID,
+		Username:  u.Username,
+		Avatar:    u.Avatar,
+		RoleID:    u.RoleID,
+		Status:    u.Status,
+		CreatedAt: u.CreatedAt,
+		LastSeen:  u.LastSeen,
+		Banned:    u.Banned,
+		BanReason: u.BanReason,
+		BanExpires: u.BanExpires,
 	}
 }
 
@@ -209,7 +283,14 @@ func handlePatchUser(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		actor := actorID(database, r)
+		actor := actorFromContext(r)
+
+		// Prevent admins from modifying their own role or ban status, which
+		// could lock them out of the admin panel with no recovery path.
+		if id == actor {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "cannot modify your own account via admin panel")
+			return
+		}
 
 		if req.RoleID != nil {
 			if err := database.UpdateUserRole(id, *req.RoleID); err != nil {
@@ -250,7 +331,7 @@ func handlePatchUser(database *db.DB) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch updated user")
 			return
 		}
-		writeJSON(w, http.StatusOK, updated)
+		writeJSON(w, http.StatusOK, toAdminUserResponseFromUser(updated))
 	}
 }
 
@@ -266,7 +347,7 @@ func handleForceLogout(database *db.DB) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to logout user")
 			return
 		}
-		actor := actorID(database, r)
+		actor := actorFromContext(r)
 		slog.Info("force logout", "actor_id", actor, "target_user_id", id)
 		_ = database.LogAudit(actor, "force_logout", "user", id, "all sessions terminated")
 		w.WriteHeader(http.StatusNoContent)
@@ -293,7 +374,7 @@ type createChannelRequest struct {
 	Position int    `json:"position"`
 }
 
-func handleCreateChannel(database *db.DB) http.HandlerFunc {
+func handleCreateChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req createChannelRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -320,10 +401,13 @@ func handleCreateChannel(database *db.DB) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch created channel")
 			return
 		}
-		actor := actorID(database, r)
+		actor := actorFromContext(r)
 		slog.Info("channel created", "actor_id", actor, "channel", req.Name, "type", req.Type)
 		_ = database.LogAudit(actor, "channel_create", "channel", id,
 			fmt.Sprintf("created #%s (%s)", req.Name, req.Type))
+		if hub != nil {
+			hub.BroadcastChannelCreate(ch)
+		}
 		writeJSON(w, http.StatusCreated, ch)
 	}
 }
@@ -337,7 +421,7 @@ type updateChannelRequest struct {
 	Archived bool   `json:"archived"`
 }
 
-func handlePatchChannel(database *db.DB) http.HandlerFunc {
+func handlePatchChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
 		if err != nil {
@@ -373,17 +457,24 @@ func handlePatchChannel(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		actor := actorID(database, r)
+		actor := actorFromContext(r)
 		slog.Info("channel updated", "actor_id", actor, "channel_id", id, "name", req.Name)
 		_ = database.LogAudit(actor, "channel_update", "channel", id,
 			fmt.Sprintf("updated #%s", req.Name))
 
-		updated, _ := database.GetChannel(id)
+		updated, err := database.GetChannel(id)
+		if err != nil || updated == nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch updated channel")
+			return
+		}
+		if hub != nil {
+			hub.BroadcastChannelUpdate(updated)
+		}
 		writeJSON(w, http.StatusOK, updated)
 	}
 }
 
-func handleDeleteChannel(database *db.DB) http.HandlerFunc {
+func handleDeleteChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
 		if err != nil {
@@ -405,10 +496,13 @@ func handleDeleteChannel(database *db.DB) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete channel")
 			return
 		}
-		actor := actorID(database, r)
+		actor := actorFromContext(r)
 		slog.Warn("channel deleted", "actor_id", actor, "channel_id", id, "name", existing.Name)
 		_ = database.LogAudit(actor, "channel_delete", "channel", id,
 			fmt.Sprintf("deleted #%s", existing.Name))
+		if hub != nil {
+			hub.BroadcastChannelDelete(id)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -446,7 +540,17 @@ func handlePatchSettings(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		actor := actorID(database, r)
+		// Validate all keys against the whitelist before writing anything so
+		// the operation is atomic from the caller's perspective.
+		for key := range updates {
+			if _, ok := allowedSettingKeys[key]; !ok {
+				writeErr(w, http.StatusBadRequest, "BAD_REQUEST",
+					fmt.Sprintf("unknown setting key: %q", key))
+				return
+			}
+		}
+
+		actor := actorFromContext(r)
 		for key, value := range updates {
 			if err := database.SetSetting(key, value); err != nil {
 				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update setting: "+key)
@@ -482,7 +586,7 @@ func handleBackup(database *db.DB) http.Handler {
 			return
 		}
 
-		actor := actorID(database, r)
+		actor := actorFromContext(r)
 		slog.Info("database backup created", "actor_id", actor, "path", backupPath)
 		_ = database.LogAudit(actor, "backup_create", "server", 0,
 			fmt.Sprintf("backup saved to %s", backupPath))
@@ -501,7 +605,7 @@ type errorResponse struct {
 	Message string `json:"message"`
 }
 
-func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
@@ -509,18 +613,6 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 
 func writeErr(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, errorResponse{Error: code, Message: msg})
-}
-
-func extractBearer(r *http.Request) (string, bool) {
-	header := r.Header.Get("Authorization")
-	if header == "" {
-		return "", false
-	}
-	parts := strings.SplitN(header, " ", 2)
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") || parts[1] == "" {
-		return "", false
-	}
-	return parts[1], true
 }
 
 func pathInt64(r *http.Request, param string) (int64, error) {
@@ -534,32 +626,24 @@ func queryInt(r *http.Request, key string, defaultVal int) int {
 		return defaultVal
 	}
 	n, err := strconv.Atoi(raw)
-	if err != nil || n < 0 {
+	if err != nil || n < 1 {
 		return defaultVal
+	}
+	// Cap to prevent unbounded result sets exhausting memory.
+	const maxLimit = 500
+	if n > maxLimit {
+		return maxLimit
 	}
 	return n
 }
 
-// actorID extracts the authenticated user's ID from the request token.
-// Returns 0 if the actor cannot be determined (should not happen behind auth middleware).
-func actorID(database *db.DB, r *http.Request) int64 {
-	token, ok := extractBearer(r)
-	if !ok {
+// actorFromContext returns the authenticated user's ID stored in the request
+// context by adminAuthMiddleware. Returns 0 if called outside that middleware
+// (should not happen in production).
+func actorFromContext(r *http.Request) int64 {
+	user, ok := r.Context().Value(adminUserKey).(*db.User)
+	if !ok || user == nil {
 		return 0
 	}
-	sess, err := database.GetSessionByTokenHash(auth.HashToken(token))
-	if err != nil || sess == nil {
-		return 0
-	}
-	return sess.UserID
-}
-
-func isExpired(expiresAt string) bool {
-	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02T15:04:05Z"} {
-		t, err := time.Parse(layout, expiresAt)
-		if err == nil {
-			return time.Now().UTC().After(t.UTC())
-		}
-	}
-	return true
+	return user.ID
 }

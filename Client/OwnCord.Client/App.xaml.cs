@@ -17,8 +17,9 @@ public partial class App : Application
 
         var profileService = new ProfileService(dataDir);
         var credentialService = new CredentialService();
-        var wsService = new WebSocketService();
-        var apiClient = ApiClient.CreateWithSelfSignedTls();
+        var trustService = new CertificateTrustService();
+        var wsService = new WebSocketService(trustService);
+        var apiClient = ApiClient.CreateWithTofuTls(trustService);
         var chatService = new ChatService(apiClient, wsService);
 
         var connectVm = new ConnectViewModel(profileService, credentialService);

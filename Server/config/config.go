@@ -39,9 +39,11 @@ type VoiceConfig struct {
 
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
-	Port    int    `koanf:"port"`
-	Name    string `koanf:"name"`
-	DataDir string `koanf:"data_dir"`
+	Port           int      `koanf:"port"`
+	Name           string   `koanf:"name"`
+	DataDir        string   `koanf:"data_dir"`
+	AllowedOrigins []string `koanf:"allowed_origins"`
+	TrustedProxies []string `koanf:"trusted_proxies"`
 }
 
 // DatabaseConfig holds database settings.
@@ -51,10 +53,11 @@ type DatabaseConfig struct {
 
 // TLSConfig holds TLS/certificate settings.
 type TLSConfig struct {
-	Mode     string `koanf:"mode"`
-	CertFile string `koanf:"cert_file"`
-	KeyFile  string `koanf:"key_file"`
-	Domain   string `koanf:"domain"`
+	Mode         string `koanf:"mode"`
+	CertFile     string `koanf:"cert_file"`
+	KeyFile      string `koanf:"key_file"`
+	Domain       string `koanf:"domain"`
+	AcmeCacheDir string `koanf:"acme_cache_dir"`
 }
 
 // UploadConfig holds file upload settings.
@@ -67,17 +70,20 @@ type UploadConfig struct {
 func defaults() Config {
 	return Config{
 		Server: ServerConfig{
-			Port:    8443,
-			Name:    "OwnCord Server",
-			DataDir: "data",
+			Port:           8443,
+			Name:           "OwnCord Server",
+			DataDir:        "data",
+			AllowedOrigins: []string{"*"},
+			TrustedProxies: []string{},
 		},
 		Database: DatabaseConfig{
 			Path: "data/chatserver.db",
 		},
 		TLS: TLSConfig{
-			Mode:     "self_signed",
-			CertFile: "data/cert.pem",
-			KeyFile:  "data/key.pem",
+			Mode:         "self_signed",
+			CertFile:     "data/cert.pem",
+			KeyFile:      "data/key.pem",
+			AcmeCacheDir: "data/acme_certs",
 		},
 		Upload: UploadConfig{
 			MaxSizeMB:  100,
@@ -98,6 +104,8 @@ server:
   port: 8443
   name: "OwnCord Server"
   data_dir: "data"
+  # allowed_origins: ["*"]   # restrict WebSocket origins, e.g. ["https://example.com"]
+  # trusted_proxies: []       # CIDRs of trusted reverse proxies, e.g. ["10.0.0.0/8"]
 
 database:
   path: "data/chatserver.db"
@@ -106,7 +114,8 @@ tls:
   mode: "self_signed"  # self_signed, acme, manual, off
   cert_file: "data/cert.pem"
   key_file: "data/key.pem"
-  domain: ""
+  domain: ""              # required for acme mode (e.g. "chat.example.com")
+  acme_cache_dir: "data/acme_certs"  # where Let's Encrypt certs are cached
 
 upload:
   max_size_mb: 100
@@ -175,7 +184,7 @@ func Load(cfgPath string) (*Config, error) {
 
 // validateYAML checks that raw bytes are valid YAML.
 func validateYAML(raw []byte) error {
-	var v interface{}
+	var v any
 	return goyaml.Unmarshal(raw, &v)
 }
 

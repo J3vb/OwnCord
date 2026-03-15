@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Threading;
 using System.Windows;
 using System.Windows.Input;
 using OwnCord.Client.Models;
@@ -13,6 +14,7 @@ public sealed class MainViewModel : ViewModelBase
     private string _messageInput = string.Empty;
     private bool _isTyping;
     private string? _connectionStatus;
+    private Timer? _typingTimer;
 
     public MainViewModel()
     {
@@ -34,6 +36,9 @@ public sealed class MainViewModel : ViewModelBase
         chat.ChatEdited += p => RunOnUI(() => OnChatEdited(p));
         chat.ChatDeleted += p => RunOnUI(() => OnChatDeleted(p));
         chat.MemberJoined += p => RunOnUI(() => OnMemberJoined(p));
+        chat.ChannelCreated += p => RunOnUI(() => OnChannelCreated(p));
+        chat.ChannelUpdated += p => RunOnUI(() => OnChannelUpdated(p));
+        chat.ChannelDeleted += id => RunOnUI(() => OnChannelDeleted(id));
         chat.ConnectionLost += r => RunOnUI(() => OnConnectionLost(r));
     }
 
@@ -226,7 +231,7 @@ public sealed class MainViewModel : ViewModelBase
             );
             Messages.Add(msg);
         }
-        else if (payload.ChannelId != SelectedChannel?.Id)
+        else
         {
             // Increment unread for non-active channel
             UpdateUnreadCount(payload.ChannelId, GetUnreadCount(payload.ChannelId) + 1);
@@ -236,7 +241,11 @@ public sealed class MainViewModel : ViewModelBase
     private void OnTyping(TypingPayload payload)
     {
         if (SelectedChannel is not null && payload.ChannelId == SelectedChannel.Id)
+        {
             ShowTyping(payload.Username);
+            _typingTimer?.Dispose();
+            _typingTimer = new Timer(_ => RunOnUI(HideTyping), null, 5000, Timeout.Infinite);
+        }
     }
 
     private void OnPresence(PresencePayload payload)
@@ -282,6 +291,42 @@ public sealed class MainViewModel : ViewModelBase
             _ => UserStatus.Offline
         };
         Members.Add(new User(payload.Id, payload.Username, payload.Avatar, payload.RoleId, status));
+    }
+
+    private void OnChannelCreated(ChannelEventPayload payload)
+    {
+        if (Channels.Any(c => c.Id == payload.Id)) return;
+        var type = payload.Type switch
+        {
+            "voice" => ChannelType.Voice,
+            "announcement" => ChannelType.Announcement,
+            _ => ChannelType.Text
+        };
+        Channels.Add(new Channel(payload.Id, payload.Name, type, payload.Category, payload.Position, 0, null));
+    }
+
+    private void OnChannelUpdated(ChannelEventPayload payload)
+    {
+        var idx = Channels.ToList().FindIndex(c => c.Id == payload.Id);
+        if (idx < 0) return;
+        var type = payload.Type switch
+        {
+            "voice" => ChannelType.Voice,
+            "announcement" => ChannelType.Announcement,
+            _ => ChannelType.Text
+        };
+        Channels[idx] = new Channel(payload.Id, payload.Name, type, payload.Category, payload.Position, Channels[idx].UnreadCount, Channels[idx].LastMessageId);
+    }
+
+    private void OnChannelDeleted(long channelId)
+    {
+        var ch = Channels.FirstOrDefault(c => c.Id == channelId);
+        if (ch is not null)
+        {
+            Channels.Remove(ch);
+            if (SelectedChannel?.Id == channelId)
+                SelectedChannel = Channels.FirstOrDefault();
+        }
     }
 
     private void OnConnectionLost(string reason)

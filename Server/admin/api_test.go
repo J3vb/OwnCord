@@ -661,9 +661,457 @@ func TestAdminAPI_Backup_Unauthenticated(t *testing.T) {
 	}
 }
 
+// ─── Task 0.3: actor stored in context ───────────────────────────────────────
+
+// TestAdminAPI_ActorFromContext verifies that after auth middleware runs, the
+// user ID surfaced by audit log entries comes from the context-stored user (not
+// a redundant DB lookup). We exercise this through the PATCH /users/{id} path
+// which logs an audit entry containing the actor_id.
+func TestAdminAPI_ActorFromContext_AuditEntry(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	token := createAdminUser(t, database)
+
+	// Create a target user to act on.
+	targetUID, _ := database.CreateUser("ctxtarget", "hash", 3)
+
+	body := map[string]interface{}{"banned": true, "ban_reason": "context test"}
+	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	// The audit log should have a non-zero actor_id showing the actor was
+	// resolved (not 0, which would indicate a failed context lookup).
+	entries, err := database.GetAuditLog(10, 0)
+	if err != nil {
+		t.Fatalf("GetAuditLog: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected at least 1 audit entry")
+	}
+	// All entries should have a non-zero actor_id.
+	for _, e := range entries {
+		if e.ActorID == 0 {
+			t.Errorf("audit entry actor_id = 0, expected the admin user's ID (actor stored from context)")
+		}
+	}
+}
+
+// TestAdminAPI_ActorFromContext_ForceLogout exercises actorFromContext via the
+// DELETE /users/{id}/sessions path.
+func TestAdminAPI_ActorFromContext_ForceLogout(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	token := createAdminUser(t, database)
+
+	targetUID, _ := database.CreateUser("logoutctx", "hash", 3)
+	database.CreateSession(targetUID, "victim-hash-ctx", "web", "1.2.3.4")
+
+	w := doRequest(t, handler, http.MethodDelete, "/users/"+itoa(targetUID)+"/sessions", token, nil)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body: %s", w.Code, w.Body.String())
+	}
+
+	entries, err := database.GetAuditLog(10, 0)
+	if err != nil {
+		t.Fatalf("GetAuditLog: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected at least 1 audit entry")
+	}
+	for _, e := range entries {
+		if e.ActorID == 0 {
+			t.Errorf("audit entry actor_id = 0, expected non-zero actor from context")
+		}
+	}
+}
+
+// ─── Task 0.6: Settings key whitelist ────────────────────────────────────────
+
+// TestAdminAPI_PatchSettings_RejectsUnknownKey verifies that an unknown key
+// returns 400 without writing anything to the database.
+func TestAdminAPI_PatchSettings_RejectsUnknownKey(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	token := createAdminUser(t, database)
+
+	body := map[string]string{
+		"unknown_key": "should be rejected",
+	}
+	w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+	// The error message must name the offending key so the caller knows what to fix.
+	if msg, ok := resp["message"]; !ok || msg == "" {
+		t.Error("response should include a non-empty 'message' field")
+	}
+}
+
+// TestAdminAPI_PatchSettings_RejectsMixedKeys verifies that a payload
+// containing both valid and invalid keys is rejected entirely (no partial write).
+func TestAdminAPI_PatchSettings_RejectsMixedKeys(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	token := createAdminUser(t, database)
+
+	body := map[string]string{
+		"server_name": "valid",
+		"injected_key": "should block the whole request",
+	}
+	w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+
+	// The valid key must NOT have been written because the request was rejected.
+	val, err := database.GetSetting("server_name")
+	if err != nil {
+		t.Fatalf("GetSetting: %v", err)
+	}
+	if val == "valid" {
+		t.Error("server_name was updated despite invalid key in payload — partial write occurred")
+	}
+}
+
+// TestAdminAPI_PatchSettings_AcceptsAllWhitelistedKeys iterates over every key
+// in the whitelist and confirms each one is individually accepted.
+func TestAdminAPI_PatchSettings_AcceptsAllWhitelistedKeys(t *testing.T) {
+	whitelistedKeys := []string{
+		"server_name",
+		"server_icon",
+		"motd",
+		"max_upload_bytes",
+		"voice_quality",
+		"require_2fa",
+		"registration_open",
+		"backup_schedule",
+		"backup_retention",
+	}
+
+	for _, key := range whitelistedKeys {
+		t.Run(key, func(t *testing.T) {
+			database := openAdminTestDB(t)
+			handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+			token := createAdminUser(t, database)
+
+			body := map[string]string{key: "testvalue"}
+			w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
+
+			if w.Code != http.StatusOK {
+				t.Errorf("key %q: status = %d, want 200; body: %s", key, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+// TestAdminAPI_PatchSettings_EmptyPayloadIsOK verifies that an empty map
+// (no-op update) is accepted and returns the current settings.
+func TestAdminAPI_PatchSettings_EmptyPayloadIsOK(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	token := createAdminUser(t, database)
+
+	body := map[string]string{}
+	w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// ─── Fix 2.1: Sensitive field redaction ──────────────────────────────────────
+
+// TestAdminAPI_ListUsers_NoPasswordHash verifies that GET /users does not
+// expose the PasswordHash field in any returned user object.
+func TestAdminAPI_ListUsers_NoPasswordHash(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	token := createAdminUser(t, database)
+
+	// Create a second user so the list is non-trivial.
+	database.CreateUser("plainuser", "supersecretbcrypthash", 3)
+
+	w := doRequest(t, handler, http.MethodGet, "/users", token, nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	body := w.Body.String()
+	// The raw bcrypt hash must never appear in the response.
+	if contains(body, "supersecretbcrypthash") {
+		t.Error("GET /users response contains PasswordHash — sensitive field leaked")
+	}
+	// The JSON key itself must also be absent.
+	if contains(body, "password_hash") || contains(body, "PasswordHash") {
+		t.Error("GET /users response contains password_hash key — sensitive field leaked")
+	}
+}
+
+// TestAdminAPI_ListUsers_NoTOTPSecret verifies that GET /users does not
+// expose the TOTPSecret field.
+func TestAdminAPI_ListUsers_NoTOTPSecret(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	token := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodGet, "/users", token, nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	body := w.Body.String()
+	if contains(body, "totp_secret") || contains(body, "TOTPSecret") {
+		t.Error("GET /users response contains totp_secret key — sensitive field leaked")
+	}
+}
+
+// TestAdminAPI_ListUsers_PublicFieldsPresent verifies that safe public fields
+// are still present after the sensitive-field removal.
+func TestAdminAPI_ListUsers_PublicFieldsPresent(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	token := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodGet, "/users", token, nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	var users []map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &users); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(users) == 0 {
+		t.Fatal("expected at least one user")
+	}
+
+	u := users[0]
+	for _, field := range []string{"id", "username", "status", "role_id", "created_at", "banned", "role_name"} {
+		if _, ok := u[field]; !ok {
+			t.Errorf("GET /users response user object missing expected field %q", field)
+		}
+	}
+}
+
+// TestAdminAPI_PatchUser_NoPasswordHash verifies that PATCH /users/{id} does
+// not expose PasswordHash in the returned user object.
+func TestAdminAPI_PatchUser_NoPasswordHash(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	token := createAdminUser(t, database)
+
+	targetUID, _ := database.CreateUser("patchvictim", "topsecretbcrypt", 3)
+
+	body := map[string]interface{}{
+		"banned":     true,
+		"ban_reason": "test",
+	}
+	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	respBody := w.Body.String()
+	if contains(respBody, "topsecretbcrypt") {
+		t.Error("PATCH /users/{id} response contains PasswordHash — sensitive field leaked")
+	}
+	if contains(respBody, "password_hash") || contains(respBody, "PasswordHash") {
+		t.Error("PATCH /users/{id} response contains password_hash key — sensitive field leaked")
+	}
+}
+
+// TestAdminAPI_PatchUser_NoTOTPSecret verifies that PATCH /users/{id} does
+// not expose TOTPSecret in the returned user object.
+func TestAdminAPI_PatchUser_NoTOTPSecret(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	token := createAdminUser(t, database)
+
+	targetUID, _ := database.CreateUser("patchtotp", "hash", 3)
+
+	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, map[string]interface{}{
+		"banned": false,
+	})
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	respBody := w.Body.String()
+	if contains(respBody, "totp_secret") || contains(respBody, "TOTPSecret") {
+		t.Error("PATCH /users/{id} response contains totp_secret — sensitive field leaked")
+	}
+}
+
+// ─── 4.1: Channel CRUD broadcast tests ───────────────────────────────────────
+
+// mockHub records which broadcast methods were called and with what arguments.
+type mockHub struct {
+	restartCalls      []restartCall
+	channelCreates    []*db.Channel
+	channelUpdates    []*db.Channel
+	channelDeleteIDs  []int64
+}
+
+type restartCall struct {
+	reason       string
+	delaySeconds int
+}
+
+func (m *mockHub) BroadcastServerRestart(reason string, delaySeconds int) {
+	m.restartCalls = append(m.restartCalls, restartCall{reason, delaySeconds})
+}
+
+func (m *mockHub) BroadcastChannelCreate(ch *db.Channel) {
+	m.channelCreates = append(m.channelCreates, ch)
+}
+
+func (m *mockHub) BroadcastChannelUpdate(ch *db.Channel) {
+	m.channelUpdates = append(m.channelUpdates, ch)
+}
+
+func (m *mockHub) BroadcastChannelDelete(channelID int64) {
+	m.channelDeleteIDs = append(m.channelDeleteIDs, channelID)
+}
+
+func TestAdminAPI_CreateChannel_BroadcastsChannelCreate(t *testing.T) {
+	database := openAdminTestDB(t)
+	hub := &mockHub{}
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil)
+	token := createAdminUser(t, database)
+
+	body := map[string]interface{}{
+		"name": "broadcast-test",
+		"type": "text",
+	}
+	w := doRequest(t, handler, http.MethodPost, "/channels", token, body)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body: %s", w.Code, w.Body.String())
+	}
+	if len(hub.channelCreates) != 1 {
+		t.Fatalf("BroadcastChannelCreate called %d times, want 1", len(hub.channelCreates))
+	}
+	if hub.channelCreates[0].Name != "broadcast-test" {
+		t.Errorf("broadcast channel name = %q, want broadcast-test", hub.channelCreates[0].Name)
+	}
+}
+
+func TestAdminAPI_CreateChannel_NilHubDoesNotPanic(t *testing.T) {
+	database := openAdminTestDB(t)
+	// nil hub: handler must not panic
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	token := createAdminUser(t, database)
+
+	body := map[string]interface{}{"name": "safe-channel", "type": "text"}
+	w := doRequest(t, handler, http.MethodPost, "/channels", token, body)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("status = %d, want 201", w.Code)
+	}
+}
+
+func TestAdminAPI_UpdateChannel_BroadcastsChannelUpdate(t *testing.T) {
+	database := openAdminTestDB(t)
+	hub := &mockHub{}
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil)
+	token := createAdminUser(t, database)
+
+	chID, _ := database.AdminCreateChannel("before", "text", "", "", 0)
+
+	body := map[string]interface{}{"name": "after"}
+	w := doRequest(t, handler, http.MethodPatch, "/channels/"+itoa(chID), token, body)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if len(hub.channelUpdates) != 1 {
+		t.Fatalf("BroadcastChannelUpdate called %d times, want 1", len(hub.channelUpdates))
+	}
+	if hub.channelUpdates[0].Name != "after" {
+		t.Errorf("broadcast channel name = %q, want after", hub.channelUpdates[0].Name)
+	}
+}
+
+func TestAdminAPI_UpdateChannel_NilHubDoesNotPanic(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	token := createAdminUser(t, database)
+
+	chID, _ := database.AdminCreateChannel("patchme", "text", "", "", 0)
+	body := map[string]interface{}{"name": "patched"}
+	w := doRequest(t, handler, http.MethodPatch, "/channels/"+itoa(chID), token, body)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestAdminAPI_DeleteChannel_BroadcastsChannelDelete(t *testing.T) {
+	database := openAdminTestDB(t)
+	hub := &mockHub{}
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil)
+	token := createAdminUser(t, database)
+
+	chID, _ := database.AdminCreateChannel("delete-me", "text", "", "", 0)
+
+	w := doRequest(t, handler, http.MethodDelete, "/channels/"+itoa(chID), token, nil)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body: %s", w.Code, w.Body.String())
+	}
+	if len(hub.channelDeleteIDs) != 1 {
+		t.Fatalf("BroadcastChannelDelete called %d times, want 1", len(hub.channelDeleteIDs))
+	}
+	if hub.channelDeleteIDs[0] != chID {
+		t.Errorf("broadcast channel id = %d, want %d", hub.channelDeleteIDs[0], chID)
+	}
+}
+
+func TestAdminAPI_DeleteChannel_NilHubDoesNotPanic(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	token := createAdminUser(t, database)
+
+	chID, _ := database.AdminCreateChannel("del-no-hub", "text", "", "", 0)
+	w := doRequest(t, handler, http.MethodDelete, "/channels/"+itoa(chID), token, nil)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want 204", w.Code)
+	}
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 // itoa converts an int64 to a string for use in URL paths.
 func itoa(n int64) string {
 	return fmt.Sprint(n)
+}
+
+// contains reports whether s contains sub (plain substring search).
+func contains(s, sub string) bool {
+	if len(sub) == 0 {
+		return true
+	}
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }

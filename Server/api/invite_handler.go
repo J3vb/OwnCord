@@ -7,10 +7,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 )
-
-// manageInvitesPerm is the MANAGE_INVITES permission bit.
-const manageInvitesPerm = int64(0x4000000)
 
 // createInviteRequest is the JSON body for POST /api/v1/invites.
 type createInviteRequest struct {
@@ -34,7 +32,7 @@ type inviteResponse struct {
 func MountInviteRoutes(r chi.Router, database *db.DB) {
 	r.Route("/api/v1/invites", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
-		r.Use(RequirePermission(manageInvitesPerm))
+		r.Use(RequirePermission(permissions.ManageInvites))
 
 		r.Post("/", handleCreateInvite(database))
 		r.Get("/", handleListInvites(database))

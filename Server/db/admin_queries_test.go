@@ -666,9 +666,9 @@ func TestGetAllSettings_AfterClearing(t *testing.T) {
 	}
 }
 
-// ─── BackupTo ─────────────────────────────────────────────────────────────────
+// ─── BackupToSafe ────────────────────────────────────────────────────────────
 
-func TestBackupTo(t *testing.T) {
+func TestBackupToSafe_AdminQueries(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "source.db")
 
@@ -685,9 +685,11 @@ func TestBackupTo(t *testing.T) {
 		t.Fatalf("MigrateFS: %v", err)
 	}
 
-	backupPath := filepath.Join(tmpDir, "backup.db")
-	if err := database.BackupTo(backupPath); err != nil {
-		t.Fatalf("BackupTo() error: %v", err)
+	backupDir := filepath.Join(tmpDir, "backups")
+	os.MkdirAll(backupDir, 0o755)
+	backupPath := filepath.Join(backupDir, "backup.db")
+	if err := database.BackupToSafe(backupPath, backupDir); err != nil {
+		t.Fatalf("BackupToSafe() error: %v", err)
 	}
 
 	info, err := os.Stat(backupPath)
@@ -699,7 +701,7 @@ func TestBackupTo(t *testing.T) {
 	}
 }
 
-func TestBackupTo_CreatesDirectoryFile(t *testing.T) {
+func TestBackupToSafe_CreatesDirectoryFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "src.db")
 
@@ -714,13 +716,12 @@ func TestBackupTo_CreatesDirectoryFile(t *testing.T) {
 	}
 	db.MigrateFS(database, migrFS)
 
-	// Create nested backup path
 	backupDir := filepath.Join(tmpDir, "backups")
 	os.MkdirAll(backupDir, 0o755)
 	backupPath := filepath.Join(backupDir, "chatserver_20260314_120000.db")
 
-	if err := database.BackupTo(backupPath); err != nil {
-		t.Fatalf("BackupTo() error: %v", err)
+	if err := database.BackupToSafe(backupPath, backupDir); err != nil {
+		t.Fatalf("BackupToSafe() error: %v", err)
 	}
 
 	if _, err := os.Stat(backupPath); os.IsNotExist(err) {

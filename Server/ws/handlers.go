@@ -7,15 +7,8 @@ import (
 	"time"
 
 	"github.com/microcosm-cc/bluemonday"
-)
-
-// Permission bits (from SCHEMA.md).
-const (
-	permSendMessages   = int64(0x0001) // bit 0
-	permReadMessages   = int64(0x0002) // bit 1
-	permAddReactions   = int64(0x0040) // bit 6
-	permManageMessages = int64(0x10000) // bit 16
-	permAdministrator  = int64(0x40000000) // bit 30
+	"github.com/owncord/server/auth"
+	"github.com/owncord/server/permissions"
 )
 
 // Rate limit windows.
@@ -40,6 +33,26 @@ func (h *Hub) HandleMessageForTest(c *Client, raw []byte) {
 
 // handleMessage parses the envelope and dispatches to the appropriate handler.
 func (h *Hub) handleMessage(c *Client, raw []byte) {
+	// Periodic session expiry check: every SessionCheckInterval messages,
+	// re-validate the session token. This catches sessions that are revoked or
+	// expire while the WebSocket connection is still open.
+	c.mu.Lock()
+	c.msgCount++
+	shouldCheck := c.msgCount >= SessionCheckInterval
+	if shouldCheck {
+		c.msgCount = 0
+	}
+	c.mu.Unlock()
+
+	if shouldCheck && c.tokenHash != "" {
+		sess, dbErr := h.db.GetSessionByTokenHash(c.tokenHash)
+		if dbErr != nil || sess == nil || auth.IsSessionExpired(sess.ExpiresAt) {
+			slog.Info("ws session expired, closing connection", "user_id", c.userID)
+			h.kickClient(c)
+			return
+		}
+	}
+
 	var env envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
 		slog.Warn("ws handleMessage invalid JSON", "user_id", c.userID, "err", err)
@@ -115,15 +128,28 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 	}
 
 	// Permission check.
-	if !h.hasChannelPerm(c, channelID, permReadMessages|permSendMessages) {
+	if !h.hasChannelPerm(c, channelID, permissions.ReadMessages|permissions.SendMessages) {
 		c.sendMsg(buildErrorMsg("FORBIDDEN", "missing SEND_MESSAGES permission"))
 		return
 	}
 
-	// Sanitize content.
+	// Slow mode enforcement: moderators with MANAGE_MESSAGES bypass it.
+	if ch.SlowMode > 0 && !h.hasChannelPerm(c, channelID, permissions.ManageMessages) {
+		slowKey := fmt.Sprintf("slow:%d:%d", c.userID, channelID)
+		if !h.limiter.Allow(slowKey, 1, time.Duration(ch.SlowMode)*time.Second) {
+			c.sendMsg(buildErrorMsg("SLOW_MODE", fmt.Sprintf("channel has %ds slow mode", ch.SlowMode)))
+			return
+		}
+	}
+
+	// Sanitize and validate content length.
 	content := sanitizer.Sanitize(p.Content)
 	if content == "" {
 		c.sendMsg(buildErrorMsg("BAD_REQUEST", "message content cannot be empty"))
+		return
+	}
+	if len([]rune(content)) > 4000 {
+		c.sendMsg(buildErrorMsg("BAD_REQUEST", "message content exceeds maximum length of 4000 characters"))
 		return
 	}
 
@@ -223,7 +249,7 @@ func (h *Hub) handleChatDelete(c *Client, _ string, payload json.RawMessage) {
 		return
 	}
 
-	isMod := h.hasChannelPerm(c, msg.ChannelID, permManageMessages)
+	isMod := h.hasChannelPerm(c, msg.ChannelID, permissions.ManageMessages)
 	if err := h.db.DeleteMessage(msgID, c.userID, isMod); err != nil {
 		c.sendMsg(buildErrorMsg("FORBIDDEN", "cannot delete this message"))
 		return
@@ -260,6 +286,10 @@ func (h *Hub) handleReaction(c *Client, add bool, payload json.RawMessage) {
 		c.sendMsg(buildErrorMsg("BAD_REQUEST", "emoji cannot be empty"))
 		return
 	}
+	if len(p.Emoji) > 32 {
+		c.sendMsg(buildErrorMsg("BAD_REQUEST", "emoji too long"))
+		return
+	}
 
 	msg, err := h.db.GetMessage(msgID)
 	if err != nil || msg == nil {
@@ -267,7 +297,7 @@ func (h *Hub) handleReaction(c *Client, add bool, payload json.RawMessage) {
 		return
 	}
 
-	if !h.hasChannelPerm(c, msg.ChannelID, permAddReactions) {
+	if !h.hasChannelPerm(c, msg.ChannelID, permissions.AddReactions) {
 		c.sendMsg(buildErrorMsg("FORBIDDEN", "missing ADD_REACTIONS permission"))
 		return
 	}
@@ -347,7 +377,7 @@ func (h *Hub) hasChannelPerm(c *Client, channelID int64, perm int64) bool {
 	if err != nil || role == nil {
 		return false
 	}
-	if role.Permissions&permAdministrator != 0 {
+	if role.Permissions&permissions.Administrator != 0 {
 		return true
 	}
 	// Check channel overrides.
@@ -355,7 +385,7 @@ func (h *Hub) hasChannelPerm(c *Client, channelID int64, perm int64) bool {
 	if err != nil {
 		return false
 	}
-	effective := (role.Permissions | allow) &^ deny
+	effective := permissions.EffectivePerms(role.Permissions, allow, deny)
 	return effective&perm == perm
 }
 

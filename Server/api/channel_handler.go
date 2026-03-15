@@ -9,10 +9,6 @@ import (
 )
 
 const (
-	// Permission bits (from SCHEMA.md).
-	permReadMessages   = int64(0x0002) // bit 1
-	permAdministrator  = int64(0x40000000) // bit 30
-
 	defaultMessageLimit = 50
 	maxMessageLimit     = 100
 )

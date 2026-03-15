@@ -5,12 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
-)
 
-// Voice permission bits (from SCHEMA.md).
-const (
-	permConnectVoice   = int64(0x200)  // bit 9
-	permUseSoundboard  = int64(0x100)  // bit 8
+	"github.com/owncord/server/permissions"
 )
 
 // Voice rate limit settings.
@@ -27,14 +23,14 @@ const (
 // 3. Broadcasts voice_state to channel.
 // 4. Sends all current voice states in the channel back to the joiner.
 func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
-	if !h.hasChannelPerm(c, 0, permConnectVoice) {
-		c.sendMsg(buildErrorMsg("FORBIDDEN", "missing CONNECT_VOICE permission"))
-		return
-	}
-
 	channelID, err := parseChannelID(payload)
 	if err != nil || channelID <= 0 {
 		c.sendMsg(buildErrorMsg("BAD_REQUEST", "channel_id must be a positive integer"))
+		return
+	}
+
+	if !h.hasChannelPerm(c, channelID, permissions.ConnectVoice) {
+		c.sendMsg(buildErrorMsg("FORBIDDEN", "missing CONNECT_VOICE permission"))
 		return
 	}
 
@@ -162,7 +158,7 @@ func (h *Hub) handleSoundboard(c *Client, payload json.RawMessage) {
 		return
 	}
 
-	if !h.hasChannelPerm(c, 0, permUseSoundboard) {
+	if !h.hasChannelPerm(c, 0, permissions.UseSoundboard) {
 		c.sendMsg(buildErrorMsg("FORBIDDEN", "missing USE_SOUNDBOARD permission"))
 		return
 	}

@@ -233,45 +233,35 @@ func (d *DB) GetInvite(code string) (*Invite, error) {
 	return inv, nil
 }
 
-// UseInvite increments use_count after validating the invite is usable.
-// Returns an error if the invite is revoked, expired, or has reached max uses.
-func (d *DB) UseInvite(code string) error {
-	inv, err := d.GetInvite(code)
-	if err != nil {
-		return err
-	}
-	if inv == nil {
-		return errors.New("invite not found")
-	}
-	if inv.Revoked {
-		return errors.New("invite has been revoked")
-	}
-	if inv.ExpiresAt != nil {
-		// Try both SQLite datetime format and ISO-8601 format.
-		var expires time.Time
-		var parseErr error
-		for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02T15:04:05Z"} {
-			expires, parseErr = time.Parse(layout, *inv.ExpiresAt)
-			if parseErr == nil {
-				break
-			}
-		}
-		if parseErr != nil {
-			return fmt.Errorf("parsing invite expiry: %w", parseErr)
-		}
-		if time.Now().UTC().After(expires) {
-			return errors.New("invite has expired")
-		}
-	}
-	if inv.MaxUses != nil && inv.Uses >= *inv.MaxUses {
-		return errors.New("invite has reached its maximum uses")
-	}
-	_, err = d.sqlDB.Exec(
-		`UPDATE invites SET use_count = use_count + 1 WHERE code = ?`,
+// UseInviteAtomic validates and increments the use_count in a single SQL
+// statement, eliminating the TOCTOU race that exists when GetInvite and
+// UseInvite are called as separate operations.
+//
+// The UPDATE only matches rows where:
+//   - the code exists
+//   - revoked = 0
+//   - max_uses IS NULL (unlimited) OR uses < max_uses
+//   - expires_at IS NULL (never) OR expires_at > now
+//
+// If zero rows are affected the invite is missing, revoked, expired, or
+// exhausted — an error is returned in all such cases.
+func (d *DB) UseInviteAtomic(code string) error {
+	result, err := d.sqlDB.Exec(
+		`UPDATE invites SET use_count = use_count + 1
+		 WHERE code = ? AND revoked = 0
+		 AND (max_uses IS NULL OR use_count < max_uses)
+		 AND (expires_at IS NULL OR strftime('%s', expires_at) > strftime('%s', 'now'))`,
 		code,
 	)
 	if err != nil {
-		return fmt.Errorf("UseInvite update: %w", err)
+		return fmt.Errorf("UseInviteAtomic: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("UseInviteAtomic rows: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("UseInviteAtomic: invite not found, revoked, expired, or exhausted")
 	}
 	return nil
 }

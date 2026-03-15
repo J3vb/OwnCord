@@ -186,6 +186,9 @@ func (u *Updater) DownloadAndVerify(ctx context.Context, downloadURL, checksumUR
 	if err := u.ValidateDownloadURL(downloadURL); err != nil {
 		return err
 	}
+	if err := u.ValidateDownloadURL(checksumURL); err != nil {
+		return fmt.Errorf("validating checksum URL: %w", err)
+	}
 
 	// Fetch checksum file.
 	checksumData, err := u.fetchBody(ctx, checksumURL)

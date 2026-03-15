@@ -5,6 +5,10 @@ import (
 	"time"
 )
 
+// defaultCleanupMaxWindow is the age beyond which a window entry with no
+// recent timestamps is considered stale and eligible for eviction.
+const defaultCleanupMaxWindow = 15 * time.Minute
+
 // entry records individual request timestamps for sliding-window limiting.
 type entry struct {
 	timestamps []time.Time
@@ -101,4 +105,70 @@ func (r *RateLimiter) Reset(key string) {
 	defer r.mu.Unlock()
 	delete(r.windows, key)
 	delete(r.lockouts, key)
+}
+
+// Cleanup evicts stale map entries to prevent unbounded memory growth.
+//
+// A windows entry is removed when every recorded timestamp is older than
+// maxWindow — meaning the entry could not affect any future Allow call that
+// uses a window equal to or shorter than maxWindow.
+//
+// A lockouts entry is removed when its expiry has passed.
+//
+// Pass defaultCleanupMaxWindow (15 minutes) for normal server operation, or
+// a shorter duration in tests.
+func (r *RateLimiter) Cleanup(maxWindow time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	cutoff := time.Now().Add(-maxWindow)
+
+	for key, e := range r.windows {
+		allStale := true
+		for _, ts := range e.timestamps {
+			if ts.After(cutoff) {
+				allStale = false
+				break
+			}
+		}
+		if allStale {
+			delete(r.windows, key)
+		}
+	}
+
+	now := time.Now()
+	for key, lo := range r.lockouts {
+		if now.After(lo.expiresAt) {
+			delete(r.lockouts, key)
+		}
+	}
+}
+
+// StartCleanup runs Cleanup on a ticker with the given interval until the
+// stop channel is closed. It is intended to be called in a goroutine:
+//
+//	stop := make(chan struct{})
+//	go rl.StartCleanup(5*time.Minute, 15*time.Minute, stop)
+//
+// Closing stop causes the goroutine to exit promptly.
+func (r *RateLimiter) StartCleanup(interval, maxWindow time.Duration, stop <-chan struct{}) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			r.Cleanup(maxWindow)
+		case <-stop:
+			return
+		}
+	}
+}
+
+// Len returns the number of entries currently stored in the windows and
+// lockouts maps. It is primarily useful for testing and monitoring.
+func (r *RateLimiter) Len() (windows, lockouts int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.windows), len(r.lockouts)
 }

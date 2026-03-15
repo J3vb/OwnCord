@@ -34,6 +34,9 @@ public sealed class ChatService : IChatService
     public event Action<WsErrorPayload>? ErrorReceived;
     public event Action<ServerRestartPayload>? ServerRestarting;
     public event Action<WsMember>? MemberJoined;
+    public event Action<ChannelEventPayload>? ChannelCreated;
+    public event Action<ChannelEventPayload>? ChannelUpdated;
+    public event Action<long>? ChannelDeleted;
     public event Action<string>? ConnectionLost;
 
     public ChatService(IApiClient api, IWebSocketService ws)
@@ -89,7 +92,23 @@ public sealed class ChatService : IChatService
 
         var wsUri = $"wss://{ApiClient.NormalizeHost(host)}/api/v1/ws";
         await _ws.ConnectAsync(wsUri, token, ct);
-        _ = _ws.RunReceiveLoopAsync(ct);
+        _ = RunReceiveLoopWithErrorHandlingAsync(ct);
+    }
+
+    private async Task RunReceiveLoopWithErrorHandlingAsync(CancellationToken ct)
+    {
+        try
+        {
+            await _ws.RunReceiveLoopAsync(ct);
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown — ignore
+        }
+        catch (Exception ex)
+        {
+            ConnectionLost?.Invoke($"Receive loop error: {ex.Message}");
+        }
     }
 
     public Task DisconnectWebSocketAsync()
@@ -124,7 +143,7 @@ public sealed class ChatService : IChatService
     {
         var envelope = new
         {
-            type = "typing",
+            type = "typing_start",
             payload = new { channel_id = channelId }
         };
         return _ws.SendAsync(envelope, ct);
@@ -186,6 +205,17 @@ public sealed class ChatService : IChatService
                     break;
                 case "member_join":
                     MemberJoined?.Invoke(Deserialize<WsMember>(envelope));
+                    break;
+                case "channel_create":
+                    ChannelCreated?.Invoke(Deserialize<ChannelEventPayload>(envelope));
+                    break;
+                case "channel_update":
+                    ChannelUpdated?.Invoke(Deserialize<ChannelEventPayload>(envelope));
+                    break;
+                case "channel_delete":
+                    var delPayload = envelope.Payload?.Deserialize<JsonElement>();
+                    if (delPayload?.TryGetProperty("id", out var idEl) == true)
+                        ChannelDeleted?.Invoke(idEl.GetInt64());
                     break;
                 // Unknown types silently ignored — forward compatibility
             }
