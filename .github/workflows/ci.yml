@@ -4,11 +4,13 @@ on:
   push:
     branches:
       - main
+      - dev
+      - tauri-migration
       - "feature/*"
   pull_request:
     branches:
       - main
-      - "feature/*"
+      - dev
 
 jobs:
   server-build-test:
@@ -50,3 +52,38 @@ jobs:
 
       - name: Run client tests
         run: dotnet test Client/OwnCord.Client.Tests/
+
+  tauri-client:
+    name: Tauri Client Build & Test
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: Client/tauri-client/
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: Client/tauri-client/package-lock.json
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: Client/tauri-client/src-tauri
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Build Tauri app
+        run: npm run tauri build
