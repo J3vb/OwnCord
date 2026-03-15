@@ -49,7 +49,7 @@ public sealed class ChatService : IChatService
         _ws = ws;
 
         _ws.MessageReceived += OnMessageReceived;
-        _ws.Disconnected += OnDisconnected;
+        _ws.Disconnected += reason => OnDisconnected(reason);
     }
 
     // ── Auth ────────────────────────────────────────────────────────────────
@@ -105,7 +105,10 @@ public sealed class ChatService : IChatService
 
         var wsUri = $"wss://{ApiClient.NormalizeHost(host)}/api/v1/ws";
         await _ws.ConnectAsync(wsUri, token, ct);
-        _ = RunReceiveLoopWithErrorHandlingAsync(ct);
+
+        // Use the reconnect CTS so the loop can be cancelled on logout/disconnect,
+        // not the caller's token which may be default/already disposed.
+        _ = RunReceiveLoopWithErrorHandlingAsync(_reconnectCts.Token);
     }
 
     private async Task RunReceiveLoopWithErrorHandlingAsync(CancellationToken ct)
@@ -321,9 +324,9 @@ public sealed class ChatService : IChatService
         }
     }
 
-    private void OnDisconnected()
+    private void OnDisconnected(string reason)
     {
-        ConnectionLost?.Invoke("WebSocket connection lost");
+        ConnectionLost?.Invoke(reason);
 
         if (!_intentionalDisconnect && _host is not null && CurrentToken is not null)
             _ = ReconnectAsync();

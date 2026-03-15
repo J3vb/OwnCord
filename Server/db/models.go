@@ -44,12 +44,12 @@ type Invite struct {
 
 // Role represents a row in the roles table.
 type Role struct {
-	ID          int64
-	Name        string
-	Color       *string
-	Permissions int64
-	Position    int
-	IsDefault   bool
+	ID          int64   `json:"id"`
+	Name        string  `json:"name"`
+	Color       *string `json:"color"`
+	Permissions int64   `json:"permissions"`
+	Position    int     `json:"position"`
+	IsDefault   bool    `json:"is_default"`
 }
 
 // Channel represents a row in the channels table.
@@ -109,14 +109,14 @@ type MessageSearchResult struct {
 // VoiceState represents a row in the voice_states table.
 // It tracks which voice channel a user is in and their current audio state.
 type VoiceState struct {
-	UserID      int64
-	ChannelID   int64
-	Username    string
-	Muted       bool
-	Deafened    bool
-	Speaking    bool
-	Camera      bool
-	Screenshare bool
+	UserID      int64  `json:"user_id"`
+	ChannelID   int64  `json:"channel_id"`
+	Username    string `json:"username"`
+	Muted       bool   `json:"muted"`
+	Deafened    bool   `json:"deafened"`
+	Speaking    bool   `json:"speaking"`
+	Camera      bool   `json:"camera"`
+	Screenshare bool   `json:"screenshare"`
 }
 
 // ServerStats contains aggregate counts for the admin dashboard.

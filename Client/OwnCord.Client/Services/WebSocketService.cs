@@ -21,7 +21,7 @@ public sealed class WebSocketService : IWebSocketService, IDisposable
     public WebSocketState State => _ws?.State ?? WebSocketState.None;
 
     public event Action<string>? MessageReceived;
-    public event Action? Disconnected;
+    public event Action<string>? Disconnected;
 
     public async Task ConnectAsync(string uri, string token, CancellationToken ct = default)
     {
@@ -67,7 +67,8 @@ public sealed class WebSocketService : IWebSocketService, IDisposable
                     result = await _ws.ReceiveAsync(buf, ct);
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
-                        Disconnected?.Invoke();
+                        var desc = _ws.CloseStatusDescription ?? _ws.CloseStatus?.ToString() ?? "server closed connection";
+                        Disconnected?.Invoke(desc);
                         return;
                     }
                     ms.Write(buf, 0, result.Count);
@@ -81,9 +82,9 @@ public sealed class WebSocketService : IWebSocketService, IDisposable
         {
             // Normal shutdown via cancellation.
         }
-        catch (WebSocketException)
+        catch (WebSocketException ex)
         {
-            Disconnected?.Invoke();
+            Disconnected?.Invoke($"WebSocket error: {ex.Message}");
         }
     }
 

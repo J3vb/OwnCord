@@ -51,7 +51,15 @@ public partial class MainWindow : Window
             _mainVm.Initialize(_chat);
             RootFrame.Navigate(new MainPage(_mainVm));
 
-            await _chat.ConnectWebSocketAsync(host, _chat.CurrentToken!);
+            try
+            {
+                await _chat.ConnectWebSocketAsync(host, _chat.CurrentToken!);
+            }
+            catch (Exception wsEx)
+            {
+                // WebSocket errors after navigation should show on MainPage, not ConnectPage
+                _mainVm.ConnectionStatus = $"WebSocket failed: {wsEx.Message}";
+            }
         }
         catch (ApiException ex)
         {
@@ -83,7 +91,14 @@ public partial class MainWindow : Window
             _mainVm.Initialize(_chat);
             RootFrame.Navigate(new MainPage(_mainVm));
 
-            await _chat.ConnectWebSocketAsync(host, _chat.CurrentToken!);
+            try
+            {
+                await _chat.ConnectWebSocketAsync(host, _chat.CurrentToken!);
+            }
+            catch (Exception wsEx)
+            {
+                _mainVm.ConnectionStatus = $"WebSocket failed: {wsEx.Message}";
+            }
         }
         catch (ApiException ex)
         {

@@ -10,8 +10,8 @@ public interface IWebSocketService
     /// <summary>Fires for each raw JSON message received.</summary>
     event Action<string>? MessageReceived;
 
-    /// <summary>Fires when the connection drops unexpectedly.</summary>
-    event Action? Disconnected;
+    /// <summary>Fires when the connection drops unexpectedly, with a reason string.</summary>
+    event Action<string>? Disconnected;
 
     Task ConnectAsync(string uri, string token, CancellationToken ct = default);
     Task SendAsync(object message, CancellationToken ct = default);

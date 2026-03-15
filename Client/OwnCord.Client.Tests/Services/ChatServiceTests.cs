@@ -62,7 +62,7 @@ public class FakeWebSocketService : IWebSocketService
     public WebSocketState State { get; set; } = WebSocketState.None;
 
     public event Action<string>? MessageReceived;
-    public event Action? Disconnected;
+    public event Action<string>? Disconnected;
 
     public string? LastConnectUri { get; private set; }
     public string? LastConnectToken { get; private set; }
@@ -104,11 +104,11 @@ public class FakeWebSocketService : IWebSocketService
 
     // Test helpers to simulate server messages
     public void SimulateMessage(string json) => MessageReceived?.Invoke(json);
-    public void SimulateDisconnect()
+    public void SimulateDisconnect(string reason = "test disconnect")
     {
         IsConnected = false;
         State = WebSocketState.Closed;
-        Disconnected?.Invoke();
+        Disconnected?.Invoke(reason);
     }
 }
 

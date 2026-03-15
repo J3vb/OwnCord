@@ -92,6 +92,7 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         chat.ChannelUpdated += p => RunOnUI(() => OnChannelUpdated(p));
         chat.ChannelDeleted += id => RunOnUI(() => OnChannelDeleted(id));
         chat.ConnectionLost += r => RunOnUI(() => OnConnectionLost(r));
+        chat.ErrorReceived += p => RunOnUI(() => OnWsError(p));
         chat.VoiceStateReceived += p => RunOnUI(() => OnVoiceState(p));
         chat.VoiceLeaveReceived += p => RunOnUI(() => OnVoiceLeave(p));
         chat.VoiceSpeakersReceived += p => RunOnUI(() => OnVoiceSpeakers(p));
@@ -675,7 +676,9 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     private void RebuildChannelGroups()
     {
         // Preserve expanded state across rebuilds
-        var expandedState = ChannelGroups.ToDictionary(g => g.CategoryName ?? "", g => g.IsExpanded);
+        var expandedState = new Dictionary<string, bool>();
+        foreach (var g in ChannelGroups)
+            expandedState.TryAdd(g.CategoryName ?? "", g.IsExpanded);
 
         ChannelGroups.Clear();
 
@@ -715,7 +718,9 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     {
         MemberGroups.Clear();
 
-        var roleMap = Roles.ToDictionary(r => r.Id);
+        var roleMap = new Dictionary<long, WsRole>();
+        foreach (var r in Roles)
+            roleMap.TryAdd(r.Id, r);
 
         var grouped = Members
             .GroupBy(m => m.RoleId)
@@ -994,7 +999,12 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
 
     private void OnConnectionLost(string reason)
     {
-        ConnectionStatus = "Disconnected \u2014 reconnecting...";
+        ConnectionStatus = $"Disconnected \u2014 {reason}";
+    }
+
+    private void OnWsError(WsErrorPayload error)
+    {
+        ConnectionStatus = $"Server error: {error.Message}";
     }
 
     // ── Voice event handlers ─────────────────────────────────────────────────
