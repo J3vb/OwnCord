@@ -1,25 +1,59 @@
 # Code Review Findings (2026-03-16)
 
-Scope: server (Go), Tauri client (TS/Rust), and spec/docs alignment. I did not run tests.
+Scope: server (Go), Tauri client (TS/Rust), spec/docs.
+No tests run.
 
-**Critical**
-1. Authorization bypass for read access to channels and messages. Any authenticated client can set `channel_focus` to any channel ID and receive broadcasts, and REST endpoints return channels/messages/search results without permission checks. Impact: data exposure across private channels. Evidence: `D:\Local-Lab\Coding\Repos\OwnCord\Server\ws\handlers.go:426-435`, `D:\Local-Lab\Coding\Repos\OwnCord\Server\ws\hub.go:216-301`, `D:\Local-Lab\Coding\Repos\OwnCord\Server\api\channel_handler.go:16-176`. Recommendation: enforce `READ_MESSAGES` (and visibility) for `channel_focus`, `GET /channels`, `GET /channels/{id}/messages`, and `GET /search`, and track per-user channel access in hub routing.
-2. WebSocket auth failure handling is incompatible between server and client. Server emits `type: "error"` with code `AUTH_ERROR` and then closes; client only treats `auth_error` as non-recoverable and will reconnect forever with a bad token. Impact: infinite reconnect loop and no clear UX on auth failure. Evidence: `D:\Local-Lab\Coding\Repos\OwnCord\Server\ws\serve.go:127-165`, `D:\Local-Lab\Coding\Repos\OwnCord\Server\ws\messages.go:27-35`, `D:\Local-Lab\Coding\Repos\OwnCord\Client\tauri-client\src\lib\ws.ts:145-152`. Recommendation: emit `auth_error` with the spec payload and have the client stop reconnecting on auth errors.
-3. Member/role protocol mismatches will crash or mis-render the client. Server emits `member_join` as a flat payload with `role_id`, and `ready` members and `auth_ok` omit role name entirely. Client expects `payload.user` with a role string and uses it for UI. Impact: runtime exceptions on join and incorrect role display. Evidence: `D:\Local-Lab\Coding\Repos\OwnCord\Server\ws\messages.go:49-64`, `D:\Local-Lab\Coding\Repos\OwnCord\Server\ws\serve.go:171-191`, `D:\Local-Lab\Coding\Repos\OwnCord\Server\db\auth_queries.go:290-320`, `D:\Local-Lab\Coding\Repos\OwnCord\Client\tauri-client\src\lib\types.ts:61-104`, `D:\Local-Lab\Coding\Repos\OwnCord\Client\tauri-client\src\stores\members.store.ts:58-69`. Recommendation: align server WS payloads to `UserWithRole` or update client to accept current server shapes.
-4. `chat_message` WS payload omits `attachments`, and the client assumes it exists. This can throw at render time (`for ... of msg.attachments`) and drop messages. Impact: client crashes on any message if `attachments` is undefined. Evidence: `D:\Local-Lab\Coding\Repos\OwnCord\Server\ws\messages.go:67-87`, `D:\Local-Lab\Coding\Repos\OwnCord\Client\tauri-client\src\stores\messages.store.ts:51-63`, `D:\Local-Lab\Coding\Repos\OwnCord\Client\tauri-client\src\components\MessageList.ts:324-327`. Recommendation: always include `attachments: []` in WS payloads or make client defaults defensive.
+> **Status: ALL RESOLVED** (2026-03-16).
+> Commits: `0680a32`, `0bd9165`, `642cd54`.
 
-**High**
-1. REST message/search responses do not match API spec or client types. `GET /channels/{id}/messages` returns `MessageWithUser` (username/avatar only) without `user` object, attachments, reactions, pinned, or deleted fields. Search returns `username` instead of `user`. Impact: REST clients (including the Tauri client) will mis-parse or lose required data. Evidence: `D:\Local-Lab\Coding\Repos\OwnCord\Server\api\channel_handler.go:97-117`, `D:\Local-Lab\Coding\Repos\OwnCord\Server\db\models.go:85-107`, `D:\Local-Lab\Coding\Repos\OwnCord\Server\db\message_queries.go:35-80`, `D:\Local-Lab\Coding\Repos\OwnCord\Server\db\message_queries.go:185-236`, `D:\Local-Lab\Coding\Repos\OwnCord\Client\tauri-client\src\lib\types.ts:478-520`, `D:\Local-Lab\Coding\Repos\OwnCord\API.md:65-132`. Recommendation: update REST handlers and DB queries to return the documented shapes (including attachments/reactions/user object), or update API.md and client types to match reality.
-2. Health check endpoint mismatch. Server exposes `/health`, while the client probes `/api/v1/health`, and API.md documents `/api/health`. Impact: health checks always fail; status badges will show offline. Evidence: `D:\Local-Lab\Coding\Repos\OwnCord\Server\api\router.go:33-35`, `D:\Local-Lab\Coding\Repos\OwnCord\Client\tauri-client\src\lib\api.ts:403-418`, `D:\Local-Lab\Coding\Repos\OwnCord\API.md:260-268`. Recommendation: choose one canonical health path and update server, client, and docs to match.
-3. Attachments are parsed on `chat_send` but never validated or persisted. The server accepts an attachments array but ignores it entirely. Impact: attachments feature appears to work client-side but messages will drop attachments and can’t be retrieved later; also no access validation on attachment IDs. Evidence: `D:\Local-Lab\Coding\Repos\OwnCord\Server\ws\handlers.go:123-203`. Recommendation: validate attachment IDs against uploads table, enforce permissions, persist the relationship, and include attachments in WS/REST responses.
+## Critical
 
-**Medium**
-1. WS heartbeat sends `ping` messages that the server treats as unknown and responds with `error`. Impact: noisy logs, unnecessary error traffic, and potential user-visible errors if surfaced. Evidence: `D:\Local-Lab\Coding\Repos\OwnCord\Client\tauri-client\src\lib\ws.ts:86-96`, `D:\Local-Lab\Coding\Repos\OwnCord\Server\ws\handlers.go:71-110`. Recommendation: implement a `ping` handler (or disable client heartbeat if server doesn’t need it).
-2. API base path is inconsistent across docs and guidance. `API.md` says `/api` while `CLAUDE.md` says `/api/v1`, and the server/router+client are `/api/v1`. Impact: contributors and third-party clients will integrate against the wrong base URL. Evidence: `D:\Local-Lab\Coding\Repos\OwnCord\API.md:3-18`, `D:\Local-Lab\Coding\Repos\OwnCord\CLAUDE.md:21-22`, `D:\Local-Lab\Coding\Repos\OwnCord\Server\api\router.go:40-68`, `D:\Local-Lab\Coding\Repos\OwnCord\Client\tauri-client\src\lib\api.ts:52-54`. Recommendation: pick a single base path, then update code and docs consistently.
+1. Auth bypass: any client can `channel_focus` any channel
+   and REST returns data without permission checks.
+   Impact: cross-channel data exposure.
+   Fix: enforce `READ_MESSAGES` on focus, GET channels,
+   messages, and search; track access in hub routing.
+2. WS auth failure mismatch: server sends `type: "error"`
+   with `AUTH_ERROR`; client expects `auth_error` type.
+   Impact: infinite reconnect with bad token.
+   Fix: emit `auth_error` per spec; client stops on it.
+3. Member/role protocol mismatch: server sends flat
+   `member_join` with `role_id`; client expects nested
+   `payload.user` with role string.
+   Impact: runtime crash on join, wrong role display.
+   Fix: align payloads to `UserWithRole` shape.
+4. `chat_message` omits `attachments`; client iterates
+   it unconditionally. Impact: crash on render.
+   Fix: always include `attachments: []` in payloads.
+
+## High
+
+1. REST message/search responses diverge from API spec.
+   Missing `user` object, attachments, reactions, pinned,
+   deleted fields. Impact: clients mis-parse data.
+   Fix: update handlers/queries to match spec shapes.
+2. Health endpoint mismatch: server `/health`, client
+   `/api/v1/health`, docs `/api/health`.
+   Impact: health checks always fail.
+   Fix: pick one canonical path, update all.
+3. Attachments parsed on `chat_send` but never persisted.
+   Impact: attachments silently dropped.
+   Fix: validate IDs, persist, include in responses.
+
+## Medium
+
+1. WS heartbeat `ping` treated as unknown by server.
+   Impact: noisy error logs.
+   Fix: add `ping` handler or disable client heartbeat.
+2. API base path inconsistent: docs say `/api`, code
+   uses `/api/v1`. Impact: wrong integration URLs.
+   Fix: pick one path, update code and docs.
 
 **Low**
+
 1. `auth_ok` does not include role, but UI expects role-based color coding. Even if `member_join` and `ready` are fixed, initial auth state will still lack role. Impact: inconsistent role display until ready arrives. Evidence: `D:\Local-Lab\Coding\Repos\OwnCord\Server\ws\serve.go:171-191`, `D:\Local-Lab\Coding\Repos\OwnCord\Client\tauri-client\src\lib\types.ts:163-167`, `D:\Local-Lab\Coding\Repos\OwnCord\Client\tauri-client\src\lib\dispatcher.ts:55-63`. Recommendation: include role in `auth_ok` or adjust client to tolerate missing role until ready.
 
 **Test Gaps**
+
 1. No automated coverage for authorization of channel read access (REST and WS channel focus). Given the permission system, this should have dedicated tests to prevent regressions. Suggested targets: `D:\Local-Lab\Coding\Repos\OwnCord\Server\api\channel_handler_test.go` and WS tests in `D:\Local-Lab\Coding\Repos\OwnCord\Server\ws\handlers_test.go`.
 2. No contract tests asserting server responses match `API.md` and `PROTOCOL.md`. The current drift would have been caught by simple golden tests.
