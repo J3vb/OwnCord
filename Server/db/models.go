@@ -98,12 +98,50 @@ type ReactionCount struct {
 
 // MessageSearchResult is a row returned by the FTS5 message search.
 type MessageSearchResult struct {
-	MessageID   int64
-	ChannelID   int64
-	ChannelName string
-	Username    string
-	Content     string
-	Timestamp   string
+	MessageID   int64          `json:"message_id"`
+	ChannelID   int64          `json:"channel_id"`
+	ChannelName string         `json:"channel_name"`
+	User        UserPublic     `json:"user"`
+	Content     string         `json:"content"`
+	Timestamp   string         `json:"timestamp"`
+}
+
+// UserPublic is the public-facing user shape for API responses.
+type UserPublic struct {
+	ID       int64   `json:"id"`
+	Username string  `json:"username"`
+	Avatar   *string `json:"avatar,omitempty"`
+}
+
+// MessageAPIResponse matches the API.md shape for GET /channels/{id}/messages.
+type MessageAPIResponse struct {
+	ID          int64           `json:"id"`
+	ChannelID   int64           `json:"channel_id"`
+	User        UserPublic      `json:"user"`
+	Content     string          `json:"content"`
+	ReplyTo     *int64          `json:"reply_to"`
+	Attachments []AttachmentInfo `json:"attachments"`
+	Reactions   []ReactionInfo  `json:"reactions"`
+	Pinned      bool            `json:"pinned"`
+	EditedAt    *string         `json:"edited_at"`
+	Deleted     bool            `json:"deleted"`
+	Timestamp   string          `json:"timestamp"`
+}
+
+// AttachmentInfo is the attachment shape in API responses.
+type AttachmentInfo struct {
+	ID       string `json:"id"`
+	Filename string `json:"filename"`
+	Size     int64  `json:"size"`
+	Mime     string `json:"mime"`
+	URL      string `json:"url"`
+}
+
+// ReactionInfo is the reaction shape in API responses.
+type ReactionInfo struct {
+	Emoji string `json:"emoji"`
+	Count int    `json:"count"`
+	Me    bool   `json:"me"`
 }
 
 // VoiceState represents a row in the voice_states table.

@@ -193,7 +193,7 @@ func (d *DB) SearchMessages(query string, channelID *int64, limit int) ([]Messag
 
 	if channelID != nil {
 		rows, err = d.sqlDB.Query(
-			`SELECT m.id, m.channel_id, c.name, u.username, m.content, m.timestamp
+			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content, m.timestamp
 			 FROM messages_fts f
 			 JOIN messages m ON f.rowid = m.id
 			 JOIN channels c ON m.channel_id = c.id
@@ -204,7 +204,7 @@ func (d *DB) SearchMessages(query string, channelID *int64, limit int) ([]Messag
 		)
 	} else {
 		rows, err = d.sqlDB.Query(
-			`SELECT m.id, m.channel_id, c.name, u.username, m.content, m.timestamp
+			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content, m.timestamp
 			 FROM messages_fts f
 			 JOIN messages m ON f.rowid = m.id
 			 JOIN channels c ON m.channel_id = c.id
@@ -222,7 +222,9 @@ func (d *DB) SearchMessages(query string, channelID *int64, limit int) ([]Messag
 	var results []MessageSearchResult
 	for rows.Next() {
 		var r MessageSearchResult
-		if scanErr := rows.Scan(&r.MessageID, &r.ChannelID, &r.ChannelName, &r.Username, &r.Content, &r.Timestamp); scanErr != nil {
+		if scanErr := rows.Scan(&r.MessageID, &r.ChannelID, &r.ChannelName,
+			&r.User.ID, &r.User.Username, &r.User.Avatar,
+			&r.Content, &r.Timestamp); scanErr != nil {
 			return nil, fmt.Errorf("SearchMessages scan: %w", scanErr)
 		}
 		results = append(results, r)
@@ -234,6 +236,124 @@ func (d *DB) SearchMessages(query string, channelID *int64, limit int) ([]Messag
 		results = []MessageSearchResult{}
 	}
 	return results, nil
+}
+
+// GetMessagesForAPI returns messages in the API.md response shape, including
+// user object, reactions (with me flag), and attachments.
+func (d *DB) GetMessagesForAPI(channelID, before int64, limit int, requestingUserID int64) ([]MessageAPIResponse, error) {
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if before > 0 {
+		rows, err = d.sqlDB.Query(
+			`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
+			        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp
+			 FROM messages m JOIN users u ON m.user_id = u.id
+			 WHERE m.channel_id = ? AND m.id < ? AND m.deleted = 0
+			 ORDER BY m.id DESC LIMIT ?`,
+			channelID, before, limit,
+		)
+	} else {
+		rows, err = d.sqlDB.Query(
+			`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
+			        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp
+			 FROM messages m JOIN users u ON m.user_id = u.id
+			 WHERE m.channel_id = ? AND m.deleted = 0
+			 ORDER BY m.id DESC LIMIT ?`,
+			channelID, limit,
+		)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("GetMessagesForAPI: %w", err)
+	}
+	defer rows.Close()
+
+	var msgs []MessageAPIResponse
+	var msgIDs []int64
+	for rows.Next() {
+		var m MessageAPIResponse
+		var deleted, pinned int
+		if scanErr := rows.Scan(
+			&m.ID, &m.ChannelID, &m.User.ID, &m.User.Username, &m.User.Avatar,
+			&m.Content, &m.ReplyTo, &m.EditedAt, &deleted, &pinned, &m.Timestamp,
+		); scanErr != nil {
+			return nil, fmt.Errorf("GetMessagesForAPI scan: %w", scanErr)
+		}
+		m.Deleted = deleted != 0
+		m.Pinned = pinned != 0
+		m.Attachments = []AttachmentInfo{}
+		m.Reactions = []ReactionInfo{}
+		msgs = append(msgs, m)
+		msgIDs = append(msgIDs, m.ID)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("GetMessagesForAPI rows: %w", rows.Err())
+	}
+	if msgs == nil {
+		return []MessageAPIResponse{}, nil
+	}
+
+	// Batch-fetch reactions for all message IDs.
+	reactMap, err := d.getReactionsBatch(msgIDs, requestingUserID)
+	if err != nil {
+		return nil, fmt.Errorf("GetMessagesForAPI reactions: %w", err)
+	}
+	for i := range msgs {
+		if r, ok := reactMap[msgs[i].ID]; ok {
+			msgs[i].Reactions = r
+		}
+	}
+
+	return msgs, nil
+}
+
+// getReactionsBatch returns aggregated reactions for multiple messages.
+func (d *DB) getReactionsBatch(msgIDs []int64, requestingUserID int64) (map[int64][]ReactionInfo, error) {
+	if len(msgIDs) == 0 {
+		return map[int64][]ReactionInfo{}, nil
+	}
+
+	// Build placeholders for IN clause.
+	placeholders := ""
+	args := make([]any, 0, len(msgIDs)+len(msgIDs))
+	for i, id := range msgIDs {
+		if i > 0 {
+			placeholders += ","
+		}
+		placeholders += "?"
+		args = append(args, id)
+	}
+
+	// Query: aggregate count + check if requesting user reacted.
+	query := fmt.Sprintf(
+		`SELECT r.message_id, r.emoji, COUNT(*) as cnt,
+		        MAX(CASE WHEN r.user_id = ? THEN 1 ELSE 0 END) as me
+		 FROM reactions r
+		 WHERE r.message_id IN (%s)
+		 GROUP BY r.message_id, r.emoji`,
+		placeholders,
+	)
+	args = append([]any{requestingUserID}, args...)
+
+	rows, err := d.sqlDB.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("getReactionsBatch: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[int64][]ReactionInfo)
+	for rows.Next() {
+		var msgID int64
+		var ri ReactionInfo
+		var me int
+		if scanErr := rows.Scan(&msgID, &ri.Emoji, &ri.Count, &me); scanErr != nil {
+			return nil, fmt.Errorf("getReactionsBatch scan: %w", scanErr)
+		}
+		ri.Me = me != 0
+		result[msgID] = append(result[msgID], ri)
+	}
+	return result, nil
 }
 
 // UpdateReadState upserts the read state for a user in a channel.

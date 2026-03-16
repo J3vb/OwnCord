@@ -135,8 +135,14 @@ func handleGetMessages(database *db.DB) http.HandlerFunc {
 			limit = v
 		}
 
+		// Extract requesting user ID for reaction "me" flag.
+		var userID int64
+		if user, ok := r.Context().Value(UserKey).(*db.User); ok && user != nil {
+			userID = user.ID
+		}
+
 		// Fetch one extra to determine has_more.
-		msgs, err := database.GetMessages(channelID, before, limit+1)
+		msgs, err := database.GetMessagesForAPI(channelID, before, limit+1, userID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL",
@@ -152,8 +158,8 @@ func handleGetMessages(database *db.DB) http.HandlerFunc {
 		}
 
 		type response struct {
-			Messages []db.MessageWithUser `json:"messages"`
-			HasMore  bool                 `json:"has_more"`
+			Messages []db.MessageAPIResponse `json:"messages"`
+			HasMore  bool                    `json:"has_more"`
 		}
 		writeJSON(w, http.StatusOK, response{Messages: msgs, HasMore: hasMore})
 	}
