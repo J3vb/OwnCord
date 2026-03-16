@@ -5,6 +5,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
+import { createEmojiPicker } from "@components/EmojiPicker";
 
 export interface MessageInputOptions {
   readonly channelId: number;
@@ -151,6 +152,47 @@ export function createMessageInput(
     }, { signal });
 
     sendBtn.addEventListener("click", handleSend, { signal });
+
+    // Emoji picker toggle
+    let emojiPicker: { element: HTMLDivElement; destroy(): void } | null = null;
+
+    function toggleEmojiPicker(): void {
+      if (emojiPicker !== null) {
+        emojiPicker.element.remove();
+        emojiPicker.destroy();
+        emojiPicker = null;
+        return;
+      }
+      emojiPicker = createEmojiPicker({
+        onSelect: (emoji: string) => {
+          if (textarea !== null) {
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const before = textarea.value.slice(0, start);
+            const after = textarea.value.slice(end);
+            textarea.value = before + emoji + after;
+            textarea.selectionStart = textarea.selectionEnd = start + emoji.length;
+            textarea.focus();
+          }
+          // Close after selection
+          if (emojiPicker !== null) {
+            emojiPicker.element.remove();
+            emojiPicker.destroy();
+            emojiPicker = null;
+          }
+        },
+        onClose: () => {
+          if (emojiPicker !== null) {
+            emojiPicker.element.remove();
+            emojiPicker.destroy();
+            emojiPicker = null;
+          }
+        },
+      });
+      root?.appendChild(emojiPicker.element);
+    }
+
+    emojiBtn.addEventListener("click", toggleEmojiPicker, { signal });
 
     appendChildren(inputBox, attachBtn, textarea, emojiBtn, sendBtn);
     appendChildren(root, replyBar, editBar, inputBox);

@@ -168,7 +168,8 @@ describe("Store integration via dispatcher", () => {
       const channels = channelsStore.getState().channels;
       expect(channels.size).toBe(3);
       expect(channels.get(1)?.name).toBe("general");
-      expect(channels.get(1)?.unreadCount).toBe(3);
+      // Auto-select first text channel clears its unread count
+      expect(channels.get(1)?.unreadCount).toBe(0);
       expect(channels.get(3)?.type).toBe("voice");
 
       // Members
@@ -209,10 +210,10 @@ describe("Store integration via dispatcher", () => {
     });
 
     it("adds message to store and increments unread on non-active channel", () => {
-      // No active channel set, so channel 1 is non-active
+      // After ready, channel 1 is auto-selected. Send to channel 2 (non-active).
       ws.simulate("chat_message", {
         id: 100,
-        channel_id: 1,
+        channel_id: 2,
         user: { id: 10, username: "sender", avatar: null },
         content: "Hello!",
         reply_to: null,
@@ -220,11 +221,11 @@ describe("Store integration via dispatcher", () => {
         timestamp: "2026-03-15T12:00:00Z",
       });
 
-      const messages = messagesStore.getState().messagesByChannel.get(1);
+      const messages = messagesStore.getState().messagesByChannel.get(2);
       expect(messages).toHaveLength(1);
       expect(messages![0]!.content).toBe("Hello!");
 
-      const channel = channelsStore.getState().channels.get(1);
+      const channel = channelsStore.getState().channels.get(2);
       expect(channel?.unreadCount).toBe(1);
     });
 

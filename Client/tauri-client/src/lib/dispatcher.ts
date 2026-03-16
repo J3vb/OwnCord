@@ -6,6 +6,7 @@ import type { WsClient } from "./ws";
 import { authStore, setAuth, clearAuth } from "@stores/auth.store";
 import {
   setChannels,
+  setActiveChannel,
   addChannel,
   updateChannel,
   removeChannel,
@@ -33,6 +34,7 @@ import {
   removeVoiceUser,
   setVoiceConfig,
   setSpeakers,
+  joinVoiceChannel,
 } from "@stores/voice.store";
 import { createLogger } from "./logger";
 
@@ -75,6 +77,16 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
       setChannels(payload.channels);
       setMembers(payload.members);
       setVoiceStates(payload.voice_states);
+
+      // Auto-select the first text channel if none is active
+      const currentActive = channelsStore.select((s) => s.activeChannelId);
+      if (currentActive === null && payload.channels.length > 0) {
+        const firstText = payload.channels.find((ch) => ch.type === "text");
+        if (firstText !== undefined) {
+          setActiveChannel(firstText.id);
+        }
+      }
+
       log.info("Ready payload applied", {
         channels: payload.channels.length,
         members: payload.members.length,
@@ -194,6 +206,11 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   unsubs.push(
     ws.on("voice_state", (payload) => {
       updateVoiceState(payload);
+      // Auto-join voice channel if the event is for the current user
+      const currentUserId = authStore.getState().user?.id ?? 0;
+      if (payload.user_id === currentUserId) {
+        joinVoiceChannel(payload.channel_id);
+      }
     }),
   );
 

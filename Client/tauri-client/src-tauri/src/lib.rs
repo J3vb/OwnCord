@@ -1,4 +1,5 @@
 mod commands;
+mod credentials;
 mod hotkeys;
 mod tray;
 mod ws_proxy;
@@ -19,6 +20,9 @@ pub fn run() {
             ws_proxy::ws_connect,
             ws_proxy::ws_send,
             ws_proxy::ws_disconnect,
+            credentials::save_credential,
+            credentials::load_credential,
+            credentials::delete_credential,
         ])
         .setup(|app| {
             tray::create_tray(app.handle())?;

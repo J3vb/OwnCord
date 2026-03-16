@@ -12,10 +12,12 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
+    "@playwright/test": "^1",
     "@tauri-apps/cli": "^2",
     "@vitest/coverage-v8": "^3",
     "jsdom": "^29.0.0",

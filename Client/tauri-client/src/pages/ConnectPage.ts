@@ -11,6 +11,7 @@ import {
 import type { MountableComponent } from "@lib/safe-render";
 import { openSettings, closeSettings } from "@stores/ui.store";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
+import type { HealthStatus } from "@lib/profiles";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -80,6 +81,7 @@ export function createConnectPage(
   showConnecting(): void;
   showError(message: string): void;
   resetToIdle(): void;
+  updateHealthStatus(host: string, status: HealthStatus): void;
 } {
   // --- internal state (mutable, local to this instance) ---
   let formState: FormState = "idle";
@@ -149,8 +151,12 @@ export function createConnectPage(
     return panel;
   }
 
+  // Map of host -> DOM elements for health status updates
+  const healthElements = new Map<string, { dot: HTMLDivElement; latency: HTMLSpanElement }>();
+
   function renderServerProfiles(profiles: readonly ServerProfile[]): void {
     clearChildren(serverListEl);
+    healthElements.clear();
     for (const profile of profiles) {
       const item = createElement("div", {
         class: "server-item",
@@ -163,12 +169,19 @@ export function createConnectPage(
       });
       setText(icon, getIconInitials(profile.name));
 
+      // Health status dot on the icon
+      const statusDot = createElement("div", { class: "srv-status-dot unknown" });
+      icon.appendChild(statusDot);
+
       const info = createElement("div", { class: "srv-info" });
       const name = createElement("div", { class: "srv-name" }, profile.name);
       const meta = createElement("div", { class: "srv-meta" });
       const host = createElement("span", { class: "srv-host" }, profile.host);
-      meta.appendChild(host);
+      const latency = createElement("span", { class: "srv-latency" });
+      appendChildren(meta, host, latency);
       appendChildren(info, name, meta);
+
+      healthElements.set(profile.host, { dot: statusDot, latency });
 
       appendChildren(item, icon, info);
 
@@ -181,6 +194,24 @@ export function createConnectPage(
       );
 
       serverListEl.appendChild(item);
+    }
+  }
+
+  function updateHealthStatus(host: string, status: HealthStatus): void {
+    const els = healthElements.get(host);
+    if (!els) return;
+
+    // Update status dot
+    els.dot.className = `srv-status-dot ${status.status}`;
+
+    // Update latency badge
+    if (status.latencyMs !== null) {
+      const ms = status.latencyMs;
+      setText(els.latency, `${ms}ms`);
+      els.latency.className = `srv-latency ${ms < 100 ? "good" : ms < 500 ? "warn" : "bad"}`;
+    } else {
+      setText(els.latency, "");
+      els.latency.className = "srv-latency";
     }
   }
 
@@ -628,6 +659,7 @@ export function createConnectPage(
     showConnecting,
     showError,
     resetToIdle,
+    updateHealthStatus,
   };
 }
 

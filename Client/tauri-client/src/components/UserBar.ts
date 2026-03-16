@@ -15,6 +15,7 @@ export function createUserBar(): MountableComponent {
 
   // Element references for targeted updates
   let avatarEl: HTMLDivElement | null = null;
+  let avatarTextEl: HTMLSpanElement | null = null;
   let nameEl: HTMLSpanElement | null = null;
   let statusEl: HTMLSpanElement | null = null;
 
@@ -24,8 +25,8 @@ export function createUserBar(): MountableComponent {
     const username = user?.username ?? "Unknown";
     const initial = username.charAt(0).toUpperCase() || "?";
 
-    if (avatarEl !== null) {
-      setText(avatarEl, initial);
+    if (avatarTextEl !== null) {
+      setText(avatarTextEl, initial);
     }
     if (nameEl !== null) {
       setText(nameEl, username);
@@ -40,11 +41,13 @@ export function createUserBar(): MountableComponent {
 
     avatarEl = createElement(
       "div",
-      { class: "ub-avatar", style: "background: var(--accent)" },
+      { class: "ub-avatar", style: "background: var(--accent); position: relative;" },
     );
+    avatarTextEl = createElement("span", {});
+    avatarEl.appendChild(avatarTextEl);
     const statusDot = createElement("div", {
       class: "status-dot",
-      style: "background: var(--green)",
+      style: "background: var(--green); width: 10px; height: 10px; border-radius: 50%; position: absolute; bottom: 0; right: 0;",
     });
     avatarEl.appendChild(statusDot);
 
@@ -106,6 +109,7 @@ export function createUserBar(): MountableComponent {
       root = null;
     }
     avatarEl = null;
+    avatarTextEl = null;
     nameEl = null;
     statusEl = null;
   }

@@ -11,6 +11,8 @@ import type {
   VoiceConfigPayload,
   VoiceSpeakersPayload,
 } from "@lib/types";
+import { membersStore } from "@stores/members.store";
+import { authStore } from "@stores/auth.store";
 
 export interface VoiceUser {
   readonly userId: number;
@@ -59,9 +61,10 @@ export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
       userMap = new Map();
       channelMap.set(vs.channel_id, userMap);
     }
+    const member = membersStore.getState().members.get(vs.user_id);
     userMap.set(vs.user_id, {
       userId: vs.user_id,
-      username: "",
+      username: member?.username ?? "",
       muted: vs.muted,
       deafened: vs.deafened,
       speaking: false,
@@ -70,9 +73,22 @@ export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
     });
   }
 
+  // Check if current user is in any voice channel
+  const currentUserId = authStore.getState().user?.id ?? 0;
+  let autoJoinChannel: number | null = null;
+  if (currentUserId !== 0) {
+    for (const vs of states) {
+      if (vs.user_id === currentUserId) {
+        autoJoinChannel = vs.channel_id;
+        break;
+      }
+    }
+  }
+
   voiceStore.setState((prev) => ({
     ...prev,
     voiceUsers: channelMap,
+    currentChannelId: autoJoinChannel ?? prev.currentChannelId,
   }));
 }
 

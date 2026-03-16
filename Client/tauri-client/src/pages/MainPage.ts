@@ -6,6 +6,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
+import { createRateLimiterSet } from "@lib/rate-limiter";
 import { createServerStrip } from "@components/ServerStrip";
 import { createChannelSidebar } from "@components/ChannelSidebar";
 import { createUserBar } from "@components/UserBar";
@@ -17,8 +18,11 @@ import type { MessageInputComponent } from "@components/MessageInput";
 import { createTypingIndicator } from "@components/TypingIndicator";
 import { createServerBanner } from "@components/ServerBanner";
 import type { ServerBannerControl } from "@components/ServerBanner";
-import { authStore } from "@stores/auth.store";
-import { channelsStore, getActiveChannel } from "@stores/channels.store";
+import { createSettingsOverlay } from "@components/SettingsOverlay";
+import { createQuickSwitcher } from "@components/QuickSwitcher";
+import { authStore, clearAuth } from "@stores/auth.store";
+import { closeSettings } from "@stores/ui.store";
+import { channelsStore, getActiveChannel, setActiveChannel } from "@stores/channels.store";
 import {
   voiceStore,
   leaveVoiceChannel,
@@ -49,6 +53,8 @@ export interface MainPageOptions {
 
 export function createMainPage(options: MainPageOptions): MountableComponent {
   const { ws, api } = options;
+
+  const limiters = createRateLimiterSet();
 
   let container: Element | null = null;
   let root: HTMLDivElement | null = null;
@@ -200,10 +206,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       onReactionClick: (msgId: number, emoji: string) => {
         if (emoji === "") return; // empty = open picker (future)
-        ws.send({
-          type: "reaction_add",
-          payload: { message_id: msgId, emoji },
-        });
+        if (limiters.reactions.tryConsume()) {
+          ws.send({
+            type: "reaction_add",
+            payload: { message_id: msgId, emoji },
+          });
+        }
       },
     });
     if (messagesSlot !== null) {
@@ -237,10 +245,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         });
       },
       onTyping: () => {
-        ws.send({
-          type: "typing_start",
-          payload: { channel_id: channelId },
-        });
+        if (limiters.typing.tryConsume(String(channelId))) {
+          ws.send({
+            type: "typing_start",
+            payload: { channel_id: channelId },
+          });
+        }
       },
       onEditMessage: (messageId: number, content: string) => {
         ws.send({
@@ -363,16 +373,19 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         leaveVoiceChannel();
       },
       onMuteToggle: () => {
+        if (!limiters.voice.tryConsume()) return;
         const next = !voiceStore.getState().localMuted;
         setLocalMuted(next);
         ws.send({ type: "voice_mute", payload: { muted: next } });
       },
       onDeafenToggle: () => {
+        if (!limiters.voice.tryConsume()) return;
         const next = !voiceStore.getState().localDeafened;
         setLocalDeafened(next);
         ws.send({ type: "voice_deafen", payload: { deafened: next } });
       },
       onCameraToggle: () => {
+        if (!limiters.voiceVideo.tryConsume()) return;
         ws.send({ type: "voice_camera", payload: { enabled: false } });
       },
       onScreenshareToggle: () => {
@@ -407,6 +420,55 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     appendChildren(app, serverStripSlot, sidebarWrapper, chatArea, memberListSlot);
     root.appendChild(app);
+
+    // Settings overlay (full-screen, toggled via uiStore.settingsOpen)
+    const settingsOverlay = createSettingsOverlay({
+      onClose: () => closeSettings(),
+      onChangePassword: async () => { /* wired when API integration is complete */ },
+      onUpdateProfile: async () => { /* wired when API integration is complete */ },
+      onLogout: () => clearAuth(),
+    });
+    settingsOverlay.mount(root);
+    children.push(settingsOverlay);
+
+    // Quick switcher (Ctrl+K)
+    let quickSwitcher: MountableComponent | null = null;
+
+    function openQuickSwitcher(): void {
+      if (quickSwitcher !== null || root === null) return;
+      quickSwitcher = createQuickSwitcher({
+        onSelectChannel: (channelId: number) => {
+          setActiveChannel(channelId);
+        },
+        onSearch: () => {},
+        onClose: closeQuickSwitcher,
+      });
+      quickSwitcher.mount(root);
+    }
+
+    function closeQuickSwitcher(): void {
+      if (quickSwitcher !== null) {
+        quickSwitcher.destroy?.();
+        quickSwitcher = null;
+      }
+    }
+
+    const quickSwitcherKeyHandler = (e: KeyboardEvent): void => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        if (quickSwitcher !== null) {
+          closeQuickSwitcher();
+        } else {
+          openQuickSwitcher();
+        }
+      }
+    };
+    document.addEventListener("keydown", quickSwitcherKeyHandler);
+    unsubscribers.push(() => {
+      document.removeEventListener("keydown", quickSwitcherKeyHandler);
+      closeQuickSwitcher();
+    });
+
     container.appendChild(root);
 
     // --- Subscribe to channel changes ---
