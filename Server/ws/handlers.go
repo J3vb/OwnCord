@@ -105,6 +105,8 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		h.handleVoiceICE(c, env.Payload)
 	case "soundboard_play":
 		h.handleSoundboard(c, env.Payload)
+	case "ping":
+		c.sendMsg(buildJSON(map[string]any{"type": "pong"}))
 	default:
 		slog.Warn("ws handleMessage unknown type", "type", env.Type, "user_id", c.userID)
 		c.sendMsg(buildErrorMsg("UNKNOWN_TYPE", fmt.Sprintf("unknown message type: %s", env.Type)))
@@ -198,7 +200,7 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 	c.sendMsg(buildChatSendOK(reqID, msgID, msg.Timestamp))
 
 	// Broadcast to channel.
-	broadcast := buildChatMessage(msgID, channelID, c.userID, username, avatar, content, msg.Timestamp, p.ReplyTo)
+	broadcast := buildChatMessage(msgID, channelID, c.userID, username, avatar, content, msg.Timestamp, p.ReplyTo, nil)
 	h.BroadcastToChannel(channelID, broadcast)
 }
 
@@ -430,6 +432,13 @@ func (h *Hub) handleChannelFocus(c *Client, payload json.RawMessage) {
 	if err != nil || chID <= 0 {
 		return
 	}
+
+	// Permission check: user must have READ_MESSAGES on the target channel.
+	if !h.hasChannelPerm(c, chID, permissions.ReadMessages) {
+		c.sendMsg(buildErrorMsg("FORBIDDEN", "no permission to view this channel"))
+		return
+	}
+
 	c.mu.Lock()
 	c.channelID = chID
 	c.mu.Unlock()

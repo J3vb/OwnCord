@@ -43,6 +43,12 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 		c := newClient(hub, conn, user, tokenHash)
 		hub.Register(c)
 
+		// Look up role name for protocol-compliant payloads.
+		roleName := "member"
+		if role, roleErr := database.GetRoleByID(user.RoleID); roleErr == nil && role != nil {
+			roleName = role.Name
+		}
+
 		slog.Info("websocket connected", "username", user.Username, "user_id", user.ID, "remote", r.RemoteAddr)
 		_ = database.LogAudit(user.ID, "ws_connect", "user", user.ID,
 			"WebSocket connected from "+r.RemoteAddr)
@@ -53,12 +59,12 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 
 		// Send auth_ok followed by the ready payload.
 		ctx := r.Context()
-		_ = conn.Write(ctx, websocket.MessageText, buildAuthOK(database, user))
+		_ = conn.Write(ctx, websocket.MessageText, buildAuthOK(database, user, roleName))
 		if ready, readyErr := buildReady(database); readyErr == nil {
 			_ = conn.Write(ctx, websocket.MessageText, ready)
 		}
 
-		hub.BroadcastToAll(buildMemberJoin(user))
+		hub.BroadcastToAll(buildMemberJoin(user, roleName))
 		hub.BroadcastToAll(buildPresenceMsg(user.ID, "online"))
 
 		// writePump runs in background; readPump blocks.
@@ -126,11 +132,11 @@ func authenticateConn(conn *websocket.Conn, database *db.DB) (*db.User, string, 
 
 	var env envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
-		_ = conn.Write(ctx, websocket.MessageText, buildErrorMsg("AUTH_ERROR", "invalid message"))
+		_ = conn.Write(ctx, websocket.MessageText, buildAuthError( "invalid message"))
 		return nil, "", fmt.Errorf("auth: invalid JSON: %w", err)
 	}
 	if env.Type != "auth" {
-		_ = conn.Write(ctx, websocket.MessageText, buildErrorMsg("AUTH_ERROR", "first message must be auth"))
+		_ = conn.Write(ctx, websocket.MessageText, buildAuthError( "first message must be auth"))
 		return nil, "", fmt.Errorf("auth: unexpected type %q", env.Type)
 	}
 
@@ -138,25 +144,25 @@ func authenticateConn(conn *websocket.Conn, database *db.DB) (*db.User, string, 
 		Token string `json:"token"`
 	}
 	if err := json.Unmarshal(env.Payload, &p); err != nil || p.Token == "" {
-		_ = conn.Write(ctx, websocket.MessageText, buildErrorMsg("AUTH_ERROR", "missing token"))
+		_ = conn.Write(ctx, websocket.MessageText, buildAuthError( "missing token"))
 		return nil, "", fmt.Errorf("auth: missing token")
 	}
 
 	hash := auth.HashToken(p.Token)
 	sess, err := database.GetSessionByTokenHash(hash)
 	if err != nil || sess == nil {
-		_ = conn.Write(ctx, websocket.MessageText, buildErrorMsg("AUTH_ERROR", "invalid token"))
+		_ = conn.Write(ctx, websocket.MessageText, buildAuthError( "invalid token"))
 		return nil, "", fmt.Errorf("auth: invalid session")
 	}
 
 	if auth.IsSessionExpired(sess.ExpiresAt) {
-		_ = conn.Write(ctx, websocket.MessageText, buildErrorMsg("AUTH_ERROR", "session expired"))
+		_ = conn.Write(ctx, websocket.MessageText, buildAuthError( "session expired"))
 		return nil, "", fmt.Errorf("auth: session expired")
 	}
 
 	user, err := database.GetUserByID(sess.UserID)
 	if err != nil || user == nil {
-		_ = conn.Write(ctx, websocket.MessageText, buildErrorMsg("AUTH_ERROR", "user not found"))
+		_ = conn.Write(ctx, websocket.MessageText, buildAuthError( "user not found"))
 		return nil, "", fmt.Errorf("auth: user not found")
 	}
 
@@ -169,7 +175,7 @@ func authenticateConn(conn *websocket.Conn, database *db.DB) (*db.User, string, 
 }
 
 // buildAuthOK constructs the auth_ok server→client message.
-func buildAuthOK(database *db.DB, user *db.User) []byte {
+func buildAuthOK(database *db.DB, user *db.User, roleName string) []byte {
 	serverName := "OwnCord Server"
 	motd := "Welcome!"
 	_ = database.QueryRow("SELECT value FROM settings WHERE key='server_name'").Scan(&serverName)
@@ -188,6 +194,7 @@ func buildAuthOK(database *db.DB, user *db.User) []byte {
 				"username": user.Username,
 				"avatar":   avatarVal,
 				"status":   user.Status,
+				"role":     roleName,
 			},
 			"server_name": serverName,
 			"motd":        motd,

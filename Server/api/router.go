@@ -38,6 +38,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string) http.Handler {
 
 	// Versioned API routes.
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Get("/health", handleHealth(ver))
 		r.Get("/info", handleInfo(cfg, ver))
 	})
 

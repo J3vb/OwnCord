@@ -35,6 +35,17 @@ func buildErrorMsg(code, message string) []byte {
 	})
 }
 
+// buildAuthError produces an auth_error envelope per PROTOCOL.md.
+// The client treats this type as non-recoverable and stops reconnecting.
+func buildAuthError(message string) []byte {
+	return buildJSON(map[string]any{
+		"type": "auth_error",
+		"payload": map[string]string{
+			"message": message,
+		},
+	})
+}
+
 // buildPresenceMsg constructs a presence broadcast payload.
 func buildPresenceMsg(userID int64, status string) []byte {
 	return buildJSON(map[string]any{
@@ -47,7 +58,7 @@ func buildPresenceMsg(userID int64, status string) []byte {
 }
 
 // buildMemberJoin constructs a member_join broadcast for when a user comes online.
-func buildMemberJoin(user *db.User) []byte {
+func buildMemberJoin(user *db.User, roleName string) []byte {
 	var avatarVal any
 	if user.Avatar != nil {
 		avatarVal = *user.Avatar
@@ -55,20 +66,24 @@ func buildMemberJoin(user *db.User) []byte {
 	return buildJSON(map[string]any{
 		"type": "member_join",
 		"payload": map[string]any{
-			"id":       user.ID,
-			"username": user.Username,
-			"avatar":   avatarVal,
-			"status":   "online",
-			"role_id":  user.RoleID,
+			"user": map[string]any{
+				"id":       user.ID,
+				"username": user.Username,
+				"avatar":   avatarVal,
+				"role":     roleName,
+			},
 		},
 	})
 }
 
 // buildChatMessage constructs a chat_message broadcast envelope.
-func buildChatMessage(msgID, channelID, userID int64, username string, avatar *string, content string, timestamp string, replyTo *int64) []byte {
+func buildChatMessage(msgID, channelID, userID int64, username string, avatar *string, content string, timestamp string, replyTo *int64, attachments []map[string]any) []byte {
 	var avatarVal any
 	if avatar != nil {
 		avatarVal = *avatar
+	}
+	if attachments == nil {
+		attachments = []map[string]any{}
 	}
 	return buildJSON(map[string]any{
 		"type": "chat_message",
@@ -80,9 +95,10 @@ func buildChatMessage(msgID, channelID, userID int64, username string, avatar *s
 				"username": username,
 				"avatar":   avatarVal,
 			},
-			"content":   content,
-			"reply_to":  replyTo,
-			"timestamp": timestamp,
+			"content":     content,
+			"reply_to":    replyTo,
+			"timestamp":   timestamp,
+			"attachments": attachments,
 		},
 	})
 }

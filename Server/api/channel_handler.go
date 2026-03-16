@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 )
 
 const (
@@ -24,9 +25,28 @@ func MountChannelRoutes(r chi.Router, database *db.DB) {
 	r.With(AuthMiddleware(database)).Get("/api/v1/search", handleSearch(database))
 }
 
+// hasChannelPermREST checks whether the role has the given permission on the channel,
+// accounting for Administrator bypass and channel overrides.
+func hasChannelPermREST(database *db.DB, role *db.Role, channelID, perm int64) bool {
+	if role == nil {
+		return false
+	}
+	if permissions.HasAdmin(role.Permissions) {
+		return true
+	}
+	allow, deny, err := database.GetChannelPermissions(channelID, role.ID)
+	if err != nil {
+		return false
+	}
+	effective := permissions.EffectivePerms(role.Permissions, allow, deny)
+	return effective&perm == perm
+}
+
 // handleListChannels returns all channels the authenticated user can see.
 func handleListChannels(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		role, _ := r.Context().Value(RoleKey).(*db.Role)
+
 		channels, err := database.ListChannels()
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
@@ -35,7 +55,18 @@ func handleListChannels(database *db.DB) http.HandlerFunc {
 			})
 			return
 		}
-		writeJSON(w, http.StatusOK, channels)
+
+		// Filter channels by READ_MESSAGES permission.
+		var visible []db.Channel
+		for _, ch := range channels {
+			if hasChannelPermREST(database, role, ch.ID, permissions.ReadMessages) {
+				visible = append(visible, ch)
+			}
+		}
+		if visible == nil {
+			visible = []db.Channel{}
+		}
+		writeJSON(w, http.StatusOK, visible)
 	}
 }
 
@@ -60,6 +91,16 @@ func handleGetMessages(database *db.DB) http.HandlerFunc {
 			writeJSON(w, http.StatusNotFound, errorResponse{
 				Error:   "NOT_FOUND",
 				Message: "channel not found",
+			})
+			return
+		}
+
+		// Permission check: user must have READ_MESSAGES on this channel.
+		role, _ := r.Context().Value(RoleKey).(*db.Role)
+		if !hasChannelPermREST(database, role, channelID, permissions.ReadMessages) {
+			writeJSON(w, http.StatusForbidden, errorResponse{
+				Error:   "FORBIDDEN",
+				Message: "no permission to view this channel",
 			})
 			return
 		}
@@ -169,10 +210,22 @@ func handleSearch(database *db.DB) http.HandlerFunc {
 			return
 		}
 
+		// Post-filter results by READ_MESSAGES permission on each channel.
+		role, _ := r.Context().Value(RoleKey).(*db.Role)
+		var filtered []db.MessageSearchResult
+		for _, res := range results {
+			if hasChannelPermREST(database, role, res.ChannelID, permissions.ReadMessages) {
+				filtered = append(filtered, res)
+			}
+		}
+		if filtered == nil {
+			filtered = []db.MessageSearchResult{}
+		}
+
 		type response struct {
 			Results []db.MessageSearchResult `json:"results"`
 		}
-		writeJSON(w, http.StatusOK, response{Results: results})
+		writeJSON(w, http.StatusOK, response{Results: filtered})
 	}
 }
 

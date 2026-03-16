@@ -293,13 +293,17 @@ type MemberSummary struct {
 	Username string  `json:"username"`
 	Avatar   *string `json:"avatar"`
 	Status   string  `json:"status"`
-	RoleID   int64   `json:"role_id"`
+	Role     string  `json:"role"`
 }
 
 // ListMembers returns all non-banned users as lightweight summaries.
 func (d *DB) ListMembers() ([]MemberSummary, error) {
 	rows, err := d.sqlDB.Query(
-		`SELECT id, username, avatar, status, role_id FROM users WHERE banned = 0 ORDER BY username ASC`,
+		`SELECT u.id, u.username, u.avatar, u.status, r.name
+		 FROM users u
+		 JOIN roles r ON u.role_id = r.id
+		 WHERE u.banned = 0
+		 ORDER BY u.username ASC`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("ListMembers: %w", err)
@@ -309,7 +313,7 @@ func (d *DB) ListMembers() ([]MemberSummary, error) {
 	var members []MemberSummary
 	for rows.Next() {
 		var m MemberSummary
-		if err := rows.Scan(&m.ID, &m.Username, &m.Avatar, &m.Status, &m.RoleID); err != nil {
+		if err := rows.Scan(&m.ID, &m.Username, &m.Avatar, &m.Status, &m.Role); err != nil {
 			return nil, fmt.Errorf("ListMembers scan: %w", err)
 		}
 		members = append(members, m)
