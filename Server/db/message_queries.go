@@ -305,6 +305,17 @@ func (d *DB) GetMessagesForAPI(channelID, before int64, limit int, requestingUse
 		}
 	}
 
+	// Batch-fetch attachments for all message IDs.
+	attMap, err := d.GetAttachmentsByMessageIDs(msgIDs)
+	if err != nil {
+		return nil, fmt.Errorf("GetMessagesForAPI attachments: %w", err)
+	}
+	for i := range msgs {
+		if a, ok := attMap[msgs[i].ID]; ok {
+			msgs[i].Attachments = a
+		}
+	}
+
 	return msgs, nil
 }
 

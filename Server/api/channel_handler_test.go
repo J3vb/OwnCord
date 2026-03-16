@@ -109,6 +109,15 @@ CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
     INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
 END;
 
+CREATE TABLE IF NOT EXISTS attachments (
+    id          TEXT    PRIMARY KEY,
+    message_id  INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+    filename    TEXT    NOT NULL,
+    stored_as   TEXT    NOT NULL,
+    mime_type   TEXT    NOT NULL,
+    size        INTEGER NOT NULL,
+    uploaded_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS reactions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,

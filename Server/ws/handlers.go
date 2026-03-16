@@ -171,12 +171,39 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 		return
 	}
 
-	// Persist.
+	// Persist message.
 	msgID, err := h.db.CreateMessage(channelID, c.userID, content, p.ReplyTo)
 	if err != nil {
 		slog.Error("ws handleChatSend CreateMessage", "err", err)
 		c.sendMsg(buildErrorMsg("INTERNAL", "failed to save message"))
 		return
+	}
+
+	// Link attachments if provided.
+	var attachments []map[string]any
+	if len(p.Attachments) > 0 {
+		if !h.hasChannelPerm(c, channelID, permissions.AttachFiles) {
+			c.sendMsg(buildErrorMsg("FORBIDDEN", "missing ATTACH_FILES permission"))
+			return
+		}
+		linked, linkErr := h.db.LinkAttachmentsToMessage(msgID, p.Attachments)
+		if linkErr != nil {
+			slog.Error("ws handleChatSend LinkAttachments", "err", linkErr)
+		}
+		if linked > 0 {
+			attMap, attErr := h.db.GetAttachmentsByMessageIDs([]int64{msgID})
+			if attErr == nil {
+				for _, ai := range attMap[msgID] {
+					attachments = append(attachments, map[string]any{
+						"id":       ai.ID,
+						"filename": ai.Filename,
+						"size":     ai.Size,
+						"mime":     ai.Mime,
+						"url":      ai.URL,
+					})
+				}
+			}
+		}
 	}
 
 	// Retrieve to get timestamp.
@@ -200,7 +227,7 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 	c.sendMsg(buildChatSendOK(reqID, msgID, msg.Timestamp))
 
 	// Broadcast to channel.
-	broadcast := buildChatMessage(msgID, channelID, c.userID, username, avatar, content, msg.Timestamp, p.ReplyTo, nil)
+	broadcast := buildChatMessage(msgID, channelID, c.userID, username, avatar, content, msg.Timestamp, p.ReplyTo, attachments)
 	h.BroadcastToChannel(channelID, broadcast)
 }
 
