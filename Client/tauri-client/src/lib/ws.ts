@@ -42,6 +42,14 @@ export interface CertTofuEvent {
   readonly fingerprint: string;
   readonly status: "trusted_first_use" | "trusted" | "mismatch";
   readonly message?: string;
+  readonly storedFingerprint?: string;
+}
+
+/** Parse the stored fingerprint from the Rust cert-tofu message string. */
+export function parseStoredFingerprint(message?: string): string | undefined {
+  if (!message) return undefined;
+  const match = /Stored:\s+(\S+)/.exec(message);
+  return match?.[1];
 }
 
 export type CertMismatchListener = (event: CertTofuEvent) => void;
@@ -143,18 +151,25 @@ export function createWsClient() {
       return;
     }
 
-    let msg: ServerMessage;
+    let parsed: { type?: string; payload?: unknown; id?: string };
     try {
-      msg = JSON.parse(raw) as ServerMessage;
+      parsed = JSON.parse(raw) as { type?: string; payload?: unknown; id?: string };
     } catch {
       log.warn("Failed to parse WS message", { data: raw });
       return;
     }
 
-    if (!msg.type || msg.payload === undefined) {
-      log.warn("Invalid WS message: missing type or payload", { msg });
+    // Server pong messages have no payload — silently ignore.
+    if (parsed.type === "pong") return;
+
+    if (!parsed.type || parsed.payload === undefined) {
+      log.warn("Invalid WS message: missing type or payload", { parsed });
       return;
     }
+
+    const msg = parsed as unknown as ServerMessage;
+
+    log.debug("WS ←", { type: msg.type, id: msg.id });
 
     // auth_error — non-recoverable
     if (msg.type === "auth_error") {
@@ -178,16 +193,18 @@ export function createWsClient() {
 
   function dispatch(msg: ServerMessage): void {
     const typeListeners = listeners.get(msg.type);
-    if (typeListeners) {
-      for (const listener of typeListeners) {
-        try {
-          (listener as WsListener<typeof msg.type>)(
-            msg.payload as Extract<ServerMessage, { type: typeof msg.type }>["payload"],
-            msg.id,
-          );
-        } catch (err) {
-          log.error(`Listener error for ${msg.type}`, err);
-        }
+    if (!typeListeners || typeListeners.size === 0) {
+      log.debug("WS dispatch: no listeners", { type: msg.type });
+      return;
+    }
+    for (const listener of typeListeners) {
+      try {
+        (listener as WsListener<typeof msg.type>)(
+          msg.payload as Extract<ServerMessage, { type: typeof msg.type }>["payload"],
+          msg.id,
+        );
+      } catch (err) {
+        log.error(`Listener error for ${msg.type}`, err);
       }
     }
   }
@@ -232,14 +249,18 @@ export function createWsClient() {
 
     // TOFU certificate events
     const unsubCert = await tauriListen("cert-tofu", (e) => {
-      const evt = e.payload as CertTofuEvent;
-      log.info("TOFU cert event", { host: evt.host, status: evt.status });
+      const raw = e.payload as CertTofuEvent;
+      log.info("TOFU cert event", { host: raw.host, status: raw.status });
 
-      if (evt.status === "mismatch") {
+      if (raw.status === "mismatch") {
+        const evt: CertTofuEvent = {
+          ...raw,
+          storedFingerprint: parseStoredFingerprint(raw.message),
+        };
         log.error("Certificate fingerprint mismatch!", {
           host: evt.host,
           fingerprint: evt.fingerprint,
-          message: evt.message,
+          storedFingerprint: evt.storedFingerprint,
         });
         certMismatchBlock = true;
         setState("disconnected");
@@ -253,7 +274,16 @@ export function createWsClient() {
 
   function cleanupEventListeners(): void {
     for (const unsub of eventUnsubs) {
-      unsub();
+      try {
+        // Unsub may return a rejected promise if the Tauri resource
+        // was already invalidated after disconnect — safe to ignore.
+        const result = unsub() as unknown;
+        if (result instanceof Promise) {
+          result.catch(() => {});
+        }
+      } catch {
+        // Sync errors also safe to ignore.
+      }
     }
     eventUnsubs.length = 0;
   }
@@ -305,6 +335,7 @@ export function createWsClient() {
   function send(msg: ClientMessage | { type: string; payload: unknown }): string {
     const id = uuid();
     const envelope = { ...msg, id };
+    log.debug("WS →", { type: msg.type, id });
     sendRaw(JSON.stringify(envelope));
     return id;
   }

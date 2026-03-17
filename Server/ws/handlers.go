@@ -76,6 +76,8 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		return
 	}
 
+	slog.Debug("ws ← client message", "type", env.Type, "user_id", c.userID, "id", env.ID)
+
 	switch env.Type {
 	case "chat_send":
 		h.handleChatSend(c, env.ID, env.Payload)
@@ -476,6 +478,7 @@ func (h *Hub) requireChannelPerm(c *Client, channelID int64, perm int64, permLab
 	if h.hasChannelPerm(c, channelID, perm) {
 		return true
 	}
+	slog.Warn("ws permission denied", "user_id", c.userID, "channel_id", channelID, "perm", permLabel)
 	c.sendMsg(buildErrorMsg("FORBIDDEN", "missing "+permLabel+" permission"))
 	return false
 }
@@ -504,6 +507,7 @@ func (h *Hub) broadcastExclude(channelID, excludeUserID int64, msg []byte) {
 func (h *Hub) handleChannelFocus(c *Client, payload json.RawMessage) {
 	chID, err := parseChannelID(payload)
 	if err != nil || chID <= 0 {
+		slog.Debug("handleChannelFocus: invalid channel_id", "user_id", c.userID, "err", err)
 		return
 	}
 
@@ -513,8 +517,11 @@ func (h *Hub) handleChannelFocus(c *Client, payload json.RawMessage) {
 	}
 
 	c.mu.Lock()
+	prevCh := c.channelID
 	c.channelID = chID
 	c.mu.Unlock()
+
+	slog.Info("channel_focus", "user_id", c.userID, "channel_id", chID, "prev_channel_id", prevCh)
 
 	// Mark channel as read by updating read_states to the latest message.
 	latestID, latestErr := h.db.GetLatestMessageID(chID)

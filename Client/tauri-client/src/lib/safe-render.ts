@@ -65,12 +65,20 @@ export function installGlobalErrorHandlers(): void {
   });
 
   window.addEventListener("unhandledrejection", (event) => {
-    log.error("Unhandled promise rejection", {
-      reason:
-        event.reason instanceof Error
-          ? event.reason.stack
-          : String(event.reason),
-    });
+    const reason =
+      event.reason instanceof Error
+        ? event.reason.stack ?? event.reason.message
+        : String(event.reason);
+
+    // Tauri plugin-http GC cleanup: when a consumed Response body is finalized,
+    // Tauri tries to drop the Rust resource which may already be freed.
+    // This is cosmetic — downgrade to debug instead of polluting error logs.
+    if (typeof reason === "string" && /resource id .+ is invalid/.test(reason)) {
+      log.debug("Tauri resource already freed (benign)", { reason });
+      return;
+    }
+
+    log.error("Unhandled promise rejection", { reason });
   });
 
   log.info("Global error handlers installed");

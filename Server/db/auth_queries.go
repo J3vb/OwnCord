@@ -337,7 +337,7 @@ type MemberSummary struct {
 // ListMembers returns all non-banned users as lightweight summaries.
 func (d *DB) ListMembers() ([]MemberSummary, error) {
 	rows, err := d.sqlDB.Query(
-		`SELECT u.id, u.username, u.avatar, u.status, r.name
+		`SELECT u.id, u.username, u.avatar, u.status, LOWER(r.name)
 		 FROM users u
 		 JOIN roles r ON u.role_id = r.id
 		 WHERE u.banned = 0

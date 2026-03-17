@@ -49,9 +49,11 @@ function setHasMore(channelId: number, value: boolean): void {
   });
 }
 
+export type MessageListComponent = ReturnType<typeof createMessageList>;
+
 describe("MessageList", () => {
   let container: HTMLDivElement;
-  let msgList: ReturnType<typeof createMessageList>;
+  let msgList: MessageListComponent;
   let options: MessageListOptions;
 
   beforeEach(() => {
@@ -126,6 +128,27 @@ describe("MessageList", () => {
     messagesStore.flush();
 
     expect(content!.children.length).toBeGreaterThan(0);
+  });
+
+  it("scrollToMessage returns true when message exists in virtual items", () => {
+    const messages = [
+      makeMessage({ id: 1, content: "Hello" }),
+      makeMessage({ id: 2, content: "Target message" }),
+      makeMessage({ id: 3, content: "World" }),
+    ];
+    setMessages(1, messages);
+    msgList.mount(container);
+
+    const result = msgList.scrollToMessage(2);
+    expect(result).toBe(true);
+  });
+
+  it("scrollToMessage returns false when message not found", () => {
+    setMessages(1, [makeMessage({ id: 1 })]);
+    msgList.mount(container);
+
+    const result = msgList.scrollToMessage(999);
+    expect(result).toBe(false);
   });
 
   it("renders day dividers between messages on different days", () => {

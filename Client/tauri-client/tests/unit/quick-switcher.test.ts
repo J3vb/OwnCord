@@ -22,7 +22,6 @@ describe("QuickSwitcher", () => {
   let container: HTMLDivElement;
   let switcher: ReturnType<typeof createQuickSwitcher>;
   let onSelectChannel: ReturnType<typeof vi.fn>;
-  let onSearch: ReturnType<typeof vi.fn>;
   let onClose: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -31,9 +30,8 @@ describe("QuickSwitcher", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     onSelectChannel = vi.fn();
-    onSearch = vi.fn();
     onClose = vi.fn();
-    switcher = createQuickSwitcher({ onSelectChannel, onSearch, onClose });
+    switcher = createQuickSwitcher({ onSelectChannel, onClose });
   });
 
   afterEach(() => {
@@ -79,14 +77,17 @@ describe("QuickSwitcher", () => {
     expect(name?.textContent).toBe("general");
   });
 
-  it("calls onSearch when typing", () => {
+  it("filters channels without calling external search (client-side only)", () => {
     switcher.mount(container);
     const input = container.querySelector(".quick-switcher__input") as HTMLInputElement;
 
     input.value = "random";
     input.dispatchEvent(new Event("input"));
 
-    expect(onSearch).toHaveBeenCalledWith("random");
+    // Filtering should work client-side
+    const items = container.querySelectorAll(".quick-switcher__item");
+    expect(items.length).toBe(1);
+    expect(items[0]!.querySelector(".quick-switcher__name")?.textContent).toBe("random");
   });
 
   it("clicking a channel calls onSelectChannel and onClose", () => {

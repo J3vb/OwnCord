@@ -8,7 +8,6 @@ import type { MountableComponent } from "@lib/safe-render";
 
 export interface QuickSwitcherOptions {
   readonly onSelectChannel: (channelId: number) => void;
-  readonly onSearch: (query: string) => void;
   readonly onClose: () => void;
 }
 
@@ -78,7 +77,6 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
 
   function handleInput(): void {
     const query = input.value.trim();
-    options.onSearch(query);
     filteredChannels = getFilteredChannels(query);
     activeIndex = 0;
     renderResults();

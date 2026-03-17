@@ -40,3 +40,4 @@ Client/publish-release/
 # HTML mockups (large design reference files)
 Client/login-mockup.html
 Client/ui-mockup.html
+.gstack/

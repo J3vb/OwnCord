@@ -28,6 +28,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string) http.Handler {
 	// any source allows IP spoofing for rate-limit bypass. IP header trust is now
 	// handled explicitly in clientIPWithProxies using the trusted_proxies config.
 	r.Use(middleware.Recoverer)
+	r.Use(requestLogger) // structured request/response logging
 	r.Use(SecurityHeaders)
 	r.Use(MaxBodySize(1 << 20)) // 1 MiB default; upload routes use their own limit
 
@@ -119,6 +120,37 @@ func setRequestIDHeader(next http.Handler) http.Handler {
 			w.Header().Set("X-Request-Id", requestID)
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// requestLogger logs every HTTP request with method, path, status, and duration.
+// Health checks are logged at Debug level to avoid noise.
+func requestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		next.ServeHTTP(ww, r)
+		elapsed := time.Since(start)
+		status := ww.Status()
+
+		// Health checks at Debug level; errors at Warn; everything else at Info.
+		path := r.URL.Path
+		attrs := []any{
+			"method", r.Method,
+			"path", path,
+			"status", status,
+			"duration_ms", elapsed.Milliseconds(),
+		}
+		switch {
+		case path == "/health" || path == "/api/v1/health":
+			slog.Debug("http request", attrs...)
+		case status >= 500:
+			slog.Error("http request", attrs...)
+		case status >= 400:
+			slog.Warn("http request", attrs...)
+		default:
+			slog.Info("http request", attrs...)
+		}
 	})
 }
 

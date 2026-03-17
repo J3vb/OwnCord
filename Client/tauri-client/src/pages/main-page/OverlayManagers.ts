@@ -79,7 +79,6 @@ export function createQuickSwitcherManager(
       onSelectChannel: (channelId: number) => {
         setActiveChannel(channelId);
       },
-      onSearch: () => {},
       onClose: close,
     });
     instance.mount(root);
@@ -149,10 +148,15 @@ export function createInviteManagerController(opts: {
           return mapInviteResponse(created);
         },
         onRevokeInvite: async (code: string) => {
-          const raw2 = await opts.api.getInvites();
-          const match = raw2.find((i) => i.code === code);
-          if (match !== undefined) {
-            await opts.api.revokeInvite(match.id);
+          try {
+            const raw2 = await opts.api.getInvites();
+            const match = raw2.find((i) => i.code === code);
+            if (match !== undefined) {
+              await opts.api.revokeInvite(match.id);
+            }
+          } catch (err) {
+            log.error("Invite revoke failed", { code, error: String(err) });
+            throw err;
           }
         },
         onCopyLink: (code: string) => {
@@ -190,6 +194,7 @@ export function createPinnedPanelController(opts: {
   readonly getRoot: () => HTMLDivElement | null;
   readonly getToast: () => ToastContainer | null;
   readonly getCurrentChannelId: () => number | null;
+  readonly onJumpToMessage?: (messageId: number) => boolean;
 }): PinnedPanelController {
   let instance: MountableComponent | null = null;
 
@@ -214,12 +219,25 @@ export function createPinnedPanelController(opts: {
       instance = createPinnedMessages({
         channelId,
         pinnedMessages: pins,
-        onJumpToMessage: (_msgId: number) => {
-          close();
+        onJumpToMessage: (msgId: number) => {
+          if (opts.onJumpToMessage !== undefined) {
+            const found = opts.onJumpToMessage(msgId);
+            if (found) {
+              close();
+            } else {
+              opts.getToast()?.show("Message not in loaded window", "info");
+            }
+          } else {
+            close();
+          }
         },
         onUnpin: (msgId: number) => {
-          void opts.api.unpinMessage(channelId, msgId);
-          close();
+          void opts.api.unpinMessage(channelId, msgId).then(() => {
+            close();
+          }).catch((err: unknown) => {
+            log.error("Failed to unpin message", { msgId, error: String(err) });
+            opts.getToast()?.show("Failed to unpin message", "error");
+          });
         },
         onClose: close,
       });

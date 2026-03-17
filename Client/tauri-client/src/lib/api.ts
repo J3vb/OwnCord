@@ -80,17 +80,21 @@ export function createApiClient(
       init.body = JSON.stringify(body);
     }
 
+    log.debug("API →", { method, path });
+
     let res: Response;
     try {
       res = await fetch(url, init as RequestInit);
     } catch (fetchErr) {
       // Tauri plugin errors may not be standard Error instances
-      log.error("fetch failed", { error: String(fetchErr), type: typeof fetchErr });
+      log.error("API fetch failed", { method, path, error: String(fetchErr) });
       if (fetchErr instanceof Error) {
         throw fetchErr;
       }
       throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr));
     }
+
+    log.debug("API ←", { method, path, status: res.status });
 
     if (res.status === 401) {
       onUnauthorized?.();
@@ -100,6 +104,7 @@ export function createApiClient(
 
     if (!res.ok) {
       const err = await parseError(res);
+      log.warn("API error", { method, path, status: res.status, code: err.error, message: err.message });
       throw new ApiClientError(res.status, err.error, err.message);
     }
 

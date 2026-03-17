@@ -284,6 +284,20 @@
 .form-checkbox input:checked + .checkbox-box svg { opacity: 1; }
 .checkbox-label { font-size: 13px; color: var(--text-muted); }
 
+/* Remember password */
+.remember-password-group {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 16px; margin-top: -8px;
+}
+.remember-password-group input[type="checkbox"] {
+  width: 16px; height: 16px; accent-color: var(--accent);
+  cursor: pointer; margin: 0;
+}
+.remember-password-label {
+  font-size: 13px; color: var(--text-muted);
+  cursor: pointer; user-select: none;
+}
+
 /* Primary button */
 .btn-primary {
   width: 100%; padding: 12px; border-radius: var(--radius-sm);

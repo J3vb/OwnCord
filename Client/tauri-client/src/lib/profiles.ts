@@ -28,6 +28,7 @@ export interface ServerProfile {
   readonly host: string;
   readonly username: string;
   readonly autoConnect: boolean;
+  readonly rememberPassword: boolean;
   readonly color: string;
   readonly lastConnected: string | null;
 }
@@ -85,6 +86,7 @@ function isValidProfileShape(item: unknown): item is ServerProfile {
     typeof obj.username === "string" &&
     typeof obj.color === "string" &&
     typeof obj.autoConnect === "boolean" &&
+    (obj.rememberPassword === undefined || typeof obj.rememberPassword === "boolean") &&
     (obj.lastConnected === null || typeof obj.lastConnected === "string")
   );
 }
@@ -400,6 +402,7 @@ export function createProfileManager(
             username: raw.username,
             color: raw.color,
             autoConnect: raw.autoConnect,
+            rememberPassword: raw.rememberPassword ?? false,
             lastConnected: null,
           };
           newProfiles.push(profile);

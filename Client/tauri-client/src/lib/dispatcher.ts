@@ -100,6 +100,11 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
 
   unsubs.push(
     ws.on("chat_message", (payload) => {
+      log.debug("chat_message received", {
+        id: payload.id,
+        channelId: payload.channel_id,
+        user: payload.user.username,
+      });
       addMessage(payload);
       // Increment unread for non-active channels
       const activeId = channelsStore.select(
@@ -191,24 +196,28 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
 
   unsubs.push(
     ws.on("member_join", (payload) => {
+      log.info("Member joined", { userId: payload.user.id, username: payload.user.username });
       addMember(payload);
     }),
   );
 
   unsubs.push(
     ws.on("member_leave", (payload) => {
+      log.info("Member left", { userId: payload.user_id });
       removeMember(payload.user_id);
     }),
   );
 
   unsubs.push(
     ws.on("member_ban", (payload) => {
+      log.info("Member banned", { userId: payload.user_id });
       removeMember(payload.user_id);
     }),
   );
 
   unsubs.push(
     ws.on("member_update", (payload) => {
+      log.info("Member role updated", { userId: payload.user_id, role: payload.role });
       updateMemberRole(payload.user_id, payload.role);
     }),
   );

@@ -74,7 +74,12 @@ function buildVirtualItems(messages: readonly Message[]): readonly VirtualItem[]
 
 // -- Factory ------------------------------------------------------------------
 
-export function createMessageList(options: MessageListOptions): MountableComponent {
+export type MessageListComponent = MountableComponent & {
+  /** Scroll to a message by ID. Returns false if the message is not in the loaded window. */
+  scrollToMessage(messageId: number): boolean;
+};
+
+export function createMessageList(options: MessageListOptions): MessageListComponent {
   const ac = new AbortController();
   const unsubscribers: Array<() => void> = [];
   let root: HTMLDivElement | null = null;
@@ -339,5 +344,28 @@ export function createMessageList(options: MessageListOptions): MountableCompone
     bottomSpacer = null;
   }
 
-  return { mount, destroy };
+  function scrollToMessage(messageId: number): boolean {
+    if (root === null) return false;
+    const idx = virtualItems.findIndex(
+      (item) => item.kind === "message" && item.message.id === messageId,
+    );
+    if (idx === -1) return false;
+
+    root.scrollTop = offsetBefore(idx);
+    renderWindow();
+
+    // Briefly highlight the target message element
+    if (contentContainer !== null) {
+      const localIdx = idx - renderedStart;
+      const el = contentContainer.children[localIdx] as HTMLElement | undefined;
+      if (el !== undefined) {
+        el.classList.add("highlight-flash");
+        setTimeout(() => { el.classList.remove("highlight-flash"); }, 1500);
+      }
+    }
+
+    return true;
+  }
+
+  return { mount, destroy, scrollToMessage };
 }
