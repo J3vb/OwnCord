@@ -91,9 +91,15 @@ export function createInviteManager(
   }
 
   function mount(container: Element): void {
-    root = createElement("div", { class: "invite-manager-overlay" });
+    root = createElement("div", {
+      class: "invite-manager-overlay",
+      style: "position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;justify-content:center;align-items:center;",
+    });
 
-    const modal = createElement("div", { class: "invite-manager" });
+    const modal = createElement("div", {
+      class: "invite-manager",
+      style: "background:var(--bg-secondary,#2f3136);border-radius:8px;padding:16px;min-width:400px;max-width:520px;",
+    });
 
     // Header
     const header = createElement("div", { class: "invite-manager__header" });

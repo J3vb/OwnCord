@@ -2,8 +2,8 @@
 
 Native Windows desktop client + self-hosted server.
 Two executables: `chatserver.exe` (server) and
-`chatclient.exe` (client). Server operator runs the
-server, friends install the client.
+`OwnCord.exe` (Tauri v2 client). Server operator runs
+the server, friends install the client.
 
 ## Tech Stack
 
@@ -44,7 +44,7 @@ SERVER (chatserver.exe) — runs on the host machine
 ├── Admin Web UI (embedded, browser-based, /admin)
 └── config.yaml
 
-CLIENT (chatclient.exe) — installed by each friend
+CLIENT (OwnCord.exe) — installed by each friend
 ├── Native Windows UI
 ├── WebSocket Client (chat connection)
 ├── WebRTC Client (voice/video)
@@ -56,7 +56,7 @@ CLIENT (chatclient.exe) — installed by each friend
 ### How It Works
 
 1. Server operator runs `chatserver.exe` on their PC/home server
-2. Friends download and install `chatclient.exe`
+2. Friends download and install `OwnCord.exe`
 3. Client connects to the server via IP/domain + port
 4. All chat, voice, video, and file transfers go through the server
 5. Admin manages the server through a browser at `https://server-ip:port/admin`
@@ -75,7 +75,8 @@ CLIENT (chatclient.exe) — installed by each friend
   channels, messages, sessions, roles, invites)
 - [ ] config.yaml generation on first run (port, name,
   max upload size, voice quality, TLS mode)
-- [ ] Server systray icon (getlantern/systray) — minimize to tray, status indicator, open admin panel, quit
+- [ ] Server systray icon (getlantern/systray) — minimize to tray, status
+  indicator, open admin panel, quit
 - [ ] Windows Firewall handling on first launch
 - [ ] Optional: register as Windows Service for headless operation
 
@@ -99,7 +100,7 @@ CLIENT (chatclient.exe) — installed by each friend
 - [ ] Connection dialog: server address, port, login/register, invite code entry
 - [ ] Save server profiles (connect to multiple
   servers like TeamSpeak)
-- [ ] Main window layout: server list sidebar → channel list → message area → member list
+- [ ] Main window layout: server list → channel list → message area → member list
 - [ ] Channel tree view with categories, text channels, voice channels
 - [ ] Message rendering: markdown, code blocks, timestamps, avatars, replies, reactions
 - [ ] Message input: multi-line, markdown preview, emoji picker, file drag-and-drop
@@ -160,9 +161,9 @@ CLIENT (chatclient.exe) — installed by each friend
 
 - [ ] **Server:** GitHub Actions builds
   `chatserver.exe` (amd64), SHA256, GitHub Release
-- [ ] **Client:** NSIS or WiX installer — Program
-  Files, Start Menu, auto-start, protocol handler
-  for `chatserver://` invite links
+- [ ] **Client:** Tauri bundler (NSIS) installer —
+  Program Files, Start Menu, auto-start, protocol
+  handler for `chatserver://` invite links
 - [ ] Client auto-update: check GitHub releases on
   launch, prompt to download + install
 - [ ] Server update: admin panel shows available update, one-click download + restart
@@ -175,18 +176,23 @@ CLIENT (chatclient.exe) — installed by each friend
 
 ## Windows-Specific Details
 
-### Client
+### Client (Tauri v2)
 
-- **Installer:** NSIS or WiX (~20-40MB). Registers
-  `chatserver://` protocol handler.
-- **Auto-start:** Registry key `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
-- **Credentials:** Auth tokens stored in Windows Credential Manager (DPAPI).
-- **Push-to-talk:** Global hook via
-  `SetWindowsHookEx` — works in fullscreen games.
-- **Audio:** WASAPI for low-latency capture/playback.
-- **Screen capture:** DXGI Desktop Duplication API.
-- **Notifications:** Windows Toast notifications with action buttons.
-- **Tray:** System tray icon with unread badge overlay.
+- **Installer:** Tauri bundler (NSIS, ~10-15 MB).
+  Registers `chatserver://` protocol handler.
+- **Auto-start:** Registry key
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+- **Credentials:** Auth tokens stored in Windows
+  Credential Manager via `windows-rs` Rust crate.
+- **Push-to-talk:** Global hotkey via
+  `tauri-plugin-global-shortcut`.
+- **Audio:** WebView2 WebRTC API (browser audio).
+- **Screen capture:** WebRTC `getDisplayMedia` in
+  webview.
+- **Notifications:** `tauri-plugin-notification`
+  (Windows toast).
+- **Tray:** Tauri built-in system tray with badge.
+- See CLIENT-ARCHITECTURE.md for full design.
 
 ### Server
 

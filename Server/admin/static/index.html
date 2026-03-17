@@ -263,6 +263,7 @@
       <a href="#" data-section="channels">Channels</a>
       <a href="#" data-section="audit-log">Audit Log</a>
       <a href="#" data-section="settings">Settings</a>
+      <a href="#" data-section="backups">Backups</a>
     </nav>
   </div>
 
@@ -371,10 +372,68 @@
           <input id="setting-server_name" type="text">
         </div>
         <div class="form-group">
+          <label>Server Icon URL</label>
+          <input id="setting-server_icon" type="text" placeholder="https://...">
+        </div>
+        <div class="form-group">
           <label>Message of the Day (MOTD)</label>
           <textarea id="setting-motd" rows="3"></textarea>
         </div>
+        <div class="form-group">
+          <label>Max Upload Size (bytes)</label>
+          <input id="setting-max_upload_bytes" type="number" min="0">
+        </div>
+        <div class="form-group">
+          <label>Voice Quality</label>
+          <select id="setting-voice_quality">
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Require 2FA</label>
+          <select id="setting-require_2fa">
+            <option value="false">No</option>
+            <option value="true">Yes</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Registration Open</label>
+          <select id="setting-registration_open">
+            <option value="true">Yes</option>
+            <option value="false">No</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Backup Schedule</label>
+          <select id="setting-backup_schedule">
+            <option value="off">Off</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Backup Retention (days)</label>
+          <input id="setting-backup_retention" type="number" min="1">
+        </div>
         <button class="btn" id="save-settings-btn">Save Settings</button>
+      </div>
+    </section>
+
+    <!-- Backups -->
+    <section id="section-backups" class="hidden">
+      <h1>Backups</h1>
+      <div id="backups-alert"></div>
+      <div class="card" style="padding:24px;margin-bottom:24px">
+        <button class="btn" id="create-backup-btn">Create Backup Now</button>
+      </div>
+      <div class="card" style="padding:24px">
+        <h2 style="margin-top:0">Backup History</h2>
+        <table id="backups-table">
+          <thead><tr><th>Name</th><th>Size</th><th>Date</th><th>Actions</th></tr></thead>
+          <tbody id="backups-body"></tbody>
+        </table>
       </div>
     </section>
   </div>
@@ -549,6 +608,7 @@ function loadSection(name) {
     case 'channels': loadChannels(); break;
     case 'audit-log': auditPage = 0; loadAuditLog(); break;
     case 'settings': loadSettings(); break;
+    case 'backups': loadBackups(); break;
   }
 }
 
@@ -833,6 +893,71 @@ document.getElementById('save-settings-btn').onclick = async () => {
     showAlert('settings-alert', 'danger', e.message);
   }
 };
+
+// ─── Backups ─────────────────────────────────────────────────────────────────
+function formatBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB';
+  return (b / 1073741824).toFixed(2) + ' GB';
+}
+
+async function loadBackups() {
+  try {
+    const backups = await api('GET', '/backups');
+    const tbody = document.getElementById('backups-body');
+    if (!backups.length) {
+      tbody.innerHTML = '<tr><td colspan="4">No backups found</td></tr>';
+      return;
+    }
+    tbody.innerHTML = backups.map(b => `<tr>
+      <td>${esc(b.name)}</td>
+      <td>${formatBytes(b.size)}</td>
+      <td>${new Date(b.date).toLocaleString()}</td>
+      <td>
+        <button class="btn btn-sm" onclick="restoreBackup('${esc(b.name)}')">Restore</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteBackup('${esc(b.name)}')">Delete</button>
+      </td>
+    </tr>`).join('');
+  } catch (e) {
+    showAlert('backups-alert', 'danger', e.message);
+  }
+}
+
+document.getElementById('create-backup-btn').onclick = async () => {
+  try {
+    await api('POST', '/backup');
+    showAlert('backups-alert', 'success', 'Backup created');
+    loadBackups();
+  } catch (e) {
+    showAlert('backups-alert', 'danger', e.message);
+  }
+};
+
+async function deleteBackup(name) {
+  if (!confirm('Delete backup ' + name + '?')) return;
+  try {
+    await fetch('/admin/api/backups/' + encodeURIComponent(name), {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + token },
+    });
+    showAlert('backups-alert', 'success', 'Backup deleted');
+    loadBackups();
+  } catch (e) {
+    showAlert('backups-alert', 'danger', e.message);
+  }
+}
+
+async function restoreBackup(name) {
+  if (!confirm('Restore from ' + name + '? A pre-restore backup will be created. Server restart recommended after restore.')) return;
+  try {
+    await api('POST', '/backups/' + encodeURIComponent(name) + '/restore');
+    showAlert('backups-alert', 'success', 'Database restored from ' + name + '. Restart the server to apply.');
+    loadBackups();
+  } catch (e) {
+    showAlert('backups-alert', 'danger', e.message);
+  }
+}
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 function esc(s) {

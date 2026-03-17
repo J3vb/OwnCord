@@ -35,6 +35,18 @@ func buildErrorMsg(code, message string) []byte {
 	})
 }
 
+// buildRateLimitError produces a RATE_LIMITED error with retry_after per PROTOCOL.md.
+func buildRateLimitError(message string, retryAfterSeconds float64) []byte {
+	return buildJSON(map[string]any{
+		"type": "error",
+		"payload": map[string]any{
+			"code":        "RATE_LIMITED",
+			"message":     message,
+			"retry_after": retryAfterSeconds,
+		},
+	})
+}
+
 // buildAuthError produces an auth_error envelope per PROTOCOL.md.
 // The client treats this type as non-recoverable and stops reconnecting.
 func buildAuthError(message string) []byte {
@@ -77,7 +89,8 @@ func buildMemberJoin(user *db.User, roleName string) []byte {
 }
 
 // buildChatMessage constructs a chat_message broadcast envelope.
-func buildChatMessage(msgID, channelID, userID int64, username string, avatar *string, content string, timestamp string, replyTo *int64, attachments []map[string]any) []byte {
+// Includes role in user object and empty reactions array for consistency with REST API.
+func buildChatMessage(msgID, channelID, userID int64, username string, avatar *string, roleName string, content string, timestamp string, replyTo *int64, attachments []map[string]any) []byte {
 	var avatarVal any
 	if avatar != nil {
 		avatarVal = *avatar
@@ -94,11 +107,44 @@ func buildChatMessage(msgID, channelID, userID int64, username string, avatar *s
 				"id":       userID,
 				"username": username,
 				"avatar":   avatarVal,
+				"role":     roleName,
 			},
 			"content":     content,
 			"reply_to":    replyTo,
 			"timestamp":   timestamp,
 			"attachments": attachments,
+			"reactions":   []any{},
+		},
+	})
+}
+
+// buildMemberLeave constructs a member_leave broadcast per PROTOCOL.md.
+func buildMemberLeave(userID int64) []byte {
+	return buildJSON(map[string]any{
+		"type": "member_leave",
+		"payload": map[string]any{
+			"user_id": userID,
+		},
+	})
+}
+
+// buildMemberUpdate constructs a member_update broadcast per PROTOCOL.md.
+func buildMemberUpdate(userID int64, roleName string) []byte {
+	return buildJSON(map[string]any{
+		"type": "member_update",
+		"payload": map[string]any{
+			"user_id": userID,
+			"role":    roleName,
+		},
+	})
+}
+
+// buildMemberBan constructs a member_ban broadcast per PROTOCOL.md.
+func buildMemberBan(userID int64) []byte {
+	return buildJSON(map[string]any{
+		"type": "member_ban",
+		"payload": map[string]any{
+			"user_id": userID,
 		},
 	})
 }

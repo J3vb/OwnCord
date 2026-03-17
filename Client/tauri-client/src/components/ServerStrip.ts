@@ -11,7 +11,7 @@ export function createServerStrip(): MountableComponent {
   let root: HTMLDivElement | null = null;
 
   function mount(container: Element): void {
-    root = createElement("div", { class: "server-strip" });
+    root = createElement("div", { class: "server-strip", "data-testid": "server-strip" });
 
     const homeIcon = createElement(
       "div",

@@ -381,6 +381,53 @@ func (d *DB) UpdateReadState(userID, channelID, lastReadMessageID int64) error {
 	return nil
 }
 
+// GetChannelUnreadCounts returns per-channel unread counts and last message IDs
+// for a given user. Only text channels with at least one message are included.
+func (d *DB) GetChannelUnreadCounts(userID int64) (map[int64]ChannelUnread, error) {
+	rows, err := d.sqlDB.Query(
+		`SELECT c.id,
+		        COALESCE(MAX(m.id), 0) AS last_msg_id,
+		        COUNT(CASE WHEN m.id > COALESCE(rs.last_message_id, 0) AND m.deleted = 0 THEN 1 END) AS unread
+		 FROM channels c
+		 LEFT JOIN messages m ON m.channel_id = c.id AND m.deleted = 0
+		 LEFT JOIN read_states rs ON rs.channel_id = c.id AND rs.user_id = ?
+		 WHERE c.type = 'text'
+		 GROUP BY c.id`,
+		userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("GetChannelUnreadCounts: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[int64]ChannelUnread)
+	for rows.Next() {
+		var chID int64
+		var cu ChannelUnread
+		if scanErr := rows.Scan(&chID, &cu.LastMessageID, &cu.UnreadCount); scanErr != nil {
+			return nil, fmt.Errorf("GetChannelUnreadCounts scan: %w", scanErr)
+		}
+		result[chID] = cu
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("GetChannelUnreadCounts rows: %w", rows.Err())
+	}
+	return result, nil
+}
+
+// GetLatestMessageID returns the highest message ID in a channel, or 0 if empty.
+func (d *DB) GetLatestMessageID(channelID int64) (int64, error) {
+	var id int64
+	err := d.sqlDB.QueryRow(
+		`SELECT COALESCE(MAX(id), 0) FROM messages WHERE channel_id = ? AND deleted = 0`,
+		channelID,
+	).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("GetLatestMessageID: %w", err)
+	}
+	return id, nil
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 // scanMessage scans a single message from *sql.Row.

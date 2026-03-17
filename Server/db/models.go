@@ -157,6 +157,12 @@ type VoiceState struct {
 	Screenshare bool   `json:"screenshare"`
 }
 
+// ChannelUnread holds per-user unread data for a single channel.
+type ChannelUnread struct {
+	LastMessageID int64 `json:"last_message_id"`
+	UnreadCount   int   `json:"unread_count"`
+}
+
 // ServerStats contains aggregate counts for the admin dashboard.
 type ServerStats struct {
 	UserCount    int64 `json:"user_count"`

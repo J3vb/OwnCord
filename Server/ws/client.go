@@ -25,6 +25,7 @@ type Client struct {
 	channelID  int64  // currently viewed channel for channel-scoped broadcasts
 	voiceChID  int64  // voice channel the user is in (0 = not in voice); guarded by voiceMu
 	pc         *webrtc.PeerConnection // SFU peer connection; nil when not in voice; guarded by voiceMu
+	roleName   string // cached role name for chat_message broadcasts
 	tokenHash  string // SHA-256 hex of the session token; used for periodic revalidation
 	msgCount   int    // count of messages processed; resets after session check
 	sendClosed bool   // true after the send channel has been closed

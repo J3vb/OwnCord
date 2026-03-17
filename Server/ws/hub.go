@@ -246,6 +246,16 @@ func (h *Hub) BroadcastChannelDelete(channelID int64) {
 	h.BroadcastToAll(buildChannelDelete(channelID))
 }
 
+// BroadcastMemberBan sends a member_ban message to all connected clients.
+func (h *Hub) BroadcastMemberBan(userID int64) {
+	h.BroadcastToAll(buildMemberBan(userID))
+}
+
+// BroadcastMemberUpdate sends a member_update message to all connected clients.
+func (h *Hub) BroadcastMemberUpdate(userID int64, roleName string) {
+	h.BroadcastToAll(buildMemberUpdate(userID, roleName))
+}
+
 // SendToUser delivers msg directly to the client identified by userID.
 // Returns true if the client was found and the message was queued.
 func (h *Hub) SendToUser(userID int64, msg []byte) bool {

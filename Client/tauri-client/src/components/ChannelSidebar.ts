@@ -37,7 +37,7 @@ function renderChannelItem(
     .filter(Boolean)
     .join(" ");
 
-  const item = createElement("div", { class: classes });
+  const item = createElement("div", { class: classes, "data-testid": `channel-${channel.id}` });
   item.dataset.channelId = String(channel.id);
 
   const prefix =
@@ -148,7 +148,7 @@ export function createChannelSidebar(): MountableComponent {
   }
 
   function mount(container: Element): void {
-    root = createElement("div", { class: "channel-sidebar" });
+    root = createElement("div", { class: "channel-sidebar", "data-testid": "channel-sidebar" });
 
     // Header
     const header = createElement("div", { class: "channel-sidebar-header" });
