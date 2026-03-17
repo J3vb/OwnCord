@@ -67,7 +67,10 @@ test.describe("Quick Switcher", () => {
     const initialCount = await page.locator(".quick-switcher__item").count();
 
     await input.fill("general");
-    await page.waitForTimeout(200);
+    await expect.poll(
+      async () => page.locator(".quick-switcher__item").count(),
+      { timeout: 2000 },
+    ).toBeGreaterThan(0);
 
     const filteredCount = await page.locator(".quick-switcher__item").count();
     expect(filteredCount).toBeLessThanOrEqual(initialCount);
@@ -84,24 +87,18 @@ test.describe("Quick Switcher", () => {
 
   test("arrow keys navigate results", async ({ page }) => {
     await page.keyboard.press("Control+k");
-    await expect(page.locator(".quick-switcher__item").first()).toBeVisible({ timeout: 3_000 });
-
     const firstItem = page.locator(".quick-switcher__item").first();
-    const firstIsActive = await firstItem.evaluate((el) =>
-      el.classList.contains("quick-switcher__item--active"),
-    );
+    await expect(firstItem).toBeVisible({ timeout: 3_000 });
+
+    // First item should start as active
+    await expect(firstItem).toHaveClass(/quick-switcher__item--active/);
 
     await page.keyboard.press("ArrowDown");
-    await page.waitForTimeout(100);
 
-    // Active state should have moved
+    // After ArrowDown, second item should be active and first should not
     const secondItem = page.locator(".quick-switcher__item").nth(1);
-    if (await secondItem.count() > 0) {
-      const secondIsActive = await secondItem.evaluate((el) =>
-        el.classList.contains("quick-switcher__item--active"),
-      );
-      expect(firstIsActive || secondIsActive).toBe(true);
-    }
+    await expect(secondItem).toHaveClass(/quick-switcher__item--active/);
+    await expect(firstItem).not.toHaveClass(/quick-switcher__item--active/);
   });
 });
 
@@ -165,7 +162,10 @@ test.describe("Emoji Picker", () => {
 
     // Search for a specific emoji character that exists in the grid
     await search.fill("\uD83D\uDE00");
-    await page.waitForTimeout(200);
+    await expect.poll(
+      async () => page.locator(".ep-emoji").count(),
+      { timeout: 2000 },
+    ).toBeGreaterThan(0);
 
     const countAfter = await allEmojis.count();
     // After filtering, should have fewer results
@@ -175,57 +175,115 @@ test.describe("Emoji Picker", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests: Pinned Messages
-// ---------------------------------------------------------------------------
-
-test.describe("Pinned Messages", () => {
-  test("pinned panel can be opened from chat header", async ({ page }) => {
-    await mockTauriFullSessionWithMessages(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
-
-    // Look for a pin button in chat header tools area
-    const pinBtn = page.locator(".ch-tools button", { hasText: /pin/i });
-    if (await pinBtn.count() > 0) {
-      await pinBtn.click();
-
-      const panel = page.locator(".pinned-panel");
-      await expect(panel).toBeVisible({ timeout: 3_000 });
-    }
-  });
-
-  test("pinned panel has close button", async ({ page }) => {
-    await mockTauriFullSessionWithMessages(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
-
-    const pinBtn = page.locator(".ch-tools button", { hasText: /pin/i });
-    if (await pinBtn.count() > 0) {
-      await pinBtn.click();
-
-      const closeBtn = page.locator(".pinned-panel__close");
-      await expect(closeBtn).toBeVisible({ timeout: 3_000 });
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Tests: Invite Manager
 // ---------------------------------------------------------------------------
 
 test.describe("Invite Manager", () => {
-  test("invite manager can be opened", async ({ page }) => {
+  test.beforeEach(async ({ page }) => {
     await mockTauriFullSessionWithMessages(page);
     await page.goto("/");
     await navigateToMainPage(page);
+  });
 
-    // Invite manager is typically opened from channel sidebar header or server context
-    const inviteBtn = page.locator("button", { hasText: /invite/i });
-    if (await inviteBtn.count() > 0) {
-      await inviteBtn.first().click();
+  test("invite button opens invite manager overlay", async ({ page }) => {
+    const inviteBtn = page.getByRole("button", { name: /invite/i });
+    await expect(inviteBtn).toBeVisible({ timeout: 3_000 });
+    await inviteBtn.click();
 
-      const overlay = page.locator(".invite-manager-overlay");
-      await expect(overlay).toBeVisible({ timeout: 3_000 });
-    }
+    const overlay = page.locator(".invite-manager-overlay");
+    await expect(overlay).toBeVisible({ timeout: 3_000 });
+  });
+
+  test("invite manager shows invite list", async ({ page }) => {
+    await page.getByRole("button", { name: /invite/i }).click();
+
+    const items = page.locator(".invite-item");
+    await expect(items.first()).toBeVisible({ timeout: 3_000 });
+  });
+
+  test("invite manager has create invite button", async ({ page }) => {
+    await page.getByRole("button", { name: /invite/i }).click();
+
+    const createBtn = page.locator(".invite-manager__create");
+    await expect(createBtn).toBeVisible({ timeout: 3_000 });
+  });
+
+  test("Escape closes invite manager", async ({ page }) => {
+    await page.getByRole("button", { name: /invite/i }).click();
+    const overlay = page.locator(".invite-manager-overlay");
+    await expect(overlay).toBeVisible({ timeout: 3_000 });
+
+    await page.keyboard.press("Escape");
+    await expect(overlay).not.toBeVisible();
+  });
+
+  test("clicking overlay backdrop closes invite manager", async ({ page }) => {
+    await page.getByRole("button", { name: /invite/i }).click();
+    const overlay = page.locator(".invite-manager-overlay");
+    await expect(overlay).toBeVisible({ timeout: 3_000 });
+
+    // Click the backdrop (not the modal)
+    await overlay.click({ position: { x: 10, y: 10 } });
+    await expect(overlay).not.toBeVisible();
+  });
+
+  test("close button closes invite manager", async ({ page }) => {
+    await page.getByRole("button", { name: /invite/i }).click();
+    const overlay = page.locator(".invite-manager-overlay");
+    await expect(overlay).toBeVisible({ timeout: 3_000 });
+
+    await page.locator(".invite-manager__close").click();
+    await expect(overlay).not.toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Pinned Messages
+// ---------------------------------------------------------------------------
+
+test.describe("Pinned Messages", () => {
+  test.beforeEach(async ({ page }) => {
+    await mockTauriFullSession(page);
+    await page.goto("/");
+    await navigateToMainPage(page);
+  });
+
+  test("pin button exists in chat header tools", async ({ page }) => {
+    const pinBtn = page.locator("[data-testid='pin-btn']");
+    await expect(pinBtn).toBeVisible({ timeout: 3_000 });
+  });
+
+  test("clicking pin button opens pinned panel", async ({ page }) => {
+    const pinBtn = page.locator("[data-testid='pin-btn']");
+    await pinBtn.click();
+
+    const panel = page.locator(".pinned-panel");
+    await expect(panel).toBeVisible({ timeout: 3_000 });
+  });
+
+  test("pinned panel has close button", async ({ page }) => {
+    await page.locator("[data-testid='pin-btn']").click();
+
+    const closeBtn = page.locator(".pinned-panel__close");
+    await expect(closeBtn).toBeVisible({ timeout: 3_000 });
+  });
+
+  test("close button closes pinned panel", async ({ page }) => {
+    await page.locator("[data-testid='pin-btn']").click();
+    const panel = page.locator(".pinned-panel");
+    await expect(panel).toBeVisible({ timeout: 3_000 });
+
+    await page.locator(".pinned-panel__close").click();
+    await expect(panel).not.toBeVisible();
+  });
+
+  test("clicking pin button again closes pinned panel", async ({ page }) => {
+    const pinBtn = page.locator("[data-testid='pin-btn']");
+    await pinBtn.click();
+    const panel = page.locator(".pinned-panel");
+    await expect(panel).toBeVisible({ timeout: 3_000 });
+
+    await pinBtn.click();
+    await expect(panel).not.toBeVisible();
   });
 });

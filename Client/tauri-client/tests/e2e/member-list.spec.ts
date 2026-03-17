@@ -1,9 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { mockTauriFullSession, mockTauriFullSessionWithMessages, navigateToMainPage } from "./helpers";
-
-// ---------------------------------------------------------------------------
-// Tests: Member List
-// ---------------------------------------------------------------------------
+import {
+  mockTauriFullSession,
+  mockTauriFullSessionWithMessages,
+  navigateToMainPage,
+  emitWsMessage,
+} from "./helpers";
 
 test.describe("Member List", () => {
   test.beforeEach(async ({ page }) => {
@@ -12,62 +13,116 @@ test.describe("Member List", () => {
     await navigateToMainPage(page);
   });
 
-  test("member list is visible", async ({ page }) => {
-    const memberList = page.locator(".member-list");
+  test("renders members with role groups, avatars, names, and status", async ({ page }) => {
+    const memberList = page.locator("[data-testid='member-list']");
     await expect(memberList).toBeVisible();
-  });
 
-  test("member list shows role groups", async ({ page }) => {
+    // Should have at least one role group header
     const roleGroups = page.locator(".member-role-group");
-    const count = await roleGroups.count();
-    expect(count).toBeGreaterThanOrEqual(1);
+    expect(await roleGroups.count()).toBeGreaterThanOrEqual(1);
+
+    // First member should have all required elements
+    const firstMember = page.locator("[data-testid='member-1']");
+    await expect(firstMember).toBeVisible();
+    await expect(firstMember.locator(".mi-avatar")).toBeVisible();
+    await expect(firstMember.locator(".mi-name")).toBeVisible();
+    await expect(firstMember.locator(".mi-status")).toBeAttached();
   });
 
-  test("member items display usernames", async ({ page }) => {
-    const memberItem = page.locator(".member-item").first();
-    await expect(memberItem).toBeVisible();
+  test("new member appears when member_join event is received", async ({ page }) => {
+    const membersBefore = await page.locator(".member-item").count();
 
-    const name = memberItem.locator(".mi-name");
-    await expect(name).toBeVisible();
+    await emitWsMessage(page, {
+      type: "member_join",
+      payload: {
+        user: {
+          id: 99,
+          username: "newjoiner",
+          avatar: "",
+          role: "member",
+        },
+      },
+    });
+
+    // Wait for the new member to appear
+    const newMember = page.locator(".mi-name", { hasText: "newjoiner" });
+    await expect(newMember).toBeVisible({ timeout: 5_000 });
+
+    const membersAfter = await page.locator(".member-item").count();
+    expect(membersAfter).toBe(membersBefore + 1);
   });
 
-  test("member items show avatars", async ({ page }) => {
-    const memberItem = page.locator(".member-item").first();
-    const avatar = memberItem.locator(".mi-avatar");
-    await expect(avatar).toBeVisible();
+  test("member disappears when member_ban event is received", async ({ page }) => {
+    // Verify otheruser exists first
+    const otherUser = page.locator(".mi-name", { hasText: "otheruser" });
+    await expect(otherUser).toBeVisible({ timeout: 5_000 });
+
+    const membersBefore = await page.locator(".member-item").count();
+
+    await emitWsMessage(page, {
+      type: "member_ban",
+      payload: { user_id: 2 },
+    });
+
+    // otheruser should disappear
+    await expect(otherUser).not.toBeVisible({ timeout: 5_000 });
+
+    const membersAfter = await page.locator(".member-item").count();
+    expect(membersAfter).toBe(membersBefore - 1);
   });
 
-  test("member items show status indicators", async ({ page }) => {
-    const memberItem = page.locator(".member-item").first();
-    const status = memberItem.locator(".mi-status");
-    await expect(status).toBeAttached();
+  test("member status updates when presence event is received", async ({ page }) => {
+    // otheruser starts as "online"
+    const otherUserItem = page.locator(".member-item").filter({
+      has: page.locator(".mi-name", { hasText: "otheruser" }),
+    });
+    await expect(otherUserItem).toBeVisible({ timeout: 5_000 });
+
+    // Should NOT have offline class initially
+    await expect(otherUserItem).not.toHaveClass(/offline/);
+
+    // Send presence update to offline
+    await emitWsMessage(page, {
+      type: "presence",
+      payload: { user_id: 2, status: "offline" },
+    });
+
+    // Should now have offline class
+    await expect(otherUserItem).toHaveClass(/offline/, { timeout: 5_000 });
+  });
+
+  test("toggle visibility via header button", async ({ page }) => {
+    const memberList = page.locator("[data-testid='member-list']");
+    await expect(memberList).toBeVisible();
+
+    const toggle = page.locator("[data-testid='members-toggle']");
+    await toggle.click();
+    await expect(memberList).not.toBeVisible({ timeout: 3_000 });
+
+    await toggle.click();
+    await expect(memberList).toBeVisible({ timeout: 3_000 });
   });
 });
 
 test.describe("Member List — Multi-role", () => {
-  test("shows members from multiple roles", async ({ page }) => {
+  test("shows members grouped by role with correct counts", async ({ page }) => {
     await mockTauriFullSessionWithMessages(page);
     await page.goto("/");
     await navigateToMainPage(page);
 
-    const memberList = page.locator(".member-list");
+    const memberList = page.locator("[data-testid='member-list']");
     await expect(memberList).toBeVisible();
 
+    // Multi-role mock has 5 members across different roles
     const members = page.locator(".member-item");
-    const count = await members.count();
-    expect(count).toBeGreaterThanOrEqual(3);
-  });
+    expect(await members.count()).toBeGreaterThanOrEqual(3);
 
-  test("offline members have offline class", async ({ page }) => {
-    await mockTauriFullSessionWithMessages(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    // Multiple role groups should be present
+    const roleGroups = page.locator(".member-role-group");
+    expect(await roleGroups.count()).toBeGreaterThanOrEqual(2);
 
-    // Wait for member list to populate
-    await page.waitForTimeout(500);
-
+    // Offline members should have the offline class
     const offlineMembers = page.locator(".member-item.offline");
-    const count = await offlineMembers.count();
-    expect(count).toBeGreaterThanOrEqual(1);
+    await expect(offlineMembers.first()).toBeAttached({ timeout: 5000 });
   });
 });

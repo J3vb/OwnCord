@@ -1,10 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { mockTauriFullSession, navigateToMainPage } from "./helpers";
 
-// ---------------------------------------------------------------------------
-// Tests: Chat Header
-// ---------------------------------------------------------------------------
-
 test.describe("Chat Header", () => {
   test.beforeEach(async ({ page }) => {
     await mockTauriFullSession(page);
@@ -12,34 +8,61 @@ test.describe("Chat Header", () => {
     await navigateToMainPage(page);
   });
 
-  test("chat header is visible", async ({ page }) => {
-    const header = page.locator(".chat-header");
+  test("renders channel info with hash, name, tools, and search", async ({ page }) => {
+    const header = page.locator("[data-testid='chat-header']");
     await expect(header).toBeVisible();
-  });
-
-  test("chat header shows hash icon", async ({ page }) => {
-    const hash = page.locator(".chat-header .ch-hash");
-    await expect(hash).toBeVisible();
-  });
-
-  test("chat header shows channel name", async ({ page }) => {
-    const name = page.locator(".chat-header .ch-name");
+    await expect(header.locator(".ch-hash")).toBeVisible();
+    const name = page.locator("[data-testid='chat-header-name']");
     await expect(name).toBeVisible();
     await expect(name).not.toBeEmpty();
+    await expect(header.locator(".ch-topic")).toBeAttached();
+    await expect(header.locator(".ch-tools")).toBeVisible();
+    await expect(header.locator(".ch-tools .search-input")).toBeAttached();
   });
 
-  test("chat header shows topic", async ({ page }) => {
-    const topic = page.locator(".chat-header .ch-topic");
-    await expect(topic).toBeAttached();
+  test("members toggle button hides and shows member list", async ({ page }) => {
+    const membersToggle = page.locator("[data-testid='members-toggle']");
+    await expect(membersToggle).toBeVisible();
+
+    const memberList = page.locator("[data-testid='member-list']");
+    await expect(memberList).toBeVisible({ timeout: 3000 });
+
+    await membersToggle.click();
+    await expect(memberList).not.toBeVisible({ timeout: 3000 });
+
+    await membersToggle.click();
+    await expect(memberList).toBeVisible({ timeout: 3000 });
   });
 
-  test("chat header has tools area", async ({ page }) => {
-    const tools = page.locator(".ch-tools");
-    await expect(tools).toBeVisible();
-  });
-
-  test("chat header has search input", async ({ page }) => {
+  test("search input expands on focus and collapses on blur", async ({ page }) => {
     const search = page.locator(".ch-tools .search-input");
     await expect(search).toBeAttached();
+
+    // Focus the search — should trigger CSS width expansion
+    await search.focus();
+    await expect(search).toBeFocused();
+
+    // Type something to verify it accepts input
+    await search.fill("test query");
+    await expect(search).toHaveValue("test query");
+
+    // Blur and verify value persists
+    await search.blur();
+    await expect(search).toHaveValue("test query");
+  });
+
+  test("pin button opens pinned messages panel", async ({ page }) => {
+    const pinBtn = page.locator("[data-testid='pin-btn']");
+    await expect(pinBtn).toBeVisible();
+
+    await pinBtn.click();
+
+    const pinnedPanel = page.locator(".pinned-panel");
+    await expect(pinnedPanel).toBeVisible({ timeout: 3000 });
+
+    // Close it
+    const closeBtn = pinnedPanel.locator(".pinned-panel__close");
+    await closeBtn.click();
+    await expect(pinnedPanel).not.toBeAttached({ timeout: 3000 });
   });
 });

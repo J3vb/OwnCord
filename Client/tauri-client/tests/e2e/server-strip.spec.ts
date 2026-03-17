@@ -13,25 +13,27 @@ test.describe("Server Strip", () => {
   });
 
   test("server strip is visible with server icons", async ({ page }) => {
-    const strip = page.locator(".server-strip");
+    const strip = page.locator("[data-testid='server-strip']");
     await expect(strip).toBeVisible();
 
-    const icons = page.locator(".server-strip .server-icon");
+    const icons = strip.locator(".server-icon");
     await expect(icons.first()).toBeVisible();
   });
 
-  test("active server icon has active class", async ({ page }) => {
-    const activeIcon = page.locator(".server-strip .server-icon.active");
+  test("active server icon shows home initial 'O'", async ({ page }) => {
+    const activeIcon = page.locator("[data-testid='server-strip'] .server-icon.active");
     await expect(activeIcon).toBeVisible();
+    await expect(activeIcon).toHaveText("O");
   });
 
   test("server separator exists between icons", async ({ page }) => {
-    const separator = page.locator(".server-strip .server-separator");
+    const separator = page.locator("[data-testid='server-strip'] .server-separator");
     await expect(separator).toBeAttached();
   });
 
-  test("add server button exists", async ({ page }) => {
-    const addBtn = page.locator(".server-strip .server-icon.add");
+  test("add server button shows '+' icon", async ({ page }) => {
+    const addBtn = page.locator("[data-testid='server-strip'] .server-icon.add");
     await expect(addBtn).toBeVisible();
+    await expect(addBtn).toHaveText("+");
   });
 });

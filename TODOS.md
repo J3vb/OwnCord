@@ -117,24 +117,19 @@ synchronous test assertions.
 
 ---
 
-### 13. E2E test improvement plan (Phases 4-6)
+### ~~13. E2E test improvement plan (Phases 4-6)~~ DONE
 
-**What:** Complete the remaining phases of the E2E
-improvement plan:
+Completed all remaining E2E improvement phases:
 
-- Phase 4: Strengthen assertions, fix quality
-- Phase 5: Toast coverage
-- Phase 6: Migrate all selectors to data-testid
-
-**Why:** Phases 1-3 are complete. Remaining phases improve
-test reliability and coverage.
-
-**Context:** See `project_e2e_improvement_plan.md` in
-Claude memory for full plan.
-
-**Effort:** M (per phase)
-
-**Depends on:** TODO #4 (toast wiring) for Phase 5 — DONE
+- Phase 4: Strengthened assertions in server-strip,
+  main-layout, user-bar, message-input specs. Fixed
+  "presence_update" test title in member-list.spec.ts.
+- Phase 5: Replaced skipped toast.spec.ts with 5 real
+  tests (load failure, auto-dismiss, container check,
+  message display, stacking). Added
+  mockTauriFullSessionWithFailingMessages helper.
+- Phase 6: Migrated 12 spec files to data-testid selectors
+  for all primary elements.
 
 ---
 

@@ -13,7 +13,7 @@ test.describe("Typing Indicator", () => {
   });
 
   test("typing indicator slot exists", async ({ page }) => {
-    const slot = page.locator(".typing-slot");
+    const slot = page.locator("[data-testid='typing-slot']");
     await expect(slot).toBeAttached();
   });
 
@@ -33,6 +33,7 @@ test.describe("Typing Indicator", () => {
       payload: {
         channel_id: 1,
         user_id: 2,
+        username: "otheruser",
       },
     });
 
@@ -47,6 +48,7 @@ test.describe("Typing Indicator", () => {
       payload: {
         channel_id: 1,
         user_id: 2,
+        username: "otheruser",
       },
     });
 

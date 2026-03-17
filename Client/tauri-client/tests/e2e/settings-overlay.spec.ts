@@ -1,18 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mockTauriFullSession, navigateToMainPage } from "./helpers";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-async function openSettings(page: import("@playwright/test").Page): Promise<void> {
-  // Settings is opened via user bar settings button (gear icon)
-  const settingsBtn = page.locator(".ub-controls button").last();
-  await settingsBtn.click();
-
-  const overlay = page.locator(".settings-overlay.open");
-  await expect(overlay).toBeVisible({ timeout: 5_000 });
-}
+import { mockTauriFullSession, navigateToMainPage, openSettings, switchSettingsTab } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Tests: Settings Overlay — structure
@@ -28,7 +15,7 @@ test.describe("Settings Overlay", () => {
   test("settings overlay opens from user bar", async ({ page }) => {
     await openSettings(page);
 
-    const overlay = page.locator(".settings-overlay");
+    const overlay = page.locator("[data-testid='settings-overlay']");
     await expect(overlay).toHaveClass(/open/);
   });
 
@@ -56,7 +43,7 @@ test.describe("Settings Overlay", () => {
     const closeBtn = page.locator(".settings-close-btn");
     await closeBtn.click();
 
-    const overlay = page.locator(".settings-overlay");
+    const overlay = page.locator("[data-testid='settings-overlay']");
     await expect(overlay).not.toHaveClass(/open/);
   });
 
@@ -65,7 +52,7 @@ test.describe("Settings Overlay", () => {
 
     await page.keyboard.press("Escape");
 
-    const overlay = page.locator(".settings-overlay");
+    const overlay = page.locator("[data-testid='settings-overlay']");
     await expect(overlay).not.toHaveClass(/open/);
   });
 
@@ -122,9 +109,7 @@ test.describe("Settings — Appearance Tab", () => {
     await navigateToMainPage(page);
     await openSettings(page);
 
-    // Switch to Appearance tab
-    const tabs = page.locator(".settings-sidebar button.settings-nav-item");
-    await tabs.nth(1).click();
+    await switchSettingsTab(page, "Appearance");
   });
 
   test("shows theme options", async ({ page }) => {
@@ -171,9 +156,7 @@ test.describe("Settings — Notifications Tab", () => {
     await page.goto("/");
     await navigateToMainPage(page);
     await openSettings(page);
-
-    const tabs = page.locator(".settings-sidebar button.settings-nav-item");
-    await tabs.nth(2).click();
+    await switchSettingsTab(page, "Notifications");
   });
 
   test("shows notification toggles", async ({ page }) => {
@@ -202,9 +185,7 @@ test.describe("Settings — Voice & Audio Tab", () => {
     await page.goto("/");
     await navigateToMainPage(page);
     await openSettings(page);
-
-    const tabs = page.locator(".settings-sidebar button.settings-nav-item");
-    await tabs.nth(3).click();
+    await switchSettingsTab(page, "Voice & Audio");
   });
 
   test("shows device selectors", async ({ page }) => {
@@ -235,9 +216,7 @@ test.describe("Settings — Keybinds Tab", () => {
     await page.goto("/");
     await navigateToMainPage(page);
     await openSettings(page);
-
-    const tabs = page.locator(".settings-sidebar button.settings-nav-item");
-    await tabs.nth(4).click();
+    await switchSettingsTab(page, "Keybinds");
   });
 
   test("shows keybind rows", async ({ page }) => {
@@ -262,9 +241,7 @@ test.describe("Settings — Logs Tab", () => {
     await page.goto("/");
     await navigateToMainPage(page);
     await openSettings(page);
-
-    const tabs = page.locator(".settings-sidebar button.settings-nav-item");
-    await tabs.nth(5).click();
+    await switchSettingsTab(page, "Logs");
   });
 
   test("shows log viewer", async ({ page }) => {

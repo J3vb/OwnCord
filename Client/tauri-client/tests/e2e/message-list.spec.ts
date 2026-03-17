@@ -6,52 +6,25 @@ import {
   emitWsMessage,
 } from "./helpers";
 
-// ---------------------------------------------------------------------------
-// Tests: Message List — basic
-// ---------------------------------------------------------------------------
-
-test.describe("Message List", () => {
-  test.beforeEach(async ({ page }) => {
+test.describe("Message List — Structure", () => {
+  test("renders messages with author, content, timestamp, and avatar", async ({ page }) => {
     await mockTauriFullSession(page);
     await page.goto("/");
     await navigateToMainPage(page);
-  });
 
-  test("messages container is visible", async ({ page }) => {
     const container = page.locator(".messages-container");
     await expect(container).toBeVisible();
-  });
 
-  test("displays messages after channel load", async ({ page }) => {
-    const messages = page.locator(".message");
-    await expect(messages.first()).toBeVisible({ timeout: 10_000 });
-  });
+    const message = page.locator("[data-testid='message-101']");
+    await expect(message).toBeVisible({ timeout: 10_000 });
 
-  test("message shows author name", async ({ page }) => {
-    const author = page.locator(".msg-author").first();
-    await expect(author).toBeVisible({ timeout: 10_000 });
-  });
-
-  test("message shows content text", async ({ page }) => {
-    const text = page.locator(".msg-text").first();
-    await expect(text).toBeVisible({ timeout: 10_000 });
-    await expect(text).toHaveText("Hello world!");
-  });
-
-  test("message shows timestamp", async ({ page }) => {
-    const time = page.locator(".msg-time").first();
-    await expect(time).toBeVisible({ timeout: 10_000 });
-  });
-
-  test("message shows avatar", async ({ page }) => {
-    const avatar = page.locator(".msg-avatar").first();
-    await expect(avatar).toBeVisible({ timeout: 10_000 });
+    // Verify all parts of a message render
+    await expect(message.locator(".msg-author")).toBeVisible();
+    await expect(message.locator(".msg-text")).toHaveText("Hello world!");
+    await expect(message.locator(".msg-time")).toBeVisible();
+    await expect(message.locator(".msg-avatar")).toBeVisible();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Tests: Message List — rich content
-// ---------------------------------------------------------------------------
 
 test.describe("Message List — Rich Content", () => {
   test.beforeEach(async ({ page }) => {
@@ -60,70 +33,48 @@ test.describe("Message List — Rich Content", () => {
     await navigateToMainPage(page);
   });
 
-  test("displays multiple messages", async ({ page }) => {
+  test("displays multiple messages with rich formatting", async ({ page }) => {
     const messages = page.locator(".message");
     await expect(messages.first()).toBeVisible({ timeout: 10_000 });
-
     const count = await messages.count();
     expect(count).toBeGreaterThanOrEqual(3);
+
+    // Edited messages show indicator
+    await expect(page.locator(".msg-edited").first()).toBeVisible();
+
+    // Reply references show author
+    const replyRef = page.locator(".msg-reply-ref").first();
+    await expect(replyRef).toBeVisible();
+    await expect(replyRef.locator(".rr-author")).toBeVisible();
+
+    // Code blocks render
+    await expect(page.locator(".msg-codeblock").first()).toBeVisible();
   });
 
-  test("shows edited indicator", async ({ page }) => {
-    const edited = page.locator(".msg-edited");
-    await expect(edited.first()).toBeVisible({ timeout: 10_000 });
-  });
+  test("reactions and attachments render correctly", async ({ page }) => {
+    await expect(page.locator(".message").first()).toBeVisible({ timeout: 10_000 });
 
-  test("shows reply references", async ({ page }) => {
-    const replyRef = page.locator(".msg-reply-ref");
-    await expect(replyRef.first()).toBeVisible({ timeout: 10_000 });
-
-    const replyAuthor = replyRef.first().locator(".rr-author");
-    await expect(replyAuthor).toBeVisible();
-  });
-
-  test("renders code blocks", async ({ page }) => {
-    const codeBlock = page.locator(".msg-codeblock");
-    await expect(codeBlock.first()).toBeVisible({ timeout: 10_000 });
-  });
-
-  test("shows reactions on messages", async ({ page }) => {
-    const reactions = page.locator(".msg-reactions");
-    await expect(reactions.first()).toBeVisible({ timeout: 10_000 });
-
+    // Reaction chips show emoji and count
     const chip = page.locator(".reaction-chip").first();
     await expect(chip).toBeVisible();
+    await expect(chip).not.toBeEmpty();
+
+    // Image and file attachments
+    await expect(page.locator(".msg-image").first()).toBeAttached();
+    const file = page.locator(".msg-file").first();
+    await expect(file).toBeAttached();
+    await expect(file.locator(".msg-file-name")).toBeVisible();
   });
 
-  test("shows image attachments", async ({ page }) => {
-    const image = page.locator(".msg-image");
-    await expect(image.first()).toBeAttached({ timeout: 10_000 });
-  });
-
-  test("shows file attachments", async ({ page }) => {
-    const file = page.locator(".msg-file");
-    await expect(file.first()).toBeAttached({ timeout: 10_000 });
-
-    const filename = file.first().locator(".msg-file-name");
-    await expect(filename).toBeVisible();
-  });
-
-  test("grouped messages have grouped class", async ({ page }) => {
-    await page.waitForTimeout(500);
+  test("grouped messages share avatar and day dividers separate dates", async ({ page }) => {
     const grouped = page.locator(".message.grouped");
-    const count = await grouped.count();
-    // Messages from same author in quick succession should be grouped
-    expect(count).toBeGreaterThanOrEqual(1);
-  });
+    await expect(grouped.first()).toBeAttached({ timeout: 5000 });
+    expect(await grouped.count()).toBeGreaterThanOrEqual(1);
 
-  test("day dividers are shown", async ({ page }) => {
     const divider = page.locator(".msg-day-divider");
-    await expect(divider.first()).toBeAttached({ timeout: 10_000 });
+    await expect(divider.first()).toBeAttached();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Tests: Message List — real-time
-// ---------------------------------------------------------------------------
 
 test.describe("Message List — Real-time", () => {
   test("new message appears via WebSocket", async ({ page }) => {
@@ -131,10 +82,9 @@ test.describe("Message List — Real-time", () => {
     await page.goto("/");
     await navigateToMainPage(page);
 
-    // Wait for initial messages to load
     await expect(page.locator(".message").first()).toBeVisible({ timeout: 10_000 });
+    const countBefore = await page.locator(".message").count();
 
-    // Emit a new message via WebSocket
     await emitWsMessage(page, {
       type: "chat_message",
       payload: {
@@ -148,8 +98,38 @@ test.describe("Message List — Real-time", () => {
       },
     });
 
-    // The new message should appear
     const newMsg = page.locator(".msg-text", { hasText: "A new real-time message!" });
     await expect(newMsg).toBeVisible({ timeout: 5_000 });
+
+    const countAfter = await page.locator(".message").count();
+    expect(countAfter).toBe(countBefore + 1);
+  });
+
+  test("multiple rapid messages all appear in order", async ({ page }) => {
+    await mockTauriFullSession(page);
+    await page.goto("/");
+    await navigateToMainPage(page);
+    await expect(page.locator(".message").first()).toBeVisible({ timeout: 10_000 });
+
+    for (let i = 0; i < 3; i++) {
+      await emitWsMessage(page, {
+        type: "chat_message",
+        payload: {
+          id: 300 + i,
+          channel_id: 1,
+          user: { id: 2, username: "otheruser", avatar: "" },
+          content: `Rapid message ${i}`,
+          timestamp: new Date().toISOString(),
+          attachments: [],
+          reply_to: null,
+        },
+      });
+    }
+
+    for (let i = 0; i < 3; i++) {
+      await expect(
+        page.locator(".msg-text", { hasText: `Rapid message ${i}` })
+      ).toBeVisible({ timeout: 5_000 });
+    }
   });
 });

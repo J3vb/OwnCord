@@ -13,8 +13,8 @@ test.describe("Channel Sidebar", () => {
   });
 
   test("sidebar is visible after login", async ({ page }) => {
-    const sidebar = page.locator(".channel-sidebar");
-    await expect(sidebar).toBeVisible();
+    const sidebar = page.locator("[data-testid='channel-sidebar']");
+    await expect(sidebar).toBeVisible({ timeout: 5_000 });
   });
 
   test("sidebar header shows server name", async ({ page }) => {
@@ -33,7 +33,7 @@ test.describe("Channel Sidebar", () => {
   });
 
   test("channel items display channel name", async ({ page }) => {
-    const firstChannel = page.locator(".channel-item").first();
+    const firstChannel = page.locator("[data-testid='channel-1']");
     await expect(firstChannel).toBeVisible();
 
     const name = firstChannel.locator(".ch-name");
@@ -41,38 +41,52 @@ test.describe("Channel Sidebar", () => {
   });
 
   test("channel items have hash icon", async ({ page }) => {
-    const firstChannel = page.locator(".channel-item").first();
+    const firstChannel = page.locator("[data-testid='channel-1']");
     const icon = firstChannel.locator(".ch-icon");
     await expect(icon).toBeVisible();
   });
 
   test("clicking a channel marks it as active", async ({ page }) => {
-    const channels = page.locator(".channel-item");
-    const count = await channels.count();
-    if (count < 2) return;
-
-    const secondChannel = channels.nth(1);
+    // Mock has 2 channels (general, random)
+    const secondChannel = page.locator("[data-testid='channel-2']");
+    await expect(secondChannel).toBeVisible({ timeout: 3000 });
     await secondChannel.click();
 
     await expect(secondChannel).toHaveClass(/active/);
   });
 
   test("clicking a channel updates chat header", async ({ page }) => {
-    const channels = page.locator(".channel-item");
-    const count = await channels.count();
-    if (count < 2) return;
-
-    const secondChannel = channels.nth(1);
+    const secondChannel = page.locator("[data-testid='channel-2']");
+    await expect(secondChannel).toBeVisible({ timeout: 3000 });
     const channelName = await secondChannel.locator(".ch-name").textContent();
 
     await secondChannel.click();
 
-    const headerName = page.locator(".chat-header .ch-name");
+    const headerName = page.locator("[data-testid='chat-header-name']");
+    await expect(headerName).toHaveText(channelName ?? "");
+  });
+
+  test("switching channels re-mounts message container", async ({ page }) => {
+    // Verify first channel is active and messages container exists
+    const messagesContainer = page.locator(".messages-container");
+    await expect(messagesContainer).toBeVisible({ timeout: 5000 });
+
+    // Switch to second channel
+    const secondChannel = page.locator("[data-testid='channel-2']");
+    await expect(secondChannel).toBeVisible({ timeout: 3000 });
+    await secondChannel.click();
+
+    // Messages container should still be present (re-mounted for new channel)
+    await expect(messagesContainer).toBeVisible({ timeout: 5000 });
+
+    // Chat header should reflect the new channel
+    const headerName = page.locator("[data-testid='chat-header-name']");
+    const channelName = await secondChannel.locator(".ch-name").textContent();
     await expect(headerName).toHaveText(channelName ?? "");
   });
 
   test("first channel is active by default", async ({ page }) => {
-    const firstChannel = page.locator(".channel-item").first();
+    const firstChannel = page.locator("[data-testid='channel-1']");
     await expect(firstChannel).toHaveClass(/active/);
   });
 });

@@ -27,8 +27,8 @@ export const MOCK_LOGIN_2FA_RESPONSE = {
 };
 
 export const MOCK_CHANNELS = [
-  { id: 1, name: "general", type: "text", position: 0, topic: "General chat" },
-  { id: 2, name: "random", type: "text", position: 1, topic: "Off-topic" },
+  { id: 1, name: "general", type: "text", position: 0, category: null },
+  { id: 2, name: "random", type: "text", position: 1, category: null },
 ];
 
 export const MOCK_MESSAGES = {
@@ -50,25 +50,29 @@ export const MOCK_MESSAGES = {
   has_more: false,
 };
 
+export const MOCK_ROLES = [
+  { id: 1, name: "admin", color: "#ff0000", permissions: 0x40000000 },
+  { id: 2, name: "moderator", color: "#00aaff", permissions: 0x1000000 },
+  { id: 3, name: "member", color: null, permissions: 0x3 },
+];
+
 export const MOCK_READY_PAYLOAD = {
   type: "ready",
   payload: {
-    user: { id: 1, username: "testuser", avatar: "", status: "online" },
-    server_name: "Test Server",
-    motd: "Welcome to the test server",
     channels: MOCK_CHANNELS,
     members: [
       { id: 1, username: "testuser", avatar: "", status: "online", role: "admin" },
       { id: 2, username: "otheruser", avatar: "", status: "online", role: "member" },
     ],
     voice_states: [],
+    roles: MOCK_ROLES,
   },
 };
 
 export const MOCK_AUTH_OK = {
   type: "auth_ok",
   payload: {
-    user: { id: 1, username: "testuser", avatar: "", status: "online" },
+    user: { id: 1, username: "testuser", avatar: "", role: "admin" },
     server_name: "Test Server",
     motd: "Welcome to the test server",
   },
@@ -79,11 +83,11 @@ export const MOCK_AUTH_OK = {
 // ---------------------------------------------------------------------------
 
 export const MOCK_CHANNELS_WITH_CATEGORIES = [
-  { id: 1, name: "general", type: "text", position: 0, topic: "General chat", category: "Text Channels" },
-  { id: 2, name: "random", type: "text", position: 1, topic: "Off-topic", category: "Text Channels" },
-  { id: 3, name: "announcements", type: "text", position: 2, topic: "Important updates", category: "Information" },
-  { id: 10, name: "Voice Chat", type: "voice", position: 3, topic: "", category: "Voice Channels" },
-  { id: 11, name: "Music", type: "voice", position: 4, topic: "", category: "Voice Channels" },
+  { id: 1, name: "general", type: "text", position: 0, category: "Text Channels" },
+  { id: 2, name: "random", type: "text", position: 1, category: "Text Channels" },
+  { id: 3, name: "announcements", type: "text", position: 2, category: "Information" },
+  { id: 10, name: "Voice Chat", type: "voice", position: 3, category: "Voice Channels" },
+  { id: 11, name: "Music", type: "voice", position: 4, category: "Voice Channels" },
 ];
 
 export const MOCK_MEMBERS_MULTI_ROLE = [
@@ -187,30 +191,40 @@ export const MOCK_VOICE_STATE = [
   { user_id: 2, channel_id: 10, muted: true, deafened: false },
 ];
 
-export const MOCK_PINNED_MESSAGES = [
-  {
-    id: 101,
-    channel_id: 1,
-    user: { id: 1, username: "testuser", avatar: "" },
-    content: "Hello world!",
-    created_at: "2026-03-15T10:00:00Z",
-    pinned: true,
-  },
-];
+export const MOCK_PINNED_MESSAGES = {
+  messages: [
+    {
+      id: 101,
+      channel_id: 1,
+      user: { id: 1, username: "testuser", avatar: "" },
+      content: "Hello world!",
+      timestamp: "2026-03-15T10:00:00Z",
+      pinned: true,
+      edited_at: null,
+      deleted: false,
+      reply_to: null,
+      attachments: [],
+      reactions: [],
+    },
+  ],
+  has_more: false,
+};
 
 export const MOCK_INVITES = [
   {
+    id: 1,
     code: "abc123",
-    uses: 3,
+    url: "https://localhost:8443/invite/abc123",
+    use_count: 3,
     max_uses: 10,
-    created_by: { id: 1, username: "testuser" },
     expires_at: "2026-04-15T00:00:00Z",
   },
   {
+    id: 2,
     code: "xyz789",
-    uses: 0,
+    url: "https://localhost:8443/invite/xyz789",
+    use_count: 0,
     max_uses: 1,
-    created_by: { id: 2, username: "otheruser" },
     expires_at: null,
   },
 ];
@@ -223,16 +237,15 @@ function buildReadyPayload(overrides?: {
   channels?: unknown[];
   members?: unknown[];
   voice_states?: unknown[];
+  roles?: unknown[];
 }): unknown {
   return {
     type: "ready",
     payload: {
-      user: { id: 1, username: "testuser", avatar: "", status: "online" },
-      server_name: "Test Server",
-      motd: "Welcome to the test server",
       channels: overrides?.channels ?? MOCK_CHANNELS,
       members: overrides?.members ?? MOCK_READY_PAYLOAD.payload.members,
       voice_states: overrides?.voice_states ?? [],
+      roles: overrides?.roles ?? MOCK_ROLES,
     },
   };
 }
@@ -241,9 +254,10 @@ function buildReadyPayload(overrides?: {
 // Tauri mock script builder
 // ---------------------------------------------------------------------------
 
-function buildTauriMockScript(opts: {
+export function buildTauriMockScript(opts: {
   httpRoutes: Array<{ pattern: string; status: number; body: unknown }>;
   simulateWsFlow: boolean;
+  echoChatSend?: boolean;
   readyOverrides?: {
     channels?: unknown[];
     members?: unknown[];
@@ -407,6 +421,56 @@ function buildTauriMockScript(opts: {
                 __tauriEmitEvent("ws-message", JSON.stringify(${JSON.stringify(readyPayload)}));
               }, 200);
             }
+            ${opts.echoChatSend ? `
+            if (parsed.type === "chat_send") {
+              const p = parsed.payload;
+              const echo = {
+                type: "chat_message",
+                payload: {
+                  id: Date.now(),
+                  channel_id: p.channel_id,
+                  user: { id: 1, username: "testuser", avatar: "" },
+                  content: p.content,
+                  timestamp: new Date().toISOString(),
+                  edited_at: null,
+                  attachments: p.attachments || [],
+                  reactions: [],
+                  reply_to: p.reply_to || null,
+                  pinned: false,
+                  deleted: false,
+                },
+              };
+              setTimeout(() => {
+                __tauriEmitEvent("ws-message", JSON.stringify(echo));
+              }, 50);
+            }
+            if (parsed.type === "chat_edit") {
+              const echo = {
+                type: "chat_edited",
+                payload: {
+                  message_id: parsed.payload.message_id,
+                  channel_id: parsed.payload.channel_id || 1,
+                  content: parsed.payload.content,
+                  edited_at: new Date().toISOString(),
+                },
+              };
+              setTimeout(() => {
+                __tauriEmitEvent("ws-message", JSON.stringify(echo));
+              }, 50);
+            }
+            if (parsed.type === "chat_delete") {
+              const echo = {
+                type: "chat_deleted",
+                payload: {
+                  message_id: parsed.payload.message_id,
+                  channel_id: parsed.payload.channel_id || 1,
+                },
+              };
+              setTimeout(() => {
+                __tauriEmitEvent("ws-message", JSON.stringify(echo));
+              }, 50);
+            }
+            ` : ""}
           } catch (e) {}
           ` : ""}
           return;
@@ -464,6 +528,7 @@ export async function mockTauriFullSession(page: Page): Promise<void> {
       { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
       { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
       { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+      { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
     ],
     simulateWsFlow: true,
   }));
@@ -502,6 +567,47 @@ export async function mockTauriFullSessionWithVoice(page: Page): Promise<void> {
   }));
 }
 
+export async function mockTauriFullSessionWithEcho(page: Page): Promise<void> {
+  await page.addInitScript(buildTauriMockScript({
+    httpRoutes: [
+      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+      { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+      { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+    ],
+    simulateWsFlow: true,
+    echoChatSend: true,
+  }));
+}
+
+export async function mockTauriFullSessionWithMessagesAndEcho(page: Page): Promise<void> {
+  await page.addInitScript(buildTauriMockScript({
+    httpRoutes: [
+      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+      { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+      { pattern: "/messages", status: 200, body: MOCK_MESSAGES_RICH },
+      { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
+      { pattern: "/api/v1/invites", status: 200, body: MOCK_INVITES },
+    ],
+    simulateWsFlow: true,
+    echoChatSend: true,
+    readyOverrides: {
+      channels: MOCK_CHANNELS_WITH_CATEGORIES,
+      members: MOCK_MEMBERS_MULTI_ROLE,
+    },
+  }));
+}
+
+export async function mockTauriFullSessionWithFailingMessages(page: Page): Promise<void> {
+  await page.addInitScript(buildTauriMockScript({
+    httpRoutes: [
+      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+      { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+      { pattern: "/messages", status: 500, body: { error: "INTERNAL_ERROR", message: "Failed to load messages" } },
+    ],
+    simulateWsFlow: true,
+  }));
+}
+
 export async function mockTauriLoginError(page: Page): Promise<void> {
   await page.addInitScript(buildTauriMockScript({
     httpRoutes: [
@@ -528,8 +634,28 @@ export async function submitLogin(page: Page): Promise<void> {
  */
 export async function navigateToMainPage(page: Page): Promise<void> {
   await submitLogin(page);
-  const appLayout = page.locator(".app");
+  const appLayout = page.locator("[data-testid='app-layout']");
   await expect(appLayout).toBeVisible({ timeout: 15_000 });
+}
+
+/**
+ * Open the settings overlay via the user bar gear button.
+ */
+export async function openSettings(page: Page): Promise<void> {
+  const settingsBtn = page.locator("button[aria-label='Settings']");
+  await settingsBtn.click();
+
+  const overlay = page.locator("[data-testid='settings-overlay']");
+  await expect(overlay).toHaveClass(/open/, { timeout: 5_000 });
+}
+
+/**
+ * Switch to a settings tab by name.
+ */
+export async function switchSettingsTab(page: Page, tabName: string): Promise<void> {
+  const tab = page.locator(".settings-sidebar button.settings-nav-item", { hasText: tabName });
+  await tab.click();
+  await expect(tab).toHaveClass(/active/);
 }
 
 /**
