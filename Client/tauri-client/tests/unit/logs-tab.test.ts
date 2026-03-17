@@ -146,7 +146,7 @@ describe("LogsTab", () => {
     ]);
     const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
     const el = handle.build();
-    const filterSelect = el.querySelectorAll("select")[0];
+    const filterSelect = el.querySelectorAll("select")[0]!;
 
     // Change to "warn" filter
     filterSelect.value = "warn";
@@ -169,7 +169,7 @@ describe("LogsTab", () => {
   it("level selector calls setLogLevel", () => {
     const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
     const el = handle.build();
-    const levelSelect = el.querySelectorAll("select")[1];
+    const levelSelect = el.querySelectorAll("select")[1]!;
     levelSelect.value = "error";
     levelSelect.dispatchEvent(new Event("change"));
     expect(mockSetLogLevel).toHaveBeenCalledWith("error");

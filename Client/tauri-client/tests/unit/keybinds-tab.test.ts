@@ -19,21 +19,21 @@ describe("KeybindsTab", () => {
     const el = buildKeybindsTab();
     const rows = el.querySelectorAll(".keybind-row");
     expect(rows.length).toBe(2);
-    const pttLabel = rows[0].querySelector(".setting-label");
+    const pttLabel = rows[0]!.querySelector(".setting-label");
     expect(pttLabel!.textContent).toBe("Push to Talk");
   });
 
   it("renders Quick Switcher keybind row with Ctrl + K", () => {
     const el = buildKeybindsTab();
     const rows = el.querySelectorAll(".keybind-row");
-    const kbd = rows[1].querySelector(".kbd");
+    const kbd = rows[1]!.querySelector(".kbd");
     expect(kbd!.textContent).toBe("Ctrl + K");
   });
 
   it("shows fallback for PTT when not configured", () => {
     const el = buildKeybindsTab();
     const rows = el.querySelectorAll(".keybind-row");
-    const kbd = rows[0].querySelector(".kbd");
+    const kbd = rows[0]!.querySelector(".kbd");
     expect(kbd!.textContent).toBe("Not set");
   });
 });

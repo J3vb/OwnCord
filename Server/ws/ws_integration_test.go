@@ -39,7 +39,7 @@ func TestServeWS_InvalidUpgrade_ReturnsError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("http.Get: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// nhooyr.io/websocket returns 400 or 426 when upgrade is absent.
 	if resp.StatusCode == 200 {
