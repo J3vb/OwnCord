@@ -4,3 +4,6 @@ src-tauri/target/
 src-tauri/gen/
 *.tsbuildinfo
 .vite/
+coverage/
+playwright-report/
+test-results/
