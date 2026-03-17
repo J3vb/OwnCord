@@ -23,7 +23,7 @@ func setupRouter(t *testing.T) http.Handler {
 	if err := db.Migrate(database); err != nil {
 		t.Fatalf("db.Migrate error: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	cfg := &config.Config{
 		Server: config.ServerConfig{

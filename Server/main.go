@@ -69,7 +69,7 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("opening database: %w", err)
 	}
-	defer database.Close()
+	defer database.Close() //nolint:errcheck
 
 	if err := db.Migrate(database); err != nil {
 		return fmt.Errorf("running migrations: %w", err)
@@ -277,7 +277,7 @@ func getOutboundIP() string {
 	if err != nil {
 		return "localhost"
 	}
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 	addr := conn.LocalAddr().(*net.UDPAddr)
 	return addr.IP.String()
 }

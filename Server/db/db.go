@@ -25,7 +25,7 @@ func Open(path string) (*DB, error) {
 
 	// Verify the connection is actually usable.
 	if err := sqlDB.Ping(); err != nil {
-		sqlDB.Close()
+		_ = sqlDB.Close()
 		return nil, fmt.Errorf("pinging sqlite db: %w", err)
 	}
 
@@ -37,13 +37,13 @@ func Open(path string) (*DB, error) {
 
 	// Enable WAL mode for better concurrent read performance.
 	if _, err := sqlDB.Exec("PRAGMA journal_mode=WAL;"); err != nil {
-		sqlDB.Close()
+		_ = sqlDB.Close()
 		return nil, fmt.Errorf("enabling WAL mode: %w", err)
 	}
 
 	// Enforce foreign key constraints.
 	if _, err := sqlDB.Exec("PRAGMA foreign_keys=ON;"); err != nil {
-		sqlDB.Close()
+		_ = sqlDB.Close()
 		return nil, fmt.Errorf("enabling foreign keys: %w", err)
 	}
 

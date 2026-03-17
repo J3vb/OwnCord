@@ -16,7 +16,7 @@ func (d *DB) ListChannels() ([]Channel, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ListChannels: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var channels []Channel
 	for rows.Next() {

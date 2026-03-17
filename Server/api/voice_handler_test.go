@@ -28,7 +28,7 @@ func newVoiceAPITestDB(t *testing.T) *db.DB {
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	migrFS := fstest.MapFS{
 		"001_schema.sql": {Data: apiTestSchema},
@@ -156,7 +156,7 @@ func TestVoiceCredentials_ContainsSTUNEntry(t *testing.T) {
 	rr := voiceGetWithToken(t, router, "/api/v1/voice/credentials", token)
 
 	var resp map[string]any
-	json.NewDecoder(rr.Body).Decode(&resp)
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 
 	servers := resp["ice_servers"].([]any)
 	foundSTUN := false
@@ -183,7 +183,7 @@ func TestVoiceCredentials_ContainsTURNEntry(t *testing.T) {
 	rr := voiceGetWithToken(t, router, "/api/v1/voice/credentials", token)
 
 	var resp map[string]any
-	json.NewDecoder(rr.Body).Decode(&resp)
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 
 	servers := resp["ice_servers"].([]any)
 	foundTURN := false
@@ -225,7 +225,7 @@ func TestVoiceCredentials_TURNCredentialIsValidHMAC(t *testing.T) {
 	rr := voiceGetWithToken(t, router, "/api/v1/voice/credentials", token)
 
 	var resp map[string]any
-	json.NewDecoder(rr.Body).Decode(&resp)
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 
 	servers := resp["ice_servers"].([]any)
 	for _, s := range servers {
@@ -263,7 +263,7 @@ func TestVoiceCredentials_UsernameContainsTimestampAndUserID(t *testing.T) {
 	rr := voiceGetWithToken(t, router, "/api/v1/voice/credentials", token)
 
 	var resp map[string]any
-	json.NewDecoder(rr.Body).Decode(&resp)
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 
 	servers := resp["ice_servers"].([]any)
 	for _, s := range servers {
@@ -299,7 +299,7 @@ func TestVoiceCredentials_ResponseContainsExpiresIn(t *testing.T) {
 	rr := voiceGetWithToken(t, router, "/api/v1/voice/credentials", token)
 
 	var resp map[string]any
-	json.NewDecoder(rr.Body).Decode(&resp)
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 
 	expiresIn, ok := resp["expires_in"]
 	if !ok {
@@ -332,7 +332,7 @@ func TestVoiceCredentials_TURNDisabled_NoTURNEntry(t *testing.T) {
 	}
 
 	var resp map[string]any
-	json.NewDecoder(rr.Body).Decode(&resp)
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 
 	servers := resp["ice_servers"].([]any)
 	for _, s := range servers {

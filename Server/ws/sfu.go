@@ -47,7 +47,7 @@ func NewSFU(cfg *config.VoiceConfig) (*SFU, error) {
 	}
 
 	var se webrtc.SettingEngine
-	se.SetEphemeralUDPPortRange(uint16(cfg.MediaPortMin), uint16(cfg.MediaPortMax))
+	_ = se.SetEphemeralUDPPortRange(uint16(cfg.MediaPortMin), uint16(cfg.MediaPortMax))
 
 	if cfg.ExternalIP != "" {
 		if err := se.SetICEAddressRewriteRules(webrtc.ICEAddressRewriteRule{

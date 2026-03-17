@@ -5,10 +5,6 @@ import (
 	"time"
 )
 
-// defaultCleanupMaxWindow is the age beyond which a window entry with no
-// recent timestamps is considered stale and eligible for eviction.
-const defaultCleanupMaxWindow = 15 * time.Minute
-
 // entry records individual request timestamps for sliding-window limiting.
 type entry struct {
 	timestamps []time.Time

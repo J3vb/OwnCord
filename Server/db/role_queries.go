@@ -33,7 +33,7 @@ func (d *DB) ListRoles() ([]*Role, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ListRoles: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var roles []*Role
 	for rows.Next() {

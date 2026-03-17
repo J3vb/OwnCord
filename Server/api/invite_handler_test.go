@@ -26,7 +26,7 @@ func loginAndGetToken(t *testing.T, _ http.Handler, database *db.DB, username st
 	hash, _ := auth.HashPassword("Password1!")
 	uid, _ := database.CreateUser(username, hash, roleID)
 	token, _ := auth.GenerateToken()
-	database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
 	return token
 }
 
@@ -50,7 +50,7 @@ func TestCreateInvite_Success(t *testing.T) {
 	}
 
 	var resp map[string]any
-	json.NewDecoder(rr.Body).Decode(&resp)
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 	if resp["code"] == nil {
 		t.Error("CreateInvite response missing code")
 	}
@@ -125,7 +125,7 @@ func TestListInvites_Success(t *testing.T) {
 	}
 
 	var resp []any
-	json.NewDecoder(rr.Body).Decode(&resp)
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 	if len(resp) < 2 {
 		t.Errorf("ListInvites returned %d items, want >= 2", len(resp))
 	}
@@ -161,7 +161,7 @@ func TestRevokeInvite_Success(t *testing.T) {
 		t.Fatalf("Create invite for revoke test: status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 	var created map[string]any
-	json.NewDecoder(rr.Body).Decode(&created)
+	_ = json.NewDecoder(rr.Body).Decode(&created)
 	codeVal, ok := created["code"]
 	if !ok || codeVal == nil {
 		t.Fatalf("Create invite response missing code field; body parsed as %v", created)
@@ -215,7 +215,7 @@ func TestRevokeInvite_MemberForbidden(t *testing.T) {
 	// Admin creates invite.
 	rr := postJSONWithToken(t, router, "/api/v1/invites", adminToken, map[string]any{})
 	var created map[string]any
-	json.NewDecoder(rr.Body).Decode(&created)
+	_ = json.NewDecoder(rr.Body).Decode(&created)
 	code := created["code"].(string)
 
 	// Member tries to revoke.
@@ -245,7 +245,7 @@ func TestListInvites_IncludesRevokedAndActive(t *testing.T) {
 		t.Fatalf("Create invite for list test: status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 	var created map[string]any
-	json.NewDecoder(rr.Body).Decode(&created)
+	_ = json.NewDecoder(rr.Body).Decode(&created)
 	code := created["code"].(string)
 
 	delReq := httptest.NewRequest(http.MethodDelete, "/api/v1/invites/"+code, nil)

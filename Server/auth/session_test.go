@@ -22,7 +22,7 @@ func TestGenerateToken_HexCharacters(t *testing.T) {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
 	for i, c := range token {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			t.Errorf("GenerateToken() char[%d] = %q, not lowercase hex", i, c)
 		}
 	}

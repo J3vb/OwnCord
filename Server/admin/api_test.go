@@ -125,7 +125,7 @@ func openAdminTestDB(t *testing.T) *db.DB {
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	migrFS := fstest.MapFS{
 		"001_schema.sql": {Data: adminSchema},
@@ -374,7 +374,7 @@ func TestAdminAPI_ForceLogout_OK(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	targetUID, _ := database.CreateUser("logoutme", "hash", 3)
-	database.CreateSession(targetUID, "victim-token-hash", "web", "1.2.3.4")
+	_, _ = database.CreateSession(targetUID, "victim-token-hash", "web", "1.2.3.4")
 
 	w := doRequest(t, handler, http.MethodDelete, "/users/"+itoa(targetUID)+"/sessions", token, nil)
 
@@ -406,7 +406,7 @@ func TestAdminAPI_ListChannels_OK(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil)
 	token := createAdminUser(t, database)
 
-	database.AdminCreateChannel("general", "text", "", "", 0)
+	_, _ = database.AdminCreateChannel("general", "text", "", "", 0)
 
 	w := doRequest(t, handler, http.MethodGet, "/channels", token, nil)
 
@@ -539,7 +539,7 @@ func TestAdminAPI_AuditLog_OK(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	uid, _ := database.CreateUser("actor", "hash", 1)
-	database.LogAudit(uid, "TEST_ACTION", "user", uid, "detail")
+	_ = database.LogAudit(uid, "TEST_ACTION", "user", uid, "detail")
 
 	w := doRequest(t, handler, http.MethodGet, "/audit-log?limit=10&offset=0", token, nil)
 
@@ -568,7 +568,7 @@ func TestAdminAPI_AuditLog_Empty(t *testing.T) {
 	}
 
 	var entries []any
-	json.Unmarshal(w.Body.Bytes(), &entries)
+	_ = json.Unmarshal(w.Body.Bytes(), &entries)
 	if len(entries) != 0 {
 		t.Errorf("expected 0 entries, got %d", len(entries))
 	}
@@ -647,7 +647,7 @@ func TestAdminAPI_Backup_RequiresOwner(t *testing.T) {
 	// Admin (role 2) can authenticate but is not Owner (role 1, position 100)
 	adminUID, _ := database.CreateUser("adminonly", "hash", 2)
 	token := "admin-only-token"
-	database.CreateSession(adminUID, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(adminUID, auth.HashToken(token), "test", "127.0.0.1")
 
 	w := doRequest(t, handler, http.MethodPost, "/backup", token, nil)
 
@@ -714,7 +714,7 @@ func TestAdminAPI_ActorFromContext_ForceLogout(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	targetUID, _ := database.CreateUser("logoutctx", "hash", 3)
-	database.CreateSession(targetUID, "victim-hash-ctx", "web", "1.2.3.4")
+	_, _ = database.CreateSession(targetUID, "victim-hash-ctx", "web", "1.2.3.4")
 
 	w := doRequest(t, handler, http.MethodDelete, "/users/"+itoa(targetUID)+"/sessions", token, nil)
 
@@ -847,7 +847,7 @@ func TestAdminAPI_ListUsers_NoPasswordHash(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	// Create a second user so the list is non-trivial.
-	database.CreateUser("plainuser", "supersecretbcrypthash", 3)
+	_, _ = database.CreateUser("plainuser", "supersecretbcrypthash", 3)
 
 	w := doRequest(t, handler, http.MethodGet, "/users", token, nil)
 

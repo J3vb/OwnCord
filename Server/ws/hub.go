@@ -10,8 +10,7 @@ import (
 
 // broadcastMsg is an internal message queued for delivery.
 type broadcastMsg struct {
-	channelID int64  // 0 = send to all connected clients
-	senderID  int64  // reserved for future exclude-sender logic
+	channelID int64 // 0 = send to all connected clients
 	msg       []byte
 }
 

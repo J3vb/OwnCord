@@ -55,7 +55,7 @@ func openHandlerDB(t *testing.T) *db.DB {
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 	migrFS := fstest.MapFS{
 		"001_schema.sql": {Data: handlerTestSchema},
 	}
@@ -247,9 +247,7 @@ func TestSessionExpiry_ExpiredSessionClosesConnection(t *testing.T) {
 	// which manifests as a zero-value receive without blocking.
 	select {
 	case _, open := <-send:
-		if open {
-			// A message was delivered instead; drain and check again.
-		}
+		_ = open
 		// closed channel or a message — either way connection was acted on.
 	default:
 		// Send channel still open and empty — check hub registration instead.

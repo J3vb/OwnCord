@@ -32,7 +32,7 @@ func newVoiceTestDB(t *testing.T) *db.DB {
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	migrFS := fstest.MapFS{
 		"001_schema.sql":   {Data: testSchema},
@@ -644,8 +644,8 @@ func TestVoice_GetVoiceState_IncludesCameraAndScreenshare(t *testing.T) {
 	}
 
 	// Enable both.
-	database.UpdateVoiceCamera(userID, true)
-	database.UpdateVoiceScreenshare(userID, true)
+	_ = database.UpdateVoiceCamera(userID, true)
+	_ = database.UpdateVoiceScreenshare(userID, true)
 
 	state, _ = database.GetVoiceState(userID)
 	if state == nil {
@@ -669,7 +669,7 @@ func TestVoice_GetChannelVoiceStates_IncludesCameraAndScreenshare(t *testing.T) 
 	if err := database.JoinVoiceChannel(userID, chanID); err != nil {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
-	database.UpdateVoiceCamera(userID, true)
+	_ = database.UpdateVoiceCamera(userID, true)
 
 	states, err := database.GetChannelVoiceStates(chanID)
 	if err != nil {

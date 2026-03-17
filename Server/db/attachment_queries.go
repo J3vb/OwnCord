@@ -79,7 +79,7 @@ func (d *DB) GetAttachmentsByMessageIDs(msgIDs []int64) (map[int64][]AttachmentI
 	if err != nil {
 		return nil, fmt.Errorf("GetAttachmentsByMessageIDs: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	result := make(map[int64][]AttachmentInfo)
 	for rows.Next() {

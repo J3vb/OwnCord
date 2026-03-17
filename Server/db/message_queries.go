@@ -62,7 +62,7 @@ func (d *DB) GetMessages(channelID, before int64, limit int) ([]MessageWithUser,
 	if err != nil {
 		return nil, fmt.Errorf("GetMessages: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var msgs []MessageWithUser
 	for rows.Next() {
@@ -164,7 +164,7 @@ func (d *DB) GetReactions(messageID int64) ([]ReactionCount, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GetReactions: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var counts []ReactionCount
 	for rows.Next() {
@@ -225,7 +225,7 @@ func (d *DB) SearchMessages(query string, channelID *int64, limit int) ([]Messag
 	if err != nil {
 		return nil, fmt.Errorf("SearchMessages: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var results []MessageSearchResult
 	for rows.Next() {
@@ -275,7 +275,7 @@ func (d *DB) GetMessagesForAPI(channelID, before int64, limit int, requestingUse
 	if err != nil {
 		return nil, fmt.Errorf("GetMessagesForAPI: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var msgs []MessageAPIResponse
 	var msgIDs []int64
@@ -360,7 +360,7 @@ func (d *DB) getReactionsBatch(msgIDs []int64, requestingUserID int64) (map[int6
 	if err != nil {
 		return nil, fmt.Errorf("getReactionsBatch: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	result := make(map[int64][]ReactionInfo)
 	for rows.Next() {
@@ -407,7 +407,7 @@ func (d *DB) GetChannelUnreadCounts(userID int64) (map[int64]ChannelUnread, erro
 	if err != nil {
 		return nil, fmt.Errorf("GetChannelUnreadCounts: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	result := make(map[int64]ChannelUnread)
 	for rows.Next() {

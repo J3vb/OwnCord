@@ -52,7 +52,7 @@ func newTestServer(t *testing.T, release ghRelease, statusCode int) *httptest.Se
 				t.Fatalf("encoding release: %v", err)
 			}
 		} else {
-			fmt.Fprint(w, `{"message":"Internal Server Error"}`)
+			_, _ = fmt.Fprint(w, `{"message":"Internal Server Error"}`)
 		}
 	})
 	return httptest.NewServer(mux)

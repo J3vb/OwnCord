@@ -115,9 +115,9 @@ func TestListInvites_Multiple(t *testing.T) {
 	database := newTestDB(t)
 	uid, _ := database.CreateUser("listowner", "hash", 4)
 
-	database.CreateInvite(uid, 1, nil)
-	database.CreateInvite(uid, 5, nil)
-	database.CreateInvite(uid, 0, nil)
+	_, _ = database.CreateInvite(uid, 1, nil)
+	_, _ = database.CreateInvite(uid, 5, nil)
+	_, _ = database.CreateInvite(uid, 0, nil)
 
 	invites, err := database.ListInvites()
 	if err != nil {
@@ -133,8 +133,8 @@ func TestListInvites_IncludesRevokedInvites(t *testing.T) {
 	uid, _ := database.CreateUser("revokelistowner", "hash", 4)
 
 	code, _ := database.CreateInvite(uid, 1, nil)
-	database.RevokeInvite(code)
-	database.CreateInvite(uid, 0, nil) // active
+	_ = database.RevokeInvite(code)
+	_, _ = database.CreateInvite(uid, 0, nil) // active
 
 	invites, err := database.ListInvites()
 	if err != nil {
