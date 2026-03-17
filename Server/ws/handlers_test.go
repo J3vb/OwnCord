@@ -1206,6 +1206,61 @@ func TestChatDelete_InvalidMessageID_ReturnsBadRequest(t *testing.T) {
 	}
 }
 
+// TestChatEdit_RateLimit_ReturnsError verifies that exceeding the chat edit
+// rate limit returns a RATE_LIMITED error.
+func TestChatEdit_RateLimit_ReturnsError(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "edit-rl1")
+	chID := seedTestChannel(t, database, "edit-rl-chan1")
+	msgID := seedMessage(t, database, chID, user.ID, "original")
+
+	send := make(chan []byte, 64)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	// Exhaust the rate limit (chatRateLimit = 10 per second).
+	for i := 0; i < 11; i++ {
+		hub.HandleMessageForTest(c, chatEditMsg(msgID, fmt.Sprintf("edit-%d", i)))
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "RATE_LIMITED" {
+		t.Errorf("expected RATE_LIMITED for excess chat edits, got %q", code)
+	}
+}
+
+// TestChatDelete_RateLimit_ReturnsError verifies that exceeding the chat delete
+// rate limit returns a RATE_LIMITED error.
+func TestChatDelete_RateLimit_ReturnsError(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "del-rl1")
+	chID := seedTestChannel(t, database, "del-rl-chan1")
+
+	// Seed enough messages to attempt deleting.
+	msgIDs := make([]int64, 11)
+	for i := range msgIDs {
+		msgIDs[i] = seedMessage(t, database, chID, user.ID, fmt.Sprintf("msg-%d", i))
+	}
+
+	send := make(chan []byte, 64)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	// Exhaust the rate limit (chatRateLimit = 10 per second).
+	for _, id := range msgIDs {
+		hub.HandleMessageForTest(c, chatDeleteMsg(id))
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "RATE_LIMITED" {
+		t.Errorf("expected RATE_LIMITED for excess chat deletes, got %q", code)
+	}
+}
+
 // ─── handleReaction ───────────────────────────────────────────────────────────
 
 // TestReaction_AddReaction_BroadcastsReactionUpdate verifies that adding a
@@ -1431,8 +1486,8 @@ func TestReaction_InvalidMessageID_ReturnsBadRequest(t *testing.T) {
 // waitForClients blocks until the hub has at least n clients registered, or
 // the deadline expires. Returns true if the count was reached.
 func waitForClients(hub *ws.Hub, n int, deadline time.Duration) bool {
-	deadline_t := time.Now().Add(deadline)
-	for time.Now().Before(deadline_t) {
+	deadlineT := time.Now().Add(deadline)
+	for time.Now().Before(deadlineT) {
 		if hub.ClientCount() >= n {
 			return true
 		}

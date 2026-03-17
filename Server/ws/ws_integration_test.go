@@ -14,41 +14,10 @@ import (
 	"time"
 
 	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/ws"
 )
-
-// dialAndAuth connects to the WS server and sends an auth message.
-// Returns the connection on success, t.Fatal on error.
-func dialAndAuth(t *testing.T, ctx context.Context, wsURL, token string) *websocket.Conn {
-	t.Helper()
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
-	if err != nil {
-		t.Fatalf("websocket.Dial: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close(websocket.StatusNormalClosure, "") })
-
-	authMsg := map[string]any{
-		"type":    "auth",
-		"payload": map[string]string{"token": token},
-	}
-	if err := wsjson.Write(ctx, conn, authMsg); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
-	return conn
-}
-
-// readNextMsg reads the next JSON message from conn.
-func readNextMsg(t *testing.T, ctx context.Context, conn *websocket.Conn) map[string]any {
-	t.Helper()
-	var msg map[string]any
-	if err := wsjson.Read(ctx, conn, &msg); err != nil {
-		t.Fatalf("read message: %v", err)
-	}
-	return msg
-}
 
 // ─── ServeWS / authenticateConn happy path ────────────────────────────────────
 
@@ -104,7 +73,7 @@ func TestAuthenticateConn_NoAuthMessage_ServerClosesConn(t *testing.T) {
 
 	// Close without sending auth — the server's authDeadline (10s) will fire,
 	// but closing immediately should cause a read error on the server side.
-	conn.Close(websocket.StatusNormalClosure, "no auth")
+	_ = conn.Close(websocket.StatusNormalClosure, "no auth")
 
 	// Give the server a moment to react.
 	time.Sleep(50 * time.Millisecond)
@@ -136,7 +105,7 @@ func TestAuthenticateConn_InvalidJSON_ReceivesAuthError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	// Send invalid JSON as first message.
 	if err := conn.Write(ctx, websocket.MessageText, []byte("NOT JSON")); err != nil {
@@ -179,7 +148,7 @@ func TestAuthenticateConn_WrongMessageType_ReceivesAuthError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	// Send a chat_send instead of auth.
 	wrongMsg := map[string]any{
@@ -225,7 +194,7 @@ func TestAuthenticateConn_MissingToken_ReceivesAuthError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	authMsg := map[string]any{
 		"type":    "auth",
@@ -270,7 +239,7 @@ func TestAuthenticateConn_InvalidToken_ReceivesAuthError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	authMsg := map[string]any{
 		"type":    "auth",
@@ -329,7 +298,7 @@ func TestServeWS_ValidAuth_FullHandshake(t *testing.T) {
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	// Send auth.
 	authMsg := map[string]any{
@@ -409,7 +378,7 @@ func TestServeWS_writePump_MessageDelivered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	// Authenticate.
 	authMsg := map[string]any{
@@ -502,7 +471,7 @@ func TestServeWS_BannedUser_ReceivesError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	authMsg := map[string]any{
 		"type":    "auth",

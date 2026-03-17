@@ -8,6 +8,7 @@ import (
 
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/owncord/server/auth"
+	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 )
 
@@ -53,15 +54,14 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	c.mu.Unlock()
 
 	if shouldCheck && c.tokenHash != "" {
-		sess, dbErr := h.db.GetSessionByTokenHash(c.tokenHash)
-		if dbErr != nil || sess == nil || auth.IsSessionExpired(sess.ExpiresAt) {
+		result, dbErr := h.db.GetSessionWithBanStatus(c.tokenHash)
+		if dbErr != nil || result == nil || auth.IsSessionExpired(result.ExpiresAt) {
 			slog.Info("ws session expired, closing connection", "user_id", c.userID)
 			h.kickClient(c)
 			return
 		}
-		// Also check if user has been banned since connection was established.
-		user, userErr := h.db.GetUserByID(c.userID)
-		if userErr != nil || user == nil || auth.IsEffectivelyBanned(user) {
+		tempUser := &db.User{Banned: result.Banned, BanExpires: result.BanExpires}
+		if auth.IsEffectivelyBanned(tempUser) {
 			slog.Info("ws user banned, closing connection", "user_id", c.userID)
 			c.sendMsg(buildErrorMsg("BANNED", "you are banned"))
 			h.kickClient(c)
@@ -245,6 +245,12 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 
 // handleChatEdit processes a chat_edit message.
 func (h *Hub) handleChatEdit(c *Client, _ string, payload json.RawMessage) {
+	ratKey := fmt.Sprintf("chat_edit:%d", c.userID)
+	if !h.limiter.Allow(ratKey, chatRateLimit, chatWindow) {
+		c.sendMsg(buildRateLimitError("too many edits", chatWindow.Seconds()))
+		return
+	}
+
 	var p struct {
 		MessageID json.Number `json:"message_id"`
 		Content   string      `json:"content"`
@@ -288,6 +294,12 @@ func (h *Hub) handleChatEdit(c *Client, _ string, payload json.RawMessage) {
 
 // handleChatDelete processes a chat_delete message.
 func (h *Hub) handleChatDelete(c *Client, _ string, payload json.RawMessage) {
+	ratKey := fmt.Sprintf("chat_delete:%d", c.userID)
+	if !h.limiter.Allow(ratKey, chatRateLimit, chatWindow) {
+		c.sendMsg(buildRateLimitError("too many deletes", chatWindow.Seconds()))
+		return
+	}
+
 	var p struct {
 		MessageID json.Number `json:"message_id"`
 	}

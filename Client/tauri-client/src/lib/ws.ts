@@ -241,6 +241,8 @@ export function createWsClient() {
           fingerprint: evt.fingerprint,
           message: evt.message,
         });
+        certMismatchBlock = true;
+        setState("disconnected");
         for (const listener of certMismatchListeners) {
           listener(evt);
         }
@@ -280,18 +282,13 @@ export function createWsClient() {
     try {
       await tauriInvoke("ws_connect", { url: wsUrl });
     } catch (err) {
-      const errStr = String(err);
       log.error("ws_connect failed", err);
       proxyOpen = false;
 
-      // If the error is a cert fingerprint mismatch, don't auto-reconnect.
-      // The user must explicitly accept the new fingerprint first.
-      if (errStr.includes("Certificate fingerprint changed")) {
-        certMismatchBlock = true;
-        setState("disconnected");
-      } else {
-        scheduleReconnect();
-      }
+      // Cert mismatch is handled by the cert-tofu event listener
+      // (which sets certMismatchBlock before this catch runs).
+      // scheduleReconnect() checks certMismatchBlock and will no-op if set.
+      scheduleReconnect();
     }
   }
 

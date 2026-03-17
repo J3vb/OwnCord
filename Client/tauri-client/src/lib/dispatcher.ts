@@ -177,13 +177,10 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
       removeChannel(payload.id);
       if (payload.id === activeId) {
         const remaining = channelsStore.select((s) => s.channels);
-        let firstTextId: number | null = null;
-        for (const [, ch] of remaining) {
-          if (ch.type === "text") {
-            firstTextId = ch.id;
-            break;
-          }
-        }
+        const sorted = [...remaining.values()]
+          .filter((ch) => ch.type === "text")
+          .sort((a, b) => a.position - b.position);
+        const firstTextId = sorted.length > 0 ? sorted[0].id : null;
         setActiveChannel(firstTextId);
         log.info("Active channel deleted, redirected", { deletedId: payload.id });
       }

@@ -277,6 +277,60 @@ func TestGetSessionByTokenHash_NotFound(t *testing.T) {
 	}
 }
 
+func TestGetSessionWithBanStatus_Found(t *testing.T) {
+	database := newTestDB(t)
+	uid, _ := database.CreateUser("zara", "hash", 4)
+	_, _ = database.CreateSession(uid, "banCheckToken", "GoTest/1.0", "127.0.0.1")
+
+	result, err := database.GetSessionWithBanStatus("banCheckToken")
+	if err != nil {
+		t.Fatalf("GetSessionWithBanStatus: %v", err)
+	}
+	if result == nil {
+		t.Fatal("GetSessionWithBanStatus returned nil for existing session")
+	}
+	if result.UserID != uid {
+		t.Errorf("UserID = %d, want %d", result.UserID, uid)
+	}
+	if result.Banned {
+		t.Error("expected user not banned")
+	}
+}
+
+func TestGetSessionWithBanStatus_BannedUser(t *testing.T) {
+	database := newTestDB(t)
+	uid, _ := database.CreateUser("banned-zara", "hash", 4)
+	_, _ = database.CreateSession(uid, "bannedToken", "GoTest/1.0", "127.0.0.1")
+	if err := database.BanUser(uid, "rule violation", nil); err != nil {
+		t.Fatalf("BanUser: %v", err)
+	}
+
+	result, err := database.GetSessionWithBanStatus("bannedToken")
+	if err != nil {
+		t.Fatalf("GetSessionWithBanStatus: %v", err)
+	}
+	if result == nil {
+		t.Fatal("GetSessionWithBanStatus returned nil for existing session")
+	}
+	if !result.Banned {
+		t.Error("expected Banned = true for banned user")
+	}
+	if result.BanReason == nil || *result.BanReason != "rule violation" {
+		t.Errorf("BanReason = %v, want 'rule violation'", result.BanReason)
+	}
+}
+
+func TestGetSessionWithBanStatus_NotFound(t *testing.T) {
+	database := newTestDB(t)
+	result, err := database.GetSessionWithBanStatus("nonexistent")
+	if err != nil {
+		t.Fatalf("GetSessionWithBanStatus(not found): %v", err)
+	}
+	if result != nil {
+		t.Error("GetSessionWithBanStatus returned non-nil for missing session")
+	}
+}
+
 func TestDeleteSession(t *testing.T) {
 	database := newTestDB(t)
 	uid, _ := database.CreateUser("leo", "hash", 4)

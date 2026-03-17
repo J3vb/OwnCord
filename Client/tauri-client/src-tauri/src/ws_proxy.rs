@@ -350,6 +350,19 @@ pub fn accept_cert_fingerprint<R: Runtime>(
         return Err("host and fingerprint must not be empty".into());
     }
 
+    // Validate SHA-256 colon-hex format: XX:XX:XX:... (32 pairs = 95 chars)
+    let valid = fingerprint.len() == 95
+        && fingerprint.bytes().enumerate().all(|(i, b)| {
+            if (i + 1) % 3 == 0 {
+                b == b':'
+            } else {
+                b.is_ascii_hexdigit()
+            }
+        });
+    if !valid {
+        return Err("fingerprint must be SHA-256 colon-hex format (e.g. aa:bb:cc:...)".into());
+    }
+
     let store = app
         .store(CERTS_STORE)
         .map_err(|e| format!("failed to open certs store: {e}"))?;
