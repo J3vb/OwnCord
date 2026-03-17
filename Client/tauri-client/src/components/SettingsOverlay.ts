@@ -72,6 +72,22 @@ function applyTheme(name: ThemeName): void {
   }
 }
 
+/**
+ * Apply stored appearance preferences (theme, font size, compact mode).
+ * Call at app startup so the UI doesn't flash default styles.
+ */
+export function applyStoredAppearance(): void {
+  applyTheme(loadPref<ThemeName>("theme", "dark"));
+  document.documentElement.style.setProperty(
+    "--font-size",
+    `${loadPref<number>("fontSize", 16)}px`,
+  );
+  document.documentElement.classList.toggle(
+    "compact-mode",
+    loadPref<boolean>("compactMode", false),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -590,7 +606,7 @@ export function createSettingsOverlay(
   // ---- MountableComponent ---------------------------------------------------
 
   function mount(container: Element): void {
-    root = createElement("div", { class: "settings-overlay" });
+    root = createElement("div", { class: "settings-overlay", "data-testid": "settings-overlay" });
 
     // Sidebar
     const sidebar = createElement("div", { class: "settings-sidebar" });

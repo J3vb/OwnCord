@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"nhooyr.io/websocket"
@@ -16,6 +17,59 @@ import (
 
 const authDeadline = 10 * time.Second
 const writeTimeout = 10 * time.Second
+const settingsCacheTTL = 30 * time.Second
+
+// cachedSettings holds server_name and motd to avoid per-connection DB queries.
+var (
+	settingsMu         sync.RWMutex
+	settingsName       = "OwnCord Server"
+	settingsMotd       = "Welcome!"
+	settingsLastUpdate time.Time
+	settingsDB         *db.DB
+)
+
+// InitSettingsCache sets the DB reference for the settings cache.
+// Must be called once during server startup.
+func InitSettingsCache(database *db.DB) {
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+	settingsDB = database
+	refreshSettingsLocked()
+}
+
+func refreshSettingsLocked() {
+	if settingsDB == nil {
+		return
+	}
+	var name, motd string
+	if err := settingsDB.QueryRow("SELECT value FROM settings WHERE key='server_name'").Scan(&name); err == nil {
+		settingsName = name
+	}
+	if err := settingsDB.QueryRow("SELECT value FROM settings WHERE key='motd'").Scan(&motd); err == nil {
+		settingsMotd = motd
+	}
+	settingsLastUpdate = time.Now()
+}
+
+// getCachedSettings returns server_name and motd, refreshing the cache if stale.
+func getCachedSettings() (string, string) {
+	settingsMu.RLock()
+	if time.Since(settingsLastUpdate) < settingsCacheTTL {
+		name, motd := settingsName, settingsMotd
+		settingsMu.RUnlock()
+		return name, motd
+	}
+	settingsMu.RUnlock()
+
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+	// Double-check after acquiring write lock.
+	if time.Since(settingsLastUpdate) < settingsCacheTTL {
+		return settingsName, settingsMotd
+	}
+	refreshSettingsLocked()
+	return settingsName, settingsMotd
+}
 
 // ServeWS upgrades an HTTP connection to WebSocket, performs in-band auth,
 // then drives the client's read/write loops.
@@ -32,6 +86,7 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 			slog.Warn("ws upgrade failed", "err", err)
 			return
 		}
+		conn.SetReadLimit(1 << 20) // 1 MB — match client-side limit
 
 		user, tokenHash, err := authenticateConn(conn, database)
 		if err != nil {
@@ -43,11 +98,12 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 		c := newClient(hub, conn, user, tokenHash)
 		hub.Register(c)
 
-		// Look up role name for protocol-compliant payloads.
+		// Look up role name for protocol-compliant payloads and cache on client.
 		roleName := "member"
 		if role, roleErr := database.GetRoleByID(user.RoleID); roleErr == nil && role != nil {
 			roleName = role.Name
 		}
+		c.roleName = roleName
 
 		slog.Info("websocket connected", "username", user.Username, "user_id", user.ID, "remote", r.RemoteAddr)
 		_ = database.LogAudit(user.ID, "ws_connect", "user", user.ID,
@@ -59,8 +115,8 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 
 		// Send auth_ok followed by the ready payload.
 		ctx := r.Context()
-		_ = conn.Write(ctx, websocket.MessageText, buildAuthOK(database, user, roleName))
-		if ready, readyErr := buildReady(database); readyErr == nil {
+		_ = conn.Write(ctx, websocket.MessageText, buildAuthOK(user, roleName))
+		if ready, readyErr := buildReady(database, user.ID); readyErr == nil {
 			_ = conn.Write(ctx, websocket.MessageText, ready)
 		}
 
@@ -175,16 +231,14 @@ func authenticateConn(conn *websocket.Conn, database *db.DB) (*db.User, string, 
 }
 
 // buildAuthOK constructs the auth_ok server→client message.
-func buildAuthOK(database *db.DB, user *db.User, roleName string) []byte {
-	serverName := "OwnCord Server"
-	motd := "Welcome!"
-	_ = database.QueryRow("SELECT value FROM settings WHERE key='server_name'").Scan(&serverName)
-	_ = database.QueryRow("SELECT value FROM settings WHERE key='motd'").Scan(&motd)
-
+// Per PROTOCOL.md, user object contains only id, username, avatar, role (no status).
+func buildAuthOK(user *db.User, roleName string) []byte {
 	var avatarVal any
 	if user.Avatar != nil {
 		avatarVal = *user.Avatar
 	}
+
+	serverName, motd := getCachedSettings()
 
 	return buildJSON(map[string]any{
 		"type": "auth_ok",
@@ -193,7 +247,6 @@ func buildAuthOK(database *db.DB, user *db.User, roleName string) []byte {
 				"id":       user.ID,
 				"username": user.Username,
 				"avatar":   avatarVal,
-				"status":   user.Status,
 				"role":     roleName,
 			},
 			"server_name": serverName,
@@ -203,7 +256,9 @@ func buildAuthOK(database *db.DB, user *db.User, roleName string) []byte {
 }
 
 // buildReady constructs the ready server→client message.
-func buildReady(database *db.DB) ([]byte, error) {
+// Per PROTOCOL.md, channels include unread_count and last_message_id per user,
+// and only protocol-specified fields (no slow_mode, archived, voice_* extras).
+func buildReady(database *db.DB, userID int64) ([]byte, error) {
 	channels, err := database.ListChannels()
 	if err != nil {
 		return nil, fmt.Errorf("buildReady ListChannels: %w", err)
@@ -219,6 +274,35 @@ func buildReady(database *db.DB) ([]byte, error) {
 		members = []db.MemberSummary{}
 	}
 
+	// Per-user unread counts.
+	unreadMap, err := database.GetChannelUnreadCounts(userID)
+	if err != nil {
+		slog.Warn("buildReady GetChannelUnreadCounts", "err", err)
+		unreadMap = map[int64]db.ChannelUnread{}
+	}
+
+	// Build protocol-compliant channel objects (strip extra fields).
+	channelPayloads := make([]map[string]any, 0, len(channels))
+	for _, ch := range channels {
+		entry := map[string]any{
+			"id":       ch.ID,
+			"name":     ch.Name,
+			"type":     ch.Type,
+			"category": ch.Category,
+			"position": ch.Position,
+		}
+		if ch.Type == "text" {
+			if u, ok := unreadMap[ch.ID]; ok {
+				entry["unread_count"] = u.UnreadCount
+				entry["last_message_id"] = u.LastMessageID
+			} else {
+				entry["unread_count"] = 0
+				entry["last_message_id"] = 0
+			}
+		}
+		channelPayloads = append(channelPayloads, entry)
+	}
+
 	// Collect all active voice states across every voice channel.
 	voiceStates, err := collectAllVoiceStates(database, channels)
 	if err != nil {
@@ -227,13 +311,17 @@ func buildReady(database *db.DB) ([]byte, error) {
 		voiceStates = []db.VoiceState{}
 	}
 
+	serverName, motd := getCachedSettings()
+
 	return buildJSON(map[string]any{
 		"type": "ready",
 		"payload": map[string]any{
-			"channels":     channels,
+			"channels":     channelPayloads,
 			"members":      members,
 			"voice_states": voiceStates,
 			"roles":        roles,
+			"server_name":  serverName,
+			"motd":         motd,
 		},
 	}), nil
 }

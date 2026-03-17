@@ -118,7 +118,7 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 	// Rate limit.
 	ratKey := fmt.Sprintf("chat:%d", c.userID)
 	if !h.limiter.Allow(ratKey, chatRateLimit, chatWindow) {
-		c.sendMsg(buildErrorMsg("RATE_LIMITED", "too many messages"))
+		c.sendMsg(buildRateLimitError("too many messages", chatWindow.Seconds()))
 		return
 	}
 
@@ -146,8 +146,7 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 	}
 
 	// Permission check.
-	if !h.hasChannelPerm(c, channelID, permissions.ReadMessages|permissions.SendMessages) {
-		c.sendMsg(buildErrorMsg("FORBIDDEN", "missing SEND_MESSAGES permission"))
+	if !h.requireChannelPerm(c, channelID, permissions.ReadMessages|permissions.SendMessages, "SEND_MESSAGES") {
 		return
 	}
 
@@ -171,6 +170,13 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 		return
 	}
 
+	// Check attachment permission before persisting anything.
+	if len(p.Attachments) > 0 {
+		if !h.requireChannelPerm(c, channelID, permissions.AttachFiles, "ATTACH_FILES") {
+			return
+		}
+	}
+
 	// Persist message.
 	msgID, err := h.db.CreateMessage(channelID, c.userID, content, p.ReplyTo)
 	if err != nil {
@@ -182,17 +188,15 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 	// Link attachments if provided.
 	var attachments []map[string]any
 	if len(p.Attachments) > 0 {
-		if !h.hasChannelPerm(c, channelID, permissions.AttachFiles) {
-			c.sendMsg(buildErrorMsg("FORBIDDEN", "missing ATTACH_FILES permission"))
-			return
-		}
 		linked, linkErr := h.db.LinkAttachmentsToMessage(msgID, p.Attachments)
 		if linkErr != nil {
 			slog.Error("ws handleChatSend LinkAttachments", "err", linkErr)
 		}
 		if linked > 0 {
 			attMap, attErr := h.db.GetAttachmentsByMessageIDs([]int64{msgID})
-			if attErr == nil {
+			if attErr != nil {
+				slog.Error("ws handleChatSend GetAttachments", "err", attErr)
+			} else {
 				for _, ai := range attMap[msgID] {
 					attachments = append(attachments, map[string]any{
 						"id":       ai.ID,
@@ -227,7 +231,7 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 	c.sendMsg(buildChatSendOK(reqID, msgID, msg.Timestamp))
 
 	// Broadcast to channel.
-	broadcast := buildChatMessage(msgID, channelID, c.userID, username, avatar, content, msg.Timestamp, p.ReplyTo, attachments)
+	broadcast := buildChatMessage(msgID, channelID, c.userID, username, avatar, c.roleName, content, msg.Timestamp, p.ReplyTo, attachments)
 	h.BroadcastToChannel(channelID, broadcast)
 }
 
@@ -310,7 +314,7 @@ func (h *Hub) handleChatDelete(c *Client, _ string, payload json.RawMessage) {
 func (h *Hub) handleReaction(c *Client, add bool, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("reaction:%d", c.userID)
 	if !h.limiter.Allow(ratKey, reactionRateLimit, reactionWindow) {
-		c.sendMsg(buildErrorMsg("RATE_LIMITED", "too many reactions"))
+		c.sendMsg(buildRateLimitError("too many reactions", reactionWindow.Seconds()))
 		return
 	}
 
@@ -335,6 +339,13 @@ func (h *Hub) handleReaction(c *Client, add bool, payload json.RawMessage) {
 		c.sendMsg(buildErrorMsg("BAD_REQUEST", "emoji too long"))
 		return
 	}
+	// Reject control characters (U+0000–U+001F, U+007F) to prevent injection.
+	for _, r := range p.Emoji {
+		if r < 0x20 || r == 0x7F {
+			c.sendMsg(buildErrorMsg("BAD_REQUEST", "emoji contains invalid characters"))
+			return
+		}
+	}
 
 	msg, err := h.db.GetMessage(msgID)
 	if err != nil || msg == nil {
@@ -342,8 +353,7 @@ func (h *Hub) handleReaction(c *Client, add bool, payload json.RawMessage) {
 		return
 	}
 
-	if !h.hasChannelPerm(c, msg.ChannelID, permissions.AddReactions) {
-		c.sendMsg(buildErrorMsg("FORBIDDEN", "missing ADD_REACTIONS permission"))
+	if !h.requireChannelPerm(c, msg.ChannelID, permissions.AddReactions, "ADD_REACTIONS") {
 		return
 	}
 
@@ -388,7 +398,7 @@ func (h *Hub) handleTyping(c *Client, payload json.RawMessage) {
 func (h *Hub) handlePresence(c *Client, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("presence:%d", c.userID)
 	if !h.limiter.Allow(ratKey, presenceRateLimit, presenceWindow) {
-		c.sendMsg(buildErrorMsg("RATE_LIMITED", "too many presence updates"))
+		c.sendMsg(buildRateLimitError("too many presence updates", presenceWindow.Seconds()))
 		return
 	}
 
@@ -434,6 +444,17 @@ func (h *Hub) hasChannelPerm(c *Client, channelID int64, perm int64) bool {
 	return effective&perm == perm
 }
 
+// requireChannelPerm checks whether the client has the given permission on the
+// channel. If not, it sends a FORBIDDEN error to the client and returns false.
+// The permLabel should be the human-readable permission name (e.g. "SEND_MESSAGES").
+func (h *Hub) requireChannelPerm(c *Client, channelID int64, perm int64, permLabel string) bool {
+	if h.hasChannelPerm(c, channelID, perm) {
+		return true
+	}
+	c.sendMsg(buildErrorMsg("FORBIDDEN", "missing "+permLabel+" permission"))
+	return false
+}
+
 // broadcastExclude sends msg to all channel members except excludeUserID.
 func (h *Hub) broadcastExclude(channelID, excludeUserID int64, msg []byte) {
 	h.mu.RLock()
@@ -454,6 +475,7 @@ func (h *Hub) broadcastExclude(channelID, excludeUserID int64, msg []byte) {
 
 // handleChannelFocus sets which channel the client is currently viewing,
 // so channel-scoped broadcasts (chat messages, typing) reach them.
+// Also updates read_states so unread counts decrease when the user views a channel.
 func (h *Hub) handleChannelFocus(c *Client, payload json.RawMessage) {
 	chID, err := parseChannelID(payload)
 	if err != nil || chID <= 0 {
@@ -461,12 +483,19 @@ func (h *Hub) handleChannelFocus(c *Client, payload json.RawMessage) {
 	}
 
 	// Permission check: user must have READ_MESSAGES on the target channel.
-	if !h.hasChannelPerm(c, chID, permissions.ReadMessages) {
-		c.sendMsg(buildErrorMsg("FORBIDDEN", "no permission to view this channel"))
+	if !h.requireChannelPerm(c, chID, permissions.ReadMessages, "READ_MESSAGES") {
 		return
 	}
 
 	c.mu.Lock()
 	c.channelID = chID
 	c.mu.Unlock()
+
+	// Mark channel as read by updating read_states to the latest message.
+	latestID, latestErr := h.db.GetLatestMessageID(chID)
+	if latestErr == nil && latestID > 0 {
+		if rsErr := h.db.UpdateReadState(c.userID, chID, latestID); rsErr != nil {
+			slog.Warn("handleChannelFocus UpdateReadState", "err", rsErr, "user_id", c.userID, "channel_id", chID)
+		}
+	}
 }

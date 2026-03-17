@@ -1,5 +1,10 @@
 // OwnCord Tauri v2 Client — Entry Point
 
+import "@styles/tokens.css";
+import "@styles/base.css";
+import "@styles/login.css";
+import "@styles/app.css";
+
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
 import { createRouter } from "@lib/router";
 import { createApiClient } from "@lib/api";
@@ -8,6 +13,7 @@ import { wireDispatcher } from "@lib/dispatcher";
 import { authStore, setAuth, clearAuth } from "@stores/auth.store";
 import { createConnectPage } from "@pages/ConnectPage";
 import { createMainPage } from "@pages/MainPage";
+import { applyStoredAppearance } from "@components/SettingsOverlay";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
 import type { ConnectedOverlayControl } from "@components/ConnectedOverlay";
 import { createLogger } from "@lib/logger";
@@ -19,6 +25,9 @@ const log = createLogger("main");
 // Install global error handlers first
 installGlobalErrorHandlers();
 
+// Apply stored theme/font/compact preferences before first render
+applyStoredAppearance();
+
 const appEl = document.getElementById("app");
 if (!appEl) {
   throw new Error("Missing #app element");
@@ -26,7 +35,10 @@ if (!appEl) {
 
 // Create core services
 const router = createRouter("connect");
-const api = createApiClient({ host: "" });
+const api = createApiClient({ host: "" }, () => {
+  log.warn("Session expired (401), clearing auth");
+  clearAuth();
+});
 const ws = createWsClient();
 let dispatcherCleanup: (() => void) | null = null;
 let connectedOverlay: ConnectedOverlayControl | null = null;
@@ -44,6 +56,8 @@ function renderPage(pageId: "connect" | "main"): void {
   // Shared helper for post-auth WS connect + overlay flow
   function wirePostAuth(host: string, token: string, username: string): void {
     api.setConfig({ token });
+    // Store token in authStore so the dispatcher's auth_ok handler has it
+    authStore.setState((prev) => ({ ...prev, token }));
     ws.connect({ host, token });
     dispatcherCleanup = wireDispatcher(ws);
 

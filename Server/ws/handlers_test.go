@@ -9,6 +9,7 @@ import (
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/ws"
 )
 
@@ -35,6 +36,16 @@ CREATE TABLE IF NOT EXISTS audit_log (
     target_id   INTEGER NOT NULL DEFAULT 0,
     detail      TEXT    NOT NULL DEFAULT '',
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS attachments (
+    id          TEXT    PRIMARY KEY,
+    message_id  INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+    filename    TEXT    NOT NULL,
+    stored_as   TEXT    NOT NULL,
+    mime_type   TEXT    NOT NULL,
+    size        INTEGER NOT NULL,
+    uploaded_at TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 `)...)
 
@@ -465,6 +476,68 @@ func TestSlowMode_DifferentChannels_IndependentWindows(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// ─── Attachment permission ordering ───────────────────────────────────────────
+
+// chatSendMsgWithAttachments constructs a raw chat_send envelope with attachment IDs.
+func chatSendMsgWithAttachments(channelID int64, content string, attachmentIDs []string) []byte {
+	raw, _ := json.Marshal(map[string]any{
+		"type": "chat_send",
+		"payload": map[string]any{
+			"channel_id":  channelID,
+			"content":     content,
+			"attachments": attachmentIDs,
+		},
+	})
+	return raw
+}
+
+// denyAttachOnChannel inserts a channel_override that denies ATTACH_FILES.
+func denyAttachOnChannel(t *testing.T, database *db.DB, channelID, roleID int64) {
+	t.Helper()
+	_, err := database.Exec(
+		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, ?, 0, ?)`,
+		channelID, roleID, permissions.AttachFiles,
+	)
+	if err != nil {
+		t.Fatalf("denyAttachOnChannel: %v", err)
+	}
+}
+
+// TestChatSend_AttachmentsDeniedNoMessageCreated verifies that when ATTACH_FILES
+// is denied, the message is NOT persisted (permission check before CreateMessage).
+func TestChatSend_AttachmentsDeniedNoMessageCreated(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedMemberUser(t, database, "attach-denied")
+	chID := seedTestChannel(t, database, "attach-chan")
+
+	// Deny ATTACH_FILES for Member role on this channel.
+	denyAttachOnChannel(t, database, chID, permissions.MemberRoleID)
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	// Send a message with attachments — should be rejected before persisting.
+	hub.HandleMessageForTest(c, chatSendMsgWithAttachments(chID, "has attachment", []string{"fake-attach-id"}))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "FORBIDDEN" {
+		t.Errorf("expected FORBIDDEN for denied ATTACH_FILES, got %q", code)
+	}
+
+	// Verify no message was persisted in the database.
+	var count int
+	err := database.QueryRow("SELECT COUNT(*) FROM messages WHERE channel_id = ?", chID).Scan(&count)
+	if err != nil {
+		t.Fatalf("count query: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 messages in DB (permission denied before persist), got %d", count)
 	}
 }
 

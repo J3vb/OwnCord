@@ -71,8 +71,7 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 		return
 	}
 
-	if !h.hasChannelPerm(c, channelID, permissions.ConnectVoice) {
-		c.sendMsg(buildErrorMsg("FORBIDDEN", "missing CONNECT_VOICE permission"))
+	if !h.requireChannelPerm(c, channelID, permissions.ConnectVoice, "CONNECT_VOICE") {
 		return
 	}
 
@@ -279,7 +278,7 @@ func (h *Hub) handleVoiceDeafen(c *Client, payload json.RawMessage) {
 func (h *Hub) handleVoiceCamera(c *Client, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("voice_camera:%d", c.userID)
 	if !h.limiter.Allow(ratKey, voiceCameraRateLimit, voiceCameraWindow) {
-		c.sendMsg(buildErrorMsg("RATE_LIMITED", "too many camera toggles"))
+		c.sendMsg(buildRateLimitError("too many camera toggles", voiceCameraWindow.Seconds()))
 		return
 	}
 
@@ -289,8 +288,7 @@ func (h *Hub) handleVoiceCamera(c *Client, payload json.RawMessage) {
 		return
 	}
 
-	if !h.hasChannelPerm(c, voiceChID, permissions.UseVideo) {
-		c.sendMsg(buildErrorMsg("FORBIDDEN", "missing USE_VIDEO permission"))
+	if !h.requireChannelPerm(c, voiceChID, permissions.UseVideo, "USE_VIDEO") {
 		return
 	}
 
@@ -320,7 +318,7 @@ func (h *Hub) handleVoiceCamera(c *Client, payload json.RawMessage) {
 func (h *Hub) handleVoiceScreenshare(c *Client, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("voice_screenshare:%d", c.userID)
 	if !h.limiter.Allow(ratKey, voiceScreenshareRateLimit, voiceScreenshareWindow) {
-		c.sendMsg(buildErrorMsg("RATE_LIMITED", "too many screenshare toggles"))
+		c.sendMsg(buildRateLimitError("too many screenshare toggles", voiceScreenshareWindow.Seconds()))
 		return
 	}
 
@@ -330,8 +328,7 @@ func (h *Hub) handleVoiceScreenshare(c *Client, payload json.RawMessage) {
 		return
 	}
 
-	if !h.hasChannelPerm(c, voiceChID, permissions.ShareScreen) {
-		c.sendMsg(buildErrorMsg("FORBIDDEN", "missing SHARE_SCREEN permission"))
+	if !h.requireChannelPerm(c, voiceChID, permissions.ShareScreen, "SHARE_SCREEN") {
 		return
 	}
 
@@ -358,7 +355,7 @@ func (h *Hub) handleVoiceScreenshare(c *Client, payload json.RawMessage) {
 func (h *Hub) handleVoiceOffer(c *Client, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("voice_signal:%d", c.userID)
 	if !h.limiter.Allow(ratKey, voiceSignalRateLimit, voiceSignalWindow) {
-		c.sendMsg(buildErrorMsg("RATE_LIMITED", "too many signaling messages"))
+		c.sendMsg(buildRateLimitError("too many signaling messages", voiceSignalWindow.Seconds()))
 		return
 	}
 
@@ -415,7 +412,7 @@ func (h *Hub) handleVoiceOffer(c *Client, payload json.RawMessage) {
 func (h *Hub) handleVoiceAnswer(c *Client, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("voice_signal:%d", c.userID)
 	if !h.limiter.Allow(ratKey, voiceSignalRateLimit, voiceSignalWindow) {
-		c.sendMsg(buildErrorMsg("RATE_LIMITED", "too many signaling messages"))
+		c.sendMsg(buildRateLimitError("too many signaling messages", voiceSignalWindow.Seconds()))
 		return
 	}
 
@@ -454,7 +451,7 @@ func (h *Hub) handleVoiceAnswer(c *Client, payload json.RawMessage) {
 func (h *Hub) handleVoiceICE(c *Client, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("voice_signal:%d", c.userID)
 	if !h.limiter.Allow(ratKey, voiceSignalRateLimit, voiceSignalWindow) {
-		c.sendMsg(buildErrorMsg("RATE_LIMITED", "too many signaling messages"))
+		c.sendMsg(buildRateLimitError("too many signaling messages", voiceSignalWindow.Seconds()))
 		return
 	}
 
@@ -491,8 +488,7 @@ func (h *Hub) handleSoundboard(c *Client, payload json.RawMessage) {
 		return
 	}
 
-	if !h.hasChannelPerm(c, 0, permissions.UseSoundboard) {
-		c.sendMsg(buildErrorMsg("FORBIDDEN", "missing USE_SOUNDBOARD permission"))
+	if !h.requireChannelPerm(c, 0, permissions.UseSoundboard, "USE_SOUNDBOARD") {
 		return
 	}
 

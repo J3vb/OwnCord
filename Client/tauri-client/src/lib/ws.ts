@@ -234,6 +234,7 @@ export function createWsClient() {
     await ensureTauriApis();
     if (tauriInvoke === null) {
       log.error("Tauri APIs not available, cannot connect WebSocket");
+      setState("disconnected");
       return;
     }
 

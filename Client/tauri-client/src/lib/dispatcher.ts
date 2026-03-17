@@ -35,6 +35,7 @@ import {
   setVoiceConfig,
   setSpeakers,
   joinVoiceChannel,
+  leaveVoiceChannel,
 } from "@stores/voice.store";
 import { createLogger } from "./logger";
 
@@ -217,6 +218,11 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   unsubs.push(
     ws.on("voice_leave", (payload) => {
       removeVoiceUser(payload);
+      // Clear local voice state if the current user was removed (kick/disconnect)
+      const currentUserId = authStore.getState().user?.id ?? 0;
+      if (payload.user_id === currentUserId) {
+        leaveVoiceChannel();
+      }
     }),
   );
 

@@ -24,6 +24,7 @@ export type MessageInputComponent = MountableComponent & {
 
 const TYPING_THROTTLE_MS = 3_000;
 const MAX_TEXTAREA_HEIGHT = 200;
+const SEND_DEBOUNCE_MS = 200;
 
 export function createMessageInput(
   options: MessageInputOptions,
@@ -34,6 +35,7 @@ export function createMessageInput(
   let state = { replyTo: null as { messageId: number; username: string } | null,
     editing: null as { messageId: number } | null };
   let lastTypingTime = 0;
+  let lastSendTime = 0;
 
   let textarea: HTMLTextAreaElement | null = null;
   let replyBar: HTMLDivElement | null = null;
@@ -68,6 +70,11 @@ export function createMessageInput(
     if (textarea === null) return;
     const content = textarea.value.trim();
     if (content.length === 0) return;
+
+    // Debounce to prevent double-click duplicate sends
+    const now = Date.now();
+    if (now - lastSendTime < SEND_DEBOUNCE_MS) return;
+    lastSendTime = now;
 
     if (state.editing !== null) {
       options.onEditMessage(state.editing.messageId, content);
@@ -112,7 +119,7 @@ export function createMessageInput(
   }
 
   function mount(container: Element): void {
-    root = createElement("div", { class: "message-input-wrap" });
+    root = createElement("div", { class: "message-input-wrap", "data-testid": "message-input" });
 
     replyBar = createElement("div", { class: "reply-bar" });
     const replyInner = createElement("div", { class: "reply-bar-inner" });
@@ -137,11 +144,12 @@ export function createMessageInput(
       { class: "input-btn attach-btn", "aria-label": "Attach file" }, "+");
     textarea = createElement("textarea", {
       class: "msg-textarea", placeholder: `Message #${options.channelName}`, rows: "1",
+      "data-testid": "msg-textarea",
     });
     const emojiBtn = createElement("button",
       { class: "input-btn emoji-btn", "aria-label": "Emoji" }, "\uD83D\uDE00");
     const sendBtn = createElement("button",
-      { class: "input-btn send-btn", "aria-label": "Send message" }, "\u27A4");
+      { class: "input-btn send-btn", "aria-label": "Send message", "data-testid": "send-btn" }, "\u27A4");
 
     textarea.addEventListener("input", () => { autoResize(); maybeEmitTyping(); }, { signal });
     textarea.addEventListener("keydown", (e: KeyboardEvent) => {

@@ -20,8 +20,15 @@ import { createServerBanner } from "@components/ServerBanner";
 import type { ServerBannerControl } from "@components/ServerBanner";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
 import { createQuickSwitcher } from "@components/QuickSwitcher";
+import { createInviteManager } from "@components/InviteManager";
+import type { InviteItem } from "@components/InviteManager";
+import type { InviteResponse } from "@lib/types";
+import { createToastContainer } from "@components/Toast";
+import type { ToastContainer } from "@components/Toast";
+import { createPinnedMessages } from "@components/PinnedMessages";
+import type { PinnedMessage } from "@components/PinnedMessages";
 import { authStore, clearAuth } from "@stores/auth.store";
-import { closeSettings } from "@stores/ui.store";
+import { closeSettings, toggleMemberList, uiStore } from "@stores/ui.store";
 import { channelsStore, getActiveChannel, setActiveChannel } from "@stores/channels.store";
 import {
   voiceStore,
@@ -82,6 +89,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // Abort controller for channel-scoped async operations (e.g. message fetch)
   let channelAbort: AbortController | null = null;
 
+  // Toast container for user-facing error feedback
+  let toast: ToastContainer | null = null;
+
+  // Pinned panel toggle — assigned inside mount(), called from buildChatHeader()
+  let togglePinnedPanel: () => Promise<void> = async () => {};
+
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
@@ -104,6 +117,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     } catch (err) {
       if (!signal.aborted) {
         log.error("Failed to load messages", { channelId, error: String(err) });
+        toast?.show("Failed to load messages", "error");
       }
     }
   }
@@ -125,6 +139,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     } catch (err) {
       if (!signal.aborted) {
         log.error("Failed to load older messages", { channelId, error: String(err) });
+        toast?.show("Failed to load older messages", "error");
       }
     }
   }
@@ -134,13 +149,21 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // ---------------------------------------------------------------------------
 
   function buildChatHeader(): HTMLDivElement {
-    const header = createElement("div", { class: "chat-header" });
+    const header = createElement("div", { class: "chat-header", "data-testid": "chat-header" });
     const hash = createElement("span", { class: "ch-hash" }, "#");
-    chatHeaderName = createElement("span", { class: "ch-name" }, "general");
+    chatHeaderName = createElement("span", { class: "ch-name", "data-testid": "chat-header-name" }, "general");
     const divider = createElement("div", { class: "ch-divider" });
     chatHeaderTopic = createElement("span", { class: "ch-topic" }, "");
 
     const tools = createElement("div", { class: "ch-tools" });
+    const pinBtn = createElement("button", {
+      type: "button",
+      class: "pin-btn",
+      title: "Pins",
+      "aria-label": "Pins",
+      "data-testid": "pin-btn",
+    }, "\uD83D\uDCCC");
+    pinBtn.addEventListener("click", () => { void togglePinnedPanel(); });
     const searchInput = createElement("input", {
       class: "search-input",
       type: "text",
@@ -149,8 +172,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const membersToggle = createElement("button", {
       type: "button",
       "aria-label": "Toggle member list",
+      "data-testid": "members-toggle",
     }, "\uD83D\uDC65");
-    appendChildren(tools, searchInput, membersToggle);
+    membersToggle.addEventListener("click", () => toggleMemberList());
+    appendChildren(tools, searchInput, pinBtn, membersToggle);
 
     appendChildren(header, hash, chatHeaderName, divider, chatHeaderTopic, tools);
     return header;
@@ -163,10 +188,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   function mountChannelComponents(channelId: number, channelName: string): void {
     // Skip if already mounted for this channel
     if (currentChannelId === channelId) return;
-    currentChannelId = channelId;
 
     // Tear down previous instances
     destroyChannelComponents();
+
+    // Set after destroy (which resets currentChannelId to null)
+    currentChannelId = channelId;
 
     // New abort controller for this channel's async work
     channelAbort = new AbortController();
@@ -234,6 +261,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       channelId,
       channelName,
       onSend: (content: string, replyTo: number | null) => {
+        if (ws.getState() !== "connected") {
+          log.warn("Cannot send message: not connected");
+          toast?.show("Not connected — message not sent", "error");
+          return;
+        }
         ws.send({
           type: "chat_send",
           payload: {
@@ -342,7 +374,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     );
 
     // --- Main .app row ---
-    const app = createElement("div", { class: "app" });
+    const app = createElement("div", { class: "app", "data-testid": "app-layout" });
 
     // Server strip
     const serverStripSlot = createElement("div", {});
@@ -351,7 +383,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     children.push(serverStrip);
 
     // Channel sidebar (composed: sidebar + voice widget + user bar)
-    const sidebarWrapper = createElement("div", { class: "channel-sidebar" });
+    const sidebarWrapper = createElement("div", { class: "channel-sidebar", "data-testid": "channel-sidebar" });
 
     const channelSidebarSlot = createElement("div", {});
     const channelSidebar = createChannelSidebar();
@@ -364,6 +396,19 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       while (mountedSidebar.firstChild !== null) {
         sidebarWrapper.appendChild(mountedSidebar.firstChild);
       }
+    }
+
+    // Invite button in sidebar header
+    const sidebarHeader = sidebarWrapper.querySelector(".channel-sidebar-header");
+    if (sidebarHeader !== null) {
+      const inviteBtn = createElement("button", {
+        class: "invite-btn",
+        title: "Invite",
+      }, "Invite");
+      inviteBtn.addEventListener("click", () => {
+        void openInviteManager();
+      });
+      sidebarHeader.appendChild(inviteBtn);
     }
 
     // Voice widget (hidden when not in voice)
@@ -404,12 +449,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     sidebarWrapper.appendChild(userBarSlot);
 
     // Chat area
-    const chatArea = createElement("div", { class: "chat-area" });
+    const chatArea = createElement("div", { class: "chat-area", "data-testid": "chat-area" });
     chatArea.appendChild(buildChatHeader());
 
-    messagesSlot = createElement("div", { class: "messages-slot" });
-    typingSlot = createElement("div", { class: "typing-slot" });
-    inputSlot = createElement("div", { class: "input-slot" });
+    messagesSlot = createElement("div", { class: "messages-slot", "data-testid": "messages-slot" });
+    typingSlot = createElement("div", { class: "typing-slot", "data-testid": "typing-slot" });
+    inputSlot = createElement("div", { class: "input-slot", "data-testid": "input-slot" });
     appendChildren(chatArea, messagesSlot, typingSlot, inputSlot);
 
     // Member list
@@ -417,6 +462,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const memberList = createMemberList();
     memberList.mount(memberListSlot);
     children.push(memberList);
+
+    // Wire member list visibility to uiStore
+    const memberListEl = memberListSlot.querySelector(".member-list");
+    const unsubMemberList = uiStore.subscribe((state) => {
+      if (memberListEl !== null) {
+        memberListEl.classList.toggle("hidden", !state.memberListVisible);
+      }
+    });
+    unsubscribers.push(unsubMemberList);
 
     appendChildren(app, serverStripSlot, sidebarWrapper, chatArea, memberListSlot);
     root.appendChild(app);
@@ -468,6 +522,136 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       document.removeEventListener("keydown", quickSwitcherKeyHandler);
       closeQuickSwitcher();
     });
+
+    // Invite manager overlay
+    let inviteManager: MountableComponent | null = null;
+
+    function closeInviteManager(): void {
+      if (inviteManager !== null) {
+        inviteManager.destroy?.();
+        inviteManager = null;
+      }
+    }
+
+    function mapInviteResponse(r: InviteResponse): InviteItem {
+      // Server may include extra fields (e.g. created_by) beyond the typed response
+      const extra = r as unknown as Record<string, unknown>;
+      const createdBy = typeof extra["created_by"] === "object"
+        && extra["created_by"] !== null
+        ? (extra["created_by"] as { username?: string }).username ?? "unknown"
+        : "unknown";
+      const uses = r.use_count
+        ?? (typeof extra["uses"] === "number" ? (extra["uses"] as number) : 0);
+      return {
+        code: r.code,
+        createdBy,
+        createdAt: r.expires_at ?? "",
+        uses,
+        maxUses: r.max_uses,
+        expiresAt: r.expires_at,
+      };
+    }
+
+    async function openInviteManager(): Promise<void> {
+      if (inviteManager !== null || root === null) return;
+      try {
+        const raw = await api.getInvites();
+        const invites = raw.map(mapInviteResponse);
+        inviteManager = createInviteManager({
+          invites,
+          onCreateInvite: async () => {
+            const created = await api.createInvite({});
+            return mapInviteResponse(created);
+          },
+          onRevokeInvite: async (code: string) => {
+            const raw2 = await api.getInvites();
+            const match = raw2.find((i) => i.code === code);
+            if (match !== undefined) {
+              await api.revokeInvite(match.id);
+            }
+          },
+          onCopyLink: (code: string) => {
+            void navigator.clipboard.writeText(code);
+          },
+          onClose: closeInviteManager,
+        });
+        if (root !== null) {
+          inviteManager.mount(root);
+        }
+      } catch (err) {
+        log.error("Failed to open invite manager", { error: String(err) });
+        toast?.show("Failed to load invites", "error");
+      }
+    }
+
+    unsubscribers.push(() => {
+      closeInviteManager();
+    });
+
+    // Pinned messages panel
+    let pinnedPanel: MountableComponent | null = null;
+
+    function closePinnedPanel(): void {
+      if (pinnedPanel !== null) {
+        pinnedPanel.destroy?.();
+        pinnedPanel = null;
+      }
+    }
+
+    function mapToPinnedMessage(msg: {
+      readonly id: number;
+      readonly user: { readonly username: string };
+      readonly content: string;
+      readonly created_at?: string;
+      readonly timestamp?: string;
+    }): PinnedMessage {
+      return {
+        id: msg.id,
+        author: msg.user.username,
+        content: msg.content,
+        timestamp: msg.created_at ?? msg.timestamp ?? "",
+      };
+    }
+
+    togglePinnedPanel = async (): Promise<void> => {
+      if (pinnedPanel !== null) {
+        closePinnedPanel();
+        return;
+      }
+      if (root === null || currentChannelId === null) return;
+      const channelId = currentChannelId;
+      try {
+        const resp = await api.getPins(channelId);
+        const pins = resp.messages.map(mapToPinnedMessage);
+        pinnedPanel = createPinnedMessages({
+          channelId,
+          pinnedMessages: pins,
+          onJumpToMessage: (_msgId: number) => {
+            closePinnedPanel();
+          },
+          onUnpin: (msgId: number) => {
+            void api.unpinMessage(channelId, msgId);
+            closePinnedPanel();
+          },
+          onClose: closePinnedPanel,
+        });
+        if (root !== null) {
+          pinnedPanel.mount(root);
+        }
+      } catch (err) {
+        log.error("Failed to load pinned messages", { error: String(err) });
+        toast?.show("Failed to load pinned messages", "error");
+      }
+    };
+
+    unsubscribers.push(() => {
+      closePinnedPanel();
+    });
+
+    // Toast container for error feedback
+    toast = createToastContainer();
+    toast.mount(root);
+    children.push(toast);
 
     container.appendChild(root);
 

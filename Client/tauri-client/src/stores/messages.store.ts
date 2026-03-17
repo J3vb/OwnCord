@@ -303,3 +303,8 @@ export function getChannelMessages(channelId: number): readonly Message[] {
 export function isChannelLoaded(channelId: number): boolean {
   return messagesStore.select((s) => s.loadedChannels.has(channelId));
 }
+
+/** Check whether a channel has more older messages to fetch. */
+export function hasMoreMessages(channelId: number): boolean {
+  return messagesStore.select((s) => s.hasMore.get(channelId) ?? false);
+}

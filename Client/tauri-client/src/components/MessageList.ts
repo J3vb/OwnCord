@@ -11,7 +11,7 @@ import {
 } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { Attachment } from "@lib/types";
-import { messagesStore, getChannelMessages } from "@stores/messages.store";
+import { messagesStore, getChannelMessages, hasMoreMessages } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 
@@ -274,6 +274,7 @@ function renderMessage(
 
   const el = createElement("div", {
     class: isGrouped ? "message grouped" : "message",
+    "data-testid": `message-${msg.id}`,
   });
 
   // Avatar (hidden for grouped messages via CSS)
@@ -336,25 +337,25 @@ function renderMessage(
   if (!msg.deleted) {
     const actionsBar = createElement("div", { class: "msg-actions-bar" });
 
-    const reactBtn = createElement("button", {}, "\uD83D\uDE04");
+    const reactBtn = createElement("button", { "data-testid": `msg-react-${msg.id}` }, "\uD83D\uDE04");
     reactBtn.title = "React";
     reactBtn.addEventListener("click", () => opts.onReactionClick(msg.id, ""), { signal });
     actionsBar.appendChild(reactBtn);
 
-    const replyBtn = createElement("button", {}, "\u21A9");
+    const replyBtn = createElement("button", { "data-testid": `msg-reply-${msg.id}` }, "\u21A9");
     replyBtn.title = "Reply";
     replyBtn.addEventListener("click", () => opts.onReplyClick(msg.id), { signal });
     actionsBar.appendChild(replyBtn);
 
     if (msg.user.id === opts.currentUserId) {
-      const editBtn = createElement("button", {}, "\u270E");
+      const editBtn = createElement("button", { "data-testid": `msg-edit-${msg.id}` }, "\u270E");
       editBtn.title = "Edit";
       editBtn.addEventListener("click", () => opts.onEditClick(msg.id), { signal });
       actionsBar.appendChild(editBtn);
     }
 
     if (msg.user.id === opts.currentUserId) {
-      const deleteBtn = createElement("button", {}, "\uD83D\uDDD1");
+      const deleteBtn = createElement("button", { "data-testid": `msg-delete-${msg.id}` }, "\uD83D\uDDD1");
       deleteBtn.title = "Delete";
       deleteBtn.addEventListener("click", () => opts.onDeleteClick(msg.id), { signal });
       actionsBar.appendChild(deleteBtn);
@@ -414,14 +415,26 @@ export function createMessageList(options: MessageListOptions): MountableCompone
   }
 
   let loadingOlder = false;
+  let prevMessageCount = 0;
+
+  // Reset loadingOlder when the store updates with new messages (fetch completed)
+  const unsubLoadingReset = messagesStore.subscribe(() => {
+    const msgs = getChannelMessages(options.channelId);
+    if (msgs.length !== prevMessageCount) {
+      prevMessageCount = msgs.length;
+      loadingOlder = false;
+    }
+  });
 
   function handleScroll(): void {
     if (messagesContainer === null) return;
-    if (messagesContainer.scrollTop < SCROLL_TOP_THRESHOLD && !loadingOlder) {
+    if (
+      messagesContainer.scrollTop < SCROLL_TOP_THRESHOLD
+      && !loadingOlder
+      && hasMoreMessages(options.channelId)
+    ) {
       loadingOlder = true;
       options.onScrollTop();
-      // Reset after a short delay to allow the fetch to land
-      setTimeout(() => { loadingOlder = false; }, 500);
     }
   }
 
@@ -448,6 +461,7 @@ export function createMessageList(options: MessageListOptions): MountableCompone
 
   function destroy(): void {
     ac.abort();
+    unsubLoadingReset();
     for (const unsub of unsubscribers) { unsub(); }
     unsubscribers.length = 0;
     if (root !== null) { root.remove(); root = null; }
