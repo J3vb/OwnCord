@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -66,6 +67,7 @@ func handleCreateInvite(database *db.DB) http.HandlerFunc {
 
 		code, err := database.CreateInvite(user.ID, req.MaxUses, expiresAt)
 		if err != nil {
+			slog.Error("handleCreateInvite CreateInvite", "err", err, "user_id", user.ID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "SERVER_ERROR",
 				Message: "failed to create invite",
@@ -75,6 +77,7 @@ func handleCreateInvite(database *db.DB) http.HandlerFunc {
 
 		inv, err := database.GetInvite(code)
 		if err != nil || inv == nil {
+			slog.Error("handleCreateInvite GetInvite", "err", err, "code", code)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "SERVER_ERROR",
 				Message: "failed to retrieve invite",
@@ -91,6 +94,7 @@ func handleListInvites(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		invites, err := database.ListInvites()
 		if err != nil {
+			slog.Error("handleListInvites ListInvites", "err", err)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "SERVER_ERROR",
 				Message: "failed to list invites",
@@ -113,6 +117,7 @@ func handleRevokeInvite(database *db.DB) http.HandlerFunc {
 
 		inv, err := database.GetInvite(code)
 		if err != nil {
+			slog.Error("handleRevokeInvite GetInvite", "err", err, "code", code)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "SERVER_ERROR",
 				Message: "failed to look up invite",
@@ -128,6 +133,7 @@ func handleRevokeInvite(database *db.DB) http.HandlerFunc {
 		}
 
 		if err := database.RevokeInvite(code); err != nil {
+			slog.Error("handleRevokeInvite RevokeInvite", "err", err, "code", code)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "SERVER_ERROR",
 				Message: "failed to revoke invite",

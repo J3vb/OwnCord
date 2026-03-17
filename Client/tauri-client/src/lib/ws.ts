@@ -36,6 +36,16 @@ export type WsListener<T extends ServerMessage["type"]> = (
   id?: string,
 ) => void;
 
+/** TOFU certificate event emitted by the Rust WS proxy. */
+export interface CertTofuEvent {
+  readonly host: string;
+  readonly fingerprint: string;
+  readonly status: "trusted_first_use" | "trusted" | "mismatch";
+  readonly message?: string;
+}
+
+export type CertMismatchListener = (event: CertTofuEvent) => void;
+
 export interface WsClientConfig {
   readonly host: string;
   readonly token: string;
@@ -58,6 +68,7 @@ export function createWsClient() {
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let intentionalClose = false;
+  let certMismatchBlock = false; // blocks reconnect on TOFU mismatch
   let proxyOpen = false;
 
   // Tauri event unsubscribe functions
@@ -68,6 +79,9 @@ export function createWsClient() {
 
   // State change listeners
   const stateListeners = new Set<(state: ConnectionState) => void>();
+
+  // TOFU cert mismatch listeners
+  const certMismatchListeners = new Set<CertMismatchListener>();
 
   function setState(newState: ConnectionState): void {
     if (state !== newState) {
@@ -104,7 +118,7 @@ export function createWsClient() {
   }
 
   function scheduleReconnect(): void {
-    if (intentionalClose || !config) return;
+    if (intentionalClose || certMismatchBlock || !config) return;
     const delay = getReconnectDelay();
     log.info(`Reconnecting in ${delay}ms (attempt ${reconnectAttempt + 1})`);
     setState("reconnecting");
@@ -215,6 +229,26 @@ export function createWsClient() {
       log.warn("WebSocket error (proxy)", { error: e.payload });
     });
     eventUnsubs.push(unsubErr);
+
+    // TOFU certificate events
+    const unsubCert = await tauriListen("cert-tofu", (e) => {
+      const evt = e.payload as CertTofuEvent;
+      log.info("TOFU cert event", { host: evt.host, status: evt.status });
+
+      if (evt.status === "mismatch") {
+        log.error("Certificate fingerprint mismatch!", {
+          host: evt.host,
+          fingerprint: evt.fingerprint,
+          message: evt.message,
+        });
+        certMismatchBlock = true;
+        setState("disconnected");
+        for (const listener of certMismatchListeners) {
+          listener(evt);
+        }
+      }
+    });
+    eventUnsubs.push(unsubCert);
   }
 
   function cleanupEventListeners(): void {
@@ -250,6 +284,10 @@ export function createWsClient() {
     } catch (err) {
       log.error("ws_connect failed", err);
       proxyOpen = false;
+
+      // Cert mismatch is handled by the cert-tofu event listener
+      // (which sets certMismatchBlock before this catch runs).
+      // scheduleReconnect() checks certMismatchBlock and will no-op if set.
       scheduleReconnect();
     }
   }
@@ -284,6 +322,7 @@ export function createWsClient() {
 
   function disconnect(): void {
     intentionalClose = true;
+    certMismatchBlock = false;
     cancelReconnect();
     stopHeartbeat();
     cleanupEventListeners();
@@ -319,6 +358,27 @@ export function createWsClient() {
     onStateChange(listener: (state: ConnectionState) => void): () => void {
       stateListeners.add(listener);
       return () => stateListeners.delete(listener);
+    },
+
+    /** Register a listener for TOFU certificate mismatch events. */
+    onCertMismatch(listener: CertMismatchListener): () => void {
+      certMismatchListeners.add(listener);
+      return () => certMismatchListeners.delete(listener);
+    },
+
+    /**
+     * Accept a changed certificate fingerprint for a host.
+     * Call after the user acknowledges a cert mismatch warning,
+     * then reconnect.
+     */
+    async acceptCertFingerprint(host: string, fingerprint: string): Promise<void> {
+      await ensureTauriApis();
+      if (tauriInvoke === null) {
+        throw new Error("Tauri APIs not available");
+      }
+      await tauriInvoke("accept_cert_fingerprint", { host, fingerprint });
+      certMismatchBlock = false;
+      log.info("Accepted new cert fingerprint", { host });
     },
 
     getState(): ConnectionState {

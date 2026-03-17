@@ -20,6 +20,7 @@ pub fn run() {
             ws_proxy::ws_connect,
             ws_proxy::ws_send,
             ws_proxy::ws_disconnect,
+            ws_proxy::accept_cert_fingerprint,
             credentials::save_credential,
             credentials::load_credential,
             credentials::delete_credential,

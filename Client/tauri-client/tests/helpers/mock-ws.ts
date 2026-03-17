@@ -9,7 +9,7 @@ import type {
   ServerMessage,
   ClientMessage,
 } from "@lib/types";
-import type { ConnectionState, WsListener } from "@lib/ws";
+import type { ConnectionState, WsListener, CertMismatchListener } from "@lib/ws";
 
 interface SentEnvelope {
   readonly type: string;
@@ -76,6 +76,14 @@ export function createMockWsClient() {
     onStateChange(listener: (s: ConnectionState) => void): () => void {
       stateListeners.add(listener);
       return () => stateListeners.delete(listener);
+    },
+
+    onCertMismatch(_listener: CertMismatchListener): () => void {
+      return () => {};
+    },
+
+    async acceptCertFingerprint(_host: string, _fingerprint: string): Promise<void> {
+      // no-op in mock
     },
 
     getState(): ConnectionState {

@@ -65,6 +65,14 @@ function createMockWsClient(): MockWsClient {
       return () => stateListeners.delete(listener);
     },
 
+    onCertMismatch(): () => void {
+      return () => {};
+    },
+
+    async acceptCertFingerprint(): Promise<void> {
+      // no-op in mock
+    },
+
     getState(): ConnectionState {
       return currentState;
     },

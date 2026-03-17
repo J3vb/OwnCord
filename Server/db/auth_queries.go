@@ -157,6 +157,44 @@ func (d *DB) GetSessionByTokenHash(tokenHash string) (*Session, error) {
 	return s, nil
 }
 
+// SessionWithBanStatus combines session data with user ban fields
+// in a single query, avoiding two sequential DB round-trips.
+type SessionWithBanStatus struct {
+	Session
+	Banned     bool
+	BanReason  *string
+	BanExpires *string
+}
+
+// GetSessionWithBanStatus returns the session joined with the user's ban
+// status in a single query. Returns nil, nil when not found.
+func (d *DB) GetSessionWithBanStatus(tokenHash string) (*SessionWithBanStatus, error) {
+	row := d.sqlDB.QueryRow(
+		`SELECT s.id, s.user_id, s.token, s.device, s.ip_address,
+		        s.created_at, s.last_used, s.expires_at,
+		        u.banned, u.ban_reason, u.ban_expires
+		 FROM sessions s
+		 JOIN users u ON s.user_id = u.id
+		 WHERE s.token = ?`,
+		tokenHash,
+	)
+	r := &SessionWithBanStatus{}
+	var banned int
+	err := row.Scan(
+		&r.ID, &r.UserID, &r.TokenHash, &r.Device, &r.IP,
+		&r.CreatedAt, &r.LastUsed, &r.ExpiresAt,
+		&banned, &r.BanReason, &r.BanExpires,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("GetSessionWithBanStatus: %w", err)
+	}
+	r.Banned = banned != 0
+	return r, nil
+}
+
 // DeleteSession removes the session with the given token hash.
 func (d *DB) DeleteSession(tokenHash string) error {
 	_, err := d.sqlDB.Exec(`DELETE FROM sessions WHERE token = ?`, tokenHash)

@@ -23,6 +23,7 @@ tokio-tungstenite = { version = "0.28.0", features = ["rustls-tls-webpki-roots"]
 futures-util = "0.3.32"
 tokio = { version = "1", features = ["sync"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+ring = "0.17"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = ["Win32_Security_Credentials", "Win32_Foundation"] }
