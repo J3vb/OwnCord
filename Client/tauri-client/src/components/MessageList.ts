@@ -1,19 +1,19 @@
 /**
  * MessageList component — renders chat messages with grouping, day dividers,
- * role-colored usernames, @mention highlighting, and infinite scroll.
- * Step 5.41
+ * role-colored usernames, @mention highlighting, infinite scroll, and
+ * virtual scrolling (DOM windowing) for performance with large message counts.
  */
-import {
-  createElement,
-  setText,
-  clearChildren,
-  appendChildren,
-} from "@lib/dom";
+import { createElement, clearChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
-import type { Attachment } from "@lib/types";
 import { messagesStore, getChannelMessages, hasMoreMessages } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
+import {
+  shouldGroup,
+  isSameDay,
+  renderDayDivider,
+  renderMessage,
+} from "./message-list/renderers";
 
 // -- Options ------------------------------------------------------------------
 
@@ -29,342 +29,47 @@ export interface MessageListOptions {
 
 // -- Constants ----------------------------------------------------------------
 
-const GROUP_THRESHOLD_MS = 5 * 60 * 1000;
 const SCROLL_TOP_THRESHOLD = 50;
 const SCROLL_BOTTOM_THRESHOLD = 100;
-const MENTION_REGEX = /@(\w+)/g;
-const CODE_BLOCK_REGEX = /```([\s\S]*?)```/g;
-const INLINE_CODE_REGEX = /`([^`]+)`/g;
 
-// -- Formatting helpers -------------------------------------------------------
+/** Number of items to render beyond visible viewport in each direction. */
+const OVERSCAN = 10;
 
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+/** Estimated pixel height per row (message or day divider) for initial layout. */
+const ESTIMATED_ROW_HEIGHT = 52;
+
+// -- Virtual item types -------------------------------------------------------
+
+interface VirtualItemMessage {
+  readonly kind: "message";
+  readonly message: Message;
+  readonly isGrouped: boolean;
 }
 
-function formatFullDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+interface VirtualItemDivider {
+  readonly kind: "divider";
+  readonly timestamp: string;
 }
 
-function isSameDay(a: string, b: string): boolean {
-  const da = new Date(a);
-  const db = new Date(b);
-  return (
-    da.getFullYear() === db.getFullYear() &&
-    da.getMonth() === db.getMonth() &&
-    da.getDate() === db.getDate()
-  );
-}
+type VirtualItem = VirtualItemMessage | VirtualItemDivider;
 
-function shouldGroup(prev: Message, curr: Message): boolean {
-  if (prev.user.id !== curr.user.id) return false;
-  if (prev.deleted || curr.deleted) return false;
-  const dt = new Date(curr.timestamp).getTime() - new Date(prev.timestamp).getTime();
-  return dt < GROUP_THRESHOLD_MS;
-}
+// -- Pre-process messages into virtual items ----------------------------------
 
-function getUserRole(userId: number): string {
-  return membersStore.getState().members.get(userId)?.role ?? "member";
-}
+function buildVirtualItems(messages: readonly Message[]): readonly VirtualItem[] {
+  const items: VirtualItem[] = [];
+  let lastTimestamp: string | null = null;
+  let prevMsg: Message | null = null;
 
-function roleColorVar(role: string): string {
-  switch (role) {
-    case "owner": return "var(--role-owner)";
-    case "admin": return "var(--role-admin)";
-    case "moderator": return "var(--role-mod)";
-    default: return "var(--role-member)";
-  }
-}
-
-// -- Content parsing (XSS-safe, no innerHTML) ---------------------------------
-
-function renderInlineContent(text: string): DocumentFragment {
-  // First handle inline code, then mentions in non-code parts
-  const fragment = document.createDocumentFragment();
-  let lastIndex = 0;
-  for (const match of text.matchAll(INLINE_CODE_REGEX)) {
-    const idx = match.index;
-    if (idx === undefined) continue;
-    if (idx > lastIndex) {
-      fragment.appendChild(renderMentions(text.slice(lastIndex, idx)));
+  for (const msg of messages) {
+    if (lastTimestamp === null || !isSameDay(lastTimestamp, msg.timestamp)) {
+      items.push({ kind: "divider", timestamp: msg.timestamp });
     }
-    const code = createElement("code", {});
-    setText(code, match[1]!);
-    fragment.appendChild(code);
-    lastIndex = idx + match[0].length;
+    const isGrouped = prevMsg !== null && shouldGroup(prevMsg, msg);
+    items.push({ kind: "message", message: msg, isGrouped });
+    lastTimestamp = msg.timestamp;
+    prevMsg = msg;
   }
-  if (lastIndex < text.length) {
-    fragment.appendChild(renderMentions(text.slice(lastIndex)));
-  }
-  return fragment;
-}
-
-function renderMentions(text: string): DocumentFragment {
-  const fragment = document.createDocumentFragment();
-  let lastIndex = 0;
-  for (const match of text.matchAll(MENTION_REGEX)) {
-    const idx = match.index;
-    if (idx === undefined) continue;
-    if (idx > lastIndex) {
-      fragment.appendChild(document.createTextNode(text.slice(lastIndex, idx)));
-    }
-    const span = createElement("span", { class: "mention" });
-    setText(span, match[0]);
-    fragment.appendChild(span);
-    lastIndex = idx + match[0].length;
-  }
-  if (lastIndex < text.length) {
-    fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
-  }
-  return fragment;
-}
-
-function renderMessageContent(content: string): DocumentFragment {
-  const fragment = document.createDocumentFragment();
-  // Split on code blocks first
-  let lastIndex = 0;
-  for (const match of content.matchAll(CODE_BLOCK_REGEX)) {
-    const idx = match.index;
-    if (idx === undefined) continue;
-    // Render text before code block
-    if (idx > lastIndex) {
-      const text = createElement("div", { class: "msg-text" });
-      text.appendChild(renderInlineContent(content.slice(lastIndex, idx)));
-      fragment.appendChild(text);
-    }
-    // Render code block
-    const codeBlock = createElement("div", { class: "msg-codeblock" });
-    setText(codeBlock, match[1]!.trim());
-    fragment.appendChild(codeBlock);
-    lastIndex = idx + match[0].length;
-  }
-  if (lastIndex === 0) {
-    // No code blocks — render as single text node
-    const text = createElement("div", { class: "msg-text" });
-    text.appendChild(renderInlineContent(content));
-    fragment.appendChild(text);
-  } else if (lastIndex < content.length) {
-    // Remaining text after last code block
-    const remaining = content.slice(lastIndex).trim();
-    if (remaining.length > 0) {
-      const text = createElement("div", { class: "msg-text" });
-      text.appendChild(renderInlineContent(remaining));
-      fragment.appendChild(text);
-    }
-  }
-  return fragment;
-}
-
-// -- Attachment rendering -----------------------------------------------------
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function isImageMime(mime: string): boolean {
-  return mime.startsWith("image/");
-}
-
-function renderAttachment(att: Attachment): HTMLDivElement {
-  if (isImageMime(att.mime)) {
-    const wrap = createElement("div", { class: "msg-image" });
-    const placeholder = createElement("div", { class: "placeholder-img" }, att.filename);
-    wrap.appendChild(placeholder);
-    return wrap;
-  }
-  // File attachment
-  const wrap = createElement("div", { class: "msg-file" });
-  const inner = createElement("div", { class: "msg-file-inner" });
-  const icon = createElement("div", { class: "msg-file-icon" }, "\uD83D\uDCC4");
-  const nameEl = createElement("div", { class: "msg-file-name" }, att.filename);
-  const sizeEl = createElement("div", { class: "msg-file-size" }, formatFileSize(att.size));
-  const info = createElement("div", {});
-  appendChildren(info, nameEl, sizeEl);
-  appendChildren(inner, icon, info);
-  wrap.appendChild(inner);
-  return wrap;
-}
-
-// -- Reaction rendering -------------------------------------------------------
-
-function renderReactions(
-  msg: Message,
-  opts: MessageListOptions,
-  signal: AbortSignal,
-): HTMLDivElement {
-  const container = createElement("div", { class: "msg-reactions" });
-  for (const reaction of msg.reactions) {
-    const chip = createElement("span", {
-      class: reaction.me ? "reaction-chip me" : "reaction-chip",
-    });
-    const emoji = document.createTextNode(reaction.emoji);
-    const count = createElement("span", { class: "rc-count" }, String(reaction.count));
-    chip.appendChild(emoji);
-    chip.appendChild(count);
-    chip.addEventListener("click", () => opts.onReactionClick(msg.id, reaction.emoji), { signal });
-    container.appendChild(chip);
-  }
-  // Add reaction button
-  const addBtn = createElement("span", { class: "reaction-chip add-reaction" }, "+");
-  addBtn.addEventListener("click", () => opts.onReactionClick(msg.id, ""), { signal });
-  container.appendChild(addBtn);
-  return container;
-}
-
-// -- DOM rendering (matches ui-mockup.html structure) -------------------------
-
-function renderDayDivider(iso: string): HTMLDivElement {
-  const divider = createElement("div", { class: "msg-day-divider" });
-  appendChildren(
-    divider,
-    createElement("span", { class: "line" }),
-    createElement("span", { class: "date" }, formatFullDate(iso)),
-    createElement("span", { class: "line" }),
-  );
-  return divider;
-}
-
-function renderReplyRef(
-  replyToId: number,
-  allMessages: readonly Message[],
-): HTMLDivElement {
-  const ref = allMessages.find((m) => m.id === replyToId);
-  const bar = createElement("div", { class: "msg-reply-ref" });
-  if (ref) {
-    const preview = ref.deleted ? "[message deleted]" : ref.content.slice(0, 100);
-    appendChildren(
-      bar,
-      createElement("span", { class: "rr-author" }, ref.user.username),
-      createElement("span", { class: "rr-text" }, preview),
-    );
-  } else {
-    setText(bar, "Reply to unknown message");
-  }
-  return bar;
-}
-
-function renderSystemMessage(msg: Message): HTMLDivElement {
-  const el = createElement("div", { class: "system-msg" });
-  const icon = createElement("span", { class: "sm-icon" }, "\u2192");
-  const text = createElement("span", { class: "sm-text" });
-  text.appendChild(renderMentions(msg.content));
-  const time = createElement("span", { class: "sm-time" }, formatTime(msg.timestamp));
-  appendChildren(el, icon, text, time);
-  return el;
-}
-
-function renderMessage(
-  msg: Message,
-  isGrouped: boolean,
-  allMessages: readonly Message[],
-  opts: MessageListOptions,
-  signal: AbortSignal,
-): HTMLDivElement {
-  // System messages use a different layout
-  if (msg.user.username === "System") {
-    return renderSystemMessage(msg);
-  }
-
-  const el = createElement("div", {
-    class: isGrouped ? "message grouped" : "message",
-    "data-testid": `message-${msg.id}`,
-  });
-
-  // Avatar (hidden for grouped messages via CSS)
-  const role = getUserRole(msg.user.id);
-  const initial = msg.user.username.charAt(0).toUpperCase();
-  const avatar = createElement("div", {
-    class: "msg-avatar",
-    style: `background: ${roleColorVar(role)}`,
-  }, initial);
-  el.appendChild(avatar);
-
-  // Hover time (shown on grouped messages)
-  if (isGrouped) {
-    const hoverTime = createElement("div", {
-      class: "msg-hover-time",
-    }, formatTime(msg.timestamp));
-    el.appendChild(hoverTime);
-  }
-
-  // Reply reference
-  if (msg.replyTo !== null) {
-    el.appendChild(renderReplyRef(msg.replyTo, allMessages));
-  }
-
-  // Header (hidden for grouped via CSS)
-  const header = createElement("div", { class: "msg-header" });
-  const author = createElement("span", {
-    class: "msg-author",
-    style: `color: ${roleColorVar(role)}`,
-  }, msg.user.username);
-  const time = createElement("span", { class: "msg-time" }, formatTime(msg.timestamp));
-  appendChildren(header, author, time);
-  el.appendChild(header);
-
-  // Message content
-  if (msg.deleted) {
-    const text = createElement("div", { class: "msg-text" });
-    text.style.fontStyle = "italic";
-    text.style.color = "var(--text-muted)";
-    setText(text, "[message deleted]");
-    el.appendChild(text);
-  } else {
-    el.appendChild(renderMessageContent(msg.content));
-    if (msg.editedAt !== null) {
-      el.appendChild(createElement("span", { class: "msg-edited" }, "(edited)"));
-    }
-
-    // Attachments
-    for (const att of msg.attachments) {
-      el.appendChild(renderAttachment(att));
-    }
-
-    // Reactions
-    if (msg.reactions.length > 0) {
-      el.appendChild(renderReactions(msg, opts, signal));
-    }
-  }
-
-  // Hover actions bar (mockup: React, Reply, Edit, More)
-  if (!msg.deleted) {
-    const actionsBar = createElement("div", { class: "msg-actions-bar" });
-
-    const reactBtn = createElement("button", { "data-testid": `msg-react-${msg.id}` }, "\uD83D\uDE04");
-    reactBtn.title = "React";
-    reactBtn.addEventListener("click", () => opts.onReactionClick(msg.id, ""), { signal });
-    actionsBar.appendChild(reactBtn);
-
-    const replyBtn = createElement("button", { "data-testid": `msg-reply-${msg.id}` }, "\u21A9");
-    replyBtn.title = "Reply";
-    replyBtn.addEventListener("click", () => opts.onReplyClick(msg.id), { signal });
-    actionsBar.appendChild(replyBtn);
-
-    if (msg.user.id === opts.currentUserId) {
-      const editBtn = createElement("button", { "data-testid": `msg-edit-${msg.id}` }, "\u270E");
-      editBtn.title = "Edit";
-      editBtn.addEventListener("click", () => opts.onEditClick(msg.id), { signal });
-      actionsBar.appendChild(editBtn);
-    }
-
-    if (msg.user.id === opts.currentUserId) {
-      const deleteBtn = createElement("button", { "data-testid": `msg-delete-${msg.id}` }, "\uD83D\uDDD1");
-      deleteBtn.title = "Delete";
-      deleteBtn.addEventListener("click", () => opts.onDeleteClick(msg.id), { signal });
-      actionsBar.appendChild(deleteBtn);
-    }
-
-    el.appendChild(actionsBar);
-  }
-
-  return el;
+  return items;
 }
 
 // -- Factory ------------------------------------------------------------------
@@ -373,51 +78,183 @@ export function createMessageList(options: MessageListOptions): MountableCompone
   const ac = new AbortController();
   const unsubscribers: Array<() => void> = [];
   let root: HTMLDivElement | null = null;
-  let messagesContainer: HTMLDivElement | null = null;
   let wasAtBottom = true;
 
+  // Virtual scroll state
+  let virtualItems: readonly VirtualItem[] = [];
+  let allMessages: readonly Message[] = [];
+  const heightCache = new Map<string, number>(); // itemKey → measured px
+  let topSpacer: HTMLDivElement | null = null;
+  let bottomSpacer: HTMLDivElement | null = null;
+  let contentContainer: HTMLDivElement | null = null;
+  let renderedStart = 0;
+  let renderedEnd = 0;
+
+  // ---------------------------------------------------------------------------
+  // Height estimation
+  // ---------------------------------------------------------------------------
+
+  function itemKey(index: number): string {
+    const item = virtualItems[index];
+    if (item === undefined) return `idx-${index}`;
+    if (item.kind === "divider") return `div-${item.timestamp}`;
+    return `msg-${item.message.id}`;
+  }
+
+  function getItemHeight(index: number): number {
+    return heightCache.get(itemKey(index)) ?? ESTIMATED_ROW_HEIGHT;
+  }
+
+  function totalHeight(): number {
+    let h = 0;
+    for (let i = 0; i < virtualItems.length; i++) {
+      h += getItemHeight(i);
+    }
+    return h;
+  }
+
+  function offsetToIndex(scrollTop: number): number {
+    let offset = 0;
+    for (let i = 0; i < virtualItems.length; i++) {
+      const h = getItemHeight(i);
+      if (offset + h > scrollTop) return i;
+      offset += h;
+    }
+    return virtualItems.length - 1;
+  }
+
+  function offsetBefore(index: number): number {
+    let offset = 0;
+    for (let i = 0; i < index && i < virtualItems.length; i++) {
+      offset += getItemHeight(i);
+    }
+    return offset;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Scroll helpers
+  // ---------------------------------------------------------------------------
+
   function isNearBottom(): boolean {
-    if (messagesContainer === null) return true;
-    const { scrollTop, scrollHeight, clientHeight } = messagesContainer;
+    if (root === null) return true;
+    const { scrollTop, scrollHeight, clientHeight } = root;
     return scrollHeight - scrollTop - clientHeight < SCROLL_BOTTOM_THRESHOLD;
   }
 
   function scrollToBottom(): void {
-    if (messagesContainer === null) return;
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    if (root === null) return;
+    root.scrollTop = root.scrollHeight;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Render visible window
+  // ---------------------------------------------------------------------------
+
+  function measureRendered(): void {
+    if (contentContainer === null) return;
+    const children = contentContainer.children;
+    for (let i = 0; i < children.length; i++) {
+      const globalIdx = renderedStart + i;
+      const el = children[i] as HTMLElement;
+      const h = el.offsetHeight;
+      if (h > 0) {
+        heightCache.set(itemKey(globalIdx), h);
+      }
+    }
+  }
+
+  function renderWindow(): void {
+    if (root === null || contentContainer === null || topSpacer === null || bottomSpacer === null) return;
+
+    const scrollTop = root.scrollTop;
+    const clientHeight = root.clientHeight;
+
+    if (virtualItems.length === 0) {
+      clearChildren(contentContainer);
+      topSpacer.style.height = "0px";
+      bottomSpacer.style.height = "0px";
+      renderedStart = 0;
+      renderedEnd = 0;
+      return;
+    }
+
+    // Determine visible range
+    const firstVisible = offsetToIndex(scrollTop);
+    const lastVisible = offsetToIndex(scrollTop + clientHeight);
+
+    const start = Math.max(0, firstVisible - OVERSCAN);
+    const end = Math.min(virtualItems.length, lastVisible + OVERSCAN + 1);
+
+    // Skip re-render if the range hasn't changed
+    if (start === renderedStart && end === renderedEnd) return;
+
+    // Measure current elements before replacing
+    measureRendered();
+
+    renderedStart = start;
+    renderedEnd = end;
+
+    // Rebuild content
+    clearChildren(contentContainer);
+    const fragment = document.createDocumentFragment();
+    for (let i = start; i < end; i++) {
+      const item = virtualItems[i]!;
+      if (item.kind === "divider") {
+        fragment.appendChild(renderDayDivider(item.timestamp));
+      } else {
+        fragment.appendChild(
+          renderMessage(item.message, item.isGrouped, allMessages, options, ac.signal),
+        );
+      }
+    }
+    contentContainer.appendChild(fragment);
+
+    // Set spacer heights
+    topSpacer.style.height = `${offsetBefore(start)}px`;
+
+    let bottomHeight = 0;
+    for (let i = end; i < virtualItems.length; i++) {
+      bottomHeight += getItemHeight(i);
+    }
+    bottomSpacer.style.height = `${bottomHeight}px`;
+
+    // Measure newly rendered elements
+    measureRendered();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Full rebuild (on data change)
+  // ---------------------------------------------------------------------------
+
+  function rebuildItems(): void {
+    allMessages = getChannelMessages(options.channelId);
+    virtualItems = buildVirtualItems(allMessages);
   }
 
   function renderAll(): void {
-    if (messagesContainer === null) return;
+    if (root === null) return;
     wasAtBottom = isNearBottom();
-    clearChildren(messagesContainer);
-    const messages = getChannelMessages(options.channelId);
-    if (messages.length === 0) return;
 
-    let lastTimestamp: string | null = null;
-    let prevMsg: Message | null = null;
+    rebuildItems();
 
-    for (const msg of messages) {
-      // Day divider
-      if (lastTimestamp === null || !isSameDay(lastTimestamp, msg.timestamp)) {
-        messagesContainer.appendChild(renderDayDivider(msg.timestamp));
-      }
+    // Reset rendered range to force full re-render
+    renderedStart = -1;
+    renderedEnd = -1;
 
-      const isGrouped = prevMsg !== null && shouldGroup(prevMsg, msg);
-      messagesContainer.appendChild(
-        renderMessage(msg, isGrouped, messages, options, ac.signal),
-      );
+    renderWindow();
 
-      lastTimestamp = msg.timestamp;
-      prevMsg = msg;
+    if (wasAtBottom) {
+      scrollToBottom();
     }
-    if (wasAtBottom) { scrollToBottom(); }
   }
+
+  // ---------------------------------------------------------------------------
+  // Scroll / load-more handling
+  // ---------------------------------------------------------------------------
 
   let loadingOlder = false;
   let prevMessageCount = 0;
 
-  // Reset loadingOlder when the store updates with new messages (fetch completed)
   const unsubLoadingReset = messagesStore.subscribe(() => {
     const msgs = getChannelMessages(options.channelId);
     if (msgs.length !== prevMessageCount) {
@@ -426,27 +263,54 @@ export function createMessageList(options: MessageListOptions): MountableCompone
     }
   });
 
+  let scrollRafId = 0;
+
   function handleScroll(): void {
-    if (messagesContainer === null) return;
+    if (root === null) return;
+
+    // Load older messages when near top
     if (
-      messagesContainer.scrollTop < SCROLL_TOP_THRESHOLD
+      root.scrollTop < SCROLL_TOP_THRESHOLD
       && !loadingOlder
       && hasMoreMessages(options.channelId)
     ) {
       loadingOlder = true;
       options.onScrollTop();
     }
+
+    // Debounce virtual window updates to animation frames
+    if (scrollRafId === 0) {
+      scrollRafId = requestAnimationFrame(() => {
+        scrollRafId = 0;
+        renderWindow();
+      });
+    }
   }
+
+  // ---------------------------------------------------------------------------
+  // Mount / Destroy
+  // ---------------------------------------------------------------------------
 
   function mount(parentContainer: Element): void {
     root = createElement("div", { class: "messages-container" });
-    messagesContainer = root;
-    messagesContainer.addEventListener("scroll", handleScroll, {
+
+    topSpacer = createElement("div", { class: "virtual-spacer-top" });
+    contentContainer = createElement("div", { class: "virtual-content" });
+    bottomSpacer = createElement("div", { class: "virtual-spacer-bottom" });
+
+    root.appendChild(topSpacer);
+    root.appendChild(contentContainer);
+    root.appendChild(bottomSpacer);
+
+    root.addEventListener("scroll", handleScroll, {
       signal: ac.signal,
       passive: true,
     });
+
     parentContainer.appendChild(root);
+
     renderAll();
+
     unsubscribers.push(messagesStore.subscribe(() => { renderAll(); }));
 
     // Only re-render when member roles change, not on typing updates
@@ -461,11 +325,18 @@ export function createMessageList(options: MessageListOptions): MountableCompone
 
   function destroy(): void {
     ac.abort();
+    if (scrollRafId !== 0) {
+      cancelAnimationFrame(scrollRafId);
+      scrollRafId = 0;
+    }
     unsubLoadingReset();
     for (const unsub of unsubscribers) { unsub(); }
     unsubscribers.length = 0;
+    heightCache.clear();
     if (root !== null) { root.remove(); root = null; }
-    messagesContainer = null;
+    contentContainer = null;
+    topSpacer = null;
+    bottomSpacer = null;
   }
 
   return { mount, destroy };

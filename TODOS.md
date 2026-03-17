@@ -96,33 +96,24 @@ helper in `handlers.go`. Replaced 8 instances across
 
 ---
 
-### 11. Virtual scrolling for MessageList
+### ~~11. Virtual scrolling for MessageList~~ DONE
 
-**What:** Implement DOM windowing/recycling in
-`MessageList.ts` so only visible messages (plus buffer) are
-in the DOM.
-
-**Why:** Channels with 10K+ messages will cause initial
-render hang and high memory usage.
-
-**Context:** Phase 5 of MIGRATION-PLAN.md mentions this.
-Consider a lightweight virtual scroll library or custom
-implementation using IntersectionObserver.
-
-**Effort:** L
+Implemented DOM windowing in `MessageList.ts`. Only visible
+messages plus 10-item overscan buffer are in the DOM.
+Uses estimated heights (52px) with measured-height cache,
+top/bottom spacer elements, and `requestAnimationFrame`
+debounced scroll updates. Rendering helpers extracted to
+`components/message-list/renderers.ts`.
 
 ---
 
-### 12. WS message render batching
+### ~~12. WS message render batching~~ DONE
 
-**What:** Batch store subscription callbacks using
-`requestAnimationFrame` or `queueMicrotask` so 100 rapid
-WS messages don't trigger 100 full re-renders.
-
-**Why:** Burst activity (e.g., reconnect with backlog)
-causes jank from unbatched DOM updates.
-
-**Effort:** M
+Added `queueMicrotask`-based notification batching to
+`createStore` in `store.ts`. Multiple rapid `setState`
+calls now coalesce into a single subscriber notification
+with the final state. Added `flush()` method for
+synchronous test assertions.
 
 ---
 

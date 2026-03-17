@@ -92,7 +92,9 @@ describe("MessageList", () => {
     list.mount(container);
     const messagesContainer = container.querySelector(".messages-container");
     expect(messagesContainer).not.toBeNull();
-    expect(messagesContainer?.children.length).toBe(0);
+    const virtualContent = messagesContainer?.querySelector(".virtual-content");
+    expect(virtualContent).not.toBeNull();
+    expect(virtualContent?.children.length).toBe(0);
     list.destroy?.();
   });
 
