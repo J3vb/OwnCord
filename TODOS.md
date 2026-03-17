@@ -72,26 +72,19 @@ Added `slog.Error("ws handleChatSend GetAttachments", ...)` in
 
 ## P3 — Tech debt / polish
 
-### 9. Split oversized files
+### ~~9. Split oversized files~~ DONE
 
-**What:** Break these files into smaller modules:
+Split all three targets:
 
-- `Server/admin/api.go` (788 lines) into
+- `Server/admin/api.go` (788→281 lines) into
   `handlers_users.go`, `handlers_channels.go`,
-  `handlers_backup.go`
-- `Client/tauri-client/src/pages/MainPage.ts` (683 lines)
-  into extracted helpers
+  `handlers_settings.go`, `handlers_backup.go`
 - `Client/tauri-client/src/components/SettingsOverlay.ts`
-  (670 lines) into per-tab components
-
-**Why:** All exceed the 400-line target. Larger files are
-harder to navigate, review, and test. They will grow as
-features are added.
-
-**Context:** Pure refactor, no behavior change. Best done
-when no other PRs touch these files.
-
-**Effort:** M per file (3 files)
+  (~685→173 lines) into 7 per-tab modules under
+  `components/settings/`
+- `Client/tauri-client/src/pages/MainPage.ts` (703→508
+  lines) into `pages/main-page/ChatHeader.ts` and
+  `pages/main-page/OverlayManagers.ts`
 
 ---
 
