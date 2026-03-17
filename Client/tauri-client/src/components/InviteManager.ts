@@ -25,6 +25,7 @@ export interface InviteManagerOptions {
   onRevokeInvite(code: string): Promise<void>;
   onCopyLink(code: string): void;
   onClose(): void;
+  onError?(message: string): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +83,8 @@ export function createInviteManager(
         void options.onRevokeInvite(invite.code).then(() => {
           invites = invites.filter((i) => i.code !== invite.code);
           renderList();
+        }).catch(() => {
+          options.onError?.("Failed to revoke invite");
         });
       }, { signal: ac.signal });
 
@@ -91,9 +94,15 @@ export function createInviteManager(
   }
 
   function mount(container: Element): void {
-    root = createElement("div", { class: "invite-manager-overlay" });
+    root = createElement("div", {
+      class: "invite-manager-overlay",
+      style: "position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;justify-content:center;align-items:center;",
+    });
 
-    const modal = createElement("div", { class: "invite-manager" });
+    const modal = createElement("div", {
+      class: "invite-manager",
+      style: "background:var(--bg-secondary,#2f3136);border-radius:8px;padding:16px;min-width:400px;max-width:520px;",
+    });
 
     // Header
     const header = createElement("div", { class: "invite-manager__header" });
@@ -108,6 +117,8 @@ export function createInviteManager(
       void options.onCreateInvite().then((newInvite) => {
         invites = [...invites, newInvite];
         renderList();
+      }).catch(() => {
+        options.onError?.("Failed to create invite");
       });
     }, { signal: ac.signal });
 

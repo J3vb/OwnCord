@@ -124,7 +124,7 @@ func (u *Updater) CheckForUpdate(ctx context.Context) (UpdateInfo, error) {
 	if err != nil {
 		return UpdateInfo{}, fmt.Errorf("fetching latest release: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return UpdateInfo{}, fmt.Errorf("github API returned status %d", resp.StatusCode)
@@ -224,7 +224,7 @@ func (u *Updater) VerifyChecksum(filePath, expectedHash string) error {
 	if err != nil {
 		return fmt.Errorf("opening file for checksum: %w", err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
@@ -271,7 +271,7 @@ func (u *Updater) fetchBody(ctx context.Context, url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d fetching %s", resp.StatusCode, url)
@@ -294,7 +294,7 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error 
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d downloading %s", resp.StatusCode, url)
@@ -304,7 +304,7 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error 
 	if err != nil {
 		return fmt.Errorf("creating destination file: %w", err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	if _, err := io.Copy(f, resp.Body); err != nil {
 		return fmt.Errorf("writing downloaded file: %w", err)

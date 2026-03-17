@@ -70,7 +70,7 @@ func (d *DB) GetChannelVoiceStates(channelID int64) ([]VoiceState, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GetChannelVoiceStates: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var states []VoiceState
 	for rows.Next() {

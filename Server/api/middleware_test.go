@@ -21,7 +21,7 @@ func newAPITestDB(t *testing.T) *db.DB {
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	migrFS := fstest.MapFS{
 		"001_schema.sql": {Data: apiTestSchema},
@@ -51,7 +51,7 @@ func TestAuthMiddleware_ValidToken(t *testing.T) {
 	uid, _ := database.CreateUser("alice", "hash", 4)
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
-	database.CreateSession(uid, hash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(uid, hash, "test", "127.0.0.1")
 
 	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -102,7 +102,7 @@ func TestAuthMiddleware_ExpiredSession(t *testing.T) {
 
 	// Insert an already-expired session.
 	pastTime := time.Now().Add(-time.Hour).UTC().Format("2006-01-02 15:04:05")
-	database.Exec(
+	_, _ = database.Exec(
 		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at) VALUES (?, ?, ?, ?, ?)`,
 		uid, hash, "test", "127.0.0.1", pastTime,
 	)
@@ -147,7 +147,7 @@ func TestRequirePermission_Allowed(t *testing.T) {
 	uid, _ := database.CreateUser("carol", "hash", 4) // Member role = 0x663
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
-	database.CreateSession(uid, hash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(uid, hash, "test", "127.0.0.1")
 
 	// SEND_MESSAGES = 0x1 — Member role has this bit
 	h := api.AuthMiddleware(database)(
@@ -169,7 +169,7 @@ func TestRequirePermission_Forbidden(t *testing.T) {
 	uid, _ := database.CreateUser("dave", "hash", 4) // Member role = 0x663
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
-	database.CreateSession(uid, hash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(uid, hash, "test", "127.0.0.1")
 
 	// MANAGE_ROLES = 0x1000000 — Member does not have this
 	h := api.AuthMiddleware(database)(
@@ -192,7 +192,7 @@ func TestRequirePermission_Administrator_Bypass(t *testing.T) {
 	uid, _ := database.CreateUser("owner", "hash", 1)
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
-	database.CreateSession(uid, hash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(uid, hash, "test", "127.0.0.1")
 
 	// Any permission should pass for ADMINISTRATOR
 	h := api.AuthMiddleware(database)(
@@ -232,7 +232,7 @@ func TestRateLimitMiddleware_OverLimit(t *testing.T) {
 
 	h := api.RateLimitMiddleware(limiter, limit, time.Minute)(http.HandlerFunc(ok))
 
-	for i := 0; i < limit; i++ {
+	for range limit {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = "10.0.0.2:1234"
 		rr := httptest.NewRecorder()
@@ -256,7 +256,7 @@ func TestRateLimitMiddleware_RetryAfterHeader(t *testing.T) {
 	h := api.RateLimitMiddleware(limiter, 1, time.Minute)(http.HandlerFunc(ok))
 
 	// Exhaust limit.
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = "10.0.0.3:1234"
 		rr := httptest.NewRecorder()
@@ -283,7 +283,7 @@ func TestRateLimitMiddleware_XRealIPIgnoredWithoutTrustedProxy(t *testing.T) {
 	h := api.RateLimitMiddleware(limiter, limit, time.Minute)(http.HandlerFunc(ok))
 
 	// Two requests from RemoteAddr 10.0.0.99 with an attacker-supplied X-Real-IP.
-	for i := 0; i < limit; i++ {
+	for range limit {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("X-Real-IP", "192.168.1.1") // forged; must be ignored
 		req.RemoteAddr = "10.0.0.99:9999"
@@ -313,7 +313,7 @@ func TestRateLimitMiddleware_XRealIPHonouredFromTrustedProxy(t *testing.T) {
 	h := api.RateLimitMiddleware(limiter, limit, time.Minute, trustedCIDRs)(http.HandlerFunc(ok))
 
 	// Two requests coming through trusted proxy 10.0.0.1, client IP 203.0.113.5.
-	for i := 0; i < limit; i++ {
+	for range limit {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("X-Real-IP", "203.0.113.5")
 		req.RemoteAddr = "10.0.0.1:9999"
@@ -340,10 +340,10 @@ func TestRateLimitMiddleware_XRealIPHonouredFromTrustedProxy(t *testing.T) {
 func TestAuthMiddleware_BannedUserBlocked(t *testing.T) {
 	database := newAPITestDB(t)
 	uid, _ := database.CreateUser("banneduser", "hash", 4)
-	database.BanUser(uid, "rule violation", nil) // permanent ban
+	_ = database.BanUser(uid, "rule violation", nil) // permanent ban
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
-	database.CreateSession(uid, hash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(uid, hash, "test", "127.0.0.1")
 
 	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -365,11 +365,11 @@ func TestAuthMiddleware_ExpiredBanAllowed(t *testing.T) {
 
 	// Set ban with an expiry time in the past.
 	past := time.Now().UTC().Add(-time.Hour)
-	database.BanUser(uid, "temp ban", &past)
+	_ = database.BanUser(uid, "temp ban", &past)
 
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
-	database.CreateSession(uid, hash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(uid, hash, "test", "127.0.0.1")
 
 	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -391,11 +391,11 @@ func TestAuthMiddleware_ActiveTemporaryBanBlocked(t *testing.T) {
 
 	// Set ban with an expiry time in the future.
 	future := time.Now().UTC().Add(time.Hour)
-	database.BanUser(uid, "temp ban", &future)
+	_ = database.BanUser(uid, "temp ban", &future)
 
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
-	database.CreateSession(uid, hash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(uid, hash, "test", "127.0.0.1")
 
 	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

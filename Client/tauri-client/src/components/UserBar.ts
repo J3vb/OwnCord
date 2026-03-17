@@ -37,7 +37,7 @@ export function createUserBar(): MountableComponent {
   }
 
   function mount(container: Element): void {
-    root = createElement("div", { class: "user-bar" });
+    root = createElement("div", { class: "user-bar", "data-testid": "user-bar" });
 
     avatarEl = createElement(
       "div",
@@ -52,7 +52,7 @@ export function createUserBar(): MountableComponent {
     avatarEl.appendChild(statusDot);
 
     const info = createElement("div", { class: "ub-info" });
-    nameEl = createElement("span", { class: "ub-name" });
+    nameEl = createElement("span", { class: "ub-name", "data-testid": "user-bar-name" });
     statusEl = createElement("span", { class: "ub-status" });
     appendChildren(info, nameEl, statusEl);
 

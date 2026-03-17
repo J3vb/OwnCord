@@ -1,6 +1,7 @@
 package ws_test
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ func TestSpeakerDetector_UpdateLevel(t *testing.T) {
 	sd := ws.NewSpeakerDetector(3)
 
 	// Feed several level samples for a single user.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		sd.UpdateLevel(1, 30) // relatively loud
 	}
 
@@ -58,7 +59,7 @@ func TestSpeakerDetector_TopSpeakers_RankedByLoudest(t *testing.T) {
 		{50, 100},
 	}
 	for _, u := range users {
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			sd.UpdateLevel(u.id, u.level)
 		}
 	}
@@ -81,11 +82,11 @@ func TestSpeakerDetector_TopSpeakers_SilentExcluded(t *testing.T) {
 	sd := ws.NewSpeakerDetector(3)
 
 	// User 1: loud
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		sd.UpdateLevel(1, 20)
 	}
 	// User 2: completely silent (127 = digital silence in RFC 6464)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		sd.UpdateLevel(2, 127)
 	}
 
@@ -103,25 +104,18 @@ func TestSpeakerDetector_TopSpeakers_HoldoffKeepsSpeaker(t *testing.T) {
 	sd := ws.NewSpeakerDetectorWithHoldoff(3, 50*time.Millisecond)
 
 	// User 1 speaks loudly.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		sd.UpdateLevel(1, 20)
 	}
 
 	// User 1 goes silent.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		sd.UpdateLevel(1, 127)
 	}
 
 	// Immediately check — holdoff should keep user 1 in top speakers.
 	top := sd.TopSpeakers()
-	found := false
-	for _, id := range top {
-		if id == int64(1) {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !slices.Contains(top, int64(1)) {
 		t.Fatalf("expected user 1 to remain in top speakers during holdoff, got %v", top)
 	}
 }
@@ -131,12 +125,12 @@ func TestSpeakerDetector_TopSpeakers_HoldoffExpires(t *testing.T) {
 	sd := ws.NewSpeakerDetectorWithHoldoff(3, 50*time.Millisecond)
 
 	// User 1 speaks loudly.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		sd.UpdateLevel(1, 20)
 	}
 
 	// User 1 goes silent — fill ring buffer with silence.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		sd.UpdateLevel(1, 127)
 	}
 
@@ -155,7 +149,7 @@ func TestSpeakerDetector_RemoveSpeaker(t *testing.T) {
 	t.Parallel()
 	sd := ws.NewSpeakerDetector(3)
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		sd.UpdateLevel(1, 20)
 		sd.UpdateLevel(2, 30)
 	}
@@ -182,7 +176,7 @@ func TestParseAudioLevel_Valid(t *testing.T) {
 	// RFC 5285 one-byte header format: 4-bit ID | 4-bit length-1
 	// For extensionID=1, length=1 byte: header = 0x10
 	extensionID := uint8(1)
-	buf := []byte{(extensionID << 4) | 0x00, extByte} // ID=1, L=0 (meaning 1 byte), then the data byte
+	buf := []byte{extensionID << 4, extByte} // ID=1, L=0 (meaning 1 byte), then the data byte
 
 	level, voice, ok := ws.ParseAudioLevel(buf, extensionID)
 	if !ok {
@@ -197,7 +191,7 @@ func TestParseAudioLevel_Valid(t *testing.T) {
 
 	// Test with voice=false, level=10 → binary: 0_0001010 → 0x0A
 	extByte2 := byte(10) // voice=0, level=10
-	buf2 := []byte{(extensionID << 4) | 0x00, extByte2}
+	buf2 := []byte{extensionID << 4, extByte2}
 
 	level2, voice2, ok2 := ws.ParseAudioLevel(buf2, extensionID)
 	if !ok2 {
@@ -226,7 +220,7 @@ func TestParseAudioLevel_NotFound(t *testing.T) {
 	}
 
 	// Wrong extension ID — buffer has ID=2 but we ask for ID=1.
-	buf := []byte{(2 << 4) | 0x00, 0x80}
+	buf := []byte{2 << 4, 0x80}
 	_, _, ok = ws.ParseAudioLevel(buf, 1)
 	if ok {
 		t.Error("expected ok=false for wrong extension ID")

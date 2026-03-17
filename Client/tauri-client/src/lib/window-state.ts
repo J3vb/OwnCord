@@ -18,22 +18,17 @@ export interface WindowState {
 const STORAGE_KEY = "windowState";
 const SAVE_DEBOUNCE_MS = 500;
 
-async function getInvoke(): Promise<
+const invokePromise: Promise<
   ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null
-> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke;
-  } catch {
-    return null;
-  }
-}
+> = import("@tauri-apps/api/core")
+  .then((m) => m.invoke)
+  .catch(() => null);
 
 /**
  * Save the current window state to the Tauri settings store.
  */
 async function saveState(state: WindowState): Promise<void> {
-  const invoke = await getInvoke();
+  const invoke = await invokePromise;
   if (!invoke) return;
   try {
     await invoke("save_settings", { key: STORAGE_KEY, value: state });
@@ -46,7 +41,7 @@ async function saveState(state: WindowState): Promise<void> {
  * Load the previously saved window state.
  */
 async function loadState(): Promise<WindowState | null> {
-  const invoke = await getInvoke();
+  const invoke = await invokePromise;
   if (!invoke) return null;
   try {
     const all = (await invoke("get_settings")) as Record<string, unknown>;
@@ -82,8 +77,7 @@ async function loadState(): Promise<WindowState | null> {
  * Returns a cleanup function.
  */
 export async function initWindowState(): Promise<() => void> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let tauriWindow: any;
+  let tauriWindow: typeof import("@tauri-apps/api/window") | undefined;
   try {
     tauriWindow = await import("@tauri-apps/api/window");
   } catch {

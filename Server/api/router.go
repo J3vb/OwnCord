@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -65,6 +66,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string) http.Handler {
 		hub.SetSFU(sfu)
 	}
 
+	ws.InitSettingsCache(database)
 	go hub.Run()
 	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins))
 
@@ -75,10 +77,14 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string) http.Handler {
 	return r
 }
 
+// serverStartTime records when the process started; used for uptime in /health.
+var serverStartTime = time.Now()
+
 // healthResponse is the JSON shape returned by GET /health.
 type healthResponse struct {
 	Status  string `json:"status"`
 	Version string `json:"version"`
+	Uptime  int64  `json:"uptime"`
 }
 
 // infoResponse is the JSON shape returned by GET /api/v1/info.
@@ -92,6 +98,7 @@ func handleHealth(ver string) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, healthResponse{
 			Status:  "ok",
 			Version: ver,
+			Uptime:  int64(time.Since(serverStartTime).Seconds()),
 		})
 	}
 }

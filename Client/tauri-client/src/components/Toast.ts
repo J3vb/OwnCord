@@ -69,6 +69,7 @@ export function createToastContainer(): ToastContainer {
 
     const el = createElement("div", {
       class: `toast toast-${type}`,
+      "data-testid": "toast",
     });
     setText(el, message);
 
@@ -98,7 +99,7 @@ export function createToastContainer(): ToastContainer {
   }
 
   function mount(container: Element): void {
-    root = createElement("div", { class: "toast-container" });
+    root = createElement("div", { class: "toast-container", "data-testid": "toast-container" });
     container.appendChild(root);
   }
 

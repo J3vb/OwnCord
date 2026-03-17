@@ -21,7 +21,7 @@ func openTestDB(t *testing.T) *db.DB {
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	migrFS := fstest.MapFS{
 		"001_schema.sql": {Data: hubTestSchema},
@@ -283,7 +283,7 @@ func TestHub_HandleMessage_UnknownType_SendsError(t *testing.T) {
 
 	select {
 	case got := <-send:
-		var resp map[string]interface{}
+		var resp map[string]any
 		if err := json.Unmarshal(got, &resp); err != nil {
 			t.Fatalf("unmarshal response: %v", err)
 		}
@@ -311,7 +311,7 @@ func TestHub_HandleMessage_InvalidJSON(t *testing.T) {
 
 	select {
 	case got := <-send:
-		var resp map[string]interface{}
+		var resp map[string]any
 		if err := json.Unmarshal(got, &resp); err != nil {
 			t.Fatalf("unmarshal: %v", err)
 		}
@@ -337,17 +337,17 @@ func TestHub_ChatSend_RateLimit(t *testing.T) {
 	hub.Register(c)
 	time.Sleep(20 * time.Millisecond)
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"channel_id": chID,
 		"content":    "hi",
 	}
-	raw, _ := json.Marshal(map[string]interface{}{
+	raw, _ := json.Marshal(map[string]any{
 		"type":    "chat_send",
 		"payload": payload,
 	})
 
 	// Send 12 messages rapidly — 11th and beyond should be rate-limited.
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		hub.HandleMessageForTest(c, raw)
 	}
 	time.Sleep(100 * time.Millisecond)
@@ -358,7 +358,7 @@ func TestHub_ChatSend_RateLimit(t *testing.T) {
 	for {
 		select {
 		case got := <-send:
-			var resp map[string]interface{}
+			var resp map[string]any
 			if err := json.Unmarshal(got, &resp); err == nil {
 				if resp["type"] == "error" {
 					errCount++
@@ -381,7 +381,7 @@ func TestHub_ConcurrentRegisterUnregister(t *testing.T) {
 	defer hub.Stop()
 
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -528,7 +528,7 @@ func TestHub_VoiceRooms_ConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Concurrent creates and reads must not race.
-	for i := int64(0); i < 20; i++ {
+	for i := range int64(20) {
 		wg.Add(1)
 		go func(id int64) {
 			defer wg.Done()
@@ -638,7 +638,7 @@ func TestHub_CleanupVoiceForChannel_BroadcastsVoiceLeave(t *testing.T) {
 	allMsgs := append(drainChan(send1), drainChan(send2)...)
 	found := false
 	for _, msg := range allMsgs {
-		var env map[string]interface{}
+		var env map[string]any
 		if err := json.Unmarshal(msg, &env); err == nil {
 			if env["type"] == "voice_leave" {
 				found = true

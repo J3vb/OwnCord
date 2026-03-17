@@ -33,7 +33,7 @@ func main() {
 	}))
 
 	if err := run(log); err != nil {
-		fmt.Fprintf(os.Stderr, "\n  [ERROR] %v\n\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "\n  [ERROR] %v\n\n", err)
 		log.Error("server exited with error", "error", err)
 		os.Exit(1)
 	}
@@ -69,7 +69,7 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("opening database: %w", err)
 	}
-	defer database.Close()
+	defer database.Close() //nolint:errcheck
 
 	if err := db.Migrate(database); err != nil {
 		return fmt.Errorf("running migrations: %w", err)
@@ -258,7 +258,7 @@ func printBanner(cfg *config.Config, ver string, tls bool) {
 `, cfg.Server.Name, ver, tlsStatus, runtime.GOOS, runtime.GOARCH,
 		baseURL, wsURL(scheme, localIP, port), adminURL, baseURL)
 
-	fmt.Fprint(os.Stderr, banner)
+	_, _ = fmt.Fprint(os.Stderr, banner)
 }
 
 // wsURL builds the WebSocket URL with the correct scheme.
@@ -277,7 +277,7 @@ func getOutboundIP() string {
 	if err != nil {
 		return "localhost"
 	}
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 	addr := conn.LocalAddr().(*net.UDPAddr)
 	return addr.IP.String()
 }

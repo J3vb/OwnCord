@@ -55,7 +55,7 @@ func openHandlerDB(t *testing.T) *db.DB {
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 	migrFS := fstest.MapFS{
 		"001_schema.sql": {Data: handlerTestSchema},
 	}
@@ -123,9 +123,9 @@ func seedChannelWithSlowMode(t *testing.T, database *db.DB, name string, slowMod
 
 // chatSendMsg constructs a raw chat_send WebSocket envelope.
 func chatSendMsg(channelID int64, content string) []byte {
-	raw, _ := json.Marshal(map[string]interface{}{
+	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_send",
-		"payload": map[string]interface{}{
+		"payload": map[string]any{
 			"channel_id": channelID,
 			"content":    content,
 		},
@@ -141,12 +141,12 @@ func receiveErrorCode(ch <-chan []byte, deadline time.Duration) string {
 	for {
 		select {
 		case msg := <-ch:
-			var env map[string]interface{}
+			var env map[string]any
 			if err := json.Unmarshal(msg, &env); err != nil {
 				continue
 			}
 			if env["type"] == "error" {
-				if payload, ok := env["payload"].(map[string]interface{}); ok {
+				if payload, ok := env["payload"].(map[string]any); ok {
 					code, _ := payload["code"].(string)
 					return code
 				}
@@ -198,7 +198,7 @@ func TestSessionExpiry_ValidSessionAllowsMessages(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// Trigger the expiry check by sending enough messages to cross the check threshold.
-	for i := 0; i < ws.SessionCheckInterval+1; i++ {
+	for i := range ws.SessionCheckInterval + 1 {
 		hub.HandleMessageForTest(c, chatSendMsg(chID, fmt.Sprintf("msg %d", i)))
 	}
 	time.Sleep(100 * time.Millisecond)
@@ -236,7 +236,7 @@ func TestSessionExpiry_ExpiredSessionClosesConnection(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// Trigger the expiry check.
-	for i := 0; i < ws.SessionCheckInterval+1; i++ {
+	for range ws.SessionCheckInterval + 1 {
 		// Use a harmless but parseable message to accumulate message count.
 		hub.HandleMessageForTest(c, []byte(`{"type":"presence_update","payload":{"status":"online"}}`))
 	}
@@ -247,9 +247,7 @@ func TestSessionExpiry_ExpiredSessionClosesConnection(t *testing.T) {
 	// which manifests as a zero-value receive without blocking.
 	select {
 	case _, open := <-send:
-		if open {
-			// A message was delivered instead; drain and check again.
-		}
+		_ = open
 		// closed channel or a message — either way connection was acted on.
 	default:
 		// Send channel still open and empty — check hub registration instead.
@@ -277,7 +275,7 @@ func TestSessionExpiry_MissingTokenHashSkipsCheck(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// Send past the threshold; should not panic or remove the client.
-	for i := 0; i < ws.SessionCheckInterval+1; i++ {
+	for i := range ws.SessionCheckInterval + 1 {
 		hub.HandleMessageForTest(c, chatSendMsg(chID, fmt.Sprintf("msg %d", i)))
 	}
 	time.Sleep(100 * time.Millisecond)
@@ -302,7 +300,7 @@ func TestSlowMode_ZeroSlowMode_AllowsRapidMessages(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// Send 3 messages in quick succession.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		hub.HandleMessageForTest(c, chatSendMsg(chID, fmt.Sprintf("rapid %d", i)))
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -310,12 +308,12 @@ func TestSlowMode_ZeroSlowMode_AllowsRapidMessages(t *testing.T) {
 	// Drain all messages.
 	msgs := drainChan(send)
 	for _, m := range msgs {
-		var env map[string]interface{}
+		var env map[string]any
 		if err := json.Unmarshal(m, &env); err != nil {
 			continue
 		}
 		if env["type"] == "error" {
-			if payload, ok := env["payload"].(map[string]interface{}); ok {
+			if payload, ok := env["payload"].(map[string]any); ok {
 				if payload["code"] == "SLOW_MODE" {
 					t.Error("got unexpected SLOW_MODE error when slow_mode=0")
 				}
@@ -378,12 +376,12 @@ func TestSlowMode_DifferentUsersNotBlocked(t *testing.T) {
 	// B should NOT receive a SLOW_MODE error.
 	msgs := drainChan(sendB)
 	for _, m := range msgs {
-		var env map[string]interface{}
+		var env map[string]any
 		if err := json.Unmarshal(m, &env); err != nil {
 			continue
 		}
 		if env["type"] == "error" {
-			if payload, ok := env["payload"].(map[string]interface{}); ok {
+			if payload, ok := env["payload"].(map[string]any); ok {
 				if payload["code"] == "SLOW_MODE" {
 					t.Error("user B was incorrectly slow-mode throttled by user A's window")
 				}
@@ -414,12 +412,12 @@ func TestSlowMode_ModeratorBypassesSlowMode(t *testing.T) {
 
 	msgs := drainChan(send)
 	for _, m := range msgs {
-		var env map[string]interface{}
+		var env map[string]any
 		if err := json.Unmarshal(m, &env); err != nil {
 			continue
 		}
 		if env["type"] == "error" {
-			if payload, ok := env["payload"].(map[string]interface{}); ok {
+			if payload, ok := env["payload"].(map[string]any); ok {
 				if payload["code"] == "SLOW_MODE" {
 					t.Error("moderator was incorrectly blocked by slow mode")
 				}
@@ -465,12 +463,12 @@ func TestSlowMode_DifferentChannels_IndependentWindows(t *testing.T) {
 
 	msgs := drainChan(sendB)
 	for _, m := range msgs {
-		var env map[string]interface{}
+		var env map[string]any
 		if err := json.Unmarshal(m, &env); err != nil {
 			continue
 		}
 		if env["type"] == "error" {
-			if payload, ok := env["payload"].(map[string]interface{}); ok {
+			if payload, ok := env["payload"].(map[string]any); ok {
 				if payload["code"] == "SLOW_MODE" {
 					t.Error("slow mode in channel A incorrectly blocked channel B")
 				}
@@ -568,14 +566,14 @@ func TestSlowMode_ErrorMessageContainsSlowModeDuration(t *testing.T) {
 	for {
 		select {
 		case msg := <-send:
-			var env map[string]interface{}
+			var env map[string]any
 			if err := json.Unmarshal(msg, &env); err != nil {
 				continue
 			}
 			if env["type"] != "error" {
 				continue
 			}
-			payload, ok := env["payload"].(map[string]interface{})
+			payload, ok := env["payload"].(map[string]any)
 			if !ok {
 				continue
 			}

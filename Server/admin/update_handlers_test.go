@@ -14,11 +14,11 @@ import (
 func TestAdminAPI_CheckUpdate_OK(t *testing.T) {
 	// Mock GitHub API
 	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"tag_name": "v2.0.0",
 			"body":     "New release",
 			"html_url": "https://github.com/J3vb/OwnCord/releases/tag/v2.0.0",
-			"assets": []map[string]interface{}{
+			"assets": []map[string]any{
 				{"name": "chatserver.exe", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver.exe"},
 				{"name": "checksums.sha256", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/checksums.sha256"},
 			},
@@ -39,7 +39,7 @@ func TestAdminAPI_CheckUpdate_OK(t *testing.T) {
 	}
 
 	var info updater.UpdateInfo
-	json.Unmarshal(w.Body.Bytes(), &info)
+	_ = json.Unmarshal(w.Body.Bytes(), &info)
 	if !info.UpdateAvailable {
 		t.Error("expected update_available = true")
 	}
@@ -50,11 +50,11 @@ func TestAdminAPI_CheckUpdate_OK(t *testing.T) {
 
 func TestAdminAPI_CheckUpdate_UpToDate(t *testing.T) {
 	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"tag_name": "v1.0.0",
 			"body":     "",
 			"html_url": "https://github.com/J3vb/OwnCord/releases/tag/v1.0.0",
-			"assets":   []map[string]interface{}{},
+			"assets":   []map[string]any{},
 		})
 	}))
 	defer mockGH.Close()
@@ -72,7 +72,7 @@ func TestAdminAPI_CheckUpdate_UpToDate(t *testing.T) {
 	}
 
 	var info updater.UpdateInfo
-	json.Unmarshal(w.Body.Bytes(), &info)
+	_ = json.Unmarshal(w.Body.Bytes(), &info)
 	if info.UpdateAvailable {
 		t.Error("expected update_available = false")
 	}
@@ -95,7 +95,7 @@ func TestAdminAPI_ApplyUpdate_RequiresOwner(t *testing.T) {
 	// Create admin user (not owner - role 2)
 	adminUID, _ := database.CreateUser("adminonly2", "hash", 2)
 	token := "admin-role-token"
-	database.CreateSession(adminUID, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(adminUID, auth.HashToken(token), "test", "127.0.0.1")
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
 	if w.Code != http.StatusForbidden {

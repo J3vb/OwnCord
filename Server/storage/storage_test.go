@@ -171,7 +171,7 @@ func TestOpen_ValidUUID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	got, err := io.ReadAll(f)
 	if err != nil {
@@ -235,7 +235,7 @@ func TestSave_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	got, _ := io.ReadAll(f)
 	if !bytes.Equal(got, payload) {

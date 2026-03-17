@@ -28,7 +28,7 @@ func newVoiceAPITestDB(t *testing.T) *db.DB {
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	migrFS := fstest.MapFS{
 		"001_schema.sql": {Data: apiTestSchema},
@@ -132,7 +132,7 @@ func TestVoiceCredentials_ResponseContainsIceServers(t *testing.T) {
 	router := buildVoiceRouter(database, cfg)
 	rr := voiceGetWithToken(t, router, "/api/v1/voice/credentials", token)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestVoiceCredentials_ResponseContainsIceServers(t *testing.T) {
 	if !ok {
 		t.Fatal("response missing ice_servers field")
 	}
-	servers, ok := iceServers.([]interface{})
+	servers, ok := iceServers.([]any)
 	if !ok || len(servers) == 0 {
 		t.Error("ice_servers is empty or wrong type")
 	}
@@ -155,13 +155,13 @@ func TestVoiceCredentials_ContainsSTUNEntry(t *testing.T) {
 	router := buildVoiceRouter(database, cfg)
 	rr := voiceGetWithToken(t, router, "/api/v1/voice/credentials", token)
 
-	var resp map[string]interface{}
-	json.NewDecoder(rr.Body).Decode(&resp)
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 
-	servers := resp["ice_servers"].([]interface{})
+	servers := resp["ice_servers"].([]any)
 	foundSTUN := false
 	for _, s := range servers {
-		entry := s.(map[string]interface{})
+		entry := s.(map[string]any)
 		if urls, ok := entry["urls"].(string); ok {
 			if len(urls) > 5 && urls[:5] == "stun:" {
 				foundSTUN = true
@@ -182,13 +182,13 @@ func TestVoiceCredentials_ContainsTURNEntry(t *testing.T) {
 	router := buildVoiceRouter(database, cfg)
 	rr := voiceGetWithToken(t, router, "/api/v1/voice/credentials", token)
 
-	var resp map[string]interface{}
-	json.NewDecoder(rr.Body).Decode(&resp)
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 
-	servers := resp["ice_servers"].([]interface{})
+	servers := resp["ice_servers"].([]any)
 	foundTURN := false
 	for _, s := range servers {
-		entry := s.(map[string]interface{})
+		entry := s.(map[string]any)
 		if urls, ok := entry["urls"].(string); ok {
 			if len(urls) > 5 && urls[:5] == "turn:" {
 				foundTURN = true
@@ -224,12 +224,12 @@ func TestVoiceCredentials_TURNCredentialIsValidHMAC(t *testing.T) {
 	router := buildVoiceRouter(database, cfg)
 	rr := voiceGetWithToken(t, router, "/api/v1/voice/credentials", token)
 
-	var resp map[string]interface{}
-	json.NewDecoder(rr.Body).Decode(&resp)
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 
-	servers := resp["ice_servers"].([]interface{})
+	servers := resp["ice_servers"].([]any)
 	for _, s := range servers {
-		entry := s.(map[string]interface{})
+		entry := s.(map[string]any)
 		urls, _ := entry["urls"].(string)
 		if len(urls) < 5 || urls[:5] != "turn:" {
 			continue
@@ -262,12 +262,12 @@ func TestVoiceCredentials_UsernameContainsTimestampAndUserID(t *testing.T) {
 	router := buildVoiceRouter(database, cfg)
 	rr := voiceGetWithToken(t, router, "/api/v1/voice/credentials", token)
 
-	var resp map[string]interface{}
-	json.NewDecoder(rr.Body).Decode(&resp)
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 
-	servers := resp["ice_servers"].([]interface{})
+	servers := resp["ice_servers"].([]any)
 	for _, s := range servers {
-		entry := s.(map[string]interface{})
+		entry := s.(map[string]any)
 		urls, _ := entry["urls"].(string)
 		if len(urls) < 5 || urls[:5] != "turn:" {
 			continue
@@ -298,8 +298,8 @@ func TestVoiceCredentials_ResponseContainsExpiresIn(t *testing.T) {
 	router := buildVoiceRouter(database, cfg)
 	rr := voiceGetWithToken(t, router, "/api/v1/voice/credentials", token)
 
-	var resp map[string]interface{}
-	json.NewDecoder(rr.Body).Decode(&resp)
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 
 	expiresIn, ok := resp["expires_in"]
 	if !ok {
@@ -331,12 +331,12 @@ func TestVoiceCredentials_TURNDisabled_NoTURNEntry(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
 
-	var resp map[string]interface{}
-	json.NewDecoder(rr.Body).Decode(&resp)
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 
-	servers := resp["ice_servers"].([]interface{})
+	servers := resp["ice_servers"].([]any)
 	for _, s := range servers {
-		entry := s.(map[string]interface{})
+		entry := s.(map[string]any)
 		if urls, _ := entry["urls"].(string); len(urls) >= 5 && urls[:5] == "turn:" {
 			t.Error("TURN entry present when TURNEnabled=false")
 		}

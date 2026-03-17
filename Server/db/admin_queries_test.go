@@ -70,7 +70,7 @@ func newAdminTestDB(t *testing.T) *db.DB {
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	migrFS := fstest.MapFS{
 		"001_schema.sql": {Data: adminTestSchema},
@@ -176,7 +176,7 @@ func TestListAllUsers_WithRoleName(t *testing.T) {
 func TestListAllUsers_Pagination(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		_, err := database.CreateUser(
 			strings.Repeat("u", i+1),
 			"hash",
@@ -206,7 +206,7 @@ func TestListAllUsers_Pagination(t *testing.T) {
 
 func TestListAllUsers_ZeroLimit(t *testing.T) {
 	database := newAdminTestDB(t)
-	database.CreateUser("zerotest", "hash", 4)
+	_, _ = database.CreateUser("zerotest", "hash", 4)
 
 	users, err := database.ListAllUsers(0, 0)
 	if err != nil {
@@ -261,8 +261,8 @@ func TestForceLogoutUser_DeletesSessions(t *testing.T) {
 		t.Fatalf("CreateUser error: %v", err)
 	}
 
-	database.CreateSession(uid, "token1hash", "device1", "127.0.0.1")
-	database.CreateSession(uid, "token2hash", "device2", "127.0.0.1")
+	_, _ = database.CreateSession(uid, "token1hash", "device1", "127.0.0.1")
+	_, _ = database.CreateSession(uid, "token2hash", "device2", "127.0.0.1")
 
 	sessions, err := database.GetUserSessions(uid)
 	if err != nil {
@@ -323,9 +323,9 @@ func TestGetUserSessions_IsolatedByUser(t *testing.T) {
 	uid1, _ := database.CreateUser("user1sess", "hash", 4)
 	uid2, _ := database.CreateUser("user2sess", "hash", 4)
 
-	database.CreateSession(uid1, "u1t1", "web", "1.2.3.4")
-	database.CreateSession(uid1, "u1t2", "mobile", "1.2.3.5")
-	database.CreateSession(uid2, "u2t1", "web", "1.2.3.6")
+	_, _ = database.CreateSession(uid1, "u1t1", "web", "1.2.3.4")
+	_, _ = database.CreateSession(uid1, "u1t2", "mobile", "1.2.3.5")
+	_, _ = database.CreateSession(uid2, "u2t1", "web", "1.2.3.6")
 
 	sessions, err := database.GetUserSessions(uid1)
 	if err != nil {
@@ -437,7 +437,7 @@ func TestAdminUpdateChannel_Unarchive(t *testing.T) {
 	database := newAdminTestDB(t)
 
 	id, _ := database.AdminCreateChannel("arch-ch", "text", "", "", 0)
-	database.AdminUpdateChannel(id, "arch-ch", "", 0, 0, true)
+	_ = database.AdminUpdateChannel(id, "arch-ch", "", 0, 0, true)
 
 	ch, _ := database.GetChannel(id)
 	if !ch.Archived {
@@ -445,7 +445,7 @@ func TestAdminUpdateChannel_Unarchive(t *testing.T) {
 	}
 
 	// Unarchive
-	database.AdminUpdateChannel(id, "arch-ch", "", 0, 0, false)
+	_ = database.AdminUpdateChannel(id, "arch-ch", "", 0, 0, false)
 	ch, _ = database.GetChannel(id)
 	if ch.Archived {
 		t.Error("Archived = true after unarchiving, want false")
@@ -546,8 +546,8 @@ func TestGetAuditLog_Pagination(t *testing.T) {
 	database := newAdminTestDB(t)
 
 	uid, _ := database.CreateUser("auditpager", "hash", 1)
-	for i := 0; i < 5; i++ {
-		database.LogAudit(uid, "ACTION", "target", int64(i), "detail")
+	for i := range 5 {
+		_ = database.LogAudit(uid, "ACTION", "target", int64(i), "detail")
 	}
 
 	page1, err := database.GetAuditLog(3, 0)
@@ -571,8 +571,8 @@ func TestGetAuditLog_NewestFirst(t *testing.T) {
 	database := newAdminTestDB(t)
 
 	uid, _ := database.CreateUser("auditorder", "hash", 1)
-	database.LogAudit(uid, "FIRST", "", 0, "")
-	database.LogAudit(uid, "SECOND", "", 0, "")
+	_ = database.LogAudit(uid, "FIRST", "", 0, "")
+	_ = database.LogAudit(uid, "SECOND", "", 0, "")
 
 	entries, err := database.GetAuditLog(10, 0)
 	if err != nil {
@@ -659,7 +659,7 @@ func TestGetAllSettings_ReturnsMap(t *testing.T) {
 func TestGetAllSettings_AfterClearing(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	database.Exec("DELETE FROM settings")
+	_, _ = database.Exec("DELETE FROM settings")
 
 	settings, err := database.GetAllSettings()
 	if err != nil {
@@ -680,7 +680,7 @@ func TestBackupToSafe_AdminQueries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	migrFS := fstest.MapFS{
 		"001_schema.sql": {Data: adminTestSchema},
@@ -690,7 +690,7 @@ func TestBackupToSafe_AdminQueries(t *testing.T) {
 	}
 
 	backupDir := filepath.Join(tmpDir, "backups")
-	os.MkdirAll(backupDir, 0o755)
+	_ = os.MkdirAll(backupDir, 0o755)
 	backupPath := filepath.Join(backupDir, "backup.db")
 	if err := database.BackupToSafe(backupPath, backupDir); err != nil {
 		t.Fatalf("BackupToSafe() error: %v", err)
@@ -713,15 +713,15 @@ func TestBackupToSafe_CreatesDirectoryFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	migrFS := fstest.MapFS{
 		"001_schema.sql": {Data: adminTestSchema},
 	}
-	db.MigrateFS(database, migrFS)
+	_ = db.MigrateFS(database, migrFS)
 
 	backupDir := filepath.Join(tmpDir, "backups")
-	os.MkdirAll(backupDir, 0o755)
+	_ = os.MkdirAll(backupDir, 0o755)
 	backupPath := filepath.Join(backupDir, "chatserver_20260314_120000.db")
 
 	if err := database.BackupToSafe(backupPath, backupDir); err != nil {

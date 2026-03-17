@@ -159,6 +159,10 @@ export function createInviteManagerController(opts: {
           void navigator.clipboard.writeText(code);
         },
         onClose: close,
+        onError: (message: string) => {
+          log.error(message);
+          opts.getToast()?.show(message, "error");
+        },
       });
       if (root !== null) {
         instance.mount(root);

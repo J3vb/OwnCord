@@ -72,7 +72,7 @@ func (d *DB) ListAllUsers(limit, offset int) ([]UserWithRole, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ListAllUsers: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var result []UserWithRole
 	for rows.Next() {
@@ -130,7 +130,7 @@ func (d *DB) GetUserSessions(userID int64) ([]Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GetUserSessions: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var sessions []Session
 	for rows.Next() {
@@ -224,7 +224,7 @@ func (d *DB) GetAuditLog(limit, offset int) ([]AuditEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GetAuditLog: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var entries []AuditEntry
 	for rows.Next() {
@@ -281,7 +281,7 @@ func (d *DB) GetAllSettings() (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GetAllSettings: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	result := make(map[string]string)
 	for rows.Next() {

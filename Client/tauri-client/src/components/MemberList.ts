@@ -42,6 +42,7 @@ function statusColor(status: UserStatus): string {
 function createMemberItem(member: Member, colorVar: string): HTMLDivElement {
   const item = createElement("div", {
     class: member.status === "offline" ? "member-item offline" : "member-item",
+    "data-testid": `member-${member.id}`,
   });
 
   const initial = member.username.charAt(0).toUpperCase() || "?";
@@ -99,7 +100,7 @@ export function createMemberList(): MountableComponent {
   let unsubscribe: (() => void) | null = null;
 
   function mount(container: Element): void {
-    root = createElement("div", { class: "member-list" });
+    root = createElement("div", { class: "member-list", "data-testid": "member-list" });
     renderList(root);
 
     unsubscribe = membersStore.subscribe(() => {

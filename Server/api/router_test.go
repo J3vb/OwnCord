@@ -23,7 +23,7 @@ func setupRouter(t *testing.T) http.Handler {
 	if err := db.Migrate(database); err != nil {
 		t.Fatalf("db.Migrate error: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	cfg := &config.Config{
 		Server: config.ServerConfig{
@@ -61,7 +61,7 @@ func TestHealthEndpointReturnsJSON(t *testing.T) {
 		t.Errorf("Content-Type = %q, want application/json", contentType)
 	}
 
-	var body map[string]interface{}
+	var body map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("response body is not valid JSON: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestHealthEndpointStatusOK(t *testing.T) {
 
 	router.ServeHTTP(rec, req)
 
-	var body map[string]interface{}
+	var body map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("JSON decode error: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestHealthEndpointHasVersion(t *testing.T) {
 
 	router.ServeHTTP(rec, req)
 
-	var body map[string]interface{}
+	var body map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("JSON decode error: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestAPIV1InfoReturnsServerName(t *testing.T) {
 
 	router.ServeHTTP(rec, req)
 
-	var body map[string]interface{}
+	var body map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("JSON decode error: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestAPIV1InfoReturnsVersion(t *testing.T) {
 
 	router.ServeHTTP(rec, req)
 
-	var body map[string]interface{}
+	var body map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("JSON decode error: %v", err)
 	}

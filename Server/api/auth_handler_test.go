@@ -22,7 +22,7 @@ func newAuthTestDB(t *testing.T) *db.DB {
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	migrFS := fstest.MapFS{
 		"001_schema.sql": {Data: apiTestSchema},
@@ -41,7 +41,7 @@ func buildAuthRouter(database *db.DB, limiter *auth.RateLimiter) http.Handler {
 }
 
 // postJSON is a test helper that POSTs JSON to the given router.
-func postJSON(t *testing.T, router http.Handler, path string, body interface{}) *httptest.ResponseRecorder {
+func postJSON(t *testing.T, router http.Handler, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	raw, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
@@ -53,7 +53,7 @@ func postJSON(t *testing.T, router http.Handler, path string, body interface{}) 
 }
 
 // postJSONWithToken posts with an Authorization header.
-func postJSONWithToken(t *testing.T, router http.Handler, path, token string, body interface{}) *httptest.ResponseRecorder {
+func postJSONWithToken(t *testing.T, router http.Handler, path, token string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	raw, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
@@ -97,8 +97,8 @@ func TestRegister_Success(t *testing.T) {
 		t.Errorf("Register status = %d, want 201; body = %s", rr.Code, rr.Body.String())
 	}
 
-	var resp map[string]interface{}
-	json.NewDecoder(rr.Body).Decode(&resp)
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 	if resp["token"] == nil {
 		t.Error("Register response missing token")
 	}
@@ -206,7 +206,7 @@ func TestLogin_Success(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	database.CreateUser("loginuser", hash, 4)
+	_, _ = database.CreateUser("loginuser", hash, 4)
 
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
 		"username": "loginuser",
@@ -217,8 +217,8 @@ func TestLogin_Success(t *testing.T) {
 		t.Errorf("Login status = %d, want 200; body = %s", rr.Code, rr.Body.String())
 	}
 
-	var resp map[string]interface{}
-	json.NewDecoder(rr.Body).Decode(&resp)
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 	if resp["token"] == nil {
 		t.Error("Login response missing token")
 	}
@@ -230,7 +230,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	database.CreateUser("loginuser2", hash, 4)
+	_, _ = database.CreateUser("loginuser2", hash, 4)
 
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
 		"username": "loginuser2",
@@ -281,7 +281,7 @@ func TestLogin_BannedUser(t *testing.T) {
 
 	hash, _ := auth.HashPassword("correctPass1")
 	id, _ := database.CreateUser("banned", hash, 4)
-	database.BanUser(id, "violated rules", nil)
+	_ = database.BanUser(id, "violated rules", nil)
 
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
 		"username": "banned",
@@ -315,7 +315,7 @@ func TestLogout_Success(t *testing.T) {
 	uid, _ := database.CreateUser("logoutuser", hash, 4)
 	token, _ := auth.GenerateToken()
 	tokenHash := auth.HashToken(token)
-	database.CreateSession(uid, tokenHash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(uid, tokenHash, "test", "127.0.0.1")
 
 	rr := postJSONWithToken(t, router, "/api/v1/auth/logout", token, nil)
 
@@ -355,7 +355,7 @@ func TestMe_Success(t *testing.T) {
 	hash, _ := auth.HashPassword("correctPass1")
 	uid, _ := database.CreateUser("meuser", hash, 4)
 	token, _ := auth.GenerateToken()
-	database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
 
 	rr := getWithToken(t, router, "/api/v1/auth/me", token)
 
@@ -363,8 +363,8 @@ func TestMe_Success(t *testing.T) {
 		t.Errorf("Me status = %d, want 200; body = %s", rr.Code, rr.Body.String())
 	}
 
-	var resp map[string]interface{}
-	json.NewDecoder(rr.Body).Decode(&resp)
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 	if resp["id"] == nil {
 		t.Error("Me response missing id")
 	}
@@ -400,7 +400,7 @@ func TestLogin_PasswordWithLeadingSpaceIsPreserved(t *testing.T) {
 
 	// Hash the password WITH the leading space — this is what was registered.
 	hash, _ := auth.HashPassword(" securePass1")
-	database.CreateUser("spacepassuser", hash, 4)
+	_, _ = database.CreateUser("spacepassuser", hash, 4)
 
 	// Login with the exact same password (including space) must succeed.
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
@@ -422,7 +422,7 @@ func TestLogin_PasswordWithLeadingSpaceTrimmedFails(t *testing.T) {
 
 	// Register with password that has a leading space.
 	hash, _ := auth.HashPassword(" securePass1")
-	database.CreateUser("spacepassuser2", hash, 4)
+	_, _ = database.CreateUser("spacepassuser2", hash, 4)
 
 	// Login without the leading space must fail.
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
@@ -443,7 +443,7 @@ func TestLogin_PasswordWithTrailingSpaceIsPreserved(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("securePass1 ")
-	database.CreateUser("trailingspaceuser", hash, 4)
+	_, _ = database.CreateUser("trailingspaceuser", hash, 4)
 
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
 		"username": "trailingspaceuser",
@@ -463,7 +463,7 @@ func TestLogin_UsernameIsStillTrimmed(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	database.CreateUser("trimuser", hash, 4)
+	_, _ = database.CreateUser("trimuser", hash, 4)
 
 	// Username with surrounding spaces should resolve to "trimuser".
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
@@ -487,7 +487,7 @@ func TestRegister_RateLimit(t *testing.T) {
 
 	// Attempt register 4 times (limit=3) — 4th should be rate-limited.
 	var lastCode int
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		code, _ := database.CreateInvite(ownerID, 1, nil)
 		rr := postJSON(t, router, "/api/v1/auth/register", map[string]string{
 			"username":    "rl_user" + string(rune('0'+i)),

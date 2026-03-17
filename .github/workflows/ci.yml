@@ -40,8 +40,9 @@ jobs:
           retention-days: 7
 
       - name: Lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
+          version: v2.11.3
           working-directory: Server/
 
   client-check:

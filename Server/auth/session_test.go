@@ -22,7 +22,7 @@ func TestGenerateToken_HexCharacters(t *testing.T) {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
 	for i, c := range token {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			t.Errorf("GenerateToken() char[%d] = %q, not lowercase hex", i, c)
 		}
 	}
@@ -31,7 +31,7 @@ func TestGenerateToken_HexCharacters(t *testing.T) {
 func TestGenerateToken_Uniqueness(t *testing.T) {
 	const n = 1000
 	seen := make(map[string]struct{}, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		tok, err := auth.GenerateToken()
 		if err != nil {
 			t.Fatalf("GenerateToken() iteration %d error = %v", i, err)

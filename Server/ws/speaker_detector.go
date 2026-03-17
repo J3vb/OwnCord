@@ -61,7 +61,7 @@ func (d *SpeakerDetector) UpdateLevel(userID int64, level uint8) {
 
 	// Recalculate average over collected samples.
 	var sum int
-	for i := 0; i < sl.count; i++ {
+	for i := range sl.count {
 		sum += int(sl.levels[i])
 	}
 	sl.average = float64(sum) / float64(sl.count)
@@ -102,7 +102,7 @@ func (d *SpeakerDetector) TopSpeakers() []int64 {
 	}
 
 	result := make([]int64, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		result[i] = candidates[i].userID
 	}
 	return result

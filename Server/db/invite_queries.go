@@ -11,7 +11,7 @@ func (d *DB) ListInvites() ([]*Invite, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ListInvites: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var invites []*Invite
 	for rows.Next() {

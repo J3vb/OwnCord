@@ -150,7 +150,7 @@ func writePEM(path, pemType string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	return pem.Encode(f, &pem.Block{Type: pemType, Bytes: data})
 }

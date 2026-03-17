@@ -10,8 +10,7 @@ import (
 
 // broadcastMsg is an internal message queued for delivery.
 type broadcastMsg struct {
-	channelID int64  // 0 = send to all connected clients
-	senderID  int64  // reserved for future exclude-sender logic
+	channelID int64 // 0 = send to all connected clients
 	msg       []byte
 }
 
@@ -26,6 +25,7 @@ type Hub struct {
 	register     chan *Client
 	unregister   chan *Client
 	stop         chan struct{}
+	stopOnce     sync.Once
 	sfu          *SFU
 	voiceRooms   map[int64]*VoiceRoom
 	voiceRoomsMu sync.RWMutex
@@ -149,9 +149,9 @@ func (h *Hub) Run() {
 	}
 }
 
-// Stop signals Run to exit.
+// Stop signals Run to exit. Safe to call multiple times.
 func (h *Hub) Stop() {
-	close(h.stop)
+	h.stopOnce.Do(func() { close(h.stop) })
 }
 
 // GracefulStop closes all PeerConnections, voice rooms, and then stops the hub.
@@ -166,7 +166,7 @@ func (h *Hub) GracefulStop() {
 	h.mu.RUnlock()
 
 	h.CloseAllVoiceRooms()
-	close(h.stop)
+	h.stopOnce.Do(func() { close(h.stop) })
 }
 
 // CleanupVoiceForChannel removes the voice room for the given channel and
@@ -244,6 +244,16 @@ func (h *Hub) BroadcastChannelUpdate(ch *db.Channel) {
 // BroadcastChannelDelete sends a channel_delete message to all connected clients.
 func (h *Hub) BroadcastChannelDelete(channelID int64) {
 	h.BroadcastToAll(buildChannelDelete(channelID))
+}
+
+// BroadcastMemberBan sends a member_ban message to all connected clients.
+func (h *Hub) BroadcastMemberBan(userID int64) {
+	h.BroadcastToAll(buildMemberBan(userID))
+}
+
+// BroadcastMemberUpdate sends a member_update message to all connected clients.
+func (h *Hub) BroadcastMemberUpdate(userID int64, roleName string) {
+	h.BroadcastToAll(buildMemberUpdate(userID, roleName))
 }
 
 // SendToUser delivers msg directly to the client identified by userID.

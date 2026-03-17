@@ -1,0 +1,8 @@
+version: "2"
+
+linters:
+  settings:
+    staticcheck:
+      checks:
+        - "all"
+        - "-SA1019"  # suppress deprecated usage warnings (websocket library migration tracked separately)

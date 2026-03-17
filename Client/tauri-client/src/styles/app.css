@@ -1,7 +1,7 @@
 /* Main app styles — extracted from ui-mockup.html */
 
 /* ═══ Layout ═══ */
-.app { display: flex; height: 100vh; }
+.app { display: flex; flex: 1; min-height: 0; }
 
 /* ── Server Strip ── */
 .server-strip {
@@ -205,6 +205,11 @@
 .chat-header .search-input::placeholder { color: var(--text-micro); }
 .chat-header .search-input:focus { width: 240px; color: var(--text-normal); }
 
+/* ── Slot wrappers (inside .chat-area flex column) ── */
+.messages-slot { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.typing-slot { flex-shrink: 0; }
+.input-slot { flex-shrink: 0; }
+
 /* ── Messages ── */
 .messages-container { flex: 1; overflow-y: auto; padding: 16px 0; }
 .msg-day-divider {
@@ -386,7 +391,7 @@
 .typing-dots span:nth-child(3) { animation-delay: .4s; }
 
 /* Message input */
-.message-input-wrap { padding: 0 16px 20px; flex-shrink: 0; }
+.message-input-wrap { padding: 0 16px 20px; flex-shrink: 0; position: relative; }
 .message-input-wrap.reply-active { padding-top: 0; }
 .message-input-box {
   background: var(--bg-input); border-radius: var(--radius-md);
@@ -472,11 +477,13 @@
 
 /* ── Emoji Picker ── */
 .emoji-picker {
-  position: fixed; z-index: 200;
+  position: absolute; z-index: 200;
+  bottom: 100%; right: 0;
   background: var(--bg-primary); border: 1px solid var(--border);
   border-radius: var(--radius-md); width: 320px;
   box-shadow: 0 8px 32px rgba(0,0,0,.6);
   display: none; overflow: hidden;
+  margin-bottom: 4px;
 }
 .emoji-picker.open { display: block; }
 .ep-header {

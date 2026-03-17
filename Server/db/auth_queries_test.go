@@ -16,7 +16,7 @@ func newTestDB(t *testing.T) *db.DB {
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	// Build a minimal migration FS with the initial schema.
 	migrFS := fstest.MapFS{
@@ -126,7 +126,7 @@ func TestCreateUser_CaseInsensitiveDuplicate(t *testing.T) {
 
 func TestGetUserByUsername_Found(t *testing.T) {
 	database := newTestDB(t)
-	database.CreateUser("dave", "hashDave", 4)
+	_, _ = database.CreateUser("dave", "hashDave", 4)
 
 	user, err := database.GetUserByUsername("dave")
 	if err != nil {
@@ -142,7 +142,7 @@ func TestGetUserByUsername_Found(t *testing.T) {
 
 func TestGetUserByUsername_CaseInsensitive(t *testing.T) {
 	database := newTestDB(t)
-	database.CreateUser("Eve", "hashEve", 4)
+	_, _ = database.CreateUser("Eve", "hashEve", 4)
 
 	user, err := database.GetUserByUsername("EVE")
 	if err != nil {
@@ -252,7 +252,7 @@ func TestCreateSession_Success(t *testing.T) {
 func TestGetSessionByTokenHash_Found(t *testing.T) {
 	database := newTestDB(t)
 	uid, _ := database.CreateUser("kate", "hash", 4)
-	database.CreateSession(uid, "myTokenHash", "GoTest/1.0", "127.0.0.1")
+	_, _ = database.CreateSession(uid, "myTokenHash", "GoTest/1.0", "127.0.0.1")
 
 	sess, err := database.GetSessionByTokenHash("myTokenHash")
 	if err != nil {
@@ -280,7 +280,7 @@ func TestGetSessionByTokenHash_NotFound(t *testing.T) {
 func TestDeleteSession(t *testing.T) {
 	database := newTestDB(t)
 	uid, _ := database.CreateUser("leo", "hash", 4)
-	database.CreateSession(uid, "delToken", "GoTest/1.0", "127.0.0.1")
+	_, _ = database.CreateSession(uid, "delToken", "GoTest/1.0", "127.0.0.1")
 
 	if err := database.DeleteSession("delToken"); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
@@ -307,7 +307,7 @@ func TestDeleteExpiredSessions(t *testing.T) {
 	}
 
 	// Insert a valid session through the normal path.
-	database.CreateSession(uid, "validToken", "GoTest/1.0", "127.0.0.1")
+	_, _ = database.CreateSession(uid, "validToken", "GoTest/1.0", "127.0.0.1")
 
 	if err := database.DeleteExpiredSessions(); err != nil {
 		t.Fatalf("DeleteExpiredSessions: %v", err)
@@ -326,7 +326,7 @@ func TestDeleteExpiredSessions(t *testing.T) {
 func TestTouchSession(t *testing.T) {
 	database := newTestDB(t)
 	uid, _ := database.CreateUser("noah", "hash", 4)
-	database.CreateSession(uid, "touchToken", "GoTest/1.0", "127.0.0.1")
+	_, _ = database.CreateSession(uid, "touchToken", "GoTest/1.0", "127.0.0.1")
 
 	sess1, _ := database.GetSessionByTokenHash("touchToken")
 	time.Sleep(2 * time.Millisecond)
@@ -441,7 +441,7 @@ func TestUseInviteAtomic_IncrementsUses(t *testing.T) {
 	uid, _ := database.CreateUser("atomic_user2", "hash", 4)
 	code, _ := database.CreateInvite(uid, 5, nil)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := database.UseInviteAtomic(code); err != nil {
 			t.Fatalf("UseInviteAtomic iteration %d: %v", i, err)
 		}
@@ -459,7 +459,7 @@ func TestUseInviteAtomic_Revoked(t *testing.T) {
 	database := newTestDB(t)
 	uid, _ := database.CreateUser("atomic_user3", "hash", 4)
 	code, _ := database.CreateInvite(uid, 0, nil)
-	database.RevokeInvite(code)
+	_ = database.RevokeInvite(code)
 
 	if err := database.UseInviteAtomic(code); err == nil {
 		t.Error("UseInviteAtomic returned nil error for revoked invite, want error")
@@ -520,7 +520,7 @@ func TestUseInviteAtomic_ConcurrentSameCode(t *testing.T) {
 	type result struct{ err error }
 	results := make(chan result, 2)
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		go func() {
 			results <- result{err: database.UseInviteAtomic(code)}
 		}()

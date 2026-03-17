@@ -160,7 +160,7 @@ func newChannelTestDB(t *testing.T) *db.DB {
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 	migrFS := fstest.MapFS{"001_schema.sql": {Data: channelTestSchema}}
 	if err := db.MigrateFS(database, migrFS); err != nil {
 		t.Fatalf("MigrateFS: %v", err)
@@ -225,7 +225,7 @@ func TestChannelList_Empty(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
-	var resp []interface{}
+	var resp []any
 	_ = json.NewDecoder(rr.Body).Decode(&resp)
 	if len(resp) != 0 {
 		t.Errorf("expected empty array, got %d items", len(resp))
@@ -244,7 +244,7 @@ func TestChannelList_WithChannels(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rr.Code)
 	}
-	var resp []interface{}
+	var resp []any
 	_ = json.NewDecoder(rr.Body).Decode(&resp)
 	if len(resp) != 2 {
 		t.Errorf("expected 2 channels, got %d", len(resp))
@@ -293,9 +293,9 @@ func TestChannelMessages_EmptyChannel(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
-	var resp map[string]interface{}
+	var resp map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&resp)
-	msgs, ok := resp["messages"].([]interface{})
+	msgs, ok := resp["messages"].([]any)
 	if !ok || len(msgs) != 0 {
 		t.Errorf("expected empty messages array, got: %v", resp["messages"])
 	}
@@ -308,7 +308,7 @@ func TestChannelMessages_ReturnsMessages(t *testing.T) {
 	user, _ := database.GetUserByUsername("frank")
 	chID, _ := database.CreateChannel("ch", "text", "", "", 0)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, _ = database.CreateMessage(chID, user.ID, fmt.Sprintf("msg%d", i), nil)
 	}
 
@@ -316,9 +316,9 @@ func TestChannelMessages_ReturnsMessages(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rr.Code)
 	}
-	var resp map[string]interface{}
+	var resp map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&resp)
-	msgs := resp["messages"].([]interface{})
+	msgs := resp["messages"].([]any)
 	if len(msgs) != 3 {
 		t.Errorf("expected 3 messages, got %d", len(msgs))
 	}
@@ -344,7 +344,7 @@ func TestChannelMessages_HasMore(t *testing.T) {
 	user, _ := database.GetUserByUsername("henry")
 	chID, _ := database.CreateChannel("ch", "text", "", "", 0)
 
-	for i := 0; i < 60; i++ {
+	for i := range 60 {
 		_, _ = database.CreateMessage(chID, user.ID, fmt.Sprintf("m%d", i), nil)
 	}
 
@@ -352,7 +352,7 @@ func TestChannelMessages_HasMore(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rr.Code)
 	}
-	var resp map[string]interface{}
+	var resp map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&resp)
 	if resp["has_more"] != true {
 		t.Errorf("has_more = %v, want true", resp["has_more"])
@@ -366,7 +366,7 @@ func TestChannelMessages_HasMoreFalse(t *testing.T) {
 	user, _ := database.GetUserByUsername("ivan")
 	chID, _ := database.CreateChannel("ch", "text", "", "", 0)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		_, _ = database.CreateMessage(chID, user.ID, fmt.Sprintf("m%d", i), nil)
 	}
 
@@ -374,7 +374,7 @@ func TestChannelMessages_HasMoreFalse(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rr.Code)
 	}
-	var resp map[string]interface{}
+	var resp map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&resp)
 	if resp["has_more"] != false {
 		t.Errorf("has_more = %v, want false", resp["has_more"])
@@ -414,9 +414,9 @@ func TestSearch_ReturnsResults(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
-	var resp map[string]interface{}
+	var resp map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&resp)
-	results, ok := resp["results"].([]interface{})
+	results, ok := resp["results"].([]any)
 	if !ok || len(results) == 0 {
 		t.Errorf("expected search results, got: %v", resp)
 	}
@@ -431,9 +431,9 @@ func TestSearch_NoResults(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rr.Code)
 	}
-	var resp map[string]interface{}
+	var resp map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&resp)
-	results := resp["results"].([]interface{})
+	results := resp["results"].([]any)
 	if len(results) != 0 {
 		t.Errorf("expected 0 results, got %d", len(results))
 	}

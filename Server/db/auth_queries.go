@@ -308,7 +308,7 @@ func (d *DB) ListMembers() ([]MemberSummary, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ListMembers: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var members []MemberSummary
 	for rows.Next() {

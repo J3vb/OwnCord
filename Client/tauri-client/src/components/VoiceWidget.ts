@@ -66,6 +66,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   function createUserRow(user: VoiceUser, username?: string): HTMLDivElement {
     const row = createElement("div", {
       class: user.speaking ? "voice-user-item speaking" : "voice-user-item",
+      "data-testid": `voice-user-${user.userId}`,
     });
     const avatar = createElement("div", {
       class: "vu-avatar",
@@ -98,7 +99,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   }
 
   function mount(container: Element): void {
-    root = createElement("div", { class: "voice-widget" });
+    root = createElement("div", { class: "voice-widget", "data-testid": "voice-widget" });
 
     const header = createElement("div", { class: "vw-header" });
     const connLabel = createElement("span", { class: "vw-connected" }, "Voice Connected");

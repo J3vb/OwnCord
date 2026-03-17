@@ -21,12 +21,12 @@ func buildInviteRouter(database *db.DB, limiter *auth.RateLimiter) http.Handler 
 }
 
 // loginAndGetToken creates a user with a known password and returns their session token.
-func loginAndGetToken(t *testing.T, router http.Handler, database *db.DB, username string, roleID int) string {
+func loginAndGetToken(t *testing.T, _ http.Handler, database *db.DB, username string, roleID int) string {
 	t.Helper()
 	hash, _ := auth.HashPassword("Password1!")
 	uid, _ := database.CreateUser(username, hash, roleID)
 	token, _ := auth.GenerateToken()
-	database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
 	return token
 }
 
@@ -40,7 +40,7 @@ func TestCreateInvite_Success(t *testing.T) {
 	// Admin role (id=2) has MANAGE_INVITES (0x4000000) set.
 	token := loginAndGetToken(t, router, database, "invitecreator", 2)
 
-	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]interface{}{
+	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{
 		"max_uses":         5,
 		"expires_in_hours": 48,
 	})
@@ -49,8 +49,8 @@ func TestCreateInvite_Success(t *testing.T) {
 		t.Errorf("CreateInvite status = %d, want 201; body = %s", rr.Code, rr.Body.String())
 	}
 
-	var resp map[string]interface{}
-	json.NewDecoder(rr.Body).Decode(&resp)
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 	if resp["code"] == nil {
 		t.Error("CreateInvite response missing code")
 	}
@@ -61,7 +61,7 @@ func TestCreateInvite_Unauthorized(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
 
-	rr := postJSON(t, router, "/api/v1/invites", map[string]interface{}{
+	rr := postJSON(t, router, "/api/v1/invites", map[string]any{
 		"max_uses": 5,
 	})
 
@@ -78,7 +78,7 @@ func TestCreateInvite_MemberForbidden(t *testing.T) {
 	// Member role (id=4) does NOT have MANAGE_INVITES.
 	token := loginAndGetToken(t, router, database, "memberuser", 4)
 
-	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]interface{}{
+	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{
 		"max_uses": 1,
 	})
 
@@ -94,7 +94,7 @@ func TestCreateInvite_Unlimited(t *testing.T) {
 
 	token := loginAndGetToken(t, router, database, "adminuser2", 2)
 
-	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]interface{}{})
+	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{})
 
 	if rr.Code != http.StatusCreated {
 		t.Errorf("CreateInvite unlimited status = %d, want 201", rr.Code)
@@ -111,8 +111,8 @@ func TestListInvites_Success(t *testing.T) {
 	token := loginAndGetToken(t, router, database, "listuser", 2)
 
 	// Create a couple of invites.
-	postJSONWithToken(t, router, "/api/v1/invites", token, map[string]interface{}{"max_uses": 1})
-	postJSONWithToken(t, router, "/api/v1/invites", token, map[string]interface{}{"max_uses": 5})
+	postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{"max_uses": 1})
+	postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{"max_uses": 5})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/invites", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -124,8 +124,8 @@ func TestListInvites_Success(t *testing.T) {
 		t.Errorf("ListInvites status = %d, want 200; body = %s", rr.Code, rr.Body.String())
 	}
 
-	var resp []interface{}
-	json.NewDecoder(rr.Body).Decode(&resp)
+	var resp []any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
 	if len(resp) < 2 {
 		t.Errorf("ListInvites returned %d items, want >= 2", len(resp))
 	}
@@ -156,12 +156,12 @@ func TestRevokeInvite_Success(t *testing.T) {
 	token := loginAndGetToken(t, router, database, "revoker", 2)
 
 	// Create invite via API.
-	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]interface{}{})
+	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("Create invite for revoke test: status = %d, body = %s", rr.Code, rr.Body.String())
 	}
-	var created map[string]interface{}
-	json.NewDecoder(rr.Body).Decode(&created)
+	var created map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&created)
 	codeVal, ok := created["code"]
 	if !ok || codeVal == nil {
 		t.Fatalf("Create invite response missing code field; body parsed as %v", created)
@@ -213,9 +213,9 @@ func TestRevokeInvite_MemberForbidden(t *testing.T) {
 	memberToken := loginAndGetToken(t, router, database, "member3", 4)
 
 	// Admin creates invite.
-	rr := postJSONWithToken(t, router, "/api/v1/invites", adminToken, map[string]interface{}{})
-	var created map[string]interface{}
-	json.NewDecoder(rr.Body).Decode(&created)
+	rr := postJSONWithToken(t, router, "/api/v1/invites", adminToken, map[string]any{})
+	var created map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&created)
 	code := created["code"].(string)
 
 	// Member tries to revoke.
@@ -240,12 +240,12 @@ func TestListInvites_IncludesRevokedAndActive(t *testing.T) {
 	token := loginAndGetToken(t, router, database, "listall", 2)
 
 	// Create and revoke one invite.
-	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]interface{}{})
+	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("Create invite for list test: status = %d, body = %s", rr.Code, rr.Body.String())
 	}
-	var created map[string]interface{}
-	json.NewDecoder(rr.Body).Decode(&created)
+	var created map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&created)
 	code := created["code"].(string)
 
 	delReq := httptest.NewRequest(http.MethodDelete, "/api/v1/invites/"+code, nil)
@@ -255,7 +255,7 @@ func TestListInvites_IncludesRevokedAndActive(t *testing.T) {
 	router.ServeHTTP(httptest.NewRecorder(), delReq)
 
 	// Create one active invite.
-	postJSONWithToken(t, router, "/api/v1/invites", token, map[string]interface{}{})
+	postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{})
 
 	// List should include both.
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/invites", nil)
@@ -269,26 +269,3 @@ func TestListInvites_IncludesRevokedAndActive(t *testing.T) {
 	}
 }
 
-// ─── Helpers for ListInvites queries ─────────────────────────────────────────
-
-// ListInvites returns all invites from the DB for assertions.
-func listInvitesFromDB(t *testing.T, database *db.DB) []*db.Invite {
-	t.Helper()
-	rows, err := database.Query(`SELECT id, code, created_by, max_uses, use_count, expires_at, revoked, created_at FROM invites`)
-	if err != nil {
-		t.Fatalf("listing invites: %v", err)
-	}
-	defer rows.Close()
-
-	var invites []*db.Invite
-	for rows.Next() {
-		inv := &db.Invite{}
-		var revoked int
-		if err := rows.Scan(&inv.ID, &inv.Code, &inv.CreatedBy, &inv.MaxUses, &inv.Uses, &inv.ExpiresAt, &revoked, &inv.CreatedAt); err != nil {
-			t.Fatalf("scanning invite: %v", err)
-		}
-		inv.Revoked = revoked != 0
-		invites = append(invites, inv)
-	}
-	return invites
-}

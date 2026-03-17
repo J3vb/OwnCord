@@ -33,7 +33,7 @@ func openVoiceTestDB(t *testing.T) *db.DB {
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	migrFS := fstest.MapFS{
 		"001_schema.sql": {Data: voiceSchema},
@@ -81,45 +81,45 @@ func seedVoiceChan(t *testing.T, database *db.DB, name string) int64 {
 
 // voiceJoinMsg builds a raw voice_join WebSocket message.
 func voiceJoinMsg(channelID int64) []byte {
-	raw, _ := json.Marshal(map[string]interface{}{
+	raw, _ := json.Marshal(map[string]any{
 		"type":    "voice_join",
-		"payload": map[string]interface{}{"channel_id": channelID},
+		"payload": map[string]any{"channel_id": channelID},
 	})
 	return raw
 }
 
 // voiceLeaveMsg builds a raw voice_leave WebSocket message.
 func voiceLeaveMsg() []byte {
-	raw, _ := json.Marshal(map[string]interface{}{
+	raw, _ := json.Marshal(map[string]any{
 		"type":    "voice_leave",
-		"payload": map[string]interface{}{},
+		"payload": map[string]any{},
 	})
 	return raw
 }
 
 // voiceMuteMsg builds a voice_mute message.
 func voiceMuteMsg(muted bool) []byte {
-	raw, _ := json.Marshal(map[string]interface{}{
+	raw, _ := json.Marshal(map[string]any{
 		"type":    "voice_mute",
-		"payload": map[string]interface{}{"muted": muted},
+		"payload": map[string]any{"muted": muted},
 	})
 	return raw
 }
 
 // voiceDeafenMsg builds a voice_deafen message.
 func voiceDeafenMsg(deafened bool) []byte {
-	raw, _ := json.Marshal(map[string]interface{}{
+	raw, _ := json.Marshal(map[string]any{
 		"type":    "voice_deafen",
-		"payload": map[string]interface{}{"deafened": deafened},
+		"payload": map[string]any{"deafened": deafened},
 	})
 	return raw
 }
 
 // voiceSignalMsg builds a voice_offer/answer/ice message.
 func voiceSignalMsg(msgType string, channelID int64, sdp string) []byte {
-	raw, _ := json.Marshal(map[string]interface{}{
+	raw, _ := json.Marshal(map[string]any{
 		"type": msgType,
-		"payload": map[string]interface{}{
+		"payload": map[string]any{
 			"channel_id": channelID,
 			"sdp":        sdp,
 		},
@@ -129,9 +129,9 @@ func voiceSignalMsg(msgType string, channelID int64, sdp string) []byte {
 
 // voiceICEMsg builds a voice_ice message.
 func voiceICEMsg(channelID int64, candidate string) []byte {
-	raw, _ := json.Marshal(map[string]interface{}{
+	raw, _ := json.Marshal(map[string]any{
 		"type": "voice_ice",
-		"payload": map[string]interface{}{
+		"payload": map[string]any{
 			"channel_id": channelID,
 			"candidate":  candidate,
 		},
@@ -142,7 +142,7 @@ func voiceICEMsg(channelID int64, candidate string) []byte {
 // extractType parses a JSON message and returns the "type" field.
 func extractType(t *testing.T, msg []byte) string {
 	t.Helper()
-	var env map[string]interface{}
+	var env map[string]any
 	if err := json.Unmarshal(msg, &env); err != nil {
 		t.Fatalf("extractType unmarshal: %v", err)
 	}
@@ -288,9 +288,9 @@ func TestVoice_Join_MissingChannelID_SendsError(t *testing.T) {
 	hub.Register(c)
 	time.Sleep(20 * time.Millisecond)
 
-	badMsg, _ := json.Marshal(map[string]interface{}{
+	badMsg, _ := json.Marshal(map[string]any{
 		"type":    "voice_join",
-		"payload": map[string]interface{}{"channel_id": 0},
+		"payload": map[string]any{"channel_id": 0},
 	})
 	hub.HandleMessageForTest(c, badMsg)
 	time.Sleep(30 * time.Millisecond)
@@ -605,7 +605,7 @@ func TestVoice_Offer_RateLimit(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// 25 offers rapidly — limit is 20/sec.
-	for i := 0; i < 25; i++ {
+	for range 25 {
 		hub.HandleMessageForTest(c, voiceSignalMsg("voice_offer", 1, "v=0..."))
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -781,7 +781,7 @@ func TestVoice_Signal_RateLimit_BlocksExcess(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// Send 30 signals rapidly — limit is 20/sec, so some should be rate-limited.
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		hub.HandleMessageForTest(c, voiceSignalMsg("voice_offer", 1, "v=0..."))
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -816,9 +816,9 @@ func TestVoice_Soundboard_BroadcastsToAll(t *testing.T) {
 	hub.Register(cS)
 	time.Sleep(20 * time.Millisecond)
 
-	soundMsg, _ := json.Marshal(map[string]interface{}{
+	soundMsg, _ := json.Marshal(map[string]any{
 		"type":    "soundboard_play",
-		"payload": map[string]interface{}{"sound_id": "abc-uuid-123"},
+		"payload": map[string]any{"sound_id": "abc-uuid-123"},
 	})
 	hub.HandleMessageForTest(cS, soundMsg)
 	time.Sleep(50 * time.Millisecond)
@@ -845,9 +845,9 @@ func TestVoice_Soundboard_NoPermission_SendsError(t *testing.T) {
 	hub.Register(c)
 	time.Sleep(20 * time.Millisecond)
 
-	soundMsg, _ := json.Marshal(map[string]interface{}{
+	soundMsg, _ := json.Marshal(map[string]any{
 		"type":    "soundboard_play",
-		"payload": map[string]interface{}{"sound_id": "abc"},
+		"payload": map[string]any{"sound_id": "abc"},
 	})
 	hub.HandleMessageForTest(c, soundMsg)
 	time.Sleep(30 * time.Millisecond)
@@ -873,13 +873,13 @@ func TestVoice_Soundboard_RateLimit(t *testing.T) {
 	hub.Register(c)
 	time.Sleep(20 * time.Millisecond)
 
-	soundMsg, _ := json.Marshal(map[string]interface{}{
+	soundMsg, _ := json.Marshal(map[string]any{
 		"type":    "soundboard_play",
-		"payload": map[string]interface{}{"sound_id": "x"},
+		"payload": map[string]any{"sound_id": "x"},
 	})
 
 	// Send 5 soundboard plays rapidly — limit is 1 per 3 sec.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		hub.HandleMessageForTest(c, soundMsg)
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -900,9 +900,9 @@ func TestVoice_Soundboard_RateLimit(t *testing.T) {
 
 // voiceCameraMsg builds a voice_camera WebSocket message.
 func voiceCameraMsg(enabled bool) []byte {
-	raw, _ := json.Marshal(map[string]interface{}{
+	raw, _ := json.Marshal(map[string]any{
 		"type":    "voice_camera",
-		"payload": map[string]interface{}{"enabled": enabled},
+		"payload": map[string]any{"enabled": enabled},
 	})
 	return raw
 }
@@ -1011,7 +1011,7 @@ func TestVoice_Camera_RateLimit(t *testing.T) {
 	drainChan(send)
 
 	// Send 5 camera toggles rapidly — limit is 2/sec, so some should be rate-limited.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		hub.HandleMessageForTest(c, voiceCameraMsg(true))
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -1032,9 +1032,9 @@ func TestVoice_Camera_RateLimit(t *testing.T) {
 
 // voiceScreenshareMsg builds a voice_screenshare WebSocket message.
 func voiceScreenshareMsg(enabled bool) []byte {
-	raw, _ := json.Marshal(map[string]interface{}{
+	raw, _ := json.Marshal(map[string]any{
 		"type":    "voice_screenshare",
-		"payload": map[string]interface{}{"enabled": enabled},
+		"payload": map[string]any{"enabled": enabled},
 	})
 	return raw
 }
@@ -1143,7 +1143,7 @@ func TestVoice_Screenshare_RateLimit(t *testing.T) {
 	drainChan(send)
 
 	// Send 5 screenshare toggles rapidly — limit is 2/sec.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		hub.HandleMessageForTest(c, voiceScreenshareMsg(true))
 	}
 	time.Sleep(50 * time.Millisecond)

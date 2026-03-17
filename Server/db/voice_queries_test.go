@@ -7,21 +7,6 @@ import (
 	"github.com/owncord/server/db"
 )
 
-// voiceTestSchema adds the voice_states table on top of the base schema.
-var voiceTestSchema = append(testSchema, []byte(`
-CREATE TABLE IF NOT EXISTS voice_states (
-    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    muted      INTEGER NOT NULL DEFAULT 0,
-    deafened   INTEGER NOT NULL DEFAULT 0,
-    speaking   INTEGER NOT NULL DEFAULT 0,
-    camera     INTEGER NOT NULL DEFAULT 0,
-    screenshare INTEGER NOT NULL DEFAULT 0,
-    joined_at  TEXT    NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_voice_states_channel ON voice_states(channel_id);
-`)...)
-
 var channelSchema = []byte(`
 CREATE TABLE IF NOT EXISTS channels (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,7 +32,7 @@ func newVoiceTestDB(t *testing.T) *db.DB {
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	migrFS := fstest.MapFS{
 		"001_schema.sql":   {Data: testSchema},
@@ -659,8 +644,8 @@ func TestVoice_GetVoiceState_IncludesCameraAndScreenshare(t *testing.T) {
 	}
 
 	// Enable both.
-	database.UpdateVoiceCamera(userID, true)
-	database.UpdateVoiceScreenshare(userID, true)
+	_ = database.UpdateVoiceCamera(userID, true)
+	_ = database.UpdateVoiceScreenshare(userID, true)
 
 	state, _ = database.GetVoiceState(userID)
 	if state == nil {
@@ -684,7 +669,7 @@ func TestVoice_GetChannelVoiceStates_IncludesCameraAndScreenshare(t *testing.T) 
 	if err := database.JoinVoiceChannel(userID, chanID); err != nil {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
-	database.UpdateVoiceCamera(userID, true)
+	_ = database.UpdateVoiceCamera(userID, true)
 
 	states, err := database.GetChannelVoiceStates(chanID)
 	if err != nil {

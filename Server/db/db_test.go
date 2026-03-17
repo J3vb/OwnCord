@@ -21,7 +21,7 @@ func openMemory(t *testing.T) *db.DB {
 	if err != nil {
 		t.Fatalf("Open(':memory:') error: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 	return database
 }
 
@@ -40,7 +40,7 @@ func TestOpenCreatesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error: %v", err)
 	}
-	defer database.Close()
+	defer database.Close() //nolint:errcheck
 
 	if _, statErr := os.Stat(dbPath); os.IsNotExist(statErr) {
 		t.Error("Open() did not create the database file")
@@ -79,7 +79,7 @@ func TestWALModeEnabledOnFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error: %v", err)
 	}
-	defer database.Close()
+	defer database.Close() //nolint:errcheck
 
 	var journalMode string
 	if err := database.QueryRow("PRAGMA journal_mode;").Scan(&journalMode); err != nil {
@@ -286,7 +286,7 @@ func TestQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query() error: %v", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var count int
 	for rows.Next() {
@@ -315,7 +315,7 @@ func TestBegin(t *testing.T) {
 
 	_, err = tx.Exec("INSERT OR REPLACE INTO settings (key, value) VALUES ('tx_key', 'tx_val')")
 	if err != nil {
-		tx.Rollback()
+		_ = tx.Rollback()
 		t.Fatalf("tx.Exec error: %v", err)
 	}
 
@@ -372,7 +372,7 @@ func (fakeDirInfo) Size() int64       { return 0 }
 func (fakeDirInfo) Mode() fs.FileMode { return fs.ModeDir | 0o755 }
 func (fakeDirInfo) ModTime() time.Time { return time.Time{} }
 func (fakeDirInfo) IsDir() bool       { return true }
-func (fakeDirInfo) Sys() interface{}  { return nil }
+func (fakeDirInfo) Sys() any  { return nil }
 
 type fakeDirEntry struct{}
 
@@ -388,7 +388,7 @@ func (fakeFileInfo) Size() int64       { return 0 }
 func (fakeFileInfo) Mode() fs.FileMode { return 0o644 }
 func (fakeFileInfo) ModTime() time.Time { return time.Time{} }
 func (fakeFileInfo) IsDir() bool       { return false }
-func (fakeFileInfo) Sys() interface{}  { return nil }
+func (fakeFileInfo) Sys() any  { return nil }
 
 func TestMigrateFSReadFileError(t *testing.T) {
 	database := openMemory(t)
@@ -456,7 +456,7 @@ func TestMigrateWALAndFKOnFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error: %v", err)
 	}
-	defer database.Close()
+	defer database.Close() //nolint:errcheck
 
 	if err := db.Migrate(database); err != nil {
 		t.Fatalf("Migrate() error: %v", err)

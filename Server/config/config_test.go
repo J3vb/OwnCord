@@ -20,8 +20,8 @@ func TestLoadDefaults(t *testing.T) {
 
 	tests := []struct {
 		name string
-		got  interface{}
-		want interface{}
+		got  any
+		want any
 	}{
 		{"Server.Port", cfg.Server.Port, 8443},
 		{"Server.Name", cfg.Server.Name, "OwnCord Server"},
@@ -237,8 +237,8 @@ func TestLoadVoiceConfigDefaults(t *testing.T) {
 
 	tests := []struct {
 		name string
-		got  interface{}
-		want interface{}
+		got  any
+		want any
 	}{
 		{"Voice.Quality", cfg.Voice.Quality, "medium"},
 		{"Voice.MixingThreshold", cfg.Voice.MixingThreshold, 10},

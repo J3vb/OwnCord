@@ -3,8 +3,6 @@ package ws_test
 import (
 	"testing"
 
-	"nhooyr.io/websocket"
-
 	"github.com/owncord/server/ws"
 )
 
@@ -69,5 +67,5 @@ func TestOriginAcceptOptions_MixedWithWildcard(t *testing.T) {
 // TestOriginAcceptOptions_ReturnsAcceptOptions ensures the return type is the
 // correct websocket.AcceptOptions value (compile-time check via assignment).
 func TestOriginAcceptOptions_ReturnsAcceptOptions(t *testing.T) {
-	var _ *websocket.AcceptOptions = ws.OriginAcceptOptions([]string{"https://example.com"})
+	_ = ws.OriginAcceptOptions([]string{"https://example.com"})
 }

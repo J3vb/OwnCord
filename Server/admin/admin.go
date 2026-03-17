@@ -51,7 +51,7 @@ func NewHandler(database *db.DB, version string, hub HubBroadcaster, u *updater.
 		// global CSP (default-src 'self') to allow them.
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
-		w.Write(indexHTML)
+		_, _ = w.Write(indexHTML)
 	})
 	r.Handle("/*", http.FileServer(http.FS(staticFS)))
 

@@ -16,9 +16,9 @@ import (
 
 // channelFocusMsg constructs a raw channel_focus WebSocket envelope.
 func channelFocusMsg(channelID int64) []byte {
-	raw, _ := json.Marshal(map[string]interface{}{
+	raw, _ := json.Marshal(map[string]any{
 		"type": "channel_focus",
-		"payload": map[string]interface{}{
+		"payload": map[string]any{
 			"channel_id": channelID,
 		},
 	})
@@ -56,12 +56,12 @@ func TestChannelFocus_AllowedByDefault(t *testing.T) {
 	// Should NOT receive a FORBIDDEN error.
 	msgs := drainChan(send)
 	for _, m := range msgs {
-		var env map[string]interface{}
+		var env map[string]any
 		if err := json.Unmarshal(m, &env); err != nil {
 			continue
 		}
 		if env["type"] == "error" {
-			if payload, ok := env["payload"].(map[string]interface{}); ok {
+			if payload, ok := env["payload"].(map[string]any); ok {
 				if payload["code"] == "FORBIDDEN" {
 					t.Error("member was incorrectly denied channel_focus on accessible channel")
 				}
@@ -115,12 +115,12 @@ func TestChannelFocus_AdminBypassesDeny(t *testing.T) {
 	// Should NOT receive a FORBIDDEN error.
 	msgs := drainChan(send)
 	for _, m := range msgs {
-		var env map[string]interface{}
+		var env map[string]any
 		if err := json.Unmarshal(m, &env); err != nil {
 			continue
 		}
 		if env["type"] == "error" {
-			if payload, ok := env["payload"].(map[string]interface{}); ok {
+			if payload, ok := env["payload"].(map[string]any); ok {
 				if payload["code"] == "FORBIDDEN" {
 					t.Error("admin was incorrectly denied channel_focus")
 				}

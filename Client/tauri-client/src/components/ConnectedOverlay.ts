@@ -43,7 +43,7 @@ export function createConnectedOverlay(
   const ac = new AbortController();
 
   // Root overlay (hidden by default, .visible to show)
-  const overlay = createElement("div", { class: "connected-overlay" });
+  const overlay = createElement("div", { class: "connected-overlay", "data-testid": "connected-overlay" });
 
   // Server icon with check badge
   const iconWrap = createElement("div", { class: "connected-icon-wrap" });
