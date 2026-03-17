@@ -41,7 +41,7 @@ func buildAuthRouter(database *db.DB, limiter *auth.RateLimiter) http.Handler {
 }
 
 // postJSON is a test helper that POSTs JSON to the given router.
-func postJSON(t *testing.T, router http.Handler, path string, body interface{}) *httptest.ResponseRecorder {
+func postJSON(t *testing.T, router http.Handler, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	raw, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
@@ -53,7 +53,7 @@ func postJSON(t *testing.T, router http.Handler, path string, body interface{}) 
 }
 
 // postJSONWithToken posts with an Authorization header.
-func postJSONWithToken(t *testing.T, router http.Handler, path, token string, body interface{}) *httptest.ResponseRecorder {
+func postJSONWithToken(t *testing.T, router http.Handler, path, token string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	raw, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
@@ -97,7 +97,7 @@ func TestRegister_Success(t *testing.T) {
 		t.Errorf("Register status = %d, want 201; body = %s", rr.Code, rr.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	json.NewDecoder(rr.Body).Decode(&resp)
 	if resp["token"] == nil {
 		t.Error("Register response missing token")
@@ -217,7 +217,7 @@ func TestLogin_Success(t *testing.T) {
 		t.Errorf("Login status = %d, want 200; body = %s", rr.Code, rr.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	json.NewDecoder(rr.Body).Decode(&resp)
 	if resp["token"] == nil {
 		t.Error("Login response missing token")
@@ -363,7 +363,7 @@ func TestMe_Success(t *testing.T) {
 		t.Errorf("Me status = %d, want 200; body = %s", rr.Code, rr.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	json.NewDecoder(rr.Body).Decode(&resp)
 	if resp["id"] == nil {
 		t.Error("Me response missing id")
@@ -487,7 +487,7 @@ func TestRegister_RateLimit(t *testing.T) {
 
 	// Attempt register 4 times (limit=3) — 4th should be rate-limited.
 	var lastCode int
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		code, _ := database.CreateInvite(ownerID, 1, nil)
 		rr := postJSON(t, router, "/api/v1/auth/register", map[string]string{
 			"username":    "rl_user" + string(rune('0'+i)),

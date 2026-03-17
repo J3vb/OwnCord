@@ -18,7 +18,9 @@ func handleGetStats(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get stats")
 			return
 		}
-		stats.OnlineCount = hub.ClientCount()
+		if hub != nil {
+			stats.OnlineCount = hub.ClientCount()
+		}
 		writeJSON(w, http.StatusOK, stats)
 	}
 }
@@ -92,7 +94,9 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 				fmt.Sprintf("changed %s role to %d", user.Username, *req.RoleID))
 			// Broadcast member_update with the new role name.
 			if role, err := database.GetRoleByID(*req.RoleID); err == nil && role != nil {
-				hub.BroadcastMemberUpdate(id, role.Name)
+				if hub != nil {
+					hub.BroadcastMemberUpdate(id, role.Name)
+				}
 			}
 		}
 
@@ -109,7 +113,9 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 				slog.Warn("user banned", "actor_id", actor, "target_user", user.Username, "reason", reason)
 				_ = database.LogAudit(actor, "user_ban", "user", id,
 					fmt.Sprintf("banned %s: %s", user.Username, reason))
-				hub.BroadcastMemberBan(id)
+				if hub != nil {
+					hub.BroadcastMemberBan(id)
+				}
 			} else {
 				if err := database.UnbanUser(id); err != nil {
 					writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to unban user")

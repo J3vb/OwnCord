@@ -9,7 +9,7 @@ import (
 
 func TestRateLimiter_UnderLimitAllowed(t *testing.T) {
 	rl := auth.NewRateLimiter()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if !rl.Allow("key1", 5, time.Second) {
 			t.Errorf("Allow() = false at iteration %d, want true", i)
 		}
@@ -19,7 +19,7 @@ func TestRateLimiter_UnderLimitAllowed(t *testing.T) {
 func TestRateLimiter_AtLimitAllowed(t *testing.T) {
 	rl := auth.NewRateLimiter()
 	// Allow up to exactly the limit
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		rl.Allow("keyA", 3, time.Second)
 	}
 	// The 4th call should be blocked
@@ -31,7 +31,7 @@ func TestRateLimiter_AtLimitAllowed(t *testing.T) {
 func TestRateLimiter_OverLimitBlocked(t *testing.T) {
 	rl := auth.NewRateLimiter()
 	limit := 3
-	for i := 0; i < limit; i++ {
+	for range limit {
 		rl.Allow("key2", limit, time.Second)
 	}
 	if rl.Allow("key2", limit, time.Second) {
@@ -58,7 +58,7 @@ func TestRateLimiter_WindowExpiryResets(t *testing.T) {
 
 func TestRateLimiter_DifferentKeysIndependent(t *testing.T) {
 	rl := auth.NewRateLimiter()
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		rl.Allow("keyX", 3, time.Second)
 	}
 	// keyY should still be allowed
@@ -113,13 +113,13 @@ func TestRateLimiter_LockoutBlocksAllow(t *testing.T) {
 func TestRateLimiter_ThreadSafe(t *testing.T) {
 	rl := auth.NewRateLimiter()
 	done := make(chan struct{}, 100)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		go func() {
 			rl.Allow("concurrent", 50, time.Second)
 			done <- struct{}{}
 		}()
 	}
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		<-done
 	}
 	// If we get here without a race condition data race, we pass

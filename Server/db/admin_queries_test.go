@@ -176,7 +176,7 @@ func TestListAllUsers_WithRoleName(t *testing.T) {
 func TestListAllUsers_Pagination(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		_, err := database.CreateUser(
 			strings.Repeat("u", i+1),
 			"hash",
@@ -546,7 +546,7 @@ func TestGetAuditLog_Pagination(t *testing.T) {
 	database := newAdminTestDB(t)
 
 	uid, _ := database.CreateUser("auditpager", "hash", 1)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		database.LogAudit(uid, "ACTION", "target", int64(i), "detail")
 	}
 

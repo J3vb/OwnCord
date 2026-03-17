@@ -31,7 +31,7 @@ func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 }
 
 // handleApplyUpdate downloads and applies a server update.
-func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, currentVersion string) http.Handler {
+func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if u == nil {
 			writeErr(w, http.StatusServiceUnavailable, "UPDATE_UNAVAILABLE", "update checking is not configured")

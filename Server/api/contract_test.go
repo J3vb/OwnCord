@@ -41,7 +41,7 @@ func TestContract_Messages_HasRequiredFields(t *testing.T) {
 	}
 
 	// Parse the first message and verify all API.md fields are present.
-	var msg map[string]interface{}
+	var msg map[string]any
 	if err := json.Unmarshal(resp.Messages[0], &msg); err != nil {
 		t.Fatalf("decode message: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestContract_Messages_HasRequiredFields(t *testing.T) {
 	}
 
 	// Verify 'user' is an object with id, username.
-	userObj, ok := msg["user"].(map[string]interface{})
+	userObj, ok := msg["user"].(map[string]any)
 	if !ok {
 		t.Fatal("'user' is not an object")
 	}
@@ -69,12 +69,12 @@ func TestContract_Messages_HasRequiredFields(t *testing.T) {
 	}
 
 	// Verify 'attachments' is an array (even if empty).
-	if _, ok := msg["attachments"].([]interface{}); !ok {
+	if _, ok := msg["attachments"].([]any); !ok {
 		t.Error("'attachments' is not an array")
 	}
 
 	// Verify 'reactions' is an array (even if empty).
-	if _, ok := msg["reactions"].([]interface{}); !ok {
+	if _, ok := msg["reactions"].([]any); !ok {
 		t.Error("'reactions' is not an array")
 	}
 }
@@ -152,7 +152,7 @@ func TestContract_Search_HasRequiredFields(t *testing.T) {
 		t.Fatal("expected at least 1 search result")
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal(resp.Results[0], &result); err != nil {
 		t.Fatalf("decode result: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestContract_Search_HasRequiredFields(t *testing.T) {
 	}
 
 	// Verify 'user' is an object with id and username.
-	userObj, ok := result["user"].(map[string]interface{})
+	userObj, ok := result["user"].(map[string]any)
 	if !ok {
 		t.Fatal("search result 'user' is not an object")
 	}

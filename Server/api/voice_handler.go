@@ -92,7 +92,7 @@ func generateTURNCredentials(userID int64, secret string) turnCredentials {
 	username := fmt.Sprintf("%d:%d", expiry, userID)
 
 	mac := hmac.New(sha1.New, []byte(secret))
-	mac.Write([]byte(username))
+	_, _ = mac.Write([]byte(username))
 	credential := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 
 	return turnCredentials{

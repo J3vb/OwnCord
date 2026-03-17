@@ -232,7 +232,7 @@ func TestRateLimitMiddleware_OverLimit(t *testing.T) {
 
 	h := api.RateLimitMiddleware(limiter, limit, time.Minute)(http.HandlerFunc(ok))
 
-	for i := 0; i < limit; i++ {
+	for range limit {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = "10.0.0.2:1234"
 		rr := httptest.NewRecorder()
@@ -256,7 +256,7 @@ func TestRateLimitMiddleware_RetryAfterHeader(t *testing.T) {
 	h := api.RateLimitMiddleware(limiter, 1, time.Minute)(http.HandlerFunc(ok))
 
 	// Exhaust limit.
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = "10.0.0.3:1234"
 		rr := httptest.NewRecorder()
@@ -283,7 +283,7 @@ func TestRateLimitMiddleware_XRealIPIgnoredWithoutTrustedProxy(t *testing.T) {
 	h := api.RateLimitMiddleware(limiter, limit, time.Minute)(http.HandlerFunc(ok))
 
 	// Two requests from RemoteAddr 10.0.0.99 with an attacker-supplied X-Real-IP.
-	for i := 0; i < limit; i++ {
+	for range limit {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("X-Real-IP", "192.168.1.1") // forged; must be ignored
 		req.RemoteAddr = "10.0.0.99:9999"
@@ -313,7 +313,7 @@ func TestRateLimitMiddleware_XRealIPHonouredFromTrustedProxy(t *testing.T) {
 	h := api.RateLimitMiddleware(limiter, limit, time.Minute, trustedCIDRs)(http.HandlerFunc(ok))
 
 	// Two requests coming through trusted proxy 10.0.0.1, client IP 203.0.113.5.
-	for i := 0; i < limit; i++ {
+	for range limit {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("X-Real-IP", "203.0.113.5")
 		req.RemoteAddr = "10.0.0.1:9999"

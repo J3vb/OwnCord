@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -169,7 +170,7 @@ func createMemberUser(t *testing.T, database *db.DB) string {
 	return token
 }
 
-func doRequest(t *testing.T, handler http.Handler, method, path, token string, body interface{}) *httptest.ResponseRecorder {
+func doRequest(t *testing.T, handler http.Handler, method, path, token string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	var bodyBytes []byte
 	if body != nil {
@@ -206,7 +207,7 @@ func TestAdminAPI_Stats_OK(t *testing.T) {
 		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 
-	var stats map[string]interface{}
+	var stats map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &stats); err != nil {
 		t.Fatalf("unmarshal stats: %v", err)
 	}
@@ -254,7 +255,7 @@ func TestAdminAPI_ListUsers_OK(t *testing.T) {
 		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 
-	var users []interface{}
+	var users []any
 	if err := json.Unmarshal(w.Body.Bytes(), &users); err != nil {
 		t.Fatalf("unmarshal users: %v", err)
 	}
@@ -298,7 +299,7 @@ func TestAdminAPI_PatchUser_BanUser(t *testing.T) {
 	// Create a target user
 	targetUID, _ := database.CreateUser("target", "hash", 3)
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"banned":     true,
 		"ban_reason": "spam",
 	}
@@ -325,7 +326,7 @@ func TestAdminAPI_PatchUser_ChangeRole(t *testing.T) {
 
 	targetUID, _ := database.CreateUser("rolechange", "hash", 3)
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"role_id": float64(2),
 	}
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
@@ -345,7 +346,7 @@ func TestAdminAPI_PatchUser_NotFound(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil)
 	token := createAdminUser(t, database)
 
-	body := map[string]interface{}{"banned": true}
+	body := map[string]any{"banned": true}
 	w := doRequest(t, handler, http.MethodPatch, "/users/99999", token, body)
 
 	if w.Code != http.StatusNotFound {
@@ -413,7 +414,7 @@ func TestAdminAPI_ListChannels_OK(t *testing.T) {
 		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 
-	var channels []interface{}
+	var channels []any
 	if err := json.Unmarshal(w.Body.Bytes(), &channels); err != nil {
 		t.Fatalf("unmarshal channels: %v", err)
 	}
@@ -429,7 +430,7 @@ func TestAdminAPI_CreateChannel_OK(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil)
 	token := createAdminUser(t, database)
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"name":     "new-channel",
 		"type":     "text",
 		"category": "General",
@@ -442,7 +443,7 @@ func TestAdminAPI_CreateChannel_OK(t *testing.T) {
 		t.Errorf("status = %d, want 201; body: %s", w.Code, w.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
@@ -456,7 +457,7 @@ func TestAdminAPI_CreateChannel_MissingName(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil)
 	token := createAdminUser(t, database)
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"type": "text",
 	}
 	w := doRequest(t, handler, http.MethodPost, "/channels", token, body)
@@ -475,7 +476,7 @@ func TestAdminAPI_UpdateChannel_OK(t *testing.T) {
 
 	chID, _ := database.AdminCreateChannel("old", "text", "", "", 0)
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"name":      "updated",
 		"topic":     "new topic",
 		"slow_mode": float64(10),
@@ -494,7 +495,7 @@ func TestAdminAPI_UpdateChannel_NotFound(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil)
 	token := createAdminUser(t, database)
 
-	body := map[string]interface{}{"name": "x"}
+	body := map[string]any{"name": "x"}
 	w := doRequest(t, handler, http.MethodPatch, "/channels/99999", token, body)
 
 	if w.Code != http.StatusNotFound {
@@ -546,7 +547,7 @@ func TestAdminAPI_AuditLog_OK(t *testing.T) {
 		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 
-	var entries []interface{}
+	var entries []any
 	if err := json.Unmarshal(w.Body.Bytes(), &entries); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -566,7 +567,7 @@ func TestAdminAPI_AuditLog_Empty(t *testing.T) {
 		t.Errorf("status = %d, want 200", w.Code)
 	}
 
-	var entries []interface{}
+	var entries []any
 	json.Unmarshal(w.Body.Bytes(), &entries)
 	if len(entries) != 0 {
 		t.Errorf("expected 0 entries, got %d", len(entries))
@@ -681,7 +682,7 @@ func TestAdminAPI_ActorFromContext_AuditEntry(t *testing.T) {
 	// Create a target user to act on.
 	targetUID, _ := database.CreateUser("ctxtarget", "hash", 3)
 
-	body := map[string]interface{}{"banned": true, "ban_reason": "context test"}
+	body := map[string]any{"banned": true, "ban_reason": "context test"}
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
 
 	if w.Code != http.StatusOK {
@@ -856,11 +857,11 @@ func TestAdminAPI_ListUsers_NoPasswordHash(t *testing.T) {
 
 	body := w.Body.String()
 	// The raw bcrypt hash must never appear in the response.
-	if contains(body, "supersecretbcrypthash") {
+	if strings.Contains(body, "supersecretbcrypthash") {
 		t.Error("GET /users response contains PasswordHash — sensitive field leaked")
 	}
 	// The JSON key itself must also be absent.
-	if contains(body, "password_hash") || contains(body, "PasswordHash") {
+	if strings.Contains(body, "password_hash") || strings.Contains(body, "PasswordHash") {
 		t.Error("GET /users response contains password_hash key — sensitive field leaked")
 	}
 }
@@ -879,7 +880,7 @@ func TestAdminAPI_ListUsers_NoTOTPSecret(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	if contains(body, "totp_secret") || contains(body, "TOTPSecret") {
+	if strings.Contains(body, "totp_secret") || strings.Contains(body, "TOTPSecret") {
 		t.Error("GET /users response contains totp_secret key — sensitive field leaked")
 	}
 }
@@ -897,7 +898,7 @@ func TestAdminAPI_ListUsers_PublicFieldsPresent(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 
-	var users []map[string]interface{}
+	var users []map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &users); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -922,7 +923,7 @@ func TestAdminAPI_PatchUser_NoPasswordHash(t *testing.T) {
 
 	targetUID, _ := database.CreateUser("patchvictim", "topsecretbcrypt", 3)
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"banned":     true,
 		"ban_reason": "test",
 	}
@@ -933,10 +934,10 @@ func TestAdminAPI_PatchUser_NoPasswordHash(t *testing.T) {
 	}
 
 	respBody := w.Body.String()
-	if contains(respBody, "topsecretbcrypt") {
+	if strings.Contains(respBody, "topsecretbcrypt") {
 		t.Error("PATCH /users/{id} response contains PasswordHash — sensitive field leaked")
 	}
-	if contains(respBody, "password_hash") || contains(respBody, "PasswordHash") {
+	if strings.Contains(respBody, "password_hash") || strings.Contains(respBody, "PasswordHash") {
 		t.Error("PATCH /users/{id} response contains password_hash key — sensitive field leaked")
 	}
 }
@@ -950,7 +951,7 @@ func TestAdminAPI_PatchUser_NoTOTPSecret(t *testing.T) {
 
 	targetUID, _ := database.CreateUser("patchtotp", "hash", 3)
 
-	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, map[string]interface{}{
+	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, map[string]any{
 		"banned": false,
 	})
 
@@ -959,7 +960,7 @@ func TestAdminAPI_PatchUser_NoTOTPSecret(t *testing.T) {
 	}
 
 	respBody := w.Body.String()
-	if contains(respBody, "totp_secret") || contains(respBody, "TOTPSecret") {
+	if strings.Contains(respBody, "totp_secret") || strings.Contains(respBody, "TOTPSecret") {
 		t.Error("PATCH /users/{id} response contains totp_secret — sensitive field leaked")
 	}
 }
@@ -1021,7 +1022,7 @@ func TestAdminAPI_CreateChannel_BroadcastsChannelCreate(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil)
 	token := createAdminUser(t, database)
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"name": "broadcast-test",
 		"type": "text",
 	}
@@ -1041,10 +1042,10 @@ func TestAdminAPI_CreateChannel_BroadcastsChannelCreate(t *testing.T) {
 func TestAdminAPI_CreateChannel_NilHubDoesNotPanic(t *testing.T) {
 	database := openAdminTestDB(t)
 	// nil hub: handler must not panic
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
-	body := map[string]interface{}{"name": "safe-channel", "type": "text"}
+	body := map[string]any{"name": "safe-channel", "type": "text"}
 	w := doRequest(t, handler, http.MethodPost, "/channels", token, body)
 
 	if w.Code != http.StatusCreated {
@@ -1060,7 +1061,7 @@ func TestAdminAPI_UpdateChannel_BroadcastsChannelUpdate(t *testing.T) {
 
 	chID, _ := database.AdminCreateChannel("before", "text", "", "", 0)
 
-	body := map[string]interface{}{"name": "after"}
+	body := map[string]any{"name": "after"}
 	w := doRequest(t, handler, http.MethodPatch, "/channels/"+itoa(chID), token, body)
 
 	if w.Code != http.StatusOK {
@@ -1076,11 +1077,11 @@ func TestAdminAPI_UpdateChannel_BroadcastsChannelUpdate(t *testing.T) {
 
 func TestAdminAPI_UpdateChannel_NilHubDoesNotPanic(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	chID, _ := database.AdminCreateChannel("patchme", "text", "", "", 0)
-	body := map[string]interface{}{"name": "patched"}
+	body := map[string]any{"name": "patched"}
 	w := doRequest(t, handler, http.MethodPatch, "/channels/"+itoa(chID), token, body)
 
 	if w.Code != http.StatusOK {
@@ -1111,7 +1112,7 @@ func TestAdminAPI_DeleteChannel_BroadcastsChannelDelete(t *testing.T) {
 
 func TestAdminAPI_DeleteChannel_NilHubDoesNotPanic(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
 	token := createAdminUser(t, database)
 
 	chID, _ := database.AdminCreateChannel("del-no-hub", "text", "", "", 0)
@@ -1129,15 +1130,3 @@ func itoa(n int64) string {
 	return fmt.Sprint(n)
 }
 
-// contains reports whether s contains sub (plain substring search).
-func contains(s, sub string) bool {
-	if len(sub) == 0 {
-		return true
-	}
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}

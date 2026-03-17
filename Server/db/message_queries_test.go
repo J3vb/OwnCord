@@ -136,7 +136,7 @@ func TestGetMessages_ReturnsMessages(t *testing.T) {
 	userID := seedUser(t, database, "dave")
 	chID := seedChannel(t, database, "ch")
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, err := database.CreateMessage(chID, userID, "msg", nil)
 		if err != nil {
 			t.Fatalf("CreateMessage %d: %v", i, err)
@@ -157,7 +157,7 @@ func TestGetMessages_LimitRespected(t *testing.T) {
 	userID := seedUser(t, database, "eve")
 	chID := seedChannel(t, database, "ch")
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_, _ = database.CreateMessage(chID, userID, "msg", nil)
 	}
 
@@ -173,7 +173,7 @@ func TestGetMessages_BeforePagination(t *testing.T) {
 	chID := seedChannel(t, database, "ch")
 
 	var ids []int64
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		id, _ := database.CreateMessage(chID, userID, "msg", nil)
 		ids = append(ids, id)
 	}
@@ -479,7 +479,7 @@ func TestSearchMessages_LimitRespected(t *testing.T) {
 	userID := seedUser(t, database, "carl")
 	chID := seedChannel(t, database, "ch")
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		_, _ = database.CreateMessage(chID, userID, "searchable keyword content", nil)
 	}
 

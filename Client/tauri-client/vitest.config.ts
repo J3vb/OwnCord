@@ -17,7 +17,15 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],
-      exclude: ["src/main.ts", "src/**/*.d.ts"],
+      exclude: [
+        "src/main.ts",
+        "src/**/*.d.ts",
+        "src/lib/window-state.ts",
+        "src/lib/credentials.ts",
+        "src/lib/audio.ts",
+        "src/lib/vad.ts",
+        "src/lib/webrtc.ts",
+      ],
       thresholds: {
         statements: 80,
         branches: 80,

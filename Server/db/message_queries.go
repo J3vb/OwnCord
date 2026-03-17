@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // CreateMessage inserts a new message and returns the assigned ID.
@@ -333,15 +334,16 @@ func (d *DB) getReactionsBatch(msgIDs []int64, requestingUserID int64) (map[int6
 	}
 
 	// Build placeholders for IN clause.
-	placeholders := ""
-	args := make([]any, 0, len(msgIDs)+len(msgIDs))
+	args := make([]any, 0, len(msgIDs)+1)
+	var sb strings.Builder
 	for i, id := range msgIDs {
 		if i > 0 {
-			placeholders += ","
+			sb.WriteByte(',')
 		}
-		placeholders += "?"
+		sb.WriteByte('?')
 		args = append(args, id)
 	}
+	placeholders := sb.String()
 
 	// Query: aggregate count + check if requesting user reacted.
 	query := fmt.Sprintf(

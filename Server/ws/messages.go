@@ -118,16 +118,6 @@ func buildChatMessage(msgID, channelID, userID int64, username string, avatar *s
 	})
 }
 
-// buildMemberLeave constructs a member_leave broadcast per PROTOCOL.md.
-func buildMemberLeave(userID int64) []byte {
-	return buildJSON(map[string]any{
-		"type": "member_leave",
-		"payload": map[string]any{
-			"user_id": userID,
-		},
-	})
-}
-
 // buildMemberUpdate constructs a member_update broadcast per PROTOCOL.md.
 func buildMemberUpdate(userID int64, roleName string) []byte {
 	return buildJSON(map[string]any{
@@ -271,18 +261,6 @@ func buildVoiceLeave(channelID, userID int64) []byte {
 func buildVoiceAnswer(channelID int64, sdp string) []byte {
 	return buildJSON(map[string]any{
 		"type": "voice_answer",
-		"payload": map[string]any{
-			"channel_id": channelID,
-			"sdp":        sdp,
-		},
-	})
-}
-
-// buildVoiceOffer constructs a voice_offer message sent from server to client
-// (used during renegotiation when server needs to send a new offer).
-func buildVoiceOffer(channelID int64, sdp string) []byte {
-	return buildJSON(map[string]any{
-		"type": "voice_offer",
 		"payload": map[string]any{
 			"channel_id": channelID,
 			"sdp":        sdp,

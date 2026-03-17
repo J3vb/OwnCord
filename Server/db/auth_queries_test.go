@@ -441,7 +441,7 @@ func TestUseInviteAtomic_IncrementsUses(t *testing.T) {
 	uid, _ := database.CreateUser("atomic_user2", "hash", 4)
 	code, _ := database.CreateInvite(uid, 5, nil)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := database.UseInviteAtomic(code); err != nil {
 			t.Fatalf("UseInviteAtomic iteration %d: %v", i, err)
 		}
@@ -520,7 +520,7 @@ func TestUseInviteAtomic_ConcurrentSameCode(t *testing.T) {
 	type result struct{ err error }
 	results := make(chan result, 2)
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		go func() {
 			results <- result{err: database.UseInviteAtomic(code)}
 		}()

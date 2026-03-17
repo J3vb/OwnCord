@@ -372,7 +372,7 @@ func (fakeDirInfo) Size() int64       { return 0 }
 func (fakeDirInfo) Mode() fs.FileMode { return fs.ModeDir | 0o755 }
 func (fakeDirInfo) ModTime() time.Time { return time.Time{} }
 func (fakeDirInfo) IsDir() bool       { return true }
-func (fakeDirInfo) Sys() interface{}  { return nil }
+func (fakeDirInfo) Sys() any  { return nil }
 
 type fakeDirEntry struct{}
 
@@ -388,7 +388,7 @@ func (fakeFileInfo) Size() int64       { return 0 }
 func (fakeFileInfo) Mode() fs.FileMode { return 0o644 }
 func (fakeFileInfo) ModTime() time.Time { return time.Time{} }
 func (fakeFileInfo) IsDir() bool       { return false }
-func (fakeFileInfo) Sys() interface{}  { return nil }
+func (fakeFileInfo) Sys() any  { return nil }
 
 func TestMigrateFSReadFileError(t *testing.T) {
 	database := openMemory(t)

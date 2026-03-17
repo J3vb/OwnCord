@@ -31,7 +31,7 @@ func TestGenerateToken_HexCharacters(t *testing.T) {
 func TestGenerateToken_Uniqueness(t *testing.T) {
 	const n = 1000
 	seen := make(map[string]struct{}, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		tok, err := auth.GenerateToken()
 		if err != nil {
 			t.Fatalf("GenerateToken() iteration %d error = %v", i, err)

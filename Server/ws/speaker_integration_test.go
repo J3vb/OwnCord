@@ -24,7 +24,7 @@ func TestVoiceRoom_UpdateSpeakerLevel(t *testing.T) {
 	_ = room.AddParticipant(30)
 
 	// User 10 is loudest (lowest dBov = 10), user 30 quietest (90).
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		room.UpdateSpeakerLevel(10, 10)
 		room.UpdateSpeakerLevel(20, 50)
 		room.UpdateSpeakerLevel(30, 90)
@@ -62,7 +62,7 @@ func TestVoiceRoom_RemoveParticipant_RemovesFromDetector(t *testing.T) {
 	_ = room.AddParticipant(200)
 
 	// Feed audio so both appear in top speakers.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		room.UpdateSpeakerLevel(100, 20)
 		room.UpdateSpeakerLevel(200, 30)
 	}
@@ -191,7 +191,7 @@ func TestSpeakerBroadcast_Integration(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// Feed audio levels into the room — make user 1 a speaker.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		room.UpdateSpeakerLevel(1, 20) // level=20 (dBov), well below silence threshold
 	}
 
@@ -251,7 +251,7 @@ func TestSpeakerBroadcast_NoBroadcastWhenNoChange(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// Feed levels to produce a stable speaker list.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		room.UpdateSpeakerLevel(2, 20)
 	}
 
@@ -312,7 +312,7 @@ func TestSpeakerBroadcast_RoomCleanup(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// Feed levels so the ticker broadcasts at least once.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		room.UpdateSpeakerLevel(3, 20)
 	}
 
@@ -338,7 +338,7 @@ func TestSpeakerBroadcast_RoomCleanup(t *testing.T) {
 	// Re-create the room and feed a new speaker — the ticker should broadcast
 	// again because prevSpeakers[chanID] was deleted when the room was removed.
 	newRoom := hub.GetOrCreateVoiceRoom(chanID, cfg)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		newRoom.UpdateSpeakerLevel(3, 20)
 	}
 

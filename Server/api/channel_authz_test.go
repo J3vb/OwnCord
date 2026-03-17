@@ -48,7 +48,7 @@ func TestChannelList_FiltersOutDeniedChannels(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
 
-	var channels []map[string]interface{}
+	var channels []map[string]any
 	if err := json.NewDecoder(rr.Body).Decode(&channels); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestChannelList_AdminSeesAllChannels(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
 
-	var channels []interface{}
+	var channels []any
 	_ = json.NewDecoder(rr.Body).Decode(&channels)
 	if len(channels) != 2 {
 		t.Errorf("admin should see all 2 channels, got %d", len(channels))
@@ -151,9 +151,9 @@ func TestSearch_FiltersResultsByPermission(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&resp)
-	results, ok := resp["results"].([]interface{})
+	results, ok := resp["results"].([]any)
 	if !ok {
 		t.Fatalf("results is not an array: %v", resp)
 	}
@@ -184,9 +184,9 @@ func TestSearch_AdminSeesAllResults(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&resp)
-	results := resp["results"].([]interface{})
+	results := resp["results"].([]any)
 	if len(results) != 2 {
 		t.Errorf("admin should see all 2 results, got %d", len(results))
 	}
