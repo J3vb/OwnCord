@@ -13,6 +13,7 @@ import { createUserBar } from "@components/UserBar";
 import { createVoiceWidget } from "@components/VoiceWidget";
 import { createMemberList } from "@components/MemberList";
 import { createMessageList } from "@components/MessageList";
+import type { MessageListComponent } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
 import type { MessageInputComponent } from "@components/MessageInput";
 import { createTypingIndicator } from "@components/TypingIndicator";
@@ -26,6 +27,7 @@ import { closeSettings, toggleMemberList, uiStore } from "@stores/ui.store";
 import { channelsStore, getActiveChannel, setActiveChannel } from "@stores/channels.store";
 import {
   voiceStore,
+  joinVoiceChannel,
   leaveVoiceChannel,
   setLocalMuted,
   setLocalDeafened,
@@ -72,7 +74,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   // Refs we need to update reactively
   let banner: ServerBannerControl | null = null;
-  let messageList: MountableComponent | null = null;
+  let messageList: MessageListComponent | null = null;
   let messageInput: MessageInputComponent | null = null;
   let typingIndicator: MountableComponent | null = null;
   let chatHeaderName: HTMLSpanElement | null = null;
@@ -108,10 +110,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // ---------------------------------------------------------------------------
 
   async function loadMessages(channelId: number, signal: AbortSignal): Promise<void> {
-    if (isChannelLoaded(channelId)) return;
+    if (isChannelLoaded(channelId)) {
+      log.debug("Messages already loaded", { channelId });
+      return;
+    }
     try {
       const resp = await api.getMessages(channelId, { limit: 50 }, signal);
       if (!signal.aborted) {
+        log.info("Messages loaded", { channelId, count: resp.messages.length, hasMore: resp.has_more });
         setMessages(channelId, resp.messages, resp.has_more);
       }
     } catch (err) {
@@ -153,6 +159,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     destroyChannelComponents();
     currentChannelId = channelId;
+
+    log.info("Switching channel", { channelId, channelName });
+
+    // Notify server which channel we're viewing so channel-scoped
+    // broadcasts (chat_message, typing, etc.) are delivered to us.
+    ws.send({
+      type: "channel_focus",
+      payload: { channel_id: channelId },
+    });
 
     channelAbort = new AbortController();
     const signal = channelAbort.signal;
@@ -294,6 +309,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // ---------------------------------------------------------------------------
 
   function mount(target: Element): void {
+    log.info("MainPage mounting");
     container = target;
 
     root = createElement("div", {
@@ -336,7 +352,18 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const sidebarWrapper = createElement("div", { class: "channel-sidebar", "data-testid": "channel-sidebar" });
 
     const channelSidebarSlot = createElement("div", {});
-    const channelSidebar = createChannelSidebar();
+    const channelSidebar = createChannelSidebar({
+      onVoiceJoin: (channelId) => {
+        log.info("Joining voice channel", { channelId });
+        joinVoiceChannel(channelId);
+        ws.send({ type: "voice_join", payload: { channel_id: channelId } });
+      },
+      onVoiceLeave: () => {
+        log.info("Leaving voice channel");
+        leaveVoiceChannel();
+        ws.send({ type: "voice_leave", payload: {} });
+      },
+    });
     channelSidebar.mount(channelSidebarSlot);
     children.push(channelSidebar);
 
@@ -370,7 +397,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const voiceWidgetSlot = createElement("div", {});
     const voiceWidget = createVoiceWidget({
       onDisconnect: () => {
+        if (voiceStore.getState().currentChannelId === null) return;
+        log.info("Leaving voice channel (widget disconnect)");
         leaveVoiceChannel();
+        ws.send({ type: "voice_leave", payload: {} });
       },
       onMuteToggle: () => {
         if (!limiters.voice.tryConsume()) return;
@@ -409,6 +439,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       getRoot: () => root,
       getToast: () => toast,
       getCurrentChannelId: () => currentChannelId,
+      onJumpToMessage: (msgId: number) => {
+        if (messageList === null) return false;
+        return messageList.scrollToMessage(msgId);
+      },
     });
     unsubscribers.push(() => { pinnedCtrl?.cleanup(); });
 
@@ -478,6 +512,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   }
 
   function destroy(): void {
+    log.info("MainPage destroying");
     destroyChannelComponents();
 
     for (const child of children) {

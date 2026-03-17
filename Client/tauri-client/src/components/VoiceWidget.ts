@@ -1,15 +1,14 @@
 /**
  * VoiceWidget component — shows active voice channel info with controls.
  * Hidden when not connected to a voice channel.
+ * Users are displayed under the voice channel in the sidebar, NOT here.
  * Step 6.50
  */
 
-import { createElement, appendChildren, setText, clearChildren } from "@lib/dom";
+import { createElement, appendChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { voiceStore } from "@stores/voice.store";
-import type { VoiceUser } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
-import { membersStore } from "@stores/members.store";
 
 export interface VoiceWidgetOptions {
   onDisconnect(): void;
@@ -23,14 +22,13 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   const ac = new AbortController();
   let root: HTMLDivElement | null = null;
   let channelNameEl: HTMLSpanElement | null = null;
-  let usersContainer: HTMLDivElement | null = null;
   let muteBtn: HTMLButtonElement | null = null;
   let deafenBtn: HTMLButtonElement | null = null;
 
   const unsubs: Array<() => void> = [];
 
   function render(): void {
-    if (root === null || channelNameEl === null || usersContainer === null) return;
+    if (root === null || channelNameEl === null) return;
 
     const voice = voiceStore.getState();
     const channelId = voice.currentChannelId;
@@ -49,39 +47,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     // Toggle button active states
     muteBtn?.classList.toggle("active-ctrl", voice.localMuted);
     deafenBtn?.classList.toggle("active-ctrl", voice.localDeafened);
-
-    // User list
-    clearChildren(usersContainer);
-    const channelUsers = voice.voiceUsers.get(channelId);
-    if (channelUsers === undefined) return;
-
-    const members = membersStore.getState().members;
-
-    for (const user of channelUsers.values()) {
-      const userEl = createUserRow(user, members.get(user.userId)?.username);
-      usersContainer.appendChild(userEl);
-    }
-  }
-
-  function createUserRow(user: VoiceUser, username?: string): HTMLDivElement {
-    const row = createElement("div", {
-      class: user.speaking ? "voice-user-item speaking" : "voice-user-item",
-      "data-testid": `voice-user-${user.userId}`,
-    });
-    const avatar = createElement("div", {
-      class: "vu-avatar",
-      style: "background: var(--accent)",
-    }, (username ?? "?").charAt(0).toUpperCase());
-    const nameEl = createElement("span", {}, username ?? "Unknown");
-
-    appendChildren(row, avatar, nameEl);
-
-    if (user.muted) {
-      const muted = createElement("span", { class: "vu-muted" }, "\uD83D\uDD07");
-      row.appendChild(muted);
-    }
-
-    return row;
   }
 
   function createControlButton(
@@ -106,8 +71,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     channelNameEl = createElement("span", { class: "vw-channel" }, "Voice Channel");
     appendChildren(header, connLabel, channelNameEl);
 
-    usersContainer = createElement("div", { class: "voice-users-list" });
-
     const controls = createElement("div", { class: "vw-controls" });
     muteBtn = createControlButton("Mute", "\uD83C\uDFA4", options.onMuteToggle);
     deafenBtn = createControlButton("Deafen", "\uD83C\uDFA7", options.onDeafenToggle);
@@ -118,13 +81,12 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     );
     appendChildren(controls, muteBtn, deafenBtn, cameraBtn, shareBtn, disconnectBtn);
 
-    appendChildren(root, header, usersContainer, controls);
+    appendChildren(root, header, controls);
 
     render();
 
     unsubs.push(voiceStore.subscribe(() => render()));
     unsubs.push(channelsStore.subscribe(() => render()));
-    unsubs.push(membersStore.subscribe(() => render()));
 
     container.appendChild(root);
   }
@@ -138,7 +100,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     root?.remove();
     root = null;
     channelNameEl = null;
-    usersContainer = null;
     muteBtn = null;
     deafenBtn = null;
   }

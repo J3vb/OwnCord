@@ -132,7 +132,7 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
-  it("renders voice users", () => {
+  it("does not render voice users (users only shown in sidebar)", () => {
     channelsStore.setState((prev) => {
       const channels = new Map(prev.channels);
       channels.set(1, {
@@ -145,18 +145,6 @@ describe("VoiceWidget", () => {
         lastMessageId: null,
       });
       return { ...prev, channels };
-    });
-
-    membersStore.setState((prev) => {
-      const members = new Map(prev.members);
-      members.set(10, {
-        id: 10,
-        username: "Alice",
-        avatar: null,
-        role: "member",
-        status: "online",
-      });
-      return { ...prev, members };
     });
 
     setVoiceChannel(1, [
@@ -181,8 +169,7 @@ describe("VoiceWidget", () => {
     widget.mount(container);
 
     const userItems = container.querySelectorAll(".voice-user-item");
-    expect(userItems.length).toBe(1);
-    expect(container.querySelector('[data-testid="voice-user-10"]')).not.toBeNull();
+    expect(userItems.length).toBe(0);
 
     widget.destroy?.();
   });

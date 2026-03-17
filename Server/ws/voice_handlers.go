@@ -137,8 +137,8 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 		return
 	}
 
-	// Broadcast the joiner's state to all clients currently in this voice channel.
-	h.BroadcastToChannel(channelID, buildVoiceState(*state))
+	// Broadcast the joiner's state to all connected clients so every sidebar updates.
+	h.BroadcastToAll(buildVoiceState(*state))
 
 	// Send existing channel voice states to the joiner.
 	existing, err := h.db.GetChannelVoiceStates(channelID)
@@ -221,7 +221,7 @@ func (h *Hub) handleVoiceLeave(c *Client) {
 	}
 
 	if state != nil {
-		h.BroadcastToChannel(state.ChannelID, buildVoiceLeave(state.ChannelID, c.userID))
+		h.BroadcastToAll(buildVoiceLeave(state.ChannelID, c.userID))
 	}
 }
 
@@ -571,5 +571,5 @@ func (h *Hub) broadcastVoiceStateUpdate(c *Client) {
 	if state == nil {
 		return // user not in a voice channel — nothing to broadcast
 	}
-	h.BroadcastToChannel(state.ChannelID, buildVoiceState(*state))
+	h.BroadcastToAll(buildVoiceState(*state))
 }

@@ -165,6 +165,7 @@ func (h *Hub) Run() {
 			// so writePump exits cleanly before the new client takes over.
 			// Also clean up any voice state the old client held.
 			if old, ok := h.clients[c.userID]; ok && old != c {
+				slog.Info("hub: replacing existing client", "user_id", c.userID)
 				oldChID, oldPC := old.clearVoice()
 				if oldPC != nil {
 					_ = oldPC.Close()
@@ -183,12 +184,14 @@ func (h *Hub) Run() {
 				old.closeSend()
 			}
 			h.clients[c.userID] = c
+			slog.Info("hub: client registered", "user_id", c.userID, "total_clients", len(h.clients))
 			h.mu.Unlock()
 
 		case c := <-h.unregister:
 			h.mu.Lock()
 			if current, ok := h.clients[c.userID]; ok && current == c {
 				delete(h.clients, c.userID)
+				slog.Info("hub: client unregistered", "user_id", c.userID, "total_clients", len(h.clients))
 			}
 			h.mu.Unlock()
 
@@ -248,7 +251,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 
 	// Broadcast voice_leave for each participant.
 	for _, userID := range participantIDs {
-		h.BroadcastToChannel(channelID, buildVoiceLeave(channelID, userID))
+		h.BroadcastToAll(buildVoiceLeave(channelID, userID))
 	}
 }
 
@@ -347,16 +350,24 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	delivered := 0
+	skipped := 0
 	for _, c := range h.clients {
 		// channelID == 0 → broadcast to everyone.
-		if bm.channelID != 0 && c.channelID != bm.channelID {
+		if bm.channelID != 0 && c.channelID != bm.channelID && c.getVoiceChID() != bm.channelID {
+			skipped++
 			continue
 		}
 		select {
 		case c.send <- bm.msg:
+			delivered++
 		default:
 			slog.Warn("broadcast dropped: client send buffer full",
 				"user_id", c.userID, "channel_id", bm.channelID)
 		}
+	}
+	if bm.channelID != 0 {
+		slog.Debug("hub: channel broadcast",
+			"channel_id", bm.channelID, "delivered", delivered, "skipped", skipped)
 	}
 }
