@@ -59,6 +59,14 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 			h.kickClient(c)
 			return
 		}
+		// Also check if user has been banned since connection was established.
+		user, userErr := h.db.GetUserByID(c.userID)
+		if userErr != nil || user == nil || auth.IsEffectivelyBanned(user) {
+			slog.Info("ws user banned, closing connection", "user_id", c.userID)
+			c.sendMsg(buildErrorMsg("BANNED", "you are banned"))
+			h.kickClient(c)
+			return
+		}
 	}
 
 	var env envelope
@@ -265,7 +273,8 @@ func (h *Hub) handleChatEdit(c *Client, _ string, payload json.RawMessage) {
 
 	msg, err := h.db.GetMessage(msgID)
 	if err != nil || msg == nil {
-		slog.Error("ws handleChatEdit GetMessage after edit", "err", err)
+		slog.Error("ws handleChatEdit GetMessage after edit", "err", err, "msg_id", msgID)
+		c.sendMsg(buildErrorMsg("INTERNAL", "edit saved but broadcast failed"))
 		return
 	}
 
@@ -349,7 +358,9 @@ func (h *Hub) handleReaction(c *Client, add bool, payload json.RawMessage) {
 
 	msg, err := h.db.GetMessage(msgID)
 	if err != nil || msg == nil {
-		c.sendMsg(buildErrorMsg("NOT_FOUND", "message not found"))
+		// Normalize: return same error whether message doesn't exist or is in
+		// a channel the user can't see (prevents IDOR information leak).
+		c.sendMsg(buildErrorMsg("BAD_REQUEST", "reaction failed"))
 		return
 	}
 
@@ -365,7 +376,9 @@ func (h *Hub) handleReaction(c *Client, add bool, payload json.RawMessage) {
 		err = h.db.RemoveReaction(msgID, c.userID, p.Emoji)
 	}
 	if err != nil {
-		c.sendMsg(buildErrorMsg("CONFLICT", err.Error()))
+		// Sanitize: never leak raw DB constraint errors to client.
+		slog.Warn("reaction failed", "action", action, "msg_id", msgID, "user_id", c.userID, "err", err)
+		c.sendMsg(buildErrorMsg("CONFLICT", "reaction failed"))
 		return
 	}
 

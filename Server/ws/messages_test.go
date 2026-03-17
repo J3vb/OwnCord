@@ -179,3 +179,412 @@ func TestBuildChannelDelete_ValidJSON(t *testing.T) {
 		t.Errorf("buildChannelDelete output is not valid JSON: %s", msg)
 	}
 }
+
+// ─── buildAuthError ───────────────────────────────────────────────────────────
+
+func TestBuildAuthError_Type(t *testing.T) {
+	msg := buildAuthError("invalid token")
+	var env struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Type != "auth_error" {
+		t.Errorf("type = %q, want auth_error", env.Type)
+	}
+}
+
+func TestBuildAuthError_Payload(t *testing.T) {
+	msg := buildAuthError("session expired")
+	var env struct {
+		Payload struct {
+			Message string `json:"message"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Payload.Message != "session expired" {
+		t.Errorf("payload.message = %q, want session expired", env.Payload.Message)
+	}
+}
+
+func TestBuildAuthError_ValidJSON(t *testing.T) {
+	msg := buildAuthError("bad token")
+	if !json.Valid(msg) {
+		t.Errorf("buildAuthError output is not valid JSON: %s", msg)
+	}
+}
+
+// ─── buildMemberJoin ──────────────────────────────────────────────────────────
+
+func TestBuildMemberJoin_Type(t *testing.T) {
+	user := &db.User{ID: 1, Username: "alice"}
+	msg := buildMemberJoin(user, "member")
+	var env struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Type != "member_join" {
+		t.Errorf("type = %q, want member_join", env.Type)
+	}
+}
+
+func TestBuildMemberJoin_Payload(t *testing.T) {
+	user := &db.User{ID: 42, Username: "alice"}
+	msg := buildMemberJoin(user, "admin")
+	var env struct {
+		Payload struct {
+			User struct {
+				ID       int64  `json:"id"`
+				Username string `json:"username"`
+				Role     string `json:"role"`
+			} `json:"user"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	u := env.Payload.User
+	if u.ID != 42 {
+		t.Errorf("user.id = %d, want 42", u.ID)
+	}
+	if u.Username != "alice" {
+		t.Errorf("user.username = %q, want alice", u.Username)
+	}
+	if u.Role != "admin" {
+		t.Errorf("user.role = %q, want admin", u.Role)
+	}
+}
+
+func TestBuildMemberJoin_NilAvatar(t *testing.T) {
+	user := &db.User{ID: 1, Username: "noavatar", Avatar: nil}
+	msg := buildMemberJoin(user, "member")
+	var env struct {
+		Payload struct {
+			User struct {
+				Avatar any `json:"avatar"`
+			} `json:"user"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Payload.User.Avatar != nil {
+		t.Errorf("avatar = %v, want nil for nil avatar", env.Payload.User.Avatar)
+	}
+}
+
+func TestBuildMemberJoin_NonNilAvatar(t *testing.T) {
+	avatarURL := "https://example.com/avatar.png"
+	user := &db.User{ID: 1, Username: "withavatar", Avatar: &avatarURL}
+	msg := buildMemberJoin(user, "member")
+	var env struct {
+		Payload struct {
+			User struct {
+				Avatar string `json:"avatar"`
+			} `json:"user"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Payload.User.Avatar != avatarURL {
+		t.Errorf("avatar = %q, want %q", env.Payload.User.Avatar, avatarURL)
+	}
+}
+
+// ─── buildMemberUpdate ────────────────────────────────────────────────────────
+
+func TestBuildMemberUpdate_Type(t *testing.T) {
+	msg := buildMemberUpdate(7, "moderator")
+	var env struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Type != "member_update" {
+		t.Errorf("type = %q, want member_update", env.Type)
+	}
+}
+
+func TestBuildMemberUpdate_Payload(t *testing.T) {
+	msg := buildMemberUpdate(7, "moderator")
+	var env struct {
+		Payload struct {
+			UserID int64  `json:"user_id"`
+			Role   string `json:"role"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Payload.UserID != 7 {
+		t.Errorf("payload.user_id = %d, want 7", env.Payload.UserID)
+	}
+	if env.Payload.Role != "moderator" {
+		t.Errorf("payload.role = %q, want moderator", env.Payload.Role)
+	}
+}
+
+// ─── buildMemberBan ───────────────────────────────────────────────────────────
+
+func TestBuildMemberBan_Type(t *testing.T) {
+	msg := buildMemberBan(55)
+	var env struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Type != "member_ban" {
+		t.Errorf("type = %q, want member_ban", env.Type)
+	}
+}
+
+func TestBuildMemberBan_Payload(t *testing.T) {
+	msg := buildMemberBan(55)
+	var env struct {
+		Payload struct {
+			UserID int64 `json:"user_id"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Payload.UserID != 55 {
+		t.Errorf("payload.user_id = %d, want 55", env.Payload.UserID)
+	}
+}
+
+func TestBuildMemberBan_ValidJSON(t *testing.T) {
+	if !json.Valid(buildMemberBan(1)) {
+		t.Error("buildMemberBan output is not valid JSON")
+	}
+}
+
+// ─── buildChatEdited ──────────────────────────────────────────────────────────
+
+func TestBuildChatEdited_Type(t *testing.T) {
+	msg := buildChatEdited(10, 20, "new content", "2024-01-01T00:00:00Z")
+	var env struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Type != "chat_edited" {
+		t.Errorf("type = %q, want chat_edited", env.Type)
+	}
+}
+
+func TestBuildChatEdited_Payload(t *testing.T) {
+	msg := buildChatEdited(10, 20, "new content", "2024-01-01T00:00:00Z")
+	var env struct {
+		Payload struct {
+			MessageID int64  `json:"message_id"`
+			ChannelID int64  `json:"channel_id"`
+			Content   string `json:"content"`
+			EditedAt  string `json:"edited_at"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	p := env.Payload
+	if p.MessageID != 10 {
+		t.Errorf("payload.message_id = %d, want 10", p.MessageID)
+	}
+	if p.ChannelID != 20 {
+		t.Errorf("payload.channel_id = %d, want 20", p.ChannelID)
+	}
+	if p.Content != "new content" {
+		t.Errorf("payload.content = %q, want new content", p.Content)
+	}
+	if p.EditedAt != "2024-01-01T00:00:00Z" {
+		t.Errorf("payload.edited_at = %q, want 2024-01-01T00:00:00Z", p.EditedAt)
+	}
+}
+
+// ─── buildChatDeleted ─────────────────────────────────────────────────────────
+
+func TestBuildChatDeleted_Type(t *testing.T) {
+	msg := buildChatDeleted(11, 22)
+	var env struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Type != "chat_deleted" {
+		t.Errorf("type = %q, want chat_deleted", env.Type)
+	}
+}
+
+func TestBuildChatDeleted_Payload(t *testing.T) {
+	msg := buildChatDeleted(11, 22)
+	var env struct {
+		Payload struct {
+			MessageID int64 `json:"message_id"`
+			ChannelID int64 `json:"channel_id"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Payload.MessageID != 11 {
+		t.Errorf("payload.message_id = %d, want 11", env.Payload.MessageID)
+	}
+	if env.Payload.ChannelID != 22 {
+		t.Errorf("payload.channel_id = %d, want 22", env.Payload.ChannelID)
+	}
+}
+
+func TestBuildChatDeleted_ValidJSON(t *testing.T) {
+	if !json.Valid(buildChatDeleted(1, 2)) {
+		t.Error("buildChatDeleted output is not valid JSON")
+	}
+}
+
+// ─── buildReactionUpdate ──────────────────────────────────────────────────────
+
+func TestBuildReactionUpdate_Type(t *testing.T) {
+	msg := buildReactionUpdate(1, 2, 3, "👍", "add")
+	var env struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Type != "reaction_update" {
+		t.Errorf("type = %q, want reaction_update", env.Type)
+	}
+}
+
+func TestBuildReactionUpdate_Payload(t *testing.T) {
+	msg := buildReactionUpdate(100, 200, 300, "❤️", "remove")
+	var env struct {
+		Payload struct {
+			MessageID int64  `json:"message_id"`
+			ChannelID int64  `json:"channel_id"`
+			UserID    int64  `json:"user_id"`
+			Emoji     string `json:"emoji"`
+			Action    string `json:"action"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	p := env.Payload
+	if p.MessageID != 100 {
+		t.Errorf("payload.message_id = %d, want 100", p.MessageID)
+	}
+	if p.ChannelID != 200 {
+		t.Errorf("payload.channel_id = %d, want 200", p.ChannelID)
+	}
+	if p.UserID != 300 {
+		t.Errorf("payload.user_id = %d, want 300", p.UserID)
+	}
+	if p.Emoji != "❤️" {
+		t.Errorf("payload.emoji = %q, want ❤️", p.Emoji)
+	}
+	if p.Action != "remove" {
+		t.Errorf("payload.action = %q, want remove", p.Action)
+	}
+}
+
+func TestBuildReactionUpdate_ValidJSON(t *testing.T) {
+	if !json.Valid(buildReactionUpdate(1, 2, 3, "😀", "add")) {
+		t.Error("buildReactionUpdate output is not valid JSON")
+	}
+}
+
+// ─── buildTypingMsg ───────────────────────────────────────────────────────────
+
+func TestBuildTypingMsg_Type(t *testing.T) {
+	msg := buildTypingMsg(5, 10, "alice")
+	var env struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Type != "typing" {
+		t.Errorf("type = %q, want typing", env.Type)
+	}
+}
+
+func TestBuildTypingMsg_Payload(t *testing.T) {
+	msg := buildTypingMsg(5, 10, "alice")
+	var env struct {
+		Payload struct {
+			ChannelID int64  `json:"channel_id"`
+			UserID    int64  `json:"user_id"`
+			Username  string `json:"username"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	p := env.Payload
+	if p.ChannelID != 5 {
+		t.Errorf("payload.channel_id = %d, want 5", p.ChannelID)
+	}
+	if p.UserID != 10 {
+		t.Errorf("payload.user_id = %d, want 10", p.UserID)
+	}
+	if p.Username != "alice" {
+		t.Errorf("payload.username = %q, want alice", p.Username)
+	}
+}
+
+func TestBuildTypingMsg_ValidJSON(t *testing.T) {
+	if !json.Valid(buildTypingMsg(1, 2, "user")) {
+		t.Error("buildTypingMsg output is not valid JSON")
+	}
+}
+
+// ─── buildVoiceAnswer ─────────────────────────────────────────────────────────
+
+func TestBuildVoiceAnswer_Type(t *testing.T) {
+	msg := buildVoiceAnswer(99, "v=0\r\n")
+	var env struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Type != "voice_answer" {
+		t.Errorf("type = %q, want voice_answer", env.Type)
+	}
+}
+
+func TestBuildVoiceAnswer_Payload(t *testing.T) {
+	sdp := "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n"
+	msg := buildVoiceAnswer(99, sdp)
+	var env struct {
+		Payload struct {
+			ChannelID int64  `json:"channel_id"`
+			SDP       string `json:"sdp"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Payload.ChannelID != 99 {
+		t.Errorf("payload.channel_id = %d, want 99", env.Payload.ChannelID)
+	}
+	if env.Payload.SDP != sdp {
+		t.Errorf("payload.sdp = %q, want %q", env.Payload.SDP, sdp)
+	}
+}
+
+func TestBuildVoiceAnswer_ValidJSON(t *testing.T) {
+	if !json.Valid(buildVoiceAnswer(1, "sdp-data")) {
+		t.Error("buildVoiceAnswer output is not valid JSON")
+	}
+}

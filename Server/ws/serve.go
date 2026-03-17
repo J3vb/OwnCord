@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 
 	"nhooyr.io/websocket"
@@ -18,58 +17,6 @@ import (
 const authDeadline = 10 * time.Second
 const writeTimeout = 10 * time.Second
 const settingsCacheTTL = 30 * time.Second
-
-// cachedSettings holds server_name and motd to avoid per-connection DB queries.
-var (
-	settingsMu         sync.RWMutex
-	settingsName       = "OwnCord Server"
-	settingsMotd       = "Welcome!"
-	settingsLastUpdate time.Time
-	settingsDB         *db.DB
-)
-
-// InitSettingsCache sets the DB reference for the settings cache.
-// Must be called once during server startup.
-func InitSettingsCache(database *db.DB) {
-	settingsMu.Lock()
-	defer settingsMu.Unlock()
-	settingsDB = database
-	refreshSettingsLocked()
-}
-
-func refreshSettingsLocked() {
-	if settingsDB == nil {
-		return
-	}
-	var name, motd string
-	if err := settingsDB.QueryRow("SELECT value FROM settings WHERE key='server_name'").Scan(&name); err == nil {
-		settingsName = name
-	}
-	if err := settingsDB.QueryRow("SELECT value FROM settings WHERE key='motd'").Scan(&motd); err == nil {
-		settingsMotd = motd
-	}
-	settingsLastUpdate = time.Now()
-}
-
-// getCachedSettings returns server_name and motd, refreshing the cache if stale.
-func getCachedSettings() (string, string) {
-	settingsMu.RLock()
-	if time.Since(settingsLastUpdate) < settingsCacheTTL {
-		name, motd := settingsName, settingsMotd
-		settingsMu.RUnlock()
-		return name, motd
-	}
-	settingsMu.RUnlock()
-
-	settingsMu.Lock()
-	defer settingsMu.Unlock()
-	// Double-check after acquiring write lock.
-	if time.Since(settingsLastUpdate) < settingsCacheTTL {
-		return settingsName, settingsMotd
-	}
-	refreshSettingsLocked()
-	return settingsName, settingsMotd
-}
 
 // ServeWS upgrades an HTTP connection to WebSocket, performs in-band auth,
 // then drives the client's read/write loops.
@@ -115,9 +62,13 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 
 		// Send auth_ok followed by the ready payload.
 		ctx := r.Context()
-		_ = conn.Write(ctx, websocket.MessageText, buildAuthOK(user, roleName))
-		if ready, readyErr := buildReady(database, user.ID); readyErr == nil {
+		_ = conn.Write(ctx, websocket.MessageText, hub.buildAuthOK(user, roleName))
+		if ready, readyErr := hub.buildReady(database, user.ID); readyErr == nil {
 			_ = conn.Write(ctx, websocket.MessageText, ready)
+		} else {
+			slog.Error("buildReady failed", "user_id", user.ID, "err", readyErr)
+			_ = conn.Write(ctx, websocket.MessageText,
+				buildErrorMsg("INTERNAL", "failed to build ready payload"))
 		}
 
 		hub.BroadcastToAll(buildMemberJoin(user, roleName))
@@ -232,13 +183,13 @@ func authenticateConn(conn *websocket.Conn, database *db.DB) (*db.User, string, 
 
 // buildAuthOK constructs the auth_ok server→client message.
 // Per PROTOCOL.md, user object contains only id, username, avatar, role (no status).
-func buildAuthOK(user *db.User, roleName string) []byte {
+func (h *Hub) buildAuthOK(user *db.User, roleName string) []byte {
 	var avatarVal any
 	if user.Avatar != nil {
 		avatarVal = *user.Avatar
 	}
 
-	serverName, motd := getCachedSettings()
+	serverName, motd := h.getCachedSettings()
 
 	return buildJSON(map[string]any{
 		"type": "auth_ok",
@@ -258,7 +209,7 @@ func buildAuthOK(user *db.User, roleName string) []byte {
 // buildReady constructs the ready server→client message.
 // Per PROTOCOL.md, channels include unread_count and last_message_id per user,
 // and only protocol-specified fields (no slow_mode, archived, voice_* extras).
-func buildReady(database *db.DB, userID int64) ([]byte, error) {
+func (h *Hub) buildReady(database *db.DB, userID int64) ([]byte, error) {
 	channels, err := database.ListChannels()
 	if err != nil {
 		return nil, fmt.Errorf("buildReady ListChannels: %w", err)
@@ -311,7 +262,7 @@ func buildReady(database *db.DB, userID int64) ([]byte, error) {
 		voiceStates = []db.VoiceState{}
 	}
 
-	serverName, motd := getCachedSettings()
+	serverName, motd := h.getCachedSettings()
 
 	return buildJSON(map[string]any{
 		"type": "ready",

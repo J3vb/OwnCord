@@ -18,7 +18,7 @@ MIGRATION-PLAN.md
 TESTING-STRATEGY.md
 CLIENT-ARCHITECTURE.md
 docs/superpowers/
-
+docs/brain/
 # Server runtime artifacts
 Server/chatserver.exe
 Server/config.yaml

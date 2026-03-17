@@ -2,7 +2,9 @@
 package ws
 
 import (
+	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
@@ -29,20 +31,67 @@ type Hub struct {
 	sfu          *SFU
 	voiceRooms   map[int64]*VoiceRoom
 	voiceRoomsMu sync.RWMutex
+
+	// Settings cache — avoids per-connection DB queries for server_name/motd.
+	settingsMu         sync.RWMutex
+	settingsName       string
+	settingsMotd       string
+	settingsLastUpdate time.Time
 }
 
 // NewHub creates a Hub ready to be started with Run.
+// It also initializes the settings cache from the database.
 func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
-	return &Hub{
-		clients:    make(map[int64]*Client),
-		db:         database,
-		limiter:    limiter,
-		broadcast:  make(chan broadcastMsg, 256),
-		register:   make(chan *Client, 32),
-		unregister: make(chan *Client, 32),
-		stop:       make(chan struct{}),
-		voiceRooms: make(map[int64]*VoiceRoom),
+	h := &Hub{
+		clients:      make(map[int64]*Client),
+		db:           database,
+		limiter:      limiter,
+		broadcast:    make(chan broadcastMsg, 256),
+		register:     make(chan *Client, 32),
+		unregister:   make(chan *Client, 32),
+		stop:         make(chan struct{}),
+		voiceRooms:   make(map[int64]*VoiceRoom),
+		settingsName: "OwnCord Server",
+		settingsMotd: "Welcome!",
 	}
+	h.refreshSettingsLocked()
+	return h
+}
+
+// getCachedSettings returns server_name and motd, refreshing the cache if stale.
+func (h *Hub) getCachedSettings() (string, string) {
+	h.settingsMu.RLock()
+	if time.Since(h.settingsLastUpdate) < settingsCacheTTL {
+		name, motd := h.settingsName, h.settingsMotd
+		h.settingsMu.RUnlock()
+		return name, motd
+	}
+	h.settingsMu.RUnlock()
+
+	h.settingsMu.Lock()
+	defer h.settingsMu.Unlock()
+	// Double-check after acquiring write lock.
+	if time.Since(h.settingsLastUpdate) < settingsCacheTTL {
+		return h.settingsName, h.settingsMotd
+	}
+	h.refreshSettingsLocked()
+	return h.settingsName, h.settingsMotd
+}
+
+// refreshSettingsLocked reloads server_name and motd from the DB.
+// Caller must hold settingsMu (write lock) or call during init.
+func (h *Hub) refreshSettingsLocked() {
+	if h.db == nil {
+		return
+	}
+	var name, motd string
+	if err := h.db.QueryRow("SELECT value FROM settings WHERE key='server_name'").Scan(&name); err == nil {
+		h.settingsName = name
+	}
+	if err := h.db.QueryRow("SELECT value FROM settings WHERE key='motd'").Scan(&motd); err == nil {
+		h.settingsMotd = motd
+	}
+	h.settingsLastUpdate = time.Now()
 }
 
 // SetSFU sets the SFU engine on the hub. Must be called before Run.
@@ -306,7 +355,8 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		select {
 		case c.send <- bm.msg:
 		default:
-			// Client's buffer is full; skip to avoid blocking the hub.
+			slog.Warn("broadcast dropped: client send buffer full",
+				"user_id", c.userID, "channel_id", bm.channelID)
 		}
 	}
 }

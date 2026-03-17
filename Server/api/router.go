@@ -66,7 +66,6 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string) http.Handler {
 		hub.SetSFU(sfu)
 	}
 
-	ws.InitSettingsCache(database)
 	go hub.Run()
 	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins))
 

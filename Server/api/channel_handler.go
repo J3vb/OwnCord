@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -49,6 +50,7 @@ func handleListChannels(database *db.DB) http.HandlerFunc {
 
 		channels, err := database.ListChannels()
 		if err != nil {
+			slog.Error("handleListChannels ListChannels", "err", err)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL",
 				Message: "failed to list channels",
@@ -81,6 +83,7 @@ func handleGetMessages(database *db.DB) http.HandlerFunc {
 
 		ch, err := database.GetChannel(channelID)
 		if err != nil {
+			slog.Error("handleGetMessages GetChannel", "err", err, "channel_id", channelID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL",
 				Message: "failed to look up channel",
@@ -144,6 +147,7 @@ func handleGetMessages(database *db.DB) http.HandlerFunc {
 		// Fetch one extra to determine has_more.
 		msgs, err := database.GetMessagesForAPI(channelID, before, limit+1, userID)
 		if err != nil {
+			slog.Error("handleGetMessages GetMessagesForAPI", "err", err, "channel_id", channelID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL",
 				Message: "failed to fetch messages",
@@ -209,6 +213,7 @@ func handleSearch(database *db.DB) http.HandlerFunc {
 
 		results, err := database.SearchMessages(q, channelID, limit)
 		if err != nil {
+			slog.Error("handleSearch SearchMessages", "err", err, "query", q)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL",
 				Message: "search failed",

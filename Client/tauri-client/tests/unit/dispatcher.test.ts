@@ -37,6 +37,8 @@ function createMockWs() {
       };
     },
     onStateChange: vi.fn(() => () => {}),
+    onCertMismatch: vi.fn(() => () => {}),
+    acceptCertFingerprint: vi.fn(async () => {}),
     getState: vi.fn(() => "disconnected" as const),
     _getWs: vi.fn(() => null),
   };

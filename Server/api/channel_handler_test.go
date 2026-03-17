@@ -438,3 +438,118 @@ func TestSearch_NoResults(t *testing.T) {
 		t.Errorf("expected 0 results, got %d", len(results))
 	}
 }
+
+func TestSearch_WithChannelID(t *testing.T) {
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "searchch", 1)
+	user, _ := database.GetUserByUsername("searchch")
+	chID, _ := database.CreateChannel("filtered", "text", "", "", 0)
+	_, _ = database.CreateMessage(chID, user.ID, "filtered message here", nil)
+
+	rr := chGet(t, router, fmt.Sprintf("/api/v1/search?q=filtered&channel_id=%d", chID), token)
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSearch_InvalidChannelID(t *testing.T) {
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "badchid", 1)
+
+	rr := chGet(t, router, "/api/v1/search?q=test&channel_id=abc", token)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestSearch_NegativeChannelID(t *testing.T) {
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "negchid", 1)
+
+	rr := chGet(t, router, "/api/v1/search?q=test&channel_id=-1", token)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestSearch_WithLimit(t *testing.T) {
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "limituser", 1)
+
+	rr := chGet(t, router, "/api/v1/search?q=test&limit=5", token)
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rr.Code)
+	}
+}
+
+func TestSearch_InvalidLimit(t *testing.T) {
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "badlimit", 1)
+
+	rr := chGet(t, router, "/api/v1/search?q=test&limit=abc", token)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestSearch_ZeroLimit(t *testing.T) {
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "zerolimit", 1)
+
+	rr := chGet(t, router, "/api/v1/search?q=test&limit=0", token)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestSearch_LimitCappedAt100(t *testing.T) {
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "highlimit", 1)
+
+	// limit=200 should be silently capped to 100
+	rr := chGet(t, router, "/api/v1/search?q=test&limit=200", token)
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rr.Code)
+	}
+}
+
+
+// ─── Messages — before/after cursor ─────────────────────────────────────────
+
+func TestChannelMessages_BeforeCursor(t *testing.T) {
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "cursoruser", 1)
+	user, _ := database.GetUserByUsername("cursoruser")
+	chID, _ := database.CreateChannel("cursor", "text", "", "", 0)
+
+	var lastID int64
+	for i := range 5 {
+		lastID, _ = database.CreateMessage(chID, user.ID, fmt.Sprintf("msg%d", i), nil)
+	}
+
+	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages?before=%d", chID, lastID), token)
+	if rr.Code != http.StatusOK {
+		t.Errorf("before cursor status = %d, want 200", rr.Code)
+	}
+}
+
+func TestChannelMessages_InvalidLimit(t *testing.T) {
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "badlimituser", 1)
+	chID, _ := database.CreateChannel("lim", "text", "", "", 0)
+
+	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages?limit=abc", chID), token)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("invalid limit status = %d, want 400", rr.Code)
+	}
+}
+

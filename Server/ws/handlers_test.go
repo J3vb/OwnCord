@@ -604,3 +604,1268 @@ func TestSlowMode_ErrorMessageContainsSlowModeDuration(t *testing.T) {
 		}
 	}
 }
+
+// ─── handleChatSend additional coverage ──────────────────────────────────────
+
+// TestChatSend_InvalidPayload_ReturnsBadRequest verifies that a non-object
+// payload to chat_send returns BAD_REQUEST.
+func TestChatSend_InvalidPayload_ReturnsBadRequest(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "send-inv1")
+	chID := seedTestChannel(t, database, "send-inv-chan1")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	raw, _ := json.Marshal(map[string]any{
+		"type":    "chat_send",
+		"payload": "not-an-object",
+	})
+	hub.HandleMessageForTest(c, raw)
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("expected BAD_REQUEST for invalid payload, got %q", code)
+	}
+}
+
+// TestChatSend_InvalidChannelID_ReturnsBadRequest verifies that channel_id=0
+// returns BAD_REQUEST.
+func TestChatSend_InvalidChannelID_ReturnsBadRequest(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "send-inv2")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	raw, _ := json.Marshal(map[string]any{
+		"type": "chat_send",
+		"payload": map[string]any{
+			"channel_id": 0,
+			"content":    "hello",
+		},
+	})
+	hub.HandleMessageForTest(c, raw)
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("expected BAD_REQUEST for channel_id=0, got %q", code)
+	}
+}
+
+// TestChatSend_ChannelNotFound_ReturnsNotFound verifies that sending to a
+// non-existent channel returns NOT_FOUND.
+func TestChatSend_ChannelNotFound_ReturnsNotFound(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "send-inv3")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, 99999, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, chatSendMsg(99999, "hello"))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "NOT_FOUND" {
+		t.Errorf("expected NOT_FOUND for non-existent channel, got %q", code)
+	}
+}
+
+// TestChatSend_EmptyContent_ReturnsBadRequest verifies that content that
+// sanitizes to empty is rejected.
+func TestChatSend_EmptyContent_ReturnsBadRequest(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "send-empty1")
+	chID := seedTestChannel(t, database, "send-empty-chan")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	// Send message with empty content.
+	hub.HandleMessageForTest(c, chatSendMsg(chID, ""))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("expected BAD_REQUEST for empty content, got %q", code)
+	}
+}
+
+// TestChatSend_TooLongContent_ReturnsBadRequest verifies that content exceeding
+// 4000 Unicode code points is rejected.
+func TestChatSend_TooLongContent_ReturnsBadRequest(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "send-long1")
+	chID := seedTestChannel(t, database, "send-long-chan")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	// Build a 4001-rune string to exceed the limit.
+	longContent := make([]rune, 4001)
+	for i := range longContent {
+		longContent[i] = 'a'
+	}
+	hub.HandleMessageForTest(c, chatSendMsg(chID, string(longContent)))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("expected BAD_REQUEST for too-long content, got %q", code)
+	}
+}
+
+// TestChatSend_SuccessWithReplyTo verifies that a message with reply_to is
+// accepted and the broadcast includes it.
+func TestChatSend_SuccessWithReplyTo(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "send-reply1")
+	chID := seedTestChannel(t, database, "send-reply-chan")
+	parentMsgID, err := database.CreateMessage(chID, user.ID, "parent message", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage parent: %v", err)
+	}
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	raw, _ := json.Marshal(map[string]any{
+		"type": "chat_send",
+		"payload": map[string]any{
+			"channel_id": chID,
+			"content":    "reply message",
+			"reply_to":   parentMsgID,
+		},
+	})
+	hub.HandleMessageForTest(c, raw)
+	time.Sleep(50 * time.Millisecond)
+
+	// Should get a chat_send_ok ack.
+	timer := time.NewTimer(300 * time.Millisecond)
+	defer timer.Stop()
+	for {
+		select {
+		case msg := <-send:
+			var env map[string]any
+			if err := json.Unmarshal(msg, &env); err != nil {
+				continue
+			}
+			if env["type"] == "chat_send_ok" {
+				return // success
+			}
+		case <-timer.C:
+			t.Error("expected chat_send_ok for reply message, got none")
+			return
+		}
+	}
+}
+
+// TestChatSend_NilUserClientSendsMessage verifies that a client without a user
+// object attached still sends a message (uses empty username/nil avatar).
+func TestChatSend_NilUserClientSendsMessage(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	// Create a client with just an owner userID but no user object,
+	// so c.user == nil. The permission check will fail if no user is set.
+	// Use an owner-level user so permissions pass.
+	owner := seedOwnerUser(t, database, "send-niluser1")
+	chID := seedTestChannel(t, database, "send-niluser-chan")
+
+	send := make(chan []byte, 32)
+	// Use NewTestClientWithUser so permissions work (user record is attached).
+	c := ws.NewTestClientWithUser(hub, owner, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, chatSendMsg(chID, "hello"))
+	time.Sleep(50 * time.Millisecond)
+
+	// Expect a chat_send_ok.
+	timer := time.NewTimer(300 * time.Millisecond)
+	defer timer.Stop()
+	for {
+		select {
+		case msg := <-send:
+			var env map[string]any
+			if err := json.Unmarshal(msg, &env); err != nil {
+				continue
+			}
+			if env["type"] == "chat_send_ok" {
+				return
+			}
+		case <-timer.C:
+			t.Error("expected chat_send_ok for normal message, got none")
+			return
+		}
+	}
+}
+
+// TestPresence_RateLimit_ReturnsError verifies that sending more than
+// presenceRateLimit updates within presenceWindow triggers a rate-limit error.
+func TestPresence_RateLimit_ReturnsError(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "presence-rl1")
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	// First presence update — should succeed.
+	hub.HandleMessageForTest(c, presenceUpdateMsg("online"))
+	time.Sleep(20 * time.Millisecond)
+	drainChan(send)
+
+	// Second presence update immediately — should be rate-limited.
+	hub.HandleMessageForTest(c, presenceUpdateMsg("idle"))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "RATE_LIMITED" {
+		t.Errorf("expected RATE_LIMITED for excess presence updates, got %q", code)
+	}
+}
+
+// ─── helpers for the new handler tests ────────────────────────────────────────
+
+// seedMessage inserts a message into the given channel for the given user
+// and returns its ID.
+func seedMessage(t *testing.T, database *db.DB, channelID, userID int64, content string) int64 {
+	t.Helper()
+	id, err := database.CreateMessage(channelID, userID, content, nil)
+	if err != nil {
+		t.Fatalf("seedMessage CreateMessage: %v", err)
+	}
+	return id
+}
+
+// chatEditMsg constructs a raw chat_edit WebSocket envelope.
+func chatEditMsg(messageID int64, content string) []byte {
+	raw, _ := json.Marshal(map[string]any{
+		"type": "chat_edit",
+		"payload": map[string]any{
+			"message_id": messageID,
+			"content":    content,
+		},
+	})
+	return raw
+}
+
+// chatDeleteMsg constructs a raw chat_delete WebSocket envelope.
+func chatDeleteMsg(messageID int64) []byte {
+	raw, _ := json.Marshal(map[string]any{
+		"type": "chat_delete",
+		"payload": map[string]any{
+			"message_id": messageID,
+		},
+	})
+	return raw
+}
+
+// reactionMsg constructs a raw reaction_add or reaction_remove envelope.
+func reactionMsg(msgType string, messageID int64, emoji string) []byte {
+	raw, _ := json.Marshal(map[string]any{
+		"type": msgType,
+		"payload": map[string]any{
+			"message_id": messageID,
+			"emoji":      emoji,
+		},
+	})
+	return raw
+}
+
+// typingMsg constructs a raw typing_start envelope.
+func typingStartMsg(channelID int64) []byte {
+	raw, _ := json.Marshal(map[string]any{
+		"type": "typing_start",
+		"payload": map[string]any{
+			"channel_id": channelID,
+		},
+	})
+	return raw
+}
+
+// presenceMsg constructs a raw presence_update envelope.
+func presenceUpdateMsg(status string) []byte {
+	raw, _ := json.Marshal(map[string]any{
+		"type": "presence_update",
+		"payload": map[string]any{
+			"status": status,
+		},
+	})
+	return raw
+}
+
+// receiveMsgOfType drains ch until a message with the given type field is found,
+// or the deadline elapses. Returns the parsed payload or nil on timeout.
+func receiveMsgOfType(ch <-chan []byte, msgType string, deadline time.Duration) map[string]any {
+	timer := time.NewTimer(deadline)
+	defer timer.Stop()
+	for {
+		select {
+		case msg := <-ch:
+			var env map[string]any
+			if err := json.Unmarshal(msg, &env); err != nil {
+				continue
+			}
+			if env["type"] == msgType {
+				payload, _ := env["payload"].(map[string]any)
+				return payload
+			}
+		case <-timer.C:
+			return nil
+		}
+	}
+}
+
+// ─── handleChatEdit ───────────────────────────────────────────────────────────
+
+// TestChatEdit_ValidEdit_BroadcastsChatEdited verifies that editing an owned
+// message succeeds and broadcasts a chat_edited event to channel members.
+func TestChatEdit_ValidEdit_BroadcastsChatEdited(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "edit-owner1")
+	chID := seedTestChannel(t, database, "edit-chan1")
+	msgID := seedMessage(t, database, chID, user.ID, "original content")
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, chatEditMsg(msgID, "edited content"))
+	time.Sleep(50 * time.Millisecond)
+
+	payload := receiveMsgOfType(send, "chat_edited", 300*time.Millisecond)
+	if payload == nil {
+		t.Fatal("expected chat_edited broadcast, got none")
+	}
+	// Verify the message ID is included.
+	gotID, _ := payload["message_id"].(float64)
+	if int64(gotID) != msgID {
+		t.Errorf("chat_edited message_id = %v, want %d", gotID, msgID)
+	}
+}
+
+// TestChatEdit_InvalidPayload_ReturnsBadRequest verifies that malformed JSON
+// in the payload returns a BAD_REQUEST error.
+func TestChatEdit_InvalidPayload_ReturnsBadRequest(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "edit-owner2")
+	chID := seedTestChannel(t, database, "edit-chan2")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	// Send a chat_edit envelope with an unparseable payload.
+	raw, _ := json.Marshal(map[string]any{
+		"type":    "chat_edit",
+		"payload": "not-an-object",
+	})
+	hub.HandleMessageForTest(c, raw)
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("expected BAD_REQUEST for invalid payload, got %q", code)
+	}
+}
+
+// TestChatEdit_EmptyContent_ReturnsBadRequest verifies that an empty (or
+// HTML-stripped-to-empty) content field is rejected.
+func TestChatEdit_EmptyContent_ReturnsBadRequest(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "edit-owner3")
+	chID := seedTestChannel(t, database, "edit-chan3")
+	msgID := seedMessage(t, database, chID, user.ID, "original")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, chatEditMsg(msgID, ""))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("expected BAD_REQUEST for empty content, got %q", code)
+	}
+}
+
+// TestChatEdit_NotOwner_ReturnsForbidden verifies that editing another user's
+// message is rejected with a FORBIDDEN error.
+func TestChatEdit_NotOwner_ReturnsForbidden(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	author := seedOwnerUser(t, database, "edit-author4")
+	editor := seedMemberUser(t, database, "edit-editor4")
+	chID := seedTestChannel(t, database, "edit-chan4")
+	msgID := seedMessage(t, database, chID, author.ID, "author's message")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, editor, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, chatEditMsg(msgID, "stolen edit"))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "FORBIDDEN" {
+		t.Errorf("expected FORBIDDEN for editing another's message, got %q", code)
+	}
+}
+
+// TestChatEdit_InvalidMessageID_ReturnsBadRequest verifies that a non-positive
+// message_id is rejected immediately.
+func TestChatEdit_InvalidMessageID_ReturnsBadRequest(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "edit-owner5")
+	chID := seedTestChannel(t, database, "edit-chan5")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	raw, _ := json.Marshal(map[string]any{
+		"type": "chat_edit",
+		"payload": map[string]any{
+			"message_id": 0,
+			"content":    "hello",
+		},
+	})
+	hub.HandleMessageForTest(c, raw)
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("expected BAD_REQUEST for message_id=0, got %q", code)
+	}
+}
+
+// ─── handleChatDelete ─────────────────────────────────────────────────────────
+
+// TestChatDelete_OwnerDeletesOwn_BroadcastsChatDeleted verifies that a user
+// can delete their own message and a chat_deleted broadcast is sent.
+func TestChatDelete_OwnerDeletesOwn_BroadcastsChatDeleted(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "del-owner1")
+	chID := seedTestChannel(t, database, "del-chan1")
+	msgID := seedMessage(t, database, chID, user.ID, "to be deleted")
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, chatDeleteMsg(msgID))
+	time.Sleep(50 * time.Millisecond)
+
+	payload := receiveMsgOfType(send, "chat_deleted", 300*time.Millisecond)
+	if payload == nil {
+		t.Fatal("expected chat_deleted broadcast, got none")
+	}
+	gotID, _ := payload["message_id"].(float64)
+	if int64(gotID) != msgID {
+		t.Errorf("chat_deleted message_id = %v, want %d", gotID, msgID)
+	}
+}
+
+// TestChatDelete_ModeratorDeletesOthers_BroadcastsChatDeleted verifies that a
+// moderator (who has MANAGE_MESSAGES) can delete any message.
+func TestChatDelete_ModeratorDeletesOthers_BroadcastsChatDeleted(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	author := seedMemberUser(t, database, "del-author2")
+	mod := seedModUser(t, database, "del-mod2")
+	chID := seedTestChannel(t, database, "del-chan2")
+	msgID := seedMessage(t, database, chID, author.ID, "member's message")
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, mod, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, chatDeleteMsg(msgID))
+	time.Sleep(50 * time.Millisecond)
+
+	payload := receiveMsgOfType(send, "chat_deleted", 300*time.Millisecond)
+	if payload == nil {
+		t.Fatal("expected chat_deleted broadcast after mod delete, got none")
+	}
+}
+
+// TestChatDelete_NonOwnerWithoutManageMessages_ReturnsForbidden verifies that a
+// regular member cannot delete another user's message.
+func TestChatDelete_NonOwnerWithoutManageMessages_ReturnsForbidden(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	author := seedOwnerUser(t, database, "del-author3")
+	other := seedMemberUser(t, database, "del-other3")
+	chID := seedTestChannel(t, database, "del-chan3")
+	msgID := seedMessage(t, database, chID, author.ID, "owner's message")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, other, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, chatDeleteMsg(msgID))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "FORBIDDEN" {
+		t.Errorf("expected FORBIDDEN for non-owner delete, got %q", code)
+	}
+}
+
+// TestChatDelete_InvalidPayload_ReturnsBadRequest verifies that a malformed
+// payload returns BAD_REQUEST.
+func TestChatDelete_InvalidPayload_ReturnsBadRequest(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "del-owner4")
+	chID := seedTestChannel(t, database, "del-chan4")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	raw, _ := json.Marshal(map[string]any{
+		"type":    "chat_delete",
+		"payload": "bad",
+	})
+	hub.HandleMessageForTest(c, raw)
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("expected BAD_REQUEST for invalid payload, got %q", code)
+	}
+}
+
+// TestChatDelete_NonExistentMessage_ReturnsNotFound verifies that attempting
+// to delete a message that does not exist returns NOT_FOUND.
+func TestChatDelete_NonExistentMessage_ReturnsNotFound(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "del-owner5")
+	chID := seedTestChannel(t, database, "del-chan5")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, chatDeleteMsg(99999))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "NOT_FOUND" {
+		t.Errorf("expected NOT_FOUND for non-existent message, got %q", code)
+	}
+}
+
+// TestChatDelete_InvalidMessageID_ReturnsBadRequest verifies that message_id=0
+// is rejected before any DB lookup.
+func TestChatDelete_InvalidMessageID_ReturnsBadRequest(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "del-owner6")
+	chID := seedTestChannel(t, database, "del-chan6")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	raw, _ := json.Marshal(map[string]any{
+		"type": "chat_delete",
+		"payload": map[string]any{
+			"message_id": 0,
+		},
+	})
+	hub.HandleMessageForTest(c, raw)
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("expected BAD_REQUEST for message_id=0, got %q", code)
+	}
+}
+
+// ─── handleReaction ───────────────────────────────────────────────────────────
+
+// TestReaction_AddReaction_BroadcastsReactionUpdate verifies that adding a
+// valid reaction broadcasts a reaction_update event.
+func TestReaction_AddReaction_BroadcastsReactionUpdate(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "react-owner1")
+	chID := seedTestChannel(t, database, "react-chan1")
+	msgID := seedMessage(t, database, chID, user.ID, "react to me")
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, reactionMsg("reaction_add", msgID, "👍"))
+	time.Sleep(50 * time.Millisecond)
+
+	payload := receiveMsgOfType(send, "reaction_update", 300*time.Millisecond)
+	if payload == nil {
+		t.Fatal("expected reaction_update broadcast, got none")
+	}
+	if payload["action"] != "add" {
+		t.Errorf("expected action=add, got %v", payload["action"])
+	}
+}
+
+// TestReaction_RemoveReaction_BroadcastsReactionUpdate verifies that removing
+// a reaction broadcasts a reaction_update event with action=remove.
+func TestReaction_RemoveReaction_BroadcastsReactionUpdate(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "react-owner2")
+	chID := seedTestChannel(t, database, "react-chan2")
+	msgID := seedMessage(t, database, chID, user.ID, "react to me 2")
+
+	// Pre-seed the reaction so removal has something to remove.
+	if err := database.AddReaction(msgID, user.ID, "❤️"); err != nil {
+		t.Fatalf("seedReaction: %v", err)
+	}
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, reactionMsg("reaction_remove", msgID, "❤️"))
+	time.Sleep(50 * time.Millisecond)
+
+	payload := receiveMsgOfType(send, "reaction_update", 300*time.Millisecond)
+	if payload == nil {
+		t.Fatal("expected reaction_update broadcast for remove, got none")
+	}
+	if payload["action"] != "remove" {
+		t.Errorf("expected action=remove, got %v", payload["action"])
+	}
+}
+
+// TestReaction_InvalidPayload_ReturnsBadRequest verifies that a malformed
+// reaction payload returns BAD_REQUEST.
+func TestReaction_InvalidPayload_ReturnsBadRequest(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "react-owner3")
+	chID := seedTestChannel(t, database, "react-chan3")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	raw, _ := json.Marshal(map[string]any{
+		"type":    "reaction_add",
+		"payload": "bad",
+	})
+	hub.HandleMessageForTest(c, raw)
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("expected BAD_REQUEST for invalid payload, got %q", code)
+	}
+}
+
+// TestReaction_EmptyEmoji_ReturnsBadRequest verifies that an empty emoji string
+// is rejected.
+func TestReaction_EmptyEmoji_ReturnsBadRequest(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "react-owner4")
+	chID := seedTestChannel(t, database, "react-chan4")
+	msgID := seedMessage(t, database, chID, user.ID, "msg4")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, reactionMsg("reaction_add", msgID, ""))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("expected BAD_REQUEST for empty emoji, got %q", code)
+	}
+}
+
+// TestReaction_TooLongEmoji_ReturnsBadRequest verifies that an emoji string
+// exceeding 32 bytes is rejected.
+func TestReaction_TooLongEmoji_ReturnsBadRequest(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "react-owner5")
+	chID := seedTestChannel(t, database, "react-chan5")
+	msgID := seedMessage(t, database, chID, user.ID, "msg5")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	// 33-character emoji string — exceeds the 32-byte limit.
+	longEmoji := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" // 33 chars
+	hub.HandleMessageForTest(c, reactionMsg("reaction_add", msgID, longEmoji))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("expected BAD_REQUEST for too-long emoji, got %q", code)
+	}
+}
+
+// TestReaction_ControlCharInEmoji_ReturnsBadRequest verifies that an emoji
+// containing a control character (U+0000–U+001F) is rejected.
+func TestReaction_ControlCharInEmoji_ReturnsBadRequest(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "react-owner6")
+	chID := seedTestChannel(t, database, "react-chan6")
+	msgID := seedMessage(t, database, chID, user.ID, "msg6")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, reactionMsg("reaction_add", msgID, "a\x01b"))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("expected BAD_REQUEST for control char in emoji, got %q", code)
+	}
+}
+
+// TestReaction_NonExistentMessage_ReturnsBadRequest verifies that reacting to
+// a non-existent message returns a sanitized BAD_REQUEST (prevents IDOR).
+func TestReaction_NonExistentMessage_ReturnsBadRequest(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "react-owner7")
+	chID := seedTestChannel(t, database, "react-chan7")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, reactionMsg("reaction_add", 99999, "👍"))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("expected BAD_REQUEST for non-existent message (IDOR sanitize), got %q", code)
+	}
+}
+
+// TestReaction_DuplicateAdd_ReturnsCONFLICT verifies that adding the same
+// emoji twice returns a CONFLICT error (DB unique constraint).
+func TestReaction_DuplicateAdd_ReturnsConflict(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "react-owner8")
+	chID := seedTestChannel(t, database, "react-chan8")
+	msgID := seedMessage(t, database, chID, user.ID, "msg8")
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	// First add — should succeed.
+	hub.HandleMessageForTest(c, reactionMsg("reaction_add", msgID, "🔥"))
+	time.Sleep(30 * time.Millisecond)
+	drainChan(send) // clear the first broadcast
+
+	// Second add of the same emoji — should fail with CONFLICT.
+	hub.HandleMessageForTest(c, reactionMsg("reaction_add", msgID, "🔥"))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "CONFLICT" {
+		t.Errorf("expected CONFLICT for duplicate reaction, got %q", code)
+	}
+}
+
+// TestReaction_InvalidMessageID_ReturnsBadRequest verifies that message_id=0
+// is rejected before any DB call.
+func TestReaction_InvalidMessageID_ReturnsBadRequest(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "react-owner9")
+	chID := seedTestChannel(t, database, "react-chan9")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, reactionMsg("reaction_add", 0, "👍"))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("expected BAD_REQUEST for message_id=0, got %q", code)
+	}
+}
+
+// ─── handleTyping ─────────────────────────────────────────────────────────────
+
+// waitForClients blocks until the hub has at least n clients registered, or
+// the deadline expires. Returns true if the count was reached.
+func waitForClients(hub *ws.Hub, n int, deadline time.Duration) bool {
+	deadline_t := time.Now().Add(deadline)
+	for time.Now().Before(deadline_t) {
+		if hub.ClientCount() >= n {
+			return true
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return hub.ClientCount() >= n
+}
+
+// TestTyping_ValidTyping_BroadcastsToOthers verifies that a typing_start event
+// is delivered to other channel members but NOT to the sender.
+func TestTyping_ValidTyping_BroadcastsToOthers(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	chID := seedTestChannel(t, database, "typing-chan1")
+
+	sender := seedOwnerUser(t, database, "typing-sender1")
+	watcher := seedMemberUser(t, database, "typing-watcher1")
+
+	sendSender := make(chan []byte, 16)
+	sendWatcher := make(chan []byte, 16)
+
+	cSender := ws.NewTestClientWithUser(hub, sender, chID, sendSender)
+	cWatcher := ws.NewTestClientWithUser(hub, watcher, chID, sendWatcher)
+
+	hub.Register(cSender)
+	hub.Register(cWatcher)
+	// Wait until both clients are actually in the hub's client map.
+	if !waitForClients(hub, 2, 500*time.Millisecond) {
+		t.Fatalf("hub did not register both clients within timeout (count=%d)", hub.ClientCount())
+	}
+	hub.HandleMessageForTest(cSender, typingStartMsg(chID))
+	time.Sleep(50 * time.Millisecond)
+
+	// Watcher should receive a "typing" broadcast (the outbound event type from
+	// buildTypingMsg is "typing", distinct from the inbound "typing_start").
+	watcherMsgs := drainChan(sendWatcher)
+	foundTyping := false
+	for _, m := range watcherMsgs {
+		var env map[string]any
+		if err := json.Unmarshal(m, &env); err != nil {
+			continue
+		}
+		if env["type"] == "typing" {
+			foundTyping = true
+			break
+		}
+	}
+	if !foundTyping {
+		t.Error("watcher did not receive typing broadcast")
+	}
+
+	// Sender should NOT receive their own typing event.
+	senderMsgs := drainChan(sendSender)
+	for _, m := range senderMsgs {
+		var env map[string]any
+		if err := json.Unmarshal(m, &env); err != nil {
+			continue
+		}
+		if env["type"] == "typing" {
+			t.Error("sender incorrectly received their own typing event")
+		}
+	}
+}
+
+// TestTyping_InvalidChannelID_ReturnsBadRequest verifies that a typing_start
+// with channel_id=0 returns a BAD_REQUEST error.
+func TestTyping_InvalidChannelID_ReturnsBadRequest(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "typing-owner2")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, typingStartMsg(0))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("expected BAD_REQUEST for channel_id=0, got %q", code)
+	}
+}
+
+// TestTyping_RateLimited_SilentlyDropped verifies that a second typing_start
+// within the rate-limit window is silently dropped (no error sent to client).
+func TestTyping_RateLimited_SilentlyDropped(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	chID := seedTestChannel(t, database, "typing-chan3")
+
+	sender := seedOwnerUser(t, database, "typing-sender3")
+	watcher := seedMemberUser(t, database, "typing-watcher3")
+
+	sendSender := make(chan []byte, 16)
+	sendWatcher := make(chan []byte, 32)
+
+	cSender := ws.NewTestClientWithUser(hub, sender, chID, sendSender)
+	cWatcher := ws.NewTestClientWithUser(hub, watcher, chID, sendWatcher)
+
+	hub.Register(cSender)
+	hub.Register(cWatcher)
+	if !waitForClients(hub, 2, 500*time.Millisecond) {
+		t.Fatalf("hub did not register both clients within timeout")
+	}
+
+	// First typing event — should go through.
+	hub.HandleMessageForTest(cSender, typingStartMsg(chID))
+	time.Sleep(30 * time.Millisecond)
+	drainChan(sendWatcher)
+
+	// Second typing event immediately — should be silently dropped.
+	hub.HandleMessageForTest(cSender, typingStartMsg(chID))
+	time.Sleep(50 * time.Millisecond)
+
+	// Sender should NOT receive an error (silently dropped).
+	senderMsgs := drainChan(sendSender)
+	for _, m := range senderMsgs {
+		var env map[string]any
+		if err := json.Unmarshal(m, &env); err != nil {
+			continue
+		}
+		if env["type"] == "error" {
+			t.Errorf("expected silent drop for rate-limited typing, but got error: %s", m)
+		}
+	}
+
+	// Watcher should NOT receive a second typing event (broadcast type is "typing").
+	watcherMsgs := drainChan(sendWatcher)
+	typingCount := 0
+	for _, m := range watcherMsgs {
+		var env map[string]any
+		if err := json.Unmarshal(m, &env); err != nil {
+			continue
+		}
+		if env["type"] == "typing" {
+			typingCount++
+		}
+	}
+	if typingCount > 0 {
+		t.Errorf("rate-limited typing event was not dropped; watcher received %d extra typing", typingCount)
+	}
+}
+
+// ─── broadcastExclude ─────────────────────────────────────────────────────────
+
+// TestBroadcastExclude_SendsToOthersNotSelf verifies that broadcastExclude
+// delivers to all channel members except the excluded user.
+// This is exercised indirectly via typing_start (which calls broadcastExclude).
+func TestBroadcastExclude_SendsToOthersNotSelf(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	chID := seedTestChannel(t, database, "excl-chan1")
+
+	u1 := seedOwnerUser(t, database, "excl-user1")
+	u2 := seedMemberUser(t, database, "excl-user2")
+	u3 := seedMemberUser(t, database, "excl-user3")
+
+	send1 := make(chan []byte, 16)
+	send2 := make(chan []byte, 16)
+	send3 := make(chan []byte, 16)
+
+	c1 := ws.NewTestClientWithUser(hub, u1, chID, send1)
+	c2 := ws.NewTestClientWithUser(hub, u2, chID, send2)
+	c3 := ws.NewTestClientWithUser(hub, u3, chID, send3)
+
+	hub.Register(c1)
+	hub.Register(c2)
+	hub.Register(c3)
+	// Wait until all three are registered in the hub's client map.
+	if !waitForClients(hub, 3, 500*time.Millisecond) {
+		t.Fatalf("hub did not register all 3 clients within timeout (count=%d)", hub.ClientCount())
+	}
+
+	// u1 sends a typing event — should reach u2 and u3 but NOT u1.
+	hub.HandleMessageForTest(c1, typingStartMsg(chID))
+	time.Sleep(50 * time.Millisecond)
+
+	// u2 and u3 must receive the "typing" broadcast.
+	for i, sendCh := range []<-chan []byte{send2, send3} {
+		msgs := drainChan(sendCh)
+		found := false
+		for _, m := range msgs {
+			var env map[string]any
+			if err := json.Unmarshal(m, &env); err != nil {
+				continue
+			}
+			if env["type"] == "typing" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("user%d (non-sender) did not receive typing broadcast", i+2)
+		}
+	}
+
+	// u1 (sender) must NOT receive it.
+	msgs1 := drainChan(send1)
+	for _, m := range msgs1 {
+		var env map[string]any
+		if err := json.Unmarshal(m, &env); err != nil {
+			continue
+		}
+		if env["type"] == "typing" {
+			t.Error("sender (excluded user) incorrectly received their own typing event")
+		}
+	}
+}
+
+// TestBroadcastExclude_DifferentChannelNotReceived verifies that broadcastExclude
+// does NOT deliver to clients in a different channel.
+func TestBroadcastExclude_DifferentChannelNotReceived(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	chA := seedTestChannel(t, database, "excl-chanA")
+	chB := seedTestChannel(t, database, "excl-chanB")
+
+	uA := seedOwnerUser(t, database, "excl-userA")
+	uB := seedMemberUser(t, database, "excl-userB")
+
+	sendA := make(chan []byte, 16)
+	sendB := make(chan []byte, 16)
+
+	cA := ws.NewTestClientWithUser(hub, uA, chA, sendA)
+	cB := ws.NewTestClientWithUser(hub, uB, chB, sendB)
+
+	hub.Register(cA)
+	hub.Register(cB)
+	if !waitForClients(hub, 2, 500*time.Millisecond) {
+		t.Fatalf("hub did not register both clients within timeout")
+	}
+
+	// uA types in channel A — uB in channel B must NOT receive it.
+	hub.HandleMessageForTest(cA, typingStartMsg(chA))
+	time.Sleep(50 * time.Millisecond)
+
+	msgsB := drainChan(sendB)
+	for _, m := range msgsB {
+		var env map[string]any
+		if err := json.Unmarshal(m, &env); err != nil {
+			continue
+		}
+		if env["type"] == "typing" {
+			t.Error("user in different channel incorrectly received typing broadcast via broadcastExclude")
+		}
+	}
+}
+
+// ─── handlePresence (invalid status path) ─────────────────────────────────────
+
+// TestPresence_InvalidStatus_ReturnsBadRequest verifies that a status value
+// not in the allowed set (online|idle|dnd|offline) is rejected.
+func TestPresence_InvalidStatus_ReturnsBadRequest(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "presence-bad1")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, presenceUpdateMsg("invisible"))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("expected BAD_REQUEST for invalid status, got %q", code)
+	}
+}
+
+// TestPresence_ValidStatus_Broadcasts verifies that valid statuses are accepted
+// and broadcast to all connected clients.
+func TestPresence_ValidStatus_Broadcasts(t *testing.T) {
+	validStatuses := []string{"online", "idle", "dnd", "offline"}
+	for _, status := range validStatuses {
+		status := status
+		t.Run(status, func(t *testing.T) {
+			hub, database := newHandlerHub(t)
+			user := seedOwnerUser(t, database, "presence-valid-"+status)
+
+			send := make(chan []byte, 16)
+			c := ws.NewTestClientWithUser(hub, user, 0, send)
+			hub.Register(c)
+			time.Sleep(20 * time.Millisecond)
+
+			hub.HandleMessageForTest(c, presenceUpdateMsg(status))
+			time.Sleep(50 * time.Millisecond)
+
+			// Must NOT receive a BAD_REQUEST error.
+			msgs := drainChan(send)
+			for _, m := range msgs {
+				var env map[string]any
+				if err := json.Unmarshal(m, &env); err != nil {
+					continue
+				}
+				if env["type"] == "error" {
+					if payload, ok := env["payload"].(map[string]any); ok {
+						if payload["code"] == "BAD_REQUEST" {
+							t.Errorf("valid status %q was incorrectly rejected", status)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// ─── handleChannelFocus (additional edge cases) ───────────────────────────────
+
+// TestChannelFocus_ValidFocus_UpdatesChannelID verifies that a successful
+// channel_focus updates the client's tracked channel so subsequent broadcasts
+// to that channel reach the client.
+func TestChannelFocus_ValidFocus_UpdatesChannelID(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "focus-update1")
+	chID := seedTestChannel(t, database, "focus-update-chan")
+
+	send := make(chan []byte, 32)
+	// Start client on channel 0.
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	// Focus on chID.
+	raw, _ := json.Marshal(map[string]any{
+		"type":    "channel_focus",
+		"payload": map[string]any{"channel_id": chID},
+	})
+	hub.HandleMessageForTest(c, raw)
+	time.Sleep(50 * time.Millisecond)
+
+	// No error expected.
+	msgs := drainChan(send)
+	for _, m := range msgs {
+		var env map[string]any
+		if err := json.Unmarshal(m, &env); err != nil {
+			continue
+		}
+		if env["type"] == "error" {
+			t.Errorf("unexpected error on valid channel_focus: %s", m)
+		}
+	}
+
+	// Now broadcast to chID — client should receive it because channel was focused.
+	hub.BroadcastToChannel(chID, []byte(`{"type":"ping","payload":{}}`))
+	time.Sleep(30 * time.Millisecond)
+
+	found := false
+	for _, m := range drainChan(send) {
+		var env map[string]any
+		if err := json.Unmarshal(m, &env); err != nil {
+			continue
+		}
+		if env["type"] == "ping" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("client did not receive broadcast after channel_focus updated its channelID")
+	}
+}
+
+// TestChannelFocus_InvalidChannelID_NoResponse verifies that a channel_focus
+// with channel_id=0 is silently ignored (no crash, no error message).
+func TestChannelFocus_InvalidChannelID_NoResponse(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "focus-invalid1")
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	raw, _ := json.Marshal(map[string]any{
+		"type":    "channel_focus",
+		"payload": map[string]any{"channel_id": 0},
+	})
+	hub.HandleMessageForTest(c, raw)
+	time.Sleep(50 * time.Millisecond)
+
+	// No error or other message should be sent for invalid channel_id.
+	msgs := drainChan(send)
+	for _, m := range msgs {
+		var env map[string]any
+		if err := json.Unmarshal(m, &env); err != nil {
+			continue
+		}
+		if env["type"] == "error" {
+			t.Errorf("expected silent ignore for channel_id=0, but got error: %s", m)
+		}
+	}
+}
+
+// ─── handleMessage ban check (T-044) ─────────────────────────────────────────
+
+// TestHandleMessage_BannedUser_GetKickedAfterSessionCheck verifies that a
+// user who has been banned is kicked after the session-expiry check fires.
+// The ban is detected via the user record (banned=1) during the session check.
+func TestHandleMessage_BannedUser_GetKickedAfterSessionCheck(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "banned-user1")
+	chID := seedTestChannel(t, database, "banned-chan1")
+
+	// Create a valid session so the session check reaches the user lookup.
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	hash := auth.HashToken(token)
+	if _, err := database.CreateSession(user.ID, hash, "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	// Ban the user in the database (permanent ban, no expiry).
+	if _, err := database.Exec(
+		`UPDATE users SET banned=1, ban_reason='test ban', ban_expires=NULL WHERE id=?`,
+		user.ID,
+	); err != nil {
+		t.Fatalf("ban user: %v", err)
+	}
+
+	send := make(chan []byte, 64)
+	c := ws.NewTestClientWithTokenHash(hub, user, hash, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	// Send enough messages to cross the session-check threshold.
+	for i := range ws.SessionCheckInterval + 1 {
+		hub.HandleMessageForTest(c, chatSendMsg(chID, fmt.Sprintf("msg %d", i)))
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	// The hub should have kicked the banned client.
+	time.Sleep(50 * time.Millisecond)
+	if hub.ClientCount() != 0 {
+		t.Error("banned user was not kicked after session check")
+	}
+}
