@@ -117,14 +117,6 @@ npm test                         # run all tests
 npm run test:coverage            # coverage report
 ```
 
-### Legacy WPF Client (reference only, on dev branch)
-
-```bash
-cd Client
-dotnet build OwnCord.Client/OwnCord.Client.csproj
-dotnet test OwnCord.Client.Tests/
-```
-
 ---
 
 ## Summary
