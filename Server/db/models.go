@@ -170,6 +170,7 @@ type ServerStats struct {
 	ChannelCount int64 `json:"channel_count"`
 	InviteCount  int64 `json:"invite_count"`
 	DBSizeBytes  int64 `json:"db_size_bytes"`
+	OnlineCount  int   `json:"online_count"`
 }
 
 // UserWithRole extends User with the name of the user's role.

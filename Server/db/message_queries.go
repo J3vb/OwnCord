@@ -186,6 +186,13 @@ func (d *DB) GetReactions(messageID int64) ([]ReactionCount, error) {
 // When channelID is non-nil the search is scoped to that channel.
 // Deleted messages are excluded from results.
 func (d *DB) SearchMessages(query string, channelID *int64, limit int) ([]MessageSearchResult, error) {
+	if query == "" {
+		return []MessageSearchResult{}, nil
+	}
+	if limit < 1 {
+		return []MessageSearchResult{}, nil
+	}
+
 	var (
 		rows *sql.Rows
 		err  error

@@ -81,7 +81,9 @@ CREATE TABLE IF NOT EXISTS messages (
     content    TEXT    NOT NULL,
     deleted    INTEGER NOT NULL DEFAULT 0,
     pinned     INTEGER NOT NULL DEFAULT 0,
-    timestamp  TEXT    NOT NULL DEFAULT (datetime('now'))
+    timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
+    reply_to   INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    edited_at  TEXT
 );
 
 CREATE TABLE IF NOT EXISTS invites (
@@ -972,6 +974,7 @@ type mockHub struct {
 	channelDeleteIDs  []int64
 	memberBanIDs      []int64
 	memberUpdates     []memberUpdateCall
+	clientCount       int
 }
 
 type memberUpdateCall struct {
@@ -1006,6 +1009,10 @@ func (m *mockHub) BroadcastMemberBan(userID int64) {
 
 func (m *mockHub) BroadcastMemberUpdate(userID int64, roleName string) {
 	m.memberUpdates = append(m.memberUpdates, memberUpdateCall{userID, roleName})
+}
+
+func (m *mockHub) ClientCount() int {
+	return m.clientCount
 }
 
 func TestAdminAPI_CreateChannel_BroadcastsChannelCreate(t *testing.T) {

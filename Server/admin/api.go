@@ -49,6 +49,7 @@ type HubBroadcaster interface {
 	BroadcastChannelDelete(channelID int64)
 	BroadcastMemberBan(userID int64)
 	BroadcastMemberUpdate(userID int64, roleName string)
+	ClientCount() int
 }
 
 // ─── adminUserResponse ──────────────────────────────────────────────────────
@@ -124,7 +125,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	r.Group(func(r chi.Router) {
 		r.Use(adminAuthMiddleware(database))
 
-		r.Get("/stats", handleGetStats(database))
+		r.Get("/stats", handleGetStats(database, hub))
 		r.Get("/users", handleListUsers(database))
 		r.Patch("/users/{id}", handlePatchUser(database, hub))
 		r.Delete("/users/{id}/sessions", handleForceLogout(database))

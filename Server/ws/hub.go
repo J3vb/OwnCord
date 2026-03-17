@@ -26,6 +26,7 @@ type Hub struct {
 	register     chan *Client
 	unregister   chan *Client
 	stop         chan struct{}
+	stopOnce     sync.Once
 	sfu          *SFU
 	voiceRooms   map[int64]*VoiceRoom
 	voiceRoomsMu sync.RWMutex
@@ -149,9 +150,9 @@ func (h *Hub) Run() {
 	}
 }
 
-// Stop signals Run to exit.
+// Stop signals Run to exit. Safe to call multiple times.
 func (h *Hub) Stop() {
-	close(h.stop)
+	h.stopOnce.Do(func() { close(h.stop) })
 }
 
 // GracefulStop closes all PeerConnections, voice rooms, and then stops the hub.
@@ -166,7 +167,7 @@ func (h *Hub) GracefulStop() {
 	h.mu.RUnlock()
 
 	h.CloseAllVoiceRooms()
-	close(h.stop)
+	h.stopOnce.Do(func() { close(h.stop) })
 }
 
 // CleanupVoiceForChannel removes the voice room for the given channel and

@@ -11,13 +11,14 @@ import (
 
 // ─── User Handlers ───────────────────────────────────────────────────────────
 
-func handleGetStats(database *db.DB) http.HandlerFunc {
+func handleGetStats(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		stats, err := database.GetServerStats()
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get stats")
 			return
 		}
+		stats.OnlineCount = hub.ClientCount()
 		writeJSON(w, http.StatusOK, stats)
 	}
 }

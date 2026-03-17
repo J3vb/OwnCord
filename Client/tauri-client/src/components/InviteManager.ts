@@ -25,6 +25,7 @@ export interface InviteManagerOptions {
   onRevokeInvite(code: string): Promise<void>;
   onCopyLink(code: string): void;
   onClose(): void;
+  onError?(message: string): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +83,8 @@ export function createInviteManager(
         void options.onRevokeInvite(invite.code).then(() => {
           invites = invites.filter((i) => i.code !== invite.code);
           renderList();
+        }).catch(() => {
+          options.onError?.("Failed to revoke invite");
         });
       }, { signal: ac.signal });
 
@@ -114,6 +117,8 @@ export function createInviteManager(
       void options.onCreateInvite().then((newInvite) => {
         invites = [...invites, newInvite];
         renderList();
+      }).catch(() => {
+        options.onError?.("Failed to create invite");
       });
     }, { signal: ac.signal });
 
