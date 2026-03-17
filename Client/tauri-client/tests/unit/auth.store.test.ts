@@ -153,6 +153,7 @@ describe("auth store", () => {
       const unsub = authStore.subscribe(listener);
 
       setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
+      authStore.flush();
 
       expect(listener).toHaveBeenCalledTimes(1);
       expect(listener).toHaveBeenCalledWith(
@@ -175,6 +176,7 @@ describe("auth store", () => {
       const unsub = authStore.subscribe(listener);
 
       clearAuth();
+      authStore.flush();
 
       expect(listener).toHaveBeenCalledTimes(1);
       expect(listener).toHaveBeenCalledWith(
@@ -206,6 +208,7 @@ describe("auth store", () => {
       const unsubB = authStore.subscribe(listenerB);
 
       setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
+      authStore.flush();
 
       expect(listenerA).toHaveBeenCalledTimes(1);
       expect(listenerB).toHaveBeenCalledTimes(1);

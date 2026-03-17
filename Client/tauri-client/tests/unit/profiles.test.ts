@@ -515,6 +515,7 @@ describe("ProfileManager", () => {
       m.store.subscribe((s) => states.push(s));
 
       m.addProfile(sampleData);
+      m.store.flush();
 
       expect(states).toHaveLength(1);
       expect(states[0]!.profiles).toHaveLength(1);
@@ -528,6 +529,7 @@ describe("ProfileManager", () => {
       m.store.subscribe((s) => states.push(s));
 
       m.removeProfile(profile.id);
+      m.store.flush();
 
       expect(states).toHaveLength(1);
       expect(states[0]!.profiles).toHaveLength(0);

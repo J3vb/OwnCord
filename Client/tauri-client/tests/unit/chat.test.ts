@@ -353,6 +353,7 @@ describe("MessageList", () => {
       attachments: [],
       timestamp: "2026-03-15T10:00:00Z",
     });
+    messagesStore.flush();
 
     expect(container.querySelectorAll(".message").length).toBe(1);
     list.destroy?.();
@@ -428,6 +429,7 @@ describe("TypingIndicator", () => {
     indicator.mount(container);
 
     setTyping(1, 1); // Alice typing in channel 1
+    membersStore.flush();
 
     const root = container.querySelector(".typing-bar");
     expect(root?.textContent).toContain("Alice");
@@ -441,6 +443,7 @@ describe("TypingIndicator", () => {
 
     setTyping(1, 1); // Alice
     setTyping(1, 2); // Bob
+    membersStore.flush();
 
     const root = container.querySelector(".typing-bar");
     expect(root?.textContent).toContain("and");
@@ -455,6 +458,7 @@ describe("TypingIndicator", () => {
     setTyping(1, 1);
     setTyping(1, 2);
     setTyping(1, 3);
+    membersStore.flush();
 
     const root = container.querySelector(".typing-bar");
     expect(root?.textContent).toContain("Several people are typing...");

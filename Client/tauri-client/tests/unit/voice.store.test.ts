@@ -250,6 +250,7 @@ describe("voice store", () => {
       const listener = vi.fn();
       const unsub = voiceStore.subscribe(listener);
       joinVoiceChannel(42);
+      voiceStore.flush();
       expect(listener).toHaveBeenCalledTimes(1);
       unsub();
     });

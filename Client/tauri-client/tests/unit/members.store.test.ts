@@ -297,6 +297,7 @@ describe("members store", () => {
       const listener = vi.fn();
       const unsub = membersStore.subscribe(listener);
       setMembers([MEMBER_ALICE]);
+      membersStore.flush();
       expect(listener).toHaveBeenCalledTimes(1);
       unsub();
     });

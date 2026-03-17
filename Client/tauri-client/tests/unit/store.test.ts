@@ -32,6 +32,7 @@ describe('createStore', () => {
     store.subscribe(listener2);
 
     store.setState((prev) => ({ ...prev, count: 5 }));
+    store.flush();
 
     expect(listener1).toHaveBeenCalledTimes(1);
     expect(listener1).toHaveBeenCalledWith({ count: 5, name: 'test' });
@@ -45,11 +46,13 @@ describe('createStore', () => {
     const unsubscribe = store.subscribe(listener);
 
     store.setState((prev) => ({ ...prev, count: 1 }));
+    store.flush();
     expect(listener).toHaveBeenCalledTimes(1);
 
     unsubscribe();
 
     store.setState((prev) => ({ ...prev, count: 2 }));
+    store.flush();
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
@@ -61,6 +64,7 @@ describe('createStore', () => {
     store.subscribe(() => calls.push(3));
 
     store.setState((prev) => ({ ...prev, count: 10 }));
+    store.flush();
 
     expect(calls).toEqual([1, 2, 3]);
   });
@@ -75,6 +79,7 @@ describe('createStore', () => {
     unsub();
 
     store.setState((prev) => ({ ...prev, count: 99 }));
+    store.flush();
 
     expect(kept).toHaveBeenCalledTimes(1);
     expect(removed).not.toHaveBeenCalled();
@@ -109,7 +114,9 @@ describe('createStore', () => {
     store.subscribe((s) => received.push(s));
 
     store.setState((prev) => ({ ...prev, count: 7 }));
+    store.flush();
     store.setState((prev) => ({ ...prev, name: 'updated' }));
+    store.flush();
 
     expect(received).toEqual([
       { count: 7, name: 'test' },

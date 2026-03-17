@@ -153,6 +153,7 @@ describe("ChannelSidebar", () => {
     ) as HTMLElement;
     expect(textHeader).not.toBeUndefined();
     textHeader.click();
+    uiStore.flush();
 
     // After collapse, "Text Channels" channels should be hidden
     // The sidebar re-renders on uiStore change, so channels under
@@ -166,6 +167,7 @@ describe("ChannelSidebar", () => {
       (h) => h.querySelector(".category-name")?.textContent === "Text Channels",
     ) as HTMLElement;
     textHeaderAfter.click();
+    uiStore.flush();
 
     const itemsExpanded = container.querySelectorAll(".channel-item");
     expect(itemsExpanded.length).toBe(4);

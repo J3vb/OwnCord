@@ -177,6 +177,7 @@ describe("ui store", () => {
       const listener = vi.fn();
       const unsub = uiStore.subscribe(listener);
       toggleSidebar();
+      uiStore.flush();
       expect(listener).toHaveBeenCalledTimes(1);
       unsub();
     });
