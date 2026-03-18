@@ -459,6 +459,14 @@
 .msg-file-name { font-size: 13px; color: var(--text-link); cursor: pointer; }
 .msg-file-name:hover { text-decoration: underline; }
 .msg-file-size { font-size: 11px; color: var(--text-muted); }
+.msg-file-download {
+  margin-left: auto; width: 32px; height: 32px;
+  border-radius: var(--radius-sm); background: transparent;
+  color: var(--text-muted); font-size: 16px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  border: none; transition: all .15s; flex-shrink: 0;
+}
+.msg-file-download:hover { background: var(--bg-hover); color: var(--text-normal); }
 
 /* System message */
 .system-msg {

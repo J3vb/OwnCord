@@ -279,6 +279,23 @@ func MaxBodySize(maxBytes int64) func(http.Handler) http.Handler {
 	}
 }
 
+// MaxBodySizeUnless is like MaxBodySize but skips the limit for specific paths.
+// Exempted paths apply their own limit via route-scoped middleware.
+func MaxBodySizeUnless(maxBytes int64, exemptPaths ...string) func(http.Handler) http.Handler {
+	exempt := make(map[string]bool, len(exemptPaths))
+	for _, p := range exemptPaths {
+		exempt[p] = true
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !exempt[r.URL.Path] {
+				r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // errorResponse is the standard error JSON shape.
 type errorResponse struct {
 	Error   string `json:"error"`

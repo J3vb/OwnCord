@@ -9,6 +9,8 @@ import {
   appendChildren,
 } from "@lib/dom";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeFile } from "@tauri-apps/plugin-fs";
 import type { Attachment } from "@lib/types";
 import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
@@ -854,12 +856,42 @@ function renderAttachment(att: Attachment): HTMLDivElement {
   const inner = createElement("div", { class: "msg-file-inner" });
   const icon = createElement("div", { class: "msg-file-icon" }, "\uD83D\uDCC4");
   const nameEl = createElement("div", { class: "msg-file-name" }, att.filename);
+  nameEl.addEventListener("click", () => {
+    void downloadFile(resolvedUrl, att.filename);
+  });
   const sizeEl = createElement("div", { class: "msg-file-size" }, formatFileSize(att.size));
   const info = createElement("div", {});
   appendChildren(info, nameEl, sizeEl);
-  appendChildren(inner, icon, info);
+  const downloadBtn = createElement("button", {
+    class: "msg-file-download",
+    title: "Download",
+  }, "\u2B07");
+  downloadBtn.addEventListener("click", () => {
+    void downloadFile(resolvedUrl, att.filename);
+  });
+  appendChildren(inner, icon, info, downloadBtn);
   wrap.appendChild(inner);
   return wrap;
+}
+
+/** Download a file via Tauri HTTP plugin and save to disk with native dialog. */
+async function downloadFile(url: string, filename: string): Promise<void> {
+  try {
+    // Show native save dialog with suggested filename
+    const filePath = await save({ defaultPath: filename });
+    if (filePath === null) return; // User cancelled
+
+    // Fetch file data
+    const res = await tauriFetch(url, {
+      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
+    } as RequestInit);
+    if (!res.ok) return;
+
+    const buffer = await res.arrayBuffer();
+    await writeFile(filePath, new Uint8Array(buffer));
+  } catch (err) {
+    console.error("Download failed:", err);
+  }
 }
 
 // -- Reaction rendering -------------------------------------------------------

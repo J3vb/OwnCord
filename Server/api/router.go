@@ -31,7 +31,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string) http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(requestLogger) // structured request/response logging
 	r.Use(SecurityHeaders)
-	r.Use(MaxBodySize(1 << 20)) // 1 MiB default; upload routes use their own limit
+	r.Use(MaxBodySizeUnless(1<<20, "/api/v1/uploads")) // 1 MiB default; upload route exempt
 
 	// Health check — unauthenticated, no versioning prefix.
 	r.Get("/health", handleHealth(ver))
