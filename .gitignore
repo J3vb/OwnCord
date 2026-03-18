@@ -21,6 +21,7 @@ docs/superpowers/
 docs/brain/
 # Server runtime artifacts
 Server/chatserver.exe
+Server/chatserver.exe~
 Server/config.yaml
 Server/data/
 
