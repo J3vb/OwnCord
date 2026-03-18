@@ -375,7 +375,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       onVoiceLeave: () => {
         log.info("Leaving voice channel");
-        voiceSessionLeave();
+        voiceSessionLeave(false); // false: we send voice_leave below
         leaveVoiceChannel();
         ws.send({ type: "voice_leave", payload: {} });
       },
@@ -415,7 +415,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onDisconnect: () => {
         if (voiceStore.getState().currentChannelId === null) return;
         log.info("Leaving voice channel (widget disconnect)");
-        voiceSessionLeave();
+        voiceSessionLeave(false); // false: we send voice_leave below
         leaveVoiceChannel();
         ws.send({ type: "voice_leave", payload: {} });
       },

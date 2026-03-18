@@ -220,8 +220,17 @@ export async function joinVoice(
   }
 }
 
-/** Leave the current voice session and clean up all resources. */
-export function leaveVoice(): void {
+/**
+ * Leave the current voice session and clean up all resources.
+ * If sendWs is true (default), also notifies the server via voice_leave.
+ * Pass sendWs=false when the server already knows (e.g. explicit UI leave
+ * that sends voice_leave separately).
+ */
+export function leaveVoice(sendWs = true): void {
+  // Notify server so it cleans up our voice state
+  if (sendWs && ws !== null) {
+    ws.send({ type: "voice_leave", payload: {} });
+  }
   // Stop all local media tracks
   if (localStream !== null) {
     for (const track of localStream.getTracks()) {

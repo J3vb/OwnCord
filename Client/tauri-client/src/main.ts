@@ -293,7 +293,7 @@ authStore.subscribe((state) => {
     // Leave voice channel before disconnecting so other clients see it immediately
     const voice = voiceStore.getState();
     if (voice.currentChannelId !== null) {
-      voiceSessionLeave();
+      voiceSessionLeave(false); // false: we send voice_leave below
       ws.send({ type: "voice_leave", payload: {} });
       leaveVoiceChannel();
     }
@@ -313,7 +313,7 @@ authStore.subscribe((state) => {
 window.addEventListener("beforeunload", () => {
   const voice = voiceStore.getState();
   if (voice.currentChannelId !== null) {
-    voiceSessionLeave();
+    voiceSessionLeave(false); // false: we send voice_leave below
     ws.send({ type: "voice_leave", payload: {} });
   }
 });
