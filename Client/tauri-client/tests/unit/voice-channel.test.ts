@@ -11,6 +11,8 @@ function resetStores(): void {
     voiceConfigs: new Map(),
     localMuted: false,
     localDeafened: false,
+    localCamera: false,
+    localScreenshare: false,
   }));
   membersStore.setState(() => ({
     members: new Map(),

@@ -19,6 +19,8 @@ function resetStores(): void {
     voiceConfigs: new Map(),
     localMuted: false,
     localDeafened: false,
+    localCamera: false,
+    localScreenshare: false,
   }));
   authStore.setState(() => ({
     token: null,

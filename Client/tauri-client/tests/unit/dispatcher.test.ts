@@ -89,6 +89,8 @@ describe("WS Dispatcher", () => {
       voiceConfigs: new Map(),
       localMuted: false,
       localDeafened: false,
+      localCamera: false,
+      localScreenshare: false,
     }));
 
     mock = createMockWs();

@@ -12,6 +12,8 @@ function resetStores(): void {
     voiceConfigs: new Map(),
     localMuted: false,
     localDeafened: false,
+    localCamera: false,
+    localScreenshare: false,
   }));
   channelsStore.setState(() => ({
     channels: new Map(),

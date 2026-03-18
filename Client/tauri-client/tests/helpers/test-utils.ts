@@ -53,6 +53,8 @@ const VOICE_INITIAL: VoiceState = {
   voiceConfigs: new Map(),
   localMuted: false,
   localDeafened: false,
+  localCamera: false,
+  localScreenshare: false,
 };
 
 const UI_INITIAL: UiState = {
