@@ -207,19 +207,24 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         }
       },
       onDeleteClick: (msgId: number) => {
+        if (!confirm("Delete this message?")) return;
         ws.send({
           type: "chat_delete",
           payload: { message_id: msgId },
         });
+        toast?.show("Message deleted", "success");
       },
       onReactionClick: (msgId: number, emoji: string) => {
         if (emoji === "") return;
-        if (limiters.reactions.tryConsume()) {
-          ws.send({
-            type: "reaction_add",
-            payload: { message_id: msgId, emoji },
-          });
+        if (!limiters.reactions.tryConsume()) {
+          toast?.show("Slow down! Please wait before reacting again.", "error");
+          return;
         }
+        const msgs = getChannelMessages(channelId);
+        const msg = msgs.find((m) => m.id === msgId);
+        const existing = msg?.reactions.find((r) => r.emoji === emoji);
+        const type = existing?.me ? "reaction_remove" : "reaction_add";
+        ws.send({ type, payload: { message_id: msgId, emoji } });
       },
     });
     if (messagesSlot !== null) {
@@ -266,10 +271,21 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         }
       },
       onEditMessage: (messageId: number, content: string) => {
+        const trimmed = content.trim();
+        if (trimmed === "") {
+          toast?.show("Message cannot be empty", "error");
+          return;
+        }
+        const msgs = getChannelMessages(channelId);
+        const original = msgs.find((m) => m.id === messageId);
+        if (original !== undefined && original.content === trimmed) {
+          return;
+        }
         ws.send({
           type: "chat_edit",
-          payload: { message_id: messageId, content },
+          payload: { message_id: messageId, content: trimmed },
         });
+        toast?.show("Message edited", "success");
       },
     });
     if (inputSlot !== null) {
