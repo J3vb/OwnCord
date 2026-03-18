@@ -276,3 +276,71 @@ func TestVoiceRoom_AddParticipant_Duplicate(t *testing.T) {
 		t.Errorf("ParticipantCount() = %d after duplicate add, want 1", room.ParticipantCount())
 	}
 }
+
+func TestVoiceRoom_AddTrack(t *testing.T) {
+	room := ws.NewVoiceRoom(defaultRoomConfig())
+	_ = room.AddParticipant(100)
+	room.SetTrack(100, nil, nil)
+	tracks := room.GetTracks()
+	if len(tracks) != 1 {
+		t.Fatalf("GetTracks() len = %d, want 1", len(tracks))
+	}
+}
+
+func TestVoiceRoom_RemoveTrack(t *testing.T) {
+	room := ws.NewVoiceRoom(defaultRoomConfig())
+	_ = room.AddParticipant(100)
+	room.SetTrack(100, nil, nil)
+	vt := room.RemoveTrack(100)
+	if vt == nil {
+		t.Fatal("RemoveTrack returned nil")
+	}
+	tracks := room.GetTracks()
+	if len(tracks) != 0 {
+		t.Fatalf("GetTracks() after remove len = %d, want 0", len(tracks))
+	}
+}
+
+func TestVoiceRoom_GetTrackUserIDs(t *testing.T) {
+	room := ws.NewVoiceRoom(defaultRoomConfig())
+	_ = room.AddParticipant(100)
+	_ = room.AddParticipant(200)
+	room.SetTrack(100, nil, nil)
+	room.SetTrack(200, nil, nil)
+	ids := room.TrackUserIDs()
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	if len(ids) != 2 || ids[0] != 100 || ids[1] != 200 {
+		t.Fatalf("TrackUserIDs() = %v, want [100 200]", ids)
+	}
+}
+
+func TestVoiceRoom_Close_ClearsTracks(t *testing.T) {
+	room := ws.NewVoiceRoom(defaultRoomConfig())
+	_ = room.AddParticipant(100)
+	room.SetTrack(100, nil, nil)
+	room.Close()
+	if len(room.GetTracks()) != 0 {
+		t.Fatal("Close() should clear tracks")
+	}
+}
+
+func TestVoiceTrack_AddRemoveSender(t *testing.T) {
+	room := ws.NewVoiceRoom(defaultRoomConfig())
+	_ = room.AddParticipant(100)
+	room.SetTrack(100, nil, nil)
+	vt := room.GetTrack(100)
+	if vt == nil {
+		t.Fatal("GetTrack returned nil")
+	}
+	// AddSender with nil (unit test, no real sender)
+	vt.AddSender(200, nil)
+	senders := vt.CopySenders()
+	if len(senders) != 1 {
+		t.Fatalf("CopySenders len = %d, want 1", len(senders))
+	}
+	vt.RemoveSender(200)
+	senders = vt.CopySenders()
+	if len(senders) != 0 {
+		t.Fatalf("CopySenders after remove len = %d, want 0", len(senders))
+	}
+}
