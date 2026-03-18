@@ -154,8 +154,15 @@ function isImageMime(mime: string): boolean {
 function renderAttachment(att: Attachment): HTMLDivElement {
   if (isImageMime(att.mime)) {
     const wrap = createElement("div", { class: "msg-image" });
-    const placeholder = createElement("div", { class: "placeholder-img" }, att.filename);
-    wrap.appendChild(placeholder);
+    const img = createElement("img", {
+      src: att.url,
+      alt: att.filename,
+      loading: "lazy",
+    });
+    img.addEventListener("error", () => {
+      img.replaceWith(createElement("div", { class: "placeholder-img" }, att.filename));
+    });
+    wrap.appendChild(img);
     return wrap;
   }
   const wrap = createElement("div", { class: "msg-file" });
