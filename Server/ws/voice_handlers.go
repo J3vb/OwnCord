@@ -53,6 +53,21 @@ func (h *Hub) SetupICEMonitorForTest(c *Client, channelID int64) {
 	h.setupICEMonitor(c, channelID)
 }
 
+// setupICECallback registers an OnICECandidate handler on the client's
+// PeerConnection to send server-generated ICE candidates to the client.
+func (h *Hub) setupICECallback(c *Client, channelID int64) {
+	pc := c.getPC()
+	if pc == nil {
+		return
+	}
+	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		if candidate == nil {
+			return // gathering complete
+		}
+		c.sendMsg(buildVoiceICE(channelID, candidate.ToJSON()))
+	})
+}
+
 // handleVoiceJoin processes a voice_join message.
 // 1. Parses channel_id.
 // 2. Checks CONNECT_VOICE permission.
@@ -129,6 +144,7 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 	if pc != nil {
 		h.setupOnTrack(c, channelID)
 		h.setupICEMonitor(c, channelID)
+		h.setupICECallback(c, channelID)
 	}
 
 	state, err := h.db.GetVoiceState(c.userID)

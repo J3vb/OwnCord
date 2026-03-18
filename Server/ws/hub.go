@@ -242,6 +242,14 @@ func (h *Hub) IsUserConnected(userID int64) bool {
 	return ok
 }
 
+// GetClient returns the client for userID, or nil if not connected.
+// Safe to call from any goroutine.
+func (h *Hub) GetClient(userID int64) *Client {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.clients[userID]
+}
+
 // Register queues a client for registration with the hub.
 func (h *Hub) Register(c *Client) {
 	h.register <- c

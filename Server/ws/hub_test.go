@@ -401,6 +401,28 @@ func TestHub_ConcurrentRegisterUnregister(t *testing.T) {
 	}
 }
 
+// ─── GetClient ───────────────────────────────────────────────────────────────
+
+func TestHub_GetClient(t *testing.T) {
+	hub, _ := newTestHub(t)
+	send := make(chan []byte, 256)
+	client := ws.NewTestClient(hub, 42, send)
+	hub.Register(client)
+	go hub.Run()
+	defer hub.Stop()
+	time.Sleep(10 * time.Millisecond)
+
+	got := hub.GetClient(42)
+	if got == nil {
+		t.Fatal("GetClient(42) returned nil")
+	}
+
+	got2 := hub.GetClient(999)
+	if got2 != nil {
+		t.Fatal("GetClient(999) should return nil")
+	}
+}
+
 // ─── assertion helpers ────────────────────────────────────────────────────────
 
 func assertReceived(t *testing.T, ch <-chan []byte, want []byte, label string) {
