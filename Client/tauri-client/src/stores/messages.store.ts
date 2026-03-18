@@ -111,13 +111,14 @@ export function addMessage(payload: ChatMessagePayload): void {
   });
 }
 
-/** Bulk set messages from a REST response. Marks channel as loaded. */
+/** Bulk set messages from a REST response. Marks channel as loaded.
+ *  The server returns messages newest-first; we reverse to chronological order. */
 export function setMessages(
   channelId: number,
   messages: readonly MessageResponse[],
   hasMore: boolean,
 ): void {
-  const converted = messages.map(messageResponseToMessage);
+  const converted = messages.map(messageResponseToMessage).reverse();
   messagesStore.setState((prev) => {
     const updatedMessages = new Map(prev.messagesByChannel);
     updatedMessages.set(channelId, converted);
@@ -137,13 +138,14 @@ export function setMessages(
   });
 }
 
-/** Prepend older messages for infinite scroll. */
+/** Prepend older messages for infinite scroll.
+ *  The server returns messages newest-first; we reverse to chronological order. */
 export function prependMessages(
   channelId: number,
   messages: readonly MessageResponse[],
   hasMore: boolean,
 ): void {
-  const converted = messages.map(messageResponseToMessage);
+  const converted = messages.map(messageResponseToMessage).reverse();
   messagesStore.setState((prev) => {
     const existing = prev.messagesByChannel.get(channelId) ?? [];
     const updatedMessages = new Map(prev.messagesByChannel);

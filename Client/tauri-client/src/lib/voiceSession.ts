@@ -13,7 +13,7 @@ import type { VadDetector } from "@lib/vad";
 import { createWebRtcService } from "@lib/webrtc";
 import { createAudioManager } from "@lib/audio";
 import { createVadDetector } from "@lib/vad";
-import { setLocalMuted, setLocalDeafened, setLocalSpeaking } from "@stores/voice.store";
+import { voiceStore, setLocalMuted, setLocalDeafened, setLocalSpeaking } from "@stores/voice.store";
 import { loadPref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 
@@ -318,6 +318,13 @@ export function leaveVoice(sendWs = true): void {
 /** Mute or unmute the local microphone. */
 export function setMuted(muted: boolean): void {
   setLocalMuted(muted);
+  // Disable tracks on the local stream directly as a fallback
+  if (localStream !== null) {
+    for (const track of localStream.getAudioTracks()) {
+      track.enabled = !muted;
+    }
+  }
+  // Also replace tracks on WebRTC senders for full RTP-level muting
   if (webrtcService !== null) {
     webrtcService.setMuted(muted);
   }
@@ -356,6 +363,10 @@ export async function switchInputDevice(deviceId: string): Promise<void> {
     // Replace in WebRTC
     if (webrtcService !== null) {
       webrtcService.setLocalStream(localStream);
+      // Re-apply mute state to new tracks
+      if (voiceStore.getState().localMuted) {
+        webrtcService.setMuted(true);
+      }
     }
 
     // Restart VAD on new stream

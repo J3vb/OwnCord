@@ -168,10 +168,16 @@ function renderVoiceChannelItem(
       );
       row.appendChild(nameEl);
 
-      if (user.muted || user.deafened) {
-        const icon = user.deafened ? "\uD83D\uDD08" : "\uD83D\uDD07";
-        const mutedEl = createElement("span", { class: "vu-muted" }, icon);
-        row.appendChild(mutedEl);
+      if (user.deafened) {
+        // Deafened: show both crossed mic and crossed headphone
+        const muteIcon = createElement("span", { class: "vu-muted vu-icon-crossed" }, "\uD83C\uDFA4");
+        const deafIcon = createElement("span", { class: "vu-muted vu-icon-crossed" }, "\uD83C\uDFA7");
+        row.appendChild(muteIcon);
+        row.appendChild(deafIcon);
+      } else if (user.muted) {
+        // Muted only: show crossed mic
+        const muteIcon = createElement("span", { class: "vu-muted vu-icon-crossed" }, "\uD83C\uDFA4");
+        row.appendChild(muteIcon);
       }
 
       usersContainer.appendChild(row);

@@ -45,6 +45,8 @@ function applyOpusBitrate(sdp: string, bitrate: number): string {
 export function createWebRtcService(): WebRtcService {
   let pc: RTCPeerConnection | null = null;
   let localSenders: readonly RTCRtpSender[] = [];
+  /** Original tracks stored so we can restore them after unmute. */
+  const mutedTracks = new Map<RTCRtpSender, MediaStreamTrack>();
   let remoteStreams: readonly MediaStream[] = [];
   let opusBitrate: number | undefined;
   let destroyed = false;
@@ -163,6 +165,7 @@ export function createWebRtcService(): WebRtcService {
       for (const sender of localSenders) {
         conn.removeTrack(sender);
       }
+      mutedTracks.clear();
       // Add all tracks from the new stream
       const newSenders = stream.getTracks().map((track) => conn.addTrack(track, stream));
       localSenders = newSenders;
@@ -174,8 +177,22 @@ export function createWebRtcService(): WebRtcService {
 
     setMuted(muted: boolean): void {
       for (const sender of localSenders) {
-        if (sender.track !== null) {
-          sender.track.enabled = !muted;
+        if (muted) {
+          // Store original track and replace with null to fully stop sending audio
+          const track = sender.track;
+          if (track !== null) {
+            track.enabled = false;
+            mutedTracks.set(sender, track);
+            void sender.replaceTrack(null);
+          }
+        } else {
+          // Restore the original track
+          const track = mutedTracks.get(sender);
+          if (track !== undefined) {
+            track.enabled = true;
+            void sender.replaceTrack(track);
+            mutedTracks.delete(sender);
+          }
         }
       }
     },
@@ -206,6 +223,7 @@ export function createWebRtcService(): WebRtcService {
         pc = null;
       }
       localSenders = [];
+      mutedTracks.clear();
       remoteStreams = [];
       iceCandidateCallbacks.clear();
       remoteTrackCallbacks.clear();

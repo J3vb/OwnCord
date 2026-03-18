@@ -315,6 +315,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     parentContainer.appendChild(root);
 
     renderAll();
+    // Scroll to bottom on initial mount — use multiple deferred calls to handle
+    // layout shifts from images/embeds loading after the initial render.
+    scrollToBottom();
+    requestAnimationFrame(() => scrollToBottom());
+    setTimeout(() => scrollToBottom(), 100);
+    setTimeout(() => scrollToBottom(), 500);
 
     unsubscribers.push(messagesStore.subscribe(() => { renderAll(); }));
 

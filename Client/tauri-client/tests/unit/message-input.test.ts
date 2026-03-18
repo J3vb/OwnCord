@@ -68,7 +68,7 @@ describe("MessageInput", () => {
     const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
     sendBtn.click();
 
-    expect(opts.onSend).toHaveBeenCalledWith("Hello world", null);
+    expect(opts.onSend).toHaveBeenCalledWith("Hello world", null, []);
 
     comp.destroy?.();
   });
@@ -85,7 +85,7 @@ describe("MessageInput", () => {
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
     );
 
-    expect(opts.onSend).toHaveBeenCalledWith("Enter message", null);
+    expect(opts.onSend).toHaveBeenCalledWith("Enter message", null, []);
 
     comp.destroy?.();
   });
@@ -220,7 +220,7 @@ describe("MessageInput", () => {
     const attachBtn = container.querySelector(".attach-btn") as HTMLButtonElement;
     expect(attachBtn).not.toBeNull();
     expect(attachBtn.disabled).toBe(true);
-    expect(attachBtn.title).toBe("File uploads coming soon");
+    expect(attachBtn.title).toBe("File uploads not available");
 
     comp.destroy?.();
   });

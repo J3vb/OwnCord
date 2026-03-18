@@ -171,7 +171,7 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 
 	// Sanitize and validate content length.
 	content := sanitizer.Sanitize(p.Content)
-	if content == "" {
+	if content == "" && len(p.Attachments) == 0 {
 		c.sendMsg(buildErrorMsg("BAD_REQUEST", "message content cannot be empty"))
 		return
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/storage"
 	"github.com/owncord/server/updater"
 	"github.com/owncord/server/ws"
 )
@@ -52,6 +53,14 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string) http.Handler {
 
 	// Channel and message REST routes.
 	MountChannelRoutes(r, database)
+
+	// File upload and serving routes.
+	store, storeErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
+	if storeErr != nil {
+		slog.Error("failed to create file storage", "error", storeErr)
+	} else {
+		MountUploadRoutes(r, database, store)
+	}
 
 	// Voice credentials REST route.
 	MountVoiceRoutes(r, cfg, database)

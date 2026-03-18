@@ -62,6 +62,7 @@
         }
       ]
     },
-    "http:allow-fetch-cancel"
+    "http:allow-fetch-cancel",
+    "opener:default"
   ]
 }

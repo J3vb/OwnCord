@@ -16,6 +16,18 @@ type Attachment struct {
 	UploadedAt string
 }
 
+// CreateAttachment inserts a new attachment record (initially unlinked to any message).
+func (d *DB) CreateAttachment(id, filename, storedAs, mimeType string, size int64) error {
+	_, err := d.sqlDB.Exec(
+		`INSERT INTO attachments (id, filename, stored_as, mime_type, size) VALUES (?, ?, ?, ?, ?)`,
+		id, filename, storedAs, mimeType, size,
+	)
+	if err != nil {
+		return fmt.Errorf("CreateAttachment: %w", err)
+	}
+	return nil
+}
+
 // GetAttachmentByID returns the attachment with the given ID, or nil if not found.
 func (d *DB) GetAttachmentByID(id string) (*Attachment, error) {
 	row := d.sqlDB.QueryRow(

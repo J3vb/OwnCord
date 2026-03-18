@@ -526,7 +526,7 @@ describe("MessageInput", () => {
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "Hello world";
     textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
-    expect(onSend).toHaveBeenCalledWith("Hello world", null);
+    expect(onSend).toHaveBeenCalledWith("Hello world", null, []);
     input.destroy?.();
   });
 

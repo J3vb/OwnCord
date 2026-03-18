@@ -25,13 +25,24 @@ import { createCertMismatchModal } from "@components/CertMismatchModal";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import type { CertTofuEvent } from "@lib/ws";
 
+import { openUrl } from "@tauri-apps/plugin-opener";
+
 const log = createLogger("main");
 
 // Disable the default browser context menu globally.
-// Custom context menus (e.g. channel edit/delete) call e.preventDefault()
-// themselves before the event reaches this handler.
 document.addEventListener("contextmenu", (e) => {
   e.preventDefault();
+});
+
+// Open external links (target="_blank") in the user's default browser.
+document.addEventListener("click", (e) => {
+  const link = (e.target as HTMLElement).closest("a[target='_blank']") as HTMLAnchorElement | null;
+  if (link === null) return;
+  e.preventDefault();
+  const href = link.href;
+  if (href && (href.startsWith("http://") || href.startsWith("https://"))) {
+    void openUrl(href);
+  }
 });
 
 // Install global error handlers first

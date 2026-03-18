@@ -51,6 +51,7 @@ import {
   getChannelMessages,
 } from "@stores/messages.store";
 import { buildChatHeader } from "./main-page/ChatHeader";
+import { setServerHost } from "@components/message-list/renderers";
 import {
   createQuickSwitcherManager,
   createInviteManagerController,
@@ -77,6 +78,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   // Let voiceSession send signaling messages over this WS connection
   setWsClient(ws);
+
+  // Set server host for resolving relative attachment URLs
+  const apiConfig = api.getConfig();
+  if (apiConfig.host) {
+    setServerHost(apiConfig.host);
+  }
 
   const limiters = createRateLimiterSet();
 
@@ -261,7 +268,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     messageInput = createMessageInput({
       channelId,
       channelName,
-      onSend: (content: string, replyTo: number | null) => {
+      onSend: (content: string, replyTo: number | null, attachments: readonly string[]) => {
         if (ws.getState() !== "connected") {
           log.warn("Cannot send message: not connected");
           toast?.show("Not connected — message not sent", "error");
@@ -273,9 +280,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             channel_id: channelId,
             content,
             reply_to: replyTo,
-            attachments: [],
+            attachments,
           },
         });
+      },
+      onUploadFile: async (file: File) => {
+        const result = await api.uploadFile(file);
+        return { id: result.id, url: result.url, filename: result.filename };
       },
       onTyping: () => {
         if (limiters.typing.tryConsume(String(channelId))) {
@@ -532,15 +543,38 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       onMuteToggle: () => {
         if (!limiters.voice.tryConsume()) return;
-        const next = !voiceStore.getState().localMuted;
-        voiceSessionSetMuted(next);
-        ws.send({ type: "voice_mute", payload: { muted: next } });
+        const state = voiceStore.getState();
+        if (state.localMuted) {
+          // Unmuting: also undeafen if deafened
+          voiceSessionSetMuted(false);
+          ws.send({ type: "voice_mute", payload: { muted: false } });
+          if (state.localDeafened) {
+            voiceSessionSetDeafened(false);
+            ws.send({ type: "voice_deafen", payload: { deafened: false } });
+          }
+        } else {
+          voiceSessionSetMuted(true);
+          ws.send({ type: "voice_mute", payload: { muted: true } });
+        }
       },
       onDeafenToggle: () => {
         if (!limiters.voice.tryConsume()) return;
-        const next = !voiceStore.getState().localDeafened;
-        voiceSessionSetDeafened(next);
-        ws.send({ type: "voice_deafen", payload: { deafened: next } });
+        const state = voiceStore.getState();
+        if (state.localDeafened) {
+          // Undeafening: also unmute mic
+          voiceSessionSetDeafened(false);
+          ws.send({ type: "voice_deafen", payload: { deafened: false } });
+          voiceSessionSetMuted(false);
+          ws.send({ type: "voice_mute", payload: { muted: false } });
+        } else {
+          // Deafening: also mute mic
+          voiceSessionSetDeafened(true);
+          ws.send({ type: "voice_deafen", payload: { deafened: true } });
+          if (!state.localMuted) {
+            voiceSessionSetMuted(true);
+            ws.send({ type: "voice_mute", payload: { muted: true } });
+          }
+        }
       },
       onCameraToggle: () => {
         if (!limiters.voiceVideo.tryConsume()) return;
