@@ -31,6 +31,9 @@ let ws: WsClient | null = null;
 const audioElements = new Map<string, HTMLAudioElement>();
 let audioContainer: HTMLDivElement | null = null;
 
+// Optional error callback for UI feedback (e.g. toast on WebRTC failure)
+let onErrorCallback: ((message: string) => void) | null = null;
+
 // Track event-unsubscribe functions for cleanup
 let unsubIce: (() => void) | null = null;
 let unsubTrack: (() => void) | null = null;
@@ -156,6 +159,11 @@ export function setWsClient(client: WsClient): void {
   ws = client;
 }
 
+/** Set error callback for UI feedback (e.g. toast on WebRTC failure). */
+export function setOnError(cb: (message: string) => void): void {
+  onErrorCallback = cb;
+}
+
 /**
  * Fetch ICE servers (TURN/STUN credentials) for WebRTC.
  * Falls back to empty array on failure so voice still works on LAN.
@@ -221,6 +229,7 @@ export async function joinVoice(
       log.info("WebRTC connection state changed", { state });
       if (state === "failed") {
         log.error("WebRTC connection failed, leaving voice");
+        onErrorCallback?.("Voice connection failed — disconnected");
         leaveVoice();
       }
     });
@@ -308,6 +317,64 @@ export function setDeafened(deafened: boolean): void {
   for (const el of audioElements.values()) {
     el.muted = deafened;
   }
+}
+
+/** Switch the input (microphone) device on an active session. */
+export async function switchInputDevice(deviceId: string): Promise<void> {
+  if (audioManager === null) {
+    audioManager = createAudioManager();
+  }
+  try {
+    const newStream = await audioManager.getUserMedia(deviceId || undefined);
+    if (newStream === null) return;
+
+    // Stop old tracks
+    if (localStream !== null) {
+      for (const track of localStream.getTracks()) {
+        track.stop();
+      }
+    }
+    localStream = newStream;
+
+    // Replace in WebRTC
+    if (webrtcService !== null) {
+      webrtcService.setLocalStream(localStream);
+    }
+
+    // Restart VAD on new stream
+    if (vadDetector !== null) {
+      if (unsubVad !== null) {
+        unsubVad();
+        unsubVad = null;
+      }
+      vadDetector.stop();
+      vadDetector.start(localStream);
+      unsubVad = vadDetector.onSpeakingChange((speaking) => {
+        setLocalSpeaking(speaking);
+      });
+    }
+
+    log.info("Switched input device", { deviceId });
+  } catch (err) {
+    log.error("Failed to switch input device", err);
+    onErrorCallback?.("Failed to switch microphone");
+  }
+}
+
+/** Switch the output (speaker) device on an active session. */
+export async function switchOutputDevice(deviceId: string): Promise<void> {
+  for (const el of audioElements.values()) {
+    if (typeof el.setSinkId === "function") {
+      try {
+        await el.setSinkId(deviceId);
+      } catch (err) {
+        log.error("Failed to set output device on audio element", err);
+        onErrorCallback?.("Failed to switch speaker");
+        return;
+      }
+    }
+  }
+  log.info("Switched output device", { deviceId });
 }
 
 /** Handle an SDP offer from the server (re-negotiation). */

@@ -25,6 +25,11 @@ vi.mock("@stores/ui.store", () => ({
   setTheme: (...args: unknown[]) => mockSetTheme(...args),
 }));
 
+vi.mock("@lib/voiceSession", () => ({
+  switchInputDevice: vi.fn().mockResolvedValue(undefined),
+  switchOutputDevice: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("@stores/auth.store", () => ({
   authStore: {
     getState: () => ({

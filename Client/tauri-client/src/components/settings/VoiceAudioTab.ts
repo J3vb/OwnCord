@@ -4,6 +4,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref } from "./helpers";
+import { switchInputDevice, switchOutputDevice } from "@lib/voiceSession";
 
 export function buildVoiceAudioTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
@@ -65,10 +66,12 @@ export function buildVoiceAudioTab(signal: AbortSignal): HTMLDivElement {
 
   inputSelect.addEventListener("change", () => {
     savePref("audioInputDevice", inputSelect.value);
+    void switchInputDevice(inputSelect.value);
   }, { signal });
 
   outputSelect.addEventListener("change", () => {
     savePref("audioOutputDevice", outputSelect.value);
+    void switchOutputDevice(outputSelect.value);
   }, { signal });
 
   // Input sensitivity slider

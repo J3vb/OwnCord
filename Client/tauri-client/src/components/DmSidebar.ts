@@ -108,7 +108,16 @@ function renderDmItem(
     item.appendChild(unreadDot);
   }
 
-  item.addEventListener("click", () => onSelect(convo.userId), { signal });
+  item.addEventListener("click", () => {
+    const parent = item.parentElement;
+    if (parent !== null) {
+      for (const sibling of parent.querySelectorAll(".dm-item.active")) {
+        sibling.classList.remove("active");
+      }
+    }
+    item.classList.add("active");
+    onSelect(convo.userId);
+  }, { signal });
 
   return item;
 }

@@ -38,6 +38,7 @@ import {
   setMuted as voiceSessionSetMuted,
   setDeafened as voiceSessionSetDeafened,
   setWsClient,
+  setOnError as setVoiceOnError,
 } from "@lib/voiceSession";
 import {
   setMessages,
@@ -572,6 +573,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     toast = createToastContainer();
     toast.mount(root);
     children.push(toast);
+
+    // Wire voice error callback to toast
+    setVoiceOnError((msg) => toast?.show(msg, "error"));
 
     container.appendChild(root);
 
