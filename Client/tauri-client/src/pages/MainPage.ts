@@ -9,6 +9,9 @@ import { createLogger } from "@lib/logger";
 import { createRateLimiterSet } from "@lib/rate-limiter";
 import { createServerStrip } from "@components/ServerStrip";
 import { createChannelSidebar } from "@components/ChannelSidebar";
+import { createCreateChannelModal } from "@components/CreateChannelModal";
+import { createEditChannelModal } from "@components/EditChannelModal";
+import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import { createUserBar } from "@components/UserBar";
 import { createVoiceWidget } from "@components/VoiceWidget";
 import { createMemberList } from "@components/MemberList";
@@ -405,6 +408,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const sidebarWrapper = createElement("div", { class: "channel-sidebar", "data-testid": "channel-sidebar" });
 
     const channelSidebarSlot = createElement("div", {});
+    let activeModal: MountableComponent | null = null;
+
     const channelSidebar = createChannelSidebar({
       onVoiceJoin: (channelId) => {
         log.info("Joining voice channel", { channelId });
@@ -416,6 +421,74 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         voiceSessionLeave(false); // false: we send voice_leave below
         leaveVoiceChannel();
         ws.send({ type: "voice_leave", payload: {} });
+      },
+      onCreateChannel: (category) => {
+        if (activeModal !== null) {
+          return;
+        }
+        const modal = createCreateChannelModal({
+          category,
+          onCreate: async (data) => {
+            await api.adminCreateChannel(data);
+            // Server broadcasts channel_create via WS — store updates automatically
+            modal.destroy?.();
+            activeModal = null;
+          },
+          onClose: () => {
+            modal.destroy?.();
+            activeModal = null;
+          },
+        });
+        activeModal = modal;
+        modal.mount(document.body);
+      },
+      onEditChannel: (channel) => {
+        if (activeModal !== null) {
+          return;
+        }
+        const modal = createEditChannelModal({
+          channelId: channel.id,
+          channelName: channel.name,
+          channelType: channel.type,
+          onSave: async (data) => {
+            await api.adminUpdateChannel(channel.id, data);
+            // Server broadcasts channel_update via WS — store updates automatically
+            modal.destroy?.();
+            activeModal = null;
+          },
+          onClose: () => {
+            modal.destroy?.();
+            activeModal = null;
+          },
+        });
+        activeModal = modal;
+        modal.mount(document.body);
+      },
+      onDeleteChannel: (channel) => {
+        if (activeModal !== null) {
+          return;
+        }
+        const modal = createDeleteChannelModal({
+          channelId: channel.id,
+          channelName: channel.name,
+          onConfirm: async () => {
+            await api.adminDeleteChannel(channel.id);
+            // Server broadcasts channel_delete via WS — store updates automatically
+            modal.destroy?.();
+            activeModal = null;
+          },
+          onClose: () => {
+            modal.destroy?.();
+            activeModal = null;
+          },
+        });
+        activeModal = modal;
+        modal.mount(document.body);
+      },
+      onReorderChannel: (reorders) => {
+        for (const r of reorders) {
+          void api.adminUpdateChannel(r.channelId, { position: r.newPosition });
+        }
       },
     });
     channelSidebar.mount(channelSidebarSlot);

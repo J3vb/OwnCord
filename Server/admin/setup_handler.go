@@ -108,8 +108,9 @@ func handleSetup(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		// Create default "general" text channel.
-		_, _ = database.CreateChannel("general", "text", "Chat", "Welcome to the server!", 0)
+		// Create default channels under canonical categories.
+		_, _ = database.CreateChannel("general", "text", "Text Channels", "Welcome to the server!", 0)
+		_, _ = database.CreateChannel("General", "voice", "Voice Channels", "", 0)
 
 		// Generate a bootstrap invite code so the owner can invite others.
 		inviteCode, err := database.CreateInvite(uid, 0, nil) // unlimited uses, no expiry

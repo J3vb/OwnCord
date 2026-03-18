@@ -66,6 +66,13 @@
   font-size: 11px; font-weight: 700;
   color: var(--text-faint); letter-spacing: .5px; text-transform: uppercase;
 }
+.category-add-btn {
+  margin-left: auto; font-size: 16px; color: var(--text-faint);
+  cursor: pointer; padding: 0 4px; line-height: 1; opacity: 0;
+  transition: opacity .15s, color .15s;
+}
+.category:hover .category-add-btn { opacity: 1; }
+.category-add-btn:hover { color: var(--text-normal); }
 .category-channels { overflow: hidden; transition: max-height .2s; }
 .category.collapsed + .category-channels { max-height: 0 !important; overflow: hidden; }
 
@@ -77,6 +84,16 @@
 }
 .channel-item:hover { background: var(--bg-hover); color: var(--text-normal); }
 .channel-item.active { background: var(--bg-active); color: white; }
+.channel-draggable { cursor: grab; }
+.channel-draggable:active { cursor: grabbing; }
+.channel-reordering { user-select: none; cursor: grabbing !important; }
+.channel-reordering * { cursor: grabbing !important; }
+.channel-draggable.dragging { opacity: .3; }
+.channel-drop-indicator {
+  box-shadow: 0 2px 0 var(--accent) inset, 0 -2px 0 var(--accent) inset;
+  background: rgba(88, 101, 242, .15);
+  border-radius: var(--radius-sm);
+}
 .channel-item .ch-icon { font-size: 18px; opacity: .6; flex-shrink: 0; width: 20px; text-align: center; }
 .channel-item.active .ch-icon { opacity: 1; }
 .channel-item .ch-name { font-size: 14px; flex: 1; }

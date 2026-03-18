@@ -16,9 +16,10 @@ import {
   getChannelsByCategory,
   setActiveChannel,
   clearUnread,
+  updateChannelPosition,
 } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
-import { authStore } from "@stores/auth.store";
+import { authStore, getCurrentUser } from "@stores/auth.store";
 import {
   uiStore,
   toggleCategory,
@@ -26,10 +27,33 @@ import {
 } from "@stores/ui.store";
 import { voiceStore, getChannelVoiceUsers } from "@stores/voice.store";
 
+export interface ChannelReorderData {
+  readonly channelId: number;
+  readonly newPosition: number;
+}
+
 export interface ChannelSidebarOptions {
   readonly onVoiceJoin: (channelId: number) => void;
   readonly onVoiceLeave: () => void;
+  /** Called when the user clicks the "+" on a category header. */
+  readonly onCreateChannel?: (category: string) => void;
+  /** Called when the user right-clicks a channel and selects Edit. */
+  readonly onEditChannel?: (channel: Channel) => void;
+  /** Called when the user right-clicks a channel and selects Delete. */
+  readonly onDeleteChannel?: (channel: Channel) => void;
+  /** Called when the user drags a channel to a new position. */
+  readonly onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void;
 }
+
+// ── Drag state (mouse-based, avoids WebView2 HTML5 DnD issues) ──
+interface DragState {
+  channelId: number;
+  sourceEl: HTMLElement;
+  containerEl: HTMLElement;
+  channels: readonly Channel[];
+  onReorder: (reorders: readonly ChannelReorderData[]) => void;
+}
+let activeDrag: DragState | null = null;
 
 const AVATAR_COLORS = ["#5865f2", "#57f287", "#fee75c", "#eb459e", "#ed4245"];
 
@@ -158,17 +182,285 @@ function renderVoiceChannelItem(
   return wrapper;
 }
 
+/** Attach a right-click context menu to a channel element for edit/delete. */
+function attachChannelContextMenu(
+  el: HTMLElement,
+  channel: Channel,
+  signal: AbortSignal,
+  onEdit?: (channel: Channel) => void,
+  onDelete?: (channel: Channel) => void,
+): void {
+  if (onEdit === undefined && onDelete === undefined) {
+    return;
+  }
+  const user = getCurrentUser();
+  const role = user?.role?.toLowerCase() ?? "";
+  if (role !== "owner" && role !== "admin") {
+    return;
+  }
+
+  el.addEventListener(
+    "contextmenu",
+    (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Remove any existing context menu
+      document.querySelector(".channel-ctx-menu")?.remove();
+
+      const menu = createElement("div", {
+        class: "context-menu channel-ctx-menu",
+        "data-testid": "channel-context-menu",
+      });
+      menu.style.left = `${e.clientX}px`;
+      menu.style.top = `${e.clientY}px`;
+
+      if (onEdit !== undefined) {
+        const editItem = createElement(
+          "div",
+          { class: "context-menu-item", "data-testid": "ctx-edit-channel" },
+          "Edit Channel",
+        );
+        editItem.addEventListener(
+          "click",
+          () => {
+            menu.remove();
+            onEdit(channel);
+          },
+          { signal },
+        );
+        menu.appendChild(editItem);
+      }
+
+      if (onDelete !== undefined) {
+        if (onEdit !== undefined) {
+          menu.appendChild(createElement("div", { class: "context-menu-sep" }));
+        }
+        const deleteItem = createElement(
+          "div",
+          { class: "context-menu-item danger", "data-testid": "ctx-delete-channel" },
+          "Delete Channel",
+        );
+        deleteItem.addEventListener(
+          "click",
+          () => {
+            menu.remove();
+            onDelete(channel);
+          },
+          { signal },
+        );
+        menu.appendChild(deleteItem);
+      }
+
+      document.body.appendChild(menu);
+
+      // Close menu on click elsewhere
+      const closeMenu = (): void => {
+        menu.remove();
+        document.removeEventListener("click", closeMenu);
+      };
+      // Defer so this click event doesn't immediately close it
+      setTimeout(() => {
+        document.addEventListener("click", closeMenu, { signal });
+      }, 0);
+    },
+    { signal },
+  );
+}
+
+/** Global mousemove/mouseup handlers for drag reordering. Registered once. */
+let globalDragListenersAttached = false;
+
+function ensureGlobalDragListeners(): void {
+  if (globalDragListenersAttached) {
+    return;
+  }
+  globalDragListenersAttached = true;
+
+  document.addEventListener("mousemove", (e) => {
+    if (activeDrag === null) {
+      return;
+    }
+    // Clear old indicators
+    activeDrag.containerEl.querySelectorAll(".channel-drop-indicator").forEach((x) => {
+      x.classList.remove("channel-drop-indicator");
+    });
+
+    // Find which channel item we're hovering over
+    const items = activeDrag.containerEl.querySelectorAll("[data-drag-channel-id]");
+    for (const item of items) {
+      const rect = item.getBoundingClientRect();
+      if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
+        const targetId = Number((item as HTMLElement).dataset.dragChannelId);
+        if (targetId !== activeDrag.channelId) {
+          item.classList.add("channel-drop-indicator");
+        }
+        break;
+      }
+    }
+  });
+
+  document.addEventListener("mouseup", (e) => {
+    if (activeDrag === null) {
+      return;
+    }
+    const drag = activeDrag;
+    activeDrag = null;
+
+    // Clean up visual state
+    drag.sourceEl.classList.remove("dragging");
+    document.body.classList.remove("channel-reordering");
+    drag.containerEl.querySelectorAll(".channel-drop-indicator").forEach((x) => {
+      x.classList.remove("channel-drop-indicator");
+    });
+
+    // Find drop target
+    const items = drag.containerEl.querySelectorAll("[data-drag-channel-id]");
+    let dropTargetId: number | null = null;
+    let dropBefore = false;
+    for (const item of items) {
+      const rect = item.getBoundingClientRect();
+      if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
+        dropTargetId = Number((item as HTMLElement).dataset.dragChannelId);
+        dropBefore = e.clientY < rect.top + rect.height / 2;
+        break;
+      }
+    }
+
+    if (dropTargetId === null || dropTargetId === drag.channelId) {
+      return;
+    }
+
+    // Compute new order
+    const orderedIds = drag.channels.map((ch) => ch.id);
+    const dragIdx = orderedIds.indexOf(drag.channelId);
+    if (dragIdx === -1) {
+      return;
+    }
+    orderedIds.splice(dragIdx, 1);
+
+    const targetIdx = orderedIds.indexOf(dropTargetId);
+    if (targetIdx === -1) {
+      return;
+    }
+    const insertIdx = dropBefore ? targetIdx : targetIdx + 1;
+    orderedIds.splice(insertIdx, 0, drag.channelId);
+
+    // Build reorder data and update store immediately
+    const reorders: ChannelReorderData[] = [];
+    for (let i = 0; i < orderedIds.length; i++) {
+      const id = orderedIds[i];
+      if (id === undefined) {
+        continue;
+      }
+      const ch = drag.channels.find((c) => c.id === id);
+      if (ch !== undefined && ch.position !== i) {
+        reorders.push({ channelId: id, newPosition: i });
+        updateChannelPosition(id, i);
+      }
+    }
+
+    if (reorders.length > 0) {
+      drag.onReorder(reorders);
+    }
+  });
+}
+
+/** Make a channel element draggable via mousedown (admin/owner only). */
+function attachDragHandlers(
+  el: HTMLElement,
+  channel: Channel,
+  containerEl: HTMLElement,
+  channels: readonly Channel[],
+  signal: AbortSignal,
+  onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void,
+): void {
+  if (onReorderChannel === undefined) {
+    return;
+  }
+  const user = getCurrentUser();
+  const role = user?.role?.toLowerCase() ?? "";
+  if (role !== "owner" && role !== "admin") {
+    return;
+  }
+
+  ensureGlobalDragListeners();
+
+  el.classList.add("channel-draggable");
+  el.dataset.dragChannelId = String(channel.id);
+
+  let pendingDrag: { startX: number; startY: number } | null = null;
+
+  el.addEventListener(
+    "mousedown",
+    (e) => {
+      if (e.button !== 0) {
+        return;
+      }
+      // Start tracking — only activate drag after movement threshold
+      pendingDrag = { startX: e.clientX, startY: e.clientY };
+    },
+    { signal },
+  );
+
+  el.addEventListener(
+    "mousemove",
+    (e) => {
+      if (pendingDrag === null || activeDrag !== null) {
+        return;
+      }
+      const dx = Math.abs(e.clientX - pendingDrag.startX);
+      const dy = Math.abs(e.clientY - pendingDrag.startY);
+      // Require 5px movement to start drag (avoids hijacking clicks)
+      if (dx + dy < 5) {
+        return;
+      }
+      pendingDrag = null;
+      activeDrag = {
+        channelId: channel.id,
+        sourceEl: el,
+        containerEl,
+        channels,
+        onReorder: onReorderChannel,
+      };
+      el.classList.add("dragging");
+      document.body.classList.add("channel-reordering");
+    },
+    { signal },
+  );
+
+  el.addEventListener(
+    "mouseup",
+    () => {
+      pendingDrag = null;
+    },
+    { signal },
+  );
+}
+
 function renderChannelItem(
   channel: Channel,
   isActive: boolean,
   signal: AbortSignal,
   onVoiceJoin: (channelId: number) => void,
   onVoiceLeave: () => void,
+  onEditChannel?: (channel: Channel) => void,
+  onDeleteChannel?: (channel: Channel) => void,
+  containerEl?: HTMLElement,
+  channels?: readonly Channel[],
+  onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void,
 ): HTMLDivElement {
+  let el: HTMLDivElement;
   if (channel.type === "voice") {
-    return renderVoiceChannelItem(channel, signal, onVoiceJoin, onVoiceLeave);
+    el = renderVoiceChannelItem(channel, signal, onVoiceJoin, onVoiceLeave);
+  } else {
+    el = renderTextChannelItem(channel, isActive, signal);
   }
-  return renderTextChannelItem(channel, isActive, signal);
+  attachChannelContextMenu(el, channel, signal, onEditChannel, onDeleteChannel);
+  if (containerEl !== undefined && channels !== undefined) {
+    attachDragHandlers(el, channel, containerEl, channels, signal, onReorderChannel);
+  }
+  return el;
 }
 
 function renderCategoryGroup(
@@ -178,6 +470,10 @@ function renderCategoryGroup(
   signal: AbortSignal,
   onVoiceJoin: (channelId: number) => void,
   onVoiceLeave: () => void,
+  onCreateChannel?: (category: string) => void,
+  onEditChannel?: (channel: Channel) => void,
+  onDeleteChannel?: (channel: Channel) => void,
+  onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void,
 ): HTMLDivElement {
   const group = createElement("div", {});
 
@@ -197,6 +493,29 @@ function renderCategoryGroup(
 
     appendChildren(header, arrow, label);
 
+    if (onCreateChannel !== undefined) {
+      const user = getCurrentUser();
+      const role = user?.role?.toLowerCase() ?? "";
+      const canManageChannels = role === "owner" || role === "admin";
+
+      if (canManageChannels) {
+        const addBtn = createElement("span", {
+          class: "category-add-btn",
+          title: "Create Channel",
+          "data-testid": `create-channel-${categoryName.toLowerCase().replace(/\s+/g, "-")}`,
+        }, "+");
+        addBtn.addEventListener(
+          "click",
+          (e) => {
+            e.stopPropagation();
+            onCreateChannel(categoryName);
+          },
+          { signal },
+        );
+        header.appendChild(addBtn);
+      }
+    }
+
     header.addEventListener(
       "click",
       () => {
@@ -208,26 +527,30 @@ function renderCategoryGroup(
     group.appendChild(header);
 
     if (!collapsed) {
+      const channelsContainer = createElement("div", { class: "category-channels-container" });
       for (const ch of channels) {
-        group.appendChild(
-          renderChannelItem(ch, ch.id === activeChannelId, signal, onVoiceJoin, onVoiceLeave),
+        channelsContainer.appendChild(
+          renderChannelItem(ch, ch.id === activeChannelId, signal, onVoiceJoin, onVoiceLeave, onEditChannel, onDeleteChannel, channelsContainer, channels, onReorderChannel),
         );
       }
+      group.appendChild(channelsContainer);
     }
   } else {
     // Uncategorized channels render directly
+    const channelsContainer = createElement("div", { class: "category-channels-container" });
     for (const ch of channels) {
-      group.appendChild(
-        renderChannelItem(ch, ch.id === activeChannelId, signal, onVoiceJoin, onVoiceLeave),
+      channelsContainer.appendChild(
+        renderChannelItem(ch, ch.id === activeChannelId, signal, onVoiceJoin, onVoiceLeave, onEditChannel, onDeleteChannel, channelsContainer, channels, onReorderChannel),
       );
     }
+    group.appendChild(channelsContainer);
   }
 
   return group;
 }
 
 export function createChannelSidebar(options: ChannelSidebarOptions): MountableComponent {
-  const { onVoiceJoin, onVoiceLeave } = options;
+  const { onVoiceJoin, onVoiceLeave, onCreateChannel, onEditChannel, onDeleteChannel, onReorderChannel } = options;
   const ac = new AbortController();
   let root: HTMLDivElement | null = null;
   let channelList: HTMLDivElement | null = null;
@@ -246,7 +569,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
 
     for (const [category, channels] of grouped) {
       channelList.appendChild(
-        renderCategoryGroup(category, channels, state.activeChannelId, ac.signal, onVoiceJoin, onVoiceLeave),
+        renderCategoryGroup(category, channels, state.activeChannelId, ac.signal, onVoiceJoin, onVoiceLeave, onCreateChannel, onEditChannel, onDeleteChannel, onReorderChannel),
       );
     }
   }

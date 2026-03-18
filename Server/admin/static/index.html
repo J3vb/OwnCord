@@ -326,7 +326,12 @@
               <option value="announcement">Announcement</option>
             </select>
           </div>
-          <div class="form-group"><label>Category</label><input id="ch-category" type="text" placeholder="General"></div>
+          <div class="form-group"><label>Category</label>
+            <select id="ch-category">
+              <option value="Text Channels">Text Channels</option>
+              <option value="Voice Channels">Voice Channels</option>
+            </select>
+          </div>
           <div class="form-group"><label>Topic</label><input id="ch-topic" type="text"></div>
           <div class="form-group"><label>Position</label><input id="ch-position" type="number" value="0"></div>
         </div>
@@ -815,6 +820,24 @@ async function deleteChannel(id) {
 document.getElementById('show-create-channel').onclick = () => {
   document.getElementById('create-channel-form').classList.toggle('hidden');
 };
+
+// Filter channel type dropdown based on selected category
+document.getElementById('ch-category').addEventListener('change', function() {
+  const typeSelect = document.getElementById('ch-type');
+  const isVoice = this.value.toLowerCase().includes('voice');
+  for (const opt of typeSelect.options) {
+    if (isVoice) {
+      opt.hidden = opt.value !== 'voice';
+    } else {
+      opt.hidden = opt.value === 'voice';
+    }
+  }
+  // Auto-select the first visible option
+  const visible = [...typeSelect.options].find(o => !o.hidden);
+  if (visible) typeSelect.value = visible.value;
+});
+// Trigger initial filter
+document.getElementById('ch-category').dispatchEvent(new Event('change'));
 
 document.getElementById('cancel-create-channel').onclick = () => {
   document.getElementById('create-channel-form').classList.add('hidden');

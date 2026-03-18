@@ -88,6 +88,20 @@ export function updateChannel(update: ChannelUpdatePayload): void {
   });
 }
 
+/** Update a single channel's position immutably. */
+export function updateChannelPosition(id: number, position: number): void {
+  channelsStore.setState((prev) => {
+    const existing = prev.channels.get(id);
+    if (existing === undefined || existing.position === position) {
+      return prev;
+    }
+    const updated: Channel = { ...existing, position };
+    const next = new Map(prev.channels);
+    next.set(id, updated);
+    return { ...prev, channels: next };
+  });
+}
+
 /** Remove a channel. Clears activeChannelId if it was the removed channel. */
 export function removeChannel(id: number): void {
   channelsStore.setState((prev) => {

@@ -10,6 +10,43 @@ import (
 	"github.com/owncord/server/db"
 )
 
+// ─── Category-Type Validation ────────────────────────────────────────────────
+
+// isVoiceCategory returns true if the category name indicates a voice section.
+// Uses case-insensitive substring matching for "voice".
+func isVoiceCategory(category string) bool {
+	return strings.Contains(strings.ToLower(category), "voice")
+}
+
+// allowedChannelTypes returns the set of channel types valid for a category.
+func allowedChannelTypes(category string) []string {
+	if category == "" {
+		return []string{"text", "voice", "announcement"}
+	}
+	if isVoiceCategory(category) {
+		return []string{"voice"}
+	}
+	return []string{"text", "announcement"}
+}
+
+// validateCategoryType checks that the channel type is allowed under the given
+// category. Returns an error message if invalid, or empty string if OK.
+func validateCategoryType(channelType, category string) string {
+	if category == "" {
+		return ""
+	}
+	allowed := allowedChannelTypes(category)
+	for _, t := range allowed {
+		if t == channelType {
+			return ""
+		}
+	}
+	if isVoiceCategory(category) {
+		return "only voice channels can be created under a voice category"
+	}
+	return "voice channels can only be created under a voice category"
+}
+
 // ─── Channel Handlers ────────────────────────────────────────────────────────
 
 func handleListChannels(database *db.DB) http.HandlerFunc {
@@ -46,6 +83,11 @@ func handleCreateChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 		}
 		if req.Type == "" {
 			req.Type = "text"
+		}
+
+		if msg := validateCategoryType(req.Type, req.Category); msg != "" {
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", msg)
+			return
 		}
 
 		id, err := database.AdminCreateChannel(req.Name, req.Type, req.Category, req.Topic, req.Position)

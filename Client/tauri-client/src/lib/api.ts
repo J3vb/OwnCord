@@ -10,6 +10,8 @@ import type {
   MessagesResponse,
   SearchResponse,
   ApiError,
+  ChannelType,
+  ChannelResponse,
   EmojiResponse,
   SoundResponse,
   InviteResponse,
@@ -51,6 +53,10 @@ export function createApiClient(
 
   function baseUrl(): string {
     return `https://${config.host}/api/v1`;
+  }
+
+  function adminBaseUrl(): string {
+    return `https://${config.host}/admin/api`;
   }
 
   function headers(): Record<string, string> {
@@ -109,6 +115,57 @@ export function createApiClient(
     }
 
     // 204 No Content
+    if (res.status === 204) {
+      return undefined as T;
+    }
+
+    return res.json() as Promise<T>;
+  }
+
+  async function adminRequest<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    const url = `${adminBaseUrl()}${path}`;
+    const init: RequestInit & { danger?: { acceptInvalidCerts: boolean; acceptInvalidHostnames: boolean } } = {
+      method,
+      headers: headers(),
+      signal,
+      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
+    };
+    if (body !== undefined) {
+      init.body = JSON.stringify(body);
+    }
+
+    log.debug("Admin API →", { method, path });
+
+    let res: Response;
+    try {
+      res = await fetch(url, init as RequestInit);
+    } catch (fetchErr) {
+      log.error("Admin API fetch failed", { method, path, error: String(fetchErr) });
+      if (fetchErr instanceof Error) {
+        throw fetchErr;
+      }
+      throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr));
+    }
+
+    log.debug("Admin API ←", { method, path, status: res.status });
+
+    if (res.status === 401) {
+      onUnauthorized?.();
+      const err = await parseError(res);
+      throw new ApiClientError(401, err.error, err.message);
+    }
+
+    if (!res.ok) {
+      const err = await parseError(res);
+      log.warn("Admin API error", { method, path, status: res.status, code: err.error, message: err.message });
+      throw new ApiClientError(res.status, err.error, err.message);
+    }
+
     if (res.status === 204) {
       return undefined as T;
     }
@@ -424,6 +481,42 @@ export function createApiClient(
       } finally {
         clearTimeout(timer);
       }
+    },
+
+    // ── Admin: Channels ──────────────────────────────────────
+
+    adminCreateChannel(
+      data: {
+        name: string;
+        type: ChannelType;
+        category: string;
+        topic?: string;
+        position?: number;
+      },
+      signal?: AbortSignal,
+    ): Promise<ChannelResponse> {
+      return adminRequest<ChannelResponse>("POST", "/channels", data, signal);
+    },
+
+    adminUpdateChannel(
+      id: number,
+      data: {
+        name?: string;
+        topic?: string;
+        slow_mode?: number;
+        position?: number;
+        archived?: boolean;
+      },
+      signal?: AbortSignal,
+    ): Promise<ChannelResponse> {
+      return adminRequest<ChannelResponse>("PATCH", `/channels/${id}`, data, signal);
+    },
+
+    adminDeleteChannel(
+      id: number,
+      signal?: AbortSignal,
+    ): Promise<void> {
+      return adminRequest<void>("DELETE", `/channels/${id}`, undefined, signal);
     },
   };
 }
