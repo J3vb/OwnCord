@@ -8,7 +8,12 @@ import type { MountableComponent } from "@lib/safe-render";
 import { authStore } from "@stores/auth.store";
 import { openSettings } from "@stores/ui.store";
 
-export function createUserBar(): MountableComponent {
+export interface UserBarOptions {
+  readonly onMuteToggle?: () => void;
+  readonly onDeafenToggle?: () => void;
+}
+
+export function createUserBar(options?: UserBarOptions): MountableComponent {
   const ac = new AbortController();
   let root: HTMLDivElement | null = null;
   let unsubscribe: (() => void) | null = null;
@@ -75,6 +80,14 @@ export function createUserBar(): MountableComponent {
       { title: "Settings", "aria-label": "Settings" },
       "\u2699",
     );
+
+    if (options?.onMuteToggle) {
+      muteBtn.addEventListener("click", options.onMuteToggle, { signal: ac.signal });
+    }
+
+    if (options?.onDeafenToggle) {
+      deafenBtn.addEventListener("click", options.onDeafenToggle, { signal: ac.signal });
+    }
 
     settingsBtn.addEventListener(
       "click",

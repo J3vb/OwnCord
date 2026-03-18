@@ -29,6 +29,8 @@ import {
   voiceStore,
   joinVoiceChannel,
   leaveVoiceChannel,
+  setLocalCamera,
+  setLocalScreenshare,
 } from "@stores/voice.store";
 import {
   joinVoice,
@@ -436,9 +438,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       onCameraToggle: () => {
         if (!limiters.voiceVideo.tryConsume()) return;
-        ws.send({ type: "voice_camera", payload: { enabled: false } });
+        const next = !voiceStore.getState().localCamera;
+        setLocalCamera(next);
+        ws.send({ type: "voice_camera", payload: { enabled: next } });
       },
-      onScreenshareToggle: () => {},
+      onScreenshareToggle: () => {
+        if (!limiters.voiceVideo.tryConsume()) return;
+        const next = !voiceStore.getState().localScreenshare;
+        setLocalScreenshare(next);
+        ws.send({ type: "voice_screenshare", payload: { enabled: next } });
+      },
     });
     voiceWidget.mount(voiceWidgetSlot);
     children.push(voiceWidget);
@@ -446,7 +455,22 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     // User bar
     const userBarSlot = createElement("div", {});
-    const userBar = createUserBar();
+    const userBar = createUserBar({
+      onMuteToggle: () => {
+        if (voiceStore.getState().currentChannelId === null) return;
+        if (!limiters.voice.tryConsume()) return;
+        const next = !voiceStore.getState().localMuted;
+        voiceSessionSetMuted(next);
+        ws.send({ type: "voice_mute", payload: { muted: next } });
+      },
+      onDeafenToggle: () => {
+        if (voiceStore.getState().currentChannelId === null) return;
+        if (!limiters.voice.tryConsume()) return;
+        const next = !voiceStore.getState().localDeafened;
+        voiceSessionSetDeafened(next);
+        ws.send({ type: "voice_deafen", payload: { deafened: next } });
+      },
+    });
     userBar.mount(userBarSlot);
     children.push(userBar);
     sidebarWrapper.appendChild(userBarSlot);

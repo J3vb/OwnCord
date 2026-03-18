@@ -6,14 +6,14 @@
 // =============================================================================
 
 import type { WsClient } from "@lib/ws";
-import type { VoiceConfigPayload } from "@lib/types";
+import type { VoiceConfigPayload, IceServer } from "@lib/types";
 import type { WebRtcService } from "@lib/webrtc";
 import type { AudioManager } from "@lib/audio";
 import type { VadDetector } from "@lib/vad";
 import { createWebRtcService } from "@lib/webrtc";
 import { createAudioManager } from "@lib/audio";
 import { createVadDetector } from "@lib/vad";
-import { setLocalMuted, setLocalDeafened } from "@stores/voice.store";
+import { setLocalMuted, setLocalDeafened, setLocalSpeaking } from "@stores/voice.store";
 import { loadPref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 
@@ -35,6 +35,7 @@ let audioContainer: HTMLDivElement | null = null;
 let unsubIce: (() => void) | null = null;
 let unsubTrack: (() => void) | null = null;
 let unsubState: (() => void) | null = null;
+let unsubVad: (() => void) | null = null;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -126,7 +127,7 @@ function cleanupAudioElements(): void {
   }
 }
 
-/** Unsubscribe WebRTC event handlers. */
+/** Unsubscribe WebRTC and VAD event handlers. */
 function cleanupWebrtcSubs(): void {
   if (unsubIce !== null) {
     unsubIce();
@@ -140,6 +141,10 @@ function cleanupWebrtcSubs(): void {
     unsubState();
     unsubState = null;
   }
+  if (unsubVad !== null) {
+    unsubVad();
+    unsubVad = null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -151,10 +156,17 @@ export function setWsClient(client: WsClient): void {
   ws = client;
 }
 
+/**
+ * Fetch ICE servers (TURN/STUN credentials) for WebRTC.
+ * Falls back to empty array on failure so voice still works on LAN.
+ */
+export type IceServerFetcher = () => Promise<readonly IceServer[]>;
+
 /** Join a voice channel: acquire mic, set up WebRTC, send offer. */
 export async function joinVoice(
   channelId: number,
   config: VoiceConfigPayload,
+  fetchIceServers?: IceServerFetcher,
 ): Promise<void> {
   if (ws === null) {
     log.error("Cannot join voice: WS client not set");
@@ -162,13 +174,26 @@ export async function joinVoice(
   }
 
   try {
-    // 1. Acquire microphone (may be null for listen-only)
-    localStream = await acquireMicrophone();
+    // 1. Acquire microphone and ICE servers in parallel
+    const [stream, iceServers] = await Promise.all([
+      acquireMicrophone(),
+      fetchIceServers
+        ? fetchIceServers().catch((err) => {
+            log.warn("Failed to fetch ICE servers, falling back to direct", err);
+            return [] as readonly IceServer[];
+          })
+        : Promise.resolve([] as readonly IceServer[]),
+    ]);
+    localStream = stream;
 
-    // 2. Create WebRTC peer connection
+    // 2. Create WebRTC peer connection with TURN/STUN servers
     webrtcService = createWebRtcService();
     webrtcService.createConnection({
-      iceServers: [],
+      iceServers: iceServers.map((s) => ({
+        urls: s.urls,
+        username: s.username,
+        credential: s.credential,
+      })),
       opusBitrate: config.bitrate,
     });
 
@@ -204,6 +229,9 @@ export async function joinVoice(
     if (localStream !== null) {
       vadDetector = createVadDetector();
       vadDetector.start(localStream);
+      unsubVad = vadDetector.onSpeakingChange((speaking) => {
+        setLocalSpeaking(speaking);
+      });
     }
 
     // 8. Create and send SDP offer

@@ -39,6 +39,8 @@ export interface VoiceState {
   readonly voiceConfigs: ReadonlyMap<number, VoiceConfig>; // channelId -> VoiceConfig
   readonly localMuted: boolean;
   readonly localDeafened: boolean;
+  readonly localCamera: boolean;
+  readonly localScreenshare: boolean;
 }
 
 const INITIAL_STATE: VoiceState = {
@@ -47,6 +49,8 @@ const INITIAL_STATE: VoiceState = {
   voiceConfigs: new Map(),
   localMuted: false,
   localDeafened: false,
+  localCamera: false,
+  localScreenshare: false,
 };
 
 export const voiceStore = createStore<VoiceState>(INITIAL_STATE);
@@ -180,6 +184,41 @@ export function setLocalDeafened(deafened: boolean): void {
     ...prev,
     localDeafened: deafened,
   }));
+}
+
+/** Toggle local camera state. */
+export function setLocalCamera(enabled: boolean): void {
+  voiceStore.setState((prev) => ({
+    ...prev,
+    localCamera: enabled,
+  }));
+}
+
+/** Toggle local screenshare state. */
+export function setLocalScreenshare(enabled: boolean): void {
+  voiceStore.setState((prev) => ({
+    ...prev,
+    localScreenshare: enabled,
+  }));
+}
+
+/** Update the current user's speaking state for local VAD feedback. */
+export function setLocalSpeaking(speaking: boolean): void {
+  const currentUserId = authStore.getState().user?.id ?? 0;
+  if (currentUserId === 0) return;
+  voiceStore.setState((prev) => {
+    const channelId = prev.currentChannelId;
+    if (channelId === null) return prev;
+    const channelUsers = prev.voiceUsers.get(channelId);
+    if (!channelUsers) return prev;
+    const user = channelUsers.get(currentUserId);
+    if (!user || user.speaking === speaking) return prev;
+    const nextUsers = new Map(channelUsers);
+    nextUsers.set(currentUserId, { ...user, speaking });
+    const nextChannels = new Map(prev.voiceUsers);
+    nextChannels.set(channelId, nextUsers);
+    return { ...prev, voiceUsers: nextChannels };
+  });
 }
 
 /** Store voice config for a channel from a voice_config event. */
