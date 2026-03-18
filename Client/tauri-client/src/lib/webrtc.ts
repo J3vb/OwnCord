@@ -11,6 +11,8 @@ export interface WebRtcService {
   createConnection(config: WebRtcConfig): void;
   handleOffer(sdp: string): Promise<string>;
   handleAnswer(sdp: string): Promise<void>;
+  handleServerOffer(sdp: string): Promise<string>;
+  createOffer(): Promise<string>;
   handleIceCandidate(candidate: RTCIceCandidateInit): Promise<void>;
   setLocalStream(stream: MediaStream): void;
   getRemoteStreams(): readonly MediaStream[];
@@ -124,6 +126,30 @@ export function createWebRtcService(): WebRtcService {
     async handleAnswer(sdp: string): Promise<void> {
       const conn = assertConnection();
       await conn.setRemoteDescription({ type: "answer", sdp });
+    },
+
+    async handleServerOffer(sdp: string): Promise<string> {
+      const conn = assertConnection();
+      // Perfect Negotiation: client is "polite" peer.
+      // If we have a pending local offer, rollback first.
+      if (conn.signalingState === "have-local-offer") {
+        await conn.setLocalDescription({ type: "rollback" });
+      }
+      await conn.setRemoteDescription({ type: "offer", sdp });
+      const answer = await conn.createAnswer();
+      const mungedSdp = mungeIfNeeded(answer.sdp);
+      const finalAnswer: RTCSessionDescriptionInit = { type: "answer", sdp: mungedSdp };
+      await conn.setLocalDescription(finalAnswer);
+      return mungedSdp;
+    },
+
+    async createOffer(): Promise<string> {
+      const conn = assertConnection();
+      const offer = await conn.createOffer();
+      const mungedSdp = mungeIfNeeded(offer.sdp);
+      const finalOffer: RTCSessionDescriptionInit = { type: "offer", sdp: mungedSdp };
+      await conn.setLocalDescription(finalOffer);
+      return mungedSdp;
     },
 
     async handleIceCandidate(candidate: RTCIceCandidateInit): Promise<void> {
