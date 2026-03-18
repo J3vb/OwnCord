@@ -233,3 +233,61 @@ func TestGetChannelPermissions_WithOverride(t *testing.T) {
 		t.Errorf("deny = %d, want 0x200", deny)
 	}
 }
+
+// ─── SetChannelSlowMode ─────────────────────────────────────────────────────
+
+func TestSetChannelSlowMode(t *testing.T) {
+	database := openMigratedMemory(t)
+	chID, _ := database.CreateChannel("slowch", "text", "", "", 0)
+
+	if err := database.SetChannelSlowMode(chID, 10); err != nil {
+		t.Fatalf("SetChannelSlowMode: %v", err)
+	}
+
+	ch, _ := database.GetChannel(chID)
+	if ch.SlowMode != 10 {
+		t.Errorf("SlowMode = %d, want 10", ch.SlowMode)
+	}
+}
+
+func TestSetChannelSlowMode_Zero(t *testing.T) {
+	database := openMigratedMemory(t)
+	chID, _ := database.CreateChannel("slowch2", "text", "", "", 0)
+
+	_ = database.SetChannelSlowMode(chID, 30)
+	_ = database.SetChannelSlowMode(chID, 0)
+
+	ch, _ := database.GetChannel(chID)
+	if ch.SlowMode != 0 {
+		t.Errorf("SlowMode = %d, want 0 (disabled)", ch.SlowMode)
+	}
+}
+
+// ─── SetChannelVoiceMaxUsers ────────────────────────────────────────────────
+
+func TestSetChannelVoiceMaxUsers(t *testing.T) {
+	database := openMigratedMemory(t)
+	chID, _ := database.CreateChannel("voicech", "voice", "", "", 0)
+
+	if err := database.SetChannelVoiceMaxUsers(chID, 25); err != nil {
+		t.Fatalf("SetChannelVoiceMaxUsers: %v", err)
+	}
+
+	ch, _ := database.GetChannel(chID)
+	if ch.VoiceMaxUsers != 25 {
+		t.Errorf("VoiceMaxUsers = %d, want 25", ch.VoiceMaxUsers)
+	}
+}
+
+func TestSetChannelVoiceMaxUsers_Unlimited(t *testing.T) {
+	database := openMigratedMemory(t)
+	chID, _ := database.CreateChannel("voicech2", "voice", "", "", 0)
+
+	_ = database.SetChannelVoiceMaxUsers(chID, 10)
+	_ = database.SetChannelVoiceMaxUsers(chID, 0)
+
+	ch, _ := database.GetChannel(chID)
+	if ch.VoiceMaxUsers != 0 {
+		t.Errorf("VoiceMaxUsers = %d, want 0 (unlimited)", ch.VoiceMaxUsers)
+	}
+}

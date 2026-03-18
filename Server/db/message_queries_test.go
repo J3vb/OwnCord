@@ -521,3 +521,203 @@ func TestUpdateReadState_Upsert(t *testing.T) {
 		t.Fatalf("UpdateReadState second call: %v", err)
 	}
 }
+
+// ─── GetMessagesForAPI ──────────────────────────────────────────────────────
+
+func TestGetMessagesForAPI_Empty(t *testing.T) {
+	database := openMigratedMemory(t)
+	chID := seedChannel(t, database, "apichan")
+	userID := seedUser(t, database, "apiuser")
+
+	msgs, err := database.GetMessagesForAPI(chID, 0, 50, userID)
+	if err != nil {
+		t.Fatalf("GetMessagesForAPI: %v", err)
+	}
+	if len(msgs) != 0 {
+		t.Errorf("expected 0 messages, got %d", len(msgs))
+	}
+}
+
+func TestGetMessagesForAPI_ReturnsUserObject(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "apiuser2")
+	chID := seedChannel(t, database, "apichan2")
+
+	_, _ = database.CreateMessage(chID, userID, "hello api", nil)
+
+	msgs, err := database.GetMessagesForAPI(chID, 0, 50, userID)
+	if err != nil {
+		t.Fatalf("GetMessagesForAPI: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if msgs[0].User.Username != "apiuser2" {
+		t.Errorf("User.Username = %q, want 'apiuser2'", msgs[0].User.Username)
+	}
+	if msgs[0].User.ID != userID {
+		t.Errorf("User.ID = %d, want %d", msgs[0].User.ID, userID)
+	}
+	if msgs[0].Content != "hello api" {
+		t.Errorf("Content = %q, want 'hello api'", msgs[0].Content)
+	}
+}
+
+func TestGetMessagesForAPI_BeforePagination(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "apipage")
+	chID := seedChannel(t, database, "apich")
+
+	var ids []int64
+	for range 5 {
+		id, _ := database.CreateMessage(chID, userID, "msg", nil)
+		ids = append(ids, id)
+	}
+
+	msgs, err := database.GetMessagesForAPI(chID, ids[3], 50, userID)
+	if err != nil {
+		t.Fatalf("GetMessagesForAPI with before: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Errorf("expected 3 messages before id %d, got %d", ids[3], len(msgs))
+	}
+}
+
+func TestGetMessagesForAPI_WithReactions(t *testing.T) {
+	database := openMigratedMemory(t)
+	u1 := seedUser(t, database, "reactuser1")
+	u2 := seedUser(t, database, "reactuser2")
+	chID := seedChannel(t, database, "reactchan")
+
+	msgID, _ := database.CreateMessage(chID, u1, "react me", nil)
+	_ = database.AddReaction(msgID, u1, "👍")
+	_ = database.AddReaction(msgID, u2, "👍")
+
+	msgs, err := database.GetMessagesForAPI(chID, 0, 50, u1)
+	if err != nil {
+		t.Fatalf("GetMessagesForAPI: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if len(msgs[0].Reactions) != 1 {
+		t.Fatalf("expected 1 reaction type, got %d", len(msgs[0].Reactions))
+	}
+	if msgs[0].Reactions[0].Count != 2 {
+		t.Errorf("reaction count = %d, want 2", msgs[0].Reactions[0].Count)
+	}
+	if !msgs[0].Reactions[0].Me {
+		t.Error("Me should be true for requesting user who reacted")
+	}
+}
+
+func TestGetMessagesForAPI_ExcludesDeleted(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "apidel")
+	chID := seedChannel(t, database, "apidelchan")
+
+	id, _ := database.CreateMessage(chID, userID, "deleted msg", nil)
+	_ = database.DeleteMessage(id, userID, false)
+	_, _ = database.CreateMessage(chID, userID, "visible msg", nil)
+
+	msgs, err := database.GetMessagesForAPI(chID, 0, 50, userID)
+	if err != nil {
+		t.Fatalf("GetMessagesForAPI: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Errorf("expected 1 message (deleted excluded), got %d", len(msgs))
+	}
+}
+
+// ─── GetChannelUnreadCounts ─────────────────────────────────────────────────
+
+func TestGetChannelUnreadCounts_NoMessages(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "unreaduser")
+	_ = seedChannel(t, database, "unreadchan")
+
+	counts, err := database.GetChannelUnreadCounts(userID)
+	if err != nil {
+		t.Fatalf("GetChannelUnreadCounts: %v", err)
+	}
+	// Should return entries for text channels even with 0 messages.
+	if counts == nil {
+		t.Fatal("GetChannelUnreadCounts returned nil")
+	}
+}
+
+func TestGetChannelUnreadCounts_WithUnreadMessages(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "unreaduser2")
+	chID := seedChannel(t, database, "unreadchan2")
+
+	// Create 3 messages, mark first as read.
+	msg1, _ := database.CreateMessage(chID, userID, "msg1", nil)
+	_, _ = database.CreateMessage(chID, userID, "msg2", nil)
+	_, _ = database.CreateMessage(chID, userID, "msg3", nil)
+
+	_ = database.UpdateReadState(userID, chID, msg1)
+
+	counts, err := database.GetChannelUnreadCounts(userID)
+	if err != nil {
+		t.Fatalf("GetChannelUnreadCounts: %v", err)
+	}
+	cu, ok := counts[chID]
+	if !ok {
+		t.Fatalf("channel %d not in unread counts", chID)
+	}
+	if cu.UnreadCount != 2 {
+		t.Errorf("UnreadCount = %d, want 2", cu.UnreadCount)
+	}
+}
+
+// ─── GetLatestMessageID ─────────────────────────────────────────────────────
+
+func TestGetLatestMessageID_Empty(t *testing.T) {
+	database := openMigratedMemory(t)
+	chID := seedChannel(t, database, "latestchan")
+
+	id, err := database.GetLatestMessageID(chID)
+	if err != nil {
+		t.Fatalf("GetLatestMessageID: %v", err)
+	}
+	if id != 0 {
+		t.Errorf("expected 0 for empty channel, got %d", id)
+	}
+}
+
+func TestGetLatestMessageID_ReturnsHighest(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "latestuser")
+	chID := seedChannel(t, database, "latestchan2")
+
+	_, _ = database.CreateMessage(chID, userID, "first", nil)
+	_, _ = database.CreateMessage(chID, userID, "second", nil)
+	lastID, _ := database.CreateMessage(chID, userID, "third", nil)
+
+	id, err := database.GetLatestMessageID(chID)
+	if err != nil {
+		t.Fatalf("GetLatestMessageID: %v", err)
+	}
+	if id != lastID {
+		t.Errorf("GetLatestMessageID = %d, want %d", id, lastID)
+	}
+}
+
+func TestGetLatestMessageID_ExcludesDeleted(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "latestdel")
+	chID := seedChannel(t, database, "latestdelchan")
+
+	id1, _ := database.CreateMessage(chID, userID, "keep", nil)
+	id2, _ := database.CreateMessage(chID, userID, "delete me", nil)
+	_ = database.DeleteMessage(id2, userID, false)
+
+	latestID, err := database.GetLatestMessageID(chID)
+	if err != nil {
+		t.Fatalf("GetLatestMessageID: %v", err)
+	}
+	if latestID != id1 {
+		t.Errorf("GetLatestMessageID = %d, want %d (deleted excluded)", latestID, id1)
+	}
+}

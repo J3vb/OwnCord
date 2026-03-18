@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -730,5 +731,102 @@ func TestBackupToSafe_CreatesDirectoryFile(t *testing.T) {
 
 	if _, err := os.Stat(backupPath); os.IsNotExist(err) {
 		t.Error("backup file was not created")
+	}
+}
+
+// ─── UserCount ──────────────────────────────────────────────────────────────
+
+func TestUserCount_Empty(t *testing.T) {
+	database := newAdminTestDB(t)
+
+	count, err := database.UserCount()
+	if err != nil {
+		t.Fatalf("UserCount() error: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("UserCount() = %d, want 0", count)
+	}
+}
+
+func TestUserCount_WithUsers(t *testing.T) {
+	database := newAdminTestDB(t)
+
+	for i := range 3 {
+		_, err := database.CreateUser(
+			fmt.Sprintf("countuser%d", i),
+			"hash",
+			4,
+		)
+		if err != nil {
+			t.Fatalf("CreateUser[%d] error: %v", i, err)
+		}
+	}
+
+	count, err := database.UserCount()
+	if err != nil {
+		t.Fatalf("UserCount() error: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("UserCount() = %d, want 3", count)
+	}
+}
+
+// ─── BackupTo ───────────────────────────────────────────────────────────────
+
+func TestBackupToSafe_DirectCall(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "backup_src.db")
+
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	migrFS := fstest.MapFS{
+		"001_schema.sql": {Data: adminTestSchema},
+	}
+	if err := db.MigrateFS(database, migrFS); err != nil {
+		t.Fatalf("MigrateFS: %v", err)
+	}
+
+	backupDir := filepath.Join(tmpDir, "backups")
+	_ = os.MkdirAll(backupDir, 0o755)
+	backupPath := filepath.Join(backupDir, "backup_direct.db")
+	if err := database.BackupToSafe(backupPath, backupDir); err != nil {
+		t.Fatalf("BackupToSafe() error: %v", err)
+	}
+
+	info, err := os.Stat(backupPath)
+	if err != nil {
+		t.Fatalf("backup file does not exist: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Error("backup file is empty")
+	}
+}
+
+func TestBackupToSafe_RejectsTraversal(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "src.db")
+
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	migrFS := fstest.MapFS{
+		"001_schema.sql": {Data: adminTestSchema},
+	}
+	_ = db.MigrateFS(database, migrFS)
+
+	safeRoot := filepath.Join(tmpDir, "safe")
+	_ = os.MkdirAll(safeRoot, 0o755)
+	unsafePath := filepath.Join(tmpDir, "outside", "evil.db")
+
+	err = database.BackupToSafe(unsafePath, safeRoot)
+	if err == nil {
+		t.Error("BackupToSafe should reject path outside safe root")
 	}
 }

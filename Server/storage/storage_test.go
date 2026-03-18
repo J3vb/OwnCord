@@ -387,3 +387,90 @@ func TestSave_EmptyFileAllowed(t *testing.T) {
 		t.Errorf("Save(empty) = %v, want nil", err)
 	}
 }
+
+// ─── New edge cases ──────────────────────────────────────────────────────────
+
+func TestNew_CreatesDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	newDir := filepath.Join(tmpDir, "nested", "storage")
+
+	s, err := storage.New(newDir, 10)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if s == nil {
+		t.Fatal("New returned nil")
+	}
+
+	// Directory should exist.
+	info, statErr := os.Stat(newDir)
+	if statErr != nil {
+		t.Fatalf("directory not created: %v", statErr)
+	}
+	if !info.IsDir() {
+		t.Error("expected directory, got file")
+	}
+}
+
+// ─── Save large file ────────────────────────────────────────────────────────
+
+func TestSave_ExceedsMaxSize(t *testing.T) {
+	tmpDir := t.TempDir()
+	// 1 MB max.
+	s, err := storage.New(tmpDir, 1)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Create reader with >1MB of data.
+	bigData := bytes.Repeat([]byte("x"), 1024*1024+100)
+	err = s.Save("big-file", bytes.NewReader(bigData))
+	if err == nil {
+		t.Error("Save should reject file exceeding max size")
+	}
+
+	// File should be removed.
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "big-file")); !os.IsNotExist(statErr) {
+		t.Error("oversized file should be removed after rejection")
+	}
+}
+
+func TestSave_ReadError(t *testing.T) {
+	s := newTestStorage(t)
+	err := s.Save("read-err", &failReader{})
+	if err == nil {
+		t.Error("Save with failing reader should return error")
+	}
+}
+
+type failReader struct{}
+
+func (f *failReader) Read([]byte) (int, error) {
+	return 0, errors.New("simulated read error")
+}
+
+// ─── resolvedPath edge case (via Save with dot prefix) ──────────────────────
+
+func TestSave_HiddenFilename(t *testing.T) {
+	s := newTestStorage(t)
+	err := s.Save(".hidden", strings.NewReader("data"))
+	if err == nil {
+		t.Error("Save should reject hidden filenames starting with '.'")
+	}
+}
+
+func TestOpen_NotFound(t *testing.T) {
+	s := newTestStorage(t)
+	_, err := s.Open("nonexistent-file")
+	if err == nil {
+		t.Error("Open should return error for nonexistent file")
+	}
+}
+
+func TestDelete_NotFound(t *testing.T) {
+	s := newTestStorage(t)
+	err := s.Delete("nonexistent-file")
+	if err == nil {
+		t.Error("Delete should return error for nonexistent file")
+	}
+}

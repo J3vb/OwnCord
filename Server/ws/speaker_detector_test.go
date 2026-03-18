@@ -226,3 +226,68 @@ func TestParseAudioLevel_NotFound(t *testing.T) {
 		t.Error("expected ok=false for wrong extension ID")
 	}
 }
+
+func TestParseAudioLevel_PaddingByte(t *testing.T) {
+	t.Parallel()
+
+	// Padding byte (ID=0), then actual extension ID=1.
+	// Padding: byte 0x00 (id=0 means skip)
+	// Extension: ID=1, L=0 (1 byte), data=0x8A (voice=1, level=10)
+	buf := []byte{0x00, 1 << 4, 0x8A}
+
+	level, voice, ok := ws.ParseAudioLevel(buf, 1)
+	if !ok {
+		t.Fatal("expected ok=true after padding byte")
+	}
+	if level != 10 {
+		t.Errorf("level = %d, want 10", level)
+	}
+	if !voice {
+		t.Error("expected voice=true")
+	}
+}
+
+func TestParseAudioLevel_Terminator(t *testing.T) {
+	t.Parallel()
+
+	// Terminator byte (ID=15) before any matching extension.
+	buf := []byte{0xF0} // ID=15, terminates
+
+	_, _, ok := ws.ParseAudioLevel(buf, 1)
+	if ok {
+		t.Error("expected ok=false when terminator encountered before matching ID")
+	}
+}
+
+func TestParseAudioLevel_TruncatedData(t *testing.T) {
+	t.Parallel()
+
+	// Extension header says 1 byte of data, but buffer ends before data.
+	// ID=1, L=0 (meaning 1 byte of data needed), but no data follows.
+	buf := []byte{1 << 4}
+
+	_, _, ok := ws.ParseAudioLevel(buf, 1)
+	if ok {
+		t.Error("expected ok=false when data is truncated")
+	}
+}
+
+func TestParseAudioLevel_SkipOtherExtension(t *testing.T) {
+	t.Parallel()
+
+	// Extension ID=2 with 2 bytes of data, followed by ID=1 with actual data.
+	// ID=2, L=1 (2 bytes data): header 0x21, data 0x00 0x00
+	// ID=1, L=0 (1 byte data): header 0x10, data 0x85 (voice=1, level=5)
+	buf := []byte{0x21, 0x00, 0x00, 0x10, 0x85}
+
+	level, voice, ok := ws.ParseAudioLevel(buf, 1)
+	if !ok {
+		t.Fatal("expected ok=true after skipping other extension")
+	}
+	if level != 5 {
+		t.Errorf("level = %d, want 5", level)
+	}
+	if !voice {
+		t.Error("expected voice=true")
+	}
+}

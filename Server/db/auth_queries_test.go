@@ -597,3 +597,134 @@ func TestUseInviteAtomic_ConcurrentSameCode(t *testing.T) {
 		t.Errorf("use_count = %d after concurrent race, want 1", inv.Uses)
 	}
 }
+
+// ─── UnbanUser ──────────────────────────────────────────────────────────────
+
+func TestUnbanUser_ClearsBan(t *testing.T) {
+	database := newTestDB(t)
+	id, _ := database.CreateUser("unban_target", "hash", 4)
+
+	if err := database.BanUser(id, "spam", nil); err != nil {
+		t.Fatalf("BanUser: %v", err)
+	}
+
+	user, _ := database.GetUserByID(id)
+	if !user.Banned {
+		t.Fatal("user should be banned before unban")
+	}
+
+	if err := database.UnbanUser(id); err != nil {
+		t.Fatalf("UnbanUser: %v", err)
+	}
+
+	user, _ = database.GetUserByID(id)
+	if user.Banned {
+		t.Error("Banned = true after UnbanUser, want false")
+	}
+	if user.BanReason != nil {
+		t.Errorf("BanReason = %v, want nil after UnbanUser", user.BanReason)
+	}
+	if user.BanExpires != nil {
+		t.Errorf("BanExpires = %v, want nil after UnbanUser", user.BanExpires)
+	}
+}
+
+func TestUnbanUser_NonexistentUser(t *testing.T) {
+	database := newTestDB(t)
+
+	// Unbanning nonexistent user should not error.
+	if err := database.UnbanUser(99999); err != nil {
+		t.Errorf("UnbanUser(nonexistent) error: %v", err)
+	}
+}
+
+// ─── ResetAllUserStatuses ───────────────────────────────────────────────────
+
+func TestResetAllUserStatuses(t *testing.T) {
+	database := newTestDB(t)
+	id1, _ := database.CreateUser("status_u1", "hash", 4)
+	id2, _ := database.CreateUser("status_u2", "hash", 4)
+
+	_ = database.UpdateUserStatus(id1, "online")
+	_ = database.UpdateUserStatus(id2, "dnd")
+
+	if err := database.ResetAllUserStatuses(); err != nil {
+		t.Fatalf("ResetAllUserStatuses: %v", err)
+	}
+
+	u1, _ := database.GetUserByID(id1)
+	u2, _ := database.GetUserByID(id2)
+	if u1.Status != "offline" {
+		t.Errorf("user1 status = %q, want 'offline'", u1.Status)
+	}
+	if u2.Status != "offline" {
+		t.Errorf("user2 status = %q, want 'offline'", u2.Status)
+	}
+}
+
+func TestResetAllUserStatuses_AlreadyOffline(t *testing.T) {
+	database := newTestDB(t)
+	_, _ = database.CreateUser("offline_user", "hash", 4)
+
+	// Should not error when all users are already offline.
+	if err := database.ResetAllUserStatuses(); err != nil {
+		t.Errorf("ResetAllUserStatuses: %v", err)
+	}
+}
+
+// ─── ListMembers ────────────────────────────────────────────────────────────
+
+func TestListMembers_Empty(t *testing.T) {
+	database := newTestDB(t)
+
+	members, err := database.ListMembers()
+	if err != nil {
+		t.Fatalf("ListMembers: %v", err)
+	}
+	if len(members) != 0 {
+		t.Errorf("ListMembers() = %d, want 0", len(members))
+	}
+}
+
+func TestListMembers_ExcludesBanned(t *testing.T) {
+	database := newTestDB(t)
+	id1, _ := database.CreateUser("member_visible", "hash", 4)
+	id2, _ := database.CreateUser("member_banned", "hash", 4)
+	_ = database.BanUser(id2, "test ban", nil)
+	_ = id1 // suppress unused
+
+	members, err := database.ListMembers()
+	if err != nil {
+		t.Fatalf("ListMembers: %v", err)
+	}
+	if len(members) != 1 {
+		t.Fatalf("ListMembers() = %d, want 1 (banned excluded)", len(members))
+	}
+	if members[0].Username != "member_visible" {
+		t.Errorf("Username = %q, want 'member_visible'", members[0].Username)
+	}
+	if members[0].Role == "" {
+		t.Error("Role should not be empty")
+	}
+}
+
+func TestListMembers_SortedByUsername(t *testing.T) {
+	database := newTestDB(t)
+	_, _ = database.CreateUser("zeta_user", "hash", 4)
+	_, _ = database.CreateUser("alpha_user", "hash", 4)
+	_, _ = database.CreateUser("mid_user", "hash", 4)
+
+	members, err := database.ListMembers()
+	if err != nil {
+		t.Fatalf("ListMembers: %v", err)
+	}
+	if len(members) != 3 {
+		t.Fatalf("ListMembers() = %d, want 3", len(members))
+	}
+	if members[0].Username != "alpha_user" {
+		t.Errorf("first member = %q, want 'alpha_user' (sorted)", members[0].Username)
+	}
+	if members[2].Username != "zeta_user" {
+		t.Errorf("last member = %q, want 'zeta_user' (sorted)", members[2].Username)
+	}
+}

@@ -51,3 +51,13 @@ func BuildVoiceOfferForTest(channelID int64, sdp string) []byte {
 func BuildVoiceICEForTest(channelID int64, candidate any) []byte {
 	return buildVoiceICE(channelID, candidate)
 }
+
+// SetupICECallbackForTest exposes setupICECallback for external tests.
+func (h *Hub) SetupICECallbackForTest(c *Client, channelID int64) {
+	h.setupICECallback(c, channelID)
+}
+
+// RenegotiateParticipantForTest exposes renegotiateParticipant for external tests.
+func (h *Hub) RenegotiateParticipantForTest(c *Client) {
+	h.renegotiateParticipant(c)
+}

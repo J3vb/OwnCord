@@ -263,3 +263,219 @@ func TestParseChecksumFile_FileNotFound(t *testing.T) {
 		t.Error("expected error for missing file in checksum data, got nil")
 	}
 }
+
+// ─── SetBaseURL ──────────────────────────────────────────────────────────────
+
+func TestSetBaseURL(t *testing.T) {
+	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	u.SetBaseURL("https://custom.api.example.com")
+	if u.apiBaseURL() != "https://custom.api.example.com" {
+		t.Errorf("apiBaseURL = %q, want custom URL", u.apiBaseURL())
+	}
+}
+
+func TestApiBaseURL_DefaultWhenEmpty(t *testing.T) {
+	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	got := u.apiBaseURL()
+	if got != defaultBaseURL {
+		t.Errorf("apiBaseURL = %q, want default %q", got, defaultBaseURL)
+	}
+}
+
+// ─── fetchBody ───────────────────────────────────────────────────────────────
+
+func TestFetchBody_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("hello body"))
+	}))
+	defer srv.Close()
+
+	u := newTestUpdater(srv.URL, "1.0.0")
+	body, err := u.fetchBody(context.Background(), srv.URL+"/test")
+	if err != nil {
+		t.Fatalf("fetchBody: %v", err)
+	}
+	if string(body) != "hello body" {
+		t.Errorf("body = %q, want 'hello body'", body)
+	}
+}
+
+func TestFetchBody_NonOKStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	u := newTestUpdater(srv.URL, "1.0.0")
+	_, err := u.fetchBody(context.Background(), srv.URL+"/test")
+	if err == nil {
+		t.Error("fetchBody should error on non-200 status")
+	}
+}
+
+func TestFetchBody_WithGithubToken(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	u := NewUpdater("1.0.0", "my-token", "J3vb", "OwnCord")
+	u.baseURL = srv.URL
+	_, _ = u.fetchBody(context.Background(), srv.URL+"/test")
+	if gotAuth != "token my-token" {
+		t.Errorf("Authorization = %q, want 'token my-token'", gotAuth)
+	}
+}
+
+// ─── downloadFile ────────────────────────────────────────────────────────────
+
+func TestDownloadFile_Success(t *testing.T) {
+	content := []byte("binary content here")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(content)
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	dest := filepath.Join(tmpDir, "downloaded.exe")
+
+	u := newTestUpdater(srv.URL, "1.0.0")
+	if err := u.downloadFile(context.Background(), srv.URL+"/binary", dest); err != nil {
+		t.Fatalf("downloadFile: %v", err)
+	}
+
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("reading downloaded file: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("content = %q, want %q", got, content)
+	}
+}
+
+func TestDownloadFile_NonOKStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	dest := filepath.Join(tmpDir, "downloaded.exe")
+
+	u := newTestUpdater(srv.URL, "1.0.0")
+	err := u.downloadFile(context.Background(), srv.URL+"/binary", dest)
+	if err == nil {
+		t.Error("downloadFile should error on non-200 status")
+	}
+}
+
+// ─── DownloadAndVerify ───────────────────────────────────────────────────────
+
+func TestDownloadAndVerify_Success(t *testing.T) {
+	content := []byte("real binary content for verification")
+	hash := sha256.Sum256(content)
+	checksumHex := hex.EncodeToString(hash[:])
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/download/chatserver.exe", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(content)
+	})
+	mux.HandleFunc("/download/checksums.sha256", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, "%s  chatserver.exe\n", checksumHex)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	dest := filepath.Join(tmpDir, "chatserver.exe")
+
+	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	u.baseURL = srv.URL
+
+	downloadURL := fmt.Sprintf("https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe")
+	checksumURL := fmt.Sprintf("https://github.com/J3vb/OwnCord/releases/download/v1.0.0/checksums.sha256")
+
+	// Override HTTP client to route GitHub URLs to our test server.
+	u.httpClient = &http.Client{
+		Transport: &rewriteTransport{srv.URL},
+	}
+
+	err := u.DownloadAndVerify(context.Background(), downloadURL, checksumURL, dest)
+	if err != nil {
+		t.Fatalf("DownloadAndVerify: %v", err)
+	}
+
+	// File should exist and be correct.
+	got, _ := os.ReadFile(dest)
+	if string(got) != string(content) {
+		t.Errorf("downloaded content mismatch")
+	}
+}
+
+func TestDownloadAndVerify_InvalidDownloadURL(t *testing.T) {
+	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	err := u.DownloadAndVerify(context.Background(), "https://evil.com/file", "https://evil.com/sum", "/tmp/out")
+	if err == nil {
+		t.Error("DownloadAndVerify should reject invalid download URL")
+	}
+}
+
+func TestDownloadAndVerify_InvalidChecksumURL(t *testing.T) {
+	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	downloadURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe"
+	err := u.DownloadAndVerify(context.Background(), downloadURL, "https://evil.com/sum", "/tmp/out")
+	if err == nil {
+		t.Error("DownloadAndVerify should reject invalid checksum URL")
+	}
+}
+
+func TestDownloadAndVerify_ChecksumMismatch(t *testing.T) {
+	content := []byte("binary content")
+	wrongChecksum := "0000000000000000000000000000000000000000000000000000000000000000"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/download/chatserver.exe", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(content)
+	})
+	mux.HandleFunc("/download/checksums.sha256", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, "%s  chatserver.exe\n", wrongChecksum)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	dest := filepath.Join(tmpDir, "chatserver.exe")
+
+	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	u.httpClient = &http.Client{Transport: &rewriteTransport{srv.URL}}
+
+	downloadURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe"
+	checksumURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/checksums.sha256"
+
+	err := u.DownloadAndVerify(context.Background(), downloadURL, checksumURL, dest)
+	if err == nil {
+		t.Error("DownloadAndVerify should fail on checksum mismatch")
+	}
+
+	// File should be removed after mismatch.
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Error("file should be removed after checksum mismatch")
+	}
+}
+
+// rewriteTransport rewrites GitHub release URLs to a local test server.
+type rewriteTransport struct {
+	target string
+}
+
+func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Rewrite github.com URLs to the test server.
+	newURL := rt.target + "/download/" + filepath.Base(req.URL.Path)
+	newReq, _ := http.NewRequestWithContext(req.Context(), req.Method, newURL, req.Body)
+	return http.DefaultTransport.RoundTrip(newReq)
+}
