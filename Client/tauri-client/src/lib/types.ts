@@ -287,7 +287,7 @@ export interface VoiceAnswerPayload {
 
 export interface VoiceIcePayload {
   readonly channel_id: number;
-  readonly candidate: string;
+  readonly candidate: RTCIceCandidateInit;
 }
 
 export interface MemberJoinPayload {
