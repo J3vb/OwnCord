@@ -21,7 +21,11 @@ server and keep everything under your control.
 
 - Voice channels with WebRTC (Pion SFU)
 - Mute, deafen, camera, and screenshare controls
-- Built-in TURN/STUN server (no external dependencies)
+- Per-user volume control (right-click user in voice channel)
+- NAT traversal via Google STUN + configurable external IP
+- RNNoise ML noise suppression (AudioWorklet + fallback)
+- Voice activity detection with configurable sensitivity
+- Silence suppression to save bandwidth
 - Configurable audio quality (low/medium/high)
 
 ### Channels & Organization
@@ -105,7 +109,7 @@ Two components: a **Go server** and a **Tauri v2 client**
 
 - **WebSocket** — chat messages, typing, presence, voice signaling
 - **REST API** — message history, file uploads, channel management, auth
-- **WebRTC** — voice and video via Pion SFU with built-in TURN/STUN
+- **WebRTC** — voice and video via Pion SFU with Google STUN for NAT traversal
 
 ## Project Structure
 
@@ -184,7 +188,8 @@ The server generates a `config.yaml` on first run. Key settings:
 | `tls.mode` | `selfsigned` | TLS mode (see docs) |
 | `upload.max_size_mb` | `10` | Max upload size |
 | `voice.quality` | `medium` | `low`, `medium`, `high` |
-| `voice.turn_enabled` | `true` | Built-in TURN server |
+| `voice.external_ip` | — | Public IP for NAT traversal |
+| `voice.turn_enabled` | `true` | Enable TURN relay (requires coturn) |
 | `github.token` | — | Token for update checks |
 
 ## Auto-Updates
@@ -221,7 +226,7 @@ Detailed docs live in the `docs/brain/` Obsidian vault:
 | Server | Go, chi router, Pion WebRTC |
 | Database | SQLite (pure Go, embedded) |
 | Client | Tauri v2 (Rust + TypeScript) |
-| Voice/Video | WebRTC with SFU, built-in TURN/STUN |
+| Voice/Video | WebRTC with Pion SFU, Google STUN |
 | Build | NSIS installer, GitHub Actions CI |
 
 ## License
