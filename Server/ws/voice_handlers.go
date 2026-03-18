@@ -39,12 +39,16 @@ func (h *Hub) setupICEMonitor(c *Client, channelID int64) {
 		switch state {
 		case webrtc.ICEConnectionStateFailed:
 			slog.Warn("ICE connection failed, cleaning up voice", "user_id", c.userID, "channel_id", channelID)
-			h.handleVoiceLeave(c)
+			if c.getVoiceChID() != 0 {
+				h.handleVoiceLeave(c)
+			}
 		case webrtc.ICEConnectionStateClosed:
 			// Closed means the PC was shut down (client destroyed it).
-			// Clean up server-side voice state as a safety net.
-			slog.Info("ICE connection closed, cleaning up voice", "user_id", c.userID, "channel_id", channelID)
-			h.handleVoiceLeave(c)
+			// Safety net: only clean up if voice_leave hasn't already done it.
+			if c.getVoiceChID() != 0 {
+				slog.Info("ICE connection closed, cleaning up voice", "user_id", c.userID, "channel_id", channelID)
+				h.handleVoiceLeave(c)
+			}
 		case webrtc.ICEConnectionStateDisconnected:
 			// Disconnected is transient — ICE may recover.
 			// Log but don't clean up immediately.
