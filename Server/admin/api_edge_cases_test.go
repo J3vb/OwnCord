@@ -311,6 +311,56 @@ func TestAdminAPI_ListUsers_InvalidLimitParam(t *testing.T) {
 	}
 }
 
+// ─── PatchUser — nil hub does not panic ─────────────────────────────────────
+
+// TestAdminAPI_PatchUser_BanNilHubDoesNotPanic verifies that banning a user
+// when hub is nil does not panic (exercises the hub != nil guard around
+// BroadcastMemberBan).
+func TestAdminAPI_PatchUser_BanNilHubDoesNotPanic(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	token := createAdminUser(t, database)
+
+	targetUID, _ := database.CreateUser("ban-nohub", "hash", 3)
+
+	body := map[string]any{"banned": true, "ban_reason": "nil hub test"}
+	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	// Verify ban was still applied despite nil hub.
+	user, _ := database.GetUserByID(targetUID)
+	if !user.Banned {
+		t.Error("user should be banned even with nil hub")
+	}
+}
+
+// TestAdminAPI_PatchUser_RoleChangeNilHubDoesNotPanic verifies that changing a
+// user's role when hub is nil does not panic (exercises the hub != nil guard
+// around BroadcastMemberUpdate).
+func TestAdminAPI_PatchUser_RoleChangeNilHubDoesNotPanic(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	token := createAdminUser(t, database)
+
+	targetUID, _ := database.CreateUser("role-nohub", "hash", 3)
+
+	body := map[string]any{"role_id": float64(2)}
+	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	// Verify role was still changed despite nil hub.
+	user, _ := database.GetUserByID(targetUID)
+	if user.RoleID != 2 {
+		t.Errorf("RoleID = %d, want 2", user.RoleID)
+	}
+}
+
 // ─── PatchUser — BanReason nil path ────────────────────────────────────────
 
 // TestAdminAPI_PatchUser_BanWithoutReason verifies that banning a user without
