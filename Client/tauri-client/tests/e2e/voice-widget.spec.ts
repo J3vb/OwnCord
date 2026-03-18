@@ -37,10 +37,9 @@ test.describe("Voice Widget", () => {
     const widget = page.locator("[data-testid='voice-widget'].visible");
     await expect(widget).toBeVisible({ timeout: 5_000 });
 
-    // Verify all widget parts render in one test
+    // Verify all widget parts render (users list is in sidebar, not widget)
     await expect(widget.locator(".vw-connected")).toBeVisible();
     await expect(widget.locator(".vw-channel")).toBeVisible();
-    await expect(widget.locator(".voice-users-list")).toBeVisible();
     await expect(widget.locator(".vw-controls")).toBeVisible();
     await expect(page.locator("button[aria-label='Disconnect']")).toBeVisible();
   });
@@ -77,7 +76,7 @@ test.describe("Voice Widget", () => {
     expect(hasActive).not.toBe(hadActive);
   });
 
-  test("second user joining voice appears in users list", async ({ page }) => {
+  test("second user joining voice appears in sidebar users list", async ({ page }) => {
     await mockTauriFullSessionWithVoice(page);
     await page.goto("/");
     await navigateToMainPage(page);
@@ -103,8 +102,9 @@ test.describe("Voice Widget", () => {
       },
     });
 
-    // New user should appear in the list
-    await expect(page.locator("[data-testid='voice-user-3']")).toBeVisible({ timeout: 5_000 });
+    // New user should appear in the sidebar voice-users-list (not the widget)
+    const newUser = page.locator(".voice-user-item .vu-name", { hasText: "newvoiceuser" });
+    await expect(newUser).toBeVisible({ timeout: 5_000 });
     const usersAfter = await page.locator(".voice-user-item").count();
     expect(usersAfter).toBeGreaterThan(usersBefore);
   });

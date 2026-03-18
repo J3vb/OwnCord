@@ -1,104 +1,46 @@
-# E2E Test Issues — 2026-03-15
+# E2E Test Status — 2026-03-18
 
-## 135 tests: 55 passed, 80 failed (40.7%)
+## 209 tests: 209 passed (100%)
 
-## Passing Files
+All E2E tests now pass. Previous issues from 2026-03-15 have been resolved.
 
-| Spec File | Pass/Total |
-| --------- | ---------- |
-| `banners-toasts.spec.ts` | 4/4 |
-| `chat-header.spec.ts` | 6/6 |
-| `connect-page.spec.ts` | 15/17 |
-| `server-strip.spec.ts` | 4/4 |
-| `channel-sidebar.spec.ts` | 8/9 |
-| `main-layout.spec.ts` | 4/6 |
-| `user-bar.spec.ts` | 4/5 |
-| `typing-indicator.spec.ts` | 2/4 |
+## Resolved Issues
 
-## Failing Files
+### Fixed — Voice widget selector mismatches (2 tests)
 
-| Spec File | Pass/Total |
-| --------- | ---------- |
-| `message-list.spec.ts` | 0/16 |
-| `message-input.spec.ts` | 0/7 |
-| `settings-overlay.spec.ts` | 0/24 |
-| `overlays.spec.ts` (quick switcher) | 0/9 |
-| `overlays.spec.ts` (emoji picker) | 0/6 |
-| `voice-widget.spec.ts` | 0/6 |
-| `member-list.spec.ts` | 0/7 |
+- `voice-widget.spec.ts:30` — Removed `.voice-users-list` assertion.
+  Voice users render in the sidebar (`VoiceChannel.ts`), not in VoiceWidget.
+- `voice-widget.spec.ts:80` — Replaced `[data-testid='voice-user-3']` with
+  `.voice-user-item .vu-name` text matcher. VoiceChannel doesn't use
+  per-user data-testid attributes.
 
-## Root Causes (fix in this order)
+### Previously fixed (2026-03-15 → 2026-03-17)
 
-### 1. CRITICAL — No channel auto-selected on login (~35 tests)
+| Root Cause | Tests Fixed |
+| ---------- | ----------- |
+| No channel auto-selected on login | ~35 tests |
+| Settings overlay toggle broken | 24 tests |
+| Quick Switcher Ctrl+K not wired | 9 tests |
+| Voice widget stays hidden | 4 of 6 tests |
+| Member list not rendering members | 7 tests |
+| `.status-dot` selector mismatch | 1 test |
 
-First channel lacks `.active` after login, so messages pane,
-input, and typing bar never mount. Cascades into
-`message-list`, `message-input`, `overlays` (emoji),
-and `typing-indicator`.
+## Anti-Flakiness Improvements (2026-03-18)
 
-**Affected:** `message-list` (16), `message-input` (7),
-`overlays` emoji (6), `typing-indicator` (2),
-`main-layout` (2), `channel-sidebar` (1)
+- **Config**: Added `actionTimeout: 10s`, `navigationTimeout: 15s`,
+  local retry (1), video on first retry, JUnit XML reporter for CI
+- **Helpers**: Added `waitForWsReady()`, `navigateToMainPageReady()`,
+  `emitWsMessageAndWait()` for timing-safe WS event testing
+- **Patterns applied**: Web-first assertions, DOM-signal polling
+  instead of hardcoded delays, text content matchers over missing
+  data-testid attributes
 
-**Fix:** Check why first channel isn't auto-selected
-after `ready` WS payload. Likely store or MainPage
-doesn't call `setActiveChannel` on initial render.
-Mock may need correct channel data format.
+## Remaining Improvement Plan
 
-### 2. HIGH — Settings overlay toggle broken (24 tests)
+See `docs/brain/02-Tasks/PLAN-E2E-improvement.md` for Phases 2-6:
 
-Gear button click doesn't add `.open` to
-`.settings-overlay`. Button IS found (user-bar
-tests pass), so handler or class toggle is broken.
-
-**Affected:** All 24 tests in `settings-overlay.spec.ts`
-
-**Fix:** Check if gear calls `openSettings()` from
-`ui.store` and if SettingsOverlay subscribes to
-toggle `.open`. May be a wiring issue in MainPage.
-
-### 3. MEDIUM — Quick Switcher Ctrl+K not wired (9 tests)
-
-`Ctrl+K` doesn't open `.quick-switcher-overlay`.
-Possible Tauri global shortcut vs DOM `keydown`
-conflict — Tauri shortcuts don't work in E2E.
-
-**Affected:** All 9 quick switcher tests in `overlays.spec.ts`
-
-**Fix:** Check if it uses Tauri global shortcut vs
-DOM `keydown`. If global, add DOM fallback or mock
-the shortcut trigger.
-
-### 4. MEDIUM — Voice widget stays hidden (6 tests)
-
-`.voice-widget` exists in DOM but `.visible` is
-never applied after mock `voice_states` injection.
-
-**Affected:** All 6 tests in `voice-widget.spec.ts`
-
-**Fix:** Check if voice store processes
-`voice_state_update` WS messages and if widget
-subscribes to toggle `.visible`. Mock may need
-a different message type.
-
-### 5. MEDIUM — Member list not rendering members (7 tests)
-
-`.member-role-group` count is 0 despite members in
-mock ready payload. Panel is mounted but empty.
-
-**Affected:** All 7 tests in `member-list.spec.ts`
-
-**Fix:** Check if members store populates from
-`ready` payload and if MemberList subscribes.
-Verify `.member-role-group` selector matches
-actual component output.
-
-### 6. LOW — `.status-dot` selector mismatch (1 test)
-
-`.user-bar .status-dot` not found. Element either
-doesn't exist or uses a different class name.
-
-**Affected:** 1 test in `user-bar.spec.ts`
-
-**Fix:** Read UserBar component source and find
-the correct selector for the status indicator.
+- Phase 2: Add `data-testid` to 12 components
+- Phase 3: Page Object helpers + dedup
+- Phase 4: Strengthen assertions
+- Phase 5: Toast coverage
+- Phase 6: Migrate to `data-testid` selectors

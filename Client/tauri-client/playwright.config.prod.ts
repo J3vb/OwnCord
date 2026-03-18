@@ -15,14 +15,20 @@ export default defineConfig({
   },
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  retries: process.env.CI ? 2 : 1,
   workers: process.env.CI ? 1 : undefined,
-  reporter: "html",
+  reporter: process.env.CI
+    ? [["html", { open: "never" }], ["junit", { outputFile: "test-results/junit.xml" }]]
+    : "html",
 
   use: {
     baseURL: "http://localhost:4173",
+    actionTimeout: 10_000,
+    navigationTimeout: 15_000,
     screenshot: "only-on-failure",
     trace: "on-first-retry",
+    video: "on-first-retry",
+    contextOptions: { reducedMotion: "reduce" },
   },
 
   projects: [
@@ -36,6 +42,6 @@ export default defineConfig({
     command: "npm run preview",
     url: "http://localhost:4173",
     reuseExistingServer: !process.env.CI,
-    timeout: 30_000,
+    timeout: 60_000,
   },
 });

@@ -682,3 +682,49 @@ export async function emitWsEvent(
 export async function emitWsMessage(page: Page, message: unknown): Promise<void> {
   await emitWsEvent(page, "ws-message", JSON.stringify(message));
 }
+
+// ---------------------------------------------------------------------------
+// Anti-flakiness utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Wait for the WS mock to finish its auth + ready handshake.
+ * The mock uses setTimeout(100ms) for ws-state open, then
+ * setTimeout(100/200ms) for auth_ok/ready — so the handshake
+ * completes within ~300ms. This helper polls for a reliable
+ * DOM signal instead of relying on hardcoded delays.
+ */
+export async function waitForWsReady(page: Page): Promise<void> {
+  // The channel sidebar populates after the ready payload is processed.
+  // Wait for the first channel item as proof the WS flow completed.
+  await expect(page.locator(".channel-item").first()).toBeVisible({ timeout: 10_000 });
+}
+
+/**
+ * Navigate to main page and wait for WS ready handshake to complete.
+ * Combines login + WS readiness in one call to reduce boilerplate
+ * and ensure tests start from a stable state.
+ */
+export async function navigateToMainPageReady(page: Page): Promise<void> {
+  await navigateToMainPage(page);
+  await waitForWsReady(page);
+}
+
+/**
+ * Emit a WS message and wait for a DOM change to confirm it was processed.
+ * Prevents flakiness from tests asserting before the message handler runs.
+ *
+ * @param page - Playwright page
+ * @param message - WS message payload to emit
+ * @param confirmLocator - Locator that should become visible/attached after processing
+ * @param timeout - Max wait time (default 5000ms)
+ */
+export async function emitWsMessageAndWait(
+  page: Page,
+  message: unknown,
+  confirmLocator: ReturnType<Page["locator"]>,
+  timeout = 5_000,
+): Promise<void> {
+  await emitWsMessage(page, message);
+  await expect(confirmLocator).toBeVisible({ timeout });
+}
