@@ -1,6 +1,7 @@
 /**
  * ChannelSidebar component — channel list sidebar with categories,
  * unread indicators, and collapse/expand behavior.
+ * Voice channels show connected users and join/leave on click.
  */
 
 import {
@@ -23,8 +24,24 @@ import {
   toggleCategory,
   isCategoryCollapsed,
 } from "@stores/ui.store";
+import { voiceStore, getChannelVoiceUsers } from "@stores/voice.store";
 
-function renderChannelItem(
+export interface ChannelSidebarOptions {
+  readonly onVoiceJoin: (channelId: number) => void;
+  readonly onVoiceLeave: () => void;
+}
+
+const AVATAR_COLORS = ["#5865f2", "#57f287", "#fee75c", "#eb459e", "#ed4245"];
+
+function pickAvatarColor(username: string): string {
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) {
+    hash = (hash * 31 + username.charCodeAt(i)) | 0;
+  }
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? "#5865f2";
+}
+
+function renderTextChannelItem(
   channel: Channel,
   isActive: boolean,
   signal: AbortSignal,
@@ -40,11 +57,7 @@ function renderChannelItem(
   const item = createElement("div", { class: classes, "data-testid": `channel-${channel.id}` });
   item.dataset.channelId = String(channel.id);
 
-  const prefix =
-    channel.type === "voice"
-      ? createElement("span", { class: "ch-icon" }, "\uD83D\uDD0A")
-      : createElement("span", { class: "ch-icon" }, "#");
-
+  const prefix = createElement("span", { class: "ch-icon" }, "#");
   const name = createElement("span", { class: "ch-name" }, channel.name);
 
   appendChildren(item, prefix, name);
@@ -70,11 +83,101 @@ function renderChannelItem(
   return item;
 }
 
+function renderVoiceChannelItem(
+  channel: Channel,
+  signal: AbortSignal,
+  onVoiceJoin: (channelId: number) => void,
+  onVoiceLeave: () => void,
+): HTMLDivElement {
+  const voiceState = voiceStore.getState();
+  const isJoined = voiceState.currentChannelId === channel.id;
+
+  const wrapper = createElement("div", {});
+
+  const classes = ["channel-item", "voice", isJoined ? "active" : ""]
+    .filter(Boolean)
+    .join(" ");
+
+  const item = createElement("div", { class: classes, "data-testid": `channel-${channel.id}` });
+  item.dataset.channelId = String(channel.id);
+
+  const prefix = createElement("span", { class: "ch-icon" }, "\uD83D\uDD0A");
+  const name = createElement("span", { class: "ch-name" }, channel.name);
+
+  appendChildren(item, prefix, name);
+
+  item.addEventListener(
+    "click",
+    () => {
+      if (isJoined) {
+        onVoiceLeave();
+      } else {
+        onVoiceJoin(channel.id);
+      }
+    },
+    { signal },
+  );
+
+  wrapper.appendChild(item);
+
+  // Render connected voice users below the channel
+  const voiceUsers = getChannelVoiceUsers(channel.id);
+  if (voiceUsers.length > 0) {
+    const usersContainer = createElement("div", { class: "voice-users-list" });
+    for (const user of voiceUsers) {
+      const rowClasses = user.speaking
+        ? "voice-user-item speaking"
+        : "voice-user-item";
+      const row = createElement("div", { class: rowClasses });
+
+      const initial = user.username.length > 0
+        ? user.username.charAt(0).toUpperCase()
+        : "?";
+      const avatar = createElement("div", { class: "vu-avatar" }, initial);
+      avatar.style.background = pickAvatarColor(user.username);
+      row.appendChild(avatar);
+
+      const nameEl = createElement(
+        "span",
+        { class: "vu-name" },
+        user.username || "Unknown",
+      );
+      row.appendChild(nameEl);
+
+      if (user.muted || user.deafened) {
+        const icon = user.deafened ? "\uD83D\uDD08" : "\uD83D\uDD07";
+        const mutedEl = createElement("span", { class: "vu-muted" }, icon);
+        row.appendChild(mutedEl);
+      }
+
+      usersContainer.appendChild(row);
+    }
+    wrapper.appendChild(usersContainer);
+  }
+
+  return wrapper;
+}
+
+function renderChannelItem(
+  channel: Channel,
+  isActive: boolean,
+  signal: AbortSignal,
+  onVoiceJoin: (channelId: number) => void,
+  onVoiceLeave: () => void,
+): HTMLDivElement {
+  if (channel.type === "voice") {
+    return renderVoiceChannelItem(channel, signal, onVoiceJoin, onVoiceLeave);
+  }
+  return renderTextChannelItem(channel, isActive, signal);
+}
+
 function renderCategoryGroup(
   categoryName: string | null,
   channels: readonly Channel[],
   activeChannelId: number | null,
   signal: AbortSignal,
+  onVoiceJoin: (channelId: number) => void,
+  onVoiceLeave: () => void,
 ): HTMLDivElement {
   const group = createElement("div", {});
 
@@ -107,7 +210,7 @@ function renderCategoryGroup(
     if (!collapsed) {
       for (const ch of channels) {
         group.appendChild(
-          renderChannelItem(ch, ch.id === activeChannelId, signal),
+          renderChannelItem(ch, ch.id === activeChannelId, signal, onVoiceJoin, onVoiceLeave),
         );
       }
     }
@@ -115,7 +218,7 @@ function renderCategoryGroup(
     // Uncategorized channels render directly
     for (const ch of channels) {
       group.appendChild(
-        renderChannelItem(ch, ch.id === activeChannelId, signal),
+        renderChannelItem(ch, ch.id === activeChannelId, signal, onVoiceJoin, onVoiceLeave),
       );
     }
   }
@@ -123,7 +226,8 @@ function renderCategoryGroup(
   return group;
 }
 
-export function createChannelSidebar(): MountableComponent {
+export function createChannelSidebar(options: ChannelSidebarOptions): MountableComponent {
+  const { onVoiceJoin, onVoiceLeave } = options;
   const ac = new AbortController();
   let root: HTMLDivElement | null = null;
   let channelList: HTMLDivElement | null = null;
@@ -142,7 +246,7 @@ export function createChannelSidebar(): MountableComponent {
 
     for (const [category, channels] of grouped) {
       channelList.appendChild(
-        renderCategoryGroup(category, channels, state.activeChannelId, ac.signal),
+        renderCategoryGroup(category, channels, state.activeChannelId, ac.signal, onVoiceJoin, onVoiceLeave),
       );
     }
   }
@@ -188,6 +292,12 @@ export function createChannelSidebar(): MountableComponent {
       renderChannels();
     });
     unsubscribers.push(unsubUi);
+
+    // Subscribe to voice store for connected user updates
+    const unsubVoice = voiceStore.subscribe(() => {
+      renderChannels();
+    });
+    unsubscribers.push(unsubVoice);
   }
 
   function destroy(): void {

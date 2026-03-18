@@ -12,6 +12,9 @@ use windows::Win32::Security::Credentials::{
 pub struct CredentialData {
     pub username: String,
     pub token: String,
+    /// Optional saved password (only present when user opted in).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
 }
 
 /// Build the target name used in Windows Credential Manager.
@@ -34,7 +37,7 @@ fn to_wide(s: &str) -> Vec<u16> {
 /// Target name: `OwnCord/{host}`
 /// Blob: JSON `{"username":"...","token":"..."}`
 #[tauri::command]
-pub fn save_credential(host: String, username: String, token: String) -> Result<(), String> {
+pub fn save_credential(host: String, username: String, token: String, password: Option<String>) -> Result<(), String> {
     if host.is_empty() {
         return Err("host must not be empty".into());
     }
@@ -48,10 +51,13 @@ pub fn save_credential(host: String, username: String, token: String) -> Result<
     let target = target_name(&host);
     let wide_user = to_wide(&username);
 
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "username": username,
         "token": token,
     });
+    if let Some(ref pw) = password {
+        payload["password"] = serde_json::Value::String(pw.clone());
+    }
     let blob = payload.to_string().into_bytes();
 
     let mut cred = CREDENTIALW {
@@ -131,11 +137,15 @@ pub fn load_credential(host: String) -> Result<Option<CredentialData>, String> {
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
+        let password = parsed
+            .get("password")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
         // Free the credential memory allocated by Windows.
         CredFree(pcred as *const std::ffi::c_void);
 
-        Ok(Some(CredentialData { username, token }))
+        Ok(Some(CredentialData { username, token, password }))
     };
 
     result

@@ -141,7 +141,7 @@ export function createMessageInput(
 
     const inputBox = createElement("div", { class: "message-input-box" });
     const attachBtn = createElement("button",
-      { class: "input-btn attach-btn", "aria-label": "Attach file" }, "+");
+      { class: "input-btn attach-btn", "aria-label": "Attach file", disabled: "true", title: "File uploads coming soon" }, "+");
     textarea = createElement("textarea", {
       class: "msg-textarea", placeholder: `Message #${options.channelName}`, rows: "1",
       "data-testid": "msg-textarea",

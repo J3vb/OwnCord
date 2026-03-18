@@ -71,6 +71,7 @@ const sampleData: CreateProfileData = {
   username: "alice",
   color: "#ff5500",
   autoConnect: false,
+  rememberPassword: false,
 };
 
 const sampleData2: CreateProfileData = {
@@ -79,6 +80,7 @@ const sampleData2: CreateProfileData = {
   username: "bob",
   color: "#00aaff",
   autoConnect: true,
+  rememberPassword: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -389,6 +391,7 @@ describe("ProfileManager", () => {
           username: "charlie",
           color: "#000000",
           autoConnect: false,
+          rememberPassword: false,
           lastConnected: null,
         },
         {
@@ -398,6 +401,7 @@ describe("ProfileManager", () => {
           username: "dave",
           color: "#ffffff",
           autoConnect: false,
+          rememberPassword: false,
           lastConnected: null,
         },
       ];
@@ -424,8 +428,8 @@ describe("ProfileManager", () => {
     it("rejects import entries with invalid shape", () => {
       const m = mgr();
       const badEntries = [
-        { id: "x", name: "", host: "a", username: "b", color: "#000", autoConnect: false, lastConnected: null },
-        { id: "y", name: "Valid", host: "valid.com:443", username: "u", color: "#fff", autoConnect: false, lastConnected: null },
+        { id: "x", name: "", host: "a", username: "b", color: "#000", autoConnect: false, rememberPassword: false, lastConnected: null },
+        { id: "y", name: "Valid", host: "valid.com:443", username: "u", color: "#fff", autoConnect: false, rememberPassword: false, lastConnected: null },
       ];
       const result = m.importProfiles(JSON.stringify(badEntries));
       expect(result.imported).toBe(1);
@@ -475,6 +479,7 @@ describe("ProfileManager", () => {
             username: "eve",
             color: "#112233",
             autoConnect: false,
+            rememberPassword: false,
             lastConnected: "2026-01-01T00:00:00.000Z",
           },
         ],

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
 import {
   channelsStore,
@@ -7,6 +7,8 @@ import {
 } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore, toggleCategory } from "../../src/stores/ui.store";
+import { voiceStore, updateVoiceState } from "../../src/stores/voice.store";
+import { membersStore } from "../../src/stores/members.store";
 import type { ReadyChannel } from "../../src/lib/types";
 
 function resetStores(): void {
@@ -31,6 +33,17 @@ function resetStores(): void {
     transientError: null,
     persistentError: null,
     collapsedCategories: new Set<string>(),
+  }));
+  voiceStore.setState(() => ({
+    currentChannelId: null,
+    voiceUsers: new Map(),
+    voiceConfigs: new Map(),
+    localMuted: false,
+    localDeafened: false,
+  }));
+  membersStore.setState(() => ({
+    members: new Map(),
+    typingUsers: new Map(),
   }));
 }
 
@@ -74,12 +87,16 @@ const testChannels: ReadyChannel[] = [
 describe("ChannelSidebar", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
+  let onVoiceJoin: ReturnType<typeof vi.fn>;
+  let onVoiceLeave: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     resetStores();
     container = document.createElement("div");
     document.body.appendChild(container);
-    sidebar = createChannelSidebar();
+    onVoiceJoin = vi.fn();
+    onVoiceLeave = vi.fn();
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave });
   });
 
   afterEach(() => {
@@ -212,5 +229,116 @@ describe("ChannelSidebar", () => {
     );
     const icon = voiceItem?.querySelector(".ch-icon");
     expect(icon).not.toBeNull();
+  });
+
+  it("clicking voice channel calls onVoiceJoin instead of setActiveChannel", () => {
+    setChannels(testChannels);
+    sidebar.mount(container);
+
+    const voiceItem = container.querySelector(
+      '[data-channel-id="3"]',
+    ) as HTMLElement;
+    voiceItem.click();
+
+    // Should NOT set active channel
+    expect(channelsStore.getState().activeChannelId).toBeNull();
+    // Should call onVoiceJoin with channel id
+    expect(onVoiceJoin).toHaveBeenCalledWith(3);
+  });
+
+  it("clicking text channel still sets active channel normally", () => {
+    setChannels(testChannels);
+    sidebar.mount(container);
+
+    const textItem = container.querySelector(
+      '[data-channel-id="1"]',
+    ) as HTMLElement;
+    textItem.click();
+
+    expect(channelsStore.getState().activeChannelId).toBe(1);
+    expect(onVoiceJoin).not.toHaveBeenCalled();
+  });
+
+  it("clicking joined voice channel calls onVoiceLeave", () => {
+    setChannels(testChannels);
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
+    sidebar.mount(container);
+
+    const voiceItem = container.querySelector(
+      '[data-channel-id="3"]',
+    ) as HTMLElement;
+    voiceItem.click();
+
+    expect(onVoiceLeave).toHaveBeenCalled();
+    expect(onVoiceJoin).not.toHaveBeenCalled();
+  });
+
+  it("shows connected voice users under voice channel", () => {
+    setChannels(testChannels);
+    // Add a member so username resolves
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([[10, { id: 10, username: "Alice", avatar: null, role: "member", status: "online" as const }]]),
+    }));
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 10,
+      username: "Alice",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    });
+    sidebar.mount(container);
+
+    const voiceUsersList = container.querySelector(".voice-users-list");
+    expect(voiceUsersList).not.toBeNull();
+
+    const userItems = container.querySelectorAll(".voice-user-item");
+    expect(userItems.length).toBe(1);
+
+    const userName = userItems[0]?.querySelector(".vu-name");
+    expect(userName?.textContent).toBe("Alice");
+  });
+
+  it("highlights voice channel as active when user is joined", () => {
+    setChannels(testChannels);
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
+    sidebar.mount(container);
+
+    const voiceItem = container.querySelector(
+      '[data-channel-id="3"]',
+    );
+    expect(voiceItem?.classList.contains("active")).toBe(true);
+  });
+
+  it("re-renders when voice store changes", () => {
+    setChannels(testChannels);
+    sidebar.mount(container);
+
+    // Initially no voice users
+    let voiceUsers = container.querySelectorAll(".voice-user-item");
+    expect(voiceUsers.length).toBe(0);
+
+    // Add a voice user
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 20,
+      username: "Bob",
+      muted: true,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    });
+    voiceStore.flush();
+
+    voiceUsers = container.querySelectorAll(".voice-user-item");
+    expect(voiceUsers.length).toBe(1);
+
+    // Should show muted icon
+    const mutedIcon = voiceUsers[0]?.querySelector(".vu-muted");
+    expect(mutedIcon).not.toBeNull();
   });
 });

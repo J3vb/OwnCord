@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createConnectPage } from "../../src/pages/ConnectPage";
-import type { ConnectPageCallbacks, ServerProfile } from "../../src/pages/ConnectPage";
+import type { ConnectPageCallbacks, SimpleProfile } from "../../src/pages/ConnectPage";
 import { uiStore } from "../../src/stores/ui.store";
 
 // Mock SettingsOverlay so we don't pull in all its dependencies
@@ -32,7 +32,7 @@ function makeCallbacks(overrides: Partial<ConnectPageCallbacks> = {}): ConnectPa
   };
 }
 
-const testProfiles: ServerProfile[] = [
+const testProfiles: SimpleProfile[] = [
   { name: "Test Server", host: "localhost:8443" },
 ];
 

@@ -212,6 +212,19 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("attach button is disabled with tooltip", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const attachBtn = container.querySelector(".attach-btn") as HTMLButtonElement;
+    expect(attachBtn).not.toBeNull();
+    expect(attachBtn.disabled).toBe(true);
+    expect(attachBtn.title).toBe("File uploads coming soon");
+
+    comp.destroy?.();
+  });
+
   it("debounces rapid sends", () => {
     vi.useFakeTimers();
     const opts = makeOptions();

@@ -39,7 +39,16 @@ func (h *Hub) setupICEMonitor(c *Client, channelID int64) {
 		switch state {
 		case webrtc.ICEConnectionStateFailed:
 			slog.Warn("ICE connection failed, cleaning up voice", "user_id", c.userID, "channel_id", channelID)
-			h.handleVoiceLeave(c)
+			if c.getVoiceChID() != 0 {
+				h.handleVoiceLeave(c)
+			}
+		case webrtc.ICEConnectionStateClosed:
+			// Closed means the PC was shut down (client destroyed it).
+			// Safety net: only clean up if voice_leave hasn't already done it.
+			if c.getVoiceChID() != 0 {
+				slog.Info("ICE connection closed, cleaning up voice", "user_id", c.userID, "channel_id", channelID)
+				h.handleVoiceLeave(c)
+			}
 		case webrtc.ICEConnectionStateDisconnected:
 			// Disconnected is transient — ICE may recover.
 			// Log but don't clean up immediately.
@@ -51,6 +60,55 @@ func (h *Hub) setupICEMonitor(c *Client, channelID int64) {
 // SetupICEMonitorForTest exposes setupICEMonitor for tests.
 func (h *Hub) SetupICEMonitorForTest(c *Client, channelID int64) {
 	h.setupICEMonitor(c, channelID)
+}
+
+// setupICECallback registers an OnICECandidate handler on the client's
+// PeerConnection to send server-generated ICE candidates to the client.
+func (h *Hub) setupICECallback(c *Client, channelID int64) {
+	pc := c.getPC()
+	if pc == nil {
+		return
+	}
+	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		if candidate == nil {
+			return // gathering complete
+		}
+		c.sendMsg(buildVoiceICE(channelID, candidate.ToJSON()))
+	})
+}
+
+// renegotiateParticipant creates a new SDP offer for the given client
+// and sends it as voice_offer. Implements the "impolite" side of
+// Perfect Negotiation — skips if PC is in have-remote-offer state.
+func (h *Hub) renegotiateParticipant(c *Client) {
+	pc := c.getPC()
+	if pc == nil {
+		return
+	}
+
+	// Perfect Negotiation: server is impolite — skip if client
+	// already sent an offer we haven't answered yet.
+	if pc.SignalingState() == webrtc.SignalingStateHaveRemoteOffer {
+		slog.Info("renegotiate skipped: have-remote-offer",
+			"user_id", c.userID)
+		return
+	}
+
+	offer, err := pc.CreateOffer(nil)
+	if err != nil {
+		slog.Error("renegotiateParticipant CreateOffer",
+			"err", err, "user_id", c.userID)
+		return
+	}
+
+	if err := pc.SetLocalDescription(offer); err != nil {
+		slog.Error("renegotiateParticipant SetLocalDescription",
+			"err", err, "user_id", c.userID)
+		return
+	}
+
+	channelID := c.getVoiceChID()
+	c.sendMsg(buildVoiceOffer(channelID, offer.SDP))
 }
 
 // handleVoiceJoin processes a voice_join message.
@@ -126,9 +184,29 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 	// Track the voice channel and PC on the client atomically (CRIT-1 fix).
 	c.setVoice(channelID, pc)
 
+	// Add existing tracks to the new joiner's PC so they hear
+	// participants who joined before them.
+	if pc != nil {
+		existingTracks := room.GetTracks()
+		for _, vt := range existingTracks {
+			if vt.Local == nil || vt.UserID == c.userID {
+				continue
+			}
+			sender, addErr := pc.AddTrack(vt.Local)
+			if addErr != nil {
+				slog.Error("handleVoiceJoin AddTrack existing",
+					"err", addErr,
+					"from", vt.UserID, "to", c.userID)
+				continue
+			}
+			vt.AddSender(c.userID, sender)
+		}
+	}
+
 	if pc != nil {
 		h.setupOnTrack(c, channelID)
 		h.setupICEMonitor(c, channelID)
+		h.setupICECallback(c, channelID)
 	}
 
 	state, err := h.db.GetVoiceState(c.userID)
@@ -137,8 +215,8 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 		return
 	}
 
-	// Broadcast the joiner's state to all clients currently in this voice channel.
-	h.BroadcastToChannel(channelID, buildVoiceState(*state))
+	// Broadcast the joiner's state to all connected clients so every sidebar updates.
+	h.BroadcastToAll(buildVoiceState(*state))
 
 	// Send existing channel voice states to the joiner.
 	existing, err := h.db.GetChannelVoiceStates(channelID)
@@ -206,6 +284,32 @@ func (h *Hub) handleVoiceLeave(c *Client) {
 		}
 	}
 
+	// Remove this user's track from all subscribers' PCs.
+	// Done AFTER oldPC.Close() so the RTP goroutine has exited.
+	if oldChID > 0 {
+		if room := h.GetVoiceRoom(oldChID); room != nil {
+			vt := room.RemoveTrack(c.userID)
+			if vt != nil {
+				senders := vt.CopySenders()
+				for subID, sender := range senders {
+					sub := h.GetClient(subID)
+					if sub == nil {
+						continue
+					}
+					subPC := sub.getPC()
+					if subPC == nil {
+						continue
+					}
+					if rmErr := subPC.RemoveTrack(sender); rmErr != nil {
+						slog.Error("handleVoiceLeave RemoveTrack",
+							"err", rmErr, "user_id", subID)
+					}
+					h.renegotiateParticipant(sub)
+				}
+			}
+		}
+	}
+
 	// Remove from VoiceRoom and clean up empty rooms.
 	if oldChID > 0 {
 		if room := h.GetVoiceRoom(oldChID); room != nil {
@@ -221,7 +325,7 @@ func (h *Hub) handleVoiceLeave(c *Client) {
 	}
 
 	if state != nil {
-		h.BroadcastToChannel(state.ChannelID, buildVoiceLeave(state.ChannelID, c.userID))
+		h.BroadcastToAll(buildVoiceLeave(state.ChannelID, c.userID))
 	}
 }
 
@@ -504,9 +608,10 @@ func (h *Hub) handleSoundboard(c *Client, payload json.RawMessage) {
 }
 
 // setupOnTrack configures the PeerConnection's OnTrack handler to:
-// 1. Read RTP packets from incoming audio tracks.
-// 2. Parse the ssrc-audio-level header extension (RFC 6464).
-// 3. Feed the audio levels into the VoiceRoom's SpeakerDetector.
+// 1. Create a TrackLocalStaticRTP for SFU fan-out.
+// 2. Store it on the VoiceRoom as a VoiceTrack.
+// 3. Add the local track to all other participants' PCs and renegotiate.
+// 4. Forward RTP packets while parsing audio levels for speaker detection.
 //
 // Must be called after c.pc is set and before SDP negotiation completes.
 func (h *Hub) setupOnTrack(c *Client, channelID int64) {
@@ -515,15 +620,9 @@ func (h *Hub) setupOnTrack(c *Client, channelID int64) {
 		return
 	}
 
-	// audioLevelExtID is the negotiated extension ID for ssrc-audio-level.
-	// In a real deployment this is resolved via SDP; we use ID 1 as the
-	// conventional default matching the MediaEngine registration in sfu.go.
 	const audioLevelExtID = 1
 
-	// The goroutine spawned inside OnTrack exits when track.Read returns an
-	// error, which happens when the PeerConnection is closed (HIGH-1).
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		// Only process audio tracks for speaker detection.
 		if track.Kind() != webrtc.RTPCodecTypeAudio {
 			return
 		}
@@ -531,10 +630,60 @@ func (h *Hub) setupOnTrack(c *Client, channelID int64) {
 		slog.Info("SFU OnTrack",
 			"user_id", c.userID,
 			"channel_id", channelID,
-			"kind", track.Kind(),
 			"codec", track.Codec().MimeType,
 		)
 
+		// Create local track for fan-out using the remote track's codec.
+		local, err := webrtc.NewTrackLocalStaticRTP(
+			track.Codec().RTPCodecCapability,
+			fmt.Sprintf("audio-%d", c.userID),
+			fmt.Sprintf("user-%d", c.userID),
+		)
+		if err != nil {
+			slog.Error("setupOnTrack NewTrackLocalStaticRTP",
+				"err", err, "user_id", c.userID)
+			return
+		}
+
+		room := h.GetVoiceRoom(channelID)
+		if room == nil {
+			return
+		}
+
+		// Store track on room.
+		room.SetTrack(c.userID, track, local)
+		vt := room.GetTrack(c.userID)
+
+		// Collect other participant IDs (lock ordering: VoiceRoom.mu released before voiceMu).
+		participantIDs := room.ParticipantIDs()
+
+		// Add local track to each other participant's PC.
+		for _, pid := range participantIDs {
+			if pid == c.userID {
+				continue
+			}
+			other := h.GetClient(pid)
+			if other == nil {
+				continue
+			}
+			otherPC := other.getPC()
+			if otherPC == nil {
+				continue
+			}
+			sender, addErr := otherPC.AddTrack(local)
+			if addErr != nil {
+				slog.Error("setupOnTrack AddTrack",
+					"err", addErr,
+					"from", c.userID, "to", pid)
+				continue
+			}
+			if vt != nil {
+				vt.AddSender(pid, sender)
+			}
+			h.renegotiateParticipant(other)
+		}
+
+		// RTP forwarding + audio level goroutine.
 		go func() {
 			buf := make([]byte, 1500)
 			for {
@@ -543,18 +692,21 @@ func (h *Hub) setupOnTrack(c *Client, channelID int64) {
 					return // track closed or connection gone
 				}
 
-				// Parse audio level from RTP header extension.
+				// Forward RTP to local track (Pion fans out to all subscribers).
+				if _, writeErr := local.Write(buf[:n]); writeErr != nil {
+					return
+				}
+
+				// Parse audio level for speaker detection.
 				level, _, found := ParseAudioLevel(buf[:n], audioLevelExtID)
 				if !found {
 					continue
 				}
-
-				room := h.GetVoiceRoom(channelID)
-				if room == nil {
-					return // room has been removed
+				currentRoom := h.GetVoiceRoom(channelID)
+				if currentRoom == nil {
+					return
 				}
-
-				room.UpdateSpeakerLevel(c.userID, level)
+				currentRoom.UpdateSpeakerLevel(c.userID, level)
 			}
 		}()
 	})
@@ -571,5 +723,5 @@ func (h *Hub) broadcastVoiceStateUpdate(c *Client) {
 	if state == nil {
 		return // user not in a voice channel — nothing to broadcast
 	}
-	h.BroadcastToChannel(state.ChannelID, buildVoiceState(*state))
+	h.BroadcastToAll(buildVoiceState(*state))
 }

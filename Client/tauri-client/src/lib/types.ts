@@ -287,7 +287,7 @@ export interface VoiceAnswerPayload {
 
 export interface VoiceIcePayload {
   readonly channel_id: number;
-  readonly candidate: string;
+  readonly candidate: RTCIceCandidateInit;
 }
 
 export interface MemberJoinPayload {
@@ -355,6 +355,10 @@ export interface TypingStartPayload {
   readonly channel_id: number;
 }
 
+export interface ChannelFocusPayload {
+  readonly channel_id: number;
+}
+
 export interface PresenceUpdatePayload {
   readonly status: UserStatus;
 }
@@ -362,6 +366,9 @@ export interface PresenceUpdatePayload {
 export interface VoiceJoinPayload {
   readonly channel_id: number;
 }
+
+/** Client → Server: leave current voice channel (no payload needed). */
+export type VoiceLeaveClientPayload = Record<string, never>;
 
 export interface VoiceMutePayload {
   readonly muted: boolean;
@@ -431,8 +438,10 @@ export type ClientMessage =
   | (WsEnvelope<ReactionAddPayload> & { readonly type: "reaction_add" })
   | (WsEnvelope<ReactionRemovePayload> & { readonly type: "reaction_remove" })
   | (WsEnvelope<TypingStartPayload> & { readonly type: "typing_start" })
+  | (WsEnvelope<ChannelFocusPayload> & { readonly type: "channel_focus" })
   | (WsEnvelope<PresenceUpdatePayload> & { readonly type: "presence_update" })
   | (WsEnvelope<VoiceJoinPayload> & { readonly type: "voice_join" })
+  | (WsEnvelope<VoiceLeaveClientPayload> & { readonly type: "voice_leave" })
   | (WsEnvelope<VoiceMutePayload> & { readonly type: "voice_mute" })
   | (WsEnvelope<VoiceDeafenPayload> & { readonly type: "voice_deafen" })
   | (WsEnvelope<VoiceCameraPayload> & { readonly type: "voice_camera" })

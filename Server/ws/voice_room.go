@@ -4,10 +4,48 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/pion/webrtc/v4"
 )
 
 // ErrRoomFull is returned when attempting to add a participant to a full voice room.
 var ErrRoomFull = errors.New("voice room is full")
+
+// VoiceTrack pairs an incoming remote track with its local fan-out track.
+type VoiceTrack struct {
+	UserID   int64
+	Remote   *webrtc.TrackRemote
+	Local    *webrtc.TrackLocalStaticRTP
+	senderMu sync.RWMutex
+	Senders  map[int64]*webrtc.RTPSender // subscriber userID -> sender
+}
+
+// AddSender records a subscriber's RTPSender (thread-safe).
+func (vt *VoiceTrack) AddSender(userID int64, s *webrtc.RTPSender) {
+	vt.senderMu.Lock()
+	defer vt.senderMu.Unlock()
+	vt.Senders[userID] = s
+}
+
+// RemoveSender removes and returns a subscriber's RTPSender.
+func (vt *VoiceTrack) RemoveSender(userID int64) *webrtc.RTPSender {
+	vt.senderMu.Lock()
+	defer vt.senderMu.Unlock()
+	s := vt.Senders[userID]
+	delete(vt.Senders, userID)
+	return s
+}
+
+// CopySenders returns a snapshot of the senders map for iteration.
+func (vt *VoiceTrack) CopySenders() map[int64]*webrtc.RTPSender {
+	vt.senderMu.RLock()
+	defer vt.senderMu.RUnlock()
+	cp := make(map[int64]*webrtc.RTPSender, len(vt.Senders))
+	for k, v := range vt.Senders {
+		cp[k] = v
+	}
+	return cp
+}
 
 // VoiceParticipant represents one user in a voice room.
 type VoiceParticipant struct {
@@ -30,6 +68,7 @@ type VoiceRoomConfig struct {
 type VoiceRoom struct {
 	config       VoiceRoomConfig
 	participants map[int64]*VoiceParticipant
+	tracks       map[int64]*VoiceTrack
 	mode         string // "forwarding" or "selective"
 	detector     *SpeakerDetector
 	mu           sync.RWMutex
@@ -44,6 +83,7 @@ func NewVoiceRoom(cfg VoiceRoomConfig) *VoiceRoom {
 	return &VoiceRoom{
 		config:       cfg,
 		participants: make(map[int64]*VoiceParticipant),
+		tracks:       make(map[int64]*VoiceTrack),
 		mode:         "forwarding",
 		detector:     NewSpeakerDetector(topN),
 	}
@@ -128,12 +168,66 @@ func (r *VoiceRoom) HasParticipant(userID int64) bool {
 	return exists
 }
 
-// Close clears all participants from the room.
+// Close clears all participants and tracks from the room.
 func (r *VoiceRoom) Close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.participants = make(map[int64]*VoiceParticipant)
+	r.tracks = make(map[int64]*VoiceTrack)
 	r.mode = "forwarding"
+}
+
+// SetTrack stores a VoiceTrack for the given user (replaces any existing one).
+func (r *VoiceRoom) SetTrack(userID int64, remote *webrtc.TrackRemote, local *webrtc.TrackLocalStaticRTP) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.tracks[userID] = &VoiceTrack{
+		UserID:  userID,
+		Remote:  remote,
+		Local:   local,
+		Senders: make(map[int64]*webrtc.RTPSender),
+	}
+}
+
+// RemoveTrack removes and returns the VoiceTrack for the given user.
+// Returns nil if no track exists for that user.
+func (r *VoiceRoom) RemoveTrack(userID int64) *VoiceTrack {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	vt, ok := r.tracks[userID]
+	if ok {
+		delete(r.tracks, userID)
+	}
+	return vt
+}
+
+// GetTracks returns a snapshot of all current tracks.
+func (r *VoiceRoom) GetTracks() []*VoiceTrack {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make([]*VoiceTrack, 0, len(r.tracks))
+	for _, vt := range r.tracks {
+		result = append(result, vt)
+	}
+	return result
+}
+
+// TrackUserIDs returns the user IDs of all users that have an active track.
+func (r *VoiceRoom) TrackUserIDs() []int64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	ids := make([]int64, 0, len(r.tracks))
+	for id := range r.tracks {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// GetTrack returns the VoiceTrack for the given user, or nil if not present.
+func (r *VoiceRoom) GetTrack(userID int64) *VoiceTrack {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.tracks[userID]
 }
 
 // UpdateSpeakerLevel updates the audio level for a user in this room's detector.

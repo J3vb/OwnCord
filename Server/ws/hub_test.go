@@ -401,6 +401,28 @@ func TestHub_ConcurrentRegisterUnregister(t *testing.T) {
 	}
 }
 
+// ─── GetClient ───────────────────────────────────────────────────────────────
+
+func TestHub_GetClient(t *testing.T) {
+	hub, _ := newTestHub(t)
+	send := make(chan []byte, 256)
+	client := ws.NewTestClient(hub, 42, send)
+	hub.Register(client)
+	go hub.Run()
+	defer hub.Stop()
+	time.Sleep(10 * time.Millisecond)
+
+	got := hub.GetClient(42)
+	if got == nil {
+		t.Fatal("GetClient(42) returned nil")
+	}
+
+	got2 := hub.GetClient(999)
+	if got2 != nil {
+		t.Fatal("GetClient(999) should return nil")
+	}
+}
+
 // ─── assertion helpers ────────────────────────────────────────────────────────
 
 func assertReceived(t *testing.T, ch <-chan []byte, want []byte, label string) {
@@ -651,39 +673,11 @@ func TestHub_CleanupVoiceForChannel_BroadcastsVoiceLeave(t *testing.T) {
 	}
 }
 
-// ─── Hub.Register voice state cleanup ────────────────────────────────────────
-
-func TestHub_Register_CleansUpOldVoiceState(t *testing.T) {
-	// Use voiceHub (has voice_states table) so handleVoiceJoin succeeds.
-	hub, database := newVoiceHub(t)
-
-	user := seedVoiceOwner(t, database, "register-voice-user")
-	chID := seedVoiceChan(t, database, "vc-register-voice")
-
-	// Create the voice room and register the first client.
-	room := hub.GetOrCreateVoiceRoom(chID, ws.VoiceRoomConfig{ChannelID: chID, Quality: "medium"})
-
-	send1 := make(chan []byte, 16)
-	c1 := ws.NewTestClientWithUser(hub, user, chID, send1)
-	if err := room.AddParticipant(user.ID); err != nil {
-		t.Fatalf("AddParticipant: %v", err)
-	}
-	ws.SetClientVoiceChID(c1, chID)
-
-	hub.Register(c1)
-	time.Sleep(20 * time.Millisecond)
-
-	// Register a second client for the same user — should evict the first.
-	send2 := make(chan []byte, 16)
-	c2 := ws.NewTestClientWithUser(hub, user, chID, send2)
-	hub.Register(c2)
-	time.Sleep(30 * time.Millisecond)
-
-	// The old client's voice state in the room should be cleaned up.
-	if room.HasParticipant(user.ID) {
-		t.Error("expected old client's voice participation to be cleaned up after re-register")
-	}
-}
+// TestHub_Register_CleansUpOldVoiceState was removed because duplicate
+// logins are now rejected at the WebSocket handshake level (commit 00bbb46)
+// before hub.Register is called. The hub's register case simply overwrites
+// the client map entry; voice cleanup for disconnects is handled by
+// handleVoiceLeave called from readPump/ICE monitor.
 
 // hubTestSchema is the minimal schema needed for hub tests.
 var hubTestSchema = []byte(`

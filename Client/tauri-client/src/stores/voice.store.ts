@@ -142,12 +142,28 @@ export function joinVoiceChannel(channelId: number): void {
   }));
 }
 
-/** Clear the current voice channel (local leave). */
+/** Clear the current voice channel and remove current user from voice users. */
 export function leaveVoiceChannel(): void {
-  voiceStore.setState((prev) => ({
-    ...prev,
-    currentChannelId: null,
-  }));
+  const currentUserId = authStore.getState().user?.id ?? 0;
+  voiceStore.setState((prev) => {
+    const channelId = prev.currentChannelId;
+    if (channelId === null || currentUserId === 0) {
+      return { ...prev, currentChannelId: null };
+    }
+    const existingChannel = prev.voiceUsers.get(channelId);
+    if (!existingChannel || !existingChannel.has(currentUserId)) {
+      return { ...prev, currentChannelId: null };
+    }
+    const nextChannels = new Map(prev.voiceUsers);
+    const nextUsers = new Map(existingChannel);
+    nextUsers.delete(currentUserId);
+    if (nextUsers.size === 0) {
+      nextChannels.delete(channelId);
+    } else {
+      nextChannels.set(channelId, nextUsers);
+    }
+    return { ...prev, currentChannelId: null, voiceUsers: nextChannels };
+  });
 }
 
 /** Toggle local mute state. */

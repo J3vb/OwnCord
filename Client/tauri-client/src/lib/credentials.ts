@@ -10,6 +10,7 @@ const log = createLogger("credentials");
 export interface SavedCredential {
   readonly username: string;
   readonly token: string;
+  readonly password?: string;
 }
 
 /** Dynamically import Tauri invoke to avoid errors in test/browser. */
@@ -32,6 +33,7 @@ export async function saveCredential(
   host: string,
   username: string,
   token: string,
+  password?: string,
 ): Promise<boolean> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -39,7 +41,7 @@ export async function saveCredential(
     return false;
   }
   try {
-    await invoke("save_credential", { host, username, token });
+    await invoke("save_credential", { host, username, token, password: password ?? null });
     return true;
   } catch (err) {
     log.error("Failed to save credential", { host, error: String(err) });
@@ -63,7 +65,12 @@ export async function loadCredential(
     if (result && typeof result === "object") {
       const cred = result as Record<string, unknown>;
       if (typeof cred.username === "string" && typeof cred.token === "string") {
-        return { username: cred.username, token: cred.token };
+        const saved: SavedCredential = {
+          username: cred.username,
+          token: cred.token,
+          ...(typeof cred.password === "string" ? { password: cred.password } : {}),
+        };
+        return saved;
       }
     }
     return null;

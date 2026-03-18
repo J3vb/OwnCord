@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"nhooyr.io/websocket"
@@ -42,13 +43,22 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 			return
 		}
 
+		// Reject duplicate connections — prevent ping-pong reconnect loops.
+		if hub.IsUserConnected(user.ID) {
+			slog.Warn("ws duplicate login rejected", "user_id", user.ID, "remote", r.RemoteAddr)
+			ctx := r.Context()
+			_ = conn.Write(ctx, websocket.MessageText, buildAuthError("already connected from another client"))
+			_ = conn.Close(websocket.StatusPolicyViolation, "already connected")
+			return
+		}
+
 		c := newClient(hub, conn, user, tokenHash)
 		hub.Register(c)
 
 		// Look up role name for protocol-compliant payloads and cache on client.
 		roleName := "member"
 		if role, roleErr := database.GetRoleByID(user.RoleID); roleErr == nil && role != nil {
-			roleName = role.Name
+			roleName = strings.ToLower(role.Name)
 		}
 		c.roleName = roleName
 
@@ -62,8 +72,10 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 
 		// Send auth_ok followed by the ready payload.
 		ctx := r.Context()
+		slog.Info("ws sending auth_ok", "user_id", user.ID, "username", user.Username, "role", roleName)
 		_ = conn.Write(ctx, websocket.MessageText, hub.buildAuthOK(user, roleName))
 		if ready, readyErr := hub.buildReady(database, user.ID); readyErr == nil {
+			slog.Info("ws sending ready payload", "user_id", user.ID, "payload_bytes", len(ready))
 			_ = conn.Write(ctx, websocket.MessageText, ready)
 		} else {
 			slog.Error("buildReady failed", "user_id", user.ID, "err", readyErr)
@@ -71,6 +83,7 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 				buildErrorMsg("INTERNAL", "failed to build ready payload"))
 		}
 
+		slog.Info("ws broadcasting member_join and presence", "user_id", user.ID, "username", user.Username)
 		hub.BroadcastToAll(buildMemberJoin(user, roleName))
 		hub.BroadcastToAll(buildPresenceMsg(user.ID, "online"))
 

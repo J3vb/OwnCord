@@ -268,6 +268,28 @@ func buildVoiceAnswer(channelID int64, sdp string) []byte {
 	})
 }
 
+// buildVoiceOffer constructs a voice_offer message sent from server to client.
+func buildVoiceOffer(channelID int64, sdp string) []byte {
+	return buildJSON(map[string]any{
+		"type": "voice_offer",
+		"payload": map[string]any{
+			"channel_id": channelID,
+			"sdp":        sdp,
+		},
+	})
+}
+
+// buildVoiceICE constructs a voice_ice message sent from server to client.
+func buildVoiceICE(channelID int64, candidate any) []byte {
+	return buildJSON(map[string]any{
+		"type": "voice_ice",
+		"payload": map[string]any{
+			"channel_id": channelID,
+			"candidate":  candidate,
+		},
+	})
+}
+
 // buildSoundboardPlay constructs a soundboard_play broadcast.
 func buildSoundboardPlay(soundID string, userID int64) []byte {
 	return buildJSON(map[string]any{

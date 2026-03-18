@@ -80,8 +80,8 @@ func (s *SFU) NewPeerConnection() (*webrtc.PeerConnection, error) {
 		})
 	}
 
-	// Add TURN server if enabled.
-	if s.config.TURNEnabled && s.config.TURNPort > 0 {
+	// Add TURN server if enabled and secret is configured.
+	if s.config.TURNEnabled && s.config.TURNPort > 0 && s.config.TURNSecret != "" {
 		pcConfig.ICEServers = append(pcConfig.ICEServers, webrtc.ICEServer{
 			URLs:       []string{"turn:localhost:" + strconv.Itoa(s.config.TURNPort)},
 			Username:   "owncord",

@@ -9,19 +9,14 @@ import {
   qs,
 } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
-import { openSettings, closeSettings } from "@stores/ui.store";
+import { openSettings, closeSettings, uiStore, setTransientError } from "@stores/ui.store";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
-import type { HealthStatus } from "@lib/profiles";
+import type { HealthStatus, ServerProfile } from "@lib/profiles";
+import { loadCredential } from "@lib/credentials";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-/** Saved server profile for quick-connect. */
-export interface ServerProfile {
-  readonly name: string;
-  readonly host: string;
-}
 
 /** Form state machine states. */
 export type FormState = "idle" | "loading" | "totp" | "connecting" | "error";
@@ -39,6 +34,14 @@ export interface ConnectPageCallbacks {
     inviteCode: string,
   ): Promise<void>;
   onTotpSubmit(code: string): Promise<void>;
+  onAddProfile?(name: string, host: string): void;
+  onDeleteProfile?(profileId: string): void;
+}
+
+/** Minimal profile shape for the default profile list (backward compat). */
+export interface SimpleProfile {
+  readonly name: string;
+  readonly host: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -47,7 +50,7 @@ export interface ConnectPageCallbacks {
 
 const MIN_PASSWORD_LENGTH = 8;
 
-const DEFAULT_PROFILES: readonly ServerProfile[] = [
+const DEFAULT_PROFILES: readonly SimpleProfile[] = [
   { name: "Local Server", host: "localhost:8443" },
 ];
 
@@ -75,13 +78,17 @@ function getIconInitials(name: string): string {
 
 export function createConnectPage(
   callbacks: ConnectPageCallbacks,
-  initialProfiles: readonly ServerProfile[] = DEFAULT_PROFILES,
+  initialProfiles: readonly SimpleProfile[] = DEFAULT_PROFILES,
 ): MountableComponent & {
   showTotp(): void;
   showConnecting(): void;
   showError(message: string): void;
   resetToIdle(): void;
   updateHealthStatus(host: string, status: HealthStatus): void;
+  getRememberPassword(): boolean;
+  getPassword(): string;
+  /** Re-render the server profile list with updated data. */
+  refreshProfiles(profiles: readonly SimpleProfile[]): void;
 } {
   // --- internal state (mutable, local to this instance) ---
   let formState: FormState = "idle";
@@ -108,6 +115,7 @@ export function createConnectPage(
   let totpOverlay: HTMLDivElement;
   let totpInput: HTMLInputElement;
   let totpSubmitBtn: HTMLButtonElement;
+  let rememberPasswordCheckbox: HTMLInputElement;
   let statusBar: HTMLDivElement;
   let statusBarFill: HTMLDivElement;
 
@@ -147,14 +155,24 @@ export function createConnectPage(
 
     renderServerProfiles(initialProfiles);
 
-    appendChildren(panel, header, serverListEl);
+    // Footer with "Add Server" button
+    const footer = createElement("div", { class: "server-panel-footer" });
+    const addBtn = createElement("button", {
+      class: "btn-add-server",
+      type: "button",
+    });
+    setText(addBtn, "+ Add Server");
+    addBtn.addEventListener("click", handleAddServer, { signal: abortController.signal });
+    footer.appendChild(addBtn);
+
+    appendChildren(panel, header, serverListEl, footer);
     return panel;
   }
 
   // Map of host -> DOM elements for health status updates
   const healthElements = new Map<string, { dot: HTMLDivElement; latency: HTMLSpanElement }>();
 
-  function renderServerProfiles(profiles: readonly ServerProfile[]): void {
+  function renderServerProfiles(profiles: readonly SimpleProfile[]): void {
     clearChildren(serverListEl);
     healthElements.clear();
     for (const profile of profiles) {
@@ -179,16 +197,61 @@ export function createConnectPage(
       const host = createElement("span", { class: "srv-host" }, profile.host);
       const latency = createElement("span", { class: "srv-latency" });
       appendChildren(meta, host, latency);
+
+      // Show username if available (full profile has it)
+      const fullProfile = profile as Partial<ServerProfile>;
+      if (fullProfile.username) {
+        const usernameEl = createElement("span", { class: "srv-host" }, fullProfile.username);
+        appendChildren(meta, usernameEl);
+      }
+
       appendChildren(info, name, meta);
 
       healthElements.set(profile.host, { dot: statusDot, latency });
 
-      appendChildren(item, icon, info);
+      // Delete button (only for full profiles that have an id)
+      const actions = createElement("div", { class: "srv-actions" });
+      if (fullProfile.id && callbacks.onDeleteProfile) {
+        const deleteBtn = createElement("button", {
+          class: "srv-btn danger",
+          type: "button",
+          "aria-label": "Delete server",
+        });
+        setText(deleteBtn, "\u2715");
+        deleteBtn.addEventListener(
+          "click",
+          (e) => {
+            e.stopPropagation();
+            callbacks.onDeleteProfile!(fullProfile.id!);
+          },
+          { signal: abortController.signal },
+        );
+        actions.appendChild(deleteBtn);
+      }
+
+      appendChildren(item, icon, info, actions);
 
       item.addEventListener(
         "click",
         () => {
           hostInput.value = profile.host;
+          // Auto-fill username from profile
+          if (fullProfile.username) {
+            usernameInput.value = fullProfile.username;
+          }
+          // Auto-fill credentials from credential store
+          const requestedHost = profile.host;
+          void (async () => {
+            const cred = await loadCredential(requestedHost);
+            // Guard: user may have clicked a different profile while loading
+            if (cred && hostInput.value === requestedHost) {
+              usernameInput.value = cred.username;
+              if (cred.password) {
+                passwordInput.value = cred.password;
+                rememberPasswordCheckbox.checked = true;
+              }
+            }
+          })();
         },
         { signal: abortController.signal },
       );
@@ -262,6 +325,18 @@ export function createConnectPage(
     const passwordGroup = buildFormGroup("password", "Password", "password", "");
     passwordInput = qs("input", passwordGroup) as HTMLInputElement;
 
+    // Remember password checkbox
+    const rememberGroup = createElement("div", { class: "form-group remember-password-group" });
+    rememberPasswordCheckbox = createElement("input", {
+      type: "checkbox",
+      id: "remember-password",
+    });
+    const rememberLabel = createElement("label", {
+      for: "remember-password",
+      class: "remember-password-label",
+    }, "Remember password");
+    appendChildren(rememberGroup, rememberPasswordCheckbox, rememberLabel);
+
     // Invite code (register only, hidden by default)
     inviteGroup = buildFormGroup("invite", "Invite Code", "text", "");
     inviteGroup.classList.add("form-group--hidden");
@@ -283,7 +358,7 @@ export function createConnectPage(
     toggleModeBtn = createElement("a", {}, "Need an account? Register") as HTMLAnchorElement;
     formSwitch.appendChild(toggleModeBtn);
 
-    appendChildren(form, hostGroup, usernameGroup, passwordGroup, inviteGroup, submitBtn, formSwitch);
+    appendChildren(form, hostGroup, usernameGroup, passwordGroup, rememberGroup, inviteGroup, submitBtn, formSwitch);
 
     // Wire form events
     form.addEventListener("submit", handleFormSubmit, { signal: abortController.signal });
@@ -387,6 +462,84 @@ export function createConnectPage(
     appendChildren(card, title, description, totpInput, totpSubmitBtn, cancelBtn);
     overlay.appendChild(card);
     return overlay;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Add Server modal
+  // ---------------------------------------------------------------------------
+
+  function handleAddServer(): void {
+    if (!callbacks.onAddProfile) return;
+
+    const overlay = createElement("div", { class: "modal-overlay visible" });
+    const modal = createElement("div", { class: "modal" });
+
+    const header = createElement("div", { class: "modal-header" });
+    const title = createElement("h3", {}, "Add Server");
+    const closeBtn = createElement("button", { class: "modal-close", type: "button" });
+    setText(closeBtn, "\u2715");
+    appendChildren(header, title, closeBtn);
+
+    const body = createElement("div", { class: "modal-body" });
+    const nameGroup = createElement("div", { class: "form-group" });
+    const nameLabel = createElement("label", { class: "form-label" }, "Server Name");
+    const nameInput = createElement("input", {
+      class: "form-input",
+      type: "text",
+      placeholder: "My Server",
+    });
+    appendChildren(nameGroup, nameLabel, nameInput);
+
+    const hostGroup = createElement("div", { class: "form-group" });
+    const hostLabel = createElement("label", { class: "form-label" }, "Host Address");
+    const hostAddrInput = createElement("input", {
+      class: "form-input",
+      type: "text",
+      placeholder: "example.com:8443",
+    });
+    appendChildren(hostGroup, hostLabel, hostAddrInput);
+
+    appendChildren(body, nameGroup, hostGroup);
+
+    const footer = createElement("div", { class: "modal-footer" });
+    const cancelBtn = createElement("button", { class: "btn-ghost", type: "button" });
+    setText(cancelBtn, "Cancel");
+    const saveBtn = createElement("button", { class: "btn-primary", type: "button" });
+    setText(saveBtn, "Add Server");
+    appendChildren(footer, cancelBtn, saveBtn);
+
+    appendChildren(modal, header, body, footer);
+    overlay.appendChild(modal);
+
+    function closeModal(): void {
+      overlay.remove();
+    }
+
+    function handleSave(): void {
+      const name = (nameInput as HTMLInputElement).value.trim();
+      const addr = (hostAddrInput as HTMLInputElement).value.trim();
+      if (!name || !addr) return;
+      callbacks.onAddProfile!(name, addr);
+      closeModal();
+    }
+
+    closeBtn.addEventListener("click", closeModal, { signal: abortController.signal });
+    cancelBtn.addEventListener("click", closeModal, { signal: abortController.signal });
+    saveBtn.addEventListener("click", handleSave, { signal: abortController.signal });
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) closeModal();
+    }, { signal: abortController.signal });
+
+    // Allow backdrop stop propagation on modal body
+    modal.addEventListener("click", (e) => e.stopPropagation(), { signal: abortController.signal });
+
+    // Enter key submits
+    hostAddrInput.addEventListener("keydown", (e) => {
+      if ((e as KeyboardEvent).key === "Enter") handleSave();
+    }, { signal: abortController.signal });
+
+    root.appendChild(overlay);
+    (nameInput as HTMLInputElement).focus();
   }
 
   // ---------------------------------------------------------------------------
@@ -635,6 +788,13 @@ export function createConnectPage(
     });
     settingsOverlay.mount(rootEl);
 
+    // Show any pending auth error (e.g. "already connected from another client")
+    const pendingError = uiStore.getState().transientError;
+    if (pendingError) {
+      transitionTo("error", pendingError);
+      setTransientError(null);
+    }
+
     // Focus the first input
     hostInput.focus();
   }
@@ -660,6 +820,18 @@ export function createConnectPage(
     showError,
     resetToIdle,
     updateHealthStatus,
+    /** Whether the "Remember Password" checkbox is checked. */
+    getRememberPassword(): boolean {
+      return rememberPasswordCheckbox?.checked ?? false;
+    },
+    /** Get the current password input value (for saving when remember is checked). */
+    getPassword(): string {
+      return passwordInput?.value ?? "";
+    },
+    /** Re-render the server profile list with updated data. */
+    refreshProfiles(profiles: readonly SimpleProfile[]): void {
+      renderServerProfiles(profiles);
+    },
   };
 }
 
