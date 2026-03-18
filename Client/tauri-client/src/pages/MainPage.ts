@@ -39,6 +39,7 @@ import {
   setDeafened as voiceSessionSetDeafened,
   setWsClient,
   setOnError as setVoiceOnError,
+  clearOnError as clearVoiceOnError,
 } from "@lib/voiceSession";
 import {
   setMessages,
@@ -97,6 +98,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   // Track currently mounted channel to avoid redundant rebuilds
   let currentChannelId: number | null = null;
+
+  // Pending delete confirmations (double-click to delete pattern)
+  const pendingDeletes = new Map<number, number>();
 
   // Abort controller for channel-scoped async operations (e.g. message fetch)
   let channelAbort: AbortController | null = null;
@@ -208,12 +212,19 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         }
       },
       onDeleteClick: (msgId: number) => {
-        if (!confirm("Delete this message?")) return;
-        ws.send({
-          type: "chat_delete",
-          payload: { message_id: msgId },
-        });
-        toast?.show("Message deleted", "success");
+        if (pendingDeletes.has(msgId)) {
+          window.clearTimeout(pendingDeletes.get(msgId));
+          pendingDeletes.delete(msgId);
+          ws.send({
+            type: "chat_delete",
+            payload: { message_id: msgId },
+          });
+          toast?.show("Message deleted", "success");
+        } else {
+          toast?.show("Click delete again to confirm", "info");
+          const tid = window.setTimeout(() => pendingDeletes.delete(msgId), 5000);
+          pendingDeletes.set(msgId, tid);
+        }
       },
       onReactionClick: (msgId: number, emoji: string) => {
         if (emoji === "") return;
@@ -301,6 +312,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   }
 
   function destroyChannelComponents(): void {
+    for (const tid of pendingDeletes.values()) {
+      window.clearTimeout(tid);
+    }
+    pendingDeletes.clear();
+
     if (channelAbort !== null) {
       channelAbort.abort();
       channelAbort = null;
@@ -596,6 +612,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   function destroy(): void {
     log.info("MainPage destroying");
+    clearVoiceOnError();
     destroyChannelComponents();
 
     for (const child of children) {

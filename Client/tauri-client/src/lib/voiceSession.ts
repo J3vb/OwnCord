@@ -164,6 +164,11 @@ export function setOnError(cb: (message: string) => void): void {
   onErrorCallback = cb;
 }
 
+/** Clear the error callback (call on component destroy to avoid stale refs). */
+export function clearOnError(): void {
+  onErrorCallback = null;
+}
+
 /**
  * Fetch ICE servers (TURN/STUN credentials) for WebRTC.
  * Falls back to empty array on failure so voice still works on LAN.
@@ -321,6 +326,11 @@ export function setDeafened(deafened: boolean): void {
 
 /** Switch the input (microphone) device on an active session. */
 export async function switchInputDevice(deviceId: string): Promise<void> {
+  // Don't acquire microphone if there's no active voice session
+  if (webrtcService === null) {
+    log.debug("Skipping input device switch — no active voice session");
+    return;
+  }
   if (audioManager === null) {
     audioManager = createAudioManager();
   }
@@ -363,16 +373,19 @@ export async function switchInputDevice(deviceId: string): Promise<void> {
 
 /** Switch the output (speaker) device on an active session. */
 export async function switchOutputDevice(deviceId: string): Promise<void> {
+  let hadError = false;
   for (const el of audioElements.values()) {
     if (typeof el.setSinkId === "function") {
       try {
         await el.setSinkId(deviceId);
       } catch (err) {
         log.error("Failed to set output device on audio element", err);
-        onErrorCallback?.("Failed to switch speaker");
-        return;
+        hadError = true;
       }
     }
+  }
+  if (hadError) {
+    onErrorCallback?.("Failed to switch some audio to new speaker");
   }
   log.info("Switched output device", { deviceId });
 }

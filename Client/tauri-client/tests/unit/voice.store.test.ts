@@ -8,6 +8,9 @@ import {
   leaveVoiceChannel,
   setLocalMuted,
   setLocalDeafened,
+  setLocalCamera,
+  setLocalScreenshare,
+  setLocalSpeaking,
   getChannelVoiceUsers,
 } from "../../src/stores/voice.store";
 import type {
@@ -15,6 +18,7 @@ import type {
   VoiceStatePayload,
   VoiceLeavePayload,
 } from "../../src/lib/types";
+import { authStore } from "../../src/stores/auth.store";
 
 function resetStore(): void {
   voiceStore.setState(() => ({
@@ -23,6 +27,8 @@ function resetStore(): void {
     voiceConfigs: new Map(),
     localMuted: false,
     localDeafened: false,
+    localCamera: false,
+    localScreenshare: false,
   }));
 }
 
@@ -78,6 +84,14 @@ describe("voice store", () => {
 
     it("has localDeafened false", () => {
       expect(voiceStore.getState().localDeafened).toBe(false);
+    });
+
+    it("has localCamera false", () => {
+      expect(voiceStore.getState().localCamera).toBe(false);
+    });
+
+    it("has localScreenshare false", () => {
+      expect(voiceStore.getState().localScreenshare).toBe(false);
     });
   });
 
@@ -225,6 +239,68 @@ describe("voice store", () => {
       setLocalDeafened(true);
       setLocalDeafened(false);
       expect(voiceStore.getState().localDeafened).toBe(false);
+    });
+  });
+
+  describe("setLocalCamera / setLocalScreenshare", () => {
+    it("setLocalCamera sets camera to true", () => {
+      setLocalCamera(true);
+      expect(voiceStore.getState().localCamera).toBe(true);
+    });
+
+    it("setLocalCamera sets camera to false", () => {
+      setLocalCamera(true);
+      setLocalCamera(false);
+      expect(voiceStore.getState().localCamera).toBe(false);
+    });
+
+    it("setLocalScreenshare sets screenshare to true", () => {
+      setLocalScreenshare(true);
+      expect(voiceStore.getState().localScreenshare).toBe(true);
+    });
+
+    it("setLocalScreenshare sets screenshare to false", () => {
+      setLocalScreenshare(true);
+      setLocalScreenshare(false);
+      expect(voiceStore.getState().localScreenshare).toBe(false);
+    });
+  });
+
+  describe("setLocalSpeaking", () => {
+    it("updates speaking state for current user in active channel", () => {
+      // Set up: current user (id=1) in channel 10
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 1, username: "me", avatar: "", role: "member" },
+        serverName: "s",
+        motd: "",
+        isAuthenticated: true,
+      }));
+      setVoiceStates([VOICE_STATE_1]);
+      joinVoiceChannel(10);
+
+      setLocalSpeaking(true);
+      const user = voiceStore.getState().voiceUsers.get(10)?.get(1);
+      expect(user?.speaking).toBe(true);
+
+      setLocalSpeaking(false);
+      const userAfter = voiceStore.getState().voiceUsers.get(10)?.get(1);
+      expect(userAfter?.speaking).toBe(false);
+
+      // Cleanup
+      authStore.setState(() => ({
+        token: null,
+        user: null,
+        serverName: null,
+        motd: null,
+        isAuthenticated: false,
+      }));
+    });
+
+    it("is a no-op when not in a voice channel", () => {
+      const before = voiceStore.getState();
+      setLocalSpeaking(true);
+      expect(voiceStore.getState()).toBe(before);
     });
   });
 

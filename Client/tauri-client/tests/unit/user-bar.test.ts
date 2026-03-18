@@ -101,6 +101,51 @@ describe("UserBar", () => {
     expect(openSettings).toHaveBeenCalledOnce();
   });
 
+  it("calls onMuteToggle when mute button clicked", () => {
+    setAuthState({ username: "alice" }, true);
+    const onMuteToggle = vi.fn();
+    comp = createUserBar({ onMuteToggle });
+    comp.mount(container);
+
+    const muteBtn = container.querySelector('[title="Mute"]') as HTMLButtonElement;
+    muteBtn.click();
+    expect(onMuteToggle).toHaveBeenCalledOnce();
+  });
+
+  it("calls onDeafenToggle when deafen button clicked", () => {
+    setAuthState({ username: "alice" }, true);
+    const onDeafenToggle = vi.fn();
+    comp = createUserBar({ onDeafenToggle });
+    comp.mount(container);
+
+    const deafenBtn = container.querySelector('[title="Deafen"]') as HTMLButtonElement;
+    deafenBtn.click();
+    expect(onDeafenToggle).toHaveBeenCalledOnce();
+  });
+
+  it("does not throw when mute/deafen clicked without callbacks", () => {
+    setAuthState({ username: "alice" }, true);
+    comp = createUserBar();
+    comp.mount(container);
+
+    const muteBtn = container.querySelector('[title="Mute"]') as HTMLButtonElement;
+    const deafenBtn = container.querySelector('[title="Deafen"]') as HTMLButtonElement;
+    expect(() => muteBtn.click()).not.toThrow();
+    expect(() => deafenBtn.click()).not.toThrow();
+  });
+
+  it("stops responding to clicks after destroy", () => {
+    setAuthState({ username: "alice" }, true);
+    const onMuteToggle = vi.fn();
+    comp = createUserBar({ onMuteToggle });
+    comp.mount(container);
+
+    const muteBtn = container.querySelector('[title="Mute"]') as HTMLButtonElement;
+    comp.destroy?.();
+    muteBtn.click();
+    expect(onMuteToggle).not.toHaveBeenCalled();
+  });
+
   it("destroy removes DOM and unsubscribes", () => {
     setAuthState({ username: "alice" }, true);
     comp = createUserBar();

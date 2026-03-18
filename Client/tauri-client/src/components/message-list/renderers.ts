@@ -151,8 +151,17 @@ function isImageMime(mime: string): boolean {
   return mime.startsWith("image/");
 }
 
+function isSafeUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function renderAttachment(att: Attachment): HTMLDivElement {
-  if (isImageMime(att.mime)) {
+  if (isImageMime(att.mime) && isSafeUrl(att.url)) {
     const wrap = createElement("div", { class: "msg-image" });
     const img = createElement("img", {
       src: att.url,

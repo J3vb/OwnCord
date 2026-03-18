@@ -5,6 +5,7 @@ import {
   clearAuth,
   getToken,
   getCurrentUser,
+  updateUser,
 } from "../../src/stores/auth.store";
 import type { UserWithRole } from "../../src/lib/types";
 
@@ -128,7 +129,46 @@ describe("auth store", () => {
     });
   });
 
-  // 5. getCurrentUser returns current user
+  // 5. updateUser patches user fields
+  describe("updateUser", () => {
+    it("updates username on authenticated user", () => {
+      setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
+      updateUser({ username: "newname" });
+      expect(authStore.getState().user?.username).toBe("newname");
+    });
+
+    it("preserves other user fields when patching", () => {
+      setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
+      updateUser({ username: "newname" });
+      const user = authStore.getState().user;
+      expect(user?.id).toBe(42);
+      expect(user?.avatar).toBe("avatar.png");
+      expect(user?.role).toBe("member");
+    });
+
+    it("is a no-op when user is null", () => {
+      updateUser({ username: "newname" });
+      expect(authStore.getState().user).toBeNull();
+    });
+
+    it("produces a new state object", () => {
+      setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
+      const before = authStore.getState();
+      updateUser({ username: "changed" });
+      expect(authStore.getState()).not.toBe(before);
+    });
+
+    it("produces a new user object (immutable)", () => {
+      setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
+      const userBefore = authStore.getState().user;
+      updateUser({ avatar: "new-avatar.png" });
+      const userAfter = authStore.getState().user;
+      expect(userBefore).not.toBe(userAfter);
+      expect(userAfter?.avatar).toBe("new-avatar.png");
+    });
+  });
+
+  // 6. getCurrentUser returns current user
   describe("getCurrentUser", () => {
     it("returns null when unauthenticated", () => {
       expect(getCurrentUser()).toBeNull();
