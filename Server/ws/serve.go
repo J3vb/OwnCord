@@ -43,6 +43,15 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 			return
 		}
 
+		// Reject duplicate connections — prevent ping-pong reconnect loops.
+		if hub.IsUserConnected(user.ID) {
+			slog.Warn("ws duplicate login rejected", "user_id", user.ID, "remote", r.RemoteAddr)
+			ctx := r.Context()
+			_ = conn.Write(ctx, websocket.MessageText, buildAuthError("already connected from another client"))
+			_ = conn.Close(websocket.StatusPolicyViolation, "already connected")
+			return
+		}
+
 		c := newClient(hub, conn, user, tokenHash)
 		hub.Register(c)
 

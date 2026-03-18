@@ -9,7 +9,7 @@ import {
   qs,
 } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
-import { openSettings, closeSettings } from "@stores/ui.store";
+import { openSettings, closeSettings, uiStore, setTransientError } from "@stores/ui.store";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
 import type { HealthStatus, ServerProfile } from "@lib/profiles";
 import { loadCredential } from "@lib/credentials";
@@ -787,6 +787,13 @@ export function createConnectPage(
       onLogout: () => { /* no-op on connect page */ },
     });
     settingsOverlay.mount(rootEl);
+
+    // Show any pending auth error (e.g. "already connected from another client")
+    const pendingError = uiStore.getState().transientError;
+    if (pendingError) {
+      transitionTo("error", pendingError);
+      setTransientError(null);
+    }
 
     // Focus the first input
     hostInput.focus();

@@ -4,6 +4,7 @@
 
 import type { WsClient } from "./ws";
 import { authStore, setAuth, clearAuth } from "@stores/auth.store";
+import { setTransientError } from "@stores/ui.store";
 import {
   setChannels,
   setActiveChannel,
@@ -67,6 +68,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   unsubs.push(
     ws.on("auth_error", (payload) => {
       log.error("Auth failed", { message: payload.message });
+      setTransientError(payload.message);
       clearAuth();
     }),
   );

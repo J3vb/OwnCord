@@ -161,28 +161,6 @@ func (h *Hub) Run() {
 
 		case c := <-h.register:
 			h.mu.Lock()
-			// If an existing client has the same userID, close its send channel
-			// so writePump exits cleanly before the new client takes over.
-			// Also clean up any voice state the old client held.
-			if old, ok := h.clients[c.userID]; ok && old != c {
-				slog.Info("hub: replacing existing client", "user_id", c.userID)
-				oldChID, oldPC := old.clearVoice()
-				if oldPC != nil {
-					_ = oldPC.Close()
-				}
-				if oldChID > 0 {
-					if room := h.GetVoiceRoom(oldChID); room != nil {
-						room.RemoveParticipant(old.userID)
-						if room.IsEmpty() {
-							h.voiceRoomsMu.Lock()
-							delete(h.voiceRooms, oldChID)
-							h.voiceRoomsMu.Unlock()
-						}
-					}
-					_ = h.db.LeaveVoiceChannel(old.userID)
-				}
-				old.closeSend()
-			}
 			h.clients[c.userID] = c
 			slog.Info("hub: client registered", "user_id", c.userID, "total_clients", len(h.clients))
 			h.mu.Unlock()
@@ -253,6 +231,15 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 	for _, userID := range participantIDs {
 		h.BroadcastToAll(buildVoiceLeave(channelID, userID))
 	}
+}
+
+// IsUserConnected returns true if a client with the given userID is already
+// registered in the hub. Safe to call from any goroutine.
+func (h *Hub) IsUserConnected(userID int64) bool {
+	h.mu.RLock()
+	_, ok := h.clients[userID]
+	h.mu.RUnlock()
+	return ok
 }
 
 // Register queues a client for registration with the hub.
