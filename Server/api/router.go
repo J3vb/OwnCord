@@ -83,6 +83,9 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string) http.Handler {
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, "J3vb", "OwnCord")
 	r.Mount("/admin", admin.NewHandler(database, ver, hub, u))
 
+	// Client auto-update endpoint (unauthenticated).
+	MountClientUpdateRoute(r, u)
+
 	return r
 }
 

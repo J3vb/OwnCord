@@ -57,6 +57,7 @@ import {
   createInviteManagerController,
   createPinnedPanelController,
 } from "./main-page/OverlayManagers";
+import { createUpdateNotifier } from "@components/UpdateNotifier";
 
 const log = createLogger("main-page");
 
@@ -684,6 +685,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     // Wire voice error callback to toast
     setVoiceOnError((msg) => toast?.show(msg, "error"));
+
+    // Auto-update notifier — checks server for newer client version
+    if (apiConfig.host) {
+      const serverUrl = `https://${apiConfig.host}`;
+      const updateNotifier = createUpdateNotifier({ serverUrl });
+      updateNotifier.mount(root);
+      children.push(updateNotifier);
+    }
 
     container.appendChild(root);
 

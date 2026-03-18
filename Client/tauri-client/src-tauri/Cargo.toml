@@ -22,6 +22,9 @@ tauri-plugin-http = { version = "2.5.7", features = ["rustls-tls", "dangerous-se
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+url = "2"
 tokio-tungstenite = { version = "0.28.0", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3.32"
 tokio = { version = "1", features = ["sync"] }

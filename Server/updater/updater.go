@@ -35,6 +35,19 @@ type UpdateInfo struct {
 	DownloadURL     string `json:"download_url"`
 	ChecksumURL     string `json:"checksum_url"`
 	ReleaseNotes    string `json:"release_notes"`
+	Assets          []Asset `json:"assets,omitempty"`
+}
+
+// Asset is a simplified release asset with name and download URL.
+type Asset struct {
+	Name        string `json:"name"`
+	DownloadURL string `json:"download_url"`
+}
+
+// ClientAssets holds the URLs for Tauri client update artifacts.
+type ClientAssets struct {
+	InstallerURL string
+	SignatureURL string
 }
 
 // releaseResponse mirrors the subset of GitHub's release API we need.
@@ -142,7 +155,12 @@ func (u *Updater) CheckForUpdate(ctx context.Context) (UpdateInfo, error) {
 	updateAvailable := semver.Compare(currentV, latestV) < 0
 
 	var downloadURL, checksumURL string
+	assets := make([]Asset, 0, len(release.Assets))
 	for _, asset := range release.Assets {
+		assets = append(assets, Asset{
+			Name:        asset.Name,
+			DownloadURL: asset.BrowserDownloadURL,
+		})
 		switch asset.Name {
 		case binaryAsset:
 			downloadURL = asset.BrowserDownloadURL
@@ -159,6 +177,7 @@ func (u *Updater) CheckForUpdate(ctx context.Context) (UpdateInfo, error) {
 		DownloadURL:     downloadURL,
 		ChecksumURL:     checksumURL,
 		ReleaseNotes:    release.Body,
+		Assets:          assets,
 	}
 
 	u.mu.Lock()
@@ -278,6 +297,38 @@ func (u *Updater) fetchBody(ctx context.Context, url string) ([]byte, error) {
 	}
 
 	return io.ReadAll(resp.Body)
+}
+
+// FindClientAssets scans the cached release assets for the Tauri NSIS
+// installer zip and its Ed25519 signature file.
+func (u *Updater) FindClientAssets() ClientAssets {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	if u.cache == nil {
+		return ClientAssets{}
+	}
+
+	var ca ClientAssets
+	for _, a := range u.cache.Assets {
+		switch {
+		case strings.HasSuffix(a.Name, "_x64-setup.nsis.zip.sig"):
+			ca.SignatureURL = a.DownloadURL
+		case strings.HasSuffix(a.Name, "_x64-setup.nsis.zip"):
+			ca.InstallerURL = a.DownloadURL
+		}
+	}
+	return ca
+}
+
+// FetchTextAsset downloads a small text asset (e.g. a .sig file) and returns
+// its content as a string.
+func (u *Updater) FetchTextAsset(ctx context.Context, url string) (string, error) {
+	data, err := u.fetchBody(ctx, url)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // downloadFile downloads the content at url and writes it to destPath.

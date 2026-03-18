@@ -2,6 +2,7 @@ mod commands;
 mod credentials;
 mod hotkeys;
 mod tray;
+mod update_commands;
 mod ws_proxy;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -14,6 +15,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(ws_proxy::WsState::new())
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
@@ -27,6 +30,8 @@ pub fn run() {
             credentials::save_credential,
             credentials::load_credential,
             credentials::delete_credential,
+            update_commands::check_client_update,
+            update_commands::download_and_install_update,
         ])
         .setup(|app| {
             tray::create_tray(app.handle())?;

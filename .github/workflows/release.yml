@@ -48,31 +48,60 @@ jobs:
 
       - name: Build Tauri app
         working-directory: Client/tauri-client
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build
 
-      - name: Locate installer
-        id: installer
+      - name: Locate artifacts
+        id: artifacts
         shell: bash
         run: |
-          INSTALLER=$(find Client/tauri-client/src-tauri/target/release/bundle/nsis -name "*.exe" | head -1)
-          echo "path=$INSTALLER" >> "$GITHUB_OUTPUT"
-          echo "name=$(basename $INSTALLER)" >> "$GITHUB_OUTPUT"
+          NSIS_DIR="Client/tauri-client/src-tauri/target/release/bundle/nsis"
+          INSTALLER=$(find "$NSIS_DIR" -name "*.exe" | head -1)
+          echo "installer_path=$INSTALLER" >> "$GITHUB_OUTPUT"
+          echo "installer_name=$(basename $INSTALLER)" >> "$GITHUB_OUTPUT"
+          # Updater artifacts (produced when TAURI_SIGNING_PRIVATE_KEY is set)
+          NSIS_ZIP=$(find "$NSIS_DIR" -name "*_x64-setup.nsis.zip" ! -name "*.sig" | head -1)
+          NSIS_SIG=$(find "$NSIS_DIR" -name "*_x64-setup.nsis.zip.sig" | head -1)
+          echo "nsis_zip=${NSIS_ZIP:-}" >> "$GITHUB_OUTPUT"
+          echo "nsis_sig=${NSIS_SIG:-}" >> "$GITHUB_OUTPUT"
 
       - name: Generate SHA256 checksums
         shell: pwsh
         run: |
+          $lines = @()
           $serverHash = (Get-FileHash -Path Server/chatserver.exe -Algorithm SHA256).Hash.ToLower()
-          $installerPath = "${{ steps.installer.outputs.path }}"
-          $installerName = "${{ steps.installer.outputs.name }}"
+          $lines += "$serverHash  chatserver.exe"
+          $installerPath = "${{ steps.artifacts.outputs.installer_path }}"
+          $installerName = "${{ steps.artifacts.outputs.installer_name }}"
           $clientHash = (Get-FileHash -Path $installerPath -Algorithm SHA256).Hash.ToLower()
-          "$serverHash  chatserver.exe`n$clientHash  $installerName" | Out-File -FilePath checksums.sha256 -Encoding utf8 -NoNewline
+          $lines += "$clientHash  $installerName"
+          $nsisZip = "${{ steps.artifacts.outputs.nsis_zip }}"
+          if ($nsisZip -and (Test-Path $nsisZip)) {
+            $zipName = Split-Path $nsisZip -Leaf
+            $zipHash = (Get-FileHash -Path $nsisZip -Algorithm SHA256).Hash.ToLower()
+            $lines += "$zipHash  $zipName"
+          }
+          $lines -join "`n" | Out-File -FilePath checksums.sha256 -Encoding utf8 -NoNewline
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: >-
-          gh release create ${{ github.ref_name }}
-          --generate-notes
-          Server/chatserver.exe
-          "${{ steps.installer.outputs.path }}"
-          checksums.sha256
+        shell: bash
+        run: |
+          ASSETS=(
+            Server/chatserver.exe
+            "${{ steps.artifacts.outputs.installer_path }}"
+            checksums.sha256
+          )
+          # Include updater artifacts if signing key was available
+          if [ -n "${{ steps.artifacts.outputs.nsis_zip }}" ]; then
+            ASSETS+=("${{ steps.artifacts.outputs.nsis_zip }}")
+          fi
+          if [ -n "${{ steps.artifacts.outputs.nsis_sig }}" ]; then
+            ASSETS+=("${{ steps.artifacts.outputs.nsis_sig }}")
+          fi
+          gh release create ${{ github.ref_name }} \
+            --generate-notes \
+            "${ASSETS[@]}"

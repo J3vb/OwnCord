@@ -468,6 +468,23 @@
 }
 .msg-file-download:hover { background: var(--bg-hover); color: var(--text-normal); }
 
+/* ── Update Banner ── */
+.update-banner {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 16px; background: var(--accent);
+  color: #fff; font-size: 13px; font-weight: 500;
+  flex-shrink: 0; z-index: 100;
+}
+.update-banner-text { flex: 1; }
+.update-banner-btn {
+  padding: 4px 12px; border-radius: var(--radius-sm);
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  border: none; transition: opacity .15s;
+}
+.update-banner-btn:hover { opacity: 0.85; }
+.update-banner-install { background: #fff; color: var(--accent); }
+.update-banner-later { background: rgba(255,255,255,0.2); color: #fff; }
+
 /* System message */
 .system-msg {
   display: flex; align-items: center; gap: 8px;

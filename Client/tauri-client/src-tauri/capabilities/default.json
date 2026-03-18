@@ -65,6 +65,8 @@
     "http:allow-fetch-cancel",
     "opener:default",
     "dialog:default",
+    "updater:default",
+    "process:allow-restart",
     "fs:default",
     {
       "identifier": "fs:allow-write-file",
