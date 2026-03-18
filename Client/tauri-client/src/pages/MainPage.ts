@@ -29,9 +29,14 @@ import {
   voiceStore,
   joinVoiceChannel,
   leaveVoiceChannel,
-  setLocalMuted,
-  setLocalDeafened,
 } from "@stores/voice.store";
+import {
+  joinVoice,
+  leaveVoice as voiceSessionLeave,
+  setMuted as voiceSessionSetMuted,
+  setDeafened as voiceSessionSetDeafened,
+  setWsClient,
+} from "@lib/voiceSession";
 import {
   setMessages,
   prependMessages,
@@ -62,6 +67,9 @@ export interface MainPageOptions {
 
 export function createMainPage(options: MainPageOptions): MountableComponent {
   const { ws, api } = options;
+
+  // Let voiceSession send signaling messages over this WS connection
+  setWsClient(ws);
 
   const limiters = createRateLimiterSet();
 
@@ -339,6 +347,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       }),
     );
 
+    // --- Voice config: trigger WebRTC join flow ---
+    unsubscribers.push(
+      ws.on("voice_config", (payload) => {
+        void joinVoice(payload.channel_id, payload);
+      }),
+    );
+
     // --- Main .app row ---
     const app = createElement("div", { class: "app", "data-testid": "app-layout" });
 
@@ -360,6 +375,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       onVoiceLeave: () => {
         log.info("Leaving voice channel");
+        voiceSessionLeave();
         leaveVoiceChannel();
         ws.send({ type: "voice_leave", payload: {} });
       },
@@ -399,19 +415,20 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onDisconnect: () => {
         if (voiceStore.getState().currentChannelId === null) return;
         log.info("Leaving voice channel (widget disconnect)");
+        voiceSessionLeave();
         leaveVoiceChannel();
         ws.send({ type: "voice_leave", payload: {} });
       },
       onMuteToggle: () => {
         if (!limiters.voice.tryConsume()) return;
         const next = !voiceStore.getState().localMuted;
-        setLocalMuted(next);
+        voiceSessionSetMuted(next);
         ws.send({ type: "voice_mute", payload: { muted: next } });
       },
       onDeafenToggle: () => {
         if (!limiters.voice.tryConsume()) return;
         const next = !voiceStore.getState().localDeafened;
-        setLocalDeafened(next);
+        voiceSessionSetDeafened(next);
         ws.send({ type: "voice_deafen", payload: { deafened: next } });
       },
       onCameraToggle: () => {
