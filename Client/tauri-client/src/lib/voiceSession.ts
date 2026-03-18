@@ -186,6 +186,13 @@ export async function joinVoice(
     return;
   }
 
+  // Clean up any existing voice session to prevent stale callbacks
+  // from killing the new session (don't send voice_leave — server
+  // already handled the channel switch).
+  if (webrtcService !== null) {
+    leaveVoice(false);
+  }
+
   try {
     // 1. Acquire microphone and ICE servers in parallel
     const [stream, iceServers] = await Promise.all([

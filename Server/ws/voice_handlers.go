@@ -34,6 +34,12 @@ func (h *Hub) setupICEMonitor(c *Client, channelID int64) {
 	}
 
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+		// Guard: ignore stale events from old PeerConnections after channel switch
+		if c.getPC() != pc {
+			slog.Debug("ignoring stale ICE event from old PC", "user_id", c.userID, "channel_id", channelID, "state", state.String())
+			return
+		}
+
 		slog.Info("ICE state change", "user_id", c.userID, "channel_id", channelID, "state", state.String())
 
 		switch state {
