@@ -38,6 +38,11 @@ import {
   joinVoiceChannel,
   leaveVoiceChannel,
 } from "@stores/voice.store";
+import {
+  handleServerOffer,
+  handleServerAnswer,
+  handleServerIce,
+} from "@lib/voiceSession";
 import { createLogger } from "./logger";
 
 const log = createLogger("dispatcher");
@@ -257,6 +262,24 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   unsubs.push(
     ws.on("voice_speakers", (payload) => {
       setSpeakers(payload);
+    }),
+  );
+
+  unsubs.push(
+    ws.on("voice_offer", (payload) => {
+      handleServerOffer(payload.sdp, payload.channel_id);
+    }),
+  );
+
+  unsubs.push(
+    ws.on("voice_answer", (payload) => {
+      handleServerAnswer(payload.sdp);
+    }),
+  );
+
+  unsubs.push(
+    ws.on("voice_ice", (payload) => {
+      handleServerIce(payload.candidate);
     }),
   );
 
