@@ -561,22 +561,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     // User bar
     const userBarSlot = createElement("div", {});
-    const userBar = createUserBar({
-      onMuteToggle: () => {
-        if (voiceStore.getState().currentChannelId === null) return;
-        if (!limiters.voice.tryConsume()) return;
-        const next = !voiceStore.getState().localMuted;
-        voiceSessionSetMuted(next);
-        ws.send({ type: "voice_mute", payload: { muted: next } });
-      },
-      onDeafenToggle: () => {
-        if (voiceStore.getState().currentChannelId === null) return;
-        if (!limiters.voice.tryConsume()) return;
-        const next = !voiceStore.getState().localDeafened;
-        voiceSessionSetDeafened(next);
-        ws.send({ type: "voice_deafen", payload: { deafened: next } });
-      },
-    });
+    const userBar = createUserBar();
     userBar.mount(userBarSlot);
     children.push(userBar);
     sidebarWrapper.appendChild(userBarSlot);

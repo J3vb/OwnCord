@@ -27,6 +27,13 @@ import type { CertTofuEvent } from "@lib/ws";
 
 const log = createLogger("main");
 
+// Disable the default browser context menu globally.
+// Custom context menus (e.g. channel edit/delete) call e.preventDefault()
+// themselves before the event reaches this handler.
+document.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+});
+
 // Install global error handlers first
 installGlobalErrorHandlers();
 

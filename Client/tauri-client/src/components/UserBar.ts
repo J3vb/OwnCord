@@ -8,10 +8,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import { authStore } from "@stores/auth.store";
 import { openSettings } from "@stores/ui.store";
 
-export interface UserBarOptions {
-  readonly onMuteToggle?: () => void;
-  readonly onDeafenToggle?: () => void;
-}
+export type UserBarOptions = Record<string, never>;
 
 export function createUserBar(options?: UserBarOptions): MountableComponent {
   const ac = new AbortController();
@@ -63,31 +60,11 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
 
     const buttons = createElement("div", { class: "ub-controls" });
 
-    const muteBtn = createElement(
-      "button",
-      { title: "Mute", "aria-label": "Mute" },
-      "\uD83C\uDFA4",
-    );
-
-    const deafenBtn = createElement(
-      "button",
-      { title: "Deafen", "aria-label": "Deafen" },
-      "\uD83C\uDFA7",
-    );
-
     const settingsBtn = createElement(
       "button",
       { title: "Settings", "aria-label": "Settings" },
       "\u2699",
     );
-
-    if (options?.onMuteToggle) {
-      muteBtn.addEventListener("click", options.onMuteToggle, { signal: ac.signal });
-    }
-
-    if (options?.onDeafenToggle) {
-      deafenBtn.addEventListener("click", options.onDeafenToggle, { signal: ac.signal });
-    }
 
     settingsBtn.addEventListener(
       "click",
@@ -97,7 +74,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       { signal: ac.signal },
     );
 
-    appendChildren(buttons, muteBtn, deafenBtn, settingsBtn);
+    buttons.appendChild(settingsBtn);
     appendChildren(root, avatarEl, info, buttons);
 
     // Initial render
