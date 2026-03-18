@@ -22,7 +22,7 @@ import type { ServerBannerControl } from "@components/ServerBanner";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
 import { createToastContainer } from "@components/Toast";
 import type { ToastContainer } from "@components/Toast";
-import { authStore, clearAuth } from "@stores/auth.store";
+import { authStore, clearAuth, updateUser } from "@stores/auth.store";
 import { closeSettings, toggleMemberList, uiStore } from "@stores/ui.store";
 import { channelsStore, getActiveChannel, setActiveChannel } from "@stores/channels.store";
 import {
@@ -350,7 +350,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // --- Voice config: trigger WebRTC join flow ---
     unsubscribers.push(
       ws.on("voice_config", (payload) => {
-        void joinVoice(payload.channel_id, payload);
+        void joinVoice(payload.channel_id, payload, async () => {
+          const creds = await api.getVoiceCredentials();
+          return creds.ice_servers;
+        });
       }),
     );
 
@@ -495,8 +498,27 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Settings overlay
     const settingsOverlay = createSettingsOverlay({
       onClose: () => closeSettings(),
-      onChangePassword: async () => {},
-      onUpdateProfile: async () => {},
+      onChangePassword: async (oldPassword, newPassword) => {
+        try {
+          await api.changePassword(oldPassword, newPassword);
+          toast?.show("Password changed successfully", "success");
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Failed to change password";
+          toast?.show(msg, "error");
+          throw err;
+        }
+      },
+      onUpdateProfile: async (username) => {
+        try {
+          const updated = await api.updateProfile({ username });
+          updateUser({ username: updated.username });
+          toast?.show("Profile updated", "success");
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Failed to update profile";
+          toast?.show(msg, "error");
+          throw err;
+        }
+      },
       onLogout: () => clearAuth(),
     });
     settingsOverlay.mount(root);

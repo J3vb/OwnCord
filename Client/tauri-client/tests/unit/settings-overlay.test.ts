@@ -16,11 +16,13 @@ vi.mock("@lib/logger", () => ({
 }));
 
 // Mock stores
+const mockSetTheme = vi.fn();
 vi.mock("@stores/ui.store", () => ({
   uiStore: {
     getState: () => ({ settingsOpen: false }),
     subscribe: () => () => {},
   },
+  setTheme: (...args: unknown[]) => mockSetTheme(...args),
 }));
 
 vi.mock("@stores/auth.store", () => ({
@@ -144,6 +146,7 @@ describe("SettingsOverlay", () => {
     expect(midnight.classList.contains("active")).toBe(true);
     expect(document.documentElement.style.getPropertyValue("--bg-primary")).toBe("#1a1a2e");
     expect(localStorage.getItem("owncord:settings:theme")).toBe('"midnight"');
+    expect(mockSetTheme).toHaveBeenCalledWith("midnight");
 
     overlay.destroy?.();
   });

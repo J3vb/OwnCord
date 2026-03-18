@@ -5,6 +5,7 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, applyTheme, THEMES } from "./helpers";
 import type { ThemeName } from "./helpers";
+import { setTheme } from "@stores/ui.store";
 
 export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
@@ -23,6 +24,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     btn.addEventListener("click", () => {
       applyTheme(name);
       savePref("theme", name);
+      setTheme(name);
       const prev = themeRow.querySelector(".theme-opt.active");
       if (prev) prev.classList.remove("active");
       btn.classList.add("active");

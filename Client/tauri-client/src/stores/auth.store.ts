@@ -50,6 +50,14 @@ export function getToken(): string | null {
   return authStore.select((s) => s.token);
 }
 
+/** Update the current user fields (e.g. after profile edit). */
+export function updateUser(patch: Partial<UserWithRole>): void {
+  authStore.setState((prev) => ({
+    ...prev,
+    user: prev.user ? { ...prev.user, ...patch } : prev.user,
+  }));
+}
+
 /** Shorthand selector for the current user. */
 export function getCurrentUser(): UserWithRole | null {
   return authStore.select((s) => s.user);
