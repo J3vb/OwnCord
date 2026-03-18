@@ -68,6 +68,40 @@ func (h *Hub) setupICECallback(c *Client, channelID int64) {
 	})
 }
 
+// renegotiateParticipant creates a new SDP offer for the given client
+// and sends it as voice_offer. Implements the "impolite" side of
+// Perfect Negotiation — skips if PC is in have-remote-offer state.
+func (h *Hub) renegotiateParticipant(c *Client) {
+	pc := c.getPC()
+	if pc == nil {
+		return
+	}
+
+	// Perfect Negotiation: server is impolite — skip if client
+	// already sent an offer we haven't answered yet.
+	if pc.SignalingState() == webrtc.SignalingStateHaveRemoteOffer {
+		slog.Info("renegotiate skipped: have-remote-offer",
+			"user_id", c.userID)
+		return
+	}
+
+	offer, err := pc.CreateOffer(nil)
+	if err != nil {
+		slog.Error("renegotiateParticipant CreateOffer",
+			"err", err, "user_id", c.userID)
+		return
+	}
+
+	if err := pc.SetLocalDescription(offer); err != nil {
+		slog.Error("renegotiateParticipant SetLocalDescription",
+			"err", err, "user_id", c.userID)
+		return
+	}
+
+	channelID := c.getVoiceChID()
+	c.sendMsg(buildVoiceOffer(channelID, offer.SDP))
+}
+
 // handleVoiceJoin processes a voice_join message.
 // 1. Parses channel_id.
 // 2. Checks CONNECT_VOICE permission.
