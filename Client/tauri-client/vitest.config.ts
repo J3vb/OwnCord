@@ -25,6 +25,7 @@ export default defineConfig({
         "src/lib/audio.ts",
         "src/lib/vad.ts",
         "src/lib/webrtc.ts",
+        "src/lib/voiceSession.ts",
       ],
       thresholds: {
         statements: 80,
