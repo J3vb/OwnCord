@@ -41,3 +41,13 @@ func ParseChannelIDForTest(payload json.RawMessage) (int64, error) {
 func BuildJSONForTest(v any) []byte {
 	return buildJSON(v)
 }
+
+// BuildVoiceOfferForTest exposes buildVoiceOffer for external tests.
+func BuildVoiceOfferForTest(channelID int64, sdp string) []byte {
+	return buildVoiceOffer(channelID, sdp)
+}
+
+// BuildVoiceICEForTest exposes buildVoiceICE for external tests.
+func BuildVoiceICEForTest(channelID int64, candidate any) []byte {
+	return buildVoiceICE(channelID, candidate)
+}
