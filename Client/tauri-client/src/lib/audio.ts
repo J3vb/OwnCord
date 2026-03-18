@@ -2,6 +2,11 @@
 // Audio Device Manager — enumerate devices, acquire streams, set output
 // =============================================================================
 
+import { loadPref } from "@components/settings/helpers";
+import { createLogger } from "@lib/logger";
+
+const log = createLogger("audio");
+
 export interface AudioDevice {
   readonly deviceId: string;
   readonly label: string;
@@ -52,6 +57,10 @@ export function createAudioManager(): AudioManager {
   function handleDeviceChange(): void {
     if (destroyed) return;
     void listAudioDevices().then((devices) => {
+      log.info("Audio device change detected", {
+        inputs: devices.filter((d) => d.kind === "audioinput").length,
+        outputs: devices.filter((d) => d.kind === "audiooutput").length,
+      });
       for (const cb of deviceChangeCallbacks) {
         cb(devices);
       }
@@ -72,9 +81,9 @@ export function createAudioManager(): AudioManager {
       const constraints: MediaStreamConstraints = {
         audio: {
           deviceId: deviceId !== undefined ? { exact: deviceId } : undefined,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+          echoCancellation: loadPref<boolean>("echoCancellation", true),
+          noiseSuppression: loadPref<boolean>("noiseSuppression", true),
+          autoGainControl: loadPref<boolean>("autoGainControl", true),
         },
         video: false,
       };
@@ -87,6 +96,14 @@ export function createAudioManager(): AudioManager {
       if (audioTrack !== undefined) {
         const settings = audioTrack.getSettings();
         currentInputDeviceId = settings.deviceId ?? deviceId ?? null;
+        log.info("Microphone acquired", {
+          deviceId: currentInputDeviceId,
+          sampleRate: settings.sampleRate,
+          channelCount: settings.channelCount,
+          echoCancellation: settings.echoCancellation,
+          noiseSuppression: settings.noiseSuppression,
+          autoGainControl: settings.autoGainControl,
+        });
       }
 
       return stream;
@@ -123,6 +140,7 @@ export function createAudioManager(): AudioManager {
       navigator.mediaDevices.removeEventListener("devicechange", handleDeviceChange);
 
       // Stop all tracks on all active streams
+      log.debug("AudioManager destroying", { activeStreams: activeStreams.size });
       for (const stream of activeStreams) {
         for (const track of stream.getTracks()) {
           track.stop();

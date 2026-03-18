@@ -2,7 +2,7 @@ package ws
 
 import (
 	"fmt"
-	"strconv"
+	"log/slog"
 
 	"github.com/pion/interceptor"
 	"github.com/pion/webrtc/v4"
@@ -65,31 +65,20 @@ func NewSFU(cfg *config.VoiceConfig) (*SFU, error) {
 		webrtc.WithSettingEngine(se),
 	)
 
+	slog.Info("SFU initialized",
+		"quality", cfg.Quality,
+		"media_port_range", fmt.Sprintf("%d-%d", cfg.MediaPortMin, cfg.MediaPortMax),
+		"external_ip", cfg.ExternalIP)
 	return &SFU{api: api, config: cfg}, nil
 }
 
 // NewPeerConnection creates a new PeerConnection using the SFU's pre-configured
-// WebRTC API and ICE server settings from config.
+// WebRTC API. The SFU is the media server itself — it does not need STUN/TURN
+// to discover its own address. NAT traversal is handled by ExternalIP config
+// which rewrites ICE candidates via SetICEAddressRewriteRules in the
+// SettingEngine.
 func (s *SFU) NewPeerConnection() (*webrtc.PeerConnection, error) {
-	pcConfig := webrtc.Configuration{}
-
-	// Add STUN server if port is configured.
-	if s.config.STUNPort > 0 {
-		pcConfig.ICEServers = append(pcConfig.ICEServers, webrtc.ICEServer{
-			URLs: []string{"stun:localhost:" + strconv.Itoa(s.config.STUNPort)},
-		})
-	}
-
-	// Add TURN server if enabled and secret is configured.
-	if s.config.TURNEnabled && s.config.TURNPort > 0 && s.config.TURNSecret != "" {
-		pcConfig.ICEServers = append(pcConfig.ICEServers, webrtc.ICEServer{
-			URLs:       []string{"turn:localhost:" + strconv.Itoa(s.config.TURNPort)},
-			Username:   "owncord",
-			Credential: s.config.TURNSecret,
-		})
-	}
-
-	return s.api.NewPeerConnection(pcConfig)
+	return s.api.NewPeerConnection(webrtc.Configuration{})
 }
 
 // Close is a placeholder for SFU cleanup. Future implementations may close

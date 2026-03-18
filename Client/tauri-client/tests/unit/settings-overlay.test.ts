@@ -243,7 +243,9 @@ describe("SettingsOverlay", () => {
     expect(sliders.length).toBeGreaterThanOrEqual(1);
 
     const toggles = container.querySelectorAll(".toggle");
-    expect(toggles.length).toBe(3);
+    // 5 toggles: echo cancellation, noise suppression, auto gain control,
+    // enhanced noise suppression (RNNoise), silence suppression
+    expect(toggles.length).toBe(5);
 
     overlay.destroy?.();
   });

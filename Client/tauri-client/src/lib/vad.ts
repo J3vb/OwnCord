@@ -2,6 +2,10 @@
 // Voice Activity Detection — Web Audio API based speech detection
 // =============================================================================
 
+import { createLogger } from "@lib/logger";
+
+const log = createLogger("vad");
+
 export interface VadOptions {
   /** Audio volume threshold (0-1) to detect speech. Default 0.01 */
   readonly threshold?: number;
@@ -25,6 +29,17 @@ type SpeakingCallback = (speaking: boolean) => void;
 const DEFAULT_THRESHOLD = 0.01;
 const DEFAULT_INTERVAL_MS = 50;
 const DEFAULT_MIN_CONSECUTIVE = 3;
+
+/** Max VAD threshold value. Sensitivity 0% maps to this threshold. */
+const MAX_THRESHOLD = 0.15;
+
+/** Convert sensitivity slider (0-100) to VAD threshold (0-MAX_THRESHOLD).
+ *  High sensitivity = low threshold (picks up quiet sounds).
+ *  0% sensitivity = threshold 0.15 (only loud sounds trigger).
+ *  100% sensitivity = threshold 0.0 (everything triggers). */
+export function sensitivityToThreshold(sensitivity: number): number {
+  return ((100 - sensitivity) / 100) * MAX_THRESHOLD;
+}
 // Require more silence samples than speech samples to prevent flicker
 const SILENCE_MULTIPLIER = 2;
 
@@ -33,8 +48,9 @@ function computeRms(data: Uint8Array): number {
   for (let i = 0; i < data.length; i++) {
     const val = data[i];
     if (val === undefined) continue;
-    // Normalize from 0-255 to -1..1
-    const normalized = (val - 128) / 128;
+    // getByteFrequencyData returns 0-255 where 0 = silence, 255 = max.
+    // Normalize to 0-1 range.
+    const normalized = val / 255;
     sum += normalized * normalized;
   }
   return Math.sqrt(sum / data.length);
@@ -118,7 +134,11 @@ export function createVadDetector(options?: VadOptions): VadDetector {
       // Stop any existing monitoring first
       cleanup();
 
-      audioContext = new AudioContext();
+      // Force 48kHz so FFT bins cover the voice-frequency range (0-24kHz)
+      // consistently regardless of the system audio device's native rate.
+      // At high native rates (e.g. 192kHz), most bins would be above voice
+      // frequencies, making the RMS calculation artificially low.
+      audioContext = new AudioContext({ sampleRate: 48000 });
       analyser = audioContext.createAnalyser();
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.5;
@@ -127,6 +147,7 @@ export function createVadDetector(options?: VadOptions): VadDetector {
       sourceNode.connect(analyser);
 
       intervalId = setInterval(tick, intervalMs);
+      log.debug("VAD started", { threshold, intervalMs, minConsecutive, sampleRate: audioContext.sampleRate });
     },
 
     stop(): void {
@@ -138,6 +159,7 @@ export function createVadDetector(options?: VadOptions): VadDetector {
       if (newThreshold < 0 || newThreshold > 1) {
         throw new Error("Threshold must be between 0 and 1");
       }
+      log.debug("VAD threshold changed", { old: threshold, new: newThreshold });
       threshold = newThreshold;
     },
 
@@ -155,6 +177,7 @@ export function createVadDetector(options?: VadOptions): VadDetector {
       destroyed = true;
       cleanup();
       callbacks.clear();
+      log.debug("VAD destroyed");
     },
   };
 }

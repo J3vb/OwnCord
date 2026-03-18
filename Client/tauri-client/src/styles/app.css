@@ -792,6 +792,21 @@
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   padding: 8px 12px; font-size: 14px; width: 200px; cursor: pointer;
 }
+/* ── Mic Level Meter ── */
+.mic-meter-wrap { margin-bottom: 8px; }
+.mic-meter-bar {
+  position: relative; height: 8px; border-radius: 4px;
+  background: var(--bg-tertiary); overflow: visible;
+}
+.mic-meter-level {
+  height: 100%; border-radius: 4px; width: 0%;
+  background: #43b581; transition: width 50ms linear;
+}
+.mic-meter-threshold {
+  position: absolute; top: -3px; width: 2px; height: 14px;
+  background: #fff; border-radius: 1px; left: 50%;
+  pointer-events: none; opacity: 0.8;
+}
 .slider-row { display: flex; align-items: center; gap: 12px; }
 .settings-slider {
   flex: 1; -webkit-appearance: none; appearance: none;

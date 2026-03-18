@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   voiceStore,
   setVoiceStates,
@@ -11,6 +11,7 @@ import {
   setLocalCamera,
   setLocalScreenshare,
   setLocalSpeaking,
+  setSpeakers,
   getChannelVoiceUsers,
 } from "../../src/stores/voice.store";
 import type {
@@ -318,6 +319,70 @@ describe("voice store", () => {
 
     it("returns empty array when no voice states exist", () => {
       expect(getChannelVoiceUsers(10)).toHaveLength(0);
+    });
+  });
+
+  describe("setSpeakers", () => {
+    beforeEach(() => {
+      // Set up: user 1 (local) and user 2 (remote) in channel 10
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 1, username: "me", avatar: "", role: "member" },
+        serverName: "s",
+        motd: "",
+        isAuthenticated: true,
+      }));
+      setVoiceStates([VOICE_STATE_1, VOICE_STATE_2]);
+      joinVoiceChannel(10);
+    });
+
+    afterEach(() => {
+      authStore.setState(() => ({
+        token: null,
+        user: null,
+        serverName: null,
+        motd: null,
+        isAuthenticated: false,
+      }));
+    });
+
+    it("does NOT overwrite local user's speaking state", () => {
+      // Local VAD says we're speaking
+      setLocalSpeaking(true);
+      expect(voiceStore.getState().voiceUsers.get(10)?.get(1)?.speaking).toBe(true);
+
+      // Server says we're NOT speaking — local user should be unchanged
+      setSpeakers({ channel_id: 10, speakers: [2], threshold_mode: "forwarding" });
+      expect(voiceStore.getState().voiceUsers.get(10)?.get(1)?.speaking).toBe(true);
+    });
+
+    it("updates remote users' speaking state from server", () => {
+      // Server says user 2 is speaking
+      setSpeakers({ channel_id: 10, speakers: [2], threshold_mode: "forwarding" });
+      expect(voiceStore.getState().voiceUsers.get(10)?.get(2)?.speaking).toBe(true);
+
+      // Server says nobody is speaking — remote user updated, local unchanged
+      setSpeakers({ channel_id: 10, speakers: [], threshold_mode: "forwarding" });
+      expect(voiceStore.getState().voiceUsers.get(10)?.get(2)?.speaking).toBe(false);
+    });
+  });
+
+  describe("clearAuth voice cleanup", () => {
+    it("calls leaveVoice to clean up session state", async () => {
+      // We test indirectly: clearAuth should call leaveVoice(false) which
+      // is idempotent, and then resetVoiceStore which clears the store.
+      const { clearAuth } = await import("../../src/stores/auth.store");
+
+      joinVoiceChannel(42);
+      setLocalMuted(true);
+      expect(voiceStore.getState().currentChannelId).toBe(42);
+
+      clearAuth();
+
+      // After clearAuth, voice store should be fully reset
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+      expect(voiceStore.getState().localMuted).toBe(false);
+      expect(voiceStore.getState().voiceUsers.size).toBe(0);
     });
   });
 

@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -59,6 +60,16 @@ func handleVoiceCredentials(cfg *config.Config, _ *db.DB) http.HandlerFunc {
 		host := serverHost(r)
 		servers := buildICEServers(user.ID, cfg, host)
 
+		urls := make([]string, 0, len(servers))
+		for _, s := range servers {
+			urls = append(urls, s.URLs)
+		}
+		slog.Info("voice credentials issued",
+			"user_id", user.ID,
+			"host", host,
+			"ice_servers", urls,
+			"external_ip", cfg.Voice.ExternalIP)
+
 		writeJSON(w, http.StatusOK, voiceCredentialsResponse{
 			ICEServers: servers,
 			ExpiresIn:  int(voiceCredentialTTL.Seconds()),
@@ -67,8 +78,14 @@ func handleVoiceCredentials(cfg *config.Config, _ *db.DB) http.HandlerFunc {
 }
 
 // buildICEServers constructs the ICE server list for the given user.
+// Always includes a public STUN server so clients behind NAT can discover
+// their server-reflexive address. Adds the self-hosted STUN and optional
+// TURN server if configured.
 func buildICEServers(userID int64, cfg *config.Config, host string) []iceServer {
 	servers := []iceServer{
+		// Public STUN — reliable fallback for NAT traversal even if the
+		// self-hosted STUN port isn't reachable.
+		{URLs: "stun:stun.l.google.com:19302"},
 		{URLs: fmt.Sprintf("stun:%s:%d", host, cfg.Voice.STUNPort)},
 	}
 

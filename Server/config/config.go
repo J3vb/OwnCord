@@ -132,6 +132,15 @@ upload:
   max_size_mb: 100
   storage_dir: "data/uploads"
 
+voice:
+  # external_ip: ""       # set to your public IP if behind NAT (required for voice over internet)
+  # stun_port: 3478       # UDP port for STUN
+  # turn_port: 3478       # UDP port for TURN relay
+  # turn_enabled: true
+  # quality: "medium"     # low | medium | high
+  # media_port_min: 10000 # UDP port range for WebRTC media
+  # media_port_max: 10100
+
 # github:
 #   token: ""  # optional: GitHub API token for higher rate limits (5000 req/hr vs 60)
 `

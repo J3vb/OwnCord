@@ -5,6 +5,8 @@
 
 import { createStore } from "@lib/store";
 import type { UserWithRole } from "@lib/types";
+import { resetVoiceStore } from "@stores/voice.store";
+import { leaveVoice } from "@lib/voiceSession";
 
 export interface AuthState {
   readonly token: string | null;
@@ -40,8 +42,12 @@ export function setAuth(
   }));
 }
 
-/** Reset auth state (logout / disconnect). */
+/** Reset auth state (logout / disconnect). Also cleans up the voice
+ *  session (WebRTC, AudioContext, streams) and clears voice store state.
+ *  Safe to call even if no voice session is active — leaveVoice is idempotent. */
 export function clearAuth(): void {
+  leaveVoice(false);
+  resetVoiceStore();
   authStore.setState(() => ({ ...INITIAL_STATE }));
 }
 

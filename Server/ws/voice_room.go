@@ -2,6 +2,7 @@ package ws
 
 import (
 	"errors"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -172,6 +173,10 @@ func (r *VoiceRoom) HasParticipant(userID int64) bool {
 func (r *VoiceRoom) Close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	slog.Info("voice room closing",
+		"channel_id", r.config.ChannelID,
+		"participants", len(r.participants),
+		"tracks", len(r.tracks))
 	r.participants = make(map[int64]*VoiceParticipant)
 	r.tracks = make(map[int64]*VoiceTrack)
 	r.mode = "forwarding"
@@ -181,12 +186,23 @@ func (r *VoiceRoom) Close() {
 func (r *VoiceRoom) SetTrack(userID int64, remote *webrtc.TrackRemote, local *webrtc.TrackLocalStaticRTP) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	_, replaced := r.tracks[userID]
 	r.tracks[userID] = &VoiceTrack{
 		UserID:  userID,
 		Remote:  remote,
 		Local:   local,
 		Senders: make(map[int64]*webrtc.RTPSender),
 	}
+	codec := ""
+	if remote != nil {
+		codec = remote.Codec().MimeType
+	}
+	slog.Debug("voice room track set",
+		"channel_id", r.config.ChannelID,
+		"user_id", userID,
+		"replaced", replaced,
+		"codec", codec,
+		"total_tracks", len(r.tracks))
 }
 
 // RemoveTrack removes and returns the VoiceTrack for the given user.
@@ -197,6 +213,10 @@ func (r *VoiceRoom) RemoveTrack(userID int64) *VoiceTrack {
 	vt, ok := r.tracks[userID]
 	if ok {
 		delete(r.tracks, userID)
+		slog.Debug("voice room track removed",
+			"channel_id", r.config.ChannelID,
+			"user_id", userID,
+			"remaining_tracks", len(r.tracks))
 	}
 	return vt
 }
@@ -258,6 +278,7 @@ func (r *VoiceRoom) updateMode() {
 		return
 	}
 
+	oldMode := r.mode
 	switch r.mode {
 	case "forwarding":
 		if count >= threshold {
@@ -267,5 +288,13 @@ func (r *VoiceRoom) updateMode() {
 		if count <= threshold-2 {
 			r.mode = "forwarding"
 		}
+	}
+	if r.mode != oldMode {
+		slog.Info("voice room mode changed",
+			"channel_id", r.config.ChannelID,
+			"old_mode", oldMode,
+			"new_mode", r.mode,
+			"participants", count,
+			"threshold", threshold)
 	}
 }

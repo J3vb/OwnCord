@@ -27,6 +27,24 @@ function shouldLog(level: LogLevel): boolean {
   return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[currentLevel];
 }
 
+/** Convert Error objects (and nested ones) into serializable form.
+ *  Error.message and Error.stack don't appear in JSON.stringify by default. */
+function serializeData(data: unknown): unknown {
+  if (data instanceof Error) {
+    return { error: data.message, stack: data.stack };
+  }
+  if (typeof data === "object" && data !== null) {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+      result[key] = value instanceof Error
+        ? { error: value.message, stack: value.stack }
+        : value;
+    }
+    return result;
+  }
+  return data;
+}
+
 function createEntry(
   level: LogLevel,
   component: string,
@@ -38,7 +56,7 @@ function createEntry(
     level,
     component,
     message,
-    data,
+    data: data !== undefined ? serializeData(data) : undefined,
   };
 }
 

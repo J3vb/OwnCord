@@ -713,6 +713,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   function destroy(): void {
     log.info("MainPage destroying");
+    // Clean up voice session before destroying UI — prevents stale
+    // module-level state persisting across logout/reconnect cycles.
+    voiceSessionLeave(false);
     clearVoiceOnError();
     destroyChannelComponents();
 

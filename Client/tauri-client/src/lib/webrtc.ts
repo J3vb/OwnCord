@@ -2,6 +2,10 @@
 // WebRTC Service — peer connection management for voice communication
 // =============================================================================
 
+import { createLogger } from "@lib/logger";
+
+const log = createLogger("webrtc");
+
 export interface WebRtcConfig {
   readonly iceServers: readonly RTCIceServer[];
   readonly opusBitrate?: number;
@@ -12,31 +16,59 @@ export interface WebRtcService {
   handleOffer(sdp: string): Promise<string>;
   handleAnswer(sdp: string): Promise<void>;
   handleServerOffer(sdp: string): Promise<string>;
-  createOffer(): Promise<string>;
+  createOffer(iceRestart?: boolean): Promise<string>;
   handleIceCandidate(candidate: RTCIceCandidateInit): Promise<void>;
   setLocalStream(stream: MediaStream): void;
+  /** Swap the media track on existing senders without SDP renegotiation. */
+  replaceTrack(stream: MediaStream): Promise<void>;
   getRemoteStreams(): readonly MediaStream[];
   setMuted(muted: boolean): void;
+  setSilenced(silenced: boolean): void;
   onIceCandidate(callback: (candidate: RTCIceCandidateInit) => void): () => void;
   onRemoteTrack(callback: (stream: MediaStream) => void): () => void;
   onStateChange(callback: (state: RTCPeerConnectionState) => void): () => void;
+  onIceStateChange(callback: (state: RTCIceConnectionState) => void): () => void;
   destroy(): void;
 }
 
 type IceCandidateCallback = (candidate: RTCIceCandidateInit) => void;
 type RemoteTrackCallback = (stream: MediaStream) => void;
 type StateChangeCallback = (state: RTCPeerConnectionState) => void;
+type IceStateCallback = (state: RTCIceConnectionState) => void;
 
-/** Apply Opus bitrate constraint via SDP munging. */
-function applyOpusBitrate(sdp: string, bitrate: number): string {
+/** Apply Opus bitrate and FEC constraints via SDP munging. */
+function applyOpusSettings(sdp: string, bitrate: number | undefined): string {
   const lines = sdp.split("\r\n");
   const result: string[] = [];
+  let inAudioSection = false;
+  let bitrateInserted = false;
+
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    let line = lines[i];
     if (line === undefined) continue;
-    result.push(line);
+
+    // Track which media section we're in
+    if (line.startsWith("m=audio")) {
+      inAudioSection = true;
+      bitrateInserted = false;
+    } else if (line.startsWith("m=")) {
+      inAudioSection = false;
+    }
+
+    // Enable Opus in-band FEC for packet loss resilience
     if (line.startsWith("a=fmtp:111 ")) {
+      if (!line.includes("useinbandfec=")) {
+        line += ";useinbandfec=1";
+      }
+    }
+
+    result.push(line);
+
+    // Insert b=AS after m=audio line (always present, unlike c= which may
+    // only exist at session level)
+    if (inAudioSection && !bitrateInserted && bitrate !== undefined && line.startsWith("m=audio")) {
       result.push(`b=AS:${Math.round(bitrate / 1000)}`);
+      bitrateInserted = true;
     }
   }
   return result.join("\r\n");
@@ -45,15 +77,20 @@ function applyOpusBitrate(sdp: string, bitrate: number): string {
 export function createWebRtcService(): WebRtcService {
   let pc: RTCPeerConnection | null = null;
   let localSenders: readonly RTCRtpSender[] = [];
-  /** Original tracks stored so we can restore them after unmute. */
-  const mutedTracks = new Map<RTCRtpSender, MediaStreamTrack>();
+  let isMuted = false;
+  let isSilenced = false;
   let remoteStreams: readonly MediaStream[] = [];
   let opusBitrate: number | undefined;
   let destroyed = false;
+  /** True once setRemoteDescription has been called (ICE candidates are safe). */
+  let hasRemoteDescription = false;
+  /** Queue ICE candidates that arrive before the remote description is set. */
+  const pendingIceCandidates: RTCIceCandidateInit[] = [];
 
   const iceCandidateCallbacks = new Set<IceCandidateCallback>();
   const remoteTrackCallbacks = new Set<RemoteTrackCallback>();
   const stateChangeCallbacks = new Set<StateChangeCallback>();
+  const iceStateCallbacks = new Set<IceStateCallback>();
 
   function assertConnection(): RTCPeerConnection {
     if (destroyed) throw new Error("WebRTC service has been destroyed");
@@ -61,12 +98,45 @@ export function createWebRtcService(): WebRtcService {
     return pc;
   }
 
+  /** Flush queued ICE candidates now that the remote description is set. */
+  async function flushIceCandidates(conn: RTCPeerConnection): Promise<void> {
+    hasRemoteDescription = true;
+    const queued = pendingIceCandidates.splice(0);
+    if (queued.length > 0) {
+      log.debug("Flushing queued ICE candidates", { count: queued.length });
+    }
+    for (const c of queued) {
+      await conn.addIceCandidate(c);
+    }
+  }
+
+  /** Apply track.enabled based on current mute + silence state. */
+  function applyTrackEnabled(): void {
+    for (const sender of localSenders) {
+      const track = sender.track;
+      if (track !== null) {
+        track.enabled = !isMuted && !isSilenced;
+      }
+    }
+  }
+
   function handleIceCandidateEvent(event: RTCPeerConnectionIceEvent): void {
-    if (event.candidate === null) return;
+    if (event.candidate === null) {
+      log.debug("ICE gathering complete");
+      return;
+    }
+    const c = event.candidate;
+    log.debug("Local ICE candidate", {
+      type: c.type,
+      address: c.address,
+      port: c.port,
+      protocol: c.protocol,
+      candidate: c.candidate,
+    });
     const init: RTCIceCandidateInit = {
-      candidate: event.candidate.candidate,
-      sdpMid: event.candidate.sdpMid,
-      sdpMLineIndex: event.candidate.sdpMLineIndex,
+      candidate: c.candidate,
+      sdpMid: c.sdpMid,
+      sdpMLineIndex: c.sdpMLineIndex,
     };
     for (const cb of iceCandidateCallbacks) {
       cb(init);
@@ -75,9 +145,20 @@ export function createWebRtcService(): WebRtcService {
 
   function handleTrackEvent(event: RTCTrackEvent): void {
     const stream = event.streams[0];
-    if (stream === undefined) return;
-    // Only add if not already tracked
-    if (remoteStreams.some((s) => s.id === stream.id)) return;
+    if (stream === undefined) {
+      log.warn("Remote track event with no stream");
+      return;
+    }
+    if (remoteStreams.some((s) => s.id === stream.id)) {
+      log.debug("Duplicate remote stream ignored", { streamId: stream.id });
+      return;
+    }
+    log.info("Remote track received", {
+      streamId: stream.id,
+      trackId: event.track.id,
+      kind: event.track.kind,
+      totalStreams: remoteStreams.length + 1,
+    });
     remoteStreams = [...remoteStreams, stream];
     for (const cb of remoteTrackCallbacks) {
       cb(stream);
@@ -92,9 +173,24 @@ export function createWebRtcService(): WebRtcService {
     }
   }
 
+  function handleIceConnectionStateChange(): void {
+    if (pc === null) return;
+    const state = pc.iceConnectionState;
+    for (const cb of iceStateCallbacks) {
+      cb(state);
+    }
+  }
+
+  function handleNegotiationNeeded(): void {
+    // Log canary — if this fires, something triggered SDP renegotiation
+    // that our explicit offer/answer flow didn't handle. Upgrade to a
+    // full handler (auto-create offer) if this shows up in production.
+    console.warn("[WebRTC] negotiationneeded fired unexpectedly — signalingState:", pc?.signalingState);
+  }
+
   function mungeIfNeeded(sdp: string | undefined): string {
     if (sdp === undefined) return "";
-    return opusBitrate !== undefined ? applyOpusBitrate(sdp, opusBitrate) : sdp;
+    return applyOpusSettings(sdp, opusBitrate);
   }
 
   return {
@@ -106,6 +202,10 @@ export function createWebRtcService(): WebRtcService {
       opusBitrate = config.opusBitrate;
       remoteStreams = [];
       localSenders = [];
+      isMuted = false;
+      isSilenced = false;
+      hasRemoteDescription = false;
+      pendingIceCandidates.length = 0;
 
       pc = new RTCPeerConnection({
         iceServers: [...config.iceServers],
@@ -113,62 +213,102 @@ export function createWebRtcService(): WebRtcService {
       pc.addEventListener("icecandidate", handleIceCandidateEvent);
       pc.addEventListener("track", handleTrackEvent);
       pc.addEventListener("connectionstatechange", handleConnectionStateChange);
+      pc.addEventListener("iceconnectionstatechange", handleIceConnectionStateChange);
+      pc.addEventListener("negotiationneeded", handleNegotiationNeeded);
+      log.info("PeerConnection created", {
+        iceServerCount: config.iceServers.length,
+        opusBitrate: config.opusBitrate,
+      });
     },
 
     async handleOffer(sdp: string): Promise<string> {
       const conn = assertConnection();
       await conn.setRemoteDescription({ type: "offer", sdp });
+      await flushIceCandidates(conn);
       const answer = await conn.createAnswer();
       const mungedSdp = mungeIfNeeded(answer.sdp);
-      const finalAnswer: RTCSessionDescriptionInit = { type: "answer", sdp: mungedSdp };
-      await conn.setLocalDescription(finalAnswer);
+      await conn.setLocalDescription({ type: "answer", sdp: mungedSdp });
       return mungedSdp;
     },
 
     async handleAnswer(sdp: string): Promise<void> {
       const conn = assertConnection();
       await conn.setRemoteDescription({ type: "answer", sdp });
+      await flushIceCandidates(conn);
     },
 
     async handleServerOffer(sdp: string): Promise<string> {
       const conn = assertConnection();
-      // Perfect Negotiation: client is "polite" peer.
-      // If we have a pending local offer, rollback first.
       if (conn.signalingState === "have-local-offer") {
+        log.info("Rolling back local offer for server renegotiation (glare)");
         await conn.setLocalDescription({ type: "rollback" });
       }
       await conn.setRemoteDescription({ type: "offer", sdp });
+      await flushIceCandidates(conn);
       const answer = await conn.createAnswer();
       const mungedSdp = mungeIfNeeded(answer.sdp);
-      const finalAnswer: RTCSessionDescriptionInit = { type: "answer", sdp: mungedSdp };
-      await conn.setLocalDescription(finalAnswer);
+      await conn.setLocalDescription({ type: "answer", sdp: mungedSdp });
       return mungedSdp;
     },
 
-    async createOffer(): Promise<string> {
+    async createOffer(iceRestart = false): Promise<string> {
       const conn = assertConnection();
-      const offer = await conn.createOffer();
+      const offer = await conn.createOffer({ iceRestart });
       const mungedSdp = mungeIfNeeded(offer.sdp);
-      const finalOffer: RTCSessionDescriptionInit = { type: "offer", sdp: mungedSdp };
-      await conn.setLocalDescription(finalOffer);
+      await conn.setLocalDescription({ type: "offer", sdp: mungedSdp });
       return mungedSdp;
     },
 
     async handleIceCandidate(candidate: RTCIceCandidateInit): Promise<void> {
       const conn = assertConnection();
+      if (!hasRemoteDescription) {
+        pendingIceCandidates.push(candidate);
+        log.debug("ICE candidate queued (no remote description yet)", { queueDepth: pendingIceCandidates.length });
+        return;
+      }
       await conn.addIceCandidate(candidate);
     },
 
     setLocalStream(stream: MediaStream): void {
       const conn = assertConnection();
-      // Remove existing senders
+      const removedCount = localSenders.length;
       for (const sender of localSenders) {
         conn.removeTrack(sender);
       }
-      mutedTracks.clear();
-      // Add all tracks from the new stream
+
       const newSenders = stream.getTracks().map((track) => conn.addTrack(track, stream));
       localSenders = newSenders;
+
+      // Apply current mute/silence state to new tracks
+      applyTrackEnabled();
+      log.debug("Local stream set", { removedSenders: removedCount, addedTracks: newSenders.length });
+    },
+
+    async replaceTrack(stream: MediaStream): Promise<void> {
+      assertConnection();
+      const newTracks = stream.getAudioTracks();
+      if (newTracks.length === 0) {
+        log.warn("replaceTrack called with no audio tracks");
+        return;
+      }
+      const newTrack = newTracks[0]!;
+
+      if (localSenders.length > 0) {
+        // Swap track on existing sender — no SDP renegotiation needed
+        for (const sender of localSenders) {
+          await sender.replaceTrack(newTrack);
+        }
+        log.debug("Track replaced on existing senders", { senderCount: localSenders.length, trackId: newTrack.id });
+      } else {
+        // No existing senders — fall back to addTrack (initial attach)
+        log.debug("replaceTrack fallback: no senders, using addTrack");
+        const conn = assertConnection();
+        const newSenders = stream.getTracks().map((track) => conn.addTrack(track, stream));
+        localSenders = newSenders;
+      }
+
+      // Apply current mute/silence state to the new track
+      applyTrackEnabled();
     },
 
     getRemoteStreams(): readonly MediaStream[] {
@@ -176,25 +316,13 @@ export function createWebRtcService(): WebRtcService {
     },
 
     setMuted(muted: boolean): void {
-      for (const sender of localSenders) {
-        if (muted) {
-          // Store original track and replace with null to fully stop sending audio
-          const track = sender.track;
-          if (track !== null) {
-            track.enabled = false;
-            mutedTracks.set(sender, track);
-            void sender.replaceTrack(null);
-          }
-        } else {
-          // Restore the original track
-          const track = mutedTracks.get(sender);
-          if (track !== undefined) {
-            track.enabled = true;
-            void sender.replaceTrack(track);
-            mutedTracks.delete(sender);
-          }
-        }
-      }
+      isMuted = muted;
+      applyTrackEnabled();
+    },
+
+    setSilenced(silenced: boolean): void {
+      isSilenced = silenced;
+      applyTrackEnabled();
     },
 
     onIceCandidate(callback: IceCandidateCallback): () => void {
@@ -212,22 +340,31 @@ export function createWebRtcService(): WebRtcService {
       return () => { stateChangeCallbacks.delete(callback); };
     },
 
+    onIceStateChange(callback: IceStateCallback): () => void {
+      iceStateCallbacks.add(callback);
+      return () => { iceStateCallbacks.delete(callback); };
+    },
+
     destroy(): void {
       if (destroyed) return;
       destroyed = true;
+      log.debug("WebRTC service destroying", { remoteStreams: remoteStreams.length, localSenders: localSenders.length });
       if (pc !== null) {
         pc.removeEventListener("icecandidate", handleIceCandidateEvent);
         pc.removeEventListener("track", handleTrackEvent);
         pc.removeEventListener("connectionstatechange", handleConnectionStateChange);
+        pc.removeEventListener("iceconnectionstatechange", handleIceConnectionStateChange);
+        pc.removeEventListener("negotiationneeded", handleNegotiationNeeded);
         pc.close();
         pc = null;
       }
       localSenders = [];
-      mutedTracks.clear();
       remoteStreams = [];
+      pendingIceCandidates.length = 0;
       iceCandidateCallbacks.clear();
       remoteTrackCallbacks.clear();
       stateChangeCallbacks.clear();
+      iceStateCallbacks.clear();
     },
   };
 }
