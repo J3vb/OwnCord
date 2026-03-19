@@ -1,4 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// jsdom does not provide ResizeObserver — stub it so MessageList can mount.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class {
+    observe(): void { /* noop */ }
+    unobserve(): void { /* noop */ }
+    disconnect(): void { /* noop */ }
+  } as unknown as typeof ResizeObserver;
+}
+
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";

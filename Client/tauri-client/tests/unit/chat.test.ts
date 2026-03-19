@@ -6,6 +6,15 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+// jsdom does not provide ResizeObserver — stub it so MessageList can mount.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class {
+    observe(): void { /* noop */ }
+    unobserve(): void { /* noop */ }
+    disconnect(): void { /* noop */ }
+  } as unknown as typeof ResizeObserver;
+}
+
 // ---------------------------------------------------------------------------
 // MessageList helpers (we test the exported component's behavior via DOM)
 // ---------------------------------------------------------------------------
