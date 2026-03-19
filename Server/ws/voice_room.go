@@ -2,12 +2,19 @@ package ws
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/pion/webrtc/v4"
 )
+
+// trackKey builds a composite map key for a user's track of a given kind.
+func trackKey(userID int64, kind string) string {
+	return fmt.Sprintf("%d-%s", userID, kind)
+}
 
 // ErrRoomFull is returned when attempting to add a participant to a full voice room.
 var ErrRoomFull = errors.New("voice room is full")
@@ -69,7 +76,7 @@ type VoiceRoomConfig struct {
 type VoiceRoom struct {
 	config       VoiceRoomConfig
 	participants map[int64]*VoiceParticipant
-	tracks       map[int64]*VoiceTrack
+	tracks       map[string]*VoiceTrack
 	mode         string // "forwarding" or "selective"
 	detector     *SpeakerDetector
 	mu           sync.RWMutex
@@ -84,7 +91,7 @@ func NewVoiceRoom(cfg VoiceRoomConfig) *VoiceRoom {
 	return &VoiceRoom{
 		config:       cfg,
 		participants: make(map[int64]*VoiceParticipant),
-		tracks:       make(map[int64]*VoiceTrack),
+		tracks:       make(map[string]*VoiceTrack),
 		mode:         "forwarding",
 		detector:     NewSpeakerDetector(topN),
 	}
@@ -178,16 +185,17 @@ func (r *VoiceRoom) Close() {
 		"participants", len(r.participants),
 		"tracks", len(r.tracks))
 	r.participants = make(map[int64]*VoiceParticipant)
-	r.tracks = make(map[int64]*VoiceTrack)
+	r.tracks = make(map[string]*VoiceTrack)
 	r.mode = "forwarding"
 }
 
-// SetTrack stores a VoiceTrack for the given user (replaces any existing one).
-func (r *VoiceRoom) SetTrack(userID int64, remote *webrtc.TrackRemote, local *webrtc.TrackLocalStaticRTP) {
+// SetTrack stores a VoiceTrack for the given user and kind (replaces any existing one).
+func (r *VoiceRoom) SetTrack(userID int64, kind string, remote *webrtc.TrackRemote, local *webrtc.TrackLocalStaticRTP) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	_, replaced := r.tracks[userID]
-	r.tracks[userID] = &VoiceTrack{
+	key := trackKey(userID, kind)
+	_, replaced := r.tracks[key]
+	r.tracks[key] = &VoiceTrack{
 		UserID:  userID,
 		Remote:  remote,
 		Local:   local,
@@ -200,22 +208,25 @@ func (r *VoiceRoom) SetTrack(userID int64, remote *webrtc.TrackRemote, local *we
 	slog.Debug("voice room track set",
 		"channel_id", r.config.ChannelID,
 		"user_id", userID,
+		"kind", kind,
 		"replaced", replaced,
 		"codec", codec,
 		"total_tracks", len(r.tracks))
 }
 
-// RemoveTrack removes and returns the VoiceTrack for the given user.
-// Returns nil if no track exists for that user.
-func (r *VoiceRoom) RemoveTrack(userID int64) *VoiceTrack {
+// RemoveTrack removes and returns the VoiceTrack for the given user and kind.
+// Returns nil if no track exists for that user/kind.
+func (r *VoiceRoom) RemoveTrack(userID int64, kind string) *VoiceTrack {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	vt, ok := r.tracks[userID]
+	key := trackKey(userID, kind)
+	vt, ok := r.tracks[key]
 	if ok {
-		delete(r.tracks, userID)
+		delete(r.tracks, key)
 		slog.Debug("voice room track removed",
 			"channel_id", r.config.ChannelID,
 			"user_id", userID,
+			"kind", kind,
 			"remaining_tracks", len(r.tracks))
 	}
 	return vt
@@ -232,22 +243,40 @@ func (r *VoiceRoom) GetTracks() []*VoiceTrack {
 	return result
 }
 
-// TrackUserIDs returns the user IDs of all users that have an active track.
+// TrackUserIDs returns the deduplicated user IDs of all users that have an active track.
 func (r *VoiceRoom) TrackUserIDs() []int64 {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	ids := make([]int64, 0, len(r.tracks))
-	for id := range r.tracks {
+	seen := make(map[int64]struct{})
+	for _, vt := range r.tracks {
+		seen[vt.UserID] = struct{}{}
+	}
+	ids := make([]int64, 0, len(seen))
+	for id := range seen {
 		ids = append(ids, id)
 	}
 	return ids
 }
 
-// GetTrack returns the VoiceTrack for the given user, or nil if not present.
-func (r *VoiceRoom) GetTrack(userID int64) *VoiceTrack {
+// GetTrack returns the VoiceTrack for the given user and kind, or nil if not present.
+func (r *VoiceRoom) GetTrack(userID int64, kind string) *VoiceTrack {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.tracks[userID]
+	return r.tracks[trackKey(userID, kind)]
+}
+
+// GetUserTracks returns all tracks belonging to the given user.
+func (r *VoiceRoom) GetUserTracks(userID int64) []*VoiceTrack {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	prefix := fmt.Sprintf("%d-", userID)
+	var result []*VoiceTrack
+	for key, vt := range r.tracks {
+		if strings.HasPrefix(key, prefix) {
+			result = append(result, vt)
+		}
+	}
+	return result
 }
 
 // UpdateSpeakerLevel updates the audio level for a user in this room's detector.

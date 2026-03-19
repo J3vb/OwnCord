@@ -322,8 +322,12 @@ func (h *Hub) handleVoiceLeave(c *Client) {
 	// Done AFTER oldPC.Close() so the RTP goroutine has exited.
 	if oldChID > 0 {
 		if room := h.GetVoiceRoom(oldChID); room != nil {
-			vt := room.RemoveTrack(c.userID)
-			if vt != nil {
+			needsRenego := make(map[int64]*Client)
+			for _, kind := range []string{"audio", "video"} {
+				vt := room.RemoveTrack(c.userID, kind)
+				if vt == nil {
+					continue
+				}
 				senders := vt.CopySenders()
 				for subID, sender := range senders {
 					sub := h.GetClient(subID)
@@ -336,10 +340,13 @@ func (h *Hub) handleVoiceLeave(c *Client) {
 					}
 					if rmErr := subPC.RemoveTrack(sender); rmErr != nil {
 						slog.Error("handleVoiceLeave RemoveTrack",
-							"err", rmErr, "user_id", subID)
+							"err", rmErr, "user_id", subID, "kind", kind)
 					}
-					h.renegotiateParticipant(sub)
+					needsRenego[subID] = sub
 				}
+			}
+			for _, sub := range needsRenego {
+				h.renegotiateParticipant(sub)
 			}
 		}
 	}
@@ -704,8 +711,8 @@ func (h *Hub) setupOnTrack(c *Client, channelID int64) {
 		}
 
 		// Store track on room.
-		room.SetTrack(c.userID, track, local)
-		vt := room.GetTrack(c.userID)
+		room.SetTrack(c.userID, "audio", track, local)
+		vt := room.GetTrack(c.userID, "audio")
 
 		// Collect other participant IDs (lock ordering: VoiceRoom.mu released before voiceMu).
 		participantIDs := room.ParticipantIDs()

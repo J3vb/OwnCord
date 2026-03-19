@@ -1490,6 +1490,40 @@ func TestVoice_HandleMessage_VoiceScreenshare_Dispatched(t *testing.T) {
 	}
 }
 
+// ─── composite track keys ─────────────────────────────────────────────────────
+
+func TestVoiceRoom_CompositeTrackKeys(t *testing.T) {
+	room := ws.NewVoiceRoom(ws.VoiceRoomConfig{
+		ChannelID: 1, MaxUsers: 10, Quality: "medium",
+		MixingThreshold: 10, TopSpeakers: 3, MaxVideo: 25,
+	})
+
+	room.SetTrack(42, "audio", nil, nil)
+	room.SetTrack(42, "video", nil, nil)
+
+	audioTrack := room.GetTrack(42, "audio")
+	videoTrack := room.GetTrack(42, "video")
+	if audioTrack == nil {
+		t.Fatal("audio track should exist")
+	}
+	if videoTrack == nil {
+		t.Fatal("video track should exist")
+	}
+
+	room.RemoveTrack(42, "video")
+	if room.GetTrack(42, "audio") == nil {
+		t.Fatal("audio track should still exist after removing video")
+	}
+	if room.GetTrack(42, "video") != nil {
+		t.Fatal("video track should be removed")
+	}
+
+	userTracks := room.GetUserTracks(42)
+	if len(userTracks) != 1 {
+		t.Fatalf("expected 1 track, got %d", len(userTracks))
+	}
+}
+
 // ─── ICE monitor / setupICEMonitor ────────────────────────────────────────────
 
 // TestVoice_SetupICEMonitor_NilPC_NoPanic verifies that setupICEMonitor does
