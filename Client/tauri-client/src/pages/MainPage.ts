@@ -178,11 +178,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       if (isVideoMode) showChat();
       return;
     }
-    let anyCameraOn = false;
-    for (const user of channelUsers.values()) {
-      if (user.camera) {
-        anyCameraOn = true;
-        break;
+    let anyCameraOn = voice.localCamera; // Check local camera first (may not be in voiceUsers yet)
+    if (!anyCameraOn) {
+      for (const user of channelUsers.values()) {
+        if (user.camera) {
+          anyCameraOn = true;
+          break;
+        }
       }
     }
     if (anyCameraOn && !isVideoMode) {
