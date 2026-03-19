@@ -47,6 +47,7 @@ import {
   setOnRemoteVideo,
   setOnRemoteVideoRemoved,
   clearOnRemoteVideo,
+  getLocalCameraStream,
   setWsClient,
   setOnError as setVoiceOnError,
   clearOnError as clearVoiceOnError,
@@ -188,6 +189,18 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       showVideoGrid();
     } else if (!anyCameraOn && isVideoMode) {
       showChat();
+    }
+
+    // Manage local self-view tile
+    const currentUserId = getCurrentUserId();
+    if (voice.localCamera && videoGrid !== null) {
+      const localStream = getLocalCameraStream();
+      if (localStream !== null) {
+        const me = channelUsers?.get(currentUserId);
+        videoGrid.addStream(currentUserId, me?.username ? `${me.username} (You)` : "You", localStream);
+      }
+    } else if (!voice.localCamera && videoGrid !== null) {
+      videoGrid.removeStream(getCurrentUserId());
     }
   }
 

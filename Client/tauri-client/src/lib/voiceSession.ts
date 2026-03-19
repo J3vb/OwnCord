@@ -989,6 +989,11 @@ export function measureStreamLevel(stream: MediaStream): Promise<number> {
   });
 }
 
+/** Get the local camera stream for self-view display. */
+export function getLocalCameraStream(): MediaStream | null {
+  return cameraStream;
+}
+
 /** Snapshot of current voice session state for debugging. */
 export function getSessionDebugInfo(): Record<string, unknown> {
   // Gather detailed remote track info
