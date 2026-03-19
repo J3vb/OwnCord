@@ -18,7 +18,7 @@ import (
 // their own account via the admin panel.
 func TestAdminAPI_PatchUser_CannotModifySelf(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil)
 	token := createAdminUser(t, database)
 
 	// The admin user created by createAdminUser has id=1. We try to patch id=1.
@@ -34,7 +34,7 @@ func TestAdminAPI_PatchUser_CannotModifySelf(t *testing.T) {
 // banned user unbans them and returns 200.
 func TestAdminAPI_PatchUser_UnbanUser(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil)
 	token := createAdminUser(t, database)
 
 	// Create and ban a target user first.
@@ -58,7 +58,7 @@ func TestAdminAPI_PatchUser_UnbanUser(t *testing.T) {
 // TestAdminAPI_PatchUser_InvalidBody verifies that a non-JSON body returns 400.
 func TestAdminAPI_PatchUser_InvalidBody(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 	token := createAdminUser(t, database)
 
 	targetUID, _ := database.CreateUser("invalidbody", "hash", 3)
@@ -80,7 +80,7 @@ func TestAdminAPI_PatchUser_InvalidBody(t *testing.T) {
 // "type" field causes the channel to be created with type "text".
 func TestAdminAPI_CreateChannel_DefaultsTypeToText(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 	token := createAdminUser(t, database)
 
 	body := map[string]any{
@@ -105,7 +105,7 @@ func TestAdminAPI_CreateChannel_DefaultsTypeToText(t *testing.T) {
 // TestAdminAPI_CreateChannel_InvalidBody verifies that a malformed body returns 400.
 func TestAdminAPI_CreateChannel_InvalidBody(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 	token := createAdminUser(t, database)
 
 	req := httptest.NewRequest(http.MethodPost, "/channels", bytes.NewReader([]byte("not-json")))
@@ -125,7 +125,7 @@ func TestAdminAPI_CreateChannel_InvalidBody(t *testing.T) {
 // the URL returns 400.
 func TestAdminAPI_ForceLogout_InvalidID(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodDelete, "/users/notanumber/sessions", token, nil)
@@ -141,7 +141,7 @@ func TestAdminAPI_ForceLogout_InvalidID(t *testing.T) {
 // returns 400.
 func TestAdminAPI_PatchChannel_InvalidBody(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 	token := createAdminUser(t, database)
 
 	chID, _ := database.AdminCreateChannel("malformed", "text", "", "", 0)
@@ -163,7 +163,7 @@ func TestAdminAPI_PatchChannel_InvalidBody(t *testing.T) {
 // to 500 (testing the queryInt cap branch).
 func TestAdminAPI_ListUsers_CapLargeLimit(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 	token := createAdminUser(t, database)
 
 	// Passing limit=9999 should be silently capped to 500.
@@ -180,7 +180,7 @@ func TestAdminAPI_ListUsers_CapLargeLimit(t *testing.T) {
 // when no updater is configured.
 func TestAdminAPI_CheckUpdate_NilUpdater(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/updates", token, nil)
@@ -196,7 +196,7 @@ func TestAdminAPI_CheckUpdate_NilUpdater(t *testing.T) {
 // returns 400.
 func TestAdminAPI_DeleteChannel_InvalidID(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodDelete, "/channels/notanumber", token, nil)
@@ -212,7 +212,7 @@ func TestAdminAPI_DeleteChannel_InvalidID(t *testing.T) {
 // returns 400.
 func TestAdminAPI_PatchChannel_InvalidID(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 	token := createAdminUser(t, database)
 
 	body := map[string]any{"name": "x"}
@@ -228,7 +228,7 @@ func TestAdminAPI_PatchChannel_InvalidID(t *testing.T) {
 // TestAdminAPI_AuditLog_Pagination verifies that limit and offset params work.
 func TestAdminAPI_AuditLog_Pagination(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 	token := createAdminUser(t, database)
 
 	// Create several audit entries.
@@ -259,7 +259,7 @@ func TestAdminAPI_AuditLog_Pagination(t *testing.T) {
 // hub is nil (the OnlineCount field defaults to 0).
 func TestAdminAPI_Stats_NilHub(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", token, nil)
@@ -286,7 +286,7 @@ func TestAdminAPI_Stats_NilHub(t *testing.T) {
 // falls back to the default (testing the queryInt error-fallback branch).
 func TestAdminAPI_AuditLog_InvalidLimitParam(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/audit-log?limit=notanumber", token, nil)
@@ -300,7 +300,7 @@ func TestAdminAPI_AuditLog_InvalidLimitParam(t *testing.T) {
 // the default (testing the n < 1 branch of queryInt).
 func TestAdminAPI_ListUsers_InvalidLimitParam(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 	token := createAdminUser(t, database)
 
 	// limit=0 triggers the n < 1 fallback in queryInt
@@ -318,7 +318,7 @@ func TestAdminAPI_ListUsers_InvalidLimitParam(t *testing.T) {
 // BroadcastMemberBan).
 func TestAdminAPI_PatchUser_BanNilHubDoesNotPanic(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 	token := createAdminUser(t, database)
 
 	targetUID, _ := database.CreateUser("ban-nohub", "hash", 3)
@@ -342,7 +342,7 @@ func TestAdminAPI_PatchUser_BanNilHubDoesNotPanic(t *testing.T) {
 // around BroadcastMemberUpdate).
 func TestAdminAPI_PatchUser_RoleChangeNilHubDoesNotPanic(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 	token := createAdminUser(t, database)
 
 	targetUID, _ := database.CreateUser("role-nohub", "hash", 3)
@@ -367,7 +367,7 @@ func TestAdminAPI_PatchUser_RoleChangeNilHubDoesNotPanic(t *testing.T) {
 // providing ban_reason is accepted (reason defaults to empty string).
 func TestAdminAPI_PatchUser_BanWithoutReason(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil)
 	token := createAdminUser(t, database)
 
 	targetUID, _ := database.CreateUser("banwithout", "hash", 3)
@@ -388,7 +388,7 @@ func TestAdminAPI_PatchUser_BanWithoutReason(t *testing.T) {
 func TestAdminAPI_PatchUser_RoleChangeBroadcast(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil)
 	token := createAdminUser(t, database)
 
 	targetUID, _ := database.CreateUser("rolebroadcast", "hash", 3)
@@ -410,7 +410,7 @@ func TestAdminAPI_PatchUser_RoleChangeBroadcast(t *testing.T) {
 // needs_setup=true when the database has no users.
 func TestAdminAPI_SetupStatus_NeedsSetup(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 
 	w := doRequest(t, handler, http.MethodGet, "/setup/status", "", nil)
 
@@ -430,7 +430,7 @@ func TestAdminAPI_SetupStatus_NeedsSetup(t *testing.T) {
 // TestAdminAPI_SetupStatus_AlreadySetup verifies needs_setup=false when users exist.
 func TestAdminAPI_SetupStatus_AlreadySetup(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 
 	_, _ = database.CreateUser("existing", "hash", 1)
 
@@ -451,7 +451,7 @@ func TestAdminAPI_SetupStatus_AlreadySetup(t *testing.T) {
 // session, channel, and invite.
 func TestAdminAPI_Setup_Success(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 
 	body := map[string]string{
 		"username": "owner",
@@ -482,7 +482,7 @@ func TestAdminAPI_Setup_Success(t *testing.T) {
 // when users already exist.
 func TestAdminAPI_Setup_AlreadyCompleted(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 
 	_, _ = database.CreateUser("existing", "hash", 1)
 
@@ -501,7 +501,7 @@ func TestAdminAPI_Setup_AlreadyCompleted(t *testing.T) {
 // username or password returns 400.
 func TestAdminAPI_Setup_MissingFields(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 
 	body := map[string]string{
 		"username": "",
@@ -517,7 +517,7 @@ func TestAdminAPI_Setup_MissingFields(t *testing.T) {
 // TestAdminAPI_Setup_WeakPassword verifies that a weak password is rejected.
 func TestAdminAPI_Setup_WeakPassword(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 
 	body := map[string]string{
 		"username": "owner",
@@ -533,7 +533,7 @@ func TestAdminAPI_Setup_WeakPassword(t *testing.T) {
 // TestAdminAPI_Setup_InvalidBody verifies that a non-JSON body returns 400.
 func TestAdminAPI_Setup_InvalidBody(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/setup", bytes.NewReader([]byte("not-json")))
 	w := httptest.NewRecorder()

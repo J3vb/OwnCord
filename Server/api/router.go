@@ -20,7 +20,7 @@ import (
 
 // NewRouter builds and returns the fully configured HTTP handler and the
 // WebSocket hub (so the caller can call hub.GracefulStop on shutdown).
-func NewRouter(cfg *config.Config, database *db.DB, ver string) (http.Handler, *ws.Hub) {
+func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.RingBuffer) (http.Handler, *ws.Hub) {
 	r := chi.NewRouter()
 
 	// Middleware stack.
@@ -82,7 +82,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string) (http.Handler, *
 
 	// Admin panel: static files + REST API (Phase 6).
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, "J3vb", "OwnCord")
-	r.Mount("/admin", admin.NewHandler(database, ver, hub, u))
+	r.Mount("/admin", admin.NewHandler(database, ver, hub, u, logBuf))
 
 	// Client auto-update endpoint (unauthenticated).
 	MountClientUpdateRoute(r, u)

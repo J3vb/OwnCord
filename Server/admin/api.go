@@ -114,12 +114,18 @@ func toAdminUserResponseFromUser(database *db.DB, u *db.User) adminUserResponse 
 // NewAdminAPI returns a chi router with all /admin/api/* routes. All routes
 // are protected by adminAuthMiddleware which requires the ADMINISTRATOR bit,
 // except for the setup endpoints which are unauthenticated.
-func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater) http.Handler {
+func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer) http.Handler {
 	r := chi.NewRouter()
 
 	// Setup endpoints — unauthenticated, only functional when no users exist.
 	r.Get("/setup/status", handleSetupStatus(database))
 	r.Post("/setup", handleSetup(database))
+
+	// SSE log stream — does its own auth via query param token because
+	// EventSource cannot send Authorization headers.
+	if logBuf != nil {
+		r.Get("/logs/stream", handleLogStream(logBuf, database))
+	}
 
 	// All remaining routes require authentication and ADMINISTRATOR permission.
 	r.Group(func(r chi.Router) {

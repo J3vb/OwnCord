@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/owncord/server/admin"
 	"github.com/owncord/server/api"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
@@ -28,11 +29,15 @@ import (
 var version = "dev"
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
+	// Create ring buffer for admin log viewer, then build a multi-handler
+	// that tees log records to both stdout (INFO+) and the ring buffer (DEBUG+).
+	logBuf := admin.NewRingBuffer(2000)
+	stdoutHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+	multiHandler := admin.NewMultiHandler(stdoutHandler, logBuf, slog.LevelDebug)
+	log := slog.New(multiHandler)
+	slog.SetDefault(log)
 
-	if err := run(log); err != nil {
+	if err := run(log, logBuf); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "\n  [ERROR] %v\n\n", err)
 		log.Error("server exited with error", "error", err)
 		os.Exit(1)
@@ -40,7 +45,7 @@ func main() {
 }
 
 // run is the real entrypoint — separated for testability.
-func run(log *slog.Logger) error {
+func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 	// Clean up old binary from a previous update.
 	if exePath, err := os.Executable(); err == nil {
 		oldPath := exePath + ".old"
@@ -64,7 +69,17 @@ func run(log *slog.Logger) error {
 		return fmt.Errorf("creating data dir %s: %w", cfg.Server.DataDir, mkdirErr)
 	}
 
-	// ── 3. Open database + run migrations ─────────────────────────────────
+	// ── 3. TLS ────────────────────────────────────────────────────────────
+	tlsResult, err := auth.LoadOrGenerate(cfg.TLS)
+	if err != nil {
+		return fmt.Errorf("configuring TLS: %w", err)
+	}
+	tlsCfg := tlsResult.TLSConfig
+
+	// Print startup banner first so it appears above all init logs.
+	printBanner(cfg, version, tlsCfg != nil)
+
+	// ── 4. Open database + run migrations ─────────────────────────────────
 	database, err := db.Open(cfg.Database.Path)
 	if err != nil {
 		return fmt.Errorf("opening database: %w", err)
@@ -87,15 +102,8 @@ func run(log *slog.Logger) error {
 		log.Info("cleared stale voice states")
 	}
 
-	// ── 4. TLS ─────────────────────────────────────────────────────────────
-	tlsResult, err := auth.LoadOrGenerate(cfg.TLS)
-	if err != nil {
-		return fmt.Errorf("configuring TLS: %w", err)
-	}
-	tlsCfg := tlsResult.TLSConfig
-
 	// ── 5. Build HTTP router ───────────────────────────────────────────────
-	router, hub := api.NewRouter(cfg, database, version)
+	router, hub := api.NewRouter(cfg, database, version, logBuf)
 
 	// ── 6. Start server ────────────────────────────────────────────────────
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
@@ -149,9 +157,6 @@ func run(log *slog.Logger) error {
 	// Listen for OS signals for graceful shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	// Print startup banner.
-	printBanner(cfg, version, tlsCfg != nil)
 
 	// Start serving in a goroutine.
 	serveErr := make(chan error, 1)

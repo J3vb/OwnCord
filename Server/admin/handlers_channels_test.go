@@ -12,7 +12,7 @@ import (
 
 func TestCreateChannel_TextUnderTextCategory_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil)
 	token := createAdminUser(t, database)
 
 	body := map[string]any{
@@ -28,7 +28,7 @@ func TestCreateChannel_TextUnderTextCategory_OK(t *testing.T) {
 
 func TestCreateChannel_AnnouncementUnderTextCategory_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil)
 	token := createAdminUser(t, database)
 
 	body := map[string]any{
@@ -44,7 +44,7 @@ func TestCreateChannel_AnnouncementUnderTextCategory_OK(t *testing.T) {
 
 func TestCreateChannel_VoiceUnderVoiceCategory_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil)
 	token := createAdminUser(t, database)
 
 	body := map[string]any{
@@ -60,7 +60,7 @@ func TestCreateChannel_VoiceUnderVoiceCategory_OK(t *testing.T) {
 
 func TestCreateChannel_VoiceUnderTextCategory_Rejected(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil)
 	token := createAdminUser(t, database)
 
 	body := map[string]any{
@@ -83,7 +83,7 @@ func TestCreateChannel_VoiceUnderTextCategory_Rejected(t *testing.T) {
 
 func TestCreateChannel_TextUnderVoiceCategory_Rejected(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil)
 	token := createAdminUser(t, database)
 
 	body := map[string]any{
@@ -99,7 +99,7 @@ func TestCreateChannel_TextUnderVoiceCategory_Rejected(t *testing.T) {
 
 func TestCreateChannel_EmptyCategory_Allowed(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil)
 	token := createAdminUser(t, database)
 
 	body := map[string]any{
@@ -115,7 +115,7 @@ func TestCreateChannel_EmptyCategory_Allowed(t *testing.T) {
 
 func TestCreateChannel_CaseInsensitiveVoiceCategory(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil)
 	token := createAdminUser(t, database)
 
 	// "VOICE" in uppercase should still be treated as a voice category
