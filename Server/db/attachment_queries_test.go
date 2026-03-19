@@ -9,9 +9,12 @@ import (
 func TestGetAttachmentByID_NotFound(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	_, err := database.GetAttachmentByID("nonexistent-id")
-	if err == nil {
-		t.Error("GetAttachmentByID for nonexistent ID should return error")
+	att, err := database.GetAttachmentByID("nonexistent-id")
+	if err != nil {
+		t.Errorf("GetAttachmentByID for nonexistent ID should return nil error, got %v", err)
+	}
+	if att != nil {
+		t.Error("GetAttachmentByID for nonexistent ID should return nil attachment")
 	}
 }
 

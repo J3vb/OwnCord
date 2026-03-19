@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"log/slog"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -112,6 +113,11 @@ func handleServeFile(database *db.DB, store *storage.Storage) http.HandlerFunc {
 		// Look up attachment metadata.
 		att, err := database.GetAttachmentByID(fileID)
 		if err != nil {
+			slog.Error("failed to look up attachment", "id", fileID, "error", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		if att == nil {
 			http.NotFound(w, r)
 			return
 		}
@@ -126,7 +132,7 @@ func handleServeFile(database *db.DB, store *storage.Storage) http.HandlerFunc {
 
 		// Set headers before ServeContent to ensure correct MIME type.
 		w.Header().Set("Content-Type", att.MimeType)
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, att.Filename))
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": att.Filename}))
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		// CORS: allow webview to read the response body.
 		w.Header().Set("Access-Control-Allow-Origin", "*")

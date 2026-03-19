@@ -18,8 +18,9 @@ import (
 	"github.com/owncord/server/ws"
 )
 
-// NewRouter builds and returns the fully configured HTTP handler.
-func NewRouter(cfg *config.Config, database *db.DB, ver string) http.Handler {
+// NewRouter builds and returns the fully configured HTTP handler and the
+// WebSocket hub (so the caller can call hub.GracefulStop on shutdown).
+func NewRouter(cfg *config.Config, database *db.DB, ver string) (http.Handler, *ws.Hub) {
 	r := chi.NewRouter()
 
 	// Middleware stack.
@@ -86,7 +87,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string) http.Handler {
 	// Client auto-update endpoint (unauthenticated).
 	MountClientUpdateRoute(r, u)
 
-	return r
+	return r, hub
 }
 
 // serverStartTime records when the process started; used for uptime in /health.

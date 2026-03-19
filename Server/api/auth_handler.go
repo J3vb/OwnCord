@@ -156,7 +156,15 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		user, _ := database.GetUserByID(uid)
+		user, err := database.GetUserByID(uid)
+		if err != nil || user == nil {
+			slog.Error("failed to fetch user after registration", "user_id", uid, "error", err)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error:   "SERVER_ERROR",
+				Message: "registration succeeded but user fetch failed",
+			})
+			return
+		}
 		writeJSON(w, http.StatusCreated, authSuccessResponse{
 			Token: token,
 			User:  toUserResponse(user),

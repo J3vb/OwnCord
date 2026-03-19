@@ -1,6 +1,8 @@
 package db
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -36,6 +38,9 @@ func (d *DB) GetAttachmentByID(id string) (*Attachment, error) {
 	)
 	a := &Attachment{}
 	err := row.Scan(&a.ID, &a.MessageID, &a.Filename, &a.StoredAs, &a.MimeType, &a.Size, &a.UploadedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("GetAttachmentByID: %w", err)
 	}

@@ -25,6 +25,7 @@ type Client struct {
 	channelID  int64  // currently viewed channel for channel-scoped broadcasts
 	voiceChID  int64  // voice channel the user is in (0 = not in voice); guarded by voiceMu
 	pc         *webrtc.PeerConnection // SFU peer connection; nil when not in voice; guarded by voiceMu
+	voiceDone  chan struct{}          // closed by clearVoice to signal RTP goroutines to exit; guarded by voiceMu
 	roleName   string // cached role name for chat_message broadcasts
 	tokenHash  string // SHA-256 hex of the session token; used for periodic revalidation
 	msgCount   int    // count of messages processed; resets after session check
@@ -126,20 +127,34 @@ func (c *Client) getPC() *webrtc.PeerConnection {
 }
 
 // setVoice sets the voice channel and PeerConnection atomically.
+// It also creates a done channel that RTP goroutines can select on.
 func (c *Client) setVoice(chID int64, pc *webrtc.PeerConnection) {
 	c.voiceMu.Lock()
 	defer c.voiceMu.Unlock()
 	c.voiceChID = chID
 	c.pc = pc
+	c.voiceDone = make(chan struct{})
+}
+
+// getVoiceDone returns the done channel for the current voice session.
+func (c *Client) getVoiceDone() <-chan struct{} {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	return c.voiceDone
 }
 
 // clearVoice clears voice state and returns the old values for cleanup.
 // The caller is responsible for closing the returned PeerConnection.
+// Closes the voiceDone channel to signal any RTP goroutines to exit.
 func (c *Client) clearVoice() (oldChID int64, oldPC *webrtc.PeerConnection) {
 	c.voiceMu.Lock()
 	defer c.voiceMu.Unlock()
 	oldChID = c.voiceChID
 	oldPC = c.pc
+	if c.voiceDone != nil {
+		close(c.voiceDone)
+		c.voiceDone = nil
+	}
 	c.voiceChID = 0
 	c.pc = nil
 	return

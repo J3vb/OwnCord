@@ -95,7 +95,7 @@ func run(log *slog.Logger) error {
 	tlsCfg := tlsResult.TLSConfig
 
 	// ── 5. Build HTTP router ───────────────────────────────────────────────
-	router := api.NewRouter(cfg, database, version)
+	router, hub := api.NewRouter(cfg, database, version)
 
 	// ── 6. Start server ────────────────────────────────────────────────────
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
@@ -158,8 +158,8 @@ func run(log *slog.Logger) error {
 	go func() {
 		log.Info("server starting", "addr", addr, "tls", tlsCfg != nil, "version", version)
 
-		var listenErr error
 		for attempt := 0; attempt < 20; attempt++ {
+			var listenErr error
 			if tlsCfg != nil {
 				listenErr = srv.ListenAndServeTLS("", "")
 			} else {
@@ -175,9 +175,6 @@ func run(log *slog.Logger) error {
 				serveErr <- listenErr
 			}
 			break
-		}
-		if listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
-			serveErr <- listenErr
 		}
 		close(serveErr)
 	}()
@@ -201,6 +198,10 @@ func run(log *slog.Logger) error {
 			log.Warn("ACME HTTP server shutdown error", "error", err)
 		}
 	}
+
+	// Stop the WebSocket hub: close all PeerConnections, voice rooms, and
+	// notify connected clients before draining HTTP connections.
+	hub.GracefulStop()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)

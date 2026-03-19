@@ -611,8 +611,7 @@ func (h *Hub) handleVoiceICE(c *Client, payload json.RawMessage) {
 
 	pc := c.getPC()
 	if pc == nil {
-		// Silently drop — stale candidates from a torn-down session are harmless.
-		slog.Debug("voice_ice ignored: no PC", "user_id", c.userID)
+		c.sendMsg(buildErrorMsg("VOICE_ERROR", "not in a voice channel"))
 		return
 	}
 
@@ -772,6 +771,8 @@ func (h *Hub) setupOnTrack(c *Client, channelID int64) {
 		}
 
 		// RTP forwarding + audio level goroutine.
+		// Capture the done channel so this goroutine exits even if PC.Close fails.
+		done := c.getVoiceDone()
 		go func() {
 			buf := make([]byte, 1500)
 			var pktCount uint64
@@ -785,6 +786,16 @@ func (h *Hub) setupOnTrack(c *Client, channelID int64) {
 			defer noPacketTimer.Stop()
 
 			for {
+				// Check if voice session was torn down.
+				select {
+				case <-done:
+					slog.Info("RTP goroutine exiting via done signal",
+						"user_id", c.userID, "channel_id", channelID,
+						"packets_forwarded", pktCount)
+					return
+				default:
+				}
+
 				n, _, readErr := track.Read(buf)
 				if readErr != nil {
 					slog.Info("RTP read ended",
