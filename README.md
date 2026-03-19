@@ -51,10 +51,16 @@ server and keep everything under your control.
 
 ### Administration
 
-- Web-based admin panel at `/admin`
-- User management (ban, kick, role assignment)
-- Server update checker (GitHub Releases integration)
-- Structured request logging
+- Web-based admin panel at `/admin` (Discord-style dark theme)
+- Dashboard with server stats and recent activity
+- User management (ban, kick, role assignment) with modals
+- Channel management (create, edit, delete)
+- Settings management (server name, MOTD, limits, security)
+- Live server log streaming via SSE with level filters,
+  search, auto-scroll, pause/resume, copy, and clear
+- Audit log with search, action type filter, copy, and CSV export
+- Database backup and restore with pre-restore safety backups
+- Server update checker and one-click apply (GitHub Releases)
 
 ### Security
 
