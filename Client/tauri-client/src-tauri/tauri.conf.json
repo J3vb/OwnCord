@@ -27,7 +27,7 @@
   },
   "bundle": {
     "active": true,
-    "createUpdaterArtifacts": "v2Compatible",
+    "createUpdaterArtifacts": "v1Compatible",
     "targets": [
       "nsis"
     ],
