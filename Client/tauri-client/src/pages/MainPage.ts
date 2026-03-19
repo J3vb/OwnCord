@@ -202,7 +202,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         videoGrid.addStream(currentUserId, me?.username ? `${me.username} (You)` : "You", localStream);
       }
     } else if (!voice.localCamera && videoGrid !== null) {
-      videoGrid.removeStream(getCurrentUserId());
+      videoGrid.removeStream(currentUserId);
+    }
+
+    // Remove remote video tiles for users who turned off their camera
+    if (videoGrid !== null && channelUsers) {
+      for (const user of channelUsers.values()) {
+        if (!user.camera && user.userId !== currentUserId) {
+          videoGrid.removeStream(user.userId);
+        }
+      }
     }
   }
 
