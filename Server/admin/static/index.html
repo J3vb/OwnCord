@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OwnCord — Admin Panel</title>
+<style>
+  :root {
+    --bg-tertiary:#1e1f22;--bg-secondary:#2b2d31;--bg-primary:#313338;
+    --bg-input:#1e1f22;--bg-hover:#35373c;--bg-active:#404249;
+    --bg-overlay:rgba(0,0,0,.7);--bg-card:#2b2d31;--bg-table-hover:rgba(88,101,242,.06);
+    --accent:#5865f2;--accent-hover:#4752c4;--accent-active:#3c45a5;--accent-glow:rgba(88,101,242,.25);
+    --text-normal:#dbdee1;--text-muted:#949ba4;--text-faint:#80848e;--text-micro:#6d6f78;--text-link:#00a8fc;
+    --green:#23a55a;--yellow:#f0b232;--red:#f23f43;--border:#3f4147;--border-strong:#4e5058;
+    --role-owner:#e74c3c;--role-admin:#f39c12;--role-mod:#2ecc71;--role-member:#949ba4;
+    --font-body:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+    --font-mono:"Cascadia Code","Consolas",monospace;
+    --radius-sm:4px;--radius-md:8px;--sidebar-w:240px;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden}
+  body{font-family:var(--font-body);font-size:14px;color:var(--text-normal);background:var(--bg-tertiary);-webkit-font-smoothing:antialiased}
+  button{font-family:inherit;border:none;cursor:pointer;outline:none}
+  input,select,textarea{font-family:inherit;border:none;outline:none}
+  ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:var(--bg-tertiary);border-radius:3px}
+  ::-webkit-scrollbar-thumb:hover{background:var(--bg-hover)}
+
+  .admin{display:flex;height:100vh}
+  .sidebar{width:var(--sidebar-w);background:var(--bg-secondary);display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto}
+  .sidebar-header{padding:20px 16px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+  .sidebar-brand{display:flex;align-items:center;gap:10px}
+  .sidebar-logo{width:36px;height:36px;border-radius:10px;background:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .sidebar-logo svg{width:22px;height:22px}
+  .sidebar-title{font-size:15px;font-weight:700;color:white}
+  .sidebar-subtitle{font-size:11px;color:var(--text-faint);letter-spacing:.03em}
+  .sidebar-nav{flex:1;padding:8px}
+  .sidebar-label{font-size:11px;font-weight:700;color:var(--text-faint);letter-spacing:.05em;text-transform:uppercase;padding:12px 12px 4px}
+  .sidebar-sep{height:1px;background:var(--border);margin:4px 12px}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:var(--radius-sm);font-size:14px;color:var(--text-muted);background:transparent;width:100%;text-align:left;transition:all .15s;position:relative}
+  .nav-item:hover{background:var(--bg-hover);color:var(--text-normal)}
+  .nav-item.active{background:var(--bg-active);color:white}
+  .nav-item svg{width:18px;height:18px;flex-shrink:0;opacity:.7}
+  .nav-item.active svg{opacity:1}
+  .nav-item.danger{color:var(--red)}.nav-item.danger:hover{background:rgba(242,63,67,.1)}
+  .nav-item .unsaved-dot{position:absolute;left:6px;top:50%;transform:translateY(-50%);width:6px;height:6px;border-radius:50%;background:var(--yellow)}
+  .sidebar-footer{padding:12px 16px;border-top:1px solid var(--border);flex-shrink:0;font-size:11px;color:var(--text-micro);text-align:center}
+
+  .content{flex:1;overflow-y:auto;padding:32px 40px;background:var(--bg-primary)}
+  .page-title{font-size:22px;font-weight:700;color:white;margin-bottom:4px}
+  .page-desc{font-size:13px;color:var(--text-faint);margin-bottom:24px}
+
+  .stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-bottom:24px}
+  .stat-card{background:var(--bg-card);border-radius:var(--radius-md);padding:18px 20px;border:1px solid var(--border);transition:border-color .2s}
+  .stat-card:hover{border-color:var(--border-strong)}
+  .stat-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .stat-card-label{font-size:11px;font-weight:700;color:var(--text-faint);letter-spacing:.04em;text-transform:uppercase}
+  .stat-card-icon{width:32px;height:32px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .stat-card-icon svg{width:16px;height:16px}
+  .stat-card-value{font-size:28px;font-weight:700;color:white;font-family:var(--font-mono);line-height:1.1}
+  .stat-card-sub{font-size:12px;color:var(--text-faint);margin-top:4px;font-family:var(--font-mono)}
+
+  .section-card{background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border);margin-bottom:20px;overflow:hidden}
+  .section-card-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+  .section-card-header h3{font-size:14px;font-weight:700;color:white}
+  .section-card-body{padding:16px 20px}
+  .section-card-body.no-pad{padding:0}
+
+  .tbl{width:100%;border-collapse:collapse}
+  .tbl th{font-size:11px;font-weight:700;color:var(--text-faint);letter-spacing:.04em;text-transform:uppercase;text-align:left;padding:10px 16px;border-bottom:2px solid var(--border)}
+  .tbl td{padding:10px 16px;font-size:13px;border-bottom:1px solid var(--border);vertical-align:middle}
+  .tbl tr:hover td{background:var(--bg-table-hover)}
+  .tbl tr:last-child td{border-bottom:none}
+
+  .avatar{width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:white;flex-shrink:0}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;flex-shrink:0}
+  .dot.online{background:var(--green)}.dot.offline{background:var(--text-micro)}.dot.banned{background:var(--red)}
+  .role-badge{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.06)}
+  .role-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+  .act-btn{width:28px;height:28px;border-radius:var(--radius-sm);background:transparent;color:var(--text-faint);display:inline-flex;align-items:center;justify-content:center;transition:all .15s}
+  .act-btn:hover{background:var(--bg-active);color:var(--text-normal)}
+  .act-btn.danger:hover{background:var(--red);color:white}
+  .act-btn svg{width:14px;height:14px}
+  .act-group{display:flex;gap:2px}
+
+  .badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px}
+  .badge-green{background:rgba(35,165,90,.15);color:var(--green)}
+  .badge-red{background:rgba(242,63,67,.15);color:var(--red)}
+  .badge-yellow{background:rgba(240,178,50,.15);color:var(--yellow)}
+  .badge-muted{background:rgba(128,132,142,.15);color:var(--text-faint)}
+  .badge-accent{background:var(--accent-glow);color:var(--accent)}
+
+  .filter-bar{display:flex;gap:10px;margin-bottom:16px;align-items:center;flex-wrap:wrap}
+  .filter-search{flex:1;min-width:200px;padding:8px 12px;background:var(--bg-input);color:var(--text-normal);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;transition:border-color .2s}
+  .filter-search::placeholder{color:var(--text-micro)}.filter-search:focus{border-color:var(--accent)}
+  .filter-select{padding:8px 28px 8px 10px;background:var(--bg-input);color:var(--text-normal);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;appearance:none;cursor:pointer}
+  .filter-select:focus{border-color:var(--accent)}
+
+  .btn{padding:8px 16px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;transition:all .15s;display:inline-flex;align-items:center;gap:6px}
+  .btn-accent{background:var(--accent);color:white}.btn-accent:hover{background:var(--accent-hover)}
+  .btn-danger{background:var(--red);color:white}.btn-danger:hover{background:#d83135}
+  .btn-ghost{background:var(--bg-hover);color:var(--text-muted)}.btn-ghost:hover{background:var(--bg-active);color:var(--text-normal)}
+  .btn-outline{background:transparent;color:var(--text-muted);border:1px solid var(--border)}.btn-outline:hover{border-color:var(--border-strong);color:var(--text-normal)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn .spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:white;border-radius:50%;animation:spin .6s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .form-group{margin-bottom:16px}
+  .form-label{display:block;font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.02em;text-transform:uppercase;margin-bottom:6px}
+  .form-label .req{color:var(--red);margin-left:2px}
+  .form-input{width:100%;padding:10px 12px;background:var(--bg-input);color:var(--text-normal);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;transition:border-color .2s}
+  .form-input::placeholder{color:var(--text-micro)}.form-input:focus{border-color:var(--accent)}
+  .form-textarea{resize:vertical;min-height:80px}
+  .toggle{width:40px;height:22px;border-radius:11px;background:var(--border-strong);cursor:pointer;position:relative;transition:background .2s;flex-shrink:0;padding:0;appearance:none;-webkit-appearance:none;border:none}
+  .toggle.on{background:var(--green)}
+  .toggle::after{content:'';position:absolute;width:16px;height:16px;border-radius:50%;background:white;top:3px;left:3px;transition:transform .2s}
+  .toggle.on::after{transform:translateX(18px)}
+  .setting-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border)}
+  .setting-row:last-child{border-bottom:none}
+  .setting-info{flex:1;min-width:0}.setting-name{font-size:14px;color:var(--text-normal);margin-bottom:2px}
+  .setting-desc{font-size:12px;color:var(--text-faint)}.setting-ctrl{flex-shrink:0;margin-left:16px}
+
+  .modal-overlay{position:fixed;inset:0;background:var(--bg-overlay);display:none;align-items:center;justify-content:center;z-index:100}
+  .modal-overlay.visible{display:flex}
+  .modal{background:var(--bg-primary);border-radius:var(--radius-md);width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 8px 48px rgba(0,0,0,.5);animation:modalIn .25s cubic-bezier(.16,1,.3,1)}
+  @keyframes modalIn{from{opacity:0;transform:translateY(20px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+  .modal-header{padding:20px 24px 0;display:flex;align-items:center;justify-content:space-between}
+  .modal-header h3{font-size:18px;font-weight:700;color:white}
+  .modal-close{background:transparent;color:var(--text-faint);font-size:20px;padding:4px;border-radius:var(--radius-sm);transition:color .15s}
+  .modal-close:hover{color:var(--text-normal)}
+  .modal-body{padding:20px 24px}
+  .modal-footer{padding:16px 24px;background:var(--bg-secondary);border-radius:0 0 var(--radius-md) var(--radius-md);display:flex;justify-content:flex-end;gap:8px}
+
+  .pagination{display:flex;align-items:center;justify-content:space-between;padding:12px 0;margin-top:4px}
+  .pagination-info{font-size:12px;color:var(--text-faint)}
+  .pagination-btns{display:flex;gap:4px}
+  .page-btn{width:32px;height:32px;border-radius:var(--radius-sm);background:transparent;color:var(--text-muted);font-size:13px;display:flex;align-items:center;justify-content:center;transition:all .15s}
+  .page-btn:hover{background:var(--bg-hover);color:var(--text-normal)}
+  .page-btn.active{background:var(--accent);color:white}
+  .page-btn:disabled{opacity:.3;cursor:not-allowed}
+
+  .toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:var(--radius-md);font-size:13px;font-weight:600;display:none;align-items:center;gap:8px;z-index:200;box-shadow:0 4px 24px rgba(0,0,0,.4);animation:toastIn .3s cubic-bezier(.16,1,.3,1)}
+  .toast.visible{display:flex}.toast.success{background:var(--green);color:white}.toast.error{background:var(--red);color:white}.toast.info{background:var(--accent);color:white}
+  @keyframes toastIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+
+  .activity-item{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+  .activity-item:last-child{border-bottom:none}
+  .activity-icon{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .activity-icon svg{width:14px;height:14px}
+  .activity-text{font-size:13px;color:var(--text-muted);line-height:1.4}
+  .activity-text strong{color:var(--text-normal)}
+  .activity-time{font-size:11px;color:var(--text-micro);margin-top:2px}
+
+  .update-card{display:flex;align-items:flex-start;gap:16px;padding:20px;background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border)}
+  .update-icon{width:48px;height:48px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .update-icon svg{width:24px;height:24px}
+  .update-info{flex:1}.update-ver{font-size:18px;font-weight:700;color:white}
+  .update-notes{font-size:13px;color:var(--text-faint);margin-top:6px;line-height:1.5}
+
+  .code-copy{display:flex;align-items:center;gap:8px;background:var(--bg-tertiary);padding:8px 12px;border-radius:var(--radius-sm);margin-top:8px}
+  .code-copy code{flex:1;font-family:var(--font-mono);font-size:13px;color:var(--text-link);word-break:break-all}
+  .code-copy .btn{padding:4px 10px;font-size:11px}
+
+  /* Auth overlays */
+  .auth-overlay{position:fixed;inset:0;background:var(--bg-tertiary);display:none;align-items:center;justify-content:center;z-index:50}
+  .auth-overlay.visible{display:flex}
+  .auth-box{background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-md);padding:32px;width:380px}
+  .auth-box h2{font-size:20px;font-weight:700;color:white;margin-bottom:20px}
+  .auth-error{color:var(--red);font-size:13px;margin-top:10px;min-height:20px}
+
+  /* Log viewer */
+  .log-toolbar{display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap}
+  .level-toggle{padding:4px 10px;border-radius:10px;font-size:11px;font-weight:700;background:var(--bg-hover);color:var(--text-micro);transition:all .15s;text-transform:uppercase;letter-spacing:.03em}
+  .level-toggle:hover{color:var(--text-muted)}
+  .level-toggle.active-debug{background:rgba(128,132,142,.2);color:var(--text-muted)}
+  .level-toggle.active-info{background:rgba(35,165,90,.2);color:var(--green)}
+  .level-toggle.active-warn{background:rgba(240,178,50,.2);color:var(--yellow)}
+  .level-toggle.active-error{background:rgba(242,63,67,.2);color:var(--red)}
+  .log-output{background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:12px;line-height:1.6;padding:8px 12px;overflow-y:auto;height:calc(100vh - 240px);white-space:pre-wrap;word-break:break-all}
+  .log-line{padding:1px 0}
+  .log-line .log-ts{color:var(--text-micro);margin-right:8px}
+  .log-line .log-lvl{display:inline-block;width:44px;font-weight:700;margin-right:6px}
+  .log-line .log-src{color:var(--text-faint);margin-right:8px;font-size:11px}
+  .log-line.l-debug .log-lvl{color:var(--text-micro)}
+  .log-line.l-info .log-lvl{color:var(--green)}
+  .log-line.l-warn .log-lvl{color:var(--yellow)}
+  .log-line.l-error .log-lvl{color:var(--red)}
+  .log-line.l-error{color:#f5a0a2}
+  .log-status{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11px;color:var(--text-micro)}
+  .log-status .dot-live{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+  .log-status .dot-off{width:6px;height:6px;border-radius:50%;background:var(--red)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+  .hidden{display:none!important}
+
+  @media(max-width:900px){.sidebar{width:200px}.content{padding:24px 20px}.stat-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}}
+  @media(max-width:600px){.admin{flex-direction:column}.sidebar{width:100%;height:auto;max-height:56px;overflow:hidden}.content{padding:16px 12px}.stat-grid{grid-template-columns:1fr 1fr}.filter-bar{flex-direction:column}.modal{width:95vw;max-height:90vh}}
+</style>
+</head>
+<body>
+
+<!-- Auth: Setup -->
+<div class="auth-overlay" id="setupOverlay">
+  <div class="auth-box">
+    <h2>Welcome to OwnCord</h2>
+    <p style="color:var(--text-muted);font-size:14px;margin-bottom:20px">No accounts exist yet. Create the owner account to get started.</p>
+    <div class="form-group"><label class="form-label">Username</label><input class="form-input" id="setupUser" autocomplete="username" placeholder="Choose a username"></div>
+    <div class="form-group"><label class="form-label">Password</label><input class="form-input" id="setupPass" type="password" autocomplete="new-password" placeholder="Min 8 characters"></div>
+    <div class="form-group"><label class="form-label">Confirm Password</label><input class="form-input" id="setupConfirm" type="password" autocomplete="new-password" placeholder="Re-enter password"></div>
+    <button class="btn btn-accent" id="setupBtn" style="width:100%">Create Owner Account</button>
+    <div class="auth-error" id="setupErr"></div>
+  </div>
+</div>
+
+<!-- Auth: Setup Success -->
+<div class="auth-overlay" id="setupSuccessOverlay">
+  <div class="auth-box">
+    <h2>Setup Complete!</h2>
+    <p style="color:var(--text-muted);font-size:14px;margin-bottom:16px">Your owner account has been created. Here's your invite code:</p>
+    <div class="code-copy"><code id="inviteCode"></code><button class="btn btn-ghost" onclick="copyInvite()">Copy</button></div>
+    <p style="color:var(--yellow);font-size:13px;margin:16px 0">Save this code! Share it with people you want to invite.</p>
+    <button class="btn btn-accent" id="setupContinueBtn" style="width:100%">Continue to Admin Panel</button>
+  </div>
+</div>
+
+<!-- Auth: Login -->
+<div class="auth-overlay" id="loginOverlay">
+  <div class="auth-box">
+    <h2>OwnCord Admin</h2>
+    <div class="form-group"><label class="form-label">Username</label><input class="form-input" id="loginUser" autocomplete="username" placeholder="admin"></div>
+    <div class="form-group"><label class="form-label">Password</label><input class="form-input" id="loginPass" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+    <button class="btn btn-accent" id="loginBtn" style="width:100%">Sign In</button>
+    <div class="auth-error" id="loginErr"></div>
+  </div>
+</div>
+
+<!-- Admin Shell -->
+<div class="admin hidden" id="adminShell">
+  <div class="sidebar">
+    <div class="sidebar-header"><div class="sidebar-brand">
+      <div class="sidebar-logo"><svg viewBox="0 0 24 24" fill="white"><path d="M12 2L4 5.5v5c0 5.25 3.4 10.15 8 11.5 4.6-1.35 8-6.25 8-11.5v-5L12 2zm0 3l1.5 3h3.2l-2.6 1.9 1 3.1L12 11.1 8.9 13l1-3.1L7.3 8h3.2L12 5z"/></svg></div>
+      <div><div class="sidebar-title">OwnCord</div><div class="sidebar-subtitle">Admin Panel</div></div>
+    </div></div>
+    <nav class="sidebar-nav" id="sidebarNav" role="navigation" aria-label="Admin sections"></nav>
+    <div class="sidebar-footer" id="sidebarFooter">OwnCord</div>
+  </div>
+  <div class="content" id="content"></div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modal" role="dialog" aria-modal="true" aria-hidden="true">
+  <div class="modal" id="modalInner"></div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* ═══ Icons ═══ */
+const I={
+  dashboard:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
+  users:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  channels:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>',
+  settings:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>',
+  backup:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>',
+  updates:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>',
+  audit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+  logout:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
+  edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+  trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+  ban:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>',
+  disconnect:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+  refresh:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+  download:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+  voice:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>',
+  megaphone:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+  logs:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
+};
+
+/* ═══ State ═══ */
+const PAGE_SIZE=50;
+const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
+  usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditCache:[],settingsChanged:false,backupRunning:false,updateApplying:false,
+  cachedStats:null,cachedUpdate:null,
+  logEntries:[],logLevels:{DEBUG:true,INFO:true,WARN:true,ERROR:true},
+  logSearch:'',logAutoScroll:true,logPaused:false,logEventSource:null,logMaxLines:2000};
+
+/* ═══ API ═══ */
+async function api(method,path,body){
+  const opts={method,headers:{'Authorization':'Bearer '+state.token,'Content-Type':'application/json'}};
+  if(body!==undefined)opts.body=JSON.stringify(body);
+  const res=await fetch('/admin/api'+path,opts);
+  if(res.status===204)return null;
+  const data=await res.json();
+  if(!res.ok)throw new Error(data.message||res.statusText);
+  return data;
+}
+
+/* ═══ Utilities ═══ */
+function esc(s){if(s===null||s===undefined)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function fmtBytes(b){if(b<1024)return b+' B';if(b<1048576)return(b/1024).toFixed(1)+' KB';if(b<1073741824)return(b/1048576).toFixed(1)+' MB';return(b/1073741824).toFixed(2)+' GB'}
+function actionBadge(a){if(!a)return'badge-muted';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'badge-red';if(a.includes('create'))return'badge-green';if(a.includes('update'))return'badge-yellow';return'badge-accent'}
+function actionColor(a){if(!a)return'var(--accent)';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'var(--red)';if(a.includes('create'))return'var(--green)';if(a.includes('update'))return'var(--yellow)';return'var(--accent)'}
+function roleColor(rid){return{1:'var(--role-owner)',2:'var(--role-admin)',3:'var(--role-mod)'}[rid]||'var(--role-member)'}
+function roleName(rid){return{1:'Owner',2:'Admin',3:'Moderator',4:'Member'}[rid]||'Member'}
+
+function showToast(msg,type='success'){
+  const t=document.getElementById('toast');
+  t.className='toast visible '+type;
+  t.innerHTML=(type==='success'?I.check:type==='error'?I.ban:I.check)+'<span>'+esc(msg)+'</span>';
+  clearTimeout(window._tt);window._tt=setTimeout(()=>t.classList.remove('visible'),3000);
+}
+
+function openModal(html){
+  const o=document.getElementById('modal');
+  document.getElementById('modalInner').innerHTML=html;
+  o.classList.add('visible');o.setAttribute('aria-hidden','false');
+}
+function closeModal(){
+  const o=document.getElementById('modal');
+  o.classList.remove('visible');o.setAttribute('aria-hidden','true');
+}
+
+/* ═══ Auth ═══ */
+function hideAll(){['setupOverlay','setupSuccessOverlay','loginOverlay'].forEach(id=>document.getElementById(id).classList.remove('visible'));document.getElementById('adminShell').classList.add('hidden')}
+function showOverlay(id){hideAll();document.getElementById(id).classList.add('visible')}
+function showApp(){hideAll();document.getElementById('adminShell').classList.remove('hidden')}
+
+async function checkAuth(){
+  try{const r=await fetch('/admin/api/setup/status');const d=await r.json();if(d.needs_setup){showOverlay('setupOverlay');return}}catch(e){console.error('setup check:',e)}
+  if(!state.token){showOverlay('loginOverlay');return}
+  try{await api('GET','/stats');showApp();renderNav();renderContent()}catch(e){showOverlay('loginOverlay')}
+}
+
+document.getElementById('setupBtn').onclick=async()=>{
+  const u=document.getElementById('setupUser').value.trim(),p=document.getElementById('setupPass').value,c=document.getElementById('setupConfirm').value,err=document.getElementById('setupErr');
+  err.textContent='';
+  if(!u||!p){err.textContent='Username and password are required.';return}
+  if(p!==c){err.textContent='Passwords do not match.';return}
+  try{const r=await fetch('/admin/api/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});const d=await r.json();if(!r.ok)throw new Error(d.message||'Setup failed');
+    state.token=d.token;localStorage.setItem('admin_token',state.token);
+    document.getElementById('inviteCode').textContent=d.invite_code;showOverlay('setupSuccessOverlay');
+  }catch(e){err.textContent=e.message}
+};
+document.getElementById('setupContinueBtn').onclick=()=>{showApp();renderNav();renderContent()};
+function copyInvite(){navigator.clipboard.writeText(document.getElementById('inviteCode').textContent).then(()=>showToast('Copied!','info'))}
+
+document.getElementById('loginBtn').onclick=async()=>{
+  const u=document.getElementById('loginUser').value.trim(),p=document.getElementById('loginPass').value,err=document.getElementById('loginErr');
+  err.textContent='';
+  try{const r=await fetch('/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});const d=await r.json();if(!r.ok)throw new Error(d.message||'Login failed');
+    state.token=d.token;localStorage.setItem('admin_token',state.token);showApp();renderNav();renderContent();
+  }catch(e){err.textContent=e.message}
+};
+
+['setupUser','setupPass','setupConfirm'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('setupBtn').click()}));
+['loginUser','loginPass'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('loginBtn').click()}));
+
+/* ═══ Nav ═══ */
+const NAV=[
+  {section:'Management'},
+  {id:'dashboard',label:'Dashboard',icon:I.dashboard},
+  {id:'users',label:'Users',icon:I.users},
+  {id:'channels',label:'Channels',icon:I.channels},
+  {sep:true},
+  {section:'Configuration'},
+  {id:'audit',label:'Audit Log',icon:I.audit},
+  {id:'logs',label:'Server Logs',icon:I.logs},
+  {id:'settings',label:'Settings',icon:I.settings,unsaved:()=>state.settingsChanged},
+  {id:'backups',label:'Backups',icon:I.backup},
+  {id:'updates',label:'Updates',icon:I.updates},
+  {sep:true},
+  {id:'logout',label:'Sign Out',icon:I.logout,danger:true},
+];
+
+function renderNav(){
+  document.getElementById('sidebarNav').innerHTML=NAV.map(n=>{
+    if(n.section)return'<div class="sidebar-label">'+n.section+'</div>';
+    if(n.sep)return'<div class="sidebar-sep"></div>';
+    const active=state.section===n.id?'active':'';
+    const cls=n.danger?'danger':'';
+    const unsaved=n.unsaved&&n.unsaved()?'<span class="unsaved-dot"></span>':'';
+    if(n.id==='logout')return'<button class="nav-item '+cls+'" onclick="doLogout()">'+n.icon+'<span>'+n.label+'</span></button>';
+    return'<button class="nav-item '+active+' '+cls+'" role="tab" onclick="navigateTo(\''+n.id+'\')">'+unsaved+n.icon+'<span>'+n.label+'</span></button>';
+  }).join('');
+}
+
+function navigateTo(id){
+  if(state.logEventSource&&state.section==='logs'&&id!=='logs'){state.logEventSource.close();state.logEventSource=null}
+  state.section=id;renderNav();renderContent();
+}
+
+function doLogout(){state.token='';localStorage.removeItem('admin_token');showOverlay('loginOverlay')}
+
+/* ═══ Content Router ═══ */
+function renderContent(){
+  const c=document.getElementById('content');c.scrollTop=0;
+  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,audit:renderAudit,logs:renderLogs,settings:renderSettings,backups:renderBackups,updates:renderUpdates};
+  c.innerHTML='<div class="page-title">Loading...</div>';
+  const fn=r[state.section]||renderDashboard;
+  const result=fn();
+  if(result instanceof Promise)result.then(html=>{c.innerHTML=html}).catch(e=>{c.innerHTML='<div class="page-title">Error</div><p style="color:var(--red)">'+esc(e.message)+'</p>'});
+  else c.innerHTML=result;
+}
+
+/* ═══ Dashboard ═══ */
+async function renderDashboard(){
+  try{state.cachedStats=await api('GET','/stats')}catch(e){return'<div class="page-title">Dashboard</div><p style="color:var(--red)">Failed to load stats: '+esc(e.message)+'</p>'}
+  try{const r=await fetch('/admin/api/updates',{headers:{'Authorization':'Bearer '+state.token}});if(r.ok)state.cachedUpdate=await r.json()}catch(e){}
+  const s=state.cachedStats;const u=state.cachedUpdate;
+  let html='<div class="page-title">Dashboard</div><div class="page-desc">Server overview and statistics</div>';
+  if(u&&u.update_available)html+='<div class="update-card" style="border-color:var(--accent);margin-bottom:20px"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.updates+'</div><div class="update-info"><div class="update-ver">Update Available: '+esc(u.latest)+'</div><div class="update-notes">Current: '+esc(u.current)+' &mdash; <button class="btn btn-accent" style="margin-left:8px" onclick="navigateTo(\'updates\')">View Update</button></div></div></div>';
+  html+='<div class="stat-grid">';
+  html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Total Users</span><div class="stat-card-icon" style="background:rgba(35,165,90,.15);color:var(--green)">'+I.users+'</div></div><div class="stat-card-value">'+(s.user_count||0)+'</div><div class="stat-card-sub">registered</div></div>';
+  html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Messages</span><div class="stat-card-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.megaphone+'</div></div><div class="stat-card-value">'+(s.message_count||0).toLocaleString()+'</div><div class="stat-card-sub">total</div></div>';
+  html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Channels</span><div class="stat-card-icon" style="background:rgba(240,178,50,.15);color:var(--yellow)">'+I.channels+'</div></div><div class="stat-card-value">'+(s.channel_count||0)+'</div><div class="stat-card-sub">active</div></div>';
+  html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Database</span><div class="stat-card-icon" style="background:rgba(88,101,242,.15);color:var(--accent)">'+I.backup+'</div></div><div class="stat-card-value">'+fmtBytes(s.db_size_bytes||0)+'</div><div class="stat-card-sub">SQLite</div></div>';
+  html+='</div>';
+  // Recent audit
+  try{
+    const entries=await api('GET','/audit-log?limit=5&offset=0');
+    if(entries&&entries.length){
+      html+='<div class="section-card"><div class="section-card-header"><h3>Recent Activity</h3><button class="btn btn-ghost" onclick="navigateTo(\'audit\')">View All</button></div><div class="section-card-body">';
+      entries.forEach(a=>{html+='<div class="activity-item"><div class="activity-icon" style="background:'+actionColor(a.action)+'22;color:'+actionColor(a.action)+'">'+I.audit+'</div><div><div class="activity-text"><strong>'+esc(a.actor_name||a.actor_id)+'</strong> '+esc(a.action)+' <strong>'+esc(a.target_type)+(a.target_id?' #'+a.target_id:'')+'</strong></div><div class="activity-time">'+esc(a.created_at)+(a.detail?' — '+esc(a.detail):'')+'</div></div></div>'});
+      html+='</div></div>';
+    }
+  }catch(e){}
+  return html;
+}
+
+/* ═══ Users ═══ */
+async function renderUsers(){
+  const offset=(state.usersPage-1)*PAGE_SIZE;
+  let users;
+  try{users=await api('GET','/users?limit='+PAGE_SIZE+'&offset='+offset)}catch(e){return'<div class="page-title">Users</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  const totalPages=Math.max(1,Math.ceil(users.length/PAGE_SIZE));
+  let html='<div class="page-title">Users</div><div class="page-desc">Manage server members</div>';
+  html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Banned</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
+  if(!users.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">No users found</td></tr>';
+  users.forEach(u=>{
+    const uid=u.id||u.ID;const uname=u.Username||u.username||'';const rid=u.role_id||u.RoleID||4;
+    const status=u.Status||u.status||'offline';const banned=u.Banned||u.banned||false;
+    const statusDot=banned?'banned':status;const statusLabel=banned?'Banned':status==='online'?'Online':'Offline';
+    const initial=uname?uname[0].toUpperCase():'?';
+    html+='<tr><td><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="background:var(--accent)">'+initial+'</div><strong>'+esc(uname)+'</strong></div></td>';
+    html+='<td><span class="role-badge"><span class="role-dot" style="background:'+roleColor(rid)+'"></span>'+roleName(rid)+'</span></td>';
+    html+='<td><span class="dot '+statusDot+'"></span>'+statusLabel+'</td>';
+    html+='<td>'+(banned?'<span class="badge badge-red">Yes</span>':'<span class="badge badge-muted">No</span>')+'</td>';
+    html+='<td><div class="act-group" style="justify-content:flex-end">';
+    html+='<button class="act-btn" title="Edit role" onclick="openEditUser('+uid+',\''+esc(uname)+'\','+rid+')">'+I.edit+'</button>';
+    html+='<button class="act-btn" title="Force logout" onclick="forceLogout('+uid+')">'+I.disconnect+'</button>';
+    if(banned)html+='<button class="act-btn" title="Unban" onclick="unbanUser('+uid+')">'+I.check+'</button>';
+    else html+='<button class="act-btn danger" title="Ban" onclick="openBanUser('+uid+',\''+esc(uname)+'\')">'+I.ban+'</button>';
+    html+='</div></td></tr>';
+  });
+  html+='</tbody></table></div></div>';
+  html+='<div class="pagination"><div class="pagination-info">Page '+state.usersPage+'</div><div class="pagination-btns">';
+  html+='<button class="page-btn" '+(state.usersPage<=1?'disabled':'')+' onclick="state.usersPage--;renderContent()">&lt;</button>';
+  html+='<button class="page-btn active">'+state.usersPage+'</button>';
+  html+='<button class="page-btn" '+(users.length<PAGE_SIZE?'disabled':'')+' onclick="state.usersPage++;renderContent()">&gt;</button>';
+  html+='</div></div>';
+  return html;
+}
+
+function openEditUser(uid,uname,currentRole){
+  openModal('<div class="modal-header"><h3>Edit User</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><div style="display:flex;align-items:center;gap:12px;margin-bottom:20px"><div class="avatar" style="background:var(--accent);width:48px;height:48px;font-size:20px">'+uname[0].toUpperCase()+'</div><div style="font-size:16px;font-weight:700;color:white">'+esc(uname)+'</div></div><div class="form-group"><label class="form-label">Role</label><select class="form-input" id="editRoleSelect" style="appearance:auto"><option value="1" '+(currentRole===1?'selected':'')+'>Owner</option><option value="2" '+(currentRole===2?'selected':'')+'>Admin</option><option value="3" '+(currentRole===3?'selected':'')+'>Moderator</option><option value="4" '+(currentRole===4?'selected':'')+'>Member</option></select></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveUserRole('+uid+')">Save</button></div>');
+}
+
+async function saveUserRole(uid){
+  const sel=document.getElementById('editRoleSelect');if(!sel)return;
+  try{await api('PATCH','/users/'+uid,{role_id:parseInt(sel.value)});closeModal();showToast('Role updated');renderContent()}catch(e){showToast(e.message,'error')}
+}
+
+function openBanUser(uid,uname){
+  openModal('<div class="modal-header"><h3>Ban User</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted);margin-bottom:16px">Ban <strong style="color:white">'+esc(uname)+'</strong> from the server?</p><div class="form-group"><label class="form-label">Reason</label><textarea class="form-input form-textarea" id="banReason" placeholder="Reason for ban..."></textarea></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmBan('+uid+')">Ban User</button></div>');
+}
+
+async function confirmBan(uid){
+  const reason=document.getElementById('banReason')?.value||'';
+  try{await api('PATCH','/users/'+uid,{banned:true,ban_reason:reason});closeModal();showToast('User banned');renderContent()}catch(e){showToast(e.message,'error')}
+}
+
+async function unbanUser(uid){
+  try{await api('PATCH','/users/'+uid,{banned:false});showToast('User unbanned');renderContent()}catch(e){showToast(e.message,'error')}
+}
+
+async function forceLogout(uid){
+  openModal('<div class="modal-header"><h3>Force Logout</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Terminate all sessions for this user?</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmForceLogout('+uid+')">Logout</button></div>');
+}
+
+async function confirmForceLogout(uid){
+  try{await api('DELETE','/users/'+uid+'/sessions');closeModal();showToast('Sessions terminated');renderContent()}catch(e){showToast(e.message,'error')}
+}
+
+/* ═══ Channels ═══ */
+async function renderChannels(){
+  let channels;
+  try{channels=await api('GET','/channels')}catch(e){return'<div class="page-title">Channels</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  const chIcon=t=>t==='voice'?I.voice:t==='announcement'?I.megaphone:I.channels;
+  let html='<div class="page-title">Channels</div><div class="page-desc">'+channels.length+' channels</div>';
+  html+='<div class="filter-bar"><button class="btn btn-accent" onclick="openChannelModal(null)">'+I.plus+' Create Channel</button></div>';
+  html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Channel</th><th>Type</th><th>Category</th><th>Archived</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
+  if(!channels.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">No channels</td></tr>';
+  channels.forEach(ch=>{
+    const id=ch.id||ch.ID;const name=ch.name||ch.Name||'';const type=ch.type||ch.Type||'text';
+    const cat=ch.category||ch.Category||'';const archived=ch.archived||ch.Archived||false;
+    html+='<tr><td><div style="display:flex;align-items:center;gap:8px"><span style="color:var(--text-faint)">'+chIcon(type)+'</span><strong>'+esc(name)+'</strong></div></td>';
+    html+='<td><span class="badge '+(type==='voice'?'badge-yellow':type==='announcement'?'badge-accent':'badge-muted')+'">'+esc(type)+'</span></td>';
+    html+='<td style="font-size:12px;color:var(--text-faint)">'+esc(cat)+'</td>';
+    html+='<td>'+(archived?'<span class="badge badge-muted">Yes</span>':'<span class="badge badge-green">No</span>')+'</td>';
+    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn" title="Edit" onclick="openChannelEditModal('+id+',\''+esc(name)+'\')">'+I.edit+'</button><button class="act-btn danger" title="Delete" onclick="openDeleteChannel('+id+',\''+esc(name)+'\')">'+I.trash+'</button></div></td></tr>';
+  });
+  html+='</tbody></table></div></div>';
+  return html;
+}
+
+function openChannelModal(){
+  openModal('<div class="modal-header"><h3>Create Channel</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><div class="form-group"><label class="form-label">Name <span class="req">*</span></label><input class="form-input" id="chName" placeholder="general"></div><div class="form-group"><label class="form-label">Type</label><select class="form-input" id="chType" style="appearance:auto"><option value="text">Text</option><option value="voice">Voice</option><option value="announcement">Announcement</option></select></div><div class="form-group"><label class="form-label">Category</label><input class="form-input" id="chCat" placeholder="Text Channels"></div><div class="form-group"><label class="form-label">Topic</label><input class="form-input" id="chTopic"></div><div class="form-group"><label class="form-label">Position</label><input class="form-input" id="chPos" type="number" value="0" min="0"></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="createChannel()">Create</button></div>');
+}
+
+async function createChannel(){
+  const body={name:document.getElementById('chName').value.trim(),type:document.getElementById('chType').value,category:document.getElementById('chCat').value.trim(),topic:document.getElementById('chTopic').value.trim(),position:parseInt(document.getElementById('chPos').value)||0};
+  if(!body.name){showToast('Name is required','error');return}
+  try{await api('POST','/channels',body);closeModal();showToast('Channel created');renderContent()}catch(e){showToast(e.message,'error')}
+}
+
+function openChannelEditModal(id,name){
+  openModal('<div class="modal-header"><h3>Edit Channel</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><div class="form-group"><label class="form-label">Name</label><input class="form-input" id="chEditName" value="'+esc(name)+'"></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveChannelEdit('+id+')">Save</button></div>');
+}
+
+async function saveChannelEdit(id){
+  const name=document.getElementById('chEditName').value.trim();
+  try{await api('PATCH','/channels/'+id,{name});closeModal();showToast('Channel updated');renderContent()}catch(e){showToast(e.message,'error')}
+}
+
+function openDeleteChannel(id,name){
+  openModal('<div class="modal-header"><h3>Delete Channel</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Permanently delete <strong style="color:white">#'+esc(name)+'</strong> and all its messages?</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmDeleteChannel('+id+')">Delete</button></div>');
+}
+
+async function confirmDeleteChannel(id){
+  try{await api('DELETE','/channels/'+id);closeModal();showToast('Channel deleted');renderContent()}catch(e){showToast(e.message,'error')}
+}
+
+/* ═══ Audit Log ═══ */
+async function renderAudit(){
+  const offset=(state.auditPage-1)*PAGE_SIZE;
+  let entries;
+  try{entries=await api('GET','/audit-log?limit='+PAGE_SIZE+'&offset='+offset)}catch(e){return'<div class="page-title">Audit Log</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  state.auditCache=entries||[];
+
+  // Collect unique action types for the filter dropdown.
+  const actionTypes=[...new Set(state.auditCache.map(e=>e.action).filter(Boolean))].sort();
+
+  // Client-side filter on fetched page.
+  const filtered=state.auditCache.filter(e=>{
+    if(state.auditActionFilter!=='all'&&e.action!==state.auditActionFilter)return false;
+    if(state.auditSearch){const s=state.auditSearch.toLowerCase();
+      if(!(e.actor_name||String(e.actor_id)||'').toLowerCase().includes(s)&&!(e.action||'').toLowerCase().includes(s)&&!(e.target_type||'').toLowerCase().includes(s)&&!(e.detail||'').toLowerCase().includes(s))return false}
+    return true;
+  });
+
+  let html='<div class="page-title">Audit Log</div><div class="page-desc">Action history — '+state.auditCache.length+' entries on this page</div>';
+
+  // Filter bar
+  html+='<div class="filter-bar">';
+  html+='<input class="filter-search" placeholder="Search audit log..." value="'+esc(state.auditSearch)+'" oninput="state.auditSearch=this.value;refilterAudit()">';
+  html+='<select class="filter-select" onchange="state.auditActionFilter=this.value;refilterAudit()">';
+  html+='<option value="all" '+(state.auditActionFilter==='all'?'selected':'')+'>All Actions</option>';
+  actionTypes.forEach(t=>{html+='<option value="'+esc(t)+'" '+(state.auditActionFilter===t?'selected':'')+'>'+esc(t)+'</option>'});
+  html+='</select>';
+  html+='<button class="btn btn-ghost" onclick="copyAuditLog()" title="Copy filtered entries">Copy All</button>';
+  html+='<button class="btn btn-ghost" onclick="exportAuditCSV()" title="Export as CSV">Export CSV</button>';
+  html+='</div>';
+
+  // Table
+  html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead><tbody id="auditTbody">';
+  if(!filtered.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">No matching entries</td></tr>';
+  else filtered.forEach(e=>{html+=renderAuditRow(e)});
+  html+='</tbody></table></div></div>';
+
+  // Pagination
+  html+='<div class="pagination"><div class="pagination-info">Page '+state.auditPage+(state.auditSearch||state.auditActionFilter!=='all'?' ('+filtered.length+' of '+state.auditCache.length+' shown)':'')+'</div><div class="pagination-btns">';
+  html+='<button class="page-btn" '+(state.auditPage<=1?'disabled':'')+' onclick="state.auditPage--;renderContent()">&lt;</button>';
+  html+='<button class="page-btn active">'+state.auditPage+'</button>';
+  html+='<button class="page-btn" '+(!entries||entries.length<PAGE_SIZE?'disabled':'')+' onclick="state.auditPage++;renderContent()">&gt;</button>';
+  html+='</div></div>';
+  return html;
+}
+
+function renderAuditRow(e){
+  return'<tr><td style="font-size:12px;color:var(--text-faint);white-space:nowrap">'+esc(e.created_at)+'</td>'
+    +'<td><strong>'+esc(e.actor_name||e.actor_id)+'</strong></td>'
+    +'<td><span class="badge '+actionBadge(e.action)+'">'+esc(e.action)+'</span></td>'
+    +'<td>'+esc(e.target_type)+(e.target_id?' #'+e.target_id:'')+'</td>'
+    +'<td style="font-size:12px;color:var(--text-faint)">'+esc(e.detail)+'</td></tr>';
+}
+
+function refilterAudit(){
+  const tbody=document.getElementById('auditTbody');if(!tbody)return;
+  const filtered=state.auditCache.filter(e=>{
+    if(state.auditActionFilter!=='all'&&e.action!==state.auditActionFilter)return false;
+    if(state.auditSearch){const s=state.auditSearch.toLowerCase();
+      if(!(e.actor_name||String(e.actor_id)||'').toLowerCase().includes(s)&&!(e.action||'').toLowerCase().includes(s)&&!(e.target_type||'').toLowerCase().includes(s)&&!(e.detail||'').toLowerCase().includes(s))return false}
+    return true;
+  });
+  if(!filtered.length)tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px">No matching entries</td></tr>';
+  else tbody.innerHTML=filtered.map(renderAuditRow).join('');
+}
+
+function copyAuditLog(){
+  const filtered=state.auditCache.filter(e=>{
+    if(state.auditActionFilter!=='all'&&e.action!==state.auditActionFilter)return false;
+    if(state.auditSearch){const s=state.auditSearch.toLowerCase();
+      if(!(e.actor_name||String(e.actor_id)||'').toLowerCase().includes(s)&&!(e.action||'').toLowerCase().includes(s)&&!(e.target_type||'').toLowerCase().includes(s)&&!(e.detail||'').toLowerCase().includes(s))return false}
+    return true;
+  });
+  const lines=filtered.map(e=>(e.created_at||'')+'\t'+(e.actor_name||e.actor_id)+'\t'+(e.action||'')+'\t'+(e.target_type||'')+(e.target_id?' #'+e.target_id:'')+'\t'+(e.detail||''));
+  navigator.clipboard.writeText(lines.join('\n')).then(()=>showToast('Copied '+lines.length+' entries','info')).catch(()=>showToast('Copy failed','error'));
+}
+
+function exportAuditCSV(){
+  const filtered=state.auditCache.filter(e=>{
+    if(state.auditActionFilter!=='all'&&e.action!==state.auditActionFilter)return false;
+    if(state.auditSearch){const s=state.auditSearch.toLowerCase();
+      if(!(e.actor_name||String(e.actor_id)||'').toLowerCase().includes(s)&&!(e.action||'').toLowerCase().includes(s)&&!(e.target_type||'').toLowerCase().includes(s)&&!(e.detail||'').toLowerCase().includes(s))return false}
+    return true;
+  });
+  const csvQ=v=>'"'+String(v||'').replace(/"/g,'""')+'"';
+  let csv='Time,Actor,Action,Target,Detail\n';
+  filtered.forEach(e=>{csv+=csvQ(e.created_at)+','+csvQ(e.actor_name||e.actor_id)+','+csvQ(e.action)+','+csvQ((e.target_type||'')+(e.target_id?' #'+e.target_id:''))+','+csvQ(e.detail)+'\n'});
+  const blob=new Blob([csv],{type:'text/csv'});const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download='audit_log_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
+  URL.revokeObjectURL(url);showToast('Exported '+filtered.length+' entries','info');
+}
+
+/* ═══ Server Logs ═══ */
+function renderLogs(){
+  const lvlBtn=(l)=>{const on=state.logLevels[l];return'<button class="level-toggle '+(on?'active-'+l.toLowerCase():'')+'" onclick="toggleLogLevel(\''+l+'\')">'+l+'</button>'};
+  let html='<div class="page-title">Server Logs</div><div class="page-desc">Real-time structured log stream</div>';
+  html+='<div class="log-toolbar">';
+  html+=lvlBtn('DEBUG')+lvlBtn('INFO')+lvlBtn('WARN')+lvlBtn('ERROR');
+  html+='<input class="filter-search" placeholder="Filter logs..." style="flex:1;min-width:150px" value="'+esc(state.logSearch)+'" oninput="state.logSearch=this.value;renderLogLines()">';
+  html+='<button class="btn btn-ghost" onclick="toggleLogAutoScroll()" id="autoScrollBtn" title="Auto-scroll">'+(state.logAutoScroll?'⬇ Auto':'⏸ Manual')+'</button>';
+  html+='<button class="btn btn-ghost" onclick="toggleLogPause()" id="pauseBtn">'+(state.logPaused?'▶ Resume':'⏸ Pause')+'</button>';
+  html+='<button class="btn btn-ghost" onclick="copyAllLogs()" title="Copy visible logs">Copy All</button>';
+  html+='<button class="btn btn-ghost" onclick="clearLogs()" title="Clear log view">Clear</button>';
+  html+='</div>';
+  html+='<div class="log-output" id="logOutput"></div>';
+  html+='<div class="log-status"><span class="'+(state.logPaused?'dot-off':'dot-live')+'" id="logDot"></span><span id="logStatusText">'+(state.logPaused?'Paused':'Connecting...')+'</span><span style="margin-left:auto" id="logCount">'+state.logEntries.length+' entries</span></div>';
+  setTimeout(()=>{renderLogLines();if(!state.logPaused)connectLogStream()},0);
+  return html;
+}
+
+function toggleLogLevel(l){state.logLevels[l]=!state.logLevels[l];const btns=document.querySelectorAll('.level-toggle');btns.forEach(b=>{if(b.textContent===l){b.className='level-toggle '+(state.logLevels[l]?'active-'+l.toLowerCase():'')}});renderLogLines()}
+
+function toggleLogAutoScroll(){state.logAutoScroll=!state.logAutoScroll;const btn=document.getElementById('autoScrollBtn');if(btn)btn.textContent=state.logAutoScroll?'⬇ Auto':'⏸ Manual'}
+
+function toggleLogPause(){
+  state.logPaused=!state.logPaused;
+  const btn=document.getElementById('pauseBtn');if(btn)btn.textContent=state.logPaused?'▶ Resume':'⏸ Pause';
+  const dot=document.getElementById('logDot');if(dot)dot.className=state.logPaused?'dot-off':'dot-live';
+  const txt=document.getElementById('logStatusText');
+  if(state.logPaused){if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(txt)txt.textContent='Paused'}
+  else{connectLogStream()}
+}
+
+function connectLogStream(){
+  if(state.logEventSource){state.logEventSource.close()}
+  if(state.logPaused||state.section!=='logs')return;
+  const es=new EventSource('/admin/api/logs/stream?token='+encodeURIComponent(state.token));
+  state.logEventSource=es;
+  es.onopen=function(){const t=document.getElementById('logStatusText');if(t)t.textContent='Connected'};
+  es.onmessage=function(e){
+    try{const entry=JSON.parse(e.data);state.logEntries.push(entry);
+      while(state.logEntries.length>state.logMaxLines)state.logEntries.shift();
+      appendLogLine(entry);
+      const c=document.getElementById('logCount');if(c)c.textContent=state.logEntries.length+' entries';
+    }catch(err){}
+  };
+  es.onerror=function(){const t=document.getElementById('logStatusText');if(t)t.textContent='Reconnecting...';const d=document.getElementById('logDot');if(d)d.className='dot-off'};
+}
+
+function matchesLogFilter(entry){
+  if(!state.logLevels[entry.level])return false;
+  if(state.logSearch){const s=state.logSearch.toLowerCase();if(!(entry.msg||'').toLowerCase().includes(s)&&!(entry.source||'').toLowerCase().includes(s)&&!(entry.attrs||'').toLowerCase().includes(s))return false}
+  return true;
+}
+
+function appendLogLine(entry){
+  if(!matchesLogFilter(entry))return;
+  const out=document.getElementById('logOutput');if(!out)return;
+  const div=document.createElement('div');
+  div.className='log-line l-'+entry.level.toLowerCase();
+  const ts=entry.ts?entry.ts.substring(11,23):'';
+  div.innerHTML='<span class="log-ts">'+esc(ts)+'</span><span class="log-lvl">'+esc(entry.level)+'</span><span class="log-src">['+esc(entry.source||'server')+']</span>'+esc(entry.msg)+(entry.attrs&&entry.attrs!=='{}'?' <span style="color:var(--text-micro)">'+esc(entry.attrs)+'</span>':'');
+  out.appendChild(div);
+  // Trim DOM to max lines
+  while(out.children.length>state.logMaxLines)out.removeChild(out.firstChild);
+  if(state.logAutoScroll)out.scrollTop=out.scrollHeight;
+}
+
+function renderLogLines(){
+  const out=document.getElementById('logOutput');if(!out)return;
+  out.innerHTML='';
+  state.logEntries.forEach(e=>{if(matchesLogFilter(e))appendLogLine(e)});
+}
+
+function copyAllLogs(){
+  const out=document.getElementById('logOutput');if(!out)return;
+  const lines=[];state.logEntries.forEach(e=>{if(matchesLogFilter(e))lines.push((e.ts||'')+' '+e.level+' ['+( e.source||'server')+'] '+e.msg+(e.attrs&&e.attrs!=='{}'?' '+e.attrs:''))});
+  navigator.clipboard.writeText(lines.join('\n')).then(()=>showToast('Copied '+lines.length+' log lines','info')).catch(()=>showToast('Copy failed','error'));
+}
+
+function clearLogs(){state.logEntries=[];const out=document.getElementById('logOutput');if(out)out.innerHTML='';const c=document.getElementById('logCount');if(c)c.textContent='0 entries';showToast('Log view cleared','info')}
+
+/* ═══ Settings ═══ */
+async function renderSettings(){
+  let settings;
+  try{settings=await api('GET','/settings')}catch(e){return'<div class="page-title">Settings</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  state._settings={...settings};
+  const v=k=>settings[k]||'';
+  const isOn=k=>v(k)==='true';
+  let html='<div class="page-title">Server Settings</div><div class="page-desc">Configure your OwnCord server</div>';
+  html+='<div class="section-card"><div class="section-card-header"><h3>General</h3></div><div class="section-card-body">';
+  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Server Name</div></div><div class="setting-ctrl"><input class="form-input" id="s-server_name" value="'+esc(v('server_name'))+'" style="width:240px" oninput="markSettingsChanged()"></div></div>';
+  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Server Icon URL</div></div><div class="setting-ctrl"><input class="form-input" id="s-server_icon" value="'+esc(v('server_icon'))+'" style="width:240px" oninput="markSettingsChanged()"></div></div>';
+  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Message of the Day</div><div class="setting-desc">Shown to users when they connect</div></div><div class="setting-ctrl"><input class="form-input" id="s-motd" value="'+esc(v('motd'))+'" style="width:300px" oninput="markSettingsChanged()"></div></div>';
+  html+='</div></div>';
+  html+='<div class="section-card"><div class="section-card-header"><h3>Limits</h3></div><div class="section-card-body">';
+  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Max Upload Size (bytes)</div></div><div class="setting-ctrl"><input class="form-input" id="s-max_upload_bytes" value="'+esc(v('max_upload_bytes'))+'" style="width:160px" type="number" oninput="markSettingsChanged()"></div></div>';
+  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Voice Quality</div></div><div class="setting-ctrl"><select class="filter-select" id="s-voice_quality" onchange="markSettingsChanged()"><option value="low" '+(v('voice_quality')==='low'?'selected':'')+'>Low</option><option value="medium" '+(v('voice_quality')==='medium'?'selected':'')+'>Medium</option><option value="high" '+(v('voice_quality')==='high'?'selected':'')+'>High</option></select></div></div>';
+  html+='</div></div>';
+  html+='<div class="section-card"><div class="section-card-header"><h3>Security</h3></div><div class="section-card-body">';
+  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Require 2FA</div><div class="setting-desc">Require all users to enable two-factor authentication</div></div><div class="setting-ctrl"><button class="toggle '+(isOn('require_2fa')?'on':'')+'" id="s-require_2fa" onclick="this.classList.toggle(\'on\');markSettingsChanged()"></button></div></div>';
+  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Registration Open</div><div class="setting-desc">Allow new users to register with invite codes</div></div><div class="setting-ctrl"><button class="toggle '+(isOn('registration_open')?'on':'')+'" id="s-registration_open" onclick="this.classList.toggle(\'on\');markSettingsChanged()"></button></div></div>';
+  html+='</div></div>';
+  html+='<div class="section-card"><div class="section-card-header"><h3>Backup</h3></div><div class="section-card-body">';
+  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Schedule</div></div><div class="setting-ctrl"><select class="filter-select" id="s-backup_schedule" onchange="markSettingsChanged()"><option value="off" '+(v('backup_schedule')==='off'?'selected':'')+'>Off</option><option value="daily" '+(v('backup_schedule')==='daily'?'selected':'')+'>Daily</option><option value="weekly" '+(v('backup_schedule')==='weekly'?'selected':'')+'>Weekly</option></select></div></div>';
+  html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Retention (days)</div></div><div class="setting-ctrl"><input class="form-input" id="s-backup_retention" value="'+esc(v('backup_retention'))+'" style="width:100px" type="number" oninput="markSettingsChanged()"></div></div>';
+  html+='</div></div>';
+  html+='<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px"><button class="btn btn-accent" id="saveSettingsBtn" '+(state.settingsChanged?'':'disabled')+' onclick="saveSettings()">Save Changes</button></div>';
+  return html;
+}
+
+function markSettingsChanged(){state.settingsChanged=true;renderNav();const btn=document.getElementById('saveSettingsBtn');if(btn)btn.disabled=false}
+
+async function saveSettings(){
+  const body={};
+  ['server_name','server_icon','motd','max_upload_bytes','voice_quality','backup_schedule','backup_retention'].forEach(k=>{const el=document.getElementById('s-'+k);if(el)body[k]=el.value});
+  ['require_2fa','registration_open'].forEach(k=>{const el=document.getElementById('s-'+k);if(el)body[k]=el.classList.contains('on')?'true':'false'});
+  try{await api('PATCH','/settings',body);state.settingsChanged=false;renderNav();showToast('Settings saved')}catch(e){showToast(e.message,'error')}
+}
+
+/* ═══ Backups ═══ */
+async function renderBackups(){
+  let backups;
+  try{backups=await api('GET','/backups')}catch(e){return'<div class="page-title">Backups</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  let html='<div class="page-title">Backups</div><div class="page-desc">Database backup and restore</div>';
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px"><div class="section-card"><div class="section-card-header"><h3>Manual Backup</h3></div><div class="section-card-body" style="text-align:center;padding:32px"><button class="btn btn-accent" style="font-size:15px;padding:12px 32px" onclick="createBackup()" '+(state.backupRunning?'disabled':'')+'>'+(state.backupRunning?'<div class="spinner"></div> Running...':I.download+' Create Backup Now')+'</button></div></div>';
+  html+='<div class="section-card"><div class="section-card-header"><h3>Schedule</h3></div><div class="section-card-body"><p style="color:var(--text-faint);font-size:13px">Configure backup schedule in Settings.</p><button class="btn btn-ghost" style="margin-top:8px" onclick="navigateTo(\'settings\')">Go to Settings</button></div></div></div>';
+  html+='<div class="section-card"><div class="section-card-header"><h3>Backup History</h3></div><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Filename</th><th>Size</th><th>Date</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
+  if(!backups||!backups.length)html+='<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:24px">No backups found</td></tr>';
+  else backups.forEach(b=>{
+    html+='<tr><td><code style="font-family:var(--font-mono);font-size:12px">'+esc(b.name)+'</code></td>';
+    html+='<td>'+fmtBytes(b.size)+'</td><td>'+(b.date?new Date(b.date).toLocaleString():'')+'</td>';
+    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" onclick="openRestoreModal(\''+esc(b.name)+'\')">Restore</button><button class="act-btn danger" title="Delete" onclick="confirmDeleteBackup(\''+esc(b.name)+'\')">'+I.trash+'</button></div></td></tr>';
+  });
+  html+='</tbody></table></div></div>';
+  return html;
+}
+
+async function createBackup(){
+  state.backupRunning=true;renderContent();
+  try{await api('POST','/backup');state.backupRunning=false;showToast('Backup created');renderContent()}catch(e){state.backupRunning=false;showToast(e.message,'error');renderContent()}
+}
+
+function openRestoreModal(name){
+  openModal('<div class="modal-header"><h3>Restore Backup</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Overwrite the current database with <strong style="color:white">'+esc(name)+'</strong>? A pre-restore backup will be created. Server restart recommended after restore.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmRestore(\''+esc(name)+'\')">Restore</button></div>');
+}
+
+async function confirmRestore(name){
+  try{await api('POST','/backups/'+encodeURIComponent(name)+'/restore');closeModal();showToast('Database restored. Restart recommended.','info');renderContent()}catch(e){showToast(e.message,'error')}
+}
+
+async function confirmDeleteBackup(name){
+  try{await fetch('/admin/api/backups/'+encodeURIComponent(name),{method:'DELETE',headers:{'Authorization':'Bearer '+state.token}});showToast('Backup deleted');renderContent()}catch(e){showToast(e.message,'error')}
+}
+
+/* ═══ Updates ═══ */
+async function renderUpdates(){
+  let info;
+  try{const r=await fetch('/admin/api/updates',{headers:{'Authorization':'Bearer '+state.token}});if(r.ok)info=await r.json()}catch(e){}
+  let html='<div class="page-title">Updates</div><div class="page-desc">Server version management</div>';
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">';
+  html+='<div class="update-card"><div class="update-icon" style="background:rgba(35,165,90,.15);color:var(--green)">'+I.check+'</div><div class="update-info"><div class="update-ver">'+(info?esc(info.current):'unknown')+'</div><div class="update-notes">Current version</div></div></div>';
+  if(info&&info.update_available)html+='<div class="update-card" style="border-color:var(--accent)"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.updates+'</div><div class="update-info"><div class="update-ver">'+esc(info.latest)+' <span class="badge badge-accent">New</span></div><div class="update-notes">Available for download</div></div></div>';
+  else html+='<div class="update-card"><div class="update-icon" style="background:rgba(35,165,90,.15);color:var(--green)">'+I.check+'</div><div class="update-info"><div class="update-ver">Up to date</div><div class="update-notes">You\'re running the latest version</div></div></div>';
+  html+='</div>';
+  if(info&&info.update_available){
+    html+='<div style="display:flex;gap:8px"><button class="btn btn-danger" onclick="applyUpdate()" '+(state.updateApplying?'disabled':'')+'>'+(state.updateApplying?'<div class="spinner"></div> Applying...':'Apply Update & Restart')+'</button>';
+    html+='<button class="btn btn-ghost" onclick="renderContent()">'+I.refresh+' Check Again</button></div>';
+  }else{
+    html+='<div style="margin-top:16px"><button class="btn btn-ghost" onclick="renderContent()">'+I.refresh+' Check for Updates</button></div>';
+  }
+  return html;
+}
+
+async function applyUpdate(){
+  openModal('<div class="modal-header"><h3>Apply Update</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">This will restart the server. All connected users will be briefly disconnected. Continue?</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmApplyUpdate()">Update & Restart</button></div>');
+}
+
+async function confirmApplyUpdate(){
+  closeModal();state.updateApplying=true;renderContent();
+  try{
+    const r=await fetch('/admin/api/updates/apply',{method:'POST',headers:{'Authorization':'Bearer '+state.token}});
+    if(r.ok){showToast('Update applied! Server restarting...','info');setTimeout(()=>location.reload(),10000)}
+    else{const e=await r.json();showToast(e.message||'Update failed','error')}
+  }catch(e){showToast(e.message,'error')}
+  state.updateApplying=false;
+}
+
+/* ═══ Keyboard + Init ═══ */
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape')closeModal();
+  if(e.key==='/'&&!document.querySelector('.modal-overlay.visible')){const s=document.querySelector('.filter-search');if(s){e.preventDefault();s.focus()}}
+});
+document.getElementById('modal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeModal()});
+
+checkAuth();
+</script>
+</body>
+</html>

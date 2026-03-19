@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main, dev]
+
+# Cancel in-progress runs for the same branch/PR
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server-build-test:
+    name: Server Build & Test
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: Server/
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Build server
+        run: go build -o chatserver.exe -ldflags "-s -w" .
+
+      - name: Run tests with coverage
+        run: go test ./... -coverprofile=coverage.out -cover
+
+      - name: Upload Go coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage
+          path: Server/coverage.out
+          retention-days: 7
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.11.3
+          working-directory: Server/
+
+  client-check:
+    name: Client Typecheck & Test
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: Client/tauri-client/
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: Client/tauri-client/package-lock.json
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Run unit tests with coverage
+        run: npx vitest run --coverage --reporter=default
+
+      - name: Upload client coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-coverage
+          path: Client/tauri-client/coverage/
+          retention-days: 7
+
+  # Full Tauri build only on PRs to main (expensive: ~15 min x2 multiplier)
+  tauri-build:
+    name: Tauri Full Build
+    needs: client-check
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: Client/tauri-client/
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: Client/tauri-client/package-lock.json
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: Client/tauri-client/src-tauri
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build Tauri app
+        run: npm run tauri build

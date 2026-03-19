@@ -1,0 +1,56 @@
+{
+  "productName": "OwnCord",
+  "version": "0.1.0",
+  "identifier": "com.owncord.client",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "OwnCord",
+        "width": 1280,
+        "height": 720,
+        "minWidth": 940,
+        "minHeight": 500,
+        "decorations": true,
+        "resizable": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: wss:; img-src 'self' https: data:; frame-src https://www.youtube.com https://youtube.com"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgxMkZGMTUzMDBBNkFCNDAKUldSQXE2WUFVL0V2Z2NjekFXaVI1elpQYVBmOUdKNmZrTzZwRC80RHlBMkQyYzZWYXdTK00xK0wK",
+      "endpoints": [],
+      "dangerousAcceptInvalidCerts": true,
+      "dangerousAcceptInvalidHostnames": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

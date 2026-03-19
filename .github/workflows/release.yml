@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    name: Build & Release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: Client/tauri-client/package-lock.json
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: Client/tauri-client/src-tauri
+
+      - name: Extract version from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Build server
+        shell: bash
+        run: cd Server && go build -o chatserver.exe -ldflags "-s -w -X main.version=$VERSION" .
+
+      - name: Install npm dependencies
+        working-directory: Client/tauri-client
+        run: npm ci
+
+      - name: Build Tauri app
+        working-directory: Client/tauri-client
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build
+
+      - name: Locate artifacts
+        id: artifacts
+        shell: bash
+        run: |
+          NSIS_DIR="Client/tauri-client/src-tauri/target/release/bundle/nsis"
+          INSTALLER=$(find "$NSIS_DIR" -name "*.exe" | head -1)
+          echo "installer_path=$INSTALLER" >> "$GITHUB_OUTPUT"
+          echo "installer_name=$(basename $INSTALLER)" >> "$GITHUB_OUTPUT"
+          # Updater artifacts (produced when TAURI_SIGNING_PRIVATE_KEY is set)
+          NSIS_ZIP=$(find "$NSIS_DIR" -name "*_x64-setup.nsis.zip" ! -name "*.sig" | head -1)
+          NSIS_SIG=$(find "$NSIS_DIR" -name "*_x64-setup.nsis.zip.sig" | head -1)
+          echo "nsis_zip=${NSIS_ZIP:-}" >> "$GITHUB_OUTPUT"
+          echo "nsis_sig=${NSIS_SIG:-}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate SHA256 checksums
+        shell: pwsh
+        run: |
+          $lines = @()
+          $serverHash = (Get-FileHash -Path Server/chatserver.exe -Algorithm SHA256).Hash.ToLower()
+          $lines += "$serverHash  chatserver.exe"
+          $installerPath = "${{ steps.artifacts.outputs.installer_path }}"
+          $installerName = "${{ steps.artifacts.outputs.installer_name }}"
+          $clientHash = (Get-FileHash -Path $installerPath -Algorithm SHA256).Hash.ToLower()
+          $lines += "$clientHash  $installerName"
+          $nsisZip = "${{ steps.artifacts.outputs.nsis_zip }}"
+          if ($nsisZip -and (Test-Path $nsisZip)) {
+            $zipName = Split-Path $nsisZip -Leaf
+            $zipHash = (Get-FileHash -Path $nsisZip -Algorithm SHA256).Hash.ToLower()
+            $lines += "$zipHash  $zipName"
+          }
+          $lines -join "`n" | Out-File -FilePath checksums.sha256 -Encoding utf8 -NoNewline
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          ASSETS=(
+            Server/chatserver.exe
+            "${{ steps.artifacts.outputs.installer_path }}"
+            checksums.sha256
+          )
+          # Include updater artifacts if signing key was available
+          if [ -n "${{ steps.artifacts.outputs.nsis_zip }}" ]; then
+            ASSETS+=("${{ steps.artifacts.outputs.nsis_zip }}")
+          fi
+          if [ -n "${{ steps.artifacts.outputs.nsis_sig }}" ]; then
+            ASSETS+=("${{ steps.artifacts.outputs.nsis_sig }}")
+          fi
+          gh release create ${{ github.ref_name }} \
+            --generate-notes \
+            "${ASSETS[@]}"

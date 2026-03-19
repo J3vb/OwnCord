@@ -1,0 +1,43 @@
+{
+  "name": "owncord-client",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "playwright test",
+    "test:e2e:prod": "npm run build && playwright test --config playwright.config.prod.ts",
+    "test:e2e:native": "playwright test --config playwright.config.native.ts",
+    "test:e2e:ui": "playwright test --ui",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1",
+    "@tauri-apps/cli": "^2",
+    "@vitest/coverage-v8": "^3",
+    "jsdom": "^29.0.0",
+    "typescript": "^5.7",
+    "vite": "^6",
+    "vitest": "^3"
+  },
+  "dependencies": {
+    "@jitsi/rnnoise-wasm": "^0.2.1",
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-fs": "^2.4.5",
+    "@tauri-apps/plugin-global-shortcut": "^2",
+    "@tauri-apps/plugin-http": "^2.5.7",
+    "@tauri-apps/plugin-notification": "^2",
+    "@tauri-apps/plugin-opener": "^2.5.3",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-store": "^2",
+    "@tauri-apps/plugin-updater": "^2.10.0"
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "identifier": "default",
+  "description": "Default capability granting core permissions to the main window",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-is-visible",
+    "core:window:allow-set-position",
+    "core:window:allow-set-size",
+    "core:window:allow-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-outer-position",
+    "core:window:allow-outer-size",
+    "store:default",
+    "global-shortcut:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-unregister-all",
+    "global-shortcut:allow-is-registered",
+    "notification:default",
+    "notification:allow-notify",
+    "notification:allow-request-permission",
+    "notification:allow-is-permission-granted",
+    "http:default",
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [
+        {
+          "url": "https://*:*"
+        },
+        {
+          "url": "https://*"
+        }
+      ]
+    },
+    {
+      "identifier": "http:allow-fetch-send",
+      "allow": [
+        {
+          "url": "https://*:*"
+        },
+        {
+          "url": "https://*"
+        }
+      ]
+    },
+    {
+      "identifier": "http:allow-fetch-read-body",
+      "allow": [
+        {
+          "url": "https://*:*"
+        },
+        {
+          "url": "https://*"
+        }
+      ]
+    },
+    "http:allow-fetch-cancel",
+    "opener:default",
+    "dialog:default",
+    "updater:default",
+    "process:allow-restart",
+    "fs:default",
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [
+        {
+          "path": "**"
+        }
+      ]
+    }
+  ]
+}

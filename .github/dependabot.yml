@@ -1,0 +1,54 @@
+version: 2
+
+updates:
+  # Go server dependencies
+  - package-ecosystem: gomod
+    directory: /Server
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps):"
+    labels:
+      - dependencies
+      - go
+    open-pull-requests-limit: 10
+
+  # Tauri client npm dependencies
+  - package-ecosystem: npm
+    directory: /Client/tauri-client
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps):"
+    labels:
+      - dependencies
+      - npm
+    open-pull-requests-limit: 10
+
+  # Tauri Rust/Cargo dependencies
+  - package-ecosystem: cargo
+    directory: /Client/tauri-client/src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps):"
+    labels:
+      - dependencies
+      - rust
+    open-pull-requests-limit: 5
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "ci(deps):"
+    labels:
+      - dependencies
+      - ci
+    open-pull-requests-limit: 5

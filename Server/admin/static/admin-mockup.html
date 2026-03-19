@@ -1,0 +1,1300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OwnCord — Admin Panel</title>
+<style>
+  /* ═══════════════════════════════════════════
+     DESIGN TOKENS (shared with client mockups)
+     ═══════════════════════════════════════════ */
+  :root {
+    --bg-tertiary:   #1e1f22;
+    --bg-secondary:  #2b2d31;
+    --bg-primary:    #313338;
+    --bg-input:      #1e1f22;
+    --bg-hover:      #35373c;
+    --bg-active:     #404249;
+    --bg-overlay:    rgba(0,0,0,.7);
+    --bg-card:       #2b2d31;
+    --bg-table-hover:rgba(88,101,242,.06);
+    --accent:        #5865f2;
+    --accent-hover:  #4752c4;
+    --accent-active: #3c45a5;
+    --accent-glow:   rgba(88,101,242,.25);
+    --text-normal:   #dbdee1;
+    --text-muted:    #949ba4;
+    --text-faint:    #80848e;
+    --text-micro:    #6d6f78;
+    --text-link:     #00a8fc;
+    --green:         #23a55a;
+    --yellow:        #f0b232;
+    --red:           #f23f43;
+    --red-bg:        #2d1214;
+    --border:        #3f4147;
+    --border-strong: #4e5058;
+    --role-owner:    #e74c3c;
+    --role-admin:    #f39c12;
+    --role-mod:      #2ecc71;
+    --role-member:   #949ba4;
+    --font-display: "Segoe UI Variable Display","Segoe UI",system-ui,sans-serif;
+    --font-body:    "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+    --font-mono:    "Cascadia Code","Consolas",monospace;
+    --radius-sm:4px; --radius-md:8px; --radius-lg:16px;
+    --sidebar-w:240px;
+  }
+
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden}
+  body{font-family:var(--font-body);font-size:14px;color:var(--text-normal);background:var(--bg-tertiary);-webkit-font-smoothing:antialiased}
+  button{font-family:inherit;border:none;cursor:pointer;outline:none}
+  input,select,textarea{font-family:inherit;border:none;outline:none}
+  ::-webkit-scrollbar{width:6px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:var(--bg-tertiary);border-radius:3px}
+  ::-webkit-scrollbar-thumb:hover{background:var(--bg-hover)}
+
+  /* ═══ Layout ═══ */
+  .admin{display:flex;height:100vh}
+
+  /* ═══ Sidebar ═══ */
+  .sidebar{width:var(--sidebar-w);background:var(--bg-secondary);display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto}
+  .sidebar-header{padding:20px 16px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+  .sidebar-brand{display:flex;align-items:center;gap:10px}
+  .sidebar-logo{width:36px;height:36px;border-radius:10px;background:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .sidebar-logo svg{width:22px;height:22px}
+  .sidebar-title{font-size:15px;font-weight:700;color:white}
+  .sidebar-subtitle{font-size:11px;color:var(--text-faint);letter-spacing:.03em}
+  .sidebar-nav{flex:1;padding:8px}
+  .sidebar-label{font-size:11px;font-weight:700;color:var(--text-faint);letter-spacing:.05em;text-transform:uppercase;padding:12px 12px 4px}
+  .sidebar-sep{height:1px;background:var(--border);margin:4px 12px}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:var(--radius-sm);font-size:14px;color:var(--text-muted);background:transparent;width:100%;text-align:left;transition:all .15s;position:relative}
+  .nav-item:hover{background:var(--bg-hover);color:var(--text-normal)}
+  .nav-item.active{background:var(--bg-active);color:white}
+  .nav-item svg{width:18px;height:18px;flex-shrink:0;opacity:.7}
+  .nav-item.active svg{opacity:1}
+  .nav-item.danger{color:var(--red)}
+  .nav-item.danger:hover{background:rgba(242,63,67,.1)}
+  .nav-item .nav-badge{margin-left:auto;background:var(--accent);color:white;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;min-width:18px;text-align:center}
+  .nav-item .unsaved-dot{position:absolute;left:6px;top:50%;transform:translateY(-50%);width:6px;height:6px;border-radius:50%;background:var(--yellow)}
+  .sidebar-footer{padding:12px 16px;border-top:1px solid var(--border);flex-shrink:0;font-size:11px;color:var(--text-micro);text-align:center}
+
+  /* ═══ Content ═══ */
+  .content{flex:1;overflow-y:auto;padding:32px 40px;background:var(--bg-primary)}
+  .page-title{font-size:22px;font-weight:700;color:white;margin-bottom:4px}
+  .page-desc{font-size:13px;color:var(--text-faint);margin-bottom:24px}
+
+  /* ═══ Stat Cards ═══ */
+  .stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-bottom:24px}
+  .stat-card{background:var(--bg-card);border-radius:var(--radius-md);padding:18px 20px;border:1px solid var(--border);transition:border-color .2s}
+  .stat-card:hover{border-color:var(--border-strong)}
+  .stat-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .stat-card-label{font-size:11px;font-weight:700;color:var(--text-faint);letter-spacing:.04em;text-transform:uppercase}
+  .stat-card-icon{width:32px;height:32px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .stat-card-icon svg{width:16px;height:16px}
+  .stat-card-value{font-size:28px;font-weight:700;color:white;font-family:var(--font-mono);line-height:1.1}
+  .stat-card-sub{font-size:12px;color:var(--text-faint);margin-top:4px;font-family:var(--font-mono)}
+
+  /* Usage bar */
+  .usage-bar{height:6px;border-radius:3px;background:var(--border);overflow:hidden;margin-top:8px}
+  .usage-fill{height:100%;border-radius:3px;transition:width .6s ease}
+  .usage-fill.ok{background:var(--green)}
+  .usage-fill.warn{background:var(--yellow)}
+  .usage-fill.danger{background:var(--red)}
+
+  /* ═══ Section Cards ═══ */
+  .section-card{background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border);margin-bottom:20px;overflow:hidden}
+  .section-card-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+  .section-card-header h3{font-size:14px;font-weight:700;color:white}
+  .section-card-body{padding:16px 20px}
+  .section-card-body.no-pad{padding:0}
+
+  /* ═══ Tables ═══ */
+  .tbl{width:100%;border-collapse:collapse}
+  .tbl th{font-size:11px;font-weight:700;color:var(--text-faint);letter-spacing:.04em;text-transform:uppercase;text-align:left;padding:10px 16px;border-bottom:2px solid var(--border)}
+  .tbl td{padding:10px 16px;font-size:13px;border-bottom:1px solid var(--border);vertical-align:middle}
+  .tbl tr:hover td{background:var(--bg-table-hover)}
+  .tbl tr:last-child td{border-bottom:none}
+
+  /* Avatar */
+  .avatar{width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:white;flex-shrink:0}
+  .avatar-sm{width:22px;height:22px;font-size:10px}
+
+  /* Status dot */
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;flex-shrink:0}
+  .dot.online{background:var(--green)}.dot.offline{background:var(--text-micro)}.dot.banned{background:var(--red)}
+
+  /* Role badge */
+  .role-badge{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.06)}
+  .role-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+
+  /* Action buttons */
+  .act-btn{width:28px;height:28px;border-radius:var(--radius-sm);background:transparent;color:var(--text-faint);display:inline-flex;align-items:center;justify-content:center;transition:all .15s}
+  .act-btn:hover{background:var(--bg-active);color:var(--text-normal)}
+  .act-btn.danger:hover{background:var(--red);color:white}
+  .act-btn svg{width:14px;height:14px}
+  .act-group{display:flex;gap:2px}
+
+  /* Badges */
+  .badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px}
+  .badge-green{background:rgba(35,165,90,.15);color:var(--green)}
+  .badge-red{background:rgba(242,63,67,.15);color:var(--red)}
+  .badge-yellow{background:rgba(240,178,50,.15);color:var(--yellow)}
+  .badge-muted{background:rgba(128,132,142,.15);color:var(--text-faint)}
+  .badge-accent{background:var(--accent-glow);color:var(--accent)}
+
+  /* ═══ Filter Bar ═══ */
+  .filter-bar{display:flex;gap:10px;margin-bottom:16px;align-items:center;flex-wrap:wrap}
+  .filter-search{flex:1;min-width:200px;padding:8px 12px 8px 34px;background:var(--bg-input);color:var(--text-normal);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;transition:border-color .2s;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='%236d6f78' viewBox='0 0 24 24'%3E%3Ccircle cx='11' cy='11' r='8' stroke='%236d6f78' stroke-width='2' fill='none'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65' stroke='%236d6f78' stroke-width='2'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:10px center}
+  .filter-search::placeholder{color:var(--text-micro)}
+  .filter-search:focus{border-color:var(--accent)}
+  .filter-select{padding:8px 28px 8px 10px;background:var(--bg-input);color:var(--text-normal);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;appearance:none;cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' fill='%2380848e' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center}
+  .filter-select:focus{border-color:var(--accent)}
+
+  /* ═══ Buttons ═══ */
+  .btn{padding:8px 16px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;transition:all .15s;display:inline-flex;align-items:center;gap:6px}
+  .btn-accent{background:var(--accent);color:white}.btn-accent:hover{background:var(--accent-hover)}
+  .btn-danger{background:var(--red);color:white}.btn-danger:hover{background:#d83135}
+  .btn-ghost{background:var(--bg-hover);color:var(--text-muted)}.btn-ghost:hover{background:var(--bg-active);color:var(--text-normal)}
+  .btn-outline{background:transparent;color:var(--text-muted);border:1px solid var(--border)}.btn-outline:hover{border-color:var(--border-strong);color:var(--text-normal)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn .spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:white;border-radius:50%;animation:spin .6s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* ═══ Forms ═══ */
+  .form-group{margin-bottom:16px}
+  .form-label{display:block;font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.02em;text-transform:uppercase;margin-bottom:6px}
+  .form-label .req{color:var(--red);margin-left:2px}
+  .form-input{width:100%;padding:10px 12px;background:var(--bg-input);color:var(--text-normal);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;transition:border-color .2s}
+  .form-input::placeholder{color:var(--text-micro)}
+  .form-input:focus{border-color:var(--accent)}
+  .form-textarea{resize:vertical;min-height:80px}
+  .toggle{width:40px;height:22px;border-radius:11px;background:var(--border-strong);cursor:pointer;position:relative;transition:background .2s;flex-shrink:0;padding:0}
+  .toggle.on{background:var(--green)}
+  .toggle::after{content:'';position:absolute;width:16px;height:16px;border-radius:50%;background:white;top:3px;left:3px;transition:transform .2s}
+  .toggle.on::after{transform:translateX(18px)}
+  .setting-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border)}
+  .setting-row:last-child{border-bottom:none}
+  .setting-info{flex:1;min-width:0}
+  .setting-name{font-size:14px;color:var(--text-normal);margin-bottom:2px}
+  .setting-desc{font-size:12px;color:var(--text-faint)}
+  .setting-ctrl{flex-shrink:0;margin-left:16px}
+
+  /* ═══ Modals ═══ */
+  .modal-overlay{position:fixed;inset:0;background:var(--bg-overlay);display:none;align-items:center;justify-content:center;z-index:100}
+  .modal-overlay.visible{display:flex}
+  .modal{background:var(--bg-primary);border-radius:var(--radius-md);width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 8px 48px rgba(0,0,0,.5);animation:modalIn .25s cubic-bezier(.16,1,.3,1)}
+  @keyframes modalIn{from{opacity:0;transform:translateY(20px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+  .modal-header{padding:20px 24px 0;display:flex;align-items:center;justify-content:space-between}
+  .modal-header h3{font-size:18px;font-weight:700;color:white}
+  .modal-close{background:transparent;color:var(--text-faint);font-size:20px;padding:4px;border-radius:var(--radius-sm);transition:color .15s}
+  .modal-close:hover{color:var(--text-normal)}
+  .modal-body{padding:20px 24px}
+  .modal-footer{padding:16px 24px;background:var(--bg-secondary);border-radius:0 0 var(--radius-md) var(--radius-md);display:flex;justify-content:flex-end;gap:8px}
+
+  /* ═══ Pagination ═══ */
+  .pagination{display:flex;align-items:center;justify-content:space-between;padding:12px 0;margin-top:4px}
+  .pagination-info{font-size:12px;color:var(--text-faint)}
+  .pagination-btns{display:flex;gap:4px}
+  .page-btn{width:32px;height:32px;border-radius:var(--radius-sm);background:transparent;color:var(--text-muted);font-size:13px;display:flex;align-items:center;justify-content:center;transition:all .15s}
+  .page-btn:hover{background:var(--bg-hover);color:var(--text-normal)}
+  .page-btn.active{background:var(--accent);color:white}
+  .page-btn:disabled{opacity:.3;cursor:not-allowed}
+
+  /* ═══ Permission toggles ═══ */
+  .perm-grid{display:grid;gap:0}
+  .perm-row{display:flex;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)}
+  .perm-row:last-child{border-bottom:none}
+  .perm-name{flex:1;font-size:13px;color:var(--text-normal)}
+  .perm-name small{display:block;font-size:11px;color:var(--text-micro);font-family:var(--font-mono)}
+  .perm-toggles{display:flex;gap:4px}
+  .perm-btn{padding:3px 10px;border-radius:var(--radius-sm);font-size:11px;font-weight:600;background:var(--bg-hover);color:var(--text-faint);transition:all .15s}
+  .perm-btn:hover{color:var(--text-normal)}
+  .perm-btn.allow{background:rgba(35,165,90,.2);color:var(--green)}
+  .perm-btn.deny{background:rgba(242,63,67,.2);color:var(--red)}
+  .perm-btn.inherit{background:var(--bg-hover);color:var(--text-faint)}
+
+  /* ═══ Sub-tabs ═══ */
+  .sub-tabs{display:flex;gap:4px;margin-bottom:20px}
+  .sub-tab{padding:6px 14px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;color:var(--text-muted);background:transparent;transition:all .15s}
+  .sub-tab:hover{background:var(--bg-hover);color:var(--text-normal)}
+  .sub-tab.active{background:var(--bg-active);color:white}
+
+  /* ═══ Toast ═══ */
+  .toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:var(--radius-md);font-size:13px;font-weight:600;display:none;align-items:center;gap:8px;z-index:200;box-shadow:0 4px 24px rgba(0,0,0,.4);animation:toastIn .3s cubic-bezier(.16,1,.3,1)}
+  .toast.visible{display:flex}
+  .toast.success{background:var(--green);color:white}
+  .toast.error{background:var(--red);color:white}
+  .toast.info{background:var(--accent);color:white}
+  @keyframes toastIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+
+  /* ═══ Activity item ═══ */
+  .activity-item{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+  .activity-item:last-child{border-bottom:none}
+  .activity-icon{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .activity-icon svg{width:14px;height:14px}
+  .activity-text{font-size:13px;color:var(--text-muted);line-height:1.4}
+  .activity-text strong{color:var(--text-normal)}
+  .activity-time{font-size:11px;color:var(--text-micro);margin-top:2px}
+
+  /* ═══ Copyable code ═══ */
+  .code-copy{display:flex;align-items:center;gap:8px;background:var(--bg-tertiary);padding:8px 12px;border-radius:var(--radius-sm);margin-top:8px}
+  .code-copy code{flex:1;font-family:var(--font-mono);font-size:13px;color:var(--text-link);word-break:break-all}
+  .code-copy .btn{padding:4px 10px;font-size:11px}
+
+  /* ═══ Update card ═══ */
+  .update-card{display:flex;align-items:flex-start;gap:16px;padding:20px;background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border)}
+  .update-icon{width:48px;height:48px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .update-icon svg{width:24px;height:24px}
+  .update-info{flex:1}
+  .update-ver{font-size:18px;font-weight:700;color:white}
+  .update-notes{font-size:13px;color:var(--text-faint);margin-top:6px;line-height:1.5}
+
+  /* ═══ Toggle (accessible) ═══ */
+  .toggle{appearance:none;-webkit-appearance:none;border:none;font:inherit;color:inherit}
+
+  /* ═══ Responsive ═══ */
+  @media(max-width:900px){
+    .sidebar{width:200px}
+    .content{padding:24px 20px}
+    .stat-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}
+  }
+  @media(max-width:600px){
+    .admin{flex-direction:column}
+    .sidebar{width:100%;height:auto;max-height:56px;overflow:hidden;flex-direction:row;align-items:center}
+    .sidebar.expanded{max-height:100vh;flex-direction:column}
+    .sidebar-header{padding:12px 16px}
+    .sidebar-nav{display:flex;flex-wrap:wrap;gap:2px;padding:4px 8px}
+    .sidebar-label,.sidebar-sep{display:none}
+    .nav-item{padding:6px 10px;font-size:12px}
+    .content{padding:16px 12px}
+    .stat-grid{grid-template-columns:1fr 1fr}
+    .filter-bar{flex-direction:column}
+    .filter-search{min-width:unset}
+    .modal{width:95vw;max-height:90vh}
+  }
+</style>
+</head>
+<body>
+
+<div class="admin" data-wpf-component="AdminShell" data-wpf-notes="Grid: sidebar NavigationView + content Frame">
+  <!-- ═══ Sidebar ═══ -->
+  <div class="sidebar" id="sidebar" data-wpf-component="NavigationView" data-wpf-notes="WPF NavigationView with MenuItems, PaneDisplayMode=Left">
+    <div class="sidebar-header">
+      <div class="sidebar-brand">
+        <div class="sidebar-logo">
+          <svg viewBox="0 0 24 24" fill="white"><path d="M12 2L4 5.5v5c0 5.25 3.4 10.15 8 11.5 4.6-1.35 8-6.25 8-11.5v-5L12 2zm0 3l1.5 3h3.2l-2.6 1.9 1 3.1L12 11.1 8.9 13l1-3.1L7.3 8h3.2L12 5z"/></svg>
+        </div>
+        <div>
+          <div class="sidebar-title">OwnCord</div>
+          <div class="sidebar-subtitle">Admin Panel</div>
+        </div>
+      </div>
+    </div>
+    <nav class="sidebar-nav" id="sidebarNav" role="navigation" aria-label="Admin sections"><!-- JS --></nav>
+    <div class="sidebar-footer">OwnCord v1.2.0</div>
+  </div>
+
+  <!-- ═══ Content ═══ -->
+  <div class="content" id="content" data-wpf-component="Frame" data-wpf-notes="Frame navigates between admin Page subclasses"><!-- JS --></div>
+</div>
+
+<!-- ═══ Modal ═══ -->
+<div class="modal-overlay" id="modal" role="dialog" aria-modal="true" aria-hidden="true">
+  <div class="modal" id="modalInner"><!-- JS --></div>
+</div>
+
+<!-- ═══ Toast ═══ -->
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* ═══════════════════════════════════════════
+   ICONS (inline SVG strings)
+   ═══════════════════════════════════════════ */
+const I = {
+  dashboard:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
+  users:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  channels:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>',
+  invites:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+  settings:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>',
+  moderation:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+  backup:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></svg>',
+  updates:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>',
+  logout:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
+  edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+  trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+  ban:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>',
+  kick:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="18" y1="8" x2="23" y2="13"/><line x1="23" y1="8" x2="18" y2="13"/></svg>',
+  key:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>',
+  copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+  refresh:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+  disconnect:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+  voice:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>',
+  megaphone:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+  download:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+  roles:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.32 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+};
+
+/* ═══════════════════════════════════════════
+   MOCK DATA
+   ═══════════════════════════════════════════ */
+const ROLES = [
+  { id:1, name:'Owner',     color:'#e74c3c', perms:0x7FFFFFFF, position:100 },
+  { id:2, name:'Admin',     color:'#f39c12', perms:0x3FFFFFFF, position:80 },
+  { id:3, name:'Moderator', color:'#2ecc71', perms:0x000FFFFF, position:50 },
+  { id:4, name:'Member',    color:'#949ba4', perms:0x00000663, position:10 },
+];
+
+const PERMS = [
+  { name:'Send Messages',   bit:0x1 },
+  { name:'Read Messages',   bit:0x2 },
+  { name:'Attach Files',    bit:0x20 },
+  { name:'Add Reactions',   bit:0x40 },
+  { name:'Use Soundboard',  bit:0x100 },
+  { name:'Connect Voice',   bit:0x200 },
+  { name:'Speak Voice',     bit:0x400 },
+  { name:'Use Video',       bit:0x800 },
+  { name:'Share Screen',    bit:0x1000 },
+  { name:'Manage Messages', bit:0x10000 },
+  { name:'Manage Channels', bit:0x20000 },
+  { name:'Kick Members',    bit:0x40000 },
+  { name:'Ban Members',     bit:0x80000 },
+  { name:'Mute Members',    bit:0x100000 },
+  { name:'Manage Roles',    bit:0x1000000 },
+  { name:'Manage Server',   bit:0x2000000 },
+  { name:'Manage Invites',  bit:0x4000000 },
+  { name:'View Audit Log',  bit:0x8000000 },
+  { name:'Administrator',   bit:0x40000000 },
+];
+
+const USERS = [
+  { id:1,  username:'LordJebus',   color:'#5865f2', role_id:1, status:'online',  created:'2025-12-01', last_seen:'Just now',    banned:0, totp:true,  sessions:2 },
+  { id:2,  username:'alex_dev',    color:'#57f287', role_id:2, status:'online',  created:'2025-12-15', last_seen:'Just now',    banned:0, totp:true,  sessions:1 },
+  { id:3,  username:'sarah_mod',   color:'#eb459e', role_id:3, status:'online',  created:'2026-01-03', last_seen:'Just now',    banned:0, totp:false, sessions:1 },
+  { id:4,  username:'mike_gamer',  color:'#f47b67', role_id:4, status:'online',  created:'2026-01-10', last_seen:'2 min ago',   banned:0, totp:false, sessions:1 },
+  { id:5,  username:'jessica',     color:'#9b59b6', role_id:4, status:'online',  created:'2026-01-15', last_seen:'5 min ago',   banned:0, totp:false, sessions:1 },
+  { id:6,  username:'dave_music',  color:'#1abc9c', role_id:4, status:'offline', created:'2026-01-20', last_seen:'3 hours ago', banned:0, totp:false, sessions:0 },
+  { id:7,  username:'emma_art',    color:'#e67e22', role_id:4, status:'offline', created:'2026-02-01', last_seen:'Yesterday',   banned:0, totp:false, sessions:0 },
+  { id:8,  username:'toxic_user',  color:'#ed4245', role_id:4, status:'offline', created:'2026-02-10', last_seen:'1 week ago',  banned:1, totp:false, sessions:0, ban_reason:'Harassment' },
+  { id:9,  username:'bob_builder', color:'#f0b232', role_id:4, status:'offline', created:'2026-02-15', last_seen:'2 days ago',  banned:0, totp:false, sessions:0 },
+  { id:10, username:'newbie42',    color:'#5865f2', role_id:4, status:'online',  created:'2026-03-10', last_seen:'Just now',    banned:0, totp:false, sessions:1 },
+  { id:11, username:'coolcat',     color:'#57f287', role_id:4, status:'online',  created:'2026-03-12', last_seen:'1 min ago',   banned:0, totp:false, sessions:1 },
+  { id:12, username:'nightowl',    color:'#eb459e', role_id:3, status:'online',  created:'2026-02-20', last_seen:'Just now',    banned:0, totp:true,  sessions:1 },
+];
+
+const CHANNELS = [
+  { id:1, name:'general',       type:'text',         category:'Text Channels',  topic:'General chat', slow_mode:0, archived:false },
+  { id:2, name:'announcements', type:'announcement', category:'Text Channels',  topic:'Server news',  slow_mode:0, archived:false },
+  { id:3, name:'dev-talk',      type:'text',         category:'Development',    topic:'Code talk',    slow_mode:5, archived:false },
+  { id:4, name:'bug-reports',   type:'text',         category:'Development',    topic:'Report bugs',  slow_mode:0, archived:false },
+  { id:5, name:'gaming',        type:'text',         category:'Fun',            topic:'',             slow_mode:0, archived:false },
+  { id:6, name:'memes',         type:'text',         category:'Fun',            topic:'Memes only',   slow_mode:10,archived:false },
+  { id:7, name:'General Voice', type:'voice',        category:'Voice Channels', topic:'',             slow_mode:0, archived:false },
+  { id:8, name:'Gaming Voice',  type:'voice',        category:'Voice Channels', topic:'',             slow_mode:0, archived:false },
+  { id:9, name:'old-chat',      type:'text',         category:'Archived',       topic:'',             slow_mode:0, archived:true },
+];
+
+const INVITES = [
+  { id:1, code:'ABC123XY', created_by:'LordJebus', max_uses:10, uses:3,  expires:'2026-03-20', status:'active' },
+  { id:2, code:'TEAM2026', created_by:'alex_dev',  max_uses:0,  uses:12, expires:null,         status:'active' },
+  { id:3, code:'OLDCODE1', created_by:'LordJebus', max_uses:5,  uses:5,  expires:'2026-03-01', status:'exhausted' },
+  { id:4, code:'REVOKED1', created_by:'sarah_mod', max_uses:20, uses:2,  expires:'2026-04-01', status:'revoked' },
+  { id:5, code:'EXPIRED1', created_by:'LordJebus', max_uses:50, uses:8,  expires:'2026-03-10', status:'expired' },
+];
+
+const AUDIT_LOG = [
+  { id:1,  user:'LordJebus',  action:'user.ban',        target:'toxic_user',  detail:'Harassment',          time:'5 min ago' },
+  { id:2,  user:'sarah_mod',  action:'message.delete',   target:'#general',    detail:'Removed spam',        time:'12 min ago' },
+  { id:3,  user:'alex_dev',   action:'channel.create',   target:'#dev-talk',   detail:'',                    time:'1 hour ago' },
+  { id:4,  user:'LordJebus',  action:'role.update',      target:'Moderator',   detail:'Added MUTE_MEMBERS',  time:'2 hours ago' },
+  { id:5,  user:'LordJebus',  action:'invite.create',    target:'ABC123XY',    detail:'Max 10 uses',         time:'3 hours ago' },
+  { id:6,  user:'sarah_mod',  action:'user.kick',        target:'spammer99',   detail:'Spam',                time:'5 hours ago' },
+  { id:7,  user:'LordJebus',  action:'settings.update',  target:'MOTD',        detail:'Updated welcome msg', time:'Yesterday' },
+  { id:8,  user:'alex_dev',   action:'channel.update',   target:'#bug-reports',detail:'Changed topic',       time:'Yesterday' },
+  { id:9,  user:'LordJebus',  action:'backup.create',    target:'Manual',      detail:'2.3 GB',              time:'2 days ago' },
+  { id:10, user:'LordJebus',  action:'user.create',      target:'newbie42',    detail:'Via invite ABC123XY', time:'3 days ago' },
+];
+
+const BACKUPS = [
+  { id:1, name:'backup_2026-03-15_manual.db',    size:'2.3 GB', date:'Mar 15, 2026', type:'manual' },
+  { id:2, name:'backup_2026-03-14_scheduled.db',  size:'2.3 GB', date:'Mar 14, 2026', type:'scheduled' },
+  { id:3, name:'backup_2026-03-13_scheduled.db',  size:'2.2 GB', date:'Mar 13, 2026', type:'scheduled' },
+];
+
+/* ═══════════════════════════════════════════
+   STATE
+   ═══════════════════════════════════════════ */
+const state = {
+  section: 'dashboard',
+  // Users
+  users: USERS.map(u=>({...u})),
+  userSearch: '', userRoleFilter:'all', userStatusFilter:'all', userPage:1,
+  // Channels
+  channels: CHANNELS.map(c=>({...c})),
+  // Invites
+  invites: INVITES.map(i=>({...i})),
+  // Roles
+  roles: ROLES.map(r=>({...r})),
+  // Moderation
+  auditLog: AUDIT_LOG.map(a=>({...a})),
+  auditSearch: '', auditActionFilter:'all',
+  modTab: 'audit',
+  wordFilter: ['slur1','offensive2','spam-link.com'],
+  // Settings
+  serverName: 'OwnCord Home Server',
+  motd: 'Welcome to the server! Be nice.',
+  maxUpload: '50',
+  voiceQuality: '64',
+  require2FA: false,
+  tlsMode: 'self-signed',
+  rateMessages: '5',
+  rateUploads: '3',
+  rateLogins: '5',
+  settingsChanged: false,
+  // Backup
+  backups: BACKUPS.map(b=>({...b})),
+  backupSchedule: 'daily',
+  backupRetention: '30',
+  backupRunning: false,
+  // Updates
+  currentVersion: 'v1.2.0',
+  latestVersion: 'v1.3.0',
+  updateAvailable: true,
+  updateNotes: '- Fixed voice reconnection bug\n- Added message search\n- Improved upload validation\n- Security patches',
+  updateApplying: false,
+  // Stats (live)
+  stats: { online:8, total:12, msgToday:1834, msgTotal:142567, diskUsed:2340, diskTotal:50000, cpu:23, ram:128, ramTotal:8192, uptime:864000, voice:3 },
+  // Modal
+  modalContent: null,
+};
+
+/* ═══════════════════════════════════════════
+   UTILITIES
+   ═══════════════════════════════════════════ */
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function getRole(rid){return ROLES.find(r=>r.id===rid)||ROLES[3]}
+function formatUptime(s){const d=Math.floor(s/86400),h=Math.floor((s%86400)/3600);return d+'d '+h+'h'}
+function formatBytes(mb){return mb>=1000?(mb/1000).toFixed(1)+' GB':mb+' MB'}
+function usageClass(pct){return pct<60?'ok':pct<80?'warn':'danger'}
+function actionColor(a){if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'var(--red)';if(a.includes('create'))return'var(--green)';if(a.includes('update'))return'var(--yellow)';return'var(--accent)'}
+function actionBadge(a){if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'badge-red';if(a.includes('create'))return'badge-green';if(a.includes('update'))return'badge-yellow';return'badge-accent'}
+
+function showToast(msg, type='success'){
+  const t=document.getElementById('toast');
+  t.className='toast visible '+type;
+  t.innerHTML=(type==='success'?I.check:type==='error'?I.ban:I.check)+'<span>'+msg+'</span>';
+  clearTimeout(window._toastTimer);
+  window._toastTimer=setTimeout(()=>t.classList.remove('visible'),3000);
+}
+
+function openModal(html){
+  const overlay=document.getElementById('modal');
+  document.getElementById('modalInner').innerHTML=html;
+  overlay.classList.add('visible');
+  overlay.setAttribute('aria-hidden','false');
+}
+function closeModal(){
+  const overlay=document.getElementById('modal');
+  overlay.classList.remove('visible');
+  overlay.setAttribute('aria-hidden','true');
+}
+
+/* ═══════════════════════════════════════════
+   NAV
+   ═══════════════════════════════════════════ */
+const NAV = [
+  {section:'Management'},
+  {id:'dashboard',  label:'Dashboard',  icon:I.dashboard},
+  {id:'users',      label:'Users',      icon:I.users,     badge:()=>state.stats.online},
+  {id:'channels',   label:'Channels',   icon:I.channels},
+  {id:'roles',      label:'Roles',      icon:I.roles},
+  {id:'invites',    label:'Invites',    icon:I.invites},
+  {sep:true},
+  {section:'Configuration'},
+  {id:'settings',   label:'Settings',   icon:I.settings,  unsaved:()=>state.settingsChanged},
+  {id:'moderation', label:'Moderation', icon:I.moderation},
+  {id:'backup',     label:'Backup',     icon:I.backup},
+  {id:'updates',    label:'Updates',    icon:I.updates,   badge:()=>state.updateAvailable?'!':null},
+  {sep:true},
+  {id:'logout',     label:'Sign Out',   icon:I.logout,    danger:true},
+];
+
+function renderNav(){
+  document.getElementById('sidebarNav').innerHTML=NAV.map(n=>{
+    if(n.section)return`<div class="sidebar-label">${n.section}</div>`;
+    if(n.sep)return'<div class="sidebar-sep"></div>';
+    const active=state.section===n.id?'active':'';
+    const cls=n.danger?'danger':'';
+    const badge=n.badge&&n.badge()?`<span class="nav-badge">${n.badge()}</span>`:'';
+    const unsaved=n.unsaved&&n.unsaved()?'<span class="unsaved-dot"></span>':'';
+    return`<button class="nav-item ${active} ${cls}" role="tab" aria-selected="${active?'true':'false'}" onclick="${n.id==='logout'?'showToast(\'Signed out\',\'info\')':'navigateTo(\''+n.id+'\')'}">
+      ${unsaved}${n.icon}<span>${n.label}</span>${badge}</button>`;
+  }).join('');
+}
+
+function navigateTo(id){state.section=id;renderNav();renderContent()}
+
+/* ═══════════════════════════════════════════
+   CONTENT ROUTER
+   ═══════════════════════════════════════════ */
+function renderContent(){
+  const c=document.getElementById('content');
+  c.scrollTop=0;
+  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,invites:renderInvites,settings:renderSettings,moderation:renderModeration,backup:renderBackup,updates:renderUpdates};
+  c.innerHTML=(r[state.section]||renderDashboard)();
+}
+
+/* ═══════════════════════════════════════════
+   DASHBOARD
+   ═══════════════════════════════════════════ */
+function renderDashboard(){
+  const s=state.stats;
+  const diskPct=Math.round(s.diskUsed/s.diskTotal*100);
+  const cpuPct=s.cpu;
+  const ramPct=Math.round(s.ram/s.ramTotal*100);
+  return`
+  <div data-wpf-component="DashboardPage" data-wpf-notes="Page with DispatcherTimer for auto-refresh, binds to DashboardViewModel">
+  <div class="page-title">Dashboard</div>
+  <div class="page-desc">Server overview and real-time statistics</div>
+  <div class="stat-grid" data-wpf-component="UniformGrid" data-wpf-notes="Columns=3, ItemsSource=StatCards">
+    <div class="stat-card">
+      <div class="stat-card-header"><span class="stat-card-label">Users Online</span><div class="stat-card-icon" style="background:rgba(35,165,90,.15);color:var(--green)">${I.users}</div></div>
+      <div class="stat-card-value">${s.online}</div>
+      <div class="stat-card-sub">of ${s.total} total</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-header"><span class="stat-card-label">Messages Today</span><div class="stat-card-icon" style="background:var(--accent-glow);color:var(--accent)">${I.megaphone}</div></div>
+      <div class="stat-card-value">${s.msgToday.toLocaleString()}</div>
+      <div class="stat-card-sub">${s.msgTotal.toLocaleString()} total</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-header"><span class="stat-card-label">Voice Active</span><div class="stat-card-icon" style="background:rgba(240,178,50,.15);color:var(--yellow)">${I.voice}</div></div>
+      <div class="stat-card-value">${s.voice}</div>
+      <div class="stat-card-sub">connections</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-header"><span class="stat-card-label">Disk Usage</span><div class="stat-card-icon" style="background:rgba(88,101,242,.15);color:var(--accent)">${I.backup}</div></div>
+      <div class="stat-card-value">${formatBytes(s.diskUsed)}</div>
+      <div class="stat-card-sub">of ${formatBytes(s.diskTotal)}</div>
+      <div class="usage-bar"><div class="usage-fill ${usageClass(diskPct)}" style="width:${diskPct}%"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-header"><span class="stat-card-label">CPU</span></div>
+      <div class="stat-card-value">${cpuPct}%</div>
+      <div class="usage-bar"><div class="usage-fill ${usageClass(cpuPct)}" style="width:${cpuPct}%"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-header"><span class="stat-card-label">Uptime</span></div>
+      <div class="stat-card-value">${formatUptime(s.uptime)}</div>
+      <div class="stat-card-sub">v${state.currentVersion.slice(1)}</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div class="section-card">
+      <div class="section-card-header"><h3>Online Users</h3><button class="btn btn-ghost" onclick="navigateTo('users')">View All</button></div>
+      <div class="section-card-body no-pad">
+        <table class="tbl">${state.users.filter(u=>u.status==='online').slice(0,6).map(u=>{
+          const r=getRole(u.role_id);
+          return`<tr><td style="width:40px"><div class="avatar" style="background:${u.color}">${u.username[0].toUpperCase()}</div></td>
+          <td><strong>${esc(u.username)}</strong></td>
+          <td><span class="role-badge"><span class="role-dot" style="background:${r.color}"></span>${r.name}</span></td>
+          <td style="font-size:12px;color:var(--text-faint)">${u.last_seen}</td></tr>`;
+        }).join('')}</table>
+      </div>
+    </div>
+
+    <div class="section-card">
+      <div class="section-card-header"><h3>Recent Activity</h3><button class="btn btn-ghost" onclick="navigateTo('moderation')">View All</button></div>
+      <div class="section-card-body">
+        ${state.auditLog.slice(0,5).map(a=>`
+          <div class="activity-item">
+            <div class="activity-icon" style="background:${actionColor(a.action)}22;color:${actionColor(a.action)}">${I.moderation}</div>
+            <div>
+              <div class="activity-text"><strong>${esc(a.user)}</strong> ${a.action.replace('.',' ')} <strong>${esc(a.target)}</strong></div>
+              <div class="activity-time">${a.time}${a.detail?' — '+esc(a.detail):''}</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  </div>
+  </div>`;
+}
+
+/* ═══════════════════════════════════════════
+   USERS
+   ═══════════════════════════════════════════ */
+function renderUsers(){
+  let users=state.users.filter(u=>{
+    if(state.userSearch && !u.username.toLowerCase().includes(state.userSearch.toLowerCase()))return false;
+    if(state.userRoleFilter!=='all' && u.role_id!==parseInt(state.userRoleFilter))return false;
+    if(state.userStatusFilter==='online' && u.status!=='online')return false;
+    if(state.userStatusFilter==='banned' && !u.banned)return false;
+    if(state.userStatusFilter==='offline' && u.status!=='offline')return false;
+    return true;
+  });
+  const pageSize=8, totalPages=Math.ceil(users.length/pageSize)||1;
+  if(state.userPage>totalPages)state.userPage=totalPages;
+  const start=(state.userPage-1)*pageSize;
+  const paged=users.slice(start,start+pageSize);
+
+  return`
+  <div data-wpf-component="UsersPage" data-wpf-notes="Page with DataGrid, binds to UsersViewModel with search/filter ICollectionView">
+  <div class="page-title">Users</div>
+  <div class="page-desc">${state.users.length} registered users, ${state.users.filter(u=>u.status==='online').length} online</div>
+  <div class="filter-bar">
+    <input class="filter-search" placeholder="Search users..." value="${esc(state.userSearch)}" oninput="state.userSearch=this.value;state.userPage=1;renderContent()">
+    <select class="filter-select" onchange="state.userRoleFilter=this.value;state.userPage=1;renderContent()">
+      <option value="all" ${state.userRoleFilter==='all'?'selected':''}>All Roles</option>
+      ${ROLES.map(r=>`<option value="${r.id}" ${state.userRoleFilter==r.id?'selected':''}>${r.name}</option>`).join('')}
+    </select>
+    <select class="filter-select" onchange="state.userStatusFilter=this.value;state.userPage=1;renderContent()">
+      <option value="all" ${state.userStatusFilter==='all'?'selected':''}>All Status</option>
+      <option value="online" ${state.userStatusFilter==='online'?'selected':''}>Online</option>
+      <option value="offline" ${state.userStatusFilter==='offline'?'selected':''}>Offline</option>
+      <option value="banned" ${state.userStatusFilter==='banned'?'selected':''}>Banned</option>
+    </select>
+  </div>
+  <div class="section-card">
+    <div class="section-card-body no-pad">
+      <table class="tbl">
+        <thead><tr><th>User</th><th>Role</th><th>Status</th><th>2FA</th><th>Last Seen</th><th>Joined</th><th style="text-align:right">Actions</th></tr></thead>
+        <tbody>${paged.map(u=>{
+          const r=getRole(u.role_id);
+          const statusDot=u.banned?'banned':u.status;
+          const statusLabel=u.banned?'Banned':u.status==='online'?'Online':'Offline';
+          return`<tr>
+            <td><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="background:${u.color}">${u.username[0].toUpperCase()}</div><strong>${esc(u.username)}</strong></div></td>
+            <td><span class="role-badge"><span class="role-dot" style="background:${r.color}"></span>${r.name}</span></td>
+            <td><span class="dot ${statusDot}"></span>${statusLabel}</td>
+            <td>${u.totp?'<span class="badge badge-green">On</span>':'<span class="badge badge-muted">Off</span>'}</td>
+            <td style="font-size:12px;color:var(--text-faint)">${u.last_seen}</td>
+            <td style="font-size:12px;color:var(--text-faint)">${u.created}</td>
+            <td><div class="act-group" style="justify-content:flex-end">
+              <button class="act-btn" title="Edit role" onclick="openEditUser(${u.id})">${I.edit}</button>
+              <button class="act-btn" title="Reset password" onclick="showToast('Password reset. Temp: Abc12345','info')">${I.key}</button>
+              ${u.status==='online'?`<button class="act-btn danger" title="Disconnect" onclick="showToast('${esc(u.username)} disconnected')">${I.disconnect}</button>`:''}
+              ${u.banned?`<button class="act-btn" title="Unban" onclick="unbanUser(${u.id})">${I.check}</button>`:`<button class="act-btn danger" title="Ban" onclick="openBanUser(${u.id})">${I.ban}</button>`}
+            </div></td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>
+  </div>
+  <div class="pagination">
+    <div class="pagination-info">Showing ${start+1}-${Math.min(start+pageSize,users.length)} of ${users.length}</div>
+    <div class="pagination-btns">
+      <button class="page-btn" ${state.userPage<=1?'disabled':''} onclick="state.userPage--;renderContent()">&lt;</button>
+      ${Array.from({length:totalPages},(_,i)=>`<button class="page-btn ${state.userPage===i+1?'active':''}" onclick="state.userPage=${i+1};renderContent()">${i+1}</button>`).join('')}
+      <button class="page-btn" ${state.userPage>=totalPages?'disabled':''} onclick="state.userPage++;renderContent()">&gt;</button>
+    </div>
+  </div>
+  </div>`;
+}
+
+function openEditUser(id){
+  const u=state.users.find(x=>x.id===id); if(!u)return;
+  const r=getRole(u.role_id);
+  openModal(`
+    <div class="modal-header"><h3>Edit User</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
+    <div class="modal-body">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+        <div class="avatar" style="background:${u.color};width:48px;height:48px;font-size:20px;border-radius:50%">${u.username[0].toUpperCase()}</div>
+        <div><div style="font-size:16px;font-weight:700;color:white">${esc(u.username)}</div><div style="font-size:12px;color:var(--text-faint)">Joined ${u.created}</div></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Role</label>
+        <select class="form-input" id="editRoleSelect" style="appearance:auto">
+          ${ROLES.map(rl=>`<option value="${rl.id}" ${u.role_id===rl.id?'selected':''}>${rl.name}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-accent" onclick="saveUserRole(${u.id})">Save</button>
+    </div>`);
+}
+
+function saveUserRole(id){
+  const sel=document.getElementById('editRoleSelect');
+  if(!sel)return;
+  const newRoleId=parseInt(sel.value);
+  const username=state.users.find(x=>x.id===id)?.username||'User';
+  state.users=state.users.map(u=>u.id===id?{...u,role_id:newRoleId}:u);
+  closeModal();renderContent();showToast('Role updated for '+username);
+}
+
+function openBanUser(id){
+  const u=state.users.find(x=>x.id===id); if(!u)return;
+  openModal(`
+    <div class="modal-header"><h3>Ban User</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
+    <div class="modal-body">
+      <p style="color:var(--text-muted);margin-bottom:16px">Ban <strong style="color:white">${esc(u.username)}</strong> from the server?</p>
+      <div class="form-group"><label class="form-label">Reason</label><textarea class="form-input form-textarea" id="banReason" placeholder="Reason for ban..."></textarea></div>
+      <div class="form-group"><label class="form-label">Duration</label>
+        <select class="form-input" id="banDuration" style="appearance:auto">
+          <option value="permanent">Permanent</option><option value="1h">1 Hour</option><option value="1d">1 Day</option><option value="7d">7 Days</option><option value="30d">30 Days</option>
+        </select>
+      </div>
+      <div class="form-group" style="display:flex;align-items:center;gap:8px;padding-top:8px;border-top:1px solid var(--border)">
+        <input type="checkbox" id="banPurge" style="accent-color:var(--red)">
+        <label for="banPurge" style="font-size:13px;color:var(--text-muted);cursor:pointer">Delete message history from this user</label>
+      </div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmBan(${u.id})">Ban User</button></div>`);
+}
+
+function confirmBan(id){
+  const reason=document.getElementById('banReason')?.value||'';
+  const purge=document.getElementById('banPurge')?.checked||false;
+  state.users=state.users.map(u=>u.id===id?{...u,banned:1,ban_reason:reason,status:'offline',sessions:0}:u);
+  const user=state.users.find(x=>x.id===id);
+  closeModal();renderNav();renderContent();
+  showToast(user.username+' has been banned'+(purge?' (messages purged)':''));
+}
+
+function unbanUser(id){
+  const username=state.users.find(x=>x.id===id)?.username||'User';
+  state.users=state.users.map(u=>u.id===id?{...u,banned:0,ban_reason:''}:u);
+  closeModal();renderContent();showToast(username+' has been unbanned');
+}
+
+/* ═══════════════════════════════════════════
+   CHANNELS
+   ═══════════════════════════════════════════ */
+function renderChannels(){
+  const chIcon=(t)=>t==='voice'?I.voice:t==='announcement'?I.megaphone:I.channels;
+  return`
+  <div data-wpf-component="ChannelsPage" data-wpf-notes="Page with DataGrid grouped by category, binds to ChannelsViewModel">
+  <div class="page-title">Channels</div>
+  <div class="page-desc">${state.channels.length} channels across ${[...new Set(state.channels.map(c=>c.category))].length} categories</div>
+  <div class="filter-bar">
+    <button class="btn btn-accent" onclick="openChannelModal(null)">${I.plus} Create Channel</button>
+  </div>
+  <div class="section-card"><div class="section-card-body no-pad">
+    <table class="tbl">
+      <thead><tr><th>Channel</th><th>Category</th><th>Type</th><th>Slow Mode</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
+      <tbody>${state.channels.map(c=>`<tr>
+        <td><div style="display:flex;align-items:center;gap:8px"><span style="color:var(--text-faint)">${chIcon(c.type)}</span><strong>${esc(c.name)}</strong></div></td>
+        <td style="font-size:12px;color:var(--text-faint)">${esc(c.category)}</td>
+        <td><span class="badge ${c.type==='voice'?'badge-yellow':c.type==='announcement'?'badge-accent':'badge-muted'}">${c.type}</span></td>
+        <td>${c.slow_mode?c.slow_mode+'s':'—'}</td>
+        <td>${c.archived?'<span class="badge badge-muted">Archived</span>':'<span class="badge badge-green">Active</span>'}</td>
+        <td><div class="act-group" style="justify-content:flex-end">
+          <button class="act-btn" title="Edit" onclick="openChannelModal(${c.id})">${I.edit}</button>
+          <button class="act-btn" title="Permissions" onclick="openPermsModal(${c.id})">${I.moderation}</button>
+          <button class="act-btn danger" title="Delete" onclick="deleteChannel(${c.id})">${I.trash}</button>
+        </div></td>
+      </tr>`).join('')}</tbody>
+    </table>
+  </div></div>
+  </div>`;
+}
+
+function openChannelModal(id){
+  const c=id?state.channels.find(x=>x.id===id):null;
+  const cats=[...new Set(state.channels.map(x=>x.category))];
+  openModal(`
+    <div class="modal-header"><h3>${c?'Edit':'Create'} Channel</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
+    <div class="modal-body">
+      <div class="form-group"><label class="form-label">Name <span class="req">*</span></label><input class="form-input" id="chName" value="${c?esc(c.name):''}"></div>
+      <div class="form-group"><label class="form-label">Type</label><select class="form-input" id="chType" style="appearance:auto"><option value="text" ${c&&c.type==='text'?'selected':''}>Text</option><option value="voice" ${c&&c.type==='voice'?'selected':''}>Voice</option><option value="announcement" ${c&&c.type==='announcement'?'selected':''}>Announcement</option></select></div>
+      <div class="form-group"><label class="form-label">Category</label><select class="form-input" id="chCat" style="appearance:auto">${cats.map(ct=>`<option ${c&&c.category===ct?'selected':''}>${ct}</option>`).join('')}<option value="__new">+ New Category</option></select></div>
+      <div class="form-group"><label class="form-label">Topic</label><input class="form-input" id="chTopic" value="${c?esc(c.topic):''}"></div>
+      <div class="form-group"><label class="form-label">Slow Mode (seconds, 0=off)</label><input class="form-input" id="chSlow" type="number" value="${c?c.slow_mode:0}" min="0"></div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveChannel(${id||'null'})">${c?'Save':'Create'}</button></div>`);
+}
+
+function saveChannel(id){
+  const name=document.getElementById('chName').value.trim();if(!name)return;
+  const type=document.getElementById('chType').value;
+  const category=document.getElementById('chCat').value;
+  const topic=document.getElementById('chTopic').value;
+  const slow_mode=parseInt(document.getElementById('chSlow').value)||0;
+  if(id){
+    state.channels=state.channels.map(c=>c.id===id?{...c,name,type,category,topic,slow_mode}:c);
+    showToast('Channel updated');
+  }else{
+    state.channels=[...state.channels,{id:Date.now(),name,type,category,topic,slow_mode,archived:false}];
+    showToast('Channel created');
+  }
+  closeModal();renderContent();
+}
+
+function deleteChannel(id){
+  const ch=state.channels.find(c=>c.id===id);
+  openModal(`
+    <div class="modal-header"><h3>Delete Channel</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
+    <div class="modal-body"><p style="color:var(--text-muted)">Are you sure? This will permanently delete <strong style="color:white">#${esc(ch?.name||'')}</strong> and all its messages.</p></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmDeleteChannel(${id})">Delete</button></div>`);
+}
+
+function confirmDeleteChannel(id){
+  state.channels=state.channels.filter(c=>c.id!==id);
+  closeModal();renderContent();showToast('Channel deleted');
+}
+
+function openPermsModal(id){
+  const c=state.channels.find(x=>x.id===id);if(!c)return;
+  openModal(`
+    <div class="modal-header"><h3>Permissions: #${esc(c.name)}</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
+    <div class="modal-body" style="max-height:400px;overflow-y:auto">
+      ${ROLES.slice(1).map(r=>`
+        <div style="margin-bottom:16px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><span class="role-dot" style="background:${r.color};width:10px;height:10px;border-radius:50%;display:inline-block"></span><strong>${r.name}</strong></div>
+          <div class="perm-grid">
+            ${PERMS.slice(0,10).map(p=>`<div class="perm-row">
+              <div class="perm-name">${p.name}<small>0x${p.bit.toString(16)}</small></div>
+              <div class="perm-toggles" data-perm-group="${r.id}-${p.bit}">
+                <button class="perm-btn ${(r.perms&p.bit)?'allow':'inherit'}" onclick="setPermState(this,'allow')" aria-label="Allow ${p.name}">&#10003;</button>
+                <button class="perm-btn ${(r.perms&p.bit)?'inherit':'inherit'}" onclick="setPermState(this,'inherit')" aria-label="Inherit ${p.name}">—</button>
+                <button class="perm-btn inherit" onclick="setPermState(this,'deny')" aria-label="Deny ${p.name}">&#10007;</button>
+              </div>
+            </div>`).join('')}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="closeModal();showToast('Permissions saved')">Save</button></div>`);
+}
+
+/* ═══════════════════════════════════════════
+   PERMISSION TOGGLE HELPER
+   ═══════════════════════════════════════════ */
+function setPermState(btn, newState){
+  const group=btn.parentElement;
+  group.querySelectorAll('.perm-btn').forEach(b=>{b.className='perm-btn inherit'});
+  btn.className='perm-btn '+newState;
+}
+
+/* ═══════════════════════════════════════════
+   ROLES
+   ═══════════════════════════════════════════ */
+function renderRoles(){
+  return`
+  <div class="page-title" data-wpf-component="TextBlock">Roles</div>
+  <div class="page-desc">Manage roles and their global permissions</div>
+  <div class="filter-bar"><button class="btn btn-accent" onclick="openRoleModal(null)">${I.plus} Create Role</button></div>
+  <div class="section-card" data-wpf-component="ListView" data-wpf-notes="ItemsSource=Roles, DataTemplate per role"><div class="section-card-body no-pad">
+    <table class="tbl">
+      <thead><tr><th>Role</th><th>Position</th><th>Members</th><th>Permissions</th><th style="text-align:right">Actions</th></tr></thead>
+      <tbody>${state.roles.map(r=>{
+        const memberCount=state.users.filter(u=>u.role_id===r.id).length;
+        const permCount=PERMS.filter(p=>r.perms&p.bit).length;
+        return`<tr>
+          <td><span class="role-badge"><span class="role-dot" style="background:${r.color}"></span>${esc(r.name)}</span></td>
+          <td style="font-family:var(--font-mono);font-size:12px">${r.position}</td>
+          <td>${memberCount}</td>
+          <td><span class="badge badge-accent">${permCount} / ${PERMS.length}</span></td>
+          <td><div class="act-group" style="justify-content:flex-end">
+            <button class="act-btn" title="Edit" onclick="openRoleModal(${r.id})">${I.edit}</button>
+            <button class="act-btn" title="Edit permissions" onclick="openRolePermsModal(${r.id})">${I.moderation}</button>
+            ${r.id>2?`<button class="act-btn danger" title="Delete" onclick="deleteRole(${r.id})">${I.trash}</button>`:''}
+          </div></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>
+  </div></div>`;
+}
+
+function openRoleModal(id){
+  const r=id?state.roles.find(x=>x.id===id):null;
+  openModal(`
+    <div class="modal-header"><h3>${r?'Edit':'Create'} Role</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
+    <div class="modal-body">
+      <div class="form-group"><label class="form-label">Name <span class="req">*</span></label><input class="form-input" id="roleName" value="${r?esc(r.name):''}"></div>
+      <div class="form-group"><label class="form-label">Color</label><input class="form-input" id="roleColor" type="color" value="${r?r.color:'#5865f2'}" style="height:40px;padding:4px"></div>
+      <div class="form-group"><label class="form-label">Position (higher = more authority)</label><input class="form-input" id="rolePos" type="number" value="${r?r.position:10}" min="1" max="99"></div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveRole(${id||'null'})">${r?'Save':'Create'}</button></div>`);
+}
+
+function saveRole(id){
+  const name=document.getElementById('roleName').value.trim();if(!name)return;
+  const color=document.getElementById('roleColor').value;
+  const position=parseInt(document.getElementById('rolePos').value)||10;
+  if(id){
+    state.roles=state.roles.map(r=>r.id===id?{...r,name,color,position}:r);
+    showToast('Role updated');
+  }else{
+    state.roles=[...state.roles,{id:Date.now(),name,color,perms:0x00000663,position}];
+    showToast('Role created');
+  }
+  closeModal();renderContent();
+}
+
+function deleteRole(id){
+  const r=state.roles.find(x=>x.id===id);if(!r)return;
+  const memberCount=state.users.filter(u=>u.role_id===id).length;
+  openModal(`
+    <div class="modal-header"><h3>Delete Role</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
+    <div class="modal-body"><p style="color:var(--text-muted)">Delete <strong style="color:white">${esc(r.name)}</strong>${memberCount?' '+memberCount+' member(s) will be demoted to Member.':''}</p></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmDeleteRole(${id})">Delete</button></div>`);
+}
+
+function confirmDeleteRole(id){
+  state.users=state.users.map(u=>u.role_id===id?{...u,role_id:4}:u);
+  state.roles=state.roles.filter(r=>r.id!==id);
+  closeModal();renderContent();showToast('Role deleted');
+}
+
+function openRolePermsModal(id){
+  const r=state.roles.find(x=>x.id===id);if(!r)return;
+  const permsHtml=PERMS.map(p=>`<div class="perm-row">
+    <div class="perm-name">${p.name}<small>0x${p.bit.toString(16)}</small></div>
+    <div class="perm-toggles">
+      <button class="perm-btn ${(r.perms&p.bit)?'allow':'inherit'}" onclick="setPermState(this,'allow')" aria-label="Allow ${p.name}">&#10003;</button>
+      <button class="perm-btn inherit" onclick="setPermState(this,'inherit')" aria-label="Inherit ${p.name}">—</button>
+      <button class="perm-btn inherit" onclick="setPermState(this,'deny')" aria-label="Deny ${p.name}">&#10007;</button>
+    </div>
+  </div>`).join('');
+  openModal(`
+    <div class="modal-header"><h3>Permissions: ${esc(r.name)}</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
+    <div class="modal-body" style="max-height:400px;overflow-y:auto">
+      <div class="perm-grid">${permsHtml}</div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="closeModal();showToast('Permissions saved for ${esc(r.name)}')">Save</button></div>`);
+}
+
+/* ═══════════════════════════════════════════
+   INVITES
+   ═══════════════════════════════════════════ */
+function renderInvites(){
+  const statusBadge=s=>({active:'badge-green',expired:'badge-red',revoked:'badge-muted',exhausted:'badge-yellow'}[s]||'badge-muted');
+  return`
+  <div data-wpf-component="InvitesPage" data-wpf-notes="Page with DataGrid, binds to InvitesViewModel">
+  <div class="page-title">Invites</div>
+  <div class="page-desc">Manage invite codes for server registration</div>
+  <div class="filter-bar"><button class="btn btn-accent" onclick="openInviteModal()">${I.plus} Generate Invite</button></div>
+  <div class="section-card"><div class="section-card-body no-pad">
+    <table class="tbl">
+      <thead><tr><th>Code</th><th>Created By</th><th>Uses</th><th>Expires</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
+      <tbody>${state.invites.map(inv=>`<tr>
+        <td><code style="font-family:var(--font-mono);color:var(--text-link)">${inv.code}</code></td>
+        <td>${esc(inv.created_by)}</td>
+        <td>${inv.uses}${inv.max_uses?' / '+inv.max_uses:' / ∞'}</td>
+        <td style="font-size:12px;color:var(--text-faint)">${inv.expires||'Never'}</td>
+        <td><span class="badge ${statusBadge(inv.status)}">${inv.status}</span></td>
+        <td><div class="act-group" style="justify-content:flex-end">
+          <button class="act-btn" title="Copy link" onclick="showToast('Link copied!','info')">${I.copy}</button>
+          ${inv.status==='active'?`<button class="act-btn danger" title="Revoke" onclick="revokeInvite(${inv.id})">${I.ban}</button>`:''}
+        </div></td>
+      </tr>`).join('')}</tbody>
+    </table>
+  </div></div>
+  </div>`;
+}
+
+function openInviteModal(){
+  openModal(`
+    <div class="modal-header"><h3>Generate Invite</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
+    <div class="modal-body">
+      <div class="form-group"><label class="form-label">Max Uses (0 = unlimited)</label><input class="form-input" id="invMaxUses" type="number" value="10" min="0"></div>
+      <div class="form-group"><label class="form-label">Expires In</label><select class="form-input" id="invExpiry" style="appearance:auto"><option value="30m">30 Minutes</option><option value="1h">1 Hour</option><option value="6h">6 Hours</option><option value="24h" selected>24 Hours</option><option value="7d">7 Days</option><option value="never">Never</option></select></div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="generateInvite()">Generate</button></div>`);
+}
+
+function generateInvite(){
+  const code=Math.random().toString(36).substring(2,10).toUpperCase();
+  const maxUses=parseInt(document.getElementById('invMaxUses').value)||0;
+  state.invites=[{id:Date.now(),code,created_by:'LordJebus',max_uses:maxUses,uses:0,expires:'2026-03-16',status:'active'},...state.invites];
+  closeModal();renderContent();
+  openModal(`
+    <div class="modal-header"><h3>Invite Created</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
+    <div class="modal-body">
+      <p style="color:var(--text-muted);margin-bottom:12px">Share this link with people you want to invite:</p>
+      <div class="code-copy"><code>chatserver://${code}</code><button class="btn btn-ghost" onclick="showToast('Copied!','info')">Copy</button></div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-accent" onclick="closeModal()">Done</button></div>`);
+}
+
+function revokeInvite(id){
+  state.invites=state.invites.map(i=>i.id===id?{...i,status:'revoked'}:i);
+  renderContent();showToast('Invite revoked');
+}
+
+/* ═══════════════════════════════════════════
+   SETTINGS
+   ═══════════════════════════════════════════ */
+function renderSettings(){
+  return`
+  <div data-wpf-component="SettingsPage" data-wpf-notes="ScrollViewer with StackPanel of GroupBoxes, binds to SettingsViewModel with IsDirty tracking">
+  <div class="page-title">Server Settings</div>
+  <div class="page-desc">Configure your OwnCord server</div>
+  <div class="section-card" data-wpf-component="GroupBox" data-wpf-notes="General settings bound to ServerConfigViewModel">
+    <div class="section-card-header"><h3>General</h3></div>
+    <div class="section-card-body">
+      <div class="setting-row"><div class="setting-info"><div class="setting-name">Server Name</div></div><div class="setting-ctrl"><input class="form-input" value="${esc(state.serverName)}" style="width:240px" oninput="state.serverName=this.value;markChanged()"></div></div>
+      <div class="setting-row"><div class="setting-info"><div class="setting-name">Message of the Day</div><div class="setting-desc">Shown to users when they connect</div></div><div class="setting-ctrl"><input class="form-input" value="${esc(state.motd)}" style="width:300px" oninput="state.motd=this.value;markChanged()"></div></div>
+    </div>
+  </div>
+  <div class="section-card">
+    <div class="section-card-header"><h3>Limits</h3></div>
+    <div class="section-card-body">
+      <div class="setting-row"><div class="setting-info"><div class="setting-name">Max Upload Size</div></div><div class="setting-ctrl"><select class="filter-select" onchange="state.maxUpload=this.value;markChanged()"><option value="10" ${state.maxUpload==='10'?'selected':''}>10 MB</option><option value="25" ${state.maxUpload==='25'?'selected':''}>25 MB</option><option value="50" ${state.maxUpload==='50'?'selected':''}>50 MB</option><option value="100" ${state.maxUpload==='100'?'selected':''}>100 MB</option></select></div></div>
+      <div class="setting-row"><div class="setting-info"><div class="setting-name">Voice Quality</div><div class="setting-desc">Higher quality uses more bandwidth</div></div><div class="setting-ctrl"><select class="filter-select" onchange="state.voiceQuality=this.value;markChanged()"><option value="32" ${state.voiceQuality==='32'?'selected':''}>Low (32 kbps)</option><option value="64" ${state.voiceQuality==='64'?'selected':''}>Medium (64 kbps)</option><option value="128" ${state.voiceQuality==='128'?'selected':''}>High (128 kbps)</option></select></div></div>
+    </div>
+  </div>
+  <div class="section-card" data-wpf-component="GroupBox" data-wpf-notes="Rate limit settings bound to ServerConfigViewModel">
+    <div class="section-card-header"><h3>Rate Limits</h3></div>
+    <div class="section-card-body">
+      <div class="setting-row"><div class="setting-info"><div class="setting-name">Messages</div><div class="setting-desc">Max messages per second per user</div></div><div class="setting-ctrl"><select class="filter-select" onchange="state.rateMessages=this.value;markChanged()"><option value="3" ${state.rateMessages==='3'?'selected':''}>3/sec</option><option value="5" ${state.rateMessages==='5'?'selected':''}>5/sec</option><option value="10" ${state.rateMessages==='10'?'selected':''}>10/sec</option></select></div></div>
+      <div class="setting-row"><div class="setting-info"><div class="setting-name">Uploads</div><div class="setting-desc">Max uploads per minute per user</div></div><div class="setting-ctrl"><select class="filter-select" onchange="state.rateUploads=this.value;markChanged()"><option value="1" ${state.rateUploads==='1'?'selected':''}>1/min</option><option value="3" ${state.rateUploads==='3'?'selected':''}>3/min</option><option value="5" ${state.rateUploads==='5'?'selected':''}>5/min</option><option value="10" ${state.rateUploads==='10'?'selected':''}>10/min</option></select></div></div>
+      <div class="setting-row"><div class="setting-info"><div class="setting-name">Login Attempts</div><div class="setting-desc">Max failed logins before lockout</div></div><div class="setting-ctrl"><select class="filter-select" onchange="state.rateLogins=this.value;markChanged()"><option value="3" ${state.rateLogins==='3'?'selected':''}>3 attempts</option><option value="5" ${state.rateLogins==='5'?'selected':''}>5 attempts</option><option value="10" ${state.rateLogins==='10'?'selected':''}>10 attempts</option></select></div></div>
+    </div>
+  </div>
+  <div class="section-card" data-wpf-component="GroupBox" data-wpf-notes="Security settings bound to ServerConfigViewModel">
+    <div class="section-card-header"><h3>Security</h3></div>
+    <div class="section-card-body">
+      <div class="setting-row"><div class="setting-info"><div class="setting-name">Require 2FA</div><div class="setting-desc">Require all users to enable two-factor authentication</div></div><div class="setting-ctrl"><button class="toggle ${state.require2FA?'on':''}" role="switch" aria-checked="${state.require2FA}" aria-label="Require 2FA" onclick="state.require2FA=!state.require2FA;markChanged();renderContent()"></button></div></div>
+      <div class="setting-row"><div class="setting-info"><div class="setting-name">TLS Mode</div><div class="setting-desc">How the server handles HTTPS</div></div><div class="setting-ctrl"><select class="filter-select" onchange="state.tlsMode=this.value;markChanged()"><option value="self-signed" ${state.tlsMode==='self-signed'?'selected':''}>Self-Signed</option><option value="letsencrypt" ${state.tlsMode==='letsencrypt'?'selected':''}>Let's Encrypt</option><option value="manual" ${state.tlsMode==='manual'?'selected':''}>Manual Certificate</option></select></div></div>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">
+    <button class="btn btn-accent" ${state.settingsChanged?'':'disabled'} onclick="state.settingsChanged=false;renderNav();renderContent();showToast('Settings saved')">Save Changes</button>
+  </div>
+  </div>`;
+}
+
+function markChanged(){state.settingsChanged=true;renderNav()}
+
+/* ═══════════════════════════════════════════
+   MODERATION
+   ═══════════════════════════════════════════ */
+function renderModeration(){
+  const tabs=[{id:'audit',label:'Audit Log'},{id:'wordfilter',label:'Word Filter'},{id:'bans',label:'Active Bans'}];
+  let body='';
+
+  if(state.modTab==='audit'){
+    const actionTypes=[...new Set(state.auditLog.map(a=>a.action))];
+    const filteredLog=state.auditLog.filter(a=>{
+      if(state.auditSearch && !a.user.toLowerCase().includes(state.auditSearch.toLowerCase()) && !a.target.toLowerCase().includes(state.auditSearch.toLowerCase()) && !a.detail.toLowerCase().includes(state.auditSearch.toLowerCase()))return false;
+      if(state.auditActionFilter!=='all' && a.action!==state.auditActionFilter)return false;
+      return true;
+    });
+    body=`
+    <div class="filter-bar">
+      <input class="filter-search" placeholder="Search audit log..." value="${esc(state.auditSearch)}" oninput="state.auditSearch=this.value;renderContent()">
+      <select class="filter-select" onchange="state.auditActionFilter=this.value;renderContent()">
+        <option value="all" ${state.auditActionFilter==='all'?'selected':''}>All Actions</option>
+        ${actionTypes.map(t=>`<option value="${t}" ${state.auditActionFilter===t?'selected':''}>${t}</option>`).join('')}
+      </select>
+    </div>
+    <div class="section-card"><div class="section-card-body no-pad">
+      <table class="tbl"><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Target</th><th>Details</th></tr></thead>
+      <tbody>${filteredLog.map(a=>`<tr>
+        <td style="font-size:12px;color:var(--text-faint);white-space:nowrap">${a.time}</td>
+        <td><strong>${esc(a.user)}</strong></td>
+        <td><span class="badge ${actionBadge(a.action)}">${a.action}</span></td>
+        <td>${esc(a.target)}</td>
+        <td style="font-size:12px;color:var(--text-faint)">${esc(a.detail)}</td>
+      </tr>`).join('')}</tbody></table>
+    </div></div>`;
+  } else if(state.modTab==='wordfilter'){
+    body=`
+    <div class="filter-bar">
+      <input class="filter-search" id="newWordInput" placeholder="Add a word to filter..." style="flex:0 0 300px">
+      <button class="btn btn-accent" onclick="addFilterWord()">Add</button>
+    </div>
+    <div class="section-card"><div class="section-card-body">
+      ${state.wordFilter.map((w,i)=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">
+        <code style="font-family:var(--font-mono);color:var(--text-normal)">${esc(w)}</code>
+        <button class="act-btn danger" onclick="removeFilterWord(${i})">${I.trash}</button>
+      </div>`).join('')}
+      ${state.wordFilter.length===0?'<div style="text-align:center;padding:24px;color:var(--text-faint)">No filtered words</div>':''}
+    </div></div>`;
+  } else if(state.modTab==='bans'){
+    const banned=state.users.filter(u=>u.banned);
+    body=`<div class="section-card"><div class="section-card-body no-pad">
+      <table class="tbl"><thead><tr><th>User</th><th>Reason</th><th>Type</th><th style="text-align:right">Actions</th></tr></thead>
+      <tbody>${banned.length?banned.map(u=>`<tr>
+        <td><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="background:${u.color}">${u.username[0].toUpperCase()}</div><strong>${esc(u.username)}</strong></div></td>
+        <td style="color:var(--text-faint)">${esc(u.ban_reason||'No reason given')}</td>
+        <td><span class="badge badge-red">Permanent</span></td>
+        <td style="text-align:right"><button class="btn btn-ghost" onclick="unbanUser(${u.id})">Unban</button></td>
+      </tr>`).join(''):'<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:24px">No active bans</td></tr>'}</tbody></table>
+    </div></div>`;
+  }
+
+  return`
+  <div data-wpf-component="ModerationPage" data-wpf-notes="Page with TabControl for sub-tabs, binds to ModerationViewModel">
+  <div class="page-title">Moderation</div>
+  <div class="page-desc">Audit log, word filter, and ban management</div>
+  <div class="sub-tabs">${tabs.map(t=>`<button class="sub-tab ${state.modTab===t.id?'active':''}" onclick="state.modTab='${t.id}';renderContent()">${t.label}</button>`).join('')}</div>
+  ${body}
+  </div>`;
+}
+
+function addFilterWord(){
+  const input=document.getElementById('newWordInput');
+  if(input&&input.value.trim()){state.wordFilter=[...state.wordFilter,input.value.trim()];renderContent();showToast('Word added to filter')}
+}
+
+function removeFilterWord(idx){
+  state.wordFilter=state.wordFilter.filter((_,i)=>i!==idx);
+  renderContent();showToast('Word removed');
+}
+
+/* ═══════════════════════════════════════════
+   BACKUP
+   ═══════════════════════════════════════════ */
+function renderBackup(){
+  return`
+  <div data-wpf-component="BackupPage" data-wpf-notes="Page with backup controls, binds to BackupViewModel with BackgroundWorker for backup tasks">
+  <div class="page-title">Backup</div>
+  <div class="page-desc">Database backup and restore</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+    <div class="section-card">
+      <div class="section-card-header"><h3>Manual Backup</h3></div>
+      <div class="section-card-body" style="text-align:center;padding:32px">
+        <button class="btn btn-accent" style="font-size:15px;padding:12px 32px" onclick="runBackup()" ${state.backupRunning?'disabled':''}>
+          ${state.backupRunning?'<div class="spinner"></div> Running...':I.download+' Create Backup Now'}
+        </button>
+      </div>
+    </div>
+    <div class="section-card">
+      <div class="section-card-header"><h3>Schedule</h3></div>
+      <div class="section-card-body">
+        <div class="setting-row"><div class="setting-info"><div class="setting-name">Frequency</div></div><div class="setting-ctrl"><select class="filter-select" onchange="state.backupSchedule=this.value"><option value="off" ${state.backupSchedule==='off'?'selected':''}>Off</option><option value="daily" ${state.backupSchedule==='daily'?'selected':''}>Daily</option><option value="weekly" ${state.backupSchedule==='weekly'?'selected':''}>Weekly</option></select></div></div>
+        <div class="setting-row"><div class="setting-info"><div class="setting-name">Retention</div></div><div class="setting-ctrl"><select class="filter-select" onchange="state.backupRetention=this.value"><option value="7" ${state.backupRetention==='7'?'selected':''}>7 days</option><option value="14" ${state.backupRetention==='14'?'selected':''}>14 days</option><option value="30" ${state.backupRetention==='30'?'selected':''}>30 days</option><option value="90" ${state.backupRetention==='90'?'selected':''}>90 days</option></select></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="section-card">
+    <div class="section-card-header"><h3>Backup History</h3></div>
+    <div class="section-card-body no-pad">
+      <table class="tbl"><thead><tr><th>Filename</th><th>Size</th><th>Date</th><th>Type</th><th style="text-align:right">Actions</th></tr></thead>
+      <tbody>${state.backups.map(b=>`<tr>
+        <td><code style="font-family:var(--font-mono);font-size:12px">${esc(b.name)}</code></td>
+        <td>${b.size}</td><td>${b.date}</td>
+        <td><span class="badge ${b.type==='manual'?'badge-accent':'badge-muted'}">${b.type}</span></td>
+        <td><div class="act-group" style="justify-content:flex-end">
+          <button class="btn btn-ghost" onclick="openRestoreModal(${b.id})">Restore</button>
+          <button class="act-btn danger" title="Delete" onclick="deleteBackup(${b.id})">${I.trash}</button>
+        </div></td>
+      </tr>`).join('')}</tbody></table>
+    </div>
+  </div>
+  </div>`;
+}
+
+function openRestoreModal(id){
+  const b=state.backups.find(x=>x.id===id);if(!b)return;
+  openModal(`
+    <div class="modal-header"><h3>Restore Backup</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
+    <div class="modal-body"><p style="color:var(--text-muted)">This will overwrite the current database with <strong style="color:white">${esc(b.name)}</strong>. Are you sure?</p></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="closeModal();showToast('Restore started','info')">Restore</button></div>`);
+}
+
+function deleteBackup(id){
+  state.backups=state.backups.filter(x=>x.id!==id);
+  renderContent();showToast('Backup deleted');
+}
+
+function runBackup(){
+  state.backupRunning=true;renderContent();
+  setTimeout(()=>{
+    state.backupRunning=false;
+    state.backups=[{id:Date.now(),name:'backup_2026-03-15_manual_2.db',size:'2.3 GB',date:'Mar 15, 2026',type:'manual'},...state.backups];
+    renderContent();showToast('Backup completed successfully');
+  },2500);
+}
+
+/* ═══════════════════════════════════════════
+   UPDATES
+   ═══════════════════════════════════════════ */
+function renderUpdates(){
+  return`
+  <div data-wpf-component="UpdatesPage" data-wpf-notes="Page with version comparison, binds to UpdatesViewModel with async update check">
+  <div class="page-title">Updates</div>
+  <div class="page-desc">Server version management</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+    <div class="update-card">
+      <div class="update-icon" style="background:rgba(35,165,90,.15);color:var(--green)">${I.check}</div>
+      <div class="update-info">
+        <div class="update-ver">${state.currentVersion}</div>
+        <div class="update-notes">Current version</div>
+      </div>
+    </div>
+    ${state.updateAvailable?`
+    <div class="update-card" style="border-color:var(--accent)">
+      <div class="update-icon" style="background:var(--accent-glow);color:var(--accent)">${I.updates}</div>
+      <div class="update-info">
+        <div class="update-ver">${state.latestVersion} <span class="badge badge-accent">New</span></div>
+        <div class="update-notes">Available for download</div>
+      </div>
+    </div>`:`
+    <div class="update-card">
+      <div class="update-icon" style="background:rgba(35,165,90,.15);color:var(--green)">${I.check}</div>
+      <div class="update-info">
+        <div class="update-ver">Up to date</div>
+        <div class="update-notes">You're running the latest version</div>
+      </div>
+    </div>`}
+  </div>
+
+  ${state.updateAvailable?`
+  <div class="section-card">
+    <div class="section-card-header"><h3>Release Notes — ${state.latestVersion}</h3></div>
+    <div class="section-card-body">
+      <pre style="font-family:var(--font-mono);font-size:13px;color:var(--text-muted);white-space:pre-wrap;line-height:1.6">${esc(state.updateNotes)}</pre>
+    </div>
+  </div>
+  <div style="display:flex;gap:8px">
+    <button class="btn btn-danger" onclick="applyUpdate()" ${state.updateApplying?'disabled':''}>
+      ${state.updateApplying?'<div class="spinner"></div> Applying...':'Apply Update & Restart'}
+    </button>
+    <button class="btn btn-ghost" onclick="showToast('Already checked','info')">${I.refresh} Check Again</button>
+  </div>`:`
+  <div style="margin-top:16px"><button class="btn btn-ghost" onclick="state.updateAvailable=true;state.latestVersion='v1.3.0';renderContent();renderNav();showToast('Update found!','info')">${I.refresh} Check for Updates</button></div>`}
+  </div>`;
+}
+
+function applyUpdate(){
+  state.updateApplying=true;renderContent();
+  setTimeout(()=>{
+    openModal(`
+      <div class="modal-header"><h3>Update Applied</h3></div>
+      <div class="modal-body" style="text-align:center;padding:32px">
+        <div style="width:64px;height:64px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;margin:0 auto 16px">${I.check}</div>
+        <div style="font-size:18px;font-weight:700;color:white;margin-bottom:8px">Update Complete</div>
+        <div style="color:var(--text-muted)">Server updated to ${state.latestVersion}. In production, the server would restart now.</div>
+      </div>
+      <div class="modal-footer"><button class="btn btn-accent" onclick="state.updateApplying=false;state.updateAvailable=false;state.currentVersion=state.latestVersion;closeModal();renderContent();renderNav()">OK</button></div>`);
+  },3000);
+}
+
+/* ═══════════════════════════════════════════
+   KEYBOARD + AUTO-REFRESH + INIT
+   ═══════════════════════════════════════════ */
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape')closeModal();
+  if(e.key==='/'&&!document.querySelector('.modal-overlay.visible')){
+    e.preventDefault();
+    const s=document.querySelector('.filter-search');
+    if(s)s.focus();
+  }
+});
+
+// Dashboard auto-refresh
+setInterval(()=>{
+  if(state.section!=='dashboard')return;
+  const s=state.stats;
+  s.online=Math.max(3,s.online+Math.floor(Math.random()*3)-1);
+  s.msgToday+=Math.floor(Math.random()*5);
+  s.cpu=Math.max(5,Math.min(95,s.cpu+Math.floor(Math.random()*11)-5));
+  s.voice=Math.max(0,Math.min(8,s.voice+Math.floor(Math.random()*3)-1));
+  s.uptime+=5;
+  renderContent();
+},5000);
+
+renderNav();
+renderContent();
+</script>
+</body>
+</html>
