@@ -75,12 +75,40 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar)
   section.appendChild(outputHeader);
   section.appendChild(outputSelect);
 
+  // Video device selector
+  const videoHeader = createElement("h3", {}, "Video Device");
+  const videoSelect = createElement("select", {
+    class: "form-input",
+    style: "width:100%;margin-bottom:12px",
+  });
+  const defaultVideoOpt = createElement("option", { value: "" }, "Default");
+  videoSelect.appendChild(defaultVideoOpt);
+  section.appendChild(videoHeader);
+  section.appendChild(videoSelect);
+
+  // Camera preview
+  const previewWrap = createElement("div", {
+    style: "margin-bottom:16px;border-radius:8px;overflow:hidden;background:#1e1f22;aspect-ratio:16/9;max-width:320px",
+  });
+  const previewVideo = document.createElement("video");
+  previewVideo.autoplay = true;
+  previewVideo.muted = true;
+  previewVideo.playsInline = true;
+  previewVideo.style.width = "100%";
+  previewVideo.style.height = "100%";
+  previewVideo.style.objectFit = "cover";
+  previewWrap.appendChild(previewVideo);
+  section.appendChild(previewWrap);
+
+  let previewStream: MediaStream | null = null;
+
   // Populate devices asynchronously
   void (async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const savedInput = loadPref<string>("audioInputDevice", "");
       const savedOutput = loadPref<string>("audioOutputDevice", "");
+      const savedVideo = loadPref<string>("videoInputDevice", "");
 
       for (const d of devices) {
         if (d.kind === "audioinput") {
@@ -93,12 +121,18 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar)
             d.label || `Speaker (${d.deviceId.slice(0, 8)})`);
           if (d.deviceId === savedOutput) opt.setAttribute("selected", "");
           outputSelect.appendChild(opt);
+        } else if (d.kind === "videoinput") {
+          const opt = createElement("option", { value: d.deviceId },
+            d.label || `Camera (${d.deviceId.slice(0, 8)})`);
+          if (d.deviceId === savedVideo) opt.setAttribute("selected", "");
+          videoSelect.appendChild(opt);
         }
       }
 
       // Restore saved selections
       if (savedInput) inputSelect.value = savedInput;
       if (savedOutput) outputSelect.value = savedOutput;
+      if (savedVideo) videoSelect.value = savedVideo;
     } catch {
       const errOpt = createElement("option", { value: "", disabled: "" },
         "Could not enumerate devices");
@@ -115,6 +149,49 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar)
     savePref("audioOutputDevice", outputSelect.value);
     void switchOutputDevice(outputSelect.value);
   }, { signal });
+
+  videoSelect.addEventListener("change", () => {
+    savePref("videoInputDevice", videoSelect.value);
+    if (previewStream !== null) {
+      for (const track of previewStream.getTracks()) track.stop();
+      previewStream = null;
+    }
+    previewVideo.srcObject = null;
+    const selectedDevice = videoSelect.value;
+    void (async () => {
+      try {
+        const constraints: MediaStreamConstraints = {
+          video: selectedDevice
+            ? { deviceId: { exact: selectedDevice }, width: { ideal: 320 }, height: { ideal: 180 } }
+            : { width: { ideal: 320 }, height: { ideal: 180 } },
+          audio: false,
+        };
+        previewStream = await navigator.mediaDevices.getUserMedia(constraints);
+        previewVideo.srcObject = previewStream;
+      } catch { /* Camera unavailable */ }
+    })();
+  }, { signal });
+
+  // Start initial camera preview
+  void (async () => {
+    try {
+      const savedDevice = loadPref<string>("videoInputDevice", "");
+      const constraints: MediaStreamConstraints = {
+        video: savedDevice ? { deviceId: { exact: savedDevice }, width: { ideal: 320 }, height: { ideal: 180 } } : { width: { ideal: 320 }, height: { ideal: 180 } },
+        audio: false,
+      };
+      previewStream = await navigator.mediaDevices.getUserMedia(constraints);
+      previewVideo.srcObject = previewStream;
+    } catch { /* Camera unavailable */ }
+  })();
+
+  signal.addEventListener("abort", () => {
+    if (previewStream !== null) {
+      for (const track of previewStream.getTracks()) track.stop();
+      previewStream = null;
+    }
+    previewVideo.srcObject = null;
+  });
 
   // ── Mic level meter + sensitivity slider ──────────────────────────
   const sensitivityHeader = createElement("h3", {}, "Input Sensitivity");

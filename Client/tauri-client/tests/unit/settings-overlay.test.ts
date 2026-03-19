@@ -238,7 +238,7 @@ describe("SettingsOverlay", () => {
     getTab(container, 3).click();
 
     const selects = container.querySelectorAll("select.form-input");
-    expect(selects.length).toBe(2);
+    expect(selects.length).toBe(3);
 
     const sliders = container.querySelectorAll(".settings-slider");
     expect(sliders.length).toBeGreaterThanOrEqual(1);
