@@ -113,6 +113,8 @@ export function createSettingsOverlay(
 
   function hide(): void {
     root?.classList.remove("open");
+    // Stop camera preview and mic meter when settings overlay closes
+    voiceTab.cleanup();
   }
 
   // ---- MountableComponent ---------------------------------------------------

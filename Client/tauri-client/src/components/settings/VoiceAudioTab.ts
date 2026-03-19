@@ -16,6 +16,7 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
   let micStream: MediaStream | null = null;
   let micAudioCtx: AudioContext | null = null;
   let micAnimFrame: number | null = null;
+  let cameraPreviewStream: MediaStream | null = null;
 
   function cleanupMic(): void {
     if (micAnimFrame !== null) { cancelAnimationFrame(micAnimFrame); micAnimFrame = null; }
@@ -24,15 +25,22 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
       micStream = null;
     }
     if (micAudioCtx !== null) { void micAudioCtx.close(); micAudioCtx = null; }
+    // Also stop camera preview
+    if (cameraPreviewStream !== null) {
+      for (const track of cameraPreviewStream.getTracks()) track.stop();
+      cameraPreviewStream = null;
+    }
   }
 
   function build(): HTMLDivElement {
-    // Clean up any previous mic stream before rebuilding
+    // Clean up any previous mic/camera stream before rebuilding
     cleanupMic();
     return buildVoiceAudioTabInner(signal, (stream, ctx, frame) => {
       micStream = stream;
       micAudioCtx = ctx;
       micAnimFrame = frame;
+    }, (stream) => {
+      cameraPreviewStream = stream;
     });
   }
 
@@ -47,8 +55,9 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
 }
 
 type MicRegistrar = (stream: MediaStream, ctx: AudioContext, frame: number) => void;
+type CameraRegistrar = (stream: MediaStream | null) => void;
 
-function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar): HTMLDivElement {
+function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar, registerCamera: CameraRegistrar): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
   const header = createElement("h1", {}, "Voice & Audio");
   section.appendChild(header);
@@ -167,6 +176,7 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar)
           audio: false,
         };
         previewStream = await navigator.mediaDevices.getUserMedia(constraints);
+        registerCamera(previewStream);
         previewVideo.srcObject = previewStream;
       } catch { /* Camera unavailable */ }
     })();
@@ -181,6 +191,7 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar)
         audio: false,
       };
       previewStream = await navigator.mediaDevices.getUserMedia(constraints);
+      registerCamera(previewStream);
       previewVideo.srcObject = previewStream;
     } catch { /* Camera unavailable */ }
   })();
@@ -189,6 +200,7 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar)
     if (previewStream !== null) {
       for (const track of previewStream.getTracks()) track.stop();
       previewStream = null;
+      registerCamera(null);
     }
     previewVideo.srcObject = null;
   });

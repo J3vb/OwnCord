@@ -167,9 +167,10 @@ function createMockWs(): WsClient {
 }
 
 const DEFAULT_CONFIG = {
-  quality: "medium",
+  channel_id: 42,
+  quality: "medium" as const,
   bitrate: 64000,
-  threshold_mode: "top_speakers",
+  threshold_mode: "forwarding" as const,
   mixing_threshold: 3,
   top_speakers: 5,
   max_users: 25,
