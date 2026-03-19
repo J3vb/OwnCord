@@ -170,10 +170,10 @@ function getOrCreateAudioContainer(): HTMLDivElement {
   return audioContainer;
 }
 
-/** Parse userId from server's stream label "user-{id}". Returns 0 if unparseable. */
+/** Parse userId from server's stream label "user-{id}" or "user-{id}-{kind}". Returns 0 if unparseable. */
 function parseUserIdFromStream(stream: MediaStream): number {
-  // The server creates tracks with streamID = "user-{userID}"
-  const match = stream.id.match(/^user-(\d+)$/);
+  // The server creates tracks with streamID = "user-{userID}-{kind}" (e.g. "user-42-audio", "user-42-video")
+  const match = stream.id.match(/^user-(\d+)(?:-(?:audio|video))?$/);
   if (match !== null && match[1] !== undefined) {
     return Number(match[1]);
   }

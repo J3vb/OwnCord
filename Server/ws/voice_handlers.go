@@ -728,7 +728,7 @@ func (h *Hub) setupOnTrack(c *Client, channelID int64) {
 		local, err := webrtc.NewTrackLocalStaticRTP(
 			track.Codec().RTPCodecCapability,
 			fmt.Sprintf("%s-%d", kind, c.userID),
-			fmt.Sprintf("user-%d", c.userID),
+			fmt.Sprintf("user-%d-%s", c.userID, kind),
 		)
 		if err != nil {
 			slog.Error("setupOnTrack NewTrackLocalStaticRTP",
@@ -799,7 +799,7 @@ func (h *Hub) setupOnTrack(c *Client, channelID int64) {
 			}
 			for _, tr := range otherPC.GetTransceivers() {
 				if tr.Sender() != nil && tr.Sender().Track() != nil &&
-					tr.Sender().Track().StreamID() == fmt.Sprintf("user-%d", c.userID) {
+					tr.Sender().Track().StreamID() == fmt.Sprintf("user-%d-%s", c.userID, kind) {
 					slog.Info("subscriber transceiver state",
 						"subscriber", pid,
 						"track_from", c.userID,
