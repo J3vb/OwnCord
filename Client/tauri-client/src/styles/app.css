@@ -1284,3 +1284,52 @@
 @media (max-width: 600px) {
   .server-strip { width: 0; overflow: hidden; }
 }
+
+/* ── Video Grid ────────────────────────────────────── */
+
+.video-grid-slot {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.video-grid {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  height: 100%;
+  align-content: center;
+  background: var(--bg-primary, #313338);
+}
+
+.video-cell {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #1e1f22;
+}
+
+.video-cell video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.video-username {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.vw-controls .active-ctrl {
+  background: var(--brand-primary, #5865f2);
+  color: #fff;
+}
