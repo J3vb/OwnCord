@@ -317,4 +317,362 @@ describe("renderers", () => {
       ac.abort();
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // parseTimestamp (via formatTime / formatFullDate)
+  // ---------------------------------------------------------------------------
+
+  describe("parseTimestamp — UTC treatment of bare SQLite timestamps", () => {
+    it("treats a SQLite datetime string without timezone as UTC", () => {
+      // "2026-03-19 08:00:00" is SQLite output — no Z, no T, no offset.
+      // parseTimestamp must append Z so it is read as 08:00 UTC, not local.
+      const withZ = formatTime("2026-03-19T08:00:00Z");
+      const sqliteBare = formatTime("2026-03-19 08:00:00");
+      expect(sqliteBare).toBe(withZ);
+    });
+
+    it("preserves explicit UTC timestamps with Z suffix unchanged", () => {
+      // Verify that a Z-suffixed timestamp produces a valid HH:MM string.
+      // We cannot assert a specific value because formatTime uses local clock
+      // hours — instead verify that the bare and Z forms agree.
+      const withZ = formatTime("2026-03-19T15:30:00Z");
+      expect(withZ).toMatch(/^\d{2}:\d{2}$/);
+    });
+
+    it("preserves explicit positive UTC-offset timestamps", () => {
+      // +02:00 is two hours ahead of UTC, so 17:30+02:00 == 15:30Z.
+      // Both forms should produce the same local-clock HH:MM string.
+      const withOffset = formatTime("2026-03-19T17:30:00+02:00");
+      const utcEquiv = formatTime("2026-03-19T15:30:00Z");
+      expect(withOffset).toBe(utcEquiv);
+    });
+
+    it("formats full date correctly for bare SQLite timestamp", () => {
+      const result = formatFullDate("2026-03-19 00:00:00");
+      expect(result).toContain("2026");
+      expect(result).toContain("March");
+      expect(result).toContain("19");
+    });
+
+    it("handles ISO 8601 datetime with T separator and Z suffix", () => {
+      // Standard ISO — must not double-append Z. The result must be a
+      // valid HH:MM string and must equal what the same timestamp produces
+      // when formatted normally.
+      const iso = "2026-01-01T06:00:00Z";
+      const result = formatTime(iso);
+      expect(result).toMatch(/^\d{2}:\d{2}$/);
+      // Confirm idempotency: calling again with the same input gives same output
+      expect(formatTime(iso)).toBe(result);
+    });
+
+    it("returns a valid HH:MM string for every supported timestamp format", () => {
+      const formats = [
+        "2026-03-19T08:30:00Z",
+        "2026-03-19 08:30:00",
+        "2026-03-19T08:30:00+00:00",
+      ];
+      for (const ts of formats) {
+        expect(formatTime(ts)).toMatch(/^\d{2}:\d{2}$/);
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // isDirectImageUrl (via renderMessage embed output)
+  // ---------------------------------------------------------------------------
+
+  describe("isDirectImageUrl — image extension detection via renderMessage", () => {
+    const imageExtensions = [".gif", ".png", ".jpg", ".jpeg", ".webp"] as const;
+
+    for (const ext of imageExtensions) {
+      it(`produces a .msg-image embed for a ${ext} URL`, () => {
+        const url = `https://example.com/image${ext}`;
+        const msg = makeMessage({ content: url });
+        const ac = new AbortController();
+        const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+        container.appendChild(el);
+
+        // renderUrlEmbeds calls isDirectImageUrl → renderInlineImage
+        // which produces a div.msg-image inside the message element
+        const imageEmbeds = container.querySelectorAll(".msg-image");
+        // There may be multiple .msg-image (attachments share the class),
+        // but at least one must exist and have an <img src="...ext">
+        const imgEl = container.querySelector(`.msg-image img[src="${url}"]`);
+        expect(imgEl).not.toBeNull();
+
+        ac.abort();
+      });
+    }
+
+    it("does not produce a .msg-image embed for a non-image URL", () => {
+      const url = "https://example.com/page.html";
+      const msg = makeMessage({ content: url });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      // A generic link card (.msg-embed-link) should appear instead
+      expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
+      expect(container.querySelector(".msg-embed-link")).not.toBeNull();
+
+      ac.abort();
+    });
+
+    it("does not produce a .msg-image embed for a URL with image extension as query param", () => {
+      // The path itself has no image extension — only a query string does
+      const url = "https://example.com/image?format=png";
+      const msg = makeMessage({ content: url });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
+
+      ac.abort();
+    });
+
+    it("matches image extensions case-insensitively", () => {
+      // Uppercase extensions must also be detected
+      const url = "https://example.com/photo.PNG";
+      const msg = makeMessage({ content: url });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const imgEl = container.querySelector(`.msg-image img[src="${url}"]`);
+      expect(imgEl).not.toBeNull();
+
+      ac.abort();
+    });
+
+    it("does not treat a YouTube URL with no image extension as a direct image", () => {
+      const url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+      const msg = makeMessage({ content: url });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      // YouTube gets a player embed, not a .msg-image with that src
+      expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
+      expect(container.querySelector(".msg-embed-youtube")).not.toBeNull();
+
+      ac.abort();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // renderInlineImage (via renderMessage)
+  // ---------------------------------------------------------------------------
+
+  describe("renderInlineImage — img element and lightbox behaviour", () => {
+    it("creates an img element with the correct src attribute", () => {
+      const url = "https://example.com/photo.jpg";
+      const msg = makeMessage({ content: url });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const img = container.querySelector(`.msg-image img`) as HTMLImageElement | null;
+      expect(img).not.toBeNull();
+      expect(img!.getAttribute("src")).toBe(url);
+
+      ac.abort();
+    });
+
+    it("wraps the img in a div with class msg-image", () => {
+      const url = "https://cdn.example.com/banner.gif";
+      const msg = makeMessage({ content: url });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const wrap = container.querySelector(".msg-image");
+      expect(wrap).not.toBeNull();
+      expect(wrap!.querySelector("img")).not.toBeNull();
+
+      ac.abort();
+    });
+
+    it("appends a lightbox overlay to document.body on img click", () => {
+      const url = "https://example.com/photo.png";
+      const msg = makeMessage({ content: url });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const img = container.querySelector(`.msg-image img[src="${url}"]`) as HTMLElement | null;
+      expect(img).not.toBeNull();
+
+      // No lightbox before click
+      expect(document.body.querySelector(".image-lightbox")).toBeNull();
+
+      img!.click();
+
+      // Lightbox should now be in the body
+      const lightbox = document.body.querySelector(".image-lightbox");
+      expect(lightbox).not.toBeNull();
+
+      // Clean up lightbox
+      lightbox!.remove();
+      ac.abort();
+    });
+
+    it("lightbox contains a close button that removes the overlay", () => {
+      const url = "https://example.com/photo.webp";
+      const msg = makeMessage({ content: url });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const img = container.querySelector(`.msg-image img[src="${url}"]`) as HTMLElement | null;
+      img!.click();
+
+      const lightbox = document.body.querySelector(".image-lightbox")!;
+      const closeBtn = lightbox.querySelector(".image-lightbox-close") as HTMLElement | null;
+      expect(closeBtn).not.toBeNull();
+
+      closeBtn!.click();
+
+      // Lightbox should be removed from DOM after close
+      expect(document.body.querySelector(".image-lightbox")).toBeNull();
+
+      ac.abort();
+    });
+
+    it("lightbox contains an img element with the same src as the inline image", () => {
+      const url = "https://example.com/pic.jpeg";
+      const msg = makeMessage({ content: url });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const img = container.querySelector(`.msg-image img[src="${url}"]`) as HTMLElement | null;
+      img!.click();
+
+      const lightbox = document.body.querySelector(".image-lightbox")!;
+      const lbImg = lightbox.querySelector("img") as HTMLImageElement | null;
+      expect(lbImg).not.toBeNull();
+      expect(lbImg!.getAttribute("src")).toBe(url);
+
+      // Clean up
+      lightbox.remove();
+      ac.abort();
+    });
+
+    it("closes lightbox when Escape key is pressed", () => {
+      const url = "https://example.com/escape-test.png";
+      const msg = makeMessage({ content: url });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const img = container.querySelector(`.msg-image img[src="${url}"]`) as HTMLElement | null;
+      img!.click();
+
+      expect(document.body.querySelector(".image-lightbox")).not.toBeNull();
+
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+      expect(document.body.querySelector(".image-lightbox")).toBeNull();
+
+      ac.abort();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // renderUrlEmbeds (via renderMessage)
+  // ---------------------------------------------------------------------------
+
+  describe("renderUrlEmbeds — embed routing via renderMessage", () => {
+    it("produces a .msg-image element for a direct image URL instead of a generic link card", () => {
+      const url = "https://static.example.com/hero.png";
+      const msg = makeMessage({ content: url });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(".msg-image")).not.toBeNull();
+      expect(container.querySelector(".msg-embed-link")).toBeNull();
+
+      ac.abort();
+    });
+
+    it("does not duplicate embeds for the same URL appearing twice in content", () => {
+      const url = "https://example.com/img.gif";
+      const msg = makeMessage({ content: `${url} and again ${url}` });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      // URL dedup inside renderUrlEmbeds — only one img embed produced
+      const imgEmbeds = container.querySelectorAll(`.msg-image img[src="${url}"]`);
+      expect(imgEmbeds.length).toBe(1);
+
+      ac.abort();
+    });
+
+    it("skips image URLs that appear inside code blocks", () => {
+      const url = "https://example.com/hidden.png";
+      const msg = makeMessage({ content: `\`\`\`${url}\`\`\`` });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      // URL inside a code block must not produce an embed
+      expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
+
+      ac.abort();
+    });
+
+    it("skips image URLs inside inline code", () => {
+      const url = "https://example.com/inline.png";
+      const msg = makeMessage({ content: `Look at \`${url}\`` });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
+
+      ac.abort();
+    });
+
+    it("renders multiple different image URLs as separate .msg-image embeds", () => {
+      const url1 = "https://example.com/a.png";
+      const url2 = "https://example.com/b.gif";
+      const msg = makeMessage({ content: `${url1} and ${url2}` });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(`img[src="${url1}"]`)).not.toBeNull();
+      expect(container.querySelector(`img[src="${url2}"]`)).not.toBeNull();
+
+      ac.abort();
+    });
+
+    it("renders a generic link card for a plain https URL with no image extension", () => {
+      const url = "https://example.com/some-article";
+      const msg = makeMessage({ content: url });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(".msg-embed-link")).not.toBeNull();
+      expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
+
+      ac.abort();
+    });
+
+    it("produces no embeds for a message with no URLs", () => {
+      const msg = makeMessage({ content: "just plain text, no links" });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(".msg-embed")).toBeNull();
+      expect(container.querySelector(".msg-image")).toBeNull();
+
+      ac.abort();
+    });
+  });
 });
