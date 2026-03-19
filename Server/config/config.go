@@ -45,11 +45,12 @@ type VoiceConfig struct {
 
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
-	Port           int      `koanf:"port"`
-	Name           string   `koanf:"name"`
-	DataDir        string   `koanf:"data_dir"`
-	AllowedOrigins []string `koanf:"allowed_origins"`
-	TrustedProxies []string `koanf:"trusted_proxies"`
+	Port              int      `koanf:"port"`
+	Name              string   `koanf:"name"`
+	DataDir           string   `koanf:"data_dir"`
+	AllowedOrigins    []string `koanf:"allowed_origins"`
+	TrustedProxies    []string `koanf:"trusted_proxies"`
+	AdminAllowedCIDRs []string `koanf:"admin_allowed_cidrs"`
 }
 
 // DatabaseConfig holds database settings.
@@ -81,6 +82,14 @@ func defaults() Config {
 			DataDir:        "data",
 			AllowedOrigins: []string{"*"},
 			TrustedProxies: []string{},
+			AdminAllowedCIDRs: []string{
+				"127.0.0.0/8",     // localhost IPv4
+				"::1/128",         // localhost IPv6
+				"10.0.0.0/8",      // private class A
+				"172.16.0.0/12",   // private class B
+				"192.168.0.0/16",  // private class C
+				"fc00::/7",        // IPv6 unique local
+			},
 		},
 		Database: DatabaseConfig{
 			Path: "data/chatserver.db",
@@ -117,6 +126,12 @@ server:
   data_dir: "data"
   # allowed_origins: ["*"]   # restrict WebSocket origins, e.g. ["https://example.com"]
   # trusted_proxies: []       # CIDRs of trusted reverse proxies, e.g. ["10.0.0.0/8"]
+  # admin_allowed_cidrs:      # CIDRs allowed to access /admin (default: private networks only)
+  #   - "127.0.0.0/8"
+  #   - "::1/128"
+  #   - "10.0.0.0/8"
+  #   - "172.16.0.0/12"
+  #   - "192.168.0.0/16"
 
 database:
   path: "data/chatserver.db"
@@ -199,7 +214,39 @@ func Load(cfgPath string) (*Config, error) {
 		return nil, fmt.Errorf("unmarshalling config: %w", err)
 	}
 
+	// Apply voice defaults for zero-value fields (koanf loses defaults when
+	// the YAML section is present but fields are commented out / omitted).
+	applyVoiceDefaults(&cfg.Voice)
+
 	return &cfg, nil
+}
+
+// applyVoiceDefaults fills in zero-value voice fields with sensible defaults.
+// This guards against the koanf merge behaviour where an empty YAML section
+// overwrites struct defaults with Go zero values.
+func applyVoiceDefaults(v *VoiceConfig) {
+	def := defaults().Voice
+	if v.STUNPort == 0 {
+		v.STUNPort = def.STUNPort
+	}
+	if v.TURNPort == 0 {
+		v.TURNPort = def.TURNPort
+	}
+	if v.Quality == "" {
+		v.Quality = def.Quality
+	}
+	if v.MediaPortMin == 0 {
+		v.MediaPortMin = def.MediaPortMin
+	}
+	if v.MediaPortMax == 0 {
+		v.MediaPortMax = def.MediaPortMax
+	}
+	if v.MixingThreshold == 0 {
+		v.MixingThreshold = def.MixingThreshold
+	}
+	if v.TopSpeakers == 0 {
+		v.TopSpeakers = def.TopSpeakers
+	}
 }
 
 // validateYAML checks that raw bytes are valid YAML.

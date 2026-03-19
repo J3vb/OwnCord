@@ -33,7 +33,7 @@ const SCROLL_TOP_THRESHOLD = 50;
 const SCROLL_BOTTOM_THRESHOLD = 100;
 
 /** Number of items to render beyond visible viewport in each direction. */
-const OVERSCAN = 10;
+const OVERSCAN = 20;
 
 /** Estimated pixel height per row (message or day divider) for initial layout. */
 const ESTIMATED_ROW_HEIGHT = 52;
@@ -236,6 +236,37 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     virtualItems = buildVirtualItems(allMessages);
   }
 
+  /** Render all items temporarily to measure their actual heights, then
+   *  restore the normal virtual window. This eliminates the first-scroll
+   *  jump caused by estimated heights differing from measured ones. */
+  function premeasureAll(): void {
+    if (contentContainer === null || virtualItems.length === 0) return;
+    clearChildren(contentContainer);
+    const fragment = document.createDocumentFragment();
+    for (let i = 0; i < virtualItems.length; i++) {
+      const item = virtualItems[i]!;
+      if (item.kind === "divider") {
+        fragment.appendChild(renderDayDivider(item.timestamp));
+      } else {
+        fragment.appendChild(
+          renderMessage(item.message, item.isGrouped, allMessages, options, ac.signal),
+        );
+      }
+    }
+    contentContainer.appendChild(fragment);
+    // Measure all
+    const children = contentContainer.children;
+    for (let i = 0; i < children.length; i++) {
+      const h = (children[i] as HTMLElement).offsetHeight;
+      if (h > 0) heightCache.set(itemKey(i), h);
+    }
+    // Restore virtual window
+    renderedStart = -1;
+    renderedEnd = -1;
+    clearChildren(contentContainer);
+    renderWindow();
+  }
+
   function renderAll(): void {
     if (root === null) return;
     wasAtBottom = isNearBottom();
@@ -302,25 +333,49 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     topSpacer = createElement("div", { class: "virtual-spacer-top" });
     contentContainer = createElement("div", { class: "virtual-content" });
     bottomSpacer = createElement("div", { class: "virtual-spacer-bottom" });
+    const scrollAnchor = createElement("div", { class: "scroll-anchor" });
 
     root.appendChild(topSpacer);
     root.appendChild(contentContainer);
     root.appendChild(bottomSpacer);
+    root.appendChild(scrollAnchor);
 
     root.addEventListener("scroll", handleScroll, {
       signal: ac.signal,
       passive: true,
     });
 
+    // Watch for height changes in rendered items (images loading, embeds expanding).
+    // Re-measure heights and update spacers. The CSS scroll-anchor element handles
+    // pin-to-bottom automatically; for "scrolled up" we preserve distance-from-bottom.
+    const resizeObserver = new ResizeObserver(() => {
+      if (root === null || contentContainer === null) return;
+      // Capture scroll position relative to the bottom (stable reference point)
+      const distFromBottom = root.scrollHeight - root.scrollTop - root.clientHeight;
+      measureRendered();
+      // Update spacer heights with new measurements
+      if (topSpacer !== null) topSpacer.style.height = `${offsetBefore(renderedStart)}px`;
+      if (bottomSpacer !== null) {
+        let bh = 0;
+        for (let i = renderedEnd; i < virtualItems.length; i++) bh += getItemHeight(i);
+        bottomSpacer.style.height = `${bh}px`;
+      }
+      // Restore scroll position (distance from bottom stays the same)
+      if (distFromBottom > SCROLL_BOTTOM_THRESHOLD) {
+        root.scrollTop = root.scrollHeight - root.clientHeight - distFromBottom;
+      }
+    });
+    resizeObserver.observe(contentContainer);
+    ac.signal.addEventListener("abort", () => resizeObserver.disconnect());
+
     parentContainer.appendChild(root);
 
     renderAll();
-    // Scroll to bottom on initial mount — use multiple deferred calls to handle
-    // layout shifts from images/embeds loading after the initial render.
+    // Pre-measure all items to warm the height cache so scrolling up
+    // doesn't cause jumps from estimate→measured height corrections.
+    premeasureAll();
     scrollToBottom();
     requestAnimationFrame(() => scrollToBottom());
-    setTimeout(() => scrollToBottom(), 100);
-    setTimeout(() => scrollToBottom(), 500);
 
     unsubscribers.push(messagesStore.subscribe(() => { renderAll(); }));
 

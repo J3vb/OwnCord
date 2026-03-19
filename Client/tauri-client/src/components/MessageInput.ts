@@ -6,6 +6,7 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { createEmojiPicker } from "@components/EmojiPicker";
+import { createGifPicker } from "@components/GifPicker";
 
 export interface MessageInputOptions {
   readonly channelId: number;
@@ -292,6 +293,8 @@ export function createMessageInput(
     });
     const emojiBtn = createElement("button",
       { class: "input-btn emoji-btn", "aria-label": "Emoji" }, "\uD83D\uDE00");
+    const gifBtn = createElement("button",
+      { class: "input-btn gif-btn", "aria-label": "GIF" }, "GIF");
     const sendBtn = createElement("button",
       { class: "input-btn send-btn", "aria-label": "Send message", "data-testid": "send-btn" }, "\u27A4");
 
@@ -318,8 +321,9 @@ export function createMessageInput(
 
     sendBtn.addEventListener("click", handleSend, { signal });
 
-    // Emoji picker toggle
+    // Picker state (declared together so both toggle functions can cross-close)
     let emojiPicker: { element: HTMLDivElement; destroy(): void } | null = null;
+    let gifPicker: { element: HTMLDivElement; destroy(): void } | null = null;
 
     function closeEmojiPicker(): void {
       if (emojiPicker !== null) {
@@ -340,6 +344,10 @@ export function createMessageInput(
     }
 
     function toggleEmojiPicker(): void {
+      // Close GIF picker if open
+      if (gifPicker !== null) {
+        closeGifPicker();
+      }
       if (emojiPicker !== null) {
         closeEmojiPicker();
         return;
@@ -370,7 +378,54 @@ export function createMessageInput(
 
     emojiBtn.addEventListener("click", toggleEmojiPicker, { signal });
 
-    appendChildren(inputBox, attachBtn, textarea, emojiBtn, sendBtn);
+    // GIF picker toggle
+    function closeGifPicker(): void {
+      if (gifPicker !== null) {
+        gifPicker.element.remove();
+        gifPicker.destroy();
+        gifPicker = null;
+        document.removeEventListener("mousedown", handleGifClickOutside);
+      }
+    }
+
+    function handleGifClickOutside(e: MouseEvent): void {
+      if (gifPicker === null) return;
+      const target = e.target as Node;
+      if (!gifPicker.element.contains(target) && target !== gifBtn && !gifBtn.contains(target)) {
+        closeGifPicker();
+      }
+    }
+
+    function toggleGifPicker(): void {
+      // Close emoji picker if open
+      if (emojiPicker !== null) {
+        closeEmojiPicker();
+      }
+      if (gifPicker !== null) {
+        closeGifPicker();
+        return;
+      }
+      gifPicker = createGifPicker({
+        onSelect: (gifUrl: string) => {
+          if (textarea !== null) {
+            textarea.value = gifUrl;
+            handleSend();
+          }
+          closeGifPicker();
+        },
+        onClose: () => {
+          closeGifPicker();
+        },
+      });
+      root?.appendChild(gifPicker.element);
+      setTimeout(() => {
+        document.addEventListener("mousedown", handleGifClickOutside);
+      }, 0);
+    }
+
+    gifBtn.addEventListener("click", toggleGifPicker, { signal });
+
+    appendChildren(inputBox, attachBtn, textarea, emojiBtn, gifBtn, sendBtn);
     appendChildren(root, replyBar, editBar, attachmentPreviewBar, inputBox);
     container.appendChild(root);
     textarea.focus();

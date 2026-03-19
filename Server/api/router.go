@@ -81,8 +81,13 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins))
 
 	// Admin panel: static files + REST API (Phase 6).
+	// Restrict /admin to configured CIDRs (default: private networks only).
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, "J3vb", "OwnCord")
-	r.Mount("/admin", admin.NewHandler(database, ver, hub, u, logBuf))
+	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf)
+	r.Group(func(r chi.Router) {
+		r.Use(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs))
+		r.Mount("/admin", adminHandler)
+	})
 
 	// Client auto-update endpoint (unauthenticated).
 	MountClientUpdateRoute(r, u)

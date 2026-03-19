@@ -24,6 +24,7 @@ import { createServerBanner } from "@components/ServerBanner";
 import type { ServerBannerControl } from "@components/ServerBanner";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
 import { createToastContainer } from "@components/Toast";
+import { createEmojiPicker } from "@components/EmojiPicker";
 import type { ToastContainer } from "@components/Toast";
 import { authStore, clearAuth, updateUser } from "@stores/auth.store";
 import { closeSettings, toggleMemberList, uiStore } from "@stores/ui.store";
@@ -238,7 +239,72 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         }
       },
       onReactionClick: (msgId: number, emoji: string) => {
-        if (emoji === "") return;
+        if (emoji === "") {
+          // Open emoji picker for reaction selection
+          const reactBtn = document.querySelector(`[data-testid="msg-react-${msgId}"]`);
+          if (reactBtn === null) return;
+
+          // Close any existing reaction picker
+          const existingWrap = document.querySelector(".reaction-picker-wrap");
+          if (existingWrap !== null) { existingWrap.remove(); return; }
+
+          let pickerDestroy: (() => void) | null = null;
+
+          const wrap = createElement("div", {
+            class: "reaction-picker-wrap",
+          });
+
+          // Backdrop to close on click-outside
+          const backdrop = createElement("div", {
+            style: "position: fixed; inset: 0; z-index: 299;",
+          });
+          backdrop.addEventListener("click", () => {
+            pickerDestroy?.();
+            wrap.remove();
+          });
+
+          const picker = createEmojiPicker({
+            onSelect: (selectedEmoji: string) => {
+              pickerDestroy?.();
+              wrap.remove();
+              if (!limiters.reactions.tryConsume()) {
+                toast?.show("Slow down! Please wait before reacting again.", "error");
+                return;
+              }
+              const msgs = getChannelMessages(channelId);
+              const m = msgs.find((x) => x.id === msgId);
+              const existing = m?.reactions.find((r) => r.emoji === selectedEmoji);
+              const type = existing?.me ? "reaction_remove" : "reaction_add";
+              ws.send({ type, payload: { message_id: msgId, emoji: selectedEmoji } });
+            },
+            onClose: () => { pickerDestroy?.(); wrap.remove(); },
+          });
+          pickerDestroy = picker.destroy;
+
+          // Position the picker to the left of the react button, top-aligned
+          const rect = reactBtn.getBoundingClientRect();
+          const pickerW = 320;
+          let left = rect.left - pickerW - 8;
+          let top = rect.top;
+          if (left < 8) left = rect.right + 8;
+          if (top + 420 > window.innerHeight - 8) top = window.innerHeight - 420 - 8;
+          if (top < 8) top = 8;
+
+          // Override the picker's default absolute positioning
+          picker.element.style.position = "fixed";
+          picker.element.style.left = `${left}px`;
+          picker.element.style.top = `${top}px`;
+          picker.element.style.bottom = "auto";
+          picker.element.style.right = "auto";
+          picker.element.style.zIndex = "300";
+          picker.element.style.margin = "0";
+
+          wrap.appendChild(backdrop);
+          wrap.appendChild(picker.element);
+          document.body.appendChild(wrap);
+
+          return;
+        }
         if (!limiters.reactions.tryConsume()) {
           toast?.show("Slow down! Please wait before reacting again.", "error");
           return;

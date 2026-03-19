@@ -1,6 +1,7 @@
 mod commands;
 mod credentials;
 mod hotkeys;
+mod ptt;
 mod tray;
 mod update_commands;
 mod ws_proxy;
@@ -32,6 +33,11 @@ pub fn run() {
             credentials::delete_credential,
             update_commands::check_client_update,
             update_commands::download_and_install_update,
+            ptt::ptt_start,
+            ptt::ptt_stop,
+            ptt::ptt_set_key,
+            ptt::ptt_get_key,
+            ptt::ptt_listen_for_key,
         ])
         .setup(|app| {
             tray::create_tray(app.handle())?;
