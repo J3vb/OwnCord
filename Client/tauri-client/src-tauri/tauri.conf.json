@@ -1,6 +1,6 @@
 {
   "productName": "OwnCord",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "identifier": "com.owncord.client",
   "build": {
     "frontendDist": "../dist",
@@ -27,6 +27,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": "v2Compatible",
     "targets": [
       "nsis"
     ],
