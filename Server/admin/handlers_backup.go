@@ -172,9 +172,9 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("create destination: %w", err)
 	}
-	defer out.Close() //nolint:errcheck
 
 	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
 		return fmt.Errorf("copy: %w", err)
 	}
 	return out.Close()

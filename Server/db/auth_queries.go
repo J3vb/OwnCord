@@ -356,6 +356,9 @@ func (d *DB) ListMembers() ([]MemberSummary, error) {
 		}
 		members = append(members, m)
 	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("ListMembers rows: %w", rows.Err())
+	}
 	if members == nil {
 		members = []MemberSummary{}
 	}

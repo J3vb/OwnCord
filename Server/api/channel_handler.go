@@ -43,6 +43,20 @@ func hasChannelPermREST(database *db.DB, role *db.Role, channelID, perm int64) b
 	return effective&perm == perm
 }
 
+// hasChannelPermBatch checks permission using a pre-fetched overrides map,
+// eliminating N+1 queries when filtering multiple channels.
+func hasChannelPermBatch(role *db.Role, overrides map[int64]db.ChannelOverride, channelID, perm int64) bool {
+	if role == nil {
+		return false
+	}
+	if permissions.HasAdmin(role.Permissions) {
+		return true
+	}
+	o := overrides[channelID] // zero-value (0,0) when no override exists
+	effective := permissions.EffectivePerms(role.Permissions, o.Allow, o.Deny)
+	return effective&perm == perm
+}
+
 // handleListChannels returns all channels the authenticated user can see.
 func handleListChannels(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -58,10 +72,20 @@ func handleListChannels(database *db.DB) http.HandlerFunc {
 			return
 		}
 
+		// Batch-fetch all channel permission overrides for this role in one query.
+		overrides := map[int64]db.ChannelOverride{}
+		if role != nil && !permissions.HasAdmin(role.Permissions) {
+			var oErr error
+			overrides, oErr = database.GetAllChannelPermissionsForRole(role.ID)
+			if oErr != nil {
+				slog.Error("handleListChannels GetAllChannelPermissionsForRole", "err", oErr)
+			}
+		}
+
 		// Filter channels by READ_MESSAGES permission.
 		var visible []db.Channel
 		for _, ch := range channels {
-			if hasChannelPermREST(database, role, ch.ID, permissions.ReadMessages) {
+			if hasChannelPermBatch(role, overrides, ch.ID, permissions.ReadMessages) {
 				visible = append(visible, ch)
 			}
 		}
@@ -221,11 +245,19 @@ func handleSearch(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		// Post-filter results by READ_MESSAGES permission on each channel.
+		// Batch-fetch overrides and post-filter results by READ_MESSAGES.
 		role, _ := r.Context().Value(RoleKey).(*db.Role)
+		overrides := map[int64]db.ChannelOverride{}
+		if role != nil && !permissions.HasAdmin(role.Permissions) {
+			var oErr error
+			overrides, oErr = database.GetAllChannelPermissionsForRole(role.ID)
+			if oErr != nil {
+				slog.Error("handleSearch GetAllChannelPermissionsForRole", "err", oErr)
+			}
+		}
 		var filtered []db.MessageSearchResult
 		for _, res := range results {
-			if hasChannelPermREST(database, role, res.ChannelID, permissions.ReadMessages) {
+			if hasChannelPermBatch(role, overrides, res.ChannelID, permissions.ReadMessages) {
 				filtered = append(filtered, res)
 			}
 		}

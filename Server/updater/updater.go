@@ -296,7 +296,9 @@ func (u *Updater) fetchBody(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("HTTP %d fetching %s", resp.StatusCode, url)
 	}
 
-	return io.ReadAll(resp.Body)
+	// Cap reads at 1 MiB — checksum and signature files are tiny text;
+	// this prevents a malicious or corrupted release asset from exhausting memory.
+	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 }
 
 // FindClientAssets scans the cached release assets for the Tauri NSIS

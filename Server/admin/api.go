@@ -253,13 +253,15 @@ func pathInt64(r *http.Request, param string) (int64, error) {
 	return strconv.ParseInt(raw, 10, 64)
 }
 
-func queryInt(r *http.Request, key string, defaultVal int) int {
+// queryInt parses an integer query parameter with a minimum and maximum bound.
+// Use minVal=1 for limit parameters, minVal=0 for offset parameters.
+func queryInt(r *http.Request, key string, defaultVal, minVal int) int {
 	raw := r.URL.Query().Get(key)
 	if raw == "" {
 		return defaultVal
 	}
 	n, err := strconv.Atoi(raw)
-	if err != nil || n < 1 {
+	if err != nil || n < minVal {
 		return defaultVal
 	}
 	// Cap to prevent unbounded result sets exhausting memory.

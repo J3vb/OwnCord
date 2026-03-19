@@ -135,6 +135,40 @@ func (d *DB) GetChannelPermissions(channelID, roleID int64) (allow, deny int64, 
 	return allow, deny, nil
 }
 
+// ChannelOverride holds the allow/deny permission bits for a single channel.
+type ChannelOverride struct {
+	Allow int64
+	Deny  int64
+}
+
+// GetAllChannelPermissionsForRole returns all channel permission overrides for
+// a role in a single query, keyed by channel ID. Eliminates N+1 queries when
+// filtering channels by permission.
+func (d *DB) GetAllChannelPermissionsForRole(roleID int64) (map[int64]ChannelOverride, error) {
+	rows, err := d.sqlDB.Query(
+		`SELECT channel_id, allow, deny FROM channel_overrides WHERE role_id = ?`,
+		roleID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("GetAllChannelPermissionsForRole: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	result := make(map[int64]ChannelOverride)
+	for rows.Next() {
+		var chID int64
+		var o ChannelOverride
+		if scanErr := rows.Scan(&chID, &o.Allow, &o.Deny); scanErr != nil {
+			return nil, fmt.Errorf("GetAllChannelPermissionsForRole scan: %w", scanErr)
+		}
+		result[chID] = o
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("GetAllChannelPermissionsForRole rows: %w", rows.Err())
+	}
+	return result, nil
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 // scanChannel scans a single channel row from *sql.Rows.

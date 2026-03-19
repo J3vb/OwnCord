@@ -209,8 +209,8 @@ func handleDeleteChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 
 func handleGetAuditLog(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		limit := queryInt(r, "limit", 50)
-		offset := queryInt(r, "offset", 0)
+		limit := queryInt(r, "limit", 50, 1)
+		offset := queryInt(r, "offset", 0, 0)
 
 		entries, err := database.GetAuditLog(limit, offset)
 		if err != nil {

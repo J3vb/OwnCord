@@ -27,8 +27,8 @@ func handleGetStats(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 
 func handleListUsers(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		limit := queryInt(r, "limit", 50)
-		offset := queryInt(r, "offset", 0)
+		limit := queryInt(r, "limit", 50, 1)
+		offset := queryInt(r, "offset", 0, 0)
 
 		users, err := database.ListAllUsers(limit, offset)
 		if err != nil {
