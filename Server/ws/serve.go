@@ -290,21 +290,8 @@ func (h *Hub) buildReady(database *db.DB, userID int64) ([]byte, error) {
 	}), nil
 }
 
-// collectAllVoiceStates gathers voice states for all voice-type channels.
-func collectAllVoiceStates(database *db.DB, channels []db.Channel) ([]db.VoiceState, error) {
-	var all []db.VoiceState
-	for _, ch := range channels {
-		if ch.Type != "voice" {
-			continue
-		}
-		states, err := database.GetChannelVoiceStates(ch.ID)
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, states...)
-	}
-	if all == nil {
-		all = []db.VoiceState{}
-	}
-	return all, nil
+// collectAllVoiceStates gathers voice states across all channels in a single
+// query, replacing the previous N+1 per-channel pattern.
+func collectAllVoiceStates(database *db.DB, _ []db.Channel) ([]db.VoiceState, error) {
+	return database.GetAllVoiceStates()
 }

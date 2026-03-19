@@ -41,11 +41,30 @@ func handlePatchSettings(database *db.DB) http.HandlerFunc {
 		}
 
 		actor := actorFromContext(r)
+
+		// Apply all settings atomically so a mid-loop failure doesn't leave
+		// partial updates.
+		tx, err := database.Begin()
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to start transaction")
+			return
+		}
 		for key, value := range updates {
-			if err := database.SetSetting(key, value); err != nil {
+			if _, txErr := tx.Exec(
+				`INSERT INTO settings (key, value) VALUES (?, ?)
+				 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+				key, value,
+			); txErr != nil {
+				_ = tx.Rollback()
 				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update setting: "+key)
 				return
 			}
+		}
+		if err := tx.Commit(); err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to commit settings")
+			return
+		}
+		for key := range updates {
 			slog.Info("setting changed", "actor_id", actor, "key", key)
 			_ = database.LogAudit(actor, "setting_change", "setting", 0,
 				fmt.Sprintf("%s updated", key))

@@ -109,7 +109,10 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 				return
 			}
 
-			// Exit current process.
+			// Exit current process. os.Exit skips deferred cleanup intentionally —
+			// the process must die to release the file lock on its own binary
+			// before the new process can replace it on Windows. SQLite WAL mode
+			// protects DB integrity on unclean shutdown.
 			slog.Info("update: new process spawned, exiting current process")
 			os.Exit(0)
 		}()

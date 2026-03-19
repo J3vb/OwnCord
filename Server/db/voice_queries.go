@@ -89,6 +89,39 @@ func (d *DB) GetChannelVoiceStates(channelID int64) ([]VoiceState, error) {
 	return states, nil
 }
 
+// GetAllVoiceStates returns voice states across all voice channels in a single
+// query. Used at startup to build the ready payload without N+1 per-channel queries.
+func (d *DB) GetAllVoiceStates() ([]VoiceState, error) {
+	rows, err := d.sqlDB.Query(
+		`SELECT vs.user_id, vs.channel_id, u.username,
+		        vs.muted, vs.deafened, vs.speaking,
+		        vs.camera, vs.screenshare
+		 FROM voice_states vs
+		 JOIN users u ON u.id = vs.user_id
+		 ORDER BY vs.channel_id, vs.joined_at ASC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("GetAllVoiceStates: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var states []VoiceState
+	for rows.Next() {
+		vs, scanErr := scanVoiceStateRow(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("GetAllVoiceStates scan: %w", scanErr)
+		}
+		states = append(states, vs)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("GetAllVoiceStates rows: %w", rows.Err())
+	}
+	if states == nil {
+		states = []VoiceState{}
+	}
+	return states, nil
+}
+
 // UpdateVoiceMute sets the muted field for the given user's voice state.
 // It is safe to call when the user is not in any channel (no-op).
 func (d *DB) UpdateVoiceMute(userID int64, muted bool) error {

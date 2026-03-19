@@ -373,6 +373,9 @@ func (d *DB) getReactionsBatch(msgIDs []int64, requestingUserID int64) (map[int6
 		ri.Me = me != 0
 		result[msgID] = append(result[msgID], ri)
 	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("getReactionsBatch rows: %w", rows.Err())
+	}
 	return result, nil
 }
 

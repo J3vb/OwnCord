@@ -645,6 +645,8 @@ func (h *Hub) handleSoundboard(c *Client, payload json.RawMessage) {
 		return
 	}
 
+	// channelID=0: soundboard is a server-wide permission with no per-channel
+	// override. The client does not send a channel_id in the payload.
 	if !h.requireChannelPerm(c, 0, permissions.UseSoundboard, "USE_SOUNDBOARD") {
 		return
 	}

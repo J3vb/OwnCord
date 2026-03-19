@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -118,21 +119,18 @@ func generateTURNCredentials(userID int64, secret string) turnCredentials {
 	}
 }
 
-// serverHost extracts the host for ICE server URLs from the request or falls
-// back to "localhost".
+// serverHost extracts the host (without port) for ICE server URLs from the
+// request, or falls back to "localhost". Uses net.SplitHostPort for correct
+// handling of IPv6 addresses with ports (e.g. "[::1]:8443").
 func serverHost(r *http.Request) string {
-	if host := r.Host; host != "" {
-		// Strip port if present.
-		for i := len(host) - 1; i >= 0; i-- {
-			if host[i] == ':' {
-				return host[:i]
-			}
-			if host[i] == ']' {
-				// IPv6 with no port.
-				return host
-			}
-		}
+	host := r.Host
+	if host == "" {
+		return "localhost"
+	}
+	h, _, err := net.SplitHostPort(host)
+	if err != nil {
+		// No port present — return as-is.
 		return host
 	}
-	return "localhost"
+	return h
 }

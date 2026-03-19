@@ -2,6 +2,7 @@ package admin
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -141,14 +142,10 @@ func handleRestoreBackup(database *db.DB) http.Handler {
 			slog.Warn("pre-restore backup failed", "err", err)
 		}
 
-		// Copy the backup file over the live database.
-		src, err := os.ReadFile(backupPath)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to read backup file")
-			return
-		}
-		if err := os.WriteFile(dbPath, src, 0o644); err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to write database file")
+		// Stream the backup file over the live database to avoid loading
+		// the entire DB into memory (could be hundreds of MiB).
+		if err := copyFile(backupPath, dbPath); err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to restore database file")
 			return
 		}
 
@@ -161,4 +158,24 @@ func handleRestoreBackup(database *db.DB) http.Handler {
 			"backup":  name,
 		})
 	})
+}
+
+// copyFile streams src to dst without loading the entire file into memory.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open source: %w", err)
+	}
+	defer in.Close() //nolint:errcheck
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return fmt.Errorf("create destination: %w", err)
+	}
+	defer out.Close() //nolint:errcheck
+
+	if _, err := io.Copy(out, in); err != nil {
+		return fmt.Errorf("copy: %w", err)
+	}
+	return out.Close()
 }
