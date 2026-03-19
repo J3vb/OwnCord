@@ -28,6 +28,7 @@ vi.mock("@stores/ui.store", () => ({
 vi.mock("@lib/voiceSession", () => ({
   switchInputDevice: vi.fn().mockResolvedValue(undefined),
   switchOutputDevice: vi.fn().mockResolvedValue(undefined),
+  setVoiceSensitivity: vi.fn(),
 }));
 
 vi.mock("@stores/auth.store", () => ({

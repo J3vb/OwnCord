@@ -397,8 +397,8 @@ func TestDownloadAndVerify_Success(t *testing.T) {
 	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
 	u.baseURL = srv.URL
 
-	downloadURL := fmt.Sprintf("https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe")
-	checksumURL := fmt.Sprintf("https://github.com/J3vb/OwnCord/releases/download/v1.0.0/checksums.sha256")
+	downloadURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe"
+	checksumURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/checksums.sha256"
 
 	// Override HTTP client to route GitHub URLs to our test server.
 	u.httpClient = &http.Client{

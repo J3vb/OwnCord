@@ -18,6 +18,7 @@ vi.mock("@lib/logger", () => ({
   clearLogBuffer: mockClearLogBuffer,
   addLogListener: mockAddLogListener,
   setLogLevel: mockSetLogLevel,
+  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
 import { createLogsTab } from "../../src/components/settings/LogsTab";
@@ -93,7 +94,9 @@ describe("LogsTab", () => {
     ]);
     const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
     const el = handle.build();
-    const pre = el.querySelector("pre");
+    // Find the <pre> inside a log-entry row (not the diagnostics result <pre>).
+    const pre = el.querySelector(".log-entry pre");
+    expect(pre).not.toBeNull();
     expect(pre!.textContent).toBe("some string");
   });
 

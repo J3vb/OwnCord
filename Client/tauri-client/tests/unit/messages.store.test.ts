@@ -176,9 +176,10 @@ describe("messages store", () => {
   // 3. setMessages bulk sets and marks loaded
   describe("setMessages", () => {
     it("sets messages for a channel", () => {
+      // API returns newest-first; store reverses to oldest-first for display.
       const responses = [
-        makeMessageResponse({ id: 10 }),
         makeMessageResponse({ id: 11 }),
+        makeMessageResponse({ id: 10 }),
       ];
       setMessages(1, responses, false);
 
@@ -227,10 +228,11 @@ describe("messages store", () => {
   // 4. prependMessages prepends older messages
   describe("prependMessages", () => {
     it("prepends older messages before existing ones", () => {
+      // API returns newest-first; store reverses to oldest-first.
       setMessages(1, [makeMessageResponse({ id: 20 })], true);
       prependMessages(
         1,
-        [makeMessageResponse({ id: 10 }), makeMessageResponse({ id: 15 })],
+        [makeMessageResponse({ id: 15 }), makeMessageResponse({ id: 10 })],
         false,
       );
 

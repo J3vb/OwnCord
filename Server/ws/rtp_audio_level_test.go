@@ -33,7 +33,7 @@ func buildRTPPacket(csrcCount int, extensions []struct{ id, value byte }) []byte
 	// For simplicity each extension here has 1 byte of data (L=0).
 	var extData []byte
 	for _, ext := range extensions {
-		extData = append(extData, (ext.id<<4)|0x00) // ID | L=0 (1 byte data)
+		extData = append(extData, ext.id<<4) // ID | L=0 (1 byte data)
 		extData = append(extData, ext.value)
 	}
 
