@@ -44,12 +44,18 @@ export function buildAccountTab(
     editForm.style.display = "none";
   }, { signal });
 
+  const usernameError = createElement("div", { style: "color:var(--red);font-size:13px;margin-top:4px" });
+  editForm.appendChild(usernameError);
+
   saveBtn.addEventListener("click", () => {
     const newName = editInput.value.trim();
     if (newName.length > 0) {
+      setText(usernameError, "");
       void options.onUpdateProfile(newName).then(() => {
         setText(usernameValue, newName);
         editForm.style.display = "none";
+      }).catch((err: unknown) => {
+        setText(usernameError, err instanceof Error ? err.message : "Failed to update username.");
       });
     }
   }, { signal });
@@ -82,6 +88,11 @@ export function buildAccountTab(
       oldPw.value = "";
       newPw.value = "";
       confirmPw.value = "";
+      pwError.style.color = "var(--green)";
+      setText(pwError, "Password changed successfully.");
+      setTimeout(() => { setText(pwError, ""); pwError.style.color = "var(--red)"; }, 3000);
+    }).catch((err: unknown) => {
+      setText(pwError, err instanceof Error ? err.message : "Failed to change password.");
     });
   }, { signal });
 

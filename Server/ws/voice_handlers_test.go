@@ -2,9 +2,12 @@ package ws_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"testing/fstest"
 	"time"
+
+	"github.com/pion/webrtc/v4"
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
@@ -1490,6 +1493,97 @@ func TestVoice_HandleMessage_VoiceScreenshare_Dispatched(t *testing.T) {
 	}
 }
 
+// ─── composite track keys ─────────────────────────────────────────────────────
+
+func TestVoiceRoom_CompositeTrackKeys(t *testing.T) {
+	room := ws.NewVoiceRoom(ws.VoiceRoomConfig{
+		ChannelID: 1, MaxUsers: 10, Quality: "medium",
+		MixingThreshold: 10, TopSpeakers: 3, MaxVideo: 25,
+	})
+
+	room.SetTrack(42, "audio", nil, nil)
+	room.SetTrack(42, "video", nil, nil)
+
+	audioTrack := room.GetTrack(42, "audio")
+	videoTrack := room.GetTrack(42, "video")
+	if audioTrack == nil {
+		t.Fatal("audio track should exist")
+	}
+	if videoTrack == nil {
+		t.Fatal("video track should exist")
+	}
+
+	room.RemoveTrack(42, "video")
+	if room.GetTrack(42, "audio") == nil {
+		t.Fatal("audio track should still exist after removing video")
+	}
+	if room.GetTrack(42, "video") != nil {
+		t.Fatal("video track should be removed")
+	}
+
+	userTracks := room.GetUserTracks(42)
+	if len(userTracks) != 1 {
+		t.Fatalf("expected 1 track, got %d", len(userTracks))
+	}
+}
+
+// TestVoiceRoom_VideoTrackCoexistence verifies multi-user video track fan-out:
+// composite keys allow audio and video to coexist per user, GetTracks returns
+// the correct total, TrackUserIDs deduplicates, and removing one kind leaves
+// the other intact.
+func TestVoiceRoom_VideoTrackCoexistence(t *testing.T) {
+	room := ws.NewVoiceRoom(ws.VoiceRoomConfig{
+		ChannelID: 1, MaxUsers: 10, Quality: "medium",
+		MixingThreshold: 10, TopSpeakers: 3, MaxVideo: 25,
+	})
+
+	// User 42 has both audio and video.
+	room.SetTrack(42, "audio", nil, nil)
+	room.SetTrack(42, "video", nil, nil)
+
+	// User 99 has audio only.
+	room.SetTrack(99, "audio", nil, nil)
+
+	// GetTracks returns all 3 track entries.
+	tracks := room.GetTracks()
+	if len(tracks) != 3 {
+		t.Fatalf("expected 3 tracks, got %d", len(tracks))
+	}
+
+	// GetUserTracks for user 42 returns 2 (audio + video).
+	u42 := room.GetUserTracks(42)
+	if len(u42) != 2 {
+		t.Fatalf("expected 2 tracks for user 42, got %d", len(u42))
+	}
+
+	// TrackUserIDs returns 2 unique users (not 3 entries).
+	ids := room.TrackUserIDs()
+	if len(ids) != 2 {
+		t.Fatalf("expected 2 unique users, got %d", len(ids))
+	}
+
+	// Remove video for user 42 — audio must survive.
+	room.RemoveTrack(42, "video")
+
+	if room.GetTrack(42, "audio") == nil {
+		t.Fatal("audio track should still exist after removing video")
+	}
+	if room.GetTrack(42, "video") != nil {
+		t.Fatal("video track should be removed")
+	}
+
+	// GetTracks now returns 2 (user 42 audio + user 99 audio).
+	tracks = room.GetTracks()
+	if len(tracks) != 2 {
+		t.Fatalf("expected 2 tracks after video removal, got %d", len(tracks))
+	}
+
+	// User 99 is completely unaffected.
+	if room.GetTrack(99, "audio") == nil {
+		t.Fatal("user 99 audio track should be unaffected")
+	}
+}
+
 // ─── ICE monitor / setupICEMonitor ────────────────────────────────────────────
 
 // TestVoice_SetupICEMonitor_NilPC_NoPanic verifies that setupICEMonitor does
@@ -1590,6 +1684,103 @@ func TestVoice_Join_SameChannel_IsIdempotent(t *testing.T) {
 	}
 	if count := room.ParticipantCount(); count != 1 {
 		t.Errorf("ParticipantCount = %d, want 1 after idempotent join", count)
+	}
+}
+
+// ─── MaxVideo enforcement ─────────────────────────────────────────────────────
+
+// makeVideoTrack creates a TrackLocalStaticRTP with ID "video-{userID}" for testing.
+func makeVideoTrack(t *testing.T, userID int64) *webrtc.TrackLocalStaticRTP {
+	t.Helper()
+	local, err := webrtc.NewTrackLocalStaticRTP(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+		fmt.Sprintf("video-%d", userID),
+		fmt.Sprintf("user-%d", userID),
+	)
+	if err != nil {
+		t.Fatalf("NewTrackLocalStaticRTP: %v", err)
+	}
+	return local
+}
+
+// TestHandleVoiceCamera_MaxVideoEnforced verifies that when the MaxVideo limit
+// is reached, a voice_camera enable request is rejected with VIDEO_LIMIT error.
+func TestHandleVoiceCamera_MaxVideoEnforced(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	chanID := seedVoiceChan(t, database, "vc-maxvideo")
+
+	// Pre-create the room with MaxVideo=2 so handleVoiceJoin reuses it.
+	hub.GetOrCreateVoiceRoom(chanID, ws.VoiceRoomConfig{
+		ChannelID:       chanID,
+		MaxUsers:        10,
+		Quality:         "medium",
+		MixingThreshold: 10,
+		TopSpeakers:     3,
+		MaxVideo:        2,
+	})
+
+	// Create 3 users: user1 and user2 will have video tracks, user3 will be rejected.
+	user1 := seedVoiceOwner(t, database, "maxvid-user1")
+	user2 := seedVoiceOwner(t, database, "maxvid-user2")
+	user3 := seedVoiceOwner(t, database, "maxvid-user3")
+
+	send1 := make(chan []byte, 32)
+	c1 := ws.NewTestClientWithUser(hub, user1, chanID, send1)
+	hub.Register(c1)
+
+	send2 := make(chan []byte, 32)
+	c2 := ws.NewTestClientWithUser(hub, user2, chanID, send2)
+	hub.Register(c2)
+
+	send3 := make(chan []byte, 64)
+	c3 := ws.NewTestClientWithUser(hub, user3, chanID, send3)
+	hub.Register(c3)
+	time.Sleep(20 * time.Millisecond)
+
+	// All three join the voice channel.
+	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
+	time.Sleep(30 * time.Millisecond)
+	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
+	time.Sleep(30 * time.Millisecond)
+	hub.HandleMessageForTest(c3, voiceJoinMsg(chanID))
+	time.Sleep(30 * time.Millisecond)
+
+	// Simulate user1 and user2 having video tracks by setting them on the room.
+	room := hub.GetVoiceRoom(chanID)
+	if room == nil {
+		t.Fatal("VoiceRoom should exist after joins")
+	}
+	room.SetTrack(user1.ID, "video", nil, makeVideoTrack(t, user1.ID))
+	room.SetTrack(user2.ID, "video", nil, makeVideoTrack(t, user2.ID))
+
+	// Drain all messages from prior operations.
+	drainChan(send1)
+	drainChan(send2)
+	drainChan(send3)
+
+	// User3 tries to enable camera — should be rejected with VIDEO_LIMIT.
+	hub.HandleMessageForTest(c3, voiceCameraMsg(true))
+	time.Sleep(50 * time.Millisecond)
+
+	msgs := drainChan(send3)
+	foundVideoLimit := false
+	for _, m := range msgs {
+		if extractCode(t, m) == "VIDEO_LIMIT" {
+			foundVideoLimit = true
+			break
+		}
+	}
+	if !foundVideoLimit {
+		t.Error("expected VIDEO_LIMIT error when MaxVideo limit is reached")
+	}
+
+	// Verify DB state was NOT updated (camera should still be false).
+	state, err := database.GetVoiceState(user3.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state != nil && state.Camera {
+		t.Error("camera should not be enabled after VIDEO_LIMIT rejection")
 	}
 }
 

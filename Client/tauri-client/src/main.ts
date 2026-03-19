@@ -16,6 +16,7 @@ import { leaveVoice as voiceSessionLeave } from "@lib/voiceSession";
 import { createConnectPage } from "@pages/ConnectPage";
 import { createMainPage } from "@pages/MainPage";
 import { applyStoredAppearance } from "@components/SettingsOverlay";
+import { initPtt } from "@lib/ptt";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
 import type { ConnectedOverlayControl } from "@components/ConnectedOverlay";
 import { createLogger } from "@lib/logger";
@@ -50,6 +51,9 @@ installGlobalErrorHandlers();
 
 // Apply stored theme/font/compact preferences before first render
 applyStoredAppearance();
+
+// Start push-to-talk listener (Rust-side polling, non-consuming)
+void initPtt();
 
 const appEl = document.getElementById("app");
 if (!appEl) {

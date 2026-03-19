@@ -15,7 +15,9 @@ import { createAudioManager } from "@lib/audio";
 import { createVadDetector, sensitivityToThreshold } from "@lib/vad";
 import { createNoiseSuppressor } from "@lib/noise-suppression";
 import type { NoiseSuppressor } from "@lib/noise-suppression";
-import { voiceStore, setLocalMuted, setLocalDeafened, setLocalSpeaking } from "@stores/voice.store";
+import { voiceStore, setLocalMuted, setLocalDeafened, setLocalSpeaking, setLocalCamera } from "@stores/voice.store";
+import { createVideoManager } from "@lib/video";
+import type { VideoManager } from "@lib/video";
 import { loadPref, savePref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 
@@ -33,6 +35,9 @@ let localStream: MediaStream | null = null;
 /** The stream actually sent to WebRTC (may be noise-suppressed). */
 let processedStream: MediaStream | null = null;
 let ws: WsClient | null = null;
+let videoManager: VideoManager | null = null;
+let cameraStream: MediaStream | null = null;
+let videoSender: RTCRtpSender | null = null;
 const audioElements = new Map<string, HTMLAudioElement>();
 /** Shared AudioContext for all remote audio processing (avoids browser limit of ~6 contexts). */
 let sharedAudioCtx: AudioContext | null = null;
@@ -57,6 +62,25 @@ let audioContainer: HTMLDivElement | null = null;
 
 // Optional error callback for UI feedback (e.g. toast on WebRTC failure)
 let onErrorCallback: ((message: string) => void) | null = null;
+
+// Remote video callbacks
+type RemoteVideoCallback = (userId: number, stream: MediaStream) => void;
+type RemoteVideoRemovedCallback = (userId: number) => void;
+let onRemoteVideoCallback: RemoteVideoCallback | null = null;
+let onRemoteVideoRemovedCallback: RemoteVideoRemovedCallback | null = null;
+
+export function setOnRemoteVideo(cb: RemoteVideoCallback): void {
+  onRemoteVideoCallback = cb;
+}
+
+export function setOnRemoteVideoRemoved(cb: RemoteVideoRemovedCallback): void {
+  onRemoteVideoRemovedCallback = cb;
+}
+
+export function clearOnRemoteVideo(): void {
+  onRemoteVideoCallback = null;
+  onRemoteVideoRemovedCallback = null;
+}
 
 // Track event-unsubscribe functions for cleanup
 let unsubIce: (() => void) | null = null;
@@ -146,16 +170,16 @@ function getOrCreateAudioContainer(): HTMLDivElement {
   return audioContainer;
 }
 
-/** Parse userId from server's stream label "user-{id}". Returns 0 if unparseable. */
+/** Parse userId from server's stream label "user-{id}" or "user-{id}-{kind}". Returns 0 if unparseable. */
 function parseUserIdFromStream(stream: MediaStream): number {
-  // The server creates tracks with streamID = "user-{userID}"
-  const match = stream.id.match(/^user-(\d+)$/);
+  // The server creates tracks with streamID = "user-{userID}-{kind}" (e.g. "user-42-audio", "user-42-video")
+  const match = stream.id.match(/^user-(\d+)(?:-(?:audio|video))?$/);
   if (match !== null && match[1] !== undefined) {
     return Number(match[1]);
   }
   // Fallback: check track labels "audio-{userID}"
   for (const track of stream.getTracks()) {
-    const trackMatch = track.id.match(/^audio-(\d+)$/);
+    const trackMatch = track.id.match(/^(?:audio|video)-(\d+)$/);
     if (trackMatch !== null && trackMatch[1] !== undefined) {
       return Number(trackMatch[1]);
     }
@@ -453,7 +477,22 @@ export async function joinVoice(
 
     // 6. Wire remote track playback
     unsubTrack = webrtcService.onRemoteTrack((stream) => {
-      addRemoteStream(stream);
+      const hasVideo = stream.getVideoTracks().length > 0;
+      const hasAudio = stream.getAudioTracks().length > 0;
+
+      if (hasAudio && !hasVideo) {
+        addRemoteStream(stream);
+      } else if (hasVideo) {
+        const userId = parseUserIdFromStream(stream);
+        if (userId > 0 && onRemoteVideoCallback !== null) {
+          onRemoteVideoCallback(userId, stream);
+        }
+        stream.onremovetrack = () => {
+          if (stream.getTracks().length === 0 && userId > 0) {
+            onRemoteVideoRemovedCallback?.(userId);
+          }
+        };
+      }
     });
 
     // 7. Wire connection state monitoring
@@ -548,6 +587,15 @@ export function leaveVoice(sendWs = true): void {
   // Clear join guard so a new join can proceed after leave
   joinInProgress = false;
 
+  // Stop camera stream
+  if (cameraStream !== null) {
+    for (const track of cameraStream.getTracks()) {
+      track.stop();
+    }
+    cameraStream = null;
+    videoSender = null;
+  }
+
   // Stop processedStream tracks first (before nulling localStream so guard works)
   if (processedStream !== null && processedStream !== localStream) {
     for (const track of processedStream.getTracks()) {
@@ -594,6 +642,12 @@ export function leaveVoice(sendWs = true): void {
     audioManager = null;
   }
 
+  // Destroy video manager
+  if (videoManager !== null) {
+    videoManager.destroy();
+    videoManager = null;
+  }
+
   log.info("Left voice session");
 }
 
@@ -620,6 +674,102 @@ export function setDeafened(deafened: boolean): void {
     el.muted = deafened;
   }
   log.debug("Deafen state changed", { deafened, audioElements: audioElements.size });
+}
+
+/** Enable camera: acquire webcam, add video track to WebRTC, notify server. */
+export async function enableCamera(): Promise<void> {
+  if (webrtcService === null || ws === null || currentChannelId === null) {
+    log.warn("Cannot enable camera: no active voice session");
+    onErrorCallback?.("Join a voice channel first");
+    return;
+  }
+
+  if (cameraStream !== null) {
+    log.debug("Camera already enabled");
+    return;
+  }
+
+  if (videoManager === null) {
+    videoManager = createVideoManager();
+  }
+
+  try {
+    const savedDevice = loadPref<string>("videoInputDevice", "");
+    cameraStream = savedDevice !== ""
+      ? await videoManager.getCameraStream(savedDevice)
+      : await videoManager.getCameraStream();
+
+    const videoTrack = cameraStream.getVideoTracks()[0];
+    if (videoTrack !== undefined) {
+      videoTrack.addEventListener("ended", () => {
+        log.warn("Camera track ended unexpectedly (device disconnected?)");
+        void disableCamera();
+        onErrorCallback?.("Camera disconnected");
+      });
+    }
+
+    videoSender = webrtcService.addVideoTrack(cameraStream);
+
+    if (webrtcService !== null && ws !== null) {
+      const offerSdp = await webrtcService.createOffer();
+      ws.send({
+        type: "voice_offer",
+        payload: { channel_id: currentChannelId, sdp: offerSdp },
+      });
+    }
+
+    // Notify server and update store AFTER successful track addition
+    setLocalCamera(true);
+    ws.send({ type: "voice_camera", payload: { enabled: true } });
+
+    log.info("Camera enabled", { channelId: currentChannelId });
+  } catch (err) {
+    log.error("Failed to enable camera", err);
+    cameraStream = null;
+    videoSender = null;
+
+    if (err instanceof DOMException && err.name === "NotAllowedError") {
+      onErrorCallback?.("Camera permission denied");
+    } else if (err instanceof DOMException && err.name === "NotFoundError") {
+      onErrorCallback?.("No camera found");
+    } else {
+      onErrorCallback?.("Failed to start camera");
+    }
+  }
+}
+
+/** Disable camera: stop stream, remove video track, notify server. */
+export async function disableCamera(): Promise<void> {
+  if (cameraStream !== null) {
+    for (const track of cameraStream.getTracks()) {
+      track.stop();
+    }
+    cameraStream = null;
+  }
+
+  if (videoSender !== null && webrtcService !== null) {
+    webrtcService.removeVideoTrack(videoSender);
+    videoSender = null;
+
+    if (ws !== null && currentChannelId !== null) {
+      try {
+        const offerSdp = await webrtcService.createOffer();
+        ws.send({
+          type: "voice_offer",
+          payload: { channel_id: currentChannelId, sdp: offerSdp },
+        });
+      } catch (err) {
+        log.error("Failed to renegotiate after camera disable", err);
+      }
+    }
+  }
+
+  setLocalCamera(false);
+  if (ws !== null) {
+    ws.send({ type: "voice_camera", payload: { enabled: false } });
+  }
+
+  log.info("Camera disabled");
 }
 
 /** Switch the input (microphone) device on an active session. */
@@ -837,6 +987,11 @@ export function measureStreamLevel(stream: MediaStream): Promise<number> {
       resolve(-1);
     }
   });
+}
+
+/** Get the local camera stream for self-view display. */
+export function getLocalCameraStream(): MediaStream | null {
+  return cameraStream;
 }
 
 /** Snapshot of current voice session state for debugging. */

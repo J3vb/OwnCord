@@ -7,7 +7,57 @@ import { loadPref, savePref } from "./helpers";
 import { switchInputDevice, switchOutputDevice, setVoiceSensitivity, updateSilenceSuppressionPref } from "@lib/voiceSession";
 import { sensitivityToThreshold } from "@lib/vad";
 
-export function buildVoiceAudioTab(signal: AbortSignal): HTMLDivElement {
+export interface VoiceAudioTabHandle {
+  build(): HTMLDivElement;
+  cleanup(): void;
+}
+
+export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
+  let micStream: MediaStream | null = null;
+  let micAudioCtx: AudioContext | null = null;
+  let micAnimFrame: number | null = null;
+  let cameraPreviewStream: MediaStream | null = null;
+
+  function cleanupMic(): void {
+    if (micAnimFrame !== null) { cancelAnimationFrame(micAnimFrame); micAnimFrame = null; }
+    if (micStream !== null) {
+      for (const track of micStream.getTracks()) track.stop();
+      micStream = null;
+    }
+    if (micAudioCtx !== null) { void micAudioCtx.close(); micAudioCtx = null; }
+    // Also stop camera preview
+    if (cameraPreviewStream !== null) {
+      for (const track of cameraPreviewStream.getTracks()) track.stop();
+      cameraPreviewStream = null;
+    }
+  }
+
+  function build(): HTMLDivElement {
+    // Clean up any previous mic/camera stream before rebuilding
+    cleanupMic();
+    return buildVoiceAudioTabInner(signal, (stream, ctx, frame) => {
+      micStream = stream;
+      micAudioCtx = ctx;
+      micAnimFrame = frame;
+    }, (stream) => {
+      cameraPreviewStream = stream;
+    });
+  }
+
+  function cleanup(): void {
+    cleanupMic();
+  }
+
+  // Also clean up on overlay close
+  signal.addEventListener("abort", cleanupMic);
+
+  return { build, cleanup };
+}
+
+type MicRegistrar = (stream: MediaStream, ctx: AudioContext, frame: number) => void;
+type CameraRegistrar = (stream: MediaStream | null) => void;
+
+function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar, registerCamera: CameraRegistrar): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
   const header = createElement("h1", {}, "Voice & Audio");
   section.appendChild(header);
@@ -34,12 +84,40 @@ export function buildVoiceAudioTab(signal: AbortSignal): HTMLDivElement {
   section.appendChild(outputHeader);
   section.appendChild(outputSelect);
 
+  // Video device selector
+  const videoHeader = createElement("h3", {}, "Video Device");
+  const videoSelect = createElement("select", {
+    class: "form-input",
+    style: "width:100%;margin-bottom:12px",
+  });
+  const defaultVideoOpt = createElement("option", { value: "" }, "Default");
+  videoSelect.appendChild(defaultVideoOpt);
+  section.appendChild(videoHeader);
+  section.appendChild(videoSelect);
+
+  // Camera preview
+  const previewWrap = createElement("div", {
+    style: "margin-bottom:16px;border-radius:8px;overflow:hidden;background:#1e1f22;aspect-ratio:16/9;max-width:320px",
+  });
+  const previewVideo = document.createElement("video");
+  previewVideo.autoplay = true;
+  previewVideo.muted = true;
+  previewVideo.playsInline = true;
+  previewVideo.style.width = "100%";
+  previewVideo.style.height = "100%";
+  previewVideo.style.objectFit = "cover";
+  previewWrap.appendChild(previewVideo);
+  section.appendChild(previewWrap);
+
+  let previewStream: MediaStream | null = null;
+
   // Populate devices asynchronously
   void (async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const savedInput = loadPref<string>("audioInputDevice", "");
       const savedOutput = loadPref<string>("audioOutputDevice", "");
+      const savedVideo = loadPref<string>("videoInputDevice", "");
 
       for (const d of devices) {
         if (d.kind === "audioinput") {
@@ -52,12 +130,18 @@ export function buildVoiceAudioTab(signal: AbortSignal): HTMLDivElement {
             d.label || `Speaker (${d.deviceId.slice(0, 8)})`);
           if (d.deviceId === savedOutput) opt.setAttribute("selected", "");
           outputSelect.appendChild(opt);
+        } else if (d.kind === "videoinput") {
+          const opt = createElement("option", { value: d.deviceId },
+            d.label || `Camera (${d.deviceId.slice(0, 8)})`);
+          if (d.deviceId === savedVideo) opt.setAttribute("selected", "");
+          videoSelect.appendChild(opt);
         }
       }
 
       // Restore saved selections
       if (savedInput) inputSelect.value = savedInput;
       if (savedOutput) outputSelect.value = savedOutput;
+      if (savedVideo) videoSelect.value = savedVideo;
     } catch {
       const errOpt = createElement("option", { value: "", disabled: "" },
         "Could not enumerate devices");
@@ -74,6 +158,52 @@ export function buildVoiceAudioTab(signal: AbortSignal): HTMLDivElement {
     savePref("audioOutputDevice", outputSelect.value);
     void switchOutputDevice(outputSelect.value);
   }, { signal });
+
+  videoSelect.addEventListener("change", () => {
+    savePref("videoInputDevice", videoSelect.value);
+    if (previewStream !== null) {
+      for (const track of previewStream.getTracks()) track.stop();
+      previewStream = null;
+    }
+    previewVideo.srcObject = null;
+    const selectedDevice = videoSelect.value;
+    void (async () => {
+      try {
+        const constraints: MediaStreamConstraints = {
+          video: selectedDevice
+            ? { deviceId: { exact: selectedDevice }, width: { ideal: 320 }, height: { ideal: 180 } }
+            : { width: { ideal: 320 }, height: { ideal: 180 } },
+          audio: false,
+        };
+        previewStream = await navigator.mediaDevices.getUserMedia(constraints);
+        registerCamera(previewStream);
+        previewVideo.srcObject = previewStream;
+      } catch { /* Camera unavailable */ }
+    })();
+  }, { signal });
+
+  // Start initial camera preview
+  void (async () => {
+    try {
+      const savedDevice = loadPref<string>("videoInputDevice", "");
+      const constraints: MediaStreamConstraints = {
+        video: savedDevice ? { deviceId: { exact: savedDevice }, width: { ideal: 320 }, height: { ideal: 180 } } : { width: { ideal: 320 }, height: { ideal: 180 } },
+        audio: false,
+      };
+      previewStream = await navigator.mediaDevices.getUserMedia(constraints);
+      registerCamera(previewStream);
+      previewVideo.srcObject = previewStream;
+    } catch { /* Camera unavailable */ }
+  })();
+
+  signal.addEventListener("abort", () => {
+    if (previewStream !== null) {
+      for (const track of previewStream.getTracks()) track.stop();
+      previewStream = null;
+      registerCamera(null);
+    }
+    previewVideo.srcObject = null;
+  });
 
   // ── Mic level meter + sensitivity slider ──────────────────────────
   const sensitivityHeader = createElement("h3", {}, "Input Sensitivity");
@@ -121,11 +251,6 @@ export function buildVoiceAudioTab(signal: AbortSignal): HTMLDivElement {
   section.appendChild(sensitivityRow);
 
   // Start mic level monitoring for visual feedback
-  let micStream: MediaStream | null = null;
-  let micAudioCtx: AudioContext | null = null;
-  let micAnalyser: AnalyserNode | null = null;
-  let micAnimFrame: number | null = null;
-
   void (async () => {
     try {
       const savedDevice = loadPref<string>("audioInputDevice", "");
@@ -133,19 +258,19 @@ export function buildVoiceAudioTab(signal: AbortSignal): HTMLDivElement {
         audio: savedDevice ? { deviceId: { exact: savedDevice } } : true,
         video: false,
       };
-      micStream = await navigator.mediaDevices.getUserMedia(constraints);
-      micAudioCtx = new AudioContext();
-      micAnalyser = micAudioCtx.createAnalyser();
-      micAnalyser.fftSize = 256;
-      micAnalyser.smoothingTimeConstant = 0.5;
-      const source = micAudioCtx.createMediaStreamSource(micStream);
-      source.connect(micAnalyser);
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const audioCtx = new AudioContext();
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.5;
+      const source = audioCtx.createMediaStreamSource(stream);
+      source.connect(analyser);
 
-      const dataArray = new Uint8Array(micAnalyser.frequencyBinCount);
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
       function updateMeter(): void {
-        if (micAnalyser === null || signal.aborted) return;
-        micAnalyser.getByteFrequencyData(dataArray);
+        if (signal.aborted) return;
+        analyser.getByteFrequencyData(dataArray);
         // Compute RMS normalized to 0-1
         let sum = 0;
         for (let i = 0; i < dataArray.length; i++) {
@@ -159,29 +284,21 @@ export function buildVoiceAudioTab(signal: AbortSignal): HTMLDivElement {
 
         // Color: green if above threshold, yellow/red if below
         const threshold = sensitivityToThreshold(Number(sensitivitySlider.value));
-        const normalizedRms = rms;
-        if (normalizedRms >= threshold) {
+        if (rms >= threshold) {
           meterLevel.style.background = "#43b581"; // green — voice detected
         } else {
           meterLevel.style.background = "#faa61a"; // yellow — below threshold
         }
 
-        micAnimFrame = requestAnimationFrame(updateMeter);
+        const frame = requestAnimationFrame(updateMeter);
+        registerMic(stream, audioCtx, frame);
       }
-      micAnimFrame = requestAnimationFrame(updateMeter);
+      const firstFrame = requestAnimationFrame(updateMeter);
+      registerMic(stream, audioCtx, firstFrame);
     } catch {
       // Mic access denied or unavailable — meter stays empty
     }
   })();
-
-  // Cleanup mic monitoring when settings tab is closed
-  signal.addEventListener("abort", () => {
-    if (micAnimFrame !== null) cancelAnimationFrame(micAnimFrame);
-    if (micStream !== null) {
-      for (const track of micStream.getTracks()) track.stop();
-    }
-    if (micAudioCtx !== null) void micAudioCtx.close();
-  });
 
   // ── Audio processing toggles ──────────────────────────────────────
   const audioToggles: ReadonlyArray<{ key: string; label: string; desc: string; fallback: boolean }> = [

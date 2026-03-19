@@ -13,6 +13,8 @@ import { createCreateChannelModal } from "@components/CreateChannelModal";
 import { createEditChannelModal } from "@components/EditChannelModal";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import { createUserBar } from "@components/UserBar";
+import { createVideoGrid } from "@components/VideoGrid";
+import type { VideoGridComponent } from "@components/VideoGrid";
 import { createVoiceWidget } from "@components/VoiceWidget";
 import { createMemberList } from "@components/MemberList";
 import { createMessageList } from "@components/MessageList";
@@ -24,6 +26,7 @@ import { createServerBanner } from "@components/ServerBanner";
 import type { ServerBannerControl } from "@components/ServerBanner";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
 import { createToastContainer } from "@components/Toast";
+import { createEmojiPicker } from "@components/EmojiPicker";
 import type { ToastContainer } from "@components/Toast";
 import { authStore, clearAuth, updateUser } from "@stores/auth.store";
 import { closeSettings, toggleMemberList, uiStore } from "@stores/ui.store";
@@ -32,7 +35,6 @@ import {
   voiceStore,
   joinVoiceChannel,
   leaveVoiceChannel,
-  setLocalCamera,
   setLocalScreenshare,
 } from "@stores/voice.store";
 import {
@@ -40,6 +42,12 @@ import {
   leaveVoice as voiceSessionLeave,
   setMuted as voiceSessionSetMuted,
   setDeafened as voiceSessionSetDeafened,
+  enableCamera,
+  disableCamera,
+  setOnRemoteVideo,
+  setOnRemoteVideoRemoved,
+  clearOnRemoteVideo,
+  getLocalCameraStream,
   setWsClient,
   setOnError as setVoiceOnError,
   clearOnError as clearVoiceOnError,
@@ -107,6 +115,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   let typingSlot: HTMLDivElement | null = null;
   let inputSlot: HTMLDivElement | null = null;
 
+  // Video grid state
+  let videoGrid: VideoGridComponent | null = null;
+  let videoGridSlot: HTMLDivElement | null = null;
+  let isVideoMode = false;
+
   // Track currently mounted channel to avoid redundant rebuilds
   let currentChannelId: number | null = null;
 
@@ -129,6 +142,77 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   function getCurrentUserId(): number {
     return authStore.getState().user?.id ?? 0;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Chat / Video toggle
+  // ---------------------------------------------------------------------------
+
+  function showVideoGrid(): void {
+    if (isVideoMode) return;
+    isVideoMode = true;
+    if (messagesSlot !== null) messagesSlot.style.display = "none";
+    if (typingSlot !== null) typingSlot.style.display = "none";
+    if (inputSlot !== null) inputSlot.style.display = "none";
+    if (videoGridSlot !== null) videoGridSlot.style.display = "block";
+  }
+
+  function showChat(): void {
+    if (!isVideoMode) return;
+    isVideoMode = false;
+    if (messagesSlot !== null) messagesSlot.style.display = "";
+    if (typingSlot !== null) typingSlot.style.display = "";
+    if (inputSlot !== null) inputSlot.style.display = "";
+    if (videoGridSlot !== null) videoGridSlot.style.display = "none";
+  }
+
+  function checkVideoMode(): void {
+    const voice = voiceStore.getState();
+    const channelId = voice.currentChannelId;
+    if (channelId === null) {
+      if (isVideoMode) showChat();
+      return;
+    }
+    const channelUsers = voice.voiceUsers.get(channelId);
+    if (!channelUsers) {
+      if (isVideoMode) showChat();
+      return;
+    }
+    let anyCameraOn = voice.localCamera; // Check local camera first (may not be in voiceUsers yet)
+    if (!anyCameraOn) {
+      for (const user of channelUsers.values()) {
+        if (user.camera) {
+          anyCameraOn = true;
+          break;
+        }
+      }
+    }
+    if (anyCameraOn && !isVideoMode) {
+      showVideoGrid();
+    } else if (!anyCameraOn && isVideoMode) {
+      showChat();
+    }
+
+    // Manage local self-view tile
+    const currentUserId = getCurrentUserId();
+    if (voice.localCamera && videoGrid !== null) {
+      const localStream = getLocalCameraStream();
+      if (localStream !== null) {
+        const me = channelUsers?.get(currentUserId);
+        videoGrid.addStream(currentUserId, me?.username ? `${me.username} (You)` : "You", localStream);
+      }
+    } else if (!voice.localCamera && videoGrid !== null) {
+      videoGrid.removeStream(currentUserId);
+    }
+
+    // Remove remote video tiles for users who turned off their camera
+    if (videoGrid !== null && channelUsers) {
+      for (const user of channelUsers.values()) {
+        if (!user.camera && user.userId !== currentUserId) {
+          videoGrid.removeStream(user.userId);
+        }
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -238,7 +322,72 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         }
       },
       onReactionClick: (msgId: number, emoji: string) => {
-        if (emoji === "") return;
+        if (emoji === "") {
+          // Open emoji picker for reaction selection
+          const reactBtn = document.querySelector(`[data-testid="msg-react-${msgId}"]`);
+          if (reactBtn === null) return;
+
+          // Close any existing reaction picker
+          const existingWrap = document.querySelector(".reaction-picker-wrap");
+          if (existingWrap !== null) { existingWrap.remove(); return; }
+
+          let pickerDestroy: (() => void) | null = null;
+
+          const wrap = createElement("div", {
+            class: "reaction-picker-wrap",
+          });
+
+          // Backdrop to close on click-outside
+          const backdrop = createElement("div", {
+            style: "position: fixed; inset: 0; z-index: 299;",
+          });
+          backdrop.addEventListener("click", () => {
+            pickerDestroy?.();
+            wrap.remove();
+          });
+
+          const picker = createEmojiPicker({
+            onSelect: (selectedEmoji: string) => {
+              pickerDestroy?.();
+              wrap.remove();
+              if (!limiters.reactions.tryConsume()) {
+                toast?.show("Slow down! Please wait before reacting again.", "error");
+                return;
+              }
+              const msgs = getChannelMessages(channelId);
+              const m = msgs.find((x) => x.id === msgId);
+              const existing = m?.reactions.find((r) => r.emoji === selectedEmoji);
+              const type = existing?.me ? "reaction_remove" : "reaction_add";
+              ws.send({ type, payload: { message_id: msgId, emoji: selectedEmoji } });
+            },
+            onClose: () => { pickerDestroy?.(); wrap.remove(); },
+          });
+          pickerDestroy = picker.destroy;
+
+          // Position the picker to the left of the react button, top-aligned
+          const rect = reactBtn.getBoundingClientRect();
+          const pickerW = 320;
+          let left = rect.left - pickerW - 8;
+          let top = rect.top;
+          if (left < 8) left = rect.right + 8;
+          if (top + 420 > window.innerHeight - 8) top = window.innerHeight - 420 - 8;
+          if (top < 8) top = 8;
+
+          // Override the picker's default absolute positioning
+          picker.element.style.position = "fixed";
+          picker.element.style.left = `${left}px`;
+          picker.element.style.top = `${top}px`;
+          picker.element.style.bottom = "auto";
+          picker.element.style.right = "auto";
+          picker.element.style.zIndex = "300";
+          picker.element.style.margin = "0";
+
+          wrap.appendChild(backdrop);
+          wrap.appendChild(picker.element);
+          document.body.appendChild(wrap);
+
+          return;
+        }
         if (!limiters.reactions.tryConsume()) {
           toast?.show("Slow down! Please wait before reacting again.", "error");
           return;
@@ -580,8 +729,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onCameraToggle: () => {
         if (!limiters.voiceVideo.tryConsume()) return;
         const next = !voiceStore.getState().localCamera;
-        setLocalCamera(next);
-        ws.send({ type: "voice_camera", payload: { enabled: next } });
+        if (next) {
+          void enableCamera();
+        } else {
+          void disableCamera();
+        }
       },
       onScreenshareToggle: () => {
         if (!limiters.voiceVideo.tryConsume()) return;
@@ -626,7 +778,17 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     messagesSlot = createElement("div", { class: "messages-slot", "data-testid": "messages-slot" });
     typingSlot = createElement("div", { class: "typing-slot", "data-testid": "typing-slot" });
     inputSlot = createElement("div", { class: "input-slot", "data-testid": "input-slot" });
-    appendChildren(chatArea, messagesSlot, typingSlot, inputSlot);
+
+    videoGridSlot = createElement("div", {
+      class: "video-grid-slot",
+      "data-testid": "video-grid-slot",
+      style: "display:none;flex:1;min-height:0",
+    }) as HTMLDivElement;
+    videoGrid = createVideoGrid();
+    videoGrid.mount(videoGridSlot);
+    children.push(videoGrid);
+
+    appendChildren(chatArea, messagesSlot, typingSlot, inputSlot, videoGridSlot);
 
     // Member list
     const memberListSlot = createElement("div", {});
@@ -686,6 +848,27 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Wire voice error callback to toast
     setVoiceOnError((msg) => toast?.show(msg, "error"));
 
+    // Wire remote video callbacks to video grid
+    setOnRemoteVideo((userId, stream) => {
+      if (videoGrid === null) return;
+      const voice = voiceStore.getState();
+      const channelId = voice.currentChannelId;
+      if (channelId === null) return;
+      const channelUsers = voice.voiceUsers.get(channelId);
+      const user = channelUsers?.get(userId);
+      const username = user?.username ?? `User ${userId}`;
+      videoGrid.addStream(userId, username, stream);
+      checkVideoMode();
+    });
+    setOnRemoteVideoRemoved((userId) => {
+      videoGrid?.removeStream(userId);
+      checkVideoMode();
+    });
+    unsubscribers.push(() => clearOnRemoteVideo());
+
+    // Subscribe to voice store for camera state changes
+    unsubscribers.push(voiceStore.subscribe(() => checkVideoMode()));
+
     // Auto-update notifier — checks server for newer client version
     if (apiConfig.host) {
       const serverUrl = `https://${apiConfig.host}`;
@@ -717,7 +900,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // module-level state persisting across logout/reconnect cycles.
     voiceSessionLeave(false);
     clearVoiceOnError();
+    clearOnRemoteVideo();
     destroyChannelComponents();
+
+    if (videoGrid !== null) {
+      videoGrid.destroy?.();
+      videoGrid = null;
+    }
+    videoGridSlot = null;
+    isVideoMode = false;
 
     for (const child of children) {
       child.destroy?.();

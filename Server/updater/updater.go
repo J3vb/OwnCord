@@ -20,10 +20,11 @@ import (
 )
 
 const (
-	defaultBaseURL = "https://api.github.com"
-	cacheTTL       = 1 * time.Hour
-	binaryAsset    = "chatserver.exe"
-	checksumAsset  = "checksums.sha256"
+	defaultBaseURL  = "https://api.github.com"
+	cacheTTL        = 1 * time.Hour
+	errorCacheTTL   = 5 * time.Minute
+	binaryAsset     = "chatserver.exe"
+	checksumAsset   = "checksums.sha256"
 )
 
 // UpdateInfo holds the result of a version check.
@@ -72,10 +73,12 @@ type Updater struct {
 	repoName       string
 	baseURL        string // override for testing; empty uses defaultBaseURL
 
-	cache       *UpdateInfo
-	cacheExpiry time.Time
-	mu          sync.Mutex
-	httpClient  *http.Client
+	cache          *UpdateInfo
+	cacheExpiry    time.Time
+	cachedErr      error
+	errCacheExpiry time.Time
+	mu             sync.Mutex
+	httpClient     *http.Client
 }
 
 // NewUpdater creates an Updater for the given repository.
@@ -112,16 +115,44 @@ func (u *Updater) apiBaseURL() string {
 }
 
 // CheckForUpdate queries GitHub for the latest release and compares it
-// against the current version. Results are cached for cacheTTL.
+// against the current version. Results are cached for cacheTTL; errors
+// are cached for errorCacheTTL to avoid spamming the GitHub API.
 func (u *Updater) CheckForUpdate(ctx context.Context) (UpdateInfo, error) {
+	now := time.Now()
 	u.mu.Lock()
-	if u.cache != nil && time.Now().Before(u.cacheExpiry) {
+	if u.cache != nil && now.Before(u.cacheExpiry) {
 		cached := *u.cache
 		u.mu.Unlock()
 		return cached, nil
 	}
+	if u.cachedErr != nil && now.Before(u.errCacheExpiry) {
+		err := u.cachedErr
+		u.mu.Unlock()
+		return UpdateInfo{}, err
+	}
 	u.mu.Unlock()
 
+	info, err := u.fetchLatestRelease(ctx)
+	if err != nil {
+		u.mu.Lock()
+		u.cachedErr = err
+		u.errCacheExpiry = now.Add(errorCacheTTL)
+		u.mu.Unlock()
+		return UpdateInfo{}, err
+	}
+
+	u.mu.Lock()
+	u.cache = &info
+	u.cacheExpiry = now.Add(cacheTTL)
+	u.cachedErr = nil
+	u.mu.Unlock()
+
+	return info, nil
+}
+
+// fetchLatestRelease queries the GitHub API for the latest release and
+// builds the UpdateInfo struct.
+func (u *Updater) fetchLatestRelease(ctx context.Context) (UpdateInfo, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", u.apiBaseURL(), u.repoOwner, u.repoName)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -169,7 +200,7 @@ func (u *Updater) CheckForUpdate(ctx context.Context) (UpdateInfo, error) {
 		}
 	}
 
-	info := UpdateInfo{
+	return UpdateInfo{
 		Current:         currentV,
 		Latest:          latestV,
 		UpdateAvailable: updateAvailable,
@@ -178,14 +209,7 @@ func (u *Updater) CheckForUpdate(ctx context.Context) (UpdateInfo, error) {
 		ChecksumURL:     checksumURL,
 		ReleaseNotes:    release.Body,
 		Assets:          assets,
-	}
-
-	u.mu.Lock()
-	u.cache = &info
-	u.cacheExpiry = time.Now().Add(cacheTTL)
-	u.mu.Unlock()
-
-	return info, nil
+	}, nil
 }
 
 // ValidateDownloadURL ensures the URL points to an expected GitHub release

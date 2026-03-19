@@ -83,6 +83,15 @@ export function createLogsTab(
     const header = createElement("h1", {}, "Logs");
     section.appendChild(header);
 
+    // Version display
+    const versionEl = createElement("div", {
+      style: "font-size: 12px; color: var(--text-muted); margin: -8px 0 12px 0;",
+    }, "Client version: loading...");
+    section.appendChild(versionEl);
+    void import("@tauri-apps/api/app").then(({ getVersion }) =>
+      getVersion().then((v) => { versionEl.textContent = `Client version: v${v}`; }),
+    ).catch(() => { versionEl.textContent = "Client version: unknown"; });
+
     // Controls row
     const controls = createElement("div", {
       style: "display: flex; gap: 8px; margin-bottom: 8px; align-items: center;",

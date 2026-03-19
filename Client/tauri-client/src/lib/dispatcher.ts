@@ -43,6 +43,7 @@ import {
   handleServerAnswer,
   handleServerIce,
 } from "@lib/voiceSession";
+import { notifyIncomingMessage } from "./notifications";
 import { createLogger } from "./logger";
 
 const log = createLogger("dispatcher");
@@ -120,6 +121,8 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
       if (payload.channel_id !== activeId) {
         incrementUnread(payload.channel_id);
       }
+      // Fire desktop notification, taskbar flash, and sound
+      notifyIncomingMessage(payload);
     }),
   );
 

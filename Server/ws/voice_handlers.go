@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -322,8 +323,12 @@ func (h *Hub) handleVoiceLeave(c *Client) {
 	// Done AFTER oldPC.Close() so the RTP goroutine has exited.
 	if oldChID > 0 {
 		if room := h.GetVoiceRoom(oldChID); room != nil {
-			vt := room.RemoveTrack(c.userID)
-			if vt != nil {
+			needsRenego := make(map[int64]*Client)
+			for _, kind := range []string{"audio", "video"} {
+				vt := room.RemoveTrack(c.userID, kind)
+				if vt == nil {
+					continue
+				}
 				senders := vt.CopySenders()
 				for subID, sender := range senders {
 					sub := h.GetClient(subID)
@@ -336,10 +341,13 @@ func (h *Hub) handleVoiceLeave(c *Client) {
 					}
 					if rmErr := subPC.RemoveTrack(sender); rmErr != nil {
 						slog.Error("handleVoiceLeave RemoveTrack",
-							"err", rmErr, "user_id", subID)
+							"err", rmErr, "user_id", subID, "kind", kind)
 					}
-					h.renegotiateParticipant(sub)
+					needsRenego[subID] = sub
 				}
+			}
+			for _, sub := range needsRenego {
+				h.renegotiateParticipant(sub)
 			}
 		}
 	}
@@ -436,6 +444,28 @@ func (h *Hub) handleVoiceCamera(c *Client, payload json.RawMessage) {
 	if err := json.Unmarshal(payload, &p); err != nil {
 		c.sendMsg(buildErrorMsg("BAD_REQUEST", "invalid voice_camera payload"))
 		return
+	}
+
+	// Enforce MaxVideo limit when enabling camera.
+	if p.Enabled {
+		room := h.GetVoiceRoom(voiceChID)
+		if room != nil {
+			cfg := room.Config()
+			if cfg.MaxVideo > 0 {
+				allTracks := room.GetTracks()
+				videoCount := 0
+				for _, vt := range allTracks {
+					if vt.Local != nil && strings.HasPrefix(vt.Local.ID(), "video-") {
+						videoCount++
+					}
+				}
+				if videoCount >= cfg.MaxVideo {
+					c.sendMsg(buildErrorMsg("VIDEO_LIMIT",
+						fmt.Sprintf("maximum %d video streams reached", cfg.MaxVideo)))
+					return
+				}
+			}
+		}
 	}
 
 	if err := h.db.UpdateVoiceCamera(c.userID, p.Enabled); err != nil {
@@ -676,25 +706,33 @@ func (h *Hub) setupOnTrack(c *Client, channelID int64) {
 	}
 
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		if track.Kind() != webrtc.RTPCodecTypeAudio {
+		// Determine kind from the remote track.
+		var kind string
+		switch track.Kind() {
+		case webrtc.RTPCodecTypeAudio:
+			kind = "audio"
+		case webrtc.RTPCodecTypeVideo:
+			kind = "video"
+		default:
 			return
 		}
 
 		slog.Info("SFU OnTrack",
 			"user_id", c.userID,
 			"channel_id", channelID,
+			"kind", kind,
 			"codec", track.Codec().MimeType,
 		)
 
 		// Create local track for fan-out using the remote track's codec.
 		local, err := webrtc.NewTrackLocalStaticRTP(
 			track.Codec().RTPCodecCapability,
-			fmt.Sprintf("audio-%d", c.userID),
-			fmt.Sprintf("user-%d", c.userID),
+			fmt.Sprintf("%s-%d", kind, c.userID),
+			fmt.Sprintf("user-%d-%s", c.userID, kind),
 		)
 		if err != nil {
 			slog.Error("setupOnTrack NewTrackLocalStaticRTP",
-				"err", err, "user_id", c.userID)
+				"err", err, "user_id", c.userID, "kind", kind)
 			return
 		}
 
@@ -704,8 +742,8 @@ func (h *Hub) setupOnTrack(c *Client, channelID int64) {
 		}
 
 		// Store track on room.
-		room.SetTrack(c.userID, track, local)
-		vt := room.GetTrack(c.userID)
+		room.SetTrack(c.userID, kind, track, local)
+		vt := room.GetTrack(c.userID, kind)
 
 		// Collect other participant IDs (lock ordering: VoiceRoom.mu released before voiceMu).
 		participantIDs := room.ParticipantIDs()
@@ -742,6 +780,7 @@ func (h *Hub) setupOnTrack(c *Client, channelID int64) {
 		slog.Info("SFU track fan-out",
 			"from_user", c.userID,
 			"channel_id", channelID,
+			"kind", kind,
 			"participants", len(participantIDs),
 			"tracks_added", addedCount)
 
@@ -760,7 +799,7 @@ func (h *Hub) setupOnTrack(c *Client, channelID int64) {
 			}
 			for _, tr := range otherPC.GetTransceivers() {
 				if tr.Sender() != nil && tr.Sender().Track() != nil &&
-					tr.Sender().Track().StreamID() == fmt.Sprintf("user-%d", c.userID) {
+					tr.Sender().Track().StreamID() == fmt.Sprintf("user-%d-%s", c.userID, kind) {
 					slog.Info("subscriber transceiver state",
 						"subscriber", pid,
 						"track_from", c.userID,
@@ -783,7 +822,8 @@ func (h *Hub) setupOnTrack(c *Client, channelID int64) {
 			noPacketTimer := time.AfterFunc(5*time.Second, func() {
 				slog.Warn("RTP: no packets received after 5s",
 					"user_id", c.userID,
-					"channel_id", channelID)
+					"channel_id", channelID,
+					"kind", kind)
 			})
 			defer noPacketTimer.Stop()
 
@@ -793,6 +833,7 @@ func (h *Hub) setupOnTrack(c *Client, channelID int64) {
 				case <-done:
 					slog.Info("RTP goroutine exiting via done signal",
 						"user_id", c.userID, "channel_id", channelID,
+						"kind", kind,
 						"packets_forwarded", pktCount)
 					return
 				default:
@@ -803,6 +844,7 @@ func (h *Hub) setupOnTrack(c *Client, channelID int64) {
 					slog.Info("RTP read ended",
 						"user_id", c.userID,
 						"channel_id", channelID,
+						"kind", kind,
 						"packets_forwarded", pktCount,
 						"err", readErr.Error())
 					return
@@ -813,6 +855,7 @@ func (h *Hub) setupOnTrack(c *Client, channelID int64) {
 					slog.Info("RTP write ended",
 						"user_id", c.userID,
 						"channel_id", channelID,
+						"kind", kind,
 						"packets_forwarded", pktCount,
 						"err", writeErr.Error())
 					return
@@ -823,12 +866,19 @@ func (h *Hub) setupOnTrack(c *Client, channelID int64) {
 					slog.Info("RTP first packet received",
 						"user_id", c.userID,
 						"channel_id", channelID,
+						"kind", kind,
 						"bytes", n)
 				} else if pktCount%1000 == 0 {
 					slog.Info("RTP forwarding",
 						"user_id", c.userID,
 						"channel_id", channelID,
+						"kind", kind,
 						"packets", pktCount)
+				}
+
+				// Speaker detection only applies to audio tracks.
+				if kind != "audio" {
+					continue
 				}
 
 				// Extract audio level directly from raw RTP bytes (avoids full Unmarshal).

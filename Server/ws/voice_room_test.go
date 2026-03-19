@@ -280,7 +280,7 @@ func TestVoiceRoom_AddParticipant_Duplicate(t *testing.T) {
 func TestVoiceRoom_AddTrack(t *testing.T) {
 	room := ws.NewVoiceRoom(defaultRoomConfig())
 	_ = room.AddParticipant(100)
-	room.SetTrack(100, nil, nil)
+	room.SetTrack(100, "audio", nil, nil)
 	tracks := room.GetTracks()
 	if len(tracks) != 1 {
 		t.Fatalf("GetTracks() len = %d, want 1", len(tracks))
@@ -290,8 +290,8 @@ func TestVoiceRoom_AddTrack(t *testing.T) {
 func TestVoiceRoom_RemoveTrack(t *testing.T) {
 	room := ws.NewVoiceRoom(defaultRoomConfig())
 	_ = room.AddParticipant(100)
-	room.SetTrack(100, nil, nil)
-	vt := room.RemoveTrack(100)
+	room.SetTrack(100, "audio", nil, nil)
+	vt := room.RemoveTrack(100, "audio")
 	if vt == nil {
 		t.Fatal("RemoveTrack returned nil")
 	}
@@ -305,8 +305,8 @@ func TestVoiceRoom_GetTrackUserIDs(t *testing.T) {
 	room := ws.NewVoiceRoom(defaultRoomConfig())
 	_ = room.AddParticipant(100)
 	_ = room.AddParticipant(200)
-	room.SetTrack(100, nil, nil)
-	room.SetTrack(200, nil, nil)
+	room.SetTrack(100, "audio", nil, nil)
+	room.SetTrack(200, "audio", nil, nil)
 	ids := room.TrackUserIDs()
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	if len(ids) != 2 || ids[0] != 100 || ids[1] != 200 {
@@ -317,7 +317,7 @@ func TestVoiceRoom_GetTrackUserIDs(t *testing.T) {
 func TestVoiceRoom_Close_ClearsTracks(t *testing.T) {
 	room := ws.NewVoiceRoom(defaultRoomConfig())
 	_ = room.AddParticipant(100)
-	room.SetTrack(100, nil, nil)
+	room.SetTrack(100, "audio", nil, nil)
 	room.Close()
 	if len(room.GetTracks()) != 0 {
 		t.Fatal("Close() should clear tracks")
@@ -327,8 +327,8 @@ func TestVoiceRoom_Close_ClearsTracks(t *testing.T) {
 func TestVoiceTrack_AddRemoveSender(t *testing.T) {
 	room := ws.NewVoiceRoom(defaultRoomConfig())
 	_ = room.AddParticipant(100)
-	room.SetTrack(100, nil, nil)
-	vt := room.GetTrack(100)
+	room.SetTrack(100, "audio", nil, nil)
+	vt := room.GetTrack(100, "audio")
 	if vt == nil {
 		t.Fatal("GetTrack returned nil")
 	}

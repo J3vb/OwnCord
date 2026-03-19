@@ -234,6 +234,28 @@ func isTrustedProxy(remoteIP string, cidrList []string) (bool, error) {
 	return false, nil
 }
 
+// AdminIPRestrict returns middleware that blocks requests from IPs not in the
+// allowed CIDR list. Returns 403 Forbidden for disallowed IPs. If the CIDR
+// list is empty, all requests are allowed (no restriction).
+func AdminIPRestrict(allowedCIDRs []string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if len(allowedCIDRs) == 0 {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			ip := clientIP(r)
+			allowed, _ := isTrustedProxy(ip, allowedCIDRs)
+			if !allowed {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // SecurityHeaders sets a standard suite of defensive HTTP response headers on
 // every response. It must be added to the router-level middleware stack so that
 // all routes, including error responses, carry these headers.

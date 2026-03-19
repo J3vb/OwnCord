@@ -18,6 +18,10 @@ export interface WebRtcService {
   handleServerOffer(sdp: string): Promise<string>;
   createOffer(iceRestart?: boolean): Promise<string>;
   handleIceCandidate(candidate: RTCIceCandidateInit): Promise<void>;
+  /** Add a video track to the PeerConnection. Returns the sender for removal. */
+  addVideoTrack(stream: MediaStream): RTCRtpSender | null;
+  /** Remove the video track sender from the PeerConnection. */
+  removeVideoTrack(sender: RTCRtpSender): void;
   setLocalStream(stream: MediaStream): void;
   /** Swap the media track on existing senders without SDP renegotiation. */
   replaceTrack(stream: MediaStream): Promise<void>;
@@ -309,6 +313,24 @@ export function createWebRtcService(): WebRtcService {
 
       // Apply current mute/silence state to the new track
       applyTrackEnabled();
+    },
+
+    addVideoTrack(stream: MediaStream): RTCRtpSender | null {
+      const conn = assertConnection();
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack === undefined) {
+        log.warn("addVideoTrack called with no video tracks");
+        return null;
+      }
+      const sender = conn.addTrack(videoTrack, stream);
+      log.info("Video track added to PeerConnection", { trackId: videoTrack.id });
+      return sender;
+    },
+
+    removeVideoTrack(sender: RTCRtpSender): void {
+      const conn = assertConnection();
+      conn.removeTrack(sender);
+      log.info("Video track removed from PeerConnection");
     },
 
     getRemoteStreams(): readonly MediaStream[] {

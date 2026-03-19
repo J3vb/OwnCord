@@ -46,13 +46,24 @@ const URL_REGEX = /https?:\/\/[^\s<>"']+/g;
 
 // -- Formatting helpers -------------------------------------------------------
 
+/** Parse a timestamp string, appending 'Z' if no timezone info is present
+ *  so that UTC timestamps from SQLite are correctly interpreted. */
+function parseTimestamp(raw: string): Date {
+  // SQLite datetime('now') produces "2026-03-19 08:29:41" (UTC, no suffix).
+  // If there's no Z, +, or T with offset, treat as UTC by appending Z.
+  if (!raw.endsWith("Z") && !raw.includes("+") && !/T\d{2}:\d{2}:\d{2}[+-]/.test(raw)) {
+    return new Date(raw.replace(" ", "T") + "Z");
+  }
+  return new Date(raw);
+}
+
 export function formatTime(iso: string): string {
-  const d = new Date(iso);
+  const d = parseTimestamp(iso);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 export function formatFullDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", {
+  return parseTimestamp(iso).toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",
     day: "numeric",
@@ -60,8 +71,8 @@ export function formatFullDate(iso: string): string {
 }
 
 export function isSameDay(a: string, b: string): boolean {
-  const da = new Date(a);
-  const db = new Date(b);
+  const da = parseTimestamp(a);
+  const db = parseTimestamp(b);
   return (
     da.getFullYear() === db.getFullYear() &&
     da.getMonth() === db.getMonth() &&
@@ -72,7 +83,7 @@ export function isSameDay(a: string, b: string): boolean {
 export function shouldGroup(prev: Message, curr: Message): boolean {
   if (prev.user.id !== curr.user.id) return false;
   if (prev.deleted || curr.deleted) return false;
-  const dt = new Date(curr.timestamp).getTime() - new Date(prev.timestamp).getTime();
+  const dt = parseTimestamp(curr.timestamp).getTime() - parseTimestamp(prev.timestamp).getTime();
   return dt < GROUP_THRESHOLD_MS;
 }
 
@@ -309,6 +320,54 @@ function extractUrls(content: string): string[] {
   return matches ?? [];
 }
 
+/** Check if a URL points directly to an image or GIF file. */
+function isDirectImageUrl(url: string): boolean {
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    return /\.(gif|png|jpg|jpeg|webp)$/.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
+/** Render a direct image/GIF URL as an inline image with lightbox. */
+function renderInlineImage(url: string): HTMLDivElement {
+  const wrap = createElement("div", {
+    class: "msg-image",
+    style: "max-width: 400px; contain: layout;",
+  });
+  const img = createElement("img", {
+    src: url,
+    alt: "Image",
+    loading: "lazy",
+    style: "max-width: 100%; max-height: 350px; display: block; border-radius: 4px; cursor: pointer;",
+  }) as unknown as HTMLImageElement;
+
+  img.addEventListener("click", () => {
+    const lightbox = createElement("div", { class: "image-lightbox" });
+    const lbWrap = createElement("div", { class: "image-lightbox-wrap" });
+    const lbImg = createElement("img", { src: url, alt: "Image" }) as unknown as HTMLImageElement;
+    const closeBtn = createElement("button", { class: "image-lightbox-close" }, "\u00D7");
+
+    lbWrap.appendChild(lbImg);
+    lightbox.appendChild(lbWrap);
+    lightbox.appendChild(closeBtn);
+    document.body.appendChild(lightbox);
+
+    const closeLightbox = (): void => { lightbox.remove(); };
+    closeBtn.addEventListener("click", closeLightbox);
+    lightbox.addEventListener("click", (e) => {
+      if (e.target === lightbox) closeLightbox();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeLightbox();
+    }, { once: true });
+  });
+
+  wrap.appendChild(img);
+  return wrap;
+}
+
 /** Render URL embeds (YouTube players, generic link previews). */
 function renderUrlEmbeds(content: string): DocumentFragment {
   const fragment = document.createDocumentFragment();
@@ -323,6 +382,12 @@ function renderUrlEmbeds(content: string): DocumentFragment {
     const ytId = extractYouTubeId(url);
     if (ytId !== null) {
       fragment.appendChild(renderYouTubeEmbed(ytId, url));
+      continue;
+    }
+
+    // Direct image/GIF URL — render inline
+    if (isDirectImageUrl(url) && isSafeUrl(url)) {
+      fragment.appendChild(renderInlineImage(url));
       continue;
     }
 

@@ -12,7 +12,7 @@ import type { ThemeName } from "./settings/helpers";
 import { buildAccountTab } from "./settings/AccountTab";
 import { buildAppearanceTab } from "./settings/AppearanceTab";
 import { buildNotificationsTab } from "./settings/NotificationsTab";
-import { buildVoiceAudioTab } from "./settings/VoiceAudioTab";
+import { createVoiceAudioTab } from "./settings/VoiceAudioTab";
 import { buildKeybindsTab } from "./settings/KeybindsTab";
 import { createLogsTab } from "./settings/LogsTab";
 
@@ -72,8 +72,9 @@ export function createSettingsOverlay(
   const tabButtons = new Map<TabName, HTMLButtonElement>();
   let unsubUi: (() => void) | null = null;
 
-  // Logs tab has stateful cleanup needs — create once via factory
+  // Stateful tabs — create via factory for proper cleanup on tab switch
   const logsTab = createLogsTab(() => activeTab, ac.signal);
+  const voiceTab = createVoiceAudioTab(ac.signal);
 
   // ---- Tab content builders -------------------------------------------------
 
@@ -81,8 +82,8 @@ export function createSettingsOverlay(
     Account: () => buildAccountTab(options, ac.signal),
     Appearance: () => buildAppearanceTab(ac.signal),
     Notifications: () => buildNotificationsTab(ac.signal),
-    "Voice & Audio": () => buildVoiceAudioTab(ac.signal),
-    Keybinds: () => buildKeybindsTab(),
+    "Voice & Audio": () => voiceTab.build(),
+    Keybinds: () => buildKeybindsTab(ac.signal),
     Logs: () => logsTab.build(),
   };
 
@@ -97,6 +98,8 @@ export function createSettingsOverlay(
 
   function setActiveTab(tab: TabName): void {
     if (tab === activeTab) return;
+    // Clean up stateful tabs when switching away
+    if (activeTab === "Voice & Audio") voiceTab.cleanup();
     activeTab = tab;
     for (const [name, btn] of tabButtons) {
       btn.classList.toggle("active", name === tab);
@@ -110,6 +113,8 @@ export function createSettingsOverlay(
 
   function hide(): void {
     root?.classList.remove("open");
+    // Stop camera preview and mic meter when settings overlay closes
+    voiceTab.cleanup();
   }
 
   // ---- MountableComponent ---------------------------------------------------
@@ -173,6 +178,7 @@ export function createSettingsOverlay(
       unsubUi = null;
     }
     logsTab.cleanup();
+    voiceTab.cleanup();
     tabButtons.clear();
     if (root !== null) {
       root.remove();

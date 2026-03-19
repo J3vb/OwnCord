@@ -24,6 +24,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   let channelNameEl: HTMLSpanElement | null = null;
   let muteBtn: HTMLButtonElement | null = null;
   let deafenBtn: HTMLButtonElement | null = null;
+  let cameraBtn: HTMLButtonElement | null = null;
 
   const unsubs: Array<() => void> = [];
 
@@ -47,6 +48,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     // Toggle button active states
     muteBtn?.classList.toggle("active-ctrl", voice.localMuted);
     deafenBtn?.classList.toggle("active-ctrl", voice.localDeafened);
+    cameraBtn?.classList.toggle("active-ctrl", voice.localCamera);
   }
 
   function createControlButton(
@@ -74,7 +76,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     const controls = createElement("div", { class: "vw-controls" });
     muteBtn = createControlButton("Mute", "\uD83C\uDFA4", options.onMuteToggle);
     deafenBtn = createControlButton("Deafen", "\uD83C\uDFA7", options.onDeafenToggle);
-    const cameraBtn = createControlButton("Camera", "\uD83D\uDCF7", options.onCameraToggle);
+    cameraBtn = createControlButton("Camera", "\uD83D\uDCF7", options.onCameraToggle);
     const shareBtn = createControlButton("Screenshare", "\uD83D\uDDA5", options.onScreenshareToggle);
     const disconnectBtn = createControlButton(
       "Disconnect", "\u260E", options.onDisconnect, "disconnect",
@@ -102,6 +104,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     channelNameEl = null;
     muteBtn = null;
     deafenBtn = null;
+    cameraBtn = null;
   }
 
   return { mount, destroy };
