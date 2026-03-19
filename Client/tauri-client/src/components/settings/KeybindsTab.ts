@@ -35,11 +35,17 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     pttValue.style.borderColor = "var(--accent)";
     pttValue.style.color = "var(--accent)";
 
-    // Use Rust-side key detection (supports mouse buttons, works globally)
+    // Use Rust-side key detection (supports mouse buttons, works globally).
+    // Returns 0 on timeout (10s) if the user didn't press anything.
     void captureKeyPress().then((vk) => {
       capturing = false;
       pttValue.style.borderColor = "";
       pttValue.style.color = "";
+      if (vk === 0) {
+        // Timed out — restore previous value
+        setText(pttValue, savedVk !== 0 ? vkName(savedVk) : "Not set");
+        return;
+      }
       setText(pttValue, vkName(vk));
       pttClear.style.display = "";
       void updatePttKey(vk);

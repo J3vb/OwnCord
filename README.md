@@ -16,17 +16,22 @@ server and keep everything under your control.
 - Pinned messages per channel
 - Rich link previews with Open Graph metadata
 - YouTube embed support with cached titles
+- GIF picker powered by Tenor with inline rendering
+- Inline image previews with lightbox viewer
 
 ### Voice & Video
 
 - Voice channels with WebRTC (Pion SFU)
+- Webcam video chat with responsive grid layout
 - Mute, deafen, camera, and screenshare controls
+- Push-to-talk with global hotkey (non-consuming, works while unfocused)
 - Per-user volume control (right-click user in voice channel)
 - NAT traversal via Google STUN + configurable external IP
 - RNNoise ML noise suppression (AudioWorklet + fallback)
 - Voice activity detection with configurable sensitivity
 - Silence suppression to save bandwidth
 - Configurable audio quality (low/medium/high)
+- Server-enforced max video streams per room
 
 ### Channels & Organization
 
@@ -51,7 +56,7 @@ server and keep everything under your control.
 
 ### Administration
 
-- Web-based admin panel at `/admin` (Discord-style dark theme)
+- Web-based admin panel at `/admin` (IP-restricted to private networks by default)
 - Dashboard with server stats and recent activity
 - User management (ban, kick, role assignment) with modals
 - Channel management (create, edit, delete)
@@ -74,9 +79,11 @@ server and keep everything under your control.
 
 - Native Windows app built with Tauri v2
 - System tray integration
+- Desktop notifications with taskbar flash and sound
 - In-app auto-update with progress notification
 - Credential storage via Windows Credential Manager
 - Custom emoji picker and soundboard
+- Compact mode for information-dense layouts
 
 ## Quick Start
 
@@ -136,7 +143,7 @@ OwnCord/
 │       ├── src/             #   TypeScript frontend
 │       │   ├── lib/         #     Core services (API, WS, WebRTC, updater)
 │       │   ├── stores/      #     Reactive state (auth, channels, messages, voice)
-│       │   ├── components/  #     UI components (34 modules)
+│       │   ├── components/  #     UI components (36 modules)
 │       │   ├── pages/       #     Page layouts
 │       │   └── styles/      #     CSS
 │       └── tests/           #   Unit, integration, and E2E tests
@@ -196,6 +203,7 @@ The server generates a `config.yaml` on first run. Key settings:
 | `voice.quality` | `medium` | `low`, `medium`, `high` |
 | `voice.external_ip` | — | Public IP for NAT traversal |
 | `voice.turn_enabled` | `true` | Enable TURN relay (requires coturn) |
+| `server.admin_allowed_cidrs` | private nets | CIDRs allowed to access `/admin` |
 | `github.token` | — | Token for update checks |
 
 ## Auto-Updates

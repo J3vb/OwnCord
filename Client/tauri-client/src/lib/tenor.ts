@@ -1,6 +1,8 @@
 // Tenor API v2 client — provides GIF search and trending.
 // Uses the anonymous test key for development.
 
+// Google's public anonymous Tenor API key (not a secret — safe to commit).
+// See: https://developers.google.com/tenor/guides/quickstart
 const TENOR_API_KEY = "AIzaSyAyimkuYQYF_FXVALexPuGQctUWRURdCYQ";
 const TENOR_BASE = "https://tenor.googleapis.com/v2";
 const DEFAULT_LIMIT = 20;
