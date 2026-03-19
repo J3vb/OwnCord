@@ -33,7 +33,7 @@ jobs:
 
       - name: Upload Go coverage
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: go-coverage
           path: Server/coverage.out
@@ -71,7 +71,7 @@ jobs:
 
       - name: Upload client coverage
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: client-coverage
           path: Client/tauri-client/coverage/
