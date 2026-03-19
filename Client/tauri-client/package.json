@@ -24,7 +24,7 @@
     "@vitest/coverage-v8": "^3",
     "jsdom": "^29.0.0",
     "typescript": "^5.7",
-    "vite": "^6",
+    "vite": "^8",
     "vitest": "^3"
   },
   "dependencies": {
