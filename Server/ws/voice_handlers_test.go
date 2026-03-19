@@ -1527,6 +1527,63 @@ func TestVoiceRoom_CompositeTrackKeys(t *testing.T) {
 	}
 }
 
+// TestVoiceRoom_VideoTrackCoexistence verifies multi-user video track fan-out:
+// composite keys allow audio and video to coexist per user, GetTracks returns
+// the correct total, TrackUserIDs deduplicates, and removing one kind leaves
+// the other intact.
+func TestVoiceRoom_VideoTrackCoexistence(t *testing.T) {
+	room := ws.NewVoiceRoom(ws.VoiceRoomConfig{
+		ChannelID: 1, MaxUsers: 10, Quality: "medium",
+		MixingThreshold: 10, TopSpeakers: 3, MaxVideo: 25,
+	})
+
+	// User 42 has both audio and video.
+	room.SetTrack(42, "audio", nil, nil)
+	room.SetTrack(42, "video", nil, nil)
+
+	// User 99 has audio only.
+	room.SetTrack(99, "audio", nil, nil)
+
+	// GetTracks returns all 3 track entries.
+	tracks := room.GetTracks()
+	if len(tracks) != 3 {
+		t.Fatalf("expected 3 tracks, got %d", len(tracks))
+	}
+
+	// GetUserTracks for user 42 returns 2 (audio + video).
+	u42 := room.GetUserTracks(42)
+	if len(u42) != 2 {
+		t.Fatalf("expected 2 tracks for user 42, got %d", len(u42))
+	}
+
+	// TrackUserIDs returns 2 unique users (not 3 entries).
+	ids := room.TrackUserIDs()
+	if len(ids) != 2 {
+		t.Fatalf("expected 2 unique users, got %d", len(ids))
+	}
+
+	// Remove video for user 42 — audio must survive.
+	room.RemoveTrack(42, "video")
+
+	if room.GetTrack(42, "audio") == nil {
+		t.Fatal("audio track should still exist after removing video")
+	}
+	if room.GetTrack(42, "video") != nil {
+		t.Fatal("video track should be removed")
+	}
+
+	// GetTracks now returns 2 (user 42 audio + user 99 audio).
+	tracks = room.GetTracks()
+	if len(tracks) != 2 {
+		t.Fatalf("expected 2 tracks after video removal, got %d", len(tracks))
+	}
+
+	// User 99 is completely unaffected.
+	if room.GetTrack(99, "audio") == nil {
+		t.Fatal("user 99 audio track should be unaffected")
+	}
+}
+
 // ─── ICE monitor / setupICEMonitor ────────────────────────────────────────────
 
 // TestVoice_SetupICEMonitor_NilPC_NoPanic verifies that setupICEMonitor does
