@@ -130,6 +130,7 @@ func (h *Hub) RemoveVoiceRoom(channelID int64) {
 	h.voiceRoomsMu.Unlock()
 
 	if ok {
+		slog.Info("voice room destroyed", "channel_id", channelID)
 		room.Close()
 	}
 }

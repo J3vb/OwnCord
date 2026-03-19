@@ -88,6 +88,12 @@ func NewVoiceRoom(cfg VoiceRoomConfig) *VoiceRoom {
 	if topN <= 0 {
 		topN = 3
 	}
+	slog.Info("voice room created",
+		"channel_id", cfg.ChannelID,
+		"max_users", cfg.MaxUsers,
+		"quality", cfg.Quality,
+		"mixing_threshold", cfg.MixingThreshold,
+		"max_video", cfg.MaxVideo)
 	return &VoiceRoom{
 		config:       cfg,
 		participants: make(map[int64]*VoiceParticipant),
@@ -106,6 +112,8 @@ func (r *VoiceRoom) AddParticipant(userID int64) error {
 
 	// Duplicate check — already present, nothing to do.
 	if _, exists := r.participants[userID]; exists {
+		slog.Debug("voice room participant already present",
+			"channel_id", r.config.ChannelID, "user_id", userID)
 		return nil
 	}
 
@@ -117,6 +125,11 @@ func (r *VoiceRoom) AddParticipant(userID int64) error {
 		UserID:   userID,
 		JoinedAt: time.Now(),
 	}
+
+	slog.Info("voice room participant added",
+		"channel_id", r.config.ChannelID,
+		"user_id", userID,
+		"participants", len(r.participants))
 
 	r.updateMode()
 	return nil
@@ -134,6 +147,10 @@ func (r *VoiceRoom) RemoveParticipant(userID int64) {
 
 	delete(r.participants, userID)
 	r.detector.RemoveSpeaker(userID)
+	slog.Info("voice room participant removed",
+		"channel_id", r.config.ChannelID,
+		"user_id", userID,
+		"participants", len(r.participants))
 	r.updateMode()
 }
 

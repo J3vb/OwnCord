@@ -29,16 +29,22 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("pinging sqlite db: %w", err)
 	}
 
-	// In-memory databases are per-connection in SQLite; pin to one connection
-	// so all callers share the same in-memory state.
-	if path == ":memory:" {
-		sqlDB.SetMaxOpenConns(1)
-	}
+	// SQLite only allows one writer at a time. Pin to a single connection
+	// so concurrent goroutines queue on the Go side rather than getting
+	// SQLITE_BUSY. For :memory: databases this also ensures all callers
+	// share the same in-memory state.
+	sqlDB.SetMaxOpenConns(1)
 
 	// Enable WAL mode for better concurrent read performance.
 	if _, err := sqlDB.Exec("PRAGMA journal_mode=WAL;"); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("enabling WAL mode: %w", err)
+	}
+
+	// Wait up to 5 seconds for the write lock instead of failing instantly.
+	if _, err := sqlDB.Exec("PRAGMA busy_timeout=5000;"); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("setting busy_timeout: %w", err)
 	}
 
 	// Enforce foreign key constraints.

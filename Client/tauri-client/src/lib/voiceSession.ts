@@ -219,6 +219,12 @@ function addRemoteStream(stream: MediaStream): void {
   const savedVolume = userId > 0 ? getSavedUserVolume(userId) : 100;
   audio.volume = Math.min(savedVolume, 100) / 100;
 
+  // Respect current deafen state — if user is deafened, mute this element
+  // immediately so late-arriving streams don't bypass the deafen.
+  if (voiceStore.getState().localDeafened) {
+    audio.muted = true;
+  }
+
   if (userId > 0) {
     userAudioElements.set(userId, audio);
   }

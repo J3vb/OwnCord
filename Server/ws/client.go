@@ -33,6 +33,7 @@ type Client struct {
 	send       chan []byte
 	mu         sync.Mutex // guards sendClosed, msgCount, channelID
 	voiceMu    sync.Mutex // guards voiceChID and pc
+	negoMu     sync.Mutex // serialises SDP signalling (renegotiate / handleOffer / handleAnswer) per client
 }
 
 // wsConn is the subset of nhooyr.io/websocket.Conn used by writePump/readPump.

@@ -97,6 +97,11 @@ func (h *Hub) setupICECallback(c *Client, channelID int64) {
 // and sends it as voice_offer. Implements the "impolite" side of
 // Perfect Negotiation — skips if PC is in have-remote-offer state.
 func (h *Hub) renegotiateParticipant(c *Client) {
+	// Serialise all SDP signalling for this client so concurrent OnTrack
+	// goroutines don't race through state-check → rollback → createOffer.
+	c.negoMu.Lock()
+	defer c.negoMu.Unlock()
+
 	pc := c.getPC()
 	if pc == nil {
 		return
@@ -106,6 +111,8 @@ func (h *Hub) renegotiateParticipant(c *Client) {
 	// mid-negotiation (client sent us an offer, or we sent one and are
 	// waiting for an answer).
 	state := pc.SignalingState()
+	slog.Debug("renegotiateParticipant enter",
+		"user_id", c.userID, "signaling_state", state.String())
 	if state == webrtc.SignalingStateHaveRemoteOffer {
 		slog.Info("renegotiate skipped: have-remote-offer",
 			"user_id", c.userID)
@@ -121,6 +128,8 @@ func (h *Hub) renegotiateParticipant(c *Client) {
 				"err", err, "user_id", c.userID)
 			return
 		}
+		slog.Debug("renegotiateParticipant rollback OK",
+			"user_id", c.userID)
 	}
 
 	offer, err := pc.CreateOffer(nil)
@@ -137,6 +146,9 @@ func (h *Hub) renegotiateParticipant(c *Client) {
 	}
 
 	channelID := c.getVoiceChID()
+	slog.Debug("renegotiateParticipant offer sent",
+		"user_id", c.userID, "channel_id", channelID,
+		"signaling_state", pc.SignalingState().String())
 	c.sendMsg(buildVoiceOffer(channelID, offer.SDP))
 }
 
@@ -303,13 +315,15 @@ func (h *Hub) buildVoiceRoomConfig(ch *db.Channel) VoiceRoomConfig {
 // 4. Removes voice state from DB.
 // 5. Broadcasts voice_leave to the channel the user was in.
 func (h *Hub) handleVoiceLeave(c *Client) {
-	state, err := h.db.GetVoiceState(c.userID)
-	if err != nil {
-		slog.Error("ws handleVoiceLeave GetVoiceState", "err", err, "user_id", c.userID)
-	}
-
 	// Atomically clear voice state and get old values for cleanup (CRIT-1 fix).
+	// Only the first caller gets real values; concurrent calls (e.g. ICE
+	// callbacks racing with an explicit voice_leave) get oldChID=0 and
+	// become no-ops.
 	oldChID, oldPC := c.clearVoice()
+	if oldChID == 0 && oldPC == nil {
+		slog.Debug("handleVoiceLeave no-op (already cleared)", "user_id", c.userID)
+		return
+	}
 
 	// Close PeerConnection if active.
 	// This also causes any setupOnTrack goroutine to exit via track.Read error (HIGH-1).
@@ -342,6 +356,9 @@ func (h *Hub) handleVoiceLeave(c *Client) {
 					if rmErr := subPC.RemoveTrack(sender); rmErr != nil {
 						slog.Error("handleVoiceLeave RemoveTrack",
 							"err", rmErr, "user_id", subID, "kind", kind)
+					} else {
+						slog.Debug("handleVoiceLeave track removed from subscriber",
+							"leaving_user", c.userID, "subscriber", subID, "kind", kind)
 					}
 					needsRenego[subID] = sub
 				}
@@ -362,12 +379,13 @@ func (h *Hub) handleVoiceLeave(c *Client) {
 		}
 	}
 
-	if leaveErr := h.db.LeaveVoiceChannel(c.userID); leaveErr != nil {
-		slog.Error("ws handleVoiceLeave LeaveVoiceChannel", "err", leaveErr, "user_id", c.userID)
-	}
+	slog.Info("voice leave", "user_id", c.userID, "channel_id", oldChID)
 
-	if state != nil {
-		h.BroadcastToAll(buildVoiceLeave(state.ChannelID, c.userID))
+	if oldChID > 0 {
+		if leaveErr := h.db.LeaveVoiceChannel(c.userID); leaveErr != nil {
+			slog.Error("ws handleVoiceLeave LeaveVoiceChannel", "err", leaveErr, "user_id", c.userID)
+		}
+		h.BroadcastToAll(buildVoiceLeave(oldChID, c.userID))
 	}
 }
 
@@ -389,6 +407,7 @@ func (h *Hub) handleVoiceMute(c *Client, payload json.RawMessage) {
 		c.sendMsg(buildErrorMsg("INTERNAL", "failed to update mute state"))
 		return
 	}
+	slog.Debug("voice mute changed", "user_id", c.userID, "muted", p.Muted)
 
 	h.broadcastVoiceStateUpdate(c)
 }
@@ -411,6 +430,7 @@ func (h *Hub) handleVoiceDeafen(c *Client, payload json.RawMessage) {
 		c.sendMsg(buildErrorMsg("INTERNAL", "failed to update deafen state"))
 		return
 	}
+	slog.Debug("voice deafen changed", "user_id", c.userID, "deafened", p.Deafened)
 
 	h.broadcastVoiceStateUpdate(c)
 }
@@ -473,6 +493,7 @@ func (h *Hub) handleVoiceCamera(c *Client, payload json.RawMessage) {
 		c.sendMsg(buildErrorMsg("INTERNAL", "failed to update camera state"))
 		return
 	}
+	slog.Debug("voice camera changed", "user_id", c.userID, "enabled", p.Enabled)
 
 	h.broadcastVoiceStateUpdate(c)
 }
@@ -513,6 +534,7 @@ func (h *Hub) handleVoiceScreenshare(c *Client, payload json.RawMessage) {
 		c.sendMsg(buildErrorMsg("INTERNAL", "failed to update screenshare state"))
 		return
 	}
+	slog.Debug("voice screenshare changed", "user_id", c.userID, "enabled", p.Enabled)
 
 	h.broadcastVoiceStateUpdate(c)
 }
@@ -551,10 +573,19 @@ func (h *Hub) handleVoiceOffer(c *Client, payload json.RawMessage) {
 		SDP:  p.SDP,
 	}
 
+	// Serialise SDP signalling so a concurrent renegotiateParticipant
+	// cannot race with this offer/answer exchange.
+	c.negoMu.Lock()
+	defer c.negoMu.Unlock()
+
+	stateBefore := pc.SignalingState()
+	slog.Debug("handleVoiceOffer enter",
+		"user_id", c.userID, "signaling_state", stateBefore.String())
+
 	// Perfect Negotiation: if we already have a pending local offer (glare
 	// condition — server and client sent offers simultaneously), roll back
 	// ours so we can accept the client's offer.
-	if pc.SignalingState() == webrtc.SignalingStateHaveLocalOffer {
+	if stateBefore == webrtc.SignalingStateHaveLocalOffer {
 		if err := pc.SetLocalDescription(webrtc.SessionDescription{
 			Type: webrtc.SDPTypeRollback,
 		}); err != nil {
@@ -584,6 +615,9 @@ func (h *Hub) handleVoiceOffer(c *Client, payload json.RawMessage) {
 		return
 	}
 
+	slog.Debug("handleVoiceOffer answer sent",
+		"user_id", c.userID,
+		"signaling_state", pc.SignalingState().String())
 	// Send the answer back to the client.
 	c.sendMsg(buildVoiceAnswer(c.getVoiceChID(), answer.SDP))
 }
@@ -622,11 +656,22 @@ func (h *Hub) handleVoiceAnswer(c *Client, payload json.RawMessage) {
 		SDP:  p.SDP,
 	}
 
+	// Serialise with renegotiateParticipant — SetRemoteDescription(answer)
+	// transitions from have-local-offer → stable and must not race with a
+	// concurrent rollback + new offer.
+	c.negoMu.Lock()
+	defer c.negoMu.Unlock()
+
+	stateBefore := pc.SignalingState()
 	if err := pc.SetRemoteDescription(answer); err != nil {
 		slog.Error("ws handleVoiceAnswer SetRemoteDescription", "err", err, "user_id", c.userID)
 		c.sendMsg(buildErrorMsg("INVALID_SDP", "failed to set remote description"))
 		return
 	}
+	slog.Debug("handleVoiceAnswer applied",
+		"user_id", c.userID,
+		"state_before", stateBefore.String(),
+		"state_after", pc.SignalingState().String())
 }
 
 // handleVoiceICE processes a voice_ice (ICE candidate) from the client.
@@ -662,6 +707,7 @@ func (h *Hub) handleVoiceICE(c *Client, payload json.RawMessage) {
 		c.sendMsg(buildErrorMsg("VOICE_ERROR", "failed to add ICE candidate"))
 		return
 	}
+	slog.Debug("client ICE candidate added", "user_id", c.userID)
 }
 
 // handleSoundboard processes a soundboard_play message.
@@ -775,6 +821,8 @@ func (h *Hub) setupOnTrack(c *Client, channelID int64) {
 				vt.AddSender(pid, sender)
 			}
 			addedCount++
+			slog.Debug("setupOnTrack track added to subscriber",
+				"from", c.userID, "to", pid, "kind", kind)
 			h.renegotiateParticipant(other)
 		}
 		slog.Info("SFU track fan-out",
