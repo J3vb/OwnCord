@@ -110,5 +110,8 @@ func (d *DB) GetAttachmentsByMessageIDs(msgIDs []int64) (map[int64][]AttachmentI
 		ai.URL = "/api/v1/files/" + id
 		result[msgID] = append(result[msgID], ai)
 	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("GetAttachmentsByMessageIDs rows: %w", rows.Err())
+	}
 	return result, nil
 }
