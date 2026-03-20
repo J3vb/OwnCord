@@ -1,4 +1,5 @@
 use serde_json::Value;
+use tauri::Manager;
 use tauri_plugin_store::StoreExt;
 
 const SETTINGS_STORE: &str = "settings.json";
@@ -87,4 +88,14 @@ pub fn get_cert_fingerprint(
     });
 
     Ok(value)
+}
+
+// ---------------------------------------------------------------------------
+// DevTools command
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn open_devtools(window: tauri::WebviewWindow) {
+    #[cfg(feature = "devtools")]
+    window.open_devtools();
 }

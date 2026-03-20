@@ -35,6 +35,16 @@ document.addEventListener("contextmenu", (e) => {
   e.preventDefault();
 });
 
+// F12 or Ctrl+Shift+I opens WebView2 DevTools.
+document.addEventListener("keydown", (e) => {
+  if (e.key === "F12" || (e.ctrlKey && e.shiftKey && e.key === "I")) {
+    e.preventDefault();
+    void import("@tauri-apps/api/core").then(({ invoke }) => {
+      void invoke("open_devtools");
+    });
+  }
+});
+
 // Open external links (target="_blank") in the user's default browser.
 document.addEventListener("click", (e) => {
   const link = (e.target as HTMLElement).closest("a[target='_blank']") as HTMLAnchorElement | null;

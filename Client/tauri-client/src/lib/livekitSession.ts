@@ -9,6 +9,7 @@
 import {
   Room,
   RoomEvent,
+  ParticipantEvent,
   Track,
   type RemoteTrack,
   type RemoteTrackPublication,
@@ -202,21 +203,36 @@ function handleTrackUnsubscribed(
   }
 }
 
-function handleActiveSpeakersChanged(speakers: Participant[]): void {
-  if (currentChannelId === null) return;
+/** Wire IsSpeakingChanged on a participant to update the voice store. */
+function wireSpeakingDetection(participant: Participant): void {
+  participant.on(ParticipantEvent.IsSpeakingChanged, (speaking: boolean) => {
+    if (currentChannelId === null) return;
+    const userId = parseUserId(participant.identity);
+    if (userId <= 0) return;
 
-  const speakerUserIds: number[] = [];
-  for (const speaker of speakers) {
-    const userId = parseUserId(speaker.identity);
-    if (userId > 0) {
-      speakerUserIds.push(userId);
+    log.debug("IsSpeakingChanged", { userId, speaking, channelId: currentChannelId });
+
+    // Build a speakers list from all currently speaking participants
+    const speakerIds: number[] = [];
+    if (room !== null) {
+      // Check local participant
+      if (room.localParticipant.isSpeaking) {
+        const localId = parseUserId(room.localParticipant.identity);
+        if (localId > 0) speakerIds.push(localId);
+      }
+      // Check all remote participants
+      for (const [, rp] of room.remoteParticipants) {
+        if (rp.isSpeaking) {
+          const rpId = parseUserId(rp.identity);
+          if (rpId > 0) speakerIds.push(rpId);
+        }
+      }
     }
-  }
 
-  // Use setSpeakers to update all users' speaking state at once
-  setSpeakers({
-    channel_id: currentChannelId,
-    speakers: speakerUserIds,
+    setSpeakers({
+      channel_id: currentChannelId,
+      speakers: speakerIds,
+    });
   });
 }
 
@@ -312,7 +328,7 @@ export async function handleVoiceToken(
     // Wire room events
     room.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
     room.on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed);
-    room.on(RoomEvent.ActiveSpeakersChanged, handleActiveSpeakersChanged);
+    room.on(RoomEvent.ParticipantConnected, (p) => wireSpeakingDetection(p));
     room.on(RoomEvent.Disconnected, handleDisconnected);
 
     // Connect to LiveKit server with retry (LiveKit may still be initializing)
@@ -340,7 +356,7 @@ export async function handleVoiceToken(
           });
           room.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
           room.on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed);
-          room.on(RoomEvent.ActiveSpeakersChanged, handleActiveSpeakersChanged);
+          room.on(RoomEvent.ParticipantConnected, (p) => wireSpeakingDetection(p));
           room.on(RoomEvent.Disconnected, handleDisconnected);
         } else {
           throw connectErr;
@@ -348,6 +364,12 @@ export async function handleVoiceToken(
       }
     }
     log.info("Connected to LiveKit room", { channelId, url: resolvedUrl });
+
+    // Wire speaking detection on local participant + any already-connected remotes
+    wireSpeakingDetection(room.localParticipant);
+    for (const [, rp] of room.remoteParticipants) {
+      wireSpeakingDetection(rp);
+    }
 
     // Enable microphone: use RNNoise if Enhanced Noise Suppression is on
     const enhancedNS = loadPref<boolean>("enhancedNoiseSuppression", false);
