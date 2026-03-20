@@ -242,7 +242,7 @@ func TestLoadVoiceConfigDefaults(t *testing.T) {
 	}{
 		{"Voice.Quality", cfg.Voice.Quality, "medium"},
 		{"Voice.LiveKitAPIKey", cfg.Voice.LiveKitAPIKey, "devkey"},
-		{"Voice.LiveKitAPISecret", cfg.Voice.LiveKitAPISecret, "secret"},
+		{"Voice.LiveKitAPISecret", cfg.Voice.LiveKitAPISecret, "owncord-dev-secret-key-min-32chars"},
 		{"Voice.LiveKitURL", cfg.Voice.LiveKitURL, "ws://localhost:7880"},
 	}
 

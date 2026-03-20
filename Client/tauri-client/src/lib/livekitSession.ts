@@ -40,6 +40,8 @@ let ws: WsClient | null = null;
 let noiseSuppressor: NoiseSuppressor | null = null;
 let onErrorCallback: ((message: string) => void) | null = null;
 let currentChannelId: number | null = null;
+/** Server host (e.g. "192.168.0.247:8443") for constructing LiveKit proxy URL. */
+let serverHost: string | null = null;
 
 /** The raw mic stream acquired for RNNoise processing (must be stopped on cleanup). */
 let rawMicStream: MediaStream | null = null;
@@ -243,6 +245,23 @@ export function setWsClient(client: WsClient): void {
   ws = client;
 }
 
+/** Set the server host for constructing LiveKit proxy URLs. */
+export function setServerHost(host: string): void {
+  serverHost = host;
+}
+
+/**
+ * Resolve a LiveKit URL. If the server sends a relative path like "/livekit",
+ * construct the full wss:// URL using the server host. This proxies LiveKit
+ * signaling through OwnCord's HTTPS to avoid mixed-content blocks.
+ */
+function resolveLiveKitUrl(url: string): string {
+  if (url.startsWith("/") && serverHost !== null) {
+    return `wss://${serverHost}${url}`;
+  }
+  return url;
+}
+
 /** Set error callback for UI feedback (e.g. toast on connection failure). */
 export function setOnError(cb: (message: string) => void): void {
   onErrorCallback = cb;
@@ -301,9 +320,10 @@ export async function handleVoiceToken(
     room.on(RoomEvent.ActiveSpeakersChanged, handleActiveSpeakersChanged);
     room.on(RoomEvent.Disconnected, handleDisconnected);
 
-    // Connect to LiveKit server
-    await room.connect(url, token);
-    log.info("Connected to LiveKit room", { channelId, url });
+    // Connect to LiveKit server (resolve proxy URL if relative path)
+    const resolvedUrl = resolveLiveKitUrl(url);
+    await room.connect(resolvedUrl, token);
+    log.info("Connected to LiveKit room", { channelId, url: resolvedUrl });
 
     // Enable microphone: use RNNoise if Enhanced Noise Suppression is on
     const enhancedNS = loadPref<boolean>("enhancedNoiseSuppression", false);

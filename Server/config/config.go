@@ -101,7 +101,7 @@ func defaults() Config {
 		},
 		Voice: VoiceConfig{
 			LiveKitAPIKey:    "devkey",
-			LiveKitAPISecret: "secret",
+			LiveKitAPISecret: "owncord-dev-secret-key-min-32chars",
 			LiveKitURL:       "ws://localhost:7880",
 			Quality:          "medium",
 		},
@@ -139,8 +139,8 @@ upload:
   storage_dir: "data/uploads"
 
 voice:
-  livekit_api_key: "devkey"        # LiveKit API key
-  livekit_api_secret: "secret"     # LiveKit API secret
+  livekit_api_key: "devkey"                              # LiveKit API key
+  livekit_api_secret: "owncord-dev-secret-key-min-32chars"  # LiveKit API secret (min 32 chars)
   livekit_url: "ws://localhost:7880"  # LiveKit server WebSocket URL
   # livekit_binary: ""             # path to livekit-server binary; empty = don't auto-start
   # quality: "medium"              # low | medium | high

@@ -75,7 +75,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 		// Optionally start a companion LiveKit process.
 		if cfg.Voice.LiveKitBinaryPath != "" {
-			proc := ws.NewLiveKitProcess(&cfg.Voice, cfg.Server.DataDir)
+			proc := ws.NewLiveKitProcess(&cfg.Voice, &cfg.TLS, cfg.Server.DataDir)
 			if startErr := proc.Start(); startErr != nil {
 				slog.Error("failed to start LiveKit process", "error", startErr)
 			} else {
@@ -88,6 +88,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	if lkErr == nil {
 		r.Post("/api/v1/livekit/webhook",
 			ws.MountWebhookRoute(hub, cfg.Voice.LiveKitAPIKey, cfg.Voice.LiveKitAPISecret))
+
+		// Reverse proxy LiveKit signaling through OwnCord's HTTPS server.
+		// This avoids mixed-content blocks (secure page → insecure WS).
+		// Client connects to wss://server:8443/livekit/* → ws://localhost:7880/*
+		r.Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL)))
 	}
 
 	go hub.Run()

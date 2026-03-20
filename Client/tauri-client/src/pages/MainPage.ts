@@ -32,6 +32,7 @@ import {
   setOnRemoteVideoRemoved,
   clearOnRemoteVideo,
   setWsClient,
+  setServerHost as setLiveKitServerHost,
   setOnError as setVoiceOnError,
   clearOnError as clearVoiceOnError,
 } from "@lib/livekitSession";
@@ -79,10 +80,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // Let voiceSession send signaling messages over this WS connection
   setWsClient(ws);
 
-  // Set server host for resolving relative attachment URLs
+  // Set server host for resolving relative attachment URLs and LiveKit proxy
   const apiConfig = api.getConfig();
   if (apiConfig.host) {
     setServerHost(apiConfig.host);
+    setLiveKitServerHost(apiConfig.host);
   }
 
   const limiters = createRateLimiterSet();
