@@ -112,10 +112,8 @@ export function createVideoModeController(
         }
       }
     } else {
-      if (localTileAdded) {
-        videoGrid.removeStream(currentUserId);
-        localTileAdded = false;
-      }
+      videoGrid.removeStream(currentUserId);
+      localTileAdded = false;
     }
 
     // Remove remote video tiles for users who turned off their camera

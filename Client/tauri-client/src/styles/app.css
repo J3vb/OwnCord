@@ -421,6 +421,28 @@
 }
 .msg-image .placeholder-img.loading { opacity: .6; }
 
+/* GIF play/pause overlay */
+.gif-play-btn {
+  position: absolute; bottom: 8px; left: 8px;
+  width: 32px; height: 32px; border-radius: 50%;
+  background: rgba(0,0,0,.7); color: #fff;
+  border: none; cursor: pointer;
+  font-size: 14px; line-height: 32px; text-align: center;
+  opacity: 0; transition: opacity .15s ease;
+  z-index: 2; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.msg-image:hover .gif-play-btn,
+.gif-paused .gif-play-btn { opacity: 1; }
+.gif-play-btn:hover { background: rgba(0,0,0,.9); }
+.gif-play-btn.playing { font-size: 11px; letter-spacing: 1px; }
+.gif-paused::after {
+  content: "GIF"; position: absolute; top: 8px; left: 8px;
+  background: rgba(0,0,0,.7); color: #fff; font-size: 10px;
+  font-weight: 700; padding: 2px 6px; border-radius: 4px;
+  letter-spacing: .5px; pointer-events: none;
+}
+
 /* Image lightbox overlay */
 .image-lightbox {
   position: fixed; inset: 0; z-index: 600;

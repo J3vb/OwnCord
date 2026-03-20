@@ -276,6 +276,7 @@ export interface VoiceTokenPayload {
   readonly channel_id: number;
   readonly token: string;
   readonly url: string;
+  readonly direct_url?: string;
 }
 
 export interface MemberJoinPayload {

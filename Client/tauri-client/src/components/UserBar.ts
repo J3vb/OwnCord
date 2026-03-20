@@ -81,9 +81,10 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     updateFromState();
 
     // Subscribe to auth changes
-    unsubscribe = authStore.subscribe(() => {
-      updateFromState();
-    });
+    unsubscribe = authStore.subscribeSelector(
+      (s) => s.user,
+      () => updateFromState(),
+    );
 
     container.appendChild(root);
   }

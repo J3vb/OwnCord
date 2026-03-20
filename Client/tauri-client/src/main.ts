@@ -320,28 +320,31 @@ function renderPage(pageId: "connect" | "main"): void {
 router.onNavigate(renderPage);
 
 // Handle logout / disconnect
-authStore.subscribe((state) => {
-  if (!state.isAuthenticated && router.getCurrentPage() === "main") {
-    // Leave voice channel before disconnecting so other clients see it immediately
-    const voice = voiceStore.getState();
-    if (voice.currentChannelId !== null) {
-      voiceSessionLeave(false); // false: we send voice_leave below
-      ws.send({ type: "voice_leave", payload: {} });
-      leaveVoiceChannel();
+authStore.subscribeSelector(
+  (s) => s.isAuthenticated,
+  (isAuthenticated) => {
+    if (!isAuthenticated && router.getCurrentPage() === "main") {
+      // Leave voice channel before disconnecting so other clients see it immediately
+      const voice = voiceStore.getState();
+      if (voice.currentChannelId !== null) {
+        voiceSessionLeave(false); // false: we send voice_leave below
+        ws.send({ type: "voice_leave", payload: {} });
+        leaveVoiceChannel();
+      }
+      dispatcherCleanup?.();
+      dispatcherCleanup = null;
+      ws.disconnect();
+      lastConnectToken = "";
+      lastConnectHost = "";
+      // Clear stored credential on logout
+      const host = api.getConfig().host;
+      if (host) {
+        void deleteCredential(host);
+      }
+      router.navigate("connect");
     }
-    dispatcherCleanup?.();
-    dispatcherCleanup = null;
-    ws.disconnect();
-    lastConnectToken = "";
-    lastConnectHost = "";
-    // Clear stored credential on logout
-    const host = api.getConfig().host;
-    if (host) {
-      void deleteCredential(host);
-    }
-    router.navigate("connect");
-  }
-});
+  },
+);
 
 // Send voice_leave on window close (best-effort — server readPump defer is the safety net)
 window.addEventListener("beforeunload", () => {

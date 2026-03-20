@@ -395,11 +395,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     children.push(memberList);
 
     const memberListEl = memberListSlot.querySelector(".member-list");
-    const unsubMemberList = uiStore.subscribe((state) => {
-      if (memberListEl !== null) {
-        memberListEl.classList.toggle("hidden", !state.memberListVisible);
-      }
-    });
+    const unsubMemberList = uiStore.subscribeSelector(
+      (s) => s.memberListVisible,
+      (visible) => {
+        if (memberListEl !== null) {
+          memberListEl.classList.toggle("hidden", !visible);
+        }
+      },
+    );
     unsubscribers.push(unsubMemberList);
 
     appendChildren(app, serverStripSlot, sidebarWrapper, chatArea, memberListSlot);
@@ -529,12 +532,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     container.appendChild(root);
 
     // --- Subscribe to channel changes ---
-    const unsubChannels = channelsStore.subscribe(() => {
-      const active = getActiveChannel();
-      if (active !== null) {
-        channelCtrl!.mountChannel(active.id, active.name);
-      }
-    });
+    const unsubChannels = channelsStore.subscribeSelector(
+      (s) => s.activeChannelId,
+      () => {
+        const active = getActiveChannel();
+        if (active !== null) {
+          channelCtrl!.mountChannel(active.id, active.name);
+        }
+      },
+    );
     unsubscribers.push(unsubChannels);
 
     const active = getActiveChannel();

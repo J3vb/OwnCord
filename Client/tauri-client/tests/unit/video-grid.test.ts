@@ -6,7 +6,7 @@ import {
 
 /** Minimal MediaStream stub for testing. */
 function fakeStream(): MediaStream {
-  return {} as unknown as MediaStream;
+  return { getTracks: () => [] } as unknown as MediaStream;
 }
 
 describe("VideoGrid", () => {

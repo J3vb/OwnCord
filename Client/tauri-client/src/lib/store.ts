@@ -2,6 +2,18 @@
  * Generic reactive store foundation for OwnCord Tauri client.
  * Immutable state updates only — setState receives an updater
  * that must return a NEW state object.
+ *
+ * Subscription flow:
+ *
+ *   setState(updater)
+ *        │
+ *        ▼
+ *   queueMicrotask (batch)
+ *        │
+ *        ├─► subscribe() listeners    ← fire on EVERY change
+ *        │
+ *        └─► subscribeSelector()      ← fire only when selected
+ *            listeners                   slice changes (via ===)
  */
 
 export interface Store<T> {
@@ -20,6 +32,22 @@ export interface Store<T> {
    * after every setState batch. Returns an unsubscribe function.
    */
   subscribe(listener: (state: T) => void): () => void;
+
+  /**
+   * Subscribe to a derived slice of state. The listener only fires when
+   * the selector's return value changes (by default via `===`).
+   *
+   * IMPORTANT: Selectors must return stable references for unchanged data.
+   * A selector like `s => ({ ...s.users })` creates a new object every time
+   * and will fire on every update, defeating the purpose. Instead use
+   * `s => s.users` to return the existing reference, or pass a custom
+   * `isEqual` comparator for value-based comparison.
+   */
+  subscribeSelector<S>(
+    selector: (state: T) => S,
+    listener: (selected: S) => void,
+    isEqual?: (a: S, b: S) => boolean,
+  ): () => void;
 
   /** Derive a value from the current state using a selector function. */
   select<S>(selector: (state: T) => S): S;
@@ -57,6 +85,21 @@ export function createStore<T>(initialState: T): Store<T> {
     };
   }
 
+  function subscribeSelector<S>(
+    selector: (state: T) => S,
+    listener: (selected: S) => void,
+    isEqual: (a: S, b: S) => boolean = (a, b) => a === b,
+  ): () => void {
+    let prev: S = selector(state);
+    return subscribe((newState) => {
+      const next = selector(newState);
+      if (!isEqual(prev, next)) {
+        prev = next;
+        listener(next);
+      }
+    });
+  }
+
   function select<S>(selector: (state: T) => S): S {
     return selector(state);
   }
@@ -70,5 +113,5 @@ export function createStore<T>(initialState: T): Store<T> {
     }
   }
 
-  return { getState, setState, subscribe, select, flush };
+  return { getState, setState, subscribe, subscribeSelector, select, flush };
 }

@@ -87,8 +87,24 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     render();
 
-    unsubs.push(voiceStore.subscribe(() => render()));
-    unsubs.push(channelsStore.subscribe(() => render()));
+    unsubs.push(voiceStore.subscribeSelector(
+      (s) => ({
+        channelId: s.currentChannelId,
+        muted: s.localMuted,
+        deafened: s.localDeafened,
+        camera: s.localCamera,
+      }),
+      () => render(),
+      (a, b) =>
+        a.channelId === b.channelId &&
+        a.muted === b.muted &&
+        a.deafened === b.deafened &&
+        a.camera === b.camera,
+    ));
+    unsubs.push(channelsStore.subscribeSelector(
+      (s) => s.channels,
+      () => render(),
+    ));
 
     container.appendChild(root);
   }

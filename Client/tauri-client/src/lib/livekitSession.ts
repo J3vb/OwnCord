@@ -416,11 +416,23 @@ export function setServerHost(host: string): void {
  * construct the full wss:// URL using the server host. This proxies LiveKit
  * signaling through OwnCord's HTTPS to avoid mixed-content blocks.
  */
-function resolveLiveKitUrl(url: string): string {
-  if (url.startsWith("/") && serverHost !== null) {
-    return `wss://${serverHost}${url}`;
+/**
+ * Resolve which LiveKit URL to use. Prefers the direct URL on localhost
+ * (avoids self-signed TLS issues with WebView fetch). Falls back to the
+ * HTTPS proxy path for remote connections.
+ */
+function resolveLiveKitUrl(proxyPath: string, directUrl?: string): string {
+  if (serverHost !== null) {
+    const host = serverHost.split(":")[0] ?? "";
+    const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
+    if (isLocal && directUrl) {
+      return directUrl;
+    }
+    if (proxyPath.startsWith("/")) {
+      return `wss://${serverHost}${proxyPath}`;
+    }
   }
-  return url;
+  return proxyPath;
 }
 
 /** Set error callback for UI feedback (e.g. toast on connection failure). */
@@ -457,6 +469,7 @@ export async function handleVoiceToken(
   token: string,
   url: string,
   channelId: number,
+  directUrl?: string,
 ): Promise<void> {
   // Disconnect existing session first
   if (room !== null) {
@@ -481,7 +494,7 @@ export async function handleVoiceToken(
     room.on(RoomEvent.Disconnected, handleDisconnected);
 
     // Connect to LiveKit server with retry (LiveKit may still be initializing)
-    const resolvedUrl = resolveLiveKitUrl(url);
+    const resolvedUrl = resolveLiveKitUrl(url, directUrl);
     const MAX_RETRIES = 3;
     const RETRY_DELAY_MS = 2000;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -492,6 +505,8 @@ export async function handleVoiceToken(
         if (attempt < MAX_RETRIES) {
           log.warn("LiveKit connect failed, retrying", { attempt, maxRetries: MAX_RETRIES, error: connectErr });
           await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+          // Room may have been nulled by a concurrent leaveVoice() during the delay
+          if (room === null) throw connectErr;
           // Recreate room for fresh connection state
           room.removeAllListeners();
           room = new Room({
@@ -697,7 +712,14 @@ export async function switchInputDevice(deviceId: string): Promise<void> {
       // Re-publish with new device
       await publishWithNoiseSuppression();
     } else {
-      await room.switchActiveDevice("audioinput", deviceId);
+      // Empty deviceId means "use system default" — skip switchActiveDevice
+      // (it throws on empty string). Re-enable mic via LiveKit's native capture.
+      if (deviceId) {
+        await room.switchActiveDevice("audioinput", deviceId);
+      } else {
+        await room.localParticipant.setMicrophoneEnabled(false);
+        await room.localParticipant.setMicrophoneEnabled(true);
+      }
     }
     log.info("Switched input device", { deviceId });
   } catch (err) {

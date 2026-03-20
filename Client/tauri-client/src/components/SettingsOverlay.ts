@@ -155,13 +155,16 @@ export function createSettingsOverlay(
     renderActiveTab();
 
     // Subscribe to uiStore for open/close
-    unsubUi = uiStore.subscribe((state) => {
-      if (state.settingsOpen) {
-        show();
-      } else {
-        hide();
-      }
-    });
+    unsubUi = uiStore.subscribeSelector(
+      (s) => s.settingsOpen,
+      (settingsOpen) => {
+        if (settingsOpen) {
+          show();
+        } else {
+          hide();
+        }
+      },
+    );
 
     // Sync initial state
     if (uiStore.getState().settingsOpen) {

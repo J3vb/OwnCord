@@ -266,7 +266,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
 
   unsubs.push(
     ws.on("voice_token", (payload) => {
-      void handleVoiceToken(payload.token, payload.url, payload.channel_id);
+      void handleVoiceToken(payload.token, payload.url, payload.channel_id, payload.direct_url);
     }),
   );
 

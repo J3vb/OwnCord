@@ -103,11 +103,14 @@ export function createMemberList(): MountableComponent {
     root = createElement("div", { class: "member-list", "data-testid": "member-list" });
     renderList(root);
 
-    unsubscribe = membersStore.subscribe(() => {
-      if (root !== null) {
-        renderList(root);
-      }
-    });
+    unsubscribe = membersStore.subscribeSelector(
+      (s) => s.members,
+      () => {
+        if (root !== null) {
+          renderList(root);
+        }
+      },
+    );
 
     container.appendChild(root);
   }

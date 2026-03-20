@@ -218,8 +218,8 @@ export function createVoiceChannel(options: VoiceChannelOptions): VoiceChannelRe
 
   // Initial render and subscribe
   update();
-  unsubs.push(voiceStore.subscribe(() => update()));
-  unsubs.push(membersStore.subscribe(() => update()));
+  unsubs.push(voiceStore.subscribeSelector((s) => s.voiceUsers, () => update()));
+  unsubs.push(membersStore.subscribeSelector((s) => s.members, () => update()));
 
   function destroy(): void {
     closeContextMenu();

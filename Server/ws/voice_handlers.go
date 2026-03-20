@@ -108,7 +108,10 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 			slog.Error("ws handleVoiceJoin GenerateToken", "err", tokenErr, "user_id", c.userID)
 			// Non-fatal: voice join still succeeds at the DB/state level.
 		} else {
-			c.sendMsg(buildVoiceToken(channelID, token, h.livekit.URL()))
+			// Send both proxy path and direct URL. The client uses direct_url
+			// when on localhost (avoids self-signed TLS issues with WebView
+			// fetch) and falls back to the /livekit proxy for remote clients.
+			c.sendMsg(buildVoiceToken(channelID, token, "/livekit", h.livekit.URL()))
 		}
 	}
 

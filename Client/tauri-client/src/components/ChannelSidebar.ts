@@ -242,7 +242,7 @@ function renderVoiceChannelItem(
       const rowClasses = user.speaking
         ? "voice-user-item speaking"
         : "voice-user-item";
-      const row = createElement("div", { class: rowClasses });
+      const row = createElement("div", { class: rowClasses, "data-voice-uid": String(user.userId) });
 
       const initial = user.username.length > 0
         ? user.username.charAt(0).toUpperCase()
@@ -702,29 +702,66 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // Initial render
     renderChannels();
 
-    // Subscribe to channels store changes
-    const unsubChannels = channelsStore.subscribe(() => {
-      renderChannels();
-    });
-    unsubscribers.push(unsubChannels);
+    // Subscribe to channels store changes (channels map OR active channel)
+    const unsubChannelsMap = channelsStore.subscribeSelector(
+      (s) => s.channels,
+      () => renderChannels(),
+    );
+    unsubscribers.push(unsubChannelsMap);
+    const unsubActiveChannel = channelsStore.subscribeSelector(
+      (s) => s.activeChannelId,
+      () => renderChannels(),
+    );
+    unsubscribers.push(unsubActiveChannel);
 
     // Subscribe to auth store for server name updates
-    const unsubAuth = authStore.subscribe((state) => {
-      if (serverNameEl !== null) {
-        setText(serverNameEl, state.serverName ?? "Server Name");
-      }
-    });
+    const unsubAuth = authStore.subscribeSelector(
+      (s) => s.serverName,
+      (serverName) => {
+        if (serverNameEl !== null) {
+          setText(serverNameEl, serverName ?? "Server Name");
+        }
+      },
+    );
     unsubscribers.push(unsubAuth);
 
     // Subscribe to UI store for category collapse changes
-    const unsubUi = uiStore.subscribe(() => {
-      renderChannels();
-    });
+    const unsubUi = uiStore.subscribeSelector(
+      (s) => s.collapsedCategories,
+      () => renderChannels(),
+    );
     unsubscribers.push(unsubUi);
 
-    // Subscribe to voice store for connected user updates
-    const unsubVoice = voiceStore.subscribe(() => {
-      renderChannels();
+    // Subscribe to voice store — only full re-render when users join/leave
+    // or mute/deafen/camera changes. Speaking state is patched in-place via
+    // CSS class toggle to avoid destroying DOM elements (which kills hover).
+    let prevVoiceStructureSig = "";
+    const unsubVoice = voiceStore.subscribe((state) => {
+      // Structural signature: who is in which channel + mute/deafen/camera.
+      // Excludes speaking — that's patched in-place below.
+      let structSig = String(state.currentChannelId ?? "");
+      for (const [chId, users] of state.voiceUsers) {
+        structSig += `|${chId}`;
+        for (const [uid, u] of users) {
+          structSig += `:${uid}${u.muted ? "m" : ""}${u.deafened ? "d" : ""}${u.camera ? "c" : ""}`;
+        }
+      }
+      if (structSig !== prevVoiceStructureSig) {
+        prevVoiceStructureSig = structSig;
+        renderChannels();
+        return;
+      }
+
+      // Patch speaking state in-place — toggle CSS class without re-rendering.
+      if (channelList === null) return;
+      for (const [, users] of state.voiceUsers) {
+        for (const [uid, u] of users) {
+          const row = channelList.querySelector<HTMLElement>(`.voice-user-item[data-voice-uid="${uid}"]`);
+          if (row !== null) {
+            row.classList.toggle("speaking", u.speaking);
+          }
+        }
+      }
     });
     unsubscribers.push(unsubVoice);
   }

@@ -173,7 +173,10 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
     document.addEventListener("keydown", handleGlobalKeydown, { signal });
 
     // Subscribe to store changes
-    unsubscribe = channelsStore.subscribe(refreshFromStore);
+    unsubscribe = channelsStore.subscribeSelector(
+      (s) => s.channels,
+      refreshFromStore,
+    );
 
     // Auto-focus
     requestAnimationFrame(() => input.focus());

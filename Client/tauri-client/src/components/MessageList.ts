@@ -291,13 +291,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   let loadingOlder = false;
   let prevMessageCount = 0;
 
-  const unsubLoadingReset = messagesStore.subscribe(() => {
-    const msgs = getChannelMessages(options.channelId);
-    if (msgs.length !== prevMessageCount) {
-      prevMessageCount = msgs.length;
-      loadingOlder = false;
-    }
-  });
+  const unsubLoadingReset = messagesStore.subscribeSelector(
+    (s) => s.messagesByChannel,
+    () => {
+      const msgs = getChannelMessages(options.channelId);
+      if (msgs.length !== prevMessageCount) {
+        prevMessageCount = msgs.length;
+        loadingOlder = false;
+      }
+    },
+  );
 
   let scrollRafId = 0;
 
@@ -377,16 +380,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     scrollToBottom();
     requestAnimationFrame(() => scrollToBottom());
 
-    unsubscribers.push(messagesStore.subscribe(() => { renderAll(); }));
+    unsubscribers.push(messagesStore.subscribeSelector(
+      (s) => s.messagesByChannel,
+      () => { renderAll(); },
+    ));
 
     // Only re-render when member roles change, not on typing updates
-    let prevMembers = membersStore.getState().members;
-    unsubscribers.push(membersStore.subscribe((state) => {
-      if (state.members !== prevMembers) {
-        prevMembers = state.members;
-        renderAll();
-      }
-    }));
+    unsubscribers.push(membersStore.subscribeSelector(
+      (s) => s.members,
+      () => { renderAll(); },
+    ));
   }
 
   function destroy(): void {

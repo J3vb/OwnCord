@@ -61,9 +61,10 @@ export function createTypingIndicator(
 
     updateFromState();
 
-    unsubscribe = membersStore.subscribe(() => {
-      updateFromState();
-    });
+    unsubscribe = membersStore.subscribeSelector(
+      (s) => s.typingUsers,
+      () => { updateFromState(); },
+    );
 
     container.appendChild(root);
   }

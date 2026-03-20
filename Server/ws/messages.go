@@ -232,13 +232,16 @@ func buildVoiceConfig(channelID int64, quality string, bitrate int, maxUsers int
 }
 
 // buildVoiceToken constructs a voice_token message with a LiveKit token and URL.
-func buildVoiceToken(channelID int64, token string, livekitURL string) []byte {
+// url is the proxy path ("/livekit") for remote clients; direct_url is the raw
+// LiveKit URL (e.g. "ws://localhost:7880") for localhost clients.
+func buildVoiceToken(channelID int64, token string, proxyPath string, directURL string) []byte {
 	return buildJSON(map[string]any{
 		"type": "voice_token",
 		"payload": map[string]any{
 			"channel_id": channelID,
 			"token":      token,
-			"url":        livekitURL,
+			"url":        proxyPath,
+			"direct_url": directURL,
 		},
 	})
 }

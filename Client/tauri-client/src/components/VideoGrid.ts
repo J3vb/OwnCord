@@ -46,6 +46,11 @@ export function createVideoGrid(): VideoGridComponent {
           video.srcObject = stream;
         }
       }
+      // Update username label in case it changed
+      const label = existing.querySelector(".video-username");
+      if (label !== null) {
+        label.textContent = username;
+      }
       return;
     }
 
@@ -60,7 +65,7 @@ export function createVideoGrid(): VideoGridComponent {
 
     const cell = createElement("div", {
       class: "video-cell",
-      "data-userId": String(userId),
+      "data-user-id": String(userId),
     });
     appendChildren(cell, video, label);
 

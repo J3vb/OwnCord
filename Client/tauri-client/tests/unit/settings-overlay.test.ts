@@ -21,6 +21,7 @@ vi.mock("@stores/ui.store", () => ({
   uiStore: {
     getState: () => ({ settingsOpen: false }),
     subscribe: () => () => {},
+    subscribeSelector: vi.fn((_sel: unknown, _listener: unknown) => () => {}),
   },
   setTheme: (...args: unknown[]) => mockSetTheme(...args),
 }));
