@@ -21,8 +21,8 @@ import {
   voiceStore,
   setLocalMuted,
   setLocalDeafened,
-  setLocalSpeaking,
   setLocalCamera,
+  setSpeakers,
 } from "@stores/voice.store";
 import { loadPref, savePref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
@@ -203,26 +203,21 @@ function handleTrackUnsubscribed(
 }
 
 function handleActiveSpeakersChanged(speakers: Participant[]): void {
-  const speakerIds = new Set<number>();
+  if (currentChannelId === null) return;
+
+  const speakerUserIds: number[] = [];
   for (const speaker of speakers) {
     const userId = parseUserId(speaker.identity);
     if (userId > 0) {
-      speakerIds.add(userId);
+      speakerUserIds.push(userId);
     }
   }
 
-  // Update speaking state in voice store for all users in the channel
-  const state = voiceStore.getState();
-  const channelId = state.currentChannelId;
-  if (channelId === null) return;
-
-  const channelUsers = state.voiceUsers.get(channelId);
-  if (!channelUsers) return;
-
-  for (const [userId] of channelUsers) {
-    const isSpeaking = speakerIds.has(userId);
-    setLocalSpeaking(isSpeaking);
-  }
+  // Use setSpeakers to update all users' speaking state at once
+  setSpeakers({
+    channel_id: currentChannelId,
+    speakers: speakerUserIds,
+  });
 }
 
 function handleDisconnected(reason?: DisconnectReason): void {

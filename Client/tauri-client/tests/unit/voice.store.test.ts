@@ -346,14 +346,14 @@ describe("voice store", () => {
       }));
     });
 
-    it("does NOT overwrite local user's speaking state", () => {
-      // Local VAD says we're speaking
-      setLocalSpeaking(true);
+    it("updates local user's speaking state from LiveKit", () => {
+      // LiveKit says we're speaking
+      setSpeakers({ channel_id: 10, speakers: [1, 2], threshold_mode: "forwarding" });
       expect(voiceStore.getState().voiceUsers.get(10)?.get(1)?.speaking).toBe(true);
 
-      // Server says we're NOT speaking — local user should be unchanged
+      // LiveKit says we're NOT speaking — should update
       setSpeakers({ channel_id: 10, speakers: [2], threshold_mode: "forwarding" });
-      expect(voiceStore.getState().voiceUsers.get(10)?.get(1)?.speaking).toBe(true);
+      expect(voiceStore.getState().voiceUsers.get(10)?.get(1)?.speaking).toBe(false);
     });
 
     it("updates remote users' speaking state from server", () => {

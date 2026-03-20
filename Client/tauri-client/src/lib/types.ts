@@ -269,7 +269,7 @@ export interface VoiceConfigPayload {
 export interface VoiceSpeakersPayload {
   readonly channel_id: number;
   readonly speakers: readonly number[];
-  readonly threshold_mode: string;
+  readonly threshold_mode?: string;
 }
 
 export interface VoiceTokenPayload {
