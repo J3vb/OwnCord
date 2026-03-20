@@ -548,28 +548,28 @@ func TestBuildTypingMsg_ValidJSON(t *testing.T) {
 	}
 }
 
-// ─── buildVoiceAnswer ─────────────────────────────────────────────────────────
+// ─── buildVoiceToken ──────────────────────────────────────────────────────────
 
-func TestBuildVoiceAnswer_Type(t *testing.T) {
-	msg := buildVoiceAnswer(99, "v=0\r\n")
+func TestBuildVoiceToken_Type(t *testing.T) {
+	msg := buildVoiceToken(99, "jwt-token", "ws://localhost:7880")
 	var env struct {
 		Type string `json:"type"`
 	}
 	if err := json.Unmarshal(msg, &env); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if env.Type != "voice_answer" {
-		t.Errorf("type = %q, want voice_answer", env.Type)
+	if env.Type != "voice_token" {
+		t.Errorf("type = %q, want voice_token", env.Type)
 	}
 }
 
-func TestBuildVoiceAnswer_Payload(t *testing.T) {
-	sdp := "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n"
-	msg := buildVoiceAnswer(99, sdp)
+func TestBuildVoiceToken_Payload(t *testing.T) {
+	msg := buildVoiceToken(99, "jwt-token", "ws://localhost:7880")
 	var env struct {
 		Payload struct {
 			ChannelID int64  `json:"channel_id"`
-			SDP       string `json:"sdp"`
+			Token     string `json:"token"`
+			URL       string `json:"url"`
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal(msg, &env); err != nil {
@@ -578,13 +578,16 @@ func TestBuildVoiceAnswer_Payload(t *testing.T) {
 	if env.Payload.ChannelID != 99 {
 		t.Errorf("payload.channel_id = %d, want 99", env.Payload.ChannelID)
 	}
-	if env.Payload.SDP != sdp {
-		t.Errorf("payload.sdp = %q, want %q", env.Payload.SDP, sdp)
+	if env.Payload.Token != "jwt-token" {
+		t.Errorf("payload.token = %q, want jwt-token", env.Payload.Token)
+	}
+	if env.Payload.URL != "ws://localhost:7880" {
+		t.Errorf("payload.url = %q, want ws://localhost:7880", env.Payload.URL)
 	}
 }
 
-func TestBuildVoiceAnswer_ValidJSON(t *testing.T) {
-	if !json.Valid(buildVoiceAnswer(1, "sdp-data")) {
-		t.Error("buildVoiceAnswer output is not valid JSON")
+func TestBuildVoiceToken_ValidJSON(t *testing.T) {
+	if !json.Valid(buildVoiceToken(1, "t", "ws://a")) {
+		t.Error("buildVoiceToken output is not valid JSON")
 	}
 }

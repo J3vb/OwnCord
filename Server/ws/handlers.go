@@ -107,14 +107,6 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		h.handleVoiceCamera(c, env.Payload)
 	case "voice_screenshare":
 		h.handleVoiceScreenshare(c, env.Payload)
-	case "voice_offer":
-		h.handleVoiceOffer(c, env.Payload)
-	case "voice_answer":
-		h.handleVoiceAnswer(c, env.Payload)
-	case "voice_ice":
-		h.handleVoiceICE(c, env.Payload)
-	case "soundboard_play":
-		h.handleSoundboard(c, env.Payload)
 	case "ping":
 		c.sendMsg(buildJSON(map[string]any{"type": "pong"}))
 	default:

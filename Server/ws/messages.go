@@ -219,17 +219,26 @@ func buildVoiceState(state db.VoiceState) []byte {
 }
 
 // buildVoiceConfig constructs a voice_config message sent after voice_join acceptance.
-func buildVoiceConfig(channelID int64, quality string, bitrate int, mode string, threshold, topSpeakers, maxUsers int) []byte {
+func buildVoiceConfig(channelID int64, quality string, bitrate int, maxUsers int) []byte {
 	return buildJSON(map[string]any{
 		"type": "voice_config",
 		"payload": map[string]any{
-			"channel_id":       channelID,
-			"quality":          quality,
-			"bitrate":          bitrate,
-			"threshold_mode":   mode,
-			"mixing_threshold": threshold,
-			"top_speakers":     topSpeakers,
-			"max_users":        maxUsers,
+			"channel_id": channelID,
+			"quality":    quality,
+			"bitrate":    bitrate,
+			"max_users":  maxUsers,
+		},
+	})
+}
+
+// buildVoiceToken constructs a voice_token message with a LiveKit token and URL.
+func buildVoiceToken(channelID int64, token string, livekitURL string) []byte {
+	return buildJSON(map[string]any{
+		"type": "voice_token",
+		"payload": map[string]any{
+			"channel_id": channelID,
+			"token":      token,
+			"url":        livekitURL,
 		},
 	})
 }
@@ -257,49 +266,6 @@ func buildVoiceLeave(channelID, userID int64) []byte {
 	})
 }
 
-// buildVoiceAnswer constructs a voice_answer message sent from server to client.
-func buildVoiceAnswer(channelID int64, sdp string) []byte {
-	return buildJSON(map[string]any{
-		"type": "voice_answer",
-		"payload": map[string]any{
-			"channel_id": channelID,
-			"sdp":        sdp,
-		},
-	})
-}
-
-// buildVoiceOffer constructs a voice_offer message sent from server to client.
-func buildVoiceOffer(channelID int64, sdp string) []byte {
-	return buildJSON(map[string]any{
-		"type": "voice_offer",
-		"payload": map[string]any{
-			"channel_id": channelID,
-			"sdp":        sdp,
-		},
-	})
-}
-
-// buildVoiceICE constructs a voice_ice message sent from server to client.
-func buildVoiceICE(channelID int64, candidate any) []byte {
-	return buildJSON(map[string]any{
-		"type": "voice_ice",
-		"payload": map[string]any{
-			"channel_id": channelID,
-			"candidate":  candidate,
-		},
-	})
-}
-
-// buildSoundboardPlay constructs a soundboard_play broadcast.
-func buildSoundboardPlay(soundID string, userID int64) []byte {
-	return buildJSON(map[string]any{
-		"type": "soundboard_play",
-		"payload": map[string]any{
-			"sound_id": soundID,
-			"user_id":  userID,
-		},
-	})
-}
 
 // buildChannelCreate constructs a channel_create broadcast.
 func buildChannelCreate(ch *db.Channel) []byte {

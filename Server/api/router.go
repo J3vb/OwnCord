@@ -63,18 +63,25 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		MountUploadRoutes(r, database, store)
 	}
 
-	// Voice credentials REST route.
-	MountVoiceRoutes(r, cfg, database)
-
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
 	hub := ws.NewHub(database, limiter)
 
-	// Create SFU if voice config is present; voice is disabled on failure.
-	sfu, sfuErr := ws.NewSFU(&cfg.Voice)
-	if sfuErr != nil {
-		slog.Warn("failed to create SFU, voice disabled", "error", sfuErr)
+	// Create LiveKit client if voice config is present; voice is disabled on failure.
+	lk, lkErr := ws.NewLiveKitClient(&cfg.Voice)
+	if lkErr != nil {
+		slog.Warn("failed to create LiveKit client, voice disabled", "error", lkErr)
 	} else {
-		hub.SetSFU(sfu)
+		hub.SetLiveKit(lk)
+
+		// Optionally start a companion LiveKit process.
+		if cfg.Voice.LiveKitBinaryPath != "" {
+			proc := ws.NewLiveKitProcess(&cfg.Voice, cfg.Server.DataDir)
+			if startErr := proc.Start(); startErr != nil {
+				slog.Error("failed to start LiveKit process", "error", startErr)
+			} else {
+				hub.SetLiveKitProcess(proc)
+			}
+		}
 	}
 
 	go hub.Run()

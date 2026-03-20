@@ -447,120 +447,12 @@ func assertNotReceived(t *testing.T, ch <-chan []byte, label string) {
 	}
 }
 
-// ─── Voice room lifecycle ─────────────────────────────────────────────────────
+// ─── LiveKit lifecycle ────────────────────────────────────────────────────────
 
-func TestHub_SetSFU_NilSafe(t *testing.T) {
+func TestHub_SetLiveKit_NilSafe(t *testing.T) {
 	hub, _ := newTestHub(t)
-	// Setting a nil SFU must not panic.
-	hub.SetSFU(nil)
-}
-
-func TestHub_GetOrCreateVoiceRoom_CreatesNew(t *testing.T) {
-	hub, _ := newTestHub(t)
-	cfg := ws.VoiceRoomConfig{ChannelID: 42, MaxUsers: 10, Quality: "medium"}
-
-	room := hub.GetOrCreateVoiceRoom(42, cfg)
-	if room == nil {
-		t.Fatal("GetOrCreateVoiceRoom returned nil")
-	}
-}
-
-func TestHub_GetOrCreateVoiceRoom_ReturnsSameRoom(t *testing.T) {
-	hub, _ := newTestHub(t)
-	cfg := ws.VoiceRoomConfig{ChannelID: 99, MaxUsers: 5, Quality: "low"}
-
-	r1 := hub.GetOrCreateVoiceRoom(99, cfg)
-	r2 := hub.GetOrCreateVoiceRoom(99, cfg)
-	if r1 != r2 {
-		t.Error("GetOrCreateVoiceRoom should return the same room on subsequent calls")
-	}
-}
-
-func TestHub_GetOrCreateVoiceRoom_DifferentChannels(t *testing.T) {
-	hub, _ := newTestHub(t)
-	cfg1 := ws.VoiceRoomConfig{ChannelID: 1, Quality: "low"}
-	cfg2 := ws.VoiceRoomConfig{ChannelID: 2, Quality: "high"}
-
-	r1 := hub.GetOrCreateVoiceRoom(1, cfg1)
-	r2 := hub.GetOrCreateVoiceRoom(2, cfg2)
-	if r1 == r2 {
-		t.Error("different channel IDs must produce distinct rooms")
-	}
-}
-
-func TestHub_GetVoiceRoom_ReturnsNilWhenAbsent(t *testing.T) {
-	hub, _ := newTestHub(t)
-	room := hub.GetVoiceRoom(404)
-	if room != nil {
-		t.Errorf("GetVoiceRoom: want nil for absent channel, got %v", room)
-	}
-}
-
-func TestHub_GetVoiceRoom_ReturnsRoomAfterCreate(t *testing.T) {
-	hub, _ := newTestHub(t)
-	cfg := ws.VoiceRoomConfig{ChannelID: 7, Quality: "medium"}
-	hub.GetOrCreateVoiceRoom(7, cfg)
-
-	room := hub.GetVoiceRoom(7)
-	if room == nil {
-		t.Fatal("GetVoiceRoom: want non-nil after GetOrCreateVoiceRoom, got nil")
-	}
-}
-
-func TestHub_RemoveVoiceRoom_NoopWhenAbsent(t *testing.T) {
-	hub, _ := newTestHub(t)
-	// Must not panic on removal of non-existent room.
-	hub.RemoveVoiceRoom(999)
-}
-
-func TestHub_RemoveVoiceRoom_RemovesRoom(t *testing.T) {
-	hub, _ := newTestHub(t)
-	cfg := ws.VoiceRoomConfig{ChannelID: 55, Quality: "low"}
-	hub.GetOrCreateVoiceRoom(55, cfg)
-
-	hub.RemoveVoiceRoom(55)
-	if hub.GetVoiceRoom(55) != nil {
-		t.Error("GetVoiceRoom: want nil after RemoveVoiceRoom")
-	}
-}
-
-func TestHub_CloseAllVoiceRooms_ClearsAll(t *testing.T) {
-	hub, _ := newTestHub(t)
-	for _, id := range []int64{10, 20, 30} {
-		hub.GetOrCreateVoiceRoom(id, ws.VoiceRoomConfig{ChannelID: id, Quality: "medium"})
-	}
-
-	hub.CloseAllVoiceRooms()
-
-	for _, id := range []int64{10, 20, 30} {
-		if hub.GetVoiceRoom(id) != nil {
-			t.Errorf("GetVoiceRoom(%d): want nil after CloseAllVoiceRooms", id)
-		}
-	}
-}
-
-func TestHub_CloseAllVoiceRooms_EmptyIsNoop(t *testing.T) {
-	hub, _ := newTestHub(t)
-	// Must not panic when no rooms exist.
-	hub.CloseAllVoiceRooms()
-}
-
-func TestHub_VoiceRooms_ConcurrentAccess(t *testing.T) {
-	hub, _ := newTestHub(t)
-	var wg sync.WaitGroup
-
-	// Concurrent creates and reads must not race.
-	for i := range int64(20) {
-		wg.Add(1)
-		go func(id int64) {
-			defer wg.Done()
-			cfg := ws.VoiceRoomConfig{ChannelID: id, Quality: "medium"}
-			hub.GetOrCreateVoiceRoom(id, cfg)
-			hub.GetVoiceRoom(id)
-			hub.RemoveVoiceRoom(id)
-		}(i)
-	}
-	wg.Wait()
+	// Setting a nil LiveKit client must not panic.
+	hub.SetLiveKit(nil)
 }
 
 // ─── GracefulStop ─────────────────────────────────────────────────────────────
@@ -584,93 +476,19 @@ func TestHub_GracefulStop_StopsHub(t *testing.T) {
 	}
 }
 
-func TestHub_GracefulStop_ClosesAllVoiceRooms(t *testing.T) {
-	hub, _ := newTestHub(t)
-	for _, id := range []int64{100, 200, 300} {
-		hub.GetOrCreateVoiceRoom(id, ws.VoiceRoomConfig{ChannelID: id, Quality: "low"})
-	}
-	go hub.Run()
-
-	hub.GracefulStop()
-	time.Sleep(20 * time.Millisecond)
-
-	for _, id := range []int64{100, 200, 300} {
-		if hub.GetVoiceRoom(id) != nil {
-			t.Errorf("GetVoiceRoom(%d): expected nil after GracefulStop", id)
-		}
-	}
-}
-
-func TestHub_GracefulStop_NoRooms_NoPanic(t *testing.T) {
+func TestHub_GracefulStop_NoPanic(t *testing.T) {
 	hub, _ := newTestHub(t)
 	go hub.Run()
-	// Must not panic with zero voice rooms.
+	// Must not panic with no LiveKit process.
 	hub.GracefulStop()
 }
 
 // ─── CleanupVoiceForChannel ───────────────────────────────────────────────────
 
-func TestHub_CleanupVoiceForChannel_RemovesRoom(t *testing.T) {
+func TestHub_CleanupVoiceForChannel_NoVoiceState_NoPanic(t *testing.T) {
 	hub, _ := newTestHub(t)
-	chID := int64(55)
-	hub.GetOrCreateVoiceRoom(chID, ws.VoiceRoomConfig{ChannelID: chID, Quality: "medium"})
-
-	hub.CleanupVoiceForChannel(chID)
-
-	if hub.GetVoiceRoom(chID) != nil {
-		t.Error("expected room to be nil after CleanupVoiceForChannel")
-	}
-}
-
-func TestHub_CleanupVoiceForChannel_NoRoom_NoPanic(t *testing.T) {
-	hub, _ := newTestHub(t)
-	// Must not panic when channel has no voice room.
+	// Must not panic when channel has no voice state in DB.
 	hub.CleanupVoiceForChannel(9999)
-}
-
-func TestHub_CleanupVoiceForChannel_BroadcastsVoiceLeave(t *testing.T) {
-	hub, database := newTestHub(t)
-	go hub.Run()
-	defer hub.Stop()
-
-	chID := seedTestChannel(t, database, "cleanup-vc")
-	u1 := seedTestUser(t, database, "cleanup-user1")
-	u2 := seedTestUser(t, database, "cleanup-user2")
-
-	send1 := make(chan []byte, 16)
-	send2 := make(chan []byte, 16)
-	c1 := ws.NewTestClientWithChannel(hub, u1, chID, send1)
-	c2 := ws.NewTestClientWithChannel(hub, u2, chID, send2)
-	hub.Register(c1)
-	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
-
-	room := hub.GetOrCreateVoiceRoom(chID, ws.VoiceRoomConfig{ChannelID: chID, Quality: "medium"})
-	if err := room.AddParticipant(u1); err != nil {
-		t.Fatalf("AddParticipant u1: %v", err)
-	}
-	if err := room.AddParticipant(u2); err != nil {
-		t.Fatalf("AddParticipant u2: %v", err)
-	}
-
-	hub.CleanupVoiceForChannel(chID)
-	time.Sleep(50 * time.Millisecond)
-
-	// At least one of the clients must receive a voice_leave.
-	allMsgs := append(drainChan(send1), drainChan(send2)...)
-	found := false
-	for _, msg := range allMsgs {
-		var env map[string]any
-		if err := json.Unmarshal(msg, &env); err == nil {
-			if env["type"] == "voice_leave" {
-				found = true
-				break
-			}
-		}
-	}
-	if !found {
-		t.Error("expected voice_leave broadcast after CleanupVoiceForChannel")
-	}
 }
 
 // TestHub_Register_CleansUpOldVoiceState was removed because duplicate

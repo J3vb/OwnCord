@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/owncord/server/auth"
-	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/ws"
 )
@@ -136,151 +135,6 @@ func TestSetClientVoiceChID_ConcurrentAccess(t *testing.T) {
 	<-done
 }
 
-// ─── setupICEMonitor — nil PC guard path (voice_handlers.go:30) ───────────────
-
-func TestSetupICEMonitor_NilPC_NoPanic(t *testing.T) {
-	hub, _ := newCoverageHub(t)
-	send := make(chan []byte, 4)
-	c := ws.NewTestClient(hub, 1, send)
-
-	// Client has no PeerConnection (pc == nil).
-	// setupICEMonitor should return early without panic.
-	hub.SetupICEMonitorForTest(c, 42)
-}
-
-// ─── setupICECallback — nil PC guard path (voice_handlers.go:67) ──────────────
-
-func TestSetupICECallback_NilPC_NoPanic(t *testing.T) {
-	hub, _ := newCoverageHub(t)
-	send := make(chan []byte, 4)
-	c := ws.NewTestClient(hub, 1, send)
-
-	// Client has no PeerConnection (pc == nil).
-	// setupICECallback should return early without panic.
-	hub.SetupICECallbackForTest(c, 42)
-}
-
-// ─── renegotiateParticipant — nil PC guard path (voice_handlers.go:83) ────────
-
-func TestRenegotiateParticipant_NilPC_NoPanic(t *testing.T) {
-	hub, _ := newCoverageHub(t)
-	send := make(chan []byte, 4)
-	c := ws.NewTestClient(hub, 1, send)
-
-	// Client has no PeerConnection (pc == nil).
-	// renegotiateParticipant should return early without panic.
-	hub.RenegotiateParticipantForTest(c)
-}
-
-// ─── SFU.Close (sfu.go:97 — 0% coverage) ─────────────────────────────────────
-
-func TestSFU_Close_DoubleClose_NoPanic(t *testing.T) {
-	cfg := &config.VoiceConfig{
-		Quality:      "medium",
-		MediaPortMin: 50000,
-		MediaPortMax: 50100,
-	}
-	sfu, err := ws.NewSFU(cfg)
-	if err != nil {
-		t.Fatalf("NewSFU: %v", err)
-	}
-	sfu.Close()
-	// Double close must not panic.
-	sfu.Close()
-}
-
-// ─── NewSFU with STUN port (sfu.go:73 — 66.7% coverage) ─────────────────────
-
-func TestNewPeerConnection_WithSTUNPort(t *testing.T) {
-	cfg := &config.VoiceConfig{
-		Quality:      "medium",
-		MediaPortMin: 50000,
-		MediaPortMax: 50100,
-		STUNPort:     3478,
-	}
-	sfu, err := ws.NewSFU(cfg)
-	if err != nil {
-		t.Fatalf("NewSFU: %v", err)
-	}
-	defer sfu.Close()
-
-	pc, err := sfu.NewPeerConnection()
-	if err != nil {
-		t.Fatalf("NewPeerConnection: %v", err)
-	}
-	if pc == nil {
-		t.Fatal("NewPeerConnection returned nil")
-	}
-	_ = pc.Close()
-}
-
-func TestNewPeerConnection_WithTURN(t *testing.T) {
-	cfg := &config.VoiceConfig{
-		Quality:      "high",
-		MediaPortMin: 50000,
-		MediaPortMax: 50100,
-		STUNPort:     3478,
-		TURNEnabled:  true,
-		TURNPort:     3479,
-		TURNSecret:   "test-secret",
-	}
-	sfu, err := ws.NewSFU(cfg)
-	if err != nil {
-		t.Fatalf("NewSFU: %v", err)
-	}
-	defer sfu.Close()
-
-	pc, err := sfu.NewPeerConnection()
-	if err != nil {
-		t.Fatalf("NewPeerConnection: %v", err)
-	}
-	if pc == nil {
-		t.Fatal("NewPeerConnection returned nil")
-	}
-	_ = pc.Close()
-}
-
-func TestNewPeerConnection_WithTURNDisabled(t *testing.T) {
-	cfg := &config.VoiceConfig{
-		Quality:      "low",
-		MediaPortMin: 50000,
-		MediaPortMax: 50100,
-		TURNEnabled:  false,
-		TURNPort:     3479,
-		TURNSecret:   "test-secret",
-	}
-	sfu, err := ws.NewSFU(cfg)
-	if err != nil {
-		t.Fatalf("NewSFU: %v", err)
-	}
-	defer sfu.Close()
-
-	pc, err := sfu.NewPeerConnection()
-	if err != nil {
-		t.Fatalf("NewPeerConnection: %v", err)
-	}
-	_ = pc.Close()
-}
-
-func TestNewPeerConnection_NoSTUNPort(t *testing.T) {
-	cfg := &config.VoiceConfig{
-		Quality:      "medium",
-		MediaPortMin: 50000,
-		MediaPortMax: 50100,
-		STUNPort:     0,
-	}
-	sfu, err := ws.NewSFU(cfg)
-	if err != nil {
-		t.Fatalf("NewSFU: %v", err)
-	}
-	defer sfu.Close()
-
-	pc, err := sfu.NewPeerConnection()
-	if err != nil {
-		t.Fatalf("NewPeerConnection: %v", err)
-	}
-	_ = pc.Close()
-}
 
 // ─── buildJSON error fallback (messages.go:18 — 75% coverage) ────────────────
 
@@ -324,16 +178,9 @@ func TestGracefulStop_WithClientsHavingVoiceState(t *testing.T) {
 	// Set voice channel ID on the client to simulate voice state.
 	ws.SetClientVoiceChID(c, 42)
 
-	// Create a voice room so GracefulStop has rooms to clean up.
-	hub.GetOrCreateVoiceRoom(42, ws.VoiceRoomConfig{ChannelID: 42, MaxUsers: 10, Quality: "medium"})
-
 	hub.GracefulStop()
 	time.Sleep(20 * time.Millisecond)
-
-	// Voice rooms should be cleaned up.
-	if hub.GetVoiceRoom(42) != nil {
-		t.Error("expected voice room to be nil after GracefulStop")
-	}
+	// Should not panic.
 }
 
 func TestGracefulStop_MultipleClients(t *testing.T) {
@@ -779,170 +626,6 @@ func TestHandleVoiceDeafen_InvalidPayload(t *testing.T) {
 	}
 }
 
-func TestHandleVoiceOffer_NoPC(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "vo-no-pc")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_offer",
-		"payload": map[string]any{
-			"channel_id": 1,
-			"sdp":        "v=0\r\n",
-		},
-	})
-	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
-
-	code := drainForErrorCode(send, 200*time.Millisecond)
-	if code != "VOICE_ERROR" {
-		t.Errorf("error code = %q, want VOICE_ERROR for no PC", code)
-	}
-}
-
-func TestHandleVoiceAnswer_NoPC(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "va-no-pc")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_answer",
-		"payload": map[string]any{
-			"channel_id": 1,
-			"sdp":        "v=0\r\n",
-		},
-	})
-	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
-
-	code := drainForErrorCode(send, 200*time.Millisecond)
-	if code != "VOICE_ERROR" {
-		t.Errorf("error code = %q, want VOICE_ERROR for no PC", code)
-	}
-}
-
-func TestHandleVoiceICE_NoPC(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "vi-no-pc")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_ice",
-		"payload": map[string]any{
-			"channel_id": 1,
-			"candidate":  map[string]any{"candidate": ""},
-		},
-	})
-	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
-
-	code := drainForErrorCode(send, 200*time.Millisecond)
-	if code != "VOICE_ERROR" {
-		t.Errorf("error code = %q, want VOICE_ERROR for no PC", code)
-	}
-}
-
-func TestHandleVoiceOffer_InvalidPayload(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "vo-bad-payload")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	// Client needs a PC for the payload to be parsed.
-	// Without a PC, we get VOICE_ERROR before parsing.
-	// Test the payload parse path requires a PC, so test that path
-	// via the no-PC early return above.
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_offer",
-		"payload": "bad",
-	})
-	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
-
-	code := drainForErrorCode(send, 200*time.Millisecond)
-	if code == "" {
-		t.Error("expected an error for invalid voice_offer payload")
-	}
-}
-
-func TestHandleVoiceOffer_EmptySDP(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "vo-empty-sdp")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	// Without PC, gets VOICE_ERROR before SDP check. That's fine — it covers
-	// the rate limiter and early-return path.
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_offer",
-		"payload": map[string]any{
-			"channel_id": 1,
-			"sdp":        "",
-		},
-	})
-	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
-
-	code := drainForErrorCode(send, 200*time.Millisecond)
-	if code == "" {
-		t.Error("expected an error for empty SDP")
-	}
-}
-
-func TestHandleVoiceAnswer_InvalidPayload(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "va-bad-payload")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_answer",
-		"payload": "bad",
-	})
-	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
-
-	code := drainForErrorCode(send, 200*time.Millisecond)
-	if code == "" {
-		t.Error("expected error for invalid voice_answer payload")
-	}
-}
-
-func TestHandleVoiceICE_InvalidPayload(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "vi-bad-payload")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_ice",
-		"payload": "bad",
-	})
-	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
-
-	code := drainForErrorCode(send, 200*time.Millisecond)
-	if code == "" {
-		t.Error("expected error for invalid voice_ice payload")
-	}
-}
 
 // ─── voice camera and screenshare error paths ────────────────────────────────
 
@@ -1044,50 +727,6 @@ func TestHandleVoiceScreenshare_InvalidPayload(t *testing.T) {
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
 		t.Errorf("error code = %q, want BAD_REQUEST", code)
-	}
-}
-
-// ─── soundboard handler error paths ──────────────────────────────────────────
-
-func TestHandleSoundboard_MissingSoundID(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "sb-missing-id")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "soundboard_play",
-		"payload": map[string]any{},
-	})
-	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
-
-	code := drainForErrorCode(send, 200*time.Millisecond)
-	if code != "BAD_REQUEST" {
-		t.Errorf("error code = %q, want BAD_REQUEST for missing sound_id", code)
-	}
-}
-
-func TestHandleSoundboard_InvalidPayload(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "sb-bad-payload")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "soundboard_play",
-		"payload": "not-an-object",
-	})
-	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
-
-	code := drainForErrorCode(send, 200*time.Millisecond)
-	if code != "BAD_REQUEST" {
-		t.Errorf("error code = %q, want BAD_REQUEST for invalid soundboard payload", code)
 	}
 }
 
@@ -1913,10 +1552,6 @@ func TestHandleVoiceLeave_ExplicitLeave(t *testing.T) {
 	if !foundLeave {
 		t.Error("expected voice_leave broadcast after explicit leave")
 	}
-
-	if hub.GetVoiceRoom(vcID) != nil {
-		t.Error("expected voice room to be removed after last participant leaves")
-	}
 }
 
 func TestHandleVoiceLeave_NotInVoice(t *testing.T) {
@@ -2077,47 +1712,6 @@ func TestHandleVoiceJoin_WithQualityOverride(t *testing.T) {
 		}
 	}
 	t.Error("expected voice_config with quality override")
-}
-
-func TestHandleVoiceJoin_WithMixingThresholdOverride(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "vj-thresh-user")
-
-	vcID, err := database.CreateChannel("thresh-vc", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	_, err = database.Exec("UPDATE channels SET mixing_threshold = 5 WHERE id = ?", vcID)
-	if err != nil {
-		t.Fatalf("UPDATE: %v", err)
-	}
-
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_join",
-		"payload": map[string]any{
-			"channel_id": vcID,
-		},
-	})
-	hub.HandleMessageForTest(c, raw)
-	time.Sleep(100 * time.Millisecond)
-
-	msgs := drainChanTimeout(send, 300*time.Millisecond)
-	for _, msg := range msgs {
-		var env map[string]any
-		if json.Unmarshal(msg, &env) == nil && env["type"] == "voice_config" {
-			p := env["payload"].(map[string]any)
-			if p["mixing_threshold"] != float64(5) {
-				t.Errorf("voice_config mixing_threshold = %v, want 5", p["mixing_threshold"])
-			}
-			return
-		}
-	}
-	t.Error("expected voice_config with mixing_threshold override")
 }
 
 func TestHandleVoiceJoin_MultipleParticipants(t *testing.T) {

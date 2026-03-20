@@ -2,167 +2,43 @@ package ws
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
-	"github.com/pion/webrtc/v4"
-
-	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 )
 
 // Voice rate limit settings.
 const (
-	voiceSignalRateLimit      = 20
-	voiceSignalWindow         = time.Second
-	voiceICERateLimit         = 50 // ICE candidates arrive in bursts during connection setup
-	voiceICEWindow            = time.Second
-	soundboardRateLimit       = 1
-	soundboardWindow          = 3 * time.Second
 	voiceCameraRateLimit      = 2
 	voiceCameraWindow         = time.Second
 	voiceScreenshareRateLimit = 2
 	voiceScreenshareWindow    = time.Second
 )
 
-// setupICEMonitor monitors ICE connection state changes on the client's
-// PeerConnection. On failure/disconnect, it cleans up voice state.
-func (h *Hub) setupICEMonitor(c *Client, channelID int64) {
-	pc := c.getPC()
-	if pc == nil {
-		return
+// qualityBitrate returns the target audio bitrate in bits/s based on a quality preset.
+func qualityBitrate(quality string) int {
+	switch quality {
+	case "low":
+		return 32000
+	case "high":
+		return 128000
+	default:
+		return 64000
 	}
-
-	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-		// Guard: ignore stale events from old PeerConnections after channel switch
-		if c.getPC() != pc {
-			slog.Debug("ignoring stale ICE event from old PC", "user_id", c.userID, "channel_id", channelID, "state", state.String())
-			return
-		}
-
-		slog.Info("ICE state change", "user_id", c.userID, "channel_id", channelID, "state", state.String())
-
-		switch state {
-		case webrtc.ICEConnectionStateFailed:
-			slog.Warn("ICE connection failed, cleaning up voice", "user_id", c.userID, "channel_id", channelID)
-			if c.getVoiceChID() != 0 {
-				h.handleVoiceLeave(c)
-			}
-		case webrtc.ICEConnectionStateClosed:
-			// Closed means the PC was shut down (client destroyed it).
-			// Safety net: only clean up if voice_leave hasn't already done it.
-			if c.getVoiceChID() != 0 {
-				slog.Info("ICE connection closed, cleaning up voice", "user_id", c.userID, "channel_id", channelID)
-				h.handleVoiceLeave(c)
-			}
-		case webrtc.ICEConnectionStateDisconnected:
-			// Disconnected is transient — ICE may recover.
-			// Log but don't clean up immediately.
-			slog.Info("ICE disconnected (may recover)", "user_id", c.userID, "channel_id", channelID)
-		}
-	})
-}
-
-// SetupICEMonitorForTest exposes setupICEMonitor for tests.
-func (h *Hub) SetupICEMonitorForTest(c *Client, channelID int64) {
-	h.setupICEMonitor(c, channelID)
-}
-
-// setupICECallback registers an OnICECandidate handler on the client's
-// PeerConnection to send server-generated ICE candidates to the client.
-func (h *Hub) setupICECallback(c *Client, channelID int64) {
-	pc := c.getPC()
-	if pc == nil {
-		return
-	}
-	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		if candidate == nil {
-			slog.Debug("ICE gathering complete", "user_id", c.userID, "channel_id", channelID)
-			return
-		}
-		slog.Debug("SFU ICE candidate generated",
-			"user_id", c.userID,
-			"type", candidate.Typ.String(),
-			"address", candidate.Address,
-			"port", candidate.Port,
-			"protocol", candidate.Protocol.String())
-		c.sendMsg(buildVoiceICE(channelID, candidate.ToJSON()))
-	})
-}
-
-// renegotiateParticipant creates a new SDP offer for the given client
-// and sends it as voice_offer. Implements the "impolite" side of
-// Perfect Negotiation — skips if PC is in have-remote-offer state.
-func (h *Hub) renegotiateParticipant(c *Client) {
-	// Serialise all SDP signalling for this client so concurrent OnTrack
-	// goroutines don't race through state-check → rollback → createOffer.
-	c.negoMu.Lock()
-	defer c.negoMu.Unlock()
-
-	pc := c.getPC()
-	if pc == nil {
-		return
-	}
-
-	// Perfect Negotiation: server is impolite — skip if we're already
-	// mid-negotiation (client sent us an offer, or we sent one and are
-	// waiting for an answer).
-	state := pc.SignalingState()
-	slog.Debug("renegotiateParticipant enter",
-		"user_id", c.userID, "signaling_state", state.String())
-	if state == webrtc.SignalingStateHaveRemoteOffer {
-		slog.Info("renegotiate skipped: have-remote-offer",
-			"user_id", c.userID)
-		return
-	}
-	if state == webrtc.SignalingStateHaveLocalOffer {
-		// Roll back our pending offer so we can create a fresh one
-		// that includes all current tracks.
-		if err := pc.SetLocalDescription(webrtc.SessionDescription{
-			Type: webrtc.SDPTypeRollback,
-		}); err != nil {
-			slog.Error("renegotiateParticipant rollback failed",
-				"err", err, "user_id", c.userID)
-			return
-		}
-		slog.Debug("renegotiateParticipant rollback OK",
-			"user_id", c.userID)
-	}
-
-	offer, err := pc.CreateOffer(nil)
-	if err != nil {
-		slog.Error("renegotiateParticipant CreateOffer",
-			"err", err, "user_id", c.userID)
-		return
-	}
-
-	if err := pc.SetLocalDescription(offer); err != nil {
-		slog.Error("renegotiateParticipant SetLocalDescription",
-			"err", err, "user_id", c.userID)
-		return
-	}
-
-	channelID := c.getVoiceChID()
-	slog.Debug("renegotiateParticipant offer sent",
-		"user_id", c.userID, "channel_id", channelID,
-		"signaling_state", pc.SignalingState().String())
-	c.sendMsg(buildVoiceOffer(channelID, offer.SDP))
 }
 
 // handleVoiceJoin processes a voice_join message.
 // 1. Parses channel_id.
 // 2. Checks CONNECT_VOICE permission.
 // 3. If already in a different voice channel, leaves it first.
-// 4. Gets or creates VoiceRoom with config from channel settings.
-// 5. Adds participant to VoiceRoom (checks capacity).
-// 6. Persists join in DB.
-// 7. Creates PeerConnection if SFU is available.
-// 8. Broadcasts voice_state to channel.
-// 9. Sends existing voice states to joiner.
-// 10. Sends voice_config to joiner.
+// 4. Checks channel capacity (voice_max_users).
+// 5. Persists join in DB.
+// 6. Generates LiveKit token and sends voice_token to the client.
+// 7. Sends existing voice states to the joiner.
+// 8. Broadcasts voice_state to all clients.
+// 9. Sends voice_config to the joiner.
 func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 	channelID, err := parseChannelID(payload)
 	if err != nil || channelID <= 0 {
@@ -176,7 +52,7 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 
 	currentChID := c.getVoiceChID()
 
-	// HIGH-2: If user is already in the same voice channel, no-op.
+	// If user is already in the same voice channel, no-op.
 	if currentChID == channelID {
 		c.sendMsg(buildErrorMsg("ALREADY_JOINED", "already in this voice channel"))
 		return
@@ -193,76 +69,52 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 		return
 	}
 
-	roomCfg := h.buildVoiceRoomConfig(ch)
-	room := h.GetOrCreateVoiceRoom(channelID, roomCfg)
-
-	if addErr := room.AddParticipant(c.userID); addErr != nil {
-		if errors.Is(addErr, ErrRoomFull) {
-			c.sendMsg(buildErrorMsg("CHANNEL_FULL", "voice channel is full"))
-		} else {
-			c.sendMsg(buildErrorMsg("VOICE_ERROR", "failed to join voice channel"))
+	// Check channel capacity.
+	maxUsers := ch.VoiceMaxUsers
+	if maxUsers > 0 {
+		existing, qErr := h.db.GetChannelVoiceStates(channelID)
+		if qErr != nil {
+			slog.Error("ws handleVoiceJoin GetChannelVoiceStates", "err", qErr, "channel_id", channelID)
+			c.sendMsg(buildErrorMsg("INTERNAL", "failed to check channel capacity"))
+			return
 		}
-		return
+		if len(existing) >= maxUsers {
+			c.sendMsg(buildErrorMsg("CHANNEL_FULL", "voice channel is full"))
+			return
+		}
 	}
 
+	// Persist to DB.
 	if err := h.db.JoinVoiceChannel(c.userID, channelID); err != nil {
-		room.RemoveParticipant(c.userID)
 		slog.Error("ws handleVoiceJoin JoinVoiceChannel", "err", err, "user_id", c.userID)
 		c.sendMsg(buildErrorMsg("INTERNAL", "failed to join voice channel"))
 		return
 	}
 
-	// Create PeerConnection if SFU is available. Non-fatal on failure.
-	var pc *webrtc.PeerConnection
-	if h.sfu != nil {
-		var pcErr error
-		pc, pcErr = h.sfu.NewPeerConnection()
-		if pcErr != nil {
-			slog.Error("ws handleVoiceJoin NewPeerConnection", "err", pcErr, "user_id", c.userID)
+	// Set voice channel on the client.
+	c.setVoiceChID(channelID)
+
+	// Generate LiveKit token if LiveKit client is available.
+	if h.livekit != nil {
+		canPublish := true
+		canSubscribe := true
+		token, tokenErr := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, canPublish, canSubscribe)
+		if tokenErr != nil {
+			slog.Error("ws handleVoiceJoin GenerateToken", "err", tokenErr, "user_id", c.userID)
+			// Non-fatal: voice join still succeeds at the DB/state level.
+		} else {
+			c.sendMsg(buildVoiceToken(channelID, token, h.livekit.URL()))
 		}
 	}
 
-	// Track the voice channel and PC on the client atomically (CRIT-1 fix).
-	c.setVoice(channelID, pc)
-
-	// Add existing tracks to the new joiner's PC so they hear
-	// participants who joined before them.
-	if pc != nil {
-		existingTracks := room.GetTracks()
-		addedExisting := 0
-		for _, vt := range existingTracks {
-			if vt.Local == nil || vt.UserID == c.userID {
-				continue
-			}
-			sender, addErr := pc.AddTrack(vt.Local)
-			if addErr != nil {
-				slog.Error("handleVoiceJoin AddTrack existing",
-					"err", addErr,
-					"from", vt.UserID, "to", c.userID)
-				continue
-			}
-			vt.AddSender(c.userID, sender)
-			addedExisting++
-		}
-		slog.Info("existing tracks added to new joiner",
-			"user_id", c.userID,
-			"existing_tracks_total", len(existingTracks),
-			"tracks_added", addedExisting)
-	}
-
-	if pc != nil {
-		h.setupOnTrack(c, channelID)
-		h.setupICEMonitor(c, channelID)
-		h.setupICECallback(c, channelID)
-	}
-
+	// Get and broadcast the joiner's state.
 	state, err := h.db.GetVoiceState(c.userID)
 	if err != nil || state == nil {
 		slog.Error("ws handleVoiceJoin GetVoiceState", "err", err, "user_id", c.userID)
 		return
 	}
 
-	// Broadcast the joiner's state to all connected clients so every sidebar updates.
+	// Broadcast the joiner's state to all connected clients.
 	h.BroadcastToAll(buildVoiceState(*state))
 
 	// Send existing channel voice states to the joiner.
@@ -278,114 +130,41 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 		c.sendMsg(buildVoiceState(vs))
 	}
 
-	// Send voice_config to the joiner with room settings.
-	quality := roomCfg.Quality
-	bitrate := 64000 // default medium
-	if h.sfu != nil {
-		bitrate = h.sfu.QualityBitrate()
-	}
-	c.sendMsg(buildVoiceConfig(channelID, quality, bitrate, room.Mode(), roomCfg.MixingThreshold, roomCfg.TopSpeakers, roomCfg.MaxUsers))
-
-	slog.Info("voice join", "user_id", c.userID, "channel_id", channelID, "participants", room.ParticipantCount(), "mode", room.Mode())
-}
-
-// buildVoiceRoomConfig constructs a VoiceRoomConfig from channel settings and server defaults.
-func (h *Hub) buildVoiceRoomConfig(ch *db.Channel) VoiceRoomConfig {
-	cfg := VoiceRoomConfig{
-		ChannelID:       ch.ID,
-		MaxUsers:        ch.VoiceMaxUsers,
-		Quality:         "medium",
-		MixingThreshold: 10,
-		TopSpeakers:     3,
-		MaxVideo:        ch.VoiceMaxVideo,
-	}
+	// Send voice_config to the joiner.
+	quality := "medium"
 	if ch.VoiceQuality != nil && *ch.VoiceQuality != "" {
-		cfg.Quality = *ch.VoiceQuality
+		quality = *ch.VoiceQuality
 	}
-	if ch.MixingThreshold != nil {
-		cfg.MixingThreshold = *ch.MixingThreshold
-	}
-	return cfg
+	bitrate := qualityBitrate(quality)
+	c.sendMsg(buildVoiceConfig(channelID, quality, bitrate, maxUsers))
+
+	slog.Info("voice join", "user_id", c.userID, "channel_id", channelID)
 }
 
 // handleVoiceLeave processes an explicit voice_leave message or a disconnect.
-// 1. Reads current voice state (for broadcast).
-// 2. Closes PeerConnection if active.
-// 3. Removes participant from VoiceRoom; removes room if empty.
-// 4. Removes voice state from DB.
-// 5. Broadcasts voice_leave to the channel the user was in.
+// 1. Gets old voiceChID from clearVoiceChID().
+// 2. If was in voice: remove from DB, broadcast voice_leave.
+// 3. Call livekit.RemoveParticipant (ignore errors — participant may already be gone).
 func (h *Hub) handleVoiceLeave(c *Client) {
-	// Atomically clear voice state and get old values for cleanup (CRIT-1 fix).
-	// Only the first caller gets real values; concurrent calls (e.g. ICE
-	// callbacks racing with an explicit voice_leave) get oldChID=0 and
-	// become no-ops.
-	oldChID, oldPC := c.clearVoice()
-	if oldChID == 0 && oldPC == nil {
+	oldChID := c.clearVoiceChID()
+	if oldChID == 0 {
 		slog.Debug("handleVoiceLeave no-op (already cleared)", "user_id", c.userID)
 		return
 	}
 
-	// Close PeerConnection if active.
-	// This also causes any setupOnTrack goroutine to exit via track.Read error (HIGH-1).
-	if oldPC != nil {
-		if closeErr := oldPC.Close(); closeErr != nil {
-			slog.Error("ws handleVoiceLeave pc.Close", "err", closeErr, "user_id", c.userID)
-		}
-	}
-
-	// Remove this user's track from all subscribers' PCs.
-	// Done AFTER oldPC.Close() so the RTP goroutine has exited.
-	if oldChID > 0 {
-		if room := h.GetVoiceRoom(oldChID); room != nil {
-			needsRenego := make(map[int64]*Client)
-			for _, kind := range []string{"audio", "video"} {
-				vt := room.RemoveTrack(c.userID, kind)
-				if vt == nil {
-					continue
-				}
-				senders := vt.CopySenders()
-				for subID, sender := range senders {
-					sub := h.GetClient(subID)
-					if sub == nil {
-						continue
-					}
-					subPC := sub.getPC()
-					if subPC == nil {
-						continue
-					}
-					if rmErr := subPC.RemoveTrack(sender); rmErr != nil {
-						slog.Error("handleVoiceLeave RemoveTrack",
-							"err", rmErr, "user_id", subID, "kind", kind)
-					} else {
-						slog.Debug("handleVoiceLeave track removed from subscriber",
-							"leaving_user", c.userID, "subscriber", subID, "kind", kind)
-					}
-					needsRenego[subID] = sub
-				}
-			}
-			for _, sub := range needsRenego {
-				h.renegotiateParticipant(sub)
-			}
-		}
-	}
-
-	// Remove from VoiceRoom and clean up empty rooms.
-	if oldChID > 0 {
-		if room := h.GetVoiceRoom(oldChID); room != nil {
-			room.RemoveParticipant(c.userID)
-			if room.IsEmpty() {
-				h.RemoveVoiceRoom(oldChID)
-			}
-		}
-	}
-
 	slog.Info("voice leave", "user_id", c.userID, "channel_id", oldChID)
 
-	if oldChID > 0 {
-		if leaveErr := h.db.LeaveVoiceChannel(c.userID); leaveErr != nil {
-			slog.Error("ws handleVoiceLeave LeaveVoiceChannel", "err", leaveErr, "user_id", c.userID)
+	if leaveErr := h.db.LeaveVoiceChannel(c.userID); leaveErr != nil {
+		slog.Error("ws handleVoiceLeave LeaveVoiceChannel", "err", leaveErr, "user_id", c.userID)
+	}
+	h.BroadcastToAll(buildVoiceLeave(oldChID, c.userID))
+
+	// Remove from LiveKit (best-effort).
+	if h.livekit != nil {
+		if err := h.livekit.RemoveParticipant(oldChID, c.userID); err != nil {
+			slog.Debug("handleVoiceLeave RemoveParticipant (may already be gone)",
+				"err", err, "user_id", c.userID, "channel_id", oldChID)
 		}
-		h.BroadcastToAll(buildVoiceLeave(oldChID, c.userID))
 	}
 }
 
@@ -439,8 +218,9 @@ func (h *Hub) handleVoiceDeafen(c *Client, payload json.RawMessage) {
 // 1. Rate limits at 2/sec per user.
 // 2. Checks USE_VIDEO permission.
 // 3. Parses enabled bool.
-// 4. Updates DB.
-// 5. Broadcasts voice_state update to channel.
+// 4. Enforces MaxVideo limit via LiveKit.
+// 5. Updates DB.
+// 6. Broadcasts voice_state update to channel.
 func (h *Hub) handleVoiceCamera(c *Client, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("voice_camera:%d", c.userID)
 	if !h.limiter.Allow(ratKey, voiceCameraRateLimit, voiceCameraWindow) {
@@ -468,22 +248,15 @@ func (h *Hub) handleVoiceCamera(c *Client, payload json.RawMessage) {
 
 	// Enforce MaxVideo limit when enabling camera.
 	if p.Enabled {
-		room := h.GetVoiceRoom(voiceChID)
-		if room != nil {
-			cfg := room.Config()
-			if cfg.MaxVideo > 0 {
-				allTracks := room.GetTracks()
-				videoCount := 0
-				for _, vt := range allTracks {
-					if vt.Local != nil && strings.HasPrefix(vt.Local.ID(), "video-") {
-						videoCount++
-					}
-				}
-				if videoCount >= cfg.MaxVideo {
-					c.sendMsg(buildErrorMsg("VIDEO_LIMIT",
-						fmt.Sprintf("maximum %d video streams reached", cfg.MaxVideo)))
-					return
-				}
+		ch, chErr := h.db.GetChannel(voiceChID)
+		if chErr == nil && ch != nil && ch.VoiceMaxVideo > 0 && h.livekit != nil {
+			videoCount, countErr := h.livekit.CountVideoTracks(voiceChID)
+			if countErr != nil {
+				slog.Error("handleVoiceCamera CountVideoTracks", "err", countErr, "channel_id", voiceChID)
+			} else if videoCount >= ch.VoiceMaxVideo {
+				c.sendMsg(buildErrorMsg("VIDEO_LIMIT",
+					fmt.Sprintf("maximum %d video streams reached", ch.VoiceMaxVideo)))
+				return
 			}
 		}
 	}
@@ -537,412 +310,6 @@ func (h *Hub) handleVoiceScreenshare(c *Client, payload json.RawMessage) {
 	slog.Debug("voice screenshare changed", "user_id", c.userID, "enabled", p.Enabled)
 
 	h.broadcastVoiceStateUpdate(c)
-}
-
-// handleVoiceOffer processes a voice_offer from the client.
-// The client sends an SDP offer; the server sets it as remote description
-// on the client's PeerConnection, creates an answer, and sends it back.
-func (h *Hub) handleVoiceOffer(c *Client, payload json.RawMessage) {
-	ratKey := fmt.Sprintf("voice_signal:%d", c.userID)
-	if !h.limiter.Allow(ratKey, voiceSignalRateLimit, voiceSignalWindow) {
-		c.sendMsg(buildRateLimitError("too many signaling messages", voiceSignalWindow.Seconds()))
-		return
-	}
-
-	pc := c.getPC()
-	if pc == nil {
-		c.sendMsg(buildErrorMsg("VOICE_ERROR", "not in a voice channel"))
-		return
-	}
-
-	var p struct {
-		ChannelID json.Number `json:"channel_id"`
-		SDP       string      `json:"sdp"`
-	}
-	if err := json.Unmarshal(payload, &p); err != nil {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "invalid voice_offer payload"))
-		return
-	}
-	if p.SDP == "" {
-		c.sendMsg(buildErrorMsg("INVALID_SDP", "SDP is required"))
-		return
-	}
-
-	offer := webrtc.SessionDescription{
-		Type: webrtc.SDPTypeOffer,
-		SDP:  p.SDP,
-	}
-
-	// Serialise SDP signalling so a concurrent renegotiateParticipant
-	// cannot race with this offer/answer exchange.
-	c.negoMu.Lock()
-	defer c.negoMu.Unlock()
-
-	stateBefore := pc.SignalingState()
-	slog.Debug("handleVoiceOffer enter",
-		"user_id", c.userID, "signaling_state", stateBefore.String())
-
-	// Perfect Negotiation: if we already have a pending local offer (glare
-	// condition — server and client sent offers simultaneously), roll back
-	// ours so we can accept the client's offer.
-	if stateBefore == webrtc.SignalingStateHaveLocalOffer {
-		if err := pc.SetLocalDescription(webrtc.SessionDescription{
-			Type: webrtc.SDPTypeRollback,
-		}); err != nil {
-			slog.Error("ws handleVoiceOffer rollback failed", "err", err, "user_id", c.userID)
-			c.sendMsg(buildErrorMsg("VOICE_ERROR", "failed to resolve signaling conflict"))
-			return
-		}
-		slog.Info("handleVoiceOffer rolled back local offer (glare)", "user_id", c.userID)
-	}
-
-	if err := pc.SetRemoteDescription(offer); err != nil {
-		slog.Error("ws handleVoiceOffer SetRemoteDescription", "err", err, "user_id", c.userID)
-		c.sendMsg(buildErrorMsg("INVALID_SDP", "failed to set remote description"))
-		return
-	}
-
-	answer, err := pc.CreateAnswer(nil)
-	if err != nil {
-		slog.Error("ws handleVoiceOffer CreateAnswer", "err", err, "user_id", c.userID)
-		c.sendMsg(buildErrorMsg("VOICE_ERROR", "failed to create answer"))
-		return
-	}
-
-	if err := pc.SetLocalDescription(answer); err != nil {
-		slog.Error("ws handleVoiceOffer SetLocalDescription", "err", err, "user_id", c.userID)
-		c.sendMsg(buildErrorMsg("VOICE_ERROR", "failed to set local description"))
-		return
-	}
-
-	slog.Debug("handleVoiceOffer answer sent",
-		"user_id", c.userID,
-		"signaling_state", pc.SignalingState().String())
-	// Send the answer back to the client.
-	c.sendMsg(buildVoiceAnswer(c.getVoiceChID(), answer.SDP))
-}
-
-// handleVoiceAnswer processes a voice_answer from the client.
-// This handles the case where the server sent an offer (e.g., renegotiation)
-// and the client responds with an answer.
-func (h *Hub) handleVoiceAnswer(c *Client, payload json.RawMessage) {
-	ratKey := fmt.Sprintf("voice_signal:%d", c.userID)
-	if !h.limiter.Allow(ratKey, voiceSignalRateLimit, voiceSignalWindow) {
-		c.sendMsg(buildRateLimitError("too many signaling messages", voiceSignalWindow.Seconds()))
-		return
-	}
-
-	pc := c.getPC()
-	if pc == nil {
-		c.sendMsg(buildErrorMsg("VOICE_ERROR", "not in a voice channel"))
-		return
-	}
-
-	var p struct {
-		ChannelID json.Number `json:"channel_id"`
-		SDP       string      `json:"sdp"`
-	}
-	if err := json.Unmarshal(payload, &p); err != nil {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "invalid voice_answer payload"))
-		return
-	}
-	if p.SDP == "" {
-		c.sendMsg(buildErrorMsg("INVALID_SDP", "SDP is required"))
-		return
-	}
-
-	answer := webrtc.SessionDescription{
-		Type: webrtc.SDPTypeAnswer,
-		SDP:  p.SDP,
-	}
-
-	// Serialise with renegotiateParticipant — SetRemoteDescription(answer)
-	// transitions from have-local-offer → stable and must not race with a
-	// concurrent rollback + new offer.
-	c.negoMu.Lock()
-	defer c.negoMu.Unlock()
-
-	stateBefore := pc.SignalingState()
-	if err := pc.SetRemoteDescription(answer); err != nil {
-		slog.Error("ws handleVoiceAnswer SetRemoteDescription", "err", err, "user_id", c.userID)
-		c.sendMsg(buildErrorMsg("INVALID_SDP", "failed to set remote description"))
-		return
-	}
-	slog.Debug("handleVoiceAnswer applied",
-		"user_id", c.userID,
-		"state_before", stateBefore.String(),
-		"state_after", pc.SignalingState().String())
-}
-
-// handleVoiceICE processes a voice_ice (ICE candidate) from the client.
-func (h *Hub) handleVoiceICE(c *Client, payload json.RawMessage) {
-	// ICE candidates use a separate, higher rate limit — they arrive in bursts
-	// during connection setup and are mandatory for connectivity.
-	ratKey := fmt.Sprintf("voice_ice:%d", c.userID)
-	if !h.limiter.Allow(ratKey, voiceICERateLimit, voiceICEWindow) {
-		c.sendMsg(buildRateLimitError("too many ICE candidates", voiceICEWindow.Seconds()))
-		return
-	}
-
-	pc := c.getPC()
-	if pc == nil {
-		c.sendMsg(buildErrorMsg("VOICE_ERROR", "not in a voice channel"))
-		return
-	}
-
-	var p struct {
-		ChannelID json.Number             `json:"channel_id"`
-		Candidate webrtc.ICECandidateInit `json:"candidate"`
-	}
-	if err := json.Unmarshal(payload, &p); err != nil {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "invalid voice_ice payload"))
-		return
-	}
-
-	slog.Debug("client ICE candidate received",
-		"user_id", c.userID,
-		"candidate", p.Candidate.Candidate)
-	if err := pc.AddICECandidate(p.Candidate); err != nil {
-		slog.Error("ws handleVoiceICE AddICECandidate", "err", err, "user_id", c.userID)
-		c.sendMsg(buildErrorMsg("VOICE_ERROR", "failed to add ICE candidate"))
-		return
-	}
-	slog.Debug("client ICE candidate added", "user_id", c.userID)
-}
-
-// handleSoundboard processes a soundboard_play message.
-// 1. Rate limits at 1 per 3 seconds.
-// 2. Checks USE_SOUNDBOARD permission.
-// 3. Broadcasts soundboard_play (with user_id) to all connected clients.
-func (h *Hub) handleSoundboard(c *Client, payload json.RawMessage) {
-	ratKey := fmt.Sprintf("soundboard:%d", c.userID)
-	if !h.limiter.Allow(ratKey, soundboardRateLimit, soundboardWindow) {
-		c.sendMsg(buildErrorMsg("RATE_LIMITED", "soundboard is on cooldown"))
-		return
-	}
-
-	// channelID=0: soundboard is a server-wide permission with no per-channel
-	// override. The client does not send a channel_id in the payload.
-	if !h.requireChannelPerm(c, 0, permissions.UseSoundboard, "USE_SOUNDBOARD") {
-		return
-	}
-
-	var p struct {
-		SoundID string `json:"sound_id"`
-	}
-	if err := json.Unmarshal(payload, &p); err != nil || p.SoundID == "" {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "sound_id is required"))
-		return
-	}
-
-	h.BroadcastToAll(buildSoundboardPlay(p.SoundID, c.userID))
-}
-
-// setupOnTrack configures the PeerConnection's OnTrack handler to:
-// 1. Create a TrackLocalStaticRTP for SFU fan-out.
-// 2. Store it on the VoiceRoom as a VoiceTrack.
-// 3. Add the local track to all other participants' PCs and renegotiate.
-// 4. Forward RTP packets while parsing audio levels for speaker detection.
-//
-// Must be called after c.pc is set and before SDP negotiation completes.
-func (h *Hub) setupOnTrack(c *Client, channelID int64) {
-	pc := c.getPC()
-	if pc == nil {
-		return
-	}
-
-	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		// Determine kind from the remote track.
-		var kind string
-		switch track.Kind() {
-		case webrtc.RTPCodecTypeAudio:
-			kind = "audio"
-		case webrtc.RTPCodecTypeVideo:
-			kind = "video"
-		default:
-			return
-		}
-
-		slog.Info("SFU OnTrack",
-			"user_id", c.userID,
-			"channel_id", channelID,
-			"kind", kind,
-			"codec", track.Codec().MimeType,
-		)
-
-		// Create local track for fan-out using the remote track's codec.
-		local, err := webrtc.NewTrackLocalStaticRTP(
-			track.Codec().RTPCodecCapability,
-			fmt.Sprintf("%s-%d", kind, c.userID),
-			fmt.Sprintf("user-%d-%s", c.userID, kind),
-		)
-		if err != nil {
-			slog.Error("setupOnTrack NewTrackLocalStaticRTP",
-				"err", err, "user_id", c.userID, "kind", kind)
-			return
-		}
-
-		room := h.GetVoiceRoom(channelID)
-		if room == nil {
-			return
-		}
-
-		// Store track on room.
-		room.SetTrack(c.userID, kind, track, local)
-		vt := room.GetTrack(c.userID, kind)
-
-		// Collect other participant IDs (lock ordering: VoiceRoom.mu released before voiceMu).
-		participantIDs := room.ParticipantIDs()
-
-		// Add local track to each other participant's PC.
-		addedCount := 0
-		for _, pid := range participantIDs {
-			if pid == c.userID {
-				continue
-			}
-			other := h.GetClient(pid)
-			if other == nil {
-				slog.Debug("setupOnTrack: participant not found", "from", c.userID, "to", pid)
-				continue
-			}
-			otherPC := other.getPC()
-			if otherPC == nil {
-				slog.Debug("setupOnTrack: participant has no PC", "from", c.userID, "to", pid)
-				continue
-			}
-			sender, addErr := otherPC.AddTrack(local)
-			if addErr != nil {
-				slog.Error("setupOnTrack AddTrack",
-					"err", addErr,
-					"from", c.userID, "to", pid)
-				continue
-			}
-			if vt != nil {
-				vt.AddSender(pid, sender)
-			}
-			addedCount++
-			slog.Debug("setupOnTrack track added to subscriber",
-				"from", c.userID, "to", pid, "kind", kind)
-			h.renegotiateParticipant(other)
-		}
-		slog.Info("SFU track fan-out",
-			"from_user", c.userID,
-			"channel_id", channelID,
-			"kind", kind,
-			"participants", len(participantIDs),
-			"tracks_added", addedCount)
-
-		// Log transceiver state on each subscriber's PC for this track
-		for _, pid := range participantIDs {
-			if pid == c.userID {
-				continue
-			}
-			other := h.GetClient(pid)
-			if other == nil {
-				continue
-			}
-			otherPC := other.getPC()
-			if otherPC == nil {
-				continue
-			}
-			for _, tr := range otherPC.GetTransceivers() {
-				if tr.Sender() != nil && tr.Sender().Track() != nil &&
-					tr.Sender().Track().StreamID() == fmt.Sprintf("user-%d-%s", c.userID, kind) {
-					slog.Info("subscriber transceiver state",
-						"subscriber", pid,
-						"track_from", c.userID,
-						"direction", tr.Direction().String(),
-						"mid", tr.Mid(),
-						"sender_track_id", tr.Sender().Track().ID(),
-						"sender_track_stream", tr.Sender().Track().StreamID())
-				}
-			}
-		}
-
-		// RTP forwarding + audio level goroutine.
-		// Capture the done channel so this goroutine exits even if PC.Close fails.
-		done := c.getVoiceDone()
-		go func() {
-			buf := make([]byte, 1500)
-			var pktCount uint64
-
-			// Warn if no RTP packets arrive within 5 seconds
-			noPacketTimer := time.AfterFunc(5*time.Second, func() {
-				slog.Warn("RTP: no packets received after 5s",
-					"user_id", c.userID,
-					"channel_id", channelID,
-					"kind", kind)
-			})
-			defer noPacketTimer.Stop()
-
-			for {
-				// Check if voice session was torn down.
-				select {
-				case <-done:
-					slog.Info("RTP goroutine exiting via done signal",
-						"user_id", c.userID, "channel_id", channelID,
-						"kind", kind,
-						"packets_forwarded", pktCount)
-					return
-				default:
-				}
-
-				n, _, readErr := track.Read(buf)
-				if readErr != nil {
-					slog.Info("RTP read ended",
-						"user_id", c.userID,
-						"channel_id", channelID,
-						"kind", kind,
-						"packets_forwarded", pktCount,
-						"err", readErr.Error())
-					return
-				}
-
-				// Forward RTP to local track (Pion fans out to all subscribers).
-				if _, writeErr := local.Write(buf[:n]); writeErr != nil {
-					slog.Info("RTP write ended",
-						"user_id", c.userID,
-						"channel_id", channelID,
-						"kind", kind,
-						"packets_forwarded", pktCount,
-						"err", writeErr.Error())
-					return
-				}
-				pktCount++
-				if pktCount == 1 {
-					noPacketTimer.Stop()
-					slog.Info("RTP first packet received",
-						"user_id", c.userID,
-						"channel_id", channelID,
-						"kind", kind,
-						"bytes", n)
-				} else if pktCount%1000 == 0 {
-					slog.Info("RTP forwarding",
-						"user_id", c.userID,
-						"channel_id", channelID,
-						"kind", kind,
-						"packets", pktCount)
-				}
-
-				// Speaker detection only applies to audio tracks.
-				if kind != "audio" {
-					continue
-				}
-
-				// Extract audio level directly from raw RTP bytes (avoids full Unmarshal).
-				level, ok := extractAudioLevel(buf, n)
-				if !ok {
-					continue
-				}
-
-				currentRoom := h.GetVoiceRoom(channelID)
-				if currentRoom == nil {
-					return
-				}
-				currentRoom.UpdateSpeakerLevel(c.userID, level)
-			}
-		}()
-	})
 }
 
 // broadcastVoiceStateUpdate fetches the current voice state for the client
