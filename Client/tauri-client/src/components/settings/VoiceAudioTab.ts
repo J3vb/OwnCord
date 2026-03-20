@@ -234,12 +234,10 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
   });
   const sensitivityLabel = createElement("span", { class: "slider-val" }, `${savedSensitivity}%`);
 
-  // Position threshold indicator
+  // Position threshold indicator — matches slider direction:
+  // slider left (low sensitivity) = indicator left, slider right = indicator right
   function updateThresholdIndicator(sensitivity: number): void {
-    const threshold = ((100 - sensitivity) / 100) * 0.15;
-    // Map threshold (0-0.15) to percentage position (0-100%)
-    const pct = Math.min((threshold / 0.15) * 100, 100);
-    meterThreshold.style.left = `${pct}%`;
+    meterThreshold.style.left = `${sensitivity}%`;
   }
   updateThresholdIndicator(savedSensitivity);
 

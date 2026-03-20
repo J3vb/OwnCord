@@ -9,12 +9,10 @@
 import {
   Room,
   RoomEvent,
-  ParticipantEvent,
   Track,
   type RemoteTrack,
   type RemoteTrackPublication,
   type RemoteParticipant,
-  type Participant,
   DisconnectReason,
 } from "livekit-client";
 import type { WsClient } from "@lib/ws";
@@ -43,6 +41,11 @@ let onErrorCallback: ((message: string) => void) | null = null;
 let currentChannelId: number | null = null;
 /** Server host (e.g. "192.168.0.247:8443") for constructing LiveKit proxy URL. */
 let serverHost: string | null = null;
+
+// Speaking detection via audioLevel polling
+let speakingPollInterval: ReturnType<typeof setInterval> | null = null;
+/** Cached sensitivity threshold (0.0-0.15). Updated by setVoiceSensitivity. */
+let speakingThreshold = ((100 - 50) / 100) * 0.15; // default: sensitivity 50
 
 /** The raw mic stream acquired for RNNoise processing (must be stopped on cleanup). */
 let rawMicStream: MediaStream | null = null;
@@ -168,6 +171,10 @@ function handleTrackSubscribed(
     container.appendChild(audioEl);
     const trackKey = `${participant.identity}-${track.sid}`;
     audioElements.set(trackKey, audioEl);
+    // Create analyser for remote speaking detection
+    if (userId > 0) {
+      addRemoteAnalyser(userId, track.mediaStreamTrack);
+    }
     log.debug("Remote audio track subscribed", { userId, trackSid: track.sid });
   } else if (track.kind === Track.Kind.Video) {
     if (userId > 0 && onRemoteVideoCallback !== null) {
@@ -193,6 +200,9 @@ function handleTrackUnsubscribed(
     });
     const trackKey = `${participant.identity}-${track.sid}`;
     audioElements.delete(trackKey);
+    if (userId > 0) {
+      removeRemoteAnalyser(userId);
+    }
     log.debug("Remote audio track unsubscribed", { userId, trackSid: track.sid });
   } else if (track.kind === Track.Kind.Video) {
     track.detach();
@@ -203,29 +213,160 @@ function handleTrackUnsubscribed(
   }
 }
 
-/** Wire IsSpeakingChanged on a participant to update the voice store. */
-function wireSpeakingDetection(participant: Participant): void {
-  participant.on(ParticipantEvent.IsSpeakingChanged, (speaking: boolean) => {
-    if (currentChannelId === null) return;
-    const userId = parseUserId(participant.identity);
-    if (userId <= 0) return;
+// ---------------------------------------------------------------------------
+// Remote audio analysers — one per remote participant for speaking detection
+// ---------------------------------------------------------------------------
 
-    log.debug("IsSpeakingChanged", { userId, speaking, channelId: currentChannelId });
+interface RemoteAnalyser {
+  ctx: AudioContext;
+  analyser: AnalyserNode;
+  source: MediaStreamAudioSourceNode;
+  data: Uint8Array<ArrayBuffer>;
+}
 
-    // Build a speakers list from all currently speaking participants
+const remoteAnalysers = new Map<number, RemoteAnalyser>();
+
+function addRemoteAnalyser(userId: number, mediaTrack: MediaStreamTrack): void {
+  removeRemoteAnalyser(userId);
+  try {
+    const ctx = new AudioContext({ sampleRate: 48000 });
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.5;
+    const stream = new MediaStream([mediaTrack]);
+    const source = ctx.createMediaStreamSource(stream);
+    source.connect(analyser);
+    remoteAnalysers.set(userId, { ctx, analyser, source, data: new Uint8Array(128) as Uint8Array<ArrayBuffer> });
+  } catch (err) {
+    log.warn("Failed to create remote analyser", { userId, error: err });
+  }
+}
+
+function removeRemoteAnalyser(userId: number): void {
+  const ra = remoteAnalysers.get(userId);
+  if (ra) {
+    ra.source.disconnect();
+    ra.analyser.disconnect();
+    void ra.ctx.close();
+    remoteAnalysers.delete(userId);
+  }
+}
+
+function cleanupAllRemoteAnalysers(): void {
+  for (const [id] of remoteAnalysers) {
+    removeRemoteAnalyser(id);
+  }
+}
+
+/** Track whether local mic is currently gated by threshold. */
+let localMicGated = false;
+/** Local mic audio level analyser (Web Audio API). */
+let localAnalyser: AnalyserNode | null = null;
+let localAnalyserCtx: AudioContext | null = null;
+let localAnalyserSource: MediaStreamAudioSourceNode | null = null;
+let localAnalyserClonedTrack: MediaStreamTrack | null = null;
+const localAnalyserData = new Uint8Array(128);
+
+/** Compute RMS audio level (0-1) from frequency data. */
+function computeRms(data: Uint8Array<ArrayBuffer>): number {
+  let sum = 0;
+  for (let i = 0; i < data.length; i++) {
+    const v = (data[i] ?? 0) / 255;
+    sum += v * v;
+  }
+  return Math.sqrt(sum / data.length);
+}
+
+/** Start local mic audio analysis using Web Audio AnalyserNode. */
+function startLocalAnalyser(): void {
+  stopLocalAnalyser();
+  if (room === null) return;
+
+  const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+  const mediaTrack = micPub?.track?.mediaStreamTrack;
+  if (!mediaTrack) return;
+
+  try {
+    localAnalyserCtx = new AudioContext({ sampleRate: 48000 });
+    localAnalyser = localAnalyserCtx.createAnalyser();
+    localAnalyser.fftSize = 256;
+    localAnalyser.smoothingTimeConstant = 0.5;
+
+    // Clone the track so mic gating (track.enabled=false) doesn't
+    // kill the analyser's audio input — avoids a deadlock where
+    // gated silence keeps the threshold below forever.
+    localAnalyserClonedTrack = mediaTrack.clone();
+    const stream = new MediaStream([localAnalyserClonedTrack]);
+    localAnalyserSource = localAnalyserCtx.createMediaStreamSource(stream);
+    localAnalyserSource.connect(localAnalyser);
+    log.debug("Local mic analyser started");
+  } catch (err) {
+    log.warn("Failed to start local mic analyser", err);
+  }
+}
+
+function stopLocalAnalyser(): void {
+  if (localAnalyserSource !== null) {
+    localAnalyserSource.disconnect();
+    localAnalyserSource = null;
+  }
+  if (localAnalyser !== null) {
+    localAnalyser.disconnect();
+    localAnalyser = null;
+  }
+  if (localAnalyserClonedTrack !== null) {
+    localAnalyserClonedTrack.stop();
+    localAnalyserClonedTrack = null;
+  }
+  if (localAnalyserCtx !== null) {
+    void localAnalyserCtx.close();
+    localAnalyserCtx = null;
+  }
+}
+
+/** Start the speaking detection poll. Measures local mic via Web Audio
+ *  AnalyserNode (since LiveKit's audioLevel is always 0 for local
+ *  participant). Remote participants use LiveKit's audioLevel. */
+function startSpeakingPoll(): void {
+  stopSpeakingPoll();
+  localMicGated = false;
+  speakingPollInterval = setInterval(() => {
+    if (room === null || currentChannelId === null) return;
+
     const speakerIds: number[] = [];
-    if (room !== null) {
-      // Check local participant
-      if (room.localParticipant.isSpeaking) {
-        const localId = parseUserId(room.localParticipant.identity);
-        if (localId > 0) speakerIds.push(localId);
+
+    // Measure local mic level via Web Audio analyser
+    let localLevel = 0;
+    if (localAnalyser !== null) {
+      localAnalyser.getByteFrequencyData(localAnalyserData);
+      localLevel = computeRms(localAnalyserData);
+    }
+    const localSpeaking = localLevel > speakingThreshold;
+
+    // Gate local mic: disable track when below threshold (silence suppression)
+    const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+    if (micPub?.track?.mediaStreamTrack) {
+      if (localSpeaking && localMicGated) {
+        micPub.track.mediaStreamTrack.enabled = true;
+        localMicGated = false;
+      } else if (!localSpeaking && !localMicGated) {
+        micPub.track.mediaStreamTrack.enabled = false;
+        localMicGated = true;
       }
-      // Check all remote participants
-      for (const [, rp] of room.remoteParticipants) {
-        if (rp.isSpeaking) {
-          const rpId = parseUserId(rp.identity);
-          if (rpId > 0) speakerIds.push(rpId);
-        }
+    }
+
+    // Build speaker list for the ring
+    if (localSpeaking) {
+      const localId = parseUserId(room.localParticipant.identity);
+      if (localId > 0) speakerIds.push(localId);
+    }
+
+    // Check remote participants via their own audio analysers
+    for (const [userId, ra] of remoteAnalysers) {
+      ra.analyser.getByteFrequencyData(ra.data);
+      const rms = computeRms(ra.data);
+      if (rms > speakingThreshold) {
+        speakerIds.push(userId);
       }
     }
 
@@ -233,7 +374,16 @@ function wireSpeakingDetection(participant: Participant): void {
       channel_id: currentChannelId,
       speakers: speakerIds,
     });
-  });
+  }, 100);
+}
+
+function stopSpeakingPoll(): void {
+  if (speakingPollInterval !== null) {
+    clearInterval(speakingPollInterval);
+    speakingPollInterval = null;
+  }
+  stopLocalAnalyser();
+  cleanupAllRemoteAnalysers();
 }
 
 function handleDisconnected(reason?: DisconnectReason): void {
@@ -328,7 +478,6 @@ export async function handleVoiceToken(
     // Wire room events
     room.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
     room.on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed);
-    room.on(RoomEvent.ParticipantConnected, (p) => wireSpeakingDetection(p));
     room.on(RoomEvent.Disconnected, handleDisconnected);
 
     // Connect to LiveKit server with retry (LiveKit may still be initializing)
@@ -356,7 +505,6 @@ export async function handleVoiceToken(
           });
           room.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
           room.on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed);
-          room.on(RoomEvent.ParticipantConnected, (p) => wireSpeakingDetection(p));
           room.on(RoomEvent.Disconnected, handleDisconnected);
         } else {
           throw connectErr;
@@ -365,11 +513,9 @@ export async function handleVoiceToken(
     }
     log.info("Connected to LiveKit room", { channelId, url: resolvedUrl });
 
-    // Wire speaking detection on local participant + any already-connected remotes
-    wireSpeakingDetection(room.localParticipant);
-    for (const [, rp] of room.remoteParticipants) {
-      wireSpeakingDetection(rp);
-    }
+    // Start audioLevel polling for speaking ring (uses sensitivity slider threshold)
+    speakingThreshold = ((100 - loadPref<number>("voiceSensitivity", 50)) / 100) * 0.15;
+    startSpeakingPoll();
 
     // Enable microphone: use RNNoise if Enhanced Noise Suppression is on
     const enhancedNS = loadPref<boolean>("enhancedNoiseSuppression", false);
@@ -394,6 +540,9 @@ export async function handleVoiceToken(
     }
 
     currentChannelId = channelId;
+
+    // Start local mic level analyser (must be after mic is published)
+    startLocalAnalyser();
     log.info("Voice session active", { channelId });
   } catch (err) {
     log.error("Failed to connect to LiveKit", err);
@@ -424,6 +573,9 @@ export function leaveVoice(sendWs = true): void {
     noiseSuppressor.destroy();
     noiseSuppressor = null;
   }
+
+  // Stop speaking detection polling
+  stopSpeakingPoll();
 
   // Disconnect LiveKit room
   if (room !== null) {
@@ -603,9 +755,11 @@ export function getUserVolume(userId: number): number {
   return getSavedUserVolume(userId);
 }
 
-/** Update the VAD sensitivity — no-op in LiveKit (server handles VAD). */
-export function setVoiceSensitivity(_sensitivity: number): void {
-  // No local VAD in LiveKit mode — server/SFU handles speaker detection
+/** Update the speaking detection sensitivity threshold.
+ *  High sensitivity (100) = low threshold (picks up quiet sounds).
+ *  Low sensitivity (0) = high threshold (only loud sounds). */
+export function setVoiceSensitivity(sensitivity: number): void {
+  speakingThreshold = ((100 - sensitivity) / 100) * 0.15;
 }
 
 /** Get the local camera stream for self-view display. */
