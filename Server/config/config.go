@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -206,6 +207,14 @@ func Load(cfgPath string) (*Config, error) {
 	// Apply voice defaults for zero-value fields (koanf loses defaults when
 	// the YAML section is present but fields are commented out / omitted).
 	applyVoiceDefaults(&cfg.Voice)
+
+	// Warn if using default dev credentials — these are public and insecure.
+	if cfg.Voice.LiveKitAPISecret == "owncord-dev-secret-key-min-32chars" {
+		slog.Warn("using default LiveKit API secret — change voice.livekit_api_secret in config.yaml for production")
+	}
+	if cfg.Voice.LiveKitAPIKey == "devkey" {
+		slog.Warn("using default LiveKit API key — change voice.livekit_api_key in config.yaml for production")
+	}
 
 	return &cfg, nil
 }

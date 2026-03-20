@@ -108,6 +108,13 @@ func NewTestClientWithTokenHash(hub *Hub, user *db.User, tokenHash string, chann
 	}
 }
 
+// getChannelID returns the currently focused channel ID under mu.
+func (c *Client) getChannelID() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.channelID
+}
+
 // getVoiceChID returns the voice channel ID under voiceMu.
 func (c *Client) getVoiceChID() int64 {
 	c.voiceMu.Lock()
@@ -143,6 +150,22 @@ func (c *Client) sendMsg(msg []byte) {
 	case c.send <- msg:
 	default:
 		// Buffer full — drop rather than block the hub.
+	}
+}
+
+// trySendMsg queues a message and returns true if it was accepted, false if
+// the buffer is full or the channel is closed.
+func (c *Client) trySendMsg(msg []byte) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.sendClosed {
+		return false
+	}
+	select {
+	case c.send <- msg:
+		return true
+	default:
+		return false
 	}
 }
 

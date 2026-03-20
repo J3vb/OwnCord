@@ -258,13 +258,7 @@ func (h *Hub) SendToUser(userID int64, msg []byte) bool {
 	if !ok {
 		return false
 	}
-	select {
-	case c.send <- msg:
-		return true
-	default:
-		// send buffer full — drop rather than block.
-		return false
-	}
+	return c.trySendMsg(msg)
 }
 
 // ClientCount returns the number of currently registered clients (test helper).
@@ -295,17 +289,12 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	skipped := 0
 	for _, c := range h.clients {
 		// channelID == 0 → broadcast to everyone.
-		if bm.channelID != 0 && c.channelID != bm.channelID && c.getVoiceChID() != bm.channelID {
+		if bm.channelID != 0 && c.getChannelID() != bm.channelID && c.getVoiceChID() != bm.channelID {
 			skipped++
 			continue
 		}
-		select {
-		case c.send <- bm.msg:
-			delivered++
-		default:
-			slog.Warn("broadcast dropped: client send buffer full",
-				"user_id", c.userID, "channel_id", bm.channelID)
-		}
+		c.sendMsg(bm.msg)
+		delivered++
 	}
 	if bm.channelID != 0 {
 		slog.Debug("hub: channel broadcast",

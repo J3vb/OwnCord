@@ -19,7 +19,7 @@ import (
 )
 
 // tokenTTL is the validity duration for generated LiveKit access tokens.
-const tokenTTL = 24 * time.Hour
+const tokenTTL = 4 * time.Hour
 
 // LiveKitClient provides token generation and room management via
 // the LiveKit server SDK.

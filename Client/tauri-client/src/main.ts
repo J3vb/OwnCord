@@ -332,6 +332,8 @@ authStore.subscribe((state) => {
     dispatcherCleanup?.();
     dispatcherCleanup = null;
     ws.disconnect();
+    lastConnectToken = "";
+    lastConnectHost = "";
     // Clear stored credential on logout
     const host = api.getConfig().host;
     if (host) {

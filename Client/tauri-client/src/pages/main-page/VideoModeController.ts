@@ -46,6 +46,8 @@ export function createVideoModeController(
 ): VideoModeController {
   const { slots, videoGrid, getCurrentUserId } = opts;
   let videoMode = false;
+  /** Track whether we've already added the local self-view tile. */
+  let localTileAdded = false;
 
   function showVideoGrid(): void {
     if (videoMode) return;
@@ -94,20 +96,26 @@ export function createVideoModeController(
       showChat();
     }
 
-    // Manage local self-view tile
+    // Manage local self-view tile — only add once, skip if already showing
     const currentUserId = getCurrentUserId();
     if (voice.localCamera) {
-      const localStream = getLocalCameraStream();
-      if (localStream !== null) {
-        const me = channelUsers.get(currentUserId);
-        videoGrid.addStream(
-          currentUserId,
-          me?.username ? `${me.username} (You)` : "You",
-          localStream,
-        );
+      if (!localTileAdded) {
+        const localStream = getLocalCameraStream();
+        if (localStream !== null) {
+          const me = channelUsers.get(currentUserId);
+          videoGrid.addStream(
+            currentUserId,
+            me?.username ? `${me.username} (You)` : "You",
+            localStream,
+          );
+          localTileAdded = true;
+        }
       }
     } else {
-      videoGrid.removeStream(currentUserId);
+      if (localTileAdded) {
+        videoGrid.removeStream(currentUserId);
+        localTileAdded = false;
+      }
     }
 
     // Remove remote video tiles for users who turned off their camera
@@ -126,6 +134,7 @@ export function createVideoModeController(
 
   function destroy(): void {
     if (videoMode) showChat();
+    localTileAdded = false;
   }
 
   return {

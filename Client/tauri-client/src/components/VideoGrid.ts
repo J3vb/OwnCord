@@ -31,9 +31,22 @@ export function createVideoGrid(): VideoGridComponent {
   function addStream(userId: number, username: string, stream: MediaStream): void {
     if (root === null) return;
 
-    // Remove existing cell for this user first
-    if (cells.has(userId)) {
-      removeStream(userId);
+    // If a cell already exists for this user, update it in place
+    const existing = cells.get(userId);
+    if (existing) {
+      const video = existing.querySelector("video");
+      if (video !== null) {
+        // Only replace srcObject if the underlying tracks changed
+        const oldTracks = (video.srcObject as MediaStream | null)?.getTracks() ?? [];
+        const newTracks = stream.getTracks();
+        const tracksMatch =
+          oldTracks.length === newTracks.length &&
+          oldTracks.every((t, i) => t.id === newTracks[i]?.id);
+        if (!tracksMatch) {
+          video.srcObject = stream;
+        }
+      }
+      return;
     }
 
     const video = createElement("video", {

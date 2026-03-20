@@ -64,7 +64,7 @@ logging:
 	if err := os.MkdirAll(p.dataDir, 0o755); err != nil {
 		return "", fmt.Errorf("creating data dir: %w", err)
 	}
-	if err := os.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(content), 0o600); err != nil {
 		return "", fmt.Errorf("writing livekit config: %w", err)
 	}
 

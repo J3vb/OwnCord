@@ -483,13 +483,10 @@ func (h *Hub) broadcastExclude(channelID, excludeUserID int64, msg []byte) {
 		if uid == excludeUserID {
 			continue
 		}
-		if channelID != 0 && c.channelID != channelID {
+		if channelID != 0 && c.getChannelID() != channelID {
 			continue
 		}
-		select {
-		case c.send <- msg:
-		default:
-		}
+		c.sendMsg(msg)
 	}
 }
 

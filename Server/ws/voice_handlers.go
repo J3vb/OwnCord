@@ -96,6 +96,11 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 
 	// Generate LiveKit token if LiveKit client is available.
 	if h.livekit != nil {
+		if c.user == nil {
+			slog.Error("handleVoiceJoin: nil user on client", "user_id", c.userID)
+			c.sendMsg(buildErrorMsg("INTERNAL", "not authenticated"))
+			return
+		}
 		canPublish := true
 		canSubscribe := true
 		token, tokenErr := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, canPublish, canSubscribe)

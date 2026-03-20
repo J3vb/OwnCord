@@ -269,6 +269,7 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
 
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
+      let latestFrame = 0;
       function updateMeter(): void {
         if (signal.aborted) return;
         analyser.getByteFrequencyData(dataArray);
@@ -291,11 +292,11 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
           meterLevel.style.background = "#faa61a"; // yellow — below threshold
         }
 
-        const frame = requestAnimationFrame(updateMeter);
-        registerMic(stream, audioCtx, frame);
+        latestFrame = requestAnimationFrame(updateMeter);
+        registerMic(stream, audioCtx, latestFrame);
       }
-      const firstFrame = requestAnimationFrame(updateMeter);
-      registerMic(stream, audioCtx, firstFrame);
+      latestFrame = requestAnimationFrame(updateMeter);
+      registerMic(stream, audioCtx, latestFrame);
     } catch {
       // Mic access denied or unavailable — meter stays empty
     }

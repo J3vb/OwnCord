@@ -8,12 +8,22 @@ use windows::Win32::Security::Credentials::{
 };
 
 /// Data returned from `load_credential`.
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Clone)]
 pub struct CredentialData {
     pub username: String,
     pub token: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
+}
+
+impl std::fmt::Debug for CredentialData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CredentialData")
+            .field("username", &self.username)
+            .field("token", &"[REDACTED]")
+            .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 /// Build the target name used in Windows Credential Manager.
@@ -129,12 +139,12 @@ pub fn load_credential(host: String) -> Result<Option<CredentialData>, String> {
         let username = parsed
             .get("username")
             .and_then(|v| v.as_str())
-            .unwrap_or_default()
+            .ok_or("credential blob missing 'username' field")?
             .to_string();
         let token = parsed
             .get("token")
             .and_then(|v| v.as_str())
-            .unwrap_or_default()
+            .ok_or("credential blob missing 'token' field")?
             .to_string();
         let password = parsed
             .get("password")

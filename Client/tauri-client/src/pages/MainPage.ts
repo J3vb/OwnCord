@@ -496,8 +496,27 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     });
     unsubscribers.push(() => clearOnRemoteVideo());
 
-    // Subscribe to voice store for camera state changes
-    unsubscribers.push(voiceStore.subscribe(() => videoModeCtrl?.checkVideoMode()));
+    // Subscribe to voice store for camera state changes only (not speaking ticks)
+    let prevLocalCamera = voiceStore.getState().localCamera;
+    let prevCameraSignature = "";
+    unsubscribers.push(voiceStore.subscribe((state) => {
+      // Build a lightweight signature of camera-relevant state
+      let sig = state.localCamera ? "1" : "0";
+      const channelId = state.currentChannelId;
+      if (channelId !== null) {
+        const users = state.voiceUsers.get(channelId);
+        if (users) {
+          for (const [uid, u] of users) {
+            if (u.camera) sig += `:${uid}`;
+          }
+        }
+      }
+      if (sig !== prevCameraSignature || state.localCamera !== prevLocalCamera) {
+        prevCameraSignature = sig;
+        prevLocalCamera = state.localCamera;
+        videoModeCtrl?.checkVideoMode();
+      }
+    }));
 
     // Auto-update notifier — checks server for newer client version
     if (apiConfig.host) {

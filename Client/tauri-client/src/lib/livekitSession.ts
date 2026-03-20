@@ -625,6 +625,9 @@ export async function enableCamera(): Promise<void> {
     return;
   }
 
+  // Optimistic UI update — highlight button immediately
+  setLocalCamera(true);
+
   try {
     await room.localParticipant.setCameraEnabled(true);
 
@@ -634,10 +637,11 @@ export async function enableCamera(): Promise<void> {
       await room.switchActiveDevice("videoinput", savedVideoDevice);
     }
 
-    setLocalCamera(true);
     ws.send({ type: "voice_camera", payload: { enabled: true } });
     log.info("Camera enabled");
   } catch (err) {
+    // Revert optimistic update on failure
+    setLocalCamera(false);
     log.error("Failed to enable camera", err);
     if (err instanceof DOMException && err.name === "NotAllowedError") {
       onErrorCallback?.("Camera permission denied");
@@ -759,7 +763,8 @@ export function getUserVolume(userId: number): number {
  *  High sensitivity (100) = low threshold (picks up quiet sounds).
  *  Low sensitivity (0) = high threshold (only loud sounds). */
 export function setVoiceSensitivity(sensitivity: number): void {
-  speakingThreshold = ((100 - sensitivity) / 100) * 0.15;
+  const clamped = Math.max(0, Math.min(100, sensitivity));
+  speakingThreshold = ((100 - clamped) / 100) * 0.15;
 }
 
 /** Get the local camera stream for self-view display. */

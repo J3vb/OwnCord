@@ -101,7 +101,6 @@ function showUserVolumeMenu(
 
   // Close on click outside
   const dismissAc = new AbortController();
-  const combinedSignal = signal;
   setTimeout(() => {
     document.addEventListener("mousedown", (e: MouseEvent) => {
       if (!menu.contains(e.target as Node)) {
@@ -112,7 +111,7 @@ function showUserVolumeMenu(
   }, 0);
 
   // Also clean up if the parent component is destroyed
-  combinedSignal.addEventListener("abort", () => {
+  signal.addEventListener("abort", () => {
     menu.remove();
     dismissAc.abort();
   });
