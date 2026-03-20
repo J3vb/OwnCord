@@ -4,8 +4,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "./helpers";
-import { switchInputDevice, switchOutputDevice, setVoiceSensitivity, updateSilenceSuppressionPref } from "@lib/voiceSession";
-import { sensitivityToThreshold } from "@lib/vad";
+import { switchInputDevice, switchOutputDevice, setVoiceSensitivity } from "@lib/livekitSession";
 
 export interface VoiceAudioTabHandle {
   build(): HTMLDivElement;
@@ -237,7 +236,7 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
 
   // Position threshold indicator
   function updateThresholdIndicator(sensitivity: number): void {
-    const threshold = sensitivityToThreshold(sensitivity);
+    const threshold = ((100 - sensitivity) / 100) * 0.15;
     // Map threshold (0-0.15) to percentage position (0-100%)
     const pct = Math.min((threshold / 0.15) * 100, 100);
     meterThreshold.style.left = `${pct}%`;
@@ -287,7 +286,7 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
         meterLevel.style.width = `${visual * 100}%`;
 
         // Color: green if above threshold, yellow/red if below
-        const threshold = sensitivityToThreshold(Number(sensitivitySlider.value));
+        const threshold = ((100 - Number(sensitivitySlider.value)) / 100) * 0.15;
         if (rms >= threshold) {
           meterLevel.style.background = "#43b581"; // green — voice detected
         } else {
@@ -310,7 +309,6 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
     { key: "noiseSuppression", label: "Noise Suppression", desc: "Filter out background noise from your microphone", fallback: true },
     { key: "autoGainControl", label: "Automatic Gain Control", desc: "Automatically adjust microphone volume", fallback: true },
     { key: "enhancedNoiseSuppression", label: "Enhanced Noise Suppression", desc: "ML-powered noise removal (RNNoise) — filters keyboard, pets, and other non-voice sounds", fallback: false },
-    { key: "silenceSuppression", label: "Silence Suppression", desc: "Stop sending audio during silence to save bandwidth", fallback: true },
   ];
 
   for (const item of audioToggles) {
@@ -325,12 +323,8 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
       signal,
       onChange: (nowOn) => {
         savePref(item.key, nowOn);
-        if (item.key === "silenceSuppression") {
-          updateSilenceSuppressionPref();
-        } else {
-          const currentDevice = loadPref<string>("audioInputDevice", "");
-          void switchInputDevice(currentDevice);
-        }
+        const currentDevice = loadPref<string>("audioInputDevice", "");
+        void switchInputDevice(currentDevice);
       },
     });
 

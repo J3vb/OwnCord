@@ -8,7 +8,7 @@ import { createElement, appendChildren, clearChildren, setText } from "@lib/dom"
 import { voiceStore } from "@stores/voice.store";
 import type { VoiceUser } from "@stores/voice.store";
 import { membersStore } from "@stores/members.store";
-import { setUserVolume, getUserVolume } from "@lib/voiceSession";
+import { setUserVolume, getUserVolume } from "@lib/livekitSession";
 import { authStore } from "@stores/auth.store";
 
 export interface VoiceChannelOptions {

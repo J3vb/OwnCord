@@ -42,7 +42,7 @@ vi.mock("@stores/voice.store", () => ({
   setLocalScreenshare: mockSetLocalScreenshare,
 }));
 
-vi.mock("@lib/voiceSession", () => ({
+vi.mock("@lib/livekitSession", () => ({
   leaveVoice: mockVoiceSessionLeave,
   setMuted: mockSetMuted,
   setDeafened: mockSetDeafened,

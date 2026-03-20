@@ -17,9 +17,6 @@ export type ChannelType = "text" | "voice" | "announcement";
 /** Voice quality presets. */
 export type VoiceQuality = "low" | "medium" | "high";
 
-/** Voice threshold mode. CRITICAL: always "threshold_mode", never "mode". */
-export type ThresholdMode = "forwarding" | "selective";
-
 /** Reaction action direction. */
 export type ReactionAction = "add" | "remove";
 
@@ -262,7 +259,7 @@ export interface VoiceConfigPayload {
   readonly channel_id: number;
   readonly quality: VoiceQuality;
   readonly bitrate: number;
-  readonly threshold_mode: ThresholdMode;
+  readonly threshold_mode: string;
   readonly mixing_threshold: number;
   readonly top_speakers: number;
   readonly max_users: number;
@@ -272,22 +269,13 @@ export interface VoiceConfigPayload {
 export interface VoiceSpeakersPayload {
   readonly channel_id: number;
   readonly speakers: readonly number[];
-  readonly threshold_mode: ThresholdMode;
+  readonly threshold_mode: string;
 }
 
-export interface VoiceOfferPayload {
+export interface VoiceTokenPayload {
   readonly channel_id: number;
-  readonly sdp: string;
-}
-
-export interface VoiceAnswerPayload {
-  readonly channel_id: number;
-  readonly sdp: string;
-}
-
-export interface VoiceIcePayload {
-  readonly channel_id: number;
-  readonly candidate: RTCIceCandidateInit;
+  readonly token: string;
+  readonly url: string;
 }
 
 export interface MemberJoinPayload {
@@ -390,10 +378,6 @@ export interface SoundboardPlayPayload {
   readonly sound_id: string;
 }
 
-// Note: VoiceOfferPayload, VoiceAnswerPayload, VoiceIcePayload are
-// bidirectional — the same interface is used for both client→server
-// and server→client directions. See definitions above.
-
 // -----------------------------------------------------------------------------
 // Discriminated Union: Server → Client Messages
 // -----------------------------------------------------------------------------
@@ -416,9 +400,7 @@ export type ServerMessage =
   | (WsEnvelope<VoiceLeavePayload> & { readonly type: "voice_leave" })
   | (WsEnvelope<VoiceConfigPayload> & { readonly type: "voice_config" })
   | (WsEnvelope<VoiceSpeakersPayload> & { readonly type: "voice_speakers" })
-  | (WsEnvelope<VoiceOfferPayload> & { readonly type: "voice_offer" })
-  | (WsEnvelope<VoiceAnswerPayload> & { readonly type: "voice_answer" })
-  | (WsEnvelope<VoiceIcePayload> & { readonly type: "voice_ice" })
+  | (WsEnvelope<VoiceTokenPayload> & { readonly type: "voice_token" })
   | (WsEnvelope<MemberJoinPayload> & { readonly type: "member_join" })
   | (WsEnvelope<MemberLeavePayload> & { readonly type: "member_leave" })
   | (WsEnvelope<MemberUpdatePayload> & { readonly type: "member_update" })
@@ -446,10 +428,7 @@ export type ClientMessage =
   | (WsEnvelope<VoiceDeafenPayload> & { readonly type: "voice_deafen" })
   | (WsEnvelope<VoiceCameraPayload> & { readonly type: "voice_camera" })
   | (WsEnvelope<VoiceScreensharePayload> & { readonly type: "voice_screenshare" })
-  | (WsEnvelope<SoundboardPlayPayload> & { readonly type: "soundboard_play" })
-  | (WsEnvelope<VoiceOfferPayload> & { readonly type: "voice_offer" })
-  | (WsEnvelope<VoiceAnswerPayload> & { readonly type: "voice_answer" })
-  | (WsEnvelope<VoiceIcePayload> & { readonly type: "voice_ice" });
+  | (WsEnvelope<SoundboardPlayPayload> & { readonly type: "soundboard_play" });
 
 // -----------------------------------------------------------------------------
 // REST API Response Types

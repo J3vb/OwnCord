@@ -38,11 +38,7 @@ import {
   joinVoiceChannel,
   leaveVoiceChannel,
 } from "@stores/voice.store";
-import {
-  handleServerOffer,
-  handleServerAnswer,
-  handleServerIce,
-} from "@lib/voiceSession";
+import { handleVoiceToken } from "@lib/livekitSession";
 import { notifyIncomingMessage } from "./notifications";
 import { createLogger } from "./logger";
 
@@ -269,20 +265,8 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   );
 
   unsubs.push(
-    ws.on("voice_offer", (payload) => {
-      handleServerOffer(payload.sdp, payload.channel_id);
-    }),
-  );
-
-  unsubs.push(
-    ws.on("voice_answer", (payload) => {
-      handleServerAnswer(payload.sdp);
-    }),
-  );
-
-  unsubs.push(
-    ws.on("voice_ice", (payload) => {
-      handleServerIce(payload.candidate);
+    ws.on("voice_token", (payload) => {
+      void handleVoiceToken(payload.token, payload.url, payload.channel_id);
     }),
   );
 

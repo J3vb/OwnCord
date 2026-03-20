@@ -26,7 +26,7 @@ import {
   isCategoryCollapsed,
 } from "@stores/ui.store";
 import { voiceStore, getChannelVoiceUsers } from "@stores/voice.store";
-import { setUserVolume, getUserVolume } from "@lib/voiceSession";
+import { setUserVolume, getUserVolume } from "@lib/livekitSession";
 
 // ---------------------------------------------------------------------------
 // Per-user volume context menu (right-click on voice user row)

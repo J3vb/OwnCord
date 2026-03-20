@@ -4,7 +4,7 @@
  */
 
 import { voiceStore } from "@stores/voice.store";
-import { getLocalCameraStream } from "@lib/voiceSession";
+import { getLocalCameraStream } from "@lib/livekitSession";
 import type { VideoGridComponent } from "@components/VideoGrid";
 
 // ---------------------------------------------------------------------------

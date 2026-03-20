@@ -186,12 +186,12 @@ describe("ClientMessage types", () => {
     expect(soundboard.type).toBe("soundboard_play");
   });
 
-  it("includes voice signaling types", () => {
-    const offer: ClientMessage = {
-      type: "voice_offer",
-      payload: { channel_id: 10, sdp: "v=0..." },
+  it("includes voice mute type", () => {
+    const mute: ClientMessage = {
+      type: "voice_mute",
+      payload: { muted: true },
     };
-    expect(offer.type).toBe("voice_offer");
+    expect(mute.type).toBe("voice_mute");
   });
 });
 

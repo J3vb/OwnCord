@@ -17,7 +17,7 @@ import {
   setDeafened as voiceSessionSetDeafened,
   enableCamera,
   disableCamera,
-} from "@lib/voiceSession";
+} from "@lib/livekitSession";
 
 const log = createLogger("voice-callbacks");
 

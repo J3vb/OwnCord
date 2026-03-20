@@ -12,7 +12,7 @@ import { createWsClient } from "@lib/ws";
 import { wireDispatcher } from "@lib/dispatcher";
 import { authStore, setAuth, clearAuth } from "@stores/auth.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
-import { leaveVoice as voiceSessionLeave } from "@lib/voiceSession";
+import { leaveVoice as voiceSessionLeave } from "@lib/livekitSession";
 import { createConnectPage } from "@pages/ConnectPage";
 import { createMainPage } from "@pages/MainPage";
 import { applyStoredAppearance } from "@components/SettingsOverlay";

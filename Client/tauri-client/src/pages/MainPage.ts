@@ -27,7 +27,6 @@ import { closeSettings, toggleMemberList, uiStore } from "@stores/ui.store";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { voiceStore } from "@stores/voice.store";
 import {
-  joinVoice,
   leaveVoice as voiceSessionLeave,
   setOnRemoteVideo,
   setOnRemoteVideoRemoved,
@@ -35,7 +34,7 @@ import {
   setWsClient,
   setOnError as setVoiceOnError,
   clearOnError as clearVoiceOnError,
-} from "@lib/voiceSession";
+} from "@lib/livekitSession";
 import { buildChatHeader } from "./main-page/ChatHeader";
 import { setServerHost } from "@components/message-list/renderers";
 import {
@@ -174,16 +173,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         if (banner !== null) {
           banner.showRestart(payload.delay_seconds);
         }
-      }),
-    );
-
-    // --- Voice config: trigger WebRTC join flow ---
-    unsubscribers.push(
-      ws.on("voice_config", (payload) => {
-        void joinVoice(payload.channel_id, payload, async () => {
-          const creds = await api.getVoiceCredentials();
-          return creds.ice_servers;
-        });
       }),
     );
 

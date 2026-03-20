@@ -6,7 +6,7 @@ import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { getLogBuffer, clearLogBuffer, addLogListener, setLogLevel } from "@lib/logger";
 import type { LogEntry, LogLevel } from "@lib/logger";
 import type { TabName } from "../SettingsOverlay";
-import { getSessionDebugInfo, measureStreamLevel, getRemoteStreams, getLocalProcessedStream } from "@lib/voiceSession";
+import { getSessionDebugInfo } from "@lib/livekitSession";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -175,53 +175,7 @@ export function createLogsTab(
 
     function refreshDiag(): void {
       const info = getSessionDebugInfo();
-      const ctx = info.sharedAudioCtx as { state: string; sampleRate: number } | null;
-      const localTracks = info.localTracks as Array<{ id: string; enabled: boolean; muted: boolean; readyState: string }>;
-      const remoteEls = info.remoteAudioElements as Array<{
-        streamId: string; userId: number; audioPaused: boolean; audioMuted: boolean;
-        audioVolume: number; audioReadyState: number; hasSrcObject: boolean;
-        gainValue: number | string;
-        tracks: Array<{ id: string; enabled: boolean; muted: boolean; readyState: string }>;
-      }>;
-      const webrtcStreams = info.webrtcRemoteStreams as Array<{
-        streamId: string; trackCount: number;
-        audioTracks: Array<{ id: string; enabled: boolean; muted: boolean; readyState: string }>;
-      }>;
-
-      const lines: string[] = [
-        `=== Session ===`,
-        `WebRTC: ${info.hasWebrtc}  VAD: ${info.hasVad}  Suppressor: ${info.hasNoiseSuppressor}`,
-        `Join in progress: ${info.joinInProgress}  Silence suppression: ${info.silenceSuppressionEnabled}`,
-        `SharedAudioCtx: ${ctx ? `${ctx.state} @ ${ctx.sampleRate}Hz` : "none"}`,
-        ``,
-        `=== Local Audio ===`,
-        `Stream: ${info.hasLocalStream}  Processed: ${info.hasProcessedStream}`,
-      ];
-      for (const t of localTracks) {
-        lines.push(`  Track ${t.id.slice(0, 8)}: enabled=${t.enabled} muted=${t.muted} state=${t.readyState}`);
-      }
-
-      lines.push(``, `=== WebRTC Remote Streams ===`);
-      if (webrtcStreams.length === 0) lines.push(`  (none)`);
-      for (const s of webrtcStreams) {
-        lines.push(`  Stream ${s.streamId}: ${s.trackCount} tracks`);
-        for (const t of s.audioTracks) {
-          lines.push(`    Track ${t.id.slice(0, 8)}: enabled=${t.enabled} muted=${t.muted} state=${t.readyState}`);
-        }
-      }
-
-      lines.push(``, `=== Remote Audio Elements ===`);
-      if (remoteEls.length === 0) lines.push(`  (none)`);
-      for (const el of remoteEls) {
-        lines.push(`  [user ${el.userId}] stream=${el.streamId}`);
-        lines.push(`    <audio> paused=${el.audioPaused} muted=${el.audioMuted} volume=${el.audioVolume} readyState=${el.audioReadyState} srcObject=${el.hasSrcObject}`);
-        lines.push(`    GainNode: ${typeof el.gainValue === "number" ? el.gainValue.toFixed(2) : el.gainValue}`);
-        for (const t of el.tracks) {
-          lines.push(`    Track ${t.id.slice(0, 8)}: enabled=${t.enabled} muted=${t.muted} state=${t.readyState}`);
-        }
-      }
-
-      diagPanel.textContent = lines.join("\n");
+      diagPanel.textContent = JSON.stringify(info, null, 2);
     }
 
     refreshDiag();
@@ -236,100 +190,10 @@ export function createLogsTab(
       });
     }, { signal });
 
-    // Live audio level probe — measures actual signal flowing through streams
-    const levelBtn = createElement("button", { class: "ac-btn", style: "margin: 6px 0 0 6px;" }, "Probe Audio Levels");
-    const levelResult = createElement("pre", {
-      style: "margin: 6px 0 0 0; color: #ccc; font-family: monospace; font-size: 12px; white-space: pre-wrap;",
-    });
-    levelBtn.addEventListener("click", () => {
-      levelBtn.textContent = "Probing...";
-      levelResult.textContent = "";
-
-      const info = getSessionDebugInfo();
-      const promises: Array<Promise<string>> = [];
-
-      // 1. Probe local mic (what we're sending)
-      const localStream = getLocalProcessedStream();
-      if (localStream) {
-        promises.push(
-          measureStreamLevel(localStream).then((lvl) => `Local mic (outgoing): level=${lvl} ${lvl > 0 ? "✅ AUDIO FLOWING" : "❌ SILENCE"}`),
-        );
-      } else {
-        promises.push(Promise.resolve("Local mic: no stream"));
-      }
-
-      // 2. Probe raw WebRTC remote streams (before GainNode)
-      const rawRemoteStreams = getRemoteStreams();
-      rawRemoteStreams.forEach((s, i) => {
-        promises.push(
-          measureStreamLevel(s).then((lvl) => `Remote [${i}] (raw WebRTC ${s.id}): level=${lvl} ${lvl > 0 ? "✅ AUDIO FLOWING" : "❌ SILENCE"}`),
-        );
-      });
-
-      // 3. Probe GainNode output (what <audio> element plays)
-      const audioContainer = document.getElementById("voice-audio-container");
-      const audioEls = audioContainer?.querySelectorAll("audio") ?? [];
-      audioEls.forEach((el, i) => {
-        const a = el as HTMLAudioElement;
-        const src = a.srcObject as MediaStream | null;
-        if (src) {
-          promises.push(
-            measureStreamLevel(src).then((lvl) => `Remote [${i}] (GainNode output): level=${lvl} ${lvl > 0 ? "✅ AUDIO FLOWING" : "❌ SILENCE"}`),
-          );
-        }
-      });
-
-      if (promises.length === 0) {
-        levelResult.textContent = "No audio streams to probe";
-        levelBtn.textContent = "Probe Audio Levels";
-        return;
-      }
-
-      void Promise.all(promises).then((results) => {
-        levelResult.textContent = results.join("\n");
-        levelBtn.textContent = "Probe Audio Levels";
-      });
-    }, { signal });
-
     section.appendChild(diagPanel);
     const diagBtns = createElement("div", { style: "display: flex; flex-wrap: wrap;" });
-    appendChildren(diagBtns, diagRefresh, diagCopy, levelBtn);
+    appendChildren(diagBtns, diagRefresh, diagCopy);
     section.appendChild(diagBtns);
-    section.appendChild(levelResult);
-
-    // Direct playback test — bypasses GainNode pipeline entirely
-    const directBtn = createElement("button", { class: "ac-btn", style: "margin: 6px 0 0 6px;" }, "Test Direct Playback");
-    const directResult = createElement("pre", {
-      style: "margin: 6px 0 0 0; color: #ccc; font-family: monospace; font-size: 12px; white-space: pre-wrap;",
-    });
-    directBtn.addEventListener("click", () => {
-      const rawStreams = getRemoteStreams();
-      if (rawStreams.length === 0) {
-        directResult.textContent = "No remote streams to test";
-        return;
-      }
-      const lines: string[] = [];
-      for (const s of rawStreams) {
-        const testAudio = document.createElement("audio");
-        testAudio.srcObject = s;
-        testAudio.autoplay = true;
-        testAudio.volume = 1.0;
-        document.body.appendChild(testAudio);
-        testAudio.play().then(() => {
-          lines.push(`Stream ${s.id}: play() succeeded, paused=${testAudio.paused}, readyState=${testAudio.readyState}`);
-          lines.push(`  tracks: ${s.getAudioTracks().map((t) => `${t.id.slice(0,8)} enabled=${t.enabled} muted=${t.muted} readyState=${t.readyState}`).join(", ")}`);
-          directResult.textContent = lines.join("\n") + "\n\nDirect <audio> element added — can you hear audio now? (playing raw WebRTC stream, no GainNode)";
-          // Clean up after 10 seconds
-          setTimeout(() => { testAudio.srcObject = null; testAudio.remove(); }, 10000);
-        }).catch((err) => {
-          lines.push(`Stream ${s.id}: play() FAILED — ${err instanceof Error ? err.message : String(err)}`);
-          directResult.textContent = lines.join("\n");
-          testAudio.remove();
-        });
-      }
-    }, { signal });
-    diagBtns.appendChild(directBtn);
-    section.appendChild(directResult);
 
     // Log count
     const countEl = createElement("div", {
