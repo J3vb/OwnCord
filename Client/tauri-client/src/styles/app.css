@@ -989,6 +989,35 @@
   max-height: 400px; overflow-y: auto;
   border-top: 1px solid var(--border);
 }
+.search-overlay-status {
+  padding: 12px 20px; color: var(--text-micro); font-size: 14px;
+}
+.search-result-item {
+  padding: 10px 20px; cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+}
+.search-result-item:hover,
+.search-result-item--active {
+  background: var(--bg-secondary);
+}
+.search-result-header {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 4px; font-size: 12px;
+}
+.search-result-channel {
+  color: var(--text-micro); font-weight: 600;
+}
+.search-result-author {
+  color: var(--text-normal); font-weight: 600;
+}
+.search-result-time {
+  color: var(--text-micro); margin-left: auto; font-size: 11px;
+}
+.search-result-content {
+  color: var(--text-muted); font-size: 13px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
 /* ── Friends / DM View ── */
 .dm-sidebar-header {

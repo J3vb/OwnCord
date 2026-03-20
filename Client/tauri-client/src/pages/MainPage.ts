@@ -42,7 +42,9 @@ import {
   createQuickSwitcherManager,
   createInviteManagerController,
   createPinnedPanelController,
+  createSearchOverlayController,
 } from "./main-page/OverlayManagers";
+import type { SearchOverlayController } from "./main-page/OverlayManagers";
 import {
   createMessageController,
   createPendingDeleteManager,
@@ -124,6 +126,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // Overlay controllers — created in mount()
   let pinnedCtrl: ReturnType<typeof createPinnedPanelController> | null = null;
   let inviteCtrl: ReturnType<typeof createInviteManagerController> | null = null;
+  let searchCtrl: SearchOverlayController | null = null;
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -346,9 +349,23 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     });
     unsubscribers.push(() => { pinnedCtrl?.cleanup(); });
 
+    // Search overlay controller
+    searchCtrl = createSearchOverlayController({
+      api,
+      getRoot: () => root,
+      getToast: () => toast,
+      getCurrentChannelId: () => channelCtrl?.currentChannelId ?? null,
+      onJumpToMessage: (_channelId: number, msgId: number) => {
+        if (channelCtrl?.messageList === null || channelCtrl?.messageList === undefined) return false;
+        return channelCtrl.messageList.scrollToMessage(msgId);
+      },
+    });
+    unsubscribers.push(() => { searchCtrl?.cleanup(); });
+
     const chatHeader = buildChatHeader({
       onTogglePins: () => { void pinnedCtrl!.toggle(); },
       onToggleMembers: () => toggleMemberList(),
+      onSearchFocus: () => { searchCtrl?.open(); },
     });
     chatHeaderName = chatHeader.refs.nameEl;
     chatArea.appendChild(chatHeader.element);

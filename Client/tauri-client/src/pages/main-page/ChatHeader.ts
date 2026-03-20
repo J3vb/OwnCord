@@ -17,6 +17,7 @@ export interface ChatHeaderRefs {
 export interface ChatHeaderOptions {
   readonly onTogglePins: () => void;
   readonly onToggleMembers: () => void;
+  readonly onSearchFocus?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -45,7 +46,15 @@ export function buildChatHeader(
     class: "search-input",
     type: "text",
     placeholder: "Search...",
+    "data-testid": "search-input",
   });
+  if (opts.onSearchFocus !== undefined) {
+    const onFocus = opts.onSearchFocus;
+    searchInput.addEventListener("focus", () => {
+      onFocus();
+      (searchInput as HTMLInputElement).blur();
+    });
+  }
   const membersToggle = createElement("button", {
     type: "button",
     "aria-label": "Toggle member list",
