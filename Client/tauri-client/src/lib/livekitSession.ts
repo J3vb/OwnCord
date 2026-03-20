@@ -320,9 +320,38 @@ export async function handleVoiceToken(
     room.on(RoomEvent.ActiveSpeakersChanged, handleActiveSpeakersChanged);
     room.on(RoomEvent.Disconnected, handleDisconnected);
 
-    // Connect to LiveKit server (resolve proxy URL if relative path)
+    // Connect to LiveKit server with retry (LiveKit may still be initializing)
     const resolvedUrl = resolveLiveKitUrl(url);
-    await room.connect(resolvedUrl, token);
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY_MS = 2000;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        await room.connect(resolvedUrl, token);
+        break;
+      } catch (connectErr) {
+        if (attempt < MAX_RETRIES) {
+          log.warn("LiveKit connect failed, retrying", { attempt, maxRetries: MAX_RETRIES, error: connectErr });
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+          // Recreate room for fresh connection state
+          room.removeAllListeners();
+          room = new Room({
+            adaptiveStream: true,
+            dynacast: true,
+            audioCaptureDefaults: {
+              echoCancellation: loadPref("echoCancellation", true),
+              noiseSuppression: loadPref("noiseSuppression", true),
+              autoGainControl: loadPref("autoGainControl", true),
+            },
+          });
+          room.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
+          room.on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed);
+          room.on(RoomEvent.ActiveSpeakersChanged, handleActiveSpeakersChanged);
+          room.on(RoomEvent.Disconnected, handleDisconnected);
+        } else {
+          throw connectErr;
+        }
+      }
+    }
     log.info("Connected to LiveKit room", { channelId, url: resolvedUrl });
 
     // Enable microphone: use RNNoise if Enhanced Noise Suppression is on
