@@ -84,6 +84,12 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		}
 	}
 
+	// LiveKit webhook endpoint (no auth middleware — uses LiveKit JWT verification).
+	if lkErr == nil {
+		r.Post("/api/v1/livekit/webhook",
+			ws.MountWebhookRoute(hub, cfg.Voice.LiveKitAPIKey, cfg.Voice.LiveKitAPISecret))
+	}
+
 	go hub.Run()
 	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins))
 
