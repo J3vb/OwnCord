@@ -29,18 +29,13 @@ type GitHubConfig struct {
 	Token string `koanf:"token"`
 }
 
-// VoiceConfig holds STUN/TURN server settings and SFU configuration.
+// VoiceConfig holds LiveKit server connection and voice quality settings.
 type VoiceConfig struct {
-	TURNSecret      string `koanf:"turn_secret"`      // HMAC-SHA1 secret; auto-generated if empty
-	STUNPort        int    `koanf:"stun_port"`         // default 3478
-	TURNPort        int    `koanf:"turn_port"`         // default 3478
-	TURNEnabled     bool   `koanf:"turn_enabled"`      // default true
-	Quality         string `koanf:"quality"`            // low | medium | high
-	MixingThreshold int    `koanf:"mixing_threshold"`   // selective forwarding threshold
-	TopSpeakers     int    `koanf:"top_speakers"`       // top-N speakers in selective mode
-	ExternalIP      string `koanf:"external_ip"`        // set if behind NAT
-	MediaPortMin    int    `koanf:"media_port_min"`     // UDP port range start for WebRTC media
-	MediaPortMax    int    `koanf:"media_port_max"`     // UDP port range end for WebRTC media
+	LiveKitAPIKey    string `koanf:"livekit_api_key"`    // LiveKit API key
+	LiveKitAPISecret string `koanf:"livekit_api_secret"` // LiveKit API secret
+	LiveKitURL       string `koanf:"livekit_url"`        // LiveKit server WebSocket URL (e.g. ws://localhost:7880)
+	LiveKitBinaryPath string `koanf:"livekit_binary"`    // path to livekit-server binary; empty = don't auto-start
+	Quality          string `koanf:"quality"`            // low | medium | high
 }
 
 // ServerConfig holds HTTP server settings.
@@ -105,14 +100,10 @@ func defaults() Config {
 			StorageDir: "data/uploads",
 		},
 		Voice: VoiceConfig{
-			STUNPort:        3478,
-			TURNPort:        3478,
-			TURNEnabled:     true,
-			Quality:         "medium",
-			MixingThreshold: 10,
-			TopSpeakers:     3,
-			MediaPortMin:    10000,
-			MediaPortMax:    10100,
+			LiveKitAPIKey:    "devkey",
+			LiveKitAPISecret: "secret",
+			LiveKitURL:       "ws://localhost:7880",
+			Quality:          "medium",
 		},
 		GitHub: GitHubConfig{},
 	}
@@ -148,13 +139,11 @@ upload:
   storage_dir: "data/uploads"
 
 voice:
-  # external_ip: ""       # set to your public IP if behind NAT (required for voice over internet)
-  # stun_port: 3478       # UDP port for STUN
-  # turn_port: 3478       # UDP port for TURN relay
-  # turn_enabled: true
-  # quality: "medium"     # low | medium | high
-  # media_port_min: 10000 # UDP port range for WebRTC media
-  # media_port_max: 10100
+  livekit_api_key: "devkey"        # LiveKit API key
+  livekit_api_secret: "secret"     # LiveKit API secret
+  livekit_url: "ws://localhost:7880"  # LiveKit server WebSocket URL
+  # livekit_binary: ""             # path to livekit-server binary; empty = don't auto-start
+  # quality: "medium"              # low | medium | high
 
 # github:
 #   token: ""  # optional: GitHub API token for higher rate limits (5000 req/hr vs 60)
@@ -226,26 +215,17 @@ func Load(cfgPath string) (*Config, error) {
 // overwrites struct defaults with Go zero values.
 func applyVoiceDefaults(v *VoiceConfig) {
 	def := defaults().Voice
-	if v.STUNPort == 0 {
-		v.STUNPort = def.STUNPort
+	if v.LiveKitAPIKey == "" {
+		v.LiveKitAPIKey = def.LiveKitAPIKey
 	}
-	if v.TURNPort == 0 {
-		v.TURNPort = def.TURNPort
+	if v.LiveKitAPISecret == "" {
+		v.LiveKitAPISecret = def.LiveKitAPISecret
+	}
+	if v.LiveKitURL == "" {
+		v.LiveKitURL = def.LiveKitURL
 	}
 	if v.Quality == "" {
 		v.Quality = def.Quality
-	}
-	if v.MediaPortMin == 0 {
-		v.MediaPortMin = def.MediaPortMin
-	}
-	if v.MediaPortMax == 0 {
-		v.MediaPortMax = def.MediaPortMax
-	}
-	if v.MixingThreshold == 0 {
-		v.MixingThreshold = def.MixingThreshold
-	}
-	if v.TopSpeakers == 0 {
-		v.TopSpeakers = def.TopSpeakers
 	}
 }
 

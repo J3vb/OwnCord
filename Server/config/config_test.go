@@ -241,14 +241,9 @@ func TestLoadVoiceConfigDefaults(t *testing.T) {
 		want any
 	}{
 		{"Voice.Quality", cfg.Voice.Quality, "medium"},
-		{"Voice.MixingThreshold", cfg.Voice.MixingThreshold, 10},
-		{"Voice.TopSpeakers", cfg.Voice.TopSpeakers, 3},
-		{"Voice.ExternalIP", cfg.Voice.ExternalIP, ""},
-		{"Voice.MediaPortMin", cfg.Voice.MediaPortMin, 10000},
-		{"Voice.MediaPortMax", cfg.Voice.MediaPortMax, 10100},
-		{"Voice.STUNPort", cfg.Voice.STUNPort, 3478},
-		{"Voice.TURNPort", cfg.Voice.TURNPort, 3478},
-		{"Voice.TURNEnabled", cfg.Voice.TURNEnabled, true},
+		{"Voice.LiveKitAPIKey", cfg.Voice.LiveKitAPIKey, "devkey"},
+		{"Voice.LiveKitAPISecret", cfg.Voice.LiveKitAPISecret, "secret"},
+		{"Voice.LiveKitURL", cfg.Voice.LiveKitURL, "ws://localhost:7880"},
 	}
 
 	for _, tc := range tests {
@@ -267,11 +262,9 @@ func TestLoadVoiceConfigFromYAML(t *testing.T) {
 	yaml := `
 voice:
   quality: high
-  mixing_threshold: 5
-  top_speakers: 4
-  external_ip: "1.2.3.4"
-  media_port_min: 20000
-  media_port_max: 20500
+  livekit_api_key: "mykey"
+  livekit_api_secret: "mysecret"
+  livekit_url: "ws://lk.example.com:7880"
 `
 	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
 		t.Fatalf("failed to write yaml: %v", err)
@@ -285,20 +278,14 @@ voice:
 	if cfg.Voice.Quality != "high" {
 		t.Errorf("Voice.Quality = %q, want 'high'", cfg.Voice.Quality)
 	}
-	if cfg.Voice.MixingThreshold != 5 {
-		t.Errorf("Voice.MixingThreshold = %d, want 5", cfg.Voice.MixingThreshold)
+	if cfg.Voice.LiveKitAPIKey != "mykey" {
+		t.Errorf("Voice.LiveKitAPIKey = %q, want 'mykey'", cfg.Voice.LiveKitAPIKey)
 	}
-	if cfg.Voice.TopSpeakers != 4 {
-		t.Errorf("Voice.TopSpeakers = %d, want 4", cfg.Voice.TopSpeakers)
+	if cfg.Voice.LiveKitAPISecret != "mysecret" {
+		t.Errorf("Voice.LiveKitAPISecret = %q, want 'mysecret'", cfg.Voice.LiveKitAPISecret)
 	}
-	if cfg.Voice.ExternalIP != "1.2.3.4" {
-		t.Errorf("Voice.ExternalIP = %q, want '1.2.3.4'", cfg.Voice.ExternalIP)
-	}
-	if cfg.Voice.MediaPortMin != 20000 {
-		t.Errorf("Voice.MediaPortMin = %d, want 20000", cfg.Voice.MediaPortMin)
-	}
-	if cfg.Voice.MediaPortMax != 20500 {
-		t.Errorf("Voice.MediaPortMax = %d, want 20500", cfg.Voice.MediaPortMax)
+	if cfg.Voice.LiveKitURL != "ws://lk.example.com:7880" {
+		t.Errorf("Voice.LiveKitURL = %q, want 'ws://lk.example.com:7880'", cfg.Voice.LiveKitURL)
 	}
 }
 
