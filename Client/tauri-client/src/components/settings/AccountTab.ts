@@ -47,17 +47,21 @@ export function buildAccountTab(
   const usernameError = createElement("div", { style: "color:var(--red);font-size:13px;margin-top:4px" });
   editForm.appendChild(usernameError);
 
+  const MAX_USERNAME_LEN = 32;
+
   saveBtn.addEventListener("click", () => {
     const newName = editInput.value.trim();
-    if (newName.length > 0) {
-      setText(usernameError, "");
-      void options.onUpdateProfile(newName).then(() => {
-        setText(usernameValue, newName);
-        editForm.style.display = "none";
-      }).catch((err: unknown) => {
-        setText(usernameError, err instanceof Error ? err.message : "Failed to update username.");
-      });
+    if (newName.length === 0 || newName.length > MAX_USERNAME_LEN) {
+      setText(usernameError, `Username must be 1\u2013${MAX_USERNAME_LEN} characters.`);
+      return;
     }
+    setText(usernameError, "");
+    void options.onUpdateProfile(newName).then(() => {
+      setText(usernameValue, newName);
+      editForm.style.display = "none";
+    }).catch((err: unknown) => {
+      setText(usernameError, err instanceof Error ? err.message : "Failed to update username.");
+    });
   }, { signal });
 
   section.appendChild(editForm);

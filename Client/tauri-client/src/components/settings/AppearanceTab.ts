@@ -3,7 +3,7 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { loadPref, savePref, applyTheme, THEMES } from "./helpers";
+import { loadPref, savePref, applyTheme, THEMES, createToggle } from "./helpers";
 import type { ThemeName } from "./helpers";
 import { setTheme } from "@stores/ui.store";
 
@@ -57,15 +57,13 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   // Compact mode toggle
   const compactRow = createElement("div", { class: "setting-row" });
   const compactLabel = createElement("span", { class: "setting-label" }, "Compact Mode");
-  const compactToggle = createElement("div", {
-    class: currentCompact ? "toggle on" : "toggle",
+  const compactToggle = createToggle(currentCompact, {
+    signal,
+    onChange: (isNowCompact) => {
+      savePref("compactMode", isNowCompact);
+      document.documentElement.classList.toggle("compact-mode", isNowCompact);
+    },
   });
-  compactToggle.addEventListener("click", () => {
-    const isNowCompact = !compactToggle.classList.contains("on");
-    compactToggle.classList.toggle("on", isNowCompact);
-    savePref("compactMode", isNowCompact);
-    document.documentElement.classList.toggle("compact-mode", isNowCompact);
-  }, { signal });
   appendChildren(compactRow, compactLabel, compactToggle);
   section.appendChild(compactRow);
 

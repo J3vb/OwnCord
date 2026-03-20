@@ -2,6 +2,8 @@
  * Shared helpers and constants for settings tabs.
  */
 
+import { createElement } from "@lib/dom";
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -31,6 +33,43 @@ export function loadPref<T>(key: string, fallback: T): T {
 
 export function savePref(key: string, value: unknown): void {
   localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value));
+}
+
+// ---------------------------------------------------------------------------
+// Accessible toggle creation
+// ---------------------------------------------------------------------------
+
+/**
+ * Create an accessible toggle switch element with proper ARIA attributes
+ * and keyboard support (Enter/Space to toggle).
+ */
+export function createToggle(
+  isOn: boolean,
+  opts: { signal: AbortSignal; onChange: (nowOn: boolean) => void },
+): HTMLDivElement {
+  const toggle = createElement("div", {
+    class: isOn ? "toggle on" : "toggle",
+    role: "switch",
+    tabindex: "0",
+    "aria-checked": isOn ? "true" : "false",
+  });
+
+  function doToggle(): void {
+    const nowOn = !toggle.classList.contains("on");
+    toggle.classList.toggle("on", nowOn);
+    toggle.setAttribute("aria-checked", String(nowOn));
+    opts.onChange(nowOn);
+  }
+
+  toggle.addEventListener("click", doToggle, { signal: opts.signal });
+  toggle.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      doToggle();
+    }
+  }, { signal: opts.signal });
+
+  return toggle;
 }
 
 // ---------------------------------------------------------------------------

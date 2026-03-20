@@ -3,7 +3,7 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { loadPref, savePref } from "./helpers";
+import { loadPref, savePref, createToggle } from "./helpers";
 import { switchInputDevice, switchOutputDevice, setVoiceSensitivity, updateSilenceSuppressionPref } from "@lib/voiceSession";
 import { sensitivityToThreshold } from "@lib/vad";
 
@@ -40,6 +40,10 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
       micAudioCtx = ctx;
       micAnimFrame = frame;
     }, (stream) => {
+      // Stop old camera tracks before registering new stream
+      if (cameraPreviewStream !== null && cameraPreviewStream !== stream) {
+        for (const track of cameraPreviewStream.getTracks()) track.stop();
+      }
       cameraPreviewStream = stream;
     });
   }
@@ -109,8 +113,6 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
   previewWrap.appendChild(previewVideo);
   section.appendChild(previewWrap);
 
-  let previewStream: MediaStream | null = null;
-
   // Populate devices asynchronously
   void (async () => {
     try {
@@ -159,50 +161,52 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
     void switchOutputDevice(outputSelect.value);
   }, { signal });
 
-  videoSelect.addEventListener("change", () => {
-    savePref("videoInputDevice", videoSelect.value);
-    if (previewStream !== null) {
-      for (const track of previewStream.getTracks()) track.stop();
-      previewStream = null;
-    }
+  function stopCameraPreview(): void {
+    registerCamera(null);
     previewVideo.srcObject = null;
-    const selectedDevice = videoSelect.value;
+  }
+
+  let previewErrorEl: HTMLDivElement | null = null;
+
+  function clearPreviewError(): void {
+    if (previewErrorEl !== null) {
+      previewErrorEl.remove();
+      previewErrorEl = null;
+    }
+  }
+
+  function startCameraPreview(deviceId: string): void {
+    stopCameraPreview();
+    clearPreviewError();
     void (async () => {
       try {
         const constraints: MediaStreamConstraints = {
-          video: selectedDevice
-            ? { deviceId: { exact: selectedDevice }, width: { ideal: 320 }, height: { ideal: 180 } }
+          video: deviceId
+            ? { deviceId: { exact: deviceId }, width: { ideal: 320 }, height: { ideal: 180 } }
             : { width: { ideal: 320 }, height: { ideal: 180 } },
           audio: false,
         };
-        previewStream = await navigator.mediaDevices.getUserMedia(constraints);
-        registerCamera(previewStream);
-        previewVideo.srcObject = previewStream;
-      } catch { /* Camera unavailable */ }
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        registerCamera(stream);
+        previewVideo.srcObject = stream;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Camera unavailable";
+        previewErrorEl = createElement("div", { class: "setting-desc" }, msg) as HTMLDivElement;
+        previewWrap.appendChild(previewErrorEl);
+      }
     })();
+  }
+
+  videoSelect.addEventListener("change", () => {
+    savePref("videoInputDevice", videoSelect.value);
+    startCameraPreview(videoSelect.value);
   }, { signal });
 
   // Start initial camera preview
-  void (async () => {
-    try {
-      const savedDevice = loadPref<string>("videoInputDevice", "");
-      const constraints: MediaStreamConstraints = {
-        video: savedDevice ? { deviceId: { exact: savedDevice }, width: { ideal: 320 }, height: { ideal: 180 } } : { width: { ideal: 320 }, height: { ideal: 180 } },
-        audio: false,
-      };
-      previewStream = await navigator.mediaDevices.getUserMedia(constraints);
-      registerCamera(previewStream);
-      previewVideo.srcObject = previewStream;
-    } catch { /* Camera unavailable */ }
-  })();
+  startCameraPreview(loadPref<string>("videoInputDevice", ""));
 
   signal.addEventListener("abort", () => {
-    if (previewStream !== null) {
-      for (const track of previewStream.getTracks()) track.stop();
-      previewStream = null;
-      registerCamera(null);
-    }
-    previewVideo.srcObject = null;
+    stopCameraPreview();
   });
 
   // ── Mic level meter + sensitivity slider ──────────────────────────
@@ -317,20 +321,18 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
     appendChildren(info, label, desc);
 
     const isOn = loadPref<boolean>(item.key, item.fallback);
-    const toggle = createElement("div", { class: isOn ? "toggle on" : "toggle" });
-    toggle.addEventListener("click", () => {
-      const nowOn = !toggle.classList.contains("on");
-      toggle.classList.toggle("on", nowOn);
-      savePref(item.key, nowOn);
-      if (item.key === "silenceSuppression") {
-        // Silence suppression takes effect on next VAD tick — no device switch needed
-        updateSilenceSuppressionPref();
-      } else {
-        // Re-acquire mic with new constraints if in an active voice session
-        const currentDevice = loadPref<string>("audioInputDevice", "");
-        void switchInputDevice(currentDevice);
-      }
-    }, { signal });
+    const toggle = createToggle(isOn, {
+      signal,
+      onChange: (nowOn) => {
+        savePref(item.key, nowOn);
+        if (item.key === "silenceSuppression") {
+          updateSilenceSuppressionPref();
+        } else {
+          const currentDevice = loadPref<string>("audioInputDevice", "");
+          void switchInputDevice(currentDevice);
+        }
+      },
+    });
 
     appendChildren(row, info, toggle);
     section.appendChild(row);

@@ -12,7 +12,6 @@ use windows::Win32::Security::Credentials::{
 pub struct CredentialData {
     pub username: String,
     pub token: String,
-    /// Optional saved password (only present when user opted in).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
 }

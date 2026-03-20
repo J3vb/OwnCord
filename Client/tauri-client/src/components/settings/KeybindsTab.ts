@@ -15,15 +15,15 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   // ── Push to Talk ──────────────────────────────────────────
   const pttRow = createElement("div", { class: "keybind-row" });
   const pttLabel = createElement("span", { class: "setting-label" }, "Push to Talk");
-  const savedVk = loadPref<number>("pttVk", 0);
+  let currentVk = loadPref<number>("pttVk", 0);
   const pttValue = createElement("span", {
     class: "kbd",
     style: "cursor: pointer; min-width: 80px; text-align: center;",
     title: "Click to set keybind",
-  }, savedVk !== 0 ? vkName(savedVk) : "Not set");
+  }, currentVk !== 0 ? vkName(currentVk) : "Not set");
   const pttClear = createElement("button", {
     class: "ac-btn",
-    style: `margin-left: 8px; font-size: 12px; padding: 4px 10px; ${savedVk !== 0 ? "" : "display: none;"}`,
+    style: `margin-left: 8px; font-size: 12px; padding: 4px 10px; ${currentVk !== 0 ? "" : "display: none;"}`,
   }, "Clear");
 
   let capturing = false;
@@ -43,9 +43,10 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       pttValue.style.color = "";
       if (vk === 0) {
         // Timed out — restore previous value
-        setText(pttValue, savedVk !== 0 ? vkName(savedVk) : "Not set");
+        setText(pttValue, currentVk !== 0 ? vkName(currentVk) : "Not set");
         return;
       }
+      currentVk = vk;
       setText(pttValue, vkName(vk));
       pttClear.style.display = "";
       void updatePttKey(vk);
@@ -54,12 +55,13 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       capturing = false;
       pttValue.style.borderColor = "";
       pttValue.style.color = "";
-      setText(pttValue, savedVk !== 0 ? vkName(savedVk) : "Not set");
+      setText(pttValue, currentVk !== 0 ? vkName(currentVk) : "Not set");
     });
   }, { signal });
 
   pttClear.addEventListener("click", (e) => {
     e.stopPropagation();
+    currentVk = 0;
     setText(pttValue, "Not set");
     pttClear.style.display = "none";
     void updatePttKey(0);
