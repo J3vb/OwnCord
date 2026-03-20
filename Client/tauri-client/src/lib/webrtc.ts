@@ -153,17 +153,19 @@ export function createWebRtcService(): WebRtcService {
       log.warn("Remote track event with no stream");
       return;
     }
-    if (remoteStreams.some((s) => s.id === stream.id)) {
-      log.debug("Duplicate remote stream ignored", { streamId: stream.id });
-      return;
+    const isNew = !remoteStreams.some((s) => s.id === stream.id);
+    if (isNew) {
+      remoteStreams = [...remoteStreams, stream];
     }
     log.info("Remote track received", {
       streamId: stream.id,
       trackId: event.track.id,
       kind: event.track.kind,
-      totalStreams: remoteStreams.length + 1,
+      isNew,
+      totalStreams: remoteStreams.length,
     });
-    remoteStreams = [...remoteStreams, stream];
+    // Always notify — renegotiation may add new tracks to existing
+    // streams (e.g. after leave/rejoin with the same stream ID).
     for (const cb of remoteTrackCallbacks) {
       cb(stream);
     }
@@ -189,7 +191,7 @@ export function createWebRtcService(): WebRtcService {
     // Log canary — if this fires, something triggered SDP renegotiation
     // that our explicit offer/answer flow didn't handle. Upgrade to a
     // full handler (auto-create offer) if this shows up in production.
-    console.warn("[WebRTC] negotiationneeded fired unexpectedly — signalingState:", pc?.signalingState);
+    log.warn("negotiationneeded fired unexpectedly", { signalingState: pc?.signalingState ?? "none" });
   }
 
   function mungeIfNeeded(sdp: string | undefined): string {

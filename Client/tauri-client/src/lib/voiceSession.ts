@@ -207,6 +207,23 @@ function addRemoteStream(stream: MediaStream): void {
   const userId = parseUserIdFromStream(stream);
   if (userId > 0) {
     streamUserMap.set(stream.id, userId);
+
+    // Clean up any existing audio element for this user — renegotiation
+    // creates a new stream ID so the old element becomes stale. Without
+    // this, dead audio elements accumulate and degrade playback over time.
+    const oldAudio = userAudioElements.get(userId);
+    if (oldAudio !== undefined) {
+      const oldStreamId = oldAudio.srcObject instanceof MediaStream ? oldAudio.srcObject.id : null;
+      oldAudio.srcObject = null;
+      oldAudio.remove();
+      if (oldStreamId !== null) {
+        audioElements.delete(oldStreamId);
+        streamUserMap.delete(oldStreamId);
+      }
+      userGainNodes.delete(userId);
+      userAudioElements.delete(userId);
+      log.debug("Replaced stale audio element for user", { userId, oldStreamId, newStreamId: stream.id });
+    }
   }
 
   const audio = document.createElement("audio");

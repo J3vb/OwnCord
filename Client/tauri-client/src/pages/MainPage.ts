@@ -1,7 +1,7 @@
 // MainPage — primary app layout after login.
 // Composes standalone components; never sets innerHTML with user content.
 
-import { createElement, appendChildren, setText, clearChildren } from "@lib/dom";
+import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
 import type { ApiClient } from "@lib/api";
@@ -17,47 +17,25 @@ import { createVideoGrid } from "@components/VideoGrid";
 import type { VideoGridComponent } from "@components/VideoGrid";
 import { createVoiceWidget } from "@components/VoiceWidget";
 import { createMemberList } from "@components/MemberList";
-import { createMessageList } from "@components/MessageList";
-import type { MessageListComponent } from "@components/MessageList";
-import { createMessageInput } from "@components/MessageInput";
-import type { MessageInputComponent } from "@components/MessageInput";
-import { createTypingIndicator } from "@components/TypingIndicator";
 import { createServerBanner } from "@components/ServerBanner";
 import type { ServerBannerControl } from "@components/ServerBanner";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
 import { createToastContainer } from "@components/Toast";
-import { createEmojiPicker } from "@components/EmojiPicker";
 import type { ToastContainer } from "@components/Toast";
 import { authStore, clearAuth, updateUser } from "@stores/auth.store";
 import { closeSettings, toggleMemberList, uiStore } from "@stores/ui.store";
-import { channelsStore, getActiveChannel, setActiveChannel } from "@stores/channels.store";
-import {
-  voiceStore,
-  joinVoiceChannel,
-  leaveVoiceChannel,
-  setLocalScreenshare,
-} from "@stores/voice.store";
+import { channelsStore, getActiveChannel } from "@stores/channels.store";
+import { voiceStore } from "@stores/voice.store";
 import {
   joinVoice,
   leaveVoice as voiceSessionLeave,
-  setMuted as voiceSessionSetMuted,
-  setDeafened as voiceSessionSetDeafened,
-  enableCamera,
-  disableCamera,
   setOnRemoteVideo,
   setOnRemoteVideoRemoved,
   clearOnRemoteVideo,
-  getLocalCameraStream,
   setWsClient,
   setOnError as setVoiceOnError,
   clearOnError as clearVoiceOnError,
 } from "@lib/voiceSession";
-import {
-  setMessages,
-  prependMessages,
-  isChannelLoaded,
-  getChannelMessages,
-} from "@stores/messages.store";
 import { buildChatHeader } from "./main-page/ChatHeader";
 import { setServerHost } from "@components/message-list/renderers";
 import {
@@ -65,6 +43,18 @@ import {
   createInviteManagerController,
   createPinnedPanelController,
 } from "./main-page/OverlayManagers";
+import {
+  createMessageController,
+  createPendingDeleteManager,
+} from "./main-page/MessageController";
+import type { MessageController } from "./main-page/MessageController";
+import { createReactionController } from "./main-page/ReactionController";
+import type { ReactionController } from "./main-page/ReactionController";
+import { createVideoModeController } from "./main-page/VideoModeController";
+import type { VideoModeController } from "./main-page/VideoModeController";
+import { createVoiceWidgetCallbacks, createSidebarVoiceCallbacks } from "./main-page/VoiceCallbacks";
+import { createChannelController } from "./main-page/ChannelController";
+import type { ChannelController } from "./main-page/ChannelController";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
 
 const log = createLogger("main-page");
@@ -100,14 +90,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   let root: HTMLDivElement | null = null;
 
   // Child components tracked for cleanup
-  const children: MountableComponent[] = [];
-  const unsubscribers: Array<() => void> = [];
+  let children: MountableComponent[] = [];
+  let unsubscribers: Array<() => void> = [];
 
   // Refs we need to update reactively
   let banner: ServerBannerControl | null = null;
-  let messageList: MessageListComponent | null = null;
-  let messageInput: MessageInputComponent | null = null;
-  let typingIndicator: MountableComponent | null = null;
   let chatHeaderName: HTMLSpanElement | null = null;
 
   // Containers for swappable sub-components
@@ -115,22 +102,24 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   let typingSlot: HTMLDivElement | null = null;
   let inputSlot: HTMLDivElement | null = null;
 
-  // Video grid state
+  // Video grid (owned by mount, controller manages toggle state)
   let videoGrid: VideoGridComponent | null = null;
   let videoGridSlot: HTMLDivElement | null = null;
-  let isVideoMode = false;
-
-  // Track currently mounted channel to avoid redundant rebuilds
-  let currentChannelId: number | null = null;
 
   // Pending delete confirmations (double-click to delete pattern)
-  const pendingDeletes = new Map<number, number>();
+  const pendingDeleteManager = createPendingDeleteManager();
 
-  // Abort controller for channel-scoped async operations (e.g. message fetch)
-  let channelAbort: AbortController | null = null;
+  // Extracted controllers (created in mount)
+  let msgCtrl: MessageController | null = null;
+  let reactionCtrl: ReactionController | null = null;
+  let videoModeCtrl: VideoModeController | null = null;
+  let channelCtrl: ChannelController | null = null;
 
   // Toast container for user-facing error feedback
   let toast: ToastContainer | null = null;
+
+  // Active modal (channel create/edit/delete) — tracked for cleanup
+  let activeModal: MountableComponent | null = null;
 
   // Overlay controllers — created in mount()
   let pinnedCtrl: ReturnType<typeof createPinnedPanelController> | null = null;
@@ -145,371 +134,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   }
 
   // ---------------------------------------------------------------------------
-  // Chat / Video toggle
-  // ---------------------------------------------------------------------------
-
-  function showVideoGrid(): void {
-    if (isVideoMode) return;
-    isVideoMode = true;
-    if (messagesSlot !== null) messagesSlot.style.display = "none";
-    if (typingSlot !== null) typingSlot.style.display = "none";
-    if (inputSlot !== null) inputSlot.style.display = "none";
-    if (videoGridSlot !== null) videoGridSlot.style.display = "block";
-  }
-
-  function showChat(): void {
-    if (!isVideoMode) return;
-    isVideoMode = false;
-    if (messagesSlot !== null) messagesSlot.style.display = "";
-    if (typingSlot !== null) typingSlot.style.display = "";
-    if (inputSlot !== null) inputSlot.style.display = "";
-    if (videoGridSlot !== null) videoGridSlot.style.display = "none";
-  }
-
-  function checkVideoMode(): void {
-    const voice = voiceStore.getState();
-    const channelId = voice.currentChannelId;
-    if (channelId === null) {
-      if (isVideoMode) showChat();
-      return;
-    }
-    const channelUsers = voice.voiceUsers.get(channelId);
-    if (!channelUsers) {
-      if (isVideoMode) showChat();
-      return;
-    }
-    let anyCameraOn = voice.localCamera; // Check local camera first (may not be in voiceUsers yet)
-    if (!anyCameraOn) {
-      for (const user of channelUsers.values()) {
-        if (user.camera) {
-          anyCameraOn = true;
-          break;
-        }
-      }
-    }
-    if (anyCameraOn && !isVideoMode) {
-      showVideoGrid();
-    } else if (!anyCameraOn && isVideoMode) {
-      showChat();
-    }
-
-    // Manage local self-view tile
-    const currentUserId = getCurrentUserId();
-    if (voice.localCamera && videoGrid !== null) {
-      const localStream = getLocalCameraStream();
-      if (localStream !== null) {
-        const me = channelUsers?.get(currentUserId);
-        videoGrid.addStream(currentUserId, me?.username ? `${me.username} (You)` : "You", localStream);
-      }
-    } else if (!voice.localCamera && videoGrid !== null) {
-      videoGrid.removeStream(currentUserId);
-    }
-
-    // Remove remote video tiles for users who turned off their camera
-    if (videoGrid !== null && channelUsers) {
-      for (const user of channelUsers.values()) {
-        if (!user.camera && user.userId !== currentUserId) {
-          videoGrid.removeStream(user.userId);
-        }
-      }
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Message loading (REST)
-  // ---------------------------------------------------------------------------
-
-  async function loadMessages(channelId: number, signal: AbortSignal): Promise<void> {
-    if (isChannelLoaded(channelId)) {
-      log.debug("Messages already loaded", { channelId });
-      return;
-    }
-    try {
-      const resp = await api.getMessages(channelId, { limit: 50 }, signal);
-      if (!signal.aborted) {
-        log.info("Messages loaded", { channelId, count: resp.messages.length, hasMore: resp.has_more });
-        setMessages(channelId, resp.messages, resp.has_more);
-      }
-    } catch (err) {
-      if (!signal.aborted) {
-        log.error("Failed to load messages", { channelId, error: String(err) });
-        toast?.show("Failed to load messages", "error");
-      }
-    }
-  }
-
-  async function loadOlderMessages(channelId: number, signal: AbortSignal): Promise<void> {
-    const messages = getChannelMessages(channelId);
-    if (messages.length === 0) return;
-    const oldest = messages[0];
-    if (oldest === undefined) return;
-    try {
-      const resp = await api.getMessages(
-        channelId,
-        { before: oldest.id, limit: 50 },
-        signal,
-      );
-      if (!signal.aborted) {
-        prependMessages(channelId, resp.messages, resp.has_more);
-      }
-    } catch (err) {
-      if (!signal.aborted) {
-        log.error("Failed to load older messages", { channelId, error: String(err) });
-        toast?.show("Failed to load older messages", "error");
-      }
-    }
-  }
-
-  // ---------------------------------------------------------------------------
   // Channel switching — rebuild channel-dependent components
   // ---------------------------------------------------------------------------
 
-  function mountChannelComponents(channelId: number, channelName: string): void {
-    if (currentChannelId === channelId) return;
-
-    destroyChannelComponents();
-    currentChannelId = channelId;
-
-    log.info("Switching channel", { channelId, channelName });
-
-    // Notify server which channel we're viewing so channel-scoped
-    // broadcasts (chat_message, typing, etc.) are delivered to us.
-    ws.send({
-      type: "channel_focus",
-      payload: { channel_id: channelId },
-    });
-
-    channelAbort = new AbortController();
-    const signal = channelAbort.signal;
-    const userId = getCurrentUserId();
-
-    void loadMessages(channelId, signal);
-
-    // MessageList
-    messageList = createMessageList({
-      channelId,
-      currentUserId: userId,
-      onScrollTop: () => {
-        if (channelAbort !== null) {
-          void loadOlderMessages(channelId, channelAbort.signal);
-        }
-      },
-      onReplyClick: (msgId: number) => {
-        const msgs = getChannelMessages(channelId);
-        const msg = msgs.find((m) => m.id === msgId);
-        messageInput?.setReplyTo(msgId, msg?.user.username ?? "");
-      },
-      onEditClick: (msgId: number) => {
-        const msgs = getChannelMessages(channelId);
-        const msg = msgs.find((m) => m.id === msgId);
-        if (msg !== undefined) {
-          messageInput?.startEdit(msgId, msg.content);
-        }
-      },
-      onDeleteClick: (msgId: number) => {
-        if (pendingDeletes.has(msgId)) {
-          window.clearTimeout(pendingDeletes.get(msgId));
-          pendingDeletes.delete(msgId);
-          ws.send({
-            type: "chat_delete",
-            payload: { message_id: msgId },
-          });
-          toast?.show("Message deleted", "success");
-        } else {
-          toast?.show("Click delete again to confirm", "info");
-          const tid = window.setTimeout(() => pendingDeletes.delete(msgId), 5000);
-          pendingDeletes.set(msgId, tid);
-        }
-      },
-      onReactionClick: (msgId: number, emoji: string) => {
-        if (emoji === "") {
-          // Open emoji picker for reaction selection
-          const reactBtn = document.querySelector(`[data-testid="msg-react-${msgId}"]`);
-          if (reactBtn === null) return;
-
-          // Close any existing reaction picker
-          const existingWrap = document.querySelector(".reaction-picker-wrap");
-          if (existingWrap !== null) { existingWrap.remove(); return; }
-
-          let pickerDestroy: (() => void) | null = null;
-
-          const wrap = createElement("div", {
-            class: "reaction-picker-wrap",
-          });
-
-          // Backdrop to close on click-outside
-          const backdrop = createElement("div", {
-            style: "position: fixed; inset: 0; z-index: 299;",
-          });
-          backdrop.addEventListener("click", () => {
-            pickerDestroy?.();
-            wrap.remove();
-          });
-
-          const picker = createEmojiPicker({
-            onSelect: (selectedEmoji: string) => {
-              pickerDestroy?.();
-              wrap.remove();
-              if (!limiters.reactions.tryConsume()) {
-                toast?.show("Slow down! Please wait before reacting again.", "error");
-                return;
-              }
-              const msgs = getChannelMessages(channelId);
-              const m = msgs.find((x) => x.id === msgId);
-              const existing = m?.reactions.find((r) => r.emoji === selectedEmoji);
-              const type = existing?.me ? "reaction_remove" : "reaction_add";
-              ws.send({ type, payload: { message_id: msgId, emoji: selectedEmoji } });
-            },
-            onClose: () => { pickerDestroy?.(); wrap.remove(); },
-          });
-          pickerDestroy = picker.destroy;
-
-          // Position the picker to the left of the react button, top-aligned
-          const rect = reactBtn.getBoundingClientRect();
-          const pickerW = 320;
-          let left = rect.left - pickerW - 8;
-          let top = rect.top;
-          if (left < 8) left = rect.right + 8;
-          if (top + 420 > window.innerHeight - 8) top = window.innerHeight - 420 - 8;
-          if (top < 8) top = 8;
-
-          // Override the picker's default absolute positioning
-          picker.element.style.position = "fixed";
-          picker.element.style.left = `${left}px`;
-          picker.element.style.top = `${top}px`;
-          picker.element.style.bottom = "auto";
-          picker.element.style.right = "auto";
-          picker.element.style.zIndex = "300";
-          picker.element.style.margin = "0";
-
-          wrap.appendChild(backdrop);
-          wrap.appendChild(picker.element);
-          document.body.appendChild(wrap);
-
-          return;
-        }
-        if (!limiters.reactions.tryConsume()) {
-          toast?.show("Slow down! Please wait before reacting again.", "error");
-          return;
-        }
-        const msgs = getChannelMessages(channelId);
-        const msg = msgs.find((m) => m.id === msgId);
-        const existing = msg?.reactions.find((r) => r.emoji === emoji);
-        const type = existing?.me ? "reaction_remove" : "reaction_add";
-        ws.send({ type, payload: { message_id: msgId, emoji } });
-      },
-    });
-    if (messagesSlot !== null) {
-      messageList.mount(messagesSlot);
-    }
-    children.push(messageList);
-
-    // TypingIndicator
-    typingIndicator = createTypingIndicator({
-      channelId,
-      currentUserId: userId,
-    });
-    if (typingSlot !== null) {
-      typingIndicator.mount(typingSlot);
-    }
-    children.push(typingIndicator);
-
-    // MessageInput
-    messageInput = createMessageInput({
-      channelId,
-      channelName,
-      onSend: (content: string, replyTo: number | null, attachments: readonly string[]) => {
-        if (ws.getState() !== "connected") {
-          log.warn("Cannot send message: not connected");
-          toast?.show("Not connected — message not sent", "error");
-          return;
-        }
-        ws.send({
-          type: "chat_send",
-          payload: {
-            channel_id: channelId,
-            content,
-            reply_to: replyTo,
-            attachments,
-          },
-        });
-      },
-      onUploadFile: async (file: File) => {
-        const result = await api.uploadFile(file);
-        return { id: result.id, url: result.url, filename: result.filename };
-      },
-      onTyping: () => {
-        if (limiters.typing.tryConsume(String(channelId))) {
-          ws.send({
-            type: "typing_start",
-            payload: { channel_id: channelId },
-          });
-        }
-      },
-      onEditMessage: (messageId: number, content: string) => {
-        const trimmed = content.trim();
-        if (trimmed === "") {
-          toast?.show("Message cannot be empty", "error");
-          return;
-        }
-        const msgs = getChannelMessages(channelId);
-        const original = msgs.find((m) => m.id === messageId);
-        if (original !== undefined && original.content === trimmed) {
-          return;
-        }
-        ws.send({
-          type: "chat_edit",
-          payload: { message_id: messageId, content: trimmed },
-        });
-        toast?.show("Message edited", "success");
-      },
-    });
-    if (inputSlot !== null) {
-      messageInput.mount(inputSlot);
-    }
-    children.push(messageInput);
-
-    // Update header
-    if (chatHeaderName !== null) {
-      setText(chatHeaderName, channelName);
-    }
-  }
-
-  function destroyChannelComponents(): void {
-    for (const tid of pendingDeletes.values()) {
-      window.clearTimeout(tid);
-    }
-    pendingDeletes.clear();
-
-    if (channelAbort !== null) {
-      channelAbort.abort();
-      channelAbort = null;
-    }
-
-    if (messageList !== null) {
-      messageList.destroy?.();
-      const idx = children.indexOf(messageList);
-      if (idx !== -1) children.splice(idx, 1);
-      messageList = null;
-    }
-    if (typingIndicator !== null) {
-      typingIndicator.destroy?.();
-      const idx = children.indexOf(typingIndicator);
-      if (idx !== -1) children.splice(idx, 1);
-      typingIndicator = null;
-    }
-    if (messageInput !== null) {
-      messageInput.destroy?.();
-      const idx = children.indexOf(messageInput as MountableComponent);
-      if (idx !== -1) children.splice(idx, 1);
-      messageInput = null;
-    }
-    if (messagesSlot !== null) { clearChildren(messagesSlot); }
-    if (typingSlot !== null) { clearChildren(typingSlot); }
-    if (inputSlot !== null) { clearChildren(inputSlot); }
-
-    currentChannelId = null;
-  }
+  // mountChannelComponents / destroyChannelComponents delegated to channelCtrl
 
   // ---------------------------------------------------------------------------
   // Mount / Destroy
@@ -569,20 +197,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const sidebarWrapper = createElement("div", { class: "channel-sidebar", "data-testid": "channel-sidebar" });
 
     const channelSidebarSlot = createElement("div", {});
-    let activeModal: MountableComponent | null = null;
 
+    const sidebarVoice = createSidebarVoiceCallbacks(ws);
     const channelSidebar = createChannelSidebar({
-      onVoiceJoin: (channelId) => {
-        log.info("Joining voice channel", { channelId });
-        joinVoiceChannel(channelId);
-        ws.send({ type: "voice_join", payload: { channel_id: channelId } });
-      },
-      onVoiceLeave: () => {
-        log.info("Leaving voice channel");
-        voiceSessionLeave(false); // false: we send voice_leave below
-        leaveVoiceChannel();
-        ws.send({ type: "voice_leave", payload: {} });
-      },
+      onVoiceJoin: sidebarVoice.onVoiceJoin,
+      onVoiceLeave: sidebarVoice.onVoiceLeave,
       onCreateChannel: (category) => {
         if (activeModal !== null) {
           return;
@@ -590,10 +209,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         const modal = createCreateChannelModal({
           category,
           onCreate: async (data) => {
-            await api.adminCreateChannel(data);
-            // Server broadcasts channel_create via WS — store updates automatically
-            modal.destroy?.();
-            activeModal = null;
+            try {
+              await api.adminCreateChannel(data);
+              // Server broadcasts channel_create via WS — store updates automatically
+              modal.destroy?.();
+              activeModal = null;
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : "Failed to create channel";
+              toast?.show(msg, "error");
+            }
           },
           onClose: () => {
             modal.destroy?.();
@@ -612,10 +236,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           channelName: channel.name,
           channelType: channel.type,
           onSave: async (data) => {
-            await api.adminUpdateChannel(channel.id, data);
-            // Server broadcasts channel_update via WS — store updates automatically
-            modal.destroy?.();
-            activeModal = null;
+            try {
+              await api.adminUpdateChannel(channel.id, data);
+              // Server broadcasts channel_update via WS — store updates automatically
+              modal.destroy?.();
+              activeModal = null;
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : "Failed to update channel";
+              toast?.show(msg, "error");
+            }
           },
           onClose: () => {
             modal.destroy?.();
@@ -633,10 +262,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           channelId: channel.id,
           channelName: channel.name,
           onConfirm: async () => {
-            await api.adminDeleteChannel(channel.id);
-            // Server broadcasts channel_delete via WS — store updates automatically
-            modal.destroy?.();
-            activeModal = null;
+            try {
+              await api.adminDeleteChannel(channel.id);
+              // Server broadcasts channel_delete via WS — store updates automatically
+              modal.destroy?.();
+              activeModal = null;
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : "Failed to delete channel";
+              toast?.show(msg, "error");
+            }
           },
           onClose: () => {
             modal.destroy?.();
@@ -683,65 +317,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     // Voice widget
     const voiceWidgetSlot = createElement("div", {});
-    const voiceWidget = createVoiceWidget({
-      onDisconnect: () => {
-        if (voiceStore.getState().currentChannelId === null) return;
-        log.info("Leaving voice channel (widget disconnect)");
-        voiceSessionLeave(false); // false: we send voice_leave below
-        leaveVoiceChannel();
-        ws.send({ type: "voice_leave", payload: {} });
-      },
-      onMuteToggle: () => {
-        if (!limiters.voice.tryConsume()) return;
-        const state = voiceStore.getState();
-        if (state.localMuted) {
-          // Unmuting: also undeafen if deafened
-          voiceSessionSetMuted(false);
-          ws.send({ type: "voice_mute", payload: { muted: false } });
-          if (state.localDeafened) {
-            voiceSessionSetDeafened(false);
-            ws.send({ type: "voice_deafen", payload: { deafened: false } });
-          }
-        } else {
-          voiceSessionSetMuted(true);
-          ws.send({ type: "voice_mute", payload: { muted: true } });
-        }
-      },
-      onDeafenToggle: () => {
-        if (!limiters.voice.tryConsume()) return;
-        const state = voiceStore.getState();
-        if (state.localDeafened) {
-          // Undeafening: also unmute mic
-          voiceSessionSetDeafened(false);
-          ws.send({ type: "voice_deafen", payload: { deafened: false } });
-          voiceSessionSetMuted(false);
-          ws.send({ type: "voice_mute", payload: { muted: false } });
-        } else {
-          // Deafening: also mute mic
-          voiceSessionSetDeafened(true);
-          ws.send({ type: "voice_deafen", payload: { deafened: true } });
-          if (!state.localMuted) {
-            voiceSessionSetMuted(true);
-            ws.send({ type: "voice_mute", payload: { muted: true } });
-          }
-        }
-      },
-      onCameraToggle: () => {
-        if (!limiters.voiceVideo.tryConsume()) return;
-        const next = !voiceStore.getState().localCamera;
-        if (next) {
-          void enableCamera();
-        } else {
-          void disableCamera();
-        }
-      },
-      onScreenshareToggle: () => {
-        if (!limiters.voiceVideo.tryConsume()) return;
-        const next = !voiceStore.getState().localScreenshare;
-        setLocalScreenshare(next);
-        ws.send({ type: "voice_screenshare", payload: { enabled: next } });
-      },
-    });
+    const voiceWidget = createVoiceWidget(
+      createVoiceWidgetCallbacks(ws, limiters),
+    );
     voiceWidget.mount(voiceWidgetSlot);
     children.push(voiceWidget);
     sidebarWrapper.appendChild(voiceWidgetSlot);
@@ -760,10 +338,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       api,
       getRoot: () => root,
       getToast: () => toast,
-      getCurrentChannelId: () => currentChannelId,
+      getCurrentChannelId: () => channelCtrl?.currentChannelId ?? null,
       onJumpToMessage: (msgId: number) => {
-        if (messageList === null) return false;
-        return messageList.scrollToMessage(msgId);
+        if (channelCtrl?.messageList === null || channelCtrl?.messageList === undefined) return false;
+        return channelCtrl.messageList.scrollToMessage(msgId);
       },
     });
     unsubscribers.push(() => { pinnedCtrl?.cleanup(); });
@@ -787,6 +365,18 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     videoGrid = createVideoGrid();
     videoGrid.mount(videoGridSlot);
     children.push(videoGrid);
+
+    // Video mode controller (chat/video toggle + tile management)
+    videoModeCtrl = createVideoModeController({
+      slots: {
+        messagesSlot: messagesSlot as HTMLDivElement,
+        typingSlot: typingSlot as HTMLDivElement,
+        inputSlot: inputSlot as HTMLDivElement,
+        videoGridSlot: videoGridSlot as HTMLDivElement,
+      },
+      videoGrid,
+      getCurrentUserId,
+    });
 
     appendChildren(chatArea, messagesSlot, typingSlot, inputSlot, videoGridSlot);
 
@@ -845,6 +435,38 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     toast.mount(root);
     children.push(toast);
 
+    // Message loading controller
+    msgCtrl = createMessageController({
+      api,
+      showError: (msg) => toast?.show(msg, "error"),
+    });
+
+    // Reaction controller
+    reactionCtrl = createReactionController({
+      ws,
+      reactionsLimiter: limiters.reactions,
+      getChannelId: () => channelCtrl?.currentChannelId ?? 0,
+      showError: (msg) => toast?.show(msg, "error"),
+    });
+
+    // Channel controller (mount/destroy MessageList, TypingIndicator, MessageInput per channel)
+    channelCtrl = createChannelController({
+      ws,
+      api,
+      msgCtrl: msgCtrl!,
+      pendingDeleteManager,
+      reactionCtrl: reactionCtrl!,
+      typingLimiter: limiters.typing,
+      showToast: (msg, type) => toast?.show(msg, type as "success" | "error" | "info"),
+      getCurrentUserId,
+      slots: {
+        messagesSlot: messagesSlot as HTMLDivElement,
+        typingSlot: typingSlot as HTMLDivElement,
+        inputSlot: inputSlot as HTMLDivElement,
+      },
+      chatHeaderName,
+    });
+
     // Wire voice error callback to toast
     setVoiceOnError((msg) => toast?.show(msg, "error"));
 
@@ -858,16 +480,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       const user = channelUsers?.get(userId);
       const username = user?.username ?? `User ${userId}`;
       videoGrid.addStream(userId, username, stream);
-      checkVideoMode();
+      videoModeCtrl?.checkVideoMode();
     });
     setOnRemoteVideoRemoved((userId) => {
       videoGrid?.removeStream(userId);
-      checkVideoMode();
+      videoModeCtrl?.checkVideoMode();
     });
     unsubscribers.push(() => clearOnRemoteVideo());
 
     // Subscribe to voice store for camera state changes
-    unsubscribers.push(voiceStore.subscribe(() => checkVideoMode()));
+    unsubscribers.push(voiceStore.subscribe(() => videoModeCtrl?.checkVideoMode()));
 
     // Auto-update notifier — checks server for newer client version
     if (apiConfig.host) {
@@ -883,14 +505,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const unsubChannels = channelsStore.subscribe(() => {
       const active = getActiveChannel();
       if (active !== null) {
-        mountChannelComponents(active.id, active.name);
+        channelCtrl!.mountChannel(active.id, active.name);
       }
     });
     unsubscribers.push(unsubChannels);
 
     const active = getActiveChannel();
     if (active !== null) {
-      mountChannelComponents(active.id, active.name);
+      channelCtrl!.mountChannel(active.id, active.name);
     }
   }
 
@@ -901,24 +523,35 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     voiceSessionLeave(false);
     clearVoiceOnError();
     clearOnRemoteVideo();
-    destroyChannelComponents();
+    channelCtrl?.destroyChannel();
+    channelCtrl = null;
+
+    reactionCtrl?.destroy();
+    reactionCtrl = null;
+    msgCtrl = null;
+    videoModeCtrl?.destroy();
+    videoModeCtrl = null;
+
+    if (activeModal !== null) {
+      activeModal.destroy?.();
+      activeModal = null;
+    }
 
     if (videoGrid !== null) {
       videoGrid.destroy?.();
       videoGrid = null;
     }
     videoGridSlot = null;
-    isVideoMode = false;
 
     for (const child of children) {
       child.destroy?.();
     }
-    children.length = 0;
+    children = [];
 
     for (const unsub of unsubscribers) {
       unsub();
     }
-    unsubscribers.length = 0;
+    unsubscribers = [];
 
     if (banner !== null) {
       banner.destroy();
