@@ -47,7 +47,7 @@
 .channel-sidebar-header {
   height: 48px; padding: 0 16px;
   display: flex; align-items: center; justify-content: space-between;
-  border-bottom: 1px solid var(--bg-tertiary); cursor: pointer; flex-shrink: 0;
+  border-bottom: none; box-shadow: var(--elevation-low); cursor: pointer; flex-shrink: 0;
   transition: background 0.1s ease;
 }
 .channel-sidebar-header:hover { background: var(--bg-hover); }
@@ -213,7 +213,7 @@
 .chat-header {
   height: 48px; padding: 0 16px;
   display: flex; align-items: center; gap: 12px;
-  border-bottom: 1px solid var(--bg-tertiary); flex-shrink: 0;
+  border-bottom: none; box-shadow: var(--elevation-low); flex-shrink: 0;
 }
 .chat-header .ch-hash { color: var(--text-micro); font-size: 22px; font-weight: 600; }
 .chat-header .ch-name { font-size: 15px; font-weight: 700; color: white; }
@@ -1203,7 +1203,7 @@
 .friends-header {
   height: 48px; padding: 0 16px;
   display: flex; align-items: center; gap: 16px;
-  border-bottom: 1px solid var(--bg-tertiary); flex-shrink: 0;
+  border-bottom: none; box-shadow: var(--elevation-low); flex-shrink: 0;
 }
 .friends-header .fh-title {
   font-size: 15px; font-weight: 700; color: white;
@@ -1306,7 +1306,7 @@
 .dm-chat-header {
   height: 48px; padding: 0 16px;
   display: flex; align-items: center; gap: 10px;
-  border-bottom: 1px solid var(--bg-tertiary); flex-shrink: 0;
+  border-bottom: none; box-shadow: var(--elevation-low); flex-shrink: 0;
 }
 .dm-chat-header .dch-avatar {
   width: 24px; height: 24px; border-radius: var(--radius-circle);

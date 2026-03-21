@@ -23,6 +23,8 @@ body {
   color: var(--text-normal);
   background: var(--bg-tertiary);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1;
 }
 
 #app {
@@ -66,17 +68,23 @@ a {
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--scrollbar-auto-track);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--scrollbar-auto-thumb);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: #232428;
 }
+
+/* Thin scrollbar for sidebars */
+.channel-list::-webkit-scrollbar,
+.member-list::-webkit-scrollbar { width: 6px; }
+.channel-list::-webkit-scrollbar-thumb,
+.member-list::-webkit-scrollbar-thumb { background: var(--scrollbar-thin-thumb); }
 
 /* Utility classes */
 .sr-only {
