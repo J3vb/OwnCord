@@ -13,6 +13,11 @@
   --bg-active:     #404249;
   --bg-overlay:    rgba(0, 0, 0, 0.7);
 
+  /* Background modifiers (semi-transparent overlays) */
+  --bg-modifier-hover:    rgba(79, 84, 92, 0.16);
+  --bg-modifier-active:   rgba(79, 84, 92, 0.24);
+  --bg-modifier-selected: rgba(79, 84, 92, 0.32);
+
   /* Accent */
   --accent:        #5865f2;
   --accent-hover:  #4752c4;
@@ -24,6 +29,24 @@
   --text-faint:    #80848e;
   --text-micro:    #6d6f78;
   --text-link:     #00a8fc;
+
+  /* Semantic text aliases */
+  --text-positive: #23a55a;
+  --text-warning:  #f0b232;
+  --text-danger:   #f23f43;
+
+  /* Header colors */
+  --header-primary:   #f2f3f5;
+  --header-secondary: #b5bac1;
+
+  /* Interactive icon states */
+  --interactive-normal: #b5bac1;
+  --interactive-hover:  #dbdee1;
+  --interactive-active: #fff;
+  --interactive-muted:  #4e5058;
+
+  /* Channel icon */
+  --channel-icon: #80848e;
 
   /* Status colors */
   --green:         #23a55a;
@@ -40,10 +63,33 @@
   --role-mod:      #2ecc71;
   --role-member:   #949ba4;
 
+  /* Elevation shadows */
+  --elevation-low:  0 1px 0 rgba(4, 4, 5, 0.2), 0 1.5px 0 rgba(4, 4, 5, 0.05);
+  --elevation-high: 0 8px 16px rgba(0, 0, 0, 0.24);
+
+  /* Scrollbar colors */
+  --scrollbar-thin-thumb:  #1a1b1e;
+  --scrollbar-auto-thumb:  #1a1b1e;
+  --scrollbar-auto-track:  transparent;
+
+  /* Transition timing */
+  --transition-fast:   100ms ease;
+  --transition-normal: 170ms ease;
+  --transition-slow:   200ms ease;
+
   /* Typography */
   --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
   --font-body:    "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   --font-mono:    "Cascadia Code", "Consolas", monospace;
+
+  /* Typography scale */
+  --font-size-xxs: 10px;
+  --font-size-xs:  12px;
+  --font-size-sm:  13px;
+  --font-size-md:  14px;
+  --font-size-lg:  16px;
+  --font-size-xl:  20px;
+  --font-size-xxl: 24px;
 
   /* Radii */
   --radius-sm:     4px;
