@@ -536,6 +536,8 @@ export class LiveKitSession {
     this.cleanupAudioElements();
     this.closeSharedAudioCtx();
     this.currentChannelId = null;
+    // Reset camera state so the UI doesn't show a stale video grid on rejoin.
+    setLocalCamera(false);
     log.info("Left voice session");
   }
 
