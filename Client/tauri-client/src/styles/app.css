@@ -37,7 +37,7 @@
 .server-icon .badge:empty { display: none; }
 .server-separator { width: 32px; height: 2px; background: var(--border); border-radius: 1px; flex-shrink: 0; }
 .server-icon.add { background: transparent; color: var(--green); border: 2px dashed var(--border-strong); font-size: 24px; }
-.server-icon.add:hover { border-color: var(--green); background: rgba(35,165,90,.1); }
+.server-icon.add:hover { border-color: var(--green); background: var(--green); color: white; border-style: solid; }
 
 /* ── Channel Sidebar ── */
 .channel-sidebar {
@@ -83,6 +83,7 @@
   padding: 6px 8px; margin: 1px 8px;
   border-radius: var(--radius-sm); cursor: pointer;
   color: var(--text-muted); transition: all .1s;
+  position: relative;
 }
 .channel-item:hover { background: var(--bg-hover); color: var(--text-normal); }
 .channel-item.active { background: var(--bg-active); color: white; }
@@ -107,6 +108,17 @@
 }
 .channel-item .unread-badge:empty { display: none; }
 .channel-item.unread .ch-name { color: white; font-weight: 600; }
+.channel-item.unread::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 8px;
+  border-radius: 0 4px 4px 0;
+  background: white;
+}
 
 /* Voice users nested in sidebar */
 .voice-users-list { padding: 2px 0 4px 36px; }
@@ -305,7 +317,7 @@
   padding: 8px 16px 16px; margin-bottom: 8px;
 }
 .msg-day-divider .line { flex: 1; height: 1px; background: var(--border); }
-.msg-day-divider .date { font-size: 11px; font-weight: 700; color: var(--text-muted); }
+.msg-day-divider .date { font-size: 12px; font-weight: 600; color: var(--text-muted); }
 
 .message {
   padding: 2px 48px 2px 72px; position: relative;
@@ -313,7 +325,7 @@
   contain: layout style;
   transition: background 0.1s ease;
 }
-.message:hover { background: var(--bg-hover, rgba(255,255,255,.02)); }
+.message:hover { background: rgba(2, 2, 2, 0.06); }
 .message.grouped { min-height: 20px; }
 .message .msg-avatar {
   position: absolute; left: 16px; top: 4px;
@@ -327,6 +339,7 @@
   position: absolute; left: 16px; top: 4px;
   width: 40px; text-align: center;
   font-size: 10px; color: var(--text-micro);
+  font-variant-numeric: tabular-nums;
   display: none;
 }
 .message.grouped:hover .msg-hover-time { display: block; }
@@ -334,7 +347,7 @@
 .message.grouped .msg-header { display: none; }
 .message .msg-author { font-weight: 600; cursor: pointer; }
 .message .msg-author:hover { text-decoration: underline; }
-.message .msg-time { font-size: 11px; color: var(--text-micro); }
+.message .msg-time { font-size: 11px; color: var(--text-micro); font-variant-numeric: tabular-nums; }
 .message .msg-edited { font-size: 10px; color: var(--text-micro); }
 .message .msg-text { line-height: 1.45; word-break: break-word; }
 .message .msg-text code {
@@ -763,7 +776,8 @@
   border: 3px solid var(--bg-secondary);
 }
 .member-item .mi-name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.member-item.offline { opacity: .4; }
+.member-item.offline { opacity: .3; }
+.member-item.offline .mi-avatar { filter: saturate(0.3); }
 
 /* ── User Profile Popup ── */
 .user-popup {
@@ -1030,6 +1044,7 @@
   border-radius: var(--radius-sm); padding: 4px;
   box-shadow: 0 8px 24px rgba(0,0,0,.5);
   min-width: 180px;
+  animation: contextMenuPop 0.1s ease;
 }
 .context-menu-item {
   display: flex; align-items: center; gap: 8px;
@@ -1058,7 +1073,7 @@
   opacity: 0; transition: opacity .3s;
   pointer-events: none;
 }
-.toast.show { opacity: 1; }
+.toast.show { opacity: 1; animation: toastSlideUp 0.3s ease; }
 .toast-info { border-left: 4px solid var(--accent); }
 .toast-error { border-left: 4px solid var(--red); }
 .toast-success { border-left: 4px solid var(--green); }
@@ -1375,6 +1390,14 @@
 @keyframes typingAnim {
   0%, 60%, 100% { opacity: .3; transform: translateY(0); }
   30% { opacity: 1; transform: translateY(-3px); }
+}
+@keyframes contextMenuPop {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes toastSlideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .user-popup.open, .emoji-picker.open { animation: slideIn .15s ease; }
