@@ -43,7 +43,8 @@ describe("PinnedMessages", () => {
     const { panel } = makePanel();
     const title = container.querySelector("h3");
     expect(title).not.toBeNull();
-    expect(title!.textContent).toBe("\uD83D\uDCCC Pinned Messages");
+    expect(title!.querySelector('svg[data-icon="pin"]')).not.toBeNull();
+    expect(title!.textContent).toContain("Pinned Messages");
     panel.destroy?.();
   });
 

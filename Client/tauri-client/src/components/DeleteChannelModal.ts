@@ -4,6 +4,7 @@
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 
 export interface DeleteChannelModalOptions {
@@ -35,14 +36,20 @@ export function createDeleteChannelModal(
       class: "modal-close",
       type: "button",
     });
-    setText(closeBtn, "\u2715");
+    closeBtn.textContent = "";
+    closeBtn.appendChild(createIcon("x", 14));
     closeBtn.addEventListener("click", onClose, { signal: ac.signal });
     appendChildren(header, title, closeBtn);
 
     // Body
     const body = createElement("div", { class: "modal-body" });
     const warning = createElement("div", { class: "modal-danger-text" });
-    warning.innerHTML = `Are you sure you want to delete <strong>#${channelName}</strong>? This action cannot be undone and all messages in this channel will be lost.`;
+    appendChildren(
+      warning,
+      "Are you sure you want to delete ",
+      createElement("strong", {}, `#${channelName}`),
+      "? This action cannot be undone and all messages in this channel will be lost.",
+    );
     body.appendChild(warning);
 
     // Error display

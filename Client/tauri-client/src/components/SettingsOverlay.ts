@@ -5,6 +5,7 @@
  */
 
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import { uiStore } from "@stores/ui.store";
 import { loadPref, applyTheme } from "./settings/helpers";
@@ -139,7 +140,8 @@ export function createSettingsOverlay(
     contentArea = createElement("div", { class: "settings-content" });
 
     // Close button
-    const closeBtn = createElement("button", { class: "settings-close-btn" }, "\u00D7");
+    const closeBtn = createElement("button", { class: "settings-close-btn" });
+    closeBtn.appendChild(createIcon("x", 18));
     closeBtn.addEventListener("click", () => {
       options.onClose();
     }, { signal: ac.signal });

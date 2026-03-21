@@ -131,7 +131,7 @@ describe('media-visibility', () => {
     vi.advanceTimersByTime(10_000);
     expect(img.src).toBe('data:image/png;base64,frozen');
     const btn = wrap.querySelector('.gif-play-btn');
-    expect(btn?.textContent).toBe('\u25B6');
+    expect(btn?.querySelector('svg[data-icon="play"]')).not.toBeNull();
     cleanup();
   });
 

@@ -8,6 +8,7 @@ import {
   clearChildren,
   appendChildren,
 } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 
 export interface PinnedMessage {
@@ -64,11 +65,13 @@ function renderPinnedItem(
 
   // Hover actions
   const actions = createElement("div", { class: "pinned-msg__actions" });
-  const jumpBtn = createElement("button", { title: "Jump to message" }, "\u2197");
+  const jumpBtn = createElement("button", { title: "Jump to message" });
+  jumpBtn.appendChild(createIcon("external-link", 14));
   const unpinBtn = createElement("button", {
     class: "pinned-msg__unpin",
     title: "Unpin message",
-  }, "\u2715");
+  });
+  unpinBtn.appendChild(createIcon("x", 14));
 
   jumpBtn.addEventListener("click", () => options.onJumpToMessage(msg.id), { signal });
   unpinBtn.addEventListener("click", () => options.onUnpin(msg.id), { signal });
@@ -82,7 +85,8 @@ function renderPinnedItem(
 function renderEmptyState(): HTMLDivElement {
   const empty = createElement("div", { class: "pinned-panel__empty" });
   const icon = createElement("div", { class: "pinned-panel__empty-icon" });
-  icon.textContent = "\uD83D\uDCCC";
+  icon.textContent = "";
+  icon.appendChild(createIcon("pin", 20));
   const text = createElement("div", { class: "pinned-panel__empty-text" });
   text.textContent = "This channel doesn't have any pinned messages\u2026 yet!";
   appendChildren(empty, icon, text);
@@ -101,12 +105,15 @@ export function createPinnedMessages(
     // Header
     const header = createElement("div", { class: "pinned-panel__header" });
     const title = createElement("h3", {});
-    title.textContent = "\uD83D\uDCCC Pinned Messages";
+    title.textContent = "";
+    title.appendChild(createIcon("pin", 16));
+    title.appendChild(document.createTextNode(" Pinned Messages"));
 
     const count = createElement("span", { class: "pinned-panel__count" });
     count.textContent = String(options.pinnedMessages.length);
 
-    const closeBtn = createElement("button", { class: "pinned-panel__close" }, "\u00D7");
+    const closeBtn = createElement("button", { class: "pinned-panel__close" });
+    closeBtn.appendChild(createIcon("x", 16));
     closeBtn.addEventListener("click", () => options.onClose(), { signal: ac.signal });
 
     const titleGroup = createElement("div", {

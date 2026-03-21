@@ -4,6 +4,7 @@
  */
 
 import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 
 // ---------------------------------------------------------------------------
@@ -107,7 +108,8 @@ export function createInviteManager(
     // Header
     const header = createElement("div", { class: "invite-manager__header" });
     const title = createElement("h2", {}, "Server Invites");
-    const closeBtn = createElement("button", { class: "invite-manager__close" }, "\u00D7");
+    const closeBtn = createElement("button", { class: "invite-manager__close" });
+    closeBtn.appendChild(createIcon("x", 14));
     closeBtn.addEventListener("click", () => options.onClose(), { signal: ac.signal });
     appendChildren(header, title, closeBtn);
 

@@ -8,6 +8,7 @@ import {
   setText,
   appendChildren,
 } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import { observeMedia } from "@lib/media-visibility";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -258,7 +259,8 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
   }
   const wrap = createElement("div", { class: "msg-file" });
   const inner = createElement("div", { class: "msg-file-inner" });
-  const icon = createElement("div", { class: "msg-file-icon" }, "\uD83D\uDCC4");
+  const icon = createElement("div", { class: "msg-file-icon" });
+  icon.appendChild(createIcon("file-text", 20));
   const nameEl = createElement("div", { class: "msg-file-name" }, att.filename);
   nameEl.addEventListener("click", () => {
     void downloadFile(resolvedUrl, att.filename);
@@ -269,7 +271,8 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
   const downloadBtn = createElement("button", {
     class: "msg-file-download",
     title: "Download",
-  }, "\u2B07");
+  });
+  downloadBtn.appendChild(createIcon("download", 16));
   downloadBtn.addEventListener("click", () => {
     void downloadFile(resolvedUrl, att.filename);
   });

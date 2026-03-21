@@ -3,6 +3,13 @@
 /* ═══ Layout ═══ */
 .app { display: flex; flex: 1; min-height: 0; }
 
+/* ── SVG Icon base ── */
+.icon {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
 /* ── Server Strip ── */
 .server-strip {
   width: 72px; background: var(--bg-tertiary);
@@ -60,10 +67,9 @@
   cursor: pointer; user-select: none;
 }
 .category-arrow {
-  font-size: 8px; color: var(--text-muted);
-  transition: transform .2s; display: inline-block;
+  color: var(--text-muted);
+  transition: transform .2s; display: inline-flex; align-items: center;
 }
-.category.collapsed .category-arrow { transform: rotate(-90deg); }
 .category-name {
   font-size: 11px; font-weight: 700;
   color: var(--text-faint); letter-spacing: .5px; text-transform: uppercase;
@@ -97,7 +103,7 @@
   background: rgba(88, 101, 242, .15);
   border-radius: var(--radius-sm);
 }
-.channel-item .ch-icon { font-size: 18px; opacity: .6; flex-shrink: 0; width: 20px; text-align: center; }
+.channel-item .ch-icon { opacity: .6; flex-shrink: 0; width: 20px; text-align: center; display: flex; align-items: center; justify-content: center; }
 .channel-item.active .ch-icon { opacity: 1; }
 .channel-item .ch-name { font-size: 14px; flex: 1; }
 .channel-item .unread-badge {
@@ -134,18 +140,12 @@
   font-size: 9px; font-weight: 700; color: white; flex-shrink: 0;
 }
 .voice-user-item.speaking .vu-avatar { box-shadow: 0 0 0 2px var(--green); }
-.voice-user-item .vu-muted { color: var(--red); font-size: 12px; margin-left: 2px; }
-.voice-user-item .vu-muted:first-of-type { margin-left: auto; }
-.vu-icon-crossed {
-  position: relative; opacity: .9;
-}
-.vu-icon-crossed::after {
-  content: ""; position: absolute;
-  top: 50%; left: -1px; right: -1px;
-  height: 2px; background: var(--red);
-  transform: rotate(-45deg);
-  border-radius: 1px;
-}
+.voice-user-item .vu-status,
+.voice-user-item .vu-muted { margin-left: 2px; display: flex; align-items: center; }
+.voice-user-item .vu-status { color: var(--text-muted); }
+.voice-user-item .vu-muted { color: var(--red); }
+.voice-user-item .vu-name + .vu-status,
+.voice-user-item .vu-name + .vu-muted { margin-left: auto; }
 
 /* Voice widget (above user bar, when connected) */
 .voice-widget {
@@ -429,7 +429,7 @@
   width: 48px; height: 48px; border-radius: var(--radius-circle);
   background: rgba(0,0,0,.7); color: white;
   display: flex; align-items: center; justify-content: center;
-  font-size: 20px; pointer-events: none;
+  pointer-events: none;
   transition: background .15s;
 }
 .msg-embed-yt-player:hover .msg-embed-play { background: var(--red); }
@@ -600,7 +600,7 @@
   width: 36px; height: 36px; border-radius: var(--radius-sm);
   background: var(--accent); color: white;
   display: flex; align-items: center; justify-content: center;
-  font-size: 16px; font-weight: 700; flex-shrink: 0;
+  flex-shrink: 0;
 }
 .msg-file-name { font-size: 13px; color: var(--text-link); cursor: pointer; }
 .msg-file-name:hover { text-decoration: underline; }
@@ -636,7 +636,7 @@
   display: flex; align-items: center; gap: 8px;
   padding: 4px 16px; margin-top: 4px;
 }
-.system-msg .sm-icon { color: var(--green); font-size: 16px; }
+.system-msg .sm-icon { color: var(--green); display: inline-flex; align-items: center; }
 .system-msg .sm-text { font-size: 13px; color: var(--text-muted); }
 .system-msg .sm-text strong { color: var(--text-normal); }
 .system-msg .sm-time { font-size: 11px; color: var(--text-micro); margin-left: auto; }
@@ -736,9 +736,16 @@
 .attachment-preview-spinner {
   position: absolute; top: 50%; left: 50%;
   transform: translate(-50%, -50%);
-  font-size: 18px; animation: spinCentered 1s linear infinite;
+  animation: spinCentered 1s linear infinite;
 }
 @keyframes spinCentered { to { transform: translate(-50%, -50%) rotate(360deg); } }
+@keyframes iconSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.icon[data-icon="loader"] {
+  animation: iconSpin 1s linear infinite;
+}
 .attachment-upload-error {
   padding: 6px 10px; font-size: 12px; color: var(--red);
   background: rgba(237,66,69,.1); border-radius: var(--radius-sm);
@@ -1455,7 +1462,6 @@
 /* Channel sidebar */
 .compact-mode .channel-item { padding: 3px 8px; }
 .compact-mode .channel-item .ch-name { font-size: 13px; }
-.compact-mode .channel-item .ch-icon { font-size: 16px; }
 .compact-mode .channel-sidebar-header { height: 40px; }
 .compact-mode .category { padding: 10px 8px 2px 16px; }
 /* Chat header */

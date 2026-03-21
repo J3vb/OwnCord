@@ -6,6 +6,7 @@
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import type { ChannelType } from "@lib/types";
 
@@ -61,7 +62,8 @@ export function createCreateChannelModal(
       class: "modal-close",
       type: "button",
     });
-    setText(closeBtn, "\u2715");
+    closeBtn.textContent = "";
+    closeBtn.appendChild(createIcon("x", 14));
     closeBtn.addEventListener("click", onClose, { signal: ac.signal });
     appendChildren(header, title, closeBtn);
 

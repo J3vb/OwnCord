@@ -9,6 +9,7 @@ import {
   setText,
   appendChildren,
 } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 
@@ -110,7 +111,8 @@ function renderReplyRef(
 
 function renderSystemMessage(msg: Message): HTMLDivElement {
   const el = createElement("div", { class: "system-msg" });
-  const icon = createElement("span", { class: "sm-icon" }, "\u2192");
+  const icon = createElement("span", { class: "sm-icon" });
+  icon.appendChild(createIcon("arrow-right", 14));
   const text = createElement("span", { class: "sm-text" });
   text.appendChild(renderMentions(msg.content));
   const time = createElement("span", { class: "sm-time" }, formatTime(msg.timestamp));
@@ -193,21 +195,20 @@ export function renderMessage(
   if (!msg.deleted) {
     const actionsBar = createElement("div", { class: "msg-actions-bar" });
 
-    const reactBtn = createElement("button", { "data-testid": `msg-react-${msg.id}` }, "\uD83D\uDE04");
+    const reactBtn = createElement("button", { "data-testid": `msg-react-${msg.id}` });
+    reactBtn.appendChild(createIcon("smile", 16));
     reactBtn.title = "React";
     reactBtn.addEventListener("click", () => opts.onReactionClick(msg.id, ""), { signal });
     actionsBar.appendChild(reactBtn);
 
-    const replyBtn = createElement("button", { "data-testid": `msg-reply-${msg.id}` }, "\u21A9");
+    const replyBtn = createElement("button", { "data-testid": `msg-reply-${msg.id}` });
+    replyBtn.appendChild(createIcon("reply", 16));
     replyBtn.title = "Reply";
     replyBtn.addEventListener("click", () => opts.onReplyClick(msg.id), { signal });
     actionsBar.appendChild(replyBtn);
 
-    const pinBtn = createElement(
-      "button",
-      { "data-testid": `msg-pin-${msg.id}` },
-      msg.pinned ? "\uD83D\uDCCC\u2717" : "\uD83D\uDCCC",
-    );
+    const pinBtn = createElement("button", { "data-testid": `msg-pin-${msg.id}` });
+    pinBtn.appendChild(createIcon(msg.pinned ? "pin-off" : "pin", 16));
     pinBtn.title = msg.pinned ? "Unpin" : "Pin";
     pinBtn.addEventListener(
       "click",
@@ -217,14 +218,16 @@ export function renderMessage(
     actionsBar.appendChild(pinBtn);
 
     if (msg.user.id === opts.currentUserId) {
-      const editBtn = createElement("button", { "data-testid": `msg-edit-${msg.id}` }, "\u270E");
+      const editBtn = createElement("button", { "data-testid": `msg-edit-${msg.id}` });
+      editBtn.appendChild(createIcon("pencil", 16));
       editBtn.title = "Edit";
       editBtn.addEventListener("click", () => opts.onEditClick(msg.id), { signal });
       actionsBar.appendChild(editBtn);
     }
 
     if (msg.user.id === opts.currentUserId) {
-      const deleteBtn = createElement("button", { "data-testid": `msg-delete-${msg.id}` }, "\uD83D\uDDD1");
+      const deleteBtn = createElement("button", { "data-testid": `msg-delete-${msg.id}` });
+      deleteBtn.appendChild(createIcon("trash-2", 16));
       deleteBtn.title = "Delete";
       deleteBtn.addEventListener("click", () => opts.onDeleteClick(msg.id), { signal });
       actionsBar.appendChild(deleteBtn);

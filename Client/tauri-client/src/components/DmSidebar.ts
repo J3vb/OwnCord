@@ -14,6 +14,7 @@ import {
   clearChildren,
   appendChildren,
 } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 
 export interface DmConversation {
@@ -88,7 +89,8 @@ function renderDmItem(
     class: "dm-close",
     title: "Close DM",
   });
-  setText(closeBtn, "\u00d7");
+  closeBtn.textContent = "";
+  closeBtn.appendChild(createIcon("x", 14));
   closeBtn.addEventListener(
     "click",
     (e: Event) => {

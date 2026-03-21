@@ -8,6 +8,7 @@ import {
   setText,
   appendChildren,
 } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
 import { isSafeUrl } from "./attachments";
@@ -144,7 +145,8 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
     loading: "lazy",
   });
 
-  const playBtn = createElement("div", { class: "msg-embed-play" }, "\u25B6");
+  const playBtn = createElement("div", { class: "msg-embed-play" });
+  playBtn.appendChild(createIcon("play", 24));
 
   appendChildren(thumbWrap, thumb, playBtn);
   wrap.appendChild(thumbWrap);
@@ -247,7 +249,8 @@ export function openImageLightbox(src: string, alt: string): void {
   imgWrap.appendChild(img);
   overlay.appendChild(imgWrap);
 
-  const closeBtn = createElement("button", { class: "image-lightbox-close" }, "\u2715");
+  const closeBtn = createElement("button", { class: "image-lightbox-close" });
+  closeBtn.appendChild(createIcon("x", 20));
   overlay.appendChild(closeBtn);
 
   // Zoom & pan state

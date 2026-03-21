@@ -7,6 +7,7 @@ import {
   appendChildren,
   qs,
 } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -108,7 +109,8 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       type: "button",
       "aria-label": "Settings",
     });
-    setText(settingsBtn, "\u2699");
+    settingsBtn.textContent = "";
+    settingsBtn.appendChild(createIcon("settings", 16));
     settingsBtn.addEventListener("click", () => onSettingsOpen(), { signal });
 
     // Form container
@@ -219,12 +221,15 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
         class: "password-toggle",
         type: "button",
         "aria-label": "Toggle password visibility",
-      }, "\uD83D\uDC41");
+      });
+      toggle.appendChild(createIcon("eye", 16));
       toggle.addEventListener(
         "click",
         () => {
           const isPassword = input.getAttribute("type") === "password";
           input.setAttribute("type", isPassword ? "text" : "password");
+          toggle.textContent = "";
+          toggle.appendChild(createIcon(isPassword ? "eye-off" : "eye", 16));
         },
         { signal },
       );

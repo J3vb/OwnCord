@@ -7,6 +7,7 @@ import {
   appendChildren,
   clearChildren,
 } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import type { HealthStatus, ServerProfile } from "@lib/profiles";
 import { loadCredential } from "@lib/credentials";
 
@@ -149,7 +150,8 @@ export function createServerPanel(
           type: "button",
           "aria-label": "Delete server",
         });
-        setText(deleteBtn, "\u2715");
+        deleteBtn.textContent = "";
+        deleteBtn.appendChild(createIcon("x", 14));
         deleteBtn.addEventListener(
           "click",
           (e) => {
@@ -215,7 +217,8 @@ export function createServerPanel(
     const header = createElement("div", { class: "modal-header" });
     const title = createElement("h3", {}, "Add Server");
     const closeBtn = createElement("button", { class: "modal-close", type: "button" });
-    setText(closeBtn, "\u2715");
+    closeBtn.textContent = "";
+    closeBtn.appendChild(createIcon("x", 14));
     appendChildren(header, title, closeBtn);
 
     const body = createElement("div", { class: "modal-body" });

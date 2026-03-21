@@ -4,6 +4,7 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
 import { authStore } from "@stores/auth.store";
@@ -63,8 +64,8 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     const settingsBtn = createElement(
       "button",
       { title: "Settings", "aria-label": "Settings" },
-      "\u2699",
     );
+    settingsBtn.appendChild(createIcon("settings", 18));
 
     disposable.onEvent(settingsBtn, "click", () => {
       openSettings();

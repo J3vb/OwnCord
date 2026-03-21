@@ -5,6 +5,7 @@
  */
 
 import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import { voiceStore } from "@stores/voice.store";
 import type { VoiceUser } from "@stores/voice.store";
 import { membersStore } from "@stores/members.store";
@@ -42,7 +43,8 @@ export function createVoiceChannel(options: VoiceChannelOptions): VoiceChannelRe
 
   // Channel item row (same structure as text channels)
   const channelItem = createElement("div", { class: "channel-item voice" });
-  const icon = createElement("span", { class: "ch-icon" }, "\uD83D\uDD0A");
+  const icon = createElement("span", { class: "ch-icon" });
+  icon.appendChild(createIcon("volume-2", 16));
   const nameEl = createElement("span", { class: "ch-name" }, options.channelName);
   appendChildren(channelItem, icon, nameEl);
 
@@ -162,9 +164,15 @@ export function createVoiceChannel(options: VoiceChannelOptions): VoiceChannelRe
     const name = createElement("span", { class: "vu-name" }, username);
     row.appendChild(name);
 
+    if (user.camera) {
+      const cameraEl = createElement("span", { class: "vu-status" });
+      cameraEl.appendChild(createIcon("camera", 14));
+      row.appendChild(cameraEl);
+    }
+
     if (user.muted || user.deafened) {
-      const mutedIcon = user.deafened ? "\uD83D\uDD08" : "\uD83D\uDD07";
-      const mutedEl = createElement("span", { class: "vu-muted" }, mutedIcon);
+      const mutedEl = createElement("span", { class: "vu-muted" });
+      mutedEl.appendChild(createIcon(user.deafened ? "headphones-off" : "mic-off", 14));
       row.appendChild(mutedEl);
     }
 

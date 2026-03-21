@@ -4,6 +4,7 @@
  */
 
 import { createElement, appendChildren } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,7 +41,8 @@ export function buildChatHeader(
     title: "Pins",
     "aria-label": "Pins",
     "data-testid": "pin-btn",
-  }, "\uD83D\uDCCC");
+  });
+  pinBtn.appendChild(createIcon("pin", 18));
   pinBtn.addEventListener("click", () => { opts.onTogglePins(); });
   const searchInput = createElement("input", {
     class: "search-input",
@@ -59,7 +61,8 @@ export function buildChatHeader(
     type: "button",
     "aria-label": "Toggle member list",
     "data-testid": "members-toggle",
-  }, "\uD83D\uDC65");
+  });
+  membersToggle.appendChild(createIcon("users", 18));
   membersToggle.addEventListener("click", () => opts.onToggleMembers());
   appendChildren(tools, searchInput, pinBtn, membersToggle);
 

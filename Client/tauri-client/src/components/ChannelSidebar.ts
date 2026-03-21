@@ -10,6 +10,7 @@ import {
   clearChildren,
   appendChildren,
 } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import {
   channelsStore,
@@ -215,7 +216,8 @@ function renderVoiceChannelItem(
   const item = createElement("div", { class: classes, "data-testid": `channel-${channel.id}` });
   item.dataset.channelId = String(channel.id);
 
-  const prefix = createElement("span", { class: "ch-icon" }, "\uD83D\uDD0A");
+  const prefix = createElement("span", { class: "ch-icon" });
+  prefix.appendChild(createIcon("volume-2", 16));
   const name = createElement("span", { class: "ch-name" }, channel.name);
 
   appendChildren(item, prefix, name);
@@ -258,15 +260,24 @@ function renderVoiceChannelItem(
       );
       row.appendChild(nameEl);
 
+      if (user.camera) {
+        const cameraIcon = createElement("span", { class: "vu-status" });
+        cameraIcon.appendChild(createIcon("camera", 14));
+        row.appendChild(cameraIcon);
+      }
+
       if (user.deafened) {
-        // Deafened: show both crossed mic and crossed headphone
-        const muteIcon = createElement("span", { class: "vu-muted vu-icon-crossed" }, "\uD83C\uDFA4");
-        const deafIcon = createElement("span", { class: "vu-muted vu-icon-crossed" }, "\uD83C\uDFA7");
+        // Deafened: show both mic-off and headphones-off
+        const muteIcon = createElement("span", { class: "vu-muted" });
+        muteIcon.appendChild(createIcon("mic-off", 14));
+        const deafIcon = createElement("span", { class: "vu-muted" });
+        deafIcon.appendChild(createIcon("headphones-off", 14));
         row.appendChild(muteIcon);
         row.appendChild(deafIcon);
       } else if (user.muted) {
-        // Muted only: show crossed mic
-        const muteIcon = createElement("span", { class: "vu-muted vu-icon-crossed" }, "\uD83C\uDFA4");
+        // Muted only: show mic-off
+        const muteIcon = createElement("span", { class: "vu-muted" });
+        muteIcon.appendChild(createIcon("mic-off", 14));
         row.appendChild(muteIcon);
       }
 
@@ -590,11 +601,8 @@ function renderCategoryGroup(
     });
     header.dataset.category = categoryName;
 
-    const arrow = createElement(
-      "span",
-      { class: "category-arrow" },
-      collapsed ? "\u25B6" : "\u25BC",
-    );
+    const arrow = createElement("span", { class: "category-arrow" });
+    arrow.appendChild(createIcon(collapsed ? "chevron-right" : "chevron-down", 12));
     const label = createElement("span", { class: "category-name" }, categoryName);
 
     appendChildren(header, arrow, label);

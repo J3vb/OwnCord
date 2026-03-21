@@ -18,6 +18,7 @@
  */
 
 import { createElement } from "./dom";
+import { createIcon } from "./icons";
 
 /** How long a GIF plays before auto-pausing (ms). */
 const AUTO_PAUSE_MS = 10_000;
@@ -96,17 +97,20 @@ function createPlayPauseButton(): HTMLButtonElement {
     type: "button",
     "aria-label": "Play/pause GIF",
   });
-  btn.textContent = "\u25B6"; // ▶
+  btn.textContent = "";
+  btn.appendChild(createIcon("play", 14));
   return btn;
 }
 
 function updateButton(entry: MediaEntry): void {
   if (entry.isPlaying) {
-    entry.button.textContent = "\u275A\u275A"; // ❚❚
+    entry.button.textContent = "";
+    entry.button.appendChild(createIcon("pause", 14));
     entry.button.classList.add("playing");
     entry.wrapper.classList.remove("gif-paused");
   } else {
-    entry.button.textContent = "\u25B6"; // ▶
+    entry.button.textContent = "";
+    entry.button.appendChild(createIcon("play", 14));
     entry.button.classList.remove("playing");
     entry.wrapper.classList.add("gif-paused");
   }

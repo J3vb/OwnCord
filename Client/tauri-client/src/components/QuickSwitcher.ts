@@ -2,6 +2,7 @@
 // Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
 
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import { channelsStore } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
 import type { MountableComponent } from "@lib/safe-render";
@@ -22,8 +23,8 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
   let filteredChannels: readonly Channel[] = [];
   let unsubscribe: (() => void) | null = null;
 
-  function getChannelIcon(ch: Channel): string {
-    return ch.type === "voice" ? "\ud83d\udd0a" : "#";
+  function getChannelIcon(ch: Channel): SVGSVGElement {
+    return ch.type === "voice" ? createIcon("volume-2", 14) : createIcon("hash", 14);
   }
 
   function getFilteredChannels(query: string): readonly Channel[] {
@@ -52,7 +53,8 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
         "data-channelid": String(ch.id),
       });
 
-      const icon = createElement("span", { class: "quick-switcher__icon" }, getChannelIcon(ch));
+      const icon = createElement("span", { class: "quick-switcher__icon" });
+      icon.appendChild(getChannelIcon(ch));
       const name = createElement("span", { class: "quick-switcher__name" });
       setText(name, ch.name);
 
