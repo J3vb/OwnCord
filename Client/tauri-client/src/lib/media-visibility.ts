@@ -246,7 +246,10 @@ export function unobserveMedia(img: HTMLImageElement): void {
   if (entry.autoTimer !== null) {
     clearTimeout(entry.autoTimer);
   }
-  unfreezeImage(img, entry);
+  // Restore original src without starting a new auto-timer.
+  if (img.src !== entry.originalSrc) {
+    img.src = entry.originalSrc;
+  }
   tracked.delete(img);
   observer?.unobserve(img);
 }

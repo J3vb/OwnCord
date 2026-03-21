@@ -81,6 +81,7 @@ async function fetchOgMeta(url: string): Promise<OgMeta> {
     return { title: null, description: null, image: null, siteName: null };
   }
 
+  console.log("[embeds] fetchOgMeta START", url.slice(0, 100));
   ogInFlight.add(url);
   try {
     const controller = new AbortController();

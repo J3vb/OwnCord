@@ -4,10 +4,13 @@
  * virtual scrolling (DOM windowing) for performance with large message counts.
  */
 import { createElement, clearChildren } from "@lib/dom";
+import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/safe-render";
 import { messagesStore, getChannelMessages, hasMoreMessages } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
+
+const log = createLogger("message-list");
 import {
   shouldGroup,
   isSameDay,
@@ -195,16 +198,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // ---------------------------------------------------------------------------
 
   function measureRendered(): void {
-    if (contentContainer === null) return;
+    if (contentContainer === null || renderedStart < 0) return;
     const children = contentContainer.children;
     for (let i = 0; i < children.length; i++) {
       const globalIdx = renderedStart + i;
+      if (globalIdx < 0 || (tree !== null && globalIdx >= tree.size)) continue;
       const el = children[i] as HTMLElement;
       const h = el.offsetHeight;
       if (h > 0) {
         const key = itemKey(globalIdx);
         heightCache.set(key, h);
-        if (tree !== null && globalIdx < tree.size) {
+        if (tree !== null) {
           tree.set(globalIdx, h);
         }
       }
@@ -228,6 +232,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
   }
 
+  let renderWindowCount = 0;
+  let renderWindowResetTimer = 0;
+
   function renderWindow(): void {
     if (root === null || contentContainer === null || topSpacer === null || bottomSpacer === null) return;
 
@@ -250,40 +257,60 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const start = Math.max(0, firstVisible - OVERSCAN);
     const end = Math.min(virtualItems.length, lastVisible + OVERSCAN + 1);
 
-    // Skip DOM rebuild if the range hasn't changed, but still update spacers
-    // in case heights were corrected by ResizeObserver since last render.
-    if (start === renderedStart && end === renderedEnd) {
-      updateSpacers();
-      return;
-    }
-
-    // Measure current elements before replacing
-    measureRendered();
-
-    renderedStart = start;
-    renderedEnd = end;
-
-    // Rebuild content
-    clearChildren(contentContainer);
-    const fragment = document.createDocumentFragment();
-    for (let i = start; i < end; i++) {
-      const item = virtualItems[i]!;
-      if (item.kind === "divider") {
-        fragment.appendChild(renderDayDivider(item.timestamp));
-      } else {
-        fragment.appendChild(
-          renderMessage(item.message, item.isGrouped, allMessages, options, ac.signal),
-        );
+    // Only rebuild DOM if explicitly requested by renderAll (which sets
+    // renderedStart to -1). Scroll-driven renderWindow calls only update
+    // spacers — never rebuild content. This prevents the height oscillation
+    // loop where images loading → height change → range recalculation →
+    // DOM rebuild → images reload → repeat forever.
+    if (renderedStart < 0) {
+      // Rate-limit DOM rebuilds only (expensive path).
+      // Scroll-driven spacer updates are cheap and don't need limiting.
+      renderWindowCount++;
+      if (renderWindowCount > 30) {
+        console.error("[MessageList] renderWindow REBUILD called >30 times in 2s — breaking loop");
+        return;
       }
+      if (renderWindowResetTimer === 0) {
+        renderWindowResetTimer = window.setTimeout(() => {
+          renderWindowCount = 0;
+          renderWindowResetTimer = 0;
+        }, 2000);
+      }
+
+      // Full rebuild requested by renderAll
+      log.debug("renderWindow REBUILD", { start, end });
+
+      // Measure current elements before replacing.
+      measureRendered();
+
+      renderedStart = start;
+      renderedEnd = end;
+
+      // Rebuild content
+      clearChildren(contentContainer);
+      const fragment = document.createDocumentFragment();
+      for (let i = start; i < end; i++) {
+        const item = virtualItems[i]!;
+        if (item.kind === "divider") {
+          fragment.appendChild(renderDayDivider(item.timestamp));
+        } else {
+          fragment.appendChild(
+            renderMessage(item.message, item.isGrouped, allMessages, options, ac.signal),
+          );
+        }
+      }
+      contentContainer.appendChild(fragment);
+
+      // Measure newly rendered elements and update spacers
+      measureRendered();
+      updateSpacers();
+    } else {
+      // Scroll-driven: no-op. The ResizeObserver handles measurement and
+      // spacer updates when element sizes change. Calling measureRendered +
+      // updateSpacers here creates an infinite feedback loop:
+      //   spacer change → scrollHeight change → scroll event → renderWindow
+      //   → spacer change → ...
     }
-    contentContainer.appendChild(fragment);
-
-    // Measure newly rendered elements BEFORE setting spacers
-    // so spacer heights use actual DOM measurements, not estimates.
-    measureRendered();
-
-    // Set spacer heights with corrected measurements
-    updateSpacers();
   }
 
   // ---------------------------------------------------------------------------
@@ -303,20 +330,69 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
   }
 
+  // Guard against re-entrant renderAll calls (e.g. if a subscriber fires
+  // during rendering). Also detects rapid-fire loops.
+  let renderAllRunning = false;
+  let renderAllCount = 0;
+  let renderAllResetTimer = 0;
+
   function renderAll(): void {
     if (root === null) return;
-    wasAtBottom = isNearBottom();
+    if (renderAllRunning) return; // prevent re-entrancy
 
-    rebuildItems();
+    // Detect rapid-fire loops: if renderAll is called more than 20 times
+    // within 2 seconds, something is wrong — bail out to prevent freeze.
+    renderAllCount++;
+    if (renderAllCount > 20) {
+      console.error("[MessageList] renderAll called >20 times in 2s — breaking loop");
+      return;
+    }
+    if (renderAllResetTimer === 0) {
+      renderAllResetTimer = window.setTimeout(() => {
+        renderAllCount = 0;
+        renderAllResetTimer = 0;
+      }, 2000);
+    }
 
-    // Reset rendered range to force full re-render
-    renderedStart = -1;
-    renderedEnd = -1;
+    renderAllRunning = true;
+    try {
+      log.debug("renderAll START", { count: renderAllCount });
+      wasAtBottom = isNearBottom();
 
-    renderWindow();
+      rebuildItems();
+      log.debug("renderAll rebuildItems done", { itemCount: virtualItems.length });
 
-    if (wasAtBottom) {
-      scrollToBottom();
+      // If user was at bottom, pre-set scroll position using estimated total
+      // height so renderWindow renders the correct range for the bottom.
+      // Without this, renderWindow renders from the top (range [0, N]) and
+      // items near the bottom are never shown.
+      //
+      // IMPORTANT: inflate the spacers to the full estimated height BEFORE
+      // setting scrollTop. The browser clamps scrollTop to
+      // (scrollHeight - clientHeight), so if the spacers are still sized
+      // from the previous (empty) render the assignment is silently ignored
+      // and renderWindow renders from index 0 instead of the bottom.
+      if (wasAtBottom && root !== null) {
+        const estTotal = totalHeight();
+        if (topSpacer !== null) topSpacer.style.height = "0px";
+        if (bottomSpacer !== null) bottomSpacer.style.height = `${estTotal}px`;
+        root.scrollTop = Math.max(0, estTotal - root.clientHeight);
+      }
+
+      // Reset rendered range to force full re-render
+      renderedStart = -1;
+      renderedEnd = -1;
+
+      renderWindow();
+      log.debug("renderAll renderWindow done");
+
+      // Correct scroll position with actual DOM measurements
+      if (wasAtBottom) {
+        scrollToBottom();
+      }
+      log.debug("renderAll END");
+    } finally {
+      renderAllRunning = false;
     }
   }
 
@@ -341,7 +417,6 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   let scrollRafId = 0;
   let resizeRafId = 0;
   let resizeDirty = false;
-
   function handleScroll(): void {
     if (root === null) return;
 
@@ -449,6 +524,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (resizeRafId !== 0) {
       cancelAnimationFrame(resizeRafId);
       resizeRafId = 0;
+    }
+    if (renderAllResetTimer !== 0) {
+      clearTimeout(renderAllResetTimer);
+      renderAllResetTimer = 0;
+    }
+    if (renderWindowResetTimer !== 0) {
+      clearTimeout(renderWindowResetTimer);
+      renderWindowResetTimer = 0;
     }
     unsubLoadingReset();
     for (const unsub of unsubscribers) { unsub(); }

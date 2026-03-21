@@ -207,8 +207,18 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
 
     const isGif = att.mime === "image/gif";
 
-    // Clear min-height reservation once image has loaded and sized itself.
-    const clearReservation = (): void => { wrap.style.minHeight = ""; };
+    // Clear min-height reservation and cache the natural height so virtual
+    // scroll rebuilds don't oscillate between estimated and actual heights.
+    // Measure synchronously to avoid rAF race with ResizeObserver.
+    const clearReservation = (): void => {
+      wrap.style.minHeight = "";
+      const h = wrap.offsetHeight;
+      if (h > 0 && att.width == null) {
+        // Only cache for fallback path (no server-provided dimensions).
+        // Set min-height to prevent oscillation on virtual scroll rebuild.
+        wrap.style.minHeight = `${h}px`;
+      }
+    };
 
     // Check cache first for instant render
     const cached = memoryCache.get(resolvedUrl);

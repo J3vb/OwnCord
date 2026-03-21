@@ -8,10 +8,31 @@ import {
   setText,
   appendChildren,
 } from "@lib/dom";
+import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
 import { isSafeUrl } from "./attachments";
 import { CODE_BLOCK_REGEX, INLINE_CODE_REGEX, URL_REGEX } from "./content-parser";
 import { renderGenericLinkPreview } from "./embeds";
+
+const log = createLogger("media");
+
+/**
+ * Cache of rendered image heights keyed by URL. When virtual scroll rebuilds
+ * DOM elements, new images use the cached height as min-height instead of the
+ * generic 200px estimate. This prevents height oscillation (200px → actual →
+ * 200px → actual …) that causes infinite DOM rebuild loops.
+ */
+const imageHeightCache = new Map<string, number>();
+const MAX_IMAGE_HEIGHT_CACHE = 500;
+
+function cacheImageHeight(url: string, h: number): void {
+  if (imageHeightCache.size >= MAX_IMAGE_HEIGHT_CACHE) {
+    // Evict oldest entry (first inserted key)
+    const firstKey = imageHeightCache.keys().next().value;
+    if (firstKey !== undefined) imageHeightCache.delete(firstKey);
+  }
+  imageHeightCache.set(url, h);
+}
 
 /** Check if a URL points to an animated GIF. */
 function isGifUrl(url: string): boolean {
@@ -155,17 +176,19 @@ export function isDirectImageUrl(url: string): boolean {
 
 /** Render a direct image/GIF URL as an inline image with lightbox. */
 export function renderInlineImage(url: string): HTMLDivElement {
+  // Use cached height from a previous render if available, otherwise 200px.
+  // This prevents height oscillation when virtual scroll rebuilds DOM.
+  const cachedH = imageHeightCache.get(url);
+  const minH = cachedH ?? 200;
+
   const wrap = createElement("div", {
     class: "msg-image",
-    // Reserve 200px before image loads to prevent layout shift.
-    // Cleared on load when natural dimensions are known.
-    style: "max-width: 400px; contain: layout; min-height: 200px;",
+    style: `max-width: 400px; min-height: ${minH}px;`,
   });
 
   const attrs: Record<string, string> = {
     src: url,
     alt: "Image",
-    loading: "lazy",
     style: "max-width: 100%; max-height: 350px; display: block; border-radius: 4px; cursor: pointer;",
   };
   // Enable CORS for GIFs so canvas capture works for freeze/unfreeze
@@ -174,12 +197,32 @@ export function renderInlineImage(url: string): HTMLDivElement {
   }
   const img = createElement("img", attrs);
 
-  // Clear min-height reservation once the image has loaded and sized itself.
-  img.addEventListener("load", () => { wrap.style.minHeight = ""; }, { once: true });
+  // On load: clear min-height reservation and cache the natural rendered
+  // height so future virtual-scroll rebuilds start at the correct size.
+  // Measure synchronously — deferring to rAF loses the race with
+  // ResizeObserver which can rebuild the DOM before the rAF fires.
+  img.addEventListener("load", () => {
+    log.info("Image loaded", { url: url.slice(0, 80), naturalW: (img as HTMLImageElement).naturalWidth, naturalH: (img as HTMLImageElement).naturalHeight });
+    wrap.style.minHeight = "";
+    const h = wrap.offsetHeight;
+    if (h > 0) cacheImageHeight(url, h);
+    log.debug("Image height cached", { url: url.slice(0, 80), h });
+  }, { once: true });
+
+  // On error: clear min-height so the wrapper collapses instead of
+  // holding a 200px empty reservation that can oscillate with virtual scroll.
+  img.addEventListener("error", () => {
+    log.error("Image failed to load", { url });
+    wrap.style.minHeight = "";
+  }, { once: true });
 
   // Observe GIFs for visibility-based freeze/unfreeze + play/pause button
   if (isGifUrl(url)) {
-    img.addEventListener("load", () => { observeMedia(img, url, wrap); }, { once: true });
+    img.addEventListener("load", () => {
+      log.debug("Calling observeMedia for GIF", { url: url.slice(0, 80) });
+      observeMedia(img, url, wrap);
+      log.debug("observeMedia complete");
+    }, { once: true });
   }
 
   img.addEventListener("click", () => {
@@ -358,6 +401,7 @@ export function extractUrls(content: string): string[] {
 export function renderUrlEmbeds(content: string): DocumentFragment {
   const fragment = document.createDocumentFragment();
   const urls = extractUrls(content);
+  log.debug("renderUrlEmbeds", { urlCount: urls.length, urls });
   const seen = new Set<string>();
 
   for (const url of urls) {
@@ -372,16 +416,21 @@ export function renderUrlEmbeds(content: string): DocumentFragment {
     }
 
     // Direct image/GIF URL — render inline
-    if (isDirectImageUrl(url) && isSafeUrl(url)) {
+    const isDirect = isDirectImageUrl(url);
+    const isSafe = isSafeUrl(url);
+    log.debug("URL classification", { url: url.slice(0, 80), isDirect, isSafe, isGif: isGifUrl(url) });
+    if (isDirect && isSafe) {
       fragment.appendChild(renderInlineImage(url));
       continue;
     }
 
     // Generic URL preview (compact link card)
-    if (isSafeUrl(url)) {
+    if (isSafe) {
+      log.debug("Falling through to generic link preview", { url: url.slice(0, 80) });
       fragment.appendChild(renderGenericLinkPreview(url));
     }
   }
 
+  log.debug("renderUrlEmbeds complete");
   return fragment;
 }
