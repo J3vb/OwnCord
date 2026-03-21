@@ -301,6 +301,10 @@ export function createMessageInput(
     textarea.addEventListener("input", () => { autoResize(); maybeEmitTyping(); }, { signal });
     textarea.addEventListener("keydown", (e: KeyboardEvent) => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+      if (e.key === "Escape") {
+        if (state.editing !== null) { cancelEdit(); }
+        else if (state.replyTo !== null) { clearReply(); }
+      }
       if (e.key === "ArrowUp" && textarea !== null && textarea.value.length === 0) {
         root?.dispatchEvent(new CustomEvent("edit-last-message", { bubbles: true }));
       }

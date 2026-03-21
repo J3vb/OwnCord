@@ -145,6 +145,7 @@ export function renderMessage(
   if (isGrouped) {
     const hoverTime = createElement("div", {
       class: "msg-hover-time",
+      title: formatFullDate(msg.timestamp),
     }, formatTime(msg.timestamp));
     el.appendChild(hoverTime);
   }
@@ -158,7 +159,7 @@ export function renderMessage(
     class: "msg-author",
     style: `color: ${roleColorVar(role)}`,
   }, msg.user.username);
-  const time = createElement("span", { class: "msg-time" }, formatTime(msg.timestamp));
+  const time = createElement("span", { class: "msg-time", title: formatFullDate(msg.timestamp) }, formatTime(msg.timestamp));
   appendChildren(header, author, time);
   el.appendChild(header);
 
