@@ -237,6 +237,9 @@ export function renderInlineImage(url: string): HTMLDivElement {
 
 /** Open a full-screen lightbox overlay with zoom and pan. */
 export function openImageLightbox(src: string, alt: string): void {
+  // Close any existing lightbox to prevent stacking on rapid clicks
+  document.querySelector(".image-lightbox")?.remove();
+
   const overlay = createElement("div", { class: "image-lightbox" });
 
   const imgWrap = createElement("div", { class: "image-lightbox-wrap" });
