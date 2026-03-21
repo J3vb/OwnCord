@@ -40,6 +40,7 @@ function makeMessage(overrides: Partial<Message> = {}): Message {
 function makeOpts(overrides: Partial<MessageListOptions> = {}): MessageListOptions {
   return {
     channelId: 1,
+    channelName: "general",
     currentUserId: 10,
     onScrollTop: vi.fn(),
     onReplyClick: vi.fn(),

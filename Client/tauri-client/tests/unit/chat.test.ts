@@ -144,6 +144,7 @@ describe("MessageList", () => {
 
       const list = createMessageList({
         channelId: 1,
+        channelName: "general",
         currentUserId: 1,
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
@@ -170,6 +171,7 @@ describe("MessageList", () => {
 
       const list = createMessageList({
         channelId: 1,
+        channelName: "general",
         currentUserId: 1,
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
@@ -193,6 +195,7 @@ describe("MessageList", () => {
 
       const list = createMessageList({
         channelId: 1,
+        channelName: "general",
         currentUserId: 1,
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
@@ -218,6 +221,7 @@ describe("MessageList", () => {
 
       const list = createMessageList({
         channelId: 1,
+        channelName: "general",
         currentUserId: 1,
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
@@ -242,6 +246,7 @@ describe("MessageList", () => {
 
       const list = createMessageList({
         channelId: 1,
+        channelName: "general",
         currentUserId: 1,
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
@@ -265,6 +270,7 @@ describe("MessageList", () => {
 
       const list = createMessageList({
         channelId: 1,
+        channelName: "general",
         currentUserId: 1,
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
@@ -289,6 +295,7 @@ describe("MessageList", () => {
 
       const list = createMessageList({
         channelId: 1,
+        channelName: "general",
         currentUserId: 1,
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
@@ -313,6 +320,7 @@ describe("MessageList", () => {
 
       const list = createMessageList({
         channelId: 1,
+        channelName: "general",
         currentUserId: 1,
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
@@ -337,6 +345,7 @@ describe("MessageList", () => {
 
       const list = createMessageList({
         channelId: 1,
+        channelName: "general",
         currentUserId: 1,
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
