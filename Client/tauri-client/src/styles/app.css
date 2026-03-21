@@ -345,14 +345,36 @@
 .message.grouped:hover .msg-hover-time { display: block; }
 .message .msg-header { display: flex; align-items: baseline; gap: 8px; }
 .message.grouped .msg-header { display: none; }
-.message .msg-author { font-weight: 600; cursor: pointer; }
-.message .msg-author:hover { text-decoration: underline; }
+.message .msg-author { font-weight: 600; cursor: pointer; text-decoration-color: currentColor; }
+.message .msg-author:hover { text-decoration: underline; text-decoration-color: currentColor; }
 .message .msg-time { font-size: 11px; color: var(--text-micro); font-variant-numeric: tabular-nums; }
 .message .msg-edited { font-size: 10px; color: var(--text-micro); }
 .message .msg-text { line-height: 1.45; word-break: break-word; }
 .message .msg-text code {
   font-family: var(--font-mono); background: var(--bg-tertiary);
   padding: 2px 5px; border-radius: 3px; font-size: 13px;
+}
+
+/* @mention highlights */
+.mention {
+  background: rgba(88, 101, 242, 0.3);
+  color: var(--text-link);
+  border-radius: 3px;
+  padding: 0 2px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.mention:hover {
+  background: var(--accent);
+  color: white;
+}
+.message.mentioned {
+  background: rgba(240, 178, 50, 0.08);
+  border-left: 2px solid var(--yellow);
+}
+.message.mentioned:hover {
+  background: rgba(240, 178, 50, 0.12);
 }
 
 /* Reply */
@@ -1642,12 +1664,102 @@
 }
 .pinned-panel__empty-icon {
   font-size: 48px;
-  opacity: 0.3;
+  opacity: 0.4;
+  margin-bottom: 4px;
 }
 .pinned-panel__empty-text {
   font-size: 14px;
   color: var(--text-muted);
   margin-top: 12px;
+  line-height: 1.5;
+}
+
+/* ═══ Skeleton Loaders ═══ */
+.skeleton {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+}
+.skeleton--shimmer {
+  background: linear-gradient(90deg, var(--bg-secondary) 0%, var(--bg-hover) 50%, var(--bg-secondary) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-circle);
+}
+.skeleton-line {
+  height: 16px;
+  margin-bottom: 4px;
+  border-radius: var(--radius-sm);
+}
+.skeleton-line--short { width: 60%; }
+.skeleton-line--medium { width: 80%; }
+.skeleton-line--long { width: 95%; }
+.skeleton-msg {
+  display: flex;
+  gap: 12px;
+  padding: 8px 16px 8px 72px;
+  position: relative;
+}
+.skeleton-msg .skeleton-avatar {
+  position: absolute;
+  left: 16px;
+}
+
+/* ═══ Tooltip ═══ */
+.tooltip {
+  position: fixed;
+  background: #111214;
+  color: #fff;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+  z-index: 9999;
+  box-shadow: var(--elevation-high);
+  animation: tooltipFadeIn 0.1s ease;
+  white-space: nowrap;
+  max-width: 200px;
+}
+.tooltip::after {
+  content: '';
+  position: absolute;
+  border: 5px solid transparent;
+}
+.tooltip--top::after {
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-top-color: #111214;
+}
+.tooltip--right::after {
+  right: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  border-right-color: #111214;
+}
+.tooltip--bottom::after {
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-bottom-color: #111214;
+}
+.tooltip--left::after {
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  border-left-color: #111214;
+}
+@keyframes tooltipFadeIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* ═══ Responsive ═══ */
