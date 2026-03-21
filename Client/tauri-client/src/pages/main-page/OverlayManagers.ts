@@ -44,6 +44,15 @@ export function mapInviteResponse(r: InviteResponse): InviteItem {
 // Pinned message mapping
 // ---------------------------------------------------------------------------
 
+function pickPinAvatarColor(username: string): string {
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) {
+    hash = username.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 55%, 55%)`;
+}
+
 export function mapToPinnedMessage(msg: {
   readonly id: number;
   readonly user: { readonly username: string };
@@ -56,7 +65,7 @@ export function mapToPinnedMessage(msg: {
     author: msg.user.username,
     content: msg.content,
     timestamp: msg.created_at ?? msg.timestamp ?? "",
-    avatarColor: "#5865f2",
+    avatarColor: pickPinAvatarColor(msg.user.username),
   };
 }
 

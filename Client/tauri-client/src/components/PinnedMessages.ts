@@ -26,6 +26,12 @@ export interface PinnedMessagesOptions {
   readonly onClose: () => void;
 }
 
+function formatPinTime(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
 function getInitial(name: string): string {
   return name.length > 0 ? name.charAt(0).toUpperCase() : "?";
 }
@@ -49,7 +55,7 @@ function renderPinnedItem(
 
   const head = createElement("div", { class: "pinned-msg__head" });
   const authorEl = createElement("span", { class: "pinned-msg__author" }, msg.author);
-  const timeEl = createElement("span", { class: "pinned-msg__time" }, msg.timestamp);
+  const timeEl = createElement("span", { class: "pinned-msg__time" }, formatPinTime(msg.timestamp));
   appendChildren(head, authorEl, timeEl);
 
   const content = createElement("div", { class: "pinned-msg__content" }, msg.content);
@@ -104,7 +110,7 @@ export function createPinnedMessages(
     closeBtn.addEventListener("click", () => options.onClose(), { signal: ac.signal });
 
     const titleGroup = createElement("div", {
-      style: "display:flex;align-items:center;gap:8px",
+      class: "pinned-panel__title-group",
     });
     appendChildren(titleGroup, title, count);
     appendChildren(header, titleGroup, closeBtn);
