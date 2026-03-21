@@ -508,9 +508,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       () => { renderAll(); },
     ));
 
-    // Only re-render when member roles change, not on typing updates
+    // Only re-render when member roles change, not on presence/typing updates.
+    // Extract a role-only map so shallowEqual ignores status changes.
     unsubscribers.push(membersStore.subscribeSelector(
-      (s) => s.members,
+      (s) => {
+        const roles = new Map<number, string>();
+        for (const [id, m] of s.members) roles.set(id, m.role);
+        return roles;
+      },
       () => { renderAll(); },
     ));
   }
