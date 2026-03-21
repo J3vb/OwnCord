@@ -23,6 +23,7 @@ import { FenwickTree } from "./message-list/fenwick";
 
 export interface MessageListOptions {
   readonly channelId: number;
+  readonly channelName: string;
   readonly currentUserId: number;
   readonly onScrollTop: () => void;
   readonly onReplyClick: (messageId: number) => void;
@@ -105,6 +106,26 @@ function buildVirtualItems(messages: readonly Message[]): readonly VirtualItem[]
     prevMsg = msg;
   }
   return items;
+}
+
+// -- Empty state --------------------------------------------------------------
+
+function renderEmptyState(channelName: string): HTMLDivElement {
+  const icon = createElement("div", { class: "channel-welcome-icon" });
+  icon.textContent = "#";
+
+  const title = createElement("h2", { class: "channel-welcome-title" });
+  title.textContent = `Welcome to #${channelName}!`;
+
+  const text = createElement("p", { class: "channel-welcome-text" });
+  text.textContent = `This is the start of the #${channelName} channel.`;
+
+  const wrapper = createElement("div", { class: "channel-welcome" });
+  wrapper.appendChild(icon);
+  wrapper.appendChild(title);
+  wrapper.appendChild(text);
+
+  return wrapper;
 }
 
 // -- Factory ------------------------------------------------------------------
@@ -243,6 +264,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     if (virtualItems.length === 0) {
       clearChildren(contentContainer);
+      contentContainer.appendChild(renderEmptyState(options.channelName));
       topSpacer.style.height = "0px";
       bottomSpacer.style.height = "0px";
       renderedStart = 0;

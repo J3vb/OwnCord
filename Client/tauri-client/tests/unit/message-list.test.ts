@@ -73,6 +73,7 @@ describe("MessageList", () => {
     document.body.appendChild(container);
     options = {
       channelId: 1,
+      channelName: "general",
       currentUserId: 1,
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
@@ -116,11 +117,14 @@ describe("MessageList", () => {
     expect(content!.children.length).toBeGreaterThan(0);
   });
 
-  it("empty channel renders no content children (besides spacers)", () => {
+  it("empty channel renders welcome state", () => {
     msgList.mount(container);
-    const content = container.querySelector(".virtual-content");
-    expect(content).not.toBeNull();
-    expect(content!.children.length).toBe(0);
+    const welcome = container.querySelector(".channel-welcome");
+    expect(welcome).not.toBeNull();
+    const title = container.querySelector(".channel-welcome-title");
+    expect(title?.textContent).toBe("Welcome to #general!");
+    const text = container.querySelector(".channel-welcome-text");
+    expect(text?.textContent).toBe("This is the start of the #general channel.");
   });
 
   it("destroy removes DOM and cleans up", () => {
@@ -132,14 +136,17 @@ describe("MessageList", () => {
 
   it("reacts to store updates", () => {
     msgList.mount(container);
-    const content = container.querySelector(".virtual-content");
-    expect(content!.children.length).toBe(0);
+    // Initially shows welcome state
+    expect(container.querySelector(".channel-welcome")).not.toBeNull();
 
     // Add messages
     setMessages(1, [makeMessage({ id: 1, content: "New message" })]);
     messagesStore.flush();
 
+    const content = container.querySelector(".virtual-content");
     expect(content!.children.length).toBeGreaterThan(0);
+    // Welcome state should be gone once messages exist
+    expect(container.querySelector(".channel-welcome")).toBeNull();
   });
 
   it("scrollToMessage returns true when message exists in virtual items", () => {

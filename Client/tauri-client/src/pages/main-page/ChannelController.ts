@@ -128,6 +128,7 @@ export function createChannelController(
     // MessageList
     messageList = createMessageList({
       channelId,
+      channelName,
       currentUserId: userId,
       onScrollTop: () => {
         if (channelAbort !== null) {
