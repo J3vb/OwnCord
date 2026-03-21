@@ -250,8 +250,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const start = Math.max(0, firstVisible - OVERSCAN);
     const end = Math.min(virtualItems.length, lastVisible + OVERSCAN + 1);
 
-    // Skip re-render if the range hasn't changed
-    if (start === renderedStart && end === renderedEnd) return;
+    // Skip DOM rebuild if the range hasn't changed, but still update spacers
+    // in case heights were corrected by ResizeObserver since last render.
+    if (start === renderedStart && end === renderedEnd) {
+      updateSpacers();
+      return;
+    }
 
     // Measure current elements before replacing
     measureRendered();
@@ -274,11 +278,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
     contentContainer.appendChild(fragment);
 
-    // Set spacer heights
-    updateSpacers();
-
-    // Measure newly rendered elements
+    // Measure newly rendered elements BEFORE setting spacers
+    // so spacer heights use actual DOM measurements, not estimates.
     measureRendered();
+
+    // Set spacer heights with corrected measurements
+    updateSpacers();
   }
 
   // ---------------------------------------------------------------------------
