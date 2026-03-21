@@ -251,7 +251,7 @@
 }
 .form-input::placeholder { color: var(--text-micro); }
 .form-input:hover { border-color: var(--border-strong); }
-.form-input:focus { border-color: var(--accent); }
+.form-input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .form-input.error { border-color: var(--red); }
 
 /* Password field */
