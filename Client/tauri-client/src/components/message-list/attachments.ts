@@ -186,6 +186,19 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
   if (isImageMime(att.mime) && isSafeUrl(resolvedUrl)) {
     const wrap = createElement("div", { class: "msg-image" });
 
+    // Reserve space using server-provided dimensions to prevent layout shift.
+    if (att.width != null && att.height != null && att.width > 0 && att.height > 0) {
+      const maxW = 400, maxH = 350;
+      const scale = Math.min(1, maxW / att.width, maxH / att.height);
+      const w = Math.round(att.width * scale);
+      const h = Math.round(att.height * scale);
+      wrap.style.width = `${w}px`;
+      wrap.style.height = `${h}px`;
+    } else {
+      // Fallback for old attachments without dimensions — use placeholder height.
+      wrap.style.minHeight = "200px";
+    }
+
     function attachLightbox(img: HTMLImageElement): void {
       img.addEventListener("click", () => {
         openImageLightbox(img.src, att.filename);
@@ -193,6 +206,9 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
     }
 
     const isGif = att.mime === "image/gif";
+
+    // Clear min-height reservation once image has loaded and sized itself.
+    const clearReservation = (): void => { wrap.style.minHeight = ""; };
 
     // Check cache first for instant render
     const cached = memoryCache.get(resolvedUrl);
@@ -202,9 +218,10 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
         alt: att.filename,
       }) as HTMLImageElement;
       attachLightbox(img);
-      if (isGif) {
-        img.addEventListener("load", () => { observeMedia(img, cached, wrap); }, { once: true });
-      }
+      img.addEventListener("load", () => {
+        clearReservation();
+        if (isGif) observeMedia(img, cached, wrap);
+      }, { once: true });
       wrap.appendChild(img);
     } else {
       // Show loading placeholder, then replace with image
@@ -218,9 +235,10 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
             alt: att.filename,
           }) as HTMLImageElement;
           attachLightbox(img);
-          if (isGif) {
-            img.addEventListener("load", () => { observeMedia(img, dataUrl, wrap); }, { once: true });
-          }
+          img.addEventListener("load", () => {
+            clearReservation();
+            if (isGif) observeMedia(img, dataUrl, wrap);
+          }, { once: true });
           placeholder.replaceWith(img);
         }
       });

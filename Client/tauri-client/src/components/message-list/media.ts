@@ -157,7 +157,9 @@ export function isDirectImageUrl(url: string): boolean {
 export function renderInlineImage(url: string): HTMLDivElement {
   const wrap = createElement("div", {
     class: "msg-image",
-    style: "max-width: 400px; contain: layout;",
+    // Reserve 200px before image loads to prevent layout shift.
+    // Cleared on load when natural dimensions are known.
+    style: "max-width: 400px; contain: layout; min-height: 200px;",
   });
 
   const attrs: Record<string, string> = {
@@ -171,6 +173,9 @@ export function renderInlineImage(url: string): HTMLDivElement {
     attrs.crossorigin = "anonymous";
   }
   const img = createElement("img", attrs);
+
+  // Clear min-height reservation once the image has loaded and sized itself.
+  img.addEventListener("load", () => { wrap.style.minHeight = ""; }, { once: true });
 
   // Observe GIFs for visibility-based freeze/unfreeze + play/pause button
   if (isGifUrl(url)) {

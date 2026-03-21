@@ -67,6 +67,8 @@ export interface Attachment {
   readonly size: number;
   readonly mime: string;
   readonly url: string;
+  readonly width?: number;
+  readonly height?: number;
 }
 
 /** Reaction summary on a REST message response. */

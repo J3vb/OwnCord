@@ -407,7 +407,7 @@
 /* Image attachment */
 .msg-image {
   margin-top: 4px; max-width: 400px; border-radius: var(--radius-md);
-  overflow: hidden; cursor: pointer;
+  overflow: hidden; cursor: pointer; contain: layout style;
 }
 .msg-image img {
   display: block; max-width: 100%; max-height: 350px;

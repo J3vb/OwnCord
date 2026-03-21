@@ -19,10 +19,11 @@ type Attachment struct {
 }
 
 // CreateAttachment inserts a new attachment record (initially unlinked to any message).
-func (d *DB) CreateAttachment(id, filename, storedAs, mimeType string, size int64) error {
+// width and height are optional image dimensions (pass nil for non-image files).
+func (d *DB) CreateAttachment(id, filename, storedAs, mimeType string, size int64, width, height *int) error {
 	_, err := d.sqlDB.Exec(
-		`INSERT INTO attachments (id, filename, stored_as, mime_type, size) VALUES (?, ?, ?, ?, ?)`,
-		id, filename, storedAs, mimeType, size,
+		`INSERT INTO attachments (id, filename, stored_as, mime_type, size, width, height) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id, filename, storedAs, mimeType, size, width, height,
 	)
 	if err != nil {
 		return fmt.Errorf("CreateAttachment: %w", err)
@@ -88,7 +89,7 @@ func (d *DB) GetAttachmentsByMessageIDs(msgIDs []int64) (map[int64][]AttachmentI
 	}
 
 	query := fmt.Sprintf(
-		`SELECT id, message_id, filename, size, mime_type
+		`SELECT id, message_id, filename, size, mime_type, width, height
 		 FROM attachments WHERE message_id IN (%s)`,
 		strings.Join(placeholders, ","),
 	)
@@ -103,7 +104,7 @@ func (d *DB) GetAttachmentsByMessageIDs(msgIDs []int64) (map[int64][]AttachmentI
 		var id string
 		var msgID int64
 		var ai AttachmentInfo
-		if scanErr := rows.Scan(&id, &msgID, &ai.Filename, &ai.Size, &ai.Mime); scanErr != nil {
+		if scanErr := rows.Scan(&id, &msgID, &ai.Filename, &ai.Size, &ai.Mime, &ai.Width, &ai.Height); scanErr != nil {
 			return nil, fmt.Errorf("GetAttachmentsByMessageIDs scan: %w", scanErr)
 		}
 		ai.ID = id
