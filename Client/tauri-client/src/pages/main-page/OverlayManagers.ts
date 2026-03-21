@@ -56,6 +56,7 @@ export function mapToPinnedMessage(msg: {
     author: msg.user.username,
     content: msg.content,
     timestamp: msg.created_at ?? msg.timestamp ?? "",
+    avatarColor: "#5865f2",
   };
 }
 

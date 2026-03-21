@@ -1419,6 +1419,203 @@
 /* Messages container */
 .compact-mode .messages-container { padding: 8px 0; }
 
+/* ═══ Pinned Messages Panel ═══ */
+
+@keyframes pinned-enter {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.pinned-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 200;
+  width: 420px;
+  max-height: 80vh;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  animation: pinned-enter 0.15s ease-out;
+}
+
+.pinned-panel__header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.pinned-panel__header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pinned-panel__count {
+  background: var(--bg-active);
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 2px 6px;
+  font-weight: 500;
+}
+
+.pinned-panel__close {
+  width: 24px;
+  height: 24px;
+  color: var(--text-muted);
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s;
+}
+.pinned-panel__close:hover { color: var(--text-normal); }
+
+.pinned-panel__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-active) transparent;
+}
+.pinned-panel__list::-webkit-scrollbar { width: 6px; }
+.pinned-panel__list::-webkit-scrollbar-track { background: transparent; }
+.pinned-panel__list::-webkit-scrollbar-thumb {
+  background: var(--bg-active);
+  border-radius: 3px;
+}
+
+.pinned-msg {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  margin-bottom: 8px;
+  border-left: 3px solid var(--yellow);
+  position: relative;
+  transition: background 0.15s;
+}
+.pinned-msg:last-child { margin-bottom: 0; }
+.pinned-msg:hover { background: var(--bg-hover); }
+
+.pinned-msg__row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.pinned-msg__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-circle);
+  flex-shrink: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pinned-msg__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.pinned-msg__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.pinned-msg__author {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-normal);
+}
+
+.pinned-msg__time {
+  font-size: 11px;
+  color: var(--text-micro);
+  margin-left: auto;
+}
+
+.pinned-msg__content {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.pinned-msg__actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: none;
+  flex-direction: row;
+  gap: 4px;
+}
+.pinned-msg:hover .pinned-msg__actions { display: flex; }
+
+.pinned-msg__actions button {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, background 0.15s;
+}
+.pinned-msg__actions button:hover {
+  color: var(--text-normal);
+  background: var(--bg-hover);
+}
+.pinned-msg__actions button.pinned-msg__unpin:hover {
+  color: var(--red);
+}
+
+.pinned-panel__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+}
+.pinned-panel__empty-icon {
+  font-size: 48px;
+  opacity: 0.3;
+}
+.pinned-panel__empty-text {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-top: 12px;
+}
+
 /* ═══ Responsive ═══ */
 @media (max-width: 1200px) {
   .member-list { width: 0; padding: 0; overflow: hidden; }
