@@ -447,11 +447,35 @@
 .reaction-chip.add-reaction:hover { border-color: var(--text-muted); color: var(--text-muted); }
 
 /* Code block */
+.msg-codeblock-wrap {
+  position: relative;
+}
 .msg-codeblock {
   background: var(--bg-tertiary); border: 1px solid var(--border);
   border-radius: var(--radius-sm); padding: 12px; margin-top: 4px;
   font-family: var(--font-mono); font-size: 13px;
   line-height: 1.5; overflow-x: auto; white-space: pre;
+}
+.msg-codeblock-copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.msg-codeblock-wrap:hover .msg-codeblock-copy {
+  opacity: 1;
+}
+.msg-codeblock-copy:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 /* Image attachment */

@@ -101,9 +101,21 @@ export function renderMessageContent(content: string): DocumentFragment {
       text.appendChild(renderInlineContent(content.slice(lastIndex, idx)));
       fragment.appendChild(text);
     }
+    const codeWrap = createElement("div", { class: "msg-codeblock-wrap" });
     const codeBlock = createElement("div", { class: "msg-codeblock" });
-    setText(codeBlock, match[1]!.trim());
-    fragment.appendChild(codeBlock);
+    const codeContent = match[1]!.trim();
+    setText(codeBlock, codeContent);
+    const copyBtn = createElement("button", { class: "msg-codeblock-copy" });
+    setText(copyBtn, "Copy");
+    copyBtn.addEventListener("click", () => {
+      void navigator.clipboard.writeText(codeContent).then(() => {
+        setText(copyBtn, "Copied!");
+        setTimeout(() => setText(copyBtn, "Copy"), 2000);
+      });
+    });
+    codeWrap.appendChild(codeBlock);
+    codeWrap.appendChild(copyBtn);
+    fragment.appendChild(codeWrap);
     lastIndex = idx + match[0].length;
   }
   if (lastIndex === 0) {
