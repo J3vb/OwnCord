@@ -324,8 +324,9 @@
   min-height: 28px;
   contain: layout style;
   transition: background 0.1s ease;
+  border-left: 2px solid transparent;
 }
-.message:hover { background: rgba(2, 2, 2, 0.06); }
+.message:hover { background: var(--bg-modifier-hover); }
 .message.grouped { min-height: 20px; }
 .message .msg-avatar {
   position: absolute; left: 16px; top: 4px;
@@ -735,9 +736,9 @@
 .attachment-preview-spinner {
   position: absolute; top: 50%; left: 50%;
   transform: translate(-50%, -50%);
-  font-size: 18px; animation: spin 1s linear infinite;
+  font-size: 18px; animation: spinCentered 1s linear infinite;
 }
-@keyframes spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+@keyframes spinCentered { to { transform: translate(-50%, -50%) rotate(360deg); } }
 .attachment-upload-error {
   padding: 6px 10px; font-size: 12px; color: var(--red);
   background: rgba(237,66,69,.1); border-radius: var(--radius-sm);
