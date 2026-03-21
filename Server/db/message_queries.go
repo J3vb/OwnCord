@@ -277,54 +277,7 @@ func (d *DB) GetMessagesForAPI(channelID, before int64, limit int, requestingUse
 	}
 	defer rows.Close() //nolint:errcheck
 
-	var msgs []MessageAPIResponse
-	var msgIDs []int64
-	for rows.Next() {
-		var m MessageAPIResponse
-		var deleted, pinned int
-		if scanErr := rows.Scan(
-			&m.ID, &m.ChannelID, &m.User.ID, &m.User.Username, &m.User.Avatar,
-			&m.Content, &m.ReplyTo, &m.EditedAt, &deleted, &pinned, &m.Timestamp,
-		); scanErr != nil {
-			return nil, fmt.Errorf("GetMessagesForAPI scan: %w", scanErr)
-		}
-		m.Deleted = deleted != 0
-		m.Pinned = pinned != 0
-		m.Attachments = []AttachmentInfo{}
-		m.Reactions = []ReactionInfo{}
-		msgs = append(msgs, m)
-		msgIDs = append(msgIDs, m.ID)
-	}
-	if rows.Err() != nil {
-		return nil, fmt.Errorf("GetMessagesForAPI rows: %w", rows.Err())
-	}
-	if msgs == nil {
-		return []MessageAPIResponse{}, nil
-	}
-
-	// Batch-fetch reactions for all message IDs.
-	reactMap, err := d.getReactionsBatch(msgIDs, requestingUserID)
-	if err != nil {
-		return nil, fmt.Errorf("GetMessagesForAPI reactions: %w", err)
-	}
-	for i := range msgs {
-		if r, ok := reactMap[msgs[i].ID]; ok {
-			msgs[i].Reactions = r
-		}
-	}
-
-	// Batch-fetch attachments for all message IDs.
-	attMap, err := d.GetAttachmentsByMessageIDs(msgIDs)
-	if err != nil {
-		return nil, fmt.Errorf("GetMessagesForAPI attachments: %w", err)
-	}
-	for i := range msgs {
-		if a, ok := attMap[msgs[i].ID]; ok {
-			msgs[i].Attachments = a
-		}
-	}
-
-	return msgs, nil
+	return d.scanAndEnrichMessages(rows, requestingUserID)
 }
 
 // getReactionsBatch returns aggregated reactions for multiple messages.
@@ -456,6 +409,12 @@ func (d *DB) GetPinnedMessages(channelID int64, requestingUserID int64) ([]Messa
 	}
 	defer rows.Close() //nolint:errcheck
 
+	return d.scanAndEnrichMessages(rows, requestingUserID)
+}
+
+// scanAndEnrichMessages scans rows into MessageAPIResponse slice and
+// batch-fetches reactions and attachments. Caller must defer rows.Close().
+func (d *DB) scanAndEnrichMessages(rows *sql.Rows, requestingUserID int64) ([]MessageAPIResponse, error) {
 	var msgs []MessageAPIResponse
 	var msgIDs []int64
 	for rows.Next() {
@@ -465,7 +424,7 @@ func (d *DB) GetPinnedMessages(channelID int64, requestingUserID int64) ([]Messa
 			&m.ID, &m.ChannelID, &m.User.ID, &m.User.Username, &m.User.Avatar,
 			&m.Content, &m.ReplyTo, &m.EditedAt, &deleted, &pinned, &m.Timestamp,
 		); scanErr != nil {
-			return nil, fmt.Errorf("GetPinnedMessages scan: %w", scanErr)
+			return nil, fmt.Errorf("scanAndEnrichMessages scan: %w", scanErr)
 		}
 		m.Deleted = deleted != 0
 		m.Pinned = pinned != 0
@@ -475,7 +434,7 @@ func (d *DB) GetPinnedMessages(channelID int64, requestingUserID int64) ([]Messa
 		msgIDs = append(msgIDs, m.ID)
 	}
 	if rows.Err() != nil {
-		return nil, fmt.Errorf("GetPinnedMessages rows: %w", rows.Err())
+		return nil, fmt.Errorf("scanAndEnrichMessages rows: %w", rows.Err())
 	}
 	if msgs == nil {
 		return []MessageAPIResponse{}, nil
@@ -484,7 +443,7 @@ func (d *DB) GetPinnedMessages(channelID int64, requestingUserID int64) ([]Messa
 	// Batch-fetch reactions for all message IDs.
 	reactMap, err := d.getReactionsBatch(msgIDs, requestingUserID)
 	if err != nil {
-		return nil, fmt.Errorf("GetPinnedMessages reactions: %w", err)
+		return nil, fmt.Errorf("scanAndEnrichMessages reactions: %w", err)
 	}
 	for i := range msgs {
 		if r, ok := reactMap[msgs[i].ID]; ok {
@@ -495,7 +454,7 @@ func (d *DB) GetPinnedMessages(channelID int64, requestingUserID int64) ([]Messa
 	// Batch-fetch attachments for all message IDs.
 	attMap, err := d.GetAttachmentsByMessageIDs(msgIDs)
 	if err != nil {
-		return nil, fmt.Errorf("GetPinnedMessages attachments: %w", err)
+		return nil, fmt.Errorf("scanAndEnrichMessages attachments: %w", err)
 	}
 	for i := range msgs {
 		if a, ok := attMap[msgs[i].ID]; ok {
@@ -509,21 +468,17 @@ func (d *DB) GetPinnedMessages(channelID int64, requestingUserID int64) ([]Messa
 // SetMessagePinned updates the pinned column on a message.
 // Returns ErrNotFound if the message does not exist.
 func (d *DB) SetMessagePinned(id int64, pinned bool) error {
-	msg, err := d.GetMessage(id)
-	if err != nil {
-		return err
-	}
-	if msg == nil {
-		return fmt.Errorf("SetMessagePinned: message %d: %w", id, ErrNotFound)
-	}
-
 	val := 0
 	if pinned {
 		val = 1
 	}
-	_, err = d.sqlDB.Exec(`UPDATE messages SET pinned = ? WHERE id = ?`, val, id)
+	res, err := d.sqlDB.Exec(`UPDATE messages SET pinned = ? WHERE id = ? AND deleted = 0`, val, id)
 	if err != nil {
 		return fmt.Errorf("SetMessagePinned: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("SetMessagePinned: message %d: %w", id, ErrNotFound)
 	}
 	return nil
 }

@@ -23,8 +23,8 @@ func MountChannelRoutes(r chi.Router, database *db.DB) {
 		r.Get("/", handleListChannels(database))
 		r.Get("/{id}/messages", handleGetMessages(database))
 		r.Get("/{id}/pins", handleGetPins(database))
-		r.Post("/{id}/pins/{messageId}", handlePinMessage(database))
-		r.Delete("/{id}/pins/{messageId}", handleUnpinMessage(database))
+		r.Post("/{id}/pins/{messageId}", handleSetPinned(database, true))
+		r.Delete("/{id}/pins/{messageId}", handleSetPinned(database, false))
 	})
 	r.With(AuthMiddleware(database)).Get("/api/v1/search", handleSearch(database))
 }
@@ -334,87 +334,20 @@ func handleGetPins(database *db.DB) http.HandlerFunc {
 	}
 }
 
-// handlePinMessage pins a message in a channel.
-func handlePinMessage(database *db.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		channelID, ok := parseIDParam(w, r, "id")
-		if !ok {
-			return
-		}
-
-		raw := chi.URLParam(r, "messageId")
-		messageID, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || messageID <= 0 {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: "messageId must be a positive integer",
-			})
-			return
-		}
-
-		// Permission check: user must have MANAGE_MESSAGES on this channel.
-		role, _ := r.Context().Value(RoleKey).(*db.Role)
-		if !hasChannelPermREST(database, role, channelID, permissions.ManageMessages) {
-			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error:   "FORBIDDEN",
-				Message: "no permission to manage messages in this channel",
-			})
-			return
-		}
-
-		// Verify message exists and belongs to this channel.
-		msg, err := database.GetMessage(messageID)
-		if err != nil {
-			slog.Error("handlePinMessage GetMessage", "err", err, "message_id", messageID)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
-				Message: "failed to look up message",
-			})
-			return
-		}
-		if msg == nil {
-			writeJSON(w, http.StatusNotFound, errorResponse{
-				Error:   "NOT_FOUND",
-				Message: "message not found",
-			})
-			return
-		}
-		if msg.ChannelID != channelID {
-			writeJSON(w, http.StatusNotFound, errorResponse{
-				Error:   "NOT_FOUND",
-				Message: "message not found in this channel",
-			})
-			return
-		}
-
-		if err := database.SetMessagePinned(messageID, true); err != nil {
-			slog.Error("handlePinMessage SetMessagePinned", "err", err, "message_id", messageID)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
-				Message: "failed to pin message",
-			})
-			return
-		}
-
-		w.WriteHeader(http.StatusNoContent)
+// handleSetPinned pins or unpins a message in a channel.
+func handleSetPinned(database *db.DB, pinned bool) http.HandlerFunc {
+	action := "pin"
+	if !pinned {
+		action = "unpin"
 	}
-}
-
-// handleUnpinMessage unpins a message in a channel.
-func handleUnpinMessage(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		channelID, ok := parseIDParam(w, r, "id")
 		if !ok {
 			return
 		}
 
-		raw := chi.URLParam(r, "messageId")
-		messageID, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || messageID <= 0 {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: "messageId must be a positive integer",
-			})
+		messageID, ok := parseIDParam(w, r, "messageId")
+		if !ok {
 			return
 		}
 
@@ -431,33 +364,26 @@ func handleUnpinMessage(database *db.DB) http.HandlerFunc {
 		// Verify message exists and belongs to this channel.
 		msg, err := database.GetMessage(messageID)
 		if err != nil {
-			slog.Error("handleUnpinMessage GetMessage", "err", err, "message_id", messageID)
+			slog.Error("handleSetPinned GetMessage", "err", err, "action", action, "message_id", messageID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL",
 				Message: "failed to look up message",
 			})
 			return
 		}
-		if msg == nil {
+		if msg == nil || msg.ChannelID != channelID {
 			writeJSON(w, http.StatusNotFound, errorResponse{
 				Error:   "NOT_FOUND",
 				Message: "message not found",
 			})
 			return
 		}
-		if msg.ChannelID != channelID {
-			writeJSON(w, http.StatusNotFound, errorResponse{
-				Error:   "NOT_FOUND",
-				Message: "message not found in this channel",
-			})
-			return
-		}
 
-		if err := database.SetMessagePinned(messageID, false); err != nil {
-			slog.Error("handleUnpinMessage SetMessagePinned", "err", err, "message_id", messageID)
+		if err := database.SetMessagePinned(messageID, pinned); err != nil {
+			slog.Error("handleSetPinned SetMessagePinned", "err", err, "action", action, "message_id", messageID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL",
-				Message: "failed to unpin message",
+				Message: "failed to " + action + " message",
 			})
 			return
 		}
