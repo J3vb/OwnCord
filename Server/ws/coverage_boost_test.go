@@ -592,6 +592,9 @@ func TestHandleVoiceMute_InvalidPayload(t *testing.T) {
 	hub.Register(c)
 	time.Sleep(20 * time.Millisecond)
 
+	// Put client in voice so the "not in voice" guard doesn't fire first.
+	ws.SetClientVoiceChID(c, 999)
+
 	raw, _ := json.Marshal(map[string]any{
 		"type":    "voice_mute",
 		"payload": "not-an-object",
@@ -612,6 +615,9 @@ func TestHandleVoiceDeafen_InvalidPayload(t *testing.T) {
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
 	time.Sleep(20 * time.Millisecond)
+
+	// Put client in voice so the "not in voice" guard doesn't fire first.
+	ws.SetClientVoiceChID(c, 999)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type":    "voice_deafen",
@@ -2054,4 +2060,131 @@ func TestHandleChatSend_WithNonNilAvatar(t *testing.T) {
 	if !foundBroadcast {
 		t.Error("expected chat_message with non-nil avatar")
 	}
+}
+
+// ─── Webhook parse helpers ──────────────────────────────────────────────────
+
+func TestWebhookParseIdentity_Valid(t *testing.T) {
+	id, err := ws.ParseIdentityForTest("user-42")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != 42 {
+		t.Errorf("id = %d, want 42", id)
+	}
+}
+
+func TestWebhookParseIdentity_Invalid(t *testing.T) {
+	_, err := ws.ParseIdentityForTest("invalid")
+	if err == nil {
+		t.Fatal("expected error for invalid identity, got nil")
+	}
+}
+
+func TestWebhookParseRoomChannelID_Valid(t *testing.T) {
+	id, err := ws.ParseRoomChannelIDForTest("channel-5")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != 5 {
+		t.Errorf("id = %d, want 5", id)
+	}
+}
+
+func TestWebhookParseRoomChannelID_Invalid(t *testing.T) {
+	_, err := ws.ParseRoomChannelIDForTest("bad")
+	if err == nil {
+		t.Fatal("expected error for invalid room name, got nil")
+	}
+}
+
+// ─── Voice control "not in voice" guards ────────────────────────────────────
+
+func TestHandleVoiceMute_NotInVoice(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user := seedCoverageOwner(t, database, "vm-not-in-voice")
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	raw, _ := json.Marshal(map[string]any{
+		"type": "voice_mute",
+		"payload": map[string]any{
+			"muted": true,
+		},
+	})
+	hub.HandleMessageForTest(c, raw)
+	time.Sleep(50 * time.Millisecond)
+
+	code := drainForErrorCode(send, 200*time.Millisecond)
+	if code != "VOICE_ERROR" {
+		t.Errorf("error code = %q, want VOICE_ERROR", code)
+	}
+}
+
+func TestHandleVoiceDeafen_NotInVoice(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user := seedCoverageOwner(t, database, "vd-not-in-voice")
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	raw, _ := json.Marshal(map[string]any{
+		"type": "voice_deafen",
+		"payload": map[string]any{
+			"deafened": true,
+		},
+	})
+	hub.HandleMessageForTest(c, raw)
+	time.Sleep(50 * time.Millisecond)
+
+	code := drainForErrorCode(send, 200*time.Millisecond)
+	if code != "VOICE_ERROR" {
+		t.Errorf("error code = %q, want VOICE_ERROR", code)
+	}
+}
+
+// ─── Voice join with invalid quality fallback ───────────────────────────────
+
+func TestHandleVoiceJoin_InvalidQualityFallsBackToMedium(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user := seedCoverageOwner(t, database, "vj-badquality-user")
+
+	vcID, err := database.CreateChannel("badquality-vc", "voice", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	_, err = database.Exec("UPDATE channels SET voice_quality = 'garbage' WHERE id = ?", vcID)
+	if err != nil {
+		t.Fatalf("UPDATE: %v", err)
+	}
+
+	send := make(chan []byte, 64)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	raw, _ := json.Marshal(map[string]any{
+		"type": "voice_join",
+		"payload": map[string]any{
+			"channel_id": vcID,
+		},
+	})
+	hub.HandleMessageForTest(c, raw)
+	time.Sleep(100 * time.Millisecond)
+
+	msgs := drainChanTimeout(send, 300*time.Millisecond)
+	for _, msg := range msgs {
+		var env map[string]any
+		if json.Unmarshal(msg, &env) == nil && env["type"] == "voice_config" {
+			p := env["payload"].(map[string]any)
+			if p["quality"] != "medium" {
+				t.Errorf("voice_config quality = %v, want medium", p["quality"])
+			}
+			return
+		}
+	}
+	t.Error("expected voice_config with medium quality fallback")
 }

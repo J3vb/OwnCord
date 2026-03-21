@@ -13,6 +13,11 @@ import (
 // 2. Updates DB.
 // 3. Broadcasts voice_state update to channel.
 func (h *Hub) handleVoiceMute(c *Client, payload json.RawMessage) {
+	if c.getVoiceChID() == 0 {
+		c.sendMsg(buildErrorMsg(ErrCodeVoiceError, "not in a voice channel"))
+		return
+	}
+
 	var p struct {
 		Muted bool `json:"muted"`
 	}
@@ -36,6 +41,11 @@ func (h *Hub) handleVoiceMute(c *Client, payload json.RawMessage) {
 // 2. Updates DB.
 // 3. Broadcasts voice_state update to channel.
 func (h *Hub) handleVoiceDeafen(c *Client, payload json.RawMessage) {
+	if c.getVoiceChID() == 0 {
+		c.sendMsg(buildErrorMsg(ErrCodeVoiceError, "not in a voice channel"))
+		return
+	}
+
 	var p struct {
 		Deafened bool `json:"deafened"`
 	}
@@ -58,7 +68,7 @@ func (h *Hub) handleVoiceDeafen(c *Client, payload json.RawMessage) {
 // 1. Rate limits at 2/sec per user.
 // 2. Checks USE_VIDEO permission.
 // 3. Parses enabled bool.
-// 4. Enforces MaxVideo limit via LiveKit.
+// 4. Enforces MaxVideo limit via DB count (race-free).
 // 5. Updates DB.
 // 6. Broadcasts voice_state update to channel.
 func (h *Hub) handleVoiceCamera(c *Client, payload json.RawMessage) {
@@ -87,12 +97,13 @@ func (h *Hub) handleVoiceCamera(c *Client, payload json.RawMessage) {
 	}
 
 	// Enforce MaxVideo limit when enabling camera.
+	// Count from DB (race-free via SQLite serialization) instead of LiveKit API.
 	if p.Enabled {
 		ch, chErr := h.db.GetChannel(voiceChID)
-		if chErr == nil && ch != nil && ch.VoiceMaxVideo > 0 && h.livekit != nil {
-			videoCount, countErr := h.livekit.CountVideoTracks(voiceChID)
+		if chErr == nil && ch != nil && ch.VoiceMaxVideo > 0 {
+			videoCount, countErr := h.db.CountActiveCameras(voiceChID)
 			if countErr != nil {
-				slog.Error("handleVoiceCamera CountVideoTracks", "err", countErr, "channel_id", voiceChID)
+				slog.Error("handleVoiceCamera CountActiveCameras", "err", countErr, "channel_id", voiceChID)
 			} else if videoCount >= ch.VoiceMaxVideo {
 				c.sendMsg(buildErrorMsg(ErrCodeVideoLimit,
 					fmt.Sprintf("maximum %d video streams reached", ch.VoiceMaxVideo)))

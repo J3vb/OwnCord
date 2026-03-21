@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,9 +21,10 @@ import (
 
 // LiveKitProcess manages the companion livekit-server binary.
 type LiveKitProcess struct {
-	cfg      *config.VoiceConfig
-	tlsCfg   *config.TLSConfig
-	dataDir  string
+	cfg        *config.VoiceConfig
+	tlsCfg     *config.TLSConfig
+	dataDir    string
+	httpClient *http.Client // for health checks — no redirect following
 
 	mu      sync.Mutex
 	cmd     *exec.Cmd
@@ -39,6 +41,11 @@ func NewLiveKitProcess(cfg *config.VoiceConfig, tlsCfg *config.TLSConfig, dataDi
 		cfg:     cfg,
 		tlsCfg:  tlsCfg,
 		dataDir: dataDir,
+		httpClient: &http.Client{
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	}
 }
 
@@ -56,7 +63,7 @@ rtc:
   port_range_end: 60000
   use_external_ip: true
 keys:
-  %s: %s
+  "%s": "%s"
 logging:
   level: info
 `, p.cfg.LiveKitAPIKey, p.cfg.LiveKitAPISecret)
@@ -100,8 +107,18 @@ func (p *LiveKitProcess) Start() error {
 }
 
 // runLoop starts and restarts the process until stopped or context cancelled.
+// Uses exponential backoff (3s → 6s → 12s … up to 60s) and stops after 10
+// consecutive rapid failures (process exits within 30 seconds).
 func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath string) {
-	const restartDelay = 3 * time.Second
+	const (
+		baseDelay      = 3 * time.Second
+		maxDelay       = 60 * time.Second
+		maxRetries     = 10
+		stableAfter    = 30 * time.Second // reset counter if process runs longer than this
+	)
+
+	rapidFailures := 0
+	delay := baseDelay
 
 	for {
 		if ctx.Err() != nil {
@@ -111,6 +128,7 @@ func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath string) {
 		cmd := exec.CommandContext(ctx, p.cfg.LiveKitBinaryPath, "--config", cfgPath)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
+		cmd.WaitDelay = 6 * time.Second // bound Wait to prevent goroutine leak on Windows
 
 		p.mu.Lock()
 		if p.stopped {
@@ -122,8 +140,10 @@ func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath string) {
 
 		slog.Info("livekit: starting process",
 			"binary", p.cfg.LiveKitBinaryPath,
-			"config", cfgPath)
+			"config", cfgPath,
+			"rapid_failures", rapidFailures)
 
+		startTime := time.Now()
 		err := cmd.Run()
 
 		p.mu.Lock()
@@ -136,17 +156,38 @@ func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath string) {
 			return
 		}
 
+		// If the process ran for a while, it was stable — reset backoff.
+		if time.Since(startTime) > stableAfter {
+			rapidFailures = 0
+			delay = baseDelay
+		} else {
+			rapidFailures++
+		}
+
 		if err != nil {
 			slog.Error("livekit: process exited unexpectedly",
 				"error", err,
-				"restart_delay", restartDelay)
+				"rapid_failures", rapidFailures,
+				"restart_delay", delay)
+		}
+
+		if rapidFailures >= maxRetries {
+			slog.Error("livekit: too many rapid failures, giving up",
+				"rapid_failures", rapidFailures)
+			return
 		}
 
 		select {
-		case <-time.After(restartDelay):
+		case <-time.After(delay):
 			slog.Info("livekit: restarting process")
 		case <-ctx.Done():
 			return
+		}
+
+		// Exponential backoff capped at maxDelay.
+		delay *= 2
+		if delay > maxDelay {
+			delay = maxDelay
 		}
 	}
 }
@@ -156,6 +197,28 @@ func (p *LiveKitProcess) IsRunning() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.cmd != nil && p.cmd.Process != nil
+}
+
+// HealthCheck probes the LiveKit HTTP endpoint to verify it is accepting
+// connections. Returns true if the server responds (any status code).
+func (p *LiveKitProcess) HealthCheck() (bool, error) {
+	httpURL := wsToHTTP(p.cfg.LiveKitURL)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, httpURL, nil)
+	if err != nil {
+		return false, fmt.Errorf("creating health check request: %w", err)
+	}
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("livekit health check failed: %w", err)
+	}
+	resp.Body.Close()
+
+	return true, nil
 }
 
 // Stop gracefully stops the companion process.

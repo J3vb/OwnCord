@@ -20,6 +20,7 @@ import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { voiceStore } from "@stores/voice.store";
 import {
   leaveVoice as voiceSessionLeave,
+  cleanupAll as voiceCleanupAll,
   setOnRemoteVideo,
   setOnRemoteVideoRemoved,
   clearOnRemoteVideo,
@@ -126,19 +127,27 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     unsubscribers.push(
       ws.onStateChange((wsState) => {
-        if (banner === null) return;
-        if (wsState === "reconnecting") {
-          banner.showReconnecting();
-        } else if (wsState === "connected") {
-          banner.hide();
+        try {
+          if (banner === null) return;
+          if (wsState === "reconnecting") {
+            banner.showReconnecting();
+          } else if (wsState === "connected") {
+            banner.hide();
+          }
+        } catch (err) {
+          log.error("State change handler error", err);
         }
       }),
     );
 
     unsubscribers.push(
       ws.on("server_restart", (payload) => {
-        if (banner !== null) {
-          banner.showRestart(payload.delay_seconds);
+        try {
+          if (banner !== null) {
+            banner.showRestart(payload.delay_seconds);
+          }
+        } catch (err) {
+          log.error("Server restart handler error", err);
         }
       }),
     );
@@ -279,21 +288,25 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     let prevLocalCamera = voiceStore.getState().localCamera;
     let prevCameraSignature = "";
     unsubscribers.push(voiceStore.subscribe((state) => {
-      // Build a lightweight signature of camera-relevant state
-      let sig = state.localCamera ? "1" : "0";
-      const channelId = state.currentChannelId;
-      if (channelId !== null) {
-        const users = state.voiceUsers.get(channelId);
-        if (users) {
-          for (const [uid, u] of users) {
-            if (u.camera) sig += `:${uid}`;
+      try {
+        // Build a lightweight signature of camera-relevant state
+        let sig = state.localCamera ? "1" : "0";
+        const channelId = state.currentChannelId;
+        if (channelId !== null) {
+          const users = state.voiceUsers.get(channelId);
+          if (users) {
+            for (const [uid, u] of users) {
+              if (u.camera) sig += `:${uid}`;
+            }
           }
         }
-      }
-      if (sig !== prevCameraSignature || state.localCamera !== prevLocalCamera) {
-        prevCameraSignature = sig;
-        prevLocalCamera = state.localCamera;
-        videoModeCtrl?.checkVideoMode();
+        if (sig !== prevCameraSignature || state.localCamera !== prevLocalCamera) {
+          prevCameraSignature = sig;
+          prevLocalCamera = state.localCamera;
+          videoModeCtrl?.checkVideoMode();
+        }
+      } catch (err) {
+        log.error("Voice store subscription error", err);
       }
     }));
 
@@ -327,42 +340,50 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   function destroy(): void {
     log.info("MainPage destroying");
-    // Clean up voice session before destroying UI — prevents stale
-    // module-level state persisting across logout/reconnect cycles.
-    voiceSessionLeave(false);
-    clearVoiceOnError();
-    clearOnRemoteVideo();
-    channelCtrl?.destroyChannel();
-    channelCtrl = null;
+    try {
+      // Full voice cleanup — tears down room, callbacks, ws ref, serverHost.
+      // Prevents stale module-level state persisting across logout/reconnect cycles.
+      voiceCleanupAll();
+      channelCtrl?.destroyChannel();
+      channelCtrl = null;
 
-    reactionCtrl?.destroy();
-    reactionCtrl = null;
-    msgCtrl = null;
-    videoModeCtrl?.destroy();
-    videoModeCtrl = null;
+      reactionCtrl?.destroy();
+      reactionCtrl = null;
+      msgCtrl = null;
+      videoModeCtrl?.destroy();
+      videoModeCtrl = null;
 
-    videoGrid = null;
+      videoGrid = null;
 
-    for (const child of children) {
-      child.destroy?.();
+      for (const child of children) {
+        try {
+          child.destroy?.();
+        } catch (err) {
+          log.error("Child destroy error", err);
+        }
+      }
+      children = [];
+
+      for (const unsub of unsubscribers) {
+        try {
+          unsub();
+        } catch (err) {
+          log.error("Unsubscribe error", err);
+        }
+      }
+      unsubscribers = [];
+
+      if (banner !== null) {
+        banner.destroy();
+        banner = null;
+      }
+    } finally {
+      if (root !== null) {
+        root.remove();
+        root = null;
+      }
+      container = null;
     }
-    children = [];
-
-    for (const unsub of unsubscribers) {
-      unsub();
-    }
-    unsubscribers = [];
-
-    if (banner !== null) {
-      banner.destroy();
-      banner = null;
-    }
-
-    if (root !== null) {
-      root.remove();
-      root = null;
-    }
-    container = null;
   }
 
   return { mount, destroy };

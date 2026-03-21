@@ -74,7 +74,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     getCurrentChannelId: () => getChannelCtrl()?.currentChannelId ?? null,
     onJumpToMessage: (msgId: number) => {
       const ctrl = getChannelCtrl();
-      if (ctrl?.messageList === null || ctrl?.messageList === undefined) return false;
+      if (ctrl == null || ctrl.messageList == null) return false;
       return ctrl.messageList.scrollToMessage(msgId);
     },
   });
@@ -87,7 +87,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     getCurrentChannelId: () => getChannelCtrl()?.currentChannelId ?? null,
     onJumpToMessage: (_channelId: number, msgId: number) => {
       const ctrl = getChannelCtrl();
-      if (ctrl?.messageList === null || ctrl?.messageList === undefined) return false;
+      if (ctrl == null || ctrl.messageList == null) return false;
       return ctrl.messageList.scrollToMessage(msgId);
     },
   });

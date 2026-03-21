@@ -25,7 +25,7 @@ func (h *Hub) handleVoiceLeave(c *Client) {
 	// Remove from LiveKit (best-effort).
 	if h.livekit != nil {
 		if err := h.livekit.RemoveParticipant(oldChID, c.userID); err != nil {
-			slog.Debug("handleVoiceLeave RemoveParticipant (may already be gone)",
+			slog.Warn("handleVoiceLeave RemoveParticipant failed (may already be gone)",
 				"err", err, "user_id", c.userID, "channel_id", oldChID)
 		}
 	}

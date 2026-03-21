@@ -89,10 +89,14 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		r.Post("/api/v1/livekit/webhook",
 			ws.MountWebhookRoute(hub, cfg.Voice.LiveKitAPIKey, cfg.Voice.LiveKitAPISecret))
 
+		// LiveKit health check — admin-IP-restricted.
+		r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs)).
+			Get("/api/v1/livekit/health", handleLiveKitHealth(hub))
+
 		// Reverse proxy LiveKit signaling through OwnCord's HTTPS server.
 		// This avoids mixed-content blocks (secure page → insecure WS).
 		// Client connects to wss://server:8443/livekit/* → ws://localhost:7880/*
-		r.Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL)))
+		r.Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins)))
 	}
 
 	go hub.Run()
@@ -148,6 +152,36 @@ func handleInfo(cfg *config.Config, ver string) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, infoResponse{
 			Name:    cfg.Server.Name,
 			Version: ver,
+		})
+	}
+}
+
+// livekitHealthResponse is the JSON shape returned by GET /api/v1/livekit/health.
+type livekitHealthResponse struct {
+	Status           string `json:"status"`
+	LiveKitReachable bool   `json:"livekit_reachable"`
+	Error            string `json:"error,omitempty"`
+}
+
+func handleLiveKitHealth(hub *ws.Hub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ok, err := hub.LiveKitHealthCheck()
+		if ok {
+			writeJSON(w, http.StatusOK, livekitHealthResponse{
+				Status:           "ok",
+				LiveKitReachable: true,
+			})
+			return
+		}
+
+		errMsg := "unknown"
+		if err != nil {
+			errMsg = err.Error()
+		}
+		writeJSON(w, http.StatusServiceUnavailable, livekitHealthResponse{
+			Status:           "degraded",
+			LiveKitReachable: false,
+			Error:            errMsg,
 		})
 	}
 }

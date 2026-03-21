@@ -379,7 +379,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // doesn't cause jumps from estimate→measured height corrections.
     premeasureAll();
     scrollToBottom();
-    requestAnimationFrame(() => scrollToBottom());
+    const initialScrollRaf = requestAnimationFrame(() => scrollToBottom());
+    ac.signal.addEventListener("abort", () => cancelAnimationFrame(initialScrollRaf));
 
     unsubscribers.push(messagesStore.subscribeSelector(
       (s) => s.messagesByChannel,

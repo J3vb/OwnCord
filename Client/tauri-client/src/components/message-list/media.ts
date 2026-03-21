@@ -66,8 +66,19 @@ export function extractYouTubeId(url: string): string | null {
 /** Cache for YouTube video titles to avoid re-fetching on every re-render. */
 const ytTitleCache = new Map<string, string>();
 
+/** Strict pattern for YouTube video IDs (alphanumeric, hyphens, underscores). */
+const YOUTUBE_ID_RE = /^[\w-]{1,20}$/;
+
 /** Render a YouTube embed player with title header. */
 export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDivElement {
+  // Validate videoId to prevent injection into iframe src / img src.
+  if (!YOUTUBE_ID_RE.test(videoId)) {
+    const fallback = createElement("div", { class: "msg-embed" });
+    const link = createElement("a", { href: originalUrl, target: "_blank", rel: "noopener noreferrer" });
+    setText(link, originalUrl);
+    fallback.appendChild(link);
+    return fallback;
+  }
   const wrap = createElement("div", { class: "msg-embed msg-embed-youtube" });
 
   // Header: channel name + video title
@@ -85,10 +96,10 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
     setText(titleLink, cached);
   } else {
     setText(titleLink, "Loading...");
-    const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
-    fetch(oembedUrl)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { title?: string } | null) => {
+    const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&format=json`;
+    fetch(oembedUrl, { signal: AbortSignal.timeout(5000) })
+      .then((res) => (res.ok ? (res.json() as Promise<{ title?: string } | null>) : null))
+      .then((data) => {
         const title = data?.title ?? "YouTube Video";
         ytTitleCache.set(videoId, title);
         setText(titleLink, title);

@@ -22,7 +22,7 @@ import (
 // RoomEvent.ActiveSpeakersChanged (lower latency than webhooks).
 func (h *Hub) NewLiveKitWebhookHandler(apiKey, apiSecret string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
+		body, err := io.ReadAll(io.LimitReader(r.Body, 64*1024))
 		if err != nil {
 			slog.Error("livekit webhook: read body failed", "error", err)
 			http.Error(w, "bad request", http.StatusBadRequest)
@@ -151,9 +151,11 @@ func (h *Hub) handleWebhookParticipantLeft(event *livekit.WebhookEvent) {
 	h.mu.RUnlock()
 
 	if exists {
+		// Only clean up if the user is still in the channel that fired the
+		// webhook. If they've already moved or left, don't touch their state.
 		currentChID := c.getVoiceChID()
 		if currentChID == channelID {
-			c.setVoiceChID(0)
+			c.clearVoiceChID()
 
 			if h.db != nil {
 				_ = h.db.LeaveVoiceChannel(userID)

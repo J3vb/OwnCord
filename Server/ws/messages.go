@@ -3,6 +3,7 @@ package ws
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/owncord/server/db"
 )
@@ -155,6 +156,7 @@ type serverRestartPayload struct {
 func buildJSON(v any) []byte {
 	b, err := json.Marshal(v)
 	if err != nil {
+		slog.Error("buildJSON marshal failed", "error", err, "type", fmt.Sprintf("%T", v))
 		// Fallback: send a generic error rather than panicking.
 		b, _ = json.Marshal(map[string]string{"type": "error", "message": "internal marshal error"})
 	}

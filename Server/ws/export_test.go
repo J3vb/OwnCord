@@ -41,3 +41,13 @@ func ParseChannelIDForTest(payload json.RawMessage) (int64, error) {
 func BuildJSONForTest(v any) []byte {
 	return buildJSON(v)
 }
+
+// ParseIdentityForTest exposes parseIdentity for external tests.
+func ParseIdentityForTest(identity string) (int64, error) {
+	return parseIdentity(identity)
+}
+
+// ParseRoomChannelIDForTest exposes parseRoomChannelID for external tests.
+func ParseRoomChannelIDForTest(roomName string) (int64, error) {
+	return parseRoomChannelID(roomName)
+}

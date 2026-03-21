@@ -96,7 +96,11 @@ export function createWsClient() {
     if (state !== newState) {
       state = newState;
       for (const listener of stateListeners) {
-        listener(state);
+        try {
+          listener(state);
+        } catch (err) {
+          log.error("State listener error", err);
+        }
       }
     }
   }

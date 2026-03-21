@@ -121,6 +121,8 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		h.handleVoiceJoin(c, env.Payload)
 	case "voice_leave":
 		h.handleVoiceLeave(c)
+	case "voice_token_refresh":
+		h.handleVoiceTokenRefresh(c)
 	case "voice_mute":
 		h.handleVoiceMute(c, env.Payload)
 	case "voice_deafen":
@@ -214,7 +216,13 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 	if len(p.Attachments) > 0 {
 		linked, linkErr := h.db.LinkAttachmentsToMessage(msgID, p.Attachments)
 		if linkErr != nil {
-			slog.Error("ws handleChatSend LinkAttachments", "err", linkErr)
+			slog.Error("ws handleChatSend LinkAttachments", "err", linkErr, "msg_id", msgID)
+			// Delete the orphaned message so it doesn't persist without its attachments.
+			if delErr := h.db.DeleteMessage(msgID, c.userID, true); delErr != nil {
+				slog.Error("ws handleChatSend DeleteMessage (cleanup)", "err", delErr, "msg_id", msgID)
+			}
+			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to send message with attachments"))
+			return
 		}
 		if linked > 0 {
 			attMap, attErr := h.db.GetAttachmentsByMessageIDs([]int64{msgID})

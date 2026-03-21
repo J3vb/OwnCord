@@ -13,16 +13,21 @@ const (
 	voiceScreenshareWindow    = time.Second
 )
 
+// voiceQualities maps accepted voice quality presets to their target bitrate
+// in bits/s. This is the single source of truth — voice_join.go validates
+// against these keys, qualityBitrate looks up the value.
+var voiceQualities = map[string]int{
+	"low":    32000,
+	"medium": 64000,
+	"high":   128000,
+}
+
 // qualityBitrate returns the target audio bitrate in bits/s based on a quality preset.
 func qualityBitrate(quality string) int {
-	switch quality {
-	case "low":
-		return 32000
-	case "high":
-		return 128000
-	default:
-		return 64000
+	if bitrate, ok := voiceQualities[quality]; ok {
+		return bitrate
 	}
+	return voiceQualities["medium"]
 }
 
 // broadcastVoiceStateUpdate fetches the current voice state for the client

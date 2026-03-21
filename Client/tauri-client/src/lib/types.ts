@@ -430,7 +430,8 @@ export type ClientMessage =
   | (WsEnvelope<VoiceDeafenPayload> & { readonly type: "voice_deafen" })
   | (WsEnvelope<VoiceCameraPayload> & { readonly type: "voice_camera" })
   | (WsEnvelope<VoiceScreensharePayload> & { readonly type: "voice_screenshare" })
-  | (WsEnvelope<SoundboardPlayPayload> & { readonly type: "soundboard_play" });
+  | (WsEnvelope<SoundboardPlayPayload> & { readonly type: "soundboard_play" })
+  | (WsEnvelope<Record<string, never>> & { readonly type: "voice_token_refresh" });
 
 // -----------------------------------------------------------------------------
 // REST API Response Types

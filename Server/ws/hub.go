@@ -104,6 +104,17 @@ func (h *Hub) SetLiveKit(lk *LiveKitClient) {
 	h.livekit = lk
 }
 
+// LiveKitHealthCheck probes the LiveKit server for connectivity.
+// It tries the SDK client first (ListRooms), and falls back to an HTTP probe
+// if a managed process is configured. Returns false with a reason if LiveKit
+// is not configured or unreachable.
+func (h *Hub) LiveKitHealthCheck() (bool, error) {
+	if h.livekit == nil {
+		return false, fmt.Errorf("not configured")
+	}
+	return h.livekit.HealthCheck()
+}
+
 // SetLiveKitProcess sets the LiveKit process manager on the hub.
 func (h *Hub) SetLiveKitProcess(p *LiveKitProcess) {
 	h.lkProcess = p
@@ -113,7 +124,7 @@ func (h *Hub) SetLiveKitProcess(p *LiveKitProcess) {
 // Must be called in its own goroutine.
 //
 // A panic recovery wrapper restarts the select loop automatically. If the hub
-// panics more than 5 times within a 60-second window it stops permanently to
+// panics more than 3 times within a 60-second window it stops permanently to
 // avoid a tight crash loop.
 func (h *Hub) Run() {
 	var panicCount int
@@ -140,7 +151,7 @@ func (h *Hub) Run() {
 						"panic_count", panicCount,
 						"stack", string(buf[:n]))
 
-					if panicCount >= 5 {
+					if panicCount >= 3 {
 						slog.Error("hub: too many panics in 60s, stopping")
 						return
 					}
@@ -172,7 +183,7 @@ func (h *Hub) Run() {
 		}()
 
 		// If we reach here without a panic recovery continuing, stop.
-		if panicCount >= 5 {
+		if panicCount >= 3 {
 			return
 		}
 		// If stop was signaled, exit.
@@ -278,13 +289,25 @@ func (h *Hub) Unregister(c *Client) {
 
 // BroadcastToChannel enqueues msg for delivery to all clients subscribed to
 // channelID. When channelID is 0 the message is sent to every connected client.
+// Non-blocking: if the broadcast channel is full the message is dropped with a warning.
 func (h *Hub) BroadcastToChannel(channelID int64, msg []byte) {
-	h.broadcast <- broadcastMsg{channelID: channelID, msg: msg}
+	select {
+	case h.broadcast <- broadcastMsg{channelID: channelID, msg: msg}:
+	default:
+		slog.Warn("hub: broadcast channel full, dropping message",
+			"channel_id", channelID, "msg_len", len(msg))
+	}
 }
 
 // BroadcastToAll enqueues msg for delivery to every connected client.
+// Non-blocking: if the broadcast channel is full the message is dropped with a warning.
 func (h *Hub) BroadcastToAll(msg []byte) {
-	h.broadcast <- broadcastMsg{channelID: 0, msg: msg}
+	select {
+	case h.broadcast <- broadcastMsg{channelID: 0, msg: msg}:
+	default:
+		slog.Warn("hub: broadcast channel full, dropping global message",
+			"msg_len", len(msg))
+	}
 }
 
 // BroadcastServerRestart sends a server_restart message to all connected clients.

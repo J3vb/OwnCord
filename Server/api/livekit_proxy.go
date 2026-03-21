@@ -19,7 +19,7 @@ import (
 //
 // The client connects to wss://server:8443/livekit/ which is proxied to
 // ws://localhost:7880/ on the LiveKit server.
-func NewLiveKitProxy(livekitURL string) http.Handler {
+func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 	target, err := url.Parse(livekitURL)
 	if err != nil {
 		target, _ = url.Parse("http://localhost:7880")
@@ -54,7 +54,7 @@ func NewLiveKitProxy(livekitURL string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Detect WebSocket upgrade requests.
 		if isWebSocketUpgrade(r) {
-			proxyWebSocket(w, r, &wsTarget)
+			proxyWebSocket(w, r, &wsTarget, allowedOrigins)
 			return
 		}
 		httpProxy.ServeHTTP(w, r)
@@ -72,7 +72,7 @@ func isWebSocketUpgrade(r *http.Request) bool {
 
 // proxyWebSocket opens a backend WS connection and shovels data in both
 // directions until either side closes.
-func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
+func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL, allowedOrigins []string) {
 	// Build backend URL preserving the request path and query.
 	backendURL := *target
 	backendURL.Path = r.URL.Path
@@ -83,7 +83,7 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 		Subprotocols: r.Header.Values("Sec-WebSocket-Protocol"),
 	})
 	if err != nil {
-		slog.Warn("livekit proxy: backend dial failed", "url", backendURL.String(), "err", err)
+		slog.Warn("livekit proxy: backend dial failed", "host", backendURL.Host, "path", backendURL.Path, "err", err)
 		http.Error(w, "backend unavailable", http.StatusBadGateway)
 		return
 	}
@@ -92,7 +92,7 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 	// Accept the frontend WebSocket.
 	frontConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		Subprotocols:   []string{backConn.Subprotocol()},
-		OriginPatterns: []string{"*"},
+		OriginPatterns: allowedOrigins,
 	})
 	if err != nil {
 		slog.Warn("livekit proxy: frontend accept failed", "err", err)
@@ -100,7 +100,11 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 	}
 	defer frontConn.Close(websocket.StatusNormalClosure, "")
 
-	ctx := r.Context()
+	// Use a cancellable context so when one direction finishes, the other
+	// goroutine's copyWS read/write is unblocked and can drain cleanly.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
 	errc := make(chan error, 2)
 
 	// Frontend → Backend
@@ -113,7 +117,9 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 		errc <- copyWS(ctx, frontConn, backConn)
 	}()
 
-	// Wait for either direction to finish.
+	// Wait for either direction to finish, then cancel+drain both.
+	<-errc
+	cancel()
 	<-errc
 }
 

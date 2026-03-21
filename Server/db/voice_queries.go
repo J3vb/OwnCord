@@ -170,6 +170,21 @@ func (d *DB) ClearAllVoiceStates() error {
 	return nil
 }
 
+// CountActiveCameras returns the number of users with camera enabled in the
+// given voice channel. Uses the DB as source of truth (race-free via SQLite
+// serialization) rather than querying LiveKit.
+func (d *DB) CountActiveCameras(channelID int64) (int, error) {
+	var count int
+	err := d.sqlDB.QueryRow(
+		`SELECT COUNT(*) FROM voice_states WHERE channel_id = ? AND camera = 1`,
+		channelID,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("CountActiveCameras: %w", err)
+	}
+	return count, nil
+}
+
 // UpdateVoiceCamera sets the camera field for the given user's voice state.
 func (d *DB) UpdateVoiceCamera(userID int64, camera bool) error {
 	_, err := d.sqlDB.Exec(

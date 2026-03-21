@@ -92,6 +92,7 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 				writeCtx, writeCancel := context.WithCancel(ctx)
 				go writePump(writeCtx, conn, c)
 				readPump(ctx, conn, hub, c)
+				c.closeSend()
 				writeCancel()
 				return
 			}
@@ -120,9 +121,12 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 		hub.BroadcastToAll(buildPresenceMsg(user.ID, "online"))
 
 		// writePump runs in background; readPump blocks.
+		// When readPump returns (disconnect), close the send channel first
+		// so writePump drains any remaining messages, then cancel its context.
 		writeCtx, writeCancel := context.WithCancel(ctx)
 		go writePump(writeCtx, conn, c)
 		readPump(ctx, conn, hub, c)
+		c.closeSend()
 		writeCancel()
 	}
 }

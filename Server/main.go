@@ -48,7 +48,10 @@ func main() {
 // run is the real entrypoint — separated for testability.
 func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 	// Clean up old binary from a previous update.
-	if exePath, err := os.Executable(); err == nil {
+	exePath, exeErr := os.Executable()
+	if exeErr != nil {
+		log.Warn("failed to determine executable path", "error", exeErr)
+	} else {
 		oldPath := exePath + ".old"
 		if _, statErr := os.Stat(oldPath); statErr == nil {
 			if rmErr := os.Remove(oldPath); rmErr != nil {
@@ -148,11 +151,23 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 	go func() {
 		ticker := time.NewTicker(15 * time.Minute)
 		defer ticker.Stop()
+		consecutiveFailures := 0
+		const maxConsecutiveFailures = 5
 		for {
 			select {
 			case <-ticker.C:
+				if consecutiveFailures >= maxConsecutiveFailures {
+					log.Error("maintenance loop: circuit breaker open, skipping tick",
+						"consecutive_failures", consecutiveFailures)
+					// Reset after one skip to allow retry next tick.
+					consecutiveFailures = maxConsecutiveFailures - 1
+					continue
+				}
+
+				tickFailed := false
 				if err := database.DeleteExpiredSessions(); err != nil {
 					log.Warn("failed to delete expired sessions", "error", err)
+					tickFailed = true
 				}
 
 				// Clean up orphaned attachments (uploaded but never linked to a message).
@@ -160,6 +175,7 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 				orphanFiles, orphanErr := database.DeleteOrphanedAttachments(cutoff)
 				if orphanErr != nil {
 					log.Warn("failed to delete orphaned attachments", "error", orphanErr)
+					tickFailed = true
 				} else if len(orphanFiles) > 0 {
 					// Best-effort file cleanup.
 					if fileStorage != nil {
@@ -170,6 +186,12 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 						}
 					}
 					log.Info("cleaned up orphaned attachments", "count", len(orphanFiles))
+				}
+
+				if tickFailed {
+					consecutiveFailures++
+				} else {
+					consecutiveFailures = 0
 				}
 			case <-stopMaintenance:
 				return

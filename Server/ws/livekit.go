@@ -19,6 +19,9 @@ import (
 )
 
 // tokenTTL is the validity duration for generated LiveKit access tokens.
+// Kept at 4h to limit exposure if a token is leaked — there is no server-side
+// revocation for LiveKit JWTs. The client can request a refresh via
+// voice_token_refresh before expiry.
 const tokenTTL = 4 * time.Hour
 
 // LiveKitClient provides token generation and room management via
@@ -155,6 +158,20 @@ func (c *LiveKitClient) CountVideoTracks(channelID int64) (int, error) {
 		}
 	}
 	return count, nil
+}
+
+// HealthCheck verifies connectivity to the LiveKit server by listing rooms.
+// Returns true if the server responds successfully.
+func (c *LiveKitClient) HealthCheck() (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	_, err := c.roomSvc.ListRooms(ctx, &livekit.ListRoomsRequest{})
+	if err != nil {
+		return false, fmt.Errorf("livekit health check failed: %w", err)
+	}
+
+	return true, nil
 }
 
 // wsToHTTP converts a WebSocket URL to an HTTP URL.
