@@ -243,10 +243,40 @@
   flex: 1; overflow-y: auto; padding: 16px 0;
   overscroll-behavior: contain;
   contain: strict;
+  position: relative;
 }
 /* Scroll anchoring: only the bottom anchor element pins, everything else opts out */
 .messages-container > * { overflow-anchor: none; }
 .scroll-anchor { overflow-anchor: auto; height: 1px; }
+/* ── Scroll-to-bottom floating button ── */
+.scroll-to-bottom-btn {
+  position: absolute;
+  bottom: 8px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--bg-tertiary);
+  border: none;
+  color: var(--text-secondary);
+  font-size: 18px;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+  z-index: 5;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.scroll-to-bottom-btn.visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.scroll-to-bottom-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
 /* ── Channel welcome (empty state) ── */
 .channel-welcome {
   display: flex; flex-direction: column; align-items: flex-start;

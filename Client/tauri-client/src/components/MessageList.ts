@@ -149,6 +149,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   let topSpacer: HTMLDivElement | null = null;
   let bottomSpacer: HTMLDivElement | null = null;
   let contentContainer: HTMLDivElement | null = null;
+  let scrollToBottomBtn: HTMLButtonElement | null = null;
   let renderedStart = 0;
   let renderedEnd = 0;
 
@@ -212,6 +213,15 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function scrollToBottom(): void {
     if (root === null) return;
     root.scrollTop = root.scrollHeight;
+  }
+
+  function updateScrollToBottomBtn(): void {
+    if (scrollToBottomBtn === null) return;
+    if (isNearBottom()) {
+      scrollToBottomBtn.classList.remove("visible");
+    } else {
+      scrollToBottomBtn.classList.add("visible");
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -411,6 +421,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // Correct scroll position with actual DOM measurements
       if (wasAtBottom) {
         scrollToBottom();
+        updateScrollToBottomBtn();
       }
       log.debug("renderAll END");
     } finally {
@@ -452,6 +463,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       options.onScrollTop();
     }
 
+    // Update floating scroll-to-bottom button visibility
+    updateScrollToBottomBtn();
+
     // Debounce virtual window updates to animation frames
     if (scrollRafId === 0) {
       scrollRafId = requestAnimationFrame(() => {
@@ -473,10 +487,18 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     bottomSpacer = createElement("div", { class: "virtual-spacer-bottom" });
     const scrollAnchor = createElement("div", { class: "scroll-anchor" });
 
+    scrollToBottomBtn = createElement("button", { class: "scroll-to-bottom-btn" }) as HTMLButtonElement;
+    scrollToBottomBtn.textContent = "↓";
+    scrollToBottomBtn.addEventListener("click", () => {
+      scrollToBottom();
+      updateScrollToBottomBtn();
+    }, { signal: ac.signal });
+
     root.appendChild(topSpacer);
     root.appendChild(contentContainer);
     root.appendChild(bottomSpacer);
     root.appendChild(scrollAnchor);
+    root.appendChild(scrollToBottomBtn);
 
     root.addEventListener("scroll", handleScroll, {
       signal: ac.signal,
@@ -569,6 +591,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     contentContainer = null;
     topSpacer = null;
     bottomSpacer = null;
+    scrollToBottomBtn = null;
   }
 
   function scrollToMessage(messageId: number): boolean {
