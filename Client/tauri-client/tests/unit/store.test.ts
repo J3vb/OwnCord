@@ -239,20 +239,40 @@ describe('subscribeSelector', () => {
     expect(results).toEqual(['count:1', 'name:updated']);
   });
 
-  it('warns about unstable selectors (creates new ref every time)', () => {
+  it('shallow-equal default prevents firing for structurally identical selectors', () => {
     const store = freshStore();
     const listener = vi.fn();
-    // BAD selector: creates new object every time
+    // Selector creates a new object ref each time, but shallowEqual
+    // detects that the content is unchanged and skips the notification.
     store.subscribeSelector(
       (s) => ({ count: s.count }),
       listener,
     );
 
-    // Even changing just name will fire because selector returns new object
+    // Changing just name does NOT fire because { count: 0 } shallow-equals { count: 0 }
     store.setState((prev) => ({ ...prev, name: 'changed' }));
     store.flush();
+    expect(listener).toHaveBeenCalledTimes(0);
 
-    // This DOES fire because { count: 0 } !== { count: 0 } (different refs)
+    // Changing count DOES fire because { count: 1 } !== { count: 0 }
+    store.setState((prev) => ({ ...prev, count: 1 }));
+    store.flush();
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows strict reference equality via custom comparator', () => {
+    const store = freshStore();
+    const listener = vi.fn();
+    // Opt in to strict === comparison to get the old behavior
+    store.subscribeSelector(
+      (s) => ({ count: s.count }),
+      listener,
+      (a, b) => a === b,
+    );
+
+    // New object ref with same content DOES fire with strict ===
+    store.setState((prev) => ({ ...prev, name: 'changed' }));
+    store.flush();
     expect(listener).toHaveBeenCalledTimes(1);
   });
 });

@@ -28,6 +28,7 @@ export interface Message {
   readonly replyTo: number | null;
   readonly attachments: readonly Attachment[];
   readonly reactions: readonly ReactionSummary[];
+  readonly pinned: boolean;
   readonly editedAt: string | null;
   readonly deleted: boolean;
   readonly timestamp: string;
@@ -57,6 +58,7 @@ function chatPayloadToMessage(payload: ChatMessagePayload): Message {
     replyTo: payload.reply_to,
     attachments: payload.attachments,
     reactions: [],
+    pinned: false,
     editedAt: null,
     deleted: false,
     timestamp: payload.timestamp,
@@ -72,11 +74,15 @@ function messageResponseToMessage(response: MessageResponse): Message {
     replyTo: response.reply_to,
     attachments: response.attachments,
     reactions: response.reactions,
+    pinned: response.pinned,
     editedAt: response.edited_at,
     deleted: response.deleted,
     timestamp: response.timestamp,
   };
 }
+
+/** Maximum messages retained per channel. Oldest messages are evicted when exceeded. */
+const MAX_MESSAGES_PER_CHANNEL = 500;
 
 // -----------------------------------------------------------------------------
 // Initial state
@@ -105,9 +111,19 @@ export function addMessage(payload: ChatMessagePayload): void {
   messagesStore.setState((prev) => {
     const channelId = message.channelId;
     const existing = prev.messagesByChannel.get(channelId) ?? [];
+    let updatedMsgs = [...existing, message];
+    // Evict oldest messages if over the cap
+    if (updatedMsgs.length > MAX_MESSAGES_PER_CHANNEL) {
+      updatedMsgs = updatedMsgs.slice(updatedMsgs.length - MAX_MESSAGES_PER_CHANNEL);
+    }
     const updated = new Map(prev.messagesByChannel);
-    updated.set(channelId, [...existing, message]);
-    return { ...prev, messagesByChannel: updated };
+    updated.set(channelId, updatedMsgs);
+    // If we evicted, there are now more messages on the server above
+    const updatedHasMore = new Map(prev.hasMore);
+    if (existing.length + 1 > MAX_MESSAGES_PER_CHANNEL) {
+      updatedHasMore.set(channelId, true);
+    }
+    return { ...prev, messagesByChannel: updated, hasMore: updatedHasMore };
   });
 }
 
@@ -119,15 +135,18 @@ export function setMessages(
   hasMore: boolean,
 ): void {
   const converted = messages.map(messageResponseToMessage).reverse();
+  const trimmed = converted.length > MAX_MESSAGES_PER_CHANNEL
+    ? converted.slice(converted.length - MAX_MESSAGES_PER_CHANNEL)
+    : converted;
   messagesStore.setState((prev) => {
     const updatedMessages = new Map(prev.messagesByChannel);
-    updatedMessages.set(channelId, converted);
+    updatedMessages.set(channelId, trimmed);
 
     const updatedLoaded = new Set(prev.loadedChannels);
     updatedLoaded.add(channelId);
 
     const updatedHasMore = new Map(prev.hasMore);
-    updatedHasMore.set(channelId, hasMore);
+    updatedHasMore.set(channelId, hasMore || converted.length > MAX_MESSAGES_PER_CHANNEL);
 
     return {
       ...prev,
@@ -148,8 +167,13 @@ export function prependMessages(
   const converted = messages.map(messageResponseToMessage).reverse();
   messagesStore.setState((prev) => {
     const existing = prev.messagesByChannel.get(channelId) ?? [];
+    let combined = [...converted, ...existing];
+    // Keep only the newest messages if combined exceeds the cap
+    if (combined.length > MAX_MESSAGES_PER_CHANNEL) {
+      combined = combined.slice(combined.length - MAX_MESSAGES_PER_CHANNEL);
+    }
     const updatedMessages = new Map(prev.messagesByChannel);
-    updatedMessages.set(channelId, [...converted, ...existing]);
+    updatedMessages.set(channelId, combined);
 
     const updatedHasMore = new Map(prev.hasMore);
     updatedHasMore.set(channelId, hasMore);
@@ -192,6 +216,26 @@ export function deleteMessage(payload: ChatDeletedPayload): void {
 
     const updatedMessages = new Map(prev.messagesByChannel);
     updatedMessages.set(payload.channel_id, updatedList);
+    return { ...prev, messagesByChannel: updatedMessages };
+  });
+}
+
+/** Toggle the pinned state of a message (optimistic update after API call). */
+export function setMessagePinned(
+  channelId: number,
+  messageId: number,
+  pinned: boolean,
+): void {
+  messagesStore.setState((prev) => {
+    const channelMessages = prev.messagesByChannel.get(channelId);
+    if (!channelMessages) return prev;
+
+    const updatedList = channelMessages.map((msg) =>
+      msg.id === messageId ? { ...msg, pinned } : msg,
+    );
+
+    const updatedMessages = new Map(prev.messagesByChannel);
+    updatedMessages.set(channelId, updatedList);
     return { ...prev, messagesByChannel: updatedMessages };
   });
 }

@@ -5,15 +5,15 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
+import { Disposable } from "@lib/disposable";
 import { authStore } from "@stores/auth.store";
 import { openSettings } from "@stores/ui.store";
 
 export type UserBarOptions = Record<string, never>;
 
 export function createUserBar(options?: UserBarOptions): MountableComponent {
-  const ac = new AbortController();
+  const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
-  let unsubscribe: (() => void) | null = null;
 
   // Element references for targeted updates
   let avatarEl: HTMLDivElement | null = null;
@@ -66,13 +66,9 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       "\u2699",
     );
 
-    settingsBtn.addEventListener(
-      "click",
-      () => {
-        openSettings();
-      },
-      { signal: ac.signal },
-    );
+    disposable.onEvent(settingsBtn, "click", () => {
+      openSettings();
+    });
 
     buttons.appendChild(settingsBtn);
     appendChildren(root, avatarEl, info, buttons);
@@ -81,7 +77,8 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     updateFromState();
 
     // Subscribe to auth changes
-    unsubscribe = authStore.subscribeSelector(
+    disposable.onStoreChange(
+      authStore,
       (s) => s.user,
       () => updateFromState(),
     );
@@ -90,11 +87,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
   }
 
   function destroy(): void {
-    ac.abort();
-    if (unsubscribe !== null) {
-      unsubscribe();
-      unsubscribe = null;
-    }
+    disposable.destroy();
     if (root !== null) {
       root.remove();
       root = null;

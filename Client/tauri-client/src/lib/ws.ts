@@ -78,6 +78,7 @@ export function createWsClient() {
   let intentionalClose = false;
   let certMismatchBlock = false; // blocks reconnect on TOFU mismatch
   let proxyOpen = false;
+  let lastSeq = 0;
 
   // Tauri event unsubscribe functions
   const eventUnsubs: Array<() => void> = [];
@@ -151,12 +152,18 @@ export function createWsClient() {
       return;
     }
 
-    let parsed: { type?: string; payload?: unknown; id?: string };
+    let parsed: { type?: string; payload?: unknown; id?: string; seq?: number };
     try {
-      parsed = JSON.parse(raw) as { type?: string; payload?: unknown; id?: string };
+      parsed = JSON.parse(raw) as { type?: string; payload?: unknown; id?: string; seq?: number };
     } catch {
       log.warn("Failed to parse WS message", { data: raw });
       return;
+    }
+
+    // Track the highest sequence number for reconnection replay.
+    const seq = typeof parsed.seq === "number" ? parsed.seq : 0;
+    if (seq > lastSeq) {
+      lastSeq = seq;
     }
 
     // Server pong messages have no payload — silently ignore.
@@ -227,7 +234,7 @@ export function createWsClient() {
         proxyOpen = true;
         log.info("WebSocket open, sending auth");
         setState("authenticating");
-        send({ type: "auth", payload: { token: config!.token } });
+        send({ type: "auth", payload: { token: config!.token, last_seq: lastSeq } });
       } else if (rustState === "closed") {
         proxyOpen = false;
         log.info("WebSocket closed (proxy)");
@@ -354,6 +361,7 @@ export function createWsClient() {
   function disconnect(): void {
     intentionalClose = true;
     certMismatchBlock = false;
+    lastSeq = 0;
     cancelReconnect();
     stopHeartbeat();
     cleanupEventListeners();

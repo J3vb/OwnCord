@@ -89,10 +89,10 @@ func (d *DB) EditMessage(id, userID int64, content string) error {
 		return err
 	}
 	if msg == nil {
-		return fmt.Errorf("EditMessage: message %d not found", id)
+		return fmt.Errorf("EditMessage: message %d: %w", id, ErrNotFound)
 	}
 	if msg.UserID != userID {
-		return fmt.Errorf("EditMessage: user %d does not own message %d", userID, id)
+		return fmt.Errorf("EditMessage: user %d does not own message %d: %w", userID, id, ErrForbidden)
 	}
 
 	_, err = d.sqlDB.Exec(
@@ -113,10 +113,10 @@ func (d *DB) DeleteMessage(id, userID int64, ismod bool) error {
 		return err
 	}
 	if msg == nil {
-		return fmt.Errorf("DeleteMessage: message %d not found", id)
+		return fmt.Errorf("DeleteMessage: message %d: %w", id, ErrNotFound)
 	}
 	if !ismod && msg.UserID != userID {
-		return fmt.Errorf("DeleteMessage: user %d does not own message %d", userID, id)
+		return fmt.Errorf("DeleteMessage: user %d does not own message %d: %w", userID, id, ErrForbidden)
 	}
 
 	_, err = d.sqlDB.Exec(`UPDATE messages SET deleted = 1 WHERE id = ?`, id)
@@ -149,7 +149,7 @@ func (d *DB) RemoveReaction(messageID, userID int64, emoji string) error {
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("RemoveReaction: reaction not found")
+		return fmt.Errorf("RemoveReaction: reaction: %w", ErrNotFound)
 	}
 	return nil
 }

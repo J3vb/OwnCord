@@ -309,7 +309,7 @@ func (d *DB) UseInviteAtomic(code string) error {
 		return fmt.Errorf("UseInviteAtomic rows: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("UseInviteAtomic: invite not found, revoked, expired, or exhausted")
+		return fmt.Errorf("UseInviteAtomic: invite not found, revoked, expired, or exhausted: %w", ErrNotFound)
 	}
 	return nil
 }

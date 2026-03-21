@@ -425,12 +425,33 @@ func TestHub_GetClient(t *testing.T) {
 
 // ─── assertion helpers ────────────────────────────────────────────────────────
 
+// assertReceived checks that a message was received and contains the same JSON
+// fields as want (ignoring the "seq" field injected by broadcast delivery).
 func assertReceived(t *testing.T, ch <-chan []byte, want []byte, label string) {
 	t.Helper()
 	select {
 	case got := <-ch:
-		if string(got) != string(want) {
-			t.Errorf("%s: got %q, want %q", label, got, want)
+		var gotMap map[string]json.RawMessage
+		if err := json.Unmarshal(got, &gotMap); err != nil {
+			t.Errorf("%s: unmarshal got: %v", label, err)
+			return
+		}
+		var wantMap map[string]json.RawMessage
+		if err := json.Unmarshal(want, &wantMap); err != nil {
+			t.Errorf("%s: unmarshal want: %v", label, err)
+			return
+		}
+		// Strip seq before comparing — broadcasts have it, direct sends don't.
+		delete(gotMap, "seq")
+		for k, wv := range wantMap {
+			gv, ok := gotMap[k]
+			if !ok {
+				t.Errorf("%s: missing key %q in received message", label, k)
+				continue
+			}
+			if string(gv) != string(wv) {
+				t.Errorf("%s: key %q: got %s, want %s", label, k, gv, wv)
+			}
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Errorf("%s: did not receive expected message within timeout", label)

@@ -534,12 +534,25 @@ export async function handleVoiceToken(
 
     // Enable microphone: use RNNoise if Enhanced Noise Suppression is on
     const enhancedNS = loadPref<boolean>("enhancedNoiseSuppression", false);
-    if (enhancedNS) {
-      await publishWithNoiseSuppression();
-      log.info("Published mic with RNNoise noise suppression");
-    } else {
-      await room.localParticipant.setMicrophoneEnabled(true);
-      log.info("Published mic via LiveKit native capture");
+    try {
+      if (enhancedNS) {
+        await publishWithNoiseSuppression();
+        log.info("Published mic with RNNoise noise suppression");
+      } else {
+        await room.localParticipant.setMicrophoneEnabled(true);
+        log.info("Published mic via LiveKit native capture");
+      }
+    } catch (micErr) {
+      if (micErr instanceof DOMException && micErr.name === "NotAllowedError") {
+        log.warn("Microphone permission denied — joined in listen-only mode");
+        onErrorCallback?.("Microphone permission denied — joined in listen-only mode");
+      } else if (micErr instanceof DOMException && micErr.name === "NotFoundError") {
+        log.warn("No microphone found — joined in listen-only mode");
+        onErrorCallback?.("No microphone found — joined in listen-only mode");
+      } else {
+        log.warn("Microphone unavailable — joined in listen-only mode", micErr);
+        onErrorCallback?.("Microphone unavailable — joined in listen-only mode");
+      }
     }
 
     // Apply saved input device

@@ -1,12 +1,24 @@
 /**
  * MemberList component — shows server members grouped by role with online status.
  * Subscribes to membersStore for reactive updates.
+ * Right-click context menu for admin actions (kick, ban, role change).
  */
 
 import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
+import { Disposable } from "@lib/disposable";
 import { membersStore, type Member } from "@stores/members.store";
+import { authStore } from "@stores/auth.store";
+import { createMemberContextMenu } from "@components/AdminActions";
 import type { UserStatus } from "@lib/types";
+
+/** Options for configuring admin action callbacks on the member list. */
+export interface MemberListOptions {
+  readonly currentUserRole: string;
+  readonly onKick: (userId: number, username: string) => Promise<void>;
+  readonly onBan: (userId: number, username: string) => Promise<void>;
+  readonly onChangeRole: (userId: number, username: string, newRole: string) => Promise<void>;
+}
 
 /** Ordered role groups with display names and CSS color variables. */
 const ROLE_GROUPS: readonly {
@@ -39,7 +51,28 @@ function statusColor(status: UserStatus): string {
   }
 }
 
-function createMemberItem(member: Member, colorVar: string): HTMLDivElement {
+let activeMenu: { element: HTMLDivElement; destroy(): void } | null = null;
+
+function closeActiveMenu(): void {
+  if (activeMenu !== null) {
+    activeMenu.destroy();
+    activeMenu = null;
+  }
+}
+
+function handleOutsideClick(e: MouseEvent): void {
+  if (activeMenu !== null && !activeMenu.element.contains(e.target as Node)) {
+    closeActiveMenu();
+    document.removeEventListener("mousedown", handleOutsideClick);
+  }
+}
+
+function createMemberItem(
+  member: Member,
+  colorVar: string,
+  opts: MemberListOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
   const item = createElement("div", {
     class: member.status === "offline" ? "member-item offline" : "member-item",
     "data-testid": `member-${member.id}`,
@@ -65,10 +98,51 @@ function createMemberItem(member: Member, colorVar: string): HTMLDivElement {
   setText(name, member.username);
 
   appendChildren(item, avatar, name);
+
+  // Context menu for admin actions
+  item.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+
+    // Don't show context menu for yourself
+    const currentUserId = authStore.getState().user?.id ?? 0;
+    if (member.id === currentUserId) return;
+
+    // Only admins and owners can use admin actions
+    const role = opts.currentUserRole.toLowerCase();
+    if (role !== "owner" && role !== "admin") return;
+
+    closeActiveMenu();
+    document.removeEventListener("mousedown", handleOutsideClick);
+
+    const availableRoles = ["admin", "moderator", "member"];
+
+    activeMenu = createMemberContextMenu({
+      userId: member.id,
+      username: member.username,
+      currentRole: member.role.toLowerCase(),
+      availableRoles,
+      onKick: () => opts.onKick(member.id, member.username),
+      onBan: () => opts.onBan(member.id, member.username),
+      onChangeRole: (newRole: string) => opts.onChangeRole(member.id, member.username, newRole),
+    });
+
+    // Position at mouse
+    activeMenu.element.style.position = "fixed";
+    activeMenu.element.style.left = `${e.clientX}px`;
+    activeMenu.element.style.top = `${e.clientY}px`;
+    activeMenu.element.style.zIndex = "1000";
+    document.body.appendChild(activeMenu.element);
+
+    // Close on outside click (deferred so this click doesn't close it)
+    setTimeout(() => {
+      document.addEventListener("mousedown", handleOutsideClick);
+    }, 0);
+  }, { signal });
+
   return item;
 }
 
-function renderList(root: HTMLDivElement): void {
+function renderList(root: HTMLDivElement, opts: MemberListOptions, signal: AbortSignal): void {
   clearChildren(root);
 
   const state = membersStore.getState();
@@ -89,25 +163,25 @@ function renderList(root: HTMLDivElement): void {
     root.appendChild(header);
 
     for (const member of groupMembers) {
-      root.appendChild(createMemberItem(member, group.colorVar));
+      root.appendChild(createMemberItem(member, group.colorVar, opts, signal));
     }
   }
 }
 
-export function createMemberList(): MountableComponent {
-  const ac = new AbortController();
+export function createMemberList(opts: MemberListOptions): MountableComponent {
+  const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
-  let unsubscribe: (() => void) | null = null;
 
   function mount(container: Element): void {
     root = createElement("div", { class: "member-list", "data-testid": "member-list" });
-    renderList(root);
+    renderList(root, opts, disposable.signal);
 
-    unsubscribe = membersStore.subscribeSelector(
+    disposable.onStoreChange(
+      membersStore,
       (s) => s.members,
       () => {
         if (root !== null) {
-          renderList(root);
+          renderList(root, opts, disposable.signal);
         }
       },
     );
@@ -116,11 +190,9 @@ export function createMemberList(): MountableComponent {
   }
 
   function destroy(): void {
-    ac.abort();
-    if (unsubscribe !== null) {
-      unsubscribe();
-      unsubscribe = null;
-    }
+    closeActiveMenu();
+    document.removeEventListener("mousedown", handleOutsideClick);
+    disposable.destroy();
     if (root !== null) {
       root.remove();
       root = null;

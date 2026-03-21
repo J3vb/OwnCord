@@ -14,6 +14,143 @@ type envelope struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
+// wsMsg is the generic envelope for outbound WebSocket messages.
+type wsMsg struct {
+	Type    string `json:"type"`
+	ID      string `json:"id,omitempty"`
+	Payload any    `json:"payload,omitempty"`
+}
+
+// ---------------------------------------------------------------------------
+// Payload structs — one per outbound message type.
+// ---------------------------------------------------------------------------
+
+type presencePayload struct {
+	UserID int64  `json:"user_id"`
+	Status string `json:"status"`
+}
+
+type memberUserPayload struct {
+	ID       int64   `json:"id"`
+	Username string  `json:"username"`
+	Avatar   *string `json:"avatar"`
+	Role     string  `json:"role"`
+}
+
+type memberJoinPayload struct {
+	User memberUserPayload `json:"user"`
+}
+
+type chatMessagePayload struct {
+	ID          int64              `json:"id"`
+	ChannelID   int64              `json:"channel_id"`
+	User        memberUserPayload  `json:"user"`
+	Content     string             `json:"content"`
+	ReplyTo     *int64             `json:"reply_to"`
+	Timestamp   string             `json:"timestamp"`
+	Attachments []map[string]any   `json:"attachments"`
+	Reactions   []any              `json:"reactions"`
+	Pinned      bool               `json:"pinned"`
+}
+
+type memberUpdatePayload struct {
+	UserID int64  `json:"user_id"`
+	Role   string `json:"role"`
+}
+
+type memberBanPayload struct {
+	UserID int64 `json:"user_id"`
+}
+
+type chatSendOKPayload struct {
+	MessageID int64  `json:"message_id"`
+	Timestamp string `json:"timestamp"`
+}
+
+type chatEditedPayload struct {
+	MessageID int64  `json:"message_id"`
+	ChannelID int64  `json:"channel_id"`
+	Content   string `json:"content"`
+	EditedAt  string `json:"edited_at"`
+}
+
+type chatDeletedPayload struct {
+	MessageID int64 `json:"message_id"`
+	ChannelID int64 `json:"channel_id"`
+}
+
+type reactionUpdatePayload struct {
+	MessageID int64  `json:"message_id"`
+	ChannelID int64  `json:"channel_id"`
+	Emoji     string `json:"emoji"`
+	UserID    int64  `json:"user_id"`
+	Action    string `json:"action"`
+}
+
+type typingPayload struct {
+	ChannelID int64  `json:"channel_id"`
+	UserID    int64  `json:"user_id"`
+	Username  string `json:"username"`
+}
+
+type voiceStatePayload struct {
+	ChannelID   int64  `json:"channel_id"`
+	UserID      int64  `json:"user_id"`
+	Username    string `json:"username"`
+	Muted       bool   `json:"muted"`
+	Deafened    bool   `json:"deafened"`
+	Speaking    bool   `json:"speaking"`
+	Camera      bool   `json:"camera"`
+	Screenshare bool   `json:"screenshare"`
+}
+
+type voiceConfigPayload struct {
+	ChannelID int64  `json:"channel_id"`
+	Quality   string `json:"quality"`
+	Bitrate   int    `json:"bitrate"`
+	MaxUsers  int    `json:"max_users"`
+}
+
+type voiceTokenPayload struct {
+	ChannelID int64  `json:"channel_id"`
+	Token     string `json:"token"`
+	URL       string `json:"url"`
+	DirectURL string `json:"direct_url"`
+}
+
+type voiceSpeakersPayload struct {
+	ChannelID     int64   `json:"channel_id"`
+	Speakers      []int64 `json:"speakers"`
+	ThresholdMode string  `json:"threshold_mode"`
+}
+
+type voiceLeavePayload struct {
+	ChannelID int64 `json:"channel_id"`
+	UserID    int64 `json:"user_id"`
+}
+
+type channelPayload struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Category string `json:"category"`
+	Topic    string `json:"topic"`
+	Position int    `json:"position"`
+}
+
+type channelDeletePayload struct {
+	ID int64 `json:"id"`
+}
+
+type serverRestartPayload struct {
+	Reason       string `json:"reason"`
+	DelaySeconds int    `json:"delay_seconds"`
+}
+
+// ---------------------------------------------------------------------------
+// Builder helpers (kept as maps per task spec).
+// ---------------------------------------------------------------------------
+
 // buildJSON marshals v into a JSON byte slice, logging on failure.
 func buildJSON(v any) []byte {
 	b, err := json.Marshal(v)
@@ -58,31 +195,28 @@ func buildAuthError(message string) []byte {
 	})
 }
 
+// ---------------------------------------------------------------------------
+// Typed message builders.
+// ---------------------------------------------------------------------------
+
 // buildPresenceMsg constructs a presence broadcast payload.
 func buildPresenceMsg(userID int64, status string) []byte {
-	return buildJSON(map[string]any{
-		"type": "presence",
-		"payload": map[string]any{
-			"user_id": userID,
-			"status":  status,
-		},
+	return buildJSON(wsMsg{
+		Type:    "presence",
+		Payload: presencePayload{UserID: userID, Status: status},
 	})
 }
 
 // buildMemberJoin constructs a member_join broadcast for when a user comes online.
 func buildMemberJoin(user *db.User, roleName string) []byte {
-	var avatarVal any
-	if user.Avatar != nil {
-		avatarVal = *user.Avatar
-	}
-	return buildJSON(map[string]any{
-		"type": "member_join",
-		"payload": map[string]any{
-			"user": map[string]any{
-				"id":       user.ID,
-				"username": user.Username,
-				"avatar":   avatarVal,
-				"role":     roleName,
+	return buildJSON(wsMsg{
+		Type: "member_join",
+		Payload: memberJoinPayload{
+			User: memberUserPayload{
+				ID:       user.ID,
+				Username: user.Username,
+				Avatar:   user.Avatar,
+				Role:     roleName,
 			},
 		},
 	})
@@ -91,142 +225,128 @@ func buildMemberJoin(user *db.User, roleName string) []byte {
 // buildChatMessage constructs a chat_message broadcast envelope.
 // Includes role in user object and empty reactions array for consistency with REST API.
 func buildChatMessage(msgID, channelID, userID int64, username string, avatar *string, roleName string, content string, timestamp string, replyTo *int64, attachments []map[string]any) []byte {
-	var avatarVal any
-	if avatar != nil {
-		avatarVal = *avatar
-	}
 	if attachments == nil {
 		attachments = []map[string]any{}
 	}
-	return buildJSON(map[string]any{
-		"type": "chat_message",
-		"payload": map[string]any{
-			"id":         msgID,
-			"channel_id": channelID,
-			"user": map[string]any{
-				"id":       userID,
-				"username": username,
-				"avatar":   avatarVal,
-				"role":     roleName,
+	return buildJSON(wsMsg{
+		Type: "chat_message",
+		Payload: chatMessagePayload{
+			ID:        msgID,
+			ChannelID: channelID,
+			User: memberUserPayload{
+				ID:       userID,
+				Username: username,
+				Avatar:   avatar,
+				Role:     roleName,
 			},
-			"content":     content,
-			"reply_to":    replyTo,
-			"timestamp":   timestamp,
-			"attachments": attachments,
-			"reactions":   []any{},
+			Content:     content,
+			ReplyTo:     replyTo,
+			Timestamp:   timestamp,
+			Attachments: attachments,
+			Reactions:   []any{},
+			Pinned:      false,
 		},
 	})
 }
 
 // buildMemberUpdate constructs a member_update broadcast per PROTOCOL.md.
 func buildMemberUpdate(userID int64, roleName string) []byte {
-	return buildJSON(map[string]any{
-		"type": "member_update",
-		"payload": map[string]any{
-			"user_id": userID,
-			"role":    roleName,
-		},
+	return buildJSON(wsMsg{
+		Type:    "member_update",
+		Payload: memberUpdatePayload{UserID: userID, Role: roleName},
 	})
 }
 
 // buildMemberBan constructs a member_ban broadcast per PROTOCOL.md.
 func buildMemberBan(userID int64) []byte {
-	return buildJSON(map[string]any{
-		"type": "member_ban",
-		"payload": map[string]any{
-			"user_id": userID,
-		},
+	return buildJSON(wsMsg{
+		Type:    "member_ban",
+		Payload: memberBanPayload{UserID: userID},
 	})
 }
 
 // buildChatSendOK constructs a chat_send_ok ack.
 func buildChatSendOK(requestID string, msgID int64, timestamp string) []byte {
-	return buildJSON(map[string]any{
-		"type": "chat_send_ok",
-		"id":   requestID,
-		"payload": map[string]any{
-			"message_id": msgID,
-			"timestamp":  timestamp,
-		},
+	return buildJSON(wsMsg{
+		Type:    "chat_send_ok",
+		ID:      requestID,
+		Payload: chatSendOKPayload{MessageID: msgID, Timestamp: timestamp},
 	})
 }
 
 // buildChatEdited constructs a chat_edited broadcast.
 func buildChatEdited(msgID, channelID int64, content, editedAt string) []byte {
-	return buildJSON(map[string]any{
-		"type": "chat_edited",
-		"payload": map[string]any{
-			"message_id": msgID,
-			"channel_id": channelID,
-			"content":    content,
-			"edited_at":  editedAt,
+	return buildJSON(wsMsg{
+		Type: "chat_edited",
+		Payload: chatEditedPayload{
+			MessageID: msgID,
+			ChannelID: channelID,
+			Content:   content,
+			EditedAt:  editedAt,
 		},
 	})
 }
 
 // buildChatDeleted constructs a chat_deleted broadcast.
 func buildChatDeleted(msgID, channelID int64) []byte {
-	return buildJSON(map[string]any{
-		"type": "chat_deleted",
-		"payload": map[string]any{
-			"message_id": msgID,
-			"channel_id": channelID,
-		},
+	return buildJSON(wsMsg{
+		Type:    "chat_deleted",
+		Payload: chatDeletedPayload{MessageID: msgID, ChannelID: channelID},
 	})
 }
 
 // buildReactionUpdate constructs a reaction_update broadcast.
 func buildReactionUpdate(msgID, channelID, userID int64, emoji, action string) []byte {
-	return buildJSON(map[string]any{
-		"type": "reaction_update",
-		"payload": map[string]any{
-			"message_id": msgID,
-			"channel_id": channelID,
-			"emoji":      emoji,
-			"user_id":    userID,
-			"action":     action,
+	return buildJSON(wsMsg{
+		Type: "reaction_update",
+		Payload: reactionUpdatePayload{
+			MessageID: msgID,
+			ChannelID: channelID,
+			Emoji:     emoji,
+			UserID:    userID,
+			Action:    action,
 		},
 	})
 }
 
 // buildTypingMsg constructs a typing broadcast.
 func buildTypingMsg(channelID, userID int64, username string) []byte {
-	return buildJSON(map[string]any{
-		"type": "typing",
-		"payload": map[string]any{
-			"channel_id": channelID,
-			"user_id":    userID,
-			"username":   username,
+	return buildJSON(wsMsg{
+		Type: "typing",
+		Payload: typingPayload{
+			ChannelID: channelID,
+			UserID:    userID,
+			Username:  username,
 		},
 	})
 }
 
 // buildVoiceState constructs a voice_state server->client broadcast.
 func buildVoiceState(state db.VoiceState) []byte {
-	return buildJSON(map[string]any{
-		"type": "voice_state",
-		"payload": map[string]any{
-			"channel_id":  state.ChannelID,
-			"user_id":     state.UserID,
-			"username":    state.Username,
-			"muted":       state.Muted,
-			"deafened":    state.Deafened,
-			"speaking":    state.Speaking,
-			"camera":      state.Camera,
-			"screenshare": state.Screenshare,
+	return buildJSON(wsMsg{
+		Type: "voice_state",
+		Payload: voiceStatePayload{
+			ChannelID:   state.ChannelID,
+			UserID:      state.UserID,
+			Username:    state.Username,
+			Muted:       state.Muted,
+			Deafened:    state.Deafened,
+			Speaking:    state.Speaking,
+			Camera:      state.Camera,
+			Screenshare: state.Screenshare,
 		},
 	})
 }
 
 // buildVoiceConfig constructs a voice_config message sent after voice_join acceptance.
 func buildVoiceConfig(channelID int64, quality string, bitrate int, maxUsers int) []byte {
-	return buildJSON(map[string]any{
-		"type": "voice_config",
-		"payload": map[string]any{
-			"channel_id": channelID,
-			"quality":    quality,
-			"bitrate":    bitrate,
-			"max_users":  maxUsers,
+	return buildJSON(wsMsg{
+		Type: "voice_config",
+		Payload: voiceConfigPayload{
+			ChannelID: channelID,
+			Quality:   quality,
+			Bitrate:   bitrate,
+			MaxUsers:  maxUsers,
 		},
 	})
 }
@@ -235,88 +355,82 @@ func buildVoiceConfig(channelID int64, quality string, bitrate int, maxUsers int
 // url is the proxy path ("/livekit") for remote clients; direct_url is the raw
 // LiveKit URL (e.g. "ws://localhost:7880") for localhost clients.
 func buildVoiceToken(channelID int64, token string, proxyPath string, directURL string) []byte {
-	return buildJSON(map[string]any{
-		"type": "voice_token",
-		"payload": map[string]any{
-			"channel_id": channelID,
-			"token":      token,
-			"url":        proxyPath,
-			"direct_url": directURL,
+	return buildJSON(wsMsg{
+		Type: "voice_token",
+		Payload: voiceTokenPayload{
+			ChannelID: channelID,
+			Token:     token,
+			URL:       proxyPath,
+			DirectURL: directURL,
 		},
 	})
 }
 
 // buildVoiceSpeakers constructs a voice_speakers broadcast.
 func buildVoiceSpeakers(channelID int64, speakers []int64, mode string) []byte {
-	return buildJSON(map[string]any{
-		"type": "voice_speakers",
-		"payload": map[string]any{
-			"channel_id":     channelID,
-			"speakers":       speakers,
-			"threshold_mode": mode,
+	return buildJSON(wsMsg{
+		Type: "voice_speakers",
+		Payload: voiceSpeakersPayload{
+			ChannelID:     channelID,
+			Speakers:      speakers,
+			ThresholdMode: mode,
 		},
 	})
 }
 
 // buildVoiceLeave constructs a voice_leave server->client broadcast.
 func buildVoiceLeave(channelID, userID int64) []byte {
-	return buildJSON(map[string]any{
-		"type": "voice_leave",
-		"payload": map[string]any{
-			"channel_id": channelID,
-			"user_id":    userID,
-		},
+	return buildJSON(wsMsg{
+		Type:    "voice_leave",
+		Payload: voiceLeavePayload{ChannelID: channelID, UserID: userID},
 	})
 }
 
-
 // buildChannelCreate constructs a channel_create broadcast.
 func buildChannelCreate(ch *db.Channel) []byte {
-	return buildJSON(map[string]any{
-		"type": "channel_create",
-		"payload": map[string]any{
-			"id":       ch.ID,
-			"name":     ch.Name,
-			"type":     ch.Type,
-			"category": ch.Category,
-			"topic":    ch.Topic,
-			"position": ch.Position,
+	return buildJSON(wsMsg{
+		Type: "channel_create",
+		Payload: channelPayload{
+			ID:       ch.ID,
+			Name:     ch.Name,
+			Type:     ch.Type,
+			Category: ch.Category,
+			Topic:    ch.Topic,
+			Position: ch.Position,
 		},
 	})
 }
 
 // buildChannelUpdate constructs a channel_update broadcast.
 func buildChannelUpdate(ch *db.Channel) []byte {
-	return buildJSON(map[string]any{
-		"type": "channel_update",
-		"payload": map[string]any{
-			"id":       ch.ID,
-			"name":     ch.Name,
-			"type":     ch.Type,
-			"category": ch.Category,
-			"topic":    ch.Topic,
-			"position": ch.Position,
+	return buildJSON(wsMsg{
+		Type: "channel_update",
+		Payload: channelPayload{
+			ID:       ch.ID,
+			Name:     ch.Name,
+			Type:     ch.Type,
+			Category: ch.Category,
+			Topic:    ch.Topic,
+			Position: ch.Position,
 		},
 	})
 }
 
 // buildChannelDelete constructs a channel_delete broadcast.
 func buildChannelDelete(channelID int64) []byte {
-	return buildJSON(map[string]any{
-		"type": "channel_delete",
-		"payload": map[string]any{
-			"id": channelID,
-		},
+	return buildJSON(wsMsg{
+		Type:    "channel_delete",
+		Payload: channelDeletePayload{ID: channelID},
 	})
 }
 
 // buildServerRestartMsg constructs a server_restart broadcast.
 func buildServerRestartMsg(reason string, delaySeconds int) []byte {
-	return buildJSON(map[string]any{
-		"type": "server_restart",
-		"payload": map[string]any{
-			"reason":        reason,
-			"delay_seconds": delaySeconds,
+	return buildJSON(wsMsg{
+		Type: "server_restart",
+		Payload: serverRestartPayload{
+			Reason:       reason,
+			DelaySeconds: delaySeconds,
 		},
 	})
 }

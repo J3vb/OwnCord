@@ -6,6 +6,7 @@
 
 import { createElement, appendChildren, setText, clearChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
+import { Disposable } from "@lib/disposable";
 import { membersStore, getTypingUsers } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
 
@@ -27,8 +28,8 @@ function formatTypingText(users: readonly Member[]): string {
 export function createTypingIndicator(
   options: TypingIndicatorOptions,
 ): MountableComponent {
+  const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
-  let unsubscribe: (() => void) | null = null;
 
   function updateFromState(): void {
     if (root === null) return;
@@ -61,7 +62,8 @@ export function createTypingIndicator(
 
     updateFromState();
 
-    unsubscribe = membersStore.subscribeSelector(
+    disposable.onStoreChange(
+      membersStore,
       (s) => s.typingUsers,
       () => { updateFromState(); },
     );
@@ -70,10 +72,7 @@ export function createTypingIndicator(
   }
 
   function destroy(): void {
-    if (unsubscribe !== null) {
-      unsubscribe();
-      unsubscribe = null;
-    }
+    disposable.destroy();
     if (root !== null) {
       root.remove();
       root = null;

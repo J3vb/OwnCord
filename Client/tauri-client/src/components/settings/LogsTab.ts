@@ -61,7 +61,7 @@ export function createLogsTab(
   signal: AbortSignal,
 ): LogsTabHandle {
   let logListEl: HTMLDivElement | null = null;
-  let logFilterLevel: LogLevel | "all" = "all";
+  let logFilterLevel: LogLevel | "all" = (localStorage.getItem("logs_filter_level") as LogLevel | "all") ?? "all";
   let unsubLogListener: (() => void) | null = null;
 
   function renderLogEntries(): void {
@@ -108,8 +108,10 @@ export function createLogsTab(
       if (lvl === logFilterLevel) opt.setAttribute("selected", "");
       filterSelect.appendChild(opt);
     }
+    filterSelect.value = logFilterLevel;
     filterSelect.addEventListener("change", () => {
       logFilterLevel = filterSelect.value as LogLevel | "all";
+      localStorage.setItem("logs_filter_level", logFilterLevel);
       renderLogEntries();
     }, { signal });
 
@@ -123,8 +125,15 @@ export function createLogsTab(
       const opt = createElement("option", { value: lvl }, lvl.toUpperCase());
       levelSelect.appendChild(opt);
     }
+    const savedMinLevel = localStorage.getItem("logs_min_level") as LogLevel | null;
+    if (savedMinLevel !== null) {
+      levelSelect.value = savedMinLevel;
+      setLogLevel(savedMinLevel);
+    }
     levelSelect.addEventListener("change", () => {
-      setLogLevel(levelSelect.value as LogLevel);
+      const level = levelSelect.value as LogLevel;
+      setLogLevel(level);
+      localStorage.setItem("logs_min_level", level);
     }, { signal });
 
     // Copy All button

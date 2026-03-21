@@ -312,6 +312,7 @@ export interface ErrorPayload {
 
 export interface AuthPayload {
   readonly token: string;
+  readonly last_seq?: number;
 }
 
 export interface ChatSendPayload {

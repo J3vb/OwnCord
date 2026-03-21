@@ -32,16 +32,6 @@ func TestBuildServerRestartMsg(t *testing.T) {
 
 // ─── channel CRUD message builders ───────────────────────────────────────────
 
-// channelPayload is the common shape expected in channel_create/update payloads.
-type channelPayload struct {
-	ID       int64  `json:"id"`
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	Category string `json:"category"`
-	Topic    string `json:"topic"`
-	Position int    `json:"position"`
-}
-
 func sampleChannel() *db.Channel {
 	return &db.Channel{
 		ID:       42,

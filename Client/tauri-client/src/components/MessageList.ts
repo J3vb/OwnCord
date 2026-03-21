@@ -25,6 +25,7 @@ export interface MessageListOptions {
   readonly onEditClick: (messageId: number) => void;
   readonly onDeleteClick: (messageId: number) => void;
   readonly onReactionClick: (messageId: number, emoji: string) => void;
+  readonly onPinClick: (messageId: number, channelId: number, currentlyPinned: boolean) => void;
 }
 
 // -- Constants ----------------------------------------------------------------

@@ -17,6 +17,9 @@ Messages are JSON with a `type` and `payload`.
 - `type` — string, required. Determines how payload is interpreted.
 - `id` — string, optional. Client-generated UUID for request/response correlation.
 - `payload` — object, required. Contents vary by type.
+- `seq` — uint64, server→client broadcast messages only. Monotonically
+  increasing sequence number. Direct responses to a specific client
+  (e.g. `error`, `chat_send_ok`, `auth_ok`) do NOT include `seq`.
 
 Server responses to client requests include the same `id` for correlation.
 
@@ -27,8 +30,15 @@ Server responses to client requests include the same `id` for correlation.
 ### Client → Server
 
 ```json
-{ "type": "auth", "payload": { "token": "session-token-here" } }
+{ "type": "auth", "payload": { "token": "session-token-here", "last_seq": 0 } }
 ```
+
+- `token` (string, required) — session token from login.
+- `last_seq` (uint64, optional) — last `seq` received by the client.
+  If present and > 0, the server replays missed broadcast events from
+  a 1000-event ring buffer. If the requested seq is too old (no longer
+  in the buffer), the server falls back to the normal `auth_ok` + `ready`
+  flow as if `last_seq` were absent.
 
 ### Server → Client (success)
 
@@ -53,6 +63,15 @@ Server responses to client requests include the same `id` for correlation.
 ```
 
 Connection is closed by server after auth_error.
+
+### Heartbeat Monitoring
+
+The server tracks `lastActivity` per client connection. Any
+incoming WebSocket message (including pings) resets the timer.
+Clients inactive for >90 seconds are disconnected by the server.
+
+The client sends a WebSocket ping every 30 seconds, which is
+sufficient to keep the connection alive under normal conditions.
 
 ---
 

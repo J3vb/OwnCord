@@ -115,3 +115,41 @@ func (d *DB) GetAttachmentsByMessageIDs(msgIDs []int64) (map[int64][]AttachmentI
 	}
 	return result, nil
 }
+
+// DeleteOrphanedAttachments removes attachment records where message_id IS NULL
+// and uploaded_at is older than the given cutoff time string (ISO 8601).
+// Returns the stored_as filenames of deleted records so the caller can remove files.
+func (d *DB) DeleteOrphanedAttachments(cutoff string) ([]string, error) {
+	rows, err := d.sqlDB.Query(
+		`SELECT stored_as FROM attachments WHERE message_id IS NULL AND uploaded_at < ?`,
+		cutoff,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("DeleteOrphanedAttachments query: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var files []string
+	for rows.Next() {
+		var storedAs string
+		if scanErr := rows.Scan(&storedAs); scanErr != nil {
+			return nil, fmt.Errorf("DeleteOrphanedAttachments scan: %w", scanErr)
+		}
+		files = append(files, storedAs)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("DeleteOrphanedAttachments rows: %w", rows.Err())
+	}
+
+	if len(files) > 0 {
+		_, err = d.sqlDB.Exec(
+			`DELETE FROM attachments WHERE message_id IS NULL AND uploaded_at < ?`,
+			cutoff,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("DeleteOrphanedAttachments delete: %w", err)
+		}
+	}
+
+	return files, nil
+}

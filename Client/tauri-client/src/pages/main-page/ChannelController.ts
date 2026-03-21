@@ -14,7 +14,7 @@ import type { MessageListComponent } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
 import type { MessageInputComponent } from "@components/MessageInput";
 import { createTypingIndicator } from "@components/TypingIndicator";
-import { getChannelMessages } from "@stores/messages.store";
+import { getChannelMessages, setMessagePinned } from "@stores/messages.store";
 import type { MessageController } from "./MessageController";
 import type { PendingDeleteManager } from "./MessageController";
 import type { ReactionController } from "./ReactionController";
@@ -161,6 +161,18 @@ export function createChannelController(
       onReactionClick: (msgId: number, emoji: string) => {
         reactionCtrl.handleReaction(msgId, emoji);
       },
+      onPinClick: (msgId: number, chId: number, currentlyPinned: boolean) => {
+        const action = currentlyPinned
+          ? api.unpinMessage(chId, msgId)
+          : api.pinMessage(chId, msgId);
+        action.then(() => {
+          setMessagePinned(chId, msgId, !currentlyPinned);
+          showToast(currentlyPinned ? "Message unpinned" : "Message pinned", "success");
+        }).catch((err) => {
+          log.error("Pin/unpin failed", { error: String(err) });
+          showToast("Failed to pin/unpin message", "error");
+        });
+      },
     });
     messageList.mount(slots.messagesSlot);
 
@@ -228,6 +240,20 @@ export function createChannelController(
       },
     });
     messageInput.mount(slots.inputSlot);
+
+    // Arrow-up edit: listen for edit-last-message bubbling from MessageInput
+    slots.inputSlot.addEventListener("edit-last-message", () => {
+      const msgs = getChannelMessages(channelId);
+      const myId = getCurrentUserId();
+      // Find the last message sent by the current user (array is chronological)
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i]!;
+        if (m.user.id === myId && !m.deleted) {
+          messageInput?.startEdit(m.id, m.content);
+          break;
+        }
+      }
+    }, { signal });
 
     // Update header
     if (chatHeaderName !== null) {

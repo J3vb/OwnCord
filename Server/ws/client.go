@@ -2,6 +2,7 @@ package ws
 
 import (
 	"sync"
+	"time"
 
 	"github.com/owncord/server/db"
 )
@@ -24,11 +25,13 @@ type Client struct {
 	voiceChID  int64  // voice channel the user is in (0 = not in voice); guarded by voiceMu
 	roleName   string // cached role name for chat_message broadcasts
 	tokenHash  string // SHA-256 hex of the session token; used for periodic revalidation
-	msgCount   int    // count of messages processed; resets after session check
-	sendClosed bool   // true after the send channel has been closed
-	send       chan []byte
-	mu         sync.Mutex // guards sendClosed, msgCount, channelID
-	voiceMu    sync.Mutex // guards voiceChID
+	msgCount     int // count of messages processed; resets after session check
+	invalidCount int // consecutive invalid messages; reset on valid parse
+	lastActivity time.Time  // last message received from this client; guarded by mu
+	sendClosed   bool       // true after the send channel has been closed
+	send         chan []byte
+	mu           sync.Mutex // guards sendClosed, msgCount, channelID, lastActivity
+	voiceMu      sync.Mutex // guards voiceChID
 }
 
 // wsConn is the subset of nhooyr.io/websocket.Conn used by writePump/readPump.
@@ -41,12 +44,13 @@ type wsConn interface {
 // newClient creates a real client wrapping a WebSocket connection (set by serve.go).
 func newClient(hub *Hub, conn wsConn, user *db.User, tokenHash string) *Client {
 	return &Client{
-		hub:       hub,
-		conn:      conn,
-		userID:    user.ID,
-		user:      user,
-		tokenHash: tokenHash,
-		send:      make(chan []byte, sendBufSize),
+		hub:          hub,
+		conn:         conn,
+		userID:       user.ID,
+		user:         user,
+		tokenHash:    tokenHash,
+		lastActivity: time.Now(),
+		send:         make(chan []byte, sendBufSize),
 	}
 }
 
@@ -106,6 +110,20 @@ func NewTestClientWithTokenHash(hub *Hub, user *db.User, tokenHash string, chann
 		channelID: channelID,
 		send:      send,
 	}
+}
+
+// touch updates the last activity timestamp to now.
+func (c *Client) touch() {
+	c.mu.Lock()
+	c.lastActivity = time.Now()
+	c.mu.Unlock()
+}
+
+// getLastActivity returns the last activity timestamp under mu.
+func (c *Client) getLastActivity() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastActivity
 }
 
 // getChannelID returns the currently focused channel ID under mu.

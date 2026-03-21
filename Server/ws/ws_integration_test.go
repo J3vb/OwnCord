@@ -433,6 +433,240 @@ func TestServeWS_writePump_MessageDelivered(t *testing.T) {
 	}
 }
 
+// TestIntegration_MessageRoundTrip verifies that two clients can exchange messages
+// through the real WebSocket upgrade path: Client A sends chat_send, Client B
+// receives chat_message via the hub broadcast.
+func TestIntegration_MessageRoundTrip(t *testing.T) {
+	database := openServeTestDB(t)
+	limiter := auth.NewRateLimiter()
+	hub := ws.NewHub(database, limiter)
+	go hub.Run()
+	defer hub.Stop()
+
+	// Seed two users with sessions.
+	userIDA, err := database.CreateUser("roundtrip-a", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser A: %v", err)
+	}
+	tokenA, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken A: %v", err)
+	}
+	if _, err := database.CreateSession(userIDA, auth.HashToken(tokenA), "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession A: %v", err)
+	}
+
+	userIDB, err := database.CreateUser("roundtrip-b", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser B: %v", err)
+	}
+	tokenB, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken B: %v", err)
+	}
+	if _, err := database.CreateSession(userIDB, auth.HashToken(tokenB), "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession B: %v", err)
+	}
+
+	// Create a text channel for the chat.
+	chID, err := database.CreateChannel("integration-chat", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+
+	handler := ws.ServeWS(hub, database, []string{"*"})
+	srv := httptest.NewServer(http.HandlerFunc(handler))
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+
+	// --- Helper: connect and authenticate a WebSocket client ---
+	connectAndAuth := func(label, token string) *websocket.Conn {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		conn, _, dialErr := websocket.Dial(ctx, wsURL, nil)
+		if dialErr != nil {
+			t.Fatalf("%s dial: %v", label, dialErr)
+		}
+		authMsg, _ := json.Marshal(map[string]any{
+			"type":    "auth",
+			"payload": map[string]string{"token": token},
+		})
+		if writeErr := conn.Write(ctx, websocket.MessageText, authMsg); writeErr != nil {
+			t.Fatalf("%s write auth: %v", label, writeErr)
+		}
+		// Drain auth_ok + ready.
+		for i := 0; i < 2; i++ {
+			if _, _, readErr := conn.Read(ctx); readErr != nil {
+				t.Fatalf("%s drain initial msg %d: %v", label, i, readErr)
+			}
+		}
+		return conn
+	}
+
+	connA := connectAndAuth("clientA", tokenA)
+	defer func() { _ = connA.Close(websocket.StatusNormalClosure, "") }()
+
+	connB := connectAndAuth("clientB", tokenB)
+	defer func() { _ = connB.Close(websocket.StatusNormalClosure, "") }()
+
+	// Wait for both clients to be registered in the hub.
+	time.Sleep(50 * time.Millisecond)
+
+	// Client B focuses on the channel so it receives channel-scoped broadcasts.
+	focusMsg, _ := json.Marshal(map[string]any{
+		"type":    "channel_focus",
+		"payload": map[string]any{"channel_id": chID},
+	})
+	ctxB, cancelB := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelB()
+	if err := connB.Write(ctxB, websocket.MessageText, focusMsg); err != nil {
+		t.Fatalf("clientB write channel_focus: %v", err)
+	}
+	time.Sleep(30 * time.Millisecond)
+
+	// Client A sends a chat message.
+	chatSend, _ := json.Marshal(map[string]any{
+		"type": "chat_send",
+		"id":   "req-1",
+		"payload": map[string]any{
+			"channel_id": chID,
+			"content":    "hello from A",
+		},
+	})
+	ctxA, cancelA := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelA()
+	if err := connA.Write(ctxA, websocket.MessageText, chatSend); err != nil {
+		t.Fatalf("clientA write chat_send: %v", err)
+	}
+
+	// Client B should receive a chat_message broadcast.
+	// Drain a few messages (member_join, presence, etc.) until we find chat_message.
+	found := false
+	readCtx, readCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer readCancel()
+	for i := 0; i < 15 && !found; i++ {
+		_, raw, readErr := connB.Read(readCtx)
+		if readErr != nil {
+			t.Fatalf("clientB read: %v", readErr)
+		}
+		var env map[string]any
+		if json.Unmarshal(raw, &env) != nil {
+			continue
+		}
+		if env["type"] == "chat_message" {
+			payload, _ := env["payload"].(map[string]any)
+			if payload == nil {
+				t.Fatal("chat_message has nil payload")
+			}
+			if payload["content"] != "hello from A" {
+				t.Errorf("content = %q, want 'hello from A'", payload["content"])
+			}
+			user, _ := payload["user"].(map[string]any)
+			if user == nil {
+				t.Fatal("chat_message missing user")
+			}
+			if user["username"] != "roundtrip-a" {
+				t.Errorf("username = %q, want 'roundtrip-a'", user["username"])
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Error("clientB never received chat_message from clientA")
+	}
+}
+
+// TestIntegration_SequenceNumbers verifies that broadcast messages delivered via
+// the real WebSocket path carry a monotonically increasing `seq` field.
+func TestIntegration_SequenceNumbers(t *testing.T) {
+	database := openServeTestDB(t)
+	limiter := auth.NewRateLimiter()
+	hub := ws.NewHub(database, limiter)
+	go hub.Run()
+	defer hub.Stop()
+
+	userID, err := database.CreateUser("seq-user", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	if _, err := database.CreateSession(userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	handler := ws.ServeWS(hub, database, []string{"*"})
+	srv := httptest.NewServer(http.HandlerFunc(handler))
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("websocket.Dial: %v", err)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	// Authenticate.
+	authMsg, _ := json.Marshal(map[string]any{
+		"type":    "auth",
+		"payload": map[string]string{"token": token},
+	})
+	if err := conn.Write(ctx, websocket.MessageText, authMsg); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	// Drain auth_ok and ready (these are direct writes, not broadcasts).
+	for i := 0; i < 2; i++ {
+		if _, _, err := conn.Read(ctx); err != nil {
+			t.Fatalf("drain msg %d: %v", i, err)
+		}
+	}
+
+	// Wait for registration.
+	time.Sleep(50 * time.Millisecond)
+
+	// Trigger two broadcasts.
+	hub.BroadcastServerRestart("test-seq-1", 10)
+	hub.BroadcastServerRestart("test-seq-2", 20)
+
+	// Collect broadcast messages — they must carry monotonically increasing seq.
+	var seqs []float64
+	readCtx, readCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer readCancel()
+	for i := 0; i < 10; i++ {
+		_, raw, readErr := conn.Read(readCtx)
+		if readErr != nil {
+			break
+		}
+		var env map[string]any
+		if json.Unmarshal(raw, &env) != nil {
+			continue
+		}
+		// Broadcasts go through deliverBroadcast which stamps seq.
+		if seq, ok := env["seq"].(float64); ok {
+			seqs = append(seqs, seq)
+		}
+		// Stop once we've collected at least 2 seq-bearing messages.
+		if len(seqs) >= 2 {
+			break
+		}
+	}
+
+	if len(seqs) < 2 {
+		t.Fatalf("expected at least 2 messages with seq field, got %d", len(seqs))
+	}
+	for i := 1; i < len(seqs); i++ {
+		if seqs[i] <= seqs[i-1] {
+			t.Errorf("seq not monotonically increasing: seq[%d]=%.0f seq[%d]=%.0f", i-1, seqs[i-1], i, seqs[i])
+		}
+	}
+}
+
 // TestServeWS_BannedUser_ReceivesError verifies that a banned user cannot connect.
 func TestServeWS_BannedUser_ReceivesError(t *testing.T) {
 	database := openServeTestDB(t)

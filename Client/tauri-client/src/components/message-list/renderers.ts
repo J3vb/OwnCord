@@ -202,6 +202,19 @@ export function renderMessage(
     replyBtn.addEventListener("click", () => opts.onReplyClick(msg.id), { signal });
     actionsBar.appendChild(replyBtn);
 
+    const pinBtn = createElement(
+      "button",
+      { "data-testid": `msg-pin-${msg.id}` },
+      msg.pinned ? "\uD83D\uDCCC\u2717" : "\uD83D\uDCCC",
+    );
+    pinBtn.title = msg.pinned ? "Unpin" : "Pin";
+    pinBtn.addEventListener(
+      "click",
+      () => opts.onPinClick(msg.id, msg.channelId, msg.pinned),
+      { signal },
+    );
+    actionsBar.appendChild(pinBtn);
+
     if (msg.user.id === opts.currentUserId) {
       const editBtn = createElement("button", { "data-testid": `msg-edit-${msg.id}` }, "\u270E");
       editBtn.title = "Edit";

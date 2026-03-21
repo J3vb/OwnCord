@@ -159,7 +159,7 @@ export function renderInlineImage(url: string): HTMLDivElement {
   if (isGifUrl(url)) {
     attrs.crossorigin = "anonymous";
   }
-  const img = createElement("img", attrs) as unknown as HTMLImageElement;
+  const img = createElement("img", attrs);
 
   // Observe GIFs for visibility-based freeze/unfreeze + play/pause button
   if (isGifUrl(url)) {
@@ -169,7 +169,7 @@ export function renderInlineImage(url: string): HTMLDivElement {
   img.addEventListener("click", () => {
     const lightbox = createElement("div", { class: "image-lightbox" });
     const lbWrap = createElement("div", { class: "image-lightbox-wrap" });
-    const lbImg = createElement("img", { src: url, alt: "Image" }) as unknown as HTMLImageElement;
+    const lbImg = createElement("img", { src: url, alt: "Image" });
     const closeBtn = createElement("button", { class: "image-lightbox-close" }, "\u00D7");
 
     lbWrap.appendChild(lbImg);

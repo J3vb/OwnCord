@@ -254,7 +254,7 @@ func (d *DB) GetSetting(key string) (string, error) {
 	var value string
 	err := d.sqlDB.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", fmt.Errorf("GetSetting: key %q not found", key)
+		return "", fmt.Errorf("GetSetting: key %q: %w", key, ErrNotFound)
 	}
 	if err != nil {
 		return "", fmt.Errorf("GetSetting: %w", err)

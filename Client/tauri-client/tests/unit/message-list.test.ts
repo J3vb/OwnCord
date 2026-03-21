@@ -36,6 +36,7 @@ function makeMessage(overrides: Partial<Message> & { id: number }): Message {
     replyTo: null,
     attachments: [],
     reactions: [],
+    pinned: false,
     editedAt: null,
     deleted: false,
     timestamp: "2024-01-15T12:00:00Z",
@@ -78,6 +79,7 @@ describe("MessageList", () => {
       onEditClick: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
+      onPinClick: vi.fn(),
     };
     msgList = createMessageList(options);
   });

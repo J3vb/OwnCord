@@ -36,7 +36,7 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 		}
 		conn.SetReadLimit(1 << 20) // 1 MB — match client-side limit
 
-		user, tokenHash, err := authenticateConn(conn, database)
+		user, tokenHash, lastSeq, err := authenticateConn(conn, database)
 		if err != nil {
 			slog.Warn("ws auth failed", "err", err, "remote", r.RemoteAddr)
 			_ = conn.Close(websocket.StatusPolicyViolation, "authentication failed")
@@ -66,12 +66,44 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 		_ = database.LogAudit(user.ID, "ws_connect", "user", user.ID,
 			"WebSocket connected from "+r.RemoteAddr)
 
+		ctx := r.Context()
+
+		// Reconnection with state recovery: if the client sent a last_seq,
+		// try to replay missed events from the ring buffer instead of
+		// sending a full ready payload.
+		if lastSeq > 0 {
+			events := hub.ReplayBuffer().EventsSince(lastSeq)
+			if events != nil {
+				// Replay succeeded — send auth_ok then missed events.
+				slog.Info("ws sending auth_ok (reconnect)", "user_id", user.ID, "username", user.Username, "role", roleName)
+				_ = conn.Write(ctx, websocket.MessageText, hub.buildAuthOK(user, roleName))
+				for _, evt := range events {
+					_ = conn.Write(ctx, websocket.MessageText, evt)
+				}
+				slog.Info("ws replay completed", "user_id", user.ID, "events_replayed", len(events), "from_seq", lastSeq)
+
+				// Update presence but skip member_join — user was already known.
+				if updateErr := database.UpdateUserStatus(user.ID, "online"); updateErr != nil {
+					slog.Warn("ws UpdateUserStatus", "err", updateErr)
+				}
+				hub.BroadcastToAll(buildPresenceMsg(user.ID, "online"))
+
+				// Start pumps.
+				writeCtx, writeCancel := context.WithCancel(ctx)
+				go writePump(writeCtx, conn, c)
+				readPump(ctx, conn, hub, c)
+				writeCancel()
+				return
+			}
+			// Replay failed (seq too old) — fall through to full ready payload.
+			slog.Info("ws replay failed (seq too old), sending full ready", "user_id", user.ID, "last_seq", lastSeq)
+		}
+
+		// Fresh connection or replay fallback: full auth_ok + ready flow.
 		if updateErr := database.UpdateUserStatus(user.ID, "online"); updateErr != nil {
 			slog.Warn("ws UpdateUserStatus", "err", updateErr)
 		}
 
-		// Send auth_ok followed by the ready payload.
-		ctx := r.Context()
 		slog.Info("ws sending auth_ok", "user_id", user.ID, "username", user.Username, "role", roleName)
 		_ = conn.Write(ctx, websocket.MessageText, hub.buildAuthOK(user, roleName))
 		if ready, readyErr := hub.buildReady(database, user.ID); readyErr == nil {
@@ -80,7 +112,7 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 		} else {
 			slog.Error("buildReady failed", "user_id", user.ID, "err", readyErr)
 			_ = conn.Write(ctx, websocket.MessageText,
-				buildErrorMsg("INTERNAL", "failed to build ready payload"))
+				buildErrorMsg(ErrCodeInternal, "failed to build ready payload"))
 		}
 
 		slog.Info("ws broadcasting member_join and presence", "user_id", user.ID, "username", user.Username)
@@ -134,6 +166,7 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 		if err != nil {
 			return
 		}
+		c.touch()
 		hub.handleMessage(c, msg)
 	}
 }
@@ -141,57 +174,58 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 // authenticateConn reads the first WebSocket message and validates the session
 // token. Returns the authenticated user and the token hash (for later
 // periodic session revalidation).
-func authenticateConn(conn *websocket.Conn, database *db.DB) (*db.User, string, error) {
+func authenticateConn(conn *websocket.Conn, database *db.DB) (*db.User, string, uint64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), authDeadline)
 	defer cancel()
 
 	_, raw, err := conn.Read(ctx)
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 
 	var env envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError( "invalid message"))
-		return nil, "", fmt.Errorf("auth: invalid JSON: %w", err)
+		return nil, "", 0, fmt.Errorf("auth: invalid JSON: %w", err)
 	}
 	if env.Type != "auth" {
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError( "first message must be auth"))
-		return nil, "", fmt.Errorf("auth: unexpected type %q", env.Type)
+		return nil, "", 0, fmt.Errorf("auth: unexpected type %q", env.Type)
 	}
 
 	var p struct {
-		Token string `json:"token"`
+		Token   string `json:"token"`
+		LastSeq uint64 `json:"last_seq"`
 	}
 	if err := json.Unmarshal(env.Payload, &p); err != nil || p.Token == "" {
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError( "missing token"))
-		return nil, "", fmt.Errorf("auth: missing token")
+		return nil, "", 0, fmt.Errorf("auth: missing token")
 	}
 
 	hash := auth.HashToken(p.Token)
 	sess, err := database.GetSessionByTokenHash(hash)
 	if err != nil || sess == nil {
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError( "invalid token"))
-		return nil, "", fmt.Errorf("auth: invalid session")
+		return nil, "", 0, fmt.Errorf("auth: invalid session")
 	}
 
 	if auth.IsSessionExpired(sess.ExpiresAt) {
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError( "session expired"))
-		return nil, "", fmt.Errorf("auth: session expired")
+		return nil, "", 0, fmt.Errorf("auth: session expired")
 	}
 
 	user, err := database.GetUserByID(sess.UserID)
 	if err != nil || user == nil {
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError( "user not found"))
-		return nil, "", fmt.Errorf("auth: user not found")
+		return nil, "", 0, fmt.Errorf("auth: user not found")
 	}
 
 	if auth.IsEffectivelyBanned(user) {
-		_ = conn.Write(ctx, websocket.MessageText, buildErrorMsg("BANNED", "you are banned"))
-		return nil, "", fmt.Errorf("auth: banned user %d", user.ID)
+		_ = conn.Write(ctx, websocket.MessageText, buildErrorMsg(ErrCodeBanned, "you are banned"))
+		return nil, "", 0, fmt.Errorf("auth: banned user %d", user.ID)
 	}
 
-	return user, hash, nil
+	return user, hash, p.LastSeq, nil
 }
 
 // buildAuthOK constructs the auth_ok server→client message.

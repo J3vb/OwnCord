@@ -23,6 +23,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/storage"
 )
 
 // version is overridden at build time via -ldflags "-X main.version=1.0.0".
@@ -137,7 +138,12 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 	}
 
 	// ── 7. Background maintenance ────────────────────────────────────────
-	// Periodically purge expired sessions to prevent unbounded growth.
+	// Periodically purge expired sessions and orphaned attachments.
+	fileStorage, fileStorageErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
+	if fileStorageErr != nil {
+		log.Warn("failed to create file storage for maintenance; orphan file cleanup disabled", "error", fileStorageErr)
+	}
+
 	stopMaintenance := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(15 * time.Minute)
@@ -147,6 +153,23 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 			case <-ticker.C:
 				if err := database.DeleteExpiredSessions(); err != nil {
 					log.Warn("failed to delete expired sessions", "error", err)
+				}
+
+				// Clean up orphaned attachments (uploaded but never linked to a message).
+				cutoff := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339)
+				orphanFiles, orphanErr := database.DeleteOrphanedAttachments(cutoff)
+				if orphanErr != nil {
+					log.Warn("failed to delete orphaned attachments", "error", orphanErr)
+				} else if len(orphanFiles) > 0 {
+					// Best-effort file cleanup.
+					if fileStorage != nil {
+						for _, filename := range orphanFiles {
+							if delErr := fileStorage.Delete(filename); delErr != nil {
+								log.Warn("failed to delete orphan file", "file", filename, "error", delErr)
+							}
+						}
+					}
+					log.Info("cleaned up orphaned attachments", "count", len(orphanFiles))
 				}
 			case <-stopMaintenance:
 				return

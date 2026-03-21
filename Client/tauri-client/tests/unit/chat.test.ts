@@ -97,6 +97,7 @@ describe("MessageList", () => {
       onEditClick: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
+      onPinClick: vi.fn(),
     });
     list.mount(container);
     const messagesContainer = container.querySelector(".messages-container");
@@ -120,6 +121,7 @@ describe("MessageList", () => {
       onEditClick: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
+      onPinClick: vi.fn(),
     });
     list.mount(container);
 
@@ -146,6 +148,7 @@ describe("MessageList", () => {
         onEditClick: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
       });
       list.mount(container);
 
@@ -171,6 +174,7 @@ describe("MessageList", () => {
         onEditClick: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
       });
       list.mount(container);
 
@@ -193,6 +197,7 @@ describe("MessageList", () => {
         onEditClick: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
       });
       list.mount(container);
 
@@ -217,6 +222,7 @@ describe("MessageList", () => {
         onEditClick: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
       });
       list.mount(container);
 
@@ -240,6 +246,7 @@ describe("MessageList", () => {
         onEditClick: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
       });
       list.mount(container);
 
@@ -262,6 +269,7 @@ describe("MessageList", () => {
         onEditClick: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
       });
       list.mount(container);
 
@@ -285,6 +293,7 @@ describe("MessageList", () => {
         onEditClick: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
       });
       list.mount(container);
 
@@ -308,6 +317,7 @@ describe("MessageList", () => {
         onEditClick: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
       });
       list.mount(container);
 
@@ -331,6 +341,7 @@ describe("MessageList", () => {
         onEditClick: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
       });
       list.mount(container);
 
@@ -349,6 +360,7 @@ describe("MessageList", () => {
       onEditClick: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
+      onPinClick: vi.fn(),
     });
     list.mount(container);
 
@@ -379,6 +391,7 @@ describe("MessageList", () => {
       onEditClick: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
+      onPinClick: vi.fn(),
     });
     list.mount(container);
     list.destroy?.();

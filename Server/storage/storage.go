@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,7 +136,9 @@ func (s *Storage) Save(uuid string, r io.Reader) error {
 	if written > maxBytes {
 		// File exceeds limit — remove the partial write and reject.
 		_ = f.Close()
-		_ = os.Remove(dst)
+		if removeErr := os.Remove(dst); removeErr != nil {
+			slog.Error("storage: failed to remove oversized file", "path", dst, "err", removeErr)
+		}
 		return fmt.Errorf("file exceeds maximum size of %d MB", s.maxSizeMB)
 	}
 	return nil

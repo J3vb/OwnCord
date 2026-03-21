@@ -2,8 +2,11 @@
 package ws
 
 import (
+	"fmt"
 	"log/slog"
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/owncord/server/auth"
@@ -31,6 +34,9 @@ type Hub struct {
 	livekit      *LiveKitClient
 	lkProcess    *LiveKitProcess
 
+	seq       uint64           // atomic monotonic sequence counter
+	replayBuf *EventRingBuffer // recent broadcast events for reconnection replay
+
 	// Settings cache — avoids per-connection DB queries for server_name/motd.
 	settingsMu         sync.RWMutex
 	settingsName       string
@@ -49,6 +55,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
 		register:     make(chan *Client, 32),
 		unregister:   make(chan *Client, 32),
 		stop:         make(chan struct{}),
+		replayBuf:    NewEventRingBuffer(1000),
 		settingsName: "OwnCord Server",
 		settingsMotd: "Welcome!",
 	}
@@ -104,28 +111,75 @@ func (h *Hub) SetLiveKitProcess(p *LiveKitProcess) {
 
 // Run starts the hub's dispatch loop. It blocks until Stop is called.
 // Must be called in its own goroutine.
+//
+// A panic recovery wrapper restarts the select loop automatically. If the hub
+// panics more than 5 times within a 60-second window it stops permanently to
+// avoid a tight crash loop.
 func (h *Hub) Run() {
+	var panicCount int
+	var lastPanicReset time.Time
+
 	for {
+		func() {
+			staleTicker := time.NewTicker(30 * time.Second)
+			defer staleTicker.Stop()
+
+			defer func() {
+				if r := recover(); r != nil {
+					panicCount++
+					now := time.Now()
+					if lastPanicReset.IsZero() || now.Sub(lastPanicReset) > 60*time.Second {
+						panicCount = 1
+						lastPanicReset = now
+					}
+
+					buf := make([]byte, 4096)
+					n := runtime.Stack(buf, false)
+					slog.Error("hub: panic recovered",
+						"panic", r,
+						"panic_count", panicCount,
+						"stack", string(buf[:n]))
+
+					if panicCount >= 5 {
+						slog.Error("hub: too many panics in 60s, stopping")
+						return
+					}
+				}
+			}()
+
+			for {
+				select {
+				case <-h.stop:
+					return
+				case c := <-h.register:
+					h.mu.Lock()
+					h.clients[c.userID] = c
+					slog.Info("hub: client registered", "user_id", c.userID, "total_clients", len(h.clients))
+					h.mu.Unlock()
+				case c := <-h.unregister:
+					h.mu.Lock()
+					if current, ok := h.clients[c.userID]; ok && current == c {
+						delete(h.clients, c.userID)
+						slog.Info("hub: client unregistered", "user_id", c.userID, "total_clients", len(h.clients))
+					}
+					h.mu.Unlock()
+				case bm := <-h.broadcast:
+					h.deliverBroadcast(bm)
+				case <-staleTicker.C:
+					h.sweepStaleClients()
+				}
+			}
+		}()
+
+		// If we reach here without a panic recovery continuing, stop.
+		if panicCount >= 5 {
+			return
+		}
+		// If stop was signaled, exit.
 		select {
 		case <-h.stop:
 			return
-
-		case c := <-h.register:
-			h.mu.Lock()
-			h.clients[c.userID] = c
-			slog.Info("hub: client registered", "user_id", c.userID, "total_clients", len(h.clients))
-			h.mu.Unlock()
-
-		case c := <-h.unregister:
-			h.mu.Lock()
-			if current, ok := h.clients[c.userID]; ok && current == c {
-				delete(h.clients, c.userID)
-				slog.Info("hub: client unregistered", "user_id", c.userID, "total_clients", len(h.clients))
-			}
-			h.mu.Unlock()
-
-		case bm := <-h.broadcast:
-			h.deliverBroadcast(bm)
+		default:
 		}
 	}
 }
@@ -137,9 +191,25 @@ func (h *Hub) Stop() {
 
 // GracefulStop stops the LiveKit process (if managed) and then stops the hub.
 func (h *Hub) GracefulStop() {
+	// Broadcast restart notice to all connected clients.
+	h.BroadcastServerRestart("shutdown", 5)
+
+	// Stop LiveKit process.
 	if h.lkProcess != nil {
 		h.lkProcess.Stop()
 	}
+
+	// Give clients 5 seconds to disconnect gracefully.
+	time.Sleep(5 * time.Second)
+
+	// Close all remaining client connections.
+	h.mu.Lock()
+	for _, c := range h.clients {
+		c.closeSend()
+	}
+	h.mu.Unlock()
+
+	// Stop the hub dispatch loop.
 	h.stopOnce.Do(func() { close(h.stop) })
 }
 
@@ -280,8 +350,64 @@ func (h *Hub) kickClient(c *Client) {
 	c.closeSend()
 }
 
-// deliverBroadcast sends bm.msg to the appropriate clients.
+// nextSeq returns the next monotonic sequence number for broadcast messages.
+func (h *Hub) nextSeq() uint64 {
+	return atomic.AddUint64(&h.seq, 1)
+}
+
+// ReplayBuffer returns the hub's event ring buffer for reconnection replay.
+func (h *Hub) ReplayBuffer() *EventRingBuffer {
+	return h.replayBuf
+}
+
+// wrapWithSeq injects a "seq" field into a JSON message without re-serializing.
+func wrapWithSeq(msg []byte, seq uint64) []byte {
+	// Fast path: inject seq after the opening brace.
+	// e.g., {"type":"chat_message",...} → {"seq":123,"type":"chat_message",...}
+	if len(msg) > 0 && msg[0] == '{' {
+		prefix := fmt.Sprintf(`{"seq":%d,`, seq)
+		result := make([]byte, 0, len(prefix)+len(msg)-1)
+		result = append(result, prefix...)
+		result = append(result, msg[1:]...) // skip opening brace
+		return result
+	}
+	return msg
+}
+
+// staleClientTimeout is the maximum duration a client can go without sending
+// any message before being considered stale and disconnected. The client sends
+// a ping every 30s, so 90s (3x) gives plenty of margin.
+const staleClientTimeout = 90 * time.Second
+
+// sweepStaleClients iterates over all connected clients and kicks any that
+// have not sent a message within staleClientTimeout.
+func (h *Hub) sweepStaleClients() {
+	now := time.Now()
+	h.mu.RLock()
+	var stale []*Client
+	for _, c := range h.clients {
+		if now.Sub(c.getLastActivity()) > staleClientTimeout {
+			stale = append(stale, c)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, c := range stale {
+		slog.Warn("hub: closing stale connection (no activity)",
+			"user_id", c.userID, "last_activity", c.getLastActivity())
+		h.kickClient(c)
+	}
+}
+
+// deliverBroadcast stamps bm.msg with a monotonic sequence number, stores it
+// in the replay buffer, and sends it to the appropriate clients.
 func (h *Hub) deliverBroadcast(bm broadcastMsg) {
+	seq := h.nextSeq()
+	msg := wrapWithSeq(bm.msg, seq)
+
+	// Store in replay buffer for reconnection recovery.
+	h.replayBuf.Push(seq, msg)
+
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -293,11 +419,11 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 			skipped++
 			continue
 		}
-		c.sendMsg(bm.msg)
+		c.sendMsg(msg)
 		delivered++
 	}
 	if bm.channelID != 0 {
 		slog.Debug("hub: channel broadcast",
-			"channel_id", bm.channelID, "delivered", delivered, "skipped", skipped)
+			"channel_id", bm.channelID, "delivered", delivered, "skipped", skipped, "seq", seq)
 	}
 }
