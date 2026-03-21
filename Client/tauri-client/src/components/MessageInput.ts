@@ -276,7 +276,7 @@ export function createMessageInput(
       }) as HTMLInputElement;
       fileInput.addEventListener("change", () => {
         const file = fileInput.files?.[0];
-        if (file !== undefined) {
+        if (file != null) {
           void handlePasteFile(file);
         }
         fileInput.value = "";
