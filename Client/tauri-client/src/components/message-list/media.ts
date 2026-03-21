@@ -226,24 +226,7 @@ export function renderInlineImage(url: string): HTMLDivElement {
   }
 
   img.addEventListener("click", () => {
-    const lightbox = createElement("div", { class: "image-lightbox" });
-    const lbWrap = createElement("div", { class: "image-lightbox-wrap" });
-    const lbImg = createElement("img", { src: url, alt: "Image" });
-    const closeBtn = createElement("button", { class: "image-lightbox-close" }, "\u00D7");
-
-    lbWrap.appendChild(lbImg);
-    lightbox.appendChild(lbWrap);
-    lightbox.appendChild(closeBtn);
-    document.body.appendChild(lightbox);
-
-    const closeLightbox = (): void => { lightbox.remove(); };
-    closeBtn.addEventListener("click", closeLightbox);
-    lightbox.addEventListener("click", (e) => {
-      if (e.target === lightbox) closeLightbox();
-    });
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") closeLightbox();
-    }, { once: true });
+    openImageLightbox(url, "Image");
   });
 
   wrap.appendChild(img);
@@ -285,9 +268,25 @@ export function openImageLightbox(src: string, alt: string): void {
     applyTransform();
   }
 
+  function onMove(e: MouseEvent): void {
+    if (!isDragging) return;
+    panX = panStartX + (e.clientX - dragStartX);
+    panY = panStartY + (e.clientY - dragStartY);
+    applyTransform();
+  }
+
+  function onUp(): void {
+    if (isDragging) {
+      isDragging = false;
+      overlay.classList.remove("dragging");
+    }
+  }
+
   function close(): void {
     overlay.remove();
     document.removeEventListener("keydown", onKey);
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup", onUp);
   }
 
   // Mouse wheel zoom
@@ -347,19 +346,8 @@ export function openImageLightbox(src: string, alt: string): void {
     }
   });
 
-  document.addEventListener("mousemove", function onMove(e) {
-    if (!isDragging) return;
-    panX = panStartX + (e.clientX - dragStartX);
-    panY = panStartY + (e.clientY - dragStartY);
-    applyTransform();
-  });
-
-  document.addEventListener("mouseup", function onUp() {
-    if (isDragging) {
-      isDragging = false;
-      overlay.classList.remove("dragging");
-    }
-  });
+  document.addEventListener("mousemove", onMove);
+  document.addEventListener("mouseup", onUp);
 
   closeBtn.addEventListener("click", (e) => {
     e.stopPropagation();
