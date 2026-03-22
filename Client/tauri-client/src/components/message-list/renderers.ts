@@ -14,6 +14,14 @@ import { loadPref } from "@components/settings/helpers";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 
+/** Cached value of the developerMode preference. Invalidated on pref change. */
+let developerModeEnabled = loadPref<boolean>("developerMode", false);
+window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>) => {
+  if (e.detail.key === "developerMode") {
+    developerModeEnabled = loadPref<boolean>("developerMode", false);
+  }
+}) as EventListener);
+
 // -- Re-exports (preserve all existing public API) ----------------------------
 
 export {
@@ -241,11 +249,13 @@ export function renderMessage(
       actionsBar.appendChild(deleteBtn);
     }
 
-    if (loadPref("developerMode", false)) {
+    if (developerModeEnabled) {
       const copyIdBtn = createElement("button", { "data-testid": `msg-copy-id-${msg.id}` });
       copyIdBtn.appendChild(createIcon("hash", 16));
       copyIdBtn.title = "Copy ID";
-      copyIdBtn.addEventListener("click", () => navigator.clipboard.writeText(String(msg.id)), { signal });
+      copyIdBtn.addEventListener("click", () => {
+        void navigator.clipboard.writeText(String(msg.id)).catch(() => { /* clipboard unavailable */ });
+      }, { signal });
       actionsBar.appendChild(copyIdBtn);
     }
 

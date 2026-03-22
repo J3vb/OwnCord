@@ -3,6 +3,7 @@
  */
 
 import { createElement, appendChildren } from "@lib/dom";
+import { invoke } from "@tauri-apps/api/core";
 import { loadPref, savePref, createToggle } from "./helpers";
 
 export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
@@ -20,7 +21,7 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
     {
       key: "hardwareAcceleration",
       label: "Hardware Acceleration",
-      desc: "Use GPU for rendering. Disable if experiencing graphical issues",
+      desc: "Use GPU for rendering. Requires restart to take effect",
       fallback: true,
     },
   ];
@@ -61,11 +62,9 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
 
   const devtoolsBtn = createElement("button", { class: "ac-btn" }, "Open DevTools");
   devtoolsBtn.addEventListener("click", () => {
-    void import("@tauri-apps/api/core")
-      .then((mod) => mod.invoke("open_devtools"))
-      .catch(() => {
-        // DevTools not available in this build
-      });
+    void invoke("open_devtools").catch((err: unknown) => {
+      console.warn("DevTools not available:", err);
+    });
   }, { signal });
 
   appendChildren(devtoolsRow, devtoolsInfo, devtoolsBtn);

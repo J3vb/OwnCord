@@ -10,6 +10,7 @@ import {
 } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { observeMedia } from "@lib/media-visibility";
+import { loadPref } from "@components/settings/helpers";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
@@ -231,7 +232,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
       attachLightbox(img);
       img.addEventListener("load", () => {
         clearReservation();
-        if (isGif) observeMedia(img, cached, wrap);
+        if (isGif) observeMedia(img, cached, wrap, !loadPref("animateGifs", true));
       }, { once: true });
       wrap.appendChild(img);
     } else {
@@ -248,7 +249,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
           attachLightbox(img);
           img.addEventListener("load", () => {
             clearReservation();
-            if (isGif) observeMedia(img, dataUrl, wrap);
+            if (isGif) observeMedia(img, dataUrl, wrap, !loadPref("animateGifs", true));
           }, { once: true });
           placeholder.replaceWith(img);
         }

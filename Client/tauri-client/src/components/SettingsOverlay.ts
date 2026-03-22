@@ -13,6 +13,7 @@ import { uiStore } from "@stores/ui.store";
 import { authStore } from "@stores/auth.store";
 import { loadPref, applyTheme } from "./settings/helpers";
 import type { ThemeName } from "./settings/helpers";
+import { syncOsMotionListener } from "@lib/os-motion";
 import { buildAccountTab } from "./settings/AccountTab";
 import { buildAppearanceTab } from "./settings/AppearanceTab";
 import { buildNotificationsTab } from "./settings/NotificationsTab";
@@ -75,13 +76,7 @@ export function applyStoredAppearance(): void {
     loadPref<string>("accentColor", "#5865f2"),
   );
 
-  if (loadPref<boolean>("syncOsMotion", false)) {
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    document.documentElement.classList.toggle("reduced-motion", mq.matches);
-    mq.addEventListener("change", (e: MediaQueryListEvent) => {
-      document.documentElement.classList.toggle("reduced-motion", e.matches);
-    });
-  }
+  syncOsMotionListener(loadPref<boolean>("syncOsMotion", false));
 }
 
 // ---------------------------------------------------------------------------

@@ -84,12 +84,20 @@ export function shouldGroup(prev: Message, curr: Message): boolean {
 
 // -- Role helpers -------------------------------------------------------------
 
+/** Cached value of the roleColors preference. Invalidated on pref change. */
+let roleColorsEnabled = loadPref<boolean>("roleColors", true);
+window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>) => {
+  if (e.detail.key === "roleColors") {
+    roleColorsEnabled = loadPref<boolean>("roleColors", true);
+  }
+}) as EventListener);
+
 export function getUserRole(userId: number): string {
   return membersStore.getState().members.get(userId)?.role ?? "member";
 }
 
 export function roleColorVar(role: string): string {
-  if (!loadPref<boolean>("roleColors", true)) {
+  if (!roleColorsEnabled) {
     return "var(--role-member)";
   }
   switch (role) {

@@ -4,6 +4,7 @@
 
 import { createElement, appendChildren } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "./helpers";
+import { syncOsMotionListener } from "@lib/os-motion";
 
 type ToggleItem = {
   readonly key: string;
@@ -43,6 +44,7 @@ const TOGGLES: ReadonlyArray<ToggleItem> = [
     label: "Sync with OS",
     desc: "Automatically enable reduced motion based on your OS accessibility settings",
     fallback: false,
+    sideEffect: (nowOn) => { syncOsMotionListener(nowOn); },
   },
   {
     key: "largeFont",

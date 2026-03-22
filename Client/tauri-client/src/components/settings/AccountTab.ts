@@ -87,6 +87,7 @@ function buildPasswordSection(
   });
   const pwError = createElement("div", { style: "color:var(--red);font-size:13px;margin-bottom:8px" });
   const pwBtn = createElement("button", { class: "ac-btn" }, "Change Password");
+  let pwSuccessTimer: ReturnType<typeof setTimeout> | null = null;
 
   pwBtn.addEventListener("click", () => {
     const oldVal = oldPw.value;
@@ -106,9 +107,14 @@ function buildPasswordSection(
       oldPw.value = "";
       newPw.value = "";
       confirmPw.value = "";
+      if (pwSuccessTimer !== null) clearTimeout(pwSuccessTimer);
       pwError.style.color = "var(--green)";
       setText(pwError, "Password changed successfully.");
-      setTimeout(() => { setText(pwError, ""); pwError.style.color = "var(--red)"; }, 3000);
+      pwSuccessTimer = setTimeout(() => {
+        setText(pwError, "");
+        pwError.style.color = "var(--red)";
+        pwSuccessTimer = null;
+      }, 3000);
     }).catch((err: unknown) => {
       setText(pwError, err instanceof Error ? err.message : "Failed to change password.");
     });
@@ -217,7 +223,7 @@ export function buildAccountTab(
 
   const openEditForm = () => {
     editForm.style.display = "flex";
-    editInput.value = user?.username ?? "";
+    editInput.value = authStore.getState().user?.username ?? "";
     editInput.focus();
   };
 

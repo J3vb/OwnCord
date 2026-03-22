@@ -402,6 +402,11 @@ export function renderUrlEmbeds(content: string): DocumentFragment {
   log.debug("renderUrlEmbeds", { urlCount: urls.length, urls });
   const seen = new Set<string>();
 
+  // Read preferences once before the loop to avoid per-URL localStorage reads
+  const showEmbeds = loadPref("showEmbeds", true);
+  const inlineMedia = loadPref("inlineMedia", true);
+  const showLinkPreviews = loadPref("showLinkPreviews", true);
+
   for (const url of urls) {
     if (seen.has(url)) continue;
     seen.add(url);
@@ -409,7 +414,7 @@ export function renderUrlEmbeds(content: string): DocumentFragment {
     // YouTube embed
     const ytId = extractYouTubeId(url);
     if (ytId !== null) {
-      if (!loadPref("showEmbeds", true)) continue;
+      if (!showEmbeds) continue;
       fragment.appendChild(renderYouTubeEmbed(ytId, url));
       continue;
     }
@@ -419,14 +424,14 @@ export function renderUrlEmbeds(content: string): DocumentFragment {
     const isSafe = isSafeUrl(url);
     log.debug("URL classification", { url: url.slice(0, 80), isDirect, isSafe, isGif: isGifUrl(url) });
     if (isDirect && isSafe) {
-      if (!loadPref("inlineMedia", true)) continue;
+      if (!inlineMedia) continue;
       fragment.appendChild(renderInlineImage(url));
       continue;
     }
 
     // Generic URL preview (compact link card)
     if (isSafe) {
-      if (!loadPref("showLinkPreviews", true)) continue;
+      if (!showLinkPreviews) continue;
       log.debug("Falling through to generic link preview", { url: url.slice(0, 80) });
       fragment.appendChild(renderGenericLinkPreview(url));
     }

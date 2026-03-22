@@ -33,6 +33,9 @@ export function loadPref<T>(key: string, fallback: T): T {
 
 export function savePref(key: string, value: unknown): void {
   localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value));
+  // Dispatch a custom event so same-window listeners can invalidate caches.
+  // The native `storage` event only fires for cross-tab changes.
+  window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key } }));
 }
 
 // ---------------------------------------------------------------------------
