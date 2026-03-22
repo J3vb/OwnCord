@@ -1066,7 +1066,7 @@
 .account-status-dot {
   position: absolute; bottom: 4px; right: 4px;
   width: 14px; height: 14px; border-radius: 50%;
-  background: #43b581; border: 3px solid var(--bg-secondary);
+  background: var(--green); border: 3px solid var(--bg-secondary);
 }
 .account-header {
   display: flex; align-items: center; justify-content: space-between;

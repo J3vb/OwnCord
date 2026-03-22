@@ -303,7 +303,7 @@ describe("SettingsOverlay", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
 
-    const acName = container.querySelector(".ac-name");
+    const acName = container.querySelector(".account-header-name");
     expect(acName?.textContent).toBe("testuser");
 
     overlay.destroy?.();
