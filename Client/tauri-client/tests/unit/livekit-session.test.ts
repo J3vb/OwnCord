@@ -49,8 +49,8 @@ const { mockLoadPref, mockSavePref } = vi.hoisted(() => ({
 }));
 
 vi.mock("@components/settings/helpers", () => ({
-  loadPref: (...args: unknown[]) => mockLoadPref(...args),
-  savePref: (...args: unknown[]) => mockSavePref(...args),
+  loadPref: (key: string, defaultVal: unknown) => mockLoadPref(key, defaultVal),
+  savePref: (key: string, val: unknown) => mockSavePref(key, val),
 }));
 
 vi.mock("@lib/logger", () => ({
