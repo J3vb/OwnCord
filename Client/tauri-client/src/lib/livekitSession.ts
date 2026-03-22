@@ -88,7 +88,6 @@ export class LiveKitSession {
     const newRoom = new Room({
       adaptiveStream: true,
       dynacast: true,
-      webAudioMix: true,
       audioCaptureDefaults: {
         echoCancellation: loadPref("echoCancellation", true),
         noiseSuppression: loadPref("noiseSuppression", true),
@@ -111,13 +110,14 @@ export class LiveKitSession {
   ): void => {
     const userId = parseUserId(participant.identity);
     if (track.kind === Track.Kind.Audio) {
-      // Attach creates an <audio> element — required for playback
+      // Detach any previous <audio> elements to prevent duplicate playback
+      // on fast reconnects (new subscription fires before old unsubscription)
+      for (const el of track.detach()) el.remove();
       const audioEl = track.attach();
       audioEl.style.display = "none";
       document.body.appendChild(audioEl);
-      // Apply saved per-user volume scaled by master output volume
-      const savedVolume = userId > 0 ? getSavedUserVolume(userId) : 100;
-      audioEl.volume = Math.min(savedVolume, 100) / 100;
+      // Apply saved per-user volume via LiveKit's setVolume (supports 0-2.0 range)
+      participant.setVolume(this.getEffectiveVolume(userId));
       const savedOutput = loadPref<string>("audioOutputDevice", "");
       if (savedOutput !== "" && typeof audioEl.setSinkId === "function") {
         audioEl.setSinkId(savedOutput).catch((err) => {
