@@ -10,6 +10,7 @@ import {
   appendChildren,
 } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { loadPref } from "@components/settings/helpers";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 
@@ -238,6 +239,14 @@ export function renderMessage(
       deleteBtn.title = "Delete";
       deleteBtn.addEventListener("click", () => opts.onDeleteClick(msg.id), { signal });
       actionsBar.appendChild(deleteBtn);
+    }
+
+    if (loadPref("developerMode", false)) {
+      const copyIdBtn = createElement("button", { "data-testid": `msg-copy-id-${msg.id}` });
+      copyIdBtn.appendChild(createIcon("hash", 16));
+      copyIdBtn.title = "Copy ID";
+      copyIdBtn.addEventListener("click", () => navigator.clipboard.writeText(String(msg.id)), { signal });
+      actionsBar.appendChild(copyIdBtn);
     }
 
     el.appendChild(actionsBar);

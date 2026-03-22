@@ -74,6 +74,14 @@ export function applyStoredAppearance(): void {
     "--accent",
     loadPref<string>("accentColor", "#5865f2"),
   );
+
+  if (loadPref<boolean>("syncOsMotion", false)) {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    document.documentElement.classList.toggle("reduced-motion", mq.matches);
+    mq.addEventListener("change", (e: MediaQueryListEvent) => {
+      document.documentElement.classList.toggle("reduced-motion", e.matches);
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------

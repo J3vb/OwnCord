@@ -197,11 +197,16 @@ function ensureVisibilityListener(): void {
  * Start observing a GIF image. Call after the image's `load` event.
  * Returns the wrapper element that should replace the bare img in the DOM.
  * The wrapper includes the play/pause button overlay.
+ *
+ * @param startFrozen - If true, the GIF starts frozen (first frame shown)
+ *   instead of auto-playing. The user can still click the play button to
+ *   start playback. Used when the `animateGifs` preference is disabled.
  */
 export function observeMedia(
   img: HTMLImageElement,
   originalSrc: string,
   wrapper: HTMLElement,
+  startFrozen?: boolean,
 ): void {
   if (tracked.has(img)) return;
 
@@ -234,9 +239,15 @@ export function observeMedia(
     }
   });
 
-  // Mark as playing, start auto-pause timer
-  updateButton(entry);
-  startAutoTimer(img, entry);
+  if (startFrozen === true) {
+    // Start frozen: set isPlaying false, capture first frame, show ▶ button
+    entry.isPlaying = false;
+    freezeImage(img, entry);
+  } else {
+    // Default: start playing, auto-pause after AUTO_PAUSE_MS
+    updateButton(entry);
+    startAutoTimer(img, entry);
+  }
 
   ensureVisibilityListener();
   getObserver()?.observe(img);

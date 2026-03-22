@@ -11,6 +11,7 @@ import {
 import { createIcon } from "@lib/icons";
 import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
+import { loadPref } from "@components/settings/helpers";
 import { isSafeUrl } from "./attachments";
 import { CODE_BLOCK_REGEX, INLINE_CODE_REGEX, URL_REGEX } from "./content-parser";
 import { renderGenericLinkPreview } from "./embeds";
@@ -218,12 +219,15 @@ export function renderInlineImage(url: string): HTMLDivElement {
     wrap.style.minHeight = "";
   }, { once: true });
 
-  // Observe GIFs for visibility-based freeze/unfreeze + play/pause button
+  // Observe GIFs for visibility-based freeze/unfreeze + play/pause button.
+  // When the animateGifs pref is disabled, start frozen so the first frame is
+  // shown by default; the user can still click the play button to animate.
   if (isGifUrl(url)) {
     img.addEventListener("load", () => {
       log.debug("Calling observeMedia for GIF", { url: url.slice(0, 80) });
-      observeMedia(img, url, wrap);
-      log.debug("observeMedia complete");
+      const startFrozen = !loadPref("animateGifs", true);
+      observeMedia(img, url, wrap, startFrozen);
+      log.debug("observeMedia complete", { startFrozen });
     }, { once: true });
   }
 
@@ -405,6 +409,7 @@ export function renderUrlEmbeds(content: string): DocumentFragment {
     // YouTube embed
     const ytId = extractYouTubeId(url);
     if (ytId !== null) {
+      if (!loadPref("showEmbeds", true)) continue;
       fragment.appendChild(renderYouTubeEmbed(ytId, url));
       continue;
     }
@@ -414,12 +419,14 @@ export function renderUrlEmbeds(content: string): DocumentFragment {
     const isSafe = isSafeUrl(url);
     log.debug("URL classification", { url: url.slice(0, 80), isDirect, isSafe, isGif: isGifUrl(url) });
     if (isDirect && isSafe) {
+      if (!loadPref("inlineMedia", true)) continue;
       fragment.appendChild(renderInlineImage(url));
       continue;
     }
 
     // Generic URL preview (compact link card)
     if (isSafe) {
+      if (!loadPref("showLinkPreviews", true)) continue;
       log.debug("Falling through to generic link preview", { url: url.slice(0, 80) });
       fragment.appendChild(renderGenericLinkPreview(url));
     }

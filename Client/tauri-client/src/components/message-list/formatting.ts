@@ -5,6 +5,7 @@
 
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
+import { loadPref } from "@components/settings/helpers";
 
 // -- Constants ----------------------------------------------------------------
 
@@ -88,6 +89,9 @@ export function getUserRole(userId: number): string {
 }
 
 export function roleColorVar(role: string): string {
+  if (!loadPref<boolean>("roleColors", true)) {
+    return "var(--role-member)";
+  }
   switch (role) {
     case "owner": return "var(--role-owner)";
     case "admin": return "var(--role-admin)";
