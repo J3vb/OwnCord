@@ -67,7 +67,9 @@ type VirtualItem = VirtualItemMessage | VirtualItemDivider;
 function estimateItemHeight(item: VirtualItem): number {
   if (item.kind === "divider") return 32;
 
-  let height = item.isGrouped ? 42 : 72;
+  // Non-grouped: min-height 2.75rem (44px @16px root) + margin-top 17px = 61px
+  // Grouped: min-height 1.375rem (22px @16px root) + margin-top 0px = 22px
+  let height = item.isGrouped ? 22 : 61;
 
   // Image attachments
   for (const att of item.message.attachments) {
@@ -235,7 +237,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       const globalIdx = renderedStart + i;
       if (globalIdx < 0 || (tree !== null && globalIdx >= tree.size)) continue;
       const el = children[i] as HTMLElement;
-      const h = el.offsetHeight;
+      const style = getComputedStyle(el);
+      const h = el.offsetHeight + parseFloat(style.marginTop) + parseFloat(style.marginBottom);
       if (h > 0) {
         const key = itemKey(globalIdx);
         heightCache.set(key, h);

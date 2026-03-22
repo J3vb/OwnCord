@@ -106,7 +106,7 @@
 
   /* Message layout */
   --message-group-spacing: 17px;
-  --message-inline-spacing: 0px;
+  --message-inline-spacing: 0;
   --avatar-size: 40px;
   --avatar-offset-left: 16px;
   --message-content-left: 72px;

@@ -20,6 +20,7 @@ export {
   parseTimestamp,
   formatTime,
   formatFullDate,
+  formatMessageTimestamp,
   isSameDay,
   shouldGroup,
   getUserRole,
@@ -70,7 +71,7 @@ export { renderReactions } from "./reactions";
 
 // -- Imports for composite functions ------------------------------------------
 
-import { formatTime, formatFullDate } from "./formatting";
+import { formatTime, formatFullDate, formatMessageTimestamp } from "./formatting";
 import { getUserRole, roleColorVar } from "./formatting";
 import { renderMentions, renderMessageContent } from "./content-parser";
 import { renderUrlEmbeds } from "./media";
@@ -98,8 +99,14 @@ function renderReplyRef(
   const bar = createElement("div", { class: "msg-reply-ref" });
   if (ref) {
     const preview = ref.deleted ? "[message deleted]" : ref.content.slice(0, 100);
+    const role = getUserRole(ref.user.id);
+    const miniAvatar = createElement("div", {
+      class: "rr-avatar",
+      style: `background: ${roleColorVar(role)}`,
+    }, ref.user.username.charAt(0).toUpperCase());
     appendChildren(
       bar,
+      miniAvatar,
       createElement("span", { class: "rr-author" }, ref.user.username),
       createElement("span", { class: "rr-text" }, preview),
     );
@@ -161,7 +168,7 @@ export function renderMessage(
     class: "msg-author",
     style: `color: ${roleColorVar(role)}`,
   }, msg.user.username);
-  const time = createElement("span", { class: "msg-time", title: formatFullDate(msg.timestamp) }, formatTime(msg.timestamp));
+  const time = createElement("span", { class: "msg-time", title: formatFullDate(msg.timestamp) }, formatMessageTimestamp(msg.timestamp));
   appendChildren(header, author, time);
   el.appendChild(header);
 
