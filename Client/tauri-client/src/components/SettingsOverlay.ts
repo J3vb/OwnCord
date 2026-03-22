@@ -16,6 +16,7 @@ import type { ThemeName } from "./settings/helpers";
 import { buildAccountTab } from "./settings/AccountTab";
 import { buildAppearanceTab } from "./settings/AppearanceTab";
 import { buildNotificationsTab } from "./settings/NotificationsTab";
+import { buildTextImagesTab } from "./settings/TextImagesTab";
 import { createVoiceAudioTab } from "./settings/VoiceAudioTab";
 import { buildKeybindsTab } from "./settings/KeybindsTab";
 import { createLogsTab } from "./settings/LogsTab";
@@ -32,12 +33,13 @@ export interface SettingsOverlayOptions {
   onStatusChange(status: UserStatus): void;
 }
 
-export type TabName = "Account" | "Appearance" | "Notifications" | "Voice & Audio" | "Keybinds" | "Logs";
+export type TabName = "Account" | "Appearance" | "Notifications" | "Text & Images" | "Voice & Audio" | "Keybinds" | "Logs";
 
 const TAB_ICONS: Record<TabName, IconName> = {
   Account: "user",
   Appearance: "palette",
   Notifications: "bell",
+  "Text & Images": "image",
   "Voice & Audio": "mic",
   Keybinds: "keyboard",
   Logs: "scroll-text",
@@ -92,6 +94,7 @@ export function createSettingsOverlay(
     Account: () => buildAccountTab(options, ac.signal),
     Appearance: () => buildAppearanceTab(ac.signal),
     Notifications: () => buildNotificationsTab(ac.signal),
+    "Text & Images": () => buildTextImagesTab(ac.signal),
     "Voice & Audio": () => voiceTab.build(),
     Keybinds: () => buildKeybindsTab(ac.signal),
     Logs: () => logsTab.build(),
@@ -169,7 +172,7 @@ export function createSettingsOverlay(
     const appSettingsCat = createElement("div", { class: "settings-cat" }, "App Settings");
     sidebar.appendChild(appSettingsCat);
 
-    const appTabs: readonly TabName[] = ["Appearance", "Notifications", "Voice & Audio", "Keybinds", "Logs"];
+    const appTabs: readonly TabName[] = ["Appearance", "Notifications", "Text & Images", "Voice & Audio", "Keybinds", "Logs"];
     for (const name of appTabs) {
       const btn = createElement("button", {
         class: `settings-nav-item${name === activeTab ? " active" : ""}`,
