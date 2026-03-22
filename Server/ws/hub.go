@@ -2,8 +2,11 @@
 package ws
 
 import (
+	"fmt"
 	"log/slog"
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/owncord/server/auth"
@@ -28,9 +31,11 @@ type Hub struct {
 	unregister   chan *Client
 	stop         chan struct{}
 	stopOnce     sync.Once
-	sfu          *SFU
-	voiceRooms   map[int64]*VoiceRoom
-	voiceRoomsMu sync.RWMutex
+	livekit      *LiveKitClient
+	lkProcess    *LiveKitProcess
+
+	seq       uint64           // atomic monotonic sequence counter
+	replayBuf *EventRingBuffer // recent broadcast events for reconnection replay
 
 	// Settings cache — avoids per-connection DB queries for server_name/motd.
 	settingsMu         sync.RWMutex
@@ -50,7 +55,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
 		register:     make(chan *Client, 32),
 		unregister:   make(chan *Client, 32),
 		stop:         make(chan struct{}),
-		voiceRooms:   make(map[int64]*VoiceRoom),
+		replayBuf:    NewEventRingBuffer(1000),
 		settingsName: "OwnCord Server",
 		settingsMotd: "Welcome!",
 	}
@@ -94,87 +99,98 @@ func (h *Hub) refreshSettingsLocked() {
 	h.settingsLastUpdate = time.Now()
 }
 
-// SetSFU sets the SFU engine on the hub. Must be called before Run.
-func (h *Hub) SetSFU(sfu *SFU) {
-	h.sfu = sfu
+// SetLiveKit sets the LiveKit client on the hub. Must be called before Run.
+func (h *Hub) SetLiveKit(lk *LiveKitClient) {
+	h.livekit = lk
 }
 
-// GetOrCreateVoiceRoom returns the existing room for channelID or creates one.
-// cfg provides the room config (from channel settings and server defaults).
-func (h *Hub) GetOrCreateVoiceRoom(channelID int64, cfg VoiceRoomConfig) *VoiceRoom {
-	h.voiceRoomsMu.Lock()
-	defer h.voiceRoomsMu.Unlock()
-
-	if room, ok := h.voiceRooms[channelID]; ok {
-		return room
+// LiveKitHealthCheck probes the LiveKit server for connectivity.
+// It tries the SDK client first (ListRooms), and falls back to an HTTP probe
+// if a managed process is configured. Returns false with a reason if LiveKit
+// is not configured or unreachable.
+func (h *Hub) LiveKitHealthCheck() (bool, error) {
+	if h.livekit == nil {
+		return false, fmt.Errorf("not configured")
 	}
-	room := NewVoiceRoom(cfg)
-	h.voiceRooms[channelID] = room
-	return room
+	return h.livekit.HealthCheck()
 }
 
-// GetVoiceRoom returns the room for channelID, or nil if none exists.
-func (h *Hub) GetVoiceRoom(channelID int64) *VoiceRoom {
-	h.voiceRoomsMu.RLock()
-	defer h.voiceRoomsMu.RUnlock()
-	return h.voiceRooms[channelID]
-}
-
-// RemoveVoiceRoom removes and closes the room for channelID. No-op if absent.
-func (h *Hub) RemoveVoiceRoom(channelID int64) {
-	h.voiceRoomsMu.Lock()
-	room, ok := h.voiceRooms[channelID]
-	if ok {
-		delete(h.voiceRooms, channelID)
-	}
-	h.voiceRoomsMu.Unlock()
-
-	if ok {
-		room.Close()
-	}
-}
-
-// CloseAllVoiceRooms closes all voice rooms. Called during shutdown.
-func (h *Hub) CloseAllVoiceRooms() {
-	h.voiceRoomsMu.Lock()
-	rooms := make([]*VoiceRoom, 0, len(h.voiceRooms))
-	for _, room := range h.voiceRooms {
-		rooms = append(rooms, room)
-	}
-	h.voiceRooms = make(map[int64]*VoiceRoom)
-	h.voiceRoomsMu.Unlock()
-
-	for _, room := range rooms {
-		room.Close()
-	}
+// SetLiveKitProcess sets the LiveKit process manager on the hub.
+func (h *Hub) SetLiveKitProcess(p *LiveKitProcess) {
+	h.lkProcess = p
 }
 
 // Run starts the hub's dispatch loop. It blocks until Stop is called.
 // Must be called in its own goroutine.
+//
+// A panic recovery wrapper restarts the select loop automatically. If the hub
+// panics more than 3 times within a 60-second window it stops permanently to
+// avoid a tight crash loop.
 func (h *Hub) Run() {
-	go h.runSpeakerBroadcast(h.stop)
+	var panicCount int
+	var lastPanicReset time.Time
 
 	for {
+		func() {
+			staleTicker := time.NewTicker(30 * time.Second)
+			defer staleTicker.Stop()
+
+			defer func() {
+				if r := recover(); r != nil {
+					panicCount++
+					now := time.Now()
+					if lastPanicReset.IsZero() || now.Sub(lastPanicReset) > 60*time.Second {
+						panicCount = 1
+						lastPanicReset = now
+					}
+
+					buf := make([]byte, 4096)
+					n := runtime.Stack(buf, false)
+					slog.Error("hub: panic recovered",
+						"panic", r,
+						"panic_count", panicCount,
+						"stack", string(buf[:n]))
+
+					if panicCount >= 3 {
+						slog.Error("hub: too many panics in 60s, stopping")
+						return
+					}
+				}
+			}()
+
+			for {
+				select {
+				case <-h.stop:
+					return
+				case c := <-h.register:
+					h.mu.Lock()
+					h.clients[c.userID] = c
+					slog.Info("hub: client registered", "user_id", c.userID, "total_clients", len(h.clients))
+					h.mu.Unlock()
+				case c := <-h.unregister:
+					h.mu.Lock()
+					if current, ok := h.clients[c.userID]; ok && current == c {
+						delete(h.clients, c.userID)
+						slog.Info("hub: client unregistered", "user_id", c.userID, "total_clients", len(h.clients))
+					}
+					h.mu.Unlock()
+				case bm := <-h.broadcast:
+					h.deliverBroadcast(bm)
+				case <-staleTicker.C:
+					h.sweepStaleClients()
+				}
+			}
+		}()
+
+		// If we reach here without a panic recovery continuing, stop.
+		if panicCount >= 3 {
+			return
+		}
+		// If stop was signaled, exit.
 		select {
 		case <-h.stop:
 			return
-
-		case c := <-h.register:
-			h.mu.Lock()
-			h.clients[c.userID] = c
-			slog.Info("hub: client registered", "user_id", c.userID, "total_clients", len(h.clients))
-			h.mu.Unlock()
-
-		case c := <-h.unregister:
-			h.mu.Lock()
-			if current, ok := h.clients[c.userID]; ok && current == c {
-				delete(h.clients, c.userID)
-				slog.Info("hub: client unregistered", "user_id", c.userID, "total_clients", len(h.clients))
-			}
-			h.mu.Unlock()
-
-		case bm := <-h.broadcast:
-			h.deliverBroadcast(bm)
+		default:
 		}
 	}
 }
@@ -184,52 +200,63 @@ func (h *Hub) Stop() {
 	h.stopOnce.Do(func() { close(h.stop) })
 }
 
-// GracefulStop closes all PeerConnections, voice rooms, and then stops the hub.
+// GracefulStop stops the LiveKit process (if managed) and then stops the hub.
 func (h *Hub) GracefulStop() {
-	// Close all client PeerConnections first (CRIT-2 fix).
-	h.mu.RLock()
-	for _, c := range h.clients {
-		if _, oldPC := c.clearVoice(); oldPC != nil {
-			_ = oldPC.Close()
-		}
-	}
-	h.mu.RUnlock()
+	// Broadcast restart notice to all connected clients.
+	h.BroadcastServerRestart("shutdown", 5)
 
-	h.CloseAllVoiceRooms()
+	// Stop LiveKit process.
+	if h.lkProcess != nil {
+		h.lkProcess.Stop()
+	}
+
+	// Give clients 5 seconds to disconnect gracefully.
+	time.Sleep(5 * time.Second)
+
+	// Close all remaining client connections.
+	h.mu.Lock()
+	for _, c := range h.clients {
+		c.closeSend()
+	}
+	h.mu.Unlock()
+
+	// Stop the hub dispatch loop.
 	h.stopOnce.Do(func() { close(h.stop) })
 }
 
-// CleanupVoiceForChannel removes the voice room for the given channel and
-// closes PeerConnections for all participants. Called when a channel is deleted.
+// CleanupVoiceForChannel removes all voice participants from the given channel.
+// Called when a channel is deleted.
 func (h *Hub) CleanupVoiceForChannel(channelID int64) {
-	room := h.GetVoiceRoom(channelID)
-	if room == nil {
+	// Get all users in the channel's voice state from DB.
+	states, err := h.db.GetChannelVoiceStates(channelID)
+	if err != nil {
+		slog.Error("CleanupVoiceForChannel GetChannelVoiceStates", "err", err, "channel_id", channelID)
+		return
+	}
+	if len(states) == 0 {
 		return
 	}
 
-	// Get participant IDs before removing the room.
-	participantIDs := room.ParticipantIDs()
+	// Clean up DB state and LiveKit for each participant.
+	for _, vs := range states {
+		_ = h.db.LeaveVoiceChannel(vs.UserID)
 
-	// Remove the room (this also calls room.Close() which clears participants).
-	h.RemoveVoiceRoom(channelID)
-
-	// Close PeerConnections and clean up DB state for all participants.
-	// Use RLock for client map read; voice fields are guarded by voiceMu (HIGH-3 fix).
-	h.mu.RLock()
-	for _, userID := range participantIDs {
-		if client, ok := h.clients[userID]; ok {
-			if _, oldPC := client.clearVoice(); oldPC != nil {
-				_ = oldPC.Close()
-			}
+		// Clear client voice state.
+		h.mu.RLock()
+		if client, ok := h.clients[vs.UserID]; ok {
+			client.clearVoiceChID()
 		}
-		// Clean up DB voice state (best-effort; ignore error).
-		_ = h.db.LeaveVoiceChannel(userID)
+		h.mu.RUnlock()
+
+		// Remove from LiveKit (best-effort).
+		if h.livekit != nil {
+			_ = h.livekit.RemoveParticipant(channelID, vs.UserID)
+		}
 	}
-	h.mu.RUnlock()
 
 	// Broadcast voice_leave for each participant.
-	for _, userID := range participantIDs {
-		h.BroadcastToAll(buildVoiceLeave(channelID, userID))
+	for _, vs := range states {
+		h.BroadcastToAll(buildVoiceLeave(channelID, vs.UserID))
 	}
 }
 
@@ -262,13 +289,25 @@ func (h *Hub) Unregister(c *Client) {
 
 // BroadcastToChannel enqueues msg for delivery to all clients subscribed to
 // channelID. When channelID is 0 the message is sent to every connected client.
+// Non-blocking: if the broadcast channel is full the message is dropped with a warning.
 func (h *Hub) BroadcastToChannel(channelID int64, msg []byte) {
-	h.broadcast <- broadcastMsg{channelID: channelID, msg: msg}
+	select {
+	case h.broadcast <- broadcastMsg{channelID: channelID, msg: msg}:
+	default:
+		slog.Warn("hub: broadcast channel full, dropping message",
+			"channel_id", channelID, "msg_len", len(msg))
+	}
 }
 
 // BroadcastToAll enqueues msg for delivery to every connected client.
+// Non-blocking: if the broadcast channel is full the message is dropped with a warning.
 func (h *Hub) BroadcastToAll(msg []byte) {
-	h.broadcast <- broadcastMsg{channelID: 0, msg: msg}
+	select {
+	case h.broadcast <- broadcastMsg{channelID: 0, msg: msg}:
+	default:
+		slog.Warn("hub: broadcast channel full, dropping global message",
+			"msg_len", len(msg))
+	}
 }
 
 // BroadcastServerRestart sends a server_restart message to all connected clients.
@@ -312,13 +351,7 @@ func (h *Hub) SendToUser(userID int64, msg []byte) bool {
 	if !ok {
 		return false
 	}
-	select {
-	case c.send <- msg:
-		return true
-	default:
-		// send buffer full — drop rather than block.
-		return false
-	}
+	return c.trySendMsg(msg)
 }
 
 // ClientCount returns the number of currently registered clients (test helper).
@@ -340,8 +373,64 @@ func (h *Hub) kickClient(c *Client) {
 	c.closeSend()
 }
 
-// deliverBroadcast sends bm.msg to the appropriate clients.
+// nextSeq returns the next monotonic sequence number for broadcast messages.
+func (h *Hub) nextSeq() uint64 {
+	return atomic.AddUint64(&h.seq, 1)
+}
+
+// ReplayBuffer returns the hub's event ring buffer for reconnection replay.
+func (h *Hub) ReplayBuffer() *EventRingBuffer {
+	return h.replayBuf
+}
+
+// wrapWithSeq injects a "seq" field into a JSON message without re-serializing.
+func wrapWithSeq(msg []byte, seq uint64) []byte {
+	// Fast path: inject seq after the opening brace.
+	// e.g., {"type":"chat_message",...} → {"seq":123,"type":"chat_message",...}
+	if len(msg) > 0 && msg[0] == '{' {
+		prefix := fmt.Sprintf(`{"seq":%d,`, seq)
+		result := make([]byte, 0, len(prefix)+len(msg)-1)
+		result = append(result, prefix...)
+		result = append(result, msg[1:]...) // skip opening brace
+		return result
+	}
+	return msg
+}
+
+// staleClientTimeout is the maximum duration a client can go without sending
+// any message before being considered stale and disconnected. The client sends
+// a ping every 30s, so 90s (3x) gives plenty of margin.
+const staleClientTimeout = 90 * time.Second
+
+// sweepStaleClients iterates over all connected clients and kicks any that
+// have not sent a message within staleClientTimeout.
+func (h *Hub) sweepStaleClients() {
+	now := time.Now()
+	h.mu.RLock()
+	var stale []*Client
+	for _, c := range h.clients {
+		if now.Sub(c.getLastActivity()) > staleClientTimeout {
+			stale = append(stale, c)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, c := range stale {
+		slog.Warn("hub: closing stale connection (no activity)",
+			"user_id", c.userID, "last_activity", c.getLastActivity())
+		h.kickClient(c)
+	}
+}
+
+// deliverBroadcast stamps bm.msg with a monotonic sequence number, stores it
+// in the replay buffer, and sends it to the appropriate clients.
 func (h *Hub) deliverBroadcast(bm broadcastMsg) {
+	seq := h.nextSeq()
+	msg := wrapWithSeq(bm.msg, seq)
+
+	// Store in replay buffer for reconnection recovery.
+	h.replayBuf.Push(seq, msg)
+
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -349,20 +438,15 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	skipped := 0
 	for _, c := range h.clients {
 		// channelID == 0 → broadcast to everyone.
-		if bm.channelID != 0 && c.channelID != bm.channelID && c.getVoiceChID() != bm.channelID {
+		if bm.channelID != 0 && c.getChannelID() != bm.channelID && c.getVoiceChID() != bm.channelID {
 			skipped++
 			continue
 		}
-		select {
-		case c.send <- bm.msg:
-			delivered++
-		default:
-			slog.Warn("broadcast dropped: client send buffer full",
-				"user_id", c.userID, "channel_id", bm.channelID)
-		}
+		c.sendMsg(msg)
+		delivered++
 	}
 	if bm.channelID != 0 {
 		slog.Debug("hub: channel broadcast",
-			"channel_id", bm.channelID, "delivered", delivered, "skipped", skipped)
+			"channel_id", bm.channelID, "delivered", delivered, "skipped", skipped, "seq", seq)
 	}
 }

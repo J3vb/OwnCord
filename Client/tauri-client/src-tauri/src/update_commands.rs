@@ -33,10 +33,14 @@ pub async fn check_client_update(
         .parse()
         .map_err(|e: url::ParseError| format!("bad endpoint URL: {e}"))?;
 
+    // OwnCord is self-hosted and commonly uses self-signed TLS certs.
+    // The updater connects to the user's own server, so accept invalid certs
+    // (the update artifact itself is verified via Ed25519 signature).
     let updater = app
         .updater_builder()
         .endpoints(vec![url])
         .map_err(|e| format!("failed to set endpoints: {e}"))?
+        .configure_client(|client| client.danger_accept_invalid_certs(true))
         .build()
         .map_err(|e| format!("failed to build updater: {e}"))?;
 
@@ -87,6 +91,7 @@ pub async fn download_and_install_update(
         .updater_builder()
         .endpoints(vec![url])
         .map_err(|e| format!("failed to set endpoints: {e}"))?
+        .configure_client(|client| client.danger_accept_invalid_certs(true))
         .build()
         .map_err(|e| format!("failed to build updater: {e}"))?;
 

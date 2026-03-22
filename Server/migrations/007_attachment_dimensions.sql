@@ -1,0 +1,2 @@
+ALTER TABLE attachments ADD COLUMN width INTEGER;
+ALTER TABLE attachments ADD COLUMN height INTEGER;

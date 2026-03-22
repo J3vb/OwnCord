@@ -4,6 +4,7 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import { createEmojiPicker } from "@components/EmojiPicker";
 import { createGifPicker } from "@components/GifPicker";
@@ -165,19 +166,22 @@ export function createMessageInput(
         img.replaceWith(nameEl);
       });
     } else {
-      const icon = createElement("div", { class: "attachment-preview-file" }, "\uD83D\uDCC4");
+      const icon = createElement("div", { class: "attachment-preview-file" });
+      icon.appendChild(createIcon("file-text", 16));
       const nameEl = createElement("span", { class: "attachment-preview-name" }, file.name);
       appendChildren(item, icon, nameEl);
     }
 
     // Loading spinner overlay
-    const spinner = createElement("div", { class: "attachment-preview-spinner" }, "\u23F3");
+    const spinner = createElement("div", { class: "attachment-preview-spinner" });
+    spinner.appendChild(createIcon("loader", 16));
     item.appendChild(spinner);
 
     const removeBtn = createElement("button", {
       class: "attachment-preview-remove",
       "data-testid": "attachment-remove",
-    }, "\u00D7");
+    });
+    removeBtn.appendChild(createIcon("x", 14));
     removeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       removePreviewItem(tempId);
@@ -247,7 +251,8 @@ export function createMessageInput(
     const replyInner = createElement("div", { class: "reply-bar-inner" });
     replyText = createElement("strong", {});
     replyInner.appendChild(replyText);
-    const replyClose = createElement("button", { class: "reply-close" }, "\u00D7");
+    const replyClose = createElement("button", { class: "reply-close" });
+    replyClose.appendChild(createIcon("x", 14));
     replyClose.addEventListener("click", clearReply, { signal });
     replyInner.appendChild(replyClose);
     replyBar.appendChild(replyInner);
@@ -256,7 +261,8 @@ export function createMessageInput(
     const editInner = createElement("div", { class: "reply-bar-inner" });
     const editText = createElement("strong", {}, "Editing message");
     editInner.appendChild(editText);
-    const editClose = createElement("button", { class: "reply-close" }, "\u00D7");
+    const editClose = createElement("button", { class: "reply-close" });
+    editClose.appendChild(createIcon("x", 14));
     editClose.addEventListener("click", () => cancelEdit(), { signal });
     editInner.appendChild(editClose);
     editBar.appendChild(editInner);
@@ -276,7 +282,7 @@ export function createMessageInput(
       }) as HTMLInputElement;
       fileInput.addEventListener("change", () => {
         const file = fileInput.files?.[0];
-        if (file !== undefined) {
+        if (file != null) {
           void handlePasteFile(file);
         }
         fileInput.value = "";
@@ -292,15 +298,21 @@ export function createMessageInput(
       "data-testid": "msg-textarea",
     });
     const emojiBtn = createElement("button",
-      { class: "input-btn emoji-btn", "aria-label": "Emoji" }, "\uD83D\uDE00");
+      { class: "input-btn emoji-btn", "aria-label": "Emoji" });
+    emojiBtn.appendChild(createIcon("smile", 20));
     const gifBtn = createElement("button",
       { class: "input-btn gif-btn", "aria-label": "GIF" }, "GIF");
     const sendBtn = createElement("button",
-      { class: "input-btn send-btn", "aria-label": "Send message", "data-testid": "send-btn" }, "\u27A4");
+      { class: "input-btn send-btn", "aria-label": "Send message", "data-testid": "send-btn" });
+    sendBtn.appendChild(createIcon("send", 20));
 
     textarea.addEventListener("input", () => { autoResize(); maybeEmitTyping(); }, { signal });
     textarea.addEventListener("keydown", (e: KeyboardEvent) => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+      if (e.key === "Escape") {
+        if (state.editing !== null) { cancelEdit(); }
+        else if (state.replyTo !== null) { clearReply(); }
+      }
       if (e.key === "ArrowUp" && textarea !== null && textarea.value.length === 0) {
         root?.dispatchEvent(new CustomEvent("edit-last-message", { bubbles: true }));
       }

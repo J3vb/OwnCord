@@ -42,22 +42,17 @@ func BuildJSONForTest(v any) []byte {
 	return buildJSON(v)
 }
 
-// BuildVoiceOfferForTest exposes buildVoiceOffer for external tests.
-func BuildVoiceOfferForTest(channelID int64, sdp string) []byte {
-	return buildVoiceOffer(channelID, sdp)
+// ParseIdentityForTest exposes parseIdentity for external tests.
+func ParseIdentityForTest(identity string) (int64, error) {
+	return parseIdentity(identity)
 }
 
-// BuildVoiceICEForTest exposes buildVoiceICE for external tests.
-func BuildVoiceICEForTest(channelID int64, candidate any) []byte {
-	return buildVoiceICE(channelID, candidate)
+// ParseRoomChannelIDForTest exposes parseRoomChannelID for external tests.
+func ParseRoomChannelIDForTest(roomName string) (int64, error) {
+	return parseRoomChannelID(roomName)
 }
 
-// SetupICECallbackForTest exposes setupICECallback for external tests.
-func (h *Hub) SetupICECallbackForTest(c *Client, channelID int64) {
-	h.setupICECallback(c, channelID)
-}
-
-// RenegotiateParticipantForTest exposes renegotiateParticipant for external tests.
-func (h *Hub) RenegotiateParticipantForTest(c *Client) {
-	h.renegotiateParticipant(c)
+// WsToHTTPForTest exposes wsToHTTP for external tests.
+func WsToHTTPForTest(wsURL string) string {
+	return wsToHTTP(wsURL)
 }

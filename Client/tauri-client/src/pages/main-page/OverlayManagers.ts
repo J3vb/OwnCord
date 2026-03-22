@@ -12,6 +12,7 @@ import type { InviteItem } from "@components/InviteManager";
 import type { InviteResponse } from "@lib/types";
 import { createPinnedMessages } from "@components/PinnedMessages";
 import type { PinnedMessage } from "@components/PinnedMessages";
+import { createSearchOverlay } from "@components/SearchOverlay";
 import type { ToastContainer } from "@components/Toast";
 import { setActiveChannel } from "@stores/channels.store";
 
@@ -43,6 +44,15 @@ export function mapInviteResponse(r: InviteResponse): InviteItem {
 // Pinned message mapping
 // ---------------------------------------------------------------------------
 
+function pickPinAvatarColor(username: string): string {
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) {
+    hash = username.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 55%, 55%)`;
+}
+
 export function mapToPinnedMessage(msg: {
   readonly id: number;
   readonly user: { readonly username: string };
@@ -55,6 +65,7 @@ export function mapToPinnedMessage(msg: {
     author: msg.user.username,
     content: msg.content,
     timestamp: msg.created_at ?? msg.timestamp ?? "",
+    avatarColor: pickPinAvatarColor(msg.user.username),
   };
 }
 
@@ -251,4 +262,68 @@ export function createPinnedPanelController(opts: {
   }
 
   return { toggle, cleanup: close };
+}
+
+// ---------------------------------------------------------------------------
+// Search Overlay Controller
+// ---------------------------------------------------------------------------
+
+export interface SearchOverlayController {
+  open(): void;
+  cleanup(): void;
+}
+
+export function createSearchOverlayController(opts: {
+  readonly api: ApiClient;
+  readonly getRoot: () => HTMLDivElement | null;
+  readonly getToast: () => ToastContainer | null;
+  readonly getCurrentChannelId: () => number | null;
+  readonly onJumpToMessage?: (channelId: number, messageId: number) => boolean;
+}): SearchOverlayController {
+  let instance: MountableComponent | null = null;
+
+  function close(): void {
+    if (instance !== null) {
+      instance.destroy?.();
+      instance = null;
+    }
+  }
+
+  function open(): void {
+    const root = opts.getRoot();
+    if (instance !== null || root === null) return;
+
+    const channelId = opts.getCurrentChannelId();
+
+    instance = createSearchOverlay({
+      currentChannelId: channelId ?? undefined,
+      onSearch: async (query, chId, signal) => {
+        try {
+          const resp = await opts.api.search(query, { channelId: chId }, signal);
+          return resp.results;
+        } catch (err) {
+          if (err instanceof DOMException && err.name === "AbortError") throw err;
+          log.error("Search failed", { query, error: String(err) });
+          opts.getToast()?.show("Search failed", "error");
+          throw err;
+        }
+      },
+      onSelectResult: (result) => {
+        setActiveChannel(result.channel_id);
+        if (opts.onJumpToMessage !== undefined) {
+          // Give the channel a frame to mount before scrolling
+          requestAnimationFrame(() => {
+            const found = opts.onJumpToMessage!(result.channel_id, result.message_id);
+            if (!found) {
+              opts.getToast()?.show("Message not in loaded history", "info");
+            }
+          });
+        }
+      },
+      onClose: close,
+    });
+    instance.mount(root);
+  }
+
+  return { open, cleanup: close };
 }

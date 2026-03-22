@@ -3,12 +3,10 @@
  */
 
 import { createElement, appendChildren } from "@lib/dom";
-import { loadPref, savePref } from "./helpers";
+import { loadPref, savePref, createToggle } from "./helpers";
 
 export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
-  const header = createElement("h1", {}, "Notifications");
-  section.appendChild(header);
 
   const toggles: ReadonlyArray<{ key: string; label: string; desc: string; fallback: boolean }> = [
     { key: "desktopNotifications", label: "Desktop Notifications", desc: "Show desktop notifications for messages", fallback: true },
@@ -25,12 +23,10 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
     appendChildren(info, label, desc);
 
     const isOn = loadPref<boolean>(item.key, item.fallback);
-    const toggle = createElement("div", { class: isOn ? "toggle on" : "toggle" });
-    toggle.addEventListener("click", () => {
-      const nowOn = !toggle.classList.contains("on");
-      toggle.classList.toggle("on", nowOn);
-      savePref(item.key, nowOn);
-    }, { signal });
+    const toggle = createToggle(isOn, {
+      signal,
+      onChange: (nowOn) => { savePref(item.key, nowOn); },
+    });
 
     appendChildren(row, info, toggle);
     section.appendChild(row);

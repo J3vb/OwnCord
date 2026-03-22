@@ -135,6 +135,8 @@ type AttachmentInfo struct {
 	Size     int64  `json:"size"`
 	Mime     string `json:"mime"`
 	URL      string `json:"url"`
+	Width    *int   `json:"width,omitempty"`
+	Height   *int   `json:"height,omitempty"`
 }
 
 // ReactionInfo is the reaction shape in API responses.

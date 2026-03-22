@@ -1,8 +1,11 @@
 # OwnCord
 
+*The gaming chat platform you actually own.*
+
 A self-hosted Windows chat platform with real-time messaging,
 voice/video, file sharing, and a web admin panel. Run your own
-server and keep everything under your control.
+server and keep everything under your control — zero cloud
+dependencies, works fully on LAN.
 
 ## Features
 
@@ -21,17 +24,14 @@ server and keep everything under your control.
 
 ### Voice & Video
 
-- Voice channels with WebRTC (Pion SFU)
+- Voice channels powered by LiveKit SFU
 - Webcam video chat with responsive grid layout
 - Mute, deafen, camera, and screenshare controls
 - Push-to-talk with global hotkey (non-consuming, works while unfocused)
 - Per-user volume control (right-click user in voice channel)
-- NAT traversal via Google STUN + configurable external IP
-- RNNoise ML noise suppression (AudioWorklet + fallback)
-- Voice activity detection with configurable sensitivity
-- Silence suppression to save bandwidth
-- Configurable audio quality (low/medium/high)
-- Server-enforced max video streams per room
+- RNNoise ML noise suppression
+- Voice activity detection with speaker indicators
+- LiveKit server runs as a companion process alongside `chatserver.exe`
 
 ### Channels & Organization
 
@@ -111,8 +111,8 @@ Two components: a **Go server** and a **Tauri v2 client**
 |  +---------------+  |  HTTPS  |  +---------------+  |
 |  |  REST Client  |--+------->|  |  REST API     |  |
 |  +---------------+  |         |  +---------------+  |
-|  +---------------+  |  WebRTC |  +---------------+  |
-|  |  Voice/Video  |--+------->|  |  SFU (Pion)   |  |
+|  +---------------+  | LiveKit |  +---------------+  |
+|  |  Voice/Video  |--+------->|  |  LiveKit SFU  |  |
 |  +---------------+  |         |  +---------------+  |
 +---------------------+         |  +---------------+  |
                                 |  |  SQLite DB    |  |
@@ -122,7 +122,7 @@ Two components: a **Go server** and a **Tauri v2 client**
 
 - **WebSocket** — chat messages, typing, presence, voice signaling
 - **REST API** — message history, file uploads, channel management, auth
-- **WebRTC** — voice and video via Pion SFU with Google STUN for NAT traversal
+- **LiveKit** — voice and video via LiveKit SFU (companion process)
 
 ## Project Structure
 
@@ -141,9 +141,9 @@ OwnCord/
 │   └── tauri-client/        # Tauri v2 desktop client
 │       ├── src-tauri/       #   Rust backend (plugins, commands)
 │       ├── src/             #   TypeScript frontend
-│       │   ├── lib/         #     Core services (API, WS, WebRTC, updater)
+│       │   ├── lib/         #     Core services (API, WS, LiveKit, updater)
 │       │   ├── stores/      #     Reactive state (auth, channels, messages, voice)
-│       │   ├── components/  #     UI components (36 modules)
+│       │   ├── components/  #     UI components (28 modules)
 │       │   ├── pages/       #     Page layouts
 │       │   └── styles/      #     CSS
 │       └── tests/           #   Unit, integration, and E2E tests
@@ -200,9 +200,10 @@ The server generates a `config.yaml` on first run. Key settings:
 | `server.name` | `OwnCord Server` | Display name |
 | `tls.mode` | `selfsigned` | TLS mode (see docs) |
 | `upload.max_size_mb` | `10` | Max upload size |
-| `voice.quality` | `medium` | `low`, `medium`, `high` |
-| `voice.external_ip` | — | Public IP for NAT traversal |
-| `voice.turn_enabled` | `true` | Enable TURN relay (requires coturn) |
+| `voice.livekit_url` | `ws://localhost:7880` | LiveKit server WebSocket URL |
+| `voice.livekit_api_key` | `devkey` | LiveKit API key |
+| `voice.livekit_api_secret` | — | LiveKit API secret (min 32 chars) |
+| `voice.livekit_binary` | — | Path to `livekit-server` binary (auto-start) |
 | `server.admin_allowed_cidrs` | private nets | CIDRs allowed to access `/admin` |
 | `github.token` | — | Token for update checks |
 
@@ -237,10 +238,10 @@ Detailed docs live in the `docs/brain/` Obsidian vault:
 
 | Component | Technology |
 | --------- | --------- |
-| Server | Go, chi router, Pion WebRTC |
+| Server | Go, chi router, LiveKit server SDK |
 | Database | SQLite (pure Go, embedded) |
 | Client | Tauri v2 (Rust + TypeScript) |
-| Voice/Video | WebRTC with Pion SFU, Google STUN |
+| Voice/Video | LiveKit SFU (companion process) |
 | Build | NSIS installer, GitHub Actions CI |
 
 ## License

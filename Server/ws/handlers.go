@@ -63,7 +63,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		tempUser := &db.User{Banned: result.Banned, BanExpires: result.BanExpires}
 		if auth.IsEffectivelyBanned(tempUser) {
 			slog.Info("ws user banned, closing connection", "user_id", c.userID)
-			c.sendMsg(buildErrorMsg("BANNED", "you are banned"))
+			c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
 			h.kickClient(c)
 			return
 		}
@@ -71,12 +71,34 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 
 	var env envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
-		slog.Warn("ws handleMessage invalid JSON", "user_id", c.userID, "err", err)
-		c.sendMsg(buildErrorMsg("INVALID_JSON", "message must be valid JSON"))
+		c.mu.Lock()
+		c.invalidCount++
+		count := c.invalidCount
+		c.mu.Unlock()
+
+		slog.Warn("ws handleMessage invalid JSON", "user_id", c.userID, "err", err, "invalid_count", count)
+		c.sendMsg(buildErrorMsg(ErrCodeInvalidJSON, "message must be valid JSON"))
+
+		if count >= 10 {
+			slog.Warn("ws too many invalid messages, closing connection", "user_id", c.userID, "invalid_count", count)
+			h.kickClient(c)
+		}
 		return
 	}
 
-	slog.Debug("ws ← client message", "type", env.Type, "user_id", c.userID, "id", env.ID)
+	// Valid parse — reset consecutive invalid counter.
+	c.mu.Lock()
+	c.invalidCount = 0
+	c.mu.Unlock()
+
+	// Request-scoped logger with correlation context.
+	reqLog := slog.With(
+		"user_id", c.userID,
+		"msg_type", env.Type,
+		"req_id", env.ID,
+	)
+
+	reqLog.Debug("ws ← client message")
 
 	switch env.Type {
 	case "chat_send":
@@ -99,6 +121,8 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		h.handleVoiceJoin(c, env.Payload)
 	case "voice_leave":
 		h.handleVoiceLeave(c)
+	case "voice_token_refresh":
+		h.handleVoiceTokenRefresh(c)
 	case "voice_mute":
 		h.handleVoiceMute(c, env.Payload)
 	case "voice_deafen":
@@ -107,19 +131,11 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		h.handleVoiceCamera(c, env.Payload)
 	case "voice_screenshare":
 		h.handleVoiceScreenshare(c, env.Payload)
-	case "voice_offer":
-		h.handleVoiceOffer(c, env.Payload)
-	case "voice_answer":
-		h.handleVoiceAnswer(c, env.Payload)
-	case "voice_ice":
-		h.handleVoiceICE(c, env.Payload)
-	case "soundboard_play":
-		h.handleSoundboard(c, env.Payload)
 	case "ping":
 		c.sendMsg(buildJSON(map[string]any{"type": "pong"}))
 	default:
-		slog.Warn("ws handleMessage unknown type", "type", env.Type, "user_id", c.userID)
-		c.sendMsg(buildErrorMsg("UNKNOWN_TYPE", fmt.Sprintf("unknown message type: %s", env.Type)))
+		reqLog.Warn("ws handleMessage unknown type")
+		c.sendMsg(buildErrorMsg(ErrCodeUnknownType, fmt.Sprintf("unknown message type: %s", env.Type)))
 	}
 }
 
@@ -139,19 +155,19 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 		Attachments []string   `json:"attachments"`
 	}
 	if err := json.Unmarshal(payload, &p); err != nil {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "invalid chat_send payload"))
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "invalid chat_send payload"))
 		return
 	}
 	channelID, err := p.ChannelID.Int64()
 	if err != nil || channelID <= 0 {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "channel_id must be a positive integer"))
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "channel_id must be a positive integer"))
 		return
 	}
 
 	// Check channel exists.
 	ch, err := h.db.GetChannel(channelID)
 	if err != nil || ch == nil {
-		c.sendMsg(buildErrorMsg("NOT_FOUND", "channel not found"))
+		c.sendMsg(buildErrorMsg(ErrCodeNotFound, "channel not found"))
 		return
 	}
 
@@ -164,7 +180,7 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 	if ch.SlowMode > 0 && !h.hasChannelPerm(c, channelID, permissions.ManageMessages) {
 		slowKey := fmt.Sprintf("slow:%d:%d", c.userID, channelID)
 		if !h.limiter.Allow(slowKey, 1, time.Duration(ch.SlowMode)*time.Second) {
-			c.sendMsg(buildErrorMsg("SLOW_MODE", fmt.Sprintf("channel has %ds slow mode", ch.SlowMode)))
+			c.sendMsg(buildErrorMsg(ErrCodeSlowMode, fmt.Sprintf("channel has %ds slow mode", ch.SlowMode)))
 			return
 		}
 	}
@@ -172,11 +188,11 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 	// Sanitize and validate content length.
 	content := sanitizer.Sanitize(p.Content)
 	if content == "" && len(p.Attachments) == 0 {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "message content cannot be empty"))
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "message content cannot be empty"))
 		return
 	}
 	if len([]rune(content)) > 4000 {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "message content exceeds maximum length of 4000 characters"))
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "message content exceeds maximum length of 4000 characters"))
 		return
 	}
 
@@ -191,7 +207,7 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 	msgID, err := h.db.CreateMessage(channelID, c.userID, content, p.ReplyTo)
 	if err != nil {
 		slog.Error("ws handleChatSend CreateMessage", "err", err)
-		c.sendMsg(buildErrorMsg("INTERNAL", "failed to save message"))
+		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to save message"))
 		return
 	}
 
@@ -200,7 +216,13 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 	if len(p.Attachments) > 0 {
 		linked, linkErr := h.db.LinkAttachmentsToMessage(msgID, p.Attachments)
 		if linkErr != nil {
-			slog.Error("ws handleChatSend LinkAttachments", "err", linkErr)
+			slog.Error("ws handleChatSend LinkAttachments", "err", linkErr, "msg_id", msgID)
+			// Delete the orphaned message so it doesn't persist without its attachments.
+			if delErr := h.db.DeleteMessage(msgID, c.userID, true); delErr != nil {
+				slog.Error("ws handleChatSend DeleteMessage (cleanup)", "err", delErr, "msg_id", msgID)
+			}
+			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to send message with attachments"))
+			return
 		}
 		if linked > 0 {
 			attMap, attErr := h.db.GetAttachmentsByMessageIDs([]int64{msgID})
@@ -224,7 +246,7 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 	msg, err := h.db.GetMessage(msgID)
 	if err != nil || msg == nil {
 		slog.Error("ws handleChatSend GetMessage after create", "err", err)
-		c.sendMsg(buildErrorMsg("INTERNAL", "failed to retrieve message"))
+		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to retrieve message"))
 		return
 	}
 
@@ -235,7 +257,7 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 		avatar = c.user.Avatar
 	}
 
-	slog.Info("message sent", "user", username, "channel_id", channelID, "msg_id", msgID)
+	slog.Debug("message sent", "user", username, "channel_id", channelID, "msg_id", msgID)
 
 	// Ack sender.
 	c.sendMsg(buildChatSendOK(reqID, msgID, msg.Timestamp))
@@ -258,31 +280,31 @@ func (h *Hub) handleChatEdit(c *Client, _ string, payload json.RawMessage) {
 		Content   string      `json:"content"`
 	}
 	if err := json.Unmarshal(payload, &p); err != nil {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "invalid chat_edit payload"))
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "invalid chat_edit payload"))
 		return
 	}
 	msgID, err := p.MessageID.Int64()
 	if err != nil || msgID <= 0 {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "message_id must be positive integer"))
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "message_id must be positive integer"))
 		return
 	}
 
 	content := sanitizer.Sanitize(p.Content)
 	if content == "" {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "content cannot be empty"))
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "content cannot be empty"))
 		return
 	}
 
 	// EditMessage checks ownership internally.
 	if err := h.db.EditMessage(msgID, c.userID, content); err != nil {
-		c.sendMsg(buildErrorMsg("FORBIDDEN", "cannot edit this message"))
+		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "cannot edit this message"))
 		return
 	}
 
 	msg, err := h.db.GetMessage(msgID)
 	if err != nil || msg == nil {
 		slog.Error("ws handleChatEdit GetMessage after edit", "err", err, "msg_id", msgID)
-		c.sendMsg(buildErrorMsg("INTERNAL", "edit saved but broadcast failed"))
+		c.sendMsg(buildErrorMsg(ErrCodeInternal, "edit saved but broadcast failed"))
 		return
 	}
 
@@ -290,7 +312,7 @@ func (h *Hub) handleChatEdit(c *Client, _ string, payload json.RawMessage) {
 	if msg.EditedAt != nil {
 		editedAt = *msg.EditedAt
 	}
-	slog.Info("message edited", "user_id", c.userID, "msg_id", msgID, "channel_id", msg.ChannelID)
+	slog.Debug("message edited", "user_id", c.userID, "msg_id", msgID, "channel_id", msg.ChannelID)
 	h.BroadcastToChannel(msg.ChannelID, buildChatEdited(msgID, msg.ChannelID, content, editedAt))
 }
 
@@ -306,28 +328,28 @@ func (h *Hub) handleChatDelete(c *Client, _ string, payload json.RawMessage) {
 		MessageID json.Number `json:"message_id"`
 	}
 	if err := json.Unmarshal(payload, &p); err != nil {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "invalid chat_delete payload"))
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "invalid chat_delete payload"))
 		return
 	}
 	msgID, err := p.MessageID.Int64()
 	if err != nil || msgID <= 0 {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "message_id must be positive integer"))
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "message_id must be positive integer"))
 		return
 	}
 
 	msg, err := h.db.GetMessage(msgID)
 	if err != nil || msg == nil {
-		c.sendMsg(buildErrorMsg("NOT_FOUND", "message not found"))
+		c.sendMsg(buildErrorMsg(ErrCodeNotFound, "message not found"))
 		return
 	}
 
 	isMod := h.hasChannelPerm(c, msg.ChannelID, permissions.ManageMessages)
 	if err := h.db.DeleteMessage(msgID, c.userID, isMod); err != nil {
-		c.sendMsg(buildErrorMsg("FORBIDDEN", "cannot delete this message"))
+		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "cannot delete this message"))
 		return
 	}
 
-	slog.Info("message deleted", "user_id", c.userID, "msg_id", msgID, "channel_id", msg.ChannelID, "is_mod", isMod)
+	slog.Debug("message deleted", "user_id", c.userID, "msg_id", msgID, "channel_id", msg.ChannelID, "is_mod", isMod)
 	_ = h.db.LogAudit(c.userID, "message_delete", "message", msgID,
 		fmt.Sprintf("channel %d, mod_action=%v", msg.ChannelID, isMod))
 	h.BroadcastToChannel(msg.ChannelID, buildChatDeleted(msgID, msg.ChannelID))
@@ -346,26 +368,26 @@ func (h *Hub) handleReaction(c *Client, add bool, payload json.RawMessage) {
 		Emoji     string      `json:"emoji"`
 	}
 	if err := json.Unmarshal(payload, &p); err != nil {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "invalid reaction payload"))
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "invalid reaction payload"))
 		return
 	}
 	msgID, err := p.MessageID.Int64()
 	if err != nil || msgID <= 0 {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "message_id must be positive integer"))
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "message_id must be positive integer"))
 		return
 	}
 	if p.Emoji == "" {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "emoji cannot be empty"))
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "emoji cannot be empty"))
 		return
 	}
 	if len(p.Emoji) > 32 {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "emoji too long"))
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "emoji too long"))
 		return
 	}
 	// Reject control characters (U+0000–U+001F, U+007F) to prevent injection.
 	for _, r := range p.Emoji {
 		if r < 0x20 || r == 0x7F {
-			c.sendMsg(buildErrorMsg("BAD_REQUEST", "emoji contains invalid characters"))
+			c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "emoji contains invalid characters"))
 			return
 		}
 	}
@@ -374,7 +396,7 @@ func (h *Hub) handleReaction(c *Client, add bool, payload json.RawMessage) {
 	if err != nil || msg == nil {
 		// Normalize: return same error whether message doesn't exist or is in
 		// a channel the user can't see (prevents IDOR information leak).
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "reaction failed"))
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "reaction failed"))
 		return
 	}
 
@@ -392,7 +414,7 @@ func (h *Hub) handleReaction(c *Client, add bool, payload json.RawMessage) {
 	if err != nil {
 		// Sanitize: never leak raw DB constraint errors to client.
 		slog.Warn("reaction failed", "action", action, "msg_id", msgID, "user_id", c.userID, "err", err)
-		c.sendMsg(buildErrorMsg("CONFLICT", "reaction failed"))
+		c.sendMsg(buildErrorMsg(ErrCodeConflict, "reaction failed"))
 		return
 	}
 
@@ -403,7 +425,7 @@ func (h *Hub) handleReaction(c *Client, add bool, payload json.RawMessage) {
 func (h *Hub) handleTyping(c *Client, payload json.RawMessage) {
 	channelID, err := parseChannelID(payload)
 	if err != nil || channelID <= 0 {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "channel_id must be positive integer"))
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "channel_id must be positive integer"))
 		return
 	}
 
@@ -433,17 +455,19 @@ func (h *Hub) handlePresence(c *Client, payload json.RawMessage) {
 		Status string `json:"status"`
 	}
 	if err := json.Unmarshal(payload, &p); err != nil {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "invalid presence_update payload"))
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "invalid presence_update payload"))
 		return
 	}
 	validStatuses := map[string]bool{"online": true, "idle": true, "dnd": true, "offline": true}
 	if !validStatuses[p.Status] {
-		c.sendMsg(buildErrorMsg("BAD_REQUEST", "status must be online|idle|dnd|offline"))
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "status must be online|idle|dnd|offline"))
 		return
 	}
 
 	if err := h.db.UpdateUserStatus(c.userID, p.Status); err != nil {
-		slog.Error("ws handlePresence UpdateUserStatus", "err", err)
+		slog.Error("ws handlePresence UpdateUserStatus", "err", err, "user_id", c.userID)
+		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to update status"))
+		return
 	}
 
 	h.BroadcastToAll(buildPresenceMsg(c.userID, p.Status))
@@ -479,7 +503,7 @@ func (h *Hub) requireChannelPerm(c *Client, channelID int64, perm int64, permLab
 		return true
 	}
 	slog.Warn("ws permission denied", "user_id", c.userID, "channel_id", channelID, "perm", permLabel)
-	c.sendMsg(buildErrorMsg("FORBIDDEN", "missing "+permLabel+" permission"))
+	c.sendMsg(buildErrorMsg(ErrCodeForbidden, "missing "+permLabel+" permission"))
 	return false
 }
 
@@ -491,13 +515,10 @@ func (h *Hub) broadcastExclude(channelID, excludeUserID int64, msg []byte) {
 		if uid == excludeUserID {
 			continue
 		}
-		if channelID != 0 && c.channelID != channelID {
+		if channelID != 0 && c.getChannelID() != channelID {
 			continue
 		}
-		select {
-		case c.send <- msg:
-		default:
-		}
+		c.sendMsg(msg)
 	}
 }
 
@@ -521,7 +542,7 @@ func (h *Hub) handleChannelFocus(c *Client, payload json.RawMessage) {
 	c.channelID = chID
 	c.mu.Unlock()
 
-	slog.Info("channel_focus", "user_id", c.userID, "channel_id", chID, "prev_channel_id", prevCh)
+	slog.Debug("channel_focus", "user_id", c.userID, "channel_id", chID, "prev_channel_id", prevCh)
 
 	// Mark channel as read by updating read_states to the latest message.
 	latestID, latestErr := h.db.GetLatestMessageID(chID)

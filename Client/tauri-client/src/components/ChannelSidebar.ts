@@ -10,6 +10,7 @@ import {
   clearChildren,
   appendChildren,
 } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import {
   channelsStore,
@@ -26,7 +27,7 @@ import {
   isCategoryCollapsed,
 } from "@stores/ui.store";
 import { voiceStore, getChannelVoiceUsers } from "@stores/voice.store";
-import { setUserVolume, getUserVolume } from "@lib/voiceSession";
+import { setUserVolume, getUserVolume } from "@lib/livekitSession";
 
 // ---------------------------------------------------------------------------
 // Per-user volume context menu (right-click on voice user row)
@@ -101,7 +102,6 @@ function showUserVolumeMenu(
 
   // Close on click outside
   const dismissAc = new AbortController();
-  const combinedSignal = signal;
   setTimeout(() => {
     document.addEventListener("mousedown", (e: MouseEvent) => {
       if (!menu.contains(e.target as Node)) {
@@ -112,7 +112,7 @@ function showUserVolumeMenu(
   }, 0);
 
   // Also clean up if the parent component is destroyed
-  combinedSignal.addEventListener("abort", () => {
+  signal.addEventListener("abort", () => {
     menu.remove();
     dismissAc.abort();
   });
@@ -216,7 +216,8 @@ function renderVoiceChannelItem(
   const item = createElement("div", { class: classes, "data-testid": `channel-${channel.id}` });
   item.dataset.channelId = String(channel.id);
 
-  const prefix = createElement("span", { class: "ch-icon" }, "\uD83D\uDD0A");
+  const prefix = createElement("span", { class: "ch-icon" });
+  prefix.appendChild(createIcon("volume-2", 16));
   const name = createElement("span", { class: "ch-name" }, channel.name);
 
   appendChildren(item, prefix, name);
@@ -243,7 +244,7 @@ function renderVoiceChannelItem(
       const rowClasses = user.speaking
         ? "voice-user-item speaking"
         : "voice-user-item";
-      const row = createElement("div", { class: rowClasses });
+      const row = createElement("div", { class: rowClasses, "data-voice-uid": String(user.userId) });
 
       const initial = user.username.length > 0
         ? user.username.charAt(0).toUpperCase()
@@ -259,15 +260,24 @@ function renderVoiceChannelItem(
       );
       row.appendChild(nameEl);
 
+      if (user.camera) {
+        const cameraIcon = createElement("span", { class: "vu-status" });
+        cameraIcon.appendChild(createIcon("camera", 14));
+        row.appendChild(cameraIcon);
+      }
+
       if (user.deafened) {
-        // Deafened: show both crossed mic and crossed headphone
-        const muteIcon = createElement("span", { class: "vu-muted vu-icon-crossed" }, "\uD83C\uDFA4");
-        const deafIcon = createElement("span", { class: "vu-muted vu-icon-crossed" }, "\uD83C\uDFA7");
+        // Deafened: show both mic-off and headphones-off
+        const muteIcon = createElement("span", { class: "vu-muted" });
+        muteIcon.appendChild(createIcon("mic-off", 14));
+        const deafIcon = createElement("span", { class: "vu-muted" });
+        deafIcon.appendChild(createIcon("headphones-off", 14));
         row.appendChild(muteIcon);
         row.appendChild(deafIcon);
       } else if (user.muted) {
-        // Muted only: show crossed mic
-        const muteIcon = createElement("span", { class: "vu-muted vu-icon-crossed" }, "\uD83C\uDFA4");
+        // Muted only: show mic-off
+        const muteIcon = createElement("span", { class: "vu-muted" });
+        muteIcon.appendChild(createIcon("mic-off", 14));
         row.appendChild(muteIcon);
       }
 
@@ -591,11 +601,8 @@ function renderCategoryGroup(
     });
     header.dataset.category = categoryName;
 
-    const arrow = createElement(
-      "span",
-      { class: "category-arrow" },
-      collapsed ? "\u25B6" : "\u25BC",
-    );
+    const arrow = createElement("span", { class: "category-arrow" });
+    arrow.appendChild(createIcon(collapsed ? "chevron-right" : "chevron-down", 12));
     const label = createElement("span", { class: "category-name" }, categoryName);
 
     appendChildren(header, arrow, label);
@@ -674,6 +681,15 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     const grouped = getChannelsByCategory();
     const state = channelsStore.getState();
 
+    if (grouped.size === 0) {
+      const emptyState = createElement("div", { class: "channel-list-empty" });
+      const msg = createElement("p", { class: "channel-list-empty-text" }, "No channels yet");
+      const hint = createElement("p", { class: "channel-list-empty-hint" }, "Right-click a category to create one");
+      appendChildren(emptyState, msg, hint);
+      channelList.appendChild(emptyState);
+      return;
+    }
+
     for (const [category, channels] of grouped) {
       channelList.appendChild(
         renderCategoryGroup(category, channels, state.activeChannelId, ac.signal, onVoiceJoin, onVoiceLeave, onCreateChannel, onEditChannel, onDeleteChannel, onReorderChannel),
@@ -703,29 +719,66 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // Initial render
     renderChannels();
 
-    // Subscribe to channels store changes
-    const unsubChannels = channelsStore.subscribe(() => {
-      renderChannels();
-    });
-    unsubscribers.push(unsubChannels);
+    // Subscribe to channels store changes (channels map OR active channel)
+    const unsubChannelsMap = channelsStore.subscribeSelector(
+      (s) => s.channels,
+      () => renderChannels(),
+    );
+    unsubscribers.push(unsubChannelsMap);
+    const unsubActiveChannel = channelsStore.subscribeSelector(
+      (s) => s.activeChannelId,
+      () => renderChannels(),
+    );
+    unsubscribers.push(unsubActiveChannel);
 
     // Subscribe to auth store for server name updates
-    const unsubAuth = authStore.subscribe((state) => {
-      if (serverNameEl !== null) {
-        setText(serverNameEl, state.serverName ?? "Server Name");
-      }
-    });
+    const unsubAuth = authStore.subscribeSelector(
+      (s) => s.serverName,
+      (serverName) => {
+        if (serverNameEl !== null) {
+          setText(serverNameEl, serverName ?? "Server Name");
+        }
+      },
+    );
     unsubscribers.push(unsubAuth);
 
     // Subscribe to UI store for category collapse changes
-    const unsubUi = uiStore.subscribe(() => {
-      renderChannels();
-    });
+    const unsubUi = uiStore.subscribeSelector(
+      (s) => s.collapsedCategories,
+      () => renderChannels(),
+    );
     unsubscribers.push(unsubUi);
 
-    // Subscribe to voice store for connected user updates
-    const unsubVoice = voiceStore.subscribe(() => {
-      renderChannels();
+    // Subscribe to voice store — only full re-render when users join/leave
+    // or mute/deafen/camera changes. Speaking state is patched in-place via
+    // CSS class toggle to avoid destroying DOM elements (which kills hover).
+    let prevVoiceStructureSig = "";
+    const unsubVoice = voiceStore.subscribe((state) => {
+      // Structural signature: who is in which channel + mute/deafen/camera.
+      // Excludes speaking — that's patched in-place below.
+      let structSig = String(state.currentChannelId ?? "");
+      for (const [chId, users] of state.voiceUsers) {
+        structSig += `|${chId}`;
+        for (const [uid, u] of users) {
+          structSig += `:${uid}${u.muted ? "m" : ""}${u.deafened ? "d" : ""}${u.camera ? "c" : ""}`;
+        }
+      }
+      if (structSig !== prevVoiceStructureSig) {
+        prevVoiceStructureSig = structSig;
+        renderChannels();
+        return;
+      }
+
+      // Patch speaking state in-place — toggle CSS class without re-rendering.
+      if (channelList === null) return;
+      for (const [, users] of state.voiceUsers) {
+        for (const [uid, u] of users) {
+          const row = channelList.querySelector<HTMLElement>(`.voice-user-item[data-voice-uid="${uid}"]`);
+          if (row !== null) {
+            row.classList.toggle("speaking", u.speaking);
+          }
+        }
+      }
     });
     unsubscribers.push(unsubVoice);
   }

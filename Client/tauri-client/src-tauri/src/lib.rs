@@ -38,6 +38,7 @@ pub fn run() {
             ptt::ptt_set_key,
             ptt::ptt_get_key,
             ptt::ptt_listen_for_key,
+            commands::open_devtools,
         ])
         .setup(|app| {
             tray::create_tray(app.handle())?;

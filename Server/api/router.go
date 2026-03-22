@@ -63,22 +63,51 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		MountUploadRoutes(r, database, store)
 	}
 
-	// Voice credentials REST route.
-	MountVoiceRoutes(r, cfg, database)
-
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
 	hub := ws.NewHub(database, limiter)
 
-	// Create SFU if voice config is present; voice is disabled on failure.
-	sfu, sfuErr := ws.NewSFU(&cfg.Voice)
-	if sfuErr != nil {
-		slog.Warn("failed to create SFU, voice disabled", "error", sfuErr)
+	// Create LiveKit client if voice config is present; voice is disabled on failure.
+	lk, lkErr := ws.NewLiveKitClient(&cfg.Voice)
+	if lkErr != nil {
+		slog.Warn("failed to create LiveKit client, voice disabled", "error", lkErr)
 	} else {
-		hub.SetSFU(sfu)
+		hub.SetLiveKit(lk)
+
+		// Optionally start a companion LiveKit process.
+		if cfg.Voice.LiveKitBinaryPath != "" {
+			proc := ws.NewLiveKitProcess(&cfg.Voice, &cfg.TLS, cfg.Server.DataDir)
+			if startErr := proc.Start(); startErr != nil {
+				slog.Error("failed to start LiveKit process", "error", startErr)
+			} else {
+				hub.SetLiveKitProcess(proc)
+			}
+		}
+	}
+
+	// LiveKit webhook endpoint (no auth middleware — uses LiveKit JWT verification).
+	if lkErr == nil {
+		r.Post("/api/v1/livekit/webhook",
+			ws.MountWebhookRoute(hub, cfg.Voice.LiveKitAPIKey, cfg.Voice.LiveKitAPISecret))
+
+		// LiveKit health check — admin-IP-restricted.
+		r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs)).
+			Get("/api/v1/livekit/health", handleLiveKitHealth(hub))
+
+		// Reverse proxy LiveKit signaling through OwnCord's HTTPS server.
+		// This avoids mixed-content blocks (secure page → insecure WS).
+		// Client connects to wss://server:8443/livekit/* → ws://localhost:7880/*
+		r.Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins)))
 	}
 
 	go hub.Run()
 	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins))
+
+	// Metrics endpoint — admin-IP-restricted, returns runtime stats as JSON.
+	r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs)).
+		Get("/api/v1/metrics", handleMetrics(
+			func() int { return hub.ClientCount() },
+			func() (bool, error) { return hub.LiveKitHealthCheck() },
+		))
 
 	// Admin panel: static files + REST API (Phase 6).
 	// Restrict /admin to configured CIDRs (default: private networks only).
@@ -126,6 +155,36 @@ func handleInfo(cfg *config.Config, ver string) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, infoResponse{
 			Name:    cfg.Server.Name,
 			Version: ver,
+		})
+	}
+}
+
+// livekitHealthResponse is the JSON shape returned by GET /api/v1/livekit/health.
+type livekitHealthResponse struct {
+	Status           string `json:"status"`
+	LiveKitReachable bool   `json:"livekit_reachable"`
+	Error            string `json:"error,omitempty"`
+}
+
+func handleLiveKitHealth(hub *ws.Hub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ok, err := hub.LiveKitHealthCheck()
+		if ok {
+			writeJSON(w, http.StatusOK, livekitHealthResponse{
+				Status:           "ok",
+				LiveKitReachable: true,
+			})
+			return
+		}
+
+		errMsg := "unknown"
+		if err != nil {
+			errMsg = err.Error()
+		}
+		writeJSON(w, http.StatusServiceUnavailable, livekitHealthResponse{
+			Status:           "degraded",
+			LiveKitReachable: false,
+			Error:            errMsg,
 		})
 	}
 }

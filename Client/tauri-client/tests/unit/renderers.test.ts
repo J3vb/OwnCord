@@ -29,6 +29,7 @@ function makeMessage(overrides: Partial<Message> = {}): Message {
     replyTo: null,
     attachments: [],
     reactions: [],
+    pinned: false,
     editedAt: null,
     deleted: false,
     timestamp: "2025-01-15T12:30:00Z",
@@ -39,12 +40,14 @@ function makeMessage(overrides: Partial<Message> = {}): Message {
 function makeOpts(overrides: Partial<MessageListOptions> = {}): MessageListOptions {
   return {
     channelId: 1,
+    channelName: "general",
     currentUserId: 10,
     onScrollTop: vi.fn(),
     onReplyClick: vi.fn(),
     onEditClick: vi.fn(),
     onDeleteClick: vi.fn(),
     onReactionClick: vi.fn(),
+    onPinClick: vi.fn(),
     ...overrides,
   };
 }

@@ -250,25 +250,18 @@ export function setVoiceConfig(payload: VoiceConfigPayload): void {
   });
 }
 
-/** Update speaking state for users from a voice_speakers event.
- *  Skips the local user — their speaking state is driven by local VAD
- *  (lower latency, same threshold). Prevents flicker from two sources
- *  disagreeing on the same field. */
+/** Update speaking state for users from a voice_speakers event or
+ *  LiveKit's ActiveSpeakersChanged. Updates ALL users including local
+ *  (LiveKit is now the sole authority for speaking detection). */
 export function setSpeakers(payload: VoiceSpeakersPayload): void {
   voiceStore.setState((prev) => {
     const existingChannel = prev.voiceUsers.get(payload.channel_id);
     if (!existingChannel) return prev;
 
-    const currentUserId = authStore.getState().user?.id ?? 0;
     const speakerSet = new Set(payload.speakers);
     const nextUsers = new Map<number, VoiceUser>();
 
     for (const [userId, user] of existingChannel) {
-      // Skip local user — local VAD is the sole authority for our own indicator
-      if (userId === currentUserId) {
-        nextUsers.set(userId, user);
-        continue;
-      }
       const isSpeaking = speakerSet.has(userId);
       if (user.speaking !== isSpeaking) {
         nextUsers.set(userId, { ...user, speaking: isSpeaking });

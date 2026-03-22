@@ -2,6 +2,10 @@ package api
 
 import (
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"log/slog"
 	"mime"
 	"net/http"
@@ -21,6 +25,8 @@ type uploadResponse struct {
 	Size     int64  `json:"size"`
 	Mime     string `json:"mime"`
 	URL      string `json:"url"`
+	Width    *int   `json:"width,omitempty"`
+	Height   *int   `json:"height,omitempty"`
 }
 
 // MountUploadRoutes registers upload and file-serving endpoints.
@@ -78,8 +84,25 @@ func handleUpload(database *db.DB, store *storage.Storage) http.HandlerFunc {
 			return
 		}
 
+		// Extract image dimensions if the file is an image.
+		var width, height *int
+		if strings.HasPrefix(mime, "image/") {
+			f, openErr := store.Open(fileID)
+			if openErr == nil {
+				cfg, _, decErr := image.DecodeConfig(f)
+				f.Close() //nolint:errcheck
+				if decErr == nil {
+					w2, h2 := cfg.Width, cfg.Height
+					width = &w2
+					height = &h2
+				} else {
+					slog.Warn("failed to decode image dimensions", "id", fileID, "error", decErr)
+				}
+			}
+		}
+
 		// Insert attachment record in DB (unlinked — message_id is NULL).
-		if err := database.CreateAttachment(fileID, header.Filename, fileID, mime, header.Size); err != nil {
+		if err := database.CreateAttachment(fileID, header.Filename, fileID, mime, header.Size, width, height); err != nil {
 			// Clean up stored file on DB failure.
 			_ = store.Delete(fileID)
 			slog.Error("failed to create attachment record", "error", err)
@@ -98,6 +121,8 @@ func handleUpload(database *db.DB, store *storage.Storage) http.HandlerFunc {
 			Size:     header.Size,
 			Mime:     mime,
 			URL:      "/api/v1/files/" + fileID,
+			Width:    width,
+			Height:   height,
 		})
 	}
 }

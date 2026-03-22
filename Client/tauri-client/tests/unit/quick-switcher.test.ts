@@ -139,12 +139,14 @@ describe("QuickSwitcher", () => {
 
   it("shows voice icon for voice channels", () => {
     switcher.mount(container);
-    const icons = container.querySelectorAll(".quick-switcher__icon");
-    const iconTexts = Array.from(icons).map((i) => i.textContent);
 
-    // voice-lobby should have speaker icon, text channels should have #
-    expect(iconTexts).toContain("#");
-    expect(iconTexts).toContain("\ud83d\udd0a");
+    // text channels should have an SVG hash icon
+    const hashIcons = container.querySelectorAll('svg[data-icon="hash"]');
+    expect(hashIcons.length).toBeGreaterThan(0);
+
+    // voice-lobby should have an SVG volume icon instead of an emoji
+    const voiceIcons = container.querySelectorAll('svg[data-icon="volume-2"]');
+    expect(voiceIcons.length).toBeGreaterThan(0);
   });
 
   it("shows category when present", () => {

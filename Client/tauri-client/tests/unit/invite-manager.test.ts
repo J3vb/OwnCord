@@ -46,9 +46,9 @@ describe("InviteManager", () => {
     const mgr = createInviteManager(opts);
     mgr.mount(container);
 
-    const overlay = container.querySelector(".invite-manager-overlay");
+    const overlay = container.querySelector(".modal-overlay");
     expect(overlay).not.toBeNull();
-    const modal = container.querySelector(".invite-manager");
+    const modal = container.querySelector(".modal");
     expect(modal).not.toBeNull();
 
     mgr.destroy?.();
@@ -135,7 +135,7 @@ describe("InviteManager", () => {
     const mgr = createInviteManager(opts);
     mgr.mount(container);
 
-    const closeBtn = container.querySelector(".invite-manager__close") as HTMLButtonElement;
+    const closeBtn = container.querySelector(".modal-close") as HTMLButtonElement;
     closeBtn.click();
     expect(opts.onClose).toHaveBeenCalledOnce();
 
@@ -158,7 +158,7 @@ describe("InviteManager", () => {
     const mgr = createInviteManager(opts);
     mgr.mount(container);
 
-    const overlay = container.querySelector(".invite-manager-overlay") as HTMLDivElement;
+    const overlay = container.querySelector(".modal-overlay") as HTMLDivElement;
     // Clicking the overlay itself (not the modal)
     overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(opts.onClose).toHaveBeenCalledOnce();

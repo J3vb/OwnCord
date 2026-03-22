@@ -22,6 +22,9 @@ func MountChannelRoutes(r chi.Router, database *db.DB) {
 		r.Use(AuthMiddleware(database))
 		r.Get("/", handleListChannels(database))
 		r.Get("/{id}/messages", handleGetMessages(database))
+		r.Get("/{id}/pins", handleGetPins(database))
+		r.Post("/{id}/pins/{messageId}", handleSetPinned(database, true))
+		r.Delete("/{id}/pins/{messageId}", handleSetPinned(database, false))
 	})
 	r.With(AuthMiddleware(database)).Get("/api/v1/search", handleSearch(database))
 }
@@ -269,6 +272,123 @@ func handleSearch(database *db.DB) http.HandlerFunc {
 			Results []db.MessageSearchResult `json:"results"`
 		}
 		writeJSON(w, http.StatusOK, response{Results: filtered})
+	}
+}
+
+// handleGetPins returns all pinned messages for a channel.
+func handleGetPins(database *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		channelID, ok := parseIDParam(w, r, "id")
+		if !ok {
+			return
+		}
+
+		ch, err := database.GetChannel(channelID)
+		if err != nil {
+			slog.Error("handleGetPins GetChannel", "err", err, "channel_id", channelID)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error:   "INTERNAL",
+				Message: "failed to look up channel",
+			})
+			return
+		}
+		if ch == nil {
+			writeJSON(w, http.StatusNotFound, errorResponse{
+				Error:   "NOT_FOUND",
+				Message: "channel not found",
+			})
+			return
+		}
+
+		// Permission check: user must have READ_MESSAGES on this channel.
+		role, _ := r.Context().Value(RoleKey).(*db.Role)
+		if !hasChannelPermREST(database, role, channelID, permissions.ReadMessages) {
+			writeJSON(w, http.StatusForbidden, errorResponse{
+				Error:   "FORBIDDEN",
+				Message: "no permission to view this channel",
+			})
+			return
+		}
+
+		// Extract requesting user ID for reaction "me" flag.
+		var userID int64
+		if user, ok := r.Context().Value(UserKey).(*db.User); ok && user != nil {
+			userID = user.ID
+		}
+
+		msgs, err := database.GetPinnedMessages(channelID, userID)
+		if err != nil {
+			slog.Error("handleGetPins GetPinnedMessages", "err", err, "channel_id", channelID)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error:   "INTERNAL",
+				Message: "failed to fetch pinned messages",
+			})
+			return
+		}
+
+		type response struct {
+			Messages []db.MessageAPIResponse `json:"messages"`
+			HasMore  bool                    `json:"has_more"`
+		}
+		writeJSON(w, http.StatusOK, response{Messages: msgs, HasMore: false})
+	}
+}
+
+// handleSetPinned pins or unpins a message in a channel.
+func handleSetPinned(database *db.DB, pinned bool) http.HandlerFunc {
+	action := "pin"
+	if !pinned {
+		action = "unpin"
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		channelID, ok := parseIDParam(w, r, "id")
+		if !ok {
+			return
+		}
+
+		messageID, ok := parseIDParam(w, r, "messageId")
+		if !ok {
+			return
+		}
+
+		// Permission check: user must have MANAGE_MESSAGES on this channel.
+		role, _ := r.Context().Value(RoleKey).(*db.Role)
+		if !hasChannelPermREST(database, role, channelID, permissions.ManageMessages) {
+			writeJSON(w, http.StatusForbidden, errorResponse{
+				Error:   "FORBIDDEN",
+				Message: "no permission to manage messages in this channel",
+			})
+			return
+		}
+
+		// Verify message exists and belongs to this channel.
+		msg, err := database.GetMessage(messageID)
+		if err != nil {
+			slog.Error("handleSetPinned GetMessage", "err", err, "action", action, "message_id", messageID)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error:   "INTERNAL",
+				Message: "failed to look up message",
+			})
+			return
+		}
+		if msg == nil || msg.ChannelID != channelID {
+			writeJSON(w, http.StatusNotFound, errorResponse{
+				Error:   "NOT_FOUND",
+				Message: "message not found",
+			})
+			return
+		}
+
+		if err := database.SetMessagePinned(messageID, pinned); err != nil {
+			slog.Error("handleSetPinned SetMessagePinned", "err", err, "action", action, "message_id", messageID)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error:   "INTERNAL",
+				Message: "failed to " + action + " message",
+			})
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

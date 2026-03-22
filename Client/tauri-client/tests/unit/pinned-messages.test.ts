@@ -3,9 +3,9 @@ import { createPinnedMessages } from "@components/PinnedMessages";
 import type { PinnedMessage, PinnedMessagesOptions } from "@components/PinnedMessages";
 
 const samplePins: PinnedMessage[] = [
-  { id: 1, content: "Hello world", author: "Alice", timestamp: "2024-01-01 12:00" },
-  { id: 2, content: "Important notice", author: "Bob", timestamp: "2024-01-02 14:30" },
-  { id: 3, content: "Reminder", author: "Charlie", timestamp: "2024-01-03 09:00" },
+  { id: 1, content: "Hello world", author: "Alice", timestamp: "2024-01-01T12:00:00Z", avatarColor: "#5865f2" },
+  { id: 2, content: "Important notice", author: "Bob", timestamp: "2024-01-02T14:30:00Z", avatarColor: "#e74c3c" },
+  { id: 3, content: "Reminder", author: "Charlie", timestamp: "2024-01-03T09:00:00Z", avatarColor: "#2ecc71" },
 ];
 
 describe("PinnedMessages", () => {
@@ -43,7 +43,8 @@ describe("PinnedMessages", () => {
     const { panel } = makePanel();
     const title = container.querySelector("h3");
     expect(title).not.toBeNull();
-    expect(title!.textContent).toBe("Pinned Messages");
+    expect(title!.querySelector('svg[data-icon="pin"]')).not.toBeNull();
+    expect(title!.textContent).toContain("Pinned Messages");
     panel.destroy?.();
   });
 
@@ -72,7 +73,8 @@ describe("PinnedMessages", () => {
 
     expect(authors[0]!.textContent).toBe("Alice");
     expect(contents[0]!.textContent).toBe("Hello world");
-    expect(times[0]!.textContent).toBe("2024-01-01 12:00");
+    // Timestamp is formatted by formatPinTime (locale-dependent output)
+    expect(times[0]!.textContent).toBeTruthy();
     panel.destroy?.();
   });
 
@@ -104,26 +106,22 @@ describe("PinnedMessages", () => {
     const items = container.querySelectorAll(".pinned-msg");
     expect(items.length).toBe(0);
 
-    const empty = container.querySelector(".pinned-panel__empty") as HTMLDivElement;
+    // Empty state rendered, list not rendered
+    const empty = container.querySelector(".pinned-panel__empty");
     expect(empty).not.toBeNull();
-    expect(empty.textContent).toBe("No pinned messages");
-    // Empty div should be visible (display not "none")
-    expect(empty.style.display).not.toBe("none");
-
-    // List should be hidden
-    const list = container.querySelector(".pinned-panel__list") as HTMLDivElement;
-    expect(list.style.display).toBe("none");
+    const list = container.querySelector(".pinned-panel__list");
+    expect(list).toBeNull();
     panel.destroy?.();
   });
 
-  it("with pinned messages, empty state is hidden", () => {
+  it("with pinned messages, empty state is not rendered", () => {
     const { panel } = makePanel();
 
-    const empty = container.querySelector(".pinned-panel__empty") as HTMLDivElement;
-    expect(empty.style.display).toBe("none");
-
-    const list = container.querySelector(".pinned-panel__list") as HTMLDivElement;
-    expect(list.style.display).not.toBe("none");
+    // List rendered, empty state not rendered
+    const empty = container.querySelector(".pinned-panel__empty");
+    expect(empty).toBeNull();
+    const list = container.querySelector(".pinned-panel__list");
+    expect(list).not.toBeNull();
     panel.destroy?.();
   });
 

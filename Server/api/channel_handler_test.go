@@ -116,7 +116,9 @@ CREATE TABLE IF NOT EXISTS attachments (
     stored_as   TEXT    NOT NULL,
     mime_type   TEXT    NOT NULL,
     size        INTEGER NOT NULL,
-    uploaded_at TEXT    NOT NULL DEFAULT (datetime('now'))
+    uploaded_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    width       INTEGER,
+    height      INTEGER
 );
 CREATE TABLE IF NOT EXISTS reactions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -12,7 +12,7 @@ import { createWsClient } from "@lib/ws";
 import { wireDispatcher } from "@lib/dispatcher";
 import { authStore, setAuth, clearAuth } from "@stores/auth.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
-import { leaveVoice as voiceSessionLeave } from "@lib/voiceSession";
+import { leaveVoice as voiceSessionLeave } from "@lib/livekitSession";
 import { createConnectPage } from "@pages/ConnectPage";
 import { createMainPage } from "@pages/MainPage";
 import { applyStoredAppearance } from "@components/SettingsOverlay";
@@ -33,6 +33,16 @@ const log = createLogger("main");
 // Disable the default browser context menu globally.
 document.addEventListener("contextmenu", (e) => {
   e.preventDefault();
+});
+
+// F12 or Ctrl+Shift+I opens WebView2 DevTools.
+document.addEventListener("keydown", (e) => {
+  if (e.key === "F12" || (e.ctrlKey && e.shiftKey && e.key === "I")) {
+    e.preventDefault();
+    void import("@tauri-apps/api/core").then(({ invoke }) => {
+      void invoke("open_devtools");
+    });
+  }
 });
 
 // Open external links (target="_blank") in the user's default browser.
@@ -310,26 +320,31 @@ function renderPage(pageId: "connect" | "main"): void {
 router.onNavigate(renderPage);
 
 // Handle logout / disconnect
-authStore.subscribe((state) => {
-  if (!state.isAuthenticated && router.getCurrentPage() === "main") {
-    // Leave voice channel before disconnecting so other clients see it immediately
-    const voice = voiceStore.getState();
-    if (voice.currentChannelId !== null) {
-      voiceSessionLeave(false); // false: we send voice_leave below
-      ws.send({ type: "voice_leave", payload: {} });
-      leaveVoiceChannel();
+authStore.subscribeSelector(
+  (s) => s.isAuthenticated,
+  (isAuthenticated) => {
+    if (!isAuthenticated && router.getCurrentPage() === "main") {
+      // Leave voice channel before disconnecting so other clients see it immediately
+      const voice = voiceStore.getState();
+      if (voice.currentChannelId !== null) {
+        voiceSessionLeave(false); // false: we send voice_leave below
+        ws.send({ type: "voice_leave", payload: {} });
+        leaveVoiceChannel();
+      }
+      dispatcherCleanup?.();
+      dispatcherCleanup = null;
+      ws.disconnect();
+      lastConnectToken = "";
+      lastConnectHost = "";
+      // Clear stored credential on logout
+      const host = api.getConfig().host;
+      if (host) {
+        void deleteCredential(host);
+      }
+      router.navigate("connect");
     }
-    dispatcherCleanup?.();
-    dispatcherCleanup = null;
-    ws.disconnect();
-    // Clear stored credential on logout
-    const host = api.getConfig().host;
-    if (host) {
-      void deleteCredential(host);
-    }
-    router.navigate("connect");
-  }
-});
+  },
+);
 
 // Send voice_leave on window close (best-effort — server readPump defer is the safety net)
 window.addEventListener("beforeunload", () => {

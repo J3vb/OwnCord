@@ -190,7 +190,7 @@ test.describe("Invite Manager", () => {
     await expect(inviteBtn).toBeVisible({ timeout: 3_000 });
     await inviteBtn.click();
 
-    const overlay = page.locator(".invite-manager-overlay");
+    const overlay = page.locator(".modal-overlay");
     await expect(overlay).toBeVisible({ timeout: 3_000 });
   });
 
@@ -210,7 +210,7 @@ test.describe("Invite Manager", () => {
 
   test("Escape closes invite manager", async ({ page }) => {
     await page.getByRole("button", { name: /invite/i }).click();
-    const overlay = page.locator(".invite-manager-overlay");
+    const overlay = page.locator(".modal-overlay");
     await expect(overlay).toBeVisible({ timeout: 3_000 });
 
     await page.keyboard.press("Escape");
@@ -219,7 +219,7 @@ test.describe("Invite Manager", () => {
 
   test("clicking overlay backdrop closes invite manager", async ({ page }) => {
     await page.getByRole("button", { name: /invite/i }).click();
-    const overlay = page.locator(".invite-manager-overlay");
+    const overlay = page.locator(".modal-overlay");
     await expect(overlay).toBeVisible({ timeout: 3_000 });
 
     // Click the backdrop (not the modal)
@@ -229,10 +229,10 @@ test.describe("Invite Manager", () => {
 
   test("close button closes invite manager", async ({ page }) => {
     await page.getByRole("button", { name: /invite/i }).click();
-    const overlay = page.locator(".invite-manager-overlay");
+    const overlay = page.locator(".modal-overlay");
     await expect(overlay).toBeVisible({ timeout: 3_000 });
 
-    await page.locator(".invite-manager__close").click();
+    await page.locator(".modal-close").click();
     await expect(overlay).not.toBeVisible();
   });
 });

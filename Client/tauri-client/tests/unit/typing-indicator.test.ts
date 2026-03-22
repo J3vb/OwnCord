@@ -11,6 +11,12 @@ vi.mock("@stores/members.store", () => ({
         storeCallback = null;
       };
     }),
+    subscribeSelector: vi.fn((_sel: unknown, listener: () => void) => {
+      storeCallback = listener;
+      return () => {
+        storeCallback = null;
+      };
+    }),
   },
   getTypingUsers: vi.fn(() => typingUsers),
 }));

@@ -77,7 +77,7 @@ test.describe("Settings — Account Tab", () => {
   });
 
   test("shows username in account card", async ({ page }) => {
-    const name = page.locator(".ac-name");
+    const name = page.locator(".account-header-name");
     await expect(name).toHaveText("testuser");
   });
 

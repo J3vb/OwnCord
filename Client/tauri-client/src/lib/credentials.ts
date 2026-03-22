@@ -65,12 +65,11 @@ export async function loadCredential(
     if (result && typeof result === "object") {
       const cred = result as Record<string, unknown>;
       if (typeof cred.username === "string" && typeof cred.token === "string") {
-        const saved: SavedCredential = {
+        return {
           username: cred.username,
           token: cred.token,
           ...(typeof cred.password === "string" ? { password: cred.password } : {}),
         };
-        return saved;
       }
     }
     return null;

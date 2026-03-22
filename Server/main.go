@@ -23,6 +23,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/storage"
 )
 
 // version is overridden at build time via -ldflags "-X main.version=1.0.0".
@@ -47,7 +48,10 @@ func main() {
 // run is the real entrypoint — separated for testability.
 func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 	// Clean up old binary from a previous update.
-	if exePath, err := os.Executable(); err == nil {
+	exePath, exeErr := os.Executable()
+	if exeErr != nil {
+		log.Warn("failed to determine executable path", "error", exeErr)
+	} else {
 		oldPath := exePath + ".old"
 		if _, statErr := os.Stat(oldPath); statErr == nil {
 			if rmErr := os.Remove(oldPath); rmErr != nil {
@@ -137,16 +141,57 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 	}
 
 	// ── 7. Background maintenance ────────────────────────────────────────
-	// Periodically purge expired sessions to prevent unbounded growth.
+	// Periodically purge expired sessions and orphaned attachments.
+	fileStorage, fileStorageErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
+	if fileStorageErr != nil {
+		log.Warn("failed to create file storage for maintenance; orphan file cleanup disabled", "error", fileStorageErr)
+	}
+
 	stopMaintenance := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(15 * time.Minute)
 		defer ticker.Stop()
+		consecutiveFailures := 0
+		const maxConsecutiveFailures = 5
 		for {
 			select {
 			case <-ticker.C:
+				if consecutiveFailures >= maxConsecutiveFailures {
+					log.Error("maintenance loop: circuit breaker open, skipping tick",
+						"consecutive_failures", consecutiveFailures)
+					// Reset after one skip to allow retry next tick.
+					consecutiveFailures = maxConsecutiveFailures - 1
+					continue
+				}
+
+				tickFailed := false
 				if err := database.DeleteExpiredSessions(); err != nil {
 					log.Warn("failed to delete expired sessions", "error", err)
+					tickFailed = true
+				}
+
+				// Clean up orphaned attachments (uploaded but never linked to a message).
+				cutoff := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339)
+				orphanFiles, orphanErr := database.DeleteOrphanedAttachments(cutoff)
+				if orphanErr != nil {
+					log.Warn("failed to delete orphaned attachments", "error", orphanErr)
+					tickFailed = true
+				} else if len(orphanFiles) > 0 {
+					// Best-effort file cleanup.
+					if fileStorage != nil {
+						for _, filename := range orphanFiles {
+							if delErr := fileStorage.Delete(filename); delErr != nil {
+								log.Warn("failed to delete orphan file", "file", filename, "error", delErr)
+							}
+						}
+					}
+					log.Info("cleaned up orphaned attachments", "count", len(orphanFiles))
+				}
+
+				if tickFailed {
+					consecutiveFailures++
+				} else {
+					consecutiveFailures = 0
 				}
 			case <-stopMaintenance:
 				return

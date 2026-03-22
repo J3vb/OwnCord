@@ -2,12 +2,9 @@ package ws_test
 
 import (
 	"encoding/json"
-	"fmt"
 	"testing"
 	"testing/fstest"
 	"time"
-
-	"github.com/pion/webrtc/v4"
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
@@ -114,30 +111,6 @@ func voiceDeafenMsg(deafened bool) []byte {
 	raw, _ := json.Marshal(map[string]any{
 		"type":    "voice_deafen",
 		"payload": map[string]any{"deafened": deafened},
-	})
-	return raw
-}
-
-// voiceSignalMsg builds a voice_offer/answer/ice message.
-func voiceSignalMsg(msgType string, channelID int64, sdp string) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type": msgType,
-		"payload": map[string]any{
-			"channel_id": channelID,
-			"sdp":        sdp,
-		},
-	})
-	return raw
-}
-
-// voiceICEMsg builds a voice_ice message.
-func voiceICEMsg(channelID int64, candidate string) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_ice",
-		"payload": map[string]any{
-			"channel_id": channelID,
-			"candidate":  candidate,
-		},
 	})
 	return raw
 }
@@ -314,10 +287,6 @@ func TestVoice_Join_NoPermission_SendsError(t *testing.T) {
 	hub, database := newVoiceHub(t)
 	chanID := seedVoiceChan(t, database, "vc-noperm")
 
-	// Member role (id=4) has permissions 1635 (0x663). Bit 9 (0x200 = 512) for CONNECT_VOICE.
-	// Check if member has it: 1635 & 512 = 512, so member DOES have it.
-	// We need a role without it. We'll set a custom role using direct DB exec.
-	// For simplicity, use a user with nil user (no role) to fail perm check.
 	send := make(chan []byte, 16)
 	c := ws.NewTestClient(hub, 9999, send) // no user set → hasChannelPerm returns false
 	hub.Register(c)
@@ -527,375 +496,6 @@ func TestVoice_Deafen_BroadcastsVoiceState(t *testing.T) {
 	}
 	if !found {
 		t.Error("voice_state broadcast not received after voice_deafen")
-	}
-}
-
-// ─── voice signaling (SFU) ────────────────────────────────────────────────────
-//
-// The signaling flow changed from P2P relay to SFU: offer/answer/ice are now
-// exchanged between client and server, not relayed between clients.
-//
-// Tests focus on validation and error paths since PeerConnection operations
-// require a real WebRTC stack (only exercised in integration tests).
-
-// TestVoice_Offer_NoPeerConnection verifies that voice_offer when the client
-// has no PeerConnection returns a VOICE_ERROR.
-func TestVoice_Offer_NoPeerConnection(t *testing.T) {
-	hub, database := newVoiceHub(t)
-	user := seedVoiceOwner(t, database, "offer-nopc")
-
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	hub.HandleMessageForTest(c, voiceSignalMsg("voice_offer", 1, "v=0 offer..."))
-	time.Sleep(30 * time.Millisecond)
-
-	msgs := drainChan(send)
-	found := false
-	for _, m := range msgs {
-		if extractCode(t, m) == "VOICE_ERROR" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("expected VOICE_ERROR when sending voice_offer without a PeerConnection")
-	}
-}
-
-// TestVoice_Offer_EmptySDP verifies that voice_offer with an empty SDP field
-// returns INVALID_SDP before touching any PeerConnection.
-func TestVoice_Offer_EmptySDP(t *testing.T) {
-	hub, database := newVoiceHub(t)
-	user := seedVoiceOwner(t, database, "offer-emptysdp")
-
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	// Send offer with blank SDP — pc is nil but SDP check comes after pc check,
-	// so we expect VOICE_ERROR (no pc) before INVALID_SDP would fire.
-	// To isolate the empty-SDP path we need a client with pc set. Since we
-	// can't construct a real PC in unit tests, we verify the pc==nil branch
-	// fires first, which returns VOICE_ERROR. The INVALID_SDP branch is
-	// separately reachable; we test its message format via the handler directly.
-	hub.HandleMessageForTest(c, voiceSignalMsg("voice_offer", 1, ""))
-	time.Sleep(30 * time.Millisecond)
-
-	msgs := drainChan(send)
-	if len(msgs) == 0 {
-		t.Fatal("expected at least one error response for voice_offer with no pc")
-	}
-	code := extractCode(t, msgs[0])
-	if code != "VOICE_ERROR" && code != "INVALID_SDP" {
-		t.Errorf("expected VOICE_ERROR or INVALID_SDP, got %q", code)
-	}
-}
-
-// TestVoice_Offer_RateLimit verifies that sending 25+ voice_offer messages
-// rapidly results in at least one RATE_LIMITED error being sent back to the
-// client.
-func TestVoice_Offer_RateLimit(t *testing.T) {
-	hub, database := newVoiceHub(t)
-	user := seedVoiceOwner(t, database, "offer-ratelimit")
-
-	send := make(chan []byte, 256)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	// 25 offers rapidly — limit is 20/sec.
-	for range 25 {
-		hub.HandleMessageForTest(c, voiceSignalMsg("voice_offer", 1, "v=0..."))
-	}
-	time.Sleep(50 * time.Millisecond)
-
-	msgs := drainChan(send)
-	found := false
-	for _, m := range msgs {
-		if extractCode(t, m) == "RATE_LIMITED" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("expected RATE_LIMITED error after 25 rapid voice_offer messages")
-	}
-}
-
-// TestVoice_Answer_NoPeerConnection verifies that voice_answer when the client
-// has no PeerConnection returns VOICE_ERROR.
-func TestVoice_Answer_NoPeerConnection(t *testing.T) {
-	hub, database := newVoiceHub(t)
-	user := seedVoiceOwner(t, database, "answer-nopc")
-
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	hub.HandleMessageForTest(c, voiceSignalMsg("voice_answer", 1, "v=0 answer..."))
-	time.Sleep(30 * time.Millisecond)
-
-	msgs := drainChan(send)
-	found := false
-	for _, m := range msgs {
-		if extractCode(t, m) == "VOICE_ERROR" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("expected VOICE_ERROR when sending voice_answer without a PeerConnection")
-	}
-}
-
-// TestVoice_Answer_EmptySDP verifies that voice_answer with blank SDP returns
-// an error (VOICE_ERROR from pc==nil check, or INVALID_SDP if pc existed).
-func TestVoice_Answer_EmptySDP(t *testing.T) {
-	hub, database := newVoiceHub(t)
-	user := seedVoiceOwner(t, database, "answer-emptysdp")
-
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	hub.HandleMessageForTest(c, voiceSignalMsg("voice_answer", 1, ""))
-	time.Sleep(30 * time.Millisecond)
-
-	msgs := drainChan(send)
-	if len(msgs) == 0 {
-		t.Fatal("expected at least one error response for empty voice_answer")
-	}
-	code := extractCode(t, msgs[0])
-	if code != "VOICE_ERROR" && code != "INVALID_SDP" {
-		t.Errorf("expected VOICE_ERROR or INVALID_SDP, got %q", code)
-	}
-}
-
-// TestVoice_ICE_NoPeerConnection verifies that voice_ice when the client has
-// no PeerConnection returns VOICE_ERROR.
-func TestVoice_ICE_NoPeerConnection(t *testing.T) {
-	hub, database := newVoiceHub(t)
-	user := seedVoiceOwner(t, database, "ice-nopc")
-
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	hub.HandleMessageForTest(c, voiceICEMsg(1, "candidate:0 1 UDP 123 192.168.1.1 5000 typ host"))
-	time.Sleep(30 * time.Millisecond)
-
-	msgs := drainChan(send)
-	found := false
-	for _, m := range msgs {
-		if extractCode(t, m) == "VOICE_ERROR" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("expected VOICE_ERROR when sending voice_ice without a PeerConnection")
-	}
-}
-
-// TestVoice_HandleMessage_VoiceOffer_Dispatched verifies that voice_offer is
-// dispatched by handleMessage and does not produce an UNKNOWN_TYPE error.
-func TestVoice_HandleMessage_VoiceOffer_Dispatched(t *testing.T) {
-	hub, database := newVoiceHub(t)
-	user := seedVoiceOwner(t, database, "offer-dispatch")
-
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	hub.HandleMessageForTest(c, voiceSignalMsg("voice_offer", 1, "v=0..."))
-	time.Sleep(30 * time.Millisecond)
-
-	msgs := drainChan(send)
-	for _, m := range msgs {
-		if extractCode(t, m) == "UNKNOWN_TYPE" {
-			t.Error("voice_offer produced UNKNOWN_TYPE — handler not registered in dispatch")
-		}
-	}
-}
-
-// TestVoice_HandleMessage_VoiceAnswer_Dispatched verifies that voice_answer is
-// dispatched by handleMessage and does not produce an UNKNOWN_TYPE error.
-// This replaces the old TestVoice_HandleMessage_VoiceAnswer_Relayed which
-// tested the removed P2P relay behavior.
-func TestVoice_HandleMessage_VoiceAnswer_Dispatched(t *testing.T) {
-	hub, database := newVoiceHub(t)
-	user := seedVoiceOwner(t, database, "answer-dispatch")
-
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	hub.HandleMessageForTest(c, voiceSignalMsg("voice_answer", 1, "v=0 answer..."))
-	time.Sleep(30 * time.Millisecond)
-
-	msgs := drainChan(send)
-	for _, m := range msgs {
-		if extractCode(t, m) == "UNKNOWN_TYPE" {
-			t.Error("voice_answer produced UNKNOWN_TYPE — handler not registered in dispatch")
-		}
-	}
-}
-
-// TestVoice_HandleMessage_VoiceICE_Dispatched verifies that voice_ice is
-// dispatched by handleMessage and does not produce an UNKNOWN_TYPE error.
-func TestVoice_HandleMessage_VoiceICE_Dispatched(t *testing.T) {
-	hub, database := newVoiceHub(t)
-	user := seedVoiceOwner(t, database, "ice-dispatch")
-
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	hub.HandleMessageForTest(c, voiceICEMsg(1, "candidate:0 1 UDP 123 192.168.1.1 5000 typ host"))
-	time.Sleep(30 * time.Millisecond)
-
-	msgs := drainChan(send)
-	for _, m := range msgs {
-		if extractCode(t, m) == "UNKNOWN_TYPE" {
-			t.Error("voice_ice produced UNKNOWN_TYPE — handler not registered in dispatch")
-		}
-	}
-}
-
-// TestVoice_Signal_RateLimit_BlocksExcess verifies that rapid voice_offer
-// messages get rate limited (replaces the old relay-counting test).
-func TestVoice_Signal_RateLimit_BlocksExcess(t *testing.T) {
-	hub, database := newVoiceHub(t)
-	user := seedVoiceOwner(t, database, "mia")
-
-	send := make(chan []byte, 256)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	// Send 30 signals rapidly — limit is 20/sec, so some should be rate-limited.
-	for range 30 {
-		hub.HandleMessageForTest(c, voiceSignalMsg("voice_offer", 1, "v=0..."))
-	}
-	time.Sleep(50 * time.Millisecond)
-
-	msgs := drainChan(send)
-	foundRateLimit := false
-	for _, m := range msgs {
-		if extractCode(t, m) == "RATE_LIMITED" {
-			foundRateLimit = true
-			break
-		}
-	}
-	if !foundRateLimit {
-		t.Error("expected RATE_LIMITED error after 30 rapid voice_offer messages")
-	}
-}
-
-// ─── soundboard ───────────────────────────────────────────────────────────────
-
-func TestVoice_Soundboard_BroadcastsToAll(t *testing.T) {
-	hub, database := newVoiceHub(t)
-
-	user := seedVoiceOwner(t, database, "noah")
-	listener := seedVoiceOwner(t, database, "noah2")
-
-	sendL := make(chan []byte, 16)
-	cL := ws.NewTestClientWithUser(hub, listener, 0, sendL)
-	hub.Register(cL)
-
-	sendS := make(chan []byte, 16)
-	cS := ws.NewTestClientWithUser(hub, user, 0, sendS)
-	hub.Register(cS)
-	time.Sleep(20 * time.Millisecond)
-
-	soundMsg, _ := json.Marshal(map[string]any{
-		"type":    "soundboard_play",
-		"payload": map[string]any{"sound_id": "abc-uuid-123"},
-	})
-	hub.HandleMessageForTest(cS, soundMsg)
-	time.Sleep(50 * time.Millisecond)
-
-	listenerMsgs := drainChan(sendL)
-	found := false
-	for _, msg := range listenerMsgs {
-		if extractType(t, msg) == "soundboard_play" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("listener did not receive soundboard_play broadcast")
-	}
-}
-
-func TestVoice_Soundboard_NoPermission_SendsError(t *testing.T) {
-	hub, _ := newVoiceHub(t)
-
-	// Client with no user set → permission check fails.
-	send := make(chan []byte, 16)
-	c := ws.NewTestClient(hub, 8888, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	soundMsg, _ := json.Marshal(map[string]any{
-		"type":    "soundboard_play",
-		"payload": map[string]any{"sound_id": "abc"},
-	})
-	hub.HandleMessageForTest(c, soundMsg)
-	time.Sleep(30 * time.Millisecond)
-
-	msgs := drainChan(send)
-	found := false
-	for _, m := range msgs {
-		if extractType(t, m) == "error" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected FORBIDDEN error for soundboard without permission")
-	}
-}
-
-func TestVoice_Soundboard_RateLimit(t *testing.T) {
-	hub, database := newVoiceHub(t)
-	user := seedVoiceOwner(t, database, "olivia")
-
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	soundMsg, _ := json.Marshal(map[string]any{
-		"type":    "soundboard_play",
-		"payload": map[string]any{"sound_id": "x"},
-	})
-
-	// Send 5 soundboard plays rapidly — limit is 1 per 3 sec.
-	for range 5 {
-		hub.HandleMessageForTest(c, soundMsg)
-	}
-	time.Sleep(50 * time.Millisecond)
-
-	msgs := drainChan(send)
-	errCount := 0
-	for _, m := range msgs {
-		if extractType(t, m) == "error" {
-			errCount++
-		}
-	}
-	if errCount == 0 {
-		t.Error("expected rate limit errors for rapid soundboard plays")
 	}
 }
 
@@ -1165,264 +765,6 @@ func TestVoice_Screenshare_RateLimit(t *testing.T) {
 
 // ─── handleMessage dispatch ───────────────────────────────────────────────────
 
-// ─── SFU-integrated voice_join / voice_leave ──────────────────────────────────
-
-// seedVoiceChanMaxUsers creates a voice channel with a custom voice_max_users limit.
-func seedVoiceChanMaxUsers(t *testing.T, database *db.DB, name string, maxUsers int) int64 {
-	t.Helper()
-	id, err := database.CreateChannel(name, "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("seedVoiceChanMaxUsers CreateChannel: %v", err)
-	}
-	if err := database.SetChannelVoiceMaxUsers(id, maxUsers); err != nil {
-		t.Fatalf("seedVoiceChanMaxUsers SetChannelVoiceMaxUsers: %v", err)
-	}
-	return id
-}
-
-// TestVoice_Join_SFU_SendsVoiceConfig verifies that after voice_join the joiner
-// receives a voice_config message with the expected fields.
-func TestVoice_Join_SFU_SendsVoiceConfig(t *testing.T) {
-	hub, database := newVoiceHub(t)
-	user := seedVoiceOwner(t, database, "sfu-alice")
-	chanID := seedVoiceChan(t, database, "vc-sfu-alice")
-
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(50 * time.Millisecond)
-
-	msgs := drainChan(send)
-	foundConfig := false
-	for _, msg := range msgs {
-		if extractType(t, msg) == "voice_config" {
-			foundConfig = true
-			var env struct {
-				Type    string `json:"type"`
-				Payload struct {
-					ChannelID int64  `json:"channel_id"`
-					Quality   string `json:"quality"`
-					Bitrate   int    `json:"bitrate"`
-					Mode      string `json:"threshold_mode"`
-				} `json:"payload"`
-			}
-			if err := json.Unmarshal(msg, &env); err != nil {
-				t.Fatalf("unmarshal voice_config: %v", err)
-			}
-			if env.Payload.ChannelID != chanID {
-				t.Errorf("voice_config channel_id = %d, want %d", env.Payload.ChannelID, chanID)
-			}
-			if env.Payload.Quality == "" {
-				t.Error("voice_config quality is empty")
-			}
-			if env.Payload.Bitrate <= 0 {
-				t.Errorf("voice_config bitrate = %d, want > 0", env.Payload.Bitrate)
-			}
-			if env.Payload.Mode == "" {
-				t.Error("voice_config threshold_mode is empty")
-			}
-			break
-		}
-	}
-	if !foundConfig {
-		t.Error("joiner did not receive voice_config after voice_join")
-	}
-}
-
-// TestVoice_Join_SFU_ChannelFull verifies that a second join to a max-1 room
-// returns a CHANNEL_FULL error and the first participant is unaffected.
-func TestVoice_Join_SFU_ChannelFull(t *testing.T) {
-	hub, database := newVoiceHub(t)
-	chanID := seedVoiceChanMaxUsers(t, database, "vc-full", 1)
-
-	user1 := seedVoiceOwner(t, database, "full-user1")
-	send1 := make(chan []byte, 32)
-	c1 := ws.NewTestClientWithUser(hub, user1, chanID, send1)
-	hub.Register(c1)
-	time.Sleep(20 * time.Millisecond)
-
-	// First user joins — should succeed.
-	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
-	time.Sleep(50 * time.Millisecond)
-
-	// Verify first user is in DB.
-	state1, err := database.GetVoiceState(user1.ID)
-	if err != nil || state1 == nil {
-		t.Fatalf("user1 voice state missing after join: %v", err)
-	}
-
-	user2 := seedVoiceOwner(t, database, "full-user2")
-	send2 := make(chan []byte, 32)
-	c2 := ws.NewTestClientWithUser(hub, user2, chanID, send2)
-	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
-
-	drainChan(send1)
-	drainChan(send2)
-
-	// Second user joins — should get CHANNEL_FULL error.
-	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
-	time.Sleep(50 * time.Millisecond)
-
-	msgs2 := drainChan(send2)
-	foundFull := false
-	for _, msg := range msgs2 {
-		if extractType(t, msg) == "error" {
-			var env struct {
-				Payload struct {
-					Code string `json:"code"`
-				} `json:"payload"`
-			}
-			if errU := json.Unmarshal(msg, &env); errU == nil && env.Payload.Code == "CHANNEL_FULL" {
-				foundFull = true
-				break
-			}
-		}
-	}
-	if !foundFull {
-		t.Error("expected CHANNEL_FULL error when joining a full voice channel")
-	}
-
-	// Second user should NOT be in DB voice state.
-	state2, err := database.GetVoiceState(user2.ID)
-	if err != nil {
-		t.Fatalf("GetVoiceState user2: %v", err)
-	}
-	if state2 != nil {
-		t.Error("user2 voice state should be nil after CHANNEL_FULL rejection")
-	}
-}
-
-// TestVoice_Join_SFU_AddsToVoiceRoom verifies that after voice_join the
-// participant is tracked in the Hub's VoiceRoom.
-func TestVoice_Join_SFU_AddsToVoiceRoom(t *testing.T) {
-	hub, database := newVoiceHub(t)
-	user := seedVoiceOwner(t, database, "room-alice")
-	chanID := seedVoiceChan(t, database, "vc-room-alice")
-
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(50 * time.Millisecond)
-
-	room := hub.GetVoiceRoom(chanID)
-	if room == nil {
-		t.Fatal("VoiceRoom not created after voice_join")
-	}
-	if !room.HasParticipant(user.ID) {
-		t.Error("user not tracked as participant in VoiceRoom after voice_join")
-	}
-	if room.ParticipantCount() != 1 {
-		t.Errorf("VoiceRoom participant count = %d, want 1", room.ParticipantCount())
-	}
-}
-
-// TestVoice_Leave_SFU_RemovesFromRoom verifies that after voice_leave the
-// participant is no longer tracked in the VoiceRoom.
-func TestVoice_Leave_SFU_RemovesFromRoom(t *testing.T) {
-	hub, database := newVoiceHub(t)
-	user := seedVoiceOwner(t, database, "leave-bob")
-	chanID := seedVoiceChan(t, database, "vc-leave-bob")
-
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(50 * time.Millisecond)
-
-	// Confirm in room before leave.
-	room := hub.GetVoiceRoom(chanID)
-	if room == nil || !room.HasParticipant(user.ID) {
-		t.Fatal("precondition: user not in room after join")
-	}
-
-	hub.HandleMessageForTest(c, voiceLeaveMsg())
-	time.Sleep(50 * time.Millisecond)
-
-	// After leave, participant should be removed (room gone or user absent).
-	room = hub.GetVoiceRoom(chanID)
-	if room != nil && room.HasParticipant(user.ID) {
-		t.Error("user still tracked in VoiceRoom after voice_leave")
-	}
-}
-
-// TestVoice_Leave_SFU_CleansUpEmptyRoom verifies that when the last participant
-// leaves, the VoiceRoom is removed from the Hub entirely.
-func TestVoice_Leave_SFU_CleansUpEmptyRoom(t *testing.T) {
-	hub, database := newVoiceHub(t)
-	user := seedVoiceOwner(t, database, "empty-carol")
-	chanID := seedVoiceChan(t, database, "vc-empty-carol")
-
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(50 * time.Millisecond)
-
-	if hub.GetVoiceRoom(chanID) == nil {
-		t.Fatal("precondition: VoiceRoom not created after join")
-	}
-
-	hub.HandleMessageForTest(c, voiceLeaveMsg())
-	time.Sleep(50 * time.Millisecond)
-
-	if hub.GetVoiceRoom(chanID) != nil {
-		t.Error("VoiceRoom should be removed from Hub after last participant leaves")
-	}
-}
-
-// TestVoice_Leave_SFU_OnDisconnect verifies that handleVoiceLeave cleans up
-// room state when triggered by a disconnect without an explicit voice_leave message.
-func TestVoice_Leave_SFU_OnDisconnect(t *testing.T) {
-	hub, database := newVoiceHub(t)
-	user := seedVoiceOwner(t, database, "disco-dave")
-	chanID := seedVoiceChan(t, database, "vc-disco-dave")
-
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
-	time.Sleep(50 * time.Millisecond)
-
-	room := hub.GetVoiceRoom(chanID)
-	if room == nil || !room.HasParticipant(user.ID) {
-		t.Fatal("precondition: user not in VoiceRoom after join")
-	}
-
-	// Simulate disconnect by calling the exported test hook.
-	hub.HandleVoiceLeaveForTest(c)
-	time.Sleep(30 * time.Millisecond)
-
-	// DB state should be cleared.
-	state, err := database.GetVoiceState(user.ID)
-	if err != nil {
-		t.Fatalf("GetVoiceState after disconnect: %v", err)
-	}
-	if state != nil {
-		t.Error("voice state still in DB after simulated disconnect")
-	}
-
-	// VoiceRoom should be gone or user removed from it.
-	room = hub.GetVoiceRoom(chanID)
-	if room != nil && room.HasParticipant(user.ID) {
-		t.Error("user still in VoiceRoom after simulated disconnect")
-	}
-}
-
-// ─── handleMessage dispatch ───────────────────────────────────────────────────
-
 func TestVoice_HandleMessage_VoiceCamera_Dispatched(t *testing.T) {
 	hub, database := newVoiceHub(t)
 	user := seedVoiceOwner(t, database, "cam-dispatch")
@@ -1493,111 +835,133 @@ func TestVoice_HandleMessage_VoiceScreenshare_Dispatched(t *testing.T) {
 	}
 }
 
-// ─── composite track keys ─────────────────────────────────────────────────────
+// ─── channel capacity ─────────────────────────────────────────────────────────
 
-func TestVoiceRoom_CompositeTrackKeys(t *testing.T) {
-	room := ws.NewVoiceRoom(ws.VoiceRoomConfig{
-		ChannelID: 1, MaxUsers: 10, Quality: "medium",
-		MixingThreshold: 10, TopSpeakers: 3, MaxVideo: 25,
-	})
-
-	room.SetTrack(42, "audio", nil, nil)
-	room.SetTrack(42, "video", nil, nil)
-
-	audioTrack := room.GetTrack(42, "audio")
-	videoTrack := room.GetTrack(42, "video")
-	if audioTrack == nil {
-		t.Fatal("audio track should exist")
+// seedVoiceChanMaxUsers creates a voice channel with a custom voice_max_users limit.
+func seedVoiceChanMaxUsers(t *testing.T, database *db.DB, name string, maxUsers int) int64 {
+	t.Helper()
+	id, err := database.CreateChannel(name, "voice", "", "", 0)
+	if err != nil {
+		t.Fatalf("seedVoiceChanMaxUsers CreateChannel: %v", err)
 	}
-	if videoTrack == nil {
-		t.Fatal("video track should exist")
+	if err := database.SetChannelVoiceMaxUsers(id, maxUsers); err != nil {
+		t.Fatalf("seedVoiceChanMaxUsers SetChannelVoiceMaxUsers: %v", err)
 	}
-
-	room.RemoveTrack(42, "video")
-	if room.GetTrack(42, "audio") == nil {
-		t.Fatal("audio track should still exist after removing video")
-	}
-	if room.GetTrack(42, "video") != nil {
-		t.Fatal("video track should be removed")
-	}
-
-	userTracks := room.GetUserTracks(42)
-	if len(userTracks) != 1 {
-		t.Fatalf("expected 1 track, got %d", len(userTracks))
-	}
+	return id
 }
 
-// TestVoiceRoom_VideoTrackCoexistence verifies multi-user video track fan-out:
-// composite keys allow audio and video to coexist per user, GetTracks returns
-// the correct total, TrackUserIDs deduplicates, and removing one kind leaves
-// the other intact.
-func TestVoiceRoom_VideoTrackCoexistence(t *testing.T) {
-	room := ws.NewVoiceRoom(ws.VoiceRoomConfig{
-		ChannelID: 1, MaxUsers: 10, Quality: "medium",
-		MixingThreshold: 10, TopSpeakers: 3, MaxVideo: 25,
-	})
-
-	// User 42 has both audio and video.
-	room.SetTrack(42, "audio", nil, nil)
-	room.SetTrack(42, "video", nil, nil)
-
-	// User 99 has audio only.
-	room.SetTrack(99, "audio", nil, nil)
-
-	// GetTracks returns all 3 track entries.
-	tracks := room.GetTracks()
-	if len(tracks) != 3 {
-		t.Fatalf("expected 3 tracks, got %d", len(tracks))
-	}
-
-	// GetUserTracks for user 42 returns 2 (audio + video).
-	u42 := room.GetUserTracks(42)
-	if len(u42) != 2 {
-		t.Fatalf("expected 2 tracks for user 42, got %d", len(u42))
-	}
-
-	// TrackUserIDs returns 2 unique users (not 3 entries).
-	ids := room.TrackUserIDs()
-	if len(ids) != 2 {
-		t.Fatalf("expected 2 unique users, got %d", len(ids))
-	}
-
-	// Remove video for user 42 — audio must survive.
-	room.RemoveTrack(42, "video")
-
-	if room.GetTrack(42, "audio") == nil {
-		t.Fatal("audio track should still exist after removing video")
-	}
-	if room.GetTrack(42, "video") != nil {
-		t.Fatal("video track should be removed")
-	}
-
-	// GetTracks now returns 2 (user 42 audio + user 99 audio).
-	tracks = room.GetTracks()
-	if len(tracks) != 2 {
-		t.Fatalf("expected 2 tracks after video removal, got %d", len(tracks))
-	}
-
-	// User 99 is completely unaffected.
-	if room.GetTrack(99, "audio") == nil {
-		t.Fatal("user 99 audio track should be unaffected")
-	}
-}
-
-// ─── ICE monitor / setupICEMonitor ────────────────────────────────────────────
-
-// TestVoice_SetupICEMonitor_NilPC_NoPanic verifies that setupICEMonitor does
-// not panic when the client has a nil PeerConnection.
-func TestVoice_SetupICEMonitor_NilPC_NoPanic(t *testing.T) {
+// TestVoice_Join_ChannelFull verifies that a second join to a max-1 room
+// returns a CHANNEL_FULL error.
+func TestVoice_Join_ChannelFull(t *testing.T) {
 	hub, database := newVoiceHub(t)
-	user := seedVoiceOwner(t, database, "ice-monitor-nil")
-	chanID := seedVoiceChan(t, database, "vc-ice-nil")
+	chanID := seedVoiceChanMaxUsers(t, database, "vc-full", 1)
 
-	send := make(chan []byte, 16)
+	user1 := seedVoiceOwner(t, database, "full-user1")
+	send1 := make(chan []byte, 32)
+	c1 := ws.NewTestClientWithUser(hub, user1, chanID, send1)
+	hub.Register(c1)
+	time.Sleep(20 * time.Millisecond)
+
+	// First user joins — should succeed.
+	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify first user is in DB.
+	state1, err := database.GetVoiceState(user1.ID)
+	if err != nil || state1 == nil {
+		t.Fatalf("user1 voice state missing after join: %v", err)
+	}
+
+	user2 := seedVoiceOwner(t, database, "full-user2")
+	send2 := make(chan []byte, 32)
+	c2 := ws.NewTestClientWithUser(hub, user2, chanID, send2)
+	hub.Register(c2)
+	time.Sleep(20 * time.Millisecond)
+
+	drainChan(send1)
+	drainChan(send2)
+
+	// Second user joins — should get CHANNEL_FULL error.
+	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
+	time.Sleep(50 * time.Millisecond)
+
+	msgs2 := drainChan(send2)
+	foundFull := false
+	for _, msg := range msgs2 {
+		if extractType(t, msg) == "error" {
+			var env struct {
+				Payload struct {
+					Code string `json:"code"`
+				} `json:"payload"`
+			}
+			if errU := json.Unmarshal(msg, &env); errU == nil && env.Payload.Code == "CHANNEL_FULL" {
+				foundFull = true
+				break
+			}
+		}
+	}
+	if !foundFull {
+		t.Error("expected CHANNEL_FULL error when joining a full voice channel")
+	}
+
+	// Second user should NOT be in DB voice state.
+	state2, err := database.GetVoiceState(user2.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState user2: %v", err)
+	}
+	if state2 != nil {
+		t.Error("user2 voice state should be nil after CHANNEL_FULL rejection")
+	}
+}
+
+// ─── voice_join config ────────────────────────────────────────────────────────
+
+// TestVoice_Join_SendsVoiceConfig verifies that after voice_join the joiner
+// receives a voice_config message with the expected fields.
+func TestVoice_Join_SendsVoiceConfig(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	user := seedVoiceOwner(t, database, "cfg-alice")
+	chanID := seedVoiceChan(t, database, "vc-cfg-alice")
+
+	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, chanID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
 
-	// SetupICEMonitorForTest should not panic when c.pc is nil.
-	hub.SetupICEMonitorForTest(c, chanID)
+	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
+	time.Sleep(50 * time.Millisecond)
+
+	msgs := drainChan(send)
+	foundConfig := false
+	for _, msg := range msgs {
+		if extractType(t, msg) == "voice_config" {
+			foundConfig = true
+			var env struct {
+				Type    string `json:"type"`
+				Payload struct {
+					ChannelID int64  `json:"channel_id"`
+					Quality   string `json:"quality"`
+					Bitrate   int    `json:"bitrate"`
+				} `json:"payload"`
+			}
+			if err := json.Unmarshal(msg, &env); err != nil {
+				t.Fatalf("unmarshal voice_config: %v", err)
+			}
+			if env.Payload.ChannelID != chanID {
+				t.Errorf("voice_config channel_id = %d, want %d", env.Payload.ChannelID, chanID)
+			}
+			if env.Payload.Quality == "" {
+				t.Error("voice_config quality is empty")
+			}
+			if env.Payload.Bitrate <= 0 {
+				t.Errorf("voice_config bitrate = %d, want > 0", env.Payload.Bitrate)
+			}
+			break
+		}
+	}
+	if !foundConfig {
+		t.Error("joiner did not receive voice_config after voice_join")
+	}
 }
 
 // ─── duplicate voice_join (channel switch) ────────────────────────────────────
@@ -1620,37 +984,25 @@ func TestVoice_Join_SwitchChannel_LeavesOldChannel(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 	drainChan(send)
 
-	// Verify in channel A.
-	roomA := hub.GetVoiceRoom(chanA)
-	if roomA == nil {
-		t.Fatal("room A should exist after joining")
-	}
-	if !roomA.HasParticipant(userA.ID) {
-		t.Fatal("user should be participant in room A")
+	// Verify in channel A via DB.
+	stateA, _ := database.GetVoiceState(userA.ID)
+	if stateA == nil || stateA.ChannelID != chanA {
+		t.Fatal("user should be in channel A")
 	}
 
 	// Join channel B — should leave A first.
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanB))
 	time.Sleep(50 * time.Millisecond)
 
-	// Room A should no longer have the user.
-	roomA = hub.GetVoiceRoom(chanA)
-	if roomA != nil && roomA.HasParticipant(userA.ID) {
-		t.Error("user should have been removed from room A after joining room B")
-	}
-
-	// Room B should have the user.
-	roomB := hub.GetVoiceRoom(chanB)
-	if roomB == nil {
-		t.Fatal("room B should exist after joining")
-	}
-	if !roomB.HasParticipant(userA.ID) {
-		t.Error("user should be participant in room B after switching")
+	// DB state should show channel B.
+	stateB, _ := database.GetVoiceState(userA.ID)
+	if stateB == nil || stateB.ChannelID != chanB {
+		t.Error("user should be in channel B after switching")
 	}
 }
 
 // TestVoice_Join_SameChannel_IsIdempotent verifies that joining the same channel
-// twice does not result in errors or duplicate participation.
+// twice returns ALREADY_JOINED.
 func TestVoice_Join_SameChannel_IsIdempotent(t *testing.T) {
 	hub, database := newVoiceHub(t)
 	user := seedVoiceOwner(t, database, "idempotent-join")
@@ -1669,118 +1021,46 @@ func TestVoice_Join_SameChannel_IsIdempotent(t *testing.T) {
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 	time.Sleep(30 * time.Millisecond)
 
-	// Should not receive an error for the second join.
+	// Should receive ALREADY_JOINED error.
 	msgs := drainChan(send)
+	foundAlreadyJoined := false
 	for _, m := range msgs {
-		if code := extractCode(t, m); code == "CHANNEL_FULL" || code == "VOICE_ERROR" {
-			t.Errorf("unexpected error %q on re-join of same channel", code)
+		if code := extractCode(t, m); code == "ALREADY_JOINED" {
+			foundAlreadyJoined = true
 		}
 	}
-
-	// Participant count should remain 1.
-	room := hub.GetVoiceRoom(chanID)
-	if room == nil {
-		t.Fatal("room should exist")
-	}
-	if count := room.ParticipantCount(); count != 1 {
-		t.Errorf("ParticipantCount = %d, want 1 after idempotent join", count)
+	if !foundAlreadyJoined {
+		t.Error("expected ALREADY_JOINED error on re-join of same channel")
 	}
 }
 
-// ─── MaxVideo enforcement ─────────────────────────────────────────────────────
+// ─── voice leave on disconnect ────────────────────────────────────────────────
 
-// makeVideoTrack creates a TrackLocalStaticRTP with ID "video-{userID}" for testing.
-func makeVideoTrack(t *testing.T, userID int64) *webrtc.TrackLocalStaticRTP {
-	t.Helper()
-	local, err := webrtc.NewTrackLocalStaticRTP(
-		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
-		fmt.Sprintf("video-%d", userID),
-		fmt.Sprintf("user-%d", userID),
-	)
-	if err != nil {
-		t.Fatalf("NewTrackLocalStaticRTP: %v", err)
-	}
-	return local
-}
-
-// TestHandleVoiceCamera_MaxVideoEnforced verifies that when the MaxVideo limit
-// is reached, a voice_camera enable request is rejected with VIDEO_LIMIT error.
-func TestHandleVoiceCamera_MaxVideoEnforced(t *testing.T) {
+// TestVoice_Leave_OnDisconnect verifies that handleVoiceLeave cleans up
+// DB state when triggered by a disconnect without an explicit voice_leave message.
+func TestVoice_Leave_OnDisconnect(t *testing.T) {
 	hub, database := newVoiceHub(t)
-	chanID := seedVoiceChan(t, database, "vc-maxvideo")
+	user := seedVoiceOwner(t, database, "disco-dave")
+	chanID := seedVoiceChan(t, database, "vc-disco-dave")
 
-	// Pre-create the room with MaxVideo=2 so handleVoiceJoin reuses it.
-	hub.GetOrCreateVoiceRoom(chanID, ws.VoiceRoomConfig{
-		ChannelID:       chanID,
-		MaxUsers:        10,
-		Quality:         "medium",
-		MixingThreshold: 10,
-		TopSpeakers:     3,
-		MaxVideo:        2,
-	})
-
-	// Create 3 users: user1 and user2 will have video tracks, user3 will be rejected.
-	user1 := seedVoiceOwner(t, database, "maxvid-user1")
-	user2 := seedVoiceOwner(t, database, "maxvid-user2")
-	user3 := seedVoiceOwner(t, database, "maxvid-user3")
-
-	send1 := make(chan []byte, 32)
-	c1 := ws.NewTestClientWithUser(hub, user1, chanID, send1)
-	hub.Register(c1)
-
-	send2 := make(chan []byte, 32)
-	c2 := ws.NewTestClientWithUser(hub, user2, chanID, send2)
-	hub.Register(c2)
-
-	send3 := make(chan []byte, 64)
-	c3 := ws.NewTestClientWithUser(hub, user3, chanID, send3)
-	hub.Register(c3)
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, user, chanID, send)
+	hub.Register(c)
 	time.Sleep(20 * time.Millisecond)
 
-	// All three join the voice channel.
-	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-	hub.HandleMessageForTest(c3, voiceJoinMsg(chanID))
-	time.Sleep(30 * time.Millisecond)
-
-	// Simulate user1 and user2 having video tracks by setting them on the room.
-	room := hub.GetVoiceRoom(chanID)
-	if room == nil {
-		t.Fatal("VoiceRoom should exist after joins")
-	}
-	room.SetTrack(user1.ID, "video", nil, makeVideoTrack(t, user1.ID))
-	room.SetTrack(user2.ID, "video", nil, makeVideoTrack(t, user2.ID))
-
-	// Drain all messages from prior operations.
-	drainChan(send1)
-	drainChan(send2)
-	drainChan(send3)
-
-	// User3 tries to enable camera — should be rejected with VIDEO_LIMIT.
-	hub.HandleMessageForTest(c3, voiceCameraMsg(true))
+	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 	time.Sleep(50 * time.Millisecond)
 
-	msgs := drainChan(send3)
-	foundVideoLimit := false
-	for _, m := range msgs {
-		if extractCode(t, m) == "VIDEO_LIMIT" {
-			foundVideoLimit = true
-			break
-		}
-	}
-	if !foundVideoLimit {
-		t.Error("expected VIDEO_LIMIT error when MaxVideo limit is reached")
-	}
+	// Simulate disconnect by calling the exported test hook.
+	hub.HandleVoiceLeaveForTest(c)
+	time.Sleep(30 * time.Millisecond)
 
-	// Verify DB state was NOT updated (camera should still be false).
-	state, err := database.GetVoiceState(user3.ID)
+	// DB state should be cleared.
+	state, err := database.GetVoiceState(user.ID)
 	if err != nil {
-		t.Fatalf("GetVoiceState: %v", err)
+		t.Fatalf("GetVoiceState after disconnect: %v", err)
 	}
-	if state != nil && state.Camera {
-		t.Error("camera should not be enabled after VIDEO_LIMIT rejection")
+	if state != nil {
+		t.Error("voice state still in DB after simulated disconnect")
 	}
 }
-

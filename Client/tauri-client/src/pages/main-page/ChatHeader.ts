@@ -4,6 +4,7 @@
  */
 
 import { createElement, appendChildren } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -17,6 +18,7 @@ export interface ChatHeaderRefs {
 export interface ChatHeaderOptions {
   readonly onTogglePins: () => void;
   readonly onToggleMembers: () => void;
+  readonly onSearchFocus?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -39,18 +41,28 @@ export function buildChatHeader(
     title: "Pins",
     "aria-label": "Pins",
     "data-testid": "pin-btn",
-  }, "\uD83D\uDCCC");
+  });
+  pinBtn.appendChild(createIcon("pin", 18));
   pinBtn.addEventListener("click", () => { opts.onTogglePins(); });
   const searchInput = createElement("input", {
     class: "search-input",
     type: "text",
     placeholder: "Search...",
+    "data-testid": "search-input",
   });
+  if (opts.onSearchFocus !== undefined) {
+    const onFocus = opts.onSearchFocus;
+    searchInput.addEventListener("focus", () => {
+      onFocus();
+      (searchInput as HTMLInputElement).blur();
+    });
+  }
   const membersToggle = createElement("button", {
     type: "button",
     "aria-label": "Toggle member list",
     "data-testid": "members-toggle",
-  }, "\uD83D\uDC65");
+  });
+  membersToggle.appendChild(createIcon("users", 18));
   membersToggle.addEventListener("click", () => opts.onToggleMembers());
   appendChildren(tools, searchInput, pinBtn, membersToggle);
 

@@ -6,6 +6,8 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { createIcon } from "@lib/icons";
+import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import { voiceStore } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
@@ -28,6 +30,12 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
   const unsubs: Array<() => void> = [];
 
+  function swapIcon(btn: HTMLButtonElement, name: IconName): void {
+    const existing = btn.querySelector("svg");
+    if (existing) existing.remove();
+    btn.appendChild(createIcon(name, 18));
+  }
+
   function render(): void {
     if (root === null || channelNameEl === null) return;
 
@@ -45,22 +53,27 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     const channel = channelsStore.getState().channels.get(channelId);
     setText(channelNameEl, channel?.name ?? "Voice Channel");
 
-    // Toggle button active states
+    // Toggle button active states, swap icons, and update aria-pressed
     muteBtn?.classList.toggle("active-ctrl", voice.localMuted);
     deafenBtn?.classList.toggle("active-ctrl", voice.localDeafened);
     cameraBtn?.classList.toggle("active-ctrl", voice.localCamera);
+
+    if (muteBtn) { swapIcon(muteBtn, voice.localMuted ? "mic-off" : "mic"); muteBtn.setAttribute("aria-pressed", String(voice.localMuted)); }
+    if (deafenBtn) { swapIcon(deafenBtn, voice.localDeafened ? "headphones-off" : "headphones"); deafenBtn.setAttribute("aria-pressed", String(voice.localDeafened)); }
+    if (cameraBtn) { swapIcon(cameraBtn, voice.localCamera ? "camera-off" : "camera"); cameraBtn.setAttribute("aria-pressed", String(voice.localCamera)); }
   }
 
   function createControlButton(
     label: string,
-    icon: string,
+    icon: IconName,
     handler: () => void,
     extraClass?: string,
   ): HTMLButtonElement {
     const btn = createElement("button", {
       class: extraClass ?? "",
       "aria-label": label,
-    }, icon);
+    });
+    btn.appendChild(createIcon(icon, 18));
     btn.addEventListener("click", handler, { signal: ac.signal });
     return btn;
   }
@@ -74,12 +87,12 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     appendChildren(header, connLabel, channelNameEl);
 
     const controls = createElement("div", { class: "vw-controls" });
-    muteBtn = createControlButton("Mute", "\uD83C\uDFA4", options.onMuteToggle);
-    deafenBtn = createControlButton("Deafen", "\uD83C\uDFA7", options.onDeafenToggle);
-    cameraBtn = createControlButton("Camera", "\uD83D\uDCF7", options.onCameraToggle);
-    const shareBtn = createControlButton("Screenshare", "\uD83D\uDDA5", options.onScreenshareToggle);
+    muteBtn = createControlButton("Mute", "mic", options.onMuteToggle);
+    deafenBtn = createControlButton("Deafen", "headphones", options.onDeafenToggle);
+    cameraBtn = createControlButton("Camera", "camera", options.onCameraToggle);
+    const shareBtn = createControlButton("Screenshare", "monitor", options.onScreenshareToggle);
     const disconnectBtn = createControlButton(
-      "Disconnect", "\u260E", options.onDisconnect, "disconnect",
+      "Disconnect", "phone", options.onDisconnect, "disconnect",
     );
     appendChildren(controls, muteBtn, deafenBtn, cameraBtn, shareBtn, disconnectBtn);
 
@@ -87,8 +100,24 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     render();
 
-    unsubs.push(voiceStore.subscribe(() => render()));
-    unsubs.push(channelsStore.subscribe(() => render()));
+    unsubs.push(voiceStore.subscribeSelector(
+      (s) => ({
+        channelId: s.currentChannelId,
+        muted: s.localMuted,
+        deafened: s.localDeafened,
+        camera: s.localCamera,
+      }),
+      () => render(),
+      (a, b) =>
+        a.channelId === b.channelId &&
+        a.muted === b.muted &&
+        a.deafened === b.deafened &&
+        a.camera === b.camera,
+    ));
+    unsubs.push(channelsStore.subscribeSelector(
+      (s) => s.channels,
+      () => render(),
+    ));
 
     container.appendChild(root);
   }

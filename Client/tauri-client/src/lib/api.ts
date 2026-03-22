@@ -518,6 +518,36 @@ export function createApiClient(
     ): Promise<void> {
       return adminRequest<void>("DELETE", `/channels/${id}`, undefined, signal);
     },
+
+    // ── Admin: Members ──────────────────────────────────────
+
+    adminKickMember(
+      userId: number,
+      signal?: AbortSignal,
+    ): Promise<void> {
+      return adminRequest<void>("DELETE", `/users/${userId}/sessions`, undefined, signal);
+    },
+
+    adminBanMember(
+      userId: number,
+      reason?: string,
+      signal?: AbortSignal,
+    ): Promise<void> {
+      return adminRequest<void>("PATCH", `/users/${userId}`, {
+        banned: true,
+        ban_reason: reason ?? "",
+      }, signal);
+    },
+
+    adminChangeRole(
+      userId: number,
+      roleId: number,
+      signal?: AbortSignal,
+    ): Promise<void> {
+      return adminRequest<void>("PATCH", `/users/${userId}`, {
+        role_id: roleId,
+      }, signal);
+    },
   };
 }
 

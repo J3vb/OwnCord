@@ -185,7 +185,7 @@ export function createProfileManager(
   const store = createStore<ProfilesState>(initialState);
 
   // Resolve which fetch to use: injected mock, Tauri plugin, or global
-  const doFetch: FetchFn = fetchFn ?? (fetch as unknown as FetchFn);
+  const doFetch: FetchFn = fetchFn ?? fetch;
 
   // ── Helpers ────────────────────────────────────────────────
 

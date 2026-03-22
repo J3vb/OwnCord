@@ -29,11 +29,11 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("pinging sqlite db: %w", err)
 	}
 
-	// In-memory databases are per-connection in SQLite; pin to one connection
-	// so all callers share the same in-memory state.
-	if path == ":memory:" {
-		sqlDB.SetMaxOpenConns(1)
-	}
+	// SQLite only allows one writer at a time. Pin to a single connection
+	// so concurrent goroutines queue on the Go side rather than getting
+	// SQLITE_BUSY. For :memory: databases this also ensures all callers
+	// share the same in-memory state.
+	sqlDB.SetMaxOpenConns(1)
 
 	// Enable WAL mode for better concurrent read performance.
 	if _, err := sqlDB.Exec("PRAGMA journal_mode=WAL;"); err != nil {
@@ -41,10 +41,34 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("enabling WAL mode: %w", err)
 	}
 
+	// Wait up to 5 seconds for the write lock instead of failing instantly.
+	if _, err := sqlDB.Exec("PRAGMA busy_timeout=5000;"); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("setting busy_timeout: %w", err)
+	}
+
 	// Enforce foreign key constraints.
 	if _, err := sqlDB.Exec("PRAGMA foreign_keys=ON;"); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("enabling foreign keys: %w", err)
+	}
+
+	// Performance tuning (safe with WAL mode).
+	if _, err := sqlDB.Exec("PRAGMA synchronous=NORMAL;"); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("setting synchronous mode: %w", err)
+	}
+	if _, err := sqlDB.Exec("PRAGMA temp_store=MEMORY;"); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("setting temp_store: %w", err)
+	}
+	if _, err := sqlDB.Exec("PRAGMA mmap_size=268435456;"); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("setting mmap_size: %w", err)
+	}
+	if _, err := sqlDB.Exec("PRAGMA cache_size=-64000;"); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("setting cache_size: %w", err)
 	}
 
 	return &DB{sqlDB: sqlDB}, nil
@@ -60,6 +84,8 @@ func Migrate(database *DB) error {
 
 // Close releases the underlying database connection.
 func (d *DB) Close() error {
+	// Run PRAGMA optimize to analyze and update query planner statistics.
+	_, _ = d.sqlDB.Exec("PRAGMA optimize;")
 	return d.sqlDB.Close()
 }
 

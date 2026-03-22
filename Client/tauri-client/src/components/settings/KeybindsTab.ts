@@ -9,21 +9,19 @@ import { updatePttKey, captureKeyPress, vkName } from "@lib/ptt";
 
 export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
-  const header = createElement("h1", {}, "Keybinds");
-  section.appendChild(header);
 
   // ── Push to Talk ──────────────────────────────────────────
   const pttRow = createElement("div", { class: "keybind-row" });
   const pttLabel = createElement("span", { class: "setting-label" }, "Push to Talk");
-  const savedVk = loadPref<number>("pttVk", 0);
+  let currentVk = loadPref<number>("pttVk", 0);
   const pttValue = createElement("span", {
     class: "kbd",
     style: "cursor: pointer; min-width: 80px; text-align: center;",
     title: "Click to set keybind",
-  }, savedVk !== 0 ? vkName(savedVk) : "Not set");
+  }, currentVk !== 0 ? vkName(currentVk) : "Not set");
   const pttClear = createElement("button", {
     class: "ac-btn",
-    style: `margin-left: 8px; font-size: 12px; padding: 4px 10px; ${savedVk !== 0 ? "" : "display: none;"}`,
+    style: `margin-left: 8px; font-size: 12px; padding: 4px 10px; ${currentVk !== 0 ? "" : "display: none;"}`,
   }, "Clear");
 
   let capturing = false;
@@ -43,9 +41,10 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       pttValue.style.color = "";
       if (vk === 0) {
         // Timed out — restore previous value
-        setText(pttValue, savedVk !== 0 ? vkName(savedVk) : "Not set");
+        setText(pttValue, currentVk !== 0 ? vkName(currentVk) : "Not set");
         return;
       }
+      currentVk = vk;
       setText(pttValue, vkName(vk));
       pttClear.style.display = "";
       void updatePttKey(vk);
@@ -54,12 +53,13 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       capturing = false;
       pttValue.style.borderColor = "";
       pttValue.style.color = "";
-      setText(pttValue, savedVk !== 0 ? vkName(savedVk) : "Not set");
+      setText(pttValue, currentVk !== 0 ? vkName(currentVk) : "Not set");
     });
   }, { signal });
 
   pttClear.addEventListener("click", (e) => {
     e.stopPropagation();
+    currentVk = 0;
     setText(pttValue, "Not set");
     pttClear.style.display = "none";
     void updatePttKey(0);
@@ -74,12 +74,70 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   }, "PTT works globally and does not hijack the key \u2014 you can still type and use other apps normally. Mouse buttons (Mouse 4/5) also work.");
   section.appendChild(pttHint);
 
-  // ── Quick Switcher ────────────────────────────────────────
-  const searchRow = createElement("div", { class: "keybind-row" });
-  const searchLabel = createElement("span", { class: "setting-label" }, "Quick Switcher");
-  const searchValue = createElement("span", { class: "kbd" }, "Ctrl + K");
-  appendChildren(searchRow, searchLabel, searchValue);
-  section.appendChild(searchRow);
+  // ── Navigation section ────────────────────────────────────
+  section.appendChild(createElement("div", { class: "settings-separator" }));
+
+  const navHeader = createElement("div", {
+    class: "keybind-section-header",
+  }, "Navigation");
+  section.appendChild(navHeader);
+
+  const navBinds: [string, string][] = [
+    ["Quick Switcher", "Ctrl + K"],
+    ["Mark as Read", "Escape"],
+    ["Search Messages", "Ctrl + F"],
+  ];
+  for (const [label, shortcut] of navBinds) {
+    const row = createElement("div", { class: "keybind-row" });
+    appendChildren(row,
+      createElement("span", { class: "setting-label" }, label),
+      createElement("span", { class: "kbd" }, shortcut),
+    );
+    section.appendChild(row);
+  }
+
+  // ── Communication section ──────────────────────────────────
+  section.appendChild(createElement("div", { class: "settings-separator" }));
+
+  const commHeader = createElement("div", {
+    class: "keybind-section-header",
+  }, "Communication");
+  section.appendChild(commHeader);
+
+  const commBinds: [string, string][] = [
+    ["Toggle Mute", "Ctrl + M"],
+    ["Toggle Deafen", "Ctrl + D"],
+    ["Toggle Camera", "Ctrl + Shift + V"],
+  ];
+  for (const [label, shortcut] of commBinds) {
+    const row = createElement("div", { class: "keybind-row" });
+    appendChildren(row,
+      createElement("span", { class: "setting-label" }, label),
+      createElement("span", { class: "kbd" }, shortcut),
+    );
+    section.appendChild(row);
+  }
+
+  // ── Messages section ───────────────────────────────────────
+  section.appendChild(createElement("div", { class: "settings-separator" }));
+
+  const msgHeader = createElement("div", {
+    class: "keybind-section-header",
+  }, "Messages");
+  section.appendChild(msgHeader);
+
+  const msgBinds: [string, string][] = [
+    ["Upload File", "Ctrl + U"],
+    ["Edit Last Message", "Arrow Up"],
+  ];
+  for (const [label, shortcut] of msgBinds) {
+    const row = createElement("div", { class: "keybind-row" });
+    appendChildren(row,
+      createElement("span", { class: "setting-label" }, label),
+      createElement("span", { class: "kbd" }, shortcut),
+    );
+    section.appendChild(row);
+  }
 
   return section;
 }
