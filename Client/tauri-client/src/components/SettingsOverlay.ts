@@ -1,6 +1,6 @@
 /**
  * SettingsOverlay component — full-screen overlay with tabbed settings panels.
- * Tabs: Account, Appearance, Notifications, Voice & Audio, Keybinds, Logs.
+ * Tabs: Account, Appearance, Notifications, Text & Images, Accessibility, Voice & Audio, Keybinds, Advanced, Logs.
  * Subscribes to uiStore for settingsOpen state.
  */
 
@@ -20,6 +20,7 @@ import { buildTextImagesTab } from "./settings/TextImagesTab";
 import { buildAccessibilityTab } from "./settings/AccessibilityTab";
 import { createVoiceAudioTab } from "./settings/VoiceAudioTab";
 import { buildKeybindsTab } from "./settings/KeybindsTab";
+import { buildAdvancedTab } from "./settings/AdvancedTab";
 import { createLogsTab } from "./settings/LogsTab";
 
 // ---------------------------------------------------------------------------
@@ -34,7 +35,7 @@ export interface SettingsOverlayOptions {
   onStatusChange(status: UserStatus): void;
 }
 
-export type TabName = "Account" | "Appearance" | "Notifications" | "Text & Images" | "Accessibility" | "Voice & Audio" | "Keybinds" | "Logs";
+export type TabName = "Account" | "Appearance" | "Notifications" | "Text & Images" | "Accessibility" | "Voice & Audio" | "Keybinds" | "Advanced" | "Logs";
 
 const TAB_ICONS: Record<TabName, IconName> = {
   Account: "user",
@@ -44,6 +45,7 @@ const TAB_ICONS: Record<TabName, IconName> = {
   Accessibility: "eye",
   "Voice & Audio": "mic",
   Keybinds: "keyboard",
+  Advanced: "settings",
   Logs: "scroll-text",
 };
 
@@ -103,6 +105,7 @@ export function createSettingsOverlay(
     Accessibility: () => buildAccessibilityTab(ac.signal),
     "Voice & Audio": () => voiceTab.build(),
     Keybinds: () => buildKeybindsTab(ac.signal),
+    Advanced: () => buildAdvancedTab(ac.signal),
     Logs: () => logsTab.build(),
   };
 
@@ -178,7 +181,7 @@ export function createSettingsOverlay(
     const appSettingsCat = createElement("div", { class: "settings-cat" }, "App Settings");
     sidebar.appendChild(appSettingsCat);
 
-    const appTabs: readonly TabName[] = ["Appearance", "Notifications", "Text & Images", "Accessibility", "Voice & Audio", "Keybinds", "Logs"];
+    const appTabs: readonly TabName[] = ["Appearance", "Notifications", "Text & Images", "Accessibility", "Voice & Audio", "Keybinds", "Advanced", "Logs"];
     for (const name of appTabs) {
       const btn = createElement("button", {
         class: `settings-nav-item${name === activeTab ? " active" : ""}`,
