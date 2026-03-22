@@ -143,24 +143,24 @@ function buildStatusSelector(
   const wrapper = createElement("div", {});
   const separator = createElement("div", { class: "settings-separator" });
   const sectionTitle = createElement("div", { class: "settings-section-title" }, "Status");
-  const optionsList = createElement("div", { class: "status-options" });
+  const optionsList = createElement("div", { class: "settings-status-options" });
 
   const currentStatus = loadPref<UserStatus>("userStatus", "online");
   const rowElements = new Map<UserStatus, HTMLDivElement>();
 
   for (const opt of STATUS_OPTIONS) {
     const row = createElement("div", {
-      class: `status-option${opt.value === currentStatus ? " active" : ""}`,
+      class: `settings-status-option${opt.value === currentStatus ? " active" : ""}`,
     });
 
-    const dot = createElement("div", { class: "status-dot-large" });
+    const dot = createElement("div", { class: "settings-status-dot" });
     dot.style.background = opt.color;
 
     const labelWrap = createElement("div", {});
-    const labelEl = createElement("div", { class: "status-option-label" }, opt.label);
+    const labelEl = createElement("div", { class: "settings-status-label" }, opt.label);
     appendChildren(labelWrap, labelEl);
     if (opt.description.length > 0) {
-      const descEl = createElement("div", { class: "status-option-desc" }, opt.description);
+      const descEl = createElement("div", { class: "settings-status-desc" }, opt.description);
       labelWrap.appendChild(descEl);
     }
 

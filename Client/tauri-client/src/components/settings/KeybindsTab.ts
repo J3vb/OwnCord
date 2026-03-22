@@ -75,7 +75,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   section.appendChild(pttHint);
 
   // ── Navigation section ────────────────────────────────────
-  section.appendChild(createElement("hr", { class: "settings-divider" }));
+  section.appendChild(createElement("div", { class: "settings-separator" }));
 
   const navHeader = createElement("div", {
     style: "font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 4px 0 8px 0;",
@@ -97,7 +97,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   }
 
   // ── Communication section ──────────────────────────────────
-  section.appendChild(createElement("hr", { class: "settings-divider" }));
+  section.appendChild(createElement("div", { class: "settings-separator" }));
 
   const commHeader = createElement("div", {
     style: "font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 4px 0 8px 0;",
@@ -119,7 +119,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   }
 
   // ── Messages section ───────────────────────────────────────
-  section.appendChild(createElement("hr", { class: "settings-divider" }));
+  section.appendChild(createElement("div", { class: "settings-separator" }));
 
   const msgHeader = createElement("div", {
     style: "font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 4px 0 8px 0;",
