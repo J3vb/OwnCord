@@ -17,6 +17,7 @@ import { buildAccountTab } from "./settings/AccountTab";
 import { buildAppearanceTab } from "./settings/AppearanceTab";
 import { buildNotificationsTab } from "./settings/NotificationsTab";
 import { buildTextImagesTab } from "./settings/TextImagesTab";
+import { buildAccessibilityTab } from "./settings/AccessibilityTab";
 import { createVoiceAudioTab } from "./settings/VoiceAudioTab";
 import { buildKeybindsTab } from "./settings/KeybindsTab";
 import { createLogsTab } from "./settings/LogsTab";
@@ -33,13 +34,14 @@ export interface SettingsOverlayOptions {
   onStatusChange(status: UserStatus): void;
 }
 
-export type TabName = "Account" | "Appearance" | "Notifications" | "Text & Images" | "Voice & Audio" | "Keybinds" | "Logs";
+export type TabName = "Account" | "Appearance" | "Notifications" | "Text & Images" | "Accessibility" | "Voice & Audio" | "Keybinds" | "Logs";
 
 const TAB_ICONS: Record<TabName, IconName> = {
   Account: "user",
   Appearance: "palette",
   Notifications: "bell",
   "Text & Images": "image",
+  Accessibility: "eye",
   "Voice & Audio": "mic",
   Keybinds: "keyboard",
   Logs: "scroll-text",
@@ -63,6 +65,9 @@ export function applyStoredAppearance(): void {
     "compact-mode",
     loadPref<boolean>("compactMode", false),
   );
+  document.documentElement.classList.toggle("reduced-motion", loadPref<boolean>("reducedMotion", false));
+  document.documentElement.classList.toggle("high-contrast", loadPref<boolean>("highContrast", false));
+  document.documentElement.classList.toggle("large-font", loadPref<boolean>("largeFont", false));
   document.documentElement.style.setProperty(
     "--accent",
     loadPref<string>("accentColor", "#5865f2"),
@@ -95,6 +100,7 @@ export function createSettingsOverlay(
     Appearance: () => buildAppearanceTab(ac.signal),
     Notifications: () => buildNotificationsTab(ac.signal),
     "Text & Images": () => buildTextImagesTab(ac.signal),
+    Accessibility: () => buildAccessibilityTab(ac.signal),
     "Voice & Audio": () => voiceTab.build(),
     Keybinds: () => buildKeybindsTab(ac.signal),
     Logs: () => logsTab.build(),
@@ -172,7 +178,7 @@ export function createSettingsOverlay(
     const appSettingsCat = createElement("div", { class: "settings-cat" }, "App Settings");
     sidebar.appendChild(appSettingsCat);
 
-    const appTabs: readonly TabName[] = ["Appearance", "Notifications", "Text & Images", "Voice & Audio", "Keybinds", "Logs"];
+    const appTabs: readonly TabName[] = ["Appearance", "Notifications", "Text & Images", "Accessibility", "Voice & Audio", "Keybinds", "Logs"];
     for (const name of appTabs) {
       const btn = createElement("button", {
         class: `settings-nav-item${name === activeTab ? " active" : ""}`,

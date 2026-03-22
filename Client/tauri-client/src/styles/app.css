@@ -1100,19 +1100,19 @@
 }
 
 /* ── Account tab: status selector ── */
-.status-options { display: flex; flex-direction: column; gap: 2px; }
-.status-option {
+.settings-status-options { display: flex; flex-direction: column; gap: 2px; }
+.settings-status-option {
   display: flex; align-items: center; padding: 8px 12px;
   border-radius: 4px; cursor: pointer; gap: 12px;
   transition: background 0.1s ease;
 }
-.status-option:hover { background: var(--bg-active); }
-.status-option.active { background: var(--bg-active); }
-.status-dot-large {
+.settings-status-option:hover { background: var(--bg-active); }
+.settings-status-option.active { background: var(--bg-active); }
+.settings-status-dot {
   width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
 }
-.status-option-label { font-size: 14px; font-weight: 500; color: var(--text-normal); }
-.status-option-desc { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+.settings-status-label { font-size: 14px; font-weight: 500; color: var(--text-normal); }
+.settings-status-desc { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
 
 /* ── Settings Sidebar Enhancements ── */
 /* Profile section at top of sidebar */
@@ -2013,4 +2013,22 @@
 .invite-item__meta {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+/* Accessibility: reduced motion */
+.reduced-motion, .reduced-motion * {
+  animation-duration: 0s !important;
+  transition-duration: 0s !important;
+}
+
+/* Accessibility: high contrast */
+.high-contrast {
+  --text-normal: #ffffff;
+  --text-muted: #cccccc;
+  --bg-active: rgba(255, 255, 255, 0.15);
+}
+
+/* Accessibility: large font */
+.large-font {
+  --font-size: 18px;
 }
