@@ -4,7 +4,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "./helpers";
-import { switchInputDevice, switchOutputDevice, setVoiceSensitivity } from "@lib/livekitSession";
+import { switchInputDevice, switchOutputDevice, setVoiceSensitivity, setInputVolume, setOutputVolume } from "@lib/livekitSession";
 
 export interface VoiceAudioTabHandle {
   build(): HTMLDivElement;
@@ -74,6 +74,28 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
   section.appendChild(inputHeader);
   section.appendChild(inputSelect);
 
+  // Input Volume slider
+  const inputVolumeHeader = createElement("h3", {}, "Input Volume");
+  section.appendChild(inputVolumeHeader);
+  const inputVolumeRow = createElement("div", { class: "slider-row" });
+  const savedInputVolume = loadPref<number>("inputVolume", 100);
+  const inputVolumeSlider = createElement("input", {
+    class: "settings-slider",
+    type: "range",
+    min: "0",
+    max: "200",
+    step: "1",
+    value: String(savedInputVolume),
+  });
+  const inputVolumeLabel = createElement("span", { class: "slider-val" }, `${savedInputVolume}%`);
+  inputVolumeSlider.addEventListener("input", () => {
+    const val = Number(inputVolumeSlider.value);
+    setText(inputVolumeLabel, `${val}%`);
+    setInputVolume(val);
+  }, { signal });
+  appendChildren(inputVolumeRow, inputVolumeSlider, inputVolumeLabel);
+  section.appendChild(inputVolumeRow);
+
   // Output device selector
   const outputHeader = createElement("h3", {}, "Output Device");
   const outputSelect = createElement("select", {
@@ -84,6 +106,28 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
   outputSelect.appendChild(defaultOutputOpt);
   section.appendChild(outputHeader);
   section.appendChild(outputSelect);
+
+  // Output Volume slider
+  const outputVolumeHeader = createElement("h3", {}, "Output Volume");
+  section.appendChild(outputVolumeHeader);
+  const outputVolumeRow = createElement("div", { class: "slider-row" });
+  const savedOutputVolume = loadPref<number>("outputVolume", 100);
+  const outputVolumeSlider = createElement("input", {
+    class: "settings-slider",
+    type: "range",
+    min: "0",
+    max: "200",
+    step: "1",
+    value: String(savedOutputVolume),
+  });
+  const outputVolumeLabel = createElement("span", { class: "slider-val" }, `${savedOutputVolume}%`);
+  outputVolumeSlider.addEventListener("input", () => {
+    const val = Number(outputVolumeSlider.value);
+    setText(outputVolumeLabel, `${val}%`);
+    setOutputVolume(val);
+  }, { signal });
+  appendChildren(outputVolumeRow, outputVolumeSlider, outputVolumeLabel);
+  section.appendChild(outputVolumeRow);
 
   // Video device selector
   const videoHeader = createElement("h3", {}, "Video Device");

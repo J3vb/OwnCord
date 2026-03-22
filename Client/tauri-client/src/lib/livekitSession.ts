@@ -671,6 +671,20 @@ export class LiveKitSession {
 
   getUserVolume(userId: number): number { return getSavedUserVolume(userId); }
 
+  setInputVolume(volume: number): void {
+    savePref("inputVolume", Math.max(0, Math.min(200, volume)));
+  }
+
+  setOutputVolume(volume: number): void {
+    const clamped = Math.max(0, Math.min(200, volume));
+    savePref("outputVolume", clamped);
+    if (this.room !== null) {
+      for (const el of this.audioElements.values()) {
+        el.volume = Math.min(clamped, 100) / 100;
+      }
+    }
+  }
+
   setVoiceSensitivity(sensitivity: number): void {
     const clamped = Math.max(0, Math.min(100, sensitivity));
     this.speakingThreshold = ((100 - clamped) / 100) * 0.15;
@@ -729,6 +743,8 @@ export const switchInputDevice = session.switchInputDevice.bind(session);
 export const switchOutputDevice = session.switchOutputDevice.bind(session);
 export const setUserVolume = session.setUserVolume.bind(session);
 export const getUserVolume = session.getUserVolume.bind(session);
+export const setInputVolume = session.setInputVolume.bind(session);
+export const setOutputVolume = session.setOutputVolume.bind(session);
 export const setVoiceSensitivity = session.setVoiceSensitivity.bind(session);
 export const getLocalCameraStream = session.getLocalCameraStream.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
