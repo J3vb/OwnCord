@@ -103,4 +103,12 @@
   --sidebar-width: 240px;
   --members-width: 240px;
   --header-height: 48px;
+
+  /* Message layout */
+  --message-group-spacing: 17px;
+  --message-inline-spacing: 0px;
+  --avatar-size: 40px;
+  --avatar-offset-left: 16px;
+  --message-content-left: 72px;
+  --message-content-right: 48px;
 }

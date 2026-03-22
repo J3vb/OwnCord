@@ -36,6 +36,34 @@ export function formatFullDate(iso: string): string {
   });
 }
 
+/** Discord-style relative timestamp: "Today at 2:34 PM", "Yesterday at 2:34 PM",
+ *  or "MM/DD/YYYY H:MM AM/PM" for older dates. */
+export function formatMessageTimestamp(iso: string): string {
+  const date = parseTimestamp(iso);
+  const now = new Date();
+
+  const timeStr = date.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterdayStart = new Date(todayStart.getTime() - 86_400_000);
+
+  if (date >= todayStart) {
+    return `Today at ${timeStr}`;
+  }
+  if (date >= yesterdayStart) {
+    return `Yesterday at ${timeStr}`;
+  }
+
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const yyyy = date.getFullYear();
+  return `${mm}/${dd}/${yyyy} ${timeStr}`;
+}
+
 export function isSameDay(a: string, b: string): boolean {
   const da = parseTimestamp(a);
   const db = parseTimestamp(b);
