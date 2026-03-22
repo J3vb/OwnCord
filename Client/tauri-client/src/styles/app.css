@@ -1828,3 +1828,71 @@
   background: var(--brand-primary, #5865f2);
   color: #fff;
 }
+
+/* ── Invite Manager ── */
+.invite-manager__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.invite-manager__empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 32px 0;
+  font-size: 14px;
+}
+.invite-item {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  transition: background 0.15s;
+}
+.invite-item:hover {
+  background: var(--bg-hover);
+}
+.invite-item__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.invite-item__code {
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 14px;
+  color: white;
+  font-weight: 600;
+}
+.invite-item__actions {
+  display: flex;
+  gap: 4px;
+}
+.invite-item__copy,
+.invite-item__revoke {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.15s;
+  background: transparent;
+}
+.invite-item__copy {
+  color: var(--text-positive);
+}
+.invite-item__copy:hover {
+  background: rgba(35, 165, 90, 0.15);
+}
+.invite-item__revoke {
+  color: var(--text-danger);
+}
+.invite-item__revoke:hover {
+  background: rgba(242, 63, 67, 0.15);
+}
+.invite-item__meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}

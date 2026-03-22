@@ -71,15 +71,22 @@ export function createInviteManager(
 
     for (const invite of invites) {
       const row = createElement("div", { class: "invite-item" });
-      const code = createElement("span", { class: "invite-item__code" }, maskCode(invite.code));
-      const info = createElement("span", { class: "invite-item__info" }, formatInviteInfo(invite));
 
-      const copyBtn = createElement("button", { class: "invite-item__copy" }, "Copy");
+      // Top row: code + action buttons
+      const headerRow = createElement("div", { class: "invite-item__header" });
+      const code = createElement("span", { class: "invite-item__code" }, maskCode(invite.code));
+      const actions = createElement("div", { class: "invite-item__actions" });
+
+      const copyBtn = createElement("button", { class: "invite-item__copy" });
+      copyBtn.appendChild(createIcon("external-link", 14));
+      copyBtn.appendChild(document.createTextNode(" Copy"));
       copyBtn.addEventListener("click", () => {
         options.onCopyLink(invite.code);
       }, { signal: ac.signal });
 
-      const revokeBtn = createElement("button", { class: "invite-item__revoke" }, "Revoke");
+      const revokeBtn = createElement("button", { class: "invite-item__revoke" });
+      revokeBtn.appendChild(createIcon("trash-2", 14));
+      revokeBtn.appendChild(document.createTextNode(" Revoke"));
       revokeBtn.addEventListener("click", () => {
         void options.onRevokeInvite(invite.code).then(() => {
           invites = invites.filter((i) => i.code !== invite.code);
@@ -89,32 +96,45 @@ export function createInviteManager(
         });
       }, { signal: ac.signal });
 
-      appendChildren(row, code, info, copyBtn, revokeBtn);
+      appendChildren(actions, copyBtn, revokeBtn);
+      appendChildren(headerRow, code, actions);
+
+      // Bottom row: meta info
+      const meta = createElement("div", { class: "invite-item__meta" }, formatInviteInfo(invite));
+
+      appendChildren(row, headerRow, meta);
       listEl.appendChild(row);
     }
   }
 
   function mount(container: Element): void {
     root = createElement("div", {
-      class: "invite-manager-overlay",
-      style: "position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;justify-content:center;align-items:center;",
+      class: "modal-overlay visible",
     });
 
     const modal = createElement("div", {
-      class: "invite-manager",
-      style: "background:var(--bg-secondary,#2f3136);border-radius:8px;padding:16px;min-width:400px;max-width:520px;",
+      class: "modal",
     });
 
     // Header
-    const header = createElement("div", { class: "invite-manager__header" });
-    const title = createElement("h2", {}, "Server Invites");
-    const closeBtn = createElement("button", { class: "invite-manager__close" });
+    const header = createElement("div", { class: "modal-header" });
+    const title = createElement("h3", {}, "Server Invites");
+    const closeBtn = createElement("button", { class: "modal-close" });
     closeBtn.appendChild(createIcon("x", 14));
     closeBtn.addEventListener("click", () => options.onClose(), { signal: ac.signal });
     appendChildren(header, title, closeBtn);
 
-    // Create button
-    const createBtn = createElement("button", { class: "invite-manager__create" }, "Create Invite");
+    // Body
+    const body = createElement("div", { class: "modal-body" });
+    listEl = createElement("div", { class: "invite-manager__list" });
+    emptyEl = createElement("div", { class: "invite-manager__empty" }, "No active invites");
+    appendChildren(body, listEl, emptyEl);
+
+    // Footer
+    const footer = createElement("div", { class: "modal-footer" });
+    const createBtn = createElement("button", { class: "invite-manager__create btn-modal-save" });
+    createBtn.appendChild(createIcon("external-link", 14));
+    createBtn.appendChild(document.createTextNode(" Create Invite"));
     createBtn.addEventListener("click", () => {
       void options.onCreateInvite().then((newInvite) => {
         invites = [...invites, newInvite];
@@ -123,10 +143,7 @@ export function createInviteManager(
         options.onError?.("Failed to create invite");
       });
     }, { signal: ac.signal });
-
-    // List
-    listEl = createElement("div", { class: "invite-manager__list" });
-    emptyEl = createElement("div", { class: "invite-manager__empty" }, "No active invites");
+    footer.appendChild(createBtn);
 
     // Escape key
     document.addEventListener("keydown", (e: KeyboardEvent) => {
@@ -142,7 +159,7 @@ export function createInviteManager(
       }
     }, { signal: ac.signal });
 
-    appendChildren(modal, header, createBtn, listEl, emptyEl);
+    appendChildren(modal, header, body, footer);
     root.appendChild(modal);
     renderList();
 
