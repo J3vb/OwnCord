@@ -4,8 +4,10 @@ import { authStore } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import type { ChatMessagePayload } from "../../src/lib/types";
 
-// Track prefs in a shared map we can reset
-const testPrefs = new Map<string, unknown>();
+// vi.hoisted ensures testPrefs is available when vi.mock factory runs
+const { testPrefs } = vi.hoisted(() => ({
+  testPrefs: new Map<string, unknown>(),
+}));
 
 // Mock the settings helpers
 vi.mock("../../src/components/settings/helpers", () => ({
@@ -14,6 +16,17 @@ vi.mock("../../src/components/settings/helpers", () => ({
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),
   THEMES: { dark: {}, midnight: {}, light: {} },
   applyTheme: vi.fn(),
+}));
+
+// Mock livekitSession (imported transitively by auth.store)
+vi.mock("../../src/lib/livekitSession", () => ({
+  leaveVoice: vi.fn(),
+  switchInputDevice: vi.fn(),
+  switchOutputDevice: vi.fn(),
+  setVoiceSensitivity: vi.fn(),
+  setInputVolume: vi.fn(),
+  setOutputVolume: vi.fn(),
+  getSessionDebugInfo: vi.fn().mockReturnValue({}),
 }));
 
 // Mock Tauri notification plugin (not available in test env)

@@ -30,6 +30,9 @@ vi.mock("@lib/livekitSession", () => ({
   switchInputDevice: vi.fn().mockResolvedValue(undefined),
   switchOutputDevice: vi.fn().mockResolvedValue(undefined),
   setVoiceSensitivity: vi.fn(),
+  setInputVolume: vi.fn(),
+  setOutputVolume: vi.fn(),
+  getSessionDebugInfo: vi.fn().mockReturnValue({}),
 }));
 
 vi.mock("@stores/auth.store", () => ({
@@ -84,8 +87,11 @@ describe("SettingsOverlay", () => {
       "Account",
       "Appearance",
       "Notifications",
+      "Text & Images",
+      "Accessibility",
       "Voice & Audio",
       "Keybinds",
+      "Advanced",
       "Logs",
     ]);
 
@@ -237,7 +243,7 @@ describe("SettingsOverlay", () => {
   it("renders Voice & Audio tab with device selectors", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
-    getTab(container, 3).click();
+    getTab(container, 5).click();
 
     const selects = container.querySelectorAll("select.form-input");
     expect(selects.length).toBe(3);
@@ -256,9 +262,11 @@ describe("SettingsOverlay", () => {
   it("persists voice sensitivity setting", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
-    getTab(container, 3).click();
+    getTab(container, 5).click();
 
-    const slider = container.querySelector(".settings-slider") as HTMLInputElement;
+    // Sensitivity slider is the 3rd .settings-slider (after input volume and output volume)
+    const sliders = container.querySelectorAll(".settings-slider");
+    const slider = sliders[2] as HTMLInputElement;
     slider.value = "75";
     slider.dispatchEvent(new Event("input"));
 
@@ -270,7 +278,7 @@ describe("SettingsOverlay", () => {
   it("persists audio device selection on change", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
-    getTab(container, 3).click();
+    getTab(container, 5).click();
 
     const selects = container.querySelectorAll("select.form-input");
     const inputSelect = selects[0] as HTMLSelectElement;
@@ -284,7 +292,7 @@ describe("SettingsOverlay", () => {
   it("toggles echo cancellation", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
-    getTab(container, 3).click();
+    getTab(container, 5).click();
 
     const toggles = container.querySelectorAll(".toggle");
     const echoToggle = toggles[0] as HTMLElement;
