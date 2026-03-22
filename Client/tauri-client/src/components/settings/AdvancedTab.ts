@@ -61,14 +61,8 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
 
   const devtoolsBtn = createElement("button", { class: "ac-btn" }, "Open DevTools");
   devtoolsBtn.addEventListener("click", () => {
-    void import("@tauri-apps/api/webviewWindow")
-      .then((mod) => {
-        const wv = mod.getCurrentWebviewWindow();
-        const wvAny = wv as unknown as { openDevtools?: () => void };
-        if (typeof wvAny.openDevtools === "function") {
-          wvAny.openDevtools();
-        }
-      })
+    void import("@tauri-apps/api/core")
+      .then((mod) => mod.invoke("open_devtools"))
       .catch(() => {
         // DevTools not available in this build
       });
