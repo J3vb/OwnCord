@@ -104,6 +104,8 @@ func (h *Hub) handleVoiceCamera(c *Client, payload json.RawMessage) {
 			videoCount, countErr := h.db.CountActiveCameras(voiceChID)
 			if countErr != nil {
 				slog.Error("handleVoiceCamera CountActiveCameras", "err", countErr, "channel_id", voiceChID)
+				c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to check video limit"))
+				return
 			} else if videoCount >= ch.VoiceMaxVideo {
 				c.sendMsg(buildErrorMsg(ErrCodeVideoLimit,
 					fmt.Sprintf("maximum %d video streams reached", ch.VoiceMaxVideo)))

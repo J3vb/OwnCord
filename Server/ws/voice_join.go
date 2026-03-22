@@ -37,6 +37,15 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 		return
 	}
 
+	// Guard: reject voice join if LiveKit is configured but the companion
+	// process is not running (e.g. crashed 10 times and gave up).
+	// When livekit is nil, voice still works — just without SFU tokens.
+	if h.livekit != nil && h.lkProcess != nil && !h.lkProcess.IsRunning() {
+		slog.Warn("handleVoiceJoin: LiveKit process not running", "user_id", c.userID)
+		c.sendMsg(buildErrorMsg(ErrCodeVoiceError, "voice is temporarily unavailable — LiveKit is not running"))
+		return
+	}
+
 	currentChID := c.getVoiceChID()
 
 	// If user is already in the same voice channel, no-op.

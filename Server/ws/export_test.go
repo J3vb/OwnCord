@@ -51,3 +51,8 @@ func ParseIdentityForTest(identity string) (int64, error) {
 func ParseRoomChannelIDForTest(roomName string) (int64, error) {
 	return parseRoomChannelID(roomName)
 }
+
+// WsToHTTPForTest exposes wsToHTTP for external tests.
+func WsToHTTPForTest(wsURL string) string {
+	return wsToHTTP(wsURL)
+}

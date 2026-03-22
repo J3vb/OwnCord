@@ -104,7 +104,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// Metrics endpoint — admin-IP-restricted, returns runtime stats as JSON.
 	r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs)).
-		Get("/api/v1/metrics", handleMetrics(func() int { return hub.ClientCount() }))
+		Get("/api/v1/metrics", handleMetrics(
+			func() int { return hub.ClientCount() },
+			func() (bool, error) { return hub.LiveKitHealthCheck() },
+		))
 
 	// Admin panel: static files + REST API (Phase 6).
 	// Restrict /admin to configured CIDRs (default: private networks only).
