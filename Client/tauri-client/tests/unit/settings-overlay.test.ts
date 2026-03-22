@@ -60,6 +60,7 @@ describe("SettingsOverlay", () => {
     onChangePassword: vi.fn().mockResolvedValue(undefined),
     onUpdateProfile: vi.fn().mockResolvedValue(undefined),
     onLogout: vi.fn(),
+    onStatusChange: vi.fn(),
   };
 
   beforeEach(() => {

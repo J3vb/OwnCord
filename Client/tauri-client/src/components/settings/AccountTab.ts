@@ -5,8 +5,10 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
+import type { UserStatus } from "@lib/types";
 import { authStore } from "@stores/auth.store";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
+import { loadPref, savePref } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -117,6 +119,71 @@ function buildPasswordSection(
 }
 
 // ---------------------------------------------------------------------------
+// Status selector builder
+// ---------------------------------------------------------------------------
+
+interface StatusOption {
+  readonly value: UserStatus;
+  readonly label: string;
+  readonly description: string;
+  readonly color: string;
+}
+
+const STATUS_OPTIONS: readonly StatusOption[] = [
+  { value: "online",  label: "Online",          description: "",                                                    color: "#3ba55d" },
+  { value: "idle",    label: "Idle",             description: "You will appear as idle",                            color: "#faa61a" },
+  { value: "dnd",     label: "Do Not Disturb",   description: "You will not receive desktop notifications",         color: "#ed4245" },
+  { value: "offline", label: "Invisible",        description: "You will appear offline but still have full access", color: "#747f8d" },
+];
+
+function buildStatusSelector(
+  options: SettingsOverlayOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const wrapper = createElement("div", {});
+  const separator = createElement("div", { class: "settings-separator" });
+  const sectionTitle = createElement("div", { class: "settings-section-title" }, "Status");
+  const optionsList = createElement("div", { class: "status-options" });
+
+  const currentStatus = loadPref<UserStatus>("userStatus", "online");
+  const rowElements = new Map<UserStatus, HTMLDivElement>();
+
+  for (const opt of STATUS_OPTIONS) {
+    const row = createElement("div", {
+      class: `status-option${opt.value === currentStatus ? " active" : ""}`,
+    });
+
+    const dot = createElement("div", { class: "status-dot-large" });
+    dot.style.background = opt.color;
+
+    const labelWrap = createElement("div", {});
+    const labelEl = createElement("div", { class: "status-option-label" }, opt.label);
+    appendChildren(labelWrap, labelEl);
+    if (opt.description.length > 0) {
+      const descEl = createElement("div", { class: "status-option-desc" }, opt.description);
+      labelWrap.appendChild(descEl);
+    }
+
+    appendChildren(row, dot, labelWrap);
+
+    row.addEventListener("click", () => {
+      for (const [, el] of rowElements) {
+        el.classList.remove("active");
+      }
+      row.classList.add("active");
+      savePref("userStatus", opt.value);
+      options.onStatusChange(opt.value);
+    }, { signal });
+
+    rowElements.set(opt.value, row);
+    optionsList.appendChild(row);
+  }
+
+  appendChildren(wrapper, separator, sectionTitle, optionsList);
+  return wrapper;
+}
+
+// ---------------------------------------------------------------------------
 // Main tab builder
 // ---------------------------------------------------------------------------
 
@@ -134,6 +201,9 @@ export function buildAccountTab(
   const { card, headerName, usernameValue, editUserProfileBtn, editUsernameBtn } =
     buildProfileCard(username);
   section.appendChild(card);
+
+  // Status selector
+  section.appendChild(buildStatusSelector(options, signal));
 
   // Inline edit form
   const editForm = createElement("div", { class: "setting-row", style: "display:none;margin-bottom:16px" });

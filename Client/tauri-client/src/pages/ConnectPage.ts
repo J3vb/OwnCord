@@ -131,6 +131,7 @@ export function createConnectPage(
       onChangePassword: async () => { /* no-op on connect page */ },
       onUpdateProfile: async () => { /* no-op on connect page */ },
       onLogout: () => { /* no-op on connect page */ },
+      onStatusChange: () => { /* no-op on connect page */ },
     });
     settingsOverlay.mount(rootEl);
 

@@ -16,6 +16,7 @@ import { createToastContainer } from "@components/Toast";
 import type { ToastContainer } from "@components/Toast";
 import { authStore, clearAuth, updateUser } from "@stores/auth.store";
 import { closeSettings } from "@stores/ui.store";
+import { updatePresence } from "@stores/members.store";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { voiceStore } from "@stores/voice.store";
 import {
@@ -218,6 +219,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         }
       },
       onLogout: () => clearAuth(),
+      onStatusChange: (status) => {
+        const userId = getCurrentUserId();
+        if (userId !== 0) {
+          updatePresence(userId, status);
+        }
+        ws.send({ type: "presence_update", payload: { status } });
+      },
     });
     settingsOverlay.mount(root);
     children.push(settingsOverlay);

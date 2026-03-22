@@ -8,6 +8,7 @@ import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
+import type { UserStatus } from "@lib/types";
 import { uiStore } from "@stores/ui.store";
 import { authStore } from "@stores/auth.store";
 import { loadPref, applyTheme } from "./settings/helpers";
@@ -28,6 +29,7 @@ export interface SettingsOverlayOptions {
   onChangePassword(oldPassword: string, newPassword: string): Promise<void>;
   onUpdateProfile(username: string): Promise<void>;
   onLogout(): void;
+  onStatusChange(status: UserStatus): void;
 }
 
 export type TabName = "Account" | "Appearance" | "Notifications" | "Voice & Audio" | "Keybinds" | "Logs";
