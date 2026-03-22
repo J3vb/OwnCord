@@ -1588,6 +1588,18 @@
 .compact-mode .category { padding: 10px 8px 2px 16px; }
 /* Chat header */
 .compact-mode .chat-header { height: 38px; }
+/* Empty states */
+.channel-list-empty, .member-list-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 32px 16px; text-align: center; gap: 4px;
+}
+.channel-list-empty-text, .member-list-empty-text {
+  color: var(--text-muted); font-size: var(--font-size-md);
+}
+.channel-list-empty-hint {
+  color: var(--text-faint); font-size: var(--font-size-xs);
+}
+
 /* Members */
 .compact-mode .member-item { padding: 2px 8px; }
 .compact-mode .member-item .mi-avatar { width: 24px; height: 24px; font-size: 10px; }

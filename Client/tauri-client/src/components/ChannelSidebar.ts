@@ -681,6 +681,15 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     const grouped = getChannelsByCategory();
     const state = channelsStore.getState();
 
+    if (grouped.size === 0) {
+      const emptyState = createElement("div", { class: "channel-list-empty" });
+      const msg = createElement("p", { class: "channel-list-empty-text" }, "No channels yet");
+      const hint = createElement("p", { class: "channel-list-empty-hint" }, "Right-click a category to create one");
+      appendChildren(emptyState, msg, hint);
+      channelList.appendChild(emptyState);
+      return;
+    }
+
     for (const [category, channels] of grouped) {
       channelList.appendChild(
         renderCategoryGroup(category, channels, state.activeChannelId, ac.signal, onVoiceJoin, onVoiceLeave, onCreateChannel, onEditChannel, onDeleteChannel, onReorderChannel),

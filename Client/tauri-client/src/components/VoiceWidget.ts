@@ -53,14 +53,14 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     const channel = channelsStore.getState().channels.get(channelId);
     setText(channelNameEl, channel?.name ?? "Voice Channel");
 
-    // Toggle button active states and swap icons
+    // Toggle button active states, swap icons, and update aria-pressed
     muteBtn?.classList.toggle("active-ctrl", voice.localMuted);
     deafenBtn?.classList.toggle("active-ctrl", voice.localDeafened);
     cameraBtn?.classList.toggle("active-ctrl", voice.localCamera);
 
-    if (muteBtn) swapIcon(muteBtn, voice.localMuted ? "mic-off" : "mic");
-    if (deafenBtn) swapIcon(deafenBtn, voice.localDeafened ? "headphones-off" : "headphones");
-    if (cameraBtn) swapIcon(cameraBtn, voice.localCamera ? "camera-off" : "camera");
+    if (muteBtn) { swapIcon(muteBtn, voice.localMuted ? "mic-off" : "mic"); muteBtn.setAttribute("aria-pressed", String(voice.localMuted)); }
+    if (deafenBtn) { swapIcon(deafenBtn, voice.localDeafened ? "headphones-off" : "headphones"); deafenBtn.setAttribute("aria-pressed", String(voice.localDeafened)); }
+    if (cameraBtn) { swapIcon(cameraBtn, voice.localCamera ? "camera-off" : "camera"); cameraBtn.setAttribute("aria-pressed", String(voice.localCamera)); }
   }
 
   function createControlButton(

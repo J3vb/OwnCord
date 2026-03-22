@@ -88,6 +88,8 @@ function createMemberItem(
   const statusDot = createElement("div", {
     class: "mi-status",
     style: `background: ${statusColor(member.status)}`,
+    "aria-label": member.status,
+    title: member.status,
   });
   avatar.appendChild(statusDot);
 
@@ -147,6 +149,14 @@ function renderList(root: HTMLDivElement, opts: MemberListOptions, signal: Abort
 
   const state = membersStore.getState();
   const allMembers = Array.from(state.members.values());
+
+  if (allMembers.length === 0) {
+    const emptyState = createElement("div", { class: "member-list-empty" });
+    const msg = createElement("p", { class: "member-list-empty-text" }, "No members online");
+    emptyState.appendChild(msg);
+    root.appendChild(emptyState);
+    return;
+  }
 
   for (const group of ROLE_GROUPS) {
     const groupMembers = allMembers

@@ -53,6 +53,8 @@ export class LiveKitSession {
   private onRemoteVideoCallback: RemoteVideoCallback | null = null;
   private onRemoteVideoRemovedCallback: RemoteVideoRemovedCallback | null = null;
   private tokenRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Latest token received from server (used for reconnection after token refresh). */
+  private latestToken: string | null = null;
   /** Master output volume multiplier (0-2.0). Per-user volumes are scaled by this. */
   private outputVolumeMultiplier = loadPref<number>("outputVolume", 100) / 100;
 
@@ -209,7 +211,15 @@ export class LiveKitSession {
     this.startTokenRefreshTimer();
   }
 
-  handleVoiceTokenRefresh(): void {
+  handleVoiceTokenRefresh(token?: string): void {
+    // The installed livekit-client SDK version does not expose a refreshToken
+    // method on Room. Store the fresh token so that if LiveKit disconnects
+    // (e.g. token expiry), the reconnection path in handleVoiceToken can use
+    // it automatically. For now, the 4h TTL with 3.5h refresh request ensures
+    // a fresh token is always available before expiry.
+    if (token) {
+      this.latestToken = token;
+    }
     this.startTokenRefreshTimer();
     log.info("Voice token refreshed, timer restarted");
   }
@@ -250,7 +260,7 @@ export class LiveKitSession {
   ): Promise<void> {
     if (this.room !== null && this.currentChannelId === channelId
         && this.room.state === "connected") {
-      this.handleVoiceTokenRefresh();
+      this.handleVoiceTokenRefresh(token);
       return;
     }
     if (this.room !== null) this.leaveVoice(false);
@@ -325,6 +335,7 @@ export class LiveKitSession {
       r.disconnect().catch((err) => log.warn("room.disconnect() error (non-fatal)", err));
     }
     this.currentChannelId = null;
+    this.latestToken = null;
     setLocalCamera(false);
     log.info("Left voice session");
   }

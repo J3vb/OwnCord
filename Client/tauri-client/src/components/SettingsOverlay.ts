@@ -131,6 +131,7 @@ export function createSettingsOverlay(
     activeTab = tab;
     for (const [name, btn] of tabButtons) {
       btn.classList.toggle("active", name === tab);
+      btn.setAttribute("aria-selected", name === tab ? "true" : "false");
     }
     renderActiveTab();
   }
@@ -173,6 +174,8 @@ export function createSettingsOverlay(
 
     const accountBtn = createElement("button", {
       class: `settings-nav-item${activeTab === "Account" ? " active" : ""}`,
+      role: "tab",
+      "aria-selected": activeTab === "Account" ? "true" : "false",
     });
     accountBtn.prepend(createIcon(TAB_ICONS["Account"], 18));
     accountBtn.appendChild(document.createTextNode("Account"));
@@ -188,6 +191,8 @@ export function createSettingsOverlay(
     for (const name of appTabs) {
       const btn = createElement("button", {
         class: `settings-nav-item${name === activeTab ? " active" : ""}`,
+        role: "tab",
+        "aria-selected": name === activeTab ? "true" : "false",
       });
       btn.prepend(createIcon(TAB_ICONS[name], 18));
       btn.appendChild(document.createTextNode(name));
