@@ -1,5 +1,9 @@
 # ChatServer — Self-Hosted Windows Chat Platform
 
+> **Note:** Most Phase 1-6 tasks are complete as of v1.2.0. See
+> [[02-Tasks/Done|Done]] for the detailed completion list and
+> [[00-Overview/Changelog|Changelog]] for version history.
+
 Native Windows desktop client + self-hosted server.
 Two executables: `chatserver.exe` (server) and
 `OwnCord.exe` (Tauri v2 client). Server operator runs
@@ -19,7 +23,7 @@ the server, friends install the client.
 ### Client (`OwnCord.exe`)
 
 **Tauri v2** (Rust backend + TypeScript/HTML/CSS frontend).
-See LANGUAGE-REVIEW.md for the evaluation that led to this
+See [[07-Archive/LANGUAGE-REVIEW|LANGUAGE-REVIEW]] for the evaluation that led to this
 choice, and CLIENT-ARCHITECTURE.md for the full design.
 
 - Tauri v2 desktop app using system WebView2 (NOT Electron)
@@ -66,108 +70,106 @@ CLIENT (OwnCord.exe) — installed by each friend
 
 ## Phase 1: Protocol & Server Core (2–3 weeks)
 
-- [ ] Define client-server protocol over WebSocket
+- [x] Define client-server protocol over WebSocket
   (JSON messages with type/payload structure)
-- [ ] Message types: auth, chat, typing, presence,
+- [x] Message types: auth, chat, typing, presence,
   channel_update, voice_signal, file_transfer
-- [ ] Server: Go project with `go embed` for admin
+- [x] Server: Go project with `go embed` for admin
   panel static files only
-- [ ] SQLite setup with migrations on startup (users,
+- [x] SQLite setup with migrations on startup (users,
   channels, messages, sessions, roles, invites)
-- [ ] config.yaml generation on first run (port, name,
+- [x] config.yaml generation on first run (port, name,
   max upload size, voice quality, TLS mode)
-- [ ] Server systray icon (getlantern/systray) — minimize to tray, status
-  indicator, open admin panel, quit
 - [ ] Windows Firewall handling on first launch
 - [ ] Optional: register as Windows Service for headless operation
 
 ## Phase 2: Auth & Security (2–3 weeks)
 
-- [ ] Invite-only registration — server generates
+- [x] Invite-only registration — server generates
   invite codes, client has "Redeem Invite" flow
-- [ ] bcrypt (cost 12+) passwords, server-side session tokens (256-bit random)
-- [ ] Client stores auth token securely via Windows Credential Manager / DPAPI
-- [ ] Login rate limiting: 5 attempts/min/IP, lockout after 10 failures
-- [ ] Optional TOTP 2FA (`pquerna/otp`) — QR code
-  during setup, prompts on login
-- [ ] Roles: Owner, Admin, Moderator, Member + custom roles with bitfield permissions
-- [ ] Per-channel permission overrides, enforced server-side on every action
-- [ ] TLS modes: self-signed (default), Let's Encrypt,
+- [x] bcrypt (cost 12+) passwords, server-side session tokens (256-bit random)
+- [x] Client stores auth token securely via Windows Credential Manager / DPAPI
+- [x] Login rate limiting: 5 attempts/min/IP, lockout after 10 failures
+- [ ] Optional TOTP 2FA — planned, not yet implemented (T-023 in backlog).
+  DB schema has `totp_secret` column ready.
+- [x] Roles: Owner, Admin, Moderator, Member + custom roles with bitfield permissions
+- [x] Per-channel permission overrides, enforced server-side on every action
+- [x] TLS modes: self-signed (default), Let's Encrypt,
   manual cert, off (Tailscale)
-- [ ] Client: certificate pinning or trust-on-first-use (TOFU) for self-signed certs
+- [x] Client: certificate pinning or trust-on-first-use (TOFU) for self-signed certs
 
 ## Phase 3: Client App — Core UI (3–4 weeks)
 
-- [ ] Connection dialog: server address, port, login/register, invite code entry
-- [ ] Save server profiles (connect to multiple
+- [x] Connection dialog: server address, port, login/register, invite code entry
+- [x] Save server profiles (connect to multiple
   servers like TeamSpeak)
-- [ ] Main window layout: server list → channel list → message area → member list
-- [ ] Channel tree view with categories, text channels, voice channels
-- [ ] Message rendering: markdown, code blocks, timestamps, avatars, replies, reactions
-- [ ] Message input: multi-line, markdown preview, emoji picker, file drag-and-drop
-- [ ] Unread indicators, @mention badges per channel
-- [ ] System tray: minimize to tray, notification popups, badge count
-- [ ] Keyboard shortcuts: Ctrl+K quick switcher,
+- [x] Main window layout: server list → channel list → message area → member list
+- [x] Channel tree view with categories, text channels, voice channels
+- [x] Message rendering: markdown, code blocks, timestamps, avatars, replies, reactions
+- [x] Message input: multi-line, markdown preview, emoji picker, file drag-and-drop
+- [x] Unread indicators, @mention badges per channel
+- [x] System tray: minimize to tray, notification popups, badge count
+- [x] Keyboard shortcuts: Ctrl+K quick switcher,
   Escape to close panels, customizable PTT key
-- [ ] Settings: account, appearance (light/dark),
+- [x] Settings: account, appearance (light/dark),
   notifications, audio devices, keybinds
 
 ## Phase 4: Real-Time Chat Features (2–3 weeks)
 
-- [ ] WebSocket client with auto-reconnect, exponential
+- [x] WebSocket client with auto-reconnect, exponential
   backoff, message replay on reconnect
-- [ ] Send/receive messages in real-time, append to scrollback
-- [ ] Message history: paginated from server on channel switch, scroll-to-load-more
-- [ ] Threads, replies (inline preview), reactions (emoji), edit, delete
-- [ ] Typing indicators ("X is typing..." below input)
-- [ ] Online/offline/idle/DnD presence with status icons in member list
-- [ ] File uploads: drag-and-drop or clipboard paste,
+- [x] Send/receive messages in real-time, append to scrollback
+- [x] Message history: paginated from server on channel switch, scroll-to-load-more
+- [x] Threads, replies (inline preview), reactions (emoji), edit, delete
+- [x] Typing indicators ("X is typing..." below input)
+- [x] Online/offline/idle/DnD presence with status icons in member list
+- [x] File uploads: drag-and-drop or clipboard paste,
   progress bar, inline image previews
-- [ ] Client-side file validation before upload (size check, warn on large files)
-- [ ] Search: query server FTS5 endpoint, display results with jump-to-message
-- [ ] Windows toast notifications with action buttons (reply, mark read)
-- [ ] Notification sounds (configurable, per-channel mute/override)
+- [x] Client-side file validation before upload (size check, warn on large files)
+- [x] Search: query server FTS5 endpoint, display results with jump-to-message
+- [x] Windows toast notifications with action buttons (reply, mark read)
+- [x] Notification sounds (configurable, per-channel mute/override)
 
 ## Phase 5: Voice & Video (3–5 weeks)
 
-- [ ] LiveKit integration in native client for voice/video
+- [x] LiveKit integration in native client for voice/video
   (client connects to LiveKit directly using token from server)
-- [ ] Audio device selection: input/output dropdowns in settings, live preview
-- [ ] Voice channels: click to join/leave, show connected users with speaking indicators
-- [ ] Voice controls: mute (button + keybind), deafen, per-user volume sliders
-- [ ] Push-to-talk: configurable global hotkey that works in fullscreen games
-- [ ] Voice activity detection with configurable sensitivity
-- [ ] Noise suppression (RNNoise or equivalent, bundled with client)
-- [ ] Server-side: LiveKit companion process with token-based auth
+- [x] Audio device selection: input/output dropdowns in settings, live preview
+- [x] Voice channels: click to join/leave, show connected users with speaking indicators
+- [x] Voice controls: mute (button + keybind), deafen, per-user volume sliders
+- [x] Push-to-talk: configurable global hotkey that works in fullscreen games
+- [x] Voice activity detection with configurable sensitivity
+- [x] Noise suppression (RNNoise or equivalent, bundled with client)
+- [x] Server-side: LiveKit companion process with token-based auth
   and webhook sync for voice state updates
-- [ ] Voice quality: low (32kbps) / medium (64kbps) / high (128kbps Opus)
+- [x] Voice quality: low (32kbps) / medium (64kbps) / high (128kbps Opus)
 - [ ] Screen sharing via LiveKit screen share track
-- [ ] Video calls: camera capture, displayed in voice channel panel
+- [x] Video calls: camera capture, displayed in voice channel panel
 
 ## Phase 6: Admin Panel — Web-Based (1–2 weeks)
 
-- [ ] Served by server at `/admin`, browser-only access
-- [ ] Auth: admin credentials, session-based
-- [ ] Dashboard: connected users, message count, disk usage, CPU/RAM, uptime
-- [ ] User management: list all, edit roles, ban/unban, reset password, force disconnect
-- [ ] Channel management: create, rename, reorder, set permissions, archive
+- [x] Served by server at `/admin`, browser-only access
+- [x] Auth: admin credentials, session-based
+- [x] Dashboard: connected users, message count, disk usage, CPU/RAM, uptime
+- [x] User management: list all, edit roles, ban/unban, reset password, force disconnect
+- [x] Channel management: create, rename, reorder, set permissions, archive
 - [ ] Invite management: generate, view active, set expiry/use limit, revoke
-- [ ] Server settings: name, icon, MOTD, max upload size, voice quality, TLS config
-- [ ] Moderation: kick, ban, temp ban, slow mode, mute, word filter, audit log
-- [ ] Backup: trigger manual backup, configure
+- [x] Server settings: name, icon, MOTD, max upload size, voice quality, TLS config
+- [x] Moderation: kick, ban, temp ban, slow mode, mute, word filter, audit log
+- [x] Backup: trigger manual backup, configure
   schedule, view/restore from admin panel
-- [ ] Built with simple HTML/CSS/JS embedded in the server binary
+- [x] Built with simple HTML/CSS/JS embedded in the server binary
 
 ## Phase 7: Distribution & Updates (1–2 weeks)
 
-- [ ] **Server:** GitHub Actions builds
+- [x] **Server:** GitHub Actions builds
   `chatserver.exe` (amd64), SHA256, GitHub Release
-- [ ] **Client:** Tauri bundler (NSIS) installer —
+- [x] **Client:** Tauri bundler (NSIS) installer —
   Program Files, Start Menu, auto-start, protocol
   handler for `chatserver://` invite links
 - [ ] Client auto-update: check GitHub releases on
   launch, prompt to download + install
-- [ ] Server update: admin panel shows available update, one-click download + restart
+- [x] Server update: admin panel shows available update, one-click download + restart
 - [ ] Docs: Quick Start, Port Forwarding, Tailscale,
   Client install guide
 - [ ] Security hardening checklist for server operators
@@ -222,9 +224,15 @@ update integrity (SHA256).
 | LiveKit | `livekit/server-sdk-go` (token generation, webhook validation) |
 | SQLite | `modernc.org/sqlite` (pure Go) |
 | Auth | `golang.org/x/crypto/bcrypt` |
-| TOTP | `pquerna/otp` |
 | Sanitization | `bluemonday` |
 | TLS | `golang.org/x/crypto/acme/autocert` |
-| Systray | `getlantern/systray` |
 | Config | `koanf` |
 | Logging | `log/slog` |
+| Versioning | `golang.org/x/mod/semver` |
+| UUID | `google/uuid` |
+
+> **Removed references:**
+> - ~~`getlantern/systray`~~ — The server has no system tray.
+>   System tray is in the Tauri client (Rust-side).
+> - ~~`pquerna/otp`~~ — TOTP 2FA is not yet implemented
+>   (T-023 in backlog). Not in `go.mod`.

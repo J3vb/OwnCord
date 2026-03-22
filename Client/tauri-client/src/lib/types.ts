@@ -28,7 +28,6 @@ export type WsErrorCode =
   | "INVALID_INPUT"
   | "SERVER_ERROR"
   | "CHANNEL_FULL"
-  | "INVALID_SDP"
   | "VOICE_ERROR"
   | "VIDEO_LIMIT";
 

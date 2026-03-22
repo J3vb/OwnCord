@@ -6,6 +6,7 @@ import {
   type RemoteTrack,
   type RemoteTrackPublication,
   type RemoteParticipant,
+  type Participant,
   DisconnectReason,
 } from "livekit-client";
 import type { WsClient } from "@lib/ws";
@@ -18,8 +19,7 @@ import {
 } from "@stores/voice.store";
 import { loadPref, savePref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
-import { createNoiseSuppressor } from "@lib/noise-suppression";
-import type { NoiseSuppressor } from "@lib/noise-suppression";
+import { createRNNoiseProcessor } from "@lib/noise-suppression";
 
 const log = createLogger("livekitSession");
 
@@ -32,28 +32,9 @@ export function parseUserId(identity: string): number {
   return 0;
 }
 
-/** Compute RMS audio level (0-1) from frequency data. */
-export function computeRms(data: Uint8Array<ArrayBuffer>): number {
-  let sum = 0;
-  for (let i = 0; i < data.length; i++) {
-    const v = (data[i] ?? 0) / 255;
-    sum += v * v;
-  }
-  return Math.sqrt(sum / data.length);
-}
-
-/** Get saved per-user volume (0-200 range, default 100). */
+/** Get saved per-user volume (0-200 range, default 100). Applied via LiveKit's GainNode-backed setVolume(). */
 function getSavedUserVolume(userId: number): number {
   return loadPref<number>(`userVolume_${userId}`, 100);
-}
-
-/** Compare two pre-sorted speaker ID arrays. Both must be sorted ascending. */
-function speakerSetsEqual(a: readonly number[], b: readonly number[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
 }
 
 // --- Types ---
@@ -61,52 +42,42 @@ function speakerSetsEqual(a: readonly number[], b: readonly number[]): boolean {
 type RemoteVideoCallback = (userId: number, stream: MediaStream) => void;
 type RemoteVideoRemovedCallback = (userId: number) => void;
 
-interface RemoteAnalyser {
-  analyser: AnalyserNode;
-  source: MediaStreamAudioSourceNode;
-  data: Uint8Array<ArrayBuffer>;
-}
-
 // --- LiveKitSession class ---
 
 export class LiveKitSession {
   private room: Room | null = null;
   private ws: WsClient | null = null;
-  private noiseSuppressor: NoiseSuppressor | null = null;
   private onErrorCallback: ((message: string) => void) | null = null;
   private currentChannelId: number | null = null;
   private serverHost: string | null = null;
-  private speakingPollInterval: ReturnType<typeof setInterval> | null = null;
-  private speakingThreshold = ((100 - 50) / 100) * 0.15;
-  private rawMicStream: MediaStream | null = null;
-  private readonly audioElements = new Map<string, HTMLAudioElement>();
-  private audioContainer: HTMLDivElement | null = null;
   private onRemoteVideoCallback: RemoteVideoCallback | null = null;
   private onRemoteVideoRemovedCallback: RemoteVideoRemovedCallback | null = null;
-  private sharedAudioCtx: AudioContext | null = null;
-  private readonly remoteAnalysers = new Map<number, RemoteAnalyser>();
-  private localMicGated = false;
-  private localAnalyser: AnalyserNode | null = null;
-  private localAnalyserSource: MediaStreamAudioSourceNode | null = null;
-  private localAnalyserClonedTrack: MediaStreamTrack | null = null;
-  private readonly localAnalyserData = new Uint8Array(128);
-  private previousSpeakerIds: readonly number[] = [];
   private tokenRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Master output volume multiplier (0-2.0). Per-user volumes are scaled by this. */
+  private outputVolumeMultiplier = loadPref<number>("outputVolume", 100) / 100;
 
-  // --- Shared AudioContext (lazy) ---
+  // --- RNNoise processor (LiveKit TrackProcessor API) ---
 
-  private getSharedAudioCtx(): AudioContext {
-    if (this.sharedAudioCtx === null || this.sharedAudioCtx.state === "closed") {
-      this.sharedAudioCtx = new AudioContext({ sampleRate: 48000 });
-    }
-    return this.sharedAudioCtx;
+  /** Attach RNNoise processor to the local mic track. Safe to call if already attached. */
+  private async applyNoiseSuppressor(): Promise<void> {
+    if (this.room === null) return;
+    const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
+    if (micPub?.track === undefined) return;
+    if (micPub.track.getProcessor() !== undefined) return;
+    const processor = createRNNoiseProcessor();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LocalTrack.setProcessor uses wide generic, but AudioProcessorOptions is guaranteed at runtime with webAudioMix
+    await micPub.track.setProcessor(processor as any);
+    log.info("RNNoise processor attached to mic track");
   }
 
-  private closeSharedAudioCtx(): void {
-    if (this.sharedAudioCtx !== null) {
-      void this.sharedAudioCtx.close();
-      this.sharedAudioCtx = null;
-    }
+  /** Remove RNNoise processor from the local mic track. Safe to call if none attached. */
+  private async removeNoiseSuppressor(): Promise<void> {
+    if (this.room === null) return;
+    const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
+    if (micPub?.track === undefined) return;
+    if (micPub.track.getProcessor() === undefined) return;
+    await micPub.track.stopProcessor();
+    log.info("RNNoise processor removed from mic track");
   }
 
   // --- Room factory ---
@@ -115,6 +86,7 @@ export class LiveKitSession {
     const newRoom = new Room({
       adaptiveStream: true,
       dynacast: true,
+      webAudioMix: true,
       audioCaptureDefaults: {
         echoCancellation: loadPref("echoCancellation", true),
         noiseSuppression: loadPref("noiseSuppression", true),
@@ -124,68 +96,8 @@ export class LiveKitSession {
     newRoom.on(RoomEvent.TrackSubscribed, this.handleTrackSubscribed);
     newRoom.on(RoomEvent.TrackUnsubscribed, this.handleTrackUnsubscribed);
     newRoom.on(RoomEvent.Disconnected, this.handleDisconnected);
+    newRoom.on(RoomEvent.ActiveSpeakersChanged, this.handleActiveSpeakersChanged);
     return newRoom;
-  }
-
-  // --- Audio container ---
-
-  private getOrCreateAudioContainer(): HTMLDivElement {
-    if (this.audioContainer !== null) return this.audioContainer;
-    const existing = document.getElementById("voice-audio-container");
-    if (existing instanceof HTMLDivElement) {
-      this.audioContainer = existing;
-      return this.audioContainer;
-    }
-    const div = document.createElement("div");
-    div.id = "voice-audio-container";
-    div.style.display = "none";
-    document.body.appendChild(div);
-    this.audioContainer = div;
-    return this.audioContainer;
-  }
-
-  private cleanupAudioElements(): void {
-    for (const el of this.audioElements.values()) {
-      el.srcObject = null;
-      el.remove();
-    }
-    this.audioElements.clear();
-  }
-
-  // --- RNNoise ---
-
-  private async publishWithNoiseSuppression(): Promise<void> {
-    if (this.room === null) return;
-    const savedDevice = loadPref<string>("audioInputDevice", "");
-    const constraints: MediaStreamConstraints = {
-      audio: {
-        deviceId: savedDevice ? { exact: savedDevice } : undefined,
-        echoCancellation: loadPref("echoCancellation", true),
-        noiseSuppression: loadPref("noiseSuppression", true),
-        autoGainControl: loadPref("autoGainControl", true),
-      },
-      video: false,
-    };
-    const rawStream = await navigator.mediaDevices.getUserMedia(constraints);
-    this.rawMicStream = rawStream;
-    try {
-      this.noiseSuppressor = createNoiseSuppressor();
-      const processedStream = await this.noiseSuppressor.process(rawStream);
-      const processedTrack = processedStream.getAudioTracks()[0];
-      if (processedTrack) {
-        await this.room.localParticipant.publishTrack(processedTrack, {
-          source: Track.Source.Microphone,
-        });
-      }
-    } catch (err) {
-      for (const track of rawStream.getTracks()) track.stop();
-      this.rawMicStream = null;
-      if (this.noiseSuppressor !== null) {
-        this.noiseSuppressor.destroy();
-        this.noiseSuppressor = null;
-      }
-      throw err;
-    }
   }
 
   // --- Room event handlers (arrow fns to preserve `this`) ---
@@ -197,22 +109,20 @@ export class LiveKitSession {
   ): void => {
     const userId = parseUserId(participant.identity);
     if (track.kind === Track.Kind.Audio) {
-      const container = this.getOrCreateAudioContainer();
+      // Attach creates an <audio> element — required for playback
       const audioEl = track.attach();
+      audioEl.style.display = "none";
+      document.body.appendChild(audioEl);
+      // Apply saved per-user volume scaled by master output volume
       const savedVolume = userId > 0 ? getSavedUserVolume(userId) : 100;
       audioEl.volume = Math.min(savedVolume, 100) / 100;
-      if (voiceStore.getState().localDeafened) audioEl.muted = true;
       const savedOutput = loadPref<string>("audioOutputDevice", "");
       if (savedOutput !== "" && typeof audioEl.setSinkId === "function") {
         audioEl.setSinkId(savedOutput).catch((err) => {
           log.warn("Failed to set output device on remote audio", err);
         });
       }
-      container.appendChild(audioEl);
-      const trackKey = `${participant.identity}-${track.sid}`;
-      this.audioElements.set(trackKey, audioEl);
-      if (userId > 0) this.addRemoteAnalyser(userId, track.mediaStreamTrack);
-      log.debug("Remote audio track subscribed", { userId, trackSid: track.sid });
+      log.debug("Remote audio track subscribed and attached", { userId, trackSid: track.sid });
     } else if (track.kind === Track.Kind.Video) {
       if (userId > 0 && this.onRemoteVideoCallback !== null) {
         const stream = new MediaStream([track.mediaStreamTrack]);
@@ -229,11 +139,8 @@ export class LiveKitSession {
   ): void => {
     const userId = parseUserId(participant.identity);
     if (track.kind === Track.Kind.Audio) {
-      track.detach().forEach((el) => el.remove());
-      const trackKey = `${participant.identity}-${track.sid}`;
-      this.audioElements.delete(trackKey);
-      if (userId > 0) this.removeRemoteAnalyser(userId);
-      log.debug("Remote audio track unsubscribed", { userId, trackSid: track.sid });
+      for (const el of track.detach()) el.remove();
+      log.debug("Remote audio track unsubscribed and detached", { userId, trackSid: track.sid });
     } else if (track.kind === Track.Kind.Video) {
       track.detach();
       if (userId > 0) this.onRemoteVideoRemovedCallback?.(userId);
@@ -241,126 +148,17 @@ export class LiveKitSession {
     }
   };
 
-  // --- Remote audio analysers ---
-
-  private addRemoteAnalyser(userId: number, mediaTrack: MediaStreamTrack): void {
-    this.removeRemoteAnalyser(userId);
-    try {
-      const ctx = this.getSharedAudioCtx();
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
-      analyser.smoothingTimeConstant = 0.5;
-      const stream = new MediaStream([mediaTrack]);
-      const source = ctx.createMediaStreamSource(stream);
-      source.connect(analyser);
-      this.remoteAnalysers.set(userId, { analyser, source, data: new Uint8Array(128) as Uint8Array<ArrayBuffer> });
-    } catch (err) {
-      log.warn("Failed to create remote analyser", { userId, error: err });
+  /** LiveKit's built-in speaking detection — replaces custom RMS polling. */
+  private handleActiveSpeakersChanged = (speakers: Participant[]): void => {
+    if (this.currentChannelId === null) return;
+    const speakerIds: number[] = [];
+    for (const speaker of speakers) {
+      const userId = parseUserId(speaker.identity);
+      if (userId > 0) speakerIds.push(userId);
     }
-  }
-
-  private removeRemoteAnalyser(userId: number): void {
-    const ra = this.remoteAnalysers.get(userId);
-    if (ra) {
-      ra.source.disconnect();
-      ra.analyser.disconnect();
-      this.remoteAnalysers.delete(userId);
-    }
-  }
-
-  private cleanupAllRemoteAnalysers(): void {
-    for (const [id] of this.remoteAnalysers) this.removeRemoteAnalyser(id);
-  }
-
-  // --- Local mic analyser ---
-
-  private startLocalAnalyser(): void {
-    this.stopLocalAnalyser();
-    if (this.room === null) return;
-    const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
-    const mediaTrack = micPub?.track?.mediaStreamTrack;
-    if (!mediaTrack) return;
-    try {
-      const ctx = this.getSharedAudioCtx();
-      this.localAnalyser = ctx.createAnalyser();
-      this.localAnalyser.fftSize = 256;
-      this.localAnalyser.smoothingTimeConstant = 0.5;
-      this.localAnalyserClonedTrack = mediaTrack.clone();
-      const stream = new MediaStream([this.localAnalyserClonedTrack]);
-      this.localAnalyserSource = ctx.createMediaStreamSource(stream);
-      this.localAnalyserSource.connect(this.localAnalyser);
-      log.debug("Local mic analyser started");
-    } catch (err) {
-      log.warn("Failed to start local mic analyser", err);
-    }
-  }
-
-  private stopLocalAnalyser(): void {
-    if (this.localAnalyserSource !== null) {
-      this.localAnalyserSource.disconnect();
-      this.localAnalyserSource = null;
-    }
-    if (this.localAnalyser !== null) {
-      this.localAnalyser.disconnect();
-      this.localAnalyser = null;
-    }
-    if (this.localAnalyserClonedTrack !== null) {
-      this.localAnalyserClonedTrack.stop();
-      this.localAnalyserClonedTrack = null;
-    }
-  }
-
-  // --- Speaking poll ---
-
-  private startSpeakingPoll(): void {
-    this.stopSpeakingPoll();
-    this.localMicGated = false;
-    this.previousSpeakerIds = [];
-    this.speakingPollInterval = setInterval(() => {
-      if (this.room === null || this.currentChannelId === null) return;
-      const speakerIds: number[] = [];
-      let localLevel = 0;
-      if (this.localAnalyser !== null) {
-        this.localAnalyser.getByteFrequencyData(this.localAnalyserData);
-        localLevel = computeRms(this.localAnalyserData);
-      }
-      const localSpeaking = localLevel > this.speakingThreshold;
-      const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
-      if (micPub?.track?.mediaStreamTrack) {
-        if (localSpeaking && this.localMicGated) {
-          micPub.track.mediaStreamTrack.enabled = true;
-          this.localMicGated = false;
-        } else if (!localSpeaking && !this.localMicGated) {
-          micPub.track.mediaStreamTrack.enabled = false;
-          this.localMicGated = true;
-        }
-      }
-      if (localSpeaking) {
-        const localId = parseUserId(this.room.localParticipant.identity);
-        if (localId > 0) speakerIds.push(localId);
-      }
-      for (const [userId, ra] of this.remoteAnalysers) {
-        ra.analyser.getByteFrequencyData(ra.data);
-        if (computeRms(ra.data) > this.speakingThreshold) speakerIds.push(userId);
-      }
-      // Sort in place so speakerSetsEqual can compare without allocations.
-      speakerIds.sort((x, y) => x - y);
-      if (!speakerSetsEqual(speakerIds, this.previousSpeakerIds)) {
-        this.previousSpeakerIds = speakerIds; // already a fresh array each tick
-        setSpeakers({ channel_id: this.currentChannelId, speakers: speakerIds });
-      }
-    }, 100);
-  }
-
-  private stopSpeakingPoll(): void {
-    if (this.speakingPollInterval !== null) {
-      clearInterval(this.speakingPollInterval);
-      this.speakingPollInterval = null;
-    }
-    this.stopLocalAnalyser();
-    this.cleanupAllRemoteAnalysers();
-    this.previousSpeakerIds = [];
-  }
+    speakerIds.sort((x, y) => x - y);
+    setSpeakers({ channel_id: this.currentChannelId, speakers: speakerIds });
+  };
 
   private handleDisconnected = (reason?: DisconnectReason): void => {
     log.info("LiveKit room disconnected", { reason });
@@ -408,21 +206,29 @@ export class LiveKitSession {
     }
     log.info("Requesting voice token refresh");
     this.ws.send({ type: "voice_token_refresh", payload: {} });
-    // Re-arm as fallback in case the server doesn't respond (network hiccup,
-    // restart). If the server does respond, handleVoiceTokenRefresh restarts
-    // the timer, superseding this one.
     this.startTokenRefreshTimer();
   }
 
-  /**
-   * Handle a voice_token message that is a refresh (room already connected).
-   * LiveKit tokens are validated at connect time only — the existing connection
-   * stays alive regardless of token expiry. We just restart the refresh timer
-   * so we keep requesting fresh tokens periodically.
-   */
   handleVoiceTokenRefresh(): void {
     this.startTokenRefreshTimer();
     log.info("Voice token refreshed, timer restarted");
+  }
+
+  // --- Volume helpers ---
+
+  /** Compute the effective volume for a participant: per-user volume * master output. */
+  private getEffectiveVolume(userId: number): number {
+    const userVol = userId > 0 ? getSavedUserVolume(userId) : 100;
+    return (userVol / 100) * this.outputVolumeMultiplier;
+  }
+
+  /** Apply effective volume to all remote participants. */
+  private applyAllVolumes(): void {
+    if (this.room === null) return;
+    for (const participant of this.room.remoteParticipants.values()) {
+      const userId = parseUserId(participant.identity);
+      participant.setVolume(this.getEffectiveVolume(userId));
+    }
   }
 
   // --- Public API ---
@@ -442,9 +248,6 @@ export class LiveKitSession {
   async handleVoiceToken(
     token: string, url: string, channelId: number, directUrl?: string,
   ): Promise<void> {
-    // If already connected to the same channel, this is a token refresh response.
-    // LiveKit validates tokens only at connect time, so just restart the timer.
-    // Guard on room.state to avoid treating a mid-retry token as a refresh.
     if (this.room !== null && this.currentChannelId === channelId
         && this.room.state === "connected") {
       this.handleVoiceTokenRefresh();
@@ -473,16 +276,11 @@ export class LiveKitSession {
         }
       }
       log.info("Connected to LiveKit room", { channelId, url: resolvedUrl });
-      this.speakingThreshold = ((100 - loadPref<number>("voiceSensitivity", 50)) / 100) * 0.15;
-      this.startSpeakingPoll();
-      const enhancedNS = loadPref<boolean>("enhancedNoiseSuppression", false);
       try {
-        if (enhancedNS) {
-          await this.publishWithNoiseSuppression();
-          log.info("Published mic with RNNoise noise suppression");
-        } else {
-          await this.room.localParticipant.setMicrophoneEnabled(true);
-          log.info("Published mic via LiveKit native capture");
+        await this.room.localParticipant.setMicrophoneEnabled(true);
+        log.info("Published mic via LiveKit native capture");
+        if (loadPref<boolean>("enhancedNoiseSuppression", false)) {
+          await this.applyNoiseSuppressor();
         }
       } catch (micErr) {
         if (micErr instanceof DOMException && micErr.name === "NotAllowedError") {
@@ -500,8 +298,9 @@ export class LiveKitSession {
       if (savedInput) await this.room.switchActiveDevice("audioinput", savedInput);
       const savedOutput = loadPref<string>("audioOutputDevice", "");
       if (savedOutput) await this.room.switchActiveDevice("audiooutput", savedOutput);
+      // Apply saved input volume
+      this.applyInputVolume(loadPref<number>("inputVolume", 100));
       this.currentChannelId = channelId;
-      this.startLocalAnalyser();
       this.startTokenRefreshTimer();
       log.info("Voice session active", { channelId });
     } catch (err) {
@@ -518,25 +317,14 @@ export class LiveKitSession {
     if (sendWs && this.ws !== null) {
       this.ws.send({ type: "voice_leave", payload: {} });
     }
-    if (this.rawMicStream !== null) {
-      for (const track of this.rawMicStream.getTracks()) track.stop();
-      this.rawMicStream = null;
-    }
-    if (this.noiseSuppressor !== null) {
-      this.noiseSuppressor.destroy();
-      this.noiseSuppressor = null;
-    }
-    this.stopSpeakingPoll();
+    this.cleanupInputGain();
     if (this.room !== null) {
       const r = this.room;
       this.room = null;
       r.removeAllListeners();
       r.disconnect().catch((err) => log.warn("room.disconnect() error (non-fatal)", err));
     }
-    this.cleanupAudioElements();
-    this.closeSharedAudioCtx();
     this.currentChannelId = null;
-    // Reset camera state so the UI doesn't show a stale video grid on rejoin.
     setLocalCamera(false);
     log.info("Left voice session");
   }
@@ -557,12 +345,10 @@ export class LiveKitSession {
 
   setDeafened(deafened: boolean): void {
     setLocalDeafened(deafened);
-    if (this.room !== null) {
-      for (const participant of this.room.remoteParticipants.values()) {
-        for (const pub of participant.audioTrackPublications.values()) pub.setSubscribed(!deafened);
-      }
+    if (this.room === null) return;
+    for (const participant of this.room.remoteParticipants.values()) {
+      for (const pub of participant.audioTrackPublications.values()) pub.setSubscribed(!deafened);
     }
-    for (const el of this.audioElements.values()) el.muted = deafened;
     log.debug("Deafen state changed", { deafened });
   }
 
@@ -610,27 +396,21 @@ export class LiveKitSession {
       return;
     }
     try {
-      const enhancedNS = loadPref<boolean>("enhancedNoiseSuppression", false);
-      if (enhancedNS && this.noiseSuppressor !== null) {
-        if (this.rawMicStream !== null) {
-          for (const track of this.rawMicStream.getTracks()) track.stop();
-          this.rawMicStream = null;
-        }
-        this.noiseSuppressor.destroy();
-        this.noiseSuppressor = null;
-        for (const pub of this.room.localParticipant.audioTrackPublications.values()) {
-          if (pub.source === Track.Source.Microphone && pub.track) {
-            await this.room.localParticipant.unpublishTrack(pub.track);
-          }
-        }
-        await this.publishWithNoiseSuppression();
+      if (deviceId) {
+        await this.room.switchActiveDevice("audioinput", deviceId);
       } else {
-        if (deviceId) {
-          await this.room.switchActiveDevice("audioinput", deviceId);
-        } else {
-          await this.room.localParticipant.setMicrophoneEnabled(false);
-          await this.room.localParticipant.setMicrophoneEnabled(true);
-        }
+        await this.room.localParticipant.setMicrophoneEnabled(false);
+        await this.room.localParticipant.setMicrophoneEnabled(true);
+      }
+      // Reset and re-apply input volume after device switch (source track changed)
+      this.cleanupInputGain();
+      this.applyInputVolume(loadPref<number>("inputVolume", 100));
+      // Re-apply or remove RNNoise processor based on current setting
+      const enhancedNS = loadPref<boolean>("enhancedNoiseSuppression", false);
+      if (enhancedNS) {
+        await this.applyNoiseSuppressor();
+      } else {
+        await this.removeNoiseSuppressor();
       }
       log.info("Switched input device", { deviceId });
     } catch (err) {
@@ -641,13 +421,6 @@ export class LiveKitSession {
 
   async switchOutputDevice(deviceId: string): Promise<void> {
     if (this.room !== null) await this.room.switchActiveDevice("audiooutput", deviceId);
-    for (const el of this.audioElements.values()) {
-      if (typeof el.setSinkId === "function") {
-        try { await el.setSinkId(deviceId); } catch (err) {
-          log.warn("Failed to set output device on audio element", err);
-        }
-      }
-    }
     log.info("Switched output device", { deviceId });
   }
 
@@ -657,13 +430,7 @@ export class LiveKitSession {
     if (this.room !== null) {
       for (const participant of this.room.remoteParticipants.values()) {
         if (parseUserId(participant.identity) === userId) {
-          for (const pub of participant.audioTrackPublications.values()) {
-            if (pub.track) {
-              for (const el of pub.track.attachedElements) {
-                if (el instanceof HTMLAudioElement) el.volume = Math.min(clamped, 100) / 100;
-              }
-            }
-          }
+          participant.setVolume((clamped / 100) * this.outputVolumeMultiplier);
         }
       }
     }
@@ -671,23 +438,110 @@ export class LiveKitSession {
 
   getUserVolume(userId: number): number { return getSavedUserVolume(userId); }
 
+  /** Input volume GainNode — adjusts mic gain via the WebRTC sender. */
+  private inputGainNode: GainNode | null = null;
+  private inputGainCtx: AudioContext | null = null;
+  private inputGainDest: MediaStreamAudioDestinationNode | null = null;
+
+  /** Apply input volume gain to the local mic track via a Web Audio GainNode. */
+  private applyInputVolume(volume: number): void {
+    if (this.room === null) return;
+    const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
+    if (micPub?.track === undefined) return;
+    const gain = Math.max(0, Math.min(200, volume)) / 100;
+
+    // At 100% (gain=1.0), tear down the pipeline — no processing needed
+    if (gain === 1 && this.inputGainNode !== null) {
+      this.restoreOriginalSenderTrack();
+      this.cleanupInputGain();
+      log.info("Input volume reset to 100% — gain pipeline removed");
+      return;
+    }
+
+    // No gain node and volume is default — nothing to do
+    if (gain === 1) return;
+
+    if (this.inputGainNode !== null) {
+      this.inputGainNode.gain.setTargetAtTime(gain, 0, 0.05);
+      log.debug("Input volume adjusted", { gain });
+      return;
+    }
+
+    // Build GainNode pipeline and replace the sender's track
+    try {
+      const mediaTrack = micPub.track.mediaStreamTrack;
+      const ctx = new AudioContext({ sampleRate: 48000 });
+      const source = ctx.createMediaStreamSource(new MediaStream([mediaTrack]));
+      const gainNode = ctx.createGain();
+      gainNode.gain.setTargetAtTime(gain, 0, 0.05);
+      const dest = ctx.createMediaStreamDestination();
+      source.connect(gainNode);
+      gainNode.connect(dest);
+
+      this.inputGainNode = gainNode;
+      this.inputGainCtx = ctx;
+      this.inputGainDest = dest;
+
+      // Replace the WebRTC sender's track with the gain-adjusted one
+      const adjustedTrack = dest.stream.getAudioTracks()[0];
+      if (adjustedTrack !== undefined && micPub.track.sender) {
+        void micPub.track.sender.replaceTrack(adjustedTrack).catch((err) => {
+          log.warn("Failed to replace sender track with gain-adjusted track", err);
+        });
+      }
+      log.info("Input volume GainNode created", { gain });
+    } catch (err) {
+      log.warn("Failed to set up input volume gain", err);
+    }
+  }
+
+  /** Restore the original mic track on the WebRTC sender (undo gain pipeline). */
+  private restoreOriginalSenderTrack(): void {
+    if (this.room === null) return;
+    const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
+    if (micPub?.track === undefined) return;
+    const originalTrack = micPub.track.mediaStreamTrack;
+    if (micPub.track.sender) {
+      void micPub.track.sender.replaceTrack(originalTrack).catch((err) => {
+        log.warn("Failed to restore original sender track", err);
+      });
+    }
+  }
+
+  private cleanupInputGain(): void {
+    if (this.inputGainNode !== null) {
+      this.inputGainNode.disconnect();
+      this.inputGainNode = null;
+    }
+    if (this.inputGainDest !== null) {
+      this.inputGainDest.disconnect();
+      this.inputGainDest = null;
+    }
+    if (this.inputGainCtx !== null) {
+      void this.inputGainCtx.close();
+      this.inputGainCtx = null;
+    }
+  }
+
   setInputVolume(volume: number): void {
-    savePref("inputVolume", Math.max(0, Math.min(200, volume)));
+    const clamped = Math.max(0, Math.min(200, volume));
+    savePref("inputVolume", clamped);
+    this.applyInputVolume(clamped);
   }
 
   setOutputVolume(volume: number): void {
     const clamped = Math.max(0, Math.min(200, volume));
     savePref("outputVolume", clamped);
-    if (this.room !== null) {
-      for (const el of this.audioElements.values()) {
-        el.volume = Math.min(clamped, 100) / 100;
-      }
-    }
+    this.outputVolumeMultiplier = clamped / 100;
+    // Re-apply all per-user volumes scaled by the new master output
+    this.applyAllVolumes();
   }
 
-  setVoiceSensitivity(sensitivity: number): void {
-    const clamped = Math.max(0, Math.min(100, sensitivity));
-    this.speakingThreshold = ((100 - clamped) / 100) * 0.15;
+  setVoiceSensitivity(_sensitivity: number): void {
+    // Voice sensitivity is now handled by LiveKit's built-in speaking detection.
+    // The sensitivity parameter is saved in preferences by the UI but
+    // LiveKit's server-side VAD determines speaking state.
+    log.debug("Voice sensitivity setting saved (handled by LiveKit VAD)");
   }
 
   getLocalCameraStream(): MediaStream | null {
@@ -699,24 +553,34 @@ export class LiveKitSession {
 
   getSessionDebugInfo(): Record<string, unknown> {
     if (this.room === null) {
-      return { hasRoom: false, hasNoiseSuppressor: this.noiseSuppressor !== null, currentChannelId: this.currentChannelId };
+      return { hasRoom: false, hasRNNoiseProcessor: false, currentChannelId: this.currentChannelId };
     }
-    const remoteParticipants = [...this.room.remoteParticipants.values()].map((p) => ({
-      identity: p.identity,
-      userId: parseUserId(p.identity),
-      tracks: [...p.trackPublications.values()].map((pub) => ({
-        sid: pub.trackSid, source: pub.source, kind: pub.kind,
-        subscribed: pub.isSubscribed, enabled: pub.isEnabled,
-      })),
-    }));
+    const remoteParticipants = [...this.room.remoteParticipants.values()].map((p) => {
+      const userId = parseUserId(p.identity);
+      return {
+        identity: p.identity,
+        userId,
+        volume: p.getVolume(),
+        effectiveVolume: this.getEffectiveVolume(userId),
+        tracks: [...p.trackPublications.values()].map((pub) => ({
+          sid: pub.trackSid, source: pub.source, kind: pub.kind,
+          subscribed: pub.isSubscribed, enabled: pub.isEnabled,
+        })),
+      };
+    });
     const localTracks = [...this.room.localParticipant.trackPublications.values()].map((pub) => ({
       sid: pub.trackSid, source: pub.source, kind: pub.kind, isMuted: pub.isMuted,
     }));
     return {
       hasRoom: true, roomName: this.room.name, roomState: this.room.state,
-      hasNoiseSuppressor: this.noiseSuppressor !== null, currentChannelId: this.currentChannelId,
+      hasRNNoiseProcessor: this.room.localParticipant.getTrackPublication(Track.Source.Microphone)?.track?.getProcessor() !== undefined,
+      currentChannelId: this.currentChannelId,
+      outputVolumeMultiplier: this.outputVolumeMultiplier,
+      inputGainActive: this.inputGainNode !== null,
+      inputGainValue: this.inputGainNode?.gain.value ?? null,
+      inputGainCtxState: this.inputGainCtx?.state ?? null,
       localParticipant: this.room.localParticipant.identity, localTracks,
-      remoteParticipants, audioElements: this.audioElements.size,
+      remoteParticipants,
     };
   }
 }
@@ -724,6 +588,10 @@ export class LiveKitSession {
 // --- Singleton instance + re-exported bound methods ---
 
 const session = new LiveKitSession();
+
+// Expose debug info on window for DevTools console access
+// Usage: JSON.stringify(__lkDebug(), null, 2)
+(window as unknown as Record<string, unknown>).__lkDebug = session.getSessionDebugInfo.bind(session);
 
 export const setWsClient = session.setWsClient.bind(session);
 export const setServerHost = session.setServerHost.bind(session);

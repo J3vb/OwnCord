@@ -1,14 +1,17 @@
 // =============================================================================
-// Noise Suppression — RNNoise ML-based noise removal via Web Audio API
+// Noise Suppression — RNNoise ML-based noise removal as a LiveKit TrackProcessor
 //
-// Inserts between getUserMedia stream and the PeerConnection to clean audio.
+// Implements LiveKit's TrackProcessor<Track.Kind.Audio> interface so it
+// integrates with setProcessor() / stopProcessor() lifecycle, device switching,
+// and mid-call toggling automatically.
+//
 // RNNoise processes 480-sample frames at 48kHz (10ms).
-//
 // Uses AudioWorklet (modern, runs on audio thread) with ScriptProcessorNode
 // fallback (deprecated but widely supported).
 // =============================================================================
 
 import { createRNNWasmModule } from "@jitsi/rnnoise-wasm";
+import { Track, type TrackProcessor, type AudioProcessorOptions } from "livekit-client";
 import { createLogger } from "@lib/logger";
 
 const log = createLogger("noise-suppression");
@@ -16,13 +19,8 @@ const log = createLogger("noise-suppression");
 const RNNOISE_FRAME_SIZE = 480;
 const SCRIPT_PROCESSOR_BUFFER = 4096;
 
-export interface NoiseSuppressor {
-  process(input: MediaStream): Promise<MediaStream>;
-  destroy(): void;
-}
-
 // ---------------------------------------------------------------------------
-// Shared WASM module cache (used by ScriptProcessorNode fallback)
+// Shared WASM module cache
 // ---------------------------------------------------------------------------
 
 interface RNNoiseModule {
@@ -52,102 +50,78 @@ async function loadRNNoise(): Promise<RNNoiseModule> {
   return mod;
 }
 
+/** Check if AudioWorklet is available in this browser context. */
+function supportsAudioWorklet(): boolean {
+  try {
+    return typeof AudioWorkletNode !== "undefined"
+      && typeof AudioContext !== "undefined"
+      && "audioWorklet" in AudioContext.prototype;
+  } catch {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
-// AudioWorklet-based suppressor (preferred, runs on audio thread)
+// Internal processing pipeline — shared by both init strategies
 // ---------------------------------------------------------------------------
 
-function createWorkletSuppressor(): NoiseSuppressor {
-  let audioContext: AudioContext | null = null;
-  let sourceNode: MediaStreamAudioSourceNode | null = null;
-  let destNode: MediaStreamAudioDestinationNode | null = null;
-  let workletNode: AudioWorkletNode | null = null;
-  let destroyed = false;
+interface ProcessingPipeline {
+  readonly processedTrack: MediaStreamTrack;
+  destroy(): void;
+}
+
+/** AudioWorklet-based pipeline (preferred, runs on audio thread). */
+async function createWorkletPipeline(
+  inputTrack: MediaStreamTrack,
+  audioContext: AudioContext,
+): Promise<ProcessingPipeline> {
+  await audioContext.audioWorklet.addModule("/rnnoise-worklet.js");
+  const wasmResponse = await fetch("/rnnoise.wasm");
+  const wasmBytes = await wasmResponse.arrayBuffer();
+
+  const source = audioContext.createMediaStreamSource(new MediaStream([inputTrack]));
+  const dest = audioContext.createMediaStreamDestination();
+  const workletNode = new AudioWorkletNode(audioContext, "rnnoise-processor", {
+    numberOfInputs: 1,
+    numberOfOutputs: 1,
+    outputChannelCount: [1],
+  });
+
+  const initPromise = new Promise<void>((resolve, reject) => {
+    workletNode.port.onmessage = (event: MessageEvent) => {
+      if (event.data.type === "ready") resolve();
+      else if (event.data.type === "error") reject(new Error(event.data.message));
+    };
+  });
+  workletNode.port.postMessage({ type: "init", wasmBytes }, [wasmBytes]);
+  await initPromise;
+
+  source.connect(workletNode);
+  workletNode.connect(dest);
+
+  log.info("RNNoise AudioWorklet processing active");
 
   return {
-    async process(input: MediaStream): Promise<MediaStream> {
-      if (destroyed) throw new Error("NoiseSuppressor destroyed");
-
-      audioContext = new AudioContext({ sampleRate: 48000 });
-
-      // Load the worklet processor module
-      await audioContext.audioWorklet.addModule("/rnnoise-worklet.js");
-
-      // Fetch WASM bytes to send to the worklet thread
-      const wasmResponse = await fetch("/rnnoise.wasm");
-      const wasmBytes = await wasmResponse.arrayBuffer();
-
-      sourceNode = audioContext.createMediaStreamSource(input);
-      destNode = audioContext.createMediaStreamDestination();
-
-      workletNode = new AudioWorkletNode(audioContext, "rnnoise-processor", {
-        numberOfInputs: 1,
-        numberOfOutputs: 1,
-        outputChannelCount: [1],
-      });
-
-      // Wait for WASM init in the worklet
-      const initPromise = new Promise<void>((resolve, reject) => {
-        if (workletNode === null) { reject(new Error("No worklet")); return; }
-        workletNode.port.onmessage = (event: MessageEvent) => {
-          if (event.data.type === "ready") {
-            resolve();
-          } else if (event.data.type === "error") {
-            reject(new Error(event.data.message));
-          }
-        };
-      });
-
-      // Send WASM bytes to the worklet for initialization
-      workletNode.port.postMessage({ type: "init", wasmBytes }, [wasmBytes]);
-      await initPromise;
-
-      sourceNode.connect(workletNode);
-      workletNode.connect(destNode);
-
-      log.info("RNNoise AudioWorklet processing active");
-      return destNode.stream;
-    },
-
-    destroy(): void {
-      if (destroyed) return;
-      destroyed = true;
-
-      if (workletNode !== null) {
-        workletNode.port.postMessage({ type: "destroy" });
-        workletNode.disconnect();
-        workletNode = null;
-      }
-      if (sourceNode !== null) {
-        sourceNode.disconnect();
-        sourceNode = null;
-      }
-      if (destNode !== null) {
-        destNode.disconnect();
-        destNode = null;
-      }
-      if (audioContext !== null) {
-        void audioContext.close();
-        audioContext = null;
-      }
-      log.info("RNNoise AudioWorklet destroyed");
+    processedTrack: dest.stream.getAudioTracks()[0]!,
+    destroy() {
+      workletNode.port.postMessage({ type: "destroy" });
+      workletNode.disconnect();
+      source.disconnect();
+      dest.disconnect();
+      log.info("RNNoise AudioWorklet pipeline destroyed");
     },
   };
 }
 
-// ---------------------------------------------------------------------------
-// ScriptProcessorNode fallback (deprecated but universal)
-// ---------------------------------------------------------------------------
-
-function createScriptProcessorSuppressor(): NoiseSuppressor {
-  let audioContext: AudioContext | null = null;
-  let sourceNode: MediaStreamAudioSourceNode | null = null;
-  let destNode: MediaStreamAudioDestinationNode | null = null;
-  let processorNode: ScriptProcessorNode | null = null;
-  let rnnoiseState: number = 0;
-  let inputPtr: number = 0;
-  let outputPtr: number = 0;
-  let wasmModule: RNNoiseModule | null = null;
-  let destroyed = false;
+/** ScriptProcessorNode-based pipeline (fallback). */
+async function createScriptProcessorPipeline(
+  inputTrack: MediaStreamTrack,
+  audioContext: AudioContext,
+): Promise<ProcessingPipeline> {
+  const wasmModule = await loadRNNoise();
+  const rnnoiseState = wasmModule._rnnoise_create();
+  const inputPtr = wasmModule._malloc(RNNOISE_FRAME_SIZE * 4);
+  const outputPtr = wasmModule._malloc(RNNOISE_FRAME_SIZE * 4);
 
   const inputRing = new Float32Array(RNNOISE_FRAME_SIZE);
   let inputRingOffset = 0;
@@ -160,7 +134,6 @@ function createScriptProcessorSuppressor(): NoiseSuppressor {
   let outSampleOffset = 0;
 
   function processFrame(): void {
-    if (wasmModule === null) return;
     const inOff = inputPtr / 4;
     for (let i = 0; i < RNNOISE_FRAME_SIZE; i++) {
       wasmModule.HEAPF32[inOff + i] = (inputRing[i] ?? 0) * 32768;
@@ -181,140 +154,121 @@ function createScriptProcessorSuppressor(): NoiseSuppressor {
     outCount++;
   }
 
+  const source = audioContext.createMediaStreamSource(new MediaStream([inputTrack]));
+  const dest = audioContext.createMediaStreamDestination();
+  const processorNode = audioContext.createScriptProcessor(SCRIPT_PROCESSOR_BUFFER, 1, 1);
+
+  processorNode.onaudioprocess = (event: AudioProcessingEvent) => {
+    const inData = event.inputBuffer.getChannelData(0);
+    const outData = event.outputBuffer.getChannelData(0);
+
+    let inIdx = 0;
+    while (inIdx < inData.length) {
+      const needed = RNNOISE_FRAME_SIZE - inputRingOffset;
+      const toCopy = Math.min(needed, inData.length - inIdx);
+      inputRing.set(inData.subarray(inIdx, inIdx + toCopy), inputRingOffset);
+      inputRingOffset += toCopy;
+      inIdx += toCopy;
+      if (inputRingOffset >= RNNOISE_FRAME_SIZE) {
+        processFrame();
+        inputRingOffset = 0;
+      }
+    }
+
+    let outIdx = 0;
+    while (outIdx < outData.length && outCount > 0) {
+      const chunk = outRing[outReadIdx]!;
+      const available = chunk.length - outSampleOffset;
+      const toWrite = Math.min(available, outData.length - outIdx);
+      outData.set(chunk.subarray(outSampleOffset, outSampleOffset + toWrite), outIdx);
+      outIdx += toWrite;
+      outSampleOffset += toWrite;
+      if (outSampleOffset >= chunk.length) {
+        outReadIdx = (outReadIdx + 1) % OUT_RING_CAPACITY;
+        outCount--;
+        outSampleOffset = 0;
+      }
+    }
+    if (outIdx < outData.length) {
+      outData.fill(0, outIdx);
+    }
+  };
+
+  source.connect(processorNode);
+  processorNode.connect(dest);
+
+  log.info("RNNoise ScriptProcessor processing active (fallback)");
+
   return {
-    async process(input: MediaStream): Promise<MediaStream> {
-      if (destroyed) throw new Error("NoiseSuppressor destroyed");
-
-      wasmModule = await loadRNNoise();
-      rnnoiseState = wasmModule._rnnoise_create();
-      inputPtr = wasmModule._malloc(RNNOISE_FRAME_SIZE * 4);
-      outputPtr = wasmModule._malloc(RNNOISE_FRAME_SIZE * 4);
-
-      audioContext = new AudioContext({ sampleRate: 48000 });
-      sourceNode = audioContext.createMediaStreamSource(input);
-      destNode = audioContext.createMediaStreamDestination();
-      processorNode = audioContext.createScriptProcessor(SCRIPT_PROCESSOR_BUFFER, 1, 1);
-
-      processorNode.onaudioprocess = (event: AudioProcessingEvent) => {
-        const inData = event.inputBuffer.getChannelData(0);
-        const outData = event.outputBuffer.getChannelData(0);
-
-        let inIdx = 0;
-        while (inIdx < inData.length) {
-          const needed = RNNOISE_FRAME_SIZE - inputRingOffset;
-          const toCopy = Math.min(needed, inData.length - inIdx);
-          inputRing.set(inData.subarray(inIdx, inIdx + toCopy), inputRingOffset);
-          inputRingOffset += toCopy;
-          inIdx += toCopy;
-          if (inputRingOffset >= RNNOISE_FRAME_SIZE) {
-            processFrame();
-            inputRingOffset = 0;
-          }
-        }
-
-        let outIdx = 0;
-        while (outIdx < outData.length && outCount > 0) {
-          const chunk = outRing[outReadIdx]!;
-          const available = chunk.length - outSampleOffset;
-          const toWrite = Math.min(available, outData.length - outIdx);
-          outData.set(chunk.subarray(outSampleOffset, outSampleOffset + toWrite), outIdx);
-          outIdx += toWrite;
-          outSampleOffset += toWrite;
-          if (outSampleOffset >= chunk.length) {
-            outReadIdx = (outReadIdx + 1) % OUT_RING_CAPACITY;
-            outCount--;
-            outSampleOffset = 0;
-          }
-        }
-        if (outIdx < outData.length) {
-          outData.fill(0, outIdx);
-        }
-      };
-
-      sourceNode.connect(processorNode);
-      processorNode.connect(destNode);
-
-      log.info("RNNoise ScriptProcessor processing active (fallback)");
-      return destNode.stream;
-    },
-
-    destroy(): void {
-      if (destroyed) return;
-      destroyed = true;
-
-      if (processorNode !== null) {
-        processorNode.onaudioprocess = null;
-        processorNode.disconnect();
-        processorNode = null;
-      }
-      if (sourceNode !== null) {
-        sourceNode.disconnect();
-        sourceNode = null;
-      }
-      if (destNode !== null) {
-        destNode.disconnect();
-        destNode = null;
-      }
-      if (audioContext !== null) {
-        void audioContext.close();
-        audioContext = null;
-      }
-      if (wasmModule !== null && rnnoiseState !== 0) {
-        wasmModule._rnnoise_destroy(rnnoiseState);
-        wasmModule._free(inputPtr);
-        wasmModule._free(outputPtr);
-        rnnoiseState = 0;
-      }
-      outWriteIdx = 0;
-      outReadIdx = 0;
-      outCount = 0;
-      outSampleOffset = 0;
-      log.info("RNNoise ScriptProcessor destroyed");
+    processedTrack: dest.stream.getAudioTracks()[0]!,
+    destroy() {
+      processorNode.onaudioprocess = null;
+      processorNode.disconnect();
+      source.disconnect();
+      dest.disconnect();
+      wasmModule._rnnoise_destroy(rnnoiseState);
+      wasmModule._free(inputPtr);
+      wasmModule._free(outputPtr);
+      log.info("RNNoise ScriptProcessor pipeline destroyed");
     },
   };
 }
 
 // ---------------------------------------------------------------------------
-// Factory — tries AudioWorklet first, falls back to ScriptProcessorNode
+// LiveKit TrackProcessor implementation
 // ---------------------------------------------------------------------------
 
-/** Check if AudioWorklet is available in this browser context. */
-function supportsAudioWorklet(): boolean {
-  try {
-    return typeof AudioWorkletNode !== "undefined"
-      && typeof AudioContext !== "undefined"
-      && "audioWorklet" in AudioContext.prototype;
-  } catch {
-    return false;
-  }
-}
+/**
+ * Creates an RNNoise TrackProcessor compatible with LiveKit's
+ * LocalAudioTrack.setProcessor() API.
+ *
+ * Usage:
+ *   const processor = createRNNoiseProcessor();
+ *   await localAudioTrack.setProcessor(processor);
+ *   // Later:
+ *   await localAudioTrack.stopProcessor();
+ */
+export function createRNNoiseProcessor(): TrackProcessor<Track.Kind.Audio, AudioProcessorOptions> {
+  let pipeline: ProcessingPipeline | null = null;
 
-export function createNoiseSuppressor(): NoiseSuppressor {
-  log.debug("Creating noise suppressor", { audioWorkletSupported: supportsAudioWorklet() });
-  if (supportsAudioWorklet()) {
-    // Wrap in a facade that falls back to ScriptProcessor on failure
-    const worklet = createWorkletSuppressor();
-    let fallback: NoiseSuppressor | null = null;
-    let activeSuppressor: NoiseSuppressor = worklet;
+  return {
+    name: "rnnoise",
 
-    return {
-      async process(input: MediaStream): Promise<MediaStream> {
+    async init(opts: AudioProcessorOptions): Promise<void> {
+      log.debug("RNNoise processor init", { audioWorkletSupported: supportsAudioWorklet() });
+      const ctx = opts.audioContext;
+
+      if (supportsAudioWorklet()) {
         try {
-          return await worklet.process(input);
+          pipeline = await createWorkletPipeline(opts.track, ctx);
+          return;
         } catch (err) {
           log.warn("AudioWorklet failed, falling back to ScriptProcessorNode", err);
-          worklet.destroy();
-          fallback = createScriptProcessorSuppressor();
-          activeSuppressor = fallback;
-          return fallback.process(input);
         }
-      },
-      destroy(): void {
-        activeSuppressor.destroy();
-      },
-    };
-  }
+      }
 
-  log.info("AudioWorklet not supported, using ScriptProcessorNode");
-  return createScriptProcessorSuppressor();
+      pipeline = await createScriptProcessorPipeline(opts.track, ctx);
+    },
+
+    async restart(opts: AudioProcessorOptions): Promise<void> {
+      log.debug("RNNoise processor restart");
+      if (pipeline !== null) {
+        pipeline.destroy();
+        pipeline = null;
+      }
+      await this.init(opts);
+    },
+
+    async destroy(): Promise<void> {
+      if (pipeline !== null) {
+        pipeline.destroy();
+        pipeline = null;
+      }
+      log.info("RNNoise processor destroyed");
+    },
+
+    get processedTrack(): MediaStreamTrack | undefined {
+      return pipeline?.processedTrack;
+    },
+  };
 }

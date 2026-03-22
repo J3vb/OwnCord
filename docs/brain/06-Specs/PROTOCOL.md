@@ -327,9 +327,7 @@ and server URL for the client to connect directly to LiveKit.
 ```
 
 Client uses `bitrate` to configure the Opus encoder. Other fields are
-informational for UI. (`threshold_mode` and `top_speakers` fields have
-been removed — LiveKit handles audio mixing and speaker selection
-internally.)
+informational for UI.
 
 ### Voice Control (Client → Server)
 
@@ -348,9 +346,13 @@ internally.)
 Requires `USE_VIDEO` (bit 11) or `SHARE_SCREEN` (bit 12) permission.
 Rate limit: 2/sec per user.
 
-**Note:** Active speaker detection (`voice_speakers`) is no longer a
-server→client WebSocket message. Speaker detection is handled client-side
-via LiveKit SDK events (`ParticipantEvent.IsSpeakingChanged`).
+### Migration Notes (LiveKit transition)
+
+- `threshold_mode` and `top_speakers` fields have been removed from `voice_config`.
+  LiveKit handles audio mixing and speaker selection internally.
+- Active speaker detection (`voice_speakers`) is no longer a server→client
+  WebSocket message. Speaker detection is handled client-side via LiveKit SDK
+  events (`ParticipantEvent.IsSpeakingChanged`).
 
 ---
 
@@ -444,7 +446,12 @@ then auto-reconnect after the delay expires.
         "color": "#F39C12",
         "permissions": 1073741823
       },
-      { "id": 3, "name": "Member", "color": null, "permissions": 1049601 }
+      {
+        "id": 3, "name": "Moderator",
+        "color": "#3498DB",
+        "permissions": 1048575
+      },
+      { "id": 4, "name": "Member", "color": null, "permissions": 7779 }
     ]
   }
 }
@@ -457,7 +464,7 @@ then auto-reconnect after the delay expires.
 Fetched via REST API, not WebSocket, to keep the WS connection lean.
 
 ```text
-GET /api/channels/{id}/messages?before={msg_id}&limit=50
+GET /api/v1/channels/{id}/messages?before={msg_id}&limit=50
 ```
 
 ---
@@ -491,4 +498,8 @@ Error codes: `FORBIDDEN`, `NOT_FOUND`, `RATE_LIMITED`, `INVALID_INPUT`,
 - Voice signaling: 20/sec per user
 - Voice camera/screenshare: 2/sec per user
 
-Server sends `rate_limited` error with `retry_after` in seconds.
+Server sends a standard `error` message with code `RATE_LIMITED` and `retry_after` in seconds:
+
+```json
+{"type": "error", "payload": {"code": "RATE_LIMITED", "message": "...", "retry_after": 5}}
+```
