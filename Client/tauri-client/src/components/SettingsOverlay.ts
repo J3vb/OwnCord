@@ -59,6 +59,10 @@ export function applyStoredAppearance(): void {
     "compact-mode",
     loadPref<boolean>("compactMode", false),
   );
+  document.documentElement.style.setProperty(
+    "--accent",
+    loadPref<string>("accentColor", "#5865f2"),
+  );
 }
 
 // ---------------------------------------------------------------------------

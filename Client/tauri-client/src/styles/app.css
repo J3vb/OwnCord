@@ -1141,6 +1141,25 @@
 .theme-opt.dark { background: #313338; color: white; }
 .theme-opt.light { background: #f2f3f5; color: #313338; }
 .theme-opt.midnight { background: #0d0d0d; color: #b5bac1; }
+/* Accent color picker */
+.accent-swatches {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;
+}
+.accent-swatch {
+  width: 28px; height: 28px; border-radius: 50%;
+  cursor: pointer; border: none; outline: none;
+  transition: transform .12s;
+}
+.accent-swatch:hover { transform: scale(1.1); }
+.accent-swatch.active {
+  box-shadow: 0 0 0 2px white, 0 0 0 4px currentColor;
+}
+.accent-hex-row {
+  display: flex; align-items: center; gap: 4px; margin-top: 4px;
+}
+.accent-hex-prefix {
+  font-size: 14px; color: var(--text-muted); user-select: none;
+}
 .keybind-row {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 0; border-bottom: 1px solid var(--border);
