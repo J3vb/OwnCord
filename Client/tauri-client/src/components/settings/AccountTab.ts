@@ -1,5 +1,7 @@
 /**
  * Account settings tab — profile editing, password change, logout.
+ * Discord-style profile card with colored banner, overlapping avatar,
+ * and separated field rows.
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
@@ -13,41 +15,78 @@ export function buildAccountTab(
   const section = createElement("div", { class: "settings-pane active" });
   const user = authStore.getState().user;
 
-  // Account card
+  // ── Profile card ──────────────────────────────────────────────────────────
   const accountCard = createElement("div", { class: "account-card" });
-  const acAvatar = createElement("div", {
-    class: "ac-avatar",
-    style: "background: var(--accent)",
-  }, (user?.username ?? "U").charAt(0).toUpperCase());
-  const acInfo = createElement("div", {});
-  const acName = createElement("div", { class: "ac-name" }, user?.username ?? "Unknown");
-  const acId = createElement("div", { class: "ac-id" }, `ID: ${user?.id ?? "?"}`);
-  appendChildren(acInfo, acName, acId);
-  const editBtn = createElement("button", { class: "ac-btn" }, "Edit Profile");
-  appendChildren(accountCard, acAvatar, acInfo, editBtn);
+
+  // Colored banner
+  const banner = createElement("div", { class: "account-banner" });
+
+  // Avatar wrap (overlaps the banner via negative margin-top)
+  const avatarWrap = createElement("div", { class: "account-avatar-wrap" });
+  const avatarLarge = createElement("div", { class: "account-avatar-large" },
+    (user?.username ?? "U").charAt(0).toUpperCase(),
+  );
+  const statusDot = createElement("div", { class: "account-status-dot" });
+  appendChildren(avatarWrap, avatarLarge, statusDot);
+
+  // Header row: username + Edit User Profile button
+  const accountHeader = createElement("div", { class: "account-header" });
+  const headerName = createElement("div", { class: "account-header-name" }, user?.username ?? "Unknown");
+  const editUserProfileBtn = createElement("button", { class: "ac-btn" }, "Edit User Profile");
+  appendChildren(accountHeader, headerName, editUserProfileBtn);
+
+  // Field rows container
+  const fieldsContainer = createElement("div", { class: "account-fields" });
+
+  // Display Name field
+  const displayNameField = createElement("div", { class: "account-field" });
+  const displayNameLeft = createElement("div", {});
+  const displayNameLabel = createElement("div", { class: "account-field-label" }, "Display Name");
+  const displayNameValue = createElement("div", { class: "account-field-value" }, user?.username ?? "Unknown");
+  appendChildren(displayNameLeft, displayNameLabel, displayNameValue);
+  const editDisplayNameBtn = createElement("button", { class: "account-field-edit" }, "Edit");
+  appendChildren(displayNameField, displayNameLeft, editDisplayNameBtn);
+
+  // Username field
+  const usernameField = createElement("div", { class: "account-field" });
+  const usernameLeft = createElement("div", {});
+  const usernameLabel = createElement("div", { class: "account-field-label" }, "Username");
+  const usernameValue = createElement("div", { class: "account-field-value" }, user?.username ?? "Unknown");
+  appendChildren(usernameLeft, usernameLabel, usernameValue);
+  const editUsernameBtn = createElement("button", { class: "account-field-edit" }, "Edit");
+  appendChildren(usernameField, usernameLeft, editUsernameBtn);
+
+  appendChildren(fieldsContainer, displayNameField, usernameField);
+  appendChildren(accountCard, banner, avatarWrap, accountHeader, fieldsContainer);
   section.appendChild(accountCard);
 
-  const editForm = createElement("div", { class: "setting-row", style: "display:none" });
+  // ── Inline edit form (shown below fields when either Edit is clicked) ─────
+  const editForm = createElement("div", { class: "setting-row", style: "display:none;margin-bottom:16px" });
   const editInput = createElement("input", { class: "form-input", type: "text", placeholder: "New username" });
   const saveBtn = createElement("button", { class: "ac-btn" }, "Save");
   const cancelBtn = createElement("button", { class: "ac-btn", style: "background:var(--bg-active)" }, "Cancel");
-  const usernameValue = acName;
   appendChildren(editForm, editInput, saveBtn, cancelBtn);
-
-  editBtn.addEventListener("click", () => {
-    editForm.style.display = "flex";
-    editInput.value = user?.username ?? "";
-    editInput.focus();
-  }, { signal });
-
-  cancelBtn.addEventListener("click", () => {
-    editForm.style.display = "none";
-  }, { signal });
 
   const usernameError = createElement("div", { style: "color:var(--red);font-size:13px;margin-top:4px" });
   editForm.appendChild(usernameError);
 
   const MAX_USERNAME_LEN = 32;
+
+  // Both Edit buttons and the "Edit User Profile" button open the form
+  const openEditForm = () => {
+    editForm.style.display = "flex";
+    editInput.value = user?.username ?? "";
+    editInput.focus();
+  };
+
+  editUserProfileBtn.addEventListener("click", openEditForm, { signal });
+  editDisplayNameBtn.addEventListener("click", openEditForm, { signal });
+  editUsernameBtn.addEventListener("click", openEditForm, { signal });
+
+  cancelBtn.addEventListener("click", () => {
+    editForm.style.display = "none";
+    setText(usernameError, "");
+  }, { signal });
 
   saveBtn.addEventListener("click", () => {
     const newName = editInput.value.trim();
@@ -57,6 +96,9 @@ export function buildAccountTab(
     }
     setText(usernameError, "");
     void options.onUpdateProfile(newName).then(() => {
+      // Update all name display elements on success
+      setText(headerName, newName);
+      setText(displayNameValue, newName);
       setText(usernameValue, newName);
       editForm.style.display = "none";
     }).catch((err: unknown) => {
@@ -66,11 +108,31 @@ export function buildAccountTab(
 
   section.appendChild(editForm);
 
-  // Change password
-  const pwHeader = createElement("h3", {}, "Change Password");
-  const oldPw = createElement("input", { class: "form-input", type: "password", placeholder: "Old password", style: "margin-bottom:8px" });
-  const newPw = createElement("input", { class: "form-input", type: "password", placeholder: "New password", style: "margin-bottom:8px" });
-  const confirmPw = createElement("input", { class: "form-input", type: "password", placeholder: "Confirm new password", style: "margin-bottom:8px" });
+  // ── Separator ─────────────────────────────────────────────────────────────
+  const separator = createElement("div", { class: "settings-separator" });
+  section.appendChild(separator);
+
+  // ── Password and Authentication ───────────────────────────────────────────
+  const pwHeader = createElement("div", { class: "settings-section-title" }, "Password and Authentication");
+
+  const oldPw = createElement("input", {
+    class: "form-input",
+    type: "password",
+    placeholder: "Old password",
+    style: "margin-bottom:12px",
+  });
+  const newPw = createElement("input", {
+    class: "form-input",
+    type: "password",
+    placeholder: "New password",
+    style: "margin-bottom:12px",
+  });
+  const confirmPw = createElement("input", {
+    class: "form-input",
+    type: "password",
+    placeholder: "Confirm new password",
+    style: "margin-bottom:12px",
+  });
   const pwError = createElement("div", { style: "color:var(--red);font-size:13px;margin-bottom:8px" });
   const pwBtn = createElement("button", { class: "ac-btn" }, "Change Password");
 

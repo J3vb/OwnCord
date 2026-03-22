@@ -96,10 +96,9 @@ export function createSettingsOverlay(
   function renderActiveTab(): void {
     if (contentArea === null) return;
     clearChildren(contentArea);
-    if (pageTitle !== null) {
-      pageTitle.textContent = activeTab;
-    }
-    contentArea.appendChild(pageTitle as HTMLHeadingElement);
+    if (pageTitle === null) return;
+    pageTitle.textContent = activeTab;
+    contentArea.appendChild(pageTitle);
     const builder = TAB_BUILDERS[activeTab];
     contentArea.appendChild(builder());
   }
@@ -192,7 +191,7 @@ export function createSettingsOverlay(
 
     // Close button wrapped with ESC label
     const closeWrap = createElement("div", { class: "settings-close-wrap" });
-    const closeBtn = createElement("button", { class: "settings-close-btn", style: "position:static" });
+    const closeBtn = createElement("button", { class: "settings-close-btn" });
     closeBtn.appendChild(createIcon("x", 18));
     closeBtn.addEventListener("click", () => {
       options.onClose();
