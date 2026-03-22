@@ -102,13 +102,5 @@ export function buildAccountTab(
 
   appendChildren(section, pwHeader, oldPw, newPw, confirmPw, pwError, pwBtn);
 
-  // Logout
-  const logoutBtn = createElement("button", {
-    class: "settings-nav-item danger",
-    style: "margin-top:16px;width:auto;padding:8px 16px",
-  }, "Log Out");
-  logoutBtn.addEventListener("click", () => options.onLogout(), { signal });
-  section.appendChild(logoutBtn);
-
   return section;
 }
