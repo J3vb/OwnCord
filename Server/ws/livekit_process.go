@@ -216,7 +216,7 @@ func (p *LiveKitProcess) HealthCheck() (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("livekit health check failed: %w", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	return true, nil
 }

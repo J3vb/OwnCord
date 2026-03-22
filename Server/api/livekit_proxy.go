@@ -87,7 +87,7 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL, all
 		http.Error(w, "backend unavailable", http.StatusBadGateway)
 		return
 	}
-	defer backConn.Close(websocket.StatusNormalClosure, "")
+	defer backConn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort close on defer
 
 	// Accept the frontend WebSocket.
 	frontConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
@@ -98,7 +98,7 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL, all
 		slog.Warn("livekit proxy: frontend accept failed", "err", err)
 		return
 	}
-	defer frontConn.Close(websocket.StatusNormalClosure, "")
+	defer frontConn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort close on defer
 
 	// Use a cancellable context so when one direction finishes, the other
 	// goroutine's copyWS read/write is unblocked and can drain cleanly.

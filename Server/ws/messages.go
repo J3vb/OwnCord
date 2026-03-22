@@ -119,12 +119,6 @@ type voiceTokenPayload struct {
 	DirectURL string `json:"direct_url"`
 }
 
-type voiceSpeakersPayload struct {
-	ChannelID     int64   `json:"channel_id"`
-	Speakers      []int64 `json:"speakers"`
-	ThresholdMode string  `json:"threshold_mode"`
-}
-
 type voiceLeavePayload struct {
 	ChannelID int64 `json:"channel_id"`
 	UserID    int64 `json:"user_id"`
@@ -364,18 +358,6 @@ func buildVoiceToken(channelID int64, token string, proxyPath string, directURL 
 			Token:     token,
 			URL:       proxyPath,
 			DirectURL: directURL,
-		},
-	})
-}
-
-// buildVoiceSpeakers constructs a voice_speakers broadcast.
-func buildVoiceSpeakers(channelID int64, speakers []int64, mode string) []byte {
-	return buildJSON(wsMsg{
-		Type: "voice_speakers",
-		Payload: voiceSpeakersPayload{
-			ChannelID:     channelID,
-			Speakers:      speakers,
-			ThresholdMode: mode,
 		},
 	})
 }
