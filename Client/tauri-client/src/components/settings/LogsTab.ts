@@ -80,8 +80,6 @@ export function createLogsTab(
 
   function build(): HTMLDivElement {
     const section = createElement("div", { class: "settings-pane active" });
-    const header = createElement("h1", {}, "Logs");
-    section.appendChild(header);
 
     // Version display
     const versionEl = createElement("div", {

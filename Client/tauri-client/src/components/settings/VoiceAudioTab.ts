@@ -62,8 +62,6 @@ type CameraRegistrar = (stream: MediaStream | null) => void;
 
 function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar, registerCamera: CameraRegistrar): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
-  const header = createElement("h1", {}, "Voice & Audio");
-  section.appendChild(header);
 
   // Input device selector
   const inputHeader = createElement("h3", {}, "Input Device");
@@ -201,8 +199,11 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
     startCameraPreview(videoSelect.value);
   }, { signal });
 
-  // Start initial camera preview
-  startCameraPreview(loadPref<string>("videoInputDevice", ""));
+  // Start initial camera preview only if a device has been explicitly selected
+  const savedVideoDevice = loadPref<string>("videoInputDevice", "");
+  if (savedVideoDevice !== "") {
+    startCameraPreview(savedVideoDevice);
+  }
 
   signal.addEventListener("abort", () => {
     stopCameraPreview();
