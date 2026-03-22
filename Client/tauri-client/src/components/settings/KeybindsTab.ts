@@ -9,8 +9,6 @@ import { updatePttKey, captureKeyPress, vkName } from "@lib/ptt";
 
 export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
-  const header = createElement("h1", {}, "Keybinds");
-  section.appendChild(header);
 
   // ── Push to Talk ──────────────────────────────────────────
   const pttRow = createElement("div", { class: "keybind-row" });
@@ -76,12 +74,70 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   }, "PTT works globally and does not hijack the key \u2014 you can still type and use other apps normally. Mouse buttons (Mouse 4/5) also work.");
   section.appendChild(pttHint);
 
-  // ── Quick Switcher ────────────────────────────────────────
-  const searchRow = createElement("div", { class: "keybind-row" });
-  const searchLabel = createElement("span", { class: "setting-label" }, "Quick Switcher");
-  const searchValue = createElement("span", { class: "kbd" }, "Ctrl + K");
-  appendChildren(searchRow, searchLabel, searchValue);
-  section.appendChild(searchRow);
+  // ── Navigation section ────────────────────────────────────
+  section.appendChild(createElement("hr", { class: "settings-divider" }));
+
+  const navHeader = createElement("div", {
+    style: "font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 4px 0 8px 0;",
+  }, "Navigation");
+  section.appendChild(navHeader);
+
+  const navBinds: [string, string][] = [
+    ["Quick Switcher", "Ctrl + K"],
+    ["Mark as Read", "Escape"],
+    ["Search Messages", "Ctrl + F"],
+  ];
+  for (const [label, shortcut] of navBinds) {
+    const row = createElement("div", { class: "keybind-row" });
+    appendChildren(row,
+      createElement("span", { class: "setting-label" }, label),
+      createElement("span", { class: "kbd" }, shortcut),
+    );
+    section.appendChild(row);
+  }
+
+  // ── Communication section ──────────────────────────────────
+  section.appendChild(createElement("hr", { class: "settings-divider" }));
+
+  const commHeader = createElement("div", {
+    style: "font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 4px 0 8px 0;",
+  }, "Communication");
+  section.appendChild(commHeader);
+
+  const commBinds: [string, string][] = [
+    ["Toggle Mute", "Ctrl + M"],
+    ["Toggle Deafen", "Ctrl + D"],
+    ["Toggle Camera", "Ctrl + Shift + V"],
+  ];
+  for (const [label, shortcut] of commBinds) {
+    const row = createElement("div", { class: "keybind-row" });
+    appendChildren(row,
+      createElement("span", { class: "setting-label" }, label),
+      createElement("span", { class: "kbd" }, shortcut),
+    );
+    section.appendChild(row);
+  }
+
+  // ── Messages section ───────────────────────────────────────
+  section.appendChild(createElement("hr", { class: "settings-divider" }));
+
+  const msgHeader = createElement("div", {
+    style: "font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 4px 0 8px 0;",
+  }, "Messages");
+  section.appendChild(msgHeader);
+
+  const msgBinds: [string, string][] = [
+    ["Upload File", "Ctrl + U"],
+    ["Edit Last Message", "Arrow Up"],
+  ];
+  for (const [label, shortcut] of msgBinds) {
+    const row = createElement("div", { class: "keybind-row" });
+    appendChildren(row,
+      createElement("span", { class: "setting-label" }, label),
+      createElement("span", { class: "kbd" }, shortcut),
+    );
+    section.appendChild(row);
+  }
 
   return section;
 }
