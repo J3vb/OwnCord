@@ -385,10 +385,14 @@ function attachChannelContextMenu(
   );
 }
 
-/** Global mousemove/mouseup handlers for drag reordering. Registered once. */
+/** Global mousemove/mouseup handlers for drag reordering. Registered once.
+ *  Reference-counted so multiple sidebar instances share the same listeners
+ *  and only the last destroy tears them down. */
 let globalDragAc: AbortController | null = null;
+let globalDragRefCount = 0;
 
 function ensureGlobalDragListeners(): void {
+  globalDragRefCount++;
   if (globalDragAc !== null) {
     return;
   }
@@ -785,8 +789,11 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
 
   function destroy(): void {
     ac.abort();
-    globalDragAc?.abort();
-    globalDragAc = null;
+    globalDragRefCount = Math.max(0, globalDragRefCount - 1);
+    if (globalDragRefCount === 0 && globalDragAc !== null) {
+      globalDragAc.abort();
+      globalDragAc = null;
+    }
     for (const unsub of unsubscribers) {
       unsub();
     }

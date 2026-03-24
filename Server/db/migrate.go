@@ -175,21 +175,27 @@ func MigrateFS(database *DB, fsys fs.FS) error {
 
 		raw, readErr := fs.ReadFile(fsys, name)
 		if readErr != nil {
-			tx.Rollback() //nolint:errcheck
+			_ = tx.Rollback() // error ignored: already handling the triggering error
 			return fmt.Errorf("reading migration %s: %w", name, readErr)
 		}
 
 		if _, execErr := tx.Exec(string(raw)); execErr != nil {
-			tx.Rollback() //nolint:errcheck
+			_ = tx.Rollback() // error ignored: already handling the triggering error
 			return fmt.Errorf("executing migration %s: %w", name, execErr)
+		}
+
+		// Record the migration inside the same transaction so the migration
+		// and its tracking record are atomic. A crash between commit and
+		// record would otherwise cause re-application on next startup.
+		if _, execErr := tx.Exec(
+			"INSERT INTO schema_versions (version) VALUES (?)", name,
+		); execErr != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("recording migration %s: %w", name, execErr)
 		}
 
 		if commitErr := tx.Commit(); commitErr != nil {
 			return fmt.Errorf("commit migration %s: %w", name, commitErr)
-		}
-
-		if err := recordApplied(database, name); err != nil {
-			return err
 		}
 	}
 

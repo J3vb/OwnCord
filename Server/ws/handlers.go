@@ -310,8 +310,10 @@ func (h *Hub) handleChatEdit(c *Client, _ string, payload json.RawMessage) {
 	}
 
 	// Re-check that the user still has SendMessages permission on this channel.
+	// Editing an existing message requires the same permission as sending a new one —
+	// if a channel goes read-only, users cannot modify existing messages either.
 	if !h.hasChannelPerm(c, msg.ChannelID, permissions.SendMessages) {
-		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "no send permission in this channel"))
+		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "no permission to edit in this channel"))
 		return
 	}
 

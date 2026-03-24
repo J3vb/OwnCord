@@ -370,8 +370,9 @@ export function createWsClient() {
     cleanupEventListeners();
     void disconnectProxy();
     setState("disconnected");
-    // Only reset lastSeq on intentional disconnect (e.g. logout)
-    // so reconnect scenarios preserve replay ability.
+    // Reset lastSeq — disconnect() is only called for intentional close
+    // (logout). Automatic reconnects go through scheduleReconnect() which
+    // preserves lastSeq for server-side event replay.
     lastSeq = 0;
   }
 

@@ -11,8 +11,11 @@ import {
 import { createIcon } from "@lib/icons";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@components/settings/helpers";
+import { createLogger } from "@lib/logger";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { save } from "@tauri-apps/plugin-dialog";
+
+const log = createLogger("attachments");
 import { writeFile } from "@tauri-apps/plugin-fs";
 import type { Attachment } from "@lib/types";
 import { openImageLightbox } from "./media";
@@ -175,7 +178,7 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
 
       return dataUrl;
     } catch (err) {
-      console.error("Failed to fetch attachment image:", url, err);
+      log.error("Failed to fetch attachment image", { url, error: String(err) });
       return null;
     }
   })();

@@ -128,10 +128,17 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 		// Create user with default Member role.
 		uid, err := database.CreateUser(req.Username, hash, int(permissions.MemberRoleID))
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "registration failed — check your details",
-			})
+			// UNIQUE constraint violation → duplicate username → 400.
+			// Any other DB error → 500.
+			if strings.Contains(err.Error(), "UNIQUE constraint") {
+				writeJSON(w, http.StatusBadRequest, genericAuthError)
+			} else {
+				slog.Error("CreateUser failed", "err", err, "username", req.Username)
+				writeJSON(w, http.StatusInternalServerError, errorResponse{
+					Error:   "SERVER_ERROR",
+					Message: "registration failed — please try again",
+				})
+			}
 			return
 		}
 

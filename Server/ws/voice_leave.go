@@ -19,7 +19,9 @@ func (h *Hub) handleVoiceLeave(c *Client) {
 		slog.Error("ws handleVoiceLeave LeaveVoiceChannel — ghost session may remain in DB",
 			"err", leaveErr, "user_id", c.userID, "channel_id", oldChID)
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice leave failed — please rejoin if issues persist"))
-		return
+		// Do NOT return: broadcast the leave so peers update their UI,
+		// even though the DB row may be stale. In-memory state (clearVoiceChID)
+		// was already cleared above.
 	}
 
 	h.BroadcastToAll(buildVoiceLeave(oldChID, c.userID))
