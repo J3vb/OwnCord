@@ -2,6 +2,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -101,10 +103,8 @@ func defaults() Config {
 			StorageDir: "data/uploads",
 		},
 		Voice: VoiceConfig{
-			LiveKitAPIKey:    "devkey",
-			LiveKitAPISecret: "owncord-dev-secret-key-min-32chars",
-			LiveKitURL:       "ws://localhost:7880",
-			Quality:          "medium",
+			LiveKitURL: "ws://localhost:7880",
+			Quality:    "medium",
 		},
 		GitHub: GitHubConfig{},
 	}
@@ -140,8 +140,8 @@ upload:
   storage_dir: "data/uploads"
 
 voice:
-  livekit_api_key: "devkey"                              # LiveKit API key
-  livekit_api_secret: "owncord-dev-secret-key-min-32chars"  # LiveKit API secret (min 32 chars)
+  # livekit_api_key: ""       # LiveKit API key (REQUIRED for voice — generate a unique key)
+  # livekit_api_secret: ""    # LiveKit API secret (REQUIRED, min 32 chars — generate a unique secret)
   livekit_url: "ws://localhost:7880"  # LiveKit server WebSocket URL
   # livekit_binary: ""             # path to livekit-server binary; empty = don't auto-start
   # quality: "medium"              # low | medium | high
@@ -164,7 +164,7 @@ func Load(cfgPath string) (*Config, error) {
 
 	// Layer 2: YAML file (create default if missing).
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
-		if writeErr := os.WriteFile(cfgPath, []byte(defaultYAML), 0o644); writeErr != nil {
+		if writeErr := os.WriteFile(cfgPath, []byte(defaultYAML), 0o600); writeErr != nil {
 			return nil, fmt.Errorf("writing default config: %w", writeErr)
 		}
 	} else {
@@ -209,32 +209,56 @@ func Load(cfgPath string) (*Config, error) {
 	applyVoiceDefaults(&cfg.Voice)
 
 	// Warn if using default dev credentials — these are public and insecure.
-	if cfg.Voice.LiveKitAPISecret == "owncord-dev-secret-key-min-32chars" {
-		slog.Warn("using default LiveKit API secret — change voice.livekit_api_secret in config.yaml for production")
-	}
-	if cfg.Voice.LiveKitAPIKey == "devkey" {
-		slog.Warn("using default LiveKit API key — change voice.livekit_api_key in config.yaml for production")
+	if IsDefaultVoiceCredentials(&cfg.Voice) {
+		slog.Warn("using default LiveKit dev credentials — voice will be disabled; set voice.livekit_api_key and voice.livekit_api_secret in config.yaml")
 	}
 
 	return &cfg, nil
 }
 
+// defaultLiveKitAPIKey and defaultLiveKitAPISecret are the well-known dev
+// credentials that ship in the default config. They must never be used in
+// production — NewLiveKitClient rejects them.
+const (
+	DefaultLiveKitAPIKey    = "devkey"
+	DefaultLiveKitAPISecret = "owncord-dev-secret-key-min-32chars"
+)
+
+// IsDefaultVoiceCredentials returns true when the voice config still uses
+// the well-known default dev credentials shipped in the source code.
+func IsDefaultVoiceCredentials(v *VoiceConfig) bool {
+	return v.LiveKitAPIKey == DefaultLiveKitAPIKey ||
+		v.LiveKitAPISecret == DefaultLiveKitAPISecret
+}
+
+// generateRandomKey returns a crypto-random hex string of the given byte length.
+func generateRandomKey(byteLen int) string {
+	b := make([]byte, byteLen)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)
+}
+
 // applyVoiceDefaults fills in zero-value voice fields with sensible defaults.
 // This guards against the koanf merge behaviour where an empty YAML section
 // overwrites struct defaults with Go zero values.
+// When API key/secret are empty, unique random credentials are generated
+// so voice works out of the box without shipping known-public defaults.
 func applyVoiceDefaults(v *VoiceConfig) {
-	def := defaults().Voice
 	if v.LiveKitAPIKey == "" {
-		v.LiveKitAPIKey = def.LiveKitAPIKey
+		v.LiveKitAPIKey = "key-" + generateRandomKey(8)
+		slog.Info("generated random LiveKit API key (no key configured)")
 	}
 	if v.LiveKitAPISecret == "" {
-		v.LiveKitAPISecret = def.LiveKitAPISecret
+		v.LiveKitAPISecret = generateRandomKey(32) // 64 hex chars, well above 32-char minimum
+		slog.Info("generated random LiveKit API secret (no secret configured)")
 	}
 	if v.LiveKitURL == "" {
-		v.LiveKitURL = def.LiveKitURL
+		v.LiveKitURL = "ws://localhost:7880"
 	}
 	if v.Quality == "" {
-		v.Quality = def.Quality
+		v.Quality = "medium"
 	}
 }
 

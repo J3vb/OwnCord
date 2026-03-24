@@ -241,10 +241,17 @@ export function renderInlineImage(url: string): HTMLDivElement {
 
 // -- Lightbox -----------------------------------------------------------------
 
+// Store the cleanup function for the active lightbox so rapid reopens
+// properly remove document-level listeners from the previous instance.
+let activeLightboxClose: (() => void) | null = null;
+
 /** Open a full-screen lightbox overlay with zoom and pan. */
 export function openImageLightbox(src: string, alt: string): void {
-  // Close any existing lightbox to prevent stacking on rapid clicks
-  document.querySelector(".image-lightbox")?.remove();
+  // Close any existing lightbox (including its document listeners)
+  if (activeLightboxClose !== null) {
+    activeLightboxClose();
+    activeLightboxClose = null;
+  }
 
   const overlay = createElement("div", { class: "image-lightbox" });
 
@@ -297,6 +304,7 @@ export function openImageLightbox(src: string, alt: string): void {
     document.removeEventListener("keydown", onKey);
     document.removeEventListener("mousemove", onMove);
     document.removeEventListener("mouseup", onUp);
+    if (activeLightboxClose === close) activeLightboxClose = null;
   }
 
   // Mouse wheel zoom
@@ -382,6 +390,7 @@ export function openImageLightbox(src: string, alt: string): void {
   }
   document.addEventListener("keydown", onKey);
 
+  activeLightboxClose = close;
   document.body.appendChild(overlay);
 }
 

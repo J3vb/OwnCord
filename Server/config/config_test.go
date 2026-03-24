@@ -235,23 +235,24 @@ func TestLoadVoiceConfigDefaults(t *testing.T) {
 		t.Fatalf("Load() returned error: %v", err)
 	}
 
-	tests := []struct {
-		name string
-		got  any
-		want any
-	}{
-		{"Voice.Quality", cfg.Voice.Quality, "medium"},
-		{"Voice.LiveKitAPIKey", cfg.Voice.LiveKitAPIKey, "devkey"},
-		{"Voice.LiveKitAPISecret", cfg.Voice.LiveKitAPISecret, "owncord-dev-secret-key-min-32chars"},
-		{"Voice.LiveKitURL", cfg.Voice.LiveKitURL, "ws://localhost:7880"},
+	if cfg.Voice.Quality != "medium" {
+		t.Errorf("Voice.Quality = %q, want 'medium'", cfg.Voice.Quality)
 	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if tc.got != tc.want {
-				t.Errorf("got %v, want %v", tc.got, tc.want)
-			}
-		})
+	if cfg.Voice.LiveKitURL != "ws://localhost:7880" {
+		t.Errorf("Voice.LiveKitURL = %q, want 'ws://localhost:7880'", cfg.Voice.LiveKitURL)
+	}
+	// Key and secret should be auto-generated (non-empty, not the old defaults).
+	if cfg.Voice.LiveKitAPIKey == "" {
+		t.Error("Voice.LiveKitAPIKey should be auto-generated, got empty")
+	}
+	if cfg.Voice.LiveKitAPIKey == config.DefaultLiveKitAPIKey {
+		t.Error("Voice.LiveKitAPIKey should not be the well-known default")
+	}
+	if cfg.Voice.LiveKitAPISecret == "" {
+		t.Error("Voice.LiveKitAPISecret should be auto-generated, got empty")
+	}
+	if cfg.Voice.LiveKitAPISecret == config.DefaultLiveKitAPISecret {
+		t.Error("Voice.LiveKitAPISecret should not be the well-known default")
 	}
 }
 

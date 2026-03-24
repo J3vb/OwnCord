@@ -9,7 +9,10 @@ import {
 } from "@lib/dom";
 import { observeMedia } from "@lib/media-visibility";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
+import { createLogger } from "@lib/logger";
 import { isSafeUrl } from "./attachments";
+
+const log = createLogger("embeds");
 
 // -- OG metadata types --------------------------------------------------------
 
@@ -81,7 +84,7 @@ async function fetchOgMeta(url: string): Promise<OgMeta> {
     return { title: null, description: null, image: null, siteName: null };
   }
 
-  console.log("[embeds] fetchOgMeta START", url.slice(0, 100));
+  log.debug("fetchOgMeta START", url.slice(0, 100));
   ogInFlight.add(url);
   try {
     const controller = new AbortController();

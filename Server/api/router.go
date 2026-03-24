@@ -96,7 +96,9 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		// Reverse proxy LiveKit signaling through OwnCord's HTTPS server.
 		// This avoids mixed-content blocks (secure page → insecure WS).
 		// Client connects to wss://server:8443/livekit/* → ws://localhost:7880/*
-		r.Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins)))
+		// Auth + rate limiting prevent unauthenticated access to the LiveKit SFU.
+		r.With(AuthMiddleware(database), RateLimitMiddleware(limiter, 30, time.Minute)).
+			Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins)))
 	}
 
 	go hub.Run()

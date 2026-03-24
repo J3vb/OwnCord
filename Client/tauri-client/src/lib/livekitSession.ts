@@ -16,6 +16,7 @@ import {
   setLocalDeafened,
   setLocalCamera,
   setSpeakers,
+  leaveVoiceChannel,
 } from "@stores/voice.store";
 import { loadPref, savePref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
@@ -55,6 +56,8 @@ export class LiveKitSession {
   private tokenRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   /** Latest token received from server (used for reconnection after token refresh). */
   private latestToken: string | null = null;
+  /** Guard: true while handleVoiceToken is connecting — prevents concurrent joins. */
+  private connecting = false;
   /** Master output volume multiplier (0-2.0). Per-user volumes are scaled by this. */
   private outputVolumeMultiplier = loadPref<number>("outputVolume", 100) / 100;
 
@@ -166,6 +169,8 @@ export class LiveKitSession {
     log.info("LiveKit room disconnected", { reason });
     const isUnexpected = reason !== DisconnectReason.CLIENT_INITIATED;
     this.leaveVoice(false);
+    // Clear the voice store so the UI reflects the disconnected state.
+    leaveVoiceChannel();
     if (isUnexpected) this.onErrorCallback?.("Voice connection lost — disconnected");
   };
 
@@ -263,7 +268,13 @@ export class LiveKitSession {
       this.handleVoiceTokenRefresh(token);
       return;
     }
+    // Prevent concurrent connect attempts (rapid channel switching).
+    if (this.connecting) {
+      log.warn("handleVoiceToken: already connecting, ignoring duplicate call");
+      return;
+    }
     if (this.room !== null) this.leaveVoice(false);
+    this.connecting = true;
     try {
       this.room = this.createRoom();
       const resolvedUrl = this.resolveLiveKitUrl(url, directUrl);
@@ -319,6 +330,8 @@ export class LiveKitSession {
         this.onErrorCallback?.("Failed to join voice — connection error");
       }
       this.leaveVoice(false);
+    } finally {
+      this.connecting = false;
     }
   }
 
