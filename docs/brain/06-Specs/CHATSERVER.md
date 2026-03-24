@@ -89,11 +89,11 @@ CLIENT (OwnCord.exe) — installed by each friend
   invite codes, client has "Redeem Invite" flow
 - [x] bcrypt (cost 12+) passwords, server-side session tokens (256-bit random)
 - [x] Client stores auth token securely via Windows Credential Manager / DPAPI
-- [x] Login rate limiting: 5 attempts/min/IP, lockout after 10 failures
-- [ ] Optional TOTP 2FA — planned, not yet implemented (T-023 in backlog).
-  DB schema has `totp_secret` column ready.
+- [x] Login rate limiting: 5 attempts/min/IP, lockout after 10 failures (enhanced with brute-force lockout)
+- [ ] Optional TOTP 2FA — database schema ready (`totp_secret` column) but API endpoints
+  not yet exposed. Endpoint stubs planned for future release.
 - [x] Roles: Owner, Admin, Moderator, Member + custom roles with bitfield permissions
-- [x] Per-channel permission overrides, enforced server-side on every action
+- [x] Per-channel permission overrides, enforced server-side on every action (allow-wins semantics)
 - [x] TLS modes: self-signed (default), Let's Encrypt,
   manual cert, off (Tailscale)
 - [x] Client: certificate pinning or trust-on-first-use (TOFU) for self-signed certs

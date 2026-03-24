@@ -163,7 +163,7 @@ OwnCord/
 
 ```bash
 cd Server
-go build -o chatserver.exe -ldflags "-s -w -X main.version=1.0.0" .
+go build -o chatserver.exe -ldflags "-s -w -X main.version=1.2.0" .
 ```
 
 ### Client
@@ -198,14 +198,15 @@ The server generates a `config.yaml` on first run. Key settings:
 | ------- | ------- | ----------- |
 | `server.port` | `8443` | HTTPS port |
 | `server.name` | `OwnCord Server` | Display name |
-| `tls.mode` | `selfsigned` | TLS mode (see docs) |
-| `upload.max_size_mb` | `10` | Max upload size |
+| `tls.mode` | `self_signed` | TLS mode (self_signed, acme, manual, off) |
+| `upload.max_size_mb` | `100` | Max upload size |
 | `voice.livekit_url` | `ws://localhost:7880` | LiveKit server WebSocket URL |
-| `voice.livekit_api_key` | `devkey` | LiveKit API key |
-| `voice.livekit_api_secret` | — | LiveKit API secret (min 32 chars) |
-| `voice.livekit_binary` | — | Path to `livekit-server` binary (auto-start) |
+| `voice.livekit_api_key` | — | LiveKit API key (required for voice) |
+| `voice.livekit_api_secret` | — | LiveKit API secret (min 32 chars, required for voice) |
+| `voice.livekit_binary` | — | Path to `livekit-server` binary (empty = don't auto-start) |
+| `voice.quality` | `medium` | Voice quality (low, medium, high) |
 | `server.admin_allowed_cidrs` | private nets | CIDRs allowed to access `/admin` |
-| `github.token` | — | Token for update checks |
+| `github.token` | — | Token for update checks (optional, for higher rate limits) |
 
 ## Auto-Updates
 
