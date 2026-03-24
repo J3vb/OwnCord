@@ -54,16 +54,18 @@ type authSuccessResponse struct {
 }
 
 // MountAuthRoutes registers all auth endpoints on the given router.
-// Rate limiters are applied per-endpoint as specified.
-func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter) {
+// Rate limiters are applied per-endpoint as specified. trustedProxies is the
+// list of CIDRs whose X-Forwarded-For / X-Real-IP headers are honoured for
+// rate-limiting IP resolution.
+func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, trustedProxies []string) {
 	registerLimiter := limiter
 	loginLimiter := limiter
 
 	r.Route("/api/v1/auth", func(r chi.Router) {
-		r.With(RateLimitMiddleware(registerLimiter, 3, time.Minute)).
+		r.With(RateLimitMiddleware(registerLimiter, 3, time.Minute, trustedProxies)).
 			Post("/register", handleRegister(database))
 
-		r.With(RateLimitMiddleware(loginLimiter, 5, time.Minute)).
+		r.With(RateLimitMiddleware(loginLimiter, 5, time.Minute, trustedProxies)).
 			Post("/login", handleLogin(database, limiter))
 
 		r.With(AuthMiddleware(database)).
@@ -106,19 +108,20 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		// Validate and consume invite atomically to prevent TOCTOU races.
-		if err := database.UseInviteAtomic(req.InviteCode); err != nil {
-			writeJSON(w, http.StatusBadRequest, genericAuthError)
-			return
-		}
-
-		// Hash password.
+		// Hash password before consuming the invite so that a hashing failure
+		// does not burn a valid invite code.
 		hash, err := auth.HashPassword(req.Password)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "SERVER_ERROR",
 				Message: "failed to process registration",
 			})
+			return
+		}
+
+		// Validate and consume invite atomically to prevent TOCTOU races.
+		if err := database.UseInviteAtomic(req.InviteCode); err != nil {
+			writeJSON(w, http.StatusBadRequest, genericAuthError)
 			return
 		}
 

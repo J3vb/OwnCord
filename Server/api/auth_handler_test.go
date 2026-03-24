@@ -36,7 +36,7 @@ func newAuthTestDB(t *testing.T) *db.DB {
 // buildAuthRouter returns a chi router with auth routes mounted on /api/v1/auth.
 func buildAuthRouter(database *db.DB, limiter *auth.RateLimiter) http.Handler {
 	r := chi.NewRouter()
-	api.MountAuthRoutes(r, database, limiter)
+	api.MountAuthRoutes(r, database, limiter, nil)
 	return r
 }
 

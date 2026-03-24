@@ -53,6 +53,9 @@ func (h *Hub) NewLiveKitWebhookHandler(apiKey, apiSecret string) http.HandlerFun
 			return
 		}
 
+		// Verify checks both the HMAC signature and the exp/nbf claims
+		// (via jwt.Claims.Validate with Time: time.Now() inside the SDK).
+		// Expired tokens are rejected with an error here.
 		if _, _, err := verifier.Verify(apiSecret); err != nil {
 			slog.Warn("livekit webhook: token verification failed", "error", err)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)

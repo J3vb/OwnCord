@@ -386,13 +386,13 @@ function attachChannelContextMenu(
 }
 
 /** Global mousemove/mouseup handlers for drag reordering. Registered once. */
-let globalDragListenersAttached = false;
+let globalDragAc: AbortController | null = null;
 
 function ensureGlobalDragListeners(): void {
-  if (globalDragListenersAttached) {
+  if (globalDragAc !== null) {
     return;
   }
-  globalDragListenersAttached = true;
+  globalDragAc = new AbortController();
 
   document.addEventListener("mousemove", (e) => {
     if (activeDrag === null) {
@@ -415,7 +415,7 @@ function ensureGlobalDragListeners(): void {
         break;
       }
     }
-  });
+  }, { signal: globalDragAc.signal });
 
   document.addEventListener("mouseup", (e) => {
     if (activeDrag === null) {
@@ -480,7 +480,7 @@ function ensureGlobalDragListeners(): void {
     if (reorders.length > 0) {
       drag.onReorder(reorders);
     }
-  });
+  }, { signal: globalDragAc.signal });
 }
 
 /** Make a channel element draggable via mousedown (admin/owner only). */
@@ -785,6 +785,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
 
   function destroy(): void {
     ac.abort();
+    globalDragAc?.abort();
+    globalDragAc = null;
     for (const unsub of unsubscribers) {
       unsub();
     }

@@ -168,13 +168,24 @@ func MigrateFS(database *DB, fsys fs.FS) error {
 			continue
 		}
 
+		tx, txErr := database.sqlDB.Begin()
+		if txErr != nil {
+			return fmt.Errorf("begin tx for %s: %w", name, txErr)
+		}
+
 		raw, readErr := fs.ReadFile(fsys, name)
 		if readErr != nil {
+			tx.Rollback() //nolint:errcheck
 			return fmt.Errorf("reading migration %s: %w", name, readErr)
 		}
 
-		if _, execErr := database.sqlDB.Exec(string(raw)); execErr != nil {
+		if _, execErr := tx.Exec(string(raw)); execErr != nil {
+			tx.Rollback() //nolint:errcheck
 			return fmt.Errorf("executing migration %s: %w", name, execErr)
+		}
+
+		if commitErr := tx.Commit(); commitErr != nil {
+			return fmt.Errorf("commit migration %s: %w", name, commitErr)
 		}
 
 		if err := recordApplied(database, name); err != nil {

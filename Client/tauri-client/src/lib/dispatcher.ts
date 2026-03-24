@@ -278,6 +278,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
         reason: payload.reason,
         delaySeconds: payload.delay_seconds,
       });
+      setTransientError(`Server is restarting: ${payload.reason ?? "maintenance"}`);
     }),
   );
 
@@ -287,6 +288,9 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
         code: payload.code,
         message: payload.message,
       });
+      if (payload.code === "RATE_LIMITED" || payload.code === "FORBIDDEN") {
+        setTransientError(payload.message || "Server error");
+      }
     }),
   );
 

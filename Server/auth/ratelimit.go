@@ -32,8 +32,9 @@ func NewRateLimiter() *RateLimiter {
 }
 
 // Allow reports whether a request from key is permitted given the limit and
-// window. It records the current request timestamp regardless of the outcome.
-// Returns false when key is locked out or has exceeded limit within window.
+// window. It records the current request timestamp only when the request is
+// permitted. Returns false when key is locked out or has exceeded limit within
+// window.
 func (r *RateLimiter) Allow(key string, limit int, window time.Duration) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()

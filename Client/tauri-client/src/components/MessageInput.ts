@@ -445,13 +445,8 @@ export function createMessageInput(
 
   function destroy(): void {
     ac.abort();
-    // Revoke any blob URLs for image previews
-    for (const att of pendingAttachments) {
-      const img = att.previewEl.querySelector("img");
-      if (img !== null && img.src.startsWith("blob:")) {
-        URL.revokeObjectURL(img.src);
-      }
-    }
+    // Image previews now use data: URLs (via readFileAsDataUrl) which don't
+    // require revocation — just clear the array and let GC reclaim them.
     pendingAttachments.length = 0;
     root?.remove();
     root = null;

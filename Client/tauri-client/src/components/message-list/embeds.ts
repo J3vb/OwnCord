@@ -33,13 +33,19 @@ const ogInFlight = new Set<string>();
 
 // -- OG tag parsing -----------------------------------------------------------
 
+/** Escape special regex characters in a string for safe use in `new RegExp()`. */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /** Extract Open Graph meta tags from raw HTML using regex (no DOM parser needed). */
 export function parseOgTags(html: string): OgMeta {
   function getMetaContent(property: string): string | null {
     // Match both property="og:X" and name="og:X" patterns
+    const escaped = escapeRegex(property);
     const regex = new RegExp(
-      `<meta[^>]*(?:property|name)=["']${property}["'][^>]*content=["']([^"']*)["']` +
-      `|<meta[^>]*content=["']([^"']*)["'][^>]*(?:property|name)=["']${property}["']`,
+      `<meta[^>]*(?:property|name)=["']${escaped}["'][^>]*content=["']([^"']*)["']` +
+      `|<meta[^>]*content=["']([^"']*)["'][^>]*(?:property|name)=["']${escaped}["']`,
       "i",
     );
     const match = html.match(regex);

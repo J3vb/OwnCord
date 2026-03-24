@@ -41,14 +41,14 @@ export function hasAllPermissions(userPerms: number, ...perms: Permission[]): bo
  *
  * - If the base permissions contain ADMINISTRATOR the result is all bits set
  *   (deny/allow are ignored).
- * - Otherwise: start with `basePerms`, add `allow` bits, then remove `deny` bits.
- *   Deny takes precedence over allow.
+ * - Otherwise: remove `deny` bits first, then add `allow` bits.
+ *   Allow takes precedence over deny (matches server semantics).
  */
 export function computeEffective(basePerms: number, allow: number, deny: number): number {
   if ((basePerms & Permission.ADMINISTRATOR) === Permission.ADMINISTRATOR) {
     return ALL_PERMISSIONS;
   }
-  return (basePerms | allow) & ~deny;
+  return (basePerms & ~deny) | allow;
 }
 
 /** Shorthand check for the ADMINISTRATOR bit. */

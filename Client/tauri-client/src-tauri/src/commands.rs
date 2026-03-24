@@ -75,6 +75,9 @@ pub fn store_cert_fingerprint(
     host: String,
     fingerprint: String,
 ) -> Result<(), String> {
+    // Normalize to lowercase for consistent comparison with ws_proxy fingerprints
+    let fingerprint = fingerprint.to_lowercase();
+
     if host.is_empty() {
         return Err("host must not be empty".into());
     }
@@ -82,7 +85,7 @@ pub fn store_cert_fingerprint(
         return Err("fingerprint must not be empty".into());
     }
 
-    // Validate SHA-256 colon-hex format: "AA:BB:CC:..." (95 chars, 32 hex pairs)
+    // Validate SHA-256 colon-hex format: "aa:bb:cc:..." (95 chars, 32 hex pairs)
     if fingerprint.len() != 95 {
         return Err("fingerprint must be a SHA-256 colon-hex string (95 chars)".into());
     }

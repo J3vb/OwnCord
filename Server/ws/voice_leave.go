@@ -18,8 +18,10 @@ func (h *Hub) handleVoiceLeave(c *Client) {
 	if leaveErr := h.db.LeaveVoiceChannel(c.userID); leaveErr != nil {
 		slog.Error("ws handleVoiceLeave LeaveVoiceChannel — ghost session may remain in DB",
 			"err", leaveErr, "user_id", c.userID, "channel_id", oldChID)
-		c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice leave partially failed — please rejoin if issues persist"))
+		c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice leave failed — please rejoin if issues persist"))
+		return
 	}
+
 	h.BroadcastToAll(buildVoiceLeave(oldChID, c.userID))
 
 	// Remove from LiveKit (best-effort).

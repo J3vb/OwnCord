@@ -332,9 +332,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const unsubChannels = channelsStore.subscribeSelector(
       (s) => s.activeChannelId,
       () => {
-        const active = getActiveChannel();
-        if (active !== null) {
-          channelCtrl!.mountChannel(active.id, active.name);
+        try {
+          const active = getActiveChannel();
+          if (active !== null) {
+            channelCtrl!.mountChannel(active.id, active.name);
+          }
+        } catch (err) {
+          log.error("Channel mount failed", err);
         }
       },
     );

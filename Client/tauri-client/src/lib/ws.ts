@@ -365,12 +365,14 @@ export function createWsClient() {
   function disconnect(): void {
     intentionalClose = true;
     certMismatchBlock = false;
-    lastSeq = 0;
     cancelReconnect();
     stopHeartbeat();
     cleanupEventListeners();
     void disconnectProxy();
     setState("disconnected");
+    // Only reset lastSeq on intentional disconnect (e.g. logout)
+    // so reconnect scenarios preserve replay ability.
+    lastSeq = 0;
   }
 
   return {

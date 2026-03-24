@@ -232,22 +232,47 @@ export function createApiClient(
       return request<void>("POST", "/auth/logout", undefined, signal);
     },
 
-    verifyTotp(
+    async verifyTotp(
       code: string,
       partialToken: string,
       signal?: AbortSignal,
     ): Promise<AuthResponse> {
-      // Temporarily set token for this request; restore in .finally()
-      const prevToken = config.token;
-      config = { ...config, token: partialToken };
-      return request<AuthResponse>(
-        "POST",
-        "/auth/verify-totp",
-        { code },
+      // Don't mutate shared config — make direct fetch with the partial token
+      const url = `${baseUrl()}/auth/verify-totp`;
+      const init: RequestInit & { danger?: { acceptInvalidCerts: boolean; acceptInvalidHostnames: boolean } } = {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${partialToken}`,
+        },
+        body: JSON.stringify({ code }),
         signal,
-      ).finally(() => {
-        config = { ...config, token: prevToken };
-      });
+        danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
+      };
+
+      let res: Response;
+      try {
+        res = await fetch(url, init as RequestInit);
+      } catch (fetchErr) {
+        log.error("API fetch failed", { method: "POST", path: "/auth/verify-totp", error: String(fetchErr) });
+        if (fetchErr instanceof Error) {
+          throw fetchErr;
+        }
+        throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr));
+      }
+
+      if (res.status === 401) {
+        onUnauthorized?.();
+        const err = await parseError(res);
+        throw new ApiClientError(401, err.error, err.message);
+      }
+
+      if (!res.ok) {
+        const err = await parseError(res);
+        throw new ApiClientError(res.status, err.error, err.message);
+      }
+
+      return res.json() as Promise<AuthResponse>;
     },
 
     // ── Users ─────────────────────────────────────────────

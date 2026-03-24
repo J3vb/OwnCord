@@ -12,6 +12,7 @@ import { createIcon } from "@lib/icons";
 import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@components/settings/helpers";
+import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { isSafeUrl } from "./attachments";
 import { CODE_BLOCK_REGEX, INLINE_CODE_REGEX, URL_REGEX } from "./content-parser";
 import { renderGenericLinkPreview } from "./embeds";
@@ -120,7 +121,10 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
   } else {
     setText(titleLink, "Loading...");
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&format=json`;
-    fetch(oembedUrl, { signal: AbortSignal.timeout(5000) })
+    tauriFetch(oembedUrl, {
+      signal: AbortSignal.timeout(5000),
+      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
+    } as RequestInit)
       .then((res) => (res.ok ? (res.json() as Promise<{ title?: string } | null>) : null))
       .then((data) => {
         const title = data?.title ?? "YouTube Video";

@@ -137,12 +137,12 @@ func (h *Hub) Run() {
 
 			defer func() {
 				if r := recover(); r != nil {
-					panicCount++
 					now := time.Now()
 					if lastPanicReset.IsZero() || now.Sub(lastPanicReset) > 60*time.Second {
-						panicCount = 1
+						panicCount = 0
 						lastPanicReset = now
 					}
+					panicCount++
 
 					buf := make([]byte, 4096)
 					n := runtime.Stack(buf, false)

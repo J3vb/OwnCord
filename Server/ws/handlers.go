@@ -24,6 +24,9 @@ const (
 	reactionWindow    = time.Second
 )
 
+// maxMessageLen is the maximum allowed message length in runes (Unicode code points).
+const maxMessageLen = 4000
+
 var sanitizer = bluemonday.StrictPolicy()
 
 // HandleMessageForTest dispatches a raw WebSocket message from client c.
@@ -191,7 +194,7 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "message content cannot be empty"))
 		return
 	}
-	if len([]rune(content)) > 4000 {
+	if len([]rune(content)) > maxMessageLen {
 		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "message content exceeds maximum length of 4000 characters"))
 		return
 	}
@@ -294,6 +297,23 @@ func (h *Hub) handleChatEdit(c *Client, _ string, payload json.RawMessage) {
 		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "content cannot be empty"))
 		return
 	}
+	if len([]rune(content)) > maxMessageLen {
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "message too long"))
+		return
+	}
+
+	// Fetch message first to get the channel ID for the permission check.
+	msg, err := h.db.GetMessage(msgID)
+	if err != nil || msg == nil {
+		c.sendMsg(buildErrorMsg(ErrCodeNotFound, "message not found"))
+		return
+	}
+
+	// Re-check that the user still has SendMessages permission on this channel.
+	if !h.hasChannelPerm(c, msg.ChannelID, permissions.SendMessages) {
+		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "no send permission in this channel"))
+		return
+	}
 
 	// EditMessage checks ownership internally.
 	if err := h.db.EditMessage(msgID, c.userID, content); err != nil {
@@ -301,7 +321,8 @@ func (h *Hub) handleChatEdit(c *Client, _ string, payload json.RawMessage) {
 		return
 	}
 
-	msg, err := h.db.GetMessage(msgID)
+	// Re-fetch to get the updated edited_at timestamp.
+	msg, err = h.db.GetMessage(msgID)
 	if err != nil || msg == nil {
 		slog.Error("ws handleChatEdit GetMessage after edit", "err", err, "msg_id", msgID)
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "edit saved but broadcast failed"))
@@ -340,6 +361,12 @@ func (h *Hub) handleChatDelete(c *Client, _ string, payload json.RawMessage) {
 	msg, err := h.db.GetMessage(msgID)
 	if err != nil || msg == nil {
 		c.sendMsg(buildErrorMsg(ErrCodeNotFound, "message not found"))
+		return
+	}
+
+	// Ensure the user still has at least ReadMessages on this channel.
+	if !h.hasChannelPerm(c, msg.ChannelID, permissions.ReadMessages) {
+		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "no read permission in this channel"))
 		return
 	}
 
@@ -507,7 +534,11 @@ func (h *Hub) requireChannelPerm(c *Client, channelID int64, perm int64, permLab
 	return false
 }
 
-// broadcastExclude sends msg to all channel members except excludeUserID.
+// broadcastExclude sends a message to all clients in the sender's channel
+// EXCEPT the sender. Unlike hub.BroadcastToChannel, messages sent via this
+// function are NOT stored in the replay ring buffer — they are ephemeral.
+// This is correct for typing indicators but would be incorrect for messages
+// that should survive reconnection replay.
 func (h *Hub) broadcastExclude(channelID, excludeUserID int64, msg []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()

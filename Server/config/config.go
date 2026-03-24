@@ -209,8 +209,12 @@ func Load(cfgPath string) (*Config, error) {
 	applyVoiceDefaults(&cfg.Voice)
 
 	// Warn if using default dev credentials — these are public and insecure.
+	// Clear credentials so downstream consumers (e.g. NewLiveKitClient) see
+	// empty values and refuse to start voice.
 	if IsDefaultVoiceCredentials(&cfg.Voice) {
 		slog.Warn("using default LiveKit dev credentials — voice will be disabled; set voice.livekit_api_key and voice.livekit_api_secret in config.yaml")
+		cfg.Voice.LiveKitAPIKey = ""
+		cfg.Voice.LiveKitAPISecret = ""
 	}
 
 	return &cfg, nil

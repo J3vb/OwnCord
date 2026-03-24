@@ -168,9 +168,9 @@ export function prependMessages(
   messagesStore.setState((prev) => {
     const existing = prev.messagesByChannel.get(channelId) ?? [];
     let combined = [...converted, ...existing];
-    // Keep only the newest messages if combined exceeds the cap
+    // Keep oldest messages (start of array) since we're loading history
     if (combined.length > MAX_MESSAGES_PER_CHANNEL) {
-      combined = combined.slice(combined.length - MAX_MESSAGES_PER_CHANNEL);
+      combined = combined.slice(0, MAX_MESSAGES_PER_CHANNEL);
     }
     const updatedMessages = new Map(prev.messagesByChannel);
     updatedMessages.set(channelId, combined);
