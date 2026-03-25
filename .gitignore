@@ -42,3 +42,5 @@ Client/publish-release/
 Client/login-mockup.html
 Client/ui-mockup.html
 .gstack/
+.claude-flow/
+.mcp.json
