@@ -73,9 +73,6 @@ keys:
 
 logging:
   level: info
-
-audio:
-  active_loopback_prevention: true
 `, p.cfg.LiveKitAPIKey, p.cfg.LiveKitAPISecret)
 
 	if err := os.MkdirAll(p.dataDir, 0o755); err != nil {
