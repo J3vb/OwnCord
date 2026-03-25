@@ -4,7 +4,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "./helpers";
-import { switchInputDevice, switchOutputDevice, setVoiceSensitivity, setInputVolume, setOutputVolume } from "@lib/livekitSession";
+import { switchInputDevice, switchOutputDevice, setVoiceSensitivity, setInputVolume, setOutputVolume, reapplyAudioProcessing } from "@lib/livekitSession";
 
 export interface VoiceAudioTabHandle {
   build(): HTMLDivElement;
@@ -95,6 +95,59 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
   }, { signal });
   appendChildren(inputVolumeRow, inputVolumeSlider, inputVolumeLabel);
   section.appendChild(inputVolumeRow);
+
+  // ── Mic level meter with draggable sensitivity threshold ────────
+  const sensitivityHeader = createElement("h3", {}, "Input Sensitivity");
+  section.appendChild(sensitivityHeader);
+
+  // Real-time mic level bar with embedded draggable threshold handle
+  const meterWrap = createElement("div", { class: "mic-meter-wrap" });
+  const meterBar = createElement("div", { class: "mic-meter-bar" });
+  const meterLevel = createElement("div", { class: "mic-meter-level" });
+  const meterThreshold = createElement("div", { class: "mic-meter-threshold" });
+  meterBar.appendChild(meterLevel);
+  meterBar.appendChild(meterThreshold);
+  meterWrap.appendChild(meterBar);
+  section.appendChild(meterWrap);
+
+  let currentSensitivity = loadPref<number>("voiceSensitivity", 50);
+
+  function updateThresholdIndicator(sensitivity: number): void {
+    meterThreshold.style.left = `${sensitivity}%`;
+  }
+  updateThresholdIndicator(currentSensitivity);
+
+  /** Compute sensitivity % from a mouse/touch X position relative to the meter bar. */
+  function sensitivityFromPointer(clientX: number): number {
+    const rect = meterBar.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    return Math.round(ratio * 100);
+  }
+
+  function applySensitivity(val: number): void {
+    currentSensitivity = val;
+    savePref("voiceSensitivity", val);
+    setVoiceSensitivity(val);
+    updateThresholdIndicator(val);
+  }
+
+  // Drag the threshold handle
+  meterThreshold.addEventListener("pointerdown", (e: PointerEvent) => {
+    e.preventDefault();
+    meterThreshold.setPointerCapture(e.pointerId);
+    const onMove = (ev: PointerEvent): void => { applySensitivity(sensitivityFromPointer(ev.clientX)); };
+    const onUp = (): void => {
+      meterThreshold.removeEventListener("pointermove", onMove);
+      meterThreshold.removeEventListener("pointerup", onUp);
+    };
+    meterThreshold.addEventListener("pointermove", onMove, { signal });
+    meterThreshold.addEventListener("pointerup", onUp, { signal });
+  }, { signal });
+
+  // Click on the meter bar to jump the threshold
+  meterBar.addEventListener("click", (e: MouseEvent) => {
+    applySensitivity(sensitivityFromPointer(e.clientX));
+  }, { signal });
 
   // Output device selector
   const outputHeader = createElement("h3", {}, "Output Device");
@@ -253,49 +306,6 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
     stopCameraPreview();
   });
 
-  // ── Mic level meter + sensitivity slider ──────────────────────────
-  const sensitivityHeader = createElement("h3", {}, "Input Sensitivity");
-  section.appendChild(sensitivityHeader);
-
-  // Real-time mic level bar
-  const meterWrap = createElement("div", { class: "mic-meter-wrap" });
-  const meterBar = createElement("div", { class: "mic-meter-bar" });
-  const meterLevel = createElement("div", { class: "mic-meter-level" });
-  const meterThreshold = createElement("div", { class: "mic-meter-threshold" });
-  meterBar.appendChild(meterLevel);
-  meterBar.appendChild(meterThreshold);
-  meterWrap.appendChild(meterBar);
-  section.appendChild(meterWrap);
-
-  // Sensitivity slider
-  const sensitivityRow = createElement("div", { class: "slider-row" });
-  const savedSensitivity = loadPref<number>("voiceSensitivity", 50);
-  const sensitivitySlider = createElement("input", {
-    class: "settings-slider",
-    type: "range",
-    min: "0",
-    max: "100",
-    value: String(savedSensitivity),
-  });
-  const sensitivityLabel = createElement("span", { class: "slider-val" }, `${savedSensitivity}%`);
-
-  // Position threshold indicator — matches slider direction:
-  // slider left (low sensitivity) = indicator left, slider right = indicator right
-  function updateThresholdIndicator(sensitivity: number): void {
-    meterThreshold.style.left = `${sensitivity}%`;
-  }
-  updateThresholdIndicator(savedSensitivity);
-
-  sensitivitySlider.addEventListener("input", () => {
-    const val = Number(sensitivitySlider.value);
-    setText(sensitivityLabel, `${val}%`);
-    savePref("voiceSensitivity", val);
-    setVoiceSensitivity(val);
-    updateThresholdIndicator(val);
-  }, { signal });
-  appendChildren(sensitivityRow, sensitivitySlider, sensitivityLabel);
-  section.appendChild(sensitivityRow);
-
   // Start mic level monitoring for visual feedback
   void (async () => {
     try {
@@ -330,7 +340,7 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
         meterLevel.style.width = `${visual * 100}%`;
 
         // Color: green if above threshold, yellow/red if below
-        const threshold = ((100 - Number(sensitivitySlider.value)) / 100) * 0.15;
+        const threshold = ((100 - currentSensitivity) / 100) * 0.15;
         if (rms >= threshold) {
           meterLevel.style.background = "#43b581"; // green — voice detected
         } else {
@@ -367,8 +377,8 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
       signal,
       onChange: (nowOn) => {
         savePref(item.key, nowOn);
-        const currentDevice = loadPref<string>("audioInputDevice", "");
-        void switchInputDevice(currentDevice);
+        // Reapply audio processing constraints to the live mic track
+        void reapplyAudioProcessing();
       },
     });
 

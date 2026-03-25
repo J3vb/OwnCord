@@ -7,6 +7,7 @@ import {
   type RemoteTrackPublication,
   type RemoteParticipant,
   type Participant,
+  type LocalAudioTrack,
   DisconnectReason,
 } from "livekit-client";
 import type { WsClient } from "@lib/ws";
@@ -61,6 +62,19 @@ export class LiveKitSession {
   /** Master output volume multiplier (0-2.0). Per-user volumes are scaled by this. */
   private outputVolumeMultiplier = loadPref<number>("outputVolume", 100) / 100;
 
+  // --- Unified audio pipeline: input volume + VAD gating ---
+  // Pipeline: rawMicTrack → source → analyser (VAD reads here)
+  //                                 → gainNode (volume × vadGate) → dest → WebRTC sender
+  private audioPipelineCtx: AudioContext | null = null;
+  private audioPipelineGain: GainNode | null = null;
+  private audioPipelineAnalyser: AnalyserNode | null = null;
+  private audioPipelineDest: MediaStreamAudioDestinationNode | null = null;
+  private vadAnimFrame: number = 0;
+  /** When true, mic is currently gated (muted by VAD — gain set to 0). */
+  private vadGated = false;
+  /** The user's input volume gain (0-2.0). VAD multiplies this by 0 or 1. */
+  private currentInputGain = 1.0;
+
   // --- RNNoise processor (LiveKit TrackProcessor API) ---
 
   /** Attach RNNoise processor to the local mic track. Safe to call if already attached. */
@@ -101,6 +115,7 @@ export class LiveKitSession {
     newRoom.on(RoomEvent.TrackUnsubscribed, this.handleTrackUnsubscribed);
     newRoom.on(RoomEvent.Disconnected, this.handleDisconnected);
     newRoom.on(RoomEvent.ActiveSpeakersChanged, this.handleActiveSpeakersChanged);
+    newRoom.on(RoomEvent.AudioPlaybackStatusChanged, this.handleAudioPlaybackChanged);
     return newRoom;
   }
 
@@ -164,6 +179,41 @@ export class LiveKitSession {
     speakerIds.sort((x, y) => x - y);
     setSpeakers({ channel_id: this.currentChannelId, speakers: speakerIds });
   };
+
+  /**
+   * Autoplay unlock: browsers block audio playback without user interaction.
+   * When LiveKit reports audio can't play, we register a one-time click handler
+   * on document that calls room.startAudio() — the next click anywhere unlocks audio.
+   */
+  private autoplayUnlockHandler: (() => void) | null = null;
+
+  private handleAudioPlaybackChanged = (): void => {
+    if (this.room === null) return;
+    if (this.room.canPlaybackAudio) {
+      log.info("Audio playback is now allowed");
+      this.removeAutoplayUnlock();
+      return;
+    }
+    log.warn("Audio playback blocked by browser — registering click-to-unlock");
+    // Remove previous handler if any, then register a new one
+    this.removeAutoplayUnlock();
+    this.autoplayUnlockHandler = () => {
+      if (this.room !== null) {
+        void this.room.startAudio().then(() => {
+          log.info("Audio playback unlocked via user gesture");
+        });
+      }
+      this.removeAutoplayUnlock();
+    };
+    document.addEventListener("click", this.autoplayUnlockHandler, { once: true });
+  };
+
+  private removeAutoplayUnlock(): void {
+    if (this.autoplayUnlockHandler !== null) {
+      document.removeEventListener("click", this.autoplayUnlockHandler);
+      this.autoplayUnlockHandler = null;
+    }
+  }
 
   private handleDisconnected = (reason?: DisconnectReason): void => {
     log.info("LiveKit room disconnected", { reason });
@@ -297,6 +347,12 @@ export class LiveKitSession {
         }
       }
       log.info("Connected to LiveKit room", { channelId, url: resolvedUrl });
+      // Optimistic startAudio — may succeed if the join was triggered by a
+      // recent user gesture. If not, the AudioPlaybackStatusChanged handler
+      // will register a click-to-unlock fallback.
+      this.room.startAudio().catch(() => {
+        log.debug("Optimistic startAudio failed — waiting for user gesture");
+      });
       try {
         await this.room.localParticipant.setMicrophoneEnabled(true);
         log.info("Published mic via LiveKit native capture");
@@ -319,8 +375,9 @@ export class LiveKitSession {
       if (savedInput) await this.room.switchActiveDevice("audioinput", savedInput);
       const savedOutput = loadPref<string>("audioOutputDevice", "");
       if (savedOutput) await this.room.switchActiveDevice("audiooutput", savedOutput);
-      // Apply saved input volume
-      this.applyInputVolume(loadPref<number>("inputVolume", 100));
+      // Set up unified audio pipeline (input volume + VAD gating via GainNode).
+      // VAD polling only starts if saved sensitivity < 100.
+      this.setupAudioPipeline();
       this.currentChannelId = channelId;
       this.startTokenRefreshTimer();
       log.info("Voice session active", { channelId });
@@ -337,10 +394,11 @@ export class LiveKitSession {
 
   leaveVoice(sendWs = true): void {
     this.clearTokenRefreshTimer();
+    this.teardownAudioPipeline();
+    this.removeAutoplayUnlock();
     if (sendWs && this.ws !== null) {
       this.ws.send({ type: "voice_leave", payload: {} });
     }
-    this.cleanupInputGain();
     if (this.room !== null) {
       const r = this.room;
       this.room = null;
@@ -426,9 +484,8 @@ export class LiveKitSession {
         await this.room.localParticipant.setMicrophoneEnabled(false);
         await this.room.localParticipant.setMicrophoneEnabled(true);
       }
-      // Reset and re-apply input volume after device switch (source track changed)
-      this.cleanupInputGain();
-      this.applyInputVolume(loadPref<number>("inputVolume", 100));
+      // Rebuild audio pipeline (source track changed after device switch)
+      this.setupAudioPipeline();
       // Re-apply or remove RNNoise processor based on current setting
       const enhancedNS = loadPref<boolean>("enhancedNoiseSuppression", false);
       if (enhancedNS) {
@@ -462,110 +519,245 @@ export class LiveKitSession {
 
   getUserVolume(userId: number): number { return getSavedUserVolume(userId); }
 
-  /** Input volume GainNode — adjusts mic gain via the WebRTC sender. */
-  private inputGainNode: GainNode | null = null;
-  private inputGainCtx: AudioContext | null = null;
-  private inputGainDest: MediaStreamAudioDestinationNode | null = null;
+  // ── Unified audio pipeline: input volume + VAD gating ─────────────
+  //
+  // Architecture:
+  //   rawMicTrack → AudioContext source
+  //       ├──→ AnalyserNode (VAD reads raw audio here — always sees real signal)
+  //       └──→ GainNode (inputVolume × vadGate) → MediaStreamDestination → WebRTC sender
+  //
+  // The pipeline is always active while in a voice session. This avoids
+  // creating/destroying it when volume changes, and gives the VAD a stable
+  // analyser that's independent of LiveKit's track lifecycle.
 
-  /** Apply input volume gain to the local mic track via a Web Audio GainNode. */
-  private applyInputVolume(volume: number): void {
+  /** Build or rebuild the audio pipeline on the current mic track. */
+  private setupAudioPipeline(): void {
+    this.teardownAudioPipeline();
     if (this.room === null) return;
     const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
     if (micPub?.track === undefined) return;
-    const gain = Math.max(0, Math.min(200, volume)) / 100;
 
-    // At 100% (gain=1.0), tear down the pipeline — no processing needed
-    if (gain === 1 && this.inputGainNode !== null) {
-      this.restoreOriginalSenderTrack();
-      this.cleanupInputGain();
-      log.info("Input volume reset to 100% — gain pipeline removed");
-      return;
-    }
-
-    // No gain node and volume is default — nothing to do
-    if (gain === 1) return;
-
-    if (this.inputGainNode !== null) {
-      this.inputGainNode.gain.setTargetAtTime(gain, 0, 0.05);
-      log.debug("Input volume adjusted", { gain });
-      return;
-    }
-
-    // Build GainNode pipeline and replace the sender's track
     try {
       const mediaTrack = micPub.track.mediaStreamTrack;
       const ctx = new AudioContext({ sampleRate: 48000 });
+      void ctx.resume(); // Ensure not suspended (WebView2 autoplay policy)
+
       const source = ctx.createMediaStreamSource(new MediaStream([mediaTrack]));
+
+      // Analyser: VAD reads time-domain data from here (always real audio)
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.3;
+
+      // GainNode: controls both input volume and VAD gating
       const gainNode = ctx.createGain();
-      gainNode.gain.setTargetAtTime(gain, 0, 0.05);
+      this.currentInputGain = loadPref<number>("inputVolume", 100) / 100;
+      gainNode.gain.setValueAtTime(this.currentInputGain, ctx.currentTime);
+
       const dest = ctx.createMediaStreamDestination();
+
+      // Wire: source → analyser (tap) and source → gain → dest
+      source.connect(analyser);
       source.connect(gainNode);
       gainNode.connect(dest);
 
-      this.inputGainNode = gainNode;
-      this.inputGainCtx = ctx;
-      this.inputGainDest = dest;
+      this.audioPipelineCtx = ctx;
+      this.audioPipelineGain = gainNode;
+      this.audioPipelineAnalyser = analyser;
+      this.audioPipelineDest = dest;
 
-      // Replace the WebRTC sender's track with the gain-adjusted one
+      // Replace the WebRTC sender's track with the pipeline output
       const adjustedTrack = dest.stream.getAudioTracks()[0];
       if (adjustedTrack !== undefined && micPub.track.sender) {
         void micPub.track.sender.replaceTrack(adjustedTrack).catch((err) => {
-          log.warn("Failed to replace sender track with gain-adjusted track", err);
+          log.warn("Failed to replace sender track with pipeline output", err);
         });
       }
-      log.info("Input volume GainNode created", { gain });
+
+      log.info("Audio pipeline created", { inputGain: this.currentInputGain });
+
+      // Start VAD polling if sensitivity < 100
+      this.startVadPolling();
     } catch (err) {
-      log.warn("Failed to set up input volume gain", err);
+      log.warn("Failed to set up audio pipeline", err);
     }
   }
 
-  /** Restore the original mic track on the WebRTC sender (undo gain pipeline). */
-  private restoreOriginalSenderTrack(): void {
-    if (this.room === null) return;
-    const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
-    if (micPub?.track === undefined) return;
-    const originalTrack = micPub.track.mediaStreamTrack;
-    if (micPub.track.sender) {
-      void micPub.track.sender.replaceTrack(originalTrack).catch((err) => {
-        log.warn("Failed to restore original sender track", err);
-      });
+  /** Tear down the audio pipeline and restore the original sender track. */
+  private teardownAudioPipeline(): void {
+    this.stopVadPolling();
+
+    // Restore original mic track on the WebRTC sender
+    if (this.room !== null) {
+      const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
+      if (micPub?.track?.sender !== undefined) {
+        const originalTrack = micPub.track.mediaStreamTrack;
+        void micPub.track.sender.replaceTrack(originalTrack).catch(() => {});
+      }
     }
+
+    if (this.audioPipelineGain !== null) { this.audioPipelineGain.disconnect(); this.audioPipelineGain = null; }
+    if (this.audioPipelineAnalyser !== null) { this.audioPipelineAnalyser.disconnect(); this.audioPipelineAnalyser = null; }
+    if (this.audioPipelineDest !== null) { this.audioPipelineDest.disconnect(); this.audioPipelineDest = null; }
+    if (this.audioPipelineCtx !== null) { void this.audioPipelineCtx.close(); this.audioPipelineCtx = null; }
+    this.vadGated = false;
   }
 
-  private cleanupInputGain(): void {
-    if (this.inputGainNode !== null) {
-      this.inputGainNode.disconnect();
-      this.inputGainNode = null;
-    }
-    if (this.inputGainDest !== null) {
-      this.inputGainDest.disconnect();
-      this.inputGainDest = null;
-    }
-    if (this.inputGainCtx !== null) {
-      void this.inputGainCtx.close();
-      this.inputGainCtx = null;
-    }
+  /** Update the effective gain on the pipeline (inputVolume × vadGate). */
+  private updatePipelineGain(): void {
+    if (this.audioPipelineGain === null || this.audioPipelineCtx === null) return;
+    const effectiveGain = this.vadGated ? 0 : this.currentInputGain;
+    this.audioPipelineGain.gain.setTargetAtTime(effectiveGain, this.audioPipelineCtx.currentTime, 0.015);
   }
 
   setInputVolume(volume: number): void {
     const clamped = Math.max(0, Math.min(200, volume));
     savePref("inputVolume", clamped);
-    this.applyInputVolume(clamped);
+    this.currentInputGain = clamped / 100;
+    this.updatePipelineGain();
   }
 
   setOutputVolume(volume: number): void {
     const clamped = Math.max(0, Math.min(200, volume));
     savePref("outputVolume", clamped);
     this.outputVolumeMultiplier = clamped / 100;
-    // Re-apply all per-user volumes scaled by the new master output
     this.applyAllVolumes();
   }
 
-  setVoiceSensitivity(_sensitivity: number): void {
-    // Voice sensitivity is now handled by LiveKit's built-in speaking detection.
-    // The sensitivity parameter is saved in preferences by the UI but
-    // LiveKit's server-side VAD determines speaking state.
-    log.debug("Voice sensitivity setting saved (handled by LiveKit VAD)");
+  /**
+   * Apply voice sensitivity as a client-side VAD gate.
+   * Sensitivity 0 = gate everything (threshold impossibly high).
+   * Sensitivity 100 = gate nothing (no VAD polling).
+   * VAD sets gain to 0 when gated, restores inputVolume when ungated.
+   */
+  setVoiceSensitivity(sensitivity: number): void {
+    const clamped = Math.max(0, Math.min(100, sensitivity));
+    savePref("voiceSensitivity", clamped);
+    // Restart VAD polling with the new threshold (pipeline stays intact)
+    this.stopVadPolling();
+    if (clamped >= 100) {
+      // Ensure ungated
+      if (this.vadGated) { this.vadGated = false; this.updatePipelineGain(); }
+    } else {
+      this.startVadPolling();
+    }
+    log.debug("Voice sensitivity updated", { sensitivity: clamped });
+  }
+
+  /** Start VAD polling loop — reads from the pipeline's analyser. */
+  private startVadPolling(): void {
+    this.stopVadPolling();
+    if (this.audioPipelineAnalyser === null) return;
+
+    const sensitivity = loadPref<number>("voiceSensitivity", 50);
+    if (sensitivity >= 100) return;
+
+    // Convert sensitivity to an RMS threshold (time-domain):
+    // sensitivity 0 → threshold ~0.10, sensitivity 50 → ~0.05, sensitivity 99 → ~0.001
+    const threshold = ((100 - sensitivity) / 100) * 0.10;
+    const analyser = this.audioPipelineAnalyser;
+    const dataArray = new Float32Array(analyser.fftSize);
+
+    let silentFrames = 0;
+    let speechFrames = 0;
+    const GATE_ON_FRAMES = 12;  // ~200ms of silence before gating
+    const GATE_OFF_FRAMES = 2;  // ~33ms of speech before ungating
+    // Grace period: don't gate for the first ~500ms to let audio settle
+    let startupFrames = 0;
+    const STARTUP_GRACE = 30;
+
+    const poll = (): void => {
+      if (this.audioPipelineAnalyser === null) return;
+
+      analyser.getFloatTimeDomainData(dataArray);
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        const v = dataArray[i] ?? 0;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / dataArray.length);
+
+      if (startupFrames < STARTUP_GRACE) {
+        startupFrames++;
+        this.vadAnimFrame = requestAnimationFrame(poll);
+        return;
+      }
+
+      if (rms < threshold) {
+        speechFrames = 0;
+        silentFrames++;
+        if (!this.vadGated && silentFrames >= GATE_ON_FRAMES) {
+          this.vadGated = true;
+          this.updatePipelineGain(); // gain → 0
+        }
+      } else {
+        silentFrames = 0;
+        speechFrames++;
+        if (this.vadGated && speechFrames >= GATE_OFF_FRAMES) {
+          this.vadGated = false;
+          this.updatePipelineGain(); // gain → inputVolume
+        }
+      }
+
+      this.vadAnimFrame = requestAnimationFrame(poll);
+    };
+    this.vadAnimFrame = requestAnimationFrame(poll);
+    log.info("VAD polling started", { sensitivity, threshold });
+  }
+
+  /** Stop VAD polling loop (pipeline stays intact). */
+  private stopVadPolling(): void {
+    if (this.vadAnimFrame !== 0) {
+      cancelAnimationFrame(this.vadAnimFrame);
+      this.vadAnimFrame = 0;
+    }
+    // Ungate if was gated
+    if (this.vadGated) {
+      this.vadGated = false;
+      this.updatePipelineGain();
+    }
+  }
+
+  /**
+   * Re-apply audio processing settings (echo cancellation, noise suppression, AGC)
+   * to the live mic track by restarting it with updated constraints.
+   */
+  async reapplyAudioProcessing(): Promise<void> {
+    if (this.room === null) {
+      log.debug("Skipping audio processing reapply — no active voice session");
+      return;
+    }
+    const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
+    if (micPub?.track === undefined) {
+      log.debug("Skipping audio processing reapply — no mic track");
+      return;
+    }
+
+    const captureOptions = {
+      echoCancellation: loadPref("echoCancellation", true),
+      noiseSuppression: loadPref("noiseSuppression", true),
+      autoGainControl: loadPref("autoGainControl", true),
+    };
+
+    try {
+      // restartTrack re-acquires the mic with new constraints without unpublishing
+      await (micPub.track as LocalAudioTrack).restartTrack(captureOptions);
+      log.info("Audio processing reapplied via restartTrack", captureOptions);
+
+      // Rebuild audio pipeline (underlying track changed)
+      this.setupAudioPipeline();
+
+      // Re-apply or remove RNNoise processor
+      const enhancedNS = loadPref<boolean>("enhancedNoiseSuppression", false);
+      if (enhancedNS) {
+        await this.applyNoiseSuppressor();
+      } else {
+        await this.removeNoiseSuppressor();
+      }
+    } catch (err) {
+      log.error("Failed to reapply audio processing", err);
+      this.onErrorCallback?.("Failed to update audio settings");
+    }
   }
 
   getLocalCameraStream(): MediaStream | null {
@@ -600,9 +792,11 @@ export class LiveKitSession {
       hasRNNoiseProcessor: this.room.localParticipant.getTrackPublication(Track.Source.Microphone)?.track?.getProcessor() !== undefined,
       currentChannelId: this.currentChannelId,
       outputVolumeMultiplier: this.outputVolumeMultiplier,
-      inputGainActive: this.inputGainNode !== null,
-      inputGainValue: this.inputGainNode?.gain.value ?? null,
-      inputGainCtxState: this.inputGainCtx?.state ?? null,
+      audioPipelineActive: this.audioPipelineGain !== null,
+      audioPipelineGain: this.audioPipelineGain?.gain.value ?? null,
+      audioPipelineCtxState: this.audioPipelineCtx?.state ?? null,
+      vadGated: this.vadGated,
+      currentInputGain: this.currentInputGain,
       localParticipant: this.room.localParticipant.identity, localTracks,
       remoteParticipants,
     };
@@ -638,5 +832,6 @@ export const getUserVolume = session.getUserVolume.bind(session);
 export const setInputVolume = session.setInputVolume.bind(session);
 export const setOutputVolume = session.setOutputVolume.bind(session);
 export const setVoiceSensitivity = session.setVoiceSensitivity.bind(session);
+export const reapplyAudioProcessing = session.reapplyAudioProcessing.bind(session);
 export const getLocalCameraStream = session.getLocalCameraStream.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
