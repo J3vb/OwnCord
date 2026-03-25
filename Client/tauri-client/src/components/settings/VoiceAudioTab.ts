@@ -113,7 +113,10 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
   let currentSensitivity = loadPref<number>("voiceSensitivity", 50);
 
   function updateThresholdIndicator(sensitivity: number): void {
-    meterThreshold.style.left = `${sensitivity}%`;
+    // Invert: sensitivity 100 (no gating) → handle at LEFT (0%),
+    //         sensitivity 0 (max gating) → handle at RIGHT (100%).
+    // This matches Discord: drag LEFT = easier to pass, RIGHT = harder.
+    meterThreshold.style.left = `${100 - sensitivity}%`;
   }
   updateThresholdIndicator(currentSensitivity);
 
@@ -121,7 +124,8 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
   function sensitivityFromPointer(clientX: number): number {
     const rect = meterBar.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    return Math.round(ratio * 100);
+    // Invert: clicking LEFT = high sensitivity, RIGHT = low sensitivity
+    return Math.round((1 - ratio) * 100);
   }
 
   function applySensitivity(val: number): void {
