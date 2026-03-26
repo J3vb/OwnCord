@@ -42,8 +42,14 @@ function getSavedUserVolume(userId: number): number {
 
 // --- Types ---
 
-type RemoteVideoCallback = (userId: number, stream: MediaStream) => void;
-type RemoteVideoRemovedCallback = (userId: number) => void;
+type RemoteVideoCallback = (userId: number, stream: MediaStream, isScreenshare: boolean) => void;
+type RemoteVideoRemovedCallback = (userId: number, isScreenshare: boolean) => void;
+type PendingVoiceJoin = {
+  readonly token: string;
+  readonly url: string;
+  readonly channelId: number;
+  readonly directUrl?: string;
+};
 
 // --- LiveKitSession class ---
 
@@ -60,6 +66,8 @@ export class LiveKitSession {
   private latestToken: string | null = null;
   /** Guard: true while handleVoiceToken is connecting — prevents concurrent joins. */
   private connecting = false;
+  /** Latest join request received while a connection attempt is already running. */
+  private pendingJoin: PendingVoiceJoin | null = null;
   /** Last known LiveKit URL and directUrl for auto-reconnect on unexpected disconnect. */
   private lastUrl: string | null = null;
   private lastDirectUrl: string | undefined = undefined;
@@ -68,6 +76,10 @@ export class LiveKitSession {
   private static readonly RECONNECT_DELAY_MS = 3000;
   /** Master output volume multiplier (0-2.0). Per-user volumes are scaled by this. */
   private outputVolumeMultiplier = loadPref<number>("outputVolume", 100) / 100;
+  /** Screenshare audio elements keyed by userId — separate from mic audio pipeline. */
+  private screenshareAudioElements = new Map<number, Set<HTMLAudioElement>>();
+  /** Persisted mute state for screenshare audio so replacement tracks inherit UI state. */
+  private screenshareAudioMutedByUser = new Map<number, boolean>();
 
   // --- Unified audio pipeline: input volume + VAD gating ---
   // Pipeline: rawMicTrack → source → analyser (VAD reads here)
@@ -130,30 +142,55 @@ export class LiveKitSession {
 
   private handleTrackSubscribed = (
     track: RemoteTrack,
-    _publication: RemoteTrackPublication,
+    publication: RemoteTrackPublication,
     participant: RemoteParticipant,
   ): void => {
     const userId = parseUserId(participant.identity);
     if (track.kind === Track.Kind.Audio) {
-      // Detach any previous <audio> elements to prevent duplicate playback
-      // on fast reconnects (new subscription fires before old unsubscription)
-      for (const el of track.detach()) el.remove();
-      const audioEl = track.attach();
-      audioEl.style.display = "none";
-      document.body.appendChild(audioEl);
-      // Apply saved per-user volume via LiveKit's setVolume (supports 0-2.0 range)
-      participant.setVolume(this.getEffectiveVolume(userId));
-      const savedOutput = loadPref<string>("audioOutputDevice", "");
-      if (savedOutput !== "" && typeof audioEl.setSinkId === "function") {
-        audioEl.setSinkId(savedOutput).catch((err) => {
-          log.warn("Failed to set output device on remote audio", err);
-        });
+      if (publication.source === Track.Source.ScreenShareAudio) {
+        // Screenshare audio: manage via HTMLAudioElement volume (not participant.setVolume)
+        for (const el of track.detach()) el.remove();
+        const audioEl = track.attach();
+        audioEl.style.display = "none";
+        document.body.appendChild(audioEl);
+        audioEl.volume = this.getScreenshareOutputVolume();
+        audioEl.muted = this.screenshareAudioMutedByUser.get(userId) ?? false;
+        let audioEls = this.screenshareAudioElements.get(userId);
+        if (audioEls === undefined) {
+          audioEls = new Set();
+          this.screenshareAudioElements.set(userId, audioEls);
+        }
+        audioEls.add(audioEl);
+        const savedOutput = loadPref<string>("audioOutputDevice", "");
+        if (savedOutput !== "" && typeof audioEl.setSinkId === "function") {
+          audioEl.setSinkId(savedOutput).catch((err) => {
+            log.warn("Failed to set output device on screenshare audio", err);
+          });
+        }
+        log.debug("Screenshare audio track subscribed and attached", { userId, trackSid: track.sid });
+      } else {
+        // Microphone audio: use LiveKit's GainNode-backed setVolume
+        // Detach any previous <audio> elements to prevent duplicate playback
+        // on fast reconnects (new subscription fires before old unsubscription)
+        for (const el of track.detach()) el.remove();
+        const audioEl = track.attach();
+        audioEl.style.display = "none";
+        document.body.appendChild(audioEl);
+        // Apply saved per-user volume via LiveKit's setVolume (supports 0-2.0 range)
+        participant.setVolume(this.getEffectiveVolume(userId));
+        const savedOutput = loadPref<string>("audioOutputDevice", "");
+        if (savedOutput !== "" && typeof audioEl.setSinkId === "function") {
+          audioEl.setSinkId(savedOutput).catch((err) => {
+            log.warn("Failed to set output device on remote audio", err);
+          });
+        }
+        log.debug("Remote audio track subscribed and attached", { userId, trackSid: track.sid });
       }
-      log.debug("Remote audio track subscribed and attached", { userId, trackSid: track.sid });
     } else if (track.kind === Track.Kind.Video) {
       if (userId > 0 && this.onRemoteVideoCallback !== null) {
         const stream = new MediaStream([track.mediaStreamTrack]);
-        this.onRemoteVideoCallback(userId, stream);
+        const isScreenshare = publication.source === Track.Source.ScreenShare;
+        this.onRemoteVideoCallback(userId, stream, isScreenshare);
       }
       log.debug("Remote video track subscribed", { userId, trackSid: track.sid });
     }
@@ -161,16 +198,28 @@ export class LiveKitSession {
 
   private handleTrackUnsubscribed = (
     track: RemoteTrack,
-    _publication: RemoteTrackPublication,
+    publication: RemoteTrackPublication,
     participant: RemoteParticipant,
   ): void => {
     const userId = parseUserId(participant.identity);
     if (track.kind === Track.Kind.Audio) {
-      for (const el of track.detach()) el.remove();
-      log.debug("Remote audio track unsubscribed and detached", { userId, trackSid: track.sid });
+      if (publication.source === Track.Source.ScreenShareAudio) {
+        const detachedEls = track.detach() as HTMLAudioElement[];
+        for (const el of detachedEls) el.remove();
+        const audioEls = this.screenshareAudioElements.get(userId);
+        if (audioEls !== undefined) {
+          for (const el of detachedEls) audioEls.delete(el);
+          if (audioEls.size === 0) this.screenshareAudioElements.delete(userId);
+        }
+        log.debug("Screenshare audio track unsubscribed and detached", { userId, trackSid: track.sid });
+      } else {
+        for (const el of track.detach()) el.remove();
+        log.debug("Remote audio track unsubscribed and detached", { userId, trackSid: track.sid });
+      }
     } else if (track.kind === Track.Kind.Video) {
       track.detach();
-      if (userId > 0) this.onRemoteVideoRemovedCallback?.(userId);
+      const isScreenshare = publication.source === Track.Source.ScreenShare;
+      if (userId > 0) this.onRemoteVideoRemovedCallback?.(userId, isScreenshare);
       log.debug("Remote video track unsubscribed", { userId, trackSid: track.sid });
     }
   };
@@ -267,14 +316,7 @@ export class LiveKitSession {
         await this.room.connect(resolvedUrl, token);
         log.info("Auto-reconnect succeeded", { attempt, channelId });
         this.room.startAudio().catch(() => {});
-        try {
-          await this.room.localParticipant.setMicrophoneEnabled(true);
-          if (loadPref<boolean>("enhancedNoiseSuppression", false)) {
-            await this.applyNoiseSuppressor();
-          }
-        } catch (micErr) {
-          log.warn("Auto-reconnect: mic unavailable — listen-only mode", micErr);
-        }
+        await this.restoreLocalVoiceState("reconnect");
         this.setupAudioPipeline();
         this.startTokenRefreshTimer();
         // Request a fresh token since the stored one may be close to expiry.
@@ -290,8 +332,10 @@ export class LiveKitSession {
       }
     }
     // All attempts exhausted — give up and clean up.
+    // Send voice_leave over WS so the server removes our voice state;
+    // without this the server and other clients see us as a ghost participant.
     log.error("Auto-reconnect exhausted all attempts, giving up");
-    this.leaveVoice(false);
+    this.leaveVoice(true);
     leaveVoiceChannel();
     this.onErrorCallback?.("Voice connection lost — failed to reconnect");
   }
@@ -339,11 +383,16 @@ export class LiveKitSession {
   }
 
   handleVoiceTokenRefresh(token?: string): void {
-    // The installed livekit-client SDK version does not expose a refreshToken
-    // method on Room. Store the fresh token so that if LiveKit disconnects
-    // (e.g. token expiry), the reconnection path in handleVoiceToken can use
-    // it automatically. For now, the 4h TTL with 3.5h refresh request ensures
-    // a fresh token is always available before expiry.
+    // KNOWN LIMITATION: The livekit-client SDK does not expose a method to
+    // rotate the token on an active connection. We store the fresh token so
+    // that reconnection (auto-reconnect or manual rejoin) uses it, but the
+    // live session continues with the original token. This means:
+    //   - Sessions longer than the 4h TTL remain connected (LiveKit keeps
+    //     active connections alive) but lose the ability to reconnect after a
+    //     network blip once the original token expires.
+    //   - The 3.5h refresh timer ensures a fresh token is always ready
+    //     *before* the original expires, so reconnects within the window work.
+    // See also: Server/ws/livekit.go tokenTTL constant.
     if (token) {
       this.latestToken = token;
     }
@@ -357,6 +406,61 @@ export class LiveKitSession {
   private getEffectiveVolume(userId: number): number {
     const userVol = userId > 0 ? getSavedUserVolume(userId) : 100;
     return (userVol / 100) * this.outputVolumeMultiplier;
+  }
+
+  private getScreenshareOutputVolume(): number {
+    return Math.max(0, Math.min(1, this.outputVolumeMultiplier));
+  }
+
+  private getLocalVoiceFlags(): { muted: boolean; deafened: boolean } {
+    const state = voiceStore.getState();
+    return {
+      muted: state.localMuted || state.localDeafened,
+      deafened: state.localDeafened,
+    };
+  }
+
+  private applyRemoteAudioSubscriptionState(deafened: boolean): void {
+    if (this.room === null) return;
+    for (const participant of this.room.remoteParticipants.values()) {
+      for (const publication of participant.audioTrackPublications.values()) {
+        publication.setSubscribed(!deafened);
+      }
+    }
+  }
+
+  private async restoreLocalVoiceState(mode: "join" | "reconnect"): Promise<void> {
+    if (this.room === null) return;
+
+    const { muted, deafened } = this.getLocalVoiceFlags();
+    const shouldEnableMicrophone = !muted;
+
+    try {
+      await this.room.localParticipant.setMicrophoneEnabled(shouldEnableMicrophone);
+      if (shouldEnableMicrophone) {
+        log.info(mode === "join"
+          ? "Published mic via LiveKit native capture"
+          : "Auto-reconnect restored live microphone");
+        if (loadPref<boolean>("enhancedNoiseSuppression", false)) {
+          await this.applyNoiseSuppressor();
+        }
+      }
+    } catch (micErr) {
+      if (mode === "reconnect") {
+        log.warn("Auto-reconnect: mic unavailable — listen-only mode", micErr);
+      } else if (micErr instanceof DOMException && micErr.name === "NotAllowedError") {
+        log.warn("Microphone permission denied — joined in listen-only mode");
+        this.onErrorCallback?.("Microphone permission denied — joined in listen-only mode");
+      } else if (micErr instanceof DOMException && micErr.name === "NotFoundError") {
+        log.warn("No microphone found — joined in listen-only mode");
+        this.onErrorCallback?.("No microphone found — joined in listen-only mode");
+      } else {
+        log.warn("Microphone unavailable — joined in listen-only mode", micErr);
+        this.onErrorCallback?.("Microphone unavailable — joined in listen-only mode");
+      }
+    }
+
+    this.applyRemoteAudioSubscriptionState(deafened);
   }
 
   /** Apply effective volume to all remote participants. */
@@ -390,13 +494,10 @@ export class LiveKitSession {
       this.handleVoiceTokenRefresh(token);
       return;
     }
-    // Store URL/token for auto-reconnect on unexpected disconnect.
-    this.latestToken = token;
-    this.lastUrl = url;
-    this.lastDirectUrl = directUrl;
     // Prevent concurrent connect attempts (rapid channel switching).
     if (this.connecting) {
-      log.warn("handleVoiceToken: already connecting, ignoring duplicate call");
+      this.pendingJoin = { token, url, channelId, directUrl };
+      log.warn("handleVoiceToken: already connecting, queued latest join request", { channelId });
       return;
     }
     if (this.room !== null) this.leaveVoice(false);
@@ -409,6 +510,25 @@ export class LiveKitSession {
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
           await this.room.connect(resolvedUrl, token);
+          const queuedJoin = this.pendingJoin;
+          if (queuedJoin !== null
+              && (queuedJoin.token !== token
+                || queuedJoin.url !== url
+                || queuedJoin.channelId !== channelId
+                || queuedJoin.directUrl !== directUrl)) {
+            log.info("Discarding stale voice join in favor of queued request", {
+              channelId,
+              queuedChannelId: queuedJoin.channelId,
+            });
+            if (this.room !== null) {
+              const room = this.room;
+              this.room = null;
+              room.removeAllListeners();
+              room.disconnect().catch(() => {});
+            }
+            // Don't return — fall through to finally + pending-join dispatch.
+            break;
+          }
           break;
         } catch (connectErr) {
           if (attempt < MAX_RETRIES) {
@@ -422,41 +542,30 @@ export class LiveKitSession {
           }
         }
       }
-      log.info("Connected to LiveKit room", { channelId, url: resolvedUrl });
-      // Optimistic startAudio — may succeed if the join was triggered by a
-      // recent user gesture. If not, the AudioPlaybackStatusChanged handler
-      // will register a click-to-unlock fallback.
-      this.room.startAudio().catch(() => {
-        log.debug("Optimistic startAudio failed — waiting for user gesture");
-      });
-      try {
-        await this.room.localParticipant.setMicrophoneEnabled(true);
-        log.info("Published mic via LiveKit native capture");
-        if (loadPref<boolean>("enhancedNoiseSuppression", false)) {
-          await this.applyNoiseSuppressor();
-        }
-      } catch (micErr) {
-        if (micErr instanceof DOMException && micErr.name === "NotAllowedError") {
-          log.warn("Microphone permission denied — joined in listen-only mode");
-          this.onErrorCallback?.("Microphone permission denied — joined in listen-only mode");
-        } else if (micErr instanceof DOMException && micErr.name === "NotFoundError") {
-          log.warn("No microphone found — joined in listen-only mode");
-          this.onErrorCallback?.("No microphone found — joined in listen-only mode");
-        } else {
-          log.warn("Microphone unavailable — joined in listen-only mode", micErr);
-          this.onErrorCallback?.("Microphone unavailable — joined in listen-only mode");
-        }
+      // If the room was discarded (stale join superseded by pending), skip setup.
+      if (this.room !== null) {
+        log.info("Connected to LiveKit room", { channelId, url: resolvedUrl });
+        this.currentChannelId = channelId;
+        this.latestToken = token;
+        this.lastUrl = url;
+        this.lastDirectUrl = directUrl;
+        // Optimistic startAudio — may succeed if the join was triggered by a
+        // recent user gesture. If not, the AudioPlaybackStatusChanged handler
+        // will register a click-to-unlock fallback.
+        this.room.startAudio().catch(() => {
+          log.debug("Optimistic startAudio failed — waiting for user gesture");
+        });
+        await this.restoreLocalVoiceState("join");
+        const savedInput = loadPref<string>("audioInputDevice", "");
+        if (savedInput) await this.room.switchActiveDevice("audioinput", savedInput);
+        const savedOutput = loadPref<string>("audioOutputDevice", "");
+        if (savedOutput) await this.room.switchActiveDevice("audiooutput", savedOutput);
+        // Set up unified audio pipeline (input volume + VAD gating via GainNode).
+        // VAD polling only starts if saved sensitivity < 100.
+        this.setupAudioPipeline();
+        this.startTokenRefreshTimer();
+        log.info("Voice session active", { channelId });
       }
-      const savedInput = loadPref<string>("audioInputDevice", "");
-      if (savedInput) await this.room.switchActiveDevice("audioinput", savedInput);
-      const savedOutput = loadPref<string>("audioOutputDevice", "");
-      if (savedOutput) await this.room.switchActiveDevice("audiooutput", savedOutput);
-      // Set up unified audio pipeline (input volume + VAD gating via GainNode).
-      // VAD polling only starts if saved sensitivity < 100.
-      this.setupAudioPipeline();
-      this.currentChannelId = channelId;
-      this.startTokenRefreshTimer();
-      log.info("Voice session active", { channelId });
     } catch (err) {
       log.error("Failed to connect to LiveKit", err);
       if (this.room !== null) {
@@ -466,15 +575,33 @@ export class LiveKitSession {
     } finally {
       this.connecting = false;
     }
+    // Dispatch pending join *after* the try/finally so that a throw inside
+    // the recursive call doesn't interfere with the outer finally's flag reset.
+    const pendingJoin = this.pendingJoin;
+    this.pendingJoin = null;
+    if (pendingJoin !== null) {
+      await this.handleVoiceToken(
+        pendingJoin.token,
+        pendingJoin.url,
+        pendingJoin.channelId,
+        pendingJoin.directUrl,
+      );
+    }
   }
 
   leaveVoice(sendWs = true): void {
     this.clearTokenRefreshTimer();
     this.teardownAudioPipeline();
     this.removeAutoplayUnlock();
+    this.pendingJoin = null;
     if (sendWs && this.ws !== null) {
       this.ws.send({ type: "voice_leave", payload: {} });
     }
+    for (const audioEls of this.screenshareAudioElements.values()) {
+      for (const el of audioEls) el.remove();
+    }
+    this.screenshareAudioElements.clear();
+    this.screenshareAudioMutedByUser.clear();
     if (this.room !== null) {
       const r = this.room;
       this.room = null;
@@ -501,14 +628,30 @@ export class LiveKitSession {
 
   setMuted(muted: boolean): void {
     setLocalMuted(muted);
-    if (this.room !== null) void this.room.localParticipant.setMicrophoneEnabled(!muted);
+    if (this.room !== null) {
+      void this.room.localParticipant.setMicrophoneEnabled(!muted);
+      // When the audio pipeline is active, LiveKit's track disable may not
+      // silence the replaced sender track. Zero the gain to guarantee silence.
+      if (this.audioPipelineGain !== null && this.audioPipelineCtx !== null) {
+        const gain = muted ? 0 : this.currentInputGain;
+        this.audioPipelineGain.gain.setTargetAtTime(gain, this.audioPipelineCtx.currentTime, 0.015);
+      }
+    }
   }
 
   setDeafened(deafened: boolean): void {
     setLocalDeafened(deafened);
-    if (this.room === null) return;
-    for (const participant of this.room.remoteParticipants.values()) {
-      for (const pub of participant.audioTrackPublications.values()) pub.setSubscribed(!deafened);
+    this.applyRemoteAudioSubscriptionState(deafened);
+    // Deafen implies mute — stop publishing audio so other participants
+    // don't hear us while we can't hear them (matches Discord behaviour).
+    if (this.room !== null) {
+      const shouldPublish = !deafened && !voiceStore.getState().localMuted;
+      void this.room.localParticipant.setMicrophoneEnabled(shouldPublish);
+      // Also zero the pipeline gain to guarantee silence on the replaced track.
+      if (this.audioPipelineGain !== null && this.audioPipelineCtx !== null) {
+        const gain = shouldPublish ? this.currentInputGain : 0;
+        this.audioPipelineGain.gain.setTargetAtTime(gain, this.audioPipelineCtx.currentTime, 0.015);
+      }
     }
     log.debug("Deafen state changed", { deafened });
   }
@@ -559,7 +702,7 @@ export class LiveKitSession {
     }
     setLocalScreenshare(true);
     try {
-      await this.room.localParticipant.setScreenShareEnabled(true);
+      await this.room.localParticipant.setScreenShareEnabled(true, { audio: true });
       this.ws.send({ type: "voice_screenshare", payload: { enabled: true } });
       log.info("Screenshare enabled");
     } catch (err) {
@@ -631,6 +774,29 @@ export class LiveKitSession {
   }
 
   getUserVolume(userId: number): number { return getSavedUserVolume(userId); }
+
+  setScreenshareAudioVolume(userId: number, volume: number): void {
+    const audioEls = this.screenshareAudioElements.get(userId);
+    if (audioEls === undefined) return;
+    const clamped = Math.max(0, Math.min(1, volume));
+    for (const el of audioEls) el.volume = clamped;
+  }
+
+  muteScreenshareAudio(userId: number, muted: boolean): void {
+    this.screenshareAudioMutedByUser.set(userId, muted);
+    const audioEls = this.screenshareAudioElements.get(userId);
+    if (audioEls === undefined) return;
+    for (const el of audioEls) el.muted = muted;
+  }
+
+  getScreenshareAudioMuted(userId: number): boolean {
+    const storedMuted = this.screenshareAudioMutedByUser.get(userId);
+    if (storedMuted !== undefined) return storedMuted;
+    const audioEls = this.screenshareAudioElements.get(userId);
+    if (audioEls === undefined) return false;
+    for (const el of audioEls) return el.muted;
+    return false;
+  }
 
   // ── Unified audio pipeline: input volume + VAD gating ─────────────
   //
@@ -735,6 +901,12 @@ export class LiveKitSession {
     savePref("outputVolume", clamped);
     this.outputVolumeMultiplier = clamped / 100;
     this.applyAllVolumes();
+    const screenshareVolume = this.getScreenshareOutputVolume();
+    for (const audioEls of this.screenshareAudioElements.values()) {
+      for (const audioEl of audioEls) {
+        audioEl.volume = screenshareVolume;
+      }
+    }
   }
 
   /**
@@ -958,3 +1130,6 @@ export const reapplyAudioProcessing = session.reapplyAudioProcessing.bind(sessio
 export const getLocalCameraStream = session.getLocalCameraStream.bind(session);
 export const getLocalScreenshareStream = session.getLocalScreenshareStream.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
+export const setScreenshareAudioVolume = session.setScreenshareAudioVolume.bind(session);
+export const muteScreenshareAudio = session.muteScreenshareAudio.bind(session);
+export const getScreenshareAudioMuted = session.getScreenshareAudioMuted.bind(session);

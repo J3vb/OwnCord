@@ -147,6 +147,17 @@
 .voice-user-item .vu-name + .vu-status,
 .voice-user-item .vu-name + .vu-muted { margin-left: auto; }
 
+/* ── LIVE badge (voice channel sidebar) ── */
+.vu-live-badge {
+  background: #ed4245;
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-left: 2px;
+}
+
 /* Voice widget (above user bar, when connected) */
 .voice-widget {
   background: var(--bg-secondary); border-top: 1px solid var(--border);
@@ -1968,6 +1979,100 @@
 .vw-controls .active-ctrl {
   background: var(--brand-primary, #5865f2);
   color: #fff;
+}
+
+/* ── Video tile overlay (mute button) ── */
+.video-tile-overlay {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  padding: 6px;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.video-cell:hover .video-tile-overlay,
+.video-tile-overlay.muted {
+  opacity: 1;
+}
+.tile-mute-btn {
+  background: rgba(0, 0, 0, 0.6);
+  border: none;
+  border-radius: 4px;
+  color: var(--text-normal);
+  padding: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tile-mute-btn:hover {
+  background: rgba(0, 0, 0, 0.8);
+}
+.tile-volume-slider {
+  width: 80px;
+  height: 4px;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.tile-volume-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+}
+.tile-volume-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  cursor: pointer;
+}
+
+/* ── Video focus mode layout ── */
+.video-grid.focus-mode {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.video-focus-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+.video-focus-main .video-cell {
+  width: 100%;
+  height: 100%;
+}
+.video-focus-strip {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  overflow-x: auto;
+  flex-shrink: 0;
+  height: 90px;
+  background: var(--bg-tertiary);
+}
+.video-focus-strip .video-cell {
+  width: 120px;
+  min-width: 120px;
+  height: 100%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  border-radius: 4px;
+}
+.video-focus-strip .video-cell:hover {
+  border-color: var(--accent);
 }
 
 /* ── Invite Manager ── */

@@ -4,13 +4,29 @@
  */
 
 import { createElement, appendChildren } from "@lib/dom";
+import { muteScreenshareAudio, setUserVolume } from "@lib/livekitSession";
 import type { MountableComponent } from "@lib/safe-render";
 
+export interface TileConfig {
+  /** True if this is the local user's own tile (no audio controls) */
+  readonly isSelf: boolean;
+  /** The real userId for audio control (differs from tile ID for screenshare tiles) */
+  readonly audioUserId: number;
+  /** True if this tile represents a screenshare (vs camera) */
+  readonly isScreenshare: boolean;
+}
+
 export interface VideoGridComponent extends MountableComponent {
-  addStream(userId: number, username: string, stream: MediaStream): void;
+  addStream(userId: number, username: string, stream: MediaStream, config?: TileConfig): void;
   removeStream(userId: number): void;
   hasStreams(): boolean;
+  setFocusedTile(tileId: number): void;
+  getFocusedTileId(): number | null;
 }
+
+const ICON_VOLUME = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>`;
+
+const ICON_VOLUME_X = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>`;
 
 function computeGridColumns(count: number): string {
   if (count <= 1) return "1fr";
@@ -21,20 +37,80 @@ function computeGridColumns(count: number): string {
 
 export function createVideoGrid(): VideoGridComponent {
   let root: HTMLDivElement | null = null;
-  const cells = new Map<number, HTMLDivElement>();
+  const cells = new Map<number, { el: HTMLDivElement; config?: TileConfig }>();
+  let focusedTileId: number | null = null;
+
+  function rebuildFocusLayout(): void {
+    if (root === null) return;
+
+    // Clear root children (we'll re-append in focus layout order)
+    while (root.firstChild) root.removeChild(root.firstChild);
+
+    if (focusedTileId === null || cells.size === 0) {
+      // No focus — use regular grid layout
+      root.classList.remove("focus-mode");
+      root.style.gridTemplateColumns = computeGridColumns(cells.size);
+      for (const entry of cells.values()) {
+        entry.el.classList.remove("focused", "thumb");
+        root.appendChild(entry.el);
+      }
+      return;
+    }
+
+    root.classList.add("focus-mode");
+    root.style.gridTemplateColumns = "";  // Clear grid columns, focus uses flex
+
+    // Main area
+    const mainArea = createElement("div", { class: "video-focus-main" });
+    // Strip area
+    const stripArea = createElement("div", { class: "video-focus-strip" });
+
+    const focusedEntry = cells.get(focusedTileId);
+    if (focusedEntry !== undefined) {
+      focusedEntry.el.classList.add("focused");
+      focusedEntry.el.classList.remove("thumb");
+      mainArea.appendChild(focusedEntry.el);
+    }
+
+    for (const [id, entry] of cells) {
+      if (id === focusedTileId) continue;
+      entry.el.classList.remove("focused");
+      entry.el.classList.add("thumb");
+      stripArea.appendChild(entry.el);
+    }
+
+    root.appendChild(mainArea);
+    // Only show strip if there are thumbnails
+    if (stripArea.childElementCount > 0) {
+      root.appendChild(stripArea);
+    }
+  }
+
+  function setFocusedTile(tileId: number): void {
+    focusedTileId = tileId;
+    rebuildFocusLayout();
+  }
+
+  function getFocusedTileIdFn(): number | null {
+    return focusedTileId;
+  }
 
   function updateLayout(): void {
     if (root === null) return;
+    if (focusedTileId !== null) {
+      rebuildFocusLayout();
+      return;
+    }
     root.style.gridTemplateColumns = computeGridColumns(cells.size);
   }
 
-  function addStream(userId: number, username: string, stream: MediaStream): void {
+  function addStream(userId: number, username: string, stream: MediaStream, config?: TileConfig): void {
     if (root === null) return;
 
     // If a cell already exists for this user, update it in place
     const existing = cells.get(userId);
-    if (existing) {
-      const video = existing.querySelector("video");
+    if (existing !== undefined) {
+      const video = existing.el.querySelector("video");
       if (video !== null) {
         // Only replace srcObject if the underlying tracks changed
         const oldTracks = (video.srcObject as MediaStream | null)?.getTracks() ?? [];
@@ -47,7 +123,7 @@ export function createVideoGrid(): VideoGridComponent {
         }
       }
       // Update username label in case it changed
-      const label = existing.querySelector(".video-username");
+      const label = existing.el.querySelector(".video-username");
       if (label !== null) {
         label.textContent = username;
       }
@@ -69,23 +145,110 @@ export function createVideoGrid(): VideoGridComponent {
     });
     appendChildren(cell, video, label);
 
-    cells.set(userId, cell);
+    cell.addEventListener("click", (e) => {
+      // Don't switch focus if clicking the mute button
+      if ((e.target as Element).closest(".tile-mute-btn")) return;
+      if (focusedTileId !== null && focusedTileId !== userId) {
+        focusedTileId = userId;
+        rebuildFocusLayout();
+      }
+    });
+
+    // Add audio control overlay for remote tiles
+    if (config !== undefined && !config.isSelf) {
+      let muted = false;
+      let currentVolume = 100;
+
+      const overlay = createElement("div", { class: "video-tile-overlay" });
+
+      // Volume slider
+      const volumeSlider = createElement("input", {
+        type: "range",
+        min: "0",
+        max: "200",
+        value: "100",
+        class: "tile-volume-slider",
+        "aria-label": "Volume",
+      }) as HTMLInputElement;
+
+      volumeSlider.addEventListener("input", () => {
+        currentVolume = Number(volumeSlider.value);
+        const wasMuted = muted;
+        muted = currentVolume === 0;
+        if (config.isScreenshare) {
+          muteScreenshareAudio(config.audioUserId, muted);
+        } else {
+          setUserVolume(config.audioUserId, currentVolume);
+        }
+        muteBtn.innerHTML = muted ? ICON_VOLUME_X : ICON_VOLUME;
+        muteBtn.setAttribute("aria-label", muted ? "Unmute" : "Mute");
+        if (muted !== wasMuted) {
+          overlay.classList.toggle("muted", muted);
+        }
+      });
+
+      // Mute button
+      const muteBtn = createElement("button", {
+        class: "tile-mute-btn",
+        "aria-label": "Mute",
+      });
+      muteBtn.innerHTML = ICON_VOLUME;
+
+      muteBtn.addEventListener("click", () => {
+        muted = !muted;
+        if (config.isScreenshare) {
+          muteScreenshareAudio(config.audioUserId, muted);
+        } else {
+          setUserVolume(config.audioUserId, muted ? 0 : 100);
+        }
+        muteBtn.innerHTML = muted ? ICON_VOLUME_X : ICON_VOLUME;
+        muteBtn.setAttribute("aria-label", muted ? "Unmute" : "Mute");
+        overlay.classList.toggle("muted", muted);
+        if (muted) {
+          volumeSlider.value = "0";
+        } else {
+          volumeSlider.value = String(currentVolume > 0 ? currentVolume : 100);
+          if (currentVolume === 0) currentVolume = 100;
+          if (!config.isScreenshare) setUserVolume(config.audioUserId, currentVolume);
+        }
+      });
+
+      overlay.appendChild(volumeSlider);
+      overlay.appendChild(muteBtn);
+      cell.appendChild(overlay);
+    }
+
+    cells.set(userId, { el: cell, config });
     root.appendChild(cell);
-    updateLayout();
+    if (focusedTileId !== null) {
+      rebuildFocusLayout();
+    } else {
+      updateLayout();
+    }
   }
 
   function removeStream(userId: number): void {
-    const cell = cells.get(userId);
-    if (cell === undefined) return;
+    const entry = cells.get(userId);
+    if (entry === undefined) return;
 
-    const video = cell.querySelector("video");
-    if (video !== null) {
-      video.srcObject = null;
+    const video = entry.el.querySelector("video");
+    if (video !== null) video.srcObject = null;
+
+    entry.el.remove();
+    cells.delete(userId);
+
+    // If focused tile was removed, focus the first remaining tile or clear
+    const wasFocusMode = focusedTileId !== null;
+    if (focusedTileId === userId) {
+      const firstKey = cells.keys().next().value;
+      focusedTileId = firstKey ?? null;
     }
 
-    cell.remove();
-    cells.delete(userId);
-    updateLayout();
+    if (focusedTileId !== null || wasFocusMode) {
+      rebuildFocusLayout();
+    } else {
+      updateLayout();
+    }
   }
 
   function hasStreams(): boolean {
@@ -101,13 +264,12 @@ export function createVideoGrid(): VideoGridComponent {
   }
 
   function destroy(): void {
-    for (const [, cell] of cells) {
-      const video = cell.querySelector("video");
-      if (video !== null) {
-        video.srcObject = null;
-      }
+    for (const [, entry] of cells) {
+      const video = entry.el.querySelector("video");
+      if (video !== null) video.srcObject = null;
     }
     cells.clear();
+    focusedTileId = null;
 
     if (root !== null) {
       root.remove();
@@ -115,5 +277,5 @@ export function createVideoGrid(): VideoGridComponent {
     }
   }
 
-  return { mount, destroy, addStream, removeStream, hasStreams };
+  return { mount, destroy, addStream, removeStream, hasStreams, setFocusedTile, getFocusedTileId: getFocusedTileIdFn };
 }

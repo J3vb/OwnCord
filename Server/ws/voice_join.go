@@ -37,10 +37,16 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 		return
 	}
 
-	// Guard: reject voice join if LiveKit is configured but the companion
-	// process is not running (e.g. crashed 10 times and gave up).
-	// When livekit is nil, voice still works — just without SFU tokens.
-	if h.livekit != nil && h.lkProcess != nil && !h.lkProcess.IsRunning() {
+	// Hard-fail when LiveKit is not configured — without an SFU the client
+	// cannot connect to voice, so persisting state would create a ghost.
+	if h.livekit == nil {
+		c.sendMsg(buildErrorMsg(ErrCodeVoiceError, "voice is not configured on this server"))
+		return
+	}
+
+	// Guard: reject voice join if the companion LiveKit process is not running
+	// (e.g. crashed 10 times and gave up).
+	if h.lkProcess != nil && !h.lkProcess.IsRunning() {
 		slog.Warn("handleVoiceJoin: LiveKit process not running", "user_id", c.userID)
 		c.sendMsg(buildErrorMsg(ErrCodeVoiceError, "voice is temporarily unavailable — LiveKit is not running"))
 		return

@@ -252,11 +252,11 @@ func generateRandomKey(byteLen int) string {
 func applyVoiceDefaults(v *VoiceConfig) {
 	if v.LiveKitAPIKey == "" {
 		v.LiveKitAPIKey = "key-" + generateRandomKey(8)
-		slog.Info("generated random LiveKit API key (no key configured)")
+		slog.Warn("generated random LiveKit API key — voice tokens will break on restart; set voice.livekit_api_key in config.yaml for stable operation")
 	}
 	if v.LiveKitAPISecret == "" {
 		v.LiveKitAPISecret = generateRandomKey(32) // 64 hex chars, well above 32-char minimum
-		slog.Info("generated random LiveKit API secret (no secret configured)")
+		slog.Warn("generated random LiveKit API secret — set voice.livekit_api_secret in config.yaml for stable operation")
 	}
 	if v.LiveKitURL == "" {
 		v.LiveKitURL = "ws://localhost:7880"

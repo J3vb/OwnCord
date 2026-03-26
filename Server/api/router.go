@@ -86,8 +86,9 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// LiveKit webhook endpoint (no auth middleware — uses LiveKit JWT verification).
 	if lkErr == nil {
-		r.Post("/api/v1/livekit/webhook",
-			ws.MountWebhookRoute(hub, cfg.Voice.LiveKitAPIKey, cfg.Voice.LiveKitAPISecret))
+		r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs)).
+			Post("/api/v1/livekit/webhook",
+				ws.MountWebhookRoute(hub, cfg.Voice.LiveKitAPIKey, cfg.Voice.LiveKitAPISecret))
 
 		// LiveKit health check — admin-IP-restricted.
 		r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs)).
