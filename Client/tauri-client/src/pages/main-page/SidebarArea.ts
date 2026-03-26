@@ -30,6 +30,7 @@ export interface SidebarAreaOptions {
   readonly limiters: RateLimiterSet;
   readonly getRoot: () => HTMLDivElement | null;
   readonly getToast: () => ToastContainer | null;
+  readonly onWatchStream?: (userId: number) => void;
 }
 
 export interface SidebarAreaResult {
@@ -74,6 +75,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   const channelSidebar = createChannelSidebar({
     onVoiceJoin: sidebarVoice.onVoiceJoin,
     onVoiceLeave: sidebarVoice.onVoiceLeave,
+    onWatchStream: opts.onWatchStream,
     onCreateChannel: (category) => {
       if (activeModal !== null) return;
       const modal = createCreateChannelModal({

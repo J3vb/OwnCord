@@ -163,6 +163,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       limiters,
       getRoot: () => root,
       getToast: () => toast,
+      onWatchStream: (userId) => {
+        if (videoModeCtrl === null) return;
+        videoModeCtrl.showVideoGrid();
+        videoModeCtrl.setFocus(userId);
+      },
     });
     children.push(...sidebar.children);
     unsubscribers.push(...sidebar.unsubscribers);
@@ -275,19 +280,28 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     setVoiceOnError((msg) => toast?.show(msg, "error"));
 
     // Wire remote video callbacks to video grid
-    setOnRemoteVideo((userId, stream) => {
+    const SCREENSHARE_TILE_ID_OFFSET = 1_000_000;
+    setOnRemoteVideo((userId, stream, isScreenshare) => {
       if (videoGrid === null) return;
       const voice = voiceStore.getState();
       const channelId = voice.currentChannelId;
       if (channelId === null) return;
       const channelUsers = voice.voiceUsers.get(channelId);
       const user = channelUsers?.get(userId);
-      const username = user?.username ?? `User ${userId}`;
-      videoGrid.addStream(userId, username, stream);
+      const tileId = isScreenshare ? userId + SCREENSHARE_TILE_ID_OFFSET : userId;
+      const username = isScreenshare
+        ? (user?.username ? `${user.username} (Screen)` : `User ${userId} (Screen)`)
+        : (user?.username ?? `User ${userId}`);
+      videoGrid.addStream(tileId, username, stream, {
+        isSelf: false,
+        audioUserId: userId,
+        isScreenshare,
+      });
       videoModeCtrl?.checkVideoMode();
     });
-    setOnRemoteVideoRemoved((userId) => {
-      videoGrid?.removeStream(userId);
+    setOnRemoteVideoRemoved((userId, isScreenshare) => {
+      const tileId = isScreenshare ? userId + SCREENSHARE_TILE_ID_OFFSET : userId;
+      videoGrid?.removeStream(tileId);
       videoModeCtrl?.checkVideoMode();
     });
     unsubscribers.push(() => clearOnRemoteVideo());
@@ -334,6 +348,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         try {
           const active = getActiveChannel();
           if (active !== null) {
+            if (active.type === "text") {
+              videoModeCtrl?.showChat();
+            }
             channelCtrl!.mountChannel(active.id, active.name);
           }
         } catch (err) {

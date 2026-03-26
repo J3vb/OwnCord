@@ -211,19 +211,28 @@ export function renderMessage(
   if (!msg.deleted) {
     const actionsBar = createElement("div", { class: "msg-actions-bar" });
 
-    const reactBtn = createElement("button", { "data-testid": `msg-react-${msg.id}` });
+    const reactBtn = createElement("button", {
+      "data-testid": `msg-react-${msg.id}`,
+      "aria-label": "React",
+    });
     reactBtn.appendChild(createIcon("smile", 16));
     reactBtn.title = "React";
     reactBtn.addEventListener("click", () => opts.onReactionClick(msg.id, ""), { signal });
     actionsBar.appendChild(reactBtn);
 
-    const replyBtn = createElement("button", { "data-testid": `msg-reply-${msg.id}` });
+    const replyBtn = createElement("button", {
+      "data-testid": `msg-reply-${msg.id}`,
+      "aria-label": "Reply",
+    });
     replyBtn.appendChild(createIcon("reply", 16));
     replyBtn.title = "Reply";
     replyBtn.addEventListener("click", () => opts.onReplyClick(msg.id), { signal });
     actionsBar.appendChild(replyBtn);
 
-    const pinBtn = createElement("button", { "data-testid": `msg-pin-${msg.id}` });
+    const pinBtn = createElement("button", {
+      "data-testid": `msg-pin-${msg.id}`,
+      "aria-label": msg.pinned ? "Unpin" : "Pin",
+    });
     pinBtn.appendChild(createIcon(msg.pinned ? "pin-off" : "pin", 16));
     pinBtn.title = msg.pinned ? "Unpin" : "Pin";
     pinBtn.addEventListener(
@@ -234,7 +243,10 @@ export function renderMessage(
     actionsBar.appendChild(pinBtn);
 
     if (msg.user.id === opts.currentUserId) {
-      const editBtn = createElement("button", { "data-testid": `msg-edit-${msg.id}` });
+      const editBtn = createElement("button", {
+        "data-testid": `msg-edit-${msg.id}`,
+        "aria-label": "Edit",
+      });
       editBtn.appendChild(createIcon("pencil", 16));
       editBtn.title = "Edit";
       editBtn.addEventListener("click", () => opts.onEditClick(msg.id), { signal });
@@ -242,7 +254,10 @@ export function renderMessage(
     }
 
     if (msg.user.id === opts.currentUserId) {
-      const deleteBtn = createElement("button", { "data-testid": `msg-delete-${msg.id}` });
+      const deleteBtn = createElement("button", {
+        "data-testid": `msg-delete-${msg.id}`,
+        "aria-label": "Delete",
+      });
       deleteBtn.appendChild(createIcon("trash-2", 16));
       deleteBtn.title = "Delete";
       deleteBtn.addEventListener("click", () => opts.onDeleteClick(msg.id), { signal });
@@ -250,7 +265,10 @@ export function renderMessage(
     }
 
     if (developerModeEnabled) {
-      const copyIdBtn = createElement("button", { "data-testid": `msg-copy-id-${msg.id}` });
+      const copyIdBtn = createElement("button", {
+        "data-testid": `msg-copy-id-${msg.id}`,
+        "aria-label": "Copy ID",
+      });
       copyIdBtn.appendChild(createIcon("hash", 16));
       copyIdBtn.title = "Copy ID";
       copyIdBtn.addEventListener("click", () => {

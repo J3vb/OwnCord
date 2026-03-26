@@ -343,4 +343,69 @@ describe("ChannelSidebar", () => {
     const mutedIcon = voiceUsers[0]?.querySelector(".vu-muted");
     expect(mutedIcon).not.toBeNull();
   });
+
+  it("shows LIVE badge when user has screenshare active", () => {
+    setChannels(testChannels);
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 30,
+      username: "Streamer",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: true,
+    });
+    sidebar.mount(container);
+
+    const liveBadge = container.querySelector(".vu-live-badge");
+    expect(liveBadge).not.toBeNull();
+    expect(liveBadge!.textContent).toBe("LIVE");
+  });
+
+  it("shows monitor icon when user has screenshare active", () => {
+    setChannels(testChannels);
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 30,
+      username: "Streamer",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: true,
+    });
+    sidebar.mount(container);
+
+    // The screenshare user row should contain an SVG icon (monitor)
+    const voiceUserItems = container.querySelectorAll(".voice-user-item");
+    expect(voiceUserItems.length).toBe(1);
+    const screenIcon = voiceUserItems[0]?.querySelector("svg");
+    expect(screenIcon).not.toBeNull();
+  });
+
+  it("calls onWatchStream when clicking a user row with active stream", () => {
+    const onWatchStream = vi.fn();
+    sidebar.destroy?.();
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onWatchStream });
+
+    setChannels(testChannels);
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 30,
+      username: "Streamer",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: true,
+    });
+    sidebar.mount(container);
+
+    const voiceUserItem = container.querySelector(".voice-user-item") as HTMLElement;
+    expect(voiceUserItem).not.toBeNull();
+    voiceUserItem.click();
+
+    expect(onWatchStream).toHaveBeenCalledWith(30);
+  });
 });

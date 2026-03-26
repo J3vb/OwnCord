@@ -260,6 +260,32 @@ describe("renderers", () => {
       ac.abort();
     });
 
+    it("gives icon-only action buttons explicit accessible names", () => {
+      const msg = makeMessage();
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector("[data-testid='msg-react-1']")?.getAttribute("aria-label")).toBe("React");
+      expect(container.querySelector("[data-testid='msg-reply-1']")?.getAttribute("aria-label")).toBe("Reply");
+      expect(container.querySelector("[data-testid='msg-pin-1']")?.getAttribute("aria-label")).toBe("Pin");
+      expect(container.querySelector("[data-testid='msg-edit-1']")?.getAttribute("aria-label")).toBe("Edit");
+      expect(container.querySelector("[data-testid='msg-delete-1']")?.getAttribute("aria-label")).toBe("Delete");
+
+      ac.abort();
+    });
+
+    it("updates the pin button accessible name for pinned messages", () => {
+      const msg = makeMessage({ pinned: true });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector("[data-testid='msg-pin-1']")?.getAttribute("aria-label")).toBe("Unpin");
+
+      ac.abort();
+    });
+
     it("does not show action buttons for deleted messages", () => {
       const msg = makeMessage({ deleted: true });
       const ac = new AbortController();
