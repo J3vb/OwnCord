@@ -8,22 +8,24 @@ const {
   mockVoiceStoreGetState,
   mockJoinVoiceChannel,
   mockLeaveVoiceChannel,
-  mockSetLocalScreenshare,
   mockVoiceSessionLeave,
   mockSetMuted,
   mockSetDeafened,
   mockEnableCamera,
   mockDisableCamera,
+  mockEnableScreenshare,
+  mockDisableScreenshare,
 } = vi.hoisted(() => ({
   mockVoiceStoreGetState: vi.fn(),
   mockJoinVoiceChannel: vi.fn(),
   mockLeaveVoiceChannel: vi.fn(),
-  mockSetLocalScreenshare: vi.fn(),
   mockVoiceSessionLeave: vi.fn(),
   mockSetMuted: vi.fn(),
   mockSetDeafened: vi.fn(),
   mockEnableCamera: vi.fn(() => Promise.resolve()),
   mockDisableCamera: vi.fn(() => Promise.resolve()),
+  mockEnableScreenshare: vi.fn(() => Promise.resolve()),
+  mockDisableScreenshare: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -39,7 +41,6 @@ vi.mock("@stores/voice.store", () => ({
   voiceStore: { getState: mockVoiceStoreGetState },
   joinVoiceChannel: mockJoinVoiceChannel,
   leaveVoiceChannel: mockLeaveVoiceChannel,
-  setLocalScreenshare: mockSetLocalScreenshare,
 }));
 
 vi.mock("@lib/livekitSession", () => ({
@@ -48,6 +49,8 @@ vi.mock("@lib/livekitSession", () => ({
   setDeafened: mockSetDeafened,
   enableCamera: mockEnableCamera,
   disableCamera: mockDisableCamera,
+  enableScreenshare: mockEnableScreenshare,
+  disableScreenshare: mockDisableScreenshare,
 }));
 
 // ---------------------------------------------------------------------------
@@ -239,11 +242,8 @@ describe("createVoiceWidgetCallbacks", () => {
 
       cbs.onScreenshareToggle();
 
-      expect(mockSetLocalScreenshare).toHaveBeenCalledWith(true);
-      expect(ws.send).toHaveBeenCalledWith({
-        type: "voice_screenshare",
-        payload: { enabled: true },
-      });
+      expect(mockEnableScreenshare).toHaveBeenCalled();
+      expect(mockDisableScreenshare).not.toHaveBeenCalled();
     });
 
     it("disables screenshare when on", () => {
@@ -253,7 +253,8 @@ describe("createVoiceWidgetCallbacks", () => {
 
       cbs.onScreenshareToggle();
 
-      expect(mockSetLocalScreenshare).toHaveBeenCalledWith(false);
+      expect(mockDisableScreenshare).toHaveBeenCalled();
+      expect(mockEnableScreenshare).not.toHaveBeenCalled();
     });
 
     it("respects video rate limiter", () => {
@@ -262,8 +263,8 @@ describe("createVoiceWidgetCallbacks", () => {
 
       cbs.onScreenshareToggle();
 
-      expect(mockSetLocalScreenshare).not.toHaveBeenCalled();
-      expect(ws.send).not.toHaveBeenCalled();
+      expect(mockEnableScreenshare).not.toHaveBeenCalled();
+      expect(mockDisableScreenshare).not.toHaveBeenCalled();
     });
   });
 });

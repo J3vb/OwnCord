@@ -4,7 +4,7 @@
  */
 
 import { voiceStore } from "@stores/voice.store";
-import { getLocalCameraStream } from "@lib/livekitSession";
+import { getLocalCameraStream, getLocalScreenshareStream } from "@lib/livekitSession";
 import type { VideoGridComponent } from "@components/VideoGrid";
 
 // ---------------------------------------------------------------------------
@@ -48,6 +48,8 @@ export function createVideoModeController(
   let videoMode = false;
   /** Track whether we've already added the local self-view tile. */
   let localTileAdded = false;
+  let localScreenshareTileAdded = false;
+  const SCREENSHARE_TILE_ID_OFFSET = 1_000_000;
 
   function showVideoGrid(): void {
     if (videoMode) return;
@@ -61,6 +63,8 @@ export function createVideoModeController(
   function showChat(): void {
     if (!videoMode) return;
     videoMode = false;
+    localTileAdded = false;
+    localScreenshareTileAdded = false;
     slots.messagesSlot.style.display = "";
     slots.typingSlot.style.display = "";
     slots.inputSlot.style.display = "";
@@ -80,19 +84,19 @@ export function createVideoModeController(
       return;
     }
 
-    // Check if any camera is active
-    let anyCameraOn = voice.localCamera;
-    if (!anyCameraOn) {
+    // Check if any camera or screenshare is active
+    let anyVideoOn = voice.localCamera || voice.localScreenshare;
+    if (!anyVideoOn) {
       for (const user of channelUsers.values()) {
-        if (user.camera) {
-          anyCameraOn = true;
+        if (user.camera || user.screenshare) {
+          anyVideoOn = true;
           break;
         }
       }
     }
-    if (anyCameraOn && !videoMode) {
+    if (anyVideoOn && !videoMode) {
       showVideoGrid();
-    } else if (!anyCameraOn && videoMode) {
+    } else if (!anyVideoOn && videoMode) {
       showChat();
     }
 
@@ -116,10 +120,30 @@ export function createVideoModeController(
       localTileAdded = false;
     }
 
-    // Remove remote video tiles for users who turned off their camera
+    // Manage local screenshare self-view tile
+    const screenshareUserId = currentUserId + SCREENSHARE_TILE_ID_OFFSET;
+    if (voice.localScreenshare) {
+      if (!localScreenshareTileAdded) {
+        const localStream = getLocalScreenshareStream();
+        if (localStream !== null) {
+          const me = channelUsers.get(currentUserId);
+          videoGrid.addStream(
+            screenshareUserId,
+            me?.username ? `${me.username} (Screen)` : "Your Screen",
+            localStream,
+          );
+          localScreenshareTileAdded = true;
+        }
+      }
+    } else {
+      videoGrid.removeStream(screenshareUserId);
+      localScreenshareTileAdded = false;
+    }
+
+    // Remove remote video tiles for users who turned off their camera or screenshare
     if (channelUsers) {
       for (const user of channelUsers.values()) {
-        if (!user.camera && user.userId !== currentUserId) {
+        if (!user.camera && !user.screenshare && user.userId !== currentUserId) {
           videoGrid.removeStream(user.userId);
         }
       }
@@ -133,6 +157,7 @@ export function createVideoModeController(
   function destroy(): void {
     if (videoMode) showChat();
     localTileAdded = false;
+    localScreenshareTileAdded = false;
   }
 
   return {

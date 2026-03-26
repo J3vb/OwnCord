@@ -237,6 +237,27 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
+  it("toggles screenshare active state based on store", () => {
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    const screenshareBtn = container.querySelector('[aria-label="Screenshare"]') as HTMLButtonElement;
+    expect(screenshareBtn).not.toBeNull();
+    expect(screenshareBtn.classList.contains("active-ctrl")).toBe(true);
+    expect(screenshareBtn.getAttribute("aria-pressed")).toBe("true");
+
+    widget.destroy?.();
+  });
+
   it("cleans up on destroy", () => {
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),

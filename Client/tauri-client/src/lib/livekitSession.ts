@@ -16,6 +16,7 @@ import {
   setLocalMuted,
   setLocalDeafened,
   setLocalCamera,
+  setLocalScreenshare,
   setSpeakers,
   leaveVoiceChannel,
 } from "@stores/voice.store";
@@ -59,6 +60,12 @@ export class LiveKitSession {
   private latestToken: string | null = null;
   /** Guard: true while handleVoiceToken is connecting — prevents concurrent joins. */
   private connecting = false;
+  /** Last known LiveKit URL and directUrl for auto-reconnect on unexpected disconnect. */
+  private lastUrl: string | null = null;
+  private lastDirectUrl: string | undefined = undefined;
+  /** Max auto-reconnect attempts before giving up and showing error. */
+  private static readonly MAX_RECONNECT_ATTEMPTS = 2;
+  private static readonly RECONNECT_DELAY_MS = 3000;
   /** Master output volume multiplier (0-2.0). Per-user volumes are scaled by this. */
   private outputVolumeMultiplier = loadPref<number>("outputVolume", 100) / 100;
 
@@ -218,11 +225,76 @@ export class LiveKitSession {
   private handleDisconnected = (reason?: DisconnectReason): void => {
     log.info("LiveKit room disconnected", { reason });
     const isUnexpected = reason !== DisconnectReason.CLIENT_INITIATED;
+    if (isUnexpected && this.latestToken !== null && this.currentChannelId !== null && this.lastUrl !== null) {
+      // Attempt auto-reconnect with stored token before giving up.
+      const token = this.latestToken;
+      const url = this.lastUrl;
+      const channelId = this.currentChannelId;
+      const directUrl = this.lastDirectUrl;
+      // Clean up current room without sending WS leave (we're reconnecting, not leaving).
+      this.teardownAudioPipeline();
+      this.removeAutoplayUnlock();
+      this.clearTokenRefreshTimer();
+      if (this.room !== null) {
+        const r = this.room;
+        this.room = null;
+        r.removeAllListeners();
+        r.disconnect().catch(() => {});
+      }
+      void this.attemptAutoReconnect(token, url, channelId, directUrl);
+      return;
+    }
     this.leaveVoice(false);
-    // Clear the voice store so the UI reflects the disconnected state.
     leaveVoiceChannel();
     if (isUnexpected) this.onErrorCallback?.("Voice connection lost — disconnected");
   };
+
+  /** Attempt to auto-reconnect after unexpected disconnect using stored token. */
+  private async attemptAutoReconnect(
+    token: string, url: string, channelId: number, directUrl?: string,
+  ): Promise<void> {
+    for (let attempt = 1; attempt <= LiveKitSession.MAX_RECONNECT_ATTEMPTS; attempt++) {
+      log.info("Auto-reconnect attempt", { attempt, maxAttempts: LiveKitSession.MAX_RECONNECT_ATTEMPTS });
+      await new Promise((r) => setTimeout(r, LiveKitSession.RECONNECT_DELAY_MS));
+      // If user manually left or joined a different channel during the delay, abort.
+      if (this.currentChannelId !== channelId) {
+        log.info("Auto-reconnect aborted — channel changed");
+        return;
+      }
+      try {
+        this.room = this.createRoom();
+        const resolvedUrl = this.resolveLiveKitUrl(url, directUrl);
+        await this.room.connect(resolvedUrl, token);
+        log.info("Auto-reconnect succeeded", { attempt, channelId });
+        this.room.startAudio().catch(() => {});
+        try {
+          await this.room.localParticipant.setMicrophoneEnabled(true);
+          if (loadPref<boolean>("enhancedNoiseSuppression", false)) {
+            await this.applyNoiseSuppressor();
+          }
+        } catch (micErr) {
+          log.warn("Auto-reconnect: mic unavailable — listen-only mode", micErr);
+        }
+        this.setupAudioPipeline();
+        this.startTokenRefreshTimer();
+        // Request a fresh token since the stored one may be close to expiry.
+        this.requestTokenRefresh();
+        return;
+      } catch (err) {
+        log.warn("Auto-reconnect failed", { attempt, error: err });
+        if (this.room !== null) {
+          this.room.removeAllListeners();
+          this.room.disconnect().catch(() => {});
+          this.room = null;
+        }
+      }
+    }
+    // All attempts exhausted — give up and clean up.
+    log.error("Auto-reconnect exhausted all attempts, giving up");
+    this.leaveVoice(false);
+    leaveVoiceChannel();
+    this.onErrorCallback?.("Voice connection lost — failed to reconnect");
+  }
 
   // --- URL resolution ---
 
@@ -318,6 +390,10 @@ export class LiveKitSession {
       this.handleVoiceTokenRefresh(token);
       return;
     }
+    // Store URL/token for auto-reconnect on unexpected disconnect.
+    this.latestToken = token;
+    this.lastUrl = url;
+    this.lastDirectUrl = directUrl;
     // Prevent concurrent connect attempts (rapid channel switching).
     if (this.connecting) {
       log.warn("handleVoiceToken: already connecting, ignoring duplicate call");
@@ -407,7 +483,10 @@ export class LiveKitSession {
     }
     this.currentChannelId = null;
     this.latestToken = null;
+    this.lastUrl = null;
+    this.lastDirectUrl = undefined;
     setLocalCamera(false);
+    setLocalScreenshare(false);
     log.info("Left voice session");
   }
 
@@ -469,6 +548,40 @@ export class LiveKitSession {
       setLocalCamera(false);
       if (this.ws !== null) this.ws.send({ type: "voice_camera", payload: { enabled: false } });
       log.info("Camera disabled");
+    }
+  }
+
+  async enableScreenshare(): Promise<void> {
+    if (this.room === null || this.ws === null) {
+      log.warn("Cannot enable screenshare: no active voice session");
+      this.onErrorCallback?.("Join a voice channel first");
+      return;
+    }
+    setLocalScreenshare(true);
+    try {
+      await this.room.localParticipant.setScreenShareEnabled(true);
+      this.ws.send({ type: "voice_screenshare", payload: { enabled: true } });
+      log.info("Screenshare enabled");
+    } catch (err) {
+      setLocalScreenshare(false);
+      log.error("Failed to enable screenshare", err);
+      if (err instanceof DOMException && err.name === "NotAllowedError") {
+        this.onErrorCallback?.("Screen sharing permission denied");
+      } else {
+        this.onErrorCallback?.("Failed to start screen sharing");
+      }
+    }
+  }
+
+  async disableScreenshare(): Promise<void> {
+    try {
+      if (this.room !== null) await this.room.localParticipant.setScreenShareEnabled(false);
+    } catch (err) {
+      log.warn("Failed to disable screenshare track (non-fatal)", err);
+    } finally {
+      setLocalScreenshare(false);
+      if (this.ws !== null) this.ws.send({ type: "voice_screenshare", payload: { enabled: false } });
+      log.info("Screenshare disabled");
     }
   }
 
@@ -767,6 +880,13 @@ export class LiveKitSession {
     return null;
   }
 
+  getLocalScreenshareStream(): MediaStream | null {
+    if (this.room === null) return null;
+    const screenPub = this.room.localParticipant.getTrackPublication(Track.Source.ScreenShare);
+    if (screenPub?.track?.mediaStreamTrack) return new MediaStream([screenPub.track.mediaStreamTrack]);
+    return null;
+  }
+
   getSessionDebugInfo(): Record<string, unknown> {
     if (this.room === null) {
       return { hasRoom: false, hasRNNoiseProcessor: false, currentChannelId: this.currentChannelId };
@@ -825,6 +945,8 @@ export const setMuted = session.setMuted.bind(session);
 export const setDeafened = session.setDeafened.bind(session);
 export const enableCamera = session.enableCamera.bind(session);
 export const disableCamera = session.disableCamera.bind(session);
+export const enableScreenshare = session.enableScreenshare.bind(session);
+export const disableScreenshare = session.disableScreenshare.bind(session);
 export const switchInputDevice = session.switchInputDevice.bind(session);
 export const switchOutputDevice = session.switchOutputDevice.bind(session);
 export const setUserVolume = session.setUserVolume.bind(session);
@@ -834,4 +956,5 @@ export const setOutputVolume = session.setOutputVolume.bind(session);
 export const setVoiceSensitivity = session.setVoiceSensitivity.bind(session);
 export const reapplyAudioProcessing = session.reapplyAudioProcessing.bind(session);
 export const getLocalCameraStream = session.getLocalCameraStream.bind(session);
+export const getLocalScreenshareStream = session.getLocalScreenshareStream.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);

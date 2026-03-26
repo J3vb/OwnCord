@@ -32,6 +32,7 @@ vi.mock("@lib/livekitSession", () => ({
   setVoiceSensitivity: vi.fn(),
   setInputVolume: vi.fn(),
   setOutputVolume: vi.fn(),
+  reapplyAudioProcessing: vi.fn().mockResolvedValue(undefined),
   getSessionDebugInfo: vi.fn().mockReturnValue({}),
 }));
 

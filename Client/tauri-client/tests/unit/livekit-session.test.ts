@@ -16,6 +16,8 @@ const mockRoom = vi.hoisted(() => ({
   },
   remoteParticipants: new Map(),
   switchActiveDevice: vi.fn().mockResolvedValue(undefined),
+  startAudio: vi.fn().mockResolvedValue(undefined),
+  canPlaybackAudio: true,
   state: "connected" as string,
   name: "test-room",
 }));
@@ -40,6 +42,7 @@ vi.mock("@stores/voice.store", () => ({
   setLocalMuted: vi.fn(),
   setLocalDeafened: vi.fn(),
   setLocalCamera: vi.fn(),
+  setLocalScreenshare: vi.fn(),
   setSpeakers: vi.fn(),
 }));
 
@@ -68,7 +71,7 @@ vi.mock("@lib/noise-suppression", () => ({
 
 // Now import
 import { parseUserId, LiveKitSession } from "../../src/lib/livekitSession";
-import { setLocalMuted, setLocalDeafened, setLocalCamera } from "@stores/voice.store";
+import { setLocalMuted, setLocalDeafened, setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
 
 describe("parseUserId", () => {
   it("parses a valid user identity", () => {
@@ -188,6 +191,11 @@ describe("LiveKitSession", () => {
     it("calls setLocalCamera(false)", () => {
       session.leaveVoice(false);
       expect(setLocalCamera).toHaveBeenCalledWith(false);
+    });
+
+    it("calls setLocalScreenshare(false)", () => {
+      session.leaveVoice(false);
+      expect(setLocalScreenshare).toHaveBeenCalledWith(false);
     });
   });
 

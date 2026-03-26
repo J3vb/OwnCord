@@ -292,25 +292,24 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     });
     unsubscribers.push(() => clearOnRemoteVideo());
 
-    // Subscribe to voice store for camera state changes only (not speaking ticks)
-    let prevLocalCamera = voiceStore.getState().localCamera;
-    let prevCameraSignature = "";
+    // Subscribe to voice store for camera/screenshare state changes only (not speaking ticks)
+    let prevVideoSignature = "";
     unsubscribers.push(voiceStore.subscribe((state) => {
       try {
-        // Build a lightweight signature of camera-relevant state
-        let sig = state.localCamera ? "1" : "0";
+        // Build a lightweight signature of video-relevant state (camera + screenshare)
+        let sig = (state.localCamera ? "c" : "") + (state.localScreenshare ? "s" : "");
         const channelId = state.currentChannelId;
         if (channelId !== null) {
           const users = state.voiceUsers.get(channelId);
           if (users) {
             for (const [uid, u] of users) {
-              if (u.camera) sig += `:${uid}`;
+              if (u.camera) sig += `:c${uid}`;
+              if (u.screenshare) sig += `:s${uid}`;
             }
           }
         }
-        if (sig !== prevCameraSignature || state.localCamera !== prevLocalCamera) {
-          prevCameraSignature = sig;
-          prevLocalCamera = state.localCamera;
+        if (sig !== prevVideoSignature) {
+          prevVideoSignature = sig;
           videoModeCtrl?.checkVideoMode();
         }
       } catch (err) {
