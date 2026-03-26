@@ -186,6 +186,35 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
   appendChildren(outputVolumeRow, outputVolumeSlider, outputVolumeLabel);
   section.appendChild(outputVolumeRow);
 
+  // Stream quality selector
+  const qualityHeader = createElement("h3", {}, "Stream Quality");
+  const qualityDesc = createElement("p", {
+    style: "color:var(--text-muted);font-size:12px;margin:0 0 8px",
+  }, "Applies to camera and screenshare. Higher quality uses more bandwidth. Changes take effect on next voice join.");
+  const qualitySelect = createElement("select", {
+    class: "form-input",
+    style: "width:100%;margin-bottom:16px",
+  }) as HTMLSelectElement;
+  const qualityOptions: Array<[string, string]> = [
+    ["low", "Low (360p cam / 720p screen)"],
+    ["medium", "Medium (720p)"],
+    ["high", "High (1080p)"],
+    ["source", "Source (1080p max bitrate)"],
+  ];
+  const savedQuality = loadPref<string>("streamQuality", "high");
+  for (const [value, label] of qualityOptions) {
+    const opt = createElement("option", { value }, label);
+    if (value === savedQuality) opt.setAttribute("selected", "");
+    qualitySelect.appendChild(opt);
+  }
+  qualitySelect.value = savedQuality;
+  qualitySelect.addEventListener("change", () => {
+    savePref("streamQuality", qualitySelect.value);
+  }, { signal });
+  section.appendChild(qualityHeader);
+  section.appendChild(qualityDesc);
+  section.appendChild(qualitySelect);
+
   // Video device selector
   const videoHeader = createElement("h3", {}, "Video Device");
   const videoSelect = createElement("select", {

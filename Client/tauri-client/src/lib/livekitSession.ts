@@ -3,11 +3,17 @@ import {
   Room,
   RoomEvent,
   Track,
+  VideoPresets,
+  ScreenSharePresets,
+  createLocalScreenTracks,
+  createLocalVideoTrack,
   type RemoteTrack,
   type RemoteTrackPublication,
   type RemoteParticipant,
   type Participant,
   type LocalAudioTrack,
+  type VideoCaptureOptions,
+  type ScreenShareCaptureOptions,
   DisconnectReason,
 } from "livekit-client";
 import type { WsClient } from "@lib/ws";
@@ -25,6 +31,44 @@ import { createLogger } from "@lib/logger";
 import { createRNNoiseProcessor } from "@lib/noise-suppression";
 
 const log = createLogger("livekitSession");
+
+// --- Stream quality presets ---
+
+export type StreamQuality = "low" | "medium" | "high" | "source";
+
+const CAMERA_PRESETS: Record<StreamQuality, VideoCaptureOptions> = {
+  low:    { resolution: VideoPresets.h360.resolution },
+  medium: { resolution: VideoPresets.h720.resolution },
+  high:   { resolution: VideoPresets.h1080.resolution },
+  source: { resolution: VideoPresets.h1080.resolution },
+};
+
+const CAMERA_PUBLISH_BITRATES: Record<StreamQuality, number> = {
+  low:    600_000,
+  medium: 1_700_000,
+  high:   4_000_000,
+  source: 8_000_000,
+};
+
+const SCREENSHARE_PRESETS: Record<StreamQuality, ScreenShareCaptureOptions> = {
+  low:    { audio: true, resolution: ScreenSharePresets.h720fps5.resolution },
+  medium: { audio: true, resolution: ScreenSharePresets.h1080fps15.resolution, contentHint: "detail" },
+  high:   { audio: true, resolution: ScreenSharePresets.h1080fps30.resolution, contentHint: "detail" },
+  source: { audio: true, contentHint: "detail" },  // no resolution cap — use native source resolution
+};
+
+const SCREENSHARE_PUBLISH_BITRATES: Record<StreamQuality, number> = {
+  low:    1_500_000,
+  medium: 3_000_000,
+  high:   6_000_000,
+  source: 10_000_000,
+};
+
+function getStreamQuality(): StreamQuality {
+  const saved = loadPref<string>("streamQuality", "high");
+  if (saved === "low" || saved === "medium" || saved === "high" || saved === "source") return saved;
+  return "high";
+}
 
 // --- Pure helpers (no instance state) ---
 
@@ -81,6 +125,10 @@ export class LiveKitSession {
   /** Persisted mute state for screenshare audio so replacement tracks inherit UI state. */
   private screenshareAudioMutedByUser = new Map<number, boolean>();
 
+  /** Manually published local tracks (camera/screenshare) for explicit cleanup. */
+  private manualCameraTrack: { mediaStreamTrack: MediaStreamTrack; stop(): void } | null = null;
+  private manualScreenTracks: Array<{ mediaStreamTrack: MediaStreamTrack; stop(): void }> = [];
+
   // --- Unified audio pipeline: input volume + VAD gating ---
   // Pipeline: rawMicTrack → source → analyser (VAD reads here)
   //                                 → gainNode (volume × vadGate) → dest → WebRTC sender
@@ -121,13 +169,28 @@ export class LiveKitSession {
   // --- Room factory ---
 
   private createRoom(): Room {
+    const quality = getStreamQuality();
+    const isSource = quality === "source";
     const newRoom = new Room({
-      adaptiveStream: true,
-      dynacast: true,
+      // Adaptive features reduce quality based on subscriber viewport —
+      // disable for "source" quality to maintain full resolution.
+      adaptiveStream: !isSource,
+      dynacast: !isSource,
       audioCaptureDefaults: {
         echoCancellation: loadPref("echoCancellation", true),
         noiseSuppression: loadPref("noiseSuppression", true),
         autoGainControl: loadPref("autoGainControl", true),
+      },
+      videoCaptureDefaults: CAMERA_PRESETS[quality],
+      publishDefaults: {
+        videoEncoding: {
+          maxBitrate: CAMERA_PUBLISH_BITRATES[quality],
+          maxFramerate: quality === "low" ? 15 : 30,
+        },
+        screenShareEncoding: {
+          maxBitrate: SCREENSHARE_PUBLISH_BITRATES[quality],
+          maxFramerate: quality === "low" ? 5 : quality === "medium" ? 15 : 30,
+        },
       },
     });
     newRoom.on(RoomEvent.TrackSubscribed, this.handleTrackSubscribed);
@@ -135,10 +198,23 @@ export class LiveKitSession {
     newRoom.on(RoomEvent.Disconnected, this.handleDisconnected);
     newRoom.on(RoomEvent.ActiveSpeakersChanged, this.handleActiveSpeakersChanged);
     newRoom.on(RoomEvent.AudioPlaybackStatusChanged, this.handleAudioPlaybackChanged);
+    newRoom.on(RoomEvent.LocalTrackPublished, this.handleLocalTrackPublished);
     return newRoom;
   }
 
   // --- Room event handlers (arrow fns to preserve `this`) ---
+
+  /** Defense in depth: when LiveKit (re)publishes a mic track during
+   *  renegotiation, re-enforce the current mute state on the new track. */
+  private handleLocalTrackPublished = (publication: { source?: string }): void => {
+    if (publication.source === Track.Source.Microphone) {
+      const { localMuted, localDeafened } = voiceStore.getState();
+      if (localMuted || localDeafened) {
+        void this.applyMicMuteState(true);
+        log.debug("LocalTrackPublished: re-applied mute to mic track");
+      }
+    }
+  };
 
   private handleTrackSubscribed = (
     track: RemoteTrack,
@@ -318,6 +394,7 @@ export class LiveKitSession {
         this.room.startAudio().catch(() => {});
         await this.restoreLocalVoiceState("reconnect");
         this.setupAudioPipeline();
+        this.reapplyMuteGain();
         this.startTokenRefreshTimer();
         // Request a fresh token since the stored one may be close to expiry.
         this.requestTokenRefresh();
@@ -460,6 +537,13 @@ export class LiveKitSession {
       }
     }
 
+    // Always enforce mute at the track level even if no pipeline exists yet.
+    // setMicrophoneEnabled(false) doesn't guarantee mediaStreamTrack.enabled=false,
+    // and renegotiation when a new participant joins can bring a track back alive.
+    if (muted) {
+      this.applyMicMuteState(true);
+    }
+
     this.applyRemoteAudioSubscriptionState(deafened);
   }
 
@@ -563,6 +647,7 @@ export class LiveKitSession {
         // Set up unified audio pipeline (input volume + VAD gating via GainNode).
         // VAD polling only starts if saved sensitivity < 100.
         this.setupAudioPipeline();
+        this.reapplyMuteGain();
         this.startTokenRefreshTimer();
         log.info("Voice session active", { channelId });
       }
@@ -594,6 +679,10 @@ export class LiveKitSession {
     this.teardownAudioPipeline();
     this.removeAutoplayUnlock();
     this.pendingJoin = null;
+    // Clean up manually published tracks.
+    if (this.manualCameraTrack !== null) { this.manualCameraTrack.stop(); this.manualCameraTrack = null; }
+    for (const t of this.manualScreenTracks) t.stop();
+    this.manualScreenTracks = [];
     if (sendWs && this.ws !== null) {
       this.ws.send({ type: "voice_leave", payload: {} });
     }
@@ -628,32 +717,35 @@ export class LiveKitSession {
 
   setMuted(muted: boolean): void {
     setLocalMuted(muted);
-    if (this.room !== null) {
-      void this.room.localParticipant.setMicrophoneEnabled(!muted);
-      // When the audio pipeline is active, LiveKit's track disable may not
-      // silence the replaced sender track. Zero the gain to guarantee silence.
-      if (this.audioPipelineGain !== null && this.audioPipelineCtx !== null) {
-        const gain = muted ? 0 : this.currentInputGain;
-        this.audioPipelineGain.gain.setTargetAtTime(gain, this.audioPipelineCtx.currentTime, 0.015);
-      }
-    }
+    void this.applyMicMuteState(muted);
   }
 
   setDeafened(deafened: boolean): void {
     setLocalDeafened(deafened);
     this.applyRemoteAudioSubscriptionState(deafened);
-    // Deafen implies mute — stop publishing audio so other participants
-    // don't hear us while we can't hear them (matches Discord behaviour).
-    if (this.room !== null) {
-      const shouldPublish = !deafened && !voiceStore.getState().localMuted;
-      void this.room.localParticipant.setMicrophoneEnabled(shouldPublish);
-      // Also zero the pipeline gain to guarantee silence on the replaced track.
-      if (this.audioPipelineGain !== null && this.audioPipelineCtx !== null) {
-        const gain = shouldPublish ? this.currentInputGain : 0;
-        this.audioPipelineGain.gain.setTargetAtTime(gain, this.audioPipelineCtx.currentTime, 0.015);
-      }
-    }
+    const shouldMute = deafened || voiceStore.getState().localMuted;
+    void this.applyMicMuteState(shouldMute);
     log.debug("Deafen state changed", { deafened });
+  }
+
+  /** Nuclear mute: fully unpublish the mic track when muting and tear down
+   *  the audio pipeline. Re-publish and rebuild when unmuting. This guarantees
+   *  the SFU has no audio track to forward to other participants. */
+  private async applyMicMuteState(muted: boolean): Promise<void> {
+    if (this.room === null) return;
+    if (muted) {
+      // Tear down pipeline first so it doesn't hold refs to the track
+      this.teardownAudioPipeline();
+      // Fully disable the mic — this unpublishes the track from the SFU
+      await this.room.localParticipant.setMicrophoneEnabled(false);
+      log.debug("Mic fully unpublished (muted)");
+    } else {
+      // Re-enable mic — this re-publishes the track to the SFU
+      await this.room.localParticipant.setMicrophoneEnabled(true);
+      // Rebuild the audio pipeline on the fresh track
+      this.setupAudioPipeline();
+      log.debug("Mic re-published (unmuted)");
+    }
   }
 
   async enableCamera(): Promise<void> {
@@ -663,12 +755,30 @@ export class LiveKitSession {
       return;
     }
     setLocalCamera(true);
+    const quality = getStreamQuality();
     try {
-      await this.room.localParticipant.setCameraEnabled(true);
       const savedVideoDevice = loadPref<string>("videoInputDevice", "");
-      if (savedVideoDevice) await this.room.switchActiveDevice("videoinput", savedVideoDevice);
+      // Stop any existing manual camera track before creating a new one.
+      this.stopManualCameraTrack();
+      const videoTrack = await createLocalVideoTrack({
+        ...CAMERA_PRESETS[quality],
+        ...(savedVideoDevice ? { deviceId: savedVideoDevice } : {}),
+      });
+      this.manualCameraTrack = videoTrack as any;
+      await this.room.localParticipant.publishTrack(videoTrack, {
+        source: Track.Source.Camera,
+        simulcast: quality !== "source",
+        videoEncoding: {
+          maxBitrate: CAMERA_PUBLISH_BITRATES[quality],
+          maxFramerate: quality === "low" ? 15 : 30,
+        },
+      });
       this.ws.send({ type: "voice_camera", payload: { enabled: true } });
-      log.info("Camera enabled");
+      // Re-apply audio pipeline — publishing a new track can trigger WebRTC
+      // renegotiation which resets the mic sender, bypassing our GainNode mute.
+      this.setupAudioPipeline();
+      this.reapplyMuteGain();
+      log.info("Camera enabled", { quality, maxBitrate: CAMERA_PUBLISH_BITRATES[quality] });
     } catch (err) {
       setLocalCamera(false);
       log.error("Failed to enable camera", err);
@@ -684,6 +794,9 @@ export class LiveKitSession {
 
   async disableCamera(): Promise<void> {
     try {
+      this.stopManualCameraTrack();
+      // Also call setCameraEnabled(false) as a fallback to clean up any
+      // LiveKit-managed camera track that might exist.
       if (this.room !== null) await this.room.localParticipant.setCameraEnabled(false);
     } catch (err) {
       log.warn("Failed to disable camera track (non-fatal)", err);
@@ -694,6 +807,16 @@ export class LiveKitSession {
     }
   }
 
+  private stopManualCameraTrack(): void {
+    if (this.manualCameraTrack === null || this.room === null) return;
+    const track = this.manualCameraTrack;
+    this.manualCameraTrack = null;
+    try {
+      this.room.localParticipant.unpublishTrack(track.mediaStreamTrack);
+    } catch { /* already unpublished */ }
+    track.stop();
+  }
+
   async enableScreenshare(): Promise<void> {
     if (this.room === null || this.ws === null) {
       log.warn("Cannot enable screenshare: no active voice session");
@@ -701,10 +824,29 @@ export class LiveKitSession {
       return;
     }
     setLocalScreenshare(true);
+    const quality = getStreamQuality();
     try {
-      await this.room.localParticipant.setScreenShareEnabled(true, { audio: true });
+      this.stopManualScreenTracks();
+      const screenTracks = await createLocalScreenTracks(SCREENSHARE_PRESETS[quality]);
+      this.manualScreenTracks = screenTracks as any[];
+      for (const track of screenTracks) {
+        const isVideo = track.kind === Track.Kind.Video;
+        await this.room.localParticipant.publishTrack(track, {
+          source: isVideo ? Track.Source.ScreenShare : Track.Source.ScreenShareAudio,
+          simulcast: false,  // No simulcast for screenshare — send full quality
+          ...(isVideo ? {
+            videoEncoding: {
+              maxBitrate: SCREENSHARE_PUBLISH_BITRATES[quality],
+              maxFramerate: quality === "low" ? 5 : quality === "medium" ? 15 : 30,
+            },
+          } : {}),
+        });
+      }
       this.ws.send({ type: "voice_screenshare", payload: { enabled: true } });
-      log.info("Screenshare enabled");
+      // Re-apply audio pipeline — same renegotiation risk as camera.
+      this.setupAudioPipeline();
+      this.reapplyMuteGain();
+      log.info("Screenshare enabled", { quality, maxBitrate: SCREENSHARE_PUBLISH_BITRATES[quality] });
     } catch (err) {
       setLocalScreenshare(false);
       log.error("Failed to enable screenshare", err);
@@ -718,6 +860,7 @@ export class LiveKitSession {
 
   async disableScreenshare(): Promise<void> {
     try {
+      this.stopManualScreenTracks();
       if (this.room !== null) await this.room.localParticipant.setScreenShareEnabled(false);
     } catch (err) {
       log.warn("Failed to disable screenshare track (non-fatal)", err);
@@ -725,6 +868,18 @@ export class LiveKitSession {
       setLocalScreenshare(false);
       if (this.ws !== null) this.ws.send({ type: "voice_screenshare", payload: { enabled: false } });
       log.info("Screenshare disabled");
+    }
+  }
+
+  private stopManualScreenTracks(): void {
+    if (this.manualScreenTracks.length === 0 || this.room === null) return;
+    const tracks = this.manualScreenTracks;
+    this.manualScreenTracks = [];
+    for (const track of tracks) {
+      try {
+        this.room.localParticipant.unpublishTrack(track.mediaStreamTrack);
+      } catch { /* already unpublished */ }
+      track.stop();
     }
   }
 
@@ -882,11 +1037,20 @@ export class LiveKitSession {
     this.vadGated = false;
   }
 
-  /** Update the effective gain on the pipeline (inputVolume × vadGate). */
+  /** Update the effective gain on the pipeline (inputVolume × vadGate).
+   *  The pipeline only exists when unmuted — muting tears it down entirely. */
   private updatePipelineGain(): void {
     if (this.audioPipelineGain === null || this.audioPipelineCtx === null) return;
     const effectiveGain = this.vadGated ? 0 : this.currentInputGain;
     this.audioPipelineGain.gain.setTargetAtTime(effectiveGain, this.audioPipelineCtx.currentTime, 0.015);
+  }
+
+  /** Re-apply mute/deafen state after events that may reset the audio pipeline. */
+  private reapplyMuteGain(): void {
+    const { localMuted, localDeafened } = voiceStore.getState();
+    if (localMuted || localDeafened) {
+      void this.applyMicMuteState(true);
+    }
   }
 
   setInputVolume(volume: number): void {

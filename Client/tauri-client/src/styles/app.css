@@ -48,8 +48,9 @@
 
 /* ── Channel Sidebar ── */
 .channel-sidebar {
-  width: 240px; background: var(--bg-secondary);
+  width: 260px; background: var(--bg-secondary);
   display: flex; flex-direction: column; flex-shrink: 0;
+  overflow: hidden;
 }
 .channel-sidebar-header {
   height: 48px; padding: 0 16px;
@@ -129,9 +130,13 @@
 /* Voice users nested in sidebar */
 .voice-users-list { padding: 2px 0 4px 36px; }
 .voice-user-item {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 6px;
   padding: 3px 8px; border-radius: var(--radius-sm);
   cursor: pointer; font-size: 13px; color: var(--text-muted);
+  overflow: hidden;
+}
+.voice-user-item .vu-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
 }
 .voice-user-item:hover { background: var(--bg-hover); color: var(--text-normal); }
 .voice-user-item .vu-avatar {
@@ -141,7 +146,7 @@
 }
 .voice-user-item.speaking .vu-avatar { box-shadow: 0 0 0 2px var(--green); }
 .voice-user-item .vu-status,
-.voice-user-item .vu-muted { margin-left: 2px; display: flex; align-items: center; }
+.voice-user-item .vu-muted { margin-left: 2px; display: flex; align-items: center; flex-shrink: 0; }
 .voice-user-item .vu-status { color: var(--text-muted); }
 .voice-user-item .vu-muted { color: var(--red); }
 .voice-user-item .vu-name + .vu-status,
@@ -156,6 +161,7 @@
   padding: 1px 4px;
   border-radius: 3px;
   margin-left: 2px;
+  flex-shrink: 0;
 }
 
 /* Voice widget (above user bar, when connected) */

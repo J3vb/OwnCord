@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // --- Mocks must be declared before imports ---
 
+const mockVoiceState = vi.hoisted(() => ({
+  localMuted: false,
+  localDeafened: false,
+}));
+
 const mockRoom = vi.hoisted(() => ({
   connect: vi.fn().mockResolvedValue(undefined),
   disconnect: vi.fn().mockResolvedValue(undefined),
@@ -29,21 +34,46 @@ vi.mock("livekit-client", () => ({
     TrackUnsubscribed: "trackUnsubscribed",
     Disconnected: "disconnected",
     ActiveSpeakersChanged: "activeSpeakersChanged",
+    AudioPlaybackStatusChanged: "audioPlaybackStatusChanged",
+    LocalTrackPublished: "localTrackPublished",
   },
   Track: {
-    Source: { Microphone: "microphone", Camera: "camera" },
+    Source: {
+      Microphone: "microphone",
+      Camera: "camera",
+      ScreenShare: "screenShare",
+      ScreenShareAudio: "screenShareAudio",
+    },
     Kind: { Audio: "audio", Video: "video" },
   },
+  VideoPresets: {
+    h360: { resolution: { width: 640, height: 360 } },
+    h720: { resolution: { width: 1280, height: 720 } },
+    h1080: { resolution: { width: 1920, height: 1080 } },
+  },
+  ScreenSharePresets: {
+    h720fps5: { resolution: { width: 1280, height: 720 } },
+    h1080fps15: { resolution: { width: 1920, height: 1080 } },
+    h1080fps30: { resolution: { width: 1920, height: 1080 } },
+  },
   DisconnectReason: { CLIENT_INITIATED: 0 },
+  createLocalVideoTrack: vi.fn(async () => ({ kind: "video", mediaStreamTrack: new MediaStreamTrack() })),
+  createLocalScreenTracks: vi.fn(async () => [{ kind: "video", mediaStreamTrack: new MediaStreamTrack() }]),
 }));
 
 vi.mock("@stores/voice.store", () => ({
-  voiceStore: { get: vi.fn(() => ({})), set: vi.fn(), subscribe: vi.fn() },
+  voiceStore: {
+    getState: vi.fn(() => mockVoiceState),
+    get: vi.fn(() => ({})),
+    set: vi.fn(),
+    subscribe: vi.fn(),
+  },
   setLocalMuted: vi.fn(),
   setLocalDeafened: vi.fn(),
   setLocalCamera: vi.fn(),
   setLocalScreenshare: vi.fn(),
   setSpeakers: vi.fn(),
+  leaveVoiceChannel: vi.fn(),
 }));
 
 const { mockLoadPref, mockSavePref } = vi.hoisted(() => ({
@@ -72,6 +102,20 @@ vi.mock("@lib/noise-suppression", () => ({
 // Now import
 import { parseUserId, LiveKitSession } from "../../src/lib/livekitSession";
 import { setLocalMuted, setLocalDeafened, setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
+
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+  reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 describe("parseUserId", () => {
   it("parses a valid user identity", () => {
@@ -129,6 +173,8 @@ describe("LiveKitSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    mockVoiceState.localMuted = false;
+    mockVoiceState.localDeafened = false;
     session = new LiveKitSession();
     // Reset mockRoom state
     mockRoom.state = "connected";
@@ -327,6 +373,24 @@ describe("LiveKitSession", () => {
       session.setOutputVolume(-10);
       expect(mockSavePref).toHaveBeenCalledWith("outputVolume", 0);
     });
+
+    it("updates existing screenshare audio elements when master output changes", () => {
+      const screenshareAudio = document.createElement("audio");
+      (session as any).screenshareAudioElements = new Map([[42, new Set([screenshareAudio])]]);
+
+      session.setOutputVolume(80);
+
+      expect(screenshareAudio.volume).toBe(0.8);
+    });
+
+    it("clamps existing screenshare audio elements to the browser volume range", () => {
+      const screenshareAudio = document.createElement("audio");
+      (session as any).screenshareAudioElements = new Map([[42, new Set([screenshareAudio])]]);
+
+      session.setOutputVolume(150);
+
+      expect(screenshareAudio.volume).toBe(1);
+    });
   });
 
   describe("setVoiceSensitivity", () => {
@@ -432,6 +496,31 @@ describe("LiveKitSession", () => {
 
       expect(errorCb).toHaveBeenCalledWith("Failed to join voice — connection error");
     });
+
+    it("queues the latest join request that arrives while connecting", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+
+      const firstConnect = createDeferred<void>();
+      mockRoom.connect
+        .mockImplementationOnce(() => firstConnect.promise)
+        .mockResolvedValueOnce(undefined);
+
+      const firstJoin = session.handleVoiceToken("first-token", "/livekit-one", 1, "ws://localhost:7881");
+      await Promise.resolve();
+
+      await session.handleVoiceToken("second-token", "/livekit-two", 2, "ws://localhost:7882");
+      expect(mockRoom.connect).toHaveBeenCalledTimes(1);
+
+      firstConnect.resolve(undefined);
+      await firstJoin;
+
+      expect(mockRoom.connect).toHaveBeenCalledTimes(2);
+      expect(mockRoom.connect).toHaveBeenNthCalledWith(1, "ws://localhost:7881", "first-token");
+      expect(mockRoom.connect).toHaveBeenNthCalledWith(2, "ws://localhost:7882", "second-token");
+      expect(mockRoom.startAudio).toHaveBeenCalledTimes(1);
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("handleVoiceTokenRefresh", () => {
@@ -442,6 +531,150 @@ describe("LiveKitSession", () => {
 
     it("handles undefined token", () => {
       expect(() => session.handleVoiceTokenRefresh(undefined)).not.toThrow();
+    });
+  });
+
+  describe("auto reconnect", () => {
+    it("preserves local mute state on reconnect", async () => {
+      mockVoiceState.localMuted = true;
+      mockVoiceState.localDeafened = false;
+      (session as any).currentChannelId = 7;
+
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "reconnect-token",
+        "/livekit",
+        7,
+        "ws://localhost:7880",
+      );
+
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false);
+    });
+
+    it("re-applies deafened remote subscriptions on reconnect", async () => {
+      mockVoiceState.localMuted = true;
+      mockVoiceState.localDeafened = true;
+      (session as any).currentChannelId = 9;
+
+      const setSubscribed = vi.fn();
+      mockRoom.remoteParticipants = new Map([
+        [
+          "remote-user",
+          {
+            audioTrackPublications: new Map([["audio", { setSubscribed }]]),
+          },
+        ],
+      ]);
+
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "reconnect-token",
+        "/livekit",
+        9,
+        "ws://localhost:7880",
+      );
+
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      expect(setSubscribed).toHaveBeenCalledWith(false);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Screenshare audio controls (Spec 1)
+  // -----------------------------------------------------------------------
+
+  describe("setScreenshareAudioVolume", () => {
+    it("does not throw when no audio element exists for userId", () => {
+      expect(() => session.setScreenshareAudioVolume(999, 0.5)).not.toThrow();
+    });
+  });
+
+  describe("screenshare audio subscription", () => {
+    it("clamps screenshare audio element volume when output is boosted", () => {
+      session.setOutputVolume(150);
+
+      const audioEl = document.createElement("audio");
+      const track = {
+        kind: "audio",
+        sid: "track-1",
+        detach: vi.fn(() => []),
+        attach: vi.fn(() => audioEl),
+      };
+      const publication = { source: "screenShareAudio" };
+      const participant = { identity: "user-42" };
+
+      expect(() => (session as any).handleTrackSubscribed(track, publication, participant)).not.toThrow();
+      expect(audioEl.volume).toBe(1);
+    });
+
+    it("keeps a replacement screenshare audio element tracked when an older track unsubscribes", () => {
+      const firstAudioEl = document.createElement("audio");
+      const secondAudioEl = document.createElement("audio");
+      const firstTrack = {
+        kind: "audio",
+        sid: "track-1",
+        detach: vi.fn(() => [firstAudioEl]),
+        attach: vi.fn(() => firstAudioEl),
+      };
+      const secondTrack = {
+        kind: "audio",
+        sid: "track-2",
+        detach: vi.fn(() => [secondAudioEl]),
+        attach: vi.fn(() => secondAudioEl),
+      };
+      const publication = { source: "screenShareAudio" };
+      const participant = { identity: "user-42" };
+
+      (session as any).handleTrackSubscribed(firstTrack, publication, participant);
+      (session as any).handleTrackSubscribed(secondTrack, publication, participant);
+      (session as any).handleTrackUnsubscribed(firstTrack, publication, participant);
+
+      session.muteScreenshareAudio(42, true);
+
+      expect(secondAudioEl.muted).toBe(true);
+      expect((session as any).screenshareAudioElements.get(42)).toEqual(new Set([secondAudioEl]));
+    });
+
+    it("applies the stored mute state to replacement screenshare audio tracks", () => {
+      const firstAudioEl = document.createElement("audio");
+      const secondAudioEl = document.createElement("audio");
+      const firstTrack = {
+        kind: "audio",
+        sid: "track-1",
+        detach: vi.fn(() => [firstAudioEl]),
+        attach: vi.fn(() => firstAudioEl),
+      };
+      const secondTrack = {
+        kind: "audio",
+        sid: "track-2",
+        detach: vi.fn(() => [secondAudioEl]),
+        attach: vi.fn(() => secondAudioEl),
+      };
+      const publication = { source: "screenShareAudio" };
+      const participant = { identity: "user-42" };
+
+      (session as any).handleTrackSubscribed(firstTrack, publication, participant);
+      session.muteScreenshareAudio(42, true);
+
+      (session as any).handleTrackSubscribed(secondTrack, publication, participant);
+
+      expect(secondAudioEl.muted).toBe(true);
+      expect(session.getScreenshareAudioMuted(42)).toBe(true);
+    });
+  });
+
+  describe("muteScreenshareAudio", () => {
+    it("does not throw when no audio element exists for userId", () => {
+      expect(() => session.muteScreenshareAudio(999, true)).not.toThrow();
+    });
+  });
+
+  describe("getScreenshareAudioMuted", () => {
+    it("returns false when no audio element exists for userId", () => {
+      expect(session.getScreenshareAudioMuted(999)).toBe(false);
     });
   });
 });
