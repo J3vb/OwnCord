@@ -5,7 +5,7 @@
  * unified sidebar layout with a quick-switch overlay for server switching.
  */
 
-import { createElement, setText, clearChildren } from "@lib/dom";
+import { createElement, setText, clearChildren, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
 import type { ApiClient } from "@lib/api";
@@ -333,14 +333,112 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         inviteCleanup = () => { inviteCtrl.cleanup(); };
       }
 
-      // --- Member list (below channels) ---
+      // --- DM section (between channels and members) ---
+      const dmSection = createElement("div", { class: "sidebar-dm-section" });
+      const dmHeader = createElement("div", { class: "category" });
+      const dmArrow = createElement("span", { class: "category-arrow" }, "\u25BC");
+      const dmLabelEl = createElement("span", { class: "category-name" }, "DIRECT MESSAGES");
+      const dmAddBtn = createElement("button", { class: "category-add-btn", title: "New DM" }, "+");
+      dmAddBtn.style.opacity = "1";
+      appendChildren(dmHeader, dmArrow, dmLabelEl, dmAddBtn);
+      dmSection.appendChild(dmHeader);
+
+      let dmCollapsed = false;
+      const dmList = createElement("div", { class: "category-channels sidebar-dm-list" });
+
+      const currentUserId = authStore.getState().user?.id ?? 0;
+      const onlineMembers = getOnlineMembers().filter((m) => m.id !== currentUserId);
+      for (const member of onlineMembers.slice(0, 5)) {
+        const dmItem = createElement("div", {
+          class: "channel-item",
+          "data-testid": "dm-entry",
+        });
+        const avatar = createElement("span", { class: "ch-icon" }, "\uD83D\uDCAC");
+        const name = createElement("span", { class: "ch-name" }, member.username);
+        appendChildren(dmItem, avatar, name);
+        dmItem.addEventListener("click", () => {
+          setActiveDmUser(member.id);
+          setSidebarMode("dms");
+        });
+        dmList.appendChild(dmItem);
+      }
+      dmSection.appendChild(dmList);
+
+      dmHeader.addEventListener("click", () => {
+        dmCollapsed = !dmCollapsed;
+        dmHeader.classList.toggle("collapsed", dmCollapsed);
+        dmArrow.textContent = dmCollapsed ? "\u25B6" : "\u25BC";
+      });
+
+      dmAddBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        setSidebarMode("dms");
+      });
+
+      contentSlot.appendChild(dmSection);
+
+      // --- Member list (below DM section) ---
       const memberListContainer = createElement("div", {
         class: "sidebar-members-section",
         "data-testid": "sidebar-members",
       });
-      // Respect initial visibility state
-      const initialMemberVis = uiStore.getState().memberListVisible;
-      memberListContainer.style.display = initialMemberVis ? "" : "none";
+
+      // Member header (styled like category headers)
+      const memberHeader = createElement("div", { class: "category sidebar-members-header" });
+      const memberArrow = createElement("span", { class: "category-arrow" }, "\u25BC");
+      const memberLabelEl = createElement("span", { class: "category-name" }, "MEMBERS");
+      appendChildren(memberHeader, memberArrow, memberLabelEl);
+      memberListContainer.appendChild(memberHeader);
+
+      // Resize handle
+      const resizeHandle = createElement("div", { class: "sidebar-resize-handle" });
+      memberListContainer.appendChild(resizeHandle);
+
+      // Restore saved height
+      const savedHeight = localStorage.getItem("owncord:member-list-height");
+      if (savedHeight !== null) {
+        memberListContainer.style.height = `${savedHeight}px`;
+      }
+
+      // Drag-to-resize logic
+      const resizeAbort = new AbortController();
+      let isDragging = false;
+      let startY = 0;
+      let startHeight = 0;
+
+      resizeHandle.addEventListener("mousedown", (e: MouseEvent) => {
+        isDragging = true;
+        startY = e.clientY;
+        startHeight = memberListContainer.offsetHeight;
+        e.preventDefault();
+      }, { signal: resizeAbort.signal });
+
+      document.addEventListener("mousemove", (e: MouseEvent) => {
+        if (!isDragging) return;
+        const delta = startY - e.clientY;
+        const maxH = window.innerHeight * 0.4;
+        const newHeight = Math.max(80, Math.min(startHeight + delta, maxH));
+        memberListContainer.style.height = `${newHeight}px`;
+      }, { signal: resizeAbort.signal });
+
+      document.addEventListener("mouseup", () => {
+        if (!isDragging) return;
+        isDragging = false;
+        localStorage.setItem("owncord:member-list-height", String(memberListContainer.offsetHeight));
+      }, { signal: resizeAbort.signal });
+
+      channelModeUnsubs.push(() => { resizeAbort.abort(); });
+
+      // Collapse toggle for member list
+      let membersCollapsed = false;
+      const memberContent = createElement("div", { class: "sidebar-members-content" });
+
+      memberHeader.addEventListener("click", () => {
+        membersCollapsed = !membersCollapsed;
+        memberHeader.classList.toggle("collapsed", membersCollapsed);
+        memberArrow.textContent = membersCollapsed ? "\u25B6" : "\u25BC";
+        memberContent.style.display = membersCollapsed ? "none" : "";
+      });
 
       const memberList = createMemberList({
         currentUserRole: authStore.getState().user?.role ?? "member",
@@ -375,18 +473,10 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           }
         },
       });
-      memberList.mount(memberListContainer);
+      memberList.mount(memberContent);
+      memberListContainer.appendChild(memberContent);
       contentSlot.appendChild(memberListContainer);
       channelModeExtras.push(memberList);
-
-      // Toggle member list visibility from ChatHeader button
-      const unsubMemberVis = uiStore.subscribeSelector(
-        (s) => s.memberListVisible,
-        (visible) => {
-          memberListContainer.style.display = visible ? "" : "none";
-        },
-      );
-      channelModeUnsubs.push(unsubMemberVis);
     } else {
       const dmSidebar = buildDmSidebar();
       dmSidebar.mount(innerSlot);

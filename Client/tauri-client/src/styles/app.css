@@ -836,8 +836,44 @@
 .member-list.hidden { width: 0; padding: 0; overflow: hidden; }
 .sidebar-members-section {
   border-top: 1px solid var(--border-glow, var(--border));
-  overflow-y: auto;
+  overflow: hidden;
   max-height: 200px;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+.sidebar-members-header {
+  padding: 8px 8px 4px 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.sidebar-members-content {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+.sidebar-resize-handle {
+  height: 4px;
+  cursor: ns-resize;
+  background: transparent;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.sidebar-resize-handle:hover {
+  background: var(--accent-primary, var(--accent));
+}
+/* ── DM Section (sidebar) ── */
+.sidebar-dm-section {
+  border-top: 1px solid var(--border-glow, var(--border));
+  flex-shrink: 0;
+}
+.sidebar-dm-list {
+  overflow: hidden;
+  transition: max-height .2s;
+}
+.sidebar-dm-section .category.collapsed + .sidebar-dm-list {
+  max-height: 0 !important;
+  overflow: hidden;
 }
 .sidebar-members-section .member-list {
   width: 100%;

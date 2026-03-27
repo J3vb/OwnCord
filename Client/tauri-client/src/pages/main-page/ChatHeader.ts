@@ -1,6 +1,5 @@
 /**
- * ChatHeader — builds the channel header bar with name, topic, pins, search,
- * and member-list toggle.
+ * ChatHeader — builds the channel header bar with name, topic, pins, and search.
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
@@ -18,9 +17,7 @@ export interface ChatHeaderRefs {
 
 export interface ChatHeaderOptions {
   readonly onTogglePins: () => void;
-  readonly onToggleMembers: () => void;
   readonly onSearchFocus?: () => void;
-  readonly dmMode?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,17 +56,7 @@ export function buildChatHeader(
       (searchInput as HTMLInputElement).blur();
     });
   }
-  const membersToggle = createElement("button", {
-    type: "button",
-    "aria-label": "Toggle member list",
-    "data-testid": "members-toggle",
-  });
-  membersToggle.appendChild(createIcon("users", 18));
-  membersToggle.addEventListener("click", () => opts.onToggleMembers());
-  if (opts.dmMode === true) {
-    membersToggle.style.display = "none";
-  }
-  appendChildren(tools, searchInput, pinBtn, membersToggle);
+  appendChildren(tools, searchInput, pinBtn);
 
   appendChildren(header, hash, nameEl, divider, topicEl, tools);
   return { element: header, refs: { hashEl: hash, nameEl, topicEl } };

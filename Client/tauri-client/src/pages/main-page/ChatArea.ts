@@ -10,7 +10,6 @@ import type { ApiClient } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
 import { createVideoGrid } from "@components/VideoGrid";
 import type { VideoGridComponent } from "@components/VideoGrid";
-import { toggleMemberList } from "@stores/ui.store";
 import { buildChatHeader } from "./ChatHeader";
 import {
   createPinnedPanelController,
@@ -92,7 +91,6 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   // --- Chat header ---
   const chatHeader = buildChatHeader({
     onTogglePins: () => { void pinnedCtrl.toggle(); },
-    onToggleMembers: () => toggleMemberList(),
     onSearchFocus: () => { searchCtrl.open(); },
   });
   const chatHeaderName = chatHeader.refs.nameEl;

@@ -185,37 +185,15 @@ test.describe("Pinned Messages", () => {
   });
 });
 
-test.describe("Member List Toggle", () => {
+test.describe("Member List in Sidebar", () => {
   test.beforeEach(async ({ nativePage }) => {
     test.skip(SKIP_SERVER, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
     test.skip(!hasCredentials(), "Skipped: OWNCORD_TEST_USER/OWNCORD_TEST_PASS not set");
     await nativeLoginAndReady(nativePage);
   });
 
-  test("member list toggle hides and shows member list", async ({ nativePage }) => {
-    const toggleBtn = nativePage.locator("[data-testid='members-toggle']");
-    const exists = await toggleBtn.isVisible().catch(() => false);
-    test.skip(!exists, "No members toggle button");
-
-    const memberList = nativePage.locator("[data-testid='member-list']");
-    const wasVisible = await memberList.isVisible();
-
-    // Toggle
-    await toggleBtn.click();
-
-    if (wasVisible) {
-      await expect(memberList).not.toBeVisible({ timeout: 3_000 });
-    } else {
-      await expect(memberList).toBeVisible({ timeout: 3_000 });
-    }
-
-    // Toggle back
-    await toggleBtn.click();
-
-    if (wasVisible) {
-      await expect(memberList).toBeVisible({ timeout: 3_000 });
-    } else {
-      await expect(memberList).not.toBeVisible({ timeout: 3_000 });
-    }
+  test("member list is visible in sidebar", async ({ nativePage }) => {
+    const sidebarMembers = nativePage.locator("[data-testid='sidebar-members']");
+    await expect(sidebarMembers).toBeAttached({ timeout: 5_000 });
   });
 });
