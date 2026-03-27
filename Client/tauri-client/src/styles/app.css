@@ -837,7 +837,6 @@
 .sidebar-members-section {
   border-top: 1px solid var(--border-glow, var(--border));
   overflow: hidden;
-  max-height: 200px;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -877,6 +876,25 @@
 }
 .sidebar-members-section .member-list {
   width: 100%;
+}
+/* Compact member list when inside sidebar */
+.sidebar-members-section .member-role-group {
+  padding: 8px 12px 2px;
+  font-size: 10px;
+}
+.sidebar-members-section .member-item {
+  padding: 2px 8px; margin: 0 6px; gap: 6px;
+}
+.sidebar-members-section .member-item .mi-avatar {
+  width: 22px; height: 22px;
+  font-size: 9px;
+}
+.sidebar-members-section .member-item .mi-status {
+  width: 8px; height: 8px;
+  border-width: 2px;
+}
+.sidebar-members-section .member-item .mi-name {
+  font-size: 12px;
 }
 .member-role-group {
   padding: 16px 16px 4px;
