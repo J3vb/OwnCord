@@ -13,7 +13,7 @@ import type { RateLimiterSet } from "@lib/rate-limiter";
 import type { ToastContainer } from "@components/Toast";
 import { createChannelSidebar } from "@components/ChannelSidebar";
 import { createMemberList } from "@components/MemberList";
-import { createDmSidebar } from "@components/DmSidebar";
+import { createDmSidebar, type DmConversation } from "@components/DmSidebar";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
 import { createEditChannelModal } from "@components/EditChannelModal";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
@@ -23,7 +23,7 @@ import { createQuickSwitchOverlay } from "@components/QuickSwitchOverlay";
 import type { QuickSwitchProfile } from "@components/QuickSwitchOverlay";
 import { createVoiceWidgetCallbacks, createSidebarVoiceCallbacks } from "./VoiceCallbacks";
 import { createInviteManagerController } from "./OverlayManagers";
-import { uiStore, setSidebarMode, setActiveDmUser } from "@stores/ui.store";
+import { uiStore, setSidebarMode, setActiveDmUser, loadCollapsedCategories } from "@stores/ui.store";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
 import {
@@ -113,6 +113,10 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   serverHeader.appendChild(serverIcon);
   serverHeader.appendChild(serverInfoCol);
   sidebarWrapper.appendChild(serverHeader);
+
+  // Load per-server collapsed category state from localStorage
+  const initialServerName = authStore.getState().serverName ?? "Server";
+  loadCollapsedCategories(initialServerName);
 
   // Keep server name in sync with auth store
   const unsubServerName = authStore.subscribeSelector(
@@ -235,10 +239,31 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   function buildDmSidebar(): MountableComponent {
     const serverName = authStore.getState().serverName ?? "Server";
+    const currentUserId = authStore.getState().user?.id ?? null;
+    const activeDmUserId = uiStore.getState().activeDmUserId;
+
+    // Build DM conversations from online members (excluding the current user).
+    // Since the channel data model doesn't have a distinct DM channel type yet,
+    // we list online members as potential DM targets.
+    const onlineMembers = getOnlineMembers();
+    const conversations: readonly DmConversation[] = onlineMembers
+      .filter((m) => m.id !== currentUserId)
+      .map((m) => ({
+        userId: m.id,
+        username: m.username,
+        avatar: m.avatar,
+        status: m.status,
+        lastMessage: "No messages yet",
+        timestamp: "",
+        unread: false,
+        active: m.id === activeDmUserId,
+      }));
+
     return createDmSidebar({
-      conversations: [],
+      conversations,
       onSelectConversation: (userId) => {
         setActiveDmUser(userId);
+        setSidebarMode("dms");
       },
       onNewDm: () => {
         // Placeholder — DM creation flow comes later
@@ -367,6 +392,40 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       dmSidebar.mount(innerSlot);
       activeSidebarContent = dmSidebar;
       contentSlot.appendChild(innerSlot);
+
+      // Re-render DM sidebar when members change (online/offline transitions)
+      const unsubDmMembers = membersStore.subscribeSelector(
+        (s) => s.members,
+        () => {
+          if (activeSidebarContent !== null) {
+            activeSidebarContent.destroy?.();
+          }
+          clearChildren(contentSlot);
+          const freshSlot = createElement("div", { style: "flex:1;overflow:hidden;display:flex;flex-direction:column;" });
+          const freshDm = buildDmSidebar();
+          freshDm.mount(freshSlot);
+          activeSidebarContent = freshDm;
+          contentSlot.appendChild(freshSlot);
+        },
+      );
+      channelModeUnsubs.push(unsubDmMembers);
+
+      // Re-render DM sidebar when active DM user changes
+      const unsubDmActive = uiStore.subscribeSelector(
+        (s) => s.activeDmUserId,
+        () => {
+          if (activeSidebarContent !== null) {
+            activeSidebarContent.destroy?.();
+          }
+          clearChildren(contentSlot);
+          const freshSlot = createElement("div", { style: "flex:1;overflow:hidden;display:flex;flex-direction:column;" });
+          const freshDm = buildDmSidebar();
+          freshDm.mount(freshSlot);
+          activeSidebarContent = freshDm;
+          contentSlot.appendChild(freshSlot);
+        },
+      );
+      channelModeUnsubs.push(unsubDmActive);
     }
   }
 
