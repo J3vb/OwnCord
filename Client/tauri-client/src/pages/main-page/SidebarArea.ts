@@ -246,9 +246,13 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   function selectDmConversation(dmChannel: DmChannel): void {
     // Save current channel so we can restore it when user clicks "Back"
+    // Only save if the current channel is a real text/voice channel, not another DM
     const currentActive = channelsStore.getState().activeChannelId;
-    if (currentActive !== null && currentActive !== dmChannel.channelId) {
-      channelBeforeDm = currentActive;
+    if (currentActive !== null) {
+      const currentCh = channelsStore.getState().channels.get(currentActive);
+      if (currentCh !== undefined && currentCh.type !== "dm") {
+        channelBeforeDm = currentActive;
+      }
     }
 
     setActiveDmUser(dmChannel.recipient.id);
