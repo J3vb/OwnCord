@@ -217,11 +217,11 @@ function renderPage(pageId: "connect" | "main"): void {
     }
 
     // Auto-save a profile for a host after successful login (if not already saved)
-    function ensureProfileExists(host: string, username: string): void {
+    function ensureProfileExists(host: string, username: string, rememberPassword: boolean): void {
       const existing = profileManager.getAll().find((p) => p.host === host);
       if (existing) {
-        // Update username and lastConnected
-        profileManager.updateProfile(existing.id, { username });
+        // Update username, rememberPassword preference, and lastConnected
+        profileManager.updateProfile(existing.id, { username, rememberPassword });
         profileManager.setLastConnected(existing.id);
       } else {
         const created = profileManager.addProfile({
@@ -229,7 +229,7 @@ function renderPage(pageId: "connect" | "main"): void {
           host,
           username,
           autoConnect: false,
-          rememberPassword: false,
+          rememberPassword,
           color: "#5865F2",
         });
         profileManager.setLastConnected(created.id);
@@ -249,16 +249,18 @@ function renderPage(pageId: "connect" | "main"): void {
           return;
         }
         if (result.token) {
-          const savedPassword = connectPage.getRememberPassword() ? password : undefined;
-          ensureProfileExists(host, username);
+          const remember = connectPage.getRememberPassword();
+          const savedPassword = remember ? password : undefined;
+          ensureProfileExists(host, username, remember);
           wirePostAuth(host, result.token, username, savedPassword);
         }
       },
       async onRegister(host, username, password, inviteCode) {
         api.setConfig({ host });
         const result = await api.register(username, password, inviteCode);
-        const savedPassword = connectPage.getRememberPassword() ? password : undefined;
-        ensureProfileExists(host, username);
+        const remember = connectPage.getRememberPassword();
+        const savedPassword = remember ? password : undefined;
+        ensureProfileExists(host, username, remember);
         wirePostAuth(host, result.token, username, savedPassword);
       },
       async onTotpSubmit(code) {
@@ -268,8 +270,9 @@ function renderPage(pageId: "connect" | "main"): void {
         }
         const result = await api.verifyTotp(code, pendingTotpPartialToken);
         if (result.token) {
-          const savedPassword = connectPage.getRememberPassword() ? connectPage.getPassword() : undefined;
-          ensureProfileExists(pendingTotpHost, pendingTotpUsername);
+          const remember = connectPage.getRememberPassword();
+          const savedPassword = remember ? connectPage.getPassword() : undefined;
+          ensureProfileExists(pendingTotpHost, pendingTotpUsername, remember);
           wirePostAuth(pendingTotpHost, result.token, pendingTotpUsername, savedPassword);
         }
       },
