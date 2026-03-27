@@ -46,6 +46,27 @@
 .server-icon.add { background: transparent; color: var(--green); border: 2px dashed var(--border-strong); font-size: 24px; }
 .server-icon.add:hover { border-color: var(--green); background: var(--green); color: white; border-style: solid; }
 
+/* ── Unified Sidebar ── */
+.unified-sidebar {
+  width: 260px; background: var(--bg-secondary);
+  display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden;
+}
+.unified-sidebar-header {
+  height: 44px; padding: 0 14px;
+  display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--border-glow, var(--border));
+  flex-shrink: 0;
+}
+.unified-sidebar-header .server-icon-sm {
+  width: 28px; height: 28px; border-radius: var(--radius-md);
+  background: var(--accent-gradient, var(--accent));
+  display: flex; align-items: center; justify-content: center;
+  color: white; font-size: 11px; font-weight: 700;
+}
+.unified-sidebar-header .server-name { color: white; font-weight: 700; font-size: 13px; }
+.unified-sidebar-header .server-online { color: var(--text-micro); font-size: 9px; }
+.sidebar-divider { height: 1px; background: var(--border-glow, var(--border)); margin: 8px 12px; }
+
 /* ── Channel Sidebar ── */
 .channel-sidebar {
   width: 260px; background: var(--bg-secondary);
