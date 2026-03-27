@@ -313,6 +313,13 @@ func (h *Hub) buildReady(database *db.DB, userID int64) ([]byte, error) {
 		voiceStates = []db.VoiceState{}
 	}
 
+	// Load open DM channels for this user.
+	dmChannels, err := database.GetUserDMChannels(userID)
+	if err != nil {
+		slog.Warn("buildReady GetUserDMChannels", "err", err)
+		dmChannels = []db.DMChannelInfo{}
+	}
+
 	serverName, motd := h.getCachedSettings()
 
 	return buildJSON(map[string]any{
@@ -322,6 +329,7 @@ func (h *Hub) buildReady(database *db.DB, userID int64) ([]byte, error) {
 			"members":      members,
 			"voice_states": voiceStates,
 			"roles":        roles,
+			"dm_channels":  dmChannels,
 			"server_name":  serverName,
 			"motd":         motd,
 		},

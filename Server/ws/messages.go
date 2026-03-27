@@ -142,6 +142,25 @@ type serverRestartPayload struct {
 	DelaySeconds int    `json:"delay_seconds"`
 }
 
+// dmChannelOpenPayload is sent when a DM is opened/reopened for a user.
+type dmChannelOpenPayload struct {
+	ChannelID int64     `json:"channel_id"`
+	Recipient dmUserPayload `json:"recipient"`
+}
+
+// dmChannelClosePayload is sent when a user closes a DM.
+type dmChannelClosePayload struct {
+	ChannelID int64 `json:"channel_id"`
+}
+
+// dmUserPayload is the public-facing shape for a DM participant in WS events.
+type dmUserPayload struct {
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
+	Avatar   string `json:"avatar"`
+	Status   string `json:"status"`
+}
+
 // ---------------------------------------------------------------------------
 // Builder helpers (kept as maps per task spec).
 // ---------------------------------------------------------------------------
@@ -405,6 +424,34 @@ func buildChannelDelete(channelID int64) []byte {
 	return buildJSON(wsMsg{
 		Type:    "channel_delete",
 		Payload: channelDeletePayload{ID: channelID},
+	})
+}
+
+// buildDMChannelOpen constructs a dm_channel_open event sent to a user.
+func buildDMChannelOpen(channelID int64, recipient *db.User) []byte {
+	avatarStr := ""
+	if recipient.Avatar != nil {
+		avatarStr = *recipient.Avatar
+	}
+	return buildJSON(wsMsg{
+		Type: "dm_channel_open",
+		Payload: dmChannelOpenPayload{
+			ChannelID: channelID,
+			Recipient: dmUserPayload{
+				ID:       recipient.ID,
+				Username: recipient.Username,
+				Avatar:   avatarStr,
+				Status:   recipient.Status,
+			},
+		},
+	})
+}
+
+// buildDMChannelClose constructs a dm_channel_close event sent to a user.
+func buildDMChannelClose(channelID int64) []byte {
+	return buildJSON(wsMsg{
+		Type:    "dm_channel_close",
+		Payload: dmChannelClosePayload{ChannelID: channelID},
 	})
 }
 

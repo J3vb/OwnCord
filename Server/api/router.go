@@ -55,6 +55,9 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Channel and message REST routes.
 	MountChannelRoutes(r, database)
 
+	// DM (direct message) REST routes.
+	MountDMRoutes(r, database)
+
 	// File upload and serving routes.
 	store, storeErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
 	if storeErr != nil {

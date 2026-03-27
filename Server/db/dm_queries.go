@@ -219,6 +219,31 @@ func (d *DB) IsDMParticipant(userID, channelID int64) (bool, error) {
 	return true, nil
 }
 
+// GetDMParticipantIDs returns all participant user IDs for a DM channel.
+func (d *DB) GetDMParticipantIDs(channelID int64) ([]int64, error) {
+	rows, err := d.sqlDB.Query(
+		`SELECT user_id FROM dm_participants WHERE channel_id = ?`,
+		channelID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("GetDMParticipantIDs: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if scanErr := rows.Scan(&id); scanErr != nil {
+			return nil, fmt.Errorf("GetDMParticipantIDs scan: %w", scanErr)
+		}
+		ids = append(ids, id)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("GetDMParticipantIDs rows: %w", rows.Err())
+	}
+	return ids, nil
+}
+
 // GetDMRecipient returns the other participant in a DM channel.
 func (d *DB) GetDMRecipient(channelID, requestingUserID int64) (*User, error) {
 	var recipientID int64
