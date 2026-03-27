@@ -10,7 +10,7 @@ export interface UiState {
   readonly memberListVisible: boolean;
   readonly settingsOpen: boolean;
   readonly activeModal: string | null;
-  readonly theme: "dark" | "midnight" | "light";
+  readonly theme: "dark" | "neon-glow" | "midnight" | "light";
   readonly connectionStatus: "connected" | "reconnecting" | "disconnected";
   readonly transientError: string | null;
   readonly persistentError: string | null;
@@ -84,7 +84,7 @@ export function closeModal(): void {
 }
 
 /** Set the UI theme. */
-export function setTheme(theme: "dark" | "midnight" | "light"): void {
+export function setTheme(theme: "dark" | "neon-glow" | "midnight" | "light"): void {
   uiStore.setState((prev) => ({
     ...prev,
     theme,

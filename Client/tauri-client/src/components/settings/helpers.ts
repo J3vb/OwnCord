@@ -12,6 +12,7 @@ export const STORAGE_PREFIX = "owncord:settings:";
 
 export const THEMES = {
   dark: { "--bg-primary": "#313338", "--bg-secondary": "#2b2d31", "--bg-tertiary": "#1e1f22", "--text-normal": "#dbdee1" },
+  "neon-glow": { "--bg-primary": "#1a1b1e", "--bg-secondary": "#111214", "--bg-tertiary": "#0d0e10", "--text-normal": "#dbdee1" },
   midnight: { "--bg-primary": "#1a1a2e", "--bg-secondary": "#16213e", "--bg-tertiary": "#0f3460", "--text-normal": "#e0e0e0" },
   light: { "--bg-primary": "#ffffff", "--bg-secondary": "#f2f3f5", "--bg-tertiary": "#e3e5e8", "--text-normal": "#313338" },
 } as const;
@@ -90,4 +91,8 @@ export function applyTheme(name: ThemeName): void {
   for (const [prop, val] of Object.entries(vars)) {
     root.style.setProperty(prop, val);
   }
+  for (const cls of [...document.body.classList]) {
+    if (cls.startsWith("theme-")) document.body.classList.remove(cls);
+  }
+  document.body.classList.add(`theme-${name}`);
 }
