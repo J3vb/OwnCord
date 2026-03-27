@@ -67,6 +67,8 @@ const UI_INITIAL: UiState = {
   transientError: null,
   persistentError: null,
   collapsedCategories: new Set(),
+  sidebarMode: "channels",
+  activeDmUserId: null,
 };
 
 // ---------------------------------------------------------------------------
