@@ -172,7 +172,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     children.push(...sidebar.children);
     unsubscribers.push(...sidebar.unsubscribers);
 
-    // --- Chat area + member list ---
+    // --- Chat area ---
     const chatAreaResult = createChatArea({
       api,
       getRoot: () => root,
@@ -192,10 +192,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     appendChildren(
       app,
-      sidebar.serverStripSlot,
       sidebar.sidebarWrapper,
       chatAreaResult.chatArea,
-      chatAreaResult.memberListSlot,
     );
     root.appendChild(app);
 
