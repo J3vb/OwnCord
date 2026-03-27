@@ -306,6 +306,6 @@ async function downloadFile(url: string, filename: string): Promise<void> {
     const buffer = await res.arrayBuffer();
     await writeFile(filePath, new Uint8Array(buffer));
   } catch (err) {
-    console.error("Download failed:", err);
+    log.error("Download failed", { filename, error: String(err) });
   }
 }

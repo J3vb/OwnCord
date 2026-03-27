@@ -28,8 +28,8 @@ export interface OgMeta {
 
 /** Cache for OG metadata to avoid re-fetching on re-render. */
 const ogCache = new Map<string, OgMeta>();
-/** URLs currently being fetched (prevents duplicate requests). */
-const ogInFlight = new Set<string>();
+/** In-flight fetch promises keyed by URL — concurrent callers share the same promise. */
+const ogInFlight = new Map<string, Promise<OgMeta>>();
 
 // -- OG tag parsing -----------------------------------------------------------
 
@@ -78,56 +78,90 @@ export function parseOgTags(html: string): OgMeta {
   };
 }
 
+// -- SSRF protection ----------------------------------------------------------
+
+/** Block link previews to private/internal IP ranges to prevent SSRF.
+ *  The connected OwnCord server host is NOT blocked (it's trusted). */
+function isPrivateHost(hostname: string): boolean {
+  // Block localhost variants
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]") return true;
+  // Block link-local, RFC1918, and cloud metadata endpoints
+  if (hostname.startsWith("10.") || hostname.startsWith("192.168.") || hostname === "169.254.169.254") return true;
+  if (hostname.startsWith("172.")) {
+    const second = parseInt(hostname.split(".")[1] ?? "", 10);
+    if (second >= 16 && second <= 31) return true;
+  }
+  return false;
+}
+
+function isBlockedForPreview(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return isPrivateHost(parsed.hostname);
+  } catch {
+    return true; // Malformed URLs are blocked
+  }
+}
+
 // -- OG fetch -----------------------------------------------------------------
 
-/** Fetch OG metadata for a URL using the Tauri native HTTP client (no CORS). */
-async function fetchOgMeta(url: string): Promise<OgMeta> {
-  const cached = ogCache.get(url);
-  if (cached !== undefined) return cached;
+const EMPTY_OG: OgMeta = { title: null, description: null, image: null, siteName: null };
 
-  // Return empty while in-flight to avoid duplicate requests
-  if (ogInFlight.has(url)) {
-    return { title: null, description: null, image: null, siteName: null };
+/** Fetch OG metadata for a URL using the Tauri native HTTP client (no CORS).
+ *  Concurrent requests for the same URL share the same in-flight promise. */
+function fetchOgMeta(url: string): Promise<OgMeta> {
+  const cached = ogCache.get(url);
+  if (cached !== undefined) return Promise.resolve(cached);
+
+  // Return the existing in-flight promise so all callers get the real result.
+  const existing = ogInFlight.get(url);
+  if (existing !== undefined) return existing;
+
+  // Block link previews to internal/private hosts to prevent SSRF
+  if (isBlockedForPreview(url)) {
+    log.debug("fetchOgMeta blocked (private host)", url.slice(0, 100));
+    ogCache.set(url, EMPTY_OG);
+    return Promise.resolve(EMPTY_OG);
   }
 
   log.debug("fetchOgMeta START", url.slice(0, 100));
-  ogInFlight.add(url);
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    const res = await tauriFetch(url, {
-      signal: controller.signal,
-      headers: { "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)" },
-      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
-    } as RequestInit);
-    clearTimeout(timer);
+  const promise = (async (): Promise<OgMeta> => {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      const res = await tauriFetch(url, {
+        signal: controller.signal,
+        headers: { "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)" },
+        danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
+      } as RequestInit);
+      clearTimeout(timer);
 
-    if (!res.ok) {
-      const empty: OgMeta = { title: null, description: null, image: null, siteName: null };
-      ogCache.set(url, empty);
-      return empty;
+      if (!res.ok) {
+        ogCache.set(url, EMPTY_OG);
+        return EMPTY_OG;
+      }
+
+      // Only parse HTML responses (skip binary, JSON, etc.)
+      const contentType = res.headers.get("content-type") ?? "";
+      if (!contentType.includes("text/html")) {
+        ogCache.set(url, EMPTY_OG);
+        return EMPTY_OG;
+      }
+
+      const html = await res.text();
+      // Only parse the first 50KB to avoid parsing huge pages
+      const meta = parseOgTags(html.slice(0, 50_000));
+      ogCache.set(url, meta);
+      return meta;
+    } catch {
+      ogCache.set(url, EMPTY_OG);
+      return EMPTY_OG;
     }
+  })();
 
-    // Only parse HTML responses (skip binary, JSON, etc.)
-    const contentType = res.headers.get("content-type") ?? "";
-    if (!contentType.includes("text/html")) {
-      const empty: OgMeta = { title: null, description: null, image: null, siteName: null };
-      ogCache.set(url, empty);
-      return empty;
-    }
-
-    const html = await res.text();
-    // Only parse the first 50KB to avoid parsing huge pages
-    const meta = parseOgTags(html.slice(0, 50_000));
-    ogCache.set(url, meta);
-    return meta;
-  } catch {
-    const empty: OgMeta = { title: null, description: null, image: null, siteName: null };
-    ogCache.set(url, empty);
-    return empty;
-  } finally {
-    ogInFlight.delete(url);
-  }
+  ogInFlight.set(url, promise);
+  void promise.finally(() => ogInFlight.delete(url));
+  return promise;
 }
 
 // -- Link preview rendering ---------------------------------------------------

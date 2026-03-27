@@ -105,6 +105,10 @@ export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
   voiceStore.setState((prev) => ({
     ...prev,
     voiceUsers: channelMap,
+    // If user is in a voice channel per ready payload, use that channel.
+    // Otherwise preserve prev — user may be mid-join and server hasn't
+    // registered them yet. Stale IDs are cleared by leaveVoiceChannel()
+    // or resetVoiceStore() on logout.
     currentChannelId: autoJoinChannel ?? prev.currentChannelId,
   }));
 }

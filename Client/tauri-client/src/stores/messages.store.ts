@@ -169,14 +169,16 @@ export function prependMessages(
     const existing = prev.messagesByChannel.get(channelId) ?? [];
     let combined = [...converted, ...existing];
     // Keep newest messages (end of array); drop oldest loaded history when cap exceeded
-    if (combined.length > MAX_MESSAGES_PER_CHANNEL) {
+    const wasTrimmed = combined.length > MAX_MESSAGES_PER_CHANNEL;
+    if (wasTrimmed) {
       combined = combined.slice(combined.length - MAX_MESSAGES_PER_CHANNEL);
     }
     const updatedMessages = new Map(prev.messagesByChannel);
     updatedMessages.set(channelId, combined);
 
     const updatedHasMore = new Map(prev.hasMore);
-    updatedHasMore.set(channelId, hasMore);
+    // If we trimmed older messages, there are definitely more on the server above.
+    updatedHasMore.set(channelId, hasMore || wasTrimmed);
 
     return {
       ...prev,

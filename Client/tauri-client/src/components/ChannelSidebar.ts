@@ -103,6 +103,7 @@ function showUserVolumeMenu(
   // Close on click outside
   const dismissAc = new AbortController();
   setTimeout(() => {
+    if (dismissAc.signal.aborted) return;
     document.addEventListener("mousedown", (e: MouseEvent) => {
       if (!menu.contains(e.target as Node)) {
         menu.remove();

@@ -302,7 +302,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // Scroll-driven spacer updates are cheap and don't need limiting.
       renderWindowCount++;
       if (renderWindowCount > 30) {
-        console.error("[MessageList] renderWindow REBUILD called >30 times in 2s — breaking loop");
+        log.error("[MessageList] renderWindow REBUILD called >30 times in 2s — breaking loop");
         return;
       }
       if (renderWindowResetTimer === 0) {
@@ -379,7 +379,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // within 2 seconds, something is wrong — bail out to prevent freeze.
     renderAllCount++;
     if (renderAllCount > 20) {
-      console.error("[MessageList] renderAll called >20 times in 2s — breaking loop");
+      log.error("[MessageList] renderAll called >20 times in 2s — breaking loop");
       return;
     }
     if (renderAllResetTimer === 0) {

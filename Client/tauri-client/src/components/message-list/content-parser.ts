@@ -111,6 +111,9 @@ export function renderMessageContent(content: string): DocumentFragment {
       void navigator.clipboard.writeText(codeContent).then(() => {
         setText(copyBtn, "Copied!");
         setTimeout(() => setText(copyBtn, "Copy"), 2000);
+      }).catch(() => {
+        setText(copyBtn, "Failed");
+        setTimeout(() => setText(copyBtn, "Copy"), 2000);
       });
     });
     codeWrap.appendChild(codeBlock);

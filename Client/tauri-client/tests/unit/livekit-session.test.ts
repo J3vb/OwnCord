@@ -540,11 +540,13 @@ describe("LiveKitSession", () => {
       mockVoiceState.localDeafened = false;
       (session as any).currentChannelId = 7;
 
+      const ac = new AbortController();
       const reconnectPromise = (session as any).attemptAutoReconnect(
         "reconnect-token",
         "/livekit",
         7,
         "ws://localhost:7880",
+        ac.signal,
       );
 
       await vi.advanceTimersByTimeAsync(3100);
@@ -568,11 +570,13 @@ describe("LiveKitSession", () => {
         ],
       ]);
 
+      const ac = new AbortController();
       const reconnectPromise = (session as any).attemptAutoReconnect(
         "reconnect-token",
         "/livekit",
         9,
         "ws://localhost:7880",
+        ac.signal,
       );
 
       await vi.advanceTimersByTimeAsync(3100);

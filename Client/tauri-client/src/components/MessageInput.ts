@@ -48,6 +48,8 @@ export function createMessageInput(
 
   /** Pending attachment IDs to send with the next message. */
   const pendingAttachments: { id: string; filename: string; readonly previewEl: HTMLDivElement }[] = [];
+  /** References to picker close functions, set by mount() for destroy() to call. */
+  let cleanupPickers: (() => void) | null = null;
 
   function showReplyBar(username: string): void {
     if (replyBar === null || replyText === null) return;
@@ -437,6 +439,9 @@ export function createMessageInput(
 
     gifBtn.addEventListener("click", toggleGifPicker, { signal });
 
+    // Store picker cleanup for destroy()
+    cleanupPickers = () => { closeEmojiPicker(); closeGifPicker(); };
+
     appendChildren(inputBox, attachBtn, textarea, emojiBtn, gifBtn, sendBtn);
     appendChildren(root, replyBar, editBar, attachmentPreviewBar, inputBox);
     container.appendChild(root);
@@ -444,6 +449,9 @@ export function createMessageInput(
   }
 
   function destroy(): void {
+    // Close any open pickers and their document listeners before aborting
+    cleanupPickers?.();
+    cleanupPickers = null;
     ac.abort();
     // Image previews now use data: URLs (via readFileAsDataUrl) which don't
     // require revocation — just clear the array and let GC reclaim them.

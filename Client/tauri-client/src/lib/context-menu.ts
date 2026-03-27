@@ -57,6 +57,7 @@ export function showContextMenu(opts: ContextMenuOptions): void {
       "click",
       () => {
         menu.remove();
+        dismissAc.abort();
         item.onClick();
       },
       { signal },
@@ -70,6 +71,7 @@ export function showContextMenu(opts: ContextMenuOptions): void {
   // Close on click outside (deferred so the opening click doesn't immediately close)
   const dismissAc = new AbortController();
   setTimeout(() => {
+    if (dismissAc.signal.aborted) return;
     document.addEventListener(
       "mousedown",
       (e: MouseEvent) => {

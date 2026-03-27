@@ -141,6 +141,7 @@ export function createVoiceChannel(options: VoiceChannelOptions): VoiceChannelRe
     menuDismissAc = new AbortController();
     const dismissSignal = menuDismissAc.signal;
     setTimeout(() => {
+      if (dismissSignal.aborted) return;
       document.addEventListener("mousedown", (e: MouseEvent) => {
         if (!menu.contains(e.target as Node)) {
           closeContextMenu();

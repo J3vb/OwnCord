@@ -4,6 +4,7 @@
  */
 
 import { createElement, appendChildren } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import { muteScreenshareAudio, setUserVolume } from "@lib/livekitSession";
 import type { MountableComponent } from "@lib/safe-render";
 
@@ -24,9 +25,15 @@ export interface VideoGridComponent extends MountableComponent {
   getFocusedTileId(): number | null;
 }
 
-const ICON_VOLUME = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>`;
-
-const ICON_VOLUME_X = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>`;
+/** Create a fresh volume icon element. */
+function volumeIcon(): SVGSVGElement { return createIcon("volume-2", 16); }
+/** Create a fresh volume-x (muted) icon element. */
+function volumeXIcon(): SVGSVGElement { return createIcon("volume-x", 16); }
+/** Replace a button's icon child with a new one. */
+function setButtonIcon(btn: HTMLButtonElement, icon: SVGSVGElement): void {
+  while (btn.firstChild) btn.removeChild(btn.firstChild);
+  btn.appendChild(icon);
+}
 
 function computeGridColumns(count: number): string {
   if (count <= 1) return "1fr";
@@ -180,7 +187,7 @@ export function createVideoGrid(): VideoGridComponent {
         } else {
           setUserVolume(config.audioUserId, currentVolume);
         }
-        muteBtn.innerHTML = muted ? ICON_VOLUME_X : ICON_VOLUME;
+        setButtonIcon(muteBtn, muted ? volumeXIcon() : volumeIcon());
         muteBtn.setAttribute("aria-label", muted ? "Unmute" : "Mute");
         if (muted !== wasMuted) {
           overlay.classList.toggle("muted", muted);
@@ -191,26 +198,30 @@ export function createVideoGrid(): VideoGridComponent {
       const muteBtn = createElement("button", {
         class: "tile-mute-btn",
         "aria-label": "Mute",
-      });
-      muteBtn.innerHTML = ICON_VOLUME;
+      }) as HTMLButtonElement;
+      muteBtn.appendChild(volumeIcon());
 
       muteBtn.addEventListener("click", () => {
         muted = !muted;
-        if (config.isScreenshare) {
-          muteScreenshareAudio(config.audioUserId, muted);
-        } else {
-          setUserVolume(config.audioUserId, muted ? 0 : 100);
-        }
-        muteBtn.innerHTML = muted ? ICON_VOLUME_X : ICON_VOLUME;
-        muteBtn.setAttribute("aria-label", muted ? "Unmute" : "Mute");
-        overlay.classList.toggle("muted", muted);
         if (muted) {
+          if (config.isScreenshare) {
+            muteScreenshareAudio(config.audioUserId, true);
+          } else {
+            setUserVolume(config.audioUserId, 0);
+          }
           volumeSlider.value = "0";
         } else {
-          volumeSlider.value = String(currentVolume > 0 ? currentVolume : 100);
           if (currentVolume === 0) currentVolume = 100;
-          if (!config.isScreenshare) setUserVolume(config.audioUserId, currentVolume);
+          if (config.isScreenshare) {
+            muteScreenshareAudio(config.audioUserId, false);
+          } else {
+            setUserVolume(config.audioUserId, currentVolume);
+          }
+          volumeSlider.value = String(currentVolume);
         }
+        setButtonIcon(muteBtn, muted ? volumeXIcon() : volumeIcon());
+        muteBtn.setAttribute("aria-label", muted ? "Unmute" : "Mute");
+        overlay.classList.toggle("muted", muted);
       });
 
       overlay.appendChild(volumeSlider);

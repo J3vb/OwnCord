@@ -25,7 +25,12 @@ export type ThemeName = keyof typeof THEMES;
 export function loadPref<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(STORAGE_PREFIX + key);
-    return raw !== null ? (JSON.parse(raw) as T) : fallback;
+    if (raw === null) return fallback;
+    const parsed: unknown = JSON.parse(raw);
+    // Basic typeof guard against corrupted localStorage (covers boolean,
+    // number, string fallbacks used by current call sites).
+    if (typeof parsed !== typeof fallback) return fallback;
+    return parsed as T;
   } catch {
     return fallback;
   }

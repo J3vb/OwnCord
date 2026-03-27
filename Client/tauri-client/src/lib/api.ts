@@ -69,13 +69,15 @@ export function createApiClient(
     return h;
   }
 
-  async function request<T>(
+  async function doFetch<T>(
+    label: string,
+    urlBase: string,
     method: string,
     path: string,
     body?: unknown,
     signal?: AbortSignal,
   ): Promise<T> {
-    const url = `${baseUrl()}${path}`;
+    const url = `${urlBase}${path}`;
     const init: RequestInit & { danger?: { acceptInvalidCerts: boolean; acceptInvalidHostnames: boolean } } = {
       method,
       headers: headers(),
@@ -86,21 +88,20 @@ export function createApiClient(
       init.body = JSON.stringify(body);
     }
 
-    log.debug("API →", { method, path });
+    log.debug(`${label} →`, { method, path });
 
     let res: Response;
     try {
       res = await fetch(url, init as RequestInit);
     } catch (fetchErr) {
-      // Tauri plugin errors may not be standard Error instances
-      log.error("API fetch failed", { method, path, error: String(fetchErr) });
+      log.error(`${label} fetch failed`, { method, path, error: String(fetchErr) });
       if (fetchErr instanceof Error) {
         throw fetchErr;
       }
       throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr));
     }
 
-    log.debug("API ←", { method, path, status: res.status });
+    log.debug(`${label} ←`, { method, path, status: res.status });
 
     if (res.status === 401) {
       onUnauthorized?.();
@@ -110,7 +111,7 @@ export function createApiClient(
 
     if (!res.ok) {
       const err = await parseError(res);
-      log.warn("API error", { method, path, status: res.status, code: err.error, message: err.message });
+      log.warn(`${label} error`, { method, path, status: res.status, code: err.error, message: err.message });
       throw new ApiClientError(res.status, err.error, err.message);
     }
 
@@ -122,55 +123,12 @@ export function createApiClient(
     return res.json() as Promise<T>;
   }
 
-  async function adminRequest<T>(
-    method: string,
-    path: string,
-    body?: unknown,
-    signal?: AbortSignal,
-  ): Promise<T> {
-    const url = `${adminBaseUrl()}${path}`;
-    const init: RequestInit & { danger?: { acceptInvalidCerts: boolean; acceptInvalidHostnames: boolean } } = {
-      method,
-      headers: headers(),
-      signal,
-      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
-    };
-    if (body !== undefined) {
-      init.body = JSON.stringify(body);
-    }
+  function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+    return doFetch<T>("API", baseUrl(), method, path, body, signal);
+  }
 
-    log.debug("Admin API →", { method, path });
-
-    let res: Response;
-    try {
-      res = await fetch(url, init as RequestInit);
-    } catch (fetchErr) {
-      log.error("Admin API fetch failed", { method, path, error: String(fetchErr) });
-      if (fetchErr instanceof Error) {
-        throw fetchErr;
-      }
-      throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr));
-    }
-
-    log.debug("Admin API ←", { method, path, status: res.status });
-
-    if (res.status === 401) {
-      onUnauthorized?.();
-      const err = await parseError(res);
-      throw new ApiClientError(401, err.error, err.message);
-    }
-
-    if (!res.ok) {
-      const err = await parseError(res);
-      log.warn("Admin API error", { method, path, status: res.status, code: err.error, message: err.message });
-      throw new ApiClientError(res.status, err.error, err.message);
-    }
-
-    if (res.status === 204) {
-      return undefined as T;
-    }
-
-    return res.json() as Promise<T>;
+  function adminRequest<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+    return doFetch<T>("Admin API", adminBaseUrl(), method, path, body, signal);
   }
 
   async function parseError(res: Response): Promise<ApiError> {

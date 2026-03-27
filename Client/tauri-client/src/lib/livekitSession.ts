@@ -12,6 +12,9 @@ import {
   type RemoteParticipant,
   type Participant,
   type LocalAudioTrack,
+  type LocalVideoTrack,
+  type LocalTrack,
+  type LocalTrackPublication,
   type VideoCaptureOptions,
   type ScreenShareCaptureOptions,
   DisconnectReason,
@@ -118,6 +121,8 @@ export class LiveKitSession {
   /** Max auto-reconnect attempts before giving up and showing error. */
   private static readonly MAX_RECONNECT_ATTEMPTS = 2;
   private static readonly RECONNECT_DELAY_MS = 3000;
+  /** Aborted by leaveVoice() to cancel a pending auto-reconnect loop. */
+  private reconnectAc: AbortController | null = null;
   /** Master output volume multiplier (0-2.0). Per-user volumes are scaled by this. */
   private outputVolumeMultiplier = loadPref<number>("outputVolume", 100) / 100;
   /** Screenshare audio elements keyed by userId — separate from mic audio pipeline. */
@@ -126,8 +131,8 @@ export class LiveKitSession {
   private screenshareAudioMutedByUser = new Map<number, boolean>();
 
   /** Manually published local tracks (camera/screenshare) for explicit cleanup. */
-  private manualCameraTrack: { mediaStreamTrack: MediaStreamTrack; stop(): void } | null = null;
-  private manualScreenTracks: Array<{ mediaStreamTrack: MediaStreamTrack; stop(): void }> = [];
+  private manualCameraTrack: LocalVideoTrack | null = null;
+  private manualScreenTracks: LocalTrack[] = [];
 
   // --- Unified audio pipeline: input volume + VAD gating ---
   // Pipeline: rawMicTrack → source → analyser (VAD reads here)
@@ -206,7 +211,7 @@ export class LiveKitSession {
 
   /** Defense in depth: when LiveKit (re)publishes a mic track during
    *  renegotiation, re-enforce the current mute state on the new track. */
-  private handleLocalTrackPublished = (publication: { source?: string }): void => {
+  private handleLocalTrackPublished = (publication: LocalTrackPublication): void => {
     if (publication.source === Track.Source.Microphone) {
       const { localMuted, localDeafened } = voiceStore.getState();
       if (localMuted || localDeafened) {
@@ -366,7 +371,8 @@ export class LiveKitSession {
         r.removeAllListeners();
         r.disconnect().catch(() => {});
       }
-      void this.attemptAutoReconnect(token, url, channelId, directUrl);
+      this.reconnectAc = new AbortController();
+      void this.attemptAutoReconnect(token, url, channelId, directUrl, this.reconnectAc.signal);
       return;
     }
     this.leaveVoice(false);
@@ -374,16 +380,18 @@ export class LiveKitSession {
     if (isUnexpected) this.onErrorCallback?.("Voice connection lost — disconnected");
   };
 
-  /** Attempt to auto-reconnect after unexpected disconnect using stored token. */
+  /** Attempt to auto-reconnect after unexpected disconnect using stored token.
+   *  The signal is aborted by leaveVoice() to cancel the loop when the user
+   *  voluntarily leaves voice during the reconnect delay. */
   private async attemptAutoReconnect(
-    token: string, url: string, channelId: number, directUrl?: string,
+    token: string, url: string, channelId: number, directUrl: string | undefined, signal: AbortSignal,
   ): Promise<void> {
     for (let attempt = 1; attempt <= LiveKitSession.MAX_RECONNECT_ATTEMPTS; attempt++) {
       log.info("Auto-reconnect attempt", { attempt, maxAttempts: LiveKitSession.MAX_RECONNECT_ATTEMPTS });
       await new Promise((r) => setTimeout(r, LiveKitSession.RECONNECT_DELAY_MS));
       // If user manually left or joined a different channel during the delay, abort.
-      if (this.currentChannelId !== channelId) {
-        log.info("Auto-reconnect aborted — channel changed");
+      if (signal.aborted || this.currentChannelId !== channelId) {
+        log.info("Auto-reconnect aborted — user left or channel changed");
         return;
       }
       try {
@@ -675,6 +683,11 @@ export class LiveKitSession {
   }
 
   leaveVoice(sendWs = true): void {
+    // Cancel any pending auto-reconnect loop first
+    if (this.reconnectAc !== null) {
+      this.reconnectAc.abort();
+      this.reconnectAc = null;
+    }
     this.clearTokenRefreshTimer();
     this.teardownAudioPipeline();
     this.removeAutoplayUnlock();
@@ -764,7 +777,7 @@ export class LiveKitSession {
         ...CAMERA_PRESETS[quality],
         ...(savedVideoDevice ? { deviceId: savedVideoDevice } : {}),
       });
-      this.manualCameraTrack = videoTrack as any;
+      this.manualCameraTrack = videoTrack;
       await this.room.localParticipant.publishTrack(videoTrack, {
         source: Track.Source.Camera,
         simulcast: quality !== "source",
@@ -828,7 +841,7 @@ export class LiveKitSession {
     try {
       this.stopManualScreenTracks();
       const screenTracks = await createLocalScreenTracks(SCREENSHARE_PRESETS[quality]);
-      this.manualScreenTracks = screenTracks as any[];
+      this.manualScreenTracks = screenTracks;
       for (const track of screenTracks) {
         const isVideo = track.kind === Track.Kind.Video;
         await this.room.localParticipant.publishTrack(track, {
@@ -1263,9 +1276,10 @@ export class LiveKitSession {
 
 const session = new LiveKitSession();
 
-// Expose debug info on window for DevTools console access
-// Usage: JSON.stringify(__lkDebug(), null, 2)
-(window as unknown as Record<string, unknown>).__lkDebug = session.getSessionDebugInfo.bind(session);
+// Expose debug info on window under __owncord namespace for DevTools console access
+// Usage: JSON.stringify(__owncord.lkDebug(), null, 2)
+const owncordNs = ((window as unknown as Record<string, unknown>).__owncord ??= {}) as Record<string, unknown>;
+owncordNs.lkDebug = session.getSessionDebugInfo.bind(session);
 
 export const setWsClient = session.setWsClient.bind(session);
 export const setServerHost = session.setServerHost.bind(session);
