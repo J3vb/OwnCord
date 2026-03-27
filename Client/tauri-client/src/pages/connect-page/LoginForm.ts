@@ -116,12 +116,48 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     // Form container
     const formContainer = createElement("div", { class: "form-container" });
 
-    // Logo section
+    // Logo section — OC neon glow SVG
     const formLogo = createElement("div", { class: "form-logo" });
-    const logoMark = createElement("div", { class: "form-logo-mark" }, "OC");
+    const logoSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    logoSvg.setAttribute("width", "70");
+    logoSvg.setAttribute("height", "42");
+    logoSvg.setAttribute("viewBox", "0 0 120 70");
+    logoSvg.setAttribute("class", "oc-logo");
+    const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+    const grad = document.createElementNS("http://www.w3.org/2000/svg", "linearGradient");
+    grad.setAttribute("id", "oc-grad-form");
+    grad.setAttribute("x1", "0%"); grad.setAttribute("y1", "0%");
+    grad.setAttribute("x2", "100%"); grad.setAttribute("y2", "0%");
+    for (const [offset, color] of [["0%","#f97316"],["30%","#ec4899"],["65%","#8b5cf6"],["100%","#06b6d4"]] as const) {
+      const stop = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+      stop.setAttribute("offset", offset);
+      stop.setAttribute("style", `stop-color:${color}`);
+      grad.appendChild(stop);
+    }
+    const filter = document.createElementNS("http://www.w3.org/2000/svg", "filter");
+    filter.setAttribute("id", "oc-glow-form");
+    const blur = document.createElementNS("http://www.w3.org/2000/svg", "feGaussianBlur");
+    blur.setAttribute("stdDeviation", "4"); blur.setAttribute("result", "blur");
+    filter.appendChild(blur);
+    const comp = document.createElementNS("http://www.w3.org/2000/svg", "feComposite");
+    comp.setAttribute("in", "SourceGraphic"); comp.setAttribute("in2", "blur"); comp.setAttribute("operator", "over");
+    filter.appendChild(comp);
+    defs.appendChild(grad); defs.appendChild(filter);
+    logoSvg.appendChild(defs);
+    for (const [opacity, filterAttr] of [["0.4", "url(#oc-glow-form)"], [null, null]] as const) {
+      const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      t.setAttribute("x", "60"); t.setAttribute("y", "56"); t.setAttribute("text-anchor", "middle");
+      t.setAttribute("font-family", "'Segoe UI',system-ui,sans-serif");
+      t.setAttribute("font-size", "68"); t.setAttribute("font-weight", "900");
+      t.setAttribute("fill", "url(#oc-grad-form)"); t.setAttribute("letter-spacing", "-4");
+      if (opacity) { t.setAttribute("opacity", opacity); t.setAttribute("class", "oc-glow-layer"); }
+      if (filterAttr) t.setAttribute("filter", filterAttr);
+      t.textContent = "OC";
+      logoSvg.appendChild(t);
+    }
     const logoTitle = createElement("h1", {}, "OwnCord");
     const logoSubtitle = createElement("p", {}, "Connect to your server");
-    appendChildren(formLogo, logoMark, logoTitle, logoSubtitle);
+    appendChildren(formLogo, logoSvg, logoTitle, logoSubtitle);
 
     // Form title
     formTitle = createElement("h1", {}, "Login");
