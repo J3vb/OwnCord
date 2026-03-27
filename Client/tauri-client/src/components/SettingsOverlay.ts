@@ -59,7 +59,7 @@ const TAB_ICONS: Record<TabName, IconName> = {
  * Call at app startup so the UI doesn't flash default styles.
  */
 export function applyStoredAppearance(): void {
-  applyTheme(loadPref<ThemeName>("theme", "dark"));
+  applyTheme(loadPref<ThemeName>("theme", "neon-glow"));
   document.documentElement.style.setProperty(
     "--font-size",
     `${loadPref<number>("fontSize", 16)}px`,
@@ -71,10 +71,9 @@ export function applyStoredAppearance(): void {
   document.documentElement.classList.toggle("reduced-motion", loadPref<boolean>("reducedMotion", false));
   document.documentElement.classList.toggle("high-contrast", loadPref<boolean>("highContrast", false));
   document.documentElement.classList.toggle("large-font", loadPref<boolean>("largeFont", false));
-  document.documentElement.style.setProperty(
-    "--accent",
-    loadPref<string>("accentColor", "#5865f2"),
-  );
+  const storedAccent = loadPref<string>("accentColor", "#00c8ff");
+  document.documentElement.style.setProperty("--accent", storedAccent);
+  document.body.style.setProperty("--accent", storedAccent);
 
   syncOsMotionListener(loadPref<boolean>("syncOsMotion", false));
 }

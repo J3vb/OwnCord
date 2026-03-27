@@ -10,21 +10,22 @@ body.theme-neon-glow {
   --bg-hover:      #1f2023;
   --bg-active:     #2a2b2e;
 
-  /* Accent — OC cyan/purple */
+  /* Accent — defaults to OC cyan, but accent picker overrides --accent
+     so --accent-primary and --accent-gradient follow the user's choice */
   --accent:         #00c8ff;
   --accent-hover:   #7b2fff;
   --accent-active:  #6620e0;
-  --accent-primary: #00c8ff;
-  --accent-secondary: #7b2fff;
-  --accent-gradient: linear-gradient(135deg, #00c8ff, #7b2fff);
+  --accent-primary: var(--accent);
+  --accent-secondary: var(--accent-hover);
+  --accent-gradient: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
 
-  /* Border glow */
+  /* Border glow — derived from accent for consistency */
   --border:      rgba(0, 200, 255, 0.08);
   --border-strong: rgba(0, 200, 255, 0.15);
   --border-glow: rgba(0, 200, 255, 0.08);
 
-  /* Text link */
-  --text-link: #00c8ff;
+  /* Text link — follows accent */
+  --text-link: var(--accent);
 
   /* Semantic colors (theme contract) */
   --color-success: #23a55a;

@@ -67,9 +67,9 @@ export function applyThemeByName(name: string): void {
   localStorage.setItem(STORAGE_KEY_ACTIVE, name);
 }
 
-/** Returns the currently active theme name, defaulting to "dark". */
+/** Returns the currently active theme name, defaulting to "neon-glow". */
 export function getActiveThemeName(): string {
-  return localStorage.getItem(STORAGE_KEY_ACTIVE) ?? "dark";
+  return localStorage.getItem(STORAGE_KEY_ACTIVE) ?? "neon-glow";
 }
 
 /** Persists a custom theme to localStorage. */

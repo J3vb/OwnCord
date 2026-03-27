@@ -9,7 +9,7 @@ import { setTheme } from "@stores/ui.store";
 
 export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
-  const currentTheme = loadPref<ThemeName>("theme", "dark");
+  const currentTheme = loadPref<ThemeName>("theme", "neon-glow");
   const currentFontSize = loadPref<number>("fontSize", 16);
   const currentCompact = loadPref<boolean>("compactMode", false);
 
@@ -81,10 +81,13 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     "#b9bbbe", // grey
   ];
 
-  const currentAccent = loadPref<string>("accentColor", "#5865f2");
+  const currentAccent = loadPref<string>("accentColor", "#00c8ff");
 
   function applyAccent(color: string): void {
+    // Set on both documentElement and body so the accent wins over
+    // theme class specificity (body.theme-neon-glow sets --accent)
     document.documentElement.style.setProperty("--accent", color);
+    document.body.style.setProperty("--accent", color);
   }
 
   function saveAccent(color: string): void {
