@@ -120,9 +120,8 @@ export function createServerPanel(
       });
       setText(icon, getIconInitials(profile.name));
 
-      // Health status dot on the icon
+      // Health status dot — placed as sibling after info, not inside icon
       const statusDot = createElement("div", { class: "srv-status-dot unknown" });
-      icon.appendChild(statusDot);
 
       const info = createElement("div", { class: "srv-info" });
       const name = createElement("div", { class: "srv-name" }, profile.name);
@@ -163,7 +162,7 @@ export function createServerPanel(
         actions.appendChild(deleteBtn);
       }
 
-      appendChildren(item, icon, info, actions);
+      appendChildren(item, icon, info, statusDot, actions);
 
       item.addEventListener(
         "click",
