@@ -50,28 +50,32 @@ interface PrevSnapshot {
   readonly inBytes: number;
 }
 
-async function collectStats(
+/** Collect stats from both publisher and subscriber PeerConnections.
+ *  RTT is typically on the subscriber PC in LiveKit's SFU model. */
+async function collectAllStats(
   room: Room,
-): Promise<RTCStatsReport | null> {
+): Promise<RTCStatsReport[]> {
   try {
-    // Access pcManager which holds publisher and subscriber PeerConnections
     const engine = room.engine as unknown as Record<string, unknown>;
     const pcManager = engine.pcManager as
       | { publisher?: { pc?: RTCPeerConnection }; subscriber?: { pc?: RTCPeerConnection } }
       | undefined;
 
-    const pc =
-      pcManager?.publisher?.pc ?? pcManager?.subscriber?.pc ?? null;
-    if (!pc) return null;
-
-    return await pc.getStats();
+    const reports: RTCStatsReport[] = [];
+    if (pcManager?.publisher?.pc) {
+      reports.push(await pcManager.publisher.pc.getStats());
+    }
+    if (pcManager?.subscriber?.pc) {
+      reports.push(await pcManager.subscriber.pc.getStats());
+    }
+    return reports;
   } catch {
     log.debug("Failed to access peer connection stats");
-    return null;
+    return [];
   }
 }
 
-function extractMetrics(report: RTCStatsReport): {
+function extractMetrics(reports: RTCStatsReport[]): {
   rtt: number;
   totalUp: number;
   totalDown: number;
@@ -88,29 +92,31 @@ function extractMetrics(report: RTCStatsReport): {
   let outBytes = 0;
   let inBytes = 0;
 
-  report.forEach((entry: Record<string, unknown>) => {
-    if (
-      entry.type === "candidate-pair" &&
-      (entry.state === "succeeded" || entry.nominated === true)
-    ) {
-      const rawRtt = entry.currentRoundTripTime;
-      if (typeof rawRtt === "number" && rawRtt > 0) {
-        rtt = rawRtt * 1000;
+  for (const report of reports) {
+    report.forEach((entry: Record<string, unknown>) => {
+      // Look for candidate-pair with RTT — accept any state that has a valid RTT,
+      // not just "succeeded", because LiveKit's subscriber PC may report "in-progress".
+      if (entry.type === "candidate-pair") {
+        const rawRtt = entry.currentRoundTripTime;
+        if (typeof rawRtt === "number" && rawRtt > 0 && (rtt === 0 || rawRtt * 1000 < rtt)) {
+          rtt = rawRtt * 1000;
+        }
+        // Use max across candidate-pairs (avoid double-counting across PCs)
+        if (typeof entry.bytesSent === "number" && entry.bytesSent > totalUp) totalUp = entry.bytesSent;
+        if (typeof entry.bytesReceived === "number" && entry.bytesReceived > totalDown) totalDown = entry.bytesReceived;
       }
-      if (typeof entry.bytesSent === "number") totalUp = entry.bytesSent;
-      if (typeof entry.bytesReceived === "number") totalDown = entry.bytesReceived;
-    }
 
-    if (entry.type === "outbound-rtp") {
-      if (typeof entry.packetsSent === "number") outPackets += entry.packetsSent;
-      if (typeof entry.bytesSent === "number") outBytes += entry.bytesSent;
-    }
+      if (entry.type === "outbound-rtp") {
+        if (typeof entry.packetsSent === "number") outPackets += entry.packetsSent;
+        if (typeof entry.bytesSent === "number") outBytes += entry.bytesSent;
+      }
 
-    if (entry.type === "inbound-rtp") {
-      if (typeof entry.packetsReceived === "number") inPackets += entry.packetsReceived;
-      if (typeof entry.bytesReceived === "number") inBytes += entry.bytesReceived;
-    }
-  });
+      if (entry.type === "inbound-rtp") {
+        if (typeof entry.packetsReceived === "number") inPackets += entry.packetsReceived;
+        if (typeof entry.bytesReceived === "number") inBytes += entry.bytesReceived;
+      }
+    });
+  }
 
   return { rtt, totalUp, totalDown, outPackets, inPackets, outBytes, inBytes };
 }
@@ -127,10 +133,10 @@ export function createConnectionStatsPoller(
     const room = getRoom();
     if (!room) return;
 
-    const report = await collectStats(room);
-    if (!report) return;
+    const reports = await collectAllStats(room);
+    if (reports.length === 0) return;
 
-    const metrics = extractMetrics(report);
+    const metrics = extractMetrics(reports);
     const now = Date.now();
     const elapsed = (now - prev.timestamp) / 1000;
 
@@ -187,7 +193,7 @@ export function createConnectionStatsPoller(
 // --- Formatting helpers ---
 
 export function formatBytes(bytes: number): string {
-  if (bytes < 1000) return `${bytes} B`;
+  if (bytes < 1000) return `${Math.round(bytes)} B`;
   if (bytes < 1_000_000) return `${(bytes / 1000).toFixed(2)} kB`;
   return `${(bytes / 1_000_000).toFixed(2)} MB`;
 }
