@@ -17,6 +17,7 @@ import { leaveVoice as voiceSessionLeave } from "@lib/livekitSession";
 import { createConnectPage } from "@pages/ConnectPage";
 import { createMainPage } from "@pages/MainPage";
 import { applyStoredAppearance } from "@components/SettingsOverlay";
+import { restoreTheme } from "@lib/themes";
 import { initPtt } from "@lib/ptt";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
 import type { ConnectedOverlayControl } from "@components/ConnectedOverlay";
@@ -62,6 +63,9 @@ installGlobalErrorHandlers();
 
 // Apply stored theme/font/compact preferences before first render
 applyStoredAppearance();
+
+// Restore saved theme (body class) before first render
+restoreTheme();
 
 // Start push-to-talk listener (Rust-side polling, non-consuming)
 void initPtt();
