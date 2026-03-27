@@ -31,45 +31,69 @@
    LEFT PANEL — Saved Server Profiles
    ═══════════════════════════════════════════ */
 .server-panel {
-  width: 320px; background: var(--bg-secondary);
+  width: 320px; background: linear-gradient(160deg, #1a1a2e 0%, #0f3460 50%, #16213e 100%);
   display: flex; flex-direction: column; flex-shrink: 0;
-  z-index: 1; position: relative;
-  border-right: 1px solid var(--bg-tertiary);
+  z-index: 1; position: relative; overflow: hidden;
+  animation: slideInLeft 0.5s ease-out;
+}
+.server-panel::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background:
+    radial-gradient(ellipse 200px 200px at 30% 20%, rgba(139,92,246,.12) 0%, transparent 70%),
+    radial-gradient(ellipse 150px 150px at 70% 80%, rgba(35,165,90,.06) 0%, transparent 70%);
+  animation: bgShift 20s ease-in-out infinite alternate;
 }
 .server-panel-header {
   padding: 16px 20px 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid rgba(255,255,255,.06);
   flex-shrink: 0;
   display: flex; align-items: center; justify-content: space-between;
 }
 .server-panel-header h2 {
-  font-size: 11px; font-weight: 700; color: var(--text-faint);
+  font-size: 11px; font-weight: 700; color: rgba(255,255,255,.3);
   letter-spacing: .05em; text-transform: uppercase;
 }
+/* OC Branding */
+.server-branding {
+  padding: 24px 20px 20px; text-align: center;
+  position: relative; z-index: 1;
+}
+.oc-logo { display: block; margin: 0 auto 8px; }
+.oc-glow-layer { animation: glowPulse 4s ease-in-out infinite; }
+.brand-name { font-size: 20px; font-weight: 700; color: white; margin-bottom: 4px; }
+.brand-tagline { font-size: 12px; color: rgba(255,255,255,.45); line-height: 1.4; }
+
 .header-actions { display: flex; gap: 4px; }
 .header-btn {
   width: 28px; height: 28px; border-radius: var(--radius-sm);
-  background: transparent; color: var(--text-faint);
+  background: transparent; color: rgba(255,255,255,.3);
   display: flex; align-items: center; justify-content: center;
   transition: all .15s; font-size: 14px;
 }
-.header-btn:hover { background: var(--bg-hover); color: var(--text-normal); }
+.header-btn:hover { background: var(--bg-hover); color: rgba(255,255,255,.7); }
 .header-btn svg { width: 14px; height: 14px; }
 
 /* Server list */
 .server-list { flex: 1; overflow-y: auto; padding: 8px; }
 .server-item {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 12px; border-radius: 6px;
+  display: flex; align-items: center; gap: 8px;
+  border-left: 3px solid transparent; border-radius: 0 8px 8px 0;
+  padding: 8px 10px;
   cursor: pointer; transition: background .15s;
   position: relative;
+  opacity: 0; animation: slideInLeft 0.4s ease-out forwards;
 }
-.server-item:hover { background: var(--bg-hover); }
-.server-item.active { background: var(--bg-active); }
+.server-item:nth-child(1) { animation-delay: 0.3s; }
+.server-item:nth-child(2) { animation-delay: 0.4s; }
+.server-item:nth-child(3) { animation-delay: 0.5s; }
+.server-item:nth-child(4) { animation-delay: 0.6s; }
+.server-item:nth-child(5) { animation-delay: 0.7s; }
+.server-item:hover { background: rgba(255,255,255,.04); }
+.server-item.active { background: rgba(139,92,246,.15); border-left-color: #8b5cf6; }
 .server-item .srv-icon {
-  width: 40px; height: 40px; border-radius: 12px;
+  width: 28px; height: 28px; border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 16px; color: white;
+  font-weight: 700; font-size: 12px; color: white;
   flex-shrink: 0; transition: border-radius .2s;
   position: relative;
 }
@@ -77,14 +101,15 @@
 .server-item.active .srv-icon { border-radius: 10px; }
 .server-item .srv-info { flex: 1; min-width: 0; }
 .server-item .srv-name {
-  font-size: 14px; font-weight: 600; color: var(--text-normal);
+  font-size: 12px; font-weight: 600; color: rgba(255,255,255,.6);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.server-item.active .srv-name { color: white; }
 .server-item .srv-meta {
   display: flex; align-items: center; gap: 6px; margin-top: 2px;
 }
 .server-item .srv-host {
-  font-size: 12px; color: var(--text-faint);
+  font-size: 10px; color: rgba(255,255,255,.3);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .server-item .srv-last {
@@ -95,11 +120,8 @@
 /* Status dot on icon */
 .srv-status-dot {
   width: 10px; height: 10px; border-radius: 50%;
-  position: absolute; bottom: -1px; right: -1px;
-  border: 2.5px solid var(--bg-secondary);
+  margin-left: auto; flex-shrink: 0; position: static;
 }
-.server-item:hover .srv-status-dot { border-color: var(--bg-hover); }
-.server-item.active .srv-status-dot { border-color: var(--bg-active); }
 .srv-status-dot.online { background: var(--green); }
 .srv-status-dot.slow { background: var(--yellow); }
 .srv-status-dot.offline { background: var(--red); }
@@ -108,6 +130,15 @@
   background: var(--text-micro);
   animation: pulse 1s ease-in-out infinite;
 }
+
+/* Status text labels */
+.srv-status-text {
+  font-size: 9px; font-weight: 600; margin-left: auto; flex-shrink: 0;
+  text-transform: uppercase;
+}
+.srv-status-text.online { color: var(--green); }
+.srv-status-text.offline { color: var(--red); }
+.srv-status-text.unknown { color: var(--text-micro); }
 
 /* Latency badge */
 .srv-latency {
@@ -153,7 +184,7 @@
 
 /* Footer */
 .server-panel-footer {
-  padding: 10px 12px; border-top: 1px solid var(--border); flex-shrink: 0;
+  padding: 10px 12px; border-top: 1px solid rgba(255,255,255,.06); flex-shrink: 0;
   display: flex; gap: 6px;
 }
 .btn-add-server {
@@ -189,6 +220,7 @@
 .form-panel {
   flex: 1; display: flex; align-items: center; justify-content: center;
   z-index: 1; position: relative; padding: 40px;
+  animation: slideInRight 0.5s ease-out 0.1s both;
 }
 .form-container {
   width: 100%; max-width: 400px;
@@ -244,14 +276,14 @@
 }
 .form-label .required { color: var(--red); margin-left: 2px; }
 .form-input {
-  width: 100%; padding: 10px 12px;
+  width: 100%; padding: 12px 14px;
   background: var(--bg-input); color: var(--text-normal);
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
-  font-size: 14px; transition: border-color .2s;
+  border: 1px solid var(--border); border-radius: 12px;
+  font-size: 14px; transition: border-color .2s, box-shadow .2s;
 }
 .form-input::placeholder { color: var(--text-micro); }
 .form-input:hover { border-color: var(--border-strong); }
-.form-input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.form-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(88,101,242,.2); }
 .form-input.error { border-color: var(--red); }
 
 /* Password field */
@@ -290,8 +322,8 @@
   margin-bottom: 16px; margin-top: -8px;
 }
 .remember-password-group input[type="checkbox"] {
-  width: 16px; height: 16px; accent-color: var(--accent);
-  cursor: pointer; margin: 0;
+  width: 18px; height: 18px; accent-color: var(--accent);
+  cursor: pointer; margin: 0; border-radius: 6px;
 }
 .remember-password-label {
   font-size: 13px; color: var(--text-muted);
@@ -300,13 +332,20 @@
 
 /* Primary button */
 .btn-primary {
-  width: 100%; padding: 12px; border-radius: var(--radius-sm);
-  background: var(--accent); color: white;
-  font-size: 14px; font-weight: 600;
-  transition: background .15s; position: relative; overflow: hidden;
+  width: 100%; padding: 12px; border-radius: 12px;
+  background: linear-gradient(135deg, #5865f2, #4752c4);
+  color: white; font-size: 15px; font-weight: 600;
+  transition: all .2s; position: relative; overflow: hidden;
+  box-shadow: 0 2px 12px rgba(88,101,242,.3);
 }
-.btn-primary:hover { background: var(--accent-hover); }
-.btn-primary:active { background: var(--accent-active); }
+.btn-primary:hover { background: linear-gradient(135deg, #6872f5, #5460d9); box-shadow: 0 4px 16px rgba(88,101,242,.4); }
+.btn-primary:hover::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(110deg, transparent 25%, rgba(255,255,255,.1) 50%, transparent 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+.btn-primary:active { background: linear-gradient(135deg, #4752c4, #3b44b0); }
 .btn-primary:disabled { background: var(--border-strong); color: var(--text-faint); cursor: not-allowed; }
 .btn-primary.loading { pointer-events: none; }
 .btn-primary.loading .btn-text { opacity: 0; }
@@ -714,4 +753,35 @@
 @keyframes checkPop {
   from { transform: scale(0); opacity: 0; }
   to   { transform: scale(1); opacity: 1; }
+}
+
+@keyframes slideInLeft {
+  from { transform: translateX(-30px); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(30px); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes glowPulse {
+  0%, 100% { filter: blur(4px); opacity: 0.35; }
+  50%      { filter: blur(6px); opacity: 0.5; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ═══ Reduced motion ═══ */
+@media (prefers-reduced-motion: reduce) {
+  .server-panel, .form-panel, .form-container, .server-item {
+    animation: none !important; opacity: 1 !important;
+  }
+  .connect-page::before, .server-panel::before, .oc-glow-layer {
+    animation: none !important;
+  }
+  .btn-primary:hover::after { animation: none !important; }
 }
