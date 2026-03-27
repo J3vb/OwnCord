@@ -459,6 +459,11 @@ DM channels persist in the database but are marked as "closed" by the
 opening user. Messages in a closed DM auto-reopen it. Switching servers
 clears open DM state (DM channels not visible again until re-opened).
 
+The `dm_channel_close` event is sent both when the server processes
+a DM close via WebSocket and when the REST `DELETE /api/v1/dms/{id}`
+endpoint is called (the REST handler broadcasts it to the user's
+active WebSocket connections).
+
 ---
 
 ## Initial State (sent after auth_ok)
