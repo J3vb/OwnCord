@@ -24,6 +24,7 @@ import { FenwickTree } from "./message-list/fenwick";
 export interface MessageListOptions {
   readonly channelId: number;
   readonly channelName: string;
+  readonly channelType?: string;
   readonly currentUserId: number;
   readonly onScrollTop: () => void;
   readonly onReplyClick: (messageId: number) => void;
@@ -112,15 +113,21 @@ function buildVirtualItems(messages: readonly Message[]): readonly VirtualItem[]
 
 // -- Empty state --------------------------------------------------------------
 
-function renderEmptyState(channelName: string): HTMLDivElement {
+function renderEmptyState(channelName: string, channelType?: string): HTMLDivElement {
+  const isDm = channelType === "dm";
+
   const icon = createElement("div", { class: "channel-welcome-icon" });
-  icon.textContent = "#";
+  icon.textContent = isDm ? "@" : "#";
 
   const title = createElement("h2", { class: "channel-welcome-title" });
-  title.textContent = `Welcome to #${channelName}!`;
+  title.textContent = isDm
+    ? channelName
+    : `Welcome to #${channelName}!`;
 
   const text = createElement("p", { class: "channel-welcome-text" });
-  text.textContent = `This is the start of the #${channelName} channel.`;
+  text.textContent = isDm
+    ? `This is the beginning of your direct message history with ${channelName}.`
+    : `This is the start of the #${channelName} channel.`;
 
   const wrapper = createElement("div", { class: "channel-welcome" });
   wrapper.appendChild(icon);
@@ -277,7 +284,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     if (virtualItems.length === 0) {
       clearChildren(contentContainer);
-      contentContainer.appendChild(renderEmptyState(options.channelName));
+      contentContainer.appendChild(renderEmptyState(options.channelName, options.channelType));
       topSpacer.style.height = "0px";
       bottomSpacer.style.height = "0px";
       renderedStart = 0;

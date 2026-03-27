@@ -11,6 +11,7 @@ import type { ToastContainer } from "@components/Toast";
 import { createVideoGrid } from "@components/VideoGrid";
 import type { VideoGridComponent } from "@components/VideoGrid";
 import { buildChatHeader } from "./ChatHeader";
+import type { ChatHeaderRefs } from "./ChatHeader";
 import {
   createPinnedPanelController,
   createSearchOverlayController,
@@ -43,6 +44,8 @@ export interface ChatAreaResult {
   readonly videoGrid: VideoGridComponent;
   /** The chat header channel-name element (updated reactively). */
   readonly chatHeaderName: HTMLSpanElement | null;
+  /** Full chat header refs (hash, name, topic) for DM mode updates. */
+  readonly chatHeaderRefs: ChatHeaderRefs;
   /** The search overlay controller. */
   readonly searchCtrl: SearchOverlayController;
   /** All child MountableComponents for cleanup. */
@@ -133,6 +136,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     slots: { messagesSlot, typingSlot, inputSlot, videoGridSlot },
     videoGrid,
     chatHeaderName,
+    chatHeaderRefs: chatHeader.refs,
     searchCtrl,
     children,
     unsubscribers,

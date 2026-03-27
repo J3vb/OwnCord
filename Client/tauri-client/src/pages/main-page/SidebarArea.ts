@@ -28,7 +28,7 @@ import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
-import { dmStore, clearDmUnread } from "@stores/dm.store";
+import { dmStore, clearDmUnread, addDmChannel } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import {
   createProfileManager,
@@ -361,6 +361,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         unreadCount: 0,
       };
 
+      addDmChannel(dmChannel);
       selectDmConversation(dmChannel);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to create DM";

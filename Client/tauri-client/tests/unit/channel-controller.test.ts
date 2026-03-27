@@ -79,6 +79,10 @@ vi.mock("@stores/messages.store", () => ({
   getChannelMessages: mockGetChannelMessages,
 }));
 
+vi.mock("../../src/pages/main-page/ChatHeader", () => ({
+  updateChatHeaderForDm: vi.fn(),
+}));
+
 // ---------------------------------------------------------------------------
 // Imports
 // ---------------------------------------------------------------------------
@@ -110,6 +114,7 @@ function makeOpts(overrides: Partial<ChannelControllerOptions> = {}): ChannelCon
     getCurrentUserId: () => 1,
     slots: makeSlots(),
     chatHeaderName: document.createElement("span"),
+    chatHeaderRefs: null,
     ...overrides,
   };
 }

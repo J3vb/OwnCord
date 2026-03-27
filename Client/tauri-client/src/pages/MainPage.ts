@@ -272,6 +272,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         inputSlot: chatAreaResult.slots.inputSlot,
       },
       chatHeaderName: chatAreaResult.chatHeaderName,
+      chatHeaderRefs: chatAreaResult.chatHeaderRefs,
     });
 
     // Wire voice error callback to toast
@@ -349,7 +350,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             if (active.type === "text") {
               videoModeCtrl?.showChat();
             }
-            channelCtrl!.mountChannel(active.id, active.name);
+            channelCtrl!.mountChannel(active.id, active.name, active.type);
           }
         } catch (err) {
           log.error("Channel mount failed", err);
@@ -360,7 +361,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     const active = getActiveChannel();
     if (active !== null) {
-      channelCtrl!.mountChannel(active.id, active.name);
+      channelCtrl!.mountChannel(active.id, active.name, active.type);
     }
   }
 
