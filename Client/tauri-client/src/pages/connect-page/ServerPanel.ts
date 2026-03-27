@@ -36,7 +36,7 @@ function getIconColor(name: string): string {
 }
 
 function getIconInitials(name: string): string {
-  return name.slice(0, 2).toUpperCase();
+  return name.charAt(0).toUpperCase();
 }
 
 // ---------------------------------------------------------------------------
