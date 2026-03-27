@@ -8,6 +8,7 @@ import { createSettingsOverlay } from "@components/SettingsOverlay";
 import type { HealthStatus } from "@lib/profiles";
 import { createServerPanel } from "./connect-page/ServerPanel";
 import { createLoginForm } from "./connect-page/LoginForm";
+import { loadCredential } from "@lib/credentials";
 
 // ---------------------------------------------------------------------------
 // Re-exports (public API must not change)
@@ -57,6 +58,8 @@ export function createConnectPage(
   getPassword(): string;
   /** Re-render the server profile list with updated data. */
   refreshProfiles(profiles: readonly SimpleProfile[]): void;
+  /** Pre-select a server by host — fills the login form and loads saved credentials. */
+  selectServer(host: string, username?: string): void;
 } {
   let container: Element | null = null;
   let root: HTMLDivElement;
@@ -249,6 +252,23 @@ export function createConnectPage(
     getPassword: () => loginForm.getPassword(),
     refreshProfiles(profiles: readonly SimpleProfile[]): void {
       serverPanel.renderProfiles(profiles);
+    },
+    selectServer(host: string, username?: string): void {
+      loginForm.setHost(host);
+      if (username) {
+        loginForm.setCredentials(username);
+      }
+      // Load saved credentials asynchronously (same flow as clicking a server card)
+      void (async () => {
+        try {
+          const cred = await loadCredential(host);
+          if (cred && loginForm.getHost() === host) {
+            loginForm.setCredentials(cred.username, cred.password);
+          }
+        } catch {
+          // Credential loading is best-effort; user can type manually
+        }
+      })();
     },
   };
 }

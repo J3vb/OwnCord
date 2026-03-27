@@ -316,6 +316,18 @@ function renderPage(pageId: "connect" | "main"): void {
         log.warn("Failed to load profiles, using defaults", err);
         runHealthChecks(connectPage, getProfileList());
       }
+
+      // Quick-switch: if the user switched servers via the overlay, auto-select
+      // the target server profile so they can reconnect with one click.
+      const quickSwitchTarget = sessionStorage.getItem("owncord:quick-switch-target");
+      if (quickSwitchTarget !== null) {
+        sessionStorage.removeItem("owncord:quick-switch-target");
+        const targetProfile = profileManager.getAll().find((p) => p.host === quickSwitchTarget);
+        connectPage.selectServer(
+          quickSwitchTarget,
+          targetProfile?.username ?? undefined,
+        );
+      }
     })();
   } else {
     const mainPage = createMainPage({ ws, api });

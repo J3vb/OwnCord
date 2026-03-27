@@ -24,7 +24,7 @@ import type { QuickSwitchProfile } from "@components/QuickSwitchOverlay";
 import { createVoiceWidgetCallbacks, createSidebarVoiceCallbacks } from "./VoiceCallbacks";
 import { createInviteManagerController } from "./OverlayManagers";
 import { uiStore, setSidebarMode, setActiveDmUser } from "@stores/ui.store";
-import { authStore } from "@stores/auth.store";
+import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
 import {
   createProfileManager,
@@ -428,13 +428,17 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       quickSwitchInstance = createQuickSwitchOverlay({
         profiles,
         currentHost,
-        onSwitch: (_host, _name) => {
-          // Disconnect handler will be wired in Task 9
+        onSwitch: (host, _name) => {
           closeQuickSwitch();
+          // Store target for ConnectPage to auto-select after navigation
+          sessionStorage.setItem("owncord:quick-switch-target", host);
+          // Trigger normal logout flow (clears auth -> ws disconnect -> navigate to connect)
+          clearAuth();
         },
         onAddServer: () => {
-          // Navigate to connect page — wired in Task 9
           closeQuickSwitch();
+          // Navigate to ConnectPage so the user can add a new server
+          clearAuth();
         },
         onClose: closeQuickSwitch,
       });
