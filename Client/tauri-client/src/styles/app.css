@@ -834,6 +834,14 @@
   transition: width .2s;
 }
 .member-list.hidden { width: 0; padding: 0; overflow: hidden; }
+.sidebar-members-section {
+  border-top: 1px solid var(--border-glow, var(--border));
+  overflow-y: auto;
+  max-height: 200px;
+}
+.sidebar-members-section .member-list {
+  width: 100%;
+}
 .member-role-group {
   padding: 16px 16px 4px;
   font-size: 11px; font-weight: 700;

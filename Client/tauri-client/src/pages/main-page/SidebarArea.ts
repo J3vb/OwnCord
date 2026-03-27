@@ -12,6 +12,7 @@ import type { ApiClient } from "@lib/api";
 import type { RateLimiterSet } from "@lib/rate-limiter";
 import type { ToastContainer } from "@components/Toast";
 import { createChannelSidebar } from "@components/ChannelSidebar";
+import { createMemberList } from "@components/MemberList";
 import { createDmSidebar } from "@components/DmSidebar";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
 import { createEditChannelModal } from "@components/EditChannelModal";
@@ -73,6 +74,10 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   // Track invite controller cleanup (recreated on each channels mount)
   let inviteCleanup: (() => void) | null = null;
+
+  // Track extra channel-mode components (member list) for cleanup on mode switch
+  let channelModeExtras: MountableComponent[] = [];
+  let channelModeUnsubs: Array<() => void> = [];
 
   // Profile manager for quick-switch overlay
   let profileManager: ProfileManager | null = null;
@@ -259,6 +264,16 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       inviteCleanup();
       inviteCleanup = null;
     }
+    // Clean up channel-mode extras (member list, subscriptions)
+    for (const comp of channelModeExtras) {
+      comp.destroy?.();
+    }
+    channelModeExtras = [];
+    for (const unsub of channelModeUnsubs) {
+      unsub();
+    }
+    channelModeUnsubs = [];
+
     clearChildren(contentSlot);
 
     const innerSlot = createElement("div", { style: "flex:1;overflow:hidden;display:flex;flex-direction:column;" });
@@ -292,6 +307,61 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         sidebarHeader.appendChild(inviteBtn);
         inviteCleanup = () => { inviteCtrl.cleanup(); };
       }
+
+      // --- Member list (below channels) ---
+      const memberListContainer = createElement("div", {
+        class: "sidebar-members-section",
+        "data-testid": "sidebar-members",
+      });
+      // Respect initial visibility state
+      const initialMemberVis = uiStore.getState().memberListVisible;
+      memberListContainer.style.display = initialMemberVis ? "" : "none";
+
+      const memberList = createMemberList({
+        currentUserRole: authStore.getState().user?.role ?? "member",
+        onKick: async (userId, username) => {
+          try {
+            await api.adminKickMember(userId);
+            getToast()?.show(`Kicked ${username}`, "success");
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to kick member";
+            getToast()?.show(msg, "error");
+          }
+        },
+        onBan: async (userId, username) => {
+          try {
+            await api.adminBanMember(userId);
+            getToast()?.show(`Banned ${username}`, "success");
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to ban member";
+            getToast()?.show(msg, "error");
+          }
+        },
+        onChangeRole: async (userId, username, newRole) => {
+          const roleNameToId: Record<string, number> = { owner: 1, admin: 2, moderator: 3, member: 4 };
+          const roleId = roleNameToId[newRole];
+          if (roleId === undefined) return;
+          try {
+            await api.adminChangeRole(userId, roleId);
+            getToast()?.show(`Changed ${username}'s role to ${newRole}`, "success");
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to change role";
+            getToast()?.show(msg, "error");
+          }
+        },
+      });
+      memberList.mount(memberListContainer);
+      contentSlot.appendChild(memberListContainer);
+      channelModeExtras.push(memberList);
+
+      // Toggle member list visibility from ChatHeader button
+      const unsubMemberVis = uiStore.subscribeSelector(
+        (s) => s.memberListVisible,
+        (visible) => {
+          memberListContainer.style.display = visible ? "" : "none";
+        },
+      );
+      channelModeUnsubs.push(unsubMemberVis);
     } else {
       const dmSidebar = buildDmSidebar();
       dmSidebar.mount(innerSlot);
@@ -409,6 +479,14 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       inviteCleanup();
       inviteCleanup = null;
     }
+    for (const comp of channelModeExtras) {
+      comp.destroy?.();
+    }
+    channelModeExtras = [];
+    for (const unsub of channelModeUnsubs) {
+      unsub();
+    }
+    channelModeUnsubs = [];
   });
 
   unsubscribers.push(() => {
