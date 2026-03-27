@@ -15,6 +15,8 @@ export interface UiState {
   readonly transientError: string | null;
   readonly persistentError: string | null;
   readonly collapsedCategories: ReadonlySet<string>;
+  readonly sidebarMode: "channels" | "dms";
+  readonly activeDmUserId: number | null;
 }
 
 const INITIAL_STATE: UiState = {
@@ -27,6 +29,8 @@ const INITIAL_STATE: UiState = {
   transientError: null,
   persistentError: null,
   collapsedCategories: new Set(),
+  sidebarMode: "channels",
+  activeDmUserId: null,
 };
 
 export const uiStore = createStore<UiState>(INITIAL_STATE);
@@ -129,4 +133,22 @@ export function toggleCategory(category: string): void {
 /** Selector: check if a category is collapsed. */
 export function isCategoryCollapsed(category: string): boolean {
   return uiStore.select((s) => s.collapsedCategories.has(category));
+}
+
+/** Switch the sidebar between channel mode and DM mode.
+ *  Switching back to "channels" clears the active DM user. */
+export function setSidebarMode(mode: "channels" | "dms"): void {
+  uiStore.setState((prev) => ({
+    ...prev,
+    sidebarMode: mode,
+    activeDmUserId: mode === "channels" ? null : prev.activeDmUserId,
+  }));
+}
+
+/** Set the currently active DM conversation user ID. */
+export function setActiveDmUser(userId: number | null): void {
+  uiStore.setState((prev) => ({
+    ...prev,
+    activeDmUserId: userId,
+  }));
 }
