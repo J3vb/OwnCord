@@ -1356,6 +1356,19 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
+/* ── DM Back Header ── */
+.dm-back-header {
+  height: 44px; padding: 0 14px;
+  display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--border-glow, var(--border));
+  cursor: pointer; transition: background var(--transition-fast);
+}
+.dm-back-header:hover { background: var(--bg-hover); }
+.dm-back-arrow { color: var(--accent-primary, var(--accent)); font-size: 16px; }
+.dm-back-info { flex: 1; }
+.dm-back-title { color: var(--accent-primary, var(--accent)); font-weight: 600; font-size: 12px; }
+.dm-back-subtitle { color: var(--text-micro); font-size: 9px; }
+
 /* ── Friends / DM View ── */
 .dm-sidebar-header {
   padding: 8px; flex-shrink: 0;
@@ -2205,3 +2218,41 @@
 .large-font {
   --font-size: 18px;
 }
+
+/* ── Quick-Switch Overlay ── */
+.quick-switch-backdrop {
+  position: fixed; inset: 0; z-index: 200;
+  background: var(--bg-overlay);
+  display: flex; align-items: center; justify-content: center;
+}
+.quick-switch-modal {
+  width: 380px; max-width: 90vw;
+  background: var(--bg-primary); border: 1px solid var(--border-glow, var(--border));
+  border-radius: var(--radius-lg); overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0,0,0,.6);
+}
+.quick-switch-header { padding: 20px 20px 12px; }
+.quick-switch-header h2 { font-size: 16px; font-weight: 700; color: white; margin: 0 0 4px; }
+.quick-switch-subtitle { font-size: 12px; color: var(--text-micro); margin: 0; }
+.quick-switch-list { padding: 0 12px 8px; }
+.quick-switch-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px; border-radius: var(--radius-md);
+  cursor: pointer; border: 1px solid transparent;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.quick-switch-item:hover { background: var(--bg-hover); border-color: var(--border-glow, transparent); }
+.quick-switch-item.current { background: var(--bg-active); border-color: var(--border-glow, var(--border)); cursor: default; }
+.quick-switch-item.add-new { border-style: dashed; border-color: var(--border); color: var(--accent-primary, var(--accent)); }
+.quick-switch-icon {
+  width: 36px; height: 36px; border-radius: var(--radius-md);
+  background: var(--bg-secondary); display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 14px; color: var(--text-muted); flex-shrink: 0;
+}
+.quick-switch-item.current .quick-switch-icon { background: var(--accent-gradient, var(--accent)); color: white; }
+.quick-switch-item.add-new .quick-switch-icon { background: transparent; font-size: 20px; color: inherit; }
+.quick-switch-info { flex: 1; min-width: 0; }
+.quick-switch-name { font-size: 13px; font-weight: 600; color: var(--text-normal); }
+.quick-switch-host { font-size: 10px; color: var(--text-micro); }
+.quick-switch-connected-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+.quick-switch-footer { padding: 12px; text-align: center; font-size: 12px; color: var(--text-micro); }
