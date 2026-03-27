@@ -43,6 +43,17 @@ const QUALITY_BARS: Record<QualityLevel, number> = {
   bad: 1,
 };
 
+/** Format milliseconds elapsed into HH:MM:SS or MM:SS. */
+function formatElapsed(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${String(h).padStart(2, "0")}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
 export function createVoiceWidget(options: VoiceWidgetOptions): MountableComponent {
   const ac = new AbortController();
   let root: HTMLDivElement | null = null;
@@ -58,6 +69,10 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   let statsPane: HTMLDivElement | null = null;
   let statsPoller: ConnectionStatsPoller | null = null;
   let statsUnlisten: (() => void) | null = null;
+
+  // Elapsed timer
+  let timerEl: HTMLSpanElement | null = null;
+  let timerInterval: ReturnType<typeof setInterval> | null = null;
 
   // Stats pane field elements (set during mount)
   let outRateEl: HTMLSpanElement | null = null;
@@ -118,6 +133,26 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     statsPoller = null;
   }
 
+  function updateElapsedTimer(): void {
+    const joinedAt = voiceStore.getState().joinedAt;
+    if (timerEl === null || joinedAt === null) return;
+    setText(timerEl, formatElapsed(Date.now() - joinedAt));
+  }
+
+  function startElapsedTimer(): void {
+    if (timerInterval !== null) return;
+    updateElapsedTimer();
+    timerInterval = setInterval(updateElapsedTimer, 1000);
+  }
+
+  function stopElapsedTimer(): void {
+    if (timerInterval !== null) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
+    if (timerEl !== null) setText(timerEl, "00:00");
+  }
+
   function render(): void {
     if (root === null || channelNameEl === null) return;
 
@@ -127,12 +162,14 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     if (channelId === null) {
       root.classList.remove("visible");
       stopStatsPoller();
+      stopElapsedTimer();
       statsPane?.classList.remove("visible");
       return;
     }
 
     root.classList.add("visible");
     startStatsPoller();
+    startElapsedTimer();
 
     // Channel name
     const channel = channelsStore.getState().channels.get(channelId);
@@ -171,6 +208,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     // Header row: "Voice Connected" + channel name + signal icon
     const header = createElement("div", { class: "vw-header" });
     const connLabel = createElement("span", { class: "vw-connected" }, "Voice Connected");
+    timerEl = createElement("span", { class: "vw-timer" }, "00:00");
     channelNameEl = createElement("span", { class: "vw-channel" }, "Voice Channel");
 
     signalWrap = createElement("div", { class: "vw-signal", "aria-label": "Connection quality" });
@@ -182,7 +220,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       statsPane?.classList.toggle("visible");
     }, { signal: ac.signal });
 
-    appendChildren(header, connLabel, channelNameEl, signalWrap);
+    appendChildren(header, connLabel, timerEl, channelNameEl, signalWrap);
 
     // Expanded stats pane (hidden by default)
     statsPane = createElement("div", { class: "vw-stats" });
@@ -277,6 +315,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
   function destroy(): void {
     stopStatsPoller();
+    stopElapsedTimer();
     ac.abort();
     for (const unsub of unsubs) {
       unsub();
@@ -291,6 +330,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     shareBtn = null;
     signalWrap = null;
     pingLabel = null;
+    timerEl = null;
     statsPane = null;
     outRateEl = null;
     outPacketsEl = null;

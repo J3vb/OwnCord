@@ -59,6 +59,14 @@ export function applyThemeByName(name: string): void {
     if (theme !== null) {
       document.body.classList.add("theme-custom");
       for (const [prop, value] of Object.entries(theme.colors)) {
+        // Validate: property must be a CSS custom property with a spec-compliant
+        // ident name; value must only contain safe CSS value characters to
+        // prevent CSS injection from untrusted theme JSON files.
+        if (!prop.startsWith("--") || !/^[a-zA-Z_][\w-]*$/.test(prop.slice(2))) continue;
+        if (typeof value !== "string") continue;
+        // Allowlist: only permit characters found in typical CSS color/sizing values.
+        // Blocks url(), expression(), semicolons, braces, and !important.
+        if (!/^[\w\s#().,%+\-/]+$/.test(value)) continue;
         style.setProperty(prop, value);
       }
     }
@@ -116,9 +124,25 @@ export function exportTheme(theme: OwnCordTheme): string {
 }
 
 /**
- * Restores the previously persisted theme on application startup.
+ * Restores the previously persisted theme and accent color on application startup.
  * Call once from the app entry point.
  */
 export function restoreTheme(): void {
   applyThemeByName(getActiveThemeName());
+
+  // Restore the user's accent color override (saved by AppearanceTab).
+  // The accent must be applied after the theme so it wins over the theme's
+  // --accent value via inline style specificity.
+  try {
+    const raw = localStorage.getItem("owncord:pref:accentColor");
+    if (raw !== null) {
+      const accent = JSON.parse(raw);
+      if (typeof accent === "string" && /^#[\da-fA-F]{3,8}$/.test(accent)) {
+        document.documentElement.style.setProperty("--accent", accent);
+        document.body.style.setProperty("--accent", accent);
+      }
+    }
+  } catch {
+    // Corrupted localStorage — ignore, theme default will apply.
+  }
 }

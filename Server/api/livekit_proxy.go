@@ -22,6 +22,8 @@ import (
 func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 	target, err := url.Parse(livekitURL)
 	if err != nil {
+		slog.Error("invalid LiveKit URL — falling back to localhost:7880",
+			"url", livekitURL, "error", err)
 		target, _ = url.Parse("http://localhost:7880")
 	}
 

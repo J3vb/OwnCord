@@ -37,6 +37,14 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 		return
 	}
 
+	// Validate the target channel exists before any state changes (leaving
+	// the current voice channel, persisting join, etc.).
+	ch, err := h.db.GetChannel(channelID)
+	if err != nil || ch == nil {
+		c.sendMsg(buildErrorMsg(ErrCodeNotFound, "channel not found"))
+		return
+	}
+
 	// Hard-fail when LiveKit is not configured — without an SFU the client
 	// cannot connect to voice, so persisting state would create a ghost.
 	if h.livekit == nil {
@@ -63,12 +71,6 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 	// If user is already in a different voice channel, leave it first.
 	if currentChID > 0 {
 		h.handleVoiceLeave(c)
-	}
-
-	ch, err := h.db.GetChannel(channelID)
-	if err != nil || ch == nil {
-		c.sendMsg(buildErrorMsg(ErrCodeNotFound, "channel not found"))
-		return
 	}
 
 	// Check channel capacity.

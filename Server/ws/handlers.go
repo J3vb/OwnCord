@@ -560,13 +560,29 @@ func (h *Hub) handleTyping(c *Client, payload json.RawMessage) {
 		return // silently drop; no error for typing throttle
 	}
 
+	// DM channels require participant check instead of role-based permissions.
+	typCh, typChErr := h.db.GetChannel(channelID)
+	if typChErr != nil || typCh == nil {
+		return // silently drop for unknown channels
+	}
+	if typCh.Type == "dm" {
+		ok, dmErr := h.db.IsDMParticipant(c.userID, channelID)
+		if dmErr != nil || !ok {
+			return // silently drop — not a DM participant
+		}
+	}
+
 	var username string
 	if c.user != nil {
 		username = c.user.Username
 	}
 
 	// Broadcast to channel, excluding sender.
-	h.broadcastExclude(channelID, c.userID, buildTypingMsg(channelID, c.userID, username))
+	if typCh.Type == "dm" {
+		h.broadcastToDMParticipants(channelID, buildTypingMsg(channelID, c.userID, username))
+	} else {
+		h.broadcastExclude(channelID, c.userID, buildTypingMsg(channelID, c.userID, username))
+	}
 }
 
 // handlePresence processes a presence_update message.
@@ -677,9 +693,22 @@ func (h *Hub) handleChannelFocus(c *Client, payload json.RawMessage) {
 		return
 	}
 
-	// Permission check: user must have READ_MESSAGES on the target channel.
-	if !h.requireChannelPerm(c, chID, permissions.ReadMessages, "READ_MESSAGES") {
+	// DM channels use participant-based auth instead of role-based permissions.
+	ch, chErr := h.db.GetChannel(chID)
+	if chErr != nil || ch == nil {
+		slog.Debug("handleChannelFocus: channel not found", "channel_id", chID)
 		return
+	}
+	if ch.Type == "dm" {
+		ok, dmErr := h.db.IsDMParticipant(c.userID, chID)
+		if dmErr != nil || !ok {
+			c.sendMsg(buildErrorMsg(ErrCodeForbidden, "not a participant in this DM"))
+			return
+		}
+	} else {
+		if !h.requireChannelPerm(c, chID, permissions.ReadMessages, "READ_MESSAGES") {
+			return
+		}
 	}
 
 	c.mu.Lock()

@@ -125,14 +125,33 @@ func handleGetMessages(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		// Permission check: user must have READ_MESSAGES on this channel.
-		role, _ := r.Context().Value(RoleKey).(*db.Role)
-		if !hasChannelPermREST(database, role, channelID, permissions.ReadMessages) {
-			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error:   "FORBIDDEN",
-				Message: "no permission to view this channel",
-			})
-			return
+		// DM channels use participant-based auth instead of role-based permissions.
+		if ch.Type == "dm" {
+			user, _ := r.Context().Value(UserKey).(*db.User)
+			if user == nil {
+				writeJSON(w, http.StatusUnauthorized, errorResponse{
+					Error:   "UNAUTHORIZED",
+					Message: "authentication required",
+				})
+				return
+			}
+			ok, dmErr := database.IsDMParticipant(user.ID, channelID)
+			if dmErr != nil || !ok {
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "not a participant in this DM",
+				})
+				return
+			}
+		} else {
+			role, _ := r.Context().Value(RoleKey).(*db.Role)
+			if !hasChannelPermREST(database, role, channelID, permissions.ReadMessages) {
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "no permission to view this channel",
+				})
+				return
+			}
 		}
 
 		// Parse query params.

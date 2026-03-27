@@ -91,6 +91,7 @@ describe("WS Dispatcher", () => {
       localDeafened: false,
       localCamera: false,
       localScreenshare: false,
+      joinedAt: null,
     }));
 
     mock = createMockWs();

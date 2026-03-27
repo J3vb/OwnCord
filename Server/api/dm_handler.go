@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -9,14 +10,21 @@ import (
 	"github.com/owncord/server/db"
 )
 
+// DMBroadcaster is the interface needed to send WebSocket events from REST
+// handlers. Satisfied by *ws.Hub.
+type DMBroadcaster interface {
+	SendToUser(userID int64, msg []byte) bool
+}
+
 // MountDMRoutes registers DM-related routes onto r.
 // All routes require authentication.
-func MountDMRoutes(r chi.Router, database *db.DB) {
+// hub is used to send real-time WebSocket events on DM close.
+func MountDMRoutes(r chi.Router, database *db.DB, broadcaster DMBroadcaster) {
 	r.Route("/api/v1/dms", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
 		r.Post("/", handleCreateDM(database))
 		r.Get("/", handleListDMs(database))
-		r.Delete("/{channelId}", handleCloseDM(database))
+		r.Delete("/{channelId}", handleCloseDM(database, broadcaster))
 	})
 }
 
@@ -157,7 +165,7 @@ func handleListDMs(database *db.DB) http.HandlerFunc {
 }
 
 // handleCloseDM removes a DM channel from the authenticated user's open list.
-func handleCloseDM(database *db.DB) http.HandlerFunc {
+func handleCloseDM(database *db.DB, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
@@ -200,6 +208,16 @@ func handleCloseDM(database *db.DB) http.HandlerFunc {
 				Message: "failed to close DM",
 			})
 			return
+		}
+
+		// Notify the closing user's WebSocket connections so the sidebar updates
+		// immediately without waiting for a reconnect.
+		if broadcaster != nil {
+			closeMsg := []byte(fmt.Sprintf(`{"type":"dm_channel_close","payload":{"channel_id":%d}}`, channelID))
+			if ok := broadcaster.SendToUser(user.ID, closeMsg); !ok {
+				slog.Debug("handleCloseDM: user not connected, WS notify skipped",
+					"user_id", user.ID, "channel_id", channelID)
+			}
 		}
 
 		w.WriteHeader(http.StatusNoContent)

@@ -387,14 +387,15 @@ func (h *Hub) ReplayBuffer() *EventRingBuffer {
 func wrapWithSeq(msg []byte, seq uint64) []byte {
 	// Fast path: inject seq after the opening brace.
 	// e.g., {"type":"chat_message",...} → {"seq":123,"type":"chat_message",...}
-	if len(msg) > 0 && msg[0] == '{' {
-		prefix := fmt.Sprintf(`{"seq":%d,`, seq)
-		result := make([]byte, 0, len(prefix)+len(msg)-1)
-		result = append(result, prefix...)
-		result = append(result, msg[1:]...) // skip opening brace
-		return result
+	// Guard: msg must be a non-empty JSON object (starts with '{' and has content).
+	if len(msg) < 2 || msg[0] != '{' {
+		return msg
 	}
-	return msg
+	prefix := fmt.Sprintf(`{"seq":%d,`, seq)
+	result := make([]byte, 0, len(prefix)+len(msg)-1)
+	result = append(result, prefix...)
+	result = append(result, msg[1:]...) // skip opening brace
+	return result
 }
 
 // staleClientTimeout is the maximum duration a client can go without sending

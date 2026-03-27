@@ -159,24 +159,45 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
         user: payload.user.username,
       });
       addMessage(payload);
-      // Increment unread for non-active channels
       const activeId = channelsStore.select(
         (s) => s.activeChannelId,
       );
-      if (payload.channel_id !== activeId) {
+
+      // Check if this is a DM channel and whether the message is from self.
+      const dmChannels = dmStore.getState().channels;
+      const isDm = dmChannels.some((c) => c.channelId === payload.channel_id);
+      const currentUserId = authStore.getState().user?.id ?? null;
+      const isOwnMessage = currentUserId !== null && payload.user.id === currentUserId;
+
+      // Increment channel-level unread for non-active, non-own-message channels.
+      // DM channel IDs are not in channelsStore (they use dmStore), so
+      // incrementUnread is a no-op for DMs, but the own-message guard is
+      // applied here for defence-in-depth.
+      if (payload.channel_id !== activeId && !isOwnMessage) {
         incrementUnread(payload.channel_id);
       }
 
-      // Update DM store last message if this message belongs to a DM channel
-      const dmChannels = dmStore.getState().channels;
-      const isDm = dmChannels.some((c) => c.channelId === payload.channel_id);
+      // Update DM store last message if this message belongs to a DM channel.
+      // Skip unread increment for own messages and for the currently focused DM.
       if (isDm) {
-        updateDmLastMessage(
-          payload.channel_id,
-          payload.id,
-          payload.content,
-          payload.timestamp,
-        );
+        const isDmActive = payload.channel_id === activeId;
+        if (isOwnMessage || isDmActive) {
+          // Update last message preview but don't increment unread count.
+          dmStore.setState((prev) => ({
+            channels: prev.channels.map((c) =>
+              c.channelId === payload.channel_id
+                ? { ...c, lastMessageId: payload.id, lastMessage: payload.content, lastMessageAt: payload.timestamp }
+                : c,
+            ),
+          }));
+        } else {
+          updateDmLastMessage(
+            payload.channel_id,
+            payload.id,
+            payload.content,
+            payload.timestamp,
+          );
+        }
       }
 
       // Fire desktop notification, taskbar flash, and sound

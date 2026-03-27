@@ -125,6 +125,8 @@ export class LiveKitSession {
   private reconnectAc: AbortController | null = null;
   /** Master output volume multiplier (0-2.0). Per-user volumes are scaled by this. */
   private outputVolumeMultiplier = loadPref<number>("outputVolume", 100) / 100;
+  /** Remote microphone audio elements keyed by track SID for cleanup on disconnect. */
+  private remoteMicAudioElements = new Map<string, HTMLAudioElement>();
   /** Screenshare audio elements keyed by userId — separate from mic audio pipeline. */
   private screenshareAudioElements = new Map<number, Set<HTMLAudioElement>>();
   /** Persisted mute state for screenshare audio so replacement tracks inherit UI state. */
@@ -215,7 +217,7 @@ export class LiveKitSession {
     if (publication.source === Track.Source.Microphone) {
       const { localMuted, localDeafened } = voiceStore.getState();
       if (localMuted || localDeafened) {
-        void this.applyMicMuteState(true);
+        this.applyMicMuteState(true).catch((e) => log.warn("applyMicMuteState failed", e));
         log.debug("LocalTrackPublished: re-applied mute to mic track");
       }
     }
@@ -257,6 +259,10 @@ export class LiveKitSession {
         const audioEl = track.attach();
         audioEl.style.display = "none";
         document.body.appendChild(audioEl);
+        // Track mic audio elements for cleanup on abnormal disconnect
+        if (track.sid !== undefined) {
+          this.remoteMicAudioElements.set(track.sid, audioEl);
+        }
         // Apply saved per-user volume via LiveKit's setVolume (supports 0-2.0 range)
         participant.setVolume(this.getEffectiveVolume(userId));
         const savedOutput = loadPref<string>("audioOutputDevice", "");
@@ -295,6 +301,7 @@ export class LiveKitSession {
         log.debug("Screenshare audio track unsubscribed and detached", { userId, trackSid: track.sid });
       } else {
         for (const el of track.detach()) el.remove();
+        if (track.sid !== undefined) this.remoteMicAudioElements.delete(track.sid);
         log.debug("Remote audio track unsubscribed and detached", { userId, trackSid: track.sid });
       }
     } else if (track.kind === Track.Kind.Video) {
@@ -404,6 +411,9 @@ export class LiveKitSession {
         this.setupAudioPipeline();
         this.reapplyMuteGain();
         this.startTokenRefreshTimer();
+        // Clear the abort controller after all post-connect work is done so
+        // leaveVoice() can still abort during restoreLocalVoiceState above.
+        this.reconnectAc = null;
         // Request a fresh token since the stored one may be close to expiry.
         this.requestTokenRefresh();
         return;
@@ -464,7 +474,9 @@ export class LiveKitSession {
     }
     log.info("Requesting voice token refresh");
     this.ws.send({ type: "voice_token_refresh", payload: {} });
-    this.startTokenRefreshTimer();
+    // NOTE: startTokenRefreshTimer is called from handleVoiceTokenRefresh
+    // (the server response handler), not here, to avoid scheduling two
+    // competing timers per cycle.
   }
 
   handleVoiceTokenRefresh(token?: string): void {
@@ -699,6 +711,10 @@ export class LiveKitSession {
     if (sendWs && this.ws !== null) {
       this.ws.send({ type: "voice_leave", payload: {} });
     }
+    // Remove orphaned remote mic audio elements (normally cleaned up by
+    // TrackUnsubscribed, but may be missed during rapid reconnection).
+    for (const el of this.remoteMicAudioElements.values()) el.remove();
+    this.remoteMicAudioElements.clear();
     for (const audioEls of this.screenshareAudioElements.values()) {
       for (const el of audioEls) el.remove();
     }
@@ -730,14 +746,14 @@ export class LiveKitSession {
 
   setMuted(muted: boolean): void {
     setLocalMuted(muted);
-    void this.applyMicMuteState(muted);
+    this.applyMicMuteState(muted).catch((e) => log.warn("applyMicMuteState failed", e));
   }
 
   setDeafened(deafened: boolean): void {
     setLocalDeafened(deafened);
     this.applyRemoteAudioSubscriptionState(deafened);
     const shouldMute = deafened || voiceStore.getState().localMuted;
-    void this.applyMicMuteState(shouldMute);
+    this.applyMicMuteState(shouldMute).catch((e) => log.warn("applyMicMuteState failed", e));
     log.debug("Deafen state changed", { deafened });
   }
 
@@ -1062,7 +1078,7 @@ export class LiveKitSession {
   private reapplyMuteGain(): void {
     const { localMuted, localDeafened } = voiceStore.getState();
     if (localMuted || localDeafened) {
-      void this.applyMicMuteState(true);
+      this.applyMicMuteState(true).catch((e) => log.warn("applyMicMuteState failed", e));
     }
   }
 

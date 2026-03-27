@@ -55,6 +55,7 @@ const VOICE_INITIAL: VoiceState = {
   localDeafened: false,
   localCamera: false,
   localScreenshare: false,
+  joinedAt: null,
 };
 
 const UI_INITIAL: UiState = {

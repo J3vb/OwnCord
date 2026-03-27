@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -30,10 +31,20 @@ type DMUser struct {
 
 // GetOrCreateDMChannel finds or creates a DM channel between two users.
 // Returns the channel, whether it was newly created, and any error.
+// The entire lookup+create is wrapped in a single IMMEDIATE transaction to
+// prevent a TOCTOU race where two concurrent requests both see ErrNoRows and
+// each create a separate DM channel for the same user pair.
 func (d *DB) GetOrCreateDMChannel(user1ID, user2ID int64) (*Channel, bool, error) {
-	// Check for an existing DM channel between the two users.
+	tx, err := d.sqlDB.BeginTx(context.Background(), &sql.TxOptions{
+		Isolation: sql.LevelSerializable,
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("GetOrCreateDMChannel begin tx: %w", err)
+	}
+
+	// Check for an existing DM channel inside the transaction.
 	var existingID int64
-	err := d.sqlDB.QueryRow(
+	err = tx.QueryRow(
 		`SELECT dp1.channel_id FROM dm_participants dp1
 		 JOIN dm_participants dp2 ON dp1.channel_id = dp2.channel_id
 		 JOIN channels c ON c.id = dp1.channel_id
@@ -43,6 +54,16 @@ func (d *DB) GetOrCreateDMChannel(user1ID, user2ID int64) (*Channel, bool, error
 	).Scan(&existingID)
 
 	if err == nil {
+		// Existing channel found — ensure the calling user has it open (re-open
+		// is idempotent). Without this, a user who previously closed the DM would
+		// not see it in their sidebar after the other party re-initiates.
+		_, _ = tx.Exec(
+			`INSERT OR IGNORE INTO dm_open_state (user_id, channel_id) VALUES (?, ?)`,
+			user1ID, existingID,
+		)
+		if commitErr := tx.Commit(); commitErr != nil {
+			return nil, false, fmt.Errorf("GetOrCreateDMChannel commit existing: %w", commitErr)
+		}
 		ch, getErr := d.GetChannel(existingID)
 		if getErr != nil {
 			return nil, false, fmt.Errorf("GetOrCreateDMChannel fetch existing: %w", getErr)
@@ -53,14 +74,11 @@ func (d *DB) GetOrCreateDMChannel(user1ID, user2ID int64) (*Channel, bool, error
 		return ch, false, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
+		_ = tx.Rollback()
 		return nil, false, fmt.Errorf("GetOrCreateDMChannel lookup: %w", err)
 	}
 
-	// No existing DM — create one inside a transaction.
-	tx, err := d.sqlDB.Begin()
-	if err != nil {
-		return nil, false, fmt.Errorf("GetOrCreateDMChannel begin tx: %w", err)
-	}
+	// No existing DM — create one inside the same transaction.
 
 	// Insert channel with type 'dm' and empty name.
 	res, err := tx.Exec(

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -55,8 +56,8 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Channel and message REST routes.
 	MountChannelRoutes(r, database)
 
-	// DM (direct message) REST routes.
-	MountDMRoutes(r, database)
+	// DM REST routes are mounted after hub creation (below) so the hub can
+	// be passed as a DMBroadcaster for real-time close events.
 
 	// File upload and serving routes.
 	store, storeErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
@@ -87,6 +88,19 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		}
 	}
 
+	// Warn if LiveKit is externally managed and webhook may be blocked by admin CIDRs.
+	if lkErr == nil && cfg.Voice.LiveKitBinaryPath == "" {
+		lkHost := ""
+		if u, parseErr := url.Parse(cfg.Voice.LiveKitURL); parseErr == nil {
+			lkHost = u.Hostname()
+		}
+		if lkHost != "" && lkHost != "localhost" && lkHost != "127.0.0.1" && lkHost != "::1" {
+			slog.Warn("LiveKit is externally managed but webhook endpoint is admin-IP-restricted — "+
+				"ensure the LiveKit server's IP is in admin_allowed_cidrs or webhooks will be silently dropped",
+				"livekit_host", lkHost)
+		}
+	}
+
 	// LiveKit webhook endpoint (no auth middleware — uses LiveKit JWT verification).
 	if lkErr == nil {
 		r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs)).
@@ -104,6 +118,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		r.With(AuthMiddleware(database), RateLimitMiddleware(limiter, 30, time.Minute)).
 			Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins)))
 	}
+
+	// DM (direct message) REST routes — mounted after hub creation so the
+	// hub can send real-time dm_channel_close events to WebSocket clients.
+	MountDMRoutes(r, database, hub)
 
 	go hub.Run()
 	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins))

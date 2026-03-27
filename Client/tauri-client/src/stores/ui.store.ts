@@ -24,7 +24,7 @@ const INITIAL_STATE: UiState = {
   memberListVisible: true,
   settingsOpen: false,
   activeModal: null,
-  theme: "dark",
+  theme: "neon-glow",
   connectionStatus: "disconnected",
   transientError: null,
   persistentError: null,
@@ -136,8 +136,12 @@ export function loadCollapsedCategories(serverHost: string): void {
       uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
       return;
     }
-    const parsed = JSON.parse(raw) as string[];
-    const loaded: ReadonlySet<string> = new Set(parsed);
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed) || !parsed.every((s) => typeof s === "string")) {
+      uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
+      return;
+    }
+    const loaded: ReadonlySet<string> = new Set(parsed as string[]);
     uiStore.setState((prev) => ({ ...prev, collapsedCategories: loaded }));
   } catch {
     uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));

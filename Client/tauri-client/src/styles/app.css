@@ -165,6 +165,7 @@
 .voice-widget.visible { display: block; }
 .vw-header { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font-size: 12px; }
 .vw-connected { color: var(--green); font-weight: 700; }
+.vw-timer { color: var(--green); font-size: 11px; opacity: 0.8; font-variant-numeric: tabular-nums; }
 .vw-channel { color: var(--text-muted); }
 .vw-controls { display: flex; gap: 4px; padding: 4px 4px 0; }
 .vw-controls button {

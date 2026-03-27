@@ -70,7 +70,7 @@ async function collectAllStats(
     }
     return reports;
   } catch {
-    log.debug("Failed to access peer connection stats");
+    log.warn("Failed to access peer connection stats — LiveKit SDK internals may have changed");
     return [];
   }
 }

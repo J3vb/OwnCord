@@ -21,6 +21,7 @@ function resetStores(): void {
     localDeafened: false,
     localCamera: false,
     localScreenshare: false,
+    joinedAt: null,
   }));
   authStore.setState(() => ({
     token: null,

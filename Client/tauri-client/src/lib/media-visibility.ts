@@ -269,7 +269,8 @@ export function unobserveMedia(img: HTMLImageElement): void {
   observer?.unobserve(img);
   // Remove from allTracked to prevent unbounded WeakRef accumulation.
   for (const ref of allTracked) {
-    if (ref.deref() === img || ref.deref() === undefined) {
+    const target = ref.deref();
+    if (target === img || target === undefined) {
       allTracked.delete(ref);
     }
   }

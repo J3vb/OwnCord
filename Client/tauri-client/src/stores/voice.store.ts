@@ -41,6 +41,8 @@ export interface VoiceState {
   readonly localDeafened: boolean;
   readonly localCamera: boolean;
   readonly localScreenshare: boolean;
+  /** Epoch ms when the local user joined the current voice channel (for elapsed timer). */
+  readonly joinedAt: number | null;
 }
 
 const INITIAL_STATE: VoiceState = {
@@ -51,6 +53,7 @@ const INITIAL_STATE: VoiceState = {
   localDeafened: false,
   localCamera: false,
   localScreenshare: false,
+  joinedAt: null,
 };
 
 export const voiceStore = createStore<VoiceState>(INITIAL_STATE);
@@ -65,6 +68,7 @@ export function resetVoiceStore(): void {
     localDeafened: false,
     localCamera: false,
     localScreenshare: false,
+    joinedAt: null,
   }));
 }
 
@@ -155,11 +159,12 @@ export function removeVoiceUser(payload: VoiceLeavePayload): void {
   });
 }
 
-/** Set the current voice channel (local join). */
+/** Set the current voice channel (local join) and record the join timestamp. */
 export function joinVoiceChannel(channelId: number): void {
   voiceStore.setState((prev) => ({
     ...prev,
     currentChannelId: channelId,
+    joinedAt: Date.now(),
   }));
 }
 
@@ -169,11 +174,11 @@ export function leaveVoiceChannel(): void {
   voiceStore.setState((prev) => {
     const channelId = prev.currentChannelId;
     if (channelId === null || currentUserId === 0) {
-      return { ...prev, currentChannelId: null };
+      return { ...prev, currentChannelId: null, joinedAt: null };
     }
     const existingChannel = prev.voiceUsers.get(channelId);
     if (!existingChannel || !existingChannel.has(currentUserId)) {
-      return { ...prev, currentChannelId: null };
+      return { ...prev, currentChannelId: null, joinedAt: null };
     }
     const nextChannels = new Map(prev.voiceUsers);
     const nextUsers = new Map(existingChannel);
@@ -183,7 +188,7 @@ export function leaveVoiceChannel(): void {
     } else {
       nextChannels.set(channelId, nextUsers);
     }
-    return { ...prev, currentChannelId: null, voiceUsers: nextChannels };
+    return { ...prev, currentChannelId: null, joinedAt: null, voiceUsers: nextChannels };
   });
 }
 

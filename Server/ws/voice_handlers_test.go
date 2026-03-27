@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/owncord/server/auth"
+	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/ws"
 )
@@ -45,11 +46,24 @@ func openVoiceTestDB(t *testing.T) *db.DB {
 }
 
 // newVoiceHub creates a hub+db suitable for voice handler tests.
+// It injects a test LiveKit client so voice_join passes the livekit!=nil guard.
 func newVoiceHub(t *testing.T) (*ws.Hub, *db.DB) {
 	t.Helper()
 	database := openVoiceTestDB(t)
 	limiter := auth.NewRateLimiter()
 	hub := ws.NewHub(database, limiter)
+
+	// Inject a test LiveKit client with non-default credentials.
+	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{
+		LiveKitAPIKey:    "test-api-key-12345",
+		LiveKitAPISecret: "test-api-secret-67890abcdef",
+		LiveKitURL:       "ws://localhost:7880",
+	})
+	if err != nil {
+		t.Fatalf("NewLiveKitClient: %v", err)
+	}
+	hub.SetLiveKit(lk)
+
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 	return hub, database

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/owncord/server/auth"
+	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/ws"
 )
@@ -52,6 +53,7 @@ CREATE TABLE IF NOT EXISTS attachments (
     width       INTEGER,
     height      INTEGER
 );
+
 `)...)
 
 func openCoverageDB(t *testing.T) *db.DB {
@@ -75,6 +77,18 @@ func newCoverageHub(t *testing.T) (*ws.Hub, *db.DB) {
 	database := openCoverageDB(t)
 	limiter := auth.NewRateLimiter()
 	hub := ws.NewHub(database, limiter)
+
+	// Inject a test LiveKit client so voice_join passes the livekit!=nil guard.
+	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{
+		LiveKitAPIKey:    "test-api-key-12345",
+		LiveKitAPISecret: "test-api-secret-67890abcdef",
+		LiveKitURL:       "ws://localhost:7880",
+	})
+	if err != nil {
+		t.Fatalf("NewLiveKitClient: %v", err)
+	}
+	hub.SetLiveKit(lk)
+
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 	return hub, database

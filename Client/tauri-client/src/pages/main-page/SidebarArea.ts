@@ -463,6 +463,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         // Restore the channel the user was on before entering DMs
         if (channelBeforeDm !== null) {
           setActiveChannel(channelBeforeDm);
+          channelBeforeDm = null;
         } else {
           // Fall back to the first text channel
           const channels = channelsStore.getState().channels;
