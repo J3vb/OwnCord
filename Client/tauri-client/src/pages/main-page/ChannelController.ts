@@ -21,6 +21,8 @@ import type { PendingDeleteManager } from "./MessageController";
 import type { ReactionController } from "./ReactionController";
 import { updateChatHeaderForDm } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
+import { dmStore } from "@stores/dm.store";
+import { membersStore } from "@stores/members.store";
 
 const log = createLogger("channel-ctrl");
 
@@ -264,7 +266,15 @@ export function createChannelController(
 
     // Update header
     if (chatHeaderRefs !== null && channelType === "dm") {
-      updateChatHeaderForDm(chatHeaderRefs, { username: channelName, status: "Online" });
+      // Look up the recipient's actual status from DM store or members store
+      const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
+      let recipientStatus = "Offline";
+      if (dmChannel !== undefined) {
+        const member = membersStore.getState().members.get(dmChannel.recipient.id);
+        recipientStatus = member?.status ?? dmChannel.recipient.status ?? "Offline";
+      }
+      const displayStatus = recipientStatus.charAt(0).toUpperCase() + recipientStatus.slice(1);
+      updateChatHeaderForDm(chatHeaderRefs, { username: channelName, status: displayStatus });
     } else if (chatHeaderRefs !== null) {
       updateChatHeaderForDm(chatHeaderRefs, null);
       if (chatHeaderName !== null) {

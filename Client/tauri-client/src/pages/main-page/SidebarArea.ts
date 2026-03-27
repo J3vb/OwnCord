@@ -28,7 +28,7 @@ import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
-import { dmStore, clearDmUnread, addDmChannel } from "@stores/dm.store";
+import { dmStore, clearDmUnread, addDmChannel, removeDmChannel } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import {
   createProfileManager,
@@ -410,6 +410,8 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       onCloseDm: (userId) => {
         const dmChannel = dmChannels.find((c) => c.recipient.id === userId);
         if (dmChannel !== undefined) {
+          // Remove from store immediately (optimistic), then call API
+          removeDmChannel(dmChannel.channelId);
           void api.closeDm(dmChannel.channelId);
         }
       },
