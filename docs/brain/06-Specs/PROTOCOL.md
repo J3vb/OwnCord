@@ -399,6 +399,68 @@ then auto-reconnect after the delay expires.
 
 ---
 
+## Direct Messages (DM)
+
+### Create or Get DM Channel (Client → Server)
+
+```json
+{
+  "type": "dm_create",
+  "id": "req-uuid",
+  "payload": {
+    "user_id": 2
+  }
+}
+```
+
+Returns `dm_channel_open` (see below) or error if invalid user.
+
+### DM Channel Open (Server → Client)
+
+Sent after successful `dm_create` or when opening an existing DM.
+
+```json
+{
+  "type": "dm_channel_open",
+  "payload": {
+    "channel_id": 100,
+    "user": {
+      "id": 2, "username": "jordan",
+      "avatar": "uuid.png", "status": "online"
+    }
+  }
+}
+```
+
+### DM Channel Close (Client → Server)
+
+```json
+{
+  "type": "dm_close",
+  "id": "req-uuid",
+  "payload": {
+    "channel_id": 100
+  }
+}
+```
+
+### DM Channel Closed (Server → Client)
+
+```json
+{
+  "type": "dm_channel_close",
+  "payload": {
+    "channel_id": 100
+  }
+}
+```
+
+DM channels persist in the database but are marked as "closed" by the
+opening user. Messages in a closed DM auto-reopen it. Switching servers
+clears open DM state (DM channels not visible again until re-opened).
+
+---
+
 ## Initial State (sent after auth_ok)
 
 ### Ready Server → Client
@@ -418,6 +480,15 @@ then auto-reconnect after the delay expires.
         "id": 10, "name": "voice-chat",
         "type": "voice", "category": "Main",
         "position": 1
+      }
+    ],
+    "dm_channels": [
+      {
+        "channel_id": 100,
+        "user": {
+          "id": 2, "username": "jordan",
+          "avatar": null, "status": "online"
+        }
       }
     ],
     "members": [
