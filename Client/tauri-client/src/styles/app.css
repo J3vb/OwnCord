@@ -184,6 +184,45 @@
 .vw-controls button.active-ctrl { background: rgba(242,63,67,.2); color: var(--red); }
 .vw-controls button.disconnect { background: transparent; color: var(--red); }
 .vw-controls button.disconnect:hover { background: rgba(242,63,67,.15); }
+.vw-signal {
+  margin-left: auto; display: flex; align-items: center; gap: 4px;
+  cursor: pointer; padding: 2px 4px; border-radius: var(--radius-sm);
+  transition: background .1s;
+}
+.vw-signal:hover { background: var(--bg-active); }
+.vw-ping { font-size: 11px; font-weight: 600; }
+.vw-stats {
+  padding: 10px 12px; background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border); display: none;
+}
+.vw-stats.visible { display: block; }
+.vw-stats-title {
+  font-size: 11px; font-weight: 700; color: var(--text-normal);
+  text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
+}
+.vw-stats-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 10px; margin-bottom: 8px;
+}
+.vw-stats-col-label { font-size: 11px; font-weight: 700; margin-bottom: 4px; }
+.vw-stats-col-label.out { color: var(--green); }
+.vw-stats-col-label.in { color: var(--yellow, #f0b232); }
+.vw-stats-row {
+  font-size: 11px; color: var(--text-muted); line-height: 1.7;
+}
+.vw-stats-row span { color: var(--text-normal); }
+.vw-stats-totals {
+  border-top: 1px solid var(--border); padding-top: 8px;
+}
+.vw-stats-totals-label {
+  font-size: 11px; font-weight: 700; color: var(--accent, #5865f2);
+  margin-bottom: 4px;
+}
+.vw-stats-totals-row {
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: var(--text-muted);
+}
+.vw-stats-totals-row span { color: var(--text-normal); }
 
 /* ── User Bar ── */
 .user-bar {

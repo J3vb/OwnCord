@@ -1236,6 +1236,10 @@ export class LiveKitSession {
     return null;
   }
 
+  getRoom(): Room | null {
+    return this.room;
+  }
+
   getSessionDebugInfo(): Record<string, unknown> {
     if (this.room === null) {
       return { hasRoom: false, hasRNNoiseProcessor: false, currentChannelId: this.currentChannelId };
@@ -1311,3 +1315,7 @@ export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
 export const setScreenshareAudioVolume = session.setScreenshareAudioVolume.bind(session);
 export const muteScreenshareAudio = session.muteScreenshareAudio.bind(session);
 export const getScreenshareAudioMuted = session.getScreenshareAudioMuted.bind(session);
+
+export function getRoomForStats(): Room | null {
+  return session.getRoom();
+}
