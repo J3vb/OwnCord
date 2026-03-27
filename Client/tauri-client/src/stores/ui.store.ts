@@ -117,7 +117,47 @@ export function setPersistentError(msg: string | null): void {
   }));
 }
 
-/** Toggle a category's collapsed state. */
+// ---------------------------------------------------------------------------
+// Per-server collapsed category persistence
+// ---------------------------------------------------------------------------
+
+const COLLAPSED_KEY_PREFIX = "owncord:collapsed:";
+
+/** The server host currently used for persistence. Set via loadCollapsedCategories. */
+let currentServerHost: string | null = null;
+
+/** Load collapsed categories from localStorage for a given server host
+ *  and set them in the store. */
+export function loadCollapsedCategories(serverHost: string): void {
+  currentServerHost = serverHost;
+  try {
+    const raw = localStorage.getItem(COLLAPSED_KEY_PREFIX + serverHost);
+    if (raw === null) {
+      uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
+      return;
+    }
+    const parsed = JSON.parse(raw) as string[];
+    const loaded: ReadonlySet<string> = new Set(parsed);
+    uiStore.setState((prev) => ({ ...prev, collapsedCategories: loaded }));
+  } catch {
+    uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
+  }
+}
+
+/** Save collapsed categories to localStorage for the current server host. */
+function saveCollapsedCategories(categories: ReadonlySet<string>): void {
+  if (currentServerHost === null) return;
+  try {
+    localStorage.setItem(
+      COLLAPSED_KEY_PREFIX + currentServerHost,
+      JSON.stringify([...categories]),
+    );
+  } catch {
+    // localStorage may be unavailable or full — silently ignore
+  }
+}
+
+/** Toggle a category's collapsed state. Persists to localStorage for the current server. */
 export function toggleCategory(category: string): void {
   uiStore.setState((prev) => {
     const next = new Set(prev.collapsedCategories);
@@ -126,6 +166,7 @@ export function toggleCategory(category: string): void {
     } else {
       next.add(category);
     }
+    saveCollapsedCategories(next);
     return { ...prev, collapsedCategories: next };
   });
 }
