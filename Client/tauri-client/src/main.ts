@@ -4,6 +4,7 @@ import "@styles/tokens.css";
 import "@styles/base.css";
 import "@styles/login.css";
 import "@styles/app.css";
+import "@styles/theme-neon-glow.css";
 
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
 import { createRouter } from "@lib/router";
