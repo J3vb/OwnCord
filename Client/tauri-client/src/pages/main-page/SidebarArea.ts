@@ -279,8 +279,8 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     const members = membersStore.getState().members;
     const currentUserId = authStore.getState().user?.id ?? 0;
 
-    const overlay = createElement("div", { class: "modal-overlay" });
-    const modal = createElement("div", { class: "modal dm-member-picker-modal" });
+    const overlay = createElement("div", { class: "modal-overlay visible" });
+    const modal = createElement("div", { class: "modal dm-member-picker-modal", style: "padding:20px;" });
     const title = createElement("h3", {}, "New Direct Message");
     const subtitle = createElement("p", { style: "color:var(--text-secondary);font-size:0.85rem;margin:0 0 8px;" },
       "Select a member to start a conversation");
