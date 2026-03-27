@@ -267,7 +267,10 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   /** Ensure a DM channel exists in channelsStore so ChannelController can switch to it. */
   function addDmToChannelsStore(dmChannel: DmChannel): void {
     const existing = channelsStore.getState().channels.get(dmChannel.channelId);
-    if (existing !== undefined) return;
+
+    // If the channel exists but has an empty name (server sends DMs with name=''),
+    // update it with the recipient's username
+    if (existing !== undefined && existing.name !== "") return;
 
     const newChannel: Channel = {
       id: dmChannel.channelId,
@@ -414,9 +417,30 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       onCloseDm: (userId) => {
         const dmChannel = dmChannels.find((c) => c.recipient.id === userId);
         if (dmChannel !== undefined) {
+          const wasActive = channelsStore.getState().activeChannelId === dmChannel.channelId;
           // Remove from store immediately (optimistic), then call API
           removeDmChannel(dmChannel.channelId);
           void api.closeDm(dmChannel.channelId);
+
+          // If the closed DM was the active chat, switch away
+          if (wasActive) {
+            const remaining = dmStore.getState().channels;
+            if (remaining.length > 0) {
+              // Switch to the next DM
+              selectDmConversation(remaining[0]!);
+            } else {
+              // No DMs left — go back to channels
+              setSidebarMode("channels");
+              if (channelBeforeDm !== null) {
+                setActiveChannel(channelBeforeDm);
+              } else {
+                const channels = channelsStore.getState().channels;
+                for (const ch of channels.values()) {
+                  if (ch.type === "text") { setActiveChannel(ch.id); break; }
+                }
+              }
+            }
+          }
         }
       },
       onNewDm: () => {

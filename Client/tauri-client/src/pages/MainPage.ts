@@ -18,6 +18,7 @@ import { authStore, clearAuth, updateUser } from "@stores/auth.store";
 import { closeSettings } from "@stores/ui.store";
 import { updatePresence } from "@stores/members.store";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
+import { dmStore } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import {
   leaveVoice as voiceSessionLeave,
@@ -108,6 +109,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   function getCurrentUserId(): number {
     return authStore.getState().user?.id ?? 0;
+  }
+
+  /** Resolve display name for a channel — for DMs, use recipient username from DM store. */
+  function resolveChannelName(channelId: number, channelName: string, channelType?: string): string {
+    if (channelType === "dm" && (!channelName || channelName === "")) {
+      const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+      if (dm !== undefined) return dm.recipient.username;
+    }
+    return channelName;
   }
 
   // ---------------------------------------------------------------------------
@@ -350,7 +360,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             if (active.type === "text") {
               videoModeCtrl?.showChat();
             }
-            channelCtrl!.mountChannel(active.id, active.name, active.type);
+            channelCtrl!.mountChannel(active.id, resolveChannelName(active.id, active.name, active.type), active.type);
           }
         } catch (err) {
           log.error("Channel mount failed", err);
@@ -361,7 +371,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     const active = getActiveChannel();
     if (active !== null) {
-      channelCtrl!.mountChannel(active.id, active.name, active.type);
+      channelCtrl!.mountChannel(active.id, resolveChannelName(active.id, active.name, active.type), active.type);
     }
   }
 
