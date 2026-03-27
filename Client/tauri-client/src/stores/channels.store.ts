@@ -147,6 +147,8 @@ export function getChannelsByCategory(): Map<string | null, Channel[]> {
   return channelsStore.select((s) => {
     const grouped = new Map<string | null, Channel[]>();
     for (const channel of s.channels.values()) {
+      // DM channels are shown in the DM sidebar, not the channel list
+      if (channel.type === "dm") continue;
       const existing = grouped.get(channel.category);
       if (existing !== undefined) {
         existing.push(channel);
