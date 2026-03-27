@@ -119,6 +119,18 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   serverInfoCol.appendChild(serverOnlineEl);
   serverHeader.appendChild(serverIcon);
   serverHeader.appendChild(serverInfoCol);
+
+  // Invite button in the server header (proper styled button)
+  const headerInviteCtrl = createInviteManagerController({ api, getRoot, getToast });
+  const headerInviteBtn = createElement("button", {
+    class: "sidebar-invite-btn",
+    title: "Invite people",
+    "data-testid": "invite-btn",
+  }, "Invite");
+  headerInviteBtn.addEventListener("click", () => { void headerInviteCtrl.open(); });
+  serverHeader.appendChild(headerInviteBtn);
+  unsubscribers.push(() => { headerInviteCtrl.cleanup(); });
+
   sidebarWrapper.appendChild(serverHeader);
 
   // Load per-server collapsed category state from localStorage
@@ -505,23 +517,10 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       // the ChannelSidebar owns its own root element so we keep it nested.
       contentSlot.appendChild(innerSlot);
 
-      // Wire up the invite button into the channel sidebar header
-      const sidebarHeader = innerSlot.querySelector(".channel-sidebar-header");
-      if (sidebarHeader !== null) {
-        const inviteCtrl = createInviteManagerController({
-          api,
-          getRoot,
-          getToast,
-        });
-        const inviteBtn = createElement("button", {
-          class: "invite-btn",
-          title: "Invite",
-        }, "Invite");
-        inviteBtn.addEventListener("click", () => {
-          void inviteCtrl.open();
-        });
-        sidebarHeader.appendChild(inviteBtn);
-        inviteCleanup = () => { inviteCtrl.cleanup(); };
+      // Hide the redundant channel-sidebar-header (server name + invite are now in the unified header)
+      const oldSidebarHeader = innerSlot.querySelector(".channel-sidebar-header");
+      if (oldSidebarHeader !== null) {
+        (oldSidebarHeader as HTMLElement).style.display = "none";
       }
 
       // --- DM section (between channels and members) ---

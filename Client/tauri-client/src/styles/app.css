@@ -29,6 +29,14 @@
 }
 .unified-sidebar-header .server-name { color: white; font-weight: 700; font-size: 13px; }
 .unified-sidebar-header .server-online { color: var(--text-micro); font-size: 9px; }
+.sidebar-invite-btn {
+  margin-left: auto; padding: 4px 10px; border-radius: var(--radius-sm);
+  background: var(--accent-primary, var(--accent)); color: white;
+  font-size: 11px; font-weight: 600; cursor: pointer;
+  transition: background var(--transition-fast), opacity var(--transition-fast);
+  flex-shrink: 0;
+}
+.sidebar-invite-btn:hover { opacity: 0.85; }
 .sidebar-divider { height: 1px; background: var(--border-glow, var(--border)); margin: 8px 12px; }
 
 /* ── Channel Sidebar ── */
