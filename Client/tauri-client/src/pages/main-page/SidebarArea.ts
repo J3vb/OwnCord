@@ -73,6 +73,9 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // Track active modal for channel create/edit/delete
   let activeModal: MountableComponent | null = null;
 
+  // Remember the channel the user was on before entering DM mode
+  let channelBeforeDm: number | null = null;
+
   // Track the currently mounted sidebar content component
   let activeSidebarContent: MountableComponent | null = null;
 
@@ -242,6 +245,12 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // ---------------------------------------------------------------------------
 
   function selectDmConversation(dmChannel: DmChannel): void {
+    // Save current channel so we can restore it when user clicks "Back"
+    const currentActive = channelsStore.getState().activeChannelId;
+    if (currentActive !== null && currentActive !== dmChannel.channelId) {
+      channelBeforeDm = currentActive;
+    }
+
     setActiveDmUser(dmChannel.recipient.id);
     setSidebarMode("dms");
     clearDmUnread(dmChannel.channelId);
@@ -409,6 +418,19 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       },
       onBack: () => {
         setSidebarMode("channels");
+        // Restore the channel the user was on before entering DMs
+        if (channelBeforeDm !== null) {
+          setActiveChannel(channelBeforeDm);
+        } else {
+          // Fall back to the first text channel
+          const channels = channelsStore.getState().channels;
+          for (const ch of channels.values()) {
+            if (ch.type === "text") {
+              setActiveChannel(ch.id);
+              break;
+            }
+          }
+        }
       },
       serverName,
     });
