@@ -26,6 +26,10 @@ import { createInviteManagerController } from "./OverlayManagers";
 import { uiStore, setSidebarMode, setActiveDmUser, loadCollapsedCategories } from "@stores/ui.store";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
+import { channelsStore, setActiveChannel } from "@stores/channels.store";
+import type { Channel } from "@stores/channels.store";
+import { dmStore, clearDmUnread } from "@stores/dm.store";
+import type { DmChannel } from "@stores/dm.store";
 import {
   createProfileManager,
   createTauriBackend,
@@ -234,39 +238,173 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   }
 
   // ---------------------------------------------------------------------------
+  // Helpers: select a DM conversation and switch to its channel
+  // ---------------------------------------------------------------------------
+
+  function selectDmConversation(dmChannel: DmChannel): void {
+    setActiveDmUser(dmChannel.recipient.id);
+    setSidebarMode("dms");
+    clearDmUnread(dmChannel.channelId);
+
+    // Add the DM channel to channelsStore so ChannelController can load it
+    addDmToChannelsStore(dmChannel);
+    setActiveChannel(dmChannel.channelId);
+  }
+
+  /** Ensure a DM channel exists in channelsStore so ChannelController can switch to it. */
+  function addDmToChannelsStore(dmChannel: DmChannel): void {
+    const existing = channelsStore.getState().channels.get(dmChannel.channelId);
+    if (existing !== undefined) return;
+
+    const newChannel: Channel = {
+      id: dmChannel.channelId,
+      name: dmChannel.recipient.username,
+      type: "dm",
+      category: null,
+      position: 0,
+      unreadCount: dmChannel.unreadCount,
+      lastMessageId: dmChannel.lastMessageId,
+    };
+    channelsStore.setState((prev) => {
+      const next = new Map(prev.channels);
+      next.set(newChannel.id, newChannel);
+      return { ...prev, channels: next };
+    });
+  }
+
+  /** Show a simple member picker modal and call createDm on selection. */
+  function showMemberPicker(): void {
+    if (activeModal !== null) return;
+
+    const members = membersStore.getState().members;
+    const currentUserId = authStore.getState().user?.id ?? 0;
+
+    const overlay = createElement("div", { class: "modal-overlay" });
+    const modal = createElement("div", { class: "modal dm-member-picker-modal" });
+    const title = createElement("h3", {}, "New Direct Message");
+    const subtitle = createElement("p", { style: "color:var(--text-secondary);font-size:0.85rem;margin:0 0 8px;" },
+      "Select a member to start a conversation");
+    const listContainer = createElement("div", {
+      class: "dm-member-picker-list",
+      style: "max-height:300px;overflow-y:auto;",
+    });
+
+    for (const member of members.values()) {
+      if (member.id === currentUserId) continue;
+      const item = createElement("div", {
+        class: "dm-member-picker-item channel-item",
+        style: "cursor:pointer;padding:6px 8px;display:flex;align-items:center;gap:8px;",
+      });
+      const avatar = createElement("div", {
+        class: "dm-avatar",
+        style: "width:28px;height:28px;border-radius:50%;background:#5865F2;display:flex;align-items:center;justify-content:center;font-size:0.75rem;color:white;flex-shrink:0;",
+      });
+      setText(avatar, member.username.charAt(0).toUpperCase());
+      const nameEl = createElement("span", {}, member.username);
+      const statusEl = createElement("span", {
+        style: `font-size:0.75rem;margin-left:auto;color:${member.status === "online" ? "var(--green)" : "var(--text-micro)"};`,
+      }, member.status);
+      appendChildren(item, avatar, nameEl, statusEl);
+
+      item.addEventListener("click", () => {
+        closePickerModal();
+        void handleCreateDm(member.id);
+      });
+      listContainer.appendChild(item);
+    }
+
+    const cancelBtn = createElement("button", {
+      class: "btn btn-secondary",
+      style: "margin-top:12px;width:100%;",
+    }, "Cancel");
+    cancelBtn.addEventListener("click", () => closePickerModal());
+
+    appendChildren(modal, title, subtitle, listContainer, cancelBtn);
+    overlay.appendChild(modal);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) closePickerModal();
+    });
+
+    const pickerComponent: MountableComponent = {
+      mount: (container: Element) => { container.appendChild(overlay); },
+      destroy: () => { overlay.remove(); },
+    };
+
+    activeModal = pickerComponent;
+    pickerComponent.mount(document.body);
+  }
+
+  function closePickerModal(): void {
+    if (activeModal !== null) {
+      activeModal.destroy?.();
+      activeModal = null;
+    }
+  }
+
+  /** Create a DM with a user via the API and switch to it. */
+  async function handleCreateDm(recipientId: number): Promise<void> {
+    try {
+      const result = await api.createDm(recipientId);
+      const member = membersStore.getState().members.get(recipientId);
+
+      const dmChannel: DmChannel = {
+        channelId: result.channel_id,
+        recipient: {
+          id: result.recipient.id,
+          username: result.recipient.username,
+          avatar: result.recipient.avatar,
+          status: result.recipient.status ?? member?.status ?? "offline",
+        },
+        lastMessageId: null,
+        lastMessage: "",
+        lastMessageAt: "",
+        unreadCount: 0,
+      };
+
+      selectDmConversation(dmChannel);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to create DM";
+      getToast()?.show(msg, "error");
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // DM sidebar builder (dms mode)
   // ---------------------------------------------------------------------------
 
   function buildDmSidebar(): MountableComponent {
     const serverName = authStore.getState().serverName ?? "Server";
-    const currentUserId = authStore.getState().user?.id ?? null;
     const activeDmUserId = uiStore.getState().activeDmUserId;
 
-    // Build DM conversations from online members (excluding the current user).
-    // Since the channel data model doesn't have a distinct DM channel type yet,
-    // we list online members as potential DM targets.
-    const onlineMembers = getOnlineMembers();
-    const conversations: readonly DmConversation[] = onlineMembers
-      .filter((m) => m.id !== currentUserId)
-      .map((m) => ({
-        userId: m.id,
-        username: m.username,
-        avatar: m.avatar,
-        status: m.status,
-        lastMessage: "No messages yet",
-        timestamp: "",
-        unread: false,
-        active: m.id === activeDmUserId,
-      }));
+    // Build DM conversations from the DM store (real data)
+    const dmChannels = dmStore.getState().channels;
+    const conversations: readonly DmConversation[] = dmChannels.map((dm) => ({
+      userId: dm.recipient.id,
+      username: dm.recipient.username,
+      avatar: dm.recipient.avatar || null,
+      status: (dm.recipient.status as DmConversation["status"]) ?? "offline",
+      lastMessage: dm.lastMessage || "No messages yet",
+      timestamp: dm.lastMessageAt,
+      unread: dm.unreadCount > 0,
+      active: dm.recipient.id === activeDmUserId,
+    }));
 
     return createDmSidebar({
       conversations,
       onSelectConversation: (userId) => {
-        setActiveDmUser(userId);
-        setSidebarMode("dms");
+        const dmChannel = dmChannels.find((c) => c.recipient.id === userId);
+        if (dmChannel !== undefined) {
+          selectDmConversation(dmChannel);
+        }
+      },
+      onCloseDm: (userId) => {
+        const dmChannel = dmChannels.find((c) => c.recipient.id === userId);
+        if (dmChannel !== undefined) {
+          void api.closeDm(dmChannel.channelId);
+        }
       },
       onNewDm: () => {
-        // Placeholder — DM creation flow comes later
+        showMemberPicker();
       },
       onBack: () => {
         setSidebarMode("channels");
@@ -346,23 +484,49 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       let dmCollapsed = false;
       const dmList = createElement("div", { class: "category-channels sidebar-dm-list" });
 
-      const currentUserId = authStore.getState().user?.id ?? 0;
-      const onlineMembers = getOnlineMembers().filter((m) => m.id !== currentUserId);
-      for (const member of onlineMembers.slice(0, 5)) {
-        const dmItem = createElement("div", {
-          class: "channel-item",
-          "data-testid": "dm-entry",
-        });
-        const avatar = createElement("span", { class: "ch-icon" }, "\uD83D\uDCAC");
-        const name = createElement("span", { class: "ch-name" }, member.username);
-        appendChildren(dmItem, avatar, name);
-        dmItem.addEventListener("click", () => {
-          setActiveDmUser(member.id);
-          setSidebarMode("dms");
-        });
-        dmList.appendChild(dmItem);
+      /** Render DM items from the DM store into the sidebar DM list. */
+      function renderDmListItems(): void {
+        clearChildren(dmList);
+        const dmChannels = dmStore.getState().channels;
+        const displayChannels = dmChannels.slice(0, 5);
+        for (const dm of displayChannels) {
+          const dmItem = createElement("div", {
+            class: "channel-item",
+            "data-testid": "dm-entry",
+          });
+          const statusColor = dm.recipient.status === "online" ? "var(--green)"
+            : dm.recipient.status === "idle" ? "var(--yellow)"
+            : dm.recipient.status === "dnd" ? "var(--red)"
+            : "var(--text-micro)";
+          const statusDot = createElement("span", {
+            style: `display:inline-block;width:8px;height:8px;border-radius:50%;background:${statusColor};flex-shrink:0;`,
+          });
+          const name = createElement("span", { class: "ch-name" }, dm.recipient.username);
+          const parts: Element[] = [statusDot, name];
+          if (dm.unreadCount > 0) {
+            const badge = createElement("span", {
+              class: "dm-unread-badge",
+              style: "margin-left:auto;background:var(--red);color:white;border-radius:10px;padding:1px 6px;font-size:0.7rem;",
+            }, String(dm.unreadCount));
+            parts.push(badge);
+          }
+          appendChildren(dmItem, ...parts);
+          dmItem.addEventListener("click", () => {
+            selectDmConversation(dm);
+          });
+          dmList.appendChild(dmItem);
+        }
       }
+
+      renderDmListItems();
       dmSection.appendChild(dmList);
+
+      // Re-render DM list when DM store changes
+      const unsubDmSection = dmStore.subscribeSelector(
+        (s) => s.channels,
+        () => { renderDmListItems(); },
+      );
+      channelModeUnsubs.push(unsubDmSection);
 
       dmHeader.addEventListener("click", () => {
         dmCollapsed = !dmCollapsed;
@@ -372,7 +536,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
       dmAddBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        setSidebarMode("dms");
+        showMemberPicker();
       });
 
       contentSlot.appendChild(dmSection);
@@ -483,37 +647,30 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       activeSidebarContent = dmSidebar;
       contentSlot.appendChild(innerSlot);
 
-      // Re-render DM sidebar when members change (online/offline transitions)
-      const unsubDmMembers = membersStore.subscribeSelector(
-        (s) => s.members,
-        () => {
-          if (activeSidebarContent !== null) {
-            activeSidebarContent.destroy?.();
-          }
-          clearChildren(contentSlot);
-          const freshSlot = createElement("div", { style: "flex:1;overflow:hidden;display:flex;flex-direction:column;" });
-          const freshDm = buildDmSidebar();
-          freshDm.mount(freshSlot);
-          activeSidebarContent = freshDm;
-          contentSlot.appendChild(freshSlot);
-        },
+      /** Re-render the DM sidebar from fresh store data. */
+      function refreshDmSidebar(): void {
+        if (activeSidebarContent !== null) {
+          activeSidebarContent.destroy?.();
+        }
+        clearChildren(contentSlot);
+        const freshSlot = createElement("div", { style: "flex:1;overflow:hidden;display:flex;flex-direction:column;" });
+        const freshDm = buildDmSidebar();
+        freshDm.mount(freshSlot);
+        activeSidebarContent = freshDm;
+        contentSlot.appendChild(freshSlot);
+      }
+
+      // Re-render DM sidebar when DM store changes (new DMs, message updates)
+      const unsubDmStore = dmStore.subscribeSelector(
+        (s) => s.channels,
+        () => { refreshDmSidebar(); },
       );
-      channelModeUnsubs.push(unsubDmMembers);
+      channelModeUnsubs.push(unsubDmStore);
 
       // Re-render DM sidebar when active DM user changes
       const unsubDmActive = uiStore.subscribeSelector(
         (s) => s.activeDmUserId,
-        () => {
-          if (activeSidebarContent !== null) {
-            activeSidebarContent.destroy?.();
-          }
-          clearChildren(contentSlot);
-          const freshSlot = createElement("div", { style: "flex:1;overflow:hidden;display:flex;flex-direction:column;" });
-          const freshDm = buildDmSidebar();
-          freshDm.mount(freshSlot);
-          activeSidebarContent = freshDm;
-          contentSlot.appendChild(freshSlot);
-        },
+        () => { refreshDmSidebar(); },
       );
       channelModeUnsubs.push(unsubDmActive);
     }

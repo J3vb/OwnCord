@@ -38,11 +38,37 @@ import {
   joinVoiceChannel,
   leaveVoiceChannel,
 } from "@stores/voice.store";
+import {
+  dmStore,
+  setDmChannels,
+  addDmChannel,
+  removeDmChannel,
+  updateDmLastMessage,
+} from "@stores/dm.store";
+import type { DmChannel } from "@stores/dm.store";
+import type { DmChannelPayload } from "./types";
 import { handleVoiceToken } from "@lib/livekitSession";
 import { notifyIncomingMessage } from "./notifications";
 import { createLogger } from "./logger";
 
 const log = createLogger("dispatcher");
+
+/** Map a server DM channel payload to the client DmChannel type. */
+function mapDmPayload(p: DmChannelPayload): DmChannel {
+  return {
+    channelId: p.channel_id,
+    recipient: {
+      id: p.recipient.id,
+      username: p.recipient.username,
+      avatar: p.recipient.avatar,
+      status: p.recipient.status,
+    },
+    lastMessageId: p.last_message_id,
+    lastMessage: p.last_message,
+    lastMessageAt: p.last_message_at,
+    unreadCount: p.unread_count,
+  };
+}
 
 /** Unsubscribe all listeners. */
 export type DispatcherCleanup = () => void;
@@ -92,11 +118,34 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
         }
       }
 
+      // Populate DM channels if present in the ready payload
+      const dmPayloads = payload.dm_channels ?? [];
+      if (dmPayloads.length > 0) {
+        setDmChannels(dmPayloads.map(mapDmPayload));
+      }
+
       log.info("Ready payload applied", {
         channels: payload.channels.length,
         members: payload.members.length,
         voiceStates: payload.voice_states.length,
+        dmChannels: dmPayloads.length,
       });
+    }),
+  );
+
+  // ── DM Channels ─────────────────────────────────────
+
+  unsubs.push(
+    ws.on("dm_channel_open", (payload) => {
+      log.info("DM channel opened", { channelId: payload.channel_id });
+      addDmChannel(mapDmPayload(payload));
+    }),
+  );
+
+  unsubs.push(
+    ws.on("dm_channel_close", (payload) => {
+      log.info("DM channel closed", { channelId: payload.channel_id });
+      removeDmChannel(payload.channel_id);
     }),
   );
 
@@ -117,6 +166,19 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
       if (payload.channel_id !== activeId) {
         incrementUnread(payload.channel_id);
       }
+
+      // Update DM store last message if this message belongs to a DM channel
+      const dmChannels = dmStore.getState().channels;
+      const isDm = dmChannels.some((c) => c.channelId === payload.channel_id);
+      if (isDm) {
+        updateDmLastMessage(
+          payload.channel_id,
+          payload.id,
+          payload.content,
+          payload.timestamp,
+        );
+      }
+
       // Fire desktop notification, taskbar flash, and sound
       notifyIncomingMessage(payload);
     }),

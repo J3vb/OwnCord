@@ -12,7 +12,7 @@
 export type UserStatus = "online" | "idle" | "dnd" | "offline";
 
 /** Channel types supported by the server. */
-export type ChannelType = "text" | "voice" | "announcement";
+export type ChannelType = "text" | "voice" | "announcement" | "dm";
 
 /** Voice quality presets. */
 export type VoiceQuality = "low" | "medium" | "high";
@@ -173,6 +173,7 @@ export interface ReadyPayload {
   readonly members: readonly ReadyMember[];
   readonly voice_states: readonly ReadyVoiceState[];
   readonly roles: readonly ReadyRole[];
+  readonly dm_channels?: readonly DmChannelPayload[];
 }
 
 export interface ChatMessagePayload {
@@ -297,6 +298,41 @@ export interface MemberBanPayload {
   readonly user_id: number;
 }
 
+// -----------------------------------------------------------------------------
+// DM Payloads (Server → Client)
+// -----------------------------------------------------------------------------
+
+/** DM recipient object in DM channel payloads. */
+export interface DmRecipient {
+  readonly id: number;
+  readonly username: string;
+  readonly avatar: string;
+  readonly status: string;
+}
+
+/** DM channel object in ready payload and dm_channel_open event. */
+export interface DmChannelPayload {
+  readonly channel_id: number;
+  readonly recipient: DmRecipient;
+  readonly last_message_id: number | null;
+  readonly last_message: string;
+  readonly last_message_at: string;
+  readonly unread_count: number;
+}
+
+export interface DmChannelOpenPayload {
+  readonly channel_id: number;
+  readonly recipient: DmRecipient;
+  readonly last_message_id: number | null;
+  readonly last_message: string;
+  readonly last_message_at: string;
+  readonly unread_count: number;
+}
+
+export interface DmChannelClosePayload {
+  readonly channel_id: number;
+}
+
 export interface ServerRestartPayload {
   readonly reason: string;
   readonly delay_seconds: number;
@@ -408,6 +444,8 @@ export type ServerMessage =
   | (WsEnvelope<MemberLeavePayload> & { readonly type: "member_leave" })
   | (WsEnvelope<MemberUpdatePayload> & { readonly type: "member_update" })
   | (WsEnvelope<MemberBanPayload> & { readonly type: "member_ban" })
+  | (WsEnvelope<DmChannelOpenPayload> & { readonly type: "dm_channel_open" })
+  | (WsEnvelope<DmChannelClosePayload> & { readonly type: "dm_channel_close" })
   | (WsEnvelope<ServerRestartPayload> & { readonly type: "server_restart" })
   | (WsEnvelope<ErrorPayload> & { readonly type: "error" });
 
@@ -564,6 +602,18 @@ export interface UploadResponse {
   readonly size: number;
   readonly mime: string;
   readonly url: string;
+}
+
+/** GET /api/v1/dms response. */
+export interface DmChannelsResponse {
+  readonly dm_channels: readonly DmChannelPayload[];
+}
+
+/** POST /api/v1/dms response. */
+export interface CreateDmResponse {
+  readonly channel_id: number;
+  readonly recipient: DmRecipient;
+  readonly created: boolean;
 }
 
 /** TURN/STUN credentials from GET /api/voice/credentials. */

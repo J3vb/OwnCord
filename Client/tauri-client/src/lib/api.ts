@@ -19,6 +19,8 @@ import type {
   UploadResponse,
   VoiceCredentialsResponse,
   MemberResponse,
+  DmChannelsResponse,
+  CreateDmResponse,
 } from "./types";
 
 /** Configuration for the API client. */
@@ -428,6 +430,31 @@ export function createApiClient(
 
     deleteSound(soundId: number, signal?: AbortSignal): Promise<void> {
       return request<void>("DELETE", `/sounds/${soundId}`, undefined, signal);
+    },
+
+    // ── Direct Messages ─────────────────────────────────────
+
+    /** List user's open DM channels. */
+    getDmChannels(signal?: AbortSignal): Promise<DmChannelsResponse> {
+      return request<DmChannelsResponse>("GET", "/dms", undefined, signal);
+    },
+
+    /** Create or get a DM channel with a user. */
+    createDm(
+      recipientId: number,
+      signal?: AbortSignal,
+    ): Promise<CreateDmResponse> {
+      return request<CreateDmResponse>(
+        "POST",
+        "/dms",
+        { recipient_id: recipientId },
+        signal,
+      );
+    },
+
+    /** Close a DM (hide from sidebar). */
+    closeDm(channelId: number, signal?: AbortSignal): Promise<void> {
+      return request<void>("DELETE", `/dms/${channelId}`, undefined, signal);
     },
 
     // ── Voice ─────────────────────────────────────────────
