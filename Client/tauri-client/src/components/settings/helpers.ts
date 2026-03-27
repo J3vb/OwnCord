@@ -3,6 +3,7 @@
  */
 
 import { createElement } from "@lib/dom";
+import { applyThemeByName } from "@lib/themes";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -86,13 +87,12 @@ export function createToggle(
 // ---------------------------------------------------------------------------
 
 export function applyTheme(name: ThemeName): void {
-  const vars = THEMES[name];
+  // Apply CSS variables for the theme (keeps existing behavior for inline var overrides)
+  const theme = THEMES[name];
   const root = document.documentElement;
-  for (const [prop, val] of Object.entries(vars)) {
-    root.style.setProperty(prop, val);
+  for (const [key, value] of Object.entries(theme)) {
+    root.style.setProperty(key, value);
   }
-  for (const cls of [...document.body.classList]) {
-    if (cls.startsWith("theme-")) document.body.classList.remove(cls);
-  }
-  document.body.classList.add(`theme-${name}`);
+  // Delegate body class and persistence to the theme manager
+  applyThemeByName(name);
 }

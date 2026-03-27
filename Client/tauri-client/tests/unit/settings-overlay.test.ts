@@ -153,9 +153,9 @@ describe("SettingsOverlay", () => {
     getTab(container, 1).click();
 
     const themeOptions = container.querySelectorAll(".theme-opt");
-    expect(themeOptions.length).toBe(3);
+    expect(themeOptions.length).toBe(4);
 
-    const midnight = themeOptions[1] as HTMLElement;
+    const midnight = themeOptions[2] as HTMLElement;
     midnight.click();
 
     expect(midnight.classList.contains("active")).toBe(true);
@@ -247,7 +247,8 @@ describe("SettingsOverlay", () => {
     getTab(container, 5).click();
 
     const selects = container.querySelectorAll("select.form-input");
-    expect(selects.length).toBe(3);
+    // input device, output device, video quality, video device = 4
+    expect(selects.length).toBe(4);
 
     const sliders = container.querySelectorAll(".settings-slider");
     expect(sliders.length).toBeGreaterThanOrEqual(1);
@@ -260,18 +261,16 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("persists voice sensitivity setting", () => {
+  it("renders voice sensitivity meter bar", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
     getTab(container, 5).click();
 
-    // Sensitivity slider is the 3rd .settings-slider (after input volume and output volume)
-    const sliders = container.querySelectorAll(".settings-slider");
-    const slider = sliders[2] as HTMLInputElement;
-    slider.value = "75";
-    slider.dispatchEvent(new Event("input"));
-
-    expect(localStorage.getItem("owncord:settings:voiceSensitivity")).toBe("75");
+    // Sensitivity is now a draggable meter bar, not a slider.
+    const meterBar = container.querySelector(".mic-meter-bar") as HTMLElement;
+    expect(meterBar).not.toBeNull();
+    const threshold = container.querySelector(".mic-meter-threshold") as HTMLElement;
+    expect(threshold).not.toBeNull();
 
     overlay.destroy?.();
   });

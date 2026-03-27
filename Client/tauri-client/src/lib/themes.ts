@@ -80,12 +80,20 @@ export function saveCustomTheme(theme: OwnCordTheme): void {
   );
 }
 
-/** Loads a custom theme by name, or null if not found / parse error. */
+/** Loads a custom theme by name, or null if not found / parse error / invalid shape. */
 export function loadCustomTheme(name: string): OwnCordTheme | null {
   const raw = localStorage.getItem(STORAGE_KEY_CUSTOM_PREFIX + name);
   if (raw === null) return null;
   try {
-    return JSON.parse(raw) as OwnCordTheme;
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      typeof parsed !== "object" || parsed === null ||
+      typeof (parsed as Record<string, unknown>).name !== "string" ||
+      typeof (parsed as Record<string, unknown>).colors !== "object"
+    ) {
+      return null;
+    }
+    return parsed as OwnCordTheme;
   } catch {
     return null;
   }
