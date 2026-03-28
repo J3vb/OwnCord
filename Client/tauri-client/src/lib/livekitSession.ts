@@ -28,11 +28,15 @@ import {
   setLocalScreenshare,
   setSpeakers,
   leaveVoiceChannel,
+  setListenOnly,
 } from "@stores/voice.store";
 import { loadPref, savePref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import { createRNNoiseProcessor } from "@lib/noise-suppression";
 import { invoke } from "@tauri-apps/api/core";
+import { AudioPipeline } from "@lib/audioPipeline";
+import { AudioElements } from "@lib/audioElements";
+import { DeviceManager } from "@lib/deviceManager";
 
 const log = createLogger("livekitSession");
 
@@ -83,11 +87,6 @@ export function parseUserId(identity: string): number {
   return 0;
 }
 
-/** Get saved per-user volume (0-200 range, default 100). Applied via LiveKit's GainNode-backed setVolume(). */
-function getSavedUserVolume(userId: number): number {
-  return loadPref<number>(`userVolume_${userId}`, 100);
-}
-
 // --- Types ---
 
 type RemoteVideoCallback = (userId: number, stream: MediaStream, isScreenshare: boolean) => void;
@@ -126,14 +125,15 @@ export class LiveKitSession {
   private reconnectAc: AbortController | null = null;
   /** Master output volume multiplier (0-2.0). Per-user volumes are scaled by this. */
   private outputVolumeMultiplier = loadPref<number>("outputVolume", 100) / 100;
-  /** Remote microphone audio elements keyed by track SID for cleanup on disconnect. */
-  private remoteMicAudioElements = new Map<string, HTMLAudioElement>();
-  /** Screenshare audio elements keyed by userId — separate from mic audio pipeline. */
-  private screenshareAudioElements = new Map<number, Set<HTMLAudioElement>>();
+  // Remote mic + screenshare audio elements are now managed by _audioElements module.
   /** Cached port for the local LiveKit TLS proxy (Rust-side, for self-signed cert support). */
   private liveKitProxyPort: number | null = null;
-  /** Persisted mute state for screenshare audio so replacement tracks inherit UI state. */
-  private screenshareAudioMutedByUser = new Map<number, boolean>();
+  // Screenshare mute state is now managed by _audioElements module.
+
+  // --- Extracted modules (facade pattern) ---
+  private _audioPipeline = new AudioPipeline();
+  private _audioElements = new AudioElements();
+  private _deviceManager = new DeviceManager();
 
   /** Manually published local tracks (camera/screenshare) for explicit cleanup. */
   private manualCameraTrack: LocalVideoTrack | null = null;
@@ -232,6 +232,18 @@ export class LiveKitSession {
     return newRoom;
   }
 
+  // --- Module wiring helper ---
+
+  /** Update all extracted modules with the current room reference. */
+  private syncModuleRooms(): void {
+    this._audioPipeline.setRoom(this.room);
+    this._audioElements.setRoom(this.room);
+    this._deviceManager.setRoom(this.room);
+    this._deviceManager.setAudioPipeline(this.room !== null ? this._audioPipeline : null);
+    this._deviceManager.setOnError(this.onErrorCallback);
+    this._deviceManager.setOnToast(this.onErrorCallback);
+  }
+
   // --- Room event handlers (arrow fns to preserve `this`) ---
 
   /** Defense in depth: when LiveKit (re)publishes a mic track during
@@ -253,49 +265,7 @@ export class LiveKitSession {
   ): void => {
     const userId = parseUserId(participant.identity);
     if (track.kind === Track.Kind.Audio) {
-      if (publication.source === Track.Source.ScreenShareAudio) {
-        // Screenshare audio: manage via HTMLAudioElement volume (not participant.setVolume)
-        for (const el of track.detach()) el.remove();
-        const audioEl = track.attach();
-        audioEl.style.display = "none";
-        document.body.appendChild(audioEl);
-        audioEl.volume = this.getScreenshareOutputVolume();
-        audioEl.muted = this.screenshareAudioMutedByUser.get(userId) ?? false;
-        let audioEls = this.screenshareAudioElements.get(userId);
-        if (audioEls === undefined) {
-          audioEls = new Set();
-          this.screenshareAudioElements.set(userId, audioEls);
-        }
-        audioEls.add(audioEl);
-        const savedOutput = loadPref<string>("audioOutputDevice", "");
-        if (savedOutput !== "" && typeof audioEl.setSinkId === "function") {
-          audioEl.setSinkId(savedOutput).catch((err) => {
-            log.warn("Failed to set output device on screenshare audio", err);
-          });
-        }
-        log.debug("Screenshare audio track subscribed and attached", { userId, trackSid: track.sid });
-      } else {
-        // Microphone audio: use LiveKit's GainNode-backed setVolume
-        // Detach any previous <audio> elements to prevent duplicate playback
-        // on fast reconnects (new subscription fires before old unsubscription)
-        for (const el of track.detach()) el.remove();
-        const audioEl = track.attach();
-        audioEl.style.display = "none";
-        document.body.appendChild(audioEl);
-        // Track mic audio elements for cleanup on abnormal disconnect
-        if (track.sid !== undefined) {
-          this.remoteMicAudioElements.set(track.sid, audioEl);
-        }
-        // Apply saved per-user volume via LiveKit's setVolume (supports 0-2.0 range)
-        participant.setVolume(this.getEffectiveVolume(userId));
-        const savedOutput = loadPref<string>("audioOutputDevice", "");
-        if (savedOutput !== "" && typeof audioEl.setSinkId === "function") {
-          audioEl.setSinkId(savedOutput).catch((err) => {
-            log.warn("Failed to set output device on remote audio", err);
-          });
-        }
-        log.debug("Remote audio track subscribed and attached", { userId, trackSid: track.sid });
-      }
+      this._audioElements.handleTrackSubscribedAudio(track, publication, participant);
     } else if (track.kind === Track.Kind.Video) {
       if (userId > 0 && this.onRemoteVideoCallback !== null) {
         const stream = new MediaStream([track.mediaStreamTrack]);
@@ -313,20 +283,7 @@ export class LiveKitSession {
   ): void => {
     const userId = parseUserId(participant.identity);
     if (track.kind === Track.Kind.Audio) {
-      if (publication.source === Track.Source.ScreenShareAudio) {
-        const detachedEls = track.detach() as HTMLAudioElement[];
-        for (const el of detachedEls) el.remove();
-        const audioEls = this.screenshareAudioElements.get(userId);
-        if (audioEls !== undefined) {
-          for (const el of detachedEls) audioEls.delete(el);
-          if (audioEls.size === 0) this.screenshareAudioElements.delete(userId);
-        }
-        log.debug("Screenshare audio track unsubscribed and detached", { userId, trackSid: track.sid });
-      } else {
-        for (const el of track.detach()) el.remove();
-        if (track.sid !== undefined) this.remoteMicAudioElements.delete(track.sid);
-        log.debug("Remote audio track unsubscribed and detached", { userId, trackSid: track.sid });
-      }
+      this._audioElements.handleTrackUnsubscribedAudio(track, publication, participant);
     } else if (track.kind === Track.Kind.Video) {
       track.detach();
       const isScreenshare = publication.source === Track.Source.ScreenShare;
@@ -403,15 +360,11 @@ export class LiveKitSession {
       this.removeAutoplayUnlock();
       this.clearTokenRefreshTimer();
       // Clear stale remote audio elements so reconnect doesn't leak DOM nodes.
-      this.remoteMicAudioElements.forEach(el => el.remove());
-      this.remoteMicAudioElements.clear();
-      this.screenshareAudioElements.forEach(audioEls => {
-        audioEls.forEach(el => el.remove());
-      });
-      this.screenshareAudioElements.clear();
+      this._audioElements.cleanupAllAudioElements();
       if (this.room !== null) {
         const r = this.room;
         this.room = null;
+        this.syncModuleRooms();
         r.removeAllListeners();
         r.disconnect().catch((err) => log.warn("Failed to disconnect stale room", err));
       }
@@ -440,6 +393,7 @@ export class LiveKitSession {
       }
       try {
         this.room = this.createRoom();
+        this.syncModuleRooms();
         const resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
         await this.room.connect(resolvedUrl, token);
         log.info("Auto-reconnect succeeded", { attempt, channelId, url: resolvedUrl });
@@ -461,6 +415,7 @@ export class LiveKitSession {
           this.room.removeAllListeners();
           this.room.disconnect().catch((err) => log.warn("Failed to disconnect room after reconnect failure", err));
           this.room = null;
+          this.syncModuleRooms();
         }
       }
     }
@@ -513,8 +468,8 @@ export class LiveKitSession {
 
   // --- Token refresh ---
 
-  /** Token refresh interval: 3.5 hours (refresh 30min before 4h TTL expiry). */
-  private static readonly TOKEN_REFRESH_MS = 3.5 * 60 * 60 * 1000;
+  /** Token refresh interval: 23 hours (refresh 1h before 24h TTL expiry). */
+  private static readonly TOKEN_REFRESH_MS = 23 * 60 * 60 * 1000;
 
   private startTokenRefreshTimer(): void {
     this.clearTokenRefreshTimer();
@@ -551,7 +506,7 @@ export class LiveKitSession {
     //   - Sessions longer than the 4h TTL remain connected (LiveKit keeps
     //     active connections alive) but lose the ability to reconnect after a
     //     network blip once the original token expires.
-    //   - The 3.5h refresh timer ensures a fresh token is always ready
+    //   - The 23h refresh timer ensures a fresh token is always ready
     //     *before* the original expires, so reconnects within the window work.
     // See also: Server/ws/livekit.go tokenTTL constant.
     if (token) {
@@ -565,8 +520,7 @@ export class LiveKitSession {
 
   /** Compute the effective volume for a participant: per-user volume * master output. */
   private getEffectiveVolume(userId: number): number {
-    const userVol = userId > 0 ? getSavedUserVolume(userId) : 100;
-    return (userVol / 100) * this.outputVolumeMultiplier;
+    return this._audioElements.getEffectiveVolume(userId);
   }
 
   private getScreenshareOutputVolume(): number {
@@ -582,12 +536,7 @@ export class LiveKitSession {
   }
 
   private applyRemoteAudioSubscriptionState(deafened: boolean): void {
-    if (this.room === null) return;
-    for (const participant of this.room.remoteParticipants.values()) {
-      for (const publication of participant.audioTrackPublications.values()) {
-        publication.setSubscribed(!deafened);
-      }
-    }
+    this._audioElements.applyRemoteAudioSubscriptionState(deafened);
   }
 
   private async restoreLocalVoiceState(mode: "join" | "reconnect"): Promise<void> {
@@ -606,7 +555,9 @@ export class LiveKitSession {
           await this.applyNoiseSuppressor();
         }
       }
+      setListenOnly(false); // Mic acquired successfully
     } catch (micErr) {
+      setListenOnly(true);
       if (mode === "reconnect") {
         log.warn("Auto-reconnect: mic unavailable — listen-only mode", micErr);
       } else if (micErr instanceof DOMException && micErr.name === "NotAllowedError") {
@@ -633,19 +584,21 @@ export class LiveKitSession {
 
   /** Apply effective volume to all remote participants. */
   private applyAllVolumes(): void {
-    if (this.room === null) return;
-    for (const participant of this.room.remoteParticipants.values()) {
-      const userId = parseUserId(participant.identity);
-      participant.setVolume(this.getEffectiveVolume(userId));
-    }
+    this._audioElements.applyAllVolumes();
   }
 
   // --- Public API ---
 
   setWsClient(client: WsClient): void { this.ws = client; }
   setServerHost(host: string): void { this.serverHost = host; }
-  setOnError(cb: (message: string) => void): void { this.onErrorCallback = cb; }
-  clearOnError(): void { this.onErrorCallback = null; }
+  setOnError(cb: (message: string) => void): void {
+    this.onErrorCallback = cb;
+    this._deviceManager.setOnError(cb);
+  }
+  clearOnError(): void {
+    this.onErrorCallback = null;
+    this._deviceManager.setOnError(null);
+  }
   setOnRemoteVideo(cb: RemoteVideoCallback): void { this.onRemoteVideoCallback = cb; }
   setOnRemoteVideoRemoved(cb: RemoteVideoRemovedCallback): void { this.onRemoteVideoRemovedCallback = cb; }
 
@@ -675,6 +628,7 @@ export class LiveKitSession {
     let resolvedUrl = "";
     try {
       this.room = this.createRoom();
+      this.syncModuleRooms();
       resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
       const MAX_RETRIES = 3;
       const RETRY_DELAY_MS = 2000;
@@ -694,6 +648,7 @@ export class LiveKitSession {
             if (this.room !== null) {
               const room = this.room;
               this.room = null;
+              this.syncModuleRooms();
               room.removeAllListeners();
               room.disconnect().catch((err) => log.debug("Failed to disconnect room during cleanup", err));
             }
@@ -708,6 +663,7 @@ export class LiveKitSession {
             if (this.room === null) throw connectErr;
             this.room.removeAllListeners();
             this.room = this.createRoom();
+            this.syncModuleRooms();
           } else {
             throw connectErr;
           }
@@ -774,6 +730,25 @@ export class LiveKitSession {
     }
   }
 
+  /** Retry microphone permission after being in listen-only mode. */
+  async retryMicPermission(): Promise<void> {
+    if (this.room === null) return;
+    try {
+      await this.room.localParticipant.setMicrophoneEnabled(true);
+      setListenOnly(false);
+      setLocalMuted(false);
+      log.info("Microphone permission granted — exited listen-only mode");
+      // Set up audio pipeline for the new mic track
+      this.setupAudioPipeline();
+      if (loadPref<boolean>("enhancedNoiseSuppression", false)) {
+        await this.applyNoiseSuppressor();
+      }
+    } catch (err) {
+      log.warn("Microphone retry failed — still in listen-only mode", err);
+      this.onErrorCallback?.("Microphone still unavailable — check your browser permissions");
+    }
+  }
+
   leaveVoice(sendWs = true): void {
     // Cancel any pending auto-reconnect loop first
     if (this.reconnectAc !== null) {
@@ -791,18 +766,13 @@ export class LiveKitSession {
     if (sendWs && this.ws !== null) {
       this.ws.send({ type: "voice_leave", payload: {} });
     }
-    // Remove orphaned remote mic audio elements (normally cleaned up by
+    // Remove orphaned remote audio elements (normally cleaned up by
     // TrackUnsubscribed, but may be missed during rapid reconnection).
-    for (const el of this.remoteMicAudioElements.values()) el.remove();
-    this.remoteMicAudioElements.clear();
-    for (const audioEls of this.screenshareAudioElements.values()) {
-      for (const el of audioEls) el.remove();
-    }
-    this.screenshareAudioElements.clear();
-    this.screenshareAudioMutedByUser.clear();
+    this._audioElements.cleanupAllAudioElements();
     if (this.room !== null) {
       const r = this.room;
       this.room = null;
+      this.syncModuleRooms();
       r.removeAllListeners();
       r.disconnect().catch((err) => log.warn("room.disconnect() error (non-fatal)", err));
     }
@@ -915,6 +885,7 @@ export class LiveKitSession {
     } finally {
       setLocalCamera(false);
       if (this.ws !== null) this.ws.send({ type: "voice_camera", payload: { enabled: false } });
+      this.onErrorCallback?.("Camera off");
       log.info("Camera disabled");
     }
   }
@@ -979,6 +950,7 @@ export class LiveKitSession {
     } finally {
       setLocalScreenshare(false);
       if (this.ws !== null) this.ws.send({ type: "voice_screenshare", payload: { enabled: false } });
+      this.onErrorCallback?.("Screen share ended");
       log.info("Screenshare disabled");
     }
   }
@@ -995,74 +967,34 @@ export class LiveKitSession {
     }
   }
 
+  // --- Delegating methods to DeviceManager ---
+
   async switchInputDevice(deviceId: string): Promise<void> {
-    if (this.room === null) {
-      log.debug("Skipping input device switch — no active voice session");
-      return;
-    }
-    try {
-      if (deviceId) {
-        await this.room.switchActiveDevice("audioinput", deviceId);
-      } else {
-        await this.room.localParticipant.setMicrophoneEnabled(false);
-        await this.room.localParticipant.setMicrophoneEnabled(true);
-      }
-      // Rebuild audio pipeline (source track changed after device switch)
-      this.setupAudioPipeline();
-      // Re-apply or remove RNNoise processor based on current setting
-      const enhancedNS = loadPref<boolean>("enhancedNoiseSuppression", false);
-      if (enhancedNS) {
-        await this.applyNoiseSuppressor();
-      } else {
-        await this.removeNoiseSuppressor();
-      }
-      log.info("Switched input device", { deviceId });
-    } catch (err) {
-      log.error("Failed to switch input device", err);
-      this.onErrorCallback?.("Failed to switch microphone");
-    }
+    return this._deviceManager.switchInputDevice(deviceId);
   }
 
   async switchOutputDevice(deviceId: string): Promise<void> {
-    if (this.room !== null) await this.room.switchActiveDevice("audiooutput", deviceId);
-    log.info("Switched output device", { deviceId });
+    return this._deviceManager.switchOutputDevice(deviceId);
   }
+
+  // --- Delegating methods to AudioElements ---
 
   setUserVolume(userId: number, volume: number): void {
-    const clamped = Math.max(0, Math.min(200, volume));
-    savePref(`userVolume_${userId}`, clamped);
-    if (this.room !== null) {
-      for (const participant of this.room.remoteParticipants.values()) {
-        if (parseUserId(participant.identity) === userId) {
-          participant.setVolume((clamped / 100) * this.outputVolumeMultiplier);
-        }
-      }
-    }
+    this._audioElements.setUserVolume(userId, volume);
   }
 
-  getUserVolume(userId: number): number { return getSavedUserVolume(userId); }
+  getUserVolume(userId: number): number { return this._audioElements.getUserVolume(userId); }
 
   setScreenshareAudioVolume(userId: number, volume: number): void {
-    const audioEls = this.screenshareAudioElements.get(userId);
-    if (audioEls === undefined) return;
-    const clamped = Math.max(0, Math.min(1, volume));
-    for (const el of audioEls) el.volume = clamped;
+    this._audioElements.setScreenshareAudioVolume(userId, volume);
   }
 
   muteScreenshareAudio(userId: number, muted: boolean): void {
-    this.screenshareAudioMutedByUser.set(userId, muted);
-    const audioEls = this.screenshareAudioElements.get(userId);
-    if (audioEls === undefined) return;
-    for (const el of audioEls) el.muted = muted;
+    this._audioElements.muteScreenshareAudio(userId, muted);
   }
 
   getScreenshareAudioMuted(userId: number): boolean {
-    const storedMuted = this.screenshareAudioMutedByUser.get(userId);
-    if (storedMuted !== undefined) return storedMuted;
-    const audioEls = this.screenshareAudioElements.get(userId);
-    if (audioEls === undefined) return false;
-    for (const el of audioEls) return el.muted;
-    return false;
+    return this._audioElements.getScreenshareAudioMuted(userId);
   }
 
   // ── Unified audio pipeline: input volume + VAD gating ─────────────
@@ -1173,16 +1105,7 @@ export class LiveKitSession {
   }
 
   setOutputVolume(volume: number): void {
-    const clamped = Math.max(0, Math.min(200, volume));
-    savePref("outputVolume", clamped);
-    this.outputVolumeMultiplier = clamped / 100;
-    this.applyAllVolumes();
-    const screenshareVolume = this.getScreenshareOutputVolume();
-    for (const audioEls of this.screenshareAudioElements.values()) {
-      for (const audioEl of audioEls) {
-        audioEl.volume = screenshareVolume;
-      }
-    }
+    this._audioElements.setOutputVolume(volume);
   }
 
   /**
@@ -1482,6 +1405,7 @@ export const setOnRemoteVideoRemoved = session.setOnRemoteVideoRemoved.bind(sess
 export const clearOnRemoteVideo = session.clearOnRemoteVideo.bind(session);
 export const handleVoiceToken = session.handleVoiceToken.bind(session);
 export const leaveVoice = session.leaveVoice.bind(session);
+export const retryMicPermission = session.retryMicPermission.bind(session);
 export const cleanupAll = session.cleanupAll.bind(session);
 export const setMuted = session.setMuted.bind(session);
 export const setDeafened = session.setDeafened.bind(session);

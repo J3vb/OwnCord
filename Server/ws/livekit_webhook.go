@@ -167,8 +167,8 @@ func (h *Hub) handleWebhookParticipantLeft(event *livekit.WebhookEvent) {
 			c.clearVoiceChID()
 
 			if h.db != nil {
-				if err := h.db.LeaveVoiceChannel(userID); err != nil {
-					slog.Error("livekit webhook: LeaveVoiceChannel failed — ghost voice state may persist",
+				if err := leaveVoiceChannelWithRetry(h, userID, channelID); err != nil {
+					slog.Error("livekit webhook: LeaveVoiceChannel exhausted retries",
 						"error", err, "user_id", userID, "channel_id", channelID)
 				}
 			}
@@ -181,9 +181,9 @@ func (h *Hub) handleWebhookParticipantLeft(event *livekit.WebhookEvent) {
 	} else {
 		// Client already disconnected from WS — ensure DB is clean.
 		if h.db != nil {
-			if err := h.db.LeaveVoiceChannel(userID); err != nil {
-				slog.Error("livekit webhook: LeaveVoiceChannel failed (client gone) — ghost voice state may persist",
-					"error", err, "user_id", userID)
+			if err := leaveVoiceChannelWithRetry(h, userID, channelID); err != nil {
+				slog.Error("livekit webhook: LeaveVoiceChannel exhausted retries (client gone)",
+					"error", err, "user_id", userID, "channel_id", channelID)
 			}
 		}
 	}

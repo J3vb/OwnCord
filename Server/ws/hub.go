@@ -361,6 +361,19 @@ func (h *Hub) ClientCount() int {
 	return len(h.clients)
 }
 
+// VoiceSessionCount returns the number of clients currently in a voice channel.
+func (h *Hub) VoiceSessionCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	count := 0
+	for _, c := range h.clients {
+		if c.getVoiceChID() != 0 {
+			count++
+		}
+	}
+	return count
+}
+
 // kickClient forcibly removes a client from the hub and closes its send channel,
 // which causes writePump to exit and the WebSocket connection to close.
 // It is safe to call from any goroutine.

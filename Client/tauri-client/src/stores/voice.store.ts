@@ -43,6 +43,8 @@ export interface VoiceState {
   readonly localScreenshare: boolean;
   /** Epoch ms when the local user joined the current voice channel (for elapsed timer). */
   readonly joinedAt: number | null;
+  /** True when joined in listen-only mode (mic permission denied or no mic found). */
+  readonly listenOnly: boolean;
 }
 
 const INITIAL_STATE: VoiceState = {
@@ -54,6 +56,7 @@ const INITIAL_STATE: VoiceState = {
   localCamera: false,
   localScreenshare: false,
   joinedAt: null,
+  listenOnly: false,
 };
 
 export const voiceStore = createStore<VoiceState>(INITIAL_STATE);
@@ -69,6 +72,7 @@ export function resetVoiceStore(): void {
     localCamera: false,
     localScreenshare: false,
     joinedAt: null,
+    listenOnly: false,
   }));
 }
 
@@ -221,6 +225,14 @@ export function setLocalScreenshare(enabled: boolean): void {
   voiceStore.setState((prev) => ({
     ...prev,
     localScreenshare: enabled,
+  }));
+}
+
+/** Set listen-only mode (mic permission denied or no mic found). */
+export function setListenOnly(listenOnly: boolean): void {
+  voiceStore.setState((prev) => ({
+    ...prev,
+    listenOnly,
   }));
 }
 

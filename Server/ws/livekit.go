@@ -19,10 +19,13 @@ import (
 )
 
 // tokenTTL is the validity duration for generated LiveKit access tokens.
-// Kept at 4h to limit exposure if a token is leaked — there is no server-side
-// revocation for LiveKit JWTs. The client can request a refresh via
-// voice_token_refresh before expiry.
-const tokenTTL = 4 * time.Hour
+// Set to 24h so sessions aren't fragile after network blips (LiveKit's JS SDK
+// cannot rotate tokens on active connections). Security mitigations:
+//   - Tokens are scoped to a single room
+//   - Server can revoke room access via LiveKit API on ban/kick
+//   - Tokens never leave the LiveKit SDK internals on the client
+// The client requests a refresh via voice_token_refresh before expiry.
+const tokenTTL = 24 * time.Hour
 
 // LiveKitClient provides token generation and room management via
 // the LiveKit server SDK.

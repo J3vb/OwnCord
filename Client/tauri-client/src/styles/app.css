@@ -137,7 +137,14 @@
   display: flex; align-items: center; justify-content: center;
   font-size: 9px; font-weight: 700; color: white; flex-shrink: 0;
 }
-.voice-user-item.speaking .vu-avatar { box-shadow: 0 0 0 2px var(--green); }
+.voice-user-item.speaking .vu-avatar {
+  box-shadow: 0 0 0 2px var(--green), 0 0 8px rgba(35, 165, 90, 0.3);
+  animation: speak-pulse 1.5s ease-in-out infinite;
+}
+@keyframes speak-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px var(--green), 0 0 8px rgba(35, 165, 90, 0.3); }
+  50% { box-shadow: 0 0 0 2px var(--green), 0 0 14px rgba(35, 165, 90, 0.5); }
+}
 .voice-user-item .vu-status,
 .voice-user-item .vu-muted { margin-left: 2px; display: flex; align-items: center; flex-shrink: 0; }
 .voice-user-item .vu-status { color: var(--text-muted); }
@@ -178,6 +185,15 @@
 .vw-controls button.active-ctrl { background: rgba(242,63,67,.2); color: var(--red); }
 .vw-controls button.disconnect { background: transparent; color: var(--red); }
 .vw-controls button.disconnect:hover { background: rgba(242,63,67,.15); }
+.vw-grant-mic {
+  display: block; width: calc(100% - 8px); margin: 4px 4px 0;
+  padding: 6px 12px; border-radius: var(--radius-sm); border: none;
+  background: var(--accent); color: #fff; font-size: 12px;
+  font-weight: 600; font-family: var(--font-body); cursor: pointer;
+  transition: filter var(--transition-normal);
+}
+.vw-grant-mic:hover { filter: brightness(1.1); }
+.vw-grant-mic:disabled { opacity: 0.6; cursor: wait; }
 .vw-signal {
   margin-left: auto; display: flex; align-items: center; gap: 4px;
   cursor: pointer; padding: 2px 4px; border-radius: var(--radius-sm);

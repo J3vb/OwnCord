@@ -15,6 +15,7 @@ function resetStores(): void {
     localCamera: false,
     localScreenshare: false,
     joinedAt: null,
+    listenOnly: false,
   }));
   channelsStore.setState(() => ({
     channels: new Map(),

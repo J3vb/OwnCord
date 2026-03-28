@@ -46,6 +46,7 @@ function resetStores(): void {
     localCamera: false,
     localScreenshare: false,
     joinedAt: null,
+    listenOnly: false,
   }));
   membersStore.setState(() => ({
     members: new Map(),

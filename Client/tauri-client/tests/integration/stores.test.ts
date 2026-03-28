@@ -122,6 +122,7 @@ function resetAllStores(): void {
     localCamera: false,
     localScreenshare: false,
     joinedAt: null,
+    listenOnly: false,
   }));
   authStore.setState(() => ({
     token: null,

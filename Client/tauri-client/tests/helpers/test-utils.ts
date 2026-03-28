@@ -57,6 +57,7 @@ const VOICE_INITIAL: VoiceState = {
   localCamera: false,
   localScreenshare: false,
   joinedAt: null,
+    listenOnly: false,
 };
 
 const UI_INITIAL: UiState = {

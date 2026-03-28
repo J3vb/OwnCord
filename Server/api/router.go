@@ -157,6 +157,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs)).
 		Get("/api/v1/metrics", handleMetrics(
 			func() int { return hub.ClientCount() },
+			func() int { return hub.VoiceSessionCount() },
 			func() (bool, error) { return hub.LiveKitHealthCheck() },
 		))
 

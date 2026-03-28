@@ -15,11 +15,12 @@ import {
   createConnectionStatsPoller,
   formatBytes,
   formatRate,
+  formatBitrate,
   type ConnectionStats,
   type ConnectionStatsPoller,
   type QualityLevel,
 } from "@lib/connectionStats";
-import { getRoomForStats } from "@lib/livekitSession";
+import { getRoomForStats, retryMicPermission } from "@lib/livekitSession";
 
 export interface VoiceWidgetOptions {
   onDisconnect(): void;
@@ -62,6 +63,9 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   let deafenBtn: HTMLButtonElement | null = null;
   let cameraBtn: HTMLButtonElement | null = null;
   let shareBtn: HTMLButtonElement | null = null;
+
+  // Listen-only mode: "Grant Microphone" button
+  let grantMicBtn: HTMLButtonElement | null = null;
 
   // Connection stats
   let signalWrap: HTMLDivElement | null = null;
@@ -107,28 +111,38 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     pingLabel.style.color = color;
 
     // Update expanded stats pane fields if they exist
-    if (outRateEl) setText(outRateEl, formatRate(stats.outRate));
+    if (outRateEl) setText(outRateEl, `${formatRate(stats.outRate)} (${formatBitrate(stats.outRate)})`);
     if (outPacketsEl) setText(outPacketsEl, String(stats.outPackets));
     if (rttEl) {
       setText(rttEl, stats.rtt > 0 ? `${stats.rtt.toFixed(1)} ms` : "—");
       rttEl.style.color = color;
     }
-    if (inRateEl) setText(inRateEl, formatRate(stats.inRate));
+    if (inRateEl) setText(inRateEl, `${formatRate(stats.inRate)} (${formatBitrate(stats.inRate)})`);
     if (inPacketsEl) setText(inPacketsEl, String(stats.inPackets));
     if (totalUpEl) setText(totalUpEl, formatBytes(stats.totalUp));
     if (totalDownEl) setText(totalDownEl, formatBytes(stats.totalDown));
   }
 
+  let qualityUnlisten: (() => void) | null = null;
+
   function startStatsPoller(): void {
     if (statsPoller !== null) return;
     statsPoller = createConnectionStatsPoller(() => getRoomForStats());
     statsUnlisten = statsPoller.onUpdate(updateSignalIcon);
+    qualityUnlisten = statsPoller.onQualityChanged((quality, prevQuality) => {
+      // Auto-expand stats pane when quality degrades
+      if ((quality === "poor" || quality === "bad") && statsPane !== null) {
+        statsPane.classList.add("visible");
+      }
+    });
     statsPoller.start();
   }
 
   function stopStatsPoller(): void {
     statsUnlisten?.();
     statsUnlisten = null;
+    qualityUnlisten?.();
+    qualityUnlisten = null;
     statsPoller?.stop();
     statsPoller = null;
   }
@@ -185,6 +199,11 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     if (cameraBtn) { swapIcon(cameraBtn, voice.localCamera ? "camera-off" : "camera"); cameraBtn.setAttribute("aria-pressed", String(voice.localCamera)); }
     shareBtn?.classList.toggle("active-ctrl", voice.localScreenshare);
     if (shareBtn) { swapIcon(shareBtn, voice.localScreenshare ? "monitor-off" : "monitor"); shareBtn.setAttribute("aria-pressed", String(voice.localScreenshare)); }
+
+    // Show/hide "Grant Microphone" button based on listen-only state
+    if (grantMicBtn) {
+      grantMicBtn.style.display = voice.listenOnly ? "block" : "none";
+    }
   }
 
   function createControlButton(
@@ -285,7 +304,26 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     );
     appendChildren(controls, muteBtn, deafenBtn, cameraBtn, shareBtn, disconnectBtn);
 
-    appendChildren(root, header, statsPane, controls);
+    // "Grant Microphone" button for listen-only mode
+    grantMicBtn = createElement("button", {
+      class: "vw-grant-mic",
+      "aria-label": "Grant microphone permission",
+    }, "Grant Microphone");
+    grantMicBtn.style.display = "none";
+    grantMicBtn.addEventListener("click", () => {
+      if (grantMicBtn) {
+        grantMicBtn.disabled = true;
+        setText(grantMicBtn, "Requesting...");
+      }
+      void retryMicPermission().finally(() => {
+        if (grantMicBtn) {
+          grantMicBtn.disabled = false;
+          setText(grantMicBtn, "Grant Microphone");
+        }
+      });
+    }, { signal: ac.signal });
+
+    appendChildren(root, header, statsPane, grantMicBtn, controls);
 
     render();
 
@@ -296,6 +334,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
         deafened: s.localDeafened,
         camera: s.localCamera,
         screenshare: s.localScreenshare,
+        listenOnly: s.listenOnly,
       }),
       () => render(),
       (a, b) =>
@@ -303,7 +342,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
         a.muted === b.muted &&
         a.deafened === b.deafened &&
         a.camera === b.camera &&
-        a.screenshare === b.screenshare,
+        a.screenshare === b.screenshare &&
+        a.listenOnly === b.listenOnly,
     ));
     unsubs.push(channelsStore.subscribeSelector(
       (s) => s.channels,
@@ -328,6 +368,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     deafenBtn = null;
     cameraBtn = null;
     shareBtn = null;
+    grantMicBtn = null;
     signalWrap = null;
     pingLabel = null;
     timerEl = null;

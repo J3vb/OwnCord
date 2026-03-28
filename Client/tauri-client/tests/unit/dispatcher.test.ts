@@ -94,6 +94,7 @@ describe("WS Dispatcher", () => {
       localCamera: false,
       localScreenshare: false,
       joinedAt: null,
+    listenOnly: false,
     }));
     dmStore.setState(() => ({ channels: [] }));
 

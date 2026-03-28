@@ -24,6 +24,7 @@ export interface ConnectionStatsPoller {
   stop(): void;
   getStats(): ConnectionStats;
   onUpdate(cb: (stats: ConnectionStats) => void): () => void;
+  onQualityChanged(cb: (quality: QualityLevel, prevQuality: QualityLevel) => void): () => void;
 }
 
 const EMPTY_STATS: ConnectionStats = {
@@ -128,6 +129,10 @@ export function createConnectionStatsPoller(
   let prev: PrevSnapshot = { timestamp: Date.now(), outBytes: 0, inBytes: 0 };
   let intervalId: ReturnType<typeof setInterval> | null = null;
   const listeners = new Set<(stats: ConnectionStats) => void>();
+  const qualityChangeListeners = new Set<(quality: QualityLevel, prevQuality: QualityLevel) => void>();
+  let lastQuality: QualityLevel = "excellent";
+  let qualityDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  const QUALITY_DEBOUNCE_MS = 3000;
 
   async function poll(): Promise<void> {
     const room = getRoom();
@@ -157,6 +162,19 @@ export function createConnectionStatsPoller(
     };
 
     listeners.forEach((cb) => cb(current));
+
+    // Debounced quality change notification (prevents toast spam on flapping)
+    const newQuality = current.quality;
+    if (newQuality !== lastQuality) {
+      if (qualityDebounceTimer !== null) clearTimeout(qualityDebounceTimer);
+      qualityDebounceTimer = setTimeout(() => {
+        if (current.quality !== lastQuality) {
+          const prev = lastQuality;
+          lastQuality = current.quality;
+          qualityChangeListeners.forEach((cb) => cb(current.quality, prev));
+        }
+      }, QUALITY_DEBOUNCE_MS);
+    }
   }
 
   function start(): void {
@@ -187,7 +205,12 @@ export function createConnectionStatsPoller(
     };
   }
 
-  return { start, stop, getStats, onUpdate };
+  function onQualityChanged(cb: (quality: QualityLevel, prevQuality: QualityLevel) => void): () => void {
+    qualityChangeListeners.add(cb);
+    return () => { qualityChangeListeners.delete(cb); };
+  }
+
+  return { start, stop, getStats, onUpdate, onQualityChanged };
 }
 
 // --- Formatting helpers ---
@@ -200,4 +223,12 @@ export function formatBytes(bytes: number): string {
 
 export function formatRate(bytesPerSec: number): string {
   return `${formatBytes(bytesPerSec)}/s`;
+}
+
+/** Format bytes/sec as human-readable Mbps (for bandwidth display). */
+export function formatBitrate(bytesPerSec: number): string {
+  const mbps = (bytesPerSec * 8) / 1_000_000;
+  if (mbps < 0.01) return "0 Mbps";
+  if (mbps < 1) return `${(mbps * 1000).toFixed(0)} Kbps`;
+  return `${mbps.toFixed(1)} Mbps`;
 }

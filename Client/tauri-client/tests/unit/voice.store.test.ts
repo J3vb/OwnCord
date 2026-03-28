@@ -31,6 +31,7 @@ function resetStore(): void {
     localCamera: false,
     localScreenshare: false,
     joinedAt: null,
+    listenOnly: false,
   }));
 }
 

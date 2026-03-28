@@ -74,6 +74,7 @@ vi.mock("@stores/voice.store", () => ({
   setLocalScreenshare: vi.fn(),
   setSpeakers: vi.fn(),
   leaveVoiceChannel: vi.fn(),
+  setListenOnly: vi.fn(),
 }));
 
 const mockInvoke = vi.hoisted(() =>
@@ -112,7 +113,7 @@ vi.mock("@lib/noise-suppression", () => ({
 }));
 
 // Now import
-import { parseUserId, LiveKitSession } from "../../src/lib/livekitSession";
+import { parseUserId, LiveKitSession, getRoomForStats } from "../../src/lib/livekitSession";
 import { setLocalMuted, setLocalDeafened, setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
 
 function createDeferred<T>(): {
@@ -128,6 +129,12 @@ function createDeferred<T>(): {
   });
   return { promise, resolve, reject };
 }
+
+describe("getRoomForStats (pre-refactor lock)", () => {
+  it("returns null when no session is active", () => {
+    expect(getRoomForStats()).toBeNull();
+  });
+});
 
 describe("parseUserId", () => {
   it("parses a valid user identity", () => {
@@ -388,7 +395,7 @@ describe("LiveKitSession", () => {
 
     it("updates existing screenshare audio elements when master output changes", () => {
       const screenshareAudio = document.createElement("audio");
-      (session as any).screenshareAudioElements = new Map([[42, new Set([screenshareAudio])]]);
+      (session as any)._audioElements.screenshareAudioElements = new Map([[42, new Set([screenshareAudio])]]);
 
       session.setOutputVolume(80);
 
@@ -397,7 +404,7 @@ describe("LiveKitSession", () => {
 
     it("clamps existing screenshare audio elements to the browser volume range", () => {
       const screenshareAudio = document.createElement("audio");
-      (session as any).screenshareAudioElements = new Map([[42, new Set([screenshareAudio])]]);
+      (session as any)._audioElements.screenshareAudioElements = new Map([[42, new Set([screenshareAudio])]]);
 
       session.setOutputVolume(150);
 
@@ -685,7 +692,7 @@ describe("LiveKitSession", () => {
       session.muteScreenshareAudio(42, true);
 
       expect(secondAudioEl.muted).toBe(true);
-      expect((session as any).screenshareAudioElements.get(42)).toEqual(new Set([secondAudioEl]));
+      expect((session as any)._audioElements.screenshareAudioElements.get(42)).toEqual(new Set([secondAudioEl]));
     });
 
     it("applies the stored mute state to replacement screenshare audio tracks", () => {
@@ -725,6 +732,55 @@ describe("LiveKitSession", () => {
   describe("getScreenshareAudioMuted", () => {
     it("returns false when no audio element exists for userId", () => {
       expect(session.getScreenshareAudioMuted(999)).toBe(false);
+    });
+  });
+
+  // === PRE-REFACTOR BEHAVIORAL SNAPSHOT TESTS ===
+  // These lock the public API behavior before the 4-module split.
+  // Every test here must still pass after the refactor.
+
+  describe("enableScreenshare (pre-refactor lock)", () => {
+    it("shows error when no active voice session", async () => {
+      const onError = vi.fn();
+      session.setOnError(onError);
+      await session.enableScreenshare();
+      expect(onError).toHaveBeenCalledWith(expect.stringContaining("voice"));
+    });
+
+    it("does not enable screenshare when no room available", async () => {
+      const mockWs = { send: vi.fn() } as any;
+      session.setWsClient(mockWs);
+      await session.enableScreenshare();
+      // Should not send WS message without an active room
+      expect(mockWs.send).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("disableScreenshare (pre-refactor lock)", () => {
+    it("calls setLocalScreenshare(false) even without a room", async () => {
+      const mockWs = { send: vi.fn() } as any;
+      session.setWsClient(mockWs);
+      await session.disableScreenshare();
+      expect(setLocalScreenshare).toHaveBeenCalledWith(false);
+    });
+
+    it("sends voice_screenshare disabled message when ws is set", async () => {
+      const mockWs = { send: vi.fn() } as any;
+      session.setWsClient(mockWs);
+      await session.disableScreenshare();
+      expect(mockWs.send).toHaveBeenCalledWith({ type: "voice_screenshare", payload: { enabled: false } });
+    });
+  });
+
+  describe("reapplyAudioProcessing (pre-refactor lock)", () => {
+    it("does not throw when no room is active", () => {
+      expect(() => session.reapplyAudioProcessing()).not.toThrow();
+    });
+  });
+
+  describe("getLocalScreenshareStream (pre-refactor lock)", () => {
+    it("returns null when no room", () => {
+      expect(session.getLocalScreenshareStream()).toBeNull();
     });
   });
 });
