@@ -235,6 +235,15 @@ export function createApiClient(
       return res.json() as Promise<AuthResponse>;
     },
 
+    deleteAccount(password: string, signal?: AbortSignal): Promise<void> {
+      return request<void>(
+        "DELETE",
+        "/auth/account",
+        { password },
+        signal,
+      );
+    },
+
     // ── Users ─────────────────────────────────────────────
 
     getMe(signal?: AbortSignal): Promise<MemberResponse> {

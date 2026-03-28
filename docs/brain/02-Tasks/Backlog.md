@@ -9,20 +9,25 @@ Last task ID: T-183. New tasks start at T-184.
 
 ## Core Stability — Bugs Found 2026-03-28 (audit + Codex review)
 
-- [ ] **T-165:** Fix BUG-046 — wrap voice `switchActiveDevice` in try-catch with device fallback
-- [ ] **T-166:** Fix BUG-047 — block send until uploads complete or cancel in-flight uploads
-- [ ] **T-167:** Fix BUG-048 — add client-side file size/type validation before upload (incl. paste path)
-- [ ] **T-168:** Fix BUG-049 — migrate VAD from requestAnimationFrame to AudioWorklet
-- [ ] **T-169:** Fix BUG-050 — clear stale audio elements on voice auto-reconnect
-- [ ] **T-170:** Fix BUG-051 — add origin/path check to LiveKit HTTP proxy handler
-- [ ] **T-171:** Fix BUG-052 — replace swallowed `.catch(() => {})` with debug/warn logging
-- [ ] **T-172:** Fix BUG-053 — add TOFU fingerprint pinning to LiveKit TLS proxy
-- [ ] **T-173:** Fix BUG-054 — implement account deletion (server endpoint + client UI)
+- [x] **T-165:** Fix BUG-046 — wrap voice `switchActiveDevice` in try-catch with device fallback — 2026-03-28
+- [x] **T-166:** Fix BUG-047 — block send until uploads complete or cancel in-flight uploads — 2026-03-28
+- [x] **T-167:** Fix BUG-048 — add client-side file size/type validation before upload (incl. paste path) — 2026-03-28
+- [x] **T-168:** Fix BUG-049 — migrate VAD from requestAnimationFrame to setTimeout — 2026-03-28
+- [x] **T-169:** Fix BUG-050 — clear stale audio elements on voice auto-reconnect — 2026-03-28
+- [x] **T-170:** Fix BUG-051 — add origin/path check to LiveKit HTTP proxy handler — 2026-03-28
+- [x] **T-171:** Fix BUG-052 — replace swallowed `.catch(() => {})` with debug/warn logging — 2026-03-28
+- [x] **T-172:** Fix BUG-053 — add TOFU fingerprint pinning to LiveKit TLS proxy — 2026-03-28
+- [x] **T-173:** Fix BUG-054 — implement account deletion (server endpoint + client UI) — 2026-03-28
 
 ## Cleanup — Found 2026-03-28
 
-- [ ] **T-182:** Fix BUG-055 — remove 4 stale vitest coverage exclusions
-- [ ] **T-183:** Fix BUG-056 — investigate livekit-session.test.ts:434 proxy URL test failure
+- [x] **T-182:** Fix BUG-055 — remove 4 stale vitest coverage exclusions — 2026-03-28
+- [x] **T-183:** Fix BUG-056 — fix livekit-session.test.ts proxy URL test (mock Tauri invoke) — 2026-03-28
+
+## Refactoring
+
+- [ ] **T-184:** Refactor `livekitSession.ts` (1,386 lines) — extract into 4 modules: `audioPipeline.ts` (GainNode/VAD/AnalyserNode), `audioElements.ts` (remote mic/screenshare DOM elements), `deviceManager.ts` (device switching/enumeration), keep `livekitSession.ts` as public API + room lifecycle + reconnect
+- [ ] **T-185:** Add unit tests for delete account UI flow in `settings-overlay.test.ts` — trigger button, confirmation area, password validation, error display, disabled state
 
 ---
 

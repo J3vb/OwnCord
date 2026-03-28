@@ -11,6 +11,10 @@
 - [[00-Overview/Requirements|Requirements & Specs]]
 - [[01-Architecture/Design|Architecture & Design]]
 - [[01-Architecture/Tech Stack|Tech Stack]]
+- [[01-Architecture/Server-Architecture|Server Architecture]]
+- [[01-Architecture/Client-Architecture|Client Architecture]]
+- [[01-Architecture/Database-Schema|Database Schema]]
+- [[01-Architecture/Component-Map|Component Map]]
 
 ## Current Status
 
@@ -121,4 +125,17 @@ All issues created on GitHub with `agent-ready` label.
 
 ---
 
-Last updated by Claude Code: 2026-03-28 (Spec audit, 143 unit tests, E2E overhaul, CSS injection fix, new specs: DM-SYSTEM, THEME-SYSTEM, RECONNECTION, E2E-BEST-PRACTICES)
+<!-- AUTO-GENERATED: 2026-03-28 -->
+## Critical Rules (Always Apply)
+
+1. **API paths:** `/api/v1/*` (all REST routes prefixed)
+2. **DM auth:** Check `ch.Type == "dm"` and `IsDMParticipant()` before touching channel data
+3. **Status values:** Only `online`, `idle`, `dnd`, `offline` (never `invisible`)
+4. **Rate limits:** Respect client-side [[06-Specs/PROTOCOL|PROTOCOL.md]]: typing 1/3s, presence 1/10s, voice 20/s, chat 10/s
+5. **Role names:** Use strings ("admin", "member"), not numeric role_id in UI
+6. **Tenor API key:** Public key in `lib/tenor.ts` — not a secret, do not move to env
+7. **No hardcoded secrets:** All env vars checked on startup (API keys, JWT secrets, cert paths)
+
+<!-- END AUTO-GENERATED -->
+
+Last updated by Claude Code: 2026-03-28 (Spec audit, 143 unit tests, E2E overhaul, CSS injection fix, new specs: DM-SYSTEM, THEME-SYSTEM, RECONNECTION, E2E-BEST-PRACTICES; codemaps integrated into vault structure)

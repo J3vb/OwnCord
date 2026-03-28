@@ -53,12 +53,31 @@ func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 		},
 	}
 
+	// Paths that must never be forwarded to LiveKit (internal/admin endpoints).
+	// Matched as exact path segments to avoid false positives (e.g. "/user-metrics").
+	blockedSegments := map[string]bool{"admin": true, "metrics": true, "debug": true, "twirp": true}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Detect WebSocket upgrade requests.
 		if isWebSocketUpgrade(r) {
 			proxyWebSocket(w, r, &wsTarget, allowedOrigins)
 			return
 		}
+
+		// Block sensitive LiveKit endpoints (exact segment match).
+		for _, seg := range strings.Split(strings.ToLower(r.URL.Path), "/") {
+			if blockedSegments[seg] {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+		}
+
+		// Validate Origin header for HTTP requests (mirrors WS OriginPatterns).
+		if !isOriginAllowed(r, allowedOrigins) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+
 		httpProxy.ServeHTTP(w, r)
 	})
 }
@@ -67,6 +86,29 @@ func isWebSocketUpgrade(r *http.Request) bool {
 	for _, v := range r.Header.Values("Connection") {
 		if strings.EqualFold(strings.TrimSpace(v), "upgrade") {
 			return strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+		}
+	}
+	return false
+}
+
+// isOriginAllowed checks whether the request's Origin header matches one of the
+// allowed origins. Requests with no Origin header (e.g. same-origin or non-browser)
+// are permitted. An empty allowedOrigins list denies all cross-origin requests
+// (require explicit "*" wildcard to allow all).
+func isOriginAllowed(r *http.Request, allowedOrigins []string) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true // non-browser or same-origin requests
+	}
+	if len(allowedOrigins) == 0 {
+		return false // no allowlist configured — deny cross-origin
+	}
+	for _, pattern := range allowedOrigins {
+		if pattern == "*" {
+			return true
+		}
+		if strings.EqualFold(origin, pattern) {
+			return true
 		}
 	}
 	return false

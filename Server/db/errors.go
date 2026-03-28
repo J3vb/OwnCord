@@ -15,4 +15,9 @@ var (
 
 	// ErrBanned indicates the user is banned.
 	ErrBanned = errors.New("banned")
+
+	// ErrLastAdmin indicates the operation was rejected because the user is
+	// the only remaining admin/owner and deleting them would leave the server
+	// without an administrator.
+	ErrLastAdmin = errors.New("last admin cannot be deleted")
 )

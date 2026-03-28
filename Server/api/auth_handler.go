@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -73,6 +75,10 @@ func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, t
 
 		r.With(AuthMiddleware(database)).
 			Get("/me", handleMe())
+
+		r.With(AuthMiddleware(database),
+			RateLimitMiddleware(limiter, 5, time.Minute, trustedProxies)).
+			Delete("/account", handleDeleteAccount(database, limiter))
 	})
 }
 
@@ -322,6 +328,91 @@ func handleMe() http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, toUserResponse(user))
+	}
+}
+
+// deleteAccountRequest is the JSON body for DELETE /api/v1/auth/account.
+type deleteAccountRequest struct {
+	Password string `json:"password"`
+}
+
+// handleDeleteAccount processes DELETE /api/v1/auth/account.
+// The caller must supply their current password for confirmation.
+// Progressive lockout mirrors the login handler: 3 failures → 15-min lock.
+func handleDeleteAccount(database *db.DB, limiter *auth.RateLimiter) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value(UserKey).(*db.User)
+		if !ok || user == nil {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{
+				Error:   "UNAUTHORIZED",
+				Message: "not authenticated",
+			})
+			return
+		}
+
+		// Per-user lockout to prevent password brute-force on this destructive endpoint.
+		lockKey := fmt.Sprintf("delete_lock:%d", user.ID)
+		if limiter.IsLockedOut(lockKey) {
+			writeJSON(w, http.StatusTooManyRequests, errorResponse{
+				Error:   "RATE_LIMITED",
+				Message: "too many failed attempts, try again later",
+			})
+			return
+		}
+
+		var req deleteAccountRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error:   "INVALID_INPUT",
+				Message: "malformed request body",
+			})
+			return
+		}
+
+		if req.Password == "" {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error:   "INVALID_INPUT",
+				Message: "password is required",
+			})
+			return
+		}
+
+		// Verify the supplied password matches the stored hash.
+		failKey := fmt.Sprintf("delete_fail:%d", user.ID)
+		if !auth.CheckPassword(user.PasswordHash, req.Password) {
+			if !limiter.Allow(failKey, 3, 15*time.Minute) {
+				limiter.Lockout(lockKey, 15*time.Minute)
+			}
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error:   "INVALID_INPUT",
+				Message: "incorrect password",
+			})
+			return
+		}
+		limiter.Reset(failKey)
+
+		if err := database.DeleteAccount(r.Context(), user.ID); err != nil {
+			if errors.Is(err, db.ErrLastAdmin) {
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "cannot delete the last admin account",
+				})
+				return
+			}
+			slog.Error("DeleteAccount failed", "err", err, "user_id", user.ID)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error:   "SERVER_ERROR",
+				Message: "failed to delete account",
+			})
+			return
+		}
+
+		ip := clientIP(r)
+		slog.Info("account deleted", "username", user.Username, "user_id", user.ID, "ip", ip)
+		_ = database.LogAudit(user.ID, "account_deleted", "user", user.ID,
+			"account self-deleted from "+ip)
+
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

@@ -33,6 +33,7 @@ export interface SettingsOverlayOptions {
   onChangePassword(oldPassword: string, newPassword: string): Promise<void>;
   onUpdateProfile(username: string): Promise<void>;
   onLogout(): void;
+  onDeleteAccount(password: string): Promise<void>;
   onStatusChange(status: UserStatus): void;
 }
 

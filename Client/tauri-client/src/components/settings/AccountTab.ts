@@ -190,6 +190,109 @@ function buildStatusSelector(
 }
 
 // ---------------------------------------------------------------------------
+// Delete account (danger zone) builder
+// ---------------------------------------------------------------------------
+
+function buildDeleteAccountSection(
+  options: SettingsOverlayOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const wrapper = createElement("div", {});
+
+  const separator = createElement("div", { class: "settings-separator" });
+  const header = createElement("div", {
+    class: "settings-section-title",
+    style: "color:var(--red)",
+  }, "Danger Zone");
+
+  const description = createElement("div", {
+    style: "color:var(--text-muted);font-size:13px;margin-bottom:12px",
+  }, "Permanently delete your account and all associated data.");
+
+  const deleteBtn = createElement("button", {
+    class: "ac-btn account-delete-btn",
+    "data-testid": "delete-account-trigger",
+  }, "Delete Account");
+
+  // Inline confirmation area (hidden by default)
+  const confirmArea = createElement("div", {
+    class: "account-delete-confirm",
+    style: "display:none",
+    "data-testid": "delete-account-confirm-area",
+  });
+
+  const warningText = createElement("div", {
+    style: "color:var(--red);font-size:13px;margin-bottom:12px;line-height:1.4",
+  }, "This action is permanent and cannot be undone. All your data will be deleted. Enter your password to confirm.");
+
+  const passwordInput = createElement("input", {
+    class: "form-input",
+    type: "password",
+    placeholder: "Enter your password",
+    style: "margin-bottom:12px",
+    "data-testid": "delete-account-password",
+  });
+
+  const errorEl = createElement("div", {
+    style: "color:var(--red);font-size:13px;margin-bottom:8px",
+    "data-testid": "delete-account-error",
+  });
+
+  const btnRow = createElement("div", { style: "display:flex;gap:8px" });
+  const confirmBtn = createElement("button", {
+    class: "ac-btn account-delete-btn",
+    "data-testid": "delete-account-confirm",
+  }, "Confirm Delete");
+  const cancelBtn = createElement("button", {
+    class: "ac-btn",
+    style: "background:var(--bg-active)",
+  }, "Cancel");
+
+  appendChildren(btnRow, confirmBtn, cancelBtn);
+  appendChildren(confirmArea, warningText, passwordInput, errorEl, btnRow);
+
+  // Show confirmation area
+  deleteBtn.addEventListener("click", () => {
+    deleteBtn.style.display = "none";
+    confirmArea.style.display = "block";
+    passwordInput.value = "";
+    setText(errorEl, "");
+    passwordInput.focus();
+  }, { signal });
+
+  // Cancel — hide confirmation
+  cancelBtn.addEventListener("click", () => {
+    confirmArea.style.display = "none";
+    deleteBtn.style.display = "";
+    passwordInput.value = "";
+    setText(errorEl, "");
+  }, { signal });
+
+  // Confirm delete
+  confirmBtn.addEventListener("click", () => {
+    const pw = passwordInput.value;
+    if (pw.length === 0) {
+      setText(errorEl, "Password is required.");
+      return;
+    }
+    setText(errorEl, "");
+    confirmBtn.disabled = true;
+    setText(confirmBtn, "Deleting...");
+
+    void options.onDeleteAccount(pw).then(() => {
+      // Success — cleanup is handled by the callback (clears auth, navigates away)
+    }).catch((err: unknown) => {
+      setText(errorEl, err instanceof Error ? err.message : "Failed to delete account.");
+      confirmBtn.disabled = false;
+      setText(confirmBtn, "Confirm Delete");
+    });
+  }, { signal });
+
+  appendChildren(wrapper, separator, header, description, deleteBtn, confirmArea);
+  return wrapper;
+}
+
+// ---------------------------------------------------------------------------
 // Main tab builder
 // ---------------------------------------------------------------------------
 
@@ -255,6 +358,9 @@ export function buildAccountTab(
 
   // Password section
   section.appendChild(buildPasswordSection(options, signal));
+
+  // Delete account (danger zone)
+  section.appendChild(buildDeleteAccountSection(options, signal));
 
   return section;
 }

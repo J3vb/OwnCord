@@ -1173,7 +1173,18 @@ When PTT key is pressed: unmute. When released: mute.
 
 ### SettingsOverlay.ts
 
-Full-screen overlay with tab navigation:
+Discord-style centered floating panel with blurred backdrop (8px blur),
+rounded corners (12px), and scale animation on open. DOM structure:
+- `.settings-overlay` — full-screen fixed background (rgba(0, 0, 0, 0.7))
+  with backdrop-filter blur; click outside panel to close
+- `.settings-panel` — 900px wide card (max 100vw - 80px), 80vh tall
+  (max 720px), containing sidebar + content area + close button
+- Sidebar navigation with user profile, tab buttons grouped by category
+  (User Settings, App Settings), logout button at bottom
+- Content area renders active tab with page title (h1)
+- Close button with ESC label and escape key listener
+
+Tab navigation:
 
 | Tab | File | Purpose |
 |-----|------|---------|

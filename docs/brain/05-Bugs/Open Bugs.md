@@ -10,25 +10,41 @@ Bug tracker for the OwnCord project.
 
 ### High
 
-- **BUG-046**: Invalid saved audio device crashes voice join — `livekitSession.ts` calls `switchActiveDevice` for saved input/output after connect; if the saved device ID no longer exists, the exception bubbles to the outer try-catch and triggers `leaveVoice(false)`. Users cannot join voice until they manually clear prefs. Fix: wrap each `switchActiveDevice` in isolated try-catch with fallback to default device.
-- **BUG-047**: Orphaned file uploads on send — `MessageInput.ts` `handleSend()` calls `clearPendingAttachments()` even if uploads are still in flight. The upload resolves but can't attach to any message, leaving unreferenced files on the server. Also happens when a user removes a preview mid-upload. Fix: block send until uploads complete, or cancel in-flight uploads on clear.
-- **BUG-048**: No client-side file size/type validation (paste path) — `MessageInput.ts` has no size/type check before `onUploadFile`. The `accept` attribute only affects the file picker, not clipboard paste. Pasting a huge file reads it into memory (`readFileAsDataUrl`) and attempts upload, which can hang the UI. Fix: add size check (match server's 100MB limit) and type allowlist before preview/upload.
+(none)
 
 ### Medium
 
-- **BUG-049**: VAD breaks when app is backgrounded — `livekitSession.ts` VAD uses `requestAnimationFrame` which pauses when the Tauri window is minimized or behind other windows. Mic state gets stuck in whatever it was when backgrounded. Fix: migrate to `AudioWorklet` (see TODOS.md).
-- **BUG-050**: Auto-reconnect doesn't clear stale audio elements — on unexpected voice disconnect, `remoteMicAudioElements` and `screenshareAudioElements` are not cleaned up. If LiveKit doesn't emit unsubscribe events before disconnect, elements accumulate across reconnects (DOM/memory leak, possible duplicate audio). Fix: clear audio element maps at the start of auto-reconnect.
-- **BUG-051**: LiveKit proxy HTTP path has no origin check — `Server/api/livekit_proxy.go` WS path checks `OriginPatterns`, but the HTTP reverse proxy path (`httputil.ReverseProxy`) has no origin enforcement. If LiveKit exposes admin/metrics endpoints on the same port, they become reachable via the unauthenticated proxy. Fix: add origin check or path allowlist to HTTP proxy handler.
-- **BUG-052**: Swallowed `.catch(() => {})` in voice code — 6 instances in `livekitSession.ts` where errors are silently dropped (`room.disconnect`, `room.startAudio`, `replaceTrack`, `stop_livekit_proxy`). Makes debugging connection issues very hard. Fix: replace with `log.debug`/`log.warn` with context.
-- **BUG-053**: LiveKit TLS proxy has no TOFU fingerprint pinning — `livekit_proxy.rs` `InsecureVerifier` accepts ALL server certs without validation, unlike `ws_proxy.rs` which does TOFU pinning. A network MitM could intercept LiveKit signaling. Fix: add TOFU fingerprint check using the cert store from `ws_proxy.rs`. Documented in DEC-010.
-- **BUG-054**: No account deletion — users cannot delete their own account. No server API endpoint or client UI exists. GDPR concern for EU users. Fix: add `DELETE /api/v1/auth/account` endpoint + confirmation UI in AccountTab.
+(none)
 
 ### Low
 
-- **BUG-055**: 4 stale vitest coverage exclusions — `vitest.config.ts` excludes files that may no longer need exclusion. Cleanup: review each exclusion, remove stale entries, verify coverage stays above 80%.
-- **BUG-056**: `livekit-session.test.ts:434` proxy URL test failure — unit test for LiveKit proxy URL construction fails. Needs investigation of expected vs actual URL format.
+(none)
 
 ## Resolved
+
+- **BUG-054**: No account deletion — fixed 2026-03-28
+  - Server: `DELETE /api/v1/auth/account` with password confirmation. Anonymizes user (username → `[deleted-{id}]`, clears password/avatar/TOTP, bans row). Soft-deletes messages, removes sessions/DM participation/reactions/read states. Blocks last-admin deletion.
+  - Client: "Danger Zone" section in AccountTab with inline confirmation (password required). Post-deletion clears auth, disconnects WS, navigates to connect page.
+- **BUG-046**: Invalid saved audio device crashes voice join — fixed 2026-03-28
+  - Wrapped each `switchActiveDevice` in isolated try-catch with fallback to default device
+- **BUG-047**: Orphaned file uploads on send — fixed 2026-03-28
+  - Added `pendingUploadCount` tracking; `handleSend()` blocks until uploads complete
+- **BUG-048**: No client-side file size/type validation (paste path) — fixed 2026-03-28
+  - Added 100MB size limit and MIME type allowlist before `readFileAsDataUrl` on paste
+- **BUG-049**: VAD breaks when app is backgrounded — fixed 2026-03-28
+  - Replaced `requestAnimationFrame` with `setTimeout(poll, 16)` so VAD continues when minimized
+- **BUG-050**: Auto-reconnect doesn't clear stale audio elements — fixed 2026-03-28
+  - Added `remoteMicAudioElements`/`screenshareAudioElements` cleanup in `handleDisconnected()`
+- **BUG-051**: LiveKit proxy HTTP path has no origin check — fixed 2026-03-28
+  - Added `isOriginAllowed` check + path deny-list (`/admin`, `/metrics`, `/debug`, `/twirp`)
+- **BUG-052**: Swallowed `.catch(() => {})` in voice code — fixed 2026-03-28
+  - Replaced 6 silent catches with descriptive `log.warn`/`log.debug` messages
+- **BUG-053**: LiveKit TLS proxy has no TOFU fingerprint pinning — fixed 2026-03-28
+  - `livekit_proxy.rs` now uses `PinnedVerifier` with SHA-256 TOFU fingerprint check
+- **BUG-055**: 4 stale vitest coverage exclusions — fixed 2026-03-28
+  - Removed exclusions for `audio.ts`, `vad.ts`, `webrtc.ts`, `voiceSession.ts` (files deleted)
+- **BUG-056**: `livekit-session.test.ts:434` proxy URL test failure — fixed 2026-03-28
+  - Added `@tauri-apps/api/core` mock for `start_livekit_proxy`; fixed expected URL format
 
 - **BUG-057**: CSS injection via custom theme JSON — fixed 2026-03-28
   - `lib/themes.ts` accepted arbitrary CSS values from user-uploaded theme JSON without sanitization. Malicious theme could inject CSS expressions. Fix: added CSS value sanitization before DOM injection.

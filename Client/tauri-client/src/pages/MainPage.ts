@@ -232,6 +232,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         }
       },
       onLogout: () => clearAuth(),
+      onDeleteAccount: async (password) => {
+        await api.deleteAccount(password);
+        clearAuth();
+        toast?.show("Account deleted successfully", "success");
+      },
       onStatusChange: (status) => {
         const userId = getCurrentUserId();
         if (userId !== 0) {

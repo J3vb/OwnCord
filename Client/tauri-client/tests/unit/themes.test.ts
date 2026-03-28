@@ -165,20 +165,20 @@ describe("restoreTheme", () => {
   });
 
   it("should apply saved accent color on document", () => {
-    localStorage.setItem("owncord:pref:accentColor", JSON.stringify("#00ff00"));
+    localStorage.setItem("owncord:settings:accentColor", JSON.stringify("#00ff00"));
     restoreTheme();
     expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#00ff00");
     expect(document.body.style.getPropertyValue("--accent")).toBe("#00ff00");
   });
 
   it("should reject accent color that is not valid hex", () => {
-    localStorage.setItem("owncord:pref:accentColor", JSON.stringify("url(evil)"));
+    localStorage.setItem("owncord:settings:accentColor", JSON.stringify("url(evil)"));
     restoreTheme();
     expect(document.documentElement.style.getPropertyValue("--accent")).toBe("");
   });
 
   it("should handle corrupted localStorage gracefully", () => {
-    localStorage.setItem("owncord:pref:accentColor", "NOT VALID JSON {{{");
+    localStorage.setItem("owncord:settings:accentColor", "NOT VALID JSON {{{");
     // Should not throw
     expect(() => restoreTheme()).not.toThrow();
     // No accent should be set

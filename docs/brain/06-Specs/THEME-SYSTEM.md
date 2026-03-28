@@ -40,7 +40,7 @@ app startup.
   |                           |
   |  owncord:theme:active     |  <-- Active theme name
   |  owncord:theme:custom:X   |  <-- Custom theme JSON
-  |  owncord:pref:accentColor |  <-- Accent color override
+  |  owncord:settings:accentColor | <-- Accent color override
   +---------------------------+
 ```
 
@@ -217,7 +217,9 @@ the accent override wins over the theme's `--accent` value.
 
 ### 6.2 Persistence
 
-Saved to localStorage as `owncord:pref:accentColor` (JSON string).
+Saved to localStorage as `owncord:settings:accentColor` (JSON string).
+Note: Previously used `owncord:pref:accentColor` — this was corrected to
+match the actual storage key used by AppearanceTab.
 
 ### 6.3 Restore Order
 

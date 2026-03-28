@@ -76,6 +76,18 @@ vi.mock("@stores/voice.store", () => ({
   leaveVoiceChannel: vi.fn(),
 }));
 
+const mockInvoke = vi.hoisted(() =>
+  vi.fn((cmd: string, _payload?: unknown) => {
+    if (cmd === "start_livekit_proxy") return Promise.resolve(7881);
+    if (cmd === "stop_livekit_proxy") return Promise.resolve();
+    return Promise.resolve();
+  }),
+);
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (cmd: string, payload?: unknown) => mockInvoke(cmd, payload),
+}));
+
 const { mockLoadPref, mockSavePref } = vi.hoisted(() => ({
   mockLoadPref: vi.fn((_key: string, defaultVal: unknown) => defaultVal),
   mockSavePref: vi.fn(),
@@ -431,7 +443,8 @@ describe("LiveKitSession", () => {
 
       await session.handleVoiceToken("test-token", "/livekit", 1);
 
-      expect(mockRoom.connect).toHaveBeenCalledWith("wss://example.com:443/livekit", "test-token");
+      expect(mockInvoke).toHaveBeenCalledWith("start_livekit_proxy", { remoteHost: "example.com:443" });
+      expect(mockRoom.connect).toHaveBeenCalledWith("ws://127.0.0.1:7881/livekit", "test-token");
     });
 
     it("handles mic permission denied gracefully", async () => {

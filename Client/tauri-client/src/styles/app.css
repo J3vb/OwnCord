@@ -1189,6 +1189,15 @@
   font-size: 13px; font-weight: 600; transition: background .15s; margin-left: auto;
 }
 .ac-btn:hover { background: var(--accent-hover); }
+.ac-btn.account-delete-btn {
+  background: var(--red); margin-left: 0;
+}
+.ac-btn.account-delete-btn:hover { background: #d83135; }
+.ac-btn.account-delete-btn:disabled { opacity: .6; cursor: not-allowed; }
+.account-delete-confirm {
+  background: rgba(242,63,67,.06); border: 1px solid rgba(242,63,67,.2);
+  border-radius: var(--radius-sm); padding: 16px; margin-top: 12px;
+}
 
 /* ── Discord-style account profile card ── */
 .account-banner {

@@ -146,7 +146,7 @@ export class LiveKitSession {
   private audioPipelineGain: GainNode | null = null;
   private audioPipelineAnalyser: AnalyserNode | null = null;
   private audioPipelineDest: MediaStreamAudioDestinationNode | null = null;
-  private vadAnimFrame: number = 0;
+  private vadTimer: ReturnType<typeof setTimeout> | null = null;
   /** When true, mic is currently gated (muted by VAD — gain set to 0). */
   private vadGated = false;
   /** The user's input volume gain (0-2.0). VAD multiplies this by 0 or 1. */
@@ -375,11 +375,18 @@ export class LiveKitSession {
       this.teardownAudioPipeline();
       this.removeAutoplayUnlock();
       this.clearTokenRefreshTimer();
+      // Clear stale remote audio elements so reconnect doesn't leak DOM nodes.
+      this.remoteMicAudioElements.forEach(el => el.remove());
+      this.remoteMicAudioElements.clear();
+      this.screenshareAudioElements.forEach(audioEls => {
+        audioEls.forEach(el => el.remove());
+      });
+      this.screenshareAudioElements.clear();
       if (this.room !== null) {
         const r = this.room;
         this.room = null;
         r.removeAllListeners();
-        r.disconnect().catch(() => {});
+        r.disconnect().catch((err) => log.warn("Failed to disconnect stale room", err));
       }
       this.reconnectAc = new AbortController();
       void this.attemptAutoReconnect(token, url, channelId, directUrl, this.reconnectAc.signal);
@@ -409,7 +416,7 @@ export class LiveKitSession {
         const resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
         await this.room.connect(resolvedUrl, token);
         log.info("Auto-reconnect succeeded", { attempt, channelId });
-        this.room.startAudio().catch(() => {});
+        this.room.startAudio().catch((err) => log.debug("Failed to start audio after reconnect", err));
         await this.restoreLocalVoiceState("reconnect");
         this.setupAudioPipeline();
         this.reapplyMuteGain();
@@ -424,7 +431,7 @@ export class LiveKitSession {
         log.warn("Auto-reconnect failed", { attempt, error: err });
         if (this.room !== null) {
           this.room.removeAllListeners();
-          this.room.disconnect().catch(() => {});
+          this.room.disconnect().catch((err) => log.warn("Failed to disconnect room after reconnect failure", err));
           this.room = null;
         }
       }
@@ -580,7 +587,7 @@ export class LiveKitSession {
     // setMicrophoneEnabled(false) doesn't guarantee mediaStreamTrack.enabled=false,
     // and renegotiation when a new participant joins can bring a track back alive.
     if (muted) {
-      this.applyMicMuteState(true);
+      this.applyMicMuteState(true).catch((e) => log.warn("applyMicMuteState failed in restoreLocalVoiceState", e));
     }
 
     this.applyRemoteAudioSubscriptionState(deafened);
@@ -649,7 +656,7 @@ export class LiveKitSession {
               const room = this.room;
               this.room = null;
               room.removeAllListeners();
-              room.disconnect().catch(() => {});
+              room.disconnect().catch((err) => log.debug("Failed to disconnect room during cleanup", err));
             }
             // Don't return — fall through to finally + pending-join dispatch.
             break;
@@ -682,9 +689,21 @@ export class LiveKitSession {
         });
         await this.restoreLocalVoiceState("join");
         const savedInput = loadPref<string>("audioInputDevice", "");
-        if (savedInput) await this.room.switchActiveDevice("audioinput", savedInput);
+        if (savedInput) {
+          try {
+            await this.room.switchActiveDevice("audioinput", savedInput);
+          } catch (err) {
+            log.warn("Saved input device unavailable, using default", err);
+          }
+        }
         const savedOutput = loadPref<string>("audioOutputDevice", "");
-        if (savedOutput) await this.room.switchActiveDevice("audiooutput", savedOutput);
+        if (savedOutput) {
+          try {
+            await this.room.switchActiveDevice("audiooutput", savedOutput);
+          } catch (err) {
+            log.warn("Saved output device unavailable, using default", err);
+          }
+        }
         // Set up unified audio pipeline (input volume + VAD gating via GainNode).
         // VAD polling only starts if saved sensitivity < 100.
         this.setupAudioPipeline();
@@ -765,7 +784,7 @@ export class LiveKitSession {
     this.serverHost = null;
     this.liveKitProxyPort = null;
     // Stop the Rust-side TLS proxy (fire-and-forget).
-    invoke("stop_livekit_proxy").catch(() => {});
+    invoke("stop_livekit_proxy").catch((err) => log.warn("Failed to stop LiveKit proxy", err));
   }
 
   setMuted(muted: boolean): void {
@@ -1079,7 +1098,7 @@ export class LiveKitSession {
       const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
       if (micPub?.track?.sender !== undefined) {
         const originalTrack = micPub.track.mediaStreamTrack;
-        void micPub.track.sender.replaceTrack(originalTrack).catch(() => {});
+        void micPub.track.sender.replaceTrack(originalTrack).catch((err) => log.debug("Failed to replace track during teardown", err));
       }
     }
 
@@ -1168,6 +1187,12 @@ export class LiveKitSession {
     let startupFrames = 0;
     const STARTUP_GRACE = 30;
 
+    // setTimeout instead of requestAnimationFrame: rAF pauses when the Tauri
+    // window is minimized/backgrounded, which freezes the VAD gate in whatever
+    // state it was in. setTimeout continues firing (throttled to ~1 Hz by some
+    // engines when hidden), which is still fast enough for VAD gate timing
+    // (200ms gate-on, 100ms gate-off). The CPU cost is negligible since
+    // getFloatTimeDomainData is a cheap memcpy from the audio thread.
     const poll = (): void => {
       if (this.audioPipelineAnalyser === null) return;
 
@@ -1181,7 +1206,7 @@ export class LiveKitSession {
 
       if (startupFrames < STARTUP_GRACE) {
         startupFrames++;
-        this.vadAnimFrame = requestAnimationFrame(poll);
+        this.vadTimer = setTimeout(poll, 16);
         return;
       }
 
@@ -1201,17 +1226,17 @@ export class LiveKitSession {
         }
       }
 
-      this.vadAnimFrame = requestAnimationFrame(poll);
+      this.vadTimer = setTimeout(poll, 16);
     };
-    this.vadAnimFrame = requestAnimationFrame(poll);
+    this.vadTimer = setTimeout(poll, 16);
     log.info("VAD polling started", { sensitivity, threshold });
   }
 
   /** Stop VAD polling loop (pipeline stays intact). */
   private stopVadPolling(): void {
-    if (this.vadAnimFrame !== 0) {
-      cancelAnimationFrame(this.vadAnimFrame);
-      this.vadAnimFrame = 0;
+    if (this.vadTimer !== null) {
+      clearTimeout(this.vadTimer);
+      this.vadTimer = null;
     }
     // Ungate if was gated
     if (this.vadGated) {
