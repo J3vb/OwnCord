@@ -231,7 +231,16 @@ export function createSettingsOverlay(
       }
     }, { signal: ac.signal });
 
-    appendChildren(root, sidebar, contentArea, closeWrap);
+    // Inner panel (Discord-style centered card)
+    const panel = createElement("div", { class: "settings-panel" });
+    appendChildren(panel, sidebar, contentArea, closeWrap);
+
+    // Click backdrop (outside panel) to close
+    root.addEventListener("click", (e: MouseEvent) => {
+      if (e.target === root) options.onClose();
+    }, { signal: ac.signal });
+
+    root.appendChild(panel);
     renderActiveTab();
 
     // Subscribe to uiStore for open/close

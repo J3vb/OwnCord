@@ -1066,14 +1066,23 @@
 /* ── Settings Overlay (app) ── */
 .settings-overlay {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: var(--bg-primary); z-index: 500;
-  display: none;
+  background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(8px);
+  z-index: 500; display: none;
+  align-items: center; justify-content: center;
 }
 .settings-overlay.open { display: flex; }
+.settings-panel {
+  display: flex; width: 900px; max-width: calc(100vw - 80px);
+  height: 80vh; max-height: 720px;
+  background: var(--bg-primary); border-radius: 12px;
+  overflow: hidden; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  position: relative;
+}
 .settings-sidebar {
   width: 220px; background: var(--bg-secondary);
   padding: 24px 8px 16px; overflow-y: auto; flex-shrink: 0;
   display: flex; flex-direction: column;
+  border-radius: 12px 0 0 12px;
 }
 .settings-cat {
   padding: 8px 12px 4px; font-size: 11px; font-weight: 700;
@@ -1268,7 +1277,7 @@
 
 /* Close button wrap with ESC label */
 .settings-close-wrap {
-  position: absolute; top: 16px; right: 24px;
+  position: absolute; top: 12px; right: 16px;
   text-align: center; z-index: 10;
   display: flex; flex-direction: column; align-items: center; gap: 4px;
 }
@@ -1708,6 +1717,11 @@
 .user-popup.open { animation: slideIn .15s cubic-bezier(0.34, 1.56, 0.64, 1); }
 .emoji-picker.open, .gif-picker.open { animation: pickerPop .15s cubic-bezier(0.4, 0, 0.2, 1); }
 .settings-overlay.open { animation: fadeIn .2s ease; }
+.settings-panel { animation: settingsScale .2s cubic-bezier(0.2, 0, 0, 1); }
+@keyframes settingsScale {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
 
 /* ═══ Compact Mode ═══ */
 /* Messages: hide avatars, inline timestamp + author, tighter spacing */

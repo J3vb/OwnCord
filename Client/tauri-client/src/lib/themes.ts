@@ -136,7 +136,7 @@ export function restoreTheme(): void {
   // The accent must be applied after the theme so it wins over the theme's
   // --accent value via inline style specificity.
   try {
-    const raw = localStorage.getItem("owncord:pref:accentColor");
+    const raw = localStorage.getItem("owncord:settings:accentColor");
     if (raw !== null) {
       const accent = JSON.parse(raw);
       if (typeof accent === "string" && /^#[\da-fA-F]{3,8}$/.test(accent)) {
