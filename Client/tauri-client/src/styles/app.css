@@ -870,9 +870,9 @@
 .sidebar-resize-handle:hover {
   background: var(--accent-primary, var(--accent));
 }
-/* ── DM Section (sidebar) ── */
+/* ── DM Section (sidebar — positioned above channels) ── */
 .sidebar-dm-section {
-  border-top: 1px solid var(--border-glow, var(--border));
+  border-bottom: 1px solid var(--border-glow, var(--border));
   flex-shrink: 0;
 }
 .sidebar-dm-list {
@@ -883,6 +883,19 @@
   max-height: 0 !important;
   overflow: hidden;
 }
+.dm-header-unread-badge {
+  background: var(--red); color: white; border-radius: 10px;
+  padding: 0 6px; font-size: 0.65rem; font-weight: 700;
+  min-width: 16px; text-align: center; line-height: 16px;
+  margin-left: 4px; flex-shrink: 0;
+}
+.sidebar-dm-view-all {
+  display: block; width: 100%; padding: 4px 16px;
+  background: transparent; border: none; color: var(--text-link);
+  font-size: 0.75rem; cursor: pointer; text-align: left;
+  transition: color .15s;
+}
+.sidebar-dm-view-all:hover { color: var(--accent); }
 .sidebar-members-section .member-list {
   width: 100%;
 }

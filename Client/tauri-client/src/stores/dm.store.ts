@@ -49,37 +49,47 @@ export function removeDmChannel(channelId: number): void {
   }));
 }
 
-/** Update last message info for a DM channel (on new message) and increment unread. */
+/** Update last message info for a DM channel (on new message) and increment unread.
+ *  Moves the channel to the top of the list so new messages are always visible. */
 export function updateDmLastMessage(
   channelId: number,
   messageId: number,
   content: string,
   timestamp: string,
 ): void {
-  dmStore.setState((prev) => ({
-    channels: prev.channels.map((c) =>
-      c.channelId === channelId
-        ? { ...c, lastMessageId: messageId, lastMessage: content, lastMessageAt: timestamp, unreadCount: c.unreadCount + 1 }
-        : c,
-    ),
-  }));
+  dmStore.setState((prev) => {
+    const updated = prev.channels.find((c) => c.channelId === channelId);
+    if (updated === undefined) return prev;
+    const rest = prev.channels.filter((c) => c.channelId !== channelId);
+    return {
+      channels: [
+        { ...updated, lastMessageId: messageId, lastMessage: content, lastMessageAt: timestamp, unreadCount: updated.unreadCount + 1 },
+        ...rest,
+      ],
+    };
+  });
 }
 
 /** Update last message preview for a DM channel without incrementing unread count.
- *  Used for own messages and messages in the currently focused DM. */
+ *  Used for own messages and messages in the currently focused DM.
+ *  Moves the channel to the top of the list so active conversations stay visible. */
 export function updateDmLastMessagePreview(
   channelId: number,
   messageId: number,
   content: string,
   timestamp: string,
 ): void {
-  dmStore.setState((prev) => ({
-    channels: prev.channels.map((c) =>
-      c.channelId === channelId
-        ? { ...c, lastMessageId: messageId, lastMessage: content, lastMessageAt: timestamp }
-        : c,
-    ),
-  }));
+  dmStore.setState((prev) => {
+    const updated = prev.channels.find((c) => c.channelId === channelId);
+    if (updated === undefined) return prev;
+    const rest = prev.channels.filter((c) => c.channelId !== channelId);
+    return {
+      channels: [
+        { ...updated, lastMessageId: messageId, lastMessage: content, lastMessageAt: timestamp },
+        ...rest,
+      ],
+    };
+  });
 }
 
 /** Clear unread count for a DM channel. */

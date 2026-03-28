@@ -37,6 +37,7 @@ export interface HealthStatus {
   readonly status: "online" | "slow" | "offline" | "checking";
   readonly latencyMs: number | null;
   readonly version: string | null;
+  readonly onlineUsers: number | null;
 }
 
 export interface ProfilesState {
@@ -157,6 +158,13 @@ export interface ProfileManager {
   /** Returns the first profile with autoConnect=true, or null. */
   getAutoConnectProfile(): ServerProfile | null;
 
+  /**
+   * Set the auto-login profile. Only one profile can be auto-login at a time.
+   * Passing null clears auto-login on all profiles.
+   * Setting auto-login also forces rememberPassword to true on the target.
+   */
+  setAutoLogin(id: string | null): void;
+
   /** Set lastConnected to current ISO timestamp. */
   setLastConnected(id: string): void;
 
@@ -229,16 +237,17 @@ export function createProfileManager(
       const elapsed = Math.round(performance.now() - start);
 
       if (!res.ok) {
-        return { status: "offline", latencyMs: elapsed, version: null };
+        return { status: "offline", latencyMs: elapsed, version: null, onlineUsers: null };
       }
 
-      const body = (await res.json()) as { version?: string };
+      const body = (await res.json()) as { version?: string; online_users?: number };
       const version = typeof body.version === "string" ? body.version : null;
+      const onlineUsers = typeof body.online_users === "number" ? body.online_users : null;
       const status = elapsed > SLOW_THRESHOLD_MS ? "slow" : "online";
 
-      return { status, latencyMs: elapsed, version };
+      return { status, latencyMs: elapsed, version, onlineUsers };
     } catch {
-      return { status: "offline", latencyMs: null, version: null };
+      return { status: "offline", latencyMs: null, version: null, onlineUsers: null };
     } finally {
       clearTimeout(timer);
     }
@@ -301,6 +310,22 @@ export function createProfileManager(
       return currentProfiles().find((p) => p.autoConnect) ?? null;
     },
 
+    setAutoLogin(id: string | null): void {
+      const profiles = currentProfiles();
+      const updated = profiles.map((p) => {
+        if (id === null) {
+          // Clear auto-login on all profiles
+          return p.autoConnect ? { ...p, autoConnect: false } : p;
+        }
+        if (p.id === id) {
+          return { ...p, autoConnect: true, rememberPassword: true };
+        }
+        // Clear auto-login on all other profiles
+        return p.autoConnect ? { ...p, autoConnect: false } : p;
+      });
+      setProfiles(updated);
+    },
+
     setLastConnected(id: string): void {
       const profiles = currentProfiles();
       const index = profiles.findIndex((p) => p.id === id);
@@ -321,6 +346,7 @@ export function createProfileManager(
           status: "offline",
           latencyMs: null,
           version: null,
+          onlineUsers: null,
         };
         return offline;
       }
@@ -329,6 +355,7 @@ export function createProfileManager(
         status: "checking",
         latencyMs: null,
         version: null,
+        onlineUsers: null,
       });
 
       const result = await pingHost(profile.host);
@@ -345,6 +372,7 @@ export function createProfileManager(
           status: "checking",
           latencyMs: null,
           version: null,
+          onlineUsers: null,
         });
       }
 

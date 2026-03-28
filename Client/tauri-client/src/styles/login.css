@@ -154,6 +154,7 @@
   display: flex; gap: 2px; opacity: 0; transition: opacity .15s; flex-shrink: 0;
 }
 .server-item:hover .srv-actions { opacity: 1; }
+.srv-actions:has(.auto-login.active) { opacity: 1; }
 .srv-btn {
   width: 26px; height: 26px; border-radius: var(--radius-sm);
   background: transparent; color: var(--text-faint);
@@ -162,6 +163,15 @@
 }
 .srv-btn:hover { background: var(--bg-active); color: var(--text-normal); }
 .srv-btn.danger:hover { background: var(--red); color: white; }
+.srv-btn.auto-login { color: var(--text-micro); }
+.srv-btn.auto-login.active { color: var(--accent); opacity: 1; }
+.srv-btn.auto-login:hover { color: var(--accent); }
+
+/* Online users count */
+.srv-online-users {
+  font-size: 10px; color: var(--text-micro); white-space: nowrap;
+}
+.srv-online-users.has-users { color: var(--green); }
 
 /* Auto-connect indicator */
 .srv-auto { font-size: 10px; color: var(--accent); margin-left: 4px; }
@@ -374,6 +384,38 @@
   animation: formSlideIn .3s cubic-bezier(.16,1,.3,1);
 }
 .totp-overlay--hidden { display: none; }
+
+/* ═══ Auto-connect overlay ═══ */
+.auto-connect-overlay {
+  position: absolute; inset: 0;
+  background: var(--bg-primary);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 10;
+  animation: formSlideIn .3s cubic-bezier(.16,1,.3,1);
+}
+.auto-connect-overlay--hidden { display: none; }
+.auto-connect-card {
+  text-align: center; padding: 40px;
+}
+.auto-connect-spinner {
+  margin: 0 auto 20px; width: 48px; height: 48px;
+}
+.auto-connect-spinner .spinner {
+  width: 48px; height: 48px;
+  border-width: 3px;
+}
+.auto-connect-title {
+  font-size: 20px; font-weight: 700; color: white; margin-bottom: 8px;
+}
+.auto-connect-server {
+  display: block; font-size: 14px; color: var(--accent); margin-bottom: 24px;
+}
+.auto-connect-cancel {
+  font-size: 13px; color: var(--text-faint); cursor: pointer;
+  background: transparent; border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 6px 20px; transition: all .15s;
+}
+.auto-connect-cancel:hover { color: var(--text-normal); border-color: var(--text-muted); }
 
 /* ═══ 2FA / TOTP ═══ */
 .totp-icon {

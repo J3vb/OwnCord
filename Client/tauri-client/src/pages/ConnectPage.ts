@@ -31,6 +31,8 @@ export interface ConnectPageCallbacks {
   onTotpSubmit(code: string): Promise<void>;
   onAddProfile?(name: string, host: string): void;
   onDeleteProfile?(profileId: string): void;
+  onToggleAutoLogin?(profileId: string, enabled: boolean): void;
+  onAutoLoginCancel?(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -51,6 +53,7 @@ export function createConnectPage(
 ): MountableComponent & {
   showTotp(): void;
   showConnecting(): void;
+  showAutoConnecting(serverName: string): void;
   showError(message: string): void;
   resetToIdle(): void;
   updateHealthStatus(host: string, status: HealthStatus): void;
@@ -76,6 +79,7 @@ export function createConnectPage(
     onRegister: callbacks.onRegister,
     onTotpSubmit: callbacks.onTotpSubmit,
     onSettingsOpen: () => openSettings(),
+    onAutoLoginCancel: callbacks.onAutoLoginCancel,
   });
 
   const serverPanel = createServerPanel(
@@ -95,6 +99,7 @@ export function createConnectPage(
       },
       onAddProfile: callbacks.onAddProfile,
       onDeleteProfile: callbacks.onDeleteProfile,
+      onToggleAutoLogin: callbacks.onToggleAutoLogin,
     },
     initialProfiles,
   );
@@ -192,6 +197,9 @@ export function createConnectPage(
     // TOTP overlay
     root.appendChild(loginForm.totpOverlayElement);
 
+    // Auto-connect overlay
+    root.appendChild(loginForm.autoConnectOverlayElement);
+
     return root;
   }
 
@@ -244,6 +252,7 @@ export function createConnectPage(
     destroy,
     showTotp: () => loginForm.showTotp(),
     showConnecting: () => loginForm.showConnecting(),
+    showAutoConnecting: (serverName: string) => loginForm.showAutoConnecting(serverName),
     showError: (message: string) => loginForm.showError(message),
     resetToIdle: () => loginForm.resetToIdle(),
     updateHealthStatus: (host: string, status: HealthStatus) =>

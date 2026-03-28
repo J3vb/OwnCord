@@ -508,40 +508,34 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     const innerSlot = createElement("div", { style: "flex:1;overflow:hidden;display:flex;flex-direction:column;" });
 
     if (mode === "channels") {
-      const channelSidebar = buildChannelSidebar();
-      channelSidebar.mount(innerSlot);
-      activeSidebarContent = channelSidebar;
-
-      // Inject the channel sidebar content into contentSlot.
-      // createChannelSidebar mounts a .channel-sidebar root inside innerSlot.
-      // We want that root's children to live inside our content area, but
-      // the ChannelSidebar owns its own root element so we keep it nested.
-      contentSlot.appendChild(innerSlot);
-
-      // Hide the redundant channel-sidebar-header (server name + invite are now in the unified header)
-      const oldSidebarHeader = innerSlot.querySelector(".channel-sidebar-header");
-      if (oldSidebarHeader !== null) {
-        (oldSidebarHeader as HTMLElement).style.display = "none";
-      }
-
-      // --- DM section (between channels and members) ---
+      // --- DM section (above channels, below server header) ---
       const dmSection = createElement("div", { class: "sidebar-dm-section" });
       const dmHeader = createElement("div", { class: "category" });
       const dmArrow = createElement("span", { class: "category-arrow" }, "\u25BC");
       const dmLabelEl = createElement("span", { class: "category-name" }, "DIRECT MESSAGES");
+      const dmUnreadBadge = createElement("span", { class: "dm-header-unread-badge" });
       const dmAddBtn = createElement("button", { class: "category-add-btn", title: "New DM" }, "+");
       dmAddBtn.style.opacity = "1";
-      appendChildren(dmHeader, dmArrow, dmLabelEl, dmAddBtn);
+      appendChildren(dmHeader, dmArrow, dmLabelEl, dmUnreadBadge, dmAddBtn);
       dmSection.appendChild(dmHeader);
 
       let dmCollapsed = false;
       const dmList = createElement("div", { class: "category-channels sidebar-dm-list" });
 
+      // "View All" button (shown when more than 5 DMs exist)
+      const viewAllBtn = createElement("button", {
+        class: "sidebar-dm-view-all",
+      }, "View all messages");
+
+      viewAllBtn.addEventListener("click", () => {
+        setSidebarMode("dms");
+      });
+
       /** Render DM items from the DM store into the sidebar DM list. */
       function renderDmListItems(): void {
         clearChildren(dmList);
         const dmChannels = dmStore.getState().channels;
-        const displayChannels = dmChannels.slice(0, 5);
+        const displayChannels = dmChannels.slice(0, 3);
         for (const dm of displayChannels) {
           const dmItem = createElement("div", {
             class: "channel-item",
@@ -569,10 +563,28 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           });
           dmList.appendChild(dmItem);
         }
+
+        // Show/hide "View All" button based on DM count
+        if (dmChannels.length > 3) {
+          setText(viewAllBtn, `View all messages (${dmChannels.length})`);
+          viewAllBtn.style.display = "";
+        } else {
+          viewAllBtn.style.display = "none";
+        }
+
+        // Update total unread badge on the DM header
+        const totalUnread = dmChannels.reduce((sum, c) => sum + c.unreadCount, 0);
+        if (totalUnread > 0) {
+          setText(dmUnreadBadge, String(totalUnread));
+          dmUnreadBadge.style.display = "";
+        } else {
+          dmUnreadBadge.style.display = "none";
+        }
       }
 
       renderDmListItems();
       dmSection.appendChild(dmList);
+      dmSection.appendChild(viewAllBtn);
 
       // Re-render DM list when DM store changes
       const unsubDmSection = dmStore.subscribeSelector(
@@ -585,6 +597,8 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         dmCollapsed = !dmCollapsed;
         dmHeader.classList.toggle("collapsed", dmCollapsed);
         dmArrow.textContent = dmCollapsed ? "\u25B6" : "\u25BC";
+        dmList.style.display = dmCollapsed ? "none" : "";
+        viewAllBtn.style.display = dmCollapsed ? "none" : (dmStore.getState().channels.length > 5 ? "" : "none");
       });
 
       dmAddBtn.addEventListener("click", (e) => {
@@ -592,7 +606,21 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         showMemberPicker();
       });
 
+      // DM section goes first (above channels)
       contentSlot.appendChild(dmSection);
+
+      const channelSidebar = buildChannelSidebar();
+      channelSidebar.mount(innerSlot);
+      activeSidebarContent = channelSidebar;
+
+      // Inject the channel sidebar content into contentSlot.
+      contentSlot.appendChild(innerSlot);
+
+      // Hide the redundant channel-sidebar-header (server name + invite are now in the unified header)
+      const oldSidebarHeader = innerSlot.querySelector(".channel-sidebar-header");
+      if (oldSidebarHeader !== null) {
+        (oldSidebarHeader as HTMLElement).style.display = "none";
+      }
 
       // --- Member list (below DM section) ---
       const memberListContainer = createElement("div", {
@@ -646,15 +674,35 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
       channelModeUnsubs.push(() => { resizeAbort.abort(); });
 
-      // Collapse toggle for member list
-      let membersCollapsed = false;
+      // Restore collapsed state from localStorage
+      const savedCollapsed = localStorage.getItem("owncord:member-list-collapsed");
+      let membersCollapsed = savedCollapsed === "true";
       const memberContent = createElement("div", { class: "sidebar-members-content" });
 
-      memberHeader.addEventListener("click", () => {
-        membersCollapsed = !membersCollapsed;
+      function applyMembersCollapsed(): void {
         memberHeader.classList.toggle("collapsed", membersCollapsed);
         memberArrow.textContent = membersCollapsed ? "\u25B6" : "\u25BC";
         memberContent.style.display = membersCollapsed ? "none" : "";
+        resizeHandle.style.display = membersCollapsed ? "none" : "";
+        if (membersCollapsed) {
+          memberListContainer.style.height = "auto";
+        } else {
+          const h = localStorage.getItem("owncord:member-list-height");
+          if (h !== null) {
+            memberListContainer.style.height = `${h}px`;
+          } else {
+            memberListContainer.style.height = "";
+          }
+        }
+      }
+
+      // Apply initial state
+      applyMembersCollapsed();
+
+      memberHeader.addEventListener("click", () => {
+        membersCollapsed = !membersCollapsed;
+        localStorage.setItem("owncord:member-list-collapsed", String(membersCollapsed));
+        applyMembersCollapsed();
       });
 
       const memberList = createMemberList({

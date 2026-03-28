@@ -495,6 +495,7 @@ export interface HealthResponse {
   readonly status: string;
   readonly version: string;
   readonly uptime: number;
+  readonly online_users: number;
 }
 
 /** Single channel object from REST API. */

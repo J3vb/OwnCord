@@ -51,6 +51,8 @@ export interface ServerPanelOptions {
   readonly onCredentialLoaded: (host: string, username: string, password?: string) => void;
   readonly onAddProfile?: (name: string, host: string) => void;
   readonly onDeleteProfile?: (profileId: string) => void;
+  /** Called when the user toggles auto-login on a server profile. */
+  readonly onToggleAutoLogin?: (profileId: string, enabled: boolean) => void;
 }
 
 export interface ServerPanelApi {
@@ -68,10 +70,10 @@ export function createServerPanel(
   opts: ServerPanelOptions,
   initialProfiles: readonly SimpleProfile[],
 ): ServerPanelApi {
-  const { signal, onServerClick, onCredentialLoaded, onAddProfile, onDeleteProfile } = opts;
+  const { signal, onServerClick, onCredentialLoaded, onAddProfile, onDeleteProfile, onToggleAutoLogin } = opts;
 
   // Map of host -> DOM elements for health status updates
-  const healthElements = new Map<string, { dot: HTMLDivElement; latency: HTMLSpanElement }>();
+  const healthElements = new Map<string, { dot: HTMLDivElement; latency: HTMLSpanElement; onlineUsers: HTMLSpanElement }>();
 
   // Cached DOM references
   let serverListEl: HTMLDivElement;
@@ -128,7 +130,8 @@ export function createServerPanel(
       const meta = createElement("div", { class: "srv-meta" });
       const host = createElement("span", { class: "srv-host" }, profile.host);
       const latency = createElement("span", { class: "srv-latency" });
-      appendChildren(meta, host, latency);
+      const onlineUsersEl = createElement("span", { class: "srv-online-users" });
+      appendChildren(meta, host, latency, onlineUsersEl);
 
       // Show username if available (full profile has it)
       const fullProfile = profile as Partial<ServerProfile>;
@@ -139,10 +142,34 @@ export function createServerPanel(
 
       appendChildren(info, name, meta);
 
-      healthElements.set(profile.host, { dot: statusDot, latency });
+      healthElements.set(profile.host, { dot: statusDot, latency, onlineUsers: onlineUsersEl });
+
+      // Action buttons (auto-login toggle + delete)
+      const actions = createElement("div", { class: "srv-actions" });
+
+      // Auto-login toggle (only for full profiles)
+      if (fullProfile.id && onToggleAutoLogin) {
+        const isAutoLogin = fullProfile.autoConnect === true;
+        const autoLoginBtn = createElement("button", {
+          class: `srv-btn auto-login${isAutoLogin ? " active" : ""}`,
+          type: "button",
+          "aria-label": isAutoLogin ? "Disable auto-login" : "Enable auto-login",
+          title: isAutoLogin ? "Auto-login enabled" : "Enable auto-login",
+        });
+        autoLoginBtn.textContent = "";
+        autoLoginBtn.appendChild(createIcon("zap", 14));
+        autoLoginBtn.addEventListener(
+          "click",
+          (e) => {
+            e.stopPropagation();
+            onToggleAutoLogin(fullProfile.id!, !isAutoLogin);
+          },
+          { signal },
+        );
+        actions.appendChild(autoLoginBtn);
+      }
 
       // Delete button (only for full profiles that have an id)
-      const actions = createElement("div", { class: "srv-actions" });
       if (fullProfile.id && onDeleteProfile) {
         const deleteBtn = createElement("button", {
           class: "srv-btn danger",
@@ -200,6 +227,15 @@ export function createServerPanel(
     } else {
       setText(els.latency, "");
       els.latency.className = "srv-latency";
+    }
+
+    // Update online users count
+    if (status.onlineUsers !== null && status.onlineUsers >= 0) {
+      setText(els.onlineUsers, `${status.onlineUsers} online`);
+      els.onlineUsers.className = `srv-online-users ${status.onlineUsers > 0 ? "has-users" : ""}`;
+    } else {
+      setText(els.onlineUsers, "");
+      els.onlineUsers.className = "srv-online-users";
     }
   }
 

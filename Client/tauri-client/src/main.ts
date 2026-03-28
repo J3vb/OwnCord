@@ -22,7 +22,7 @@ import { initPtt } from "@lib/ptt";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
 import type { ConnectedOverlayControl } from "@components/ConnectedOverlay";
 import { createLogger } from "@lib/logger";
-import { saveCredential, deleteCredential } from "@lib/credentials";
+import { saveCredential, loadCredential, deleteCredential } from "@lib/credentials";
 import { initWindowState } from "@lib/window-state";
 import { createCertMismatchModal } from "@components/CertMismatchModal";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
@@ -128,7 +128,7 @@ let currentPage: { destroy?(): void } | null = null;
 
 /** Run health checks for a list of profiles and update the connect page. */
 function runHealthChecks(
-  connectPage: { updateHealthStatus(host: string, status: { status: string; latencyMs: number | null; version: string | null }): void },
+  connectPage: { updateHealthStatus(host: string, status: { status: string; latencyMs: number | null; version: string | null; onlineUsers: number | null }): void },
   profiles: readonly { host: string }[],
 ): void {
   for (const profile of profiles) {
@@ -138,6 +138,7 @@ function runHealthChecks(
           status: "checking",
           latencyMs: null,
           version: null,
+          onlineUsers: null,
         });
         const start = performance.now();
         const health = await api.getHealth(profile.host, 3000);
@@ -146,12 +147,14 @@ function runHealthChecks(
           status: elapsed > 1500 ? "slow" : "online",
           latencyMs: elapsed,
           version: health.version,
+          onlineUsers: health.online_users ?? null,
         });
       } catch {
         connectPage.updateHealthStatus(profile.host, {
           status: "offline",
           latencyMs: null,
           version: null,
+          onlineUsers: null,
         });
       }
     })();
@@ -300,10 +303,32 @@ function renderPage(pageId: "connect" | "main"): void {
         void profileManager.saveProfiles();
         connectPage.refreshProfiles(getProfileList());
       },
+      onToggleAutoLogin(profileId, enabled) {
+        profileManager.setAutoLogin(enabled ? profileId : null);
+        void profileManager.saveProfiles();
+        connectPage.refreshProfiles(getProfileList());
+      },
+      onAutoLoginCancel() {
+        autoLoginCancelled = true;
+      },
     }, getProfileList());
 
+    let autoLoginCancelled = false;
+
     safeMount(connectPage, appEl!);
-    currentPage = connectPage;
+
+    // Periodic health check — re-run every 15s so offline servers update when they come back
+    const healthCheckInterval = setInterval(() => {
+      runHealthChecks(connectPage, getProfileList());
+    }, 15_000);
+
+    // Wrap destroy to clear the interval
+    currentPage = {
+      destroy() {
+        clearInterval(healthCheckInterval);
+        connectPage.destroy?.();
+      },
+    };
 
     // Load saved profiles and kick off health checks
     void (async () => {
@@ -327,6 +352,46 @@ function renderPage(pageId: "connect" | "main"): void {
           quickSwitchTarget,
           targetProfile?.username ?? undefined,
         );
+        return; // Skip auto-login when switching servers
+      }
+
+      // Auto-login: if a profile has autoConnect enabled, try to connect automatically.
+      const autoProfile = profileManager.getAutoConnectProfile();
+      if (autoProfile) {
+        try {
+          const cred = await loadCredential(autoProfile.host);
+          if (cred?.username && cred?.password && !autoLoginCancelled) {
+            connectPage.selectServer(autoProfile.host, cred.username);
+            connectPage.showAutoConnecting(autoProfile.name);
+
+            // Attempt login
+            api.setConfig({ host: autoProfile.host });
+            const result = await api.login(cred.username, cred.password);
+
+            if (autoLoginCancelled) return;
+
+            if (result.requires_2fa) {
+              // Can't auto-login with 2FA — show TOTP overlay
+              pendingTotpHost = autoProfile.host;
+              pendingTotpPartialToken = result.partial_token ?? "";
+              pendingTotpUsername = cred.username;
+              connectPage.showTotp();
+              return;
+            }
+
+            if (result.token) {
+              ensureProfileExists(autoProfile.host, cred.username, true);
+              wirePostAuth(autoProfile.host, result.token, cred.username, cred.password);
+              return;
+            }
+          }
+        } catch (err) {
+          if (!autoLoginCancelled) {
+            const message = err instanceof Error ? err.message : "Auto-login failed";
+            log.warn("Auto-login failed", { host: autoProfile.host, error: message });
+            connectPage.showError(`Auto-login failed: ${message}`);
+          }
+        }
       }
     })();
   } else {

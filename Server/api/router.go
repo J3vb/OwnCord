@@ -36,7 +36,14 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	r.Use(MaxBodySizeUnless(1<<20, "/api/v1/uploads")) // 1 MiB default; upload route exempt
 
 	// Health check — unauthenticated, no versioning prefix.
-	r.Get("/health", handleHealth(ver))
+	// The online user count callback is set after hub creation below.
+	var getOnlineUsers func() int
+	r.Get("/health", handleHealth(ver, func() int {
+		if getOnlineUsers != nil {
+			return getOnlineUsers()
+		}
+		return 0
+	}))
 
 	// Shared rate limiter for auth endpoints.
 	limiter := auth.NewRateLimiter()
@@ -48,7 +55,12 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// Versioned API routes.
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Get("/health", handleHealth(ver))
+		r.Get("/health", handleHealth(ver, func() int {
+			if getOnlineUsers != nil {
+				return getOnlineUsers()
+			}
+			return 0
+		}))
 		r.Get("/info", handleInfo(cfg, ver))
 	})
 
@@ -74,6 +86,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
 	hub := ws.NewHub(database, limiter)
+	getOnlineUsers = func() int { return hub.ClientCount() }
 
 	// Create LiveKit client if voice config is present; voice is disabled on failure.
 	lk, lkErr := ws.NewLiveKitClient(&cfg.Voice)
@@ -163,9 +176,10 @@ var serverStartTime = time.Now()
 
 // healthResponse is the JSON shape returned by GET /health.
 type healthResponse struct {
-	Status  string `json:"status"`
-	Version string `json:"version"`
-	Uptime  int64  `json:"uptime"`
+	Status      string `json:"status"`
+	Version     string `json:"version"`
+	Uptime      int64  `json:"uptime"`
+	OnlineUsers int    `json:"online_users"`
 }
 
 // infoResponse is the JSON shape returned by GET /api/v1/info.
@@ -174,12 +188,13 @@ type infoResponse struct {
 	Version string `json:"version"`
 }
 
-func handleHealth(ver string) http.HandlerFunc {
+func handleHealth(ver string, getOnlineUsers func() int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, healthResponse{
-			Status:  "ok",
-			Version: ver,
-			Uptime:  int64(time.Since(serverStartTime).Seconds()),
+			Status:      "ok",
+			Version:     ver,
+			Uptime:      int64(time.Since(serverStartTime).Seconds()),
+			OnlineUsers: getOnlineUsers(),
 		})
 	}
 }

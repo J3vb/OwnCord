@@ -59,7 +59,8 @@ export type IconName =
   | "scroll-text"
   | "image"
   | "signal"
-  | "log-out";
+  | "log-out"
+  | "zap";
 
 // ---------------------------------------------------------------------------
 // SVG inner content (innerHTML) — Lucide 0.x path data
@@ -198,6 +199,9 @@ const ICON_PATHS: Record<IconName, string> = {
 
   // Log out / exit door with arrow
   "log-out": `<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/>`,
+
+  // Lightning bolt (auto-login indicator)
+  zap: `<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>`,
 };
 
 // ---------------------------------------------------------------------------
