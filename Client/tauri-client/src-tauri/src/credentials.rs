@@ -129,40 +129,42 @@ pub fn load_credential(host: String) -> Result<Option<CredentialData>, String> {
     }
 
     // SAFETY: `pcred` is valid after a successful CredReadW call.
-    let result = unsafe {
+    // Copy the blob bytes and free immediately — CredFree must run even if
+    // parsing fails, otherwise the credential memory leaks.
+    let blob = unsafe {
         let cred = &*pcred;
-        let blob_slice = std::slice::from_raw_parts(
+        let bytes = std::slice::from_raw_parts(
             cred.CredentialBlob,
             cred.CredentialBlobSize as usize,
-        );
-        let json_str = String::from_utf8(blob_slice.to_vec())
-            .map_err(|e| format!("credential blob is not valid UTF-8: {e}"))?;
-
-        let parsed: serde_json::Value = serde_json::from_str(&json_str)
-            .map_err(|e| format!("credential blob is not valid JSON: {e}"))?;
-
-        let username = parsed
-            .get("username")
-            .and_then(|v| v.as_str())
-            .ok_or("credential blob missing 'username' field")?
-            .to_string();
-        let token = parsed
-            .get("token")
-            .and_then(|v| v.as_str())
-            .ok_or("credential blob missing 'token' field")?
-            .to_string();
-        let password = parsed
-            .get("password")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
-        // Free the credential memory allocated by Windows.
+        )
+        .to_vec();
         CredFree(pcred as *const std::ffi::c_void);
-
-        Ok(Some(CredentialData { username, token, password }))
+        bytes
     };
 
-    result
+    // Parse outside the unsafe block — CredFree has already been called.
+    let json_str = String::from_utf8(blob)
+        .map_err(|e| format!("credential blob is not valid UTF-8: {e}"))?;
+
+    let parsed: serde_json::Value = serde_json::from_str(&json_str)
+        .map_err(|e| format!("credential blob is not valid JSON: {e}"))?;
+
+    let username = parsed
+        .get("username")
+        .and_then(|v| v.as_str())
+        .ok_or("credential blob missing 'username' field")?
+        .to_string();
+    let token = parsed
+        .get("token")
+        .and_then(|v| v.as_str())
+        .ok_or("credential blob missing 'token' field")?
+        .to_string();
+    let password = parsed
+        .get("password")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    Ok(Some(CredentialData { username, token, password }))
 }
 
 /// Delete a credential from Windows Credential Manager.

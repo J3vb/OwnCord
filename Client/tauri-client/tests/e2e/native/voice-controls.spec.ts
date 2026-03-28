@@ -5,14 +5,16 @@
  * and disconnect flow. Does NOT test actual WebRTC (no mic/audio).
  */
 
-import { test, expect } from "../native-fixture";
-import { SKIP_SERVER, hasCredentials, nativeLoginAndReady } from "./helpers";
+import { test, expect } from "../native-fixture-persistent";
+import { SKIP_SERVER, hasCredentials, ensureLoggedIn } from "./helpers";
+
+test.describe.configure({ mode: "serial" });
 
 test.describe("Voice Channel UI", () => {
   test.beforeEach(async ({ nativePage }) => {
     test.skip(SKIP_SERVER, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
     test.skip(!hasCredentials(), "Skipped: OWNCORD_TEST_USER/OWNCORD_TEST_PASS not set");
-    await nativeLoginAndReady(nativePage);
+    await ensureLoggedIn(nativePage);
   });
 
   test("voice channels are listed with speaker icon", async ({ nativePage }) => {

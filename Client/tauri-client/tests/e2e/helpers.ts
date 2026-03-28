@@ -238,6 +238,7 @@ function buildReadyPayload(overrides?: {
   members?: unknown[];
   voice_states?: unknown[];
   roles?: unknown[];
+  dm_channels?: unknown[];
 }): unknown {
   return {
     type: "ready",
@@ -246,6 +247,7 @@ function buildReadyPayload(overrides?: {
       members: overrides?.members ?? MOCK_READY_PAYLOAD.payload.members,
       voice_states: overrides?.voice_states ?? [],
       roles: overrides?.roles ?? MOCK_ROLES,
+      dm_channels: overrides?.dm_channels ?? [],
     },
   };
 }
@@ -262,6 +264,7 @@ export function buildTauriMockScript(opts: {
     channels?: unknown[];
     members?: unknown[];
     voice_states?: unknown[];
+    dm_channels?: unknown[];
   };
 }): string {
   const readyPayload = buildReadyPayload(opts.readyOverrides);

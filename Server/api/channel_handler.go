@@ -269,6 +269,7 @@ func handleSearch(database *db.DB) http.HandlerFunc {
 
 		// Batch-fetch overrides and post-filter results by READ_MESSAGES.
 		role, _ := r.Context().Value(RoleKey).(*db.Role)
+		user, _ := r.Context().Value(UserKey).(*db.User)
 		overrides := map[int64]db.ChannelOverride{}
 		if role != nil && !permissions.HasAdmin(role.Permissions) {
 			var oErr error
@@ -277,11 +278,39 @@ func handleSearch(database *db.DB) http.HandlerFunc {
 				slog.Error("handleSearch GetAllChannelPermissionsForRole", "err", oErr)
 			}
 		}
+
+		// Build a cache of channel types so we can detect DM channels without
+		// repeated queries for the same channel ID.
+		channelTypeCache := map[int64]string{}
+		for _, res := range results {
+			if _, seen := channelTypeCache[res.ChannelID]; !seen {
+				ch, chErr := database.GetChannel(res.ChannelID)
+				if chErr != nil || ch == nil {
+					channelTypeCache[res.ChannelID] = ""
+					continue
+				}
+				channelTypeCache[res.ChannelID] = ch.Type
+			}
+		}
+
 		var filtered []db.MessageSearchResult
 		for _, res := range results {
-			if hasChannelPermBatch(role, overrides, res.ChannelID, permissions.ReadMessages) {
-				filtered = append(filtered, res)
+			chType := channelTypeCache[res.ChannelID]
+			if chType == "dm" {
+				// DM channels require participant-based auth.
+				if user == nil {
+					continue
+				}
+				ok, dmErr := database.IsDMParticipant(user.ID, res.ChannelID)
+				if dmErr != nil || !ok {
+					continue
+				}
+			} else {
+				if !hasChannelPermBatch(role, overrides, res.ChannelID, permissions.ReadMessages) {
+					continue
+				}
 			}
+			filtered = append(filtered, res)
 		}
 		if filtered == nil {
 			filtered = []db.MessageSearchResult{}
@@ -319,14 +348,34 @@ func handleGetPins(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		// Permission check: user must have READ_MESSAGES on this channel.
-		role, _ := r.Context().Value(RoleKey).(*db.Role)
-		if !hasChannelPermREST(database, role, channelID, permissions.ReadMessages) {
-			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error:   "FORBIDDEN",
-				Message: "no permission to view this channel",
-			})
-			return
+		// DM channels use participant-based auth instead of role-based permissions.
+		if ch.Type == "dm" {
+			user, _ := r.Context().Value(UserKey).(*db.User)
+			if user == nil {
+				writeJSON(w, http.StatusUnauthorized, errorResponse{
+					Error:   "UNAUTHORIZED",
+					Message: "authentication required",
+				})
+				return
+			}
+			ok, dmErr := database.IsDMParticipant(user.ID, channelID)
+			if dmErr != nil || !ok {
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "not a participant in this DM",
+				})
+				return
+			}
+		} else {
+			// Permission check: user must have READ_MESSAGES on this channel.
+			role, _ := r.Context().Value(RoleKey).(*db.Role)
+			if !hasChannelPermREST(database, role, channelID, permissions.ReadMessages) {
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "no permission to view this channel",
+				})
+				return
+			}
 		}
 
 		// Extract requesting user ID for reaction "me" flag.
@@ -370,14 +419,52 @@ func handleSetPinned(database *db.DB, pinned bool) http.HandlerFunc {
 			return
 		}
 
-		// Permission check: user must have MANAGE_MESSAGES on this channel.
-		role, _ := r.Context().Value(RoleKey).(*db.Role)
-		if !hasChannelPermREST(database, role, channelID, permissions.ManageMessages) {
-			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error:   "FORBIDDEN",
-				Message: "no permission to manage messages in this channel",
+		// Look up the channel to check if it's a DM.
+		ch, chErr := database.GetChannel(channelID)
+		if chErr != nil {
+			slog.Error("handleSetPinned GetChannel", "err", chErr, "channel_id", channelID)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error:   "INTERNAL",
+				Message: "failed to look up channel",
 			})
 			return
+		}
+		if ch == nil {
+			writeJSON(w, http.StatusNotFound, errorResponse{
+				Error:   "NOT_FOUND",
+				Message: "channel not found",
+			})
+			return
+		}
+
+		// DM channels use participant-based auth instead of role-based permissions.
+		if ch.Type == "dm" {
+			user, _ := r.Context().Value(UserKey).(*db.User)
+			if user == nil {
+				writeJSON(w, http.StatusUnauthorized, errorResponse{
+					Error:   "UNAUTHORIZED",
+					Message: "authentication required",
+				})
+				return
+			}
+			ok, dmErr := database.IsDMParticipant(user.ID, channelID)
+			if dmErr != nil || !ok {
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "not a participant in this DM",
+				})
+				return
+			}
+		} else {
+			// Permission check: user must have MANAGE_MESSAGES on this channel.
+			role, _ := r.Context().Value(RoleKey).(*db.Role)
+			if !hasChannelPermREST(database, role, channelID, permissions.ManageMessages) {
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "no permission to manage messages in this channel",
+				})
+				return
+			}
 		}
 
 		// Verify message exists and belongs to this channel.

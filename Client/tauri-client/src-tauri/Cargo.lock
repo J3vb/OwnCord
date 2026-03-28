@@ -2613,6 +2613,7 @@ dependencies = [
  "tauri-plugin-store",
  "tauri-plugin-updater",
  "tokio",
+ "tokio-rustls",
  "tokio-tungstenite",
  "url",
  "windows 0.58.0",

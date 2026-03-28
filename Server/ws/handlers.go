@@ -348,9 +348,10 @@ func (h *Hub) handleChatEdit(c *Client, _ string, payload json.RawMessage) {
 	}
 
 	// Fetch message first to get the channel ID for the permission check.
+	// Use an opaque error to prevent message-ID enumeration (IDOR).
 	msg, err := h.db.GetMessage(msgID)
 	if err != nil || msg == nil {
-		c.sendMsg(buildErrorMsg(ErrCodeNotFound, "message not found"))
+		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "cannot edit this message"))
 		return
 	}
 
@@ -361,13 +362,13 @@ func (h *Hub) handleChatEdit(c *Client, _ string, payload json.RawMessage) {
 	if editIsDM {
 		ok, dmErr := h.db.IsDMParticipant(c.userID, msg.ChannelID)
 		if dmErr != nil || !ok {
-			c.sendMsg(buildErrorMsg(ErrCodeForbidden, "no permission to edit in this channel"))
+			c.sendMsg(buildErrorMsg(ErrCodeForbidden, "cannot edit this message"))
 			return
 		}
 	} else {
 		// Re-check that the user still has SendMessages permission on this channel.
 		if !h.hasChannelPerm(c, msg.ChannelID, permissions.SendMessages) {
-			c.sendMsg(buildErrorMsg(ErrCodeForbidden, "no permission to edit in this channel"))
+			c.sendMsg(buildErrorMsg(ErrCodeForbidden, "cannot edit this message"))
 			return
 		}
 	}
@@ -421,9 +422,10 @@ func (h *Hub) handleChatDelete(c *Client, _ string, payload json.RawMessage) {
 		return
 	}
 
+	// Use an opaque error to prevent message-ID enumeration (IDOR).
 	msg, err := h.db.GetMessage(msgID)
 	if err != nil || msg == nil {
-		c.sendMsg(buildErrorMsg(ErrCodeNotFound, "message not found"))
+		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "cannot delete this message"))
 		return
 	}
 
@@ -434,13 +436,13 @@ func (h *Hub) handleChatDelete(c *Client, _ string, payload json.RawMessage) {
 	if delIsDM {
 		ok, dmErr := h.db.IsDMParticipant(c.userID, msg.ChannelID)
 		if dmErr != nil || !ok {
-			c.sendMsg(buildErrorMsg(ErrCodeForbidden, "no read permission in this channel"))
+			c.sendMsg(buildErrorMsg(ErrCodeForbidden, "cannot delete this message"))
 			return
 		}
 	} else {
 		// Ensure the user still has at least ReadMessages on this channel.
 		if !h.hasChannelPerm(c, msg.ChannelID, permissions.ReadMessages) {
-			c.sendMsg(buildErrorMsg(ErrCodeForbidden, "no read permission in this channel"))
+			c.sendMsg(buildErrorMsg(ErrCodeForbidden, "cannot delete this message"))
 			return
 		}
 	}
@@ -579,7 +581,7 @@ func (h *Hub) handleTyping(c *Client, payload json.RawMessage) {
 
 	// Broadcast to channel, excluding sender.
 	if typCh.Type == "dm" {
-		h.broadcastToDMParticipants(channelID, buildTypingMsg(channelID, c.userID, username))
+		h.broadcastToDMParticipantsExclude(channelID, c.userID, buildTypingMsg(channelID, c.userID, username))
 	} else {
 		h.broadcastExclude(channelID, c.userID, buildTypingMsg(channelID, c.userID, username))
 	}
@@ -679,6 +681,23 @@ func (h *Hub) broadcastToDMParticipants(channelID int64, msg []byte) {
 		return
 	}
 	for _, pid := range participantIDs {
+		h.SendToUser(pid, msg)
+	}
+}
+
+// broadcastToDMParticipantsExclude sends a message to all participants of a DM
+// channel EXCEPT the specified user. Used for ephemeral events like typing
+// indicators where echoing back to the sender is undesirable.
+func (h *Hub) broadcastToDMParticipantsExclude(channelID, excludeUserID int64, msg []byte) {
+	participantIDs, err := h.db.GetDMParticipantIDs(channelID)
+	if err != nil {
+		slog.Error("broadcastToDMParticipantsExclude GetDMParticipantIDs", "err", err, "channel_id", channelID)
+		return
+	}
+	for _, pid := range participantIDs {
+		if pid == excludeUserID {
+			continue
+		}
 		h.SendToUser(pid, msg)
 	}
 }

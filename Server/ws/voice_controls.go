@@ -13,6 +13,12 @@ import (
 // 2. Updates DB.
 // 3. Broadcasts voice_state update to channel.
 func (h *Hub) handleVoiceMute(c *Client, payload json.RawMessage) {
+	ratKey := fmt.Sprintf("voice_mute:%d", c.userID)
+	if !h.limiter.Allow(ratKey, voiceMuteRateLimit, voiceMuteWindow) {
+		c.sendMsg(buildRateLimitError("too many mute toggles", voiceMuteWindow.Seconds()))
+		return
+	}
+
 	if c.getVoiceChID() == 0 {
 		c.sendMsg(buildErrorMsg(ErrCodeVoiceError, "not in a voice channel"))
 		return
@@ -41,6 +47,12 @@ func (h *Hub) handleVoiceMute(c *Client, payload json.RawMessage) {
 // 2. Updates DB.
 // 3. Broadcasts voice_state update to channel.
 func (h *Hub) handleVoiceDeafen(c *Client, payload json.RawMessage) {
+	ratKey := fmt.Sprintf("voice_deafen:%d", c.userID)
+	if !h.limiter.Allow(ratKey, voiceDeafenRateLimit, voiceDeafenWindow) {
+		c.sendMsg(buildRateLimitError("too many deafen toggles", voiceDeafenWindow.Seconds()))
+		return
+	}
+
 	if c.getVoiceChID() == 0 {
 		c.sendMsg(buildErrorMsg(ErrCodeVoiceError, "not in a voice channel"))
 		return

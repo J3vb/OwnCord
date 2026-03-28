@@ -26,7 +26,7 @@ import { createInviteManagerController } from "./OverlayManagers";
 import { uiStore, setSidebarMode, setActiveDmUser, loadCollapsedCategories } from "@stores/ui.store";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
-import { channelsStore, setActiveChannel } from "@stores/channels.store";
+import { channelsStore, setActiveChannel, getRoleIdByName } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
 import { dmStore, clearDmUnread, addDmChannel, removeDmChannel } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
@@ -678,8 +678,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           }
         },
         onChangeRole: async (userId, username, newRole) => {
-          const roleNameToId: Record<string, number> = { owner: 1, admin: 2, moderator: 3, member: 4 };
-          const roleId = roleNameToId[newRole];
+          const roleId = getRoleIdByName(newRole);
           if (roleId === undefined) return;
           try {
             await api.adminChangeRole(userId, roleId);
@@ -700,7 +699,14 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       activeSidebarContent = dmSidebar;
       contentSlot.appendChild(innerSlot);
 
-      /** Re-render the DM sidebar from fresh store data. */
+      /**
+       * Re-render the DM sidebar from fresh store data.
+       *
+       * TODO(H16): This is an O(n) DOM thrash — it destroys and recreates the
+       * entire DM sidebar on every store change. For a small number of DMs this
+       * is acceptable, but should be optimized to diff/patch individual DM items
+       * once the DM list grows or store updates become more frequent.
+       */
       function refreshDmSidebar(): void {
         if (activeSidebarContent !== null) {
           activeSidebarContent.destroy?.();

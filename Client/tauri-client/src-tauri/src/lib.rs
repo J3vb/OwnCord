@@ -1,6 +1,7 @@
 mod commands;
 mod credentials;
 mod hotkeys;
+mod livekit_proxy;
 mod ptt;
 mod tray;
 mod update_commands;
@@ -19,6 +20,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(ws_proxy::WsState::new())
+        .manage(livekit_proxy::LiveKitProxyState::new())
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::save_settings,
@@ -38,6 +40,8 @@ pub fn run() {
             ptt::ptt_set_key,
             ptt::ptt_get_key,
             ptt::ptt_listen_for_key,
+            livekit_proxy::start_livekit_proxy,
+            livekit_proxy::stop_livekit_proxy,
             commands::open_devtools,
         ])
         .setup(|app| {

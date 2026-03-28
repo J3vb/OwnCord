@@ -22,6 +22,7 @@ export type ReactionAction = "add" | "remove";
 
 /** WebSocket error codes returned by the server. */
 export type WsErrorCode =
+  | "BANNED"
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "RATE_LIMITED"

@@ -31,7 +31,8 @@ tauri-plugin-process = "2"
 url = "2"
 tokio-tungstenite = { version = "0.28.0", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3.32"
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "net", "io-util", "rt", "macros"] }
+tokio-rustls = { version = "0.26", default-features = false }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 ring = "0.17"
 

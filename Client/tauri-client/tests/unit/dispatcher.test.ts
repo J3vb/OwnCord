@@ -5,6 +5,7 @@ import { channelsStore } from "../../src/stores/channels.store";
 import { messagesStore } from "../../src/stores/messages.store";
 import { membersStore } from "../../src/stores/members.store";
 import { voiceStore } from "../../src/stores/voice.store";
+import { dmStore } from "../../src/stores/dm.store";
 import type { WsClient, WsListener } from "../../src/lib/ws";
 import type { ServerMessage } from "../../src/lib/types";
 
@@ -72,6 +73,7 @@ describe("WS Dispatcher", () => {
     channelsStore.setState(() => ({
       channels: new Map(),
       activeChannelId: null,
+      roles: [],
     }));
     messagesStore.setState(() => ({
       messagesByChannel: new Map(),
@@ -93,6 +95,7 @@ describe("WS Dispatcher", () => {
       localScreenshare: false,
       joinedAt: null,
     }));
+    dmStore.setState(() => ({ channels: [] }));
 
     mock = createMockWs();
     cleanup = wireDispatcher(mock.ws);
@@ -298,6 +301,45 @@ describe("WS Dispatcher", () => {
 
     const users = voiceStore.getState().voiceUsers.get(2);
     expect(users?.get(1)?.muted).toBe(true);
+  });
+
+  // ── DM events ─────────────────────────────────────────
+
+  describe("DM events", () => {
+    it("should call addDmChannel on dm_channel_open", () => {
+      mock.dispatch("dm_channel_open", {
+        channel_id: 50,
+        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+        last_message_id: null,
+        last_message: "",
+        last_message_at: "",
+        unread_count: 0,
+      });
+
+      const channels = dmStore.getState().channels;
+      expect(channels).toHaveLength(1);
+      expect(channels[0]!.channelId).toBe(50);
+      expect(channels[0]!.recipient.username).toBe("bob");
+    });
+
+    it("should call removeDmChannel on dm_channel_close", () => {
+      // Seed a DM channel first
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+          },
+        ],
+      }));
+
+      mock.dispatch("dm_channel_close", { channel_id: 50 });
+      expect(dmStore.getState().channels).toHaveLength(0);
+    });
   });
 
   it("cleanup removes all listeners", () => {

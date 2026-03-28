@@ -7,6 +7,7 @@ import { authStore, setAuth, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import {
   setChannels,
+  setRoles,
   setActiveChannel,
   addChannel,
   updateChannel,
@@ -44,6 +45,7 @@ import {
   addDmChannel,
   removeDmChannel,
   updateDmLastMessage,
+  updateDmLastMessagePreview,
 } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import type { DmChannelPayload } from "./types";
@@ -106,6 +108,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   unsubs.push(
     ws.on("ready", (payload) => {
       setChannels(payload.channels);
+      setRoles(payload.roles ?? []);
       setMembers(payload.members);
       setVoiceStates(payload.voice_states);
 
@@ -183,13 +186,12 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
         const isDmActive = payload.channel_id === activeId;
         if (isOwnMessage || isDmActive) {
           // Update last message preview but don't increment unread count.
-          dmStore.setState((prev) => ({
-            channels: prev.channels.map((c) =>
-              c.channelId === payload.channel_id
-                ? { ...c, lastMessageId: payload.id, lastMessage: payload.content, lastMessageAt: payload.timestamp }
-                : c,
-            ),
-          }));
+          updateDmLastMessagePreview(
+            payload.channel_id,
+            payload.id,
+            payload.content,
+            payload.timestamp,
+          );
         } else {
           updateDmLastMessage(
             payload.channel_id,
@@ -371,6 +373,12 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
         code: payload.code,
         message: payload.message,
       });
+      if (payload.code === "BANNED") {
+        // Banned users must not reconnect — show error and force logout.
+        setTransientError(payload.message || "You have been banned");
+        clearAuth();
+        return;
+      }
       if (payload.code === "RATE_LIMITED" || payload.code === "FORBIDDEN") {
         setTransientError(payload.message || "Server error");
       }

@@ -5,14 +5,16 @@
  * rendering against the real production app.
  */
 
-import { test, expect } from "../native-fixture";
-import { SKIP_SERVER, hasCredentials, nativeLoginAndReady } from "./helpers";
+import { test, expect } from "../native-fixture-persistent";
+import { SKIP_SERVER, hasCredentials, ensureLoggedIn } from "./helpers";
+
+test.describe.configure({ mode: "serial" });
 
 test.describe("Quick Switcher", () => {
   test.beforeEach(async ({ nativePage }) => {
     test.skip(SKIP_SERVER, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
     test.skip(!hasCredentials(), "Skipped: OWNCORD_TEST_USER/OWNCORD_TEST_PASS not set");
-    await nativeLoginAndReady(nativePage);
+    await ensureLoggedIn(nativePage);
   });
 
   test("opens with Ctrl+K keyboard shortcut", async ({ nativePage }) => {
@@ -86,7 +88,7 @@ test.describe("Emoji Picker", () => {
   test.beforeEach(async ({ nativePage }) => {
     test.skip(SKIP_SERVER, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
     test.skip(!hasCredentials(), "Skipped: OWNCORD_TEST_USER/OWNCORD_TEST_PASS not set");
-    await nativeLoginAndReady(nativePage);
+    await ensureLoggedIn(nativePage);
   });
 
   test("emoji button opens picker", async ({ nativePage }) => {
@@ -140,7 +142,7 @@ test.describe("Pinned Messages", () => {
   test.beforeEach(async ({ nativePage }) => {
     test.skip(SKIP_SERVER, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
     test.skip(!hasCredentials(), "Skipped: OWNCORD_TEST_USER/OWNCORD_TEST_PASS not set");
-    await nativeLoginAndReady(nativePage);
+    await ensureLoggedIn(nativePage);
   });
 
   test("pin button triggers pin action", async ({ nativePage }) => {
@@ -189,7 +191,7 @@ test.describe("Member List in Sidebar", () => {
   test.beforeEach(async ({ nativePage }) => {
     test.skip(SKIP_SERVER, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
     test.skip(!hasCredentials(), "Skipped: OWNCORD_TEST_USER/OWNCORD_TEST_PASS not set");
-    await nativeLoginAndReady(nativePage);
+    await ensureLoggedIn(nativePage);
   });
 
   test("member list is visible in sidebar", async ({ nativePage }) => {

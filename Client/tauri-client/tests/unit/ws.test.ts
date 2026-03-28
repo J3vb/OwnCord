@@ -279,3 +279,311 @@ describe("WebSocket Client (Tauri proxy)", () => {
     expect(client.getState()).toBe("disconnected");
   });
 });
+
+describe("lastSeq tracking", () => {
+  let client: ReturnType<typeof createWsClient>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue(undefined);
+    mockListen.mockClear();
+    eventHandlers.clear();
+    client = createWsClient();
+  });
+
+  afterEach(() => {
+    client.disconnect();
+    vi.useRealTimers();
+  });
+
+  it("should start with lastSeq = 0", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+
+    // When open fires, auth message should contain last_seq: 0
+    emitTauriEvent("ws-state", "open");
+
+    const authCall = mockInvoke.mock.calls.find(
+      (c) => c[0] === "ws_send" && typeof c[1]?.message === "string" && (c[1].message as string).includes('"type":"auth"'),
+    );
+    expect(authCall).toBeDefined();
+    const authMsg = JSON.parse((authCall![1] as { message: string }).message);
+    expect(authMsg.payload.last_seq).toBe(0);
+  });
+
+  it("should update lastSeq from seq field in incoming messages", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    // Send auth_ok so we're connected
+    emitTauriEvent("ws-message", JSON.stringify({
+      type: "auth_ok",
+      seq: 1,
+      payload: {
+        user: { id: 1, username: "a", avatar: null, role: "admin" },
+        server_name: "S", motd: "",
+      },
+    }));
+
+    // Send a message with seq 42
+    emitTauriEvent("ws-message", JSON.stringify({
+      type: "chat_message",
+      seq: 42,
+      payload: {
+        id: 1, channel_id: 1,
+        user: { id: 1, username: "a", avatar: null },
+        content: "hi", reply_to: null, attachments: [],
+        timestamp: "2026-01-01T00:00:00Z",
+      },
+    }));
+
+    // Now simulate a disconnect + reconnect to verify lastSeq was updated
+    emitTauriEvent("ws-state", "closed");
+
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(1100); // backoff
+    emitTauriEvent("ws-state", "open");
+
+    const authCall = mockInvoke.mock.calls.find(
+      (c) => c[0] === "ws_send" && typeof c[1]?.message === "string" && (c[1].message as string).includes('"type":"auth"'),
+    );
+    expect(authCall).toBeDefined();
+    const authMsg = JSON.parse((authCall![1] as { message: string }).message);
+    expect(authMsg.payload.last_seq).toBe(42);
+  });
+
+  it("should send last_seq in auth message on reconnect", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    emitTauriEvent("ws-message", JSON.stringify({
+      type: "auth_ok",
+      seq: 5,
+      payload: {
+        user: { id: 1, username: "a", avatar: null, role: "admin" },
+        server_name: "S", motd: "",
+      },
+    }));
+
+    // Disconnect unexpectedly
+    emitTauriEvent("ws-state", "closed");
+
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(1100);
+    emitTauriEvent("ws-state", "open");
+
+    const authCall = mockInvoke.mock.calls.find(
+      (c) => c[0] === "ws_send" && typeof c[1]?.message === "string" && (c[1].message as string).includes('"type":"auth"'),
+    );
+    expect(authCall).toBeDefined();
+    const authMsg = JSON.parse((authCall![1] as { message: string }).message);
+    expect(authMsg.payload.last_seq).toBe(5);
+  });
+
+  it("should preserve lastSeq across auto-reconnects", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    emitTauriEvent("ws-message", JSON.stringify({
+      type: "auth_ok", seq: 10,
+      payload: {
+        user: { id: 1, username: "a", avatar: null, role: "admin" },
+        server_name: "S", motd: "",
+      },
+    }));
+
+    // First auto-reconnect
+    emitTauriEvent("ws-state", "closed");
+    await vi.advanceTimersByTimeAsync(1100);
+    emitTauriEvent("ws-state", "open");
+
+    // Receive more messages with higher seq
+    emitTauriEvent("ws-message", JSON.stringify({
+      type: "auth_ok", seq: 11,
+      payload: {
+        user: { id: 1, username: "a", avatar: null, role: "admin" },
+        server_name: "S", motd: "",
+      },
+    }));
+    emitTauriEvent("ws-message", JSON.stringify({
+      type: "chat_message", seq: 25,
+      payload: {
+        id: 2, channel_id: 1,
+        user: { id: 1, username: "a", avatar: null },
+        content: "hello", reply_to: null, attachments: [],
+        timestamp: "2026-01-01T00:00:00Z",
+      },
+    }));
+
+    // Second auto-reconnect
+    emitTauriEvent("ws-state", "closed");
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(2100); // 2nd attempt = 2s backoff
+    emitTauriEvent("ws-state", "open");
+
+    const authCall = mockInvoke.mock.calls.find(
+      (c) => c[0] === "ws_send" && typeof c[1]?.message === "string" && (c[1].message as string).includes('"type":"auth"'),
+    );
+    const authMsg = JSON.parse((authCall![1] as { message: string }).message);
+    expect(authMsg.payload.last_seq).toBe(25);
+  });
+
+  it("should reset lastSeq to 0 on intentional disconnect", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    emitTauriEvent("ws-message", JSON.stringify({
+      type: "auth_ok", seq: 50,
+      payload: {
+        user: { id: 1, username: "a", avatar: null, role: "admin" },
+        server_name: "S", motd: "",
+      },
+    }));
+
+    // Intentional disconnect (e.g. logout)
+    client.disconnect();
+
+    // Reconnect fresh
+    mockInvoke.mockClear();
+    client.connect({ host: "localhost:8443", token: "t2" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    const authCall = mockInvoke.mock.calls.find(
+      (c) => c[0] === "ws_send" && typeof c[1]?.message === "string" && (c[1].message as string).includes('"type":"auth"'),
+    );
+    expect(authCall).toBeDefined();
+    const authMsg = JSON.parse((authCall![1] as { message: string }).message);
+    expect(authMsg.payload.last_seq).toBe(0);
+  });
+});
+
+describe("cert mismatch blocking", () => {
+  let client: ReturnType<typeof createWsClient>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue(undefined);
+    mockListen.mockClear();
+    eventHandlers.clear();
+    client = createWsClient();
+  });
+
+  afterEach(() => {
+    client.disconnect();
+    vi.useRealTimers();
+  });
+
+  it("should block reconnect when cert mismatch detected", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    emitTauriEvent("ws-message", JSON.stringify({
+      type: "auth_ok", seq: 1,
+      payload: {
+        user: { id: 1, username: "a", avatar: null, role: "admin" },
+        server_name: "S", motd: "",
+      },
+    }));
+
+    // Cert mismatch event fires
+    emitTauriEvent("cert-tofu", {
+      host: "localhost:8443",
+      fingerprint: "sha256:NEW",
+      status: "mismatch",
+      message: "Stored: sha256:OLD",
+    });
+
+    expect(client.getState()).toBe("disconnected");
+
+    // Connection closes after mismatch
+    emitTauriEvent("ws-state", "closed");
+
+    // Wait well beyond normal backoff — should NOT reconnect
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(60_000);
+    const reconnectCalls = mockInvoke.mock.calls.filter(
+      (c) => c[0] === "ws_connect",
+    );
+    expect(reconnectCalls).toHaveLength(0);
+  });
+
+  it("should unblock after acceptCertFingerprint", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    emitTauriEvent("ws-message", JSON.stringify({
+      type: "auth_ok", seq: 1,
+      payload: {
+        user: { id: 1, username: "a", avatar: null, role: "admin" },
+        server_name: "S", motd: "",
+      },
+    }));
+
+    emitTauriEvent("cert-tofu", {
+      host: "localhost:8443",
+      fingerprint: "sha256:NEW",
+      status: "mismatch",
+      message: "Stored: sha256:OLD",
+    });
+
+    expect(client.getState()).toBe("disconnected");
+
+    // Accept the new fingerprint
+    await client.acceptCertFingerprint("localhost:8443", "sha256:NEW");
+
+    // Now a manual reconnect should work
+    mockInvoke.mockClear();
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(mockInvoke).toHaveBeenCalledWith("ws_connect", expect.anything());
+  });
+
+  it("should not schedule reconnect when certMismatchBlock is true", async () => {
+    const mismatchEvents: unknown[] = [];
+    client.onCertMismatch((evt) => mismatchEvents.push(evt));
+
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    emitTauriEvent("ws-message", JSON.stringify({
+      type: "auth_ok", seq: 1,
+      payload: {
+        user: { id: 1, username: "a", avatar: null, role: "admin" },
+        server_name: "S", motd: "",
+      },
+    }));
+
+    // Trigger mismatch
+    emitTauriEvent("cert-tofu", {
+      host: "localhost:8443",
+      fingerprint: "sha256:CHANGED",
+      status: "mismatch",
+      message: "Stored: sha256:ORIGINAL",
+    });
+
+    expect(mismatchEvents).toHaveLength(1);
+
+    // Connection drops
+    emitTauriEvent("ws-state", "closed");
+
+    // State should remain disconnected, not reconnecting
+    expect(client.getState()).toBe("disconnected");
+
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    const reconnects = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    expect(reconnects).toHaveLength(0);
+  });
+});

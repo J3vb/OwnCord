@@ -32,6 +32,7 @@ import {
 import { loadPref, savePref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import { createRNNoiseProcessor } from "@lib/noise-suppression";
+import { invoke } from "@tauri-apps/api/core";
 
 const log = createLogger("livekitSession");
 
@@ -129,6 +130,8 @@ export class LiveKitSession {
   private remoteMicAudioElements = new Map<string, HTMLAudioElement>();
   /** Screenshare audio elements keyed by userId — separate from mic audio pipeline. */
   private screenshareAudioElements = new Map<number, Set<HTMLAudioElement>>();
+  /** Cached port for the local LiveKit TLS proxy (Rust-side, for self-signed cert support). */
+  private liveKitProxyPort: number | null = null;
   /** Persisted mute state for screenshare audio so replacement tracks inherit UI state. */
   private screenshareAudioMutedByUser = new Map<number, boolean>();
 
@@ -403,7 +406,7 @@ export class LiveKitSession {
       }
       try {
         this.room = this.createRoom();
-        const resolvedUrl = this.resolveLiveKitUrl(url, directUrl);
+        const resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
         await this.room.connect(resolvedUrl, token);
         log.info("Auto-reconnect succeeded", { attempt, channelId });
         this.room.startAudio().catch(() => {});
@@ -437,14 +440,30 @@ export class LiveKitSession {
 
   // --- URL resolution ---
 
-  private resolveLiveKitUrl(proxyPath: string, directUrl?: string): string {
+  private async resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise<string> {
     if (this.serverHost !== null) {
       const host = this.serverHost.split(":")[0] ?? "";
       const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
       if (isLocal && directUrl) return directUrl;
-      if (proxyPath.startsWith("/")) return `wss://${this.serverHost}${proxyPath}`;
+      if (proxyPath.startsWith("/")) {
+        // Remote server: route through the local Rust TLS proxy so WebView2
+        // doesn't reject self-signed certificates on the LiveKit signal WS.
+        const port = await this.ensureLiveKitProxy();
+        return `ws://127.0.0.1:${port}${proxyPath}`;
+      }
     }
     return proxyPath;
+  }
+
+  /** Start (or reuse) the Rust-side local TCP-to-TLS proxy for LiveKit. */
+  private async ensureLiveKitProxy(): Promise<number> {
+    if (this.liveKitProxyPort !== null) return this.liveKitProxyPort;
+    if (this.serverHost === null) throw new Error("no server host for LiveKit proxy");
+    this.liveKitProxyPort = await invoke<number>("start_livekit_proxy", {
+      remoteHost: this.serverHost,
+    });
+    log.info("LiveKit TLS proxy started on localhost", { port: this.liveKitProxyPort });
+    return this.liveKitProxyPort;
   }
 
   // --- Token refresh ---
@@ -595,6 +614,8 @@ export class LiveKitSession {
   ): Promise<void> {
     if (this.room !== null && this.currentChannelId === channelId
         && this.room.state === "connected") {
+      // handleVoiceTokenRefresh internally calls startTokenRefreshTimer,
+      // so we must NOT call startTokenRefreshTimer again after this.
       this.handleVoiceTokenRefresh(token);
       return;
     }
@@ -608,7 +629,7 @@ export class LiveKitSession {
     this.connecting = true;
     try {
       this.room = this.createRoom();
-      const resolvedUrl = this.resolveLiveKitUrl(url, directUrl);
+      const resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
       const MAX_RETRIES = 3;
       const RETRY_DELAY_MS = 2000;
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -742,6 +763,9 @@ export class LiveKitSession {
     this.onRemoteVideoRemovedCallback = null;
     this.ws = null;
     this.serverHost = null;
+    this.liveKitProxyPort = null;
+    // Stop the Rust-side TLS proxy (fire-and-forget).
+    invoke("stop_livekit_proxy").catch(() => {});
   }
 
   setMuted(muted: boolean): void {

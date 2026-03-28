@@ -33,6 +33,7 @@ const AUTH_INITIAL: AuthState = {
 const CHANNELS_INITIAL: ChannelsState = {
   channels: new Map(),
   activeChannelId: null,
+  roles: [],
 };
 
 const MEMBERS_INITIAL: MembersState = {

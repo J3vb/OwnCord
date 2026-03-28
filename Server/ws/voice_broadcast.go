@@ -7,6 +7,10 @@ import (
 
 // Voice rate limit settings.
 const (
+	voiceMuteRateLimit        = 2
+	voiceMuteWindow           = time.Second
+	voiceDeafenRateLimit      = 2
+	voiceDeafenWindow         = time.Second
 	voiceCameraRateLimit      = 2
 	voiceCameraWindow         = time.Second
 	voiceScreenshareRateLimit = 2

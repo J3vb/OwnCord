@@ -67,6 +67,8 @@ export function applyThemeByName(name: string): void {
         // Allowlist: only permit characters found in typical CSS color/sizing values.
         // Blocks url(), expression(), semicolons, braces, and !important.
         if (!/^[\w\s#().,%+\-/]+$/.test(value)) continue;
+        // Deny-list: block dangerous CSS functions that slip through the allowlist.
+        if (/\b(url|expression|import|image|cross-fade|element)\s*\(/i.test(value)) continue;
         style.setProperty(prop, value);
       }
     }

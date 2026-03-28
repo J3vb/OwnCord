@@ -33,6 +33,7 @@ function resetStores(): void {
   channelsStore.setState(() => ({
     channels: new Map(),
     activeChannelId: null,
+    roles: [],
   }));
   membersStore.setState(() => ({
     members: new Map(),

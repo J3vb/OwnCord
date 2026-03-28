@@ -73,6 +73,7 @@ describe("notifyIncomingMessage", () => {
     channelsStore.setState(() => ({
       channels: new Map([[1, { id: 1, name: "general", type: "text" as const, category: null, position: 0, unreadCount: 0, lastMessageId: null }]]),
       activeChannelId: 1,
+      roles: [],
     }));
 
     // Ensure document.hasFocus returns false (simulating unfocused window)

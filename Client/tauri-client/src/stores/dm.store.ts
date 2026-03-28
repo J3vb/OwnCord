@@ -49,7 +49,7 @@ export function removeDmChannel(channelId: number): void {
   }));
 }
 
-/** Update last message info for a DM channel (on new message). */
+/** Update last message info for a DM channel (on new message) and increment unread. */
 export function updateDmLastMessage(
   channelId: number,
   messageId: number,
@@ -60,6 +60,23 @@ export function updateDmLastMessage(
     channels: prev.channels.map((c) =>
       c.channelId === channelId
         ? { ...c, lastMessageId: messageId, lastMessage: content, lastMessageAt: timestamp, unreadCount: c.unreadCount + 1 }
+        : c,
+    ),
+  }));
+}
+
+/** Update last message preview for a DM channel without incrementing unread count.
+ *  Used for own messages and messages in the currently focused DM. */
+export function updateDmLastMessagePreview(
+  channelId: number,
+  messageId: number,
+  content: string,
+  timestamp: string,
+): void {
+  dmStore.setState((prev) => ({
+    channels: prev.channels.map((c) =>
+      c.channelId === channelId
+        ? { ...c, lastMessageId: messageId, lastMessage: content, lastMessageAt: timestamp }
         : c,
     ),
   }));

@@ -65,7 +65,7 @@ func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, t
 		r.With(RateLimitMiddleware(registerLimiter, 3, time.Minute, trustedProxies)).
 			Post("/register", handleRegister(database))
 
-		r.With(RateLimitMiddleware(loginLimiter, 5, time.Minute, trustedProxies)).
+		r.With(RateLimitMiddleware(loginLimiter, 60, time.Minute, trustedProxies)).
 			Post("/login", handleLogin(database, limiter))
 
 		r.With(AuthMiddleware(database)).
@@ -224,8 +224,8 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter) http.HandlerFunc {
 
 		failKey := "login_fail:" + ip
 		if err != nil || user == nil || !auth.CheckPassword(user.PasswordHash, req.Password) {
-			// Track failures; lockout after 10.
-			if !limiter.Allow(failKey, 10, 15*time.Minute) {
+			// Track failures; lockout on the 10th failure.
+			if !limiter.Allow(failKey, 9, 15*time.Minute) {
 				limiter.Lockout(lockKey, 15*time.Minute)
 			}
 			slog.Info("login failed", "ip", ip, "username_len", len(req.Username))

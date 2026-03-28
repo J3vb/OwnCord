@@ -106,10 +106,13 @@ type voiceStatePayload struct {
 }
 
 type voiceConfigPayload struct {
-	ChannelID int64  `json:"channel_id"`
-	Quality   string `json:"quality"`
-	Bitrate   int    `json:"bitrate"`
-	MaxUsers  int    `json:"max_users"`
+	ChannelID       int64  `json:"channel_id"`
+	Quality         string `json:"quality"`
+	Bitrate         int    `json:"bitrate"`
+	MaxUsers        int    `json:"max_users"`
+	ThresholdMode   string `json:"threshold_mode"`
+	MixingThreshold int    `json:"mixing_threshold"`
+	TopSpeakers     int    `json:"top_speakers"`
 }
 
 type voiceTokenPayload struct {
@@ -358,10 +361,13 @@ func buildVoiceConfig(channelID int64, quality string, bitrate int, maxUsers int
 	return buildJSON(wsMsg{
 		Type: "voice_config",
 		Payload: voiceConfigPayload{
-			ChannelID: channelID,
-			Quality:   quality,
-			Bitrate:   bitrate,
-			MaxUsers:  maxUsers,
+			ChannelID:       channelID,
+			Quality:         quality,
+			Bitrate:         bitrate,
+			MaxUsers:        maxUsers,
+			ThresholdMode:   "top_speakers",
+			MixingThreshold: 0,
+			TopSpeakers:     5,
 		},
 	})
 }

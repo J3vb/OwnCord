@@ -5,14 +5,16 @@
  * and message actions (edit, delete, reactions) against real server.
  */
 
-import { test, expect } from "../native-fixture";
-import { SKIP_SERVER, hasCredentials, nativeLoginAndReady, waitForMessages } from "./helpers";
+import { test, expect } from "../native-fixture-persistent";
+import { SKIP_SERVER, hasCredentials, ensureLoggedIn, waitForMessages } from "./helpers";
+
+test.describe.configure({ mode: "serial" });
 
 test.describe("Chat Operations", () => {
   test.beforeEach(async ({ nativePage }) => {
     test.skip(SKIP_SERVER, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
     test.skip(!hasCredentials(), "Skipped: OWNCORD_TEST_USER/OWNCORD_TEST_PASS not set");
-    await nativeLoginAndReady(nativePage);
+    await ensureLoggedIn(nativePage);
     await waitForMessages(nativePage);
   });
 
@@ -59,18 +61,16 @@ test.describe("Chat Operations", () => {
   });
 
   test("message displays author and timestamp", async ({ nativePage }) => {
-    // Check existing messages have author and time
-    const firstMessage = nativePage.locator(".message").first();
-    const isVisible = await firstMessage.isVisible().catch(() => false);
-    test.skip(!isVisible, "No messages in current channel");
+    // Wait for messages to render
+    await expect(nativePage.locator(".message").first()).toBeVisible({ timeout: 10_000 });
 
-    const author = firstMessage.locator(".msg-author");
-    const time = firstMessage.locator(".msg-time");
+    // Find a message with a VISIBLE author header (grouped continuation messages hide it).
+    // Look for any .msg-author that is visible anywhere in the message list.
+    const visibleAuthor = nativePage.locator(".msg-author:visible");
+    await expect(visibleAuthor.first()).toBeVisible({ timeout: 5_000 });
 
-    // At least one of these should be present (grouped messages may hide author)
-    const hasAuthor = await author.isVisible().catch(() => false);
-    const hasTime = await time.isVisible().catch(() => false);
-    expect(hasAuthor || hasTime).toBe(true);
+    // Verify it contains actual text (not empty)
+    await expect(visibleAuthor.first()).not.toHaveText("");
   });
 
   test("empty message is not sent", async ({ nativePage }) => {
@@ -81,10 +81,9 @@ test.describe("Chat Operations", () => {
     await textarea.focus();
     await textarea.press("Enter");
 
-    // Wait a moment, then verify no new message appeared
-    await nativePage.waitForTimeout(2_000);
-    const messagesAfter = await nativePage.locator(".message").count();
-    expect(messagesAfter).toBe(messagesBefore);
+    // Verify textarea kept focus (Enter was processed) then check no new message
+    await expect(textarea).toBeFocused();
+    await expect(nativePage.locator(".message")).toHaveCount(messagesBefore);
   });
 
   test("message actions bar appears on hover", async ({ nativePage }) => {
@@ -124,7 +123,7 @@ test.describe("Chat Message Display", () => {
   test.beforeEach(async ({ nativePage }) => {
     test.skip(SKIP_SERVER, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
     test.skip(!hasCredentials(), "Skipped: OWNCORD_TEST_USER/OWNCORD_TEST_PASS not set");
-    await nativeLoginAndReady(nativePage);
+    await ensureLoggedIn(nativePage);
     await waitForMessages(nativePage);
   });
 
@@ -145,6 +144,6 @@ test.describe("Chat Message Display", () => {
     // At least some messages should have avatars (non-grouped ones)
     const avatars = nativePage.locator(".message .msg-avatar");
     const avatarCount = await avatars.count();
-    expect(avatarCount).toBeGreaterThanOrEqual(0); // grouped messages may hide them
+    expect(avatarCount).toBeGreaterThan(0);
   });
 });

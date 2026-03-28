@@ -8,6 +8,7 @@ function resetStore(): void {
   channelsStore.setState(() => ({
     channels: new Map(),
     activeChannelId: null,
+    roles: [],
   }));
 }
 

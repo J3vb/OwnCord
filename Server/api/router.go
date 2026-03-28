@@ -41,6 +41,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Shared rate limiter for auth endpoints.
 	limiter := auth.NewRateLimiter()
 
+	// Start background cleanup of stale rate-limiter entries to prevent
+	// unbounded memory growth. The goroutine exits when stopCh is closed.
+	limiterStopCh := make(chan struct{})
+	go limiter.StartCleanup(5*time.Minute, 15*time.Minute, limiterStopCh)
+
 	// Versioned API routes.
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", handleHealth(ver))
@@ -114,8 +119,13 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		// Reverse proxy LiveKit signaling through OwnCord's HTTPS server.
 		// This avoids mixed-content blocks (secure page → insecure WS).
 		// Client connects to wss://server:8443/livekit/* → ws://localhost:7880/*
-		// Auth + rate limiting prevent unauthenticated access to the LiveKit SFU.
-		r.With(AuthMiddleware(database), RateLimitMiddleware(limiter, 30, time.Minute)).
+		//
+		// NOTE: AuthMiddleware is intentionally omitted. The LiveKit JS SDK's
+		// signal requests don't carry OwnCord session tokens — authentication
+		// is handled by the LiveKit JWT (access_token query param) which the
+		// LiveKit server validates. Users can only obtain a valid JWT through
+		// the authenticated voice_join WS flow. Rate limiting prevents abuse.
+		r.With(RateLimitMiddleware(limiter, 30, time.Minute)).
 			Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins)))
 	}
 
