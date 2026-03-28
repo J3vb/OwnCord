@@ -1186,9 +1186,10 @@ func TestHandleChatDelete_MessageNotFound(t *testing.T) {
 	hub.HandleMessageForTest(c, raw)
 	time.Sleep(50 * time.Millisecond)
 
+	// Handler returns FORBIDDEN (not NOT_FOUND) to prevent message-ID enumeration.
 	code := drainForErrorCode(send, 200*time.Millisecond)
-	if code != "NOT_FOUND" {
-		t.Errorf("error code = %q, want NOT_FOUND", code)
+	if code != "FORBIDDEN" {
+		t.Errorf("error code = %q, want FORBIDDEN", code)
 	}
 }
 
