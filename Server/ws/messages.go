@@ -151,11 +151,6 @@ type dmChannelOpenPayload struct {
 	Recipient dmUserPayload `json:"recipient"`
 }
 
-// dmChannelClosePayload is sent when a user closes a DM.
-type dmChannelClosePayload struct {
-	ChannelID int64 `json:"channel_id"`
-}
-
 // dmUserPayload is the public-facing shape for a DM participant in WS events.
 type dmUserPayload struct {
 	ID       int64  `json:"id"`
@@ -450,14 +445,6 @@ func buildDMChannelOpen(channelID int64, recipient *db.User) []byte {
 				Status:   recipient.Status,
 			},
 		},
-	})
-}
-
-// buildDMChannelClose constructs a dm_channel_close event sent to a user.
-func buildDMChannelClose(channelID int64) []byte {
-	return buildJSON(wsMsg{
-		Type:    "dm_channel_close",
-		Payload: dmChannelClosePayload{ChannelID: channelID},
 	})
 }
 
