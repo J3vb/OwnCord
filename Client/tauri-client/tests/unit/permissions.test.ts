@@ -82,12 +82,12 @@ describe('hasAllPermissions', () => {
 });
 
 describe('computeEffective', () => {
-  it('deny overrides allow', () => {
+  it('allow overrides deny (allow-wins, matches server semantics)', () => {
     const base = MEMBER_PERMS;
     const allow = Permission.MANAGE_MESSAGES;
     const deny = Permission.MANAGE_MESSAGES;
     const effective = computeEffective(base, allow, deny);
-    expect(effective & Permission.MANAGE_MESSAGES).toBe(0);
+    expect(effective & Permission.MANAGE_MESSAGES).toBe(Permission.MANAGE_MESSAGES);
   });
 
   it('ADMINISTRATOR ignores deny and returns all bits', () => {

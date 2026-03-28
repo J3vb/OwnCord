@@ -132,3 +132,147 @@ describe('createStore', () => {
     expect(store.getState().count).toBe(100);
   });
 });
+
+// ---------------------------------------------------------------------------
+// subscribeSelector
+// ---------------------------------------------------------------------------
+
+describe('subscribeSelector', () => {
+  it('fires when selected slice changes', () => {
+    const store = freshStore();
+    const listener = vi.fn();
+    store.subscribeSelector((s) => s.count, listener);
+
+    store.setState((prev) => ({ ...prev, count: 5 }));
+    store.flush();
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith(5);
+  });
+
+  it('does NOT fire when selected slice is unchanged', () => {
+    const store = freshStore();
+    const listener = vi.fn();
+    store.subscribeSelector((s) => s.count, listener);
+
+    // Change name but not count
+    store.setState((prev) => ({ ...prev, name: 'updated' }));
+    store.flush();
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('fires only for the changed slice among multiple selectors', () => {
+    const store = freshStore();
+    const countListener = vi.fn();
+    const nameListener = vi.fn();
+    store.subscribeSelector((s) => s.count, countListener);
+    store.subscribeSelector((s) => s.name, nameListener);
+
+    store.setState((prev) => ({ ...prev, count: 10 }));
+    store.flush();
+
+    expect(countListener).toHaveBeenCalledTimes(1);
+    expect(nameListener).not.toHaveBeenCalled();
+  });
+
+  it('returns unsubscribe function', () => {
+    const store = freshStore();
+    const listener = vi.fn();
+    const unsub = store.subscribeSelector((s) => s.count, listener);
+
+    store.setState((prev) => ({ ...prev, count: 1 }));
+    store.flush();
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    unsub();
+
+    store.setState((prev) => ({ ...prev, count: 2 }));
+    store.flush();
+    expect(listener).toHaveBeenCalledTimes(1); // no new call
+  });
+
+  it('works with custom equality comparator', () => {
+    const store = freshStore();
+    const listener = vi.fn();
+    // Custom comparator: only fire when count changes by more than 5
+    store.subscribeSelector(
+      (s) => s.count,
+      listener,
+      (a, b) => Math.abs(a - b) <= 5,
+    );
+
+    store.setState((prev) => ({ ...prev, count: 3 })); // diff = 3, within threshold
+    store.flush();
+    expect(listener).not.toHaveBeenCalled();
+
+    store.setState((prev) => ({ ...prev, count: 10 })); // diff = 10, exceeds threshold
+    store.flush();
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith(10);
+  });
+
+  it('works with microtask batching', () => {
+    const store = freshStore();
+    const listener = vi.fn();
+    store.subscribeSelector((s) => s.count, listener);
+
+    // Multiple rapid updates — only final state matters
+    store.setState((prev) => ({ ...prev, count: 1 }));
+    store.setState((prev) => ({ ...prev, count: 2 }));
+    store.setState((prev) => ({ ...prev, count: 3 }));
+    store.flush();
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith(3);
+  });
+
+  it('multiple selectors on the same store work independently', () => {
+    const store = freshStore();
+    const results: string[] = [];
+    store.subscribeSelector((s) => s.count, (c) => results.push(`count:${c}`));
+    store.subscribeSelector((s) => s.name, (n) => results.push(`name:${n}`));
+
+    store.setState((prev) => ({ ...prev, count: 1, name: 'updated' }));
+    store.flush();
+
+    expect(results).toEqual(['count:1', 'name:updated']);
+  });
+
+  it('shallow-equal default prevents firing for structurally identical selectors', () => {
+    const store = freshStore();
+    const listener = vi.fn();
+    // Selector creates a new object ref each time, but shallowEqual
+    // detects that the content is unchanged and skips the notification.
+    store.subscribeSelector(
+      (s) => ({ count: s.count }),
+      listener,
+    );
+
+    // Changing just name does NOT fire because { count: 0 } shallow-equals { count: 0 }
+    store.setState((prev) => ({ ...prev, name: 'changed' }));
+    store.flush();
+    expect(listener).toHaveBeenCalledTimes(0);
+
+    // Changing count DOES fire because { count: 1 } !== { count: 0 }
+    store.setState((prev) => ({ ...prev, count: 1 }));
+    store.flush();
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows strict reference equality via custom comparator', () => {
+    const store = freshStore();
+    const listener = vi.fn();
+    // Opt in to strict === comparison to get the old behavior
+    store.subscribeSelector(
+      (s) => ({ count: s.count }),
+      listener,
+      (a, b) => a === b,
+    );
+
+    // New object ref with same content DOES fire with strict ===
+    store.setState((prev) => ({ ...prev, name: 'changed' }));
+    store.flush();
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+});

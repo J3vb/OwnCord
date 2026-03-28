@@ -27,10 +27,32 @@ func HashPassword(password string) (string, error) {
 	return string(hash), nil
 }
 
+// dummyHash is a pre-computed bcrypt hash used to prevent timing side-channels
+// when the user does not exist. Comparing against this dummy ensures that
+// CheckPassword takes roughly constant time regardless of whether a valid hash
+// was supplied.
+var dummyHash []byte
+
+func init() {
+	h, err := bcrypt.GenerateFromPassword([]byte("dummy-timing-pad"), bcryptCost)
+	if err != nil {
+		panic("auth: failed to generate dummy bcrypt hash: " + err.Error())
+	}
+	dummyHash = h
+}
+
 // CheckPassword reports whether password matches hash. Returns false on any
-// error, including an empty or malformed hash.
+// error, including an empty or malformed hash. When hash is empty (user does
+// not exist), a dummy bcrypt comparison is performed to prevent timing-based
+// username enumeration.
 func CheckPassword(hash, password string) bool {
 	if hash == "" {
+		// Perform a dummy comparison so the response time is indistinguishable
+		// from a real check, preventing timing-based username enumeration.
+		// The error is intentionally discarded: we always return false here.
+		// The comparison is performed only to consume time and prevent
+		// timing-based username enumeration.
+		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
 		return false
 	}
 	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))

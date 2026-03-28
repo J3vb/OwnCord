@@ -6,7 +6,7 @@
 
 import { loadPref, savePref } from "@components/settings/helpers";
 import { voiceStore } from "@stores/voice.store";
-import { setMuted } from "./voiceSession";
+import { setMuted } from "./livekitSession";
 import { createLogger } from "./logger";
 
 const log = createLogger("ptt");

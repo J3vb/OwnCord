@@ -21,6 +21,7 @@ function resetStores(): void {
     localDeafened: false,
     localCamera: false,
     localScreenshare: false,
+    joinedAt: null,
   }));
   authStore.setState(() => ({
     token: null,
@@ -32,6 +33,7 @@ function resetStores(): void {
   channelsStore.setState(() => ({
     channels: new Map(),
     activeChannelId: null,
+    roles: [],
   }));
   membersStore.setState(() => ({
     members: new Map(),
@@ -47,6 +49,8 @@ function resetStores(): void {
     transientError: null,
     persistentError: null,
     collapsedCategories: new Set<string>(),
+    sidebarMode: "channels" as const,
+    activeDmUserId: null,
   }));
 }
 

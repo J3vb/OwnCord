@@ -56,7 +56,7 @@ vi.mock("@lib/logger", () => ({
 }));
 
 // setMuted is called internally by the ptt-state listener — mock to isolate
-vi.mock("../../src/lib/voiceSession", () => ({
+vi.mock("../../src/lib/livekitSession", () => ({
   setMuted: vi.fn(),
 }));
 
@@ -465,7 +465,7 @@ describe("ptt-state event listener", () => {
   });
 
   it("calls setMuted(false) when PTT is pressed (payload true) and in a voice channel", async () => {
-    const { setMuted } = await import("../../src/lib/voiceSession");
+    const { setMuted } = await import("../../src/lib/livekitSession");
     const mockSetMuted = vi.mocked(setMuted);
     mockSetMuted.mockClear();
 
@@ -487,7 +487,7 @@ describe("ptt-state event listener", () => {
   });
 
   it("calls setMuted(true) when PTT is released (payload false) and in a voice channel", async () => {
-    const { setMuted } = await import("../../src/lib/voiceSession");
+    const { setMuted } = await import("../../src/lib/livekitSession");
     const mockSetMuted = vi.mocked(setMuted);
     mockSetMuted.mockClear();
 
@@ -508,7 +508,7 @@ describe("ptt-state event listener", () => {
   });
 
   it("does not call setMuted when not in a voice channel", async () => {
-    const { setMuted } = await import("../../src/lib/voiceSession");
+    const { setMuted } = await import("../../src/lib/livekitSession");
     const mockSetMuted = vi.mocked(setMuted);
     mockSetMuted.mockClear();
 

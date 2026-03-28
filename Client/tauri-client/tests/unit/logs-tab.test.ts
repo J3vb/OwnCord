@@ -21,6 +21,10 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
+vi.mock("@lib/livekitSession", () => ({
+  getSessionDebugInfo: vi.fn().mockReturnValue({}),
+}));
+
 import { createLogsTab } from "../../src/components/settings/LogsTab";
 import type { TabName } from "../../src/components/SettingsOverlay";
 
@@ -60,11 +64,12 @@ describe("LogsTab", () => {
     expect(el.className).toBe("settings-pane active");
   });
 
-  it("renders a Logs header", () => {
+  it("renders a Voice Diagnostics header", () => {
     const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
     const el = handle.build();
-    const h1 = el.querySelector("h1");
-    expect(h1!.textContent).toBe("Logs");
+    const h3 = el.querySelector("h3");
+    expect(h3).not.toBeNull();
+    expect(h3!.textContent).toBe("Voice Diagnostics");
   });
 
   it("renders log entries from getLogBuffer", () => {

@@ -2,7 +2,10 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -29,18 +32,14 @@ type GitHubConfig struct {
 	Token string `koanf:"token"`
 }
 
-// VoiceConfig holds STUN/TURN server settings and SFU configuration.
+// VoiceConfig holds LiveKit server connection and voice quality settings.
 type VoiceConfig struct {
-	TURNSecret      string `koanf:"turn_secret"`      // HMAC-SHA1 secret; auto-generated if empty
-	STUNPort        int    `koanf:"stun_port"`         // default 3478
-	TURNPort        int    `koanf:"turn_port"`         // default 3478
-	TURNEnabled     bool   `koanf:"turn_enabled"`      // default true
-	Quality         string `koanf:"quality"`            // low | medium | high
-	MixingThreshold int    `koanf:"mixing_threshold"`   // selective forwarding threshold
-	TopSpeakers     int    `koanf:"top_speakers"`       // top-N speakers in selective mode
-	ExternalIP      string `koanf:"external_ip"`        // set if behind NAT
-	MediaPortMin    int    `koanf:"media_port_min"`     // UDP port range start for WebRTC media
-	MediaPortMax    int    `koanf:"media_port_max"`     // UDP port range end for WebRTC media
+	LiveKitAPIKey    string `koanf:"livekit_api_key"`    // LiveKit API key
+	LiveKitAPISecret string `koanf:"livekit_api_secret"` // LiveKit API secret
+	LiveKitURL       string `koanf:"livekit_url"`        // LiveKit server WebSocket URL (e.g. ws://localhost:7880)
+	LiveKitBinaryPath string `koanf:"livekit_binary"`    // path to livekit-server binary; empty = don't auto-start
+	NodeIP           string `koanf:"node_ip"`            // public IP for WebRTC ICE candidates; empty = auto-detect
+	Quality          string `koanf:"quality"`            // low | medium | high
 }
 
 // ServerConfig holds HTTP server settings.
@@ -105,14 +104,8 @@ func defaults() Config {
 			StorageDir: "data/uploads",
 		},
 		Voice: VoiceConfig{
-			STUNPort:        3478,
-			TURNPort:        3478,
-			TURNEnabled:     true,
-			Quality:         "medium",
-			MixingThreshold: 10,
-			TopSpeakers:     3,
-			MediaPortMin:    10000,
-			MediaPortMax:    10100,
+			LiveKitURL: "ws://localhost:7880",
+			Quality:    "medium",
 		},
 		GitHub: GitHubConfig{},
 	}
@@ -148,13 +141,12 @@ upload:
   storage_dir: "data/uploads"
 
 voice:
-  # external_ip: ""       # set to your public IP if behind NAT (required for voice over internet)
-  # stun_port: 3478       # UDP port for STUN
-  # turn_port: 3478       # UDP port for TURN relay
-  # turn_enabled: true
-  # quality: "medium"     # low | medium | high
-  # media_port_min: 10000 # UDP port range for WebRTC media
-  # media_port_max: 10100
+  # livekit_api_key: ""       # LiveKit API key (REQUIRED for voice — generate a unique key)
+  # livekit_api_secret: ""    # LiveKit API secret (REQUIRED, min 32 chars — generate a unique secret)
+  livekit_url: "ws://localhost:7880"  # LiveKit server WebSocket URL
+  # livekit_binary: ""             # path to livekit-server binary; empty = don't auto-start
+  # node_ip: ""                    # public IP for WebRTC media (required for remote users behind NAT)
+  # quality: "medium"              # low | medium | high
 
 # github:
 #   token: ""  # optional: GitHub API token for higher rate limits (5000 req/hr vs 60)
@@ -174,7 +166,7 @@ func Load(cfgPath string) (*Config, error) {
 
 	// Layer 2: YAML file (create default if missing).
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
-		if writeErr := os.WriteFile(cfgPath, []byte(defaultYAML), 0o644); writeErr != nil {
+		if writeErr := os.WriteFile(cfgPath, []byte(defaultYAML), 0o600); writeErr != nil {
 			return nil, fmt.Errorf("writing default config: %w", writeErr)
 		}
 	} else {
@@ -218,34 +210,61 @@ func Load(cfgPath string) (*Config, error) {
 	// the YAML section is present but fields are commented out / omitted).
 	applyVoiceDefaults(&cfg.Voice)
 
+	// Warn if using default dev credentials — these are public and insecure.
+	// Clear credentials so downstream consumers (e.g. NewLiveKitClient) see
+	// empty values and refuse to start voice.
+	if IsDefaultVoiceCredentials(&cfg.Voice) {
+		slog.Warn("using default LiveKit dev credentials — voice will be disabled; set voice.livekit_api_key and voice.livekit_api_secret in config.yaml")
+		cfg.Voice.LiveKitAPIKey = ""
+		cfg.Voice.LiveKitAPISecret = ""
+	}
+
 	return &cfg, nil
+}
+
+// defaultLiveKitAPIKey and defaultLiveKitAPISecret are the well-known dev
+// credentials that ship in the default config. They must never be used in
+// production — NewLiveKitClient rejects them.
+const (
+	DefaultLiveKitAPIKey    = "devkey"
+	DefaultLiveKitAPISecret = "owncord-dev-secret-key-min-32chars"
+)
+
+// IsDefaultVoiceCredentials returns true when the voice config still uses
+// the well-known default dev credentials shipped in the source code.
+func IsDefaultVoiceCredentials(v *VoiceConfig) bool {
+	return v.LiveKitAPIKey == DefaultLiveKitAPIKey ||
+		v.LiveKitAPISecret == DefaultLiveKitAPISecret
+}
+
+// generateRandomKey returns a crypto-random hex string of the given byte length.
+func generateRandomKey(byteLen int) string {
+	b := make([]byte, byteLen)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)
 }
 
 // applyVoiceDefaults fills in zero-value voice fields with sensible defaults.
 // This guards against the koanf merge behaviour where an empty YAML section
 // overwrites struct defaults with Go zero values.
+// When API key/secret are empty, unique random credentials are generated
+// so voice works out of the box without shipping known-public defaults.
 func applyVoiceDefaults(v *VoiceConfig) {
-	def := defaults().Voice
-	if v.STUNPort == 0 {
-		v.STUNPort = def.STUNPort
+	if v.LiveKitAPIKey == "" {
+		v.LiveKitAPIKey = "key-" + generateRandomKey(8)
+		slog.Warn("generated random LiveKit API key — voice tokens will break on restart; set voice.livekit_api_key in config.yaml for stable operation")
 	}
-	if v.TURNPort == 0 {
-		v.TURNPort = def.TURNPort
+	if v.LiveKitAPISecret == "" {
+		v.LiveKitAPISecret = generateRandomKey(32) // 64 hex chars, well above 32-char minimum
+		slog.Warn("generated random LiveKit API secret — set voice.livekit_api_secret in config.yaml for stable operation")
+	}
+	if v.LiveKitURL == "" {
+		v.LiveKitURL = "ws://localhost:7880"
 	}
 	if v.Quality == "" {
-		v.Quality = def.Quality
-	}
-	if v.MediaPortMin == 0 {
-		v.MediaPortMin = def.MediaPortMin
-	}
-	if v.MediaPortMax == 0 {
-		v.MediaPortMax = def.MediaPortMax
-	}
-	if v.MixingThreshold == 0 {
-		v.MixingThreshold = def.MixingThreshold
-	}
-	if v.TopSpeakers == 0 {
-		v.TopSpeakers = def.TopSpeakers
+		v.Quality = "medium"
 	}
 }
 

@@ -8,12 +8,22 @@ use windows::Win32::Security::Credentials::{
 };
 
 /// Data returned from `load_credential`.
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Clone)]
 pub struct CredentialData {
     pub username: String,
     pub token: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
+}
+
+impl std::fmt::Debug for CredentialData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CredentialData")
+            .field("username", &self.username)
+            .field("token", &"[REDACTED]")
+            .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 /// Build the target name used in Windows Credential Manager.
@@ -31,10 +41,15 @@ fn to_wide(s: &str) -> Vec<u16> {
 // Tauri commands
 // ---------------------------------------------------------------------------
 
-/// Save a credential (username + token) to Windows Credential Manager.
+/// Save a credential (username + token + optional password) to Windows
+/// Credential Manager.
 ///
 /// Target name: `OwnCord/{host}`
-/// Blob: JSON `{"username":"...","token":"..."}`
+/// Blob: JSON `{"username":"...","token":"...","password":"..."}`
+///
+/// The password field is only included when the user checks "Remember
+/// password". Windows Credential Manager encrypts the blob at rest using
+/// DPAPI, tied to the logged-in Windows user — plaintext is never on disk.
 #[tauri::command]
 pub fn save_credential(host: String, username: String, token: String, password: Option<String>) -> Result<(), String> {
     if host.is_empty() {
@@ -114,40 +129,42 @@ pub fn load_credential(host: String) -> Result<Option<CredentialData>, String> {
     }
 
     // SAFETY: `pcred` is valid after a successful CredReadW call.
-    let result = unsafe {
+    // Copy the blob bytes and free immediately — CredFree must run even if
+    // parsing fails, otherwise the credential memory leaks.
+    let blob = unsafe {
         let cred = &*pcred;
-        let blob_slice = std::slice::from_raw_parts(
+        let bytes = std::slice::from_raw_parts(
             cred.CredentialBlob,
             cred.CredentialBlobSize as usize,
-        );
-        let json_str = String::from_utf8(blob_slice.to_vec())
-            .map_err(|e| format!("credential blob is not valid UTF-8: {e}"))?;
-
-        let parsed: serde_json::Value = serde_json::from_str(&json_str)
-            .map_err(|e| format!("credential blob is not valid JSON: {e}"))?;
-
-        let username = parsed
-            .get("username")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-        let token = parsed
-            .get("token")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-        let password = parsed
-            .get("password")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
-        // Free the credential memory allocated by Windows.
+        )
+        .to_vec();
         CredFree(pcred as *const std::ffi::c_void);
-
-        Ok(Some(CredentialData { username, token, password }))
+        bytes
     };
 
-    result
+    // Parse outside the unsafe block — CredFree has already been called.
+    let json_str = String::from_utf8(blob)
+        .map_err(|e| format!("credential blob is not valid UTF-8: {e}"))?;
+
+    let parsed: serde_json::Value = serde_json::from_str(&json_str)
+        .map_err(|e| format!("credential blob is not valid JSON: {e}"))?;
+
+    let username = parsed
+        .get("username")
+        .and_then(|v| v.as_str())
+        .ok_or("credential blob missing 'username' field")?
+        .to_string();
+    let token = parsed
+        .get("token")
+        .and_then(|v| v.as_str())
+        .ok_or("credential blob missing 'token' field")?
+        .to_string();
+    let password = parsed
+        .get("password")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    Ok(Some(CredentialData { username, token, password }))
 }
 
 /// Delete a credential from Windows Credential Manager.

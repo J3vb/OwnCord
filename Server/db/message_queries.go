@@ -89,10 +89,10 @@ func (d *DB) EditMessage(id, userID int64, content string) error {
 		return err
 	}
 	if msg == nil {
-		return fmt.Errorf("EditMessage: message %d not found", id)
+		return fmt.Errorf("EditMessage: message %d: %w", id, ErrNotFound)
 	}
 	if msg.UserID != userID {
-		return fmt.Errorf("EditMessage: user %d does not own message %d", userID, id)
+		return fmt.Errorf("EditMessage: user %d does not own message %d: %w", userID, id, ErrForbidden)
 	}
 
 	_, err = d.sqlDB.Exec(
@@ -113,10 +113,10 @@ func (d *DB) DeleteMessage(id, userID int64, ismod bool) error {
 		return err
 	}
 	if msg == nil {
-		return fmt.Errorf("DeleteMessage: message %d not found", id)
+		return fmt.Errorf("DeleteMessage: message %d: %w", id, ErrNotFound)
 	}
 	if !ismod && msg.UserID != userID {
-		return fmt.Errorf("DeleteMessage: user %d does not own message %d", userID, id)
+		return fmt.Errorf("DeleteMessage: user %d does not own message %d: %w", userID, id, ErrForbidden)
 	}
 
 	_, err = d.sqlDB.Exec(`UPDATE messages SET deleted = 1 WHERE id = ?`, id)
@@ -149,7 +149,7 @@ func (d *DB) RemoveReaction(messageID, userID int64, emoji string) error {
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("RemoveReaction: reaction not found")
+		return fmt.Errorf("RemoveReaction: reaction: %w", ErrNotFound)
 	}
 	return nil
 }
@@ -277,54 +277,7 @@ func (d *DB) GetMessagesForAPI(channelID, before int64, limit int, requestingUse
 	}
 	defer rows.Close() //nolint:errcheck
 
-	var msgs []MessageAPIResponse
-	var msgIDs []int64
-	for rows.Next() {
-		var m MessageAPIResponse
-		var deleted, pinned int
-		if scanErr := rows.Scan(
-			&m.ID, &m.ChannelID, &m.User.ID, &m.User.Username, &m.User.Avatar,
-			&m.Content, &m.ReplyTo, &m.EditedAt, &deleted, &pinned, &m.Timestamp,
-		); scanErr != nil {
-			return nil, fmt.Errorf("GetMessagesForAPI scan: %w", scanErr)
-		}
-		m.Deleted = deleted != 0
-		m.Pinned = pinned != 0
-		m.Attachments = []AttachmentInfo{}
-		m.Reactions = []ReactionInfo{}
-		msgs = append(msgs, m)
-		msgIDs = append(msgIDs, m.ID)
-	}
-	if rows.Err() != nil {
-		return nil, fmt.Errorf("GetMessagesForAPI rows: %w", rows.Err())
-	}
-	if msgs == nil {
-		return []MessageAPIResponse{}, nil
-	}
-
-	// Batch-fetch reactions for all message IDs.
-	reactMap, err := d.getReactionsBatch(msgIDs, requestingUserID)
-	if err != nil {
-		return nil, fmt.Errorf("GetMessagesForAPI reactions: %w", err)
-	}
-	for i := range msgs {
-		if r, ok := reactMap[msgs[i].ID]; ok {
-			msgs[i].Reactions = r
-		}
-	}
-
-	// Batch-fetch attachments for all message IDs.
-	attMap, err := d.GetAttachmentsByMessageIDs(msgIDs)
-	if err != nil {
-		return nil, fmt.Errorf("GetMessagesForAPI attachments: %w", err)
-	}
-	for i := range msgs {
-		if a, ok := attMap[msgs[i].ID]; ok {
-			msgs[i].Attachments = a
-		}
-	}
-
-	return msgs, nil
+	return d.scanAndEnrichMessages(rows, requestingUserID)
 }
 
 // getReactionsBatch returns aggregated reactions for multiple messages.
@@ -438,6 +391,96 @@ func (d *DB) GetLatestMessageID(channelID int64) (int64, error) {
 		return 0, fmt.Errorf("GetLatestMessageID: %w", err)
 	}
 	return id, nil
+}
+
+// GetPinnedMessages returns all pinned messages in a channel in the API response shape,
+// including user object, reactions (with me flag), and attachments.
+func (d *DB) GetPinnedMessages(channelID int64, requestingUserID int64) ([]MessageAPIResponse, error) {
+	rows, err := d.sqlDB.Query(
+		`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
+		        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp
+		 FROM messages m JOIN users u ON m.user_id = u.id
+		 WHERE m.channel_id = ? AND m.pinned = 1 AND m.deleted = 0
+		 ORDER BY m.id DESC`,
+		channelID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("GetPinnedMessages: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	return d.scanAndEnrichMessages(rows, requestingUserID)
+}
+
+// scanAndEnrichMessages scans rows into MessageAPIResponse slice and
+// batch-fetches reactions and attachments. Caller must defer rows.Close().
+func (d *DB) scanAndEnrichMessages(rows *sql.Rows, requestingUserID int64) ([]MessageAPIResponse, error) {
+	var msgs []MessageAPIResponse
+	var msgIDs []int64
+	for rows.Next() {
+		var m MessageAPIResponse
+		var deleted, pinned int
+		if scanErr := rows.Scan(
+			&m.ID, &m.ChannelID, &m.User.ID, &m.User.Username, &m.User.Avatar,
+			&m.Content, &m.ReplyTo, &m.EditedAt, &deleted, &pinned, &m.Timestamp,
+		); scanErr != nil {
+			return nil, fmt.Errorf("scanAndEnrichMessages scan: %w", scanErr)
+		}
+		m.Deleted = deleted != 0
+		m.Pinned = pinned != 0
+		m.Attachments = []AttachmentInfo{}
+		m.Reactions = []ReactionInfo{}
+		msgs = append(msgs, m)
+		msgIDs = append(msgIDs, m.ID)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("scanAndEnrichMessages rows: %w", rows.Err())
+	}
+	if msgs == nil {
+		return []MessageAPIResponse{}, nil
+	}
+
+	// Batch-fetch reactions for all message IDs.
+	reactMap, err := d.getReactionsBatch(msgIDs, requestingUserID)
+	if err != nil {
+		return nil, fmt.Errorf("scanAndEnrichMessages reactions: %w", err)
+	}
+	for i := range msgs {
+		if r, ok := reactMap[msgs[i].ID]; ok {
+			msgs[i].Reactions = r
+		}
+	}
+
+	// Batch-fetch attachments for all message IDs.
+	attMap, err := d.GetAttachmentsByMessageIDs(msgIDs)
+	if err != nil {
+		return nil, fmt.Errorf("scanAndEnrichMessages attachments: %w", err)
+	}
+	for i := range msgs {
+		if a, ok := attMap[msgs[i].ID]; ok {
+			msgs[i].Attachments = a
+		}
+	}
+
+	return msgs, nil
+}
+
+// SetMessagePinned updates the pinned column on a message.
+// Returns ErrNotFound if the message does not exist.
+func (d *DB) SetMessagePinned(id int64, pinned bool) error {
+	val := 0
+	if pinned {
+		val = 1
+	}
+	res, err := d.sqlDB.Exec(`UPDATE messages SET pinned = ? WHERE id = ? AND deleted = 0`, val, id)
+	if err != nil {
+		return fmt.Errorf("SetMessagePinned: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("SetMessagePinned: message %d: %w", id, ErrNotFound)
+	}
+	return nil
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

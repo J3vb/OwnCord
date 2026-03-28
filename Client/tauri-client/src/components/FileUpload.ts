@@ -2,6 +2,7 @@
 // Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
 
 import { createElement, setText, appendChildren } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 
 export interface FileUploadOptions {
@@ -105,7 +106,8 @@ export function createFileUpload(options: FileUploadOptions): FileUploadComponen
     progressBar = createElement("div", { class: "file-upload__progress-bar" });
     progressBar.style.width = "0%";
     appendChildren(progressContainer, progressBar);
-    cancelBtn = createElement("button", { class: "file-upload__cancel", type: "button" }, "\u00d7") as HTMLButtonElement;
+    cancelBtn = createElement("button", { class: "file-upload__cancel", type: "button" }) as HTMLButtonElement;
+    cancelBtn.appendChild(createIcon("x", 14));
     appendChildren(preview, thumb, nameSpan, sizeSpan, progressContainer, cancelBtn);
 
     errorDiv = createElement("div", { class: "file-upload__error file-upload__error--hidden" });

@@ -4,16 +4,19 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
+import { Disposable } from "@lib/disposable";
 import { authStore } from "@stores/auth.store";
 import { openSettings } from "@stores/ui.store";
 
-export type UserBarOptions = Record<string, never>;
+export interface UserBarOptions {
+  readonly onDisconnect?: () => void;
+}
 
 export function createUserBar(options?: UserBarOptions): MountableComponent {
-  const ac = new AbortController();
+  const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
-  let unsubscribe: (() => void) | null = null;
 
   // Element references for targeted updates
   let avatarEl: HTMLDivElement | null = null;
@@ -63,37 +66,45 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     const settingsBtn = createElement(
       "button",
       { title: "Settings", "aria-label": "Settings" },
-      "\u2699",
     );
+    settingsBtn.appendChild(createIcon("settings", 18));
 
-    settingsBtn.addEventListener(
-      "click",
-      () => {
-        openSettings();
-      },
-      { signal: ac.signal },
-    );
+    disposable.onEvent(settingsBtn, "click", () => {
+      openSettings();
+    });
 
     buttons.appendChild(settingsBtn);
+
+    if (options?.onDisconnect !== undefined) {
+      const disconnectFn = options.onDisconnect;
+      const disconnectBtn = createElement("button", {
+        class: "ub-ctrl-btn",
+        title: "Switch server",
+        "aria-label": "Switch server",
+        "data-testid": "disconnect-btn",
+      });
+      disconnectBtn.appendChild(createIcon("log-out", 18));
+      disposable.onEvent(disconnectBtn, "click", () => disconnectFn());
+      buttons.appendChild(disconnectBtn);
+    }
+
     appendChildren(root, avatarEl, info, buttons);
 
     // Initial render
     updateFromState();
 
     // Subscribe to auth changes
-    unsubscribe = authStore.subscribe(() => {
-      updateFromState();
-    });
+    disposable.onStoreChange(
+      authStore,
+      (s) => s.user,
+      () => updateFromState(),
+    );
 
     container.appendChild(root);
   }
 
   function destroy(): void {
-    ac.abort();
-    if (unsubscribe !== null) {
-      unsubscribe();
-      unsubscribe = null;
-    }
+    disposable.destroy();
     if (root !== null) {
       root.remove();
       root = null;

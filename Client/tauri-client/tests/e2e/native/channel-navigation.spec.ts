@@ -5,14 +5,16 @@
  * message containers re-mount, and voice channel detection.
  */
 
-import { test, expect } from "../native-fixture";
-import { SKIP_SERVER, hasCredentials, nativeLoginAndReady } from "./helpers";
+import { test, expect } from "../native-fixture-persistent";
+import { SKIP_SERVER, hasCredentials, ensureLoggedIn } from "./helpers";
+
+test.describe.configure({ mode: "serial" });
 
 test.describe("Channel Navigation", () => {
   test.beforeEach(async ({ nativePage }) => {
     test.skip(SKIP_SERVER, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
     test.skip(!hasCredentials(), "Skipped: OWNCORD_TEST_USER/OWNCORD_TEST_PASS not set");
-    await nativeLoginAndReady(nativePage);
+    await ensureLoggedIn(nativePage);
   });
 
   test("clicking a text channel makes it active", async ({ nativePage }) => {
@@ -111,7 +113,7 @@ test.describe("Channel Navigation", () => {
   });
 
   test("channel sidebar shows server name in header", async ({ nativePage }) => {
-    const serverName = nativePage.locator(".channel-sidebar-header h2");
+    const serverName = nativePage.locator(".unified-sidebar-header .server-name");
     await expect(serverName).toBeVisible();
 
     const text = await serverName.textContent();

@@ -19,10 +19,11 @@ type Attachment struct {
 }
 
 // CreateAttachment inserts a new attachment record (initially unlinked to any message).
-func (d *DB) CreateAttachment(id, filename, storedAs, mimeType string, size int64) error {
+// width and height are optional image dimensions (pass nil for non-image files).
+func (d *DB) CreateAttachment(id, filename, storedAs, mimeType string, size int64, width, height *int) error {
 	_, err := d.sqlDB.Exec(
-		`INSERT INTO attachments (id, filename, stored_as, mime_type, size) VALUES (?, ?, ?, ?, ?)`,
-		id, filename, storedAs, mimeType, size,
+		`INSERT INTO attachments (id, filename, stored_as, mime_type, size, width, height) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id, filename, storedAs, mimeType, size, width, height,
 	)
 	if err != nil {
 		return fmt.Errorf("CreateAttachment: %w", err)
@@ -88,7 +89,7 @@ func (d *DB) GetAttachmentsByMessageIDs(msgIDs []int64) (map[int64][]AttachmentI
 	}
 
 	query := fmt.Sprintf(
-		`SELECT id, message_id, filename, size, mime_type
+		`SELECT id, message_id, filename, size, mime_type, width, height
 		 FROM attachments WHERE message_id IN (%s)`,
 		strings.Join(placeholders, ","),
 	)
@@ -103,7 +104,7 @@ func (d *DB) GetAttachmentsByMessageIDs(msgIDs []int64) (map[int64][]AttachmentI
 		var id string
 		var msgID int64
 		var ai AttachmentInfo
-		if scanErr := rows.Scan(&id, &msgID, &ai.Filename, &ai.Size, &ai.Mime); scanErr != nil {
+		if scanErr := rows.Scan(&id, &msgID, &ai.Filename, &ai.Size, &ai.Mime, &ai.Width, &ai.Height); scanErr != nil {
 			return nil, fmt.Errorf("GetAttachmentsByMessageIDs scan: %w", scanErr)
 		}
 		ai.ID = id
@@ -114,4 +115,42 @@ func (d *DB) GetAttachmentsByMessageIDs(msgIDs []int64) (map[int64][]AttachmentI
 		return nil, fmt.Errorf("GetAttachmentsByMessageIDs rows: %w", rows.Err())
 	}
 	return result, nil
+}
+
+// DeleteOrphanedAttachments removes attachment records where message_id IS NULL
+// and uploaded_at is older than the given cutoff time string (ISO 8601).
+// Returns the stored_as filenames of deleted records so the caller can remove files.
+func (d *DB) DeleteOrphanedAttachments(cutoff string) ([]string, error) {
+	rows, err := d.sqlDB.Query(
+		`SELECT stored_as FROM attachments WHERE message_id IS NULL AND uploaded_at < ?`,
+		cutoff,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("DeleteOrphanedAttachments query: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var files []string
+	for rows.Next() {
+		var storedAs string
+		if scanErr := rows.Scan(&storedAs); scanErr != nil {
+			return nil, fmt.Errorf("DeleteOrphanedAttachments scan: %w", scanErr)
+		}
+		files = append(files, storedAs)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("DeleteOrphanedAttachments rows: %w", rows.Err())
+	}
+
+	if len(files) > 0 {
+		_, err = d.sqlDB.Exec(
+			`DELETE FROM attachments WHERE message_id IS NULL AND uploaded_at < ?`,
+			cutoff,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("DeleteOrphanedAttachments delete: %w", err)
+		}
+	}
+
+	return files, nil
 }

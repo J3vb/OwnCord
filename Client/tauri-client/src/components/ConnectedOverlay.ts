@@ -5,6 +5,7 @@
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 
 export interface ConnectedOverlayOptions {
   readonly serverName: string;
@@ -98,7 +99,9 @@ export function createConnectedOverlay(
     if (ac.signal.aborted) return;
 
     spinner.style.display = "none";
-    setText(loaderText, "\u2714 Ready!");
+    loaderText.textContent = "";
+    loaderText.appendChild(createIcon("check", 16));
+    loaderText.appendChild(document.createTextNode(" Ready!"));
 
     const timer = setTimeout(() => {
       if (!ac.signal.aborted) {

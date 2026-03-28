@@ -16,7 +16,38 @@ Bug tracker for the OwnCord project.
 
 (none)
 
+### Low
+
+(none)
+
 ## Resolved
+
+- **BUG-054**: No account deletion — fixed 2026-03-28
+  - Server: `DELETE /api/v1/auth/account` with password confirmation. Anonymizes user (username → `[deleted-{id}]`, clears password/avatar/TOTP, bans row). Soft-deletes messages, removes sessions/DM participation/reactions/read states. Blocks last-admin deletion.
+  - Client: "Danger Zone" section in AccountTab with inline confirmation (password required). Post-deletion clears auth, disconnects WS, navigates to connect page.
+- **BUG-046**: Invalid saved audio device crashes voice join — fixed 2026-03-28
+  - Wrapped each `switchActiveDevice` in isolated try-catch with fallback to default device
+- **BUG-047**: Orphaned file uploads on send — fixed 2026-03-28
+  - Added `pendingUploadCount` tracking; `handleSend()` blocks until uploads complete
+- **BUG-048**: No client-side file size/type validation (paste path) — fixed 2026-03-28
+  - Added 100MB size limit and MIME type allowlist before `readFileAsDataUrl` on paste
+- **BUG-049**: VAD breaks when app is backgrounded — fixed 2026-03-28
+  - Replaced `requestAnimationFrame` with `setTimeout(poll, 16)` so VAD continues when minimized
+- **BUG-050**: Auto-reconnect doesn't clear stale audio elements — fixed 2026-03-28
+  - Added `remoteMicAudioElements`/`screenshareAudioElements` cleanup in `handleDisconnected()`
+- **BUG-051**: LiveKit proxy HTTP path has no origin check — fixed 2026-03-28
+  - Added `isOriginAllowed` check + path deny-list (`/admin`, `/metrics`, `/debug`, `/twirp`)
+- **BUG-052**: Swallowed `.catch(() => {})` in voice code — fixed 2026-03-28
+  - Replaced 6 silent catches with descriptive `log.warn`/`log.debug` messages
+- **BUG-053**: LiveKit TLS proxy has no TOFU fingerprint pinning — fixed 2026-03-28
+  - `livekit_proxy.rs` now uses `PinnedVerifier` with SHA-256 TOFU fingerprint check
+- **BUG-055**: 4 stale vitest coverage exclusions — fixed 2026-03-28
+  - Removed exclusions for `audio.ts`, `vad.ts`, `webrtc.ts`, `voiceSession.ts` (files deleted)
+- **BUG-056**: `livekit-session.test.ts:434` proxy URL test failure — fixed 2026-03-28
+  - Added `@tauri-apps/api/core` mock for `start_livekit_proxy`; fixed expected URL format
+
+- **BUG-057**: CSS injection via custom theme JSON — fixed 2026-03-28
+  - `lib/themes.ts` accepted arbitrary CSS values from user-uploaded theme JSON without sanitization. Malicious theme could inject CSS expressions. Fix: added CSS value sanitization before DOM injection.
 
 - **BUG-039**: `switchOutputDevice` early return on partial failure — fixed 2026-03-18
   - Replaced `return` with error tracking; all elements attempted before reporting

@@ -4,8 +4,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "./helpers";
-import { switchInputDevice, switchOutputDevice, setVoiceSensitivity, updateSilenceSuppressionPref } from "@lib/voiceSession";
-import { sensitivityToThreshold } from "@lib/vad";
+import { switchInputDevice, switchOutputDevice, setVoiceSensitivity, setInputVolume, setOutputVolume, reapplyAudioProcessing } from "@lib/livekitSession";
 
 export interface VoiceAudioTabHandle {
   build(): HTMLDivElement;
@@ -63,8 +62,6 @@ type CameraRegistrar = (stream: MediaStream | null) => void;
 
 function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar, registerCamera: CameraRegistrar): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
-  const header = createElement("h1", {}, "Voice & Audio");
-  section.appendChild(header);
 
   // Input device selector
   const inputHeader = createElement("h3", {}, "Input Device");
@@ -77,6 +74,85 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
   section.appendChild(inputHeader);
   section.appendChild(inputSelect);
 
+  // Input Volume slider
+  const inputVolumeHeader = createElement("h3", {}, "Input Volume");
+  section.appendChild(inputVolumeHeader);
+  const inputVolumeRow = createElement("div", { class: "slider-row" });
+  const savedInputVolume = loadPref<number>("inputVolume", 100);
+  const inputVolumeSlider = createElement("input", {
+    class: "settings-slider",
+    type: "range",
+    min: "0",
+    max: "200",
+    step: "1",
+    value: String(savedInputVolume),
+  });
+  const inputVolumeLabel = createElement("span", { class: "slider-val" }, `${savedInputVolume}%`);
+  inputVolumeSlider.addEventListener("input", () => {
+    const val = Number(inputVolumeSlider.value);
+    setText(inputVolumeLabel, `${val}%`);
+    setInputVolume(val);
+  }, { signal });
+  appendChildren(inputVolumeRow, inputVolumeSlider, inputVolumeLabel);
+  section.appendChild(inputVolumeRow);
+
+  // ── Mic level meter with draggable sensitivity threshold ────────
+  const sensitivityHeader = createElement("h3", {}, "Input Sensitivity");
+  section.appendChild(sensitivityHeader);
+
+  // Real-time mic level bar with embedded draggable threshold handle
+  const meterWrap = createElement("div", { class: "mic-meter-wrap" });
+  const meterBar = createElement("div", { class: "mic-meter-bar" });
+  const meterLevel = createElement("div", { class: "mic-meter-level" });
+  const meterThreshold = createElement("div", { class: "mic-meter-threshold" });
+  meterBar.appendChild(meterLevel);
+  meterBar.appendChild(meterThreshold);
+  meterWrap.appendChild(meterBar);
+  section.appendChild(meterWrap);
+
+  let currentSensitivity = loadPref<number>("voiceSensitivity", 50);
+
+  function updateThresholdIndicator(sensitivity: number): void {
+    // Invert: sensitivity 100 (no gating) → handle at LEFT (0%),
+    //         sensitivity 0 (max gating) → handle at RIGHT (100%).
+    // This matches Discord: drag LEFT = easier to pass, RIGHT = harder.
+    meterThreshold.style.left = `${100 - sensitivity}%`;
+  }
+  updateThresholdIndicator(currentSensitivity);
+
+  /** Compute sensitivity % from a mouse/touch X position relative to the meter bar. */
+  function sensitivityFromPointer(clientX: number): number {
+    const rect = meterBar.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    // Invert: clicking LEFT = high sensitivity, RIGHT = low sensitivity
+    return Math.round((1 - ratio) * 100);
+  }
+
+  function applySensitivity(val: number): void {
+    currentSensitivity = val;
+    savePref("voiceSensitivity", val);
+    setVoiceSensitivity(val);
+    updateThresholdIndicator(val);
+  }
+
+  // Drag the threshold handle
+  meterThreshold.addEventListener("pointerdown", (e: PointerEvent) => {
+    e.preventDefault();
+    meterThreshold.setPointerCapture(e.pointerId);
+    const onMove = (ev: PointerEvent): void => { applySensitivity(sensitivityFromPointer(ev.clientX)); };
+    const onUp = (): void => {
+      meterThreshold.removeEventListener("pointermove", onMove);
+      meterThreshold.removeEventListener("pointerup", onUp);
+    };
+    meterThreshold.addEventListener("pointermove", onMove, { signal });
+    meterThreshold.addEventListener("pointerup", onUp, { signal });
+  }, { signal });
+
+  // Click on the meter bar to jump the threshold
+  meterBar.addEventListener("click", (e: MouseEvent) => {
+    applySensitivity(sensitivityFromPointer(e.clientX));
+  }, { signal });
+
   // Output device selector
   const outputHeader = createElement("h3", {}, "Output Device");
   const outputSelect = createElement("select", {
@@ -87,6 +163,57 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
   outputSelect.appendChild(defaultOutputOpt);
   section.appendChild(outputHeader);
   section.appendChild(outputSelect);
+
+  // Output Volume slider
+  const outputVolumeHeader = createElement("h3", {}, "Output Volume");
+  section.appendChild(outputVolumeHeader);
+  const outputVolumeRow = createElement("div", { class: "slider-row" });
+  const savedOutputVolume = loadPref<number>("outputVolume", 100);
+  const outputVolumeSlider = createElement("input", {
+    class: "settings-slider",
+    type: "range",
+    min: "0",
+    max: "200",
+    step: "1",
+    value: String(savedOutputVolume),
+  });
+  const outputVolumeLabel = createElement("span", { class: "slider-val" }, `${savedOutputVolume}%`);
+  outputVolumeSlider.addEventListener("input", () => {
+    const val = Number(outputVolumeSlider.value);
+    setText(outputVolumeLabel, `${val}%`);
+    setOutputVolume(val);
+  }, { signal });
+  appendChildren(outputVolumeRow, outputVolumeSlider, outputVolumeLabel);
+  section.appendChild(outputVolumeRow);
+
+  // Stream quality selector
+  const qualityHeader = createElement("h3", {}, "Stream Quality");
+  const qualityDesc = createElement("p", {
+    style: "color:var(--text-muted);font-size:12px;margin:0 0 8px",
+  }, "Applies to camera and screenshare. Higher quality uses more bandwidth. Changes take effect on next voice join.");
+  const qualitySelect = createElement("select", {
+    class: "form-input",
+    style: "width:100%;margin-bottom:16px",
+  }) as HTMLSelectElement;
+  const qualityOptions: Array<[string, string]> = [
+    ["low", "Low (360p cam / 720p screen)"],
+    ["medium", "Medium (720p)"],
+    ["high", "High (1080p)"],
+    ["source", "Source (1080p max bitrate)"],
+  ];
+  const savedQuality = loadPref<string>("streamQuality", "high");
+  for (const [value, label] of qualityOptions) {
+    const opt = createElement("option", { value }, label);
+    if (value === savedQuality) opt.setAttribute("selected", "");
+    qualitySelect.appendChild(opt);
+  }
+  qualitySelect.value = savedQuality;
+  qualitySelect.addEventListener("change", () => {
+    savePref("streamQuality", qualitySelect.value);
+  }, { signal });
+  section.appendChild(qualityHeader);
+  section.appendChild(qualityDesc);
+  section.appendChild(qualitySelect);
 
   // Video device selector
   const videoHeader = createElement("h3", {}, "Video Device");
@@ -202,57 +329,15 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
     startCameraPreview(videoSelect.value);
   }, { signal });
 
-  // Start initial camera preview
-  startCameraPreview(loadPref<string>("videoInputDevice", ""));
+  // Start initial camera preview only if a device has been explicitly selected
+  const savedVideoDevice = loadPref<string>("videoInputDevice", "");
+  if (savedVideoDevice !== "") {
+    startCameraPreview(savedVideoDevice);
+  }
 
   signal.addEventListener("abort", () => {
     stopCameraPreview();
   });
-
-  // ── Mic level meter + sensitivity slider ──────────────────────────
-  const sensitivityHeader = createElement("h3", {}, "Input Sensitivity");
-  section.appendChild(sensitivityHeader);
-
-  // Real-time mic level bar
-  const meterWrap = createElement("div", { class: "mic-meter-wrap" });
-  const meterBar = createElement("div", { class: "mic-meter-bar" });
-  const meterLevel = createElement("div", { class: "mic-meter-level" });
-  const meterThreshold = createElement("div", { class: "mic-meter-threshold" });
-  meterBar.appendChild(meterLevel);
-  meterBar.appendChild(meterThreshold);
-  meterWrap.appendChild(meterBar);
-  section.appendChild(meterWrap);
-
-  // Sensitivity slider
-  const sensitivityRow = createElement("div", { class: "slider-row" });
-  const savedSensitivity = loadPref<number>("voiceSensitivity", 50);
-  const sensitivitySlider = createElement("input", {
-    class: "settings-slider",
-    type: "range",
-    min: "0",
-    max: "100",
-    value: String(savedSensitivity),
-  });
-  const sensitivityLabel = createElement("span", { class: "slider-val" }, `${savedSensitivity}%`);
-
-  // Position threshold indicator
-  function updateThresholdIndicator(sensitivity: number): void {
-    const threshold = sensitivityToThreshold(sensitivity);
-    // Map threshold (0-0.15) to percentage position (0-100%)
-    const pct = Math.min((threshold / 0.15) * 100, 100);
-    meterThreshold.style.left = `${pct}%`;
-  }
-  updateThresholdIndicator(savedSensitivity);
-
-  sensitivitySlider.addEventListener("input", () => {
-    const val = Number(sensitivitySlider.value);
-    setText(sensitivityLabel, `${val}%`);
-    savePref("voiceSensitivity", val);
-    setVoiceSensitivity(val);
-    updateThresholdIndicator(val);
-  }, { signal });
-  appendChildren(sensitivityRow, sensitivitySlider, sensitivityLabel);
-  section.appendChild(sensitivityRow);
 
   // Start mic level monitoring for visual feedback
   void (async () => {
@@ -272,6 +357,7 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
 
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
+      let latestFrame = 0;
       function updateMeter(): void {
         if (signal.aborted) return;
         analyser.getByteFrequencyData(dataArray);
@@ -287,18 +373,18 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
         meterLevel.style.width = `${visual * 100}%`;
 
         // Color: green if above threshold, yellow/red if below
-        const threshold = sensitivityToThreshold(Number(sensitivitySlider.value));
+        const threshold = ((100 - currentSensitivity) / 100) * 0.15;
         if (rms >= threshold) {
           meterLevel.style.background = "#43b581"; // green — voice detected
         } else {
           meterLevel.style.background = "#faa61a"; // yellow — below threshold
         }
 
-        const frame = requestAnimationFrame(updateMeter);
-        registerMic(stream, audioCtx, frame);
+        latestFrame = requestAnimationFrame(updateMeter);
+        registerMic(stream, audioCtx, latestFrame);
       }
-      const firstFrame = requestAnimationFrame(updateMeter);
-      registerMic(stream, audioCtx, firstFrame);
+      latestFrame = requestAnimationFrame(updateMeter);
+      registerMic(stream, audioCtx, latestFrame);
     } catch {
       // Mic access denied or unavailable — meter stays empty
     }
@@ -310,7 +396,6 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
     { key: "noiseSuppression", label: "Noise Suppression", desc: "Filter out background noise from your microphone", fallback: true },
     { key: "autoGainControl", label: "Automatic Gain Control", desc: "Automatically adjust microphone volume", fallback: true },
     { key: "enhancedNoiseSuppression", label: "Enhanced Noise Suppression", desc: "ML-powered noise removal (RNNoise) — filters keyboard, pets, and other non-voice sounds", fallback: false },
-    { key: "silenceSuppression", label: "Silence Suppression", desc: "Stop sending audio during silence to save bandwidth", fallback: true },
   ];
 
   for (const item of audioToggles) {
@@ -325,12 +410,8 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
       signal,
       onChange: (nowOn) => {
         savePref(item.key, nowOn);
-        if (item.key === "silenceSuppression") {
-          updateSilenceSuppressionPref();
-        } else {
-          const currentDevice = loadPref<string>("audioInputDevice", "");
-          void switchInputDevice(currentDevice);
-        }
+        // Reapply audio processing constraints to the live mic track
+        void reapplyAudioProcessing();
       },
     });
 

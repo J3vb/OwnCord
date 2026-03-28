@@ -101,6 +101,7 @@ function resetAllStores(): void {
   channelsStore.setState(() => ({
     channels: new Map(),
     activeChannelId: null,
+    roles: [],
   }));
   membersStore.setState(() => ({
     members: new Map(),
@@ -120,6 +121,7 @@ function resetAllStores(): void {
     localDeafened: false,
     localCamera: false,
     localScreenshare: false,
+    joinedAt: null,
   }));
   authStore.setState(() => ({
     token: null,

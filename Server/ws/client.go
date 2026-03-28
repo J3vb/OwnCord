@@ -2,8 +2,7 @@ package ws
 
 import (
 	"sync"
-
-	"github.com/pion/webrtc/v4"
+	"time"
 
 	"github.com/owncord/server/db"
 )
@@ -24,16 +23,15 @@ type Client struct {
 	user       *db.User
 	channelID  int64  // currently viewed channel for channel-scoped broadcasts
 	voiceChID  int64  // voice channel the user is in (0 = not in voice); guarded by voiceMu
-	pc         *webrtc.PeerConnection // SFU peer connection; nil when not in voice; guarded by voiceMu
-	voiceDone  chan struct{}          // closed by clearVoice to signal RTP goroutines to exit; guarded by voiceMu
 	roleName   string // cached role name for chat_message broadcasts
 	tokenHash  string // SHA-256 hex of the session token; used for periodic revalidation
-	msgCount   int    // count of messages processed; resets after session check
-	sendClosed bool   // true after the send channel has been closed
-	send       chan []byte
-	mu         sync.Mutex // guards sendClosed, msgCount, channelID
-	voiceMu    sync.Mutex // guards voiceChID and pc
-	negoMu     sync.Mutex // serialises SDP signalling (renegotiate / handleOffer / handleAnswer) per client
+	msgCount     int // count of messages processed; resets after session check
+	invalidCount int // consecutive invalid messages; reset on valid parse
+	lastActivity time.Time  // last message received from this client; guarded by mu
+	sendClosed   bool       // true after the send channel has been closed
+	send         chan []byte
+	mu           sync.Mutex // guards sendClosed, msgCount, channelID, lastActivity
+	voiceMu      sync.Mutex // guards voiceChID
 }
 
 // wsConn is the subset of nhooyr.io/websocket.Conn used by writePump/readPump.
@@ -46,12 +44,13 @@ type wsConn interface {
 // newClient creates a real client wrapping a WebSocket connection (set by serve.go).
 func newClient(hub *Hub, conn wsConn, user *db.User, tokenHash string) *Client {
 	return &Client{
-		hub:       hub,
-		conn:      conn,
-		userID:    user.ID,
-		user:      user,
-		tokenHash: tokenHash,
-		send:      make(chan []byte, sendBufSize),
+		hub:          hub,
+		conn:         conn,
+		userID:       user.ID,
+		user:         user,
+		tokenHash:    tokenHash,
+		lastActivity: time.Now(),
+		send:         make(chan []byte, sendBufSize),
 	}
 }
 
@@ -113,6 +112,27 @@ func NewTestClientWithTokenHash(hub *Hub, user *db.User, tokenHash string, chann
 	}
 }
 
+// touch updates the last activity timestamp to now.
+func (c *Client) touch() {
+	c.mu.Lock()
+	c.lastActivity = time.Now()
+	c.mu.Unlock()
+}
+
+// getLastActivity returns the last activity timestamp under mu.
+func (c *Client) getLastActivity() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastActivity
+}
+
+// getChannelID returns the currently focused channel ID under mu.
+func (c *Client) getChannelID() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.channelID
+}
+
 // getVoiceChID returns the voice channel ID under voiceMu.
 func (c *Client) getVoiceChID() int64 {
 	c.voiceMu.Lock()
@@ -120,45 +140,20 @@ func (c *Client) getVoiceChID() int64 {
 	return c.voiceChID
 }
 
-// getPC returns the PeerConnection under voiceMu.
-func (c *Client) getPC() *webrtc.PeerConnection {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	return c.pc
-}
-
-// setVoice sets the voice channel and PeerConnection atomically.
-// It also creates a done channel that RTP goroutines can select on.
-func (c *Client) setVoice(chID int64, pc *webrtc.PeerConnection) {
+// setVoiceChID sets the voice channel ID atomically.
+func (c *Client) setVoiceChID(chID int64) {
 	c.voiceMu.Lock()
 	defer c.voiceMu.Unlock()
 	c.voiceChID = chID
-	c.pc = pc
-	c.voiceDone = make(chan struct{})
 }
 
-// getVoiceDone returns the done channel for the current voice session.
-func (c *Client) getVoiceDone() <-chan struct{} {
+// clearVoiceChID clears the voice channel ID and returns the old value.
+func (c *Client) clearVoiceChID() int64 {
 	c.voiceMu.Lock()
 	defer c.voiceMu.Unlock()
-	return c.voiceDone
-}
-
-// clearVoice clears voice state and returns the old values for cleanup.
-// The caller is responsible for closing the returned PeerConnection.
-// Closes the voiceDone channel to signal any RTP goroutines to exit.
-func (c *Client) clearVoice() (oldChID int64, oldPC *webrtc.PeerConnection) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	oldChID = c.voiceChID
-	oldPC = c.pc
-	if c.voiceDone != nil {
-		close(c.voiceDone)
-		c.voiceDone = nil
-	}
+	oldChID := c.voiceChID
 	c.voiceChID = 0
-	c.pc = nil
-	return
+	return oldChID
 }
 
 // sendMsg queues a message to this client's send buffer without blocking.
@@ -173,6 +168,22 @@ func (c *Client) sendMsg(msg []byte) {
 	case c.send <- msg:
 	default:
 		// Buffer full — drop rather than block the hub.
+	}
+}
+
+// trySendMsg queues a message and returns true if it was accepted, false if
+// the buffer is full or the channel is closed.
+func (c *Client) trySendMsg(msg []byte) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.sendClosed {
+		return false
+	}
+	select {
+	case c.send <- msg:
+		return true
+	default:
+		return false
 	}
 }
 

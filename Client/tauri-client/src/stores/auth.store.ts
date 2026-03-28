@@ -6,7 +6,7 @@
 import { createStore } from "@lib/store";
 import type { UserWithRole } from "@lib/types";
 import { resetVoiceStore } from "@stores/voice.store";
-import { leaveVoice } from "@lib/voiceSession";
+import { leaveVoice } from "@lib/livekitSession";
 
 export interface AuthState {
   readonly token: string | null;

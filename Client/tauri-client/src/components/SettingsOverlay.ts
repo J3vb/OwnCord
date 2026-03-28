@@ -1,19 +1,27 @@
 /**
  * SettingsOverlay component — full-screen overlay with tabbed settings panels.
- * Tabs: Account, Appearance, Notifications, Voice & Audio, Keybinds, Logs.
+ * Tabs: Account, Appearance, Notifications, Text & Images, Accessibility, Voice & Audio, Keybinds, Advanced, Logs.
  * Subscribes to uiStore for settingsOpen state.
  */
 
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
+import { createIcon } from "@lib/icons";
+import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
+import type { UserStatus } from "@lib/types";
 import { uiStore } from "@stores/ui.store";
+import { authStore } from "@stores/auth.store";
 import { loadPref, applyTheme } from "./settings/helpers";
 import type { ThemeName } from "./settings/helpers";
+import { syncOsMotionListener } from "@lib/os-motion";
 import { buildAccountTab } from "./settings/AccountTab";
 import { buildAppearanceTab } from "./settings/AppearanceTab";
 import { buildNotificationsTab } from "./settings/NotificationsTab";
+import { buildTextImagesTab } from "./settings/TextImagesTab";
+import { buildAccessibilityTab } from "./settings/AccessibilityTab";
 import { createVoiceAudioTab } from "./settings/VoiceAudioTab";
 import { buildKeybindsTab } from "./settings/KeybindsTab";
+import { buildAdvancedTab } from "./settings/AdvancedTab";
 import { createLogsTab } from "./settings/LogsTab";
 
 // ---------------------------------------------------------------------------
@@ -25,18 +33,23 @@ export interface SettingsOverlayOptions {
   onChangePassword(oldPassword: string, newPassword: string): Promise<void>;
   onUpdateProfile(username: string): Promise<void>;
   onLogout(): void;
+  onDeleteAccount(password: string): Promise<void>;
+  onStatusChange(status: UserStatus): void;
 }
 
-export type TabName = "Account" | "Appearance" | "Notifications" | "Voice & Audio" | "Keybinds" | "Logs";
+export type TabName = "Account" | "Appearance" | "Notifications" | "Text & Images" | "Accessibility" | "Voice & Audio" | "Keybinds" | "Advanced" | "Logs";
 
-const TAB_NAMES: readonly TabName[] = [
-  "Account",
-  "Appearance",
-  "Notifications",
-  "Voice & Audio",
-  "Keybinds",
-  "Logs",
-] as const;
+const TAB_ICONS: Record<TabName, IconName> = {
+  Account: "user",
+  Appearance: "palette",
+  Notifications: "bell",
+  "Text & Images": "image",
+  Accessibility: "eye",
+  "Voice & Audio": "mic",
+  Keybinds: "keyboard",
+  Advanced: "settings",
+  Logs: "scroll-text",
+};
 
 // ---------------------------------------------------------------------------
 // Apply stored appearance (called at app startup)
@@ -47,7 +60,7 @@ const TAB_NAMES: readonly TabName[] = [
  * Call at app startup so the UI doesn't flash default styles.
  */
 export function applyStoredAppearance(): void {
-  applyTheme(loadPref<ThemeName>("theme", "dark"));
+  applyTheme(loadPref<ThemeName>("theme", "neon-glow"));
   document.documentElement.style.setProperty(
     "--font-size",
     `${loadPref<number>("fontSize", 16)}px`,
@@ -56,6 +69,14 @@ export function applyStoredAppearance(): void {
     "compact-mode",
     loadPref<boolean>("compactMode", false),
   );
+  document.documentElement.classList.toggle("reduced-motion", loadPref<boolean>("reducedMotion", false));
+  document.documentElement.classList.toggle("high-contrast", loadPref<boolean>("highContrast", false));
+  document.documentElement.classList.toggle("large-font", loadPref<boolean>("largeFont", false));
+  const storedAccent = loadPref<string>("accentColor", "#00c8ff");
+  document.documentElement.style.setProperty("--accent", storedAccent);
+  document.body.style.setProperty("--accent", storedAccent);
+
+  syncOsMotionListener(loadPref<boolean>("syncOsMotion", false));
 }
 
 // ---------------------------------------------------------------------------
@@ -68,6 +89,7 @@ export function createSettingsOverlay(
   const ac = new AbortController();
   let root: HTMLDivElement | null = null;
   let contentArea: HTMLDivElement | null = null;
+  let pageTitle: HTMLHeadingElement | null = null;
   let activeTab: TabName = "Account";
   const tabButtons = new Map<TabName, HTMLButtonElement>();
   let unsubUi: (() => void) | null = null;
@@ -82,8 +104,11 @@ export function createSettingsOverlay(
     Account: () => buildAccountTab(options, ac.signal),
     Appearance: () => buildAppearanceTab(ac.signal),
     Notifications: () => buildNotificationsTab(ac.signal),
+    "Text & Images": () => buildTextImagesTab(ac.signal),
+    Accessibility: () => buildAccessibilityTab(ac.signal),
     "Voice & Audio": () => voiceTab.build(),
     Keybinds: () => buildKeybindsTab(ac.signal),
+    Advanced: () => buildAdvancedTab(ac.signal),
     Logs: () => logsTab.build(),
   };
 
@@ -92,6 +117,9 @@ export function createSettingsOverlay(
   function renderActiveTab(): void {
     if (contentArea === null) return;
     clearChildren(contentArea);
+    if (pageTitle === null) return;
+    pageTitle.textContent = activeTab;
+    contentArea.appendChild(pageTitle);
     const builder = TAB_BUILDERS[activeTab];
     contentArea.appendChild(builder());
   }
@@ -103,6 +131,7 @@ export function createSettingsOverlay(
     activeTab = tab;
     for (const [name, btn] of tabButtons) {
       btn.classList.toggle("active", name === tab);
+      btn.setAttribute("aria-selected", name === tab ? "true" : "false");
     }
     renderActiveTab();
   }
@@ -124,25 +153,77 @@ export function createSettingsOverlay(
 
     // Sidebar
     const sidebar = createElement("div", { class: "settings-sidebar" });
-    const catLabel = createElement("div", { class: "settings-cat" }, "User Settings");
-    sidebar.appendChild(catLabel);
-    for (const name of TAB_NAMES) {
+
+    // User profile section at top of sidebar
+    const user = authStore.getState().user;
+    const profileSection = createElement("div", { class: "settings-sidebar-profile" });
+    const avatarEl = createElement("div", { class: "settings-sidebar-avatar" },
+      (user?.username ?? "U").charAt(0).toUpperCase());
+    const profileInfo = createElement("div", {});
+    const profileName = createElement("div", { class: "settings-sidebar-name" },
+      user?.username ?? "Unknown");
+    const editProfileLink = createElement("div", { class: "settings-sidebar-edit" }, "Edit Profile");
+    editProfileLink.addEventListener("click", () => setActiveTab("Account"), { signal: ac.signal });
+    appendChildren(profileInfo, profileName, editProfileLink);
+    appendChildren(profileSection, avatarEl, profileInfo);
+    sidebar.appendChild(profileSection);
+
+    // "User Settings" category — only Account belongs here
+    const userSettingsCat = createElement("div", { class: "settings-cat" }, "User Settings");
+    sidebar.appendChild(userSettingsCat);
+
+    const accountBtn = createElement("button", {
+      class: `settings-nav-item${activeTab === "Account" ? " active" : ""}`,
+      role: "tab",
+      "aria-selected": activeTab === "Account" ? "true" : "false",
+    });
+    accountBtn.prepend(createIcon(TAB_ICONS["Account"], 18));
+    accountBtn.appendChild(document.createTextNode("Account"));
+    accountBtn.addEventListener("click", () => setActiveTab("Account"), { signal: ac.signal });
+    tabButtons.set("Account", accountBtn);
+    sidebar.appendChild(accountBtn);
+
+    // "App Settings" category — remaining tabs
+    const appSettingsCat = createElement("div", { class: "settings-cat" }, "App Settings");
+    sidebar.appendChild(appSettingsCat);
+
+    const appTabs: readonly TabName[] = ["Appearance", "Notifications", "Text & Images", "Accessibility", "Voice & Audio", "Keybinds", "Advanced", "Logs"];
+    for (const name of appTabs) {
       const btn = createElement("button", {
         class: `settings-nav-item${name === activeTab ? " active" : ""}`,
-      }, name);
+        role: "tab",
+        "aria-selected": name === activeTab ? "true" : "false",
+      });
+      btn.prepend(createIcon(TAB_ICONS[name], 18));
+      btn.appendChild(document.createTextNode(name));
       btn.addEventListener("click", () => setActiveTab(name), { signal: ac.signal });
       tabButtons.set(name, btn);
       sidebar.appendChild(btn);
     }
 
+    // Separator + Log Out at sidebar bottom
+    const logoutWrap = createElement("div", { class: "settings-sidebar-logout" });
+    const logoutSep = createElement("div", { class: "settings-sep" });
+    const logoutBtn = createElement("button", { class: "settings-nav-item danger" }, "Log Out");
+    logoutBtn.addEventListener("click", () => options.onLogout(), { signal: ac.signal });
+    appendChildren(logoutWrap, logoutSep, logoutBtn);
+    sidebar.appendChild(logoutWrap);
+
+    // Page title (h1) at top of content area — created here, inserted in renderActiveTab
+    pageTitle = createElement("h1", {}, activeTab);
+
     // Content
     contentArea = createElement("div", { class: "settings-content" });
 
-    // Close button
-    const closeBtn = createElement("button", { class: "settings-close-btn" }, "\u00D7");
+    // Close button wrapped with ESC label
+    const closeWrap = createElement("div", { class: "settings-close-wrap" });
+    const closeBtn = createElement("button", { class: "settings-close-btn" });
+    closeBtn.appendChild(createIcon("x", 18));
     closeBtn.addEventListener("click", () => {
       options.onClose();
     }, { signal: ac.signal });
+    const escLabel = createElement("div", { class: "settings-esc-label" }, "ESC");
+    appendChildren(closeWrap, closeBtn, escLabel);
 
     // Escape key
     document.addEventListener("keydown", (e: KeyboardEvent) => {
@@ -151,17 +232,29 @@ export function createSettingsOverlay(
       }
     }, { signal: ac.signal });
 
-    appendChildren(root, sidebar, contentArea, closeBtn);
+    // Inner panel (Discord-style centered card)
+    const panel = createElement("div", { class: "settings-panel" });
+    appendChildren(panel, sidebar, contentArea, closeWrap);
+
+    // Click backdrop (outside panel) to close
+    root.addEventListener("click", (e: MouseEvent) => {
+      if (e.target === root) options.onClose();
+    }, { signal: ac.signal });
+
+    root.appendChild(panel);
     renderActiveTab();
 
     // Subscribe to uiStore for open/close
-    unsubUi = uiStore.subscribe((state) => {
-      if (state.settingsOpen) {
-        show();
-      } else {
-        hide();
-      }
-    });
+    unsubUi = uiStore.subscribeSelector(
+      (s) => s.settingsOpen,
+      (settingsOpen) => {
+        if (settingsOpen) {
+          show();
+        } else {
+          hide();
+        }
+      },
+    );
 
     // Sync initial state
     if (uiStore.getState().settingsOpen) {
@@ -185,6 +278,7 @@ export function createSettingsOverlay(
       root = null;
     }
     contentArea = null;
+    pageTitle = null;
   }
 
   function open(): void {

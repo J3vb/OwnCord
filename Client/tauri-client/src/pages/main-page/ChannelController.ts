@@ -9,15 +9,20 @@ import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
 import type { ApiClient } from "@lib/api";
+import type { ChannelType } from "@lib/types";
 import { createMessageList } from "@components/MessageList";
 import type { MessageListComponent } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
 import type { MessageInputComponent } from "@components/MessageInput";
 import { createTypingIndicator } from "@components/TypingIndicator";
-import { getChannelMessages } from "@stores/messages.store";
+import { getChannelMessages, setMessagePinned } from "@stores/messages.store";
 import type { MessageController } from "./MessageController";
 import type { PendingDeleteManager } from "./MessageController";
 import type { ReactionController } from "./ReactionController";
+import { updateChatHeaderForDm } from "./ChatHeader";
+import type { ChatHeaderRefs } from "./ChatHeader";
+import { dmStore } from "@stores/dm.store";
+import { membersStore } from "@stores/members.store";
 
 const log = createLogger("channel-ctrl");
 
@@ -40,11 +45,12 @@ export interface ChannelControllerOptions {
     readonly inputSlot: HTMLDivElement;
   };
   readonly chatHeaderName: HTMLSpanElement | null;
+  readonly chatHeaderRefs: ChatHeaderRefs | null;
 }
 
 export interface ChannelController {
   /** Mount components for a channel. No-op if same channel already mounted. */
-  mountChannel(channelId: number, channelName: string): void;
+  mountChannel(channelId: number, channelName: string, channelType?: ChannelType): void;
   /** Destroy current channel components and reset state. */
   destroyChannel(): void;
   /** Currently mounted channel ID, or null. */
@@ -71,6 +77,7 @@ export function createChannelController(
     getCurrentUserId,
     slots,
     chatHeaderName,
+    chatHeaderRefs,
   } = opts;
 
   let _currentChannelId: number | null = null;
@@ -106,7 +113,7 @@ export function createChannelController(
     _currentChannelId = null;
   }
 
-  function mountChannel(channelId: number, channelName: string): void {
+  function mountChannel(channelId: number, channelName: string, channelType?: ChannelType): void {
     if (_currentChannelId === channelId) return;
 
     destroyChannel();
@@ -128,6 +135,8 @@ export function createChannelController(
     // MessageList
     messageList = createMessageList({
       channelId,
+      channelName,
+      channelType,
       currentUserId: userId,
       onScrollTop: () => {
         if (channelAbort !== null) {
@@ -160,6 +169,18 @@ export function createChannelController(
       },
       onReactionClick: (msgId: number, emoji: string) => {
         reactionCtrl.handleReaction(msgId, emoji);
+      },
+      onPinClick: (msgId: number, chId: number, currentlyPinned: boolean) => {
+        const action = currentlyPinned
+          ? api.unpinMessage(chId, msgId)
+          : api.pinMessage(chId, msgId);
+        action.then(() => {
+          setMessagePinned(chId, msgId, !currentlyPinned);
+          showToast(currentlyPinned ? "Message unpinned" : "Message pinned", "success");
+        }).catch((err) => {
+          log.error("Pin/unpin failed", { error: String(err) });
+          showToast("Failed to pin/unpin message", "error");
+        });
       },
     });
     messageList.mount(slots.messagesSlot);
@@ -229,8 +250,37 @@ export function createChannelController(
     });
     messageInput.mount(slots.inputSlot);
 
+    // Arrow-up edit: listen for edit-last-message bubbling from MessageInput
+    slots.inputSlot.addEventListener("edit-last-message", () => {
+      const msgs = getChannelMessages(channelId);
+      const myId = getCurrentUserId();
+      // Find the last message sent by the current user (array is chronological)
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i]!;
+        if (m.user.id === myId && !m.deleted) {
+          messageInput?.startEdit(m.id, m.content);
+          break;
+        }
+      }
+    }, { signal });
+
     // Update header
-    if (chatHeaderName !== null) {
+    if (chatHeaderRefs !== null && channelType === "dm") {
+      // Look up the recipient's actual status from DM store or members store
+      const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
+      let recipientStatus = "Offline";
+      if (dmChannel !== undefined) {
+        const member = membersStore.getState().members.get(dmChannel.recipient.id);
+        recipientStatus = member?.status ?? dmChannel.recipient.status ?? "Offline";
+      }
+      const displayStatus = recipientStatus.charAt(0).toUpperCase() + recipientStatus.slice(1);
+      updateChatHeaderForDm(chatHeaderRefs, { username: channelName, status: displayStatus });
+    } else if (chatHeaderRefs !== null) {
+      updateChatHeaderForDm(chatHeaderRefs, null);
+      if (chatHeaderName !== null) {
+        setText(chatHeaderName, channelName);
+      }
+    } else if (chatHeaderName !== null) {
       setText(chatHeaderName, channelName);
     }
   }

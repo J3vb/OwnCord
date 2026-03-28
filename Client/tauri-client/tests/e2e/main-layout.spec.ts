@@ -13,8 +13,8 @@ test.describe("Main Page Layout", () => {
   });
 
   test("app layout has all major sections", async ({ page }) => {
-    // Server strip
-    await expect(page.locator("[data-testid='server-strip']")).toBeVisible();
+    // Unified sidebar (replaces old server strip)
+    await expect(page.locator("[data-testid='unified-sidebar']")).toBeVisible();
 
     // Channel sidebar
     await expect(page.locator("[data-testid='channel-sidebar']")).toBeVisible();

@@ -14,10 +14,12 @@ function resetStores(): void {
     localDeafened: false,
     localCamera: false,
     localScreenshare: false,
+    joinedAt: null,
   }));
   channelsStore.setState(() => ({
     channels: new Map(),
     activeChannelId: null,
+    roles: [],
   }));
   membersStore.setState(() => ({
     members: new Map(),
@@ -233,6 +235,27 @@ describe("VoiceWidget", () => {
 
     const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
     expect(muteBtn.classList.contains("active-ctrl")).toBe(true);
+
+    widget.destroy?.();
+  });
+
+  it("toggles screenshare active state based on store", () => {
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    const screenshareBtn = container.querySelector('[aria-label="Screenshare"]') as HTMLButtonElement;
+    expect(screenshareBtn).not.toBeNull();
+    expect(screenshareBtn.classList.contains("active-ctrl")).toBe(true);
+    expect(screenshareBtn.getAttribute("aria-pressed")).toBe("true");
 
     widget.destroy?.();
   });

@@ -13,6 +13,7 @@ function resetStores(): void {
     localDeafened: false,
     localCamera: false,
     localScreenshare: false,
+    joinedAt: null,
   }));
   membersStore.setState(() => ({
     members: new Map(),

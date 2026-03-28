@@ -77,7 +77,7 @@ test.describe("Settings — Account Tab", () => {
   });
 
   test("shows username in account card", async ({ page }) => {
-    const name = page.locator(".ac-name");
+    const name = page.locator(".account-header-name");
     await expect(name).toHaveText("testuser");
   });
 
@@ -132,12 +132,12 @@ test.describe("Settings — Appearance Tab", () => {
   });
 
   test("shows compact mode toggle", async ({ page }) => {
-    const toggle = page.locator(".toggle").first();
+    const toggle = page.locator(".setting-row", { hasText: "Compact Mode" }).locator(".toggle");
     await expect(toggle).toBeVisible();
   });
 
   test("toggling compact mode changes toggle state", async ({ page }) => {
-    const toggle = page.locator(".toggle").first();
+    const toggle = page.locator(".setting-row", { hasText: "Compact Mode" }).locator(".toggle");
     const initialOn = await toggle.evaluate((el) => el.classList.contains("on"));
 
     await toggle.click();

@@ -6,6 +6,7 @@
 import { createStore } from "@lib/store";
 import type {
   ReadyChannel,
+  ReadyRole,
   ChannelCreatePayload,
   ChannelUpdatePayload,
   ChannelType,
@@ -24,11 +25,13 @@ export interface Channel {
 export interface ChannelsState {
   readonly channels: ReadonlyMap<number, Channel>;
   readonly activeChannelId: number | null;
+  readonly roles: readonly ReadyRole[];
 }
 
 const INITIAL_STATE: ChannelsState = {
   channels: new Map(),
   activeChannelId: null,
+  roles: [],
 };
 
 export const channelsStore = createStore<ChannelsState>(INITIAL_STATE);
@@ -51,6 +54,18 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
     ...prev,
     channels: map,
   }));
+}
+
+/** Bulk set roles from the ready payload. */
+export function setRoles(roles: readonly ReadyRole[]): void {
+  channelsStore.setState((prev) => ({ ...prev, roles }));
+}
+
+/** Look up a role ID by name (case-insensitive). Returns undefined if not found. */
+export function getRoleIdByName(name: string): number | undefined {
+  const roles = channelsStore.getState().roles;
+  const match = roles.find((r) => r.name.toLowerCase() === name.toLowerCase());
+  return match?.id;
 }
 
 /** Add a single channel from a channel_create event. */
@@ -147,6 +162,8 @@ export function getChannelsByCategory(): Map<string | null, Channel[]> {
   return channelsStore.select((s) => {
     const grouped = new Map<string | null, Channel[]>();
     for (const channel of s.channels.values()) {
+      // DM channels are shown in the DM sidebar, not the channel list
+      if (channel.type === "dm") continue;
       const existing = grouped.get(channel.category);
       if (existing !== undefined) {
         existing.push(channel);

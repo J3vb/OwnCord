@@ -29,10 +29,6 @@ export function createElement<K extends keyof HTMLElementTagNameMap>(
     for (const [key, value] of Object.entries(attrs)) {
       if (key === "class") {
         el.className = value;
-      } else if (key.startsWith("data-")) {
-        el.dataset[key.slice(5)] = value;
-      } else if (key.startsWith("aria-")) {
-        el.setAttribute(key, value);
       } else {
         el.setAttribute(key, value);
       }

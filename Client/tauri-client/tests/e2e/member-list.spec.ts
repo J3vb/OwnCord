@@ -91,16 +91,9 @@ test.describe("Member List", () => {
     await expect(otherUserItem).toHaveClass(/offline/, { timeout: 5_000 });
   });
 
-  test("toggle visibility via header button", async ({ page }) => {
-    const memberList = page.locator("[data-testid='member-list']");
-    await expect(memberList).toBeVisible();
-
-    const toggle = page.locator("[data-testid='members-toggle']");
-    await toggle.click();
-    await expect(memberList).not.toBeVisible({ timeout: 3_000 });
-
-    await toggle.click();
-    await expect(memberList).toBeVisible({ timeout: 3_000 });
+  test("member list is always visible in sidebar", async ({ page }) => {
+    const sidebarMembers = page.locator("[data-testid='sidebar-members']");
+    await expect(sidebarMembers).toBeAttached({ timeout: 3_000 });
   });
 });
 

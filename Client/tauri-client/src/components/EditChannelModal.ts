@@ -4,6 +4,7 @@
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 
 export interface EditChannelModalOptions {
@@ -41,7 +42,8 @@ export function createEditChannelModal(
       class: "modal-close",
       type: "button",
     });
-    setText(closeBtn, "\u2715");
+    closeBtn.textContent = "";
+    closeBtn.appendChild(createIcon("x", 14));
     closeBtn.addEventListener("click", onClose, { signal: ac.signal });
     appendChildren(header, title, closeBtn);
 

@@ -53,6 +53,24 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("enabling foreign keys: %w", err)
 	}
 
+	// Performance tuning (safe with WAL mode).
+	if _, err := sqlDB.Exec("PRAGMA synchronous=NORMAL;"); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("setting synchronous mode: %w", err)
+	}
+	if _, err := sqlDB.Exec("PRAGMA temp_store=MEMORY;"); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("setting temp_store: %w", err)
+	}
+	if _, err := sqlDB.Exec("PRAGMA mmap_size=268435456;"); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("setting mmap_size: %w", err)
+	}
+	if _, err := sqlDB.Exec("PRAGMA cache_size=-64000;"); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("setting cache_size: %w", err)
+	}
+
 	return &DB{sqlDB: sqlDB}, nil
 }
 
@@ -66,6 +84,8 @@ func Migrate(database *DB) error {
 
 // Close releases the underlying database connection.
 func (d *DB) Close() error {
+	// Run PRAGMA optimize to analyze and update query planner statistics.
+	_, _ = d.sqlDB.Exec("PRAGMA optimize;")
 	return d.sqlDB.Close()
 }
 

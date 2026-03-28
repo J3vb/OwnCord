@@ -10,6 +10,8 @@ import {
   setTheme,
   toggleCategory,
   isCategoryCollapsed,
+  setSidebarMode,
+  setActiveDmUser,
 } from "../../src/stores/ui.store";
 
 function resetStore(): void {
@@ -23,6 +25,8 @@ function resetStore(): void {
     transientError: null,
     persistentError: null,
     collapsedCategories: new Set<string>(),
+    sidebarMode: "channels" as const,
+    activeDmUserId: null,
   }));
 }
 
@@ -188,6 +192,34 @@ describe("ui store", () => {
       unsub();
       toggleSidebar();
       expect(listener).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("sidebar mode", () => {
+    beforeEach(() => {
+      uiStore.setState((prev) => ({
+        ...prev,
+        sidebarMode: "channels",
+        activeDmUserId: null,
+      }));
+    });
+
+    it("defaults to channels mode", () => {
+      expect(uiStore.getState().sidebarMode).toBe("channels");
+    });
+
+    it("switches to DM mode with user ID", () => {
+      setSidebarMode("dms");
+      setActiveDmUser(42);
+      const state = uiStore.getState();
+      expect(state.sidebarMode).toBe("dms");
+      expect(state.activeDmUserId).toBe(42);
+    });
+
+    it("clears DM user when switching back to channels", () => {
+      setActiveDmUser(42);
+      setSidebarMode("channels");
+      expect(uiStore.getState().activeDmUserId).toBeNull();
     });
   });
 });

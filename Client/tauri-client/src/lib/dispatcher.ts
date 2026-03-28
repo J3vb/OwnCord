@@ -7,6 +7,7 @@ import { authStore, setAuth, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import {
   setChannels,
+  setRoles,
   setActiveChannel,
   addChannel,
   updateChannel,
@@ -39,14 +40,37 @@ import {
   leaveVoiceChannel,
 } from "@stores/voice.store";
 import {
-  handleServerOffer,
-  handleServerAnswer,
-  handleServerIce,
-} from "@lib/voiceSession";
+  dmStore,
+  setDmChannels,
+  addDmChannel,
+  removeDmChannel,
+  updateDmLastMessage,
+  updateDmLastMessagePreview,
+} from "@stores/dm.store";
+import type { DmChannel } from "@stores/dm.store";
+import type { DmChannelPayload } from "./types";
+import { handleVoiceToken } from "@lib/livekitSession";
 import { notifyIncomingMessage } from "./notifications";
 import { createLogger } from "./logger";
 
 const log = createLogger("dispatcher");
+
+/** Map a server DM channel payload to the client DmChannel type. */
+function mapDmPayload(p: DmChannelPayload): DmChannel {
+  return {
+    channelId: p.channel_id,
+    recipient: {
+      id: p.recipient.id,
+      username: p.recipient.username,
+      avatar: p.recipient.avatar,
+      status: p.recipient.status,
+    },
+    lastMessageId: p.last_message_id,
+    lastMessage: p.last_message,
+    lastMessageAt: p.last_message_at,
+    unreadCount: p.unread_count,
+  };
+}
 
 /** Unsubscribe all listeners. */
 export type DispatcherCleanup = () => void;
@@ -84,6 +108,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   unsubs.push(
     ws.on("ready", (payload) => {
       setChannels(payload.channels);
+      setRoles(payload.roles ?? []);
       setMembers(payload.members);
       setVoiceStates(payload.voice_states);
 
@@ -96,11 +121,34 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
         }
       }
 
+      // Populate DM channels if present in the ready payload
+      const dmPayloads = payload.dm_channels ?? [];
+      if (dmPayloads.length > 0) {
+        setDmChannels(dmPayloads.map(mapDmPayload));
+      }
+
       log.info("Ready payload applied", {
         channels: payload.channels.length,
         members: payload.members.length,
         voiceStates: payload.voice_states.length,
+        dmChannels: dmPayloads.length,
       });
+    }),
+  );
+
+  // ── DM Channels ─────────────────────────────────────
+
+  unsubs.push(
+    ws.on("dm_channel_open", (payload) => {
+      log.info("DM channel opened", { channelId: payload.channel_id });
+      addDmChannel(mapDmPayload(payload));
+    }),
+  );
+
+  unsubs.push(
+    ws.on("dm_channel_close", (payload) => {
+      log.info("DM channel closed", { channelId: payload.channel_id });
+      removeDmChannel(payload.channel_id);
     }),
   );
 
@@ -114,13 +162,46 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
         user: payload.user.username,
       });
       addMessage(payload);
-      // Increment unread for non-active channels
       const activeId = channelsStore.select(
         (s) => s.activeChannelId,
       );
-      if (payload.channel_id !== activeId) {
+
+      // Check if this is a DM channel and whether the message is from self.
+      const dmChannels = dmStore.getState().channels;
+      const isDm = dmChannels.some((c) => c.channelId === payload.channel_id);
+      const currentUserId = authStore.getState().user?.id ?? null;
+      const isOwnMessage = currentUserId !== null && payload.user.id === currentUserId;
+
+      // Increment channel-level unread for non-active, non-own-message channels.
+      // DM channel IDs are not in channelsStore (they use dmStore), so
+      // incrementUnread is a no-op for DMs, but the own-message guard is
+      // applied here for defence-in-depth.
+      if (payload.channel_id !== activeId && !isOwnMessage) {
         incrementUnread(payload.channel_id);
       }
+
+      // Update DM store last message if this message belongs to a DM channel.
+      // Skip unread increment for own messages and for the currently focused DM.
+      if (isDm) {
+        const isDmActive = payload.channel_id === activeId;
+        if (isOwnMessage || isDmActive) {
+          // Update last message preview but don't increment unread count.
+          updateDmLastMessagePreview(
+            payload.channel_id,
+            payload.id,
+            payload.content,
+            payload.timestamp,
+          );
+        } else {
+          updateDmLastMessage(
+            payload.channel_id,
+            payload.id,
+            payload.content,
+            payload.timestamp,
+          );
+        }
+      }
+
       // Fire desktop notification, taskbar flash, and sound
       notifyIncomingMessage(payload);
     }),
@@ -269,20 +350,8 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   );
 
   unsubs.push(
-    ws.on("voice_offer", (payload) => {
-      handleServerOffer(payload.sdp, payload.channel_id);
-    }),
-  );
-
-  unsubs.push(
-    ws.on("voice_answer", (payload) => {
-      handleServerAnswer(payload.sdp);
-    }),
-  );
-
-  unsubs.push(
-    ws.on("voice_ice", (payload) => {
-      handleServerIce(payload.candidate);
+    ws.on("voice_token", (payload) => {
+      void handleVoiceToken(payload.token, payload.url, payload.channel_id, payload.direct_url);
     }),
   );
 
@@ -294,6 +363,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
         reason: payload.reason,
         delaySeconds: payload.delay_seconds,
       });
+      setTransientError(`Server is restarting: ${payload.reason ?? "maintenance"}`);
     }),
   );
 
@@ -303,6 +373,15 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
         code: payload.code,
         message: payload.message,
       });
+      if (payload.code === "BANNED") {
+        // Banned users must not reconnect — show error and force logout.
+        setTransientError(payload.message || "You have been banned");
+        clearAuth();
+        return;
+      }
+      if (payload.code === "RATE_LIMITED" || payload.code === "FORBIDDEN") {
+        setTransientError(payload.message || "Server error");
+      }
     }),
   );
 

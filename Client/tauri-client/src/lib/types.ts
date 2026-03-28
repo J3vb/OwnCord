@@ -12,26 +12,23 @@
 export type UserStatus = "online" | "idle" | "dnd" | "offline";
 
 /** Channel types supported by the server. */
-export type ChannelType = "text" | "voice" | "announcement";
+export type ChannelType = "text" | "voice" | "announcement" | "dm";
 
 /** Voice quality presets. */
 export type VoiceQuality = "low" | "medium" | "high";
-
-/** Voice threshold mode. CRITICAL: always "threshold_mode", never "mode". */
-export type ThresholdMode = "forwarding" | "selective";
 
 /** Reaction action direction. */
 export type ReactionAction = "add" | "remove";
 
 /** WebSocket error codes returned by the server. */
 export type WsErrorCode =
+  | "BANNED"
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "RATE_LIMITED"
   | "INVALID_INPUT"
   | "SERVER_ERROR"
   | "CHANNEL_FULL"
-  | "INVALID_SDP"
   | "VOICE_ERROR"
   | "VIDEO_LIMIT";
 
@@ -70,6 +67,8 @@ export interface Attachment {
   readonly size: number;
   readonly mime: string;
   readonly url: string;
+  readonly width?: number;
+  readonly height?: number;
 }
 
 /** Reaction summary on a REST message response. */
@@ -175,6 +174,7 @@ export interface ReadyPayload {
   readonly members: readonly ReadyMember[];
   readonly voice_states: readonly ReadyVoiceState[];
   readonly roles: readonly ReadyRole[];
+  readonly dm_channels?: readonly DmChannelPayload[];
 }
 
 export interface ChatMessagePayload {
@@ -262,7 +262,7 @@ export interface VoiceConfigPayload {
   readonly channel_id: number;
   readonly quality: VoiceQuality;
   readonly bitrate: number;
-  readonly threshold_mode: ThresholdMode;
+  readonly threshold_mode: string;
   readonly mixing_threshold: number;
   readonly top_speakers: number;
   readonly max_users: number;
@@ -272,22 +272,14 @@ export interface VoiceConfigPayload {
 export interface VoiceSpeakersPayload {
   readonly channel_id: number;
   readonly speakers: readonly number[];
-  readonly threshold_mode: ThresholdMode;
+  readonly threshold_mode?: string;
 }
 
-export interface VoiceOfferPayload {
+export interface VoiceTokenPayload {
   readonly channel_id: number;
-  readonly sdp: string;
-}
-
-export interface VoiceAnswerPayload {
-  readonly channel_id: number;
-  readonly sdp: string;
-}
-
-export interface VoiceIcePayload {
-  readonly channel_id: number;
-  readonly candidate: RTCIceCandidateInit;
+  readonly token: string;
+  readonly url: string;
+  readonly direct_url?: string;
 }
 
 export interface MemberJoinPayload {
@@ -307,6 +299,41 @@ export interface MemberBanPayload {
   readonly user_id: number;
 }
 
+// -----------------------------------------------------------------------------
+// DM Payloads (Server → Client)
+// -----------------------------------------------------------------------------
+
+/** DM recipient object in DM channel payloads. */
+export interface DmRecipient {
+  readonly id: number;
+  readonly username: string;
+  readonly avatar: string;
+  readonly status: string;
+}
+
+/** DM channel object in ready payload and dm_channel_open event. */
+export interface DmChannelPayload {
+  readonly channel_id: number;
+  readonly recipient: DmRecipient;
+  readonly last_message_id: number | null;
+  readonly last_message: string;
+  readonly last_message_at: string;
+  readonly unread_count: number;
+}
+
+export interface DmChannelOpenPayload {
+  readonly channel_id: number;
+  readonly recipient: DmRecipient;
+  readonly last_message_id: number | null;
+  readonly last_message: string;
+  readonly last_message_at: string;
+  readonly unread_count: number;
+}
+
+export interface DmChannelClosePayload {
+  readonly channel_id: number;
+}
+
 export interface ServerRestartPayload {
   readonly reason: string;
   readonly delay_seconds: number;
@@ -323,6 +350,7 @@ export interface ErrorPayload {
 
 export interface AuthPayload {
   readonly token: string;
+  readonly last_seq?: number;
 }
 
 export interface ChatSendPayload {
@@ -390,10 +418,6 @@ export interface SoundboardPlayPayload {
   readonly sound_id: string;
 }
 
-// Note: VoiceOfferPayload, VoiceAnswerPayload, VoiceIcePayload are
-// bidirectional — the same interface is used for both client→server
-// and server→client directions. See definitions above.
-
 // -----------------------------------------------------------------------------
 // Discriminated Union: Server → Client Messages
 // -----------------------------------------------------------------------------
@@ -416,13 +440,13 @@ export type ServerMessage =
   | (WsEnvelope<VoiceLeavePayload> & { readonly type: "voice_leave" })
   | (WsEnvelope<VoiceConfigPayload> & { readonly type: "voice_config" })
   | (WsEnvelope<VoiceSpeakersPayload> & { readonly type: "voice_speakers" })
-  | (WsEnvelope<VoiceOfferPayload> & { readonly type: "voice_offer" })
-  | (WsEnvelope<VoiceAnswerPayload> & { readonly type: "voice_answer" })
-  | (WsEnvelope<VoiceIcePayload> & { readonly type: "voice_ice" })
+  | (WsEnvelope<VoiceTokenPayload> & { readonly type: "voice_token" })
   | (WsEnvelope<MemberJoinPayload> & { readonly type: "member_join" })
   | (WsEnvelope<MemberLeavePayload> & { readonly type: "member_leave" })
   | (WsEnvelope<MemberUpdatePayload> & { readonly type: "member_update" })
   | (WsEnvelope<MemberBanPayload> & { readonly type: "member_ban" })
+  | (WsEnvelope<DmChannelOpenPayload> & { readonly type: "dm_channel_open" })
+  | (WsEnvelope<DmChannelClosePayload> & { readonly type: "dm_channel_close" })
   | (WsEnvelope<ServerRestartPayload> & { readonly type: "server_restart" })
   | (WsEnvelope<ErrorPayload> & { readonly type: "error" });
 
@@ -447,9 +471,7 @@ export type ClientMessage =
   | (WsEnvelope<VoiceCameraPayload> & { readonly type: "voice_camera" })
   | (WsEnvelope<VoiceScreensharePayload> & { readonly type: "voice_screenshare" })
   | (WsEnvelope<SoundboardPlayPayload> & { readonly type: "soundboard_play" })
-  | (WsEnvelope<VoiceOfferPayload> & { readonly type: "voice_offer" })
-  | (WsEnvelope<VoiceAnswerPayload> & { readonly type: "voice_answer" })
-  | (WsEnvelope<VoiceIcePayload> & { readonly type: "voice_ice" });
+  | (WsEnvelope<Record<string, never>> & { readonly type: "voice_token_refresh" });
 
 // -----------------------------------------------------------------------------
 // REST API Response Types
@@ -473,6 +495,7 @@ export interface HealthResponse {
   readonly status: string;
   readonly version: string;
   readonly uptime: number;
+  readonly online_users: number;
 }
 
 /** Single channel object from REST API. */
@@ -581,6 +604,18 @@ export interface UploadResponse {
   readonly size: number;
   readonly mime: string;
   readonly url: string;
+}
+
+/** GET /api/v1/dms response. */
+export interface DmChannelsResponse {
+  readonly dm_channels: readonly DmChannelPayload[];
+}
+
+/** POST /api/v1/dms response. */
+export interface CreateDmResponse {
+  readonly channel_id: number;
+  readonly recipient: DmRecipient;
+  readonly created: boolean;
 }
 
 /** TURN/STUN credentials from GET /api/voice/credentials. */

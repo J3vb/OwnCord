@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMemberList } from "@components/MemberList";
+import type { MemberListOptions } from "@components/MemberList";
 import { membersStore } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
 import type { UserStatus } from "../../src/lib/types";
@@ -37,6 +38,15 @@ const testMembers: Member[] = [
   makeMember({ id: 6, username: "Frank", role: "admin", status: "online" as UserStatus }),
 ];
 
+function defaultOpts(): MemberListOptions {
+  return {
+    currentUserRole: "admin",
+    onKick: vi.fn().mockResolvedValue(undefined),
+    onBan: vi.fn().mockResolvedValue(undefined),
+    onChangeRole: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
 describe("MemberList", () => {
   let container: HTMLDivElement;
   let memberList: ReturnType<typeof createMemberList>;
@@ -45,7 +55,7 @@ describe("MemberList", () => {
     resetStore();
     container = document.createElement("div");
     document.body.appendChild(container);
-    memberList = createMemberList();
+    memberList = createMemberList(defaultOpts());
   });
 
   afterEach(() => {

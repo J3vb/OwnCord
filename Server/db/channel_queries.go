@@ -10,7 +10,11 @@ import (
 func (d *DB) ListChannels() ([]Channel, error) {
 	rows, err := d.sqlDB.Query(
 		`SELECT id, name, type, COALESCE(category,''), COALESCE(topic,''),
-		        position, slow_mode, archived, created_at
+		        position, slow_mode, archived, created_at,
+		        COALESCE(voice_max_users, 0),
+		        voice_quality,
+		        mixing_threshold,
+		        COALESCE(voice_max_video, 0)
 		 FROM channels ORDER BY position ASC, id ASC`,
 	)
 	if err != nil {
@@ -172,12 +176,16 @@ func (d *DB) GetAllChannelPermissionsForRole(roleID int64) (map[int64]ChannelOve
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 // scanChannel scans a single channel row from *sql.Rows.
+// The query must select the 13 columns: id, name, type, category, topic,
+// position, slow_mode, archived, created_at, voice_max_users,
+// voice_quality, mixing_threshold, voice_max_video.
 func scanChannel(rows *sql.Rows) (Channel, error) {
 	var ch Channel
 	var archived int
 	err := rows.Scan(
 		&ch.ID, &ch.Name, &ch.Type, &ch.Category, &ch.Topic,
 		&ch.Position, &ch.SlowMode, &archived, &ch.CreatedAt,
+		&ch.VoiceMaxUsers, &ch.VoiceQuality, &ch.MixingThreshold, &ch.VoiceMaxVideo,
 	)
 	if err != nil {
 		return Channel{}, err

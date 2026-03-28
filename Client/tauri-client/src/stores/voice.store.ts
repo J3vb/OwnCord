@@ -41,6 +41,8 @@ export interface VoiceState {
   readonly localDeafened: boolean;
   readonly localCamera: boolean;
   readonly localScreenshare: boolean;
+  /** Epoch ms when the local user joined the current voice channel (for elapsed timer). */
+  readonly joinedAt: number | null;
 }
 
 const INITIAL_STATE: VoiceState = {
@@ -51,6 +53,7 @@ const INITIAL_STATE: VoiceState = {
   localDeafened: false,
   localCamera: false,
   localScreenshare: false,
+  joinedAt: null,
 };
 
 export const voiceStore = createStore<VoiceState>(INITIAL_STATE);
@@ -65,6 +68,7 @@ export function resetVoiceStore(): void {
     localDeafened: false,
     localCamera: false,
     localScreenshare: false,
+    joinedAt: null,
   }));
 }
 
@@ -105,6 +109,10 @@ export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
   voiceStore.setState((prev) => ({
     ...prev,
     voiceUsers: channelMap,
+    // If user is in a voice channel per ready payload, use that channel.
+    // Otherwise preserve prev — user may be mid-join and server hasn't
+    // registered them yet. Stale IDs are cleared by leaveVoiceChannel()
+    // or resetVoiceStore() on logout.
     currentChannelId: autoJoinChannel ?? prev.currentChannelId,
   }));
 }
@@ -151,11 +159,12 @@ export function removeVoiceUser(payload: VoiceLeavePayload): void {
   });
 }
 
-/** Set the current voice channel (local join). */
+/** Set the current voice channel (local join) and record the join timestamp. */
 export function joinVoiceChannel(channelId: number): void {
   voiceStore.setState((prev) => ({
     ...prev,
     currentChannelId: channelId,
+    joinedAt: Date.now(),
   }));
 }
 
@@ -165,11 +174,11 @@ export function leaveVoiceChannel(): void {
   voiceStore.setState((prev) => {
     const channelId = prev.currentChannelId;
     if (channelId === null || currentUserId === 0) {
-      return { ...prev, currentChannelId: null };
+      return { ...prev, currentChannelId: null, joinedAt: null };
     }
     const existingChannel = prev.voiceUsers.get(channelId);
     if (!existingChannel || !existingChannel.has(currentUserId)) {
-      return { ...prev, currentChannelId: null };
+      return { ...prev, currentChannelId: null, joinedAt: null };
     }
     const nextChannels = new Map(prev.voiceUsers);
     const nextUsers = new Map(existingChannel);
@@ -179,7 +188,7 @@ export function leaveVoiceChannel(): void {
     } else {
       nextChannels.set(channelId, nextUsers);
     }
-    return { ...prev, currentChannelId: null, voiceUsers: nextChannels };
+    return { ...prev, currentChannelId: null, joinedAt: null, voiceUsers: nextChannels };
   });
 }
 
@@ -250,25 +259,18 @@ export function setVoiceConfig(payload: VoiceConfigPayload): void {
   });
 }
 
-/** Update speaking state for users from a voice_speakers event.
- *  Skips the local user — their speaking state is driven by local VAD
- *  (lower latency, same threshold). Prevents flicker from two sources
- *  disagreeing on the same field. */
+/** Update speaking state for users from a voice_speakers event or
+ *  LiveKit's ActiveSpeakersChanged. Updates ALL users including local
+ *  (LiveKit is now the sole authority for speaking detection). */
 export function setSpeakers(payload: VoiceSpeakersPayload): void {
   voiceStore.setState((prev) => {
     const existingChannel = prev.voiceUsers.get(payload.channel_id);
     if (!existingChannel) return prev;
 
-    const currentUserId = authStore.getState().user?.id ?? 0;
     const speakerSet = new Set(payload.speakers);
     const nextUsers = new Map<number, VoiceUser>();
 
     for (const [userId, user] of existingChannel) {
-      // Skip local user — local VAD is the sole authority for our own indicator
-      if (userId === currentUserId) {
-        nextUsers.set(userId, user);
-        continue;
-      }
       const isSpeaking = speakerSet.has(userId);
       if (user.speaking !== isSpeaking) {
         nextUsers.set(userId, { ...user, speaking: isSpeaking });

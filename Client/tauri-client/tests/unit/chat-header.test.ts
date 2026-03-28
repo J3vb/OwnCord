@@ -16,7 +16,6 @@ describe("ChatHeader", () => {
   it("renders the chat header element", () => {
     const { element } = buildChatHeader({
       onTogglePins: vi.fn(),
-      onToggleMembers: vi.fn(),
     });
     container.appendChild(element);
 
@@ -26,7 +25,6 @@ describe("ChatHeader", () => {
   it("displays default channel name", () => {
     const { element, refs } = buildChatHeader({
       onTogglePins: vi.fn(),
-      onToggleMembers: vi.fn(),
     });
     container.appendChild(element);
 
@@ -37,7 +35,6 @@ describe("ChatHeader", () => {
   it("displays hash prefix", () => {
     const { element } = buildChatHeader({
       onTogglePins: vi.fn(),
-      onToggleMembers: vi.fn(),
     });
     container.appendChild(element);
 
@@ -48,7 +45,6 @@ describe("ChatHeader", () => {
   it("contains a search input", () => {
     const { element } = buildChatHeader({
       onTogglePins: vi.fn(),
-      onToggleMembers: vi.fn(),
     });
     container.appendChild(element);
 
@@ -61,7 +57,6 @@ describe("ChatHeader", () => {
     const onTogglePins = vi.fn();
     const { element } = buildChatHeader({
       onTogglePins,
-      onToggleMembers: vi.fn(),
     });
     container.appendChild(element);
 
@@ -70,23 +65,9 @@ describe("ChatHeader", () => {
     expect(onTogglePins).toHaveBeenCalledOnce();
   });
 
-  it("calls onToggleMembers when members toggle is clicked", () => {
-    const onToggleMembers = vi.fn();
-    const { element } = buildChatHeader({
-      onTogglePins: vi.fn(),
-      onToggleMembers,
-    });
-    container.appendChild(element);
-
-    const membersToggle = container.querySelector('[data-testid="members-toggle"]') as HTMLButtonElement;
-    membersToggle.click();
-    expect(onToggleMembers).toHaveBeenCalledOnce();
-  });
-
   it("provides mutable refs for channel name and topic", () => {
     const { element, refs } = buildChatHeader({
       onTogglePins: vi.fn(),
-      onToggleMembers: vi.fn(),
     });
     container.appendChild(element);
 
@@ -102,14 +83,10 @@ describe("ChatHeader", () => {
   it("has proper aria labels on buttons", () => {
     const { element } = buildChatHeader({
       onTogglePins: vi.fn(),
-      onToggleMembers: vi.fn(),
     });
     container.appendChild(element);
 
     const pinBtn = container.querySelector('[data-testid="pin-btn"]');
     expect(pinBtn?.getAttribute("aria-label")).toBe("Pins");
-
-    const membersToggle = container.querySelector('[data-testid="members-toggle"]');
-    expect(membersToggle?.getAttribute("aria-label")).toBe("Toggle member list");
   });
 });

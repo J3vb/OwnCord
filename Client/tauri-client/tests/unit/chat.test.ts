@@ -91,19 +91,21 @@ describe("MessageList", () => {
   it("renders empty when no messages", () => {
     const list = createMessageList({
       channelId: 1,
+      channelName: "general",
       currentUserId: 1,
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
+      onPinClick: vi.fn(),
     });
     list.mount(container);
     const messagesContainer = container.querySelector(".messages-container");
     expect(messagesContainer).not.toBeNull();
-    const virtualContent = messagesContainer?.querySelector(".virtual-content");
-    expect(virtualContent).not.toBeNull();
-    expect(virtualContent?.children.length).toBe(0);
+    const welcome = messagesContainer?.querySelector(".channel-welcome");
+    expect(welcome).not.toBeNull();
+    expect(welcome?.querySelector(".channel-welcome-title")?.textContent).toBe("Welcome to #general!");
     list.destroy?.();
   });
 
@@ -114,12 +116,14 @@ describe("MessageList", () => {
 
     const list = createMessageList({
       channelId: 1,
+      channelName: "general",
       currentUserId: 1,
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
+      onPinClick: vi.fn(),
     });
     list.mount(container);
 
@@ -140,12 +144,14 @@ describe("MessageList", () => {
 
       const list = createMessageList({
         channelId: 1,
+        channelName: "general",
         currentUserId: 1,
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
       });
       list.mount(container);
 
@@ -165,12 +171,14 @@ describe("MessageList", () => {
 
       const list = createMessageList({
         channelId: 1,
+        channelName: "general",
         currentUserId: 1,
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
       });
       list.mount(container);
 
@@ -187,12 +195,14 @@ describe("MessageList", () => {
 
       const list = createMessageList({
         channelId: 1,
+        channelName: "general",
         currentUserId: 1,
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
       });
       list.mount(container);
 
@@ -211,12 +221,14 @@ describe("MessageList", () => {
 
       const list = createMessageList({
         channelId: 1,
+        channelName: "general",
         currentUserId: 1,
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
       });
       list.mount(container);
 
@@ -234,12 +246,14 @@ describe("MessageList", () => {
 
       const list = createMessageList({
         channelId: 1,
+        channelName: "general",
         currentUserId: 1,
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
       });
       list.mount(container);
 
@@ -256,12 +270,14 @@ describe("MessageList", () => {
 
       const list = createMessageList({
         channelId: 1,
+        channelName: "general",
         currentUserId: 1,
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
       });
       list.mount(container);
 
@@ -279,12 +295,14 @@ describe("MessageList", () => {
 
       const list = createMessageList({
         channelId: 1,
+        channelName: "general",
         currentUserId: 1,
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
       });
       list.mount(container);
 
@@ -302,12 +320,14 @@ describe("MessageList", () => {
 
       const list = createMessageList({
         channelId: 1,
+        channelName: "general",
         currentUserId: 1,
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
       });
       list.mount(container);
 
@@ -325,12 +345,14 @@ describe("MessageList", () => {
 
       const list = createMessageList({
         channelId: 1,
+        channelName: "general",
         currentUserId: 1,
         onScrollTop: vi.fn(),
         onReplyClick: vi.fn(),
         onEditClick: vi.fn(),
         onDeleteClick: vi.fn(),
         onReactionClick: vi.fn(),
+        onPinClick: vi.fn(),
       });
       list.mount(container);
 
@@ -343,12 +365,14 @@ describe("MessageList", () => {
   it("reacts to store changes", () => {
     const list = createMessageList({
       channelId: 1,
+      channelName: "general",
       currentUserId: 1,
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
+      onPinClick: vi.fn(),
     });
     list.mount(container);
 
@@ -373,12 +397,14 @@ describe("MessageList", () => {
   it("cleans up subscriptions on destroy", () => {
     const list = createMessageList({
       channelId: 1,
+      channelName: "general",
       currentUserId: 1,
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
+      onPinClick: vi.fn(),
     });
     list.mount(container);
     list.destroy?.();
