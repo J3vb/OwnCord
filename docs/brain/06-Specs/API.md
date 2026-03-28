@@ -1081,6 +1081,55 @@ HTTP requests are forwarded via `httputil.ReverseProxy`.
 
 ---
 
+## Diagnostics
+
+### GET /api/v1/diagnostics/connectivity
+
+Returns connectivity diagnostics for debugging voice/network issues.
+
+**Auth:** Required (any authenticated user)
+**Rate limit:** 5 requests/minute per user
+
+#### Response 200
+
+```json
+{
+  "server": {
+    "version": "1.3.0",
+    "uptime_s": 3600,
+    "go_version": "go1.23.0",
+    "online_users": 5
+  },
+  "voice": {
+    "enabled": true,
+    "livekit_url": "ws://localhost:7880",
+    "livekit_health": true,
+    "node_ip": "203.0.113.1",
+    "proxy_path": "/livekit"
+  },
+  "client": {
+    "remote_addr": "192.168.1.100",
+    "is_private_network": true
+  }
+}
+```
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `server.version` | string | Server version string |
+| `server.uptime_s` | int | Seconds since server start |
+| `server.go_version` | string | Go runtime version |
+| `server.online_users` | int | Currently connected users |
+| `voice.enabled` | bool | Whether LiveKit is configured |
+| `voice.livekit_url` | string | LiveKit server URL |
+| `voice.livekit_health` | bool | LiveKit reachable |
+| `voice.node_ip` | string | LiveKit node IP (from health) |
+| `voice.proxy_path` | string | Reverse proxy path |
+| `client.remote_addr` | string | Client's IP as seen by server |
+| `client.is_private_network` | bool | Whether client IP is RFC 1918 |
+
+---
+
 ## Client Auto-Update
 
 ### GET /api/v1/client-update/{target}/{current_version}
@@ -1889,6 +1938,7 @@ Each `data:` line is a JSON-encoded log entry:
 | GET | `/api/v1/invites` | `MANAGE_INVITES` | List invites |
 | DELETE | `/api/v1/invites/{code}` | `MANAGE_INVITES` | Revoke invite |
 | POST | `/api/v1/uploads` | Any | Upload file (100 MiB limit) |
+| GET | `/api/v1/diagnostics/connectivity` | Any | Connectivity diagnostics |
 | GET | `/api/v1/ws` | In-band WS auth | WebSocket connection |
 
 ### Admin IP-Restricted (No Token)

@@ -23,6 +23,7 @@
 
 ### Recent Milestones
 
+- 2026-03-28: Observability & debugging branch — structured logging (server, client, Rust), JSONL log persistence with 5-day rotation, ICE candidate logging, WS disconnect stats, LiveKit webhook logging, diagnostics endpoint, cache clear UI
 - 2026-03-28: Spec audit (18 spec files, 50 fixes), 143 new unit tests, E2E overhaul (22 mocked + 3 native specs), CSS injection security fix, login rate limit 5 -> 60/min
 - 2026-03-27: Login redesign (OC neon glow branding, gradient panel, accent stripe cards, animations), app icon, connection quality indicator, remember-password fix, code review (27 fixes)
 - 2025-03-24: File reference review completed — 28 doc corrections, all reference docs aligned with code
