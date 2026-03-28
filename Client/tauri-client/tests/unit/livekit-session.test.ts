@@ -599,6 +599,39 @@ describe("LiveKitSession", () => {
     });
   });
 
+  describe("handleDisconnected during initial connect", () => {
+    it("does not null the room when connecting flag is true", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+
+      // Make connect hang so we can trigger Disconnected mid-connect
+      const connectDeferred = createDeferred<void>();
+      mockRoom.connect.mockImplementation(() => connectDeferred.promise);
+
+      // Capture the Disconnected handler registered via room.on()
+      let disconnectedHandler: ((reason?: number) => void) | undefined;
+      mockRoom.on.mockImplementation((event: string, handler: any) => {
+        if (event === "disconnected") disconnectedHandler = handler;
+        return mockRoom;
+      });
+
+      const tokenPromise = session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880");
+      await Promise.resolve(); // Let handleVoiceToken reach room.connect()
+
+      // Simulate LiveKit emitting Disconnected with JOIN_FAILURE (reason 7)
+      // while the connect() is still in progress
+      expect(disconnectedHandler).toBeDefined();
+      disconnectedHandler!(7);
+
+      // The room should NOT have been nulled — retry loop is still in control
+      expect((session as any).room).not.toBeNull();
+
+      // Resolve connect to let the flow complete normally
+      connectDeferred.resolve(undefined);
+      await tokenPromise;
+    });
+  });
+
   // -----------------------------------------------------------------------
   // Screenshare audio controls (Spec 1)
   // -----------------------------------------------------------------------

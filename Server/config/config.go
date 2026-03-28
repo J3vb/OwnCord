@@ -38,6 +38,7 @@ type VoiceConfig struct {
 	LiveKitAPISecret string `koanf:"livekit_api_secret"` // LiveKit API secret
 	LiveKitURL       string `koanf:"livekit_url"`        // LiveKit server WebSocket URL (e.g. ws://localhost:7880)
 	LiveKitBinaryPath string `koanf:"livekit_binary"`    // path to livekit-server binary; empty = don't auto-start
+	NodeIP           string `koanf:"node_ip"`            // public IP for WebRTC ICE candidates; empty = auto-detect
 	Quality          string `koanf:"quality"`            // low | medium | high
 }
 
@@ -144,6 +145,7 @@ voice:
   # livekit_api_secret: ""    # LiveKit API secret (REQUIRED, min 32 chars — generate a unique secret)
   livekit_url: "ws://localhost:7880"  # LiveKit server WebSocket URL
   # livekit_binary: ""             # path to livekit-server binary; empty = don't auto-start
+  # node_ip: ""                    # public IP for WebRTC media (required for remote users behind NAT)
   # quality: "medium"              # low | medium | high
 
 # github:

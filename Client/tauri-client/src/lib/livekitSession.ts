@@ -364,6 +364,13 @@ export class LiveKitSession {
 
   private handleDisconnected = (reason?: DisconnectReason): void => {
     log.info("LiveKit room disconnected", { reason });
+    // During the initial connect/retry loop in handleVoiceToken, let that loop
+    // handle failures. If we run leaveVoice() here it nulls this.room, which
+    // causes the retry loop to abort immediately (this.room === null guard).
+    if (this.connecting) {
+      log.info("Disconnect during initial connect — deferring to retry loop");
+      return;
+    }
     const isUnexpected = reason !== DisconnectReason.CLIENT_INITIATED;
     if (isUnexpected && this.latestToken !== null && this.currentChannelId !== null && this.lastUrl !== null) {
       // Attempt auto-reconnect with stored token before giving up.
@@ -415,7 +422,7 @@ export class LiveKitSession {
         this.room = this.createRoom();
         const resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
         await this.room.connect(resolvedUrl, token);
-        log.info("Auto-reconnect succeeded", { attempt, channelId });
+        log.info("Auto-reconnect succeeded", { attempt, channelId, url: resolvedUrl });
         this.room.startAudio().catch((err) => log.debug("Failed to start audio after reconnect", err));
         await this.restoreLocalVoiceState("reconnect");
         this.setupAudioPipeline();
@@ -428,7 +435,7 @@ export class LiveKitSession {
         this.requestTokenRefresh();
         return;
       } catch (err) {
-        log.warn("Auto-reconnect failed", { attempt, error: err });
+        log.warn("Auto-reconnect failed", { attempt, url, error: err });
         if (this.room !== null) {
           this.room.removeAllListeners();
           this.room.disconnect().catch((err) => log.warn("Failed to disconnect room after reconnect failure", err));
@@ -451,14 +458,20 @@ export class LiveKitSession {
     if (this.serverHost !== null) {
       const host = this.serverHost.split(":")[0] ?? "";
       const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
-      if (isLocal && directUrl) return directUrl;
+      if (isLocal && directUrl) {
+        log.debug("LiveKit URL resolved via direct (local)", { url: directUrl });
+        return directUrl;
+      }
       if (proxyPath.startsWith("/")) {
         // Remote server: route through the local Rust TLS proxy so WebView2
         // doesn't reject self-signed certificates on the LiveKit signal WS.
         const port = await this.ensureLiveKitProxy();
-        return `ws://127.0.0.1:${port}${proxyPath}`;
+        const resolved = `ws://127.0.0.1:${port}${proxyPath}`;
+        log.debug("LiveKit URL resolved via TLS proxy", { url: resolved, remoteHost: this.serverHost });
+        return resolved;
       }
     }
+    log.debug("LiveKit URL resolved as passthrough", { url: proxyPath });
     return proxyPath;
   }
 
@@ -466,8 +479,12 @@ export class LiveKitSession {
   private async ensureLiveKitProxy(): Promise<number> {
     if (this.liveKitProxyPort !== null) return this.liveKitProxyPort;
     if (this.serverHost === null) throw new Error("no server host for LiveKit proxy");
+    // Ensure host:port format — default to 443 (standard HTTPS) when the
+    // server is behind a reverse proxy. Without an explicit port, the Rust
+    // proxy would default to 8443 which may not be exposed.
+    const hostWithPort = this.serverHost.includes(":") ? this.serverHost : `${this.serverHost}:443`;
     this.liveKitProxyPort = await invoke<number>("start_livekit_proxy", {
-      remoteHost: this.serverHost,
+      remoteHost: hostWithPort,
     });
     log.info("LiveKit TLS proxy started on localhost", { port: this.liveKitProxyPort });
     return this.liveKitProxyPort;
@@ -634,9 +651,10 @@ export class LiveKitSession {
     }
     if (this.room !== null) this.leaveVoice(false);
     this.connecting = true;
+    let resolvedUrl = "";
     try {
       this.room = this.createRoom();
-      const resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
+      resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
       const MAX_RETRIES = 3;
       const RETRY_DELAY_MS = 2000;
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -664,7 +682,7 @@ export class LiveKitSession {
           break;
         } catch (connectErr) {
           if (attempt < MAX_RETRIES) {
-            log.warn("LiveKit connect failed, retrying", { attempt, maxRetries: MAX_RETRIES, error: connectErr });
+            log.warn("LiveKit connect failed, retrying", { attempt, maxRetries: MAX_RETRIES, url: resolvedUrl, error: connectErr });
             await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
             if (this.room === null) throw connectErr;
             this.room.removeAllListeners();
@@ -712,7 +730,7 @@ export class LiveKitSession {
         log.info("Voice session active", { channelId });
       }
     } catch (err) {
-      log.error("Failed to connect to LiveKit", err);
+      log.error("Failed to connect to LiveKit", { url: resolvedUrl, error: err });
       if (this.room !== null) {
         this.onErrorCallback?.("Failed to join voice — connection error");
       }

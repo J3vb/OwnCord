@@ -151,12 +151,11 @@ impl rustls::client::danger::ServerCertVerifier for PinnedVerifier {
 // Tauri commands
 // ---------------------------------------------------------------------------
 
-/// Extract the hostname (with port) from a "host:port" string, stripping the
-/// port to produce the key used in the cert store (matching ws_proxy's format).
+/// Produce the cert store key matching ws_proxy's format.
+/// ws_proxy extracts the host from "wss://host/path" which omits port 443.
+/// We normalise by stripping the default ":443" suffix so the keys match.
 fn cert_store_key(remote_host: &str) -> String {
-    // ws_proxy stores fingerprints keyed by "host:port" extracted from the wss:// URL.
-    // The remote_host we receive is already in "host:port" format.
-    remote_host.to_string()
+    remote_host.strip_suffix(":443").unwrap_or(remote_host).to_string()
 }
 
 /// Load the stored certificate fingerprint for a host from the Tauri cert store.
@@ -357,7 +356,9 @@ async fn handle_connection(
     let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
 
     // Parse hostname (strip brackets for IPv6, e.g. "[::1]:8443").
-    let (raw_hostname, _port) = remote_host.rsplit_once(':').unwrap_or((remote_host, "8443"));
+    // Default to port 443 (standard HTTPS) when no port is specified — the
+    // server is typically behind a reverse proxy (nginx) on the standard port.
+    let (raw_hostname, _port) = remote_host.rsplit_once(':').unwrap_or((remote_host, "443"));
     let hostname = raw_hostname
         .trim_start_matches('[')
         .trim_end_matches(']');
