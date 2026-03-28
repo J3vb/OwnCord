@@ -22,6 +22,7 @@ import { initPtt } from "@lib/ptt";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
 import type { ConnectedOverlayControl } from "@components/ConnectedOverlay";
 import { createLogger } from "@lib/logger";
+import { initLogPersistence, flushLogs } from "@lib/logPersistence";
 import { saveCredential, loadCredential, deleteCredential } from "@lib/credentials";
 import { initWindowState } from "@lib/window-state";
 import { createCertMismatchModal } from "@components/CertMismatchModal";
@@ -438,6 +439,8 @@ window.addEventListener("beforeunload", () => {
     voiceSessionLeave(false); // false: we send voice_leave below
     ws.send({ type: "voice_leave", payload: {} });
   }
+  // Flush any buffered log entries to disk before the window closes.
+  void flushLogs();
 });
 
 // Initial render
@@ -445,5 +448,8 @@ renderPage(router.getCurrentPage());
 
 // Initialize window state persistence (fire-and-forget)
 void initWindowState();
+
+// Initialize log persistence to disk (fire-and-forget)
+void initLogPersistence();
 
 log.info("OwnCord client initialized");

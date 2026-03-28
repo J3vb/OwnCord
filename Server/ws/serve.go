@@ -53,6 +53,7 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 		}
 
 		c := newClient(hub, conn, user, tokenHash)
+		c.remoteAddr = r.RemoteAddr
 		hub.Register(c)
 
 		// Look up role name for protocol-compliant payloads and cache on client.
@@ -155,11 +156,36 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 
 // readPump reads from the WebSocket and dispatches messages. Blocks until disconnect.
 func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
+	var lastReadErr error
 	defer func() {
+		voiceChID := c.getVoiceChID() // capture BEFORE handleVoiceLeave clears it
 		hub.Unregister(c)
 		hub.handleVoiceLeave(c)
 		if c.user != nil {
-			slog.Info("websocket disconnected", "username", c.user.Username, "user_id", c.userID)
+			c.mu.Lock()
+			received := c.msgsReceived
+			sent := c.msgsSent
+			dropped := c.msgsDropped
+			c.mu.Unlock()
+			duration := time.Since(c.connectedAt)
+
+			attrs := []any{
+				"username", c.user.Username,
+				"user_id", c.userID,
+				"remote", c.remoteAddr,
+				"duration_s", int64(duration.Seconds()),
+				"msgs_received", received,
+				"msgs_sent", sent,
+				"msgs_dropped", dropped,
+			}
+			if voiceChID > 0 {
+				attrs = append(attrs, "voice_channel_id", voiceChID)
+			}
+			if lastReadErr != nil {
+				attrs = append(attrs, "last_error", lastReadErr.Error())
+			}
+			slog.Info("websocket disconnected", attrs...)
+
 			_ = hub.db.UpdateUserStatus(c.userID, "offline")
 			hub.BroadcastToAll(buildPresenceMsg(c.userID, "offline"))
 		}
@@ -168,6 +194,7 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 	for {
 		_, msg, err := conn.Read(ctx)
 		if err != nil {
+			lastReadErr = err
 			return
 		}
 		c.touch()

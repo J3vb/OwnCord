@@ -209,6 +209,26 @@ export class LiveKitSession {
     newRoom.on(RoomEvent.ActiveSpeakersChanged, this.handleActiveSpeakersChanged);
     newRoom.on(RoomEvent.AudioPlaybackStatusChanged, this.handleAudioPlaybackChanged);
     newRoom.on(RoomEvent.LocalTrackPublished, this.handleLocalTrackPublished);
+
+    // Room lifecycle event logging for diagnostics
+    newRoom.on(RoomEvent.Reconnecting, () => {
+      log.warn("LiveKit room reconnecting");
+    });
+    newRoom.on(RoomEvent.Reconnected, () => {
+      log.info("LiveKit room reconnected");
+    });
+    newRoom.on(RoomEvent.SignalReconnecting, () => {
+      log.debug("LiveKit signal reconnecting");
+    });
+    newRoom.on(RoomEvent.MediaDevicesError, (error: Error) => {
+      log.error("LiveKit media device error", { error: error.message });
+    });
+    newRoom.on(RoomEvent.ConnectionQualityChanged, (quality, participant) => {
+      if (participant.isLocal) {
+        log.debug("Local connection quality changed", { quality });
+      }
+    });
+
     return newRoom;
   }
 
@@ -423,6 +443,7 @@ export class LiveKitSession {
         const resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
         await this.room.connect(resolvedUrl, token);
         log.info("Auto-reconnect succeeded", { attempt, channelId, url: resolvedUrl });
+        this.logIceConnectionInfo();
         this.room.startAudio().catch((err) => log.debug("Failed to start audio after reconnect", err));
         await this.restoreLocalVoiceState("reconnect");
         this.setupAudioPipeline();
@@ -695,6 +716,7 @@ export class LiveKitSession {
       // If the room was discarded (stale join superseded by pending), skip setup.
       if (this.room !== null) {
         log.info("Connected to LiveKit room", { channelId, url: resolvedUrl });
+        this.logIceConnectionInfo();
         this.currentChannelId = channelId;
         this.latestToken = token;
         this.lastUrl = url;
@@ -1355,7 +1377,90 @@ export class LiveKitSession {
       currentInputGain: this.currentInputGain,
       localParticipant: this.room.localParticipant.identity, localTracks,
       remoteParticipants,
+      iceConnectionState: this.getIceConnectionState(),
     };
+  }
+
+  /** Log ICE connection details for debugging cross-network voice issues. */
+  private logIceConnectionInfo(): void {
+    if (this.room === null) return;
+    // Access the underlying RTCPeerConnection via LiveKit's engine.
+    // LiveKit exposes the PeerConnection via room.engine.subscriber/publisher.
+    try {
+      const engine = (this.room as any).engine;
+      if (!engine) return;
+
+      const pcs: Array<{ label: string; pc: RTCPeerConnection }> = [];
+      if (engine.subscriber?.pc) pcs.push({ label: "subscriber", pc: engine.subscriber.pc });
+      if (engine.publisher?.pc) pcs.push({ label: "publisher", pc: engine.publisher.pc });
+
+      for (const { label, pc } of pcs) {
+        log.info(`ICE ${label} connection state`, {
+          iceConnectionState: pc.iceConnectionState,
+          iceGatheringState: pc.iceGatheringState,
+          connectionState: pc.connectionState,
+          signalingState: pc.signalingState,
+        });
+
+        // Log selected candidate pair
+        pc.getStats().then((stats) => {
+          stats.forEach((report) => {
+            if (report.type === "candidate-pair" && report.state === "succeeded") {
+              const localId = report.localCandidateId;
+              const remoteId = report.remoteCandidateId;
+              let localType = "unknown";
+              let remoteType = "unknown";
+              let localProtocol = "unknown";
+
+              stats.forEach((s) => {
+                if (s.id === localId && s.type === "local-candidate") {
+                  localType = s.candidateType ?? "unknown";
+                  localProtocol = s.protocol ?? "unknown";
+                }
+                if (s.id === remoteId && s.type === "remote-candidate") {
+                  remoteType = s.candidateType ?? "unknown";
+                }
+              });
+
+              log.info(`ICE ${label} selected candidate pair`, {
+                localType,
+                remoteType,
+                localProtocol,
+              });
+            }
+          });
+        }).catch((err) => {
+          log.debug("Failed to get ICE stats", { error: String(err) });
+        });
+      }
+    } catch (err) {
+      log.debug("Failed to access ICE connection info", { error: String(err) });
+    }
+  }
+
+  /** Get ICE connection state summary for debug panel. */
+  private getIceConnectionState(): Record<string, unknown> | null {
+    if (this.room === null) return null;
+    try {
+      const engine = (this.room as any).engine;
+      if (!engine) return null;
+      const result: Record<string, unknown> = {};
+      if (engine.subscriber?.pc) {
+        result.subscriber = {
+          iceConnectionState: engine.subscriber.pc.iceConnectionState,
+          connectionState: engine.subscriber.pc.connectionState,
+        };
+      }
+      if (engine.publisher?.pc) {
+        result.publisher = {
+          iceConnectionState: engine.publisher.pc.iceConnectionState,
+          connectionState: engine.publisher.pc.connectionState,
+        };
+      }
+      return result;
+    } catch {
+      return null;
+    }
   }
 }
 

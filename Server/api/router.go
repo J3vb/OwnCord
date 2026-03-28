@@ -146,6 +146,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// hub can send real-time dm_channel_close events to WebSocket clients.
 	MountDMRoutes(r, database, hub)
 
+	// Connectivity diagnostics — any authenticated user can check.
+	r.With(AuthMiddleware(database)).Get("/api/v1/diagnostics/connectivity",
+		handleDiagnosticsConnectivity(cfg, ver, hub))
+
 	go hub.Run()
 	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins))
 
@@ -261,11 +265,17 @@ func requestLogger(next http.Handler) http.Handler {
 
 		// Health checks at Debug level; errors at Warn; everything else at Info.
 		path := r.URL.Path
+		reqID := middleware.GetReqID(r.Context())
 		attrs := []any{
 			"method", r.Method,
 			"path", path,
 			"status", status,
 			"duration_ms", elapsed.Milliseconds(),
+			"bytes", ww.BytesWritten(),
+			"client_ip", clientIP(r),
+		}
+		if reqID != "" {
+			attrs = append(attrs, "req_id", reqID)
 		}
 		switch {
 		case path == "/health" || path == "/api/v1/health":

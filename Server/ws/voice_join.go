@@ -165,7 +165,20 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 	bitrate := qualityBitrate(quality)
 	c.sendMsg(buildVoiceConfig(channelID, quality, bitrate, maxUsers))
 
-	slog.Info("voice join", "user_id", c.userID, "channel_id", channelID)
+	lkURL := ""
+	if h.livekit != nil {
+		lkURL = h.livekit.URL()
+	}
+	slog.Info("voice join",
+		"user_id", c.userID,
+		"username", c.user.Username,
+		"channel_id", channelID,
+		"remote", c.remoteAddr,
+		"livekit_url", lkURL,
+		"quality", quality,
+		"channel_users", len(existing),
+		"channel_max", maxUsers,
+	)
 }
 
 // handleVoiceTokenRefresh generates a fresh LiveKit token for a client

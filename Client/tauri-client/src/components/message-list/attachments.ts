@@ -290,7 +290,10 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
   return wrap;
 }
 
-/** Download a file via Tauri HTTP plugin and save to disk with native dialog. */
+/** Download a file via Tauri HTTP plugin and save to disk with native dialog.
+ *  NOTE: This requires fs:allow-write-file with path "**" in capabilities because
+ *  the user chooses the save location via the native OS dialog — the destination is
+ *  not under our control. The dialog itself is the security boundary. */
 async function downloadFile(url: string, filename: string): Promise<void> {
   try {
     // Show native save dialog with suggested filename
