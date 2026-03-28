@@ -37,7 +37,7 @@ func (h *Hub) handleVoiceMute(c *Client, payload json.RawMessage) {
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to update mute state"))
 		return
 	}
-	slog.Debug("voice mute changed", "user_id", c.userID, "muted", p.Muted)
+	slog.Debug("voice mute changed", "user_id", c.userID, "muted", p.Muted, "channel_id", c.getVoiceChID())
 
 	h.broadcastVoiceStateUpdate(c)
 }
@@ -71,7 +71,7 @@ func (h *Hub) handleVoiceDeafen(c *Client, payload json.RawMessage) {
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to update deafen state"))
 		return
 	}
-	slog.Debug("voice deafen changed", "user_id", c.userID, "deafened", p.Deafened)
+	slog.Debug("voice deafen changed", "user_id", c.userID, "deafened", p.Deafened, "channel_id", c.getVoiceChID())
 
 	h.broadcastVoiceStateUpdate(c)
 }
@@ -131,7 +131,7 @@ func (h *Hub) handleVoiceCamera(c *Client, payload json.RawMessage) {
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to update camera state"))
 		return
 	}
-	slog.Debug("voice camera changed", "user_id", c.userID, "enabled", p.Enabled)
+	slog.Debug("voice camera changed", "user_id", c.userID, "enabled", p.Enabled, "channel_id", voiceChID)
 
 	h.broadcastVoiceStateUpdate(c)
 }
@@ -172,7 +172,7 @@ func (h *Hub) handleVoiceScreenshare(c *Client, payload json.RawMessage) {
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to update screenshare state"))
 		return
 	}
-	slog.Debug("voice screenshare changed", "user_id", c.userID, "enabled", p.Enabled)
+	slog.Debug("voice screenshare changed", "user_id", c.userID, "enabled", p.Enabled, "channel_id", voiceChID)
 
 	h.broadcastVoiceStateUpdate(c)
 }

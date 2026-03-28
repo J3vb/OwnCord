@@ -13,7 +13,16 @@ func (h *Hub) handleVoiceLeave(c *Client) {
 		return
 	}
 
-	slog.Info("voice leave", "user_id", c.userID, "channel_id", oldChID)
+	username := ""
+	if c.user != nil {
+		username = c.user.Username
+	}
+	slog.Info("voice leave",
+		"user_id", c.userID,
+		"username", username,
+		"channel_id", oldChID,
+		"remote", c.remoteAddr,
+	)
 
 	if leaveErr := h.db.LeaveVoiceChannel(c.userID); leaveErr != nil {
 		slog.Error("ws handleVoiceLeave LeaveVoiceChannel — ghost session may remain in DB",

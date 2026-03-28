@@ -7,6 +7,7 @@
 // - If the fingerprint changes, the connection is rejected (potential MitM).
 
 use futures_util::{SinkExt, StreamExt};
+use log::{debug, error, info, warn};
 use ring::digest::{digest, SHA256};
 use serde_json::Value;
 use std::sync::Arc;
@@ -189,14 +190,20 @@ pub async fn ws_connect<R: Runtime>(
     state: tauri::State<'_, WsState>,
     url: String,
 ) -> Result<(), String> {
+    info!("[ws_proxy] connecting to {}", url);
+
     // Drop any existing connection
     {
         let mut tx_lock = state.tx.lock().await;
+        if tx_lock.is_some() {
+            debug!("[ws_proxy] dropping existing connection");
+        }
         *tx_lock = None;
     }
 
     // Only allow secure WebSocket connections
     if !url.starts_with("wss://") {
+        warn!("[ws_proxy] rejected non-wss URL: {}", url);
         return Err("Only wss:// connections are permitted".into());
     }
 
@@ -222,8 +229,16 @@ pub async fn ws_connect<R: Runtime>(
 
     let (ws_stream, _response) = tokio::time::timeout(CONNECT_TIMEOUT, connect_future)
         .await
-        .map_err(|_| format!("ws connect timed out after {}s", CONNECT_TIMEOUT.as_secs()))?
-        .map_err(|e| format!("ws connect failed: {e}"))?;
+        .map_err(|_| {
+            error!("[ws_proxy] connect timed out after {}s to {}", CONNECT_TIMEOUT.as_secs(), url);
+            format!("ws connect timed out after {}s", CONNECT_TIMEOUT.as_secs())
+        })?
+        .map_err(|e| {
+            error!("[ws_proxy] connect failed to {}: {}", url, e);
+            format!("ws connect failed: {e}")
+        })?;
+
+    debug!("[ws_proxy] WebSocket handshake complete");
 
     // ── TOFU check ───────────────────────────────────────────────────────
     let host = extract_host(&url);
@@ -239,6 +254,7 @@ pub async fn ws_connect<R: Runtime>(
 
     match tofu_check(&app, &host, &fingerprint) {
         Ok(status) => {
+            info!("[ws_proxy] TOFU check passed for {}: {}", host, status);
             let _ = app.emit(
                 "cert-tofu",
                 serde_json::json!({
@@ -249,6 +265,8 @@ pub async fn ws_connect<R: Runtime>(
             );
         }
         Err(mismatch_msg) => {
+            warn!("[ws_proxy] TOFU check FAILED for {} — certificate fingerprint mismatch", host);
+            debug!("[ws_proxy] TOFU detail: {}", mismatch_msg);
             let _ = app.emit(
                 "cert-tofu",
                 serde_json::json!({
@@ -264,6 +282,7 @@ pub async fn ws_connect<R: Runtime>(
     }
     // ── End TOFU check ───────────────────────────────────────────────────
 
+    info!("[ws_proxy] connected to {}", host);
     let _ = app.emit("ws-state", "open");
 
     let (mut sink, mut stream) = ws_stream.split();
@@ -285,8 +304,12 @@ pub async fn ws_connect<R: Runtime>(
                 Ok(Message::Text(text)) => {
                     let _ = app_read.emit("ws-message", text.to_string());
                 }
-                Ok(Message::Close(_)) => break,
+                Ok(Message::Close(frame)) => {
+                    debug!("[ws_proxy] server sent Close frame: {:?}", frame);
+                    break;
+                }
                 Err(e) => {
+                    warn!("[ws_proxy] read error: {}", e);
                     let _ = app_read.emit("ws-error", format!("{e}"));
                     break;
                 }
@@ -307,9 +330,16 @@ pub async fn ws_connect<R: Runtime>(
     // When either task ends, abort sibling and emit closed
     tokio::spawn(async move {
         tokio::select! {
-            _ = &mut read_task => { write_task.abort(); }
-            _ = &mut write_task => { read_task.abort(); }
+            _ = &mut read_task => {
+                debug!("[ws_proxy] read task ended, aborting write task");
+                write_task.abort();
+            }
+            _ = &mut write_task => {
+                debug!("[ws_proxy] write task ended, aborting read task");
+                read_task.abort();
+            }
         }
+        info!("[ws_proxy] connection closed");
         let _ = app_state.emit("ws-state", "closed");
     });
 

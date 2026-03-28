@@ -25,6 +25,7 @@
 //   port in JS becomes stale until the next voice join resets it.
 // - The accept loop exits after 5 consecutive errors to prevent CPU spin.
 
+use log::{debug, error, info, warn};
 use ring::digest::{digest, SHA256};
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -190,12 +191,16 @@ pub async fn start_livekit_proxy<R: Runtime>(
 ) -> Result<u16, String> {
     let mut inner = state.inner.lock().await;
 
+    info!("[livekit_proxy] start requested for {}", remote_host);
+
     // Reuse existing proxy for same host.
     if let Some(port) = inner.port {
         if inner.remote_host == remote_host {
+            debug!("[livekit_proxy] reusing existing proxy on port {} for {}", port, remote_host);
             return Ok(port);
         }
         // Different host — tear down old proxy.
+        info!("[livekit_proxy] stopping old proxy for {} (switching to {})", inner.remote_host, remote_host);
         if let Some(tx) = inner.shutdown_tx.take() {
             let _ = tx.send(());
         }
@@ -225,6 +230,8 @@ pub async fn start_livekit_proxy<R: Runtime>(
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let host = remote_host.clone();
     tokio::spawn(run_proxy_loop(listener, host, fingerprint, shutdown_rx));
+
+    info!("[livekit_proxy] proxy started on 127.0.0.1:{} → {}", port, remote_host);
 
     inner.port = Some(port);
     inner.remote_host = remote_host;
@@ -266,24 +273,25 @@ async fn run_proxy_loop(
         tokio::select! {
             result = listener.accept() => {
                 match result {
-                    Ok((stream, _)) => {
+                    Ok((stream, addr)) => {
                         consecutive_errors = 0;
                         let host = remote_host.clone();
                         let fp = pinned_fingerprint.clone();
+                        debug!("[livekit_proxy] accepted connection from {}", addr);
                         tokio::spawn(async move {
                             if let Err(e) = handle_connection(stream, &host, &fp).await {
-                                eprintln!("[livekit_proxy] connection error: {e}");
+                                warn!("[livekit_proxy] connection to {} failed: {}", host, e);
                             }
                         });
                     }
                     Err(e) => {
                         consecutive_errors += 1;
-                        eprintln!(
-                            "[livekit_proxy] accept error ({}/{}): {e}",
-                            consecutive_errors, MAX_CONSECUTIVE_ACCEPT_ERRORS
+                        error!(
+                            "[livekit_proxy] accept error ({}/{}): {}",
+                            consecutive_errors, MAX_CONSECUTIVE_ACCEPT_ERRORS, e
                         );
                         if consecutive_errors >= MAX_CONSECUTIVE_ACCEPT_ERRORS {
-                            eprintln!(
+                            error!(
                                 "[livekit_proxy] {} consecutive accept errors, stopping proxy loop",
                                 MAX_CONSECUTIVE_ACCEPT_ERRORS
                             );
@@ -370,12 +378,23 @@ async fn handle_connection(
             .map_err(|e| format!("invalid server name '{hostname}': {e}"))?
     };
 
+    debug!("[livekit_proxy] connecting TCP to {}", remote_host);
     let tcp = TcpStream::connect(remote_host).await?;
+    debug!("[livekit_proxy] starting TLS handshake with {}", remote_host);
     let mut tls = connector.connect(server_name, tcp).await?;
+    debug!("[livekit_proxy] TLS handshake complete, forwarding traffic");
 
     // ── 4. Forward request + bidirectional copy ──────────────────────────
     tls.write_all(modified.as_bytes()).await?;
-    let _ = io::copy_bidirectional(&mut local, &mut tls).await;
+    let result = io::copy_bidirectional(&mut local, &mut tls).await;
+    match result {
+        Ok((to_remote, from_remote)) => {
+            debug!("[livekit_proxy] connection closed: {}B sent, {}B received", to_remote, from_remote);
+        }
+        Err(e) => {
+            debug!("[livekit_proxy] bidirectional copy ended: {}", e);
+        }
+    }
 
     Ok(())
 }

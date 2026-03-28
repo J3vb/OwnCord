@@ -45,6 +45,14 @@ pub fn run() {
             commands::open_devtools,
         ])
         .setup(|app| {
+            // Initialize Rust logging (controlled by RUST_LOG env var, defaults to info).
+            // try_init avoids panic if another logger (e.g. a Tauri plugin) registered first.
+            let _ = env_logger::Builder::from_env(
+                env_logger::Env::default().default_filter_or("info"),
+            )
+            .format_timestamp_millis()
+            .try_init();
+
             tray::create_tray(app.handle())?;
             Ok(())
         })

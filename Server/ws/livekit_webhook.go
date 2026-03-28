@@ -70,6 +70,12 @@ func (h *Hub) NewLiveKitWebhookHandler(apiKey, apiSecret string) http.HandlerFun
 			return
 		}
 
+		slog.Info("livekit webhook received",
+			"event", event.Event,
+			"room", event.GetRoom().GetName(),
+			"participant", event.GetParticipant().GetIdentity(),
+		)
+
 		switch event.Event {
 		case "participant_joined":
 			h.handleWebhookParticipantJoined(&event)

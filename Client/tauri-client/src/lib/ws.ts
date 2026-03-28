@@ -133,7 +133,12 @@ export function createWsClient() {
   function scheduleReconnect(): void {
     if (intentionalClose || certMismatchBlock || !config) return;
     const delay = getReconnectDelay();
-    log.info(`Reconnecting in ${delay}ms (attempt ${reconnectAttempt + 1})`);
+    log.info("WebSocket reconnecting", {
+      delayMs: delay,
+      attempt: reconnectAttempt + 1,
+      host: config?.host ?? "unknown",
+      lastSeq,
+    });
     setState("reconnecting");
     reconnectTimer = setTimeout(() => {
       reconnectAttempt++;
@@ -194,6 +199,13 @@ export function createWsClient() {
 
     // auth_ok — mark as connected
     if (msg.type === "auth_ok") {
+      if (reconnectAttempt > 0) {
+        log.info("WebSocket reconnected successfully", {
+          afterAttempts: reconnectAttempt,
+          host: config?.host ?? "unknown",
+          lastSeq,
+        });
+      }
       setState("connected");
       reconnectAttempt = 0;
       startHeartbeat();
@@ -236,12 +248,20 @@ export function createWsClient() {
 
       if (rustState === "open") {
         proxyOpen = true;
-        log.info("WebSocket open, sending auth");
+        log.info("WebSocket open, sending auth", {
+          host: config?.host ?? "unknown",
+          isReconnect: reconnectAttempt > 0,
+          lastSeq,
+        });
         setState("authenticating");
         send({ type: "auth", payload: { token: config!.token, last_seq: lastSeq } });
       } else if (rustState === "closed") {
         proxyOpen = false;
-        log.info("WebSocket closed (proxy)");
+        log.info("WebSocket closed", {
+          host: config?.host ?? "unknown",
+          intentional: intentionalClose,
+          certBlocked: certMismatchBlock,
+        });
         stopHeartbeat();
         if (!intentionalClose) {
           scheduleReconnect();
@@ -314,7 +334,11 @@ export function createWsClient() {
     }
 
     const wsUrl = `wss://${cfg.host}/api/v1/ws`;
-    log.info("Connecting to", { url: wsUrl });
+    log.info("WebSocket connecting", {
+      url: wsUrl,
+      isReconnect: reconnectAttempt > 0,
+      attempt: reconnectAttempt,
+    });
 
     // Set up event listeners before connecting
     cleanupEventListeners();
@@ -364,6 +388,7 @@ export function createWsClient() {
 
   function disconnect(): void {
     intentionalClose = true;
+    log.info("WebSocket disconnecting (intentional)", { host: config?.host ?? "unknown" });
     certMismatchBlock = false;
     cancelReconnect();
     stopHeartbeat();
