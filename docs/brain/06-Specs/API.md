@@ -937,7 +937,8 @@ Identical to `GET /health` but under the versioned prefix.
 {
   "status": "ok",
   "version": "1.2.0",
-  "uptime": 86400
+  "uptime": 86400,
+  "online_users": 3
 }
 ```
 
@@ -946,6 +947,7 @@ Identical to `GET /health` but under the versioned prefix.
 | `status` | string | Always `"ok"` |
 | `version` | string | Server version string |
 | `uptime` | int64 | Server uptime in seconds |
+| `online_users` | int | Number of connected WebSocket clients |
 
 ---
 

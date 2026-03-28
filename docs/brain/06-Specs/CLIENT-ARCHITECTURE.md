@@ -733,11 +733,14 @@ position without a nuke-and-rebuild approach.
 
 ```text
 +----------------------------------+
-| SERVER HEADER                    |  Server name, invite button
-|  [Server Icon] ServerName  [+]  |
+| SERVER HEADER                    |  Server name, online count, invite
+|  [OC] ServerName  [Invite]      |
 +----------------------------------+
-| SEARCH BAR                      |  Jump to channel/user
-|  [Search...]                    |
+| DIRECT MESSAGES  (3)  [+]       |  Unread total badge, new DM button
+|  ● user1  (2)                   |  Max 3 visible, bubbles to top
+|  ● user2                        |  on new message
+|  ● user3                        |
+|  View all messages (7)          |  Shown when >3 DMs exist
 +----------------------------------+
 | TEXT CHANNELS                    |
 |  ▼ General                      |  Category-grouped, collapsible
@@ -750,17 +753,11 @@ position without a nuke-and-rebuild approach.
 |    🔊 Voice Chat                |  User avatars in channel
 |       🎤 User1  🔇 User2       |
 +----------------------------------+
-| DIRECT MESSAGES                  |
-|  [+] Start New DM              |  Opens member picker
-|  @ user1  (2)                   |  Unread count badge
-|  @ user2                        |
-+----------------------------------+
-| MEMBERS (drag-to-resize)         |
-|  MEMBERS ── 12 online           |  Role-grouped, status dots
-|  ▸ admin                        |
-|    🟢 AdminUser                 |
-|  ▸ member                       |
-|    🟢 User1  🌙 User2          |
+| ▼ MEMBERS (collapsible)         |  Collapses to header-only bar
+|  OWNER ── 1                     |  Role-grouped, status dots
+|    🟢 AdminUser                 |  Drag-to-resize handle
+|  MEMBER ── 3                    |  Scrollable list
+|    🟢 User1  🌙 User2          |  Collapsed state persisted
 +----------------------------------+
 | VOICE WIDGET                     |  Only visible when in voice
 |  🔊 Voice Chat  [📡 12ms]      |  Connection quality indicator
@@ -777,18 +774,38 @@ position without a nuke-and-rebuild approach.
 
 The sidebar has two modes tracked by `uiStore.sidebarMode`:
 
-- **"channels"** -- Full server view (header, channels, voice, DMs, members)
+- **"channels"** -- Full server view (header, DMs preview, channels, voice, members)
 - **"dms"** -- Replaces server header with "Back to Server" header,
-  hides channel list, shows only DM conversations
+  hides channel list, shows full DM conversations list
 
 Clicking a DM switches to DM mode. "Back to Server" returns to channel
-mode and restores the previously active channel.
+mode and restores the previously active channel. The "View all messages"
+button in the DM preview section also switches to DM mode.
+
+### DM Preview Section
+
+In channel mode, the DM section appears **above** text channels:
+- Shows the 3 most recent DM conversations
+- DMs with new messages automatically bubble to the top
+- Red unread badge on the "DIRECT MESSAGES" header shows total unread count
+- "View all messages (N)" link appears when more than 3 DMs exist
+- Collapsible via the category header arrow
+
+### Member List
+
+The member list section is collapsible:
+- Clicking the MEMBERS header toggles between expanded and collapsed
+- Collapsed state shows only the header bar (no wasted space)
+- Expanded state is scrollable with a drag-to-resize handle
+- Collapsed/expanded state is persisted in `localStorage` (`owncord:member-list-collapsed`)
+- Saved height is restored on expand (`owncord:member-list-height`)
 
 ### SidebarArea.ts
 
 The `createSidebarArea()` factory composes:
+- DM preview section (top 3 DMs with unread badges)
 - Channel sidebar or DM sidebar (reactive, based on `sidebarMode`)
-- Member list (drag-to-resize handle)
+- Member list (collapsible, drag-to-resize handle)
 - Voice widget (conditional, based on `voiceStore.currentChannelId`)
 - User bar (avatar, username, settings, quick-switch)
 - Channel modals (create, edit, delete -- mounted on demand)
@@ -1273,6 +1290,32 @@ each saved server profile. Results show status indicators:
 - green: online (<1500ms latency)
 - yellow: slow (>1500ms latency)
 - red: offline (unreachable / timeout)
+
+Health checks also display the **online user count** from the
+`online_users` field in the `/api/v1/health` response.
+
+Health checks **repeat every 15 seconds** while on the ConnectPage
+so servers that come back online are detected automatically. The
+interval is cleared when navigating away from the ConnectPage.
+
+### Auto-Login
+
+One server profile can be marked as the auto-login target via
+`setAutoLogin(id)`. Only one profile can have `autoConnect: true`
+at a time — enabling it on one clears all others. Setting auto-login
+also forces `rememberPassword: true` so credentials are saved.
+
+On startup, if an auto-login profile exists with saved credentials:
+1. Show "Auto-connecting..." overlay with server name and cancel button
+2. Load credentials from Windows Credential Manager
+3. Call `api.login()` automatically
+4. If 2FA required → fall back to TOTP overlay
+5. If login fails → show error, revert to normal login form
+6. If cancelled → revert to normal login form
+
+Auto-login is skipped when arriving via quick-switch (sessionStorage
+flag). The toggle is a lightning bolt icon on each server card in
+the ServerPanel.
 
 ---
 

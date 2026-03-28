@@ -304,13 +304,28 @@ It shares the `channel-sidebar` CSS container class.
 - Active state highlighting
 - Unread dot indicator
 
+### 5.2.1 DM Preview Section (Channel Mode)
+
+In channel mode, a DM preview section appears **above** text channels
+in the unified sidebar:
+- Shows the **3 most recent** DM conversations
+- DMs with new messages **bubble to the top** automatically
+  (both `updateDmLastMessage` and `updateDmLastMessagePreview`
+  move the channel to index 0)
+- Red unread badge on the "DIRECT MESSAGES" header shows total
+  unread count across all DMs
+- "View all messages (N)" link appears when more than 3 DMs exist
+  and switches to full DM mode
+- Collapsible via the category header arrow
+
 ### 5.3 Sidebar Mode Switching
 
 **File:** `Client/tauri-client/src/pages/main-page/SidebarArea.ts`
 
 The sidebar has two modes:
-- **Channel mode:** Shows text/voice channels, members, voice widget
-- **DM mode:** Shows DmSidebar with conversation list
+- **Channel mode:** Shows DM preview (top 3), text/voice channels,
+  collapsible members, voice widget
+- **DM mode:** Shows DmSidebar with full conversation list
 
 Switching is controlled by the UI store:
 
