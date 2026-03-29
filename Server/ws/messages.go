@@ -429,7 +429,12 @@ func buildChannelDelete(channelID int64) []byte {
 }
 
 // buildDMChannelOpen constructs a dm_channel_open event sent to a user.
+// Returns nil if recipient is nil to avoid a panic on dereferencing.
 func buildDMChannelOpen(channelID int64, recipient *db.User) []byte {
+	if recipient == nil {
+		slog.Warn("buildDMChannelOpen called with nil recipient", "channel_id", channelID)
+		return nil
+	}
 	avatarStr := ""
 	if recipient.Avatar != nil {
 		avatarStr = *recipient.Avatar

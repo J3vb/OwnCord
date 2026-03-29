@@ -295,6 +295,14 @@ export function createServerPanel(
       const name = nameInput.value.trim();
       const addr = hostAddrInput.value.trim();
       if (!name || !addr) return;
+      // Validate address: must be a valid hostname:port — no paths, no special chars
+      if (!/^[\w.\-]+(:\d+)?$/.test(addr)) {
+        // Show inline validation error via the host input
+        hostAddrInput.setCustomValidity("Invalid server address (expected host or host:port)");
+        hostAddrInput.reportValidity();
+        return;
+      }
+      hostAddrInput.setCustomValidity("");
       onAddProfile!(name, addr);
       closeModal();
     }

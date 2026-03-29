@@ -275,7 +275,11 @@ func handleLogStream(ringBuf *RingBuffer, database *db.DB) http.HandlerFunc {
 		// Authenticate via query param.
 		rawToken := r.URL.Query().Get("token")
 		if _, err := authenticateAdmin(database, rawToken); err != nil {
-			http.Error(w, `{"error":"UNAUTHORIZED","message":"`+err.Error()+`"}`, http.StatusUnauthorized)
+			errResp, _ := json.Marshal(map[string]string{
+				"error":   "UNAUTHORIZED",
+				"message": err.Error(),
+			})
+			http.Error(w, string(errResp), http.StatusUnauthorized)
 			return
 		}
 

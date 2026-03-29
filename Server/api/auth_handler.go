@@ -228,8 +228,23 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter) http.HandlerFunc {
 		// does not exist to prevent timing-based username enumeration.
 		user, err := database.GetUserByUsername(req.Username)
 
+		// Distinguish DB errors from authentication failures. DB errors
+		// should NOT increment the rate limiter — otherwise a transient
+		// DB outage would lock out legitimate users.
+		if err != nil && user == nil {
+			// Could be a real DB error or simply "user not found".
+			// GetUserByUsername returns (nil, nil) for not-found, so a
+			// non-nil error here is a genuine DB failure.
+			slog.Error("login: GetUserByUsername failed", "err", err, "ip", ip)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error:   "SERVER_ERROR",
+				Message: "login temporarily unavailable",
+			})
+			return
+		}
+
 		failKey := "login_fail:" + ip
-		if err != nil || user == nil || !auth.CheckPassword(user.PasswordHash, req.Password) {
+		if user == nil || !auth.CheckPassword(user.PasswordHash, req.Password) {
 			// Track failures; lockout on the 10th failure.
 			if !limiter.Allow(failKey, 9, 15*time.Minute) {
 				limiter.Lockout(lockKey, 15*time.Minute)

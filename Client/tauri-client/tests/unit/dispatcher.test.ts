@@ -41,6 +41,7 @@ function createMockWs() {
     onCertMismatch: vi.fn(() => () => {}),
     acceptCertFingerprint: vi.fn(async () => {}),
     getState: vi.fn(() => "disconnected" as const),
+    isReplaying: vi.fn(() => false),
     _getWs: vi.fn(() => null),
   };
 

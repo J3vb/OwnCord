@@ -129,8 +129,10 @@ export async function initLogPersistence(): Promise<() => void> {
         clearTimeout(flushTimer);
         flushTimer = null;
       }
-      // Final flush — best-effort, fire-and-forget
-      flushBuffer();
+      // Final flush — best-effort. Log a warning if it fails.
+      flushBuffer().catch((err) => {
+        log.warn("Final flush failed during cleanup", err);
+      });
     };
   } catch (err) {
     log.error("init failed", err);

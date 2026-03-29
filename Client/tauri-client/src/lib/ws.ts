@@ -80,6 +80,11 @@ export function createWsClient() {
   let proxyOpen = false;
   let lastSeq = 0;
 
+  // Deduplication cache for reconnection replay.
+  // Active when reconnecting (reconnectAttempt > 0) until auth_ok.
+  let replayDedup: Set<string> | null = null;
+  const MAX_DEDUP_SIZE = 1000;
+
   // Tauri event unsubscribe functions
   const eventUnsubs: Array<() => void> = [];
 
@@ -187,6 +192,21 @@ export function createWsClient() {
 
     log.debug("WS ←", { type: msg.type, id: msg.id });
 
+    // Deduplication during reconnection replay
+    if (replayDedup !== null && msg.type !== "auth_ok" && msg.type !== "auth_error" && msg.type !== "ready") {
+      const dedupKey = msg.id ?? `${msg.type}:${seq}`;
+      if (replayDedup.has(dedupKey)) {
+        log.debug("Dedup: skipping duplicate message", { type: msg.type, key: dedupKey });
+        return;
+      }
+      replayDedup.add(dedupKey);
+      // Evict oldest entries if set is too large
+      if (replayDedup.size > MAX_DEDUP_SIZE) {
+        const first = replayDedup.values().next().value;
+        if (first !== undefined) replayDedup.delete(first);
+      }
+    }
+
     // auth_error — non-recoverable
     if (msg.type === "auth_error") {
       log.error("Authentication failed", { message: msg.payload.message });
@@ -206,6 +226,8 @@ export function createWsClient() {
           lastSeq,
         });
       }
+      // Clear dedup cache — replay is complete
+      replayDedup = null;
       setState("connected");
       reconnectAttempt = 0;
       startHeartbeat();
@@ -253,6 +275,10 @@ export function createWsClient() {
           isReconnect: reconnectAttempt > 0,
           lastSeq,
         });
+        // Enable dedup during reconnection replay
+        if (reconnectAttempt > 0 && lastSeq > 0) {
+          replayDedup = new Set();
+        }
         setState("authenticating");
         send({ type: "auth", payload: { token: config!.token, last_seq: lastSeq } });
       } else if (rustState === "closed") {
@@ -454,6 +480,11 @@ export function createWsClient() {
 
     getState(): ConnectionState {
       return state;
+    },
+
+    /** True while processing reconnection replay messages (dedup active). */
+    isReplaying(): boolean {
+      return replayDedup !== null;
     },
 
     /** @internal for testing */

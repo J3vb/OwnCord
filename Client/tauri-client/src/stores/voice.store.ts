@@ -163,13 +163,18 @@ export function removeVoiceUser(payload: VoiceLeavePayload): void {
   });
 }
 
-/** Set the current voice channel (local join) and record the join timestamp. */
+/** Set the current voice channel (local join) and record the join timestamp.
+ *  Only resets joinedAt if the user is joining a different channel (or was not in one). */
 export function joinVoiceChannel(channelId: number): void {
-  voiceStore.setState((prev) => ({
-    ...prev,
-    currentChannelId: channelId,
-    joinedAt: Date.now(),
-  }));
+  voiceStore.setState((prev) => {
+    // Already in this channel — don't reset the timer
+    if (prev.currentChannelId === channelId) return prev;
+    return {
+      ...prev,
+      currentChannelId: channelId,
+      joinedAt: Date.now(),
+    };
+  });
 }
 
 /** Clear the current voice channel and remove current user from voice users. */

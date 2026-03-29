@@ -92,46 +92,53 @@ export function renderMentionSegment(text: string): DocumentFragment {
 
 export function renderMessageContent(content: string): DocumentFragment {
   const fragment = document.createDocumentFragment();
-  let lastIndex = 0;
-  for (const match of content.matchAll(CODE_BLOCK_REGEX)) {
-    const idx = match.index;
-    if (idx === undefined) continue;
-    if (idx > lastIndex) {
-      const text = createElement("div", { class: "msg-text" });
-      text.appendChild(renderInlineContent(content.slice(lastIndex, idx)));
-      fragment.appendChild(text);
-    }
-    const codeWrap = createElement("div", { class: "msg-codeblock-wrap" });
-    const codeBlock = createElement("div", { class: "msg-codeblock" });
-    const codeContent = match[1]!.trim();
-    setText(codeBlock, codeContent);
-    const copyBtn = createElement("button", { class: "msg-codeblock-copy" });
-    setText(copyBtn, "Copy");
-    copyBtn.addEventListener("click", () => {
-      void navigator.clipboard.writeText(codeContent).then(() => {
-        setText(copyBtn, "Copied!");
-        setTimeout(() => setText(copyBtn, "Copy"), 2000);
-      }).catch(() => {
-        setText(copyBtn, "Failed");
-        setTimeout(() => setText(copyBtn, "Copy"), 2000);
+
+  // Split on triple-backtick boundaries to avoid ReDoS from greedy regex.
+  // Odd-indexed segments are code block contents; even-indexed are prose.
+  const parts = content.split("```");
+
+  for (let i = 0; i < parts.length; i++) {
+    const segment = parts[i]!;
+    if (i % 2 === 0) {
+      // Prose segment
+      const trimmed = i === 0 ? segment : (i === parts.length - 1 ? segment.trim() : segment);
+      if (trimmed.length > 0) {
+        const text = createElement("div", { class: "msg-text" });
+        text.appendChild(renderInlineContent(trimmed));
+        fragment.appendChild(text);
+      }
+    } else {
+      // Code block segment
+      const codeContent = segment.trim();
+      const codeWrap = createElement("div", { class: "msg-codeblock-wrap" });
+      const codeBlock = createElement("div", { class: "msg-codeblock" });
+      setText(codeBlock, codeContent);
+      const copyBtn = createElement("button", { class: "msg-codeblock-copy" });
+      setText(copyBtn, "Copy");
+      copyBtn.addEventListener("click", () => {
+        void navigator.clipboard.writeText(codeContent).then(() => {
+          setText(copyBtn, "Copied!");
+          setTimeout(() => setText(copyBtn, "Copy"), 2000);
+        }).catch(() => {
+          setText(copyBtn, "Failed");
+          setTimeout(() => setText(copyBtn, "Copy"), 2000);
+        });
       });
-    });
-    codeWrap.appendChild(codeBlock);
-    codeWrap.appendChild(copyBtn);
-    fragment.appendChild(codeWrap);
-    lastIndex = idx + match[0].length;
+      codeWrap.appendChild(codeBlock);
+      codeWrap.appendChild(copyBtn);
+      fragment.appendChild(codeWrap);
+    }
   }
-  if (lastIndex === 0) {
+
+  // If there were no code blocks at all, ensure at least one text node
+  if (parts.length === 1) {
     const text = createElement("div", { class: "msg-text" });
     text.appendChild(renderInlineContent(content));
-    fragment.appendChild(text);
-  } else if (lastIndex < content.length) {
-    const remaining = content.slice(lastIndex).trim();
-    if (remaining.length > 0) {
-      const text = createElement("div", { class: "msg-text" });
-      text.appendChild(renderInlineContent(remaining));
+    // Replace the fragment content (it already has the same, but handle empty edge case)
+    if (fragment.childNodes.length === 0) {
       fragment.appendChild(text);
     }
   }
+
   return fragment;
 }

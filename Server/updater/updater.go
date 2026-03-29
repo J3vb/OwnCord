@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -192,10 +193,9 @@ func (u *Updater) fetchLatestRelease(ctx context.Context) (UpdateInfo, error) {
 			Name:        asset.Name,
 			DownloadURL: asset.BrowserDownloadURL,
 		})
-		switch asset.Name {
-		case binaryAsset:
+		if strings.EqualFold(asset.Name, binaryAsset) {
 			downloadURL = asset.BrowserDownloadURL
-		case checksumAsset:
+		} else if strings.EqualFold(asset.Name, checksumAsset) {
 			checksumURL = asset.BrowserDownloadURL
 		}
 	}
@@ -300,13 +300,38 @@ func (u *Updater) ParseChecksumFile(data []byte, filename string) (string, error
 	return "", fmt.Errorf("file %q not found in checksum data", filename)
 }
 
+// isGitHubHost reports whether the given URL points to a GitHub domain.
+func isGitHubHost(rawURL string) bool {
+	u, err := neturl.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "api.github.com" || host == "github.com" ||
+		strings.HasSuffix(host, ".github.com") ||
+		strings.HasSuffix(host, ".githubusercontent.com")
+}
+
+// shouldSendToken reports whether the GitHub token should be attached to a
+// request for the given URL. It returns true for GitHub hosts and for any URL
+// that starts with the configured baseURL (which may be a test server override).
+func (u *Updater) shouldSendToken(rawURL string) bool {
+	if isGitHubHost(rawURL) {
+		return true
+	}
+	if u.baseURL != "" && strings.HasPrefix(rawURL, u.baseURL) {
+		return true
+	}
+	return false
+}
+
 // fetchBody performs a GET request and returns the response body as bytes.
 func (u *Updater) fetchBody(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	if u.githubToken != "" {
+	if u.githubToken != "" && u.shouldSendToken(url) {
 		req.Header.Set("Authorization", "token "+u.githubToken)
 	}
 
@@ -363,7 +388,7 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error 
 	if err != nil {
 		return err
 	}
-	if u.githubToken != "" {
+	if u.githubToken != "" && u.shouldSendToken(url) {
 		req.Header.Set("Authorization", "token "+u.githubToken)
 	}
 
@@ -383,8 +408,21 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error 
 	}
 	defer f.Close() //nolint:errcheck
 
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	// Cap download at 500 MiB to prevent unbounded disk usage from a
+	// malicious or corrupted release asset.
+	const maxBinarySize = 500 * 1024 * 1024
+	limitedReader := io.LimitReader(resp.Body, maxBinarySize+1)
+
+	n, err := io.Copy(f, limitedReader)
+	if err != nil {
+		_ = f.Close()
+		_ = os.Remove(destPath)
 		return fmt.Errorf("writing downloaded file: %w", err)
+	}
+	if n > maxBinarySize {
+		_ = f.Close()
+		_ = os.Remove(destPath)
+		return fmt.Errorf("downloaded file exceeds maximum size of %d bytes", maxBinarySize)
 	}
 
 	return nil

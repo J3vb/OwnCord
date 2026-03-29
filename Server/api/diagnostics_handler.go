@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"net/url"
 	"runtime"
 	"time"
 
@@ -49,6 +50,14 @@ func handleDiagnosticsConnectivity(
 			lkHealthy = true
 		}
 
+		// Strip credentials from LiveKit URL before exposing in diagnostics.
+		sanitizedLKURL := ""
+		if cfg.Voice.LiveKitURL != "" {
+			if parsed, parseErr := url.Parse(cfg.Voice.LiveKitURL); parseErr == nil {
+				sanitizedLKURL = parsed.Host
+			}
+		}
+
 		resp := diagnosticsResponse{
 			Server: serverDiag{
 				Version:     ver,
@@ -58,7 +67,7 @@ func handleDiagnosticsConnectivity(
 			},
 			Voice: voiceDiag{
 				Enabled:       cfg.Voice.LiveKitURL != "",
-				LiveKitURL:    cfg.Voice.LiveKitURL,
+				LiveKitURL:    sanitizedLKURL,
 				LiveKitHealth: lkHealthy,
 				NodeIP:        cfg.Voice.NodeIP,
 				ProxyPath:     "/livekit",

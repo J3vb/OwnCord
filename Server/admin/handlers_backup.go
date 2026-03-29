@@ -34,12 +34,13 @@ func handleBackup(database *db.DB) http.Handler {
 		}
 
 		actor := actorFromContext(r)
-		slog.Info("database backup created", "actor_id", actor, "path", backupPath)
+		backupName := filepath.Base(backupPath)
+		slog.Info("database backup created", "actor_id", actor, "name", backupName)
 		_ = database.LogAudit(actor, "backup_create", "server", 0,
-			fmt.Sprintf("backup saved to %s", backupPath))
+			fmt.Sprintf("backup saved: %s", backupName))
 
 		writeJSON(w, http.StatusOK, map[string]string{
-			"path":    backupPath,
+			"path":    filepath.Base(backupPath),
 			"created": timestamp,
 		})
 	})
@@ -176,6 +177,10 @@ func copyFile(src, dst string) error {
 	if _, err := io.Copy(out, in); err != nil {
 		_ = out.Close()
 		return fmt.Errorf("copy: %w", err)
+	}
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("sync: %w", err)
 	}
 	return out.Close()
 }

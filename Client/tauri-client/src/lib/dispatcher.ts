@@ -174,18 +174,20 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
       const isOwnMessage = currentUserId !== null && payload.user.id === currentUserId;
 
       // Increment channel-level unread for non-active, non-own-message channels.
+      // Skip during reconnection replay to avoid inflating counts — the
+      // server's ready payload already contains accurate unread_count values.
       // DM channel IDs are not in channelsStore (they use dmStore), so
       // incrementUnread is a no-op for DMs, but the own-message guard is
       // applied here for defence-in-depth.
-      if (payload.channel_id !== activeId && !isOwnMessage) {
+      if (payload.channel_id !== activeId && !isOwnMessage && !ws.isReplaying()) {
         incrementUnread(payload.channel_id);
       }
 
       // Update DM store last message if this message belongs to a DM channel.
-      // Skip unread increment for own messages and for the currently focused DM.
+      // Skip unread increment for own messages, currently focused DM, and replay.
       if (isDm) {
         const isDmActive = payload.channel_id === activeId;
-        if (isOwnMessage || isDmActive) {
+        if (isOwnMessage || isDmActive || ws.isReplaying()) {
           // Update last message preview but don't increment unread count.
           updateDmLastMessagePreview(
             payload.channel_id,

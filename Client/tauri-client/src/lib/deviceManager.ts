@@ -86,7 +86,12 @@ export class DeviceManager {
         try {
           await this.room.localParticipant.setMicrophoneEnabled(false);
           await this.room.localParticipant.setMicrophoneEnabled(true);
-          this.audioPipeline?.setupAudioPipeline();
+          try {
+            this.audioPipeline?.setupAudioPipeline();
+          } catch (pipelineErr) {
+            log.warn("Audio pipeline setup failed after device fallback", pipelineErr);
+            this.onToast?.("Audio pipeline error after device switch");
+          }
           this.onToast?.("Audio device disconnected — switched to default");
         } catch (err) {
           log.error("Failed to fallback to default input device", err);
@@ -120,7 +125,12 @@ export class DeviceManager {
         await this.room.localParticipant.setMicrophoneEnabled(true);
       }
       // Rebuild audio pipeline (source track changed after device switch)
-      this.audioPipeline?.setupAudioPipeline();
+      try {
+        this.audioPipeline?.setupAudioPipeline();
+      } catch (pipelineErr) {
+        log.warn("Audio pipeline setup failed after input device switch", pipelineErr);
+        this.onToast?.("Audio pipeline error after device switch");
+      }
       // Re-apply or remove RNNoise processor based on current setting
       const enhancedNS = loadPref<boolean>("enhancedNoiseSuppression", false);
       if (enhancedNS) {

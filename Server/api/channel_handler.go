@@ -82,6 +82,11 @@ func handleListChannels(database *db.DB) http.HandlerFunc {
 			overrides, oErr = database.GetAllChannelPermissionsForRole(role.ID)
 			if oErr != nil {
 				slog.Error("handleListChannels GetAllChannelPermissionsForRole", "err", oErr)
+				writeJSON(w, http.StatusInternalServerError, errorResponse{
+					Error:   "INTERNAL",
+					Message: "failed to fetch channel permissions",
+				})
+				return
 			}
 		}
 

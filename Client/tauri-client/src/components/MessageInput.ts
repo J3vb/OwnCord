@@ -63,6 +63,8 @@ export function createMessageInput(
   let pendingUploadCount = 0;
   /** References to picker close functions, set by mount() for destroy() to call. */
   let cleanupPickers: (() => void) | null = null;
+  /** Timer IDs for cleanup on destroy. */
+  const activeTimers: Set<ReturnType<typeof setTimeout>> = new Set();
 
   function showReplyBar(username: string): void {
     if (replyBar === null || replyText === null) return;
@@ -104,7 +106,8 @@ export function createMessageInput(
       class: "attachment-upload-error",
     }, message);
     attachmentPreviewBar.appendChild(errEl);
-    setTimeout(() => errEl.remove(), 4000);
+    const t = setTimeout(() => { activeTimers.delete(t); errEl.remove(); }, 4000);
+    activeTimers.add(t);
   }
 
   function handleSend(): void {
@@ -423,9 +426,11 @@ export function createMessageInput(
       });
       root?.appendChild(emojiPicker.element);
       // Defer so this click doesn't immediately close it
-      setTimeout(() => {
+      const t1 = setTimeout(() => {
+        activeTimers.delete(t1);
         document.addEventListener("mousedown", handleClickOutside);
       }, 0);
+      activeTimers.add(t1);
     }
 
     emojiBtn.addEventListener("click", toggleEmojiPicker, { signal });
@@ -470,9 +475,11 @@ export function createMessageInput(
         },
       });
       root?.appendChild(gifPicker.element);
-      setTimeout(() => {
+      const t2 = setTimeout(() => {
+        activeTimers.delete(t2);
         document.addEventListener("mousedown", handleGifClickOutside);
       }, 0);
+      activeTimers.add(t2);
     }
 
     gifBtn.addEventListener("click", toggleGifPicker, { signal });
@@ -490,6 +497,9 @@ export function createMessageInput(
     // Close any open pickers and their document listeners before aborting
     cleanupPickers?.();
     cleanupPickers = null;
+    // Clear all pending timers
+    for (const t of activeTimers) clearTimeout(t);
+    activeTimers.clear();
     ac.abort();
     // Image previews now use data: URLs (via readFileAsDataUrl) which don't
     // require revocation — just clear the array and let GC reclaim them.

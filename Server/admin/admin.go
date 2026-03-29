@@ -3,7 +3,11 @@
 package admin
 
 import (
+	"bytes"
+	"crypto/rand"
 	"embed"
+	"encoding/base64"
+	"fmt"
 	"io/fs"
 	"net/http"
 
@@ -47,11 +51,19 @@ func NewHandler(database *db.DB, version string, hub HubBroadcaster, u *updater.
 	}
 	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		// The admin SPA uses inline <style> and <script> tags. Override the
-		// global CSP (default-src 'self') to allow them.
+		// Generate a per-request nonce for inline script/style tags,
+		// avoiding 'unsafe-inline' in the CSP.
+		nonceBytes := make([]byte, 16)
+		if _, err := rand.Read(nonceBytes); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		nonce := base64.StdEncoding.EncodeToString(nonceBytes)
 		w.Header().Set("Content-Security-Policy",
-			"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
-		_, _ = w.Write(indexHTML)
+			fmt.Sprintf("default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'nonce-%s'", nonce))
+		// Inject nonce into the inline <script> tag.
+		nonced := bytes.Replace(indexHTML, []byte("<script>"), []byte("<script nonce=\""+nonce+"\">"), 1)
+		_, _ = w.Write(nonced)
 	})
 	r.Handle("/*", http.FileServer(http.FS(staticFS)))
 

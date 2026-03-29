@@ -64,11 +64,14 @@ export function applyThemeByName(name: string): void {
         // prevent CSS injection from untrusted theme JSON files.
         if (!prop.startsWith("--") || !/^[a-zA-Z_][\w-]*$/.test(prop.slice(2))) continue;
         if (typeof value !== "string") continue;
+        // Reject any value containing ( or ) — no CSS functions allowed.
+        // Also reject { and } to block any injection attempts.
+        if (/[(){}]/.test(value)) continue;
         // Allowlist: only permit characters found in typical CSS color/sizing values.
-        // Blocks url(), expression(), semicolons, braces, and !important.
-        if (!/^[\w\s#().,%+\-/]+$/.test(value)) continue;
-        // Deny-list: block dangerous CSS functions that slip through the allowlist.
-        if (/\b(url|expression|import|image|cross-fade|element)\s*\(/i.test(value)) continue;
+        // No parentheses — colors must use #hex format, not rgb()/hsl().
+        if (!/^[\w\s#.,%+\-/]+$/.test(value)) continue;
+        // Deny-list: block dangerous CSS keywords that slip through the allowlist.
+        if (/\b(url|expression|import|image|cross-fade|element)\b/i.test(value)) continue;
         style.setProperty(prop, value);
       }
     }

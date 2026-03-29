@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -89,7 +90,9 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			}
 
 			// Touch session in background — non-fatal if it fails.
-			_ = database.TouchSession(hash)
+			if err := database.TouchSession(hash); err != nil {
+				slog.Warn("failed to touch session", "error", err, "user_id", user.ID)
+			}
 
 			ctx := context.WithValue(r.Context(), UserKey, user)
 			ctx = context.WithValue(ctx, SessionKey, sess)
@@ -248,7 +251,10 @@ func AdminIPRestrict(allowedCIDRs []string) func(http.Handler) http.Handler {
 			ip := clientIP(r)
 			allowed, _ := isTrustedProxy(ip, allowedCIDRs)
 			if !allowed {
-				http.Error(w, "Forbidden", http.StatusForbidden)
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "access denied",
+				})
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -256,9 +262,9 @@ func AdminIPRestrict(allowedCIDRs []string) func(http.Handler) http.Handler {
 	}
 }
 
-// SecurityHeaders sets a standard suite of defensive HTTP response headers on
-// every response. It must be added to the router-level middleware stack so that
-// all routes, including error responses, carry these headers.
+// SecurityHeadersWithTLS returns middleware that sets a standard suite of
+// defensive HTTP response headers. When tlsMode is non-empty (TLS is enabled),
+// the Strict-Transport-Security header is also set.
 //
 // Header choices:
 //   - X-Content-Type-Options: nosniff          — prevent MIME-type sniffing
@@ -268,18 +274,30 @@ func AdminIPRestrict(allowedCIDRs []string) func(http.Handler) http.Handler {
 //   - Content-Security-Policy: default-src 'self'
 //   - Permissions-Policy: camera=(), microphone=(), geolocation=()
 //   - Cache-Control: no-store                  — prevent sensitive data caching
+//   - Strict-Transport-Security (when TLS enabled)
+func SecurityHeadersWithTLS(tlsMode string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h := w.Header()
+			h.Set("X-Content-Type-Options", "nosniff")
+			h.Set("X-Frame-Options", "DENY")
+			h.Set("X-XSS-Protection", "0")
+			h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+			h.Set("Content-Security-Policy", "default-src 'self'")
+			h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+			h.Set("Cache-Control", "no-store")
+			if tlsMode != "" {
+				h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// SecurityHeaders is a convenience wrapper for SecurityHeadersWithTLS with TLS
+// disabled (no HSTS header). Kept for backwards compatibility with tests.
 func SecurityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("X-Frame-Options", "DENY")
-		h.Set("X-XSS-Protection", "0")
-		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		h.Set("Content-Security-Policy", "default-src 'self'")
-		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		h.Set("Cache-Control", "no-store")
-		next.ServeHTTP(w, r)
-	})
+	return SecurityHeadersWithTLS("")(next)
 }
 
 // MaxBodySize wraps r.Body with http.MaxBytesReader so that reads beyond

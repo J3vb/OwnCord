@@ -26,11 +26,12 @@ type LiveKitProcess struct {
 	dataDir    string
 	httpClient *http.Client // for health checks — no redirect following
 
-	mu      sync.Mutex
-	cmd     *exec.Cmd
-	cancel  context.CancelFunc
-	stopped bool
-	runDone chan struct{} // closed by runLoop when cmd.Run() returns
+	mu       sync.Mutex
+	cmd      *exec.Cmd
+	cancel   context.CancelFunc
+	stopped  bool
+	runDone  chan struct{} // closed by runLoop when cmd.Run() returns
+	loopDone chan struct{} // closed when runLoop exits entirely
 }
 
 // NewLiveKitProcess creates a new process manager. It does not start the
@@ -129,6 +130,7 @@ func (p *LiveKitProcess) Start() error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
+	p.loopDone = make(chan struct{})
 
 	go p.runLoop(ctx, cfgPath)
 
@@ -139,6 +141,14 @@ func (p *LiveKitProcess) Start() error {
 // Uses exponential backoff (3s → 6s → 12s … up to 60s) and stops after 10
 // consecutive rapid failures (process exits within 30 seconds).
 func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath string) {
+	defer func() {
+		p.mu.Lock()
+		if p.loopDone != nil {
+			close(p.loopDone)
+		}
+		p.mu.Unlock()
+	}()
+
 	const (
 		baseDelay      = 3 * time.Second
 		maxDelay       = 60 * time.Second
@@ -266,6 +276,7 @@ func (p *LiveKitProcess) Stop() {
 	cancel := p.cancel
 	cmd := p.cmd
 	done := p.runDone
+	loopDone := p.loopDone
 	p.mu.Unlock()
 
 	if cancel != nil {
@@ -284,6 +295,15 @@ func (p *LiveKitProcess) Stop() {
 			if cmd != nil && cmd.Process != nil {
 				_ = cmd.Process.Kill()
 			}
+		}
+	}
+
+	// Wait for the entire runLoop goroutine to finish, ensuring no
+	// new iteration can start after Stop returns.
+	if loopDone != nil {
+		select {
+		case <-loopDone:
+		case <-time.After(5 * time.Second):
 		}
 	}
 }

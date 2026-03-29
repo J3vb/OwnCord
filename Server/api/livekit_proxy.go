@@ -67,14 +67,20 @@ func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 		// Block sensitive LiveKit endpoints (exact segment match).
 		for _, seg := range strings.Split(strings.ToLower(r.URL.Path), "/") {
 			if blockedSegments[seg] {
-				http.Error(w, "Forbidden", http.StatusForbidden)
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "access denied",
+				})
 				return
 			}
 		}
 
 		// Validate Origin header for HTTP requests (mirrors WS OriginPatterns).
 		if !isOriginAllowed(r, allowedOrigins) {
-			http.Error(w, "Forbidden", http.StatusForbidden)
+			writeJSON(w, http.StatusForbidden, errorResponse{
+				Error:   "FORBIDDEN",
+				Message: "access denied",
+			})
 			return
 		}
 
@@ -128,7 +134,10 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL, all
 	})
 	if err != nil {
 		slog.Warn("livekit proxy: backend dial failed", "host", backendURL.Host, "path", backendURL.Path, "err", err)
-		http.Error(w, "backend unavailable", http.StatusBadGateway)
+		writeJSON(w, http.StatusBadGateway, errorResponse{
+			Error:   "BAD_GATEWAY",
+			Message: "backend unavailable",
+		})
 		return
 	}
 	defer backConn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort close on defer

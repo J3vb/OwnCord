@@ -77,6 +77,10 @@ function createMockWsClient(): MockWsClient {
       return currentState;
     },
 
+    isReplaying() {
+      return false;
+    },
+
     _getWs() {
       return null;
     },

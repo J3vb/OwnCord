@@ -12,6 +12,7 @@ import { createApiClient } from "@lib/api";
 import { createWsClient } from "@lib/ws";
 import { wireDispatcher } from "@lib/dispatcher";
 import { authStore, setAuth, clearAuth } from "@stores/auth.store";
+import { setTransientError } from "@stores/ui.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import { leaveVoice as voiceSessionLeave } from "@lib/livekitSession";
 import { createConnectPage } from "@pages/ConnectPage";
@@ -182,8 +183,15 @@ function renderPage(pageId: "connect" | "main"): void {
     dispatcherCleanup = wireDispatcher(ws);
     log.info("Dispatcher wired, connecting WS");
 
-    // Save credential for auto-reconnect (fire-and-forget)
-    void saveCredential(host, username, token, password);
+    // Save credential for auto-reconnect. Warn user if it fails.
+    saveCredential(host, username, token, password).then((ok) => {
+      if (!ok) {
+        log.warn("Credential save failed — auto-login will not work for this server");
+        setTransientError("Could not save credentials — auto-login won't work");
+      }
+    }).catch(() => {
+      // saveCredential already catches internally; this is defence-in-depth
+    });
 
     const unsubState = ws.onStateChange((wsState) => {
       log.debug("WS state change", { state: wsState });

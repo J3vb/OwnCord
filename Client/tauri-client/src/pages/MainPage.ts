@@ -243,7 +243,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         if (userId !== 0) {
           updatePresence(userId, status);
         }
-        ws.send({ type: "presence_update", payload: { status } });
+        if (limiters.presence.tryConsume()) {
+          ws.send({ type: "presence_update", payload: { status } });
+        }
       },
     });
     settingsOverlay.mount(root);

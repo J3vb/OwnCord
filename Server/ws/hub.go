@@ -176,6 +176,13 @@ func (h *Hub) Run() {
 					return
 				case c := <-h.register:
 					h.mu.Lock()
+					if old, exists := h.clients[c.userID]; exists {
+						// Kick the stale connection atomically before registering
+						// the new one — prevents TOCTOU races on duplicate login.
+						slog.Warn("hub: kicking stale connection for re-registering user",
+							"user_id", c.userID)
+						old.closeSend()
+					}
 					h.clients[c.userID] = c
 					slog.Info("hub: client registered", "user_id", c.userID, "total_clients", len(h.clients))
 					h.mu.Unlock()

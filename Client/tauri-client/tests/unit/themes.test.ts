@@ -137,12 +137,12 @@ describe("CSS injection prevention", () => {
     expect(document.body.style.getPropertyValue("--accent")).toBe("#ff0000");
   });
 
-  it("should accept valid rgb()/rgba() values", () => {
+  it("should reject rgb()/rgba() values (parentheses blocked to prevent CSS injection)", () => {
     applyCustomWithColors({ "--accent": "rgb(255, 0, 0)" });
-    expect(document.body.style.getPropertyValue("--accent")).toBe("rgb(255, 0, 0)");
+    expect(document.body.style.getPropertyValue("--accent")).toBe("");
 
     applyCustomWithColors({ "--accent": "rgba(255, 0, 0, 0.5)" });
-    expect(document.body.style.getPropertyValue("--accent")).toBe("rgba(255, 0, 0, 0.5)");
+    expect(document.body.style.getPropertyValue("--accent")).toBe("");
   });
 });
 

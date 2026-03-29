@@ -32,7 +32,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// handled explicitly in clientIPWithProxies using the trusted_proxies config.
 	r.Use(middleware.Recoverer)
 	r.Use(requestLogger) // structured request/response logging
-	r.Use(SecurityHeaders)
+	r.Use(SecurityHeadersWithTLS(cfg.TLS.Mode))
 	r.Use(MaxBodySizeUnless(1<<20, "/api/v1/uploads")) // 1 MiB default; upload route exempt
 
 	// Health check — unauthenticated, no versioning prefix.
@@ -81,7 +81,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	if storeErr != nil {
 		slog.Error("failed to create file storage", "error", storeErr)
 	} else {
-		MountUploadRoutes(r, database, store)
+		MountUploadRoutes(r, database, store, cfg.Server.AllowedOrigins)
 	}
 
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.

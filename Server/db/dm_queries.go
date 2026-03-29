@@ -129,6 +129,11 @@ func (d *DB) GetOrCreateDMChannel(user1ID, user2ID int64) (*Channel, bool, error
 
 // GetUserDMChannels returns all open DM channels for a user with recipient info,
 // last message preview, and unread count. Ordered by most recent activity.
+//
+// Note: the SQL JOIN on dm_open_state already restricts results to DM channels
+// (dm_open_state only contains rows for DM channels), and the explicit
+// "c.type = 'dm'" predicate in the JOIN provides a defensive second check.
+// No additional channel-type validation is needed at the Go layer.
 func (d *DB) GetUserDMChannels(userID int64) ([]DMChannelInfo, error) {
 	rows, err := d.sqlDB.Query(
 		`SELECT

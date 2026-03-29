@@ -170,7 +170,13 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 		participantIDs, pErr := h.db.GetDMParticipantIDs(channelID)
 		if pErr != nil {
 			slog.Error("ws handleChatSend GetDMParticipantIDs", "err", pErr, "channel_id", channelID)
+			// Message is already persisted but we cannot deliver it. Inform the
+			// sender so the failure is not silent.
+			c.sendMsg(buildErrorMsg(ErrCodeInternal, "message saved but delivery failed — please retry"))
+			return
 		}
+
+		// Deliver chat_message to all DM participants.
 		for _, pid := range participantIDs {
 			h.SendToUser(pid, broadcast)
 		}
