@@ -3,7 +3,7 @@
 **Goal:** Ship v1.2, then build gaming-native features that
 differentiate OwnCord from Discord/TeamSpeak/Mumble.
 
-Last task ID: T-183. New tasks start at T-184.
+Last task ID: T-191. New tasks start at T-192.
 
 ---
 
@@ -26,17 +26,22 @@ Last task ID: T-183. New tasks start at T-184.
 
 ## Refactoring
 
-- [ ] **T-184:** Refactor `livekitSession.ts` (1,386 lines) — extract into 4 modules: `audioPipeline.ts` (GainNode/VAD/AnalyserNode), `audioElements.ts` (remote mic/screenshare DOM elements), `deviceManager.ts` (device switching/enumeration), keep `livekitSession.ts` as public API + room lifecycle + reconnect
-- [ ] **T-185:** Add unit tests for delete account UI flow in `settings-overlay.test.ts` — trigger button, confirmation area, password validation, error display, disabled state
+- [x] **T-184:** Refactor `livekitSession.ts` — remove duplicate audio pipeline fields/methods, delegate entirely to `_audioPipeline`. 1,438 → 1,171 lines (267 lines removed) — 2026-03-29
+- [x] **T-185:** Add unit tests for delete account UI flow in `settings-overlay.test.ts` — 7 tests: trigger, cancel, password validation, callback, disabled state, error display, input clearing — 2026-03-29
+
+## Code Quality — Found 2026-03-29 (full-project audit)
+
+- [x] **T-190:** Propagate `context.Context` from WS upgrade through all handlers — added ctx to Client struct, updated MessageHandler signature, threaded ctx through all 17 WS handlers across 9 files. Added ExecContext/QueryRowContext/QueryContext/BeginTx to DB wrapper. — 2026-03-29
+- [x] **T-191:** Add ESLint v9 config with `@typescript-eslint/no-floating-promises`, `no-unused-vars`, `consistent-return` — installed eslint v9.39.4 + typescript-eslint, created flat config, fixed 61 lint violations across 22 files — 2026-03-29
 
 ---
 
 ## Unified Sidebar — Deferred Items (from 2026-03-27 redesign)
 
-- [ ] **T-161:** Relocate MemberList into unified sidebar as collapsible section (spec says members go below DMs)
-- [ ] **T-162:** Wire DM conversations to real data source (currently empty placeholder array in SidebarArea)
-- [ ] **T-163:** Wire quick-switch overlay disconnect/reconnect flow (UI built, onSwitch is stub)
-- [ ] **T-164:** Add per-server collapsible section state persistence to localStorage
+- [x] **T-161:** Relocate MemberList into unified sidebar as collapsible section — SidebarArea.ts:625-743, with resize handle and localStorage persistence — verified 2026-03-29
+- [x] **T-162:** Wire DM conversations to real data source — SidebarArea.ts:408-419 reads from dmStore, renders with status/unread/timestamps — verified 2026-03-29
+- [x] **T-163:** Wire quick-switch overlay disconnect/reconnect flow — SidebarArea.ts:844-850, stores target in sessionStorage, calls clearAuth() — verified 2026-03-29
+- [x] **T-164:** Add per-server collapsible section state persistence to localStorage — ui.store.ts:124-176, keyed by server hostname — verified 2026-03-29
 
 ---
 
@@ -276,6 +281,7 @@ Last task ID: T-183. New tasks start at T-184.
 | Phase | Focus | Tasks | Priority | Status |
 |-------|-------|-------|----------|--------|
 | 1-7 | Stabilization (original) | 37 | P0-P3 | All done |
+| Audit | Security + code quality (2026-03-29) | 8 done | P1 | All done |
 | Deferred | Pre-roadmap features | 11 | P2-P3 | Pending |
 | R1 | Community Essentials | 5 | P2 | Pending |
 | R2 | Gaming DNA (Xfire) | 5 | P2 | Pending |

@@ -2,6 +2,23 @@
 
 Completed tasks for the OwnCord project.
 
+## Code Quality & Refactoring (2026-03-29)
+
+- [x] **T-190:** Propagate `context.Context` from WS upgrade through all handlers — added `ctx context.Context` field to Client struct (set from `r.Context()` on WS upgrade), updated `MessageHandler` type signature, threaded ctx through all 17 WS handlers across 9 files (chat, presence, reaction, voice, ping). Added `ExecContext`/`QueryRowContext`/`QueryContext`/`BeginTx` context-accepting methods to DB wrapper. Go build + all ws/api/auth/db tests pass — completed 2026-03-29
+- [x] **T-191:** Add ESLint v9 config for TypeScript client — installed eslint v9.39.4 + typescript-eslint v8.57.2, created flat config (`eslint.config.js`) with `no-floating-promises`, `no-unused-vars`, `consistent-return` as errors. Fixed 61 violations across 22 source files: 15 unused imports/vars removed, 5 floating promises fixed with `void`, 4 `let` → `const`, 2 missing default returns, unnecessary type assertions, useless escapes. Added `lint`/`lint:fix` npm scripts. Zero errors, 1,353 tests pass — completed 2026-03-29
+
+## Refactoring & Tests (2026-03-29)
+
+- [x] **T-184:** Refactor `livekitSession.ts` — removed 267 lines of duplicate audio pipeline code (fields, methods, VAD polling) that duplicated `AudioPipeline` class. All calls now delegate to `_audioPipeline`. File: 1,438 → 1,171 lines. Also upgraded VAD from setTimeout-only fallback to AudioWorklet-first with fallback — completed 2026-03-29
+- [x] **T-185:** Add 7 unit tests for delete account UI flow in `settings-overlay.test.ts` — trigger button shows confirmation, cancel hides it, empty password validation, onDeleteAccount callback, disabled state during deletion, error display on failure, input clearing on reopen — completed 2026-03-29
+
+## Security Audit & Hardening (2026-03-29)
+
+- [x] **T-186:** Full-project security + code quality audit — 3 parallel agents (security, Go, TypeScript) + govulncheck + npm audit. Found 0 CRITICAL, 17 HIGH, 24 MEDIUM, 14 LOW — completed 2026-03-29
+- [x] **T-187:** Fix 15 Go server review issues — path traversal, goroutine leak, SSE token exposure, username validation, voice cleanup errors, rate limiter bypass, presence validation, non-atomic updates, conn.Write checks, N+1 search, FTS5 errors, CORS warning — completed 2026-03-29
+- [x] **T-188:** Fix 12 TypeScript client review issues — Content-Type validation, config race condition, lightbox listener leak, onErrorCallback misuse, as-any casts, acceptInvalidCerts scope, SSRF IPv6 gaps, memoryCache LRU, confirm() replacement, structured logging, OG image SSRF, channelCtrl assertions — completed 2026-03-29
+- [x] **T-189:** Fix dependency vulnerabilities — npm audit fix (picomatch + brace-expansion), grpc v1.79.1 → v1.79.3 — completed 2026-03-29
+
 ## Core Implementation
 
 - [x] **T-001**: Define WebSocket protocol spec ([[06-Specs/PROTOCOL|PROTOCOL.md]])

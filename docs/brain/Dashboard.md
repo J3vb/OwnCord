@@ -5,6 +5,11 @@
 
 ---
 
+## Documentation
+
+- [[Documentation]] — Main documentation hub (all guides, references, walkthroughs)
+- [[00-Overview/Glossary]] — Project glossary and terminology
+
 ## Quick Links
 
 - [[00-Overview/Project|Project Overview]]
@@ -18,11 +23,13 @@
 
 ## Current Status
 
-**Branch:** `feature/livekit-migration` — LiveKit voice/video integration
-**Version:** 1.2.0
+**Branch:** `dev` — Active development
+**Version:** 1.3.0
 
 ### Recent Milestones
 
+- 2026-03-29: Code quality session — ESLint v9 setup (61 fixes across 22 files), context.Context propagation through all 17 WS handlers, livekitSession refactor (-267 lines), 7 new delete-account tests
+- 2026-03-29: Full-project security + code quality audit — 3 agents, 55 findings, 27 fixed (15 Go server, 12 TS client), 0 dependency vulnerabilities, 3 deferred refactors
 - 2026-03-28: Observability & debugging branch — structured logging (server, client, Rust), JSONL log persistence with 5-day rotation, ICE candidate logging, WS disconnect stats, LiveKit webhook logging, diagnostics endpoint, cache clear UI
 - 2026-03-28: Spec audit (18 spec files, 50 fixes), 143 new unit tests, E2E overhaul (22 mocked + 3 native specs), CSS injection security fix, login rate limit 5 -> 60/min
 - 2026-03-27: Login redesign (OC neon glow branding, gradient panel, accent stripe cards, animations), app icon, connection quality indicator, remember-password fix, code review (27 fixes)
@@ -139,4 +146,4 @@ All issues created on GitHub with `agent-ready` label.
 
 <!-- END AUTO-GENERATED -->
 
-Last updated by Claude Code: 2026-03-28 (Spec audit, 143 unit tests, E2E overhaul, CSS injection fix, new specs: DM-SYSTEM, THEME-SYSTEM, RECONNECTION, E2E-BEST-PRACTICES; codemaps integrated into vault structure)
+Last updated by Claude Code: 2026-03-29 (Phase 5 doc pass: Documentation hub linked, cross-links added, file references verified)
