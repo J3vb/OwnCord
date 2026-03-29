@@ -129,7 +129,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     if (statsPoller !== null) return;
     statsPoller = createConnectionStatsPoller(() => getRoomForStats());
     statsUnlisten = statsPoller.onUpdate(updateSignalIcon);
-    qualityUnlisten = statsPoller.onQualityChanged((quality, prevQuality) => {
+    qualityUnlisten = statsPoller.onQualityChanged((quality, _prevQuality) => {
       // Auto-expand stats pane when quality degrades
       if ((quality === "poor" || quality === "bad") && statsPane !== null) {
         statsPane.classList.add("visible");

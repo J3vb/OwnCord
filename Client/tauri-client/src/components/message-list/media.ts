@@ -87,8 +87,9 @@ export function extractYouTubeId(url: string): string | null {
   return null;
 }
 
-/** Cache for YouTube video titles to avoid re-fetching on every re-render. */
+/** Cache for YouTube video titles to avoid re-fetching on every re-render (LRU at 200). */
 const ytTitleCache = new Map<string, string>();
+const YT_TITLE_CACHE_MAX = 200;
 
 /** Strict pattern for YouTube video IDs (alphanumeric, hyphens, underscores). */
 const YOUTUBE_ID_RE = /^[\w-]{1,20}$/;
@@ -127,10 +128,18 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
       .then((res) => (res.ok ? (res.json() as Promise<{ title?: string } | null>) : null))
       .then((data) => {
         const title = data?.title ?? "YouTube Video";
+        if (ytTitleCache.size >= YT_TITLE_CACHE_MAX) {
+          const firstKey = ytTitleCache.keys().next().value;
+          if (firstKey !== undefined) ytTitleCache.delete(firstKey);
+        }
         ytTitleCache.set(videoId, title);
         setText(titleLink, title);
       })
       .catch(() => {
+        if (ytTitleCache.size >= YT_TITLE_CACHE_MAX) {
+          const firstKey = ytTitleCache.keys().next().value;
+          if (firstKey !== undefined) ytTitleCache.delete(firstKey);
+        }
         ytTitleCache.set(videoId, "YouTube Video");
         setText(titleLink, "YouTube Video");
       });
@@ -208,7 +217,7 @@ export function renderInlineImage(url: string): HTMLDivElement {
   // Measure synchronously — deferring to rAF loses the race with
   // ResizeObserver which can rebuild the DOM before the rAF fires.
   img.addEventListener("load", () => {
-    log.info("Image loaded", { url: url.slice(0, 80), naturalW: (img as HTMLImageElement).naturalWidth, naturalH: (img as HTMLImageElement).naturalHeight });
+    log.info("Image loaded", { url: url.slice(0, 80), naturalW: (img).naturalWidth, naturalH: (img).naturalHeight });
     wrap.style.minHeight = "";
     const h = wrap.offsetHeight;
     if (h > 0) cacheImageHeight(url, h);
@@ -304,9 +313,7 @@ export function openImageLightbox(src: string, alt: string): void {
 
   function close(): void {
     overlay.remove();
-    document.removeEventListener("keydown", onKey);
-    document.removeEventListener("mousemove", onMove);
-    document.removeEventListener("mouseup", onUp);
+    ac.abort();
     if (activeLightboxClose === close) activeLightboxClose = null;
   }
 
@@ -367,8 +374,10 @@ export function openImageLightbox(src: string, alt: string): void {
     }
   });
 
-  document.addEventListener("mousemove", onMove);
-  document.addEventListener("mouseup", onUp);
+  // Use AbortController for cleanup of document-level listeners to prevent leaks
+  const ac = new AbortController();
+  document.addEventListener("mousemove", onMove, { signal: ac.signal });
+  document.addEventListener("mouseup", onUp, { signal: ac.signal });
 
   closeBtn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -391,7 +400,7 @@ export function openImageLightbox(src: string, alt: string): void {
     }
     if (e.key === "0") resetZoom();
   }
-  document.addEventListener("keydown", onKey);
+  document.addEventListener("keydown", onKey, { signal: ac.signal });
 
   activeLightboxClose = close;
   document.body.appendChild(overlay);

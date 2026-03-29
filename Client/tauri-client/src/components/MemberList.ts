@@ -39,6 +39,7 @@ function statusPriority(status: UserStatus): number {
     case "idle": return 1;
     case "dnd": return 2;
     case "offline": return 3;
+    default: return 99;
   }
 }
 
@@ -48,6 +49,7 @@ function statusColor(status: UserStatus): string {
     case "idle": return "var(--yellow)";
     case "dnd": return "var(--red)";
     case "offline": return "var(--text-micro)";
+    default: return "#747f8d";
   }
 }
 

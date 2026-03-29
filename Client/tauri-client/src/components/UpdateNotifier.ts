@@ -27,7 +27,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     showBanner(result.version, result.body ?? "");
   }
 
-  function showBanner(version: string, notes: string): void {
+  function showBanner(version: string, _notes: string): void {
     if (container === null || banner !== null) return;
 
     banner = createElement("div", { class: "update-banner" });

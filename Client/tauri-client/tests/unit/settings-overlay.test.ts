@@ -365,6 +365,150 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
+  // --- Delete account tests ---
+
+  it("shows confirmation area when Delete Account is clicked", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    const triggerBtn = container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement;
+    expect(triggerBtn).not.toBeNull();
+
+    const confirmArea = container.querySelector("[data-testid='delete-account-confirm-area']") as HTMLElement;
+    expect(confirmArea.style.display).toBe("none");
+
+    triggerBtn.click();
+
+    expect(confirmArea.style.display).toBe("block");
+    expect(triggerBtn.style.display).toBe("none");
+
+    overlay.destroy?.();
+  });
+
+  it("hides confirmation area when Cancel is clicked", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    const triggerBtn = container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement;
+    triggerBtn.click();
+
+    const confirmArea = container.querySelector("[data-testid='delete-account-confirm-area']") as HTMLElement;
+    expect(confirmArea.style.display).toBe("block");
+
+    const cancelBtn = confirmArea.querySelector("button:not(.account-delete-btn)") as HTMLElement;
+    cancelBtn.click();
+
+    expect(confirmArea.style.display).toBe("none");
+    expect(triggerBtn.style.display).toBe("");
+
+    overlay.destroy?.();
+  });
+
+  it("shows error when confirming delete without password", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    const triggerBtn = container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement;
+    triggerBtn.click();
+
+    const confirmBtn = container.querySelector("[data-testid='delete-account-confirm']") as HTMLElement;
+    confirmBtn.click();
+
+    const errorEl = container.querySelector("[data-testid='delete-account-error']") as HTMLElement;
+    expect(errorEl.textContent).toBe("Password is required.");
+    expect(defaultOptions.onDeleteAccount).not.toHaveBeenCalled();
+
+    overlay.destroy?.();
+  });
+
+  it("calls onDeleteAccount with password on confirm", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    const triggerBtn = container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement;
+    triggerBtn.click();
+
+    const passwordInput = container.querySelector("[data-testid='delete-account-password']") as HTMLInputElement;
+    passwordInput.value = "mypassword123";
+
+    const confirmBtn = container.querySelector("[data-testid='delete-account-confirm']") as HTMLButtonElement;
+    confirmBtn.click();
+
+    expect(defaultOptions.onDeleteAccount).toHaveBeenCalledWith("mypassword123");
+
+    overlay.destroy?.();
+  });
+
+  it("disables confirm button and shows 'Deleting...' during delete", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    const triggerBtn = container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement;
+    triggerBtn.click();
+
+    const passwordInput = container.querySelector("[data-testid='delete-account-password']") as HTMLInputElement;
+    passwordInput.value = "mypassword123";
+
+    const confirmBtn = container.querySelector("[data-testid='delete-account-confirm']") as HTMLButtonElement;
+    confirmBtn.click();
+
+    expect(confirmBtn.disabled).toBe(true);
+    expect(confirmBtn.textContent).toBe("Deleting...");
+
+    overlay.destroy?.();
+  });
+
+  it("shows error and re-enables button on delete failure", async () => {
+    const failOptions = {
+      ...defaultOptions,
+      onDeleteAccount: vi.fn().mockRejectedValue(new Error("Wrong password")),
+    };
+
+    const overlay = createSettingsOverlay(failOptions);
+    overlay.mount(container);
+
+    const triggerBtn = container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement;
+    triggerBtn.click();
+
+    const passwordInput = container.querySelector("[data-testid='delete-account-password']") as HTMLInputElement;
+    passwordInput.value = "wrongpassword";
+
+    const confirmBtn = container.querySelector("[data-testid='delete-account-confirm']") as HTMLButtonElement;
+    confirmBtn.click();
+
+    // Wait for the rejected promise to settle
+    await vi.waitFor(() => {
+      expect(confirmBtn.disabled).toBe(false);
+    });
+
+    const errorEl = container.querySelector("[data-testid='delete-account-error']") as HTMLElement;
+    expect(errorEl.textContent).toBe("Wrong password");
+    expect(confirmBtn.textContent).toBe("Confirm Delete");
+
+    overlay.destroy?.();
+  });
+
+  it("clears password input when reopening confirmation area", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    const triggerBtn = container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement;
+    triggerBtn.click();
+
+    const passwordInput = container.querySelector("[data-testid='delete-account-password']") as HTMLInputElement;
+    passwordInput.value = "typed-something";
+
+    // Cancel and reopen
+    const confirmArea = container.querySelector("[data-testid='delete-account-confirm-area']") as HTMLElement;
+    const cancelBtn = confirmArea.querySelector("button:not(.account-delete-btn)") as HTMLElement;
+    cancelBtn.click();
+    triggerBtn.click();
+
+    expect(passwordInput.value).toBe("");
+
+    overlay.destroy?.();
+  });
+
   // --- Open/Close ---
 
   it("open() adds .open class, close() removes it", () => {

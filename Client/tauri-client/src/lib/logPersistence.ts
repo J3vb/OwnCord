@@ -49,7 +49,7 @@ async function flushBuffer(): Promise<void> {
   buffer = [];
 
   try {
-    const filePath = logFilePath(logDir, currentDate!);
+    const filePath = logFilePath(logDir, currentDate);
     await writeTextFile(filePath, lines, { append: true });
   } catch (err) {
     // Log persistence failure shouldn't crash the app.
@@ -62,7 +62,7 @@ function scheduleFlush(): void {
   if (flushTimer !== null) return;
   flushTimer = setTimeout(() => {
     flushTimer = null;
-    flushBuffer();
+    void flushBuffer();
   }, 2000);
 }
 
@@ -76,7 +76,7 @@ async function rotateOldFiles(): Promise<void> {
         (e) =>
           e.name?.endsWith(".jsonl") && !e.isDirectory,
       )
-      .map((e) => e.name!)
+      .map((e) => e.name)
       .sort();
 
     if (jsonlFiles.length > MAX_LOG_FILES) {
@@ -174,7 +174,7 @@ export async function readAllPersistedLogs(): Promise<string> {
         (e) =>
           e.name?.endsWith(".jsonl") && !e.isDirectory,
       )
-      .map((e) => e.name!)
+      .map((e) => e.name)
       .sort();
 
     const parts: string[] = [];

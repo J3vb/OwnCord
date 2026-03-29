@@ -16,14 +16,19 @@
     "test:e2e:native": "playwright test --config playwright.config.native.ts",
     "test:e2e:ui": "playwright test --ui",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1",
     "@tauri-apps/cli": "^2",
     "@vitest/coverage-v8": "^3",
+    "eslint": "^9.39.4",
     "jsdom": "^29.0.0",
     "typescript": "^5.7",
+    "typescript-eslint": "^8.57.2",
     "vite": "^6",
     "vitest": "^3"
   },

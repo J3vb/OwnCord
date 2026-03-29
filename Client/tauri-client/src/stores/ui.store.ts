@@ -141,7 +141,7 @@ export function loadCollapsedCategories(serverHost: string): void {
       uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
       return;
     }
-    const loaded: ReadonlySet<string> = new Set(parsed as string[]);
+    const loaded: ReadonlySet<string> = new Set(parsed);
     uiStore.setState((prev) => ({ ...prev, collapsedCategories: loaded }));
   } catch {
     uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));

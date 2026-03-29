@@ -29,7 +29,7 @@ export function mapInviteResponse(r: InviteResponse): InviteItem {
     ? (extra["created_by"] as { username?: string }).username ?? "unknown"
     : "unknown";
   const uses = r.use_count
-    ?? (typeof extra["uses"] === "number" ? (extra["uses"] as number) : 0);
+    ?? (typeof extra["uses"] === "number" ? (extra["uses"]) : 0);
   return {
     code: r.code,
     createdBy,

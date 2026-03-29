@@ -4,7 +4,7 @@
 // after a device switch so the new source track flows through the GainNode.
 // Monitors navigator.mediaDevices.ondevicechange for hot-swap (unplug/plug).
 
-import { Room, type LocalAudioTrack, Track } from "livekit-client";
+import { Room } from "livekit-client";
 import { loadPref, savePref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import type { AudioPipeline } from "@lib/audioPipeline";

@@ -296,7 +296,7 @@ export function createServerPanel(
       const addr = hostAddrInput.value.trim();
       if (!name || !addr) return;
       // Validate address: must be a valid hostname:port — no paths, no special chars
-      if (!/^[\w.\-]+(:\d+)?$/.test(addr)) {
+      if (!/^[\w.-]+(:\d+)?$/.test(addr)) {
         // Show inline validation error via the host input
         hostAddrInput.setCustomValidity("Invalid server address (expected host or host:port)");
         hostAddrInput.reportValidity();
@@ -319,7 +319,7 @@ export function createServerPanel(
 
     // Enter key submits
     hostAddrInput.addEventListener("keydown", (e) => {
-      if ((e as KeyboardEvent).key === "Enter") handleSave();
+      if ((e).key === "Enter") handleSave();
     }, { signal });
 
     // Mount onto the panel's closest connect-page root

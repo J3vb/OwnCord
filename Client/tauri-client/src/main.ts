@@ -11,7 +11,7 @@ import { createRouter } from "@lib/router";
 import { createApiClient } from "@lib/api";
 import { createWsClient } from "@lib/ws";
 import { wireDispatcher } from "@lib/dispatcher";
-import { authStore, setAuth, clearAuth } from "@stores/auth.store";
+import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import { leaveVoice as voiceSessionLeave } from "@lib/livekitSession";
@@ -51,10 +51,10 @@ document.addEventListener("keydown", (e) => {
 
 // Open external links (target="_blank") in the user's default browser.
 document.addEventListener("click", (e) => {
-  const link = (e.target as HTMLElement).closest("a[target='_blank']") as HTMLAnchorElement | null;
+  const link = (e.target as HTMLElement).closest("a[target='_blank']");
   if (link === null) return;
   e.preventDefault();
-  const href = link.href;
+  const href = (link as HTMLAnchorElement).href;
   if (href && (href.startsWith("http://") || href.startsWith("https://"))) {
     void openUrl(href);
   }

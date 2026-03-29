@@ -5,6 +5,10 @@ Server/.claude/
 
 # Claude Code skills
 skills/
+\
+
+#github copilot
+.github/
 
 # AI-specific / internal planning docs
 Obsidian-Brain/

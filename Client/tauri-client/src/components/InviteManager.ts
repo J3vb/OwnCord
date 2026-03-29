@@ -3,7 +3,7 @@
  * Create, copy, and revoke invite codes.
  */
 
-import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
+import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 

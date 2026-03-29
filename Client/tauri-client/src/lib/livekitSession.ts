@@ -11,7 +11,6 @@ import {
   type RemoteTrackPublication,
   type RemoteParticipant,
   type Participant,
-  type LocalAudioTrack,
   type LocalVideoTrack,
   type LocalTrack,
   type LocalTrackPublication,
@@ -30,9 +29,8 @@ import {
   leaveVoiceChannel,
   setListenOnly,
 } from "@stores/voice.store";
-import { loadPref, savePref } from "@components/settings/helpers";
+import { loadPref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
-import { createRNNoiseProcessor } from "@lib/noise-suppression";
 import { invoke } from "@tauri-apps/api/core";
 import { AudioPipeline } from "@lib/audioPipeline";
 import { AudioElements } from "@lib/audioElements";
@@ -138,43 +136,6 @@ export class LiveKitSession {
   /** Manually published local tracks (camera/screenshare) for explicit cleanup. */
   private manualCameraTrack: LocalVideoTrack | null = null;
   private manualScreenTracks: LocalTrack[] = [];
-
-  // --- Unified audio pipeline: input volume + VAD gating ---
-  // Pipeline: rawMicTrack → source → analyser (VAD reads here)
-  //                                 → gainNode (volume × vadGate) → dest → WebRTC sender
-  private audioPipelineCtx: AudioContext | null = null;
-  private audioPipelineGain: GainNode | null = null;
-  private audioPipelineAnalyser: AnalyserNode | null = null;
-  private audioPipelineDest: MediaStreamAudioDestinationNode | null = null;
-  private vadTimer: ReturnType<typeof setTimeout> | null = null;
-  /** When true, mic is currently gated (muted by VAD — gain set to 0). */
-  private vadGated = false;
-  /** The user's input volume gain (0-2.0). VAD multiplies this by 0 or 1. */
-  private currentInputGain = 1.0;
-
-  // --- RNNoise processor (LiveKit TrackProcessor API) ---
-
-  /** Attach RNNoise processor to the local mic track. Safe to call if already attached. */
-  private async applyNoiseSuppressor(): Promise<void> {
-    if (this.room === null) return;
-    const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
-    if (micPub?.track === undefined) return;
-    if (micPub.track.getProcessor() !== undefined) return;
-    const processor = createRNNoiseProcessor();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LocalTrack.setProcessor uses wide generic, but AudioProcessorOptions is guaranteed at runtime with webAudioMix
-    await micPub.track.setProcessor(processor as any);
-    log.info("RNNoise processor attached to mic track");
-  }
-
-  /** Remove RNNoise processor from the local mic track. Safe to call if none attached. */
-  private async removeNoiseSuppressor(): Promise<void> {
-    if (this.room === null) return;
-    const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
-    if (micPub?.track === undefined) return;
-    if (micPub.track.getProcessor() === undefined) return;
-    await micPub.track.stopProcessor();
-    log.info("RNNoise processor removed from mic track");
-  }
 
   // --- Room factory ---
 
@@ -356,7 +317,7 @@ export class LiveKitSession {
       const channelId = this.currentChannelId;
       const directUrl = this.lastDirectUrl;
       // Clean up current room without sending WS leave (we're reconnecting, not leaving).
-      this.teardownAudioPipeline();
+      this._audioPipeline.teardownAudioPipeline();
       this.removeAutoplayUnlock();
       this.clearTokenRefreshTimer();
       // Clear stale remote audio elements so reconnect doesn't leak DOM nodes.
@@ -400,7 +361,7 @@ export class LiveKitSession {
         this.logIceConnectionInfo();
         this.room.startAudio().catch((err) => log.debug("Failed to start audio after reconnect", err));
         await this.restoreLocalVoiceState("reconnect");
-        this.setupAudioPipeline();
+        this._audioPipeline.setupAudioPipeline();
         this.reapplyMuteGain();
         this.startTokenRefreshTimer();
         // Clear the abort controller after all post-connect work is done so
@@ -552,7 +513,7 @@ export class LiveKitSession {
           ? "Published mic via LiveKit native capture"
           : "Auto-reconnect restored live microphone");
         if (loadPref<boolean>("enhancedNoiseSuppression", false)) {
-          await this.applyNoiseSuppressor();
+          await this._audioPipeline.applyNoiseSuppressor();
         }
       }
       setListenOnly(false); // Mic acquired successfully
@@ -702,7 +663,7 @@ export class LiveKitSession {
         }
         // Set up unified audio pipeline (input volume + VAD gating via GainNode).
         // VAD polling only starts if saved sensitivity < 100.
-        this.setupAudioPipeline();
+        this._audioPipeline.setupAudioPipeline();
         this.reapplyMuteGain();
         this.startTokenRefreshTimer();
         log.info("Voice session active", { channelId });
@@ -739,9 +700,9 @@ export class LiveKitSession {
       setLocalMuted(false);
       log.info("Microphone permission granted — exited listen-only mode");
       // Set up audio pipeline for the new mic track
-      this.setupAudioPipeline();
+      this._audioPipeline.setupAudioPipeline();
       if (loadPref<boolean>("enhancedNoiseSuppression", false)) {
-        await this.applyNoiseSuppressor();
+        await this._audioPipeline.applyNoiseSuppressor();
       }
     } catch (err) {
       log.warn("Microphone retry failed — still in listen-only mode", err);
@@ -756,7 +717,7 @@ export class LiveKitSession {
       this.reconnectAc = null;
     }
     this.clearTokenRefreshTimer();
-    this.teardownAudioPipeline();
+    this._audioPipeline.teardownAudioPipeline();
     this.removeAutoplayUnlock();
     this.pendingJoin = null;
     // Clean up manually published tracks.
@@ -817,7 +778,7 @@ export class LiveKitSession {
     if (this.room === null) return;
     if (muted) {
       // Tear down pipeline first so it doesn't hold refs to the track
-      this.teardownAudioPipeline();
+      this._audioPipeline.teardownAudioPipeline();
       // Fully disable the mic — this unpublishes the track from the SFU
       await this.room.localParticipant.setMicrophoneEnabled(false);
       log.debug("Mic fully unpublished (muted)");
@@ -825,7 +786,7 @@ export class LiveKitSession {
       // Re-enable mic — this re-publishes the track to the SFU
       await this.room.localParticipant.setMicrophoneEnabled(true);
       // Rebuild the audio pipeline on the fresh track
-      this.setupAudioPipeline();
+      this._audioPipeline.setupAudioPipeline();
       log.debug("Mic re-published (unmuted)");
     }
   }
@@ -858,7 +819,7 @@ export class LiveKitSession {
       this.ws.send({ type: "voice_camera", payload: { enabled: true } });
       // Re-apply audio pipeline — publishing a new track can trigger WebRTC
       // renegotiation which resets the mic sender, bypassing our GainNode mute.
-      this.setupAudioPipeline();
+      this._audioPipeline.setupAudioPipeline();
       this.reapplyMuteGain();
       log.info("Camera enabled", { quality, maxBitrate: CAMERA_PUBLISH_BITRATES[quality] });
     } catch (err) {
@@ -885,7 +846,6 @@ export class LiveKitSession {
     } finally {
       setLocalCamera(false);
       if (this.ws !== null) this.ws.send({ type: "voice_camera", payload: { enabled: false } });
-      this.onErrorCallback?.("Camera off");
       log.info("Camera disabled");
     }
   }
@@ -895,7 +855,7 @@ export class LiveKitSession {
     const track = this.manualCameraTrack;
     this.manualCameraTrack = null;
     try {
-      this.room.localParticipant.unpublishTrack(track.mediaStreamTrack);
+      void this.room.localParticipant.unpublishTrack(track.mediaStreamTrack);
     } catch { /* already unpublished */ }
     track.stop();
   }
@@ -927,7 +887,7 @@ export class LiveKitSession {
       }
       this.ws.send({ type: "voice_screenshare", payload: { enabled: true } });
       // Re-apply audio pipeline — same renegotiation risk as camera.
-      this.setupAudioPipeline();
+      this._audioPipeline.setupAudioPipeline();
       this.reapplyMuteGain();
       log.info("Screenshare enabled", { quality, maxBitrate: SCREENSHARE_PUBLISH_BITRATES[quality] });
     } catch (err) {
@@ -950,7 +910,6 @@ export class LiveKitSession {
     } finally {
       setLocalScreenshare(false);
       if (this.ws !== null) this.ws.send({ type: "voice_screenshare", payload: { enabled: false } });
-      this.onErrorCallback?.("Screen share ended");
       log.info("Screenshare disabled");
     }
   }
@@ -961,7 +920,7 @@ export class LiveKitSession {
     this.manualScreenTracks = [];
     for (const track of tracks) {
       try {
-        this.room.localParticipant.unpublishTrack(track.mediaStreamTrack);
+        void this.room.localParticipant.unpublishTrack(track.mediaStreamTrack);
       } catch { /* already unpublished */ }
       track.stop();
     }
@@ -997,97 +956,7 @@ export class LiveKitSession {
     return this._audioElements.getScreenshareAudioMuted(userId);
   }
 
-  // ── Unified audio pipeline: input volume + VAD gating ─────────────
-  //
-  // Architecture:
-  //   rawMicTrack → AudioContext source
-  //       ├──→ AnalyserNode (VAD reads raw audio here — always sees real signal)
-  //       └──→ GainNode (inputVolume × vadGate) → MediaStreamDestination → WebRTC sender
-  //
-  // The pipeline is always active while in a voice session. This avoids
-  // creating/destroying it when volume changes, and gives the VAD a stable
-  // analyser that's independent of LiveKit's track lifecycle.
-
-  /** Build or rebuild the audio pipeline on the current mic track. */
-  private setupAudioPipeline(): void {
-    this.teardownAudioPipeline();
-    if (this.room === null) return;
-    const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
-    if (micPub?.track === undefined) return;
-
-    try {
-      const mediaTrack = micPub.track.mediaStreamTrack;
-      const ctx = new AudioContext({ sampleRate: 48000 });
-      void ctx.resume(); // Ensure not suspended (WebView2 autoplay policy)
-
-      const source = ctx.createMediaStreamSource(new MediaStream([mediaTrack]));
-
-      // Analyser: VAD reads time-domain data from here (always real audio)
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 2048;
-      analyser.smoothingTimeConstant = 0.3;
-
-      // GainNode: controls both input volume and VAD gating
-      const gainNode = ctx.createGain();
-      this.currentInputGain = loadPref<number>("inputVolume", 100) / 100;
-      gainNode.gain.setValueAtTime(this.currentInputGain, ctx.currentTime);
-
-      const dest = ctx.createMediaStreamDestination();
-
-      // Wire: source → analyser (tap) and source → gain → dest
-      source.connect(analyser);
-      source.connect(gainNode);
-      gainNode.connect(dest);
-
-      this.audioPipelineCtx = ctx;
-      this.audioPipelineGain = gainNode;
-      this.audioPipelineAnalyser = analyser;
-      this.audioPipelineDest = dest;
-
-      // Replace the WebRTC sender's track with the pipeline output
-      const adjustedTrack = dest.stream.getAudioTracks()[0];
-      if (adjustedTrack !== undefined && micPub.track.sender) {
-        void micPub.track.sender.replaceTrack(adjustedTrack).catch((err) => {
-          log.warn("Failed to replace sender track with pipeline output", err);
-        });
-      }
-
-      log.info("Audio pipeline created", { inputGain: this.currentInputGain });
-
-      // Start VAD polling if sensitivity < 100
-      this.startVadPolling();
-    } catch (err) {
-      log.warn("Failed to set up audio pipeline", err);
-    }
-  }
-
-  /** Tear down the audio pipeline and restore the original sender track. */
-  private teardownAudioPipeline(): void {
-    this.stopVadPolling();
-
-    // Restore original mic track on the WebRTC sender
-    if (this.room !== null) {
-      const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
-      if (micPub?.track?.sender !== undefined) {
-        const originalTrack = micPub.track.mediaStreamTrack;
-        void micPub.track.sender.replaceTrack(originalTrack).catch((err) => log.debug("Failed to replace track during teardown", err));
-      }
-    }
-
-    if (this.audioPipelineGain !== null) { this.audioPipelineGain.disconnect(); this.audioPipelineGain = null; }
-    if (this.audioPipelineAnalyser !== null) { this.audioPipelineAnalyser.disconnect(); this.audioPipelineAnalyser = null; }
-    if (this.audioPipelineDest !== null) { this.audioPipelineDest.disconnect(); this.audioPipelineDest = null; }
-    if (this.audioPipelineCtx !== null) { void this.audioPipelineCtx.close(); this.audioPipelineCtx = null; }
-    this.vadGated = false;
-  }
-
-  /** Update the effective gain on the pipeline (inputVolume × vadGate).
-   *  The pipeline only exists when unmuted — muting tears it down entirely. */
-  private updatePipelineGain(): void {
-    if (this.audioPipelineGain === null || this.audioPipelineCtx === null) return;
-    const effectiveGain = this.vadGated ? 0 : this.currentInputGain;
-    this.audioPipelineGain.gain.setTargetAtTime(effectiveGain, this.audioPipelineCtx.currentTime, 0.015);
-  }
+  // --- Audio pipeline delegates (all state lives in AudioPipeline) ---
 
   /** Re-apply mute/deafen state after events that may reset the audio pipeline. */
   private reapplyMuteGain(): void {
@@ -1098,156 +967,19 @@ export class LiveKitSession {
   }
 
   setInputVolume(volume: number): void {
-    const clamped = Math.max(0, Math.min(200, volume));
-    savePref("inputVolume", clamped);
-    this.currentInputGain = clamped / 100;
-    this.updatePipelineGain();
+    this._audioPipeline.setInputVolume(volume);
   }
 
   setOutputVolume(volume: number): void {
     this._audioElements.setOutputVolume(volume);
   }
 
-  /**
-   * Apply voice sensitivity as a client-side VAD gate.
-   * Sensitivity 0 = gate everything (threshold impossibly high).
-   * Sensitivity 100 = gate nothing (no VAD polling).
-   * VAD sets gain to 0 when gated, restores inputVolume when ungated.
-   */
   setVoiceSensitivity(sensitivity: number): void {
-    const clamped = Math.max(0, Math.min(100, sensitivity));
-    savePref("voiceSensitivity", clamped);
-    // Restart VAD polling with the new threshold (pipeline stays intact)
-    this.stopVadPolling();
-    if (clamped >= 100) {
-      // Ensure ungated
-      if (this.vadGated) { this.vadGated = false; this.updatePipelineGain(); }
-    } else {
-      this.startVadPolling();
-    }
-    log.debug("Voice sensitivity updated", { sensitivity: clamped });
+    this._audioPipeline.setVoiceSensitivity(sensitivity);
   }
 
-  /** Start VAD polling loop — reads from the pipeline's analyser. */
-  private startVadPolling(): void {
-    this.stopVadPolling();
-    if (this.audioPipelineAnalyser === null) return;
-
-    const sensitivity = loadPref<number>("voiceSensitivity", 50);
-    if (sensitivity >= 100) return;
-
-    // Convert sensitivity to an RMS threshold (time-domain):
-    // sensitivity 0 → threshold ~0.10, sensitivity 50 → ~0.05, sensitivity 99 → ~0.001
-    const threshold = ((100 - sensitivity) / 100) * 0.10;
-    const analyser = this.audioPipelineAnalyser;
-    const dataArray = new Float32Array(analyser.fftSize);
-
-    let silentFrames = 0;
-    let speechFrames = 0;
-    const GATE_ON_FRAMES = 12;  // ~200ms of silence before gating
-    const GATE_OFF_FRAMES = 2;  // ~33ms of speech before ungating
-    // Grace period: don't gate for the first ~500ms to let audio settle
-    let startupFrames = 0;
-    const STARTUP_GRACE = 30;
-
-    // setTimeout instead of requestAnimationFrame: rAF pauses when the Tauri
-    // window is minimized/backgrounded, which freezes the VAD gate in whatever
-    // state it was in. setTimeout continues firing (throttled to ~1 Hz by some
-    // engines when hidden), which is still fast enough for VAD gate timing
-    // (200ms gate-on, 100ms gate-off). The CPU cost is negligible since
-    // getFloatTimeDomainData is a cheap memcpy from the audio thread.
-    const poll = (): void => {
-      if (this.audioPipelineAnalyser === null) return;
-
-      analyser.getFloatTimeDomainData(dataArray);
-      let sum = 0;
-      for (let i = 0; i < dataArray.length; i++) {
-        const v = dataArray[i] ?? 0;
-        sum += v * v;
-      }
-      const rms = Math.sqrt(sum / dataArray.length);
-
-      if (startupFrames < STARTUP_GRACE) {
-        startupFrames++;
-        this.vadTimer = setTimeout(poll, 16);
-        return;
-      }
-
-      if (rms < threshold) {
-        speechFrames = 0;
-        silentFrames++;
-        if (!this.vadGated && silentFrames >= GATE_ON_FRAMES) {
-          this.vadGated = true;
-          this.updatePipelineGain(); // gain → 0
-        }
-      } else {
-        silentFrames = 0;
-        speechFrames++;
-        if (this.vadGated && speechFrames >= GATE_OFF_FRAMES) {
-          this.vadGated = false;
-          this.updatePipelineGain(); // gain → inputVolume
-        }
-      }
-
-      this.vadTimer = setTimeout(poll, 16);
-    };
-    this.vadTimer = setTimeout(poll, 16);
-    log.info("VAD polling started", { sensitivity, threshold });
-  }
-
-  /** Stop VAD polling loop (pipeline stays intact). */
-  private stopVadPolling(): void {
-    if (this.vadTimer !== null) {
-      clearTimeout(this.vadTimer);
-      this.vadTimer = null;
-    }
-    // Ungate if was gated
-    if (this.vadGated) {
-      this.vadGated = false;
-      this.updatePipelineGain();
-    }
-  }
-
-  /**
-   * Re-apply audio processing settings (echo cancellation, noise suppression, AGC)
-   * to the live mic track by restarting it with updated constraints.
-   */
   async reapplyAudioProcessing(): Promise<void> {
-    if (this.room === null) {
-      log.debug("Skipping audio processing reapply — no active voice session");
-      return;
-    }
-    const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
-    if (micPub?.track === undefined) {
-      log.debug("Skipping audio processing reapply — no mic track");
-      return;
-    }
-
-    const captureOptions = {
-      echoCancellation: loadPref("echoCancellation", true),
-      noiseSuppression: loadPref("noiseSuppression", true),
-      autoGainControl: loadPref("autoGainControl", true),
-    };
-
-    try {
-      // restartTrack re-acquires the mic with new constraints without unpublishing
-      await (micPub.track as LocalAudioTrack).restartTrack(captureOptions);
-      log.info("Audio processing reapplied via restartTrack", captureOptions);
-
-      // Rebuild audio pipeline (underlying track changed)
-      this.setupAudioPipeline();
-
-      // Re-apply or remove RNNoise processor
-      const enhancedNS = loadPref<boolean>("enhancedNoiseSuppression", false);
-      if (enhancedNS) {
-        await this.applyNoiseSuppressor();
-      } else {
-        await this.removeNoiseSuppressor();
-      }
-    } catch (err) {
-      log.error("Failed to reapply audio processing", err);
-      this.onErrorCallback?.("Failed to update audio settings");
-    }
+    return this._audioPipeline.reapplyAudioProcessing(this.onErrorCallback ?? undefined);
   }
 
   getLocalCameraStream(): MediaStream | null {
@@ -1293,11 +1025,11 @@ export class LiveKitSession {
       hasRNNoiseProcessor: this.room.localParticipant.getTrackPublication(Track.Source.Microphone)?.track?.getProcessor() !== undefined,
       currentChannelId: this.currentChannelId,
       outputVolumeMultiplier: this.outputVolumeMultiplier,
-      audioPipelineActive: this.audioPipelineGain !== null,
-      audioPipelineGain: this.audioPipelineGain?.gain.value ?? null,
-      audioPipelineCtxState: this.audioPipelineCtx?.state ?? null,
-      vadGated: this.vadGated,
-      currentInputGain: this.currentInputGain,
+      audioPipelineActive: this._audioPipeline.isActive,
+      audioPipelineGain: this._audioPipeline.gainValue,
+      audioPipelineCtxState: this._audioPipeline.ctxState,
+      vadGated: this._audioPipeline.isVadGated,
+      currentInputGain: this._audioPipeline.inputGain,
       localParticipant: this.room.localParticipant.identity, localTracks,
       remoteParticipants,
       iceConnectionState: this.getIceConnectionState(),
@@ -1310,12 +1042,14 @@ export class LiveKitSession {
     // Access the underlying RTCPeerConnection via LiveKit's engine.
     // LiveKit exposes the PeerConnection via room.engine.subscriber/publisher.
     try {
-      const engine = (this.room as any).engine;
+      const engine = (this.room as unknown as Record<string, unknown>).engine as Record<string, unknown> | undefined;
       if (!engine) return;
 
+      const subscriber = engine.subscriber as Record<string, unknown> | undefined;
+      const publisher = engine.publisher as Record<string, unknown> | undefined;
       const pcs: Array<{ label: string; pc: RTCPeerConnection }> = [];
-      if (engine.subscriber?.pc) pcs.push({ label: "subscriber", pc: engine.subscriber.pc });
-      if (engine.publisher?.pc) pcs.push({ label: "publisher", pc: engine.publisher.pc });
+      if (subscriber?.pc) pcs.push({ label: "subscriber", pc: subscriber.pc as RTCPeerConnection });
+      if (publisher?.pc) pcs.push({ label: "publisher", pc: publisher.pc as RTCPeerConnection });
 
       for (const { label, pc } of pcs) {
         log.info(`ICE ${label} connection state`, {
@@ -1365,19 +1099,23 @@ export class LiveKitSession {
   private getIceConnectionState(): Record<string, unknown> | null {
     if (this.room === null) return null;
     try {
-      const engine = (this.room as any).engine;
+      const engine = (this.room as unknown as Record<string, unknown>).engine as Record<string, unknown> | undefined;
       if (!engine) return null;
+      const subscriber = engine.subscriber as Record<string, unknown> | undefined;
+      const publisher = engine.publisher as Record<string, unknown> | undefined;
       const result: Record<string, unknown> = {};
-      if (engine.subscriber?.pc) {
+      if (subscriber?.pc) {
+        const pc = subscriber.pc as RTCPeerConnection;
         result.subscriber = {
-          iceConnectionState: engine.subscriber.pc.iceConnectionState,
-          connectionState: engine.subscriber.pc.connectionState,
+          iceConnectionState: pc.iceConnectionState,
+          connectionState: pc.connectionState,
         };
       }
-      if (engine.publisher?.pc) {
+      if (publisher?.pc) {
+        const pc = publisher.pc as RTCPeerConnection;
         result.publisher = {
-          iceConnectionState: engine.publisher.pc.iceConnectionState,
-          connectionState: engine.publisher.pc.connectionState,
+          iceConnectionState: pc.iceConnectionState,
+          connectionState: pc.connectionState,
         };
       }
       return result;

@@ -22,7 +22,6 @@ import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import {
-  leaveVoice as voiceSessionLeave,
   cleanupAll as voiceCleanupAll,
   setOnRemoteVideo,
   setOnRemoteVideoRemoved,
@@ -30,7 +29,6 @@ import {
   setWsClient,
   setServerHost as setLiveKitServerHost,
   setOnError as setVoiceOnError,
-  clearOnError as clearVoiceOnError,
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
@@ -279,9 +277,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     channelCtrl = createChannelController({
       ws,
       api,
-      msgCtrl: msgCtrl!,
+      msgCtrl: msgCtrl,
       pendingDeleteManager,
-      reactionCtrl: reactionCtrl!,
+      reactionCtrl: reactionCtrl,
       typingLimiter: limiters.typing,
       showToast: (msg, type) => showToast(msg, type as "success" | "error" | "info"),
       getCurrentUserId,
@@ -369,7 +367,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             if (active.type === "text") {
               videoModeCtrl?.showChat();
             }
-            channelCtrl!.mountChannel(active.id, resolveChannelName(active.id, active.name, active.type), active.type);
+            channelCtrl?.mountChannel(active.id, resolveChannelName(active.id, active.name, active.type), active.type);
           }
         } catch (err) {
           log.error("Channel mount failed", err);
@@ -380,7 +378,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     const active = getActiveChannel();
     if (active !== null) {
-      channelCtrl!.mountChannel(active.id, resolveChannelName(active.id, active.name, active.type), active.type);
+      channelCtrl?.mountChannel(active.id, resolveChannelName(active.id, active.name, active.type), active.type);
     }
   }
 

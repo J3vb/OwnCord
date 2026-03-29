@@ -147,7 +147,7 @@ export function createWsClient() {
     setState("reconnecting");
     reconnectTimer = setTimeout(() => {
       reconnectAttempt++;
-      connect(config!);
+      void connect(config!);
     }, delay);
   }
 
@@ -244,8 +244,8 @@ export function createWsClient() {
     }
     for (const listener of typeListeners) {
       try {
-        (listener as WsListener<typeof msg.type>)(
-          msg.payload as Extract<ServerMessage, { type: typeof msg.type }>["payload"],
+        (listener)(
+          msg.payload,
           msg.id,
         );
       } catch (err) {
@@ -280,7 +280,8 @@ export function createWsClient() {
           replayDedup = new Set();
         }
         setState("authenticating");
-        send({ type: "auth", payload: { token: config!.token, last_seq: lastSeq } });
+        if (config === null) return;
+        send({ type: "auth", payload: { token: config.token, last_seq: lastSeq } });
       } else if (rustState === "closed") {
         proxyOpen = false;
         log.info("WebSocket closed", {

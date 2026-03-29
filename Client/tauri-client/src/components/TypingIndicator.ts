@@ -4,7 +4,7 @@
  * Uses mockup's .typing-bar and .typing-dots classes.
  */
 
-import { createElement, appendChildren, setText, clearChildren } from "@lib/dom";
+import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
 import { membersStore, getTypingUsers } from "@stores/members.store";

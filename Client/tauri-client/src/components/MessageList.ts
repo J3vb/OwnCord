@@ -459,7 +459,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
   let scrollRafId = 0;
   let resizeRafId = 0;
-  let resizeDirty = false;
+  // resizeDirty tracking removed — resize observer batches via RAF directly
   function handleScroll(): void {
     if (root === null) return;
 
@@ -519,12 +519,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // Batched via RAF with anchor-based scroll preservation.
     const resizeObserver = new ResizeObserver(() => {
       if (root === null || contentContainer === null) return;
-      resizeDirty = true;
       if (resizeRafId !== 0) return;
 
       resizeRafId = requestAnimationFrame(() => {
         resizeRafId = 0;
-        resizeDirty = false;
         if (root === null || contentContainer === null) return;
 
         const atBottom = isNearBottom();

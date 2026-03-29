@@ -53,7 +53,7 @@ export function buildChatHeader(
     const onFocus = opts.onSearchFocus;
     searchInput.addEventListener("focus", () => {
       onFocus();
-      (searchInput as HTMLInputElement).blur();
+      (searchInput).blur();
     });
   }
   appendChildren(tools, searchInput, pinBtn);

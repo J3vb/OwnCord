@@ -110,10 +110,7 @@ export function createTauriBackend(): PersistenceBackend {
   return {
     async load(): Promise<StoredData | null> {
       const { invoke } = await import("@tauri-apps/api/core");
-      const settings = (await invoke("get_settings")) as Record<
-        string,
-        unknown
-      >;
+      const settings = await invoke<Record<string, unknown>>("get_settings");
       const raw = settings[STORAGE_KEY];
       if (raw === undefined || raw === null) return null;
       if (isValidStoredData(raw)) return raw;

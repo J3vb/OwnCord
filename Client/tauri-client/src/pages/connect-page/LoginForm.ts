@@ -93,13 +93,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   let submitBtnText: HTMLSpanElement;
   let toggleModeBtn: HTMLAnchorElement;
   let errorBanner: HTMLDivElement;
-  let totpOverlay: HTMLDivElement;
   let totpInput: HTMLInputElement;
   let totpSubmitBtn: HTMLButtonElement;
   let rememberPasswordCheckbox: HTMLInputElement;
-  let statusBar: HTMLDivElement;
-  let statusBarFill: HTMLDivElement;
-  let autoConnectOverlay: HTMLDivElement;
   let autoConnectServerName: HTMLSpanElement;
 
   // ---------------------------------------------------------------------------
@@ -321,7 +317,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          handleTotpSubmit();
+          void handleTotpSubmit();
         }
       },
       { signal },
@@ -357,6 +353,23 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     overlay.appendChild(card);
     return overlay;
   }
+
+  // ---------------------------------------------------------------------------
+  // Build elements (before state transition functions that reference them)
+  // ---------------------------------------------------------------------------
+
+  const panelEl = buildFormPanel();
+
+  // Status bar (hidden by default, shown with .visible class)
+  const statusBar = createElement("div", { class: "status-bar" });
+  const statusBarFill = createElement("div", { class: "status-bar-fill" });
+  statusBar.appendChild(statusBarFill);
+
+  // TOTP overlay (hidden by default)
+  const totpOverlay = buildTotpOverlay();
+
+  // Auto-connect overlay (hidden by default)
+  const autoConnectOverlay = buildAutoConnectOverlay();
 
   // ---------------------------------------------------------------------------
   // State transitions
@@ -562,23 +575,6 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   function handleTotpCancel(): void {
     transitionTo("idle");
   }
-
-  // ---------------------------------------------------------------------------
-  // Build elements
-  // ---------------------------------------------------------------------------
-
-  const panelEl = buildFormPanel();
-
-  // Status bar (hidden by default, shown with .visible class)
-  statusBar = createElement("div", { class: "status-bar" });
-  statusBarFill = createElement("div", { class: "status-bar-fill" });
-  statusBar.appendChild(statusBarFill);
-
-  // TOTP overlay (hidden by default)
-  totpOverlay = buildTotpOverlay();
-
-  // Auto-connect overlay (hidden by default)
-  autoConnectOverlay = buildAutoConnectOverlay();
 
   // ---------------------------------------------------------------------------
   // Public API

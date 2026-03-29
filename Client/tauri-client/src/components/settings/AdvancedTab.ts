@@ -69,7 +69,7 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
   const devtoolsBtn = createElement("button", { class: "ac-btn" }, "Open DevTools");
   devtoolsBtn.addEventListener("click", () => {
     void invoke("open_devtools").catch((err: unknown) => {
-      console.warn("DevTools not available:", err);
+      log.warn("DevTools not available", { error: err instanceof Error ? err.message : String(err) });
     });
   }, { signal });
 
@@ -134,7 +134,24 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
     "Clear & Restart",
     signal,
     async (btn) => {
-      if (!confirm("This will clear all cached data and restart the app. Continue?")) return;
+      // Two-step confirmation: first click shows warning, second click confirms
+      if (btn.dataset.confirmPending !== "true") {
+        btn.dataset.confirmPending = "true";
+        btn.textContent = "Are you sure? Click again";
+        btn.classList.add("ac-btn-danger");
+        const resetTimer = setTimeout(() => {
+          btn.dataset.confirmPending = "";
+          btn.textContent = "Clear & Restart";
+          btn.classList.remove("ac-btn-danger");
+        }, 3000);
+        // Store timer ID so it can be cleared if the button is clicked again
+        btn.dataset.resetTimer = String(resetTimer);
+        return;
+      }
+      // Second click — clear the pending state and proceed
+      const pendingTimer = btn.dataset.resetTimer;
+      if (pendingTimer) clearTimeout(Number(pendingTimer));
+      btn.dataset.confirmPending = "";
       btn.textContent = "Clearing...";
       btn.setAttribute("disabled", "");
       try {

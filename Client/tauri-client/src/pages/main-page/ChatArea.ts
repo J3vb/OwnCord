@@ -59,7 +59,7 @@ export interface ChatAreaResult {
 // ---------------------------------------------------------------------------
 
 export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
-  const { api, getRoot, getToast, getChannelCtrl } = opts;
+  const { api, getRoot, getChannelCtrl } = opts;
 
   const children: MountableComponent[] = [];
   const unsubscribers: Array<() => void> = [];

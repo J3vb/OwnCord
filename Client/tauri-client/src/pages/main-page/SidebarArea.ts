@@ -819,7 +819,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
     // Load profiles asynchronously, then show overlay
     void (async () => {
-      let profiles: readonly QuickSwitchProfile[] = [];
+      let profiles: readonly QuickSwitchProfile[];
 
       try {
         if (profileManager === null) {

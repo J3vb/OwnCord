@@ -20,7 +20,7 @@ export class FenwickTree {
     if (delta === 0) return;
     this.values[i] = value;
     for (let x = i + 1; x <= this.size; x += x & (-x)) {
-      (this.tree as Float64Array)[x] = (this.tree[x] as number) + delta;
+      (this.tree)[x] = (this.tree[x] as number) + delta;
     }
   }
 

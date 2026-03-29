@@ -5,7 +5,7 @@
 
 import { voiceStore } from "@stores/voice.store";
 import { getLocalCameraStream, getLocalScreenshareStream } from "@lib/livekitSession";
-import type { VideoGridComponent, TileConfig } from "@components/VideoGrid";
+import type { VideoGridComponent } from "@components/VideoGrid";
 
 // ---------------------------------------------------------------------------
 // Types

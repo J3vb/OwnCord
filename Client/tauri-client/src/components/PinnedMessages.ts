@@ -5,7 +5,6 @@
 
 import {
   createElement,
-  clearChildren,
   appendChildren,
 } from "@lib/dom";
 import { createIcon } from "@lib/icons";

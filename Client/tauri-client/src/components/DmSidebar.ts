@@ -11,7 +11,6 @@
 import {
   createElement,
   setText,
-  clearChildren,
   appendChildren,
 } from "@lib/dom";
 import { createIcon } from "@lib/icons";
