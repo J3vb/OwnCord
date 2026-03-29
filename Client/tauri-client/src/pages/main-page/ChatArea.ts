@@ -68,7 +68,6 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   const pinnedCtrl = createPinnedPanelController({
     api,
     getRoot,
-    getToast,
     getCurrentChannelId: () => getChannelCtrl()?.currentChannelId ?? null,
     onJumpToMessage: (msgId: number) => {
       const ctrl = getChannelCtrl();
@@ -81,7 +80,6 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   const searchCtrl = createSearchOverlayController({
     api,
     getRoot,
-    getToast,
     getCurrentChannelId: () => getChannelCtrl()?.currentChannelId ?? null,
     onJumpToMessage: (_channelId: number, msgId: number) => {
       const ctrl = getChannelCtrl();
@@ -102,27 +100,27 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   const chatArea = createElement("div", {
     class: "chat-area",
     "data-testid": "chat-area",
-  }) as HTMLDivElement;
+  });
   chatArea.appendChild(chatHeader.element);
 
   // --- Slots ---
   const messagesSlot = createElement("div", {
     class: "messages-slot",
     "data-testid": "messages-slot",
-  }) as HTMLDivElement;
+  });
   const typingSlot = createElement("div", {
     class: "typing-slot",
     "data-testid": "typing-slot",
-  }) as HTMLDivElement;
+  });
   const inputSlot = createElement("div", {
     class: "input-slot",
     "data-testid": "input-slot",
-  }) as HTMLDivElement;
+  });
   const videoGridSlot = createElement("div", {
     class: "video-grid-slot",
     "data-testid": "video-grid-slot",
     style: "display:none;flex:1;min-height:0",
-  }) as HTMLDivElement;
+  });
 
   // --- Video grid ---
   const videoGrid = createVideoGrid();

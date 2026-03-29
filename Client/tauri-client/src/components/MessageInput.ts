@@ -198,7 +198,7 @@ export function createMessageInput(
       const img = createElement("img", {
         class: "attachment-preview-img",
         alt: file.name,
-      }) as HTMLImageElement;
+      });
       item.appendChild(img);
       readFileAsDataUrl(file).then((dataUrl) => {
         img.src = dataUrl;
@@ -319,7 +319,7 @@ export function createMessageInput(
         type: "file",
         style: "display: none;",
         accept: "image/*,video/*,audio/*,.pdf,.txt,.zip,.rar,.7z",
-      }) as HTMLInputElement;
+      });
       fileInput.addEventListener("change", () => {
         const file = fileInput.files?.[0];
         if (file != null) {

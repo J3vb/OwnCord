@@ -270,7 +270,7 @@ func (h *Hub) buildAuthOK(user *db.User, roleName string) []byte {
 	serverName, motd := h.getCachedSettings()
 
 	return buildJSON(map[string]any{
-		"type": "auth_ok",
+		"type": MsgTypeAuthOK,
 		"payload": map[string]any{
 			"user": map[string]any{
 				"id":       user.ID,
@@ -350,7 +350,7 @@ func (h *Hub) buildReady(database *db.DB, userID int64) ([]byte, error) {
 	serverName, motd := h.getCachedSettings()
 
 	return buildJSON(map[string]any{
-		"type": "ready",
+		"type": MsgTypeReady,
 		"payload": map[string]any{
 			"channels":     channelPayloads,
 			"members":      members,

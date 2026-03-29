@@ -187,7 +187,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       placeholder: "Search messages...",
       "aria-label": "Search messages",
       "data-testid": "search-overlay-input",
-    }) as HTMLInputElement;
+    });
 
     statusEl = createElement("div", {
       class: "search-overlay-status",

@@ -497,7 +497,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     bottomSpacer = createElement("div", { class: "virtual-spacer-bottom" });
     const scrollAnchor = createElement("div", { class: "scroll-anchor" });
 
-    scrollToBottomBtn = createElement("button", { class: "scroll-to-bottom-btn" }) as HTMLButtonElement;
+    scrollToBottomBtn = createElement("button", { class: "scroll-to-bottom-btn" });
     scrollToBottomBtn.textContent = "↓";
     scrollToBottomBtn.addEventListener("click", () => {
       scrollToBottom();

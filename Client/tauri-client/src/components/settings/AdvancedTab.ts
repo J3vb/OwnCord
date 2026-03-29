@@ -173,7 +173,7 @@ function buildCacheRow(
   const descEl = createElement("div", { class: "setting-desc" }, desc);
   appendChildren(info, labelEl, descEl);
 
-  const btn = createElement("button", { class: "ac-btn" }, btnText) as HTMLButtonElement;
+  const btn = createElement("button", { class: "ac-btn" }, btnText);
   btn.addEventListener("click", () => { onClick(btn); }, { signal });
 
   appendChildren(row, info, btn);

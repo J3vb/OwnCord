@@ -14,6 +14,7 @@ import type { ServerBannerControl } from "@components/ServerBanner";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
 import { createToastContainer } from "@components/Toast";
 import type { ToastContainer } from "@components/Toast";
+import { initToast, teardownToast, showToast } from "@lib/toast";
 import { authStore, clearAuth, updateUser } from "@stores/auth.store";
 import { closeSettings } from "@stores/ui.store";
 import { updatePresence } from "@stores/members.store";
@@ -213,10 +214,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onChangePassword: async (oldPassword, newPassword) => {
         try {
           await api.changePassword(oldPassword, newPassword);
-          toast?.show("Password changed successfully", "success");
+          showToast("Password changed successfully", "success");
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Failed to change password";
-          toast?.show(msg, "error");
+          showToast(msg, "error");
           throw err;
         }
       },
@@ -224,10 +225,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         try {
           const updated = await api.updateProfile({ username });
           updateUser({ username: updated.username });
-          toast?.show("Profile updated", "success");
+          showToast("Profile updated", "success");
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Failed to update profile";
-          toast?.show(msg, "error");
+          showToast(msg, "error");
           throw err;
         }
       },
@@ -235,7 +236,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onDeleteAccount: async (password) => {
         await api.deleteAccount(password);
         clearAuth();
-        toast?.show("Account deleted successfully", "success");
+        showToast("Account deleted successfully", "success");
       },
       onStatusChange: (status) => {
         const userId = getCurrentUserId();
@@ -256,11 +257,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     toast = createToastContainer();
     toast.mount(root);
     children.push(toast);
+    initToast(toast);
 
     // Message loading controller
     msgCtrl = createMessageController({
       api,
-      showError: (msg) => toast?.show(msg, "error"),
+      showError: (msg) => showToast(msg, "error"),
     });
 
     // Reaction controller
@@ -268,7 +270,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       ws,
       reactionsLimiter: limiters.reactions,
       getChannelId: () => channelCtrl?.currentChannelId ?? 0,
-      showError: (msg) => toast?.show(msg, "error"),
+      showError: (msg) => showToast(msg, "error"),
     });
 
     // Channel controller (mount/destroy MessageList, TypingIndicator, MessageInput per channel)
@@ -279,7 +281,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       pendingDeleteManager,
       reactionCtrl: reactionCtrl!,
       typingLimiter: limiters.typing,
-      showToast: (msg, type) => toast?.show(msg, type as "success" | "error" | "info"),
+      showToast: (msg, type) => showToast(msg, type as "success" | "error" | "info"),
       getCurrentUserId,
       slots: {
         messagesSlot: chatAreaResult.slots.messagesSlot,
@@ -291,7 +293,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     });
 
     // Wire voice error callback to toast
-    setVoiceOnError((msg) => toast?.show(msg, "error"));
+    setVoiceOnError((msg) => showToast(msg, "error"));
 
     // Wire remote video callbacks to video grid
     const SCREENSHARE_TILE_ID_OFFSET = 1_000_000;
@@ -383,6 +385,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   function destroy(): void {
     log.info("MainPage destroying");
     try {
+      teardownToast();
       // Full voice cleanup — tears down room, callbacks, ws ref, serverHost.
       // Prevents stale module-level state persisting across logout/reconnect cycles.
       voiceCleanupAll();

@@ -52,6 +52,7 @@ import type { DmChannelPayload } from "./types";
 import { handleVoiceToken } from "@lib/livekitSession";
 import { notifyIncomingMessage } from "./notifications";
 import { createLogger } from "./logger";
+import { ServerMessageType as S } from "./protocolTypes";
 
 const log = createLogger("dispatcher");
 
@@ -85,7 +86,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   // ── Auth ──────────────────────────────────────────────
 
   unsubs.push(
-    ws.on("auth_ok", (payload) => {
+    ws.on(S.AUTH_OK, (payload) => {
       setAuth(
         authStore.getState().token ?? "",
         payload.user,
@@ -96,7 +97,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   );
 
   unsubs.push(
-    ws.on("auth_error", (payload) => {
+    ws.on(S.AUTH_ERROR, (payload) => {
       log.error("Auth failed", { message: payload.message });
       setTransientError(payload.message);
       clearAuth();
@@ -106,7 +107,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   // ── Ready (initial state dump) ────────────────────────
 
   unsubs.push(
-    ws.on("ready", (payload) => {
+    ws.on(S.READY, (payload) => {
       setChannels(payload.channels);
       setRoles(payload.roles ?? []);
       setMembers(payload.members);
@@ -139,14 +140,14 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   // ── DM Channels ─────────────────────────────────────
 
   unsubs.push(
-    ws.on("dm_channel_open", (payload) => {
+    ws.on(S.DM_CHANNEL_OPEN, (payload) => {
       log.info("DM channel opened", { channelId: payload.channel_id });
       addDmChannel(mapDmPayload(payload));
     }),
   );
 
   unsubs.push(
-    ws.on("dm_channel_close", (payload) => {
+    ws.on(S.DM_CHANNEL_CLOSE, (payload) => {
       log.info("DM channel closed", { channelId: payload.channel_id });
       removeDmChannel(payload.channel_id);
     }),
@@ -155,7 +156,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   // ── Chat Messages ─────────────────────────────────────
 
   unsubs.push(
-    ws.on("chat_message", (payload) => {
+    ws.on(S.CHAT_MESSAGE, (payload) => {
       log.debug("chat_message received", {
         id: payload.id,
         channelId: payload.channel_id,
@@ -208,19 +209,19 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   );
 
   unsubs.push(
-    ws.on("chat_edited", (payload) => {
+    ws.on(S.CHAT_EDITED, (payload) => {
       editMessage(payload);
     }),
   );
 
   unsubs.push(
-    ws.on("chat_deleted", (payload) => {
+    ws.on(S.CHAT_DELETED, (payload) => {
       deleteMessage(payload);
     }),
   );
 
   unsubs.push(
-    ws.on("chat_send_ok", (payload, id) => {
+    ws.on(S.CHAT_SEND_OK, (payload, id) => {
       if (id) {
         confirmSend(id, payload.message_id, payload.timestamp);
       }
@@ -230,7 +231,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   // ── Reactions ───────────────────────────────────────────
 
   unsubs.push(
-    ws.on("reaction_update", (payload) => {
+    ws.on(S.REACTION_UPDATE, (payload) => {
       const userId = authStore.getState().user?.id ?? 0;
       updateReaction(payload, userId);
     }),
@@ -239,7 +240,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   // ── Typing ────────────────────────────────────────────
 
   unsubs.push(
-    ws.on("typing", (payload) => {
+    ws.on(S.TYPING, (payload) => {
       setTyping(payload.channel_id, payload.user_id);
     }),
   );
@@ -247,7 +248,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   // ── Presence ──────────────────────────────────────────
 
   unsubs.push(
-    ws.on("presence", (payload) => {
+    ws.on(S.PRESENCE, (payload) => {
       updatePresence(payload.user_id, payload.status);
     }),
   );
@@ -255,19 +256,19 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   // ── Channels ──────────────────────────────────────────
 
   unsubs.push(
-    ws.on("channel_create", (payload) => {
+    ws.on(S.CHANNEL_CREATE, (payload) => {
       addChannel(payload);
     }),
   );
 
   unsubs.push(
-    ws.on("channel_update", (payload) => {
+    ws.on(S.CHANNEL_UPDATE, (payload) => {
       updateChannel(payload);
     }),
   );
 
   unsubs.push(
-    ws.on("channel_delete", (payload) => {
+    ws.on(S.CHANNEL_DELETE, (payload) => {
       // If the deleted channel is the active one, redirect to the first text channel.
       const activeId = channelsStore.select((s) => s.activeChannelId);
       removeChannel(payload.id);
@@ -286,28 +287,28 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   // ── Members ───────────────────────────────────────────
 
   unsubs.push(
-    ws.on("member_join", (payload) => {
+    ws.on(S.MEMBER_JOIN, (payload) => {
       log.info("Member joined", { userId: payload.user.id, username: payload.user.username });
       addMember(payload);
     }),
   );
 
   unsubs.push(
-    ws.on("member_leave", (payload) => {
+    ws.on(S.MEMBER_LEAVE, (payload) => {
       log.info("Member left", { userId: payload.user_id });
       removeMember(payload.user_id);
     }),
   );
 
   unsubs.push(
-    ws.on("member_ban", (payload) => {
+    ws.on(S.MEMBER_BAN, (payload) => {
       log.info("Member banned", { userId: payload.user_id });
       removeMember(payload.user_id);
     }),
   );
 
   unsubs.push(
-    ws.on("member_update", (payload) => {
+    ws.on(S.MEMBER_UPDATE, (payload) => {
       log.info("Member role updated", { userId: payload.user_id, role: payload.role });
       updateMemberRole(payload.user_id, payload.role);
     }),
@@ -316,7 +317,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   // ── Voice ─────────────────────────────────────────────
 
   unsubs.push(
-    ws.on("voice_state", (payload) => {
+    ws.on(S.VOICE_STATE, (payload) => {
       updateVoiceState(payload);
       // Auto-join voice channel if the event is for the current user
       const currentUserId = authStore.getState().user?.id ?? 0;
@@ -327,7 +328,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   );
 
   unsubs.push(
-    ws.on("voice_leave", (payload) => {
+    ws.on(S.VOICE_LEAVE, (payload) => {
       removeVoiceUser(payload);
       // Clear local voice state if the current user was removed (kick/disconnect)
       const currentUserId = authStore.getState().user?.id ?? 0;
@@ -338,19 +339,19 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   );
 
   unsubs.push(
-    ws.on("voice_config", (payload) => {
+    ws.on(S.VOICE_CONFIG, (payload) => {
       setVoiceConfig(payload);
     }),
   );
 
   unsubs.push(
-    ws.on("voice_speakers", (payload) => {
+    ws.on(S.VOICE_SPEAKERS, (payload) => {
       setSpeakers(payload);
     }),
   );
 
   unsubs.push(
-    ws.on("voice_token", (payload) => {
+    ws.on(S.VOICE_TOKEN, (payload) => {
       void handleVoiceToken(payload.token, payload.url, payload.channel_id, payload.direct_url);
     }),
   );
@@ -358,7 +359,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   // ── Server Events ─────────────────────────────────────
 
   unsubs.push(
-    ws.on("server_restart", (payload) => {
+    ws.on(S.SERVER_RESTART, (payload) => {
       log.warn("Server restarting", {
         reason: payload.reason,
         delaySeconds: payload.delay_seconds,
@@ -368,7 +369,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   );
 
   unsubs.push(
-    ws.on("error", (payload) => {
+    ws.on(S.ERROR, (payload) => {
       log.error("Server error", {
         code: payload.code,
         message: payload.message,

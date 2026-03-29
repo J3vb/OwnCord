@@ -93,20 +93,20 @@ export function createFileUpload(options: FileUploadOptions): FileUploadComponen
     dropzone = createElement("div", { class: "file-upload__dropzone file-upload__dropzone--hidden" });
     appendChildren(dropzone, createElement("span", { class: "file-upload__droptext" }, "Drop files here"));
 
-    fileInput = createElement("input", { class: "file-upload__input", type: "file" }) as HTMLInputElement;
+    fileInput = createElement("input", { class: "file-upload__input", type: "file" });
     fileInput.style.display = "none";
 
     preview = createElement("div", { class: "file-upload__preview file-upload__preview--hidden" });
-    thumb = createElement("img", { class: "file-upload__thumb" }) as HTMLImageElement;
+    thumb = createElement("img", { class: "file-upload__thumb" });
     thumb.style.display = "none";
     thumb.alt = "";
-    nameSpan = createElement("span", { class: "file-upload__name" }) as HTMLSpanElement;
-    sizeSpan = createElement("span", { class: "file-upload__size" }) as HTMLSpanElement;
+    nameSpan = createElement("span", { class: "file-upload__name" });
+    sizeSpan = createElement("span", { class: "file-upload__size" });
     const progressContainer = createElement("div", { class: "file-upload__progress" });
     progressBar = createElement("div", { class: "file-upload__progress-bar" });
     progressBar.style.width = "0%";
     appendChildren(progressContainer, progressBar);
-    cancelBtn = createElement("button", { class: "file-upload__cancel", type: "button" }) as HTMLButtonElement;
+    cancelBtn = createElement("button", { class: "file-upload__cancel", type: "button" });
     cancelBtn.appendChild(createIcon("x", 14));
     appendChildren(preview, thumb, nameSpan, sizeSpan, progressContainer, cancelBtn);
 

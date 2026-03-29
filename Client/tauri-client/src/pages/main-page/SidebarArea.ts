@@ -99,7 +99,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   const sidebarWrapper = createElement("div", {
     class: "unified-sidebar",
     "data-testid": "unified-sidebar",
-  }) as HTMLDivElement;
+  });
 
   // ---------------------------------------------------------------------------
   // Server header
@@ -121,7 +121,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   serverHeader.appendChild(serverInfoCol);
 
   // Invite button in the server header (proper styled button)
-  const headerInviteCtrl = createInviteManagerController({ api, getRoot, getToast });
+  const headerInviteCtrl = createInviteManagerController({ api, getRoot });
   const headerInviteBtn = createElement("button", {
     class: "sidebar-invite-btn",
     title: "Invite people",

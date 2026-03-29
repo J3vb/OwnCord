@@ -11,12 +11,14 @@ const {
   mockInviteManagerDestroy,
   mockPinnedMessagesMount,
   mockPinnedMessagesDestroy,
+  mockShowToast,
 } = vi.hoisted(() => ({
   mockLogError: vi.fn(),
   mockInviteManagerMount: vi.fn(),
   mockInviteManagerDestroy: vi.fn(),
   mockPinnedMessagesMount: vi.fn(),
   mockPinnedMessagesDestroy: vi.fn(),
+  mockShowToast: vi.fn(),
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -51,6 +53,12 @@ vi.mock("@components/PinnedMessages", () => ({
 
 vi.mock("@stores/channels.store", () => ({
   setActiveChannel: vi.fn(),
+}));
+
+vi.mock("@lib/toast", () => ({
+  initToast: vi.fn(),
+  teardownToast: vi.fn(),
+  showToast: mockShowToast,
 }));
 
 // ---------------------------------------------------------------------------
@@ -123,7 +131,7 @@ describe("createInviteManagerController", () => {
     const controller = createInviteManagerController({
       api: api as never,
       getRoot: () => root,
-      getToast: () => toast as never,
+
     });
 
     await controller.open();
@@ -141,7 +149,7 @@ describe("createInviteManagerController", () => {
     const controller = createInviteManagerController({
       api: api as never,
       getRoot: () => root,
-      getToast: () => toast as never,
+
     });
 
     await controller.open();
@@ -165,7 +173,7 @@ describe("createInviteManagerController", () => {
     const controller = createInviteManagerController({
       api: api as never,
       getRoot: () => root,
-      getToast: () => toast as never,
+
     });
 
     await controller.open();
@@ -187,12 +195,12 @@ describe("createInviteManagerController", () => {
     const controller = createInviteManagerController({
       api: api as never,
       getRoot: () => root,
-      getToast: () => toast as never,
+
     });
 
     await controller.open();
 
-    expect(toast.show).toHaveBeenCalledWith("Failed to load invites", "error");
+    expect(mockShowToast).toHaveBeenCalledWith("Failed to load invites", "error");
   });
 });
 
@@ -216,7 +224,7 @@ describe("createPinnedPanelController", () => {
     const controller = createPinnedPanelController({
       api: api as never,
       getRoot: () => root,
-      getToast: () => toast as never,
+
       getCurrentChannelId: () => 42,
     });
 
@@ -235,7 +243,7 @@ describe("createPinnedPanelController", () => {
     const controller = createPinnedPanelController({
       api: api as never,
       getRoot: () => root,
-      getToast: () => toast as never,
+
       getCurrentChannelId: () => 42,
     });
 
@@ -251,7 +259,7 @@ describe("createPinnedPanelController", () => {
 
     // Wait for the async error handling to complete
     await vi.waitFor(() => {
-      expect(toast.show).toHaveBeenCalledWith("Failed to unpin message", "error");
+      expect(mockShowToast).toHaveBeenCalledWith("Failed to unpin message", "error");
     });
 
     // Panel should NOT have been destroyed (still open)
@@ -265,7 +273,7 @@ describe("createPinnedPanelController", () => {
     const controller = createPinnedPanelController({
       api: api as never,
       getRoot: () => root,
-      getToast: () => toast as never,
+
       getCurrentChannelId: () => 42,
     });
 
@@ -283,7 +291,7 @@ describe("createPinnedPanelController", () => {
     });
 
     // No error toast should be shown
-    expect(toast.show).not.toHaveBeenCalled();
+    expect(mockShowToast).not.toHaveBeenCalled();
   });
 
   it("onJumpToMessage calls provided scroll callback and closes panel", async () => {
@@ -294,7 +302,7 @@ describe("createPinnedPanelController", () => {
     const controller = createPinnedPanelController({
       api: api as never,
       getRoot: () => root,
-      getToast: () => toast as never,
+
       getCurrentChannelId: () => 42,
       onJumpToMessage: mockScrollToMessage,
     });
@@ -319,7 +327,7 @@ describe("createPinnedPanelController", () => {
     const controller = createPinnedPanelController({
       api: api as never,
       getRoot: () => root,
-      getToast: () => toast as never,
+
       getCurrentChannelId: () => 42,
       onJumpToMessage: mockScrollToMessage,
     });
@@ -333,7 +341,7 @@ describe("createPinnedPanelController", () => {
     opts.onJumpToMessage(999);
 
     expect(mockScrollToMessage).toHaveBeenCalledWith(999);
-    expect(toast.show).toHaveBeenCalledWith(
+    expect(mockShowToast).toHaveBeenCalledWith(
       expect.stringContaining("not in"),
       "info",
     );
@@ -350,12 +358,12 @@ describe("createPinnedPanelController", () => {
     const controller = createPinnedPanelController({
       api: api as never,
       getRoot: () => root,
-      getToast: () => toast as never,
+
       getCurrentChannelId: () => 42,
     });
 
     await controller.toggle();
 
-    expect(toast.show).toHaveBeenCalledWith("Failed to load pinned messages", "error");
+    expect(mockShowToast).toHaveBeenCalledWith("Failed to load pinned messages", "error");
   });
 });

@@ -292,8 +292,8 @@ export function createServerPanel(
     }
 
     function handleSave(): void {
-      const name = (nameInput as HTMLInputElement).value.trim();
-      const addr = (hostAddrInput as HTMLInputElement).value.trim();
+      const name = nameInput.value.trim();
+      const addr = hostAddrInput.value.trim();
       if (!name || !addr) return;
       onAddProfile!(name, addr);
       closeModal();
@@ -317,7 +317,7 @@ export function createServerPanel(
     // Mount onto the panel's closest connect-page root
     const root = panelEl.closest(".connect-page") ?? document.body;
     root.appendChild(overlay);
-    (nameInput as HTMLInputElement).focus();
+    nameInput.focus();
   }
 
   // ---------------------------------------------------------------------------

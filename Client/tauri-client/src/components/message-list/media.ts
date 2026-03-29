@@ -259,7 +259,7 @@ export function openImageLightbox(src: string, alt: string): void {
   const overlay = createElement("div", { class: "image-lightbox" });
 
   const imgWrap = createElement("div", { class: "image-lightbox-wrap" });
-  const img = createElement("img", { src, alt }) as HTMLImageElement;
+  const img = createElement("img", { src, alt });
   imgWrap.appendChild(img);
   overlay.appendChild(imgWrap);
 

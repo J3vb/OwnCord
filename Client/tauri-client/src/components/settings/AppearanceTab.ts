@@ -108,7 +108,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     placeholder: "5865f2",
     value: currentAccent.replace("#", ""),
     style: "width:120px",
-  }) as HTMLInputElement;
+  });
 
   for (const color of ACCENT_PRESETS) {
     const swatch = createElement("div", {

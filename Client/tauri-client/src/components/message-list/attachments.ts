@@ -236,7 +236,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
       const img = createElement("img", {
         src: cached,
         alt: att.filename,
-      }) as HTMLImageElement;
+      });
       attachLightbox(img);
       img.addEventListener("load", () => {
         clearReservation();
@@ -253,7 +253,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
           const img = createElement("img", {
             src: dataUrl,
             alt: att.filename,
-          }) as HTMLImageElement;
+          });
           attachLightbox(img);
           img.addEventListener("load", () => {
             clearReservation();

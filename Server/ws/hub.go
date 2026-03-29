@@ -11,6 +11,7 @@ import (
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 )
 
 // broadcastMsg is an internal message queued for delivery.
@@ -33,6 +34,8 @@ type Hub struct {
 	stopOnce     sync.Once
 	livekit      *LiveKitClient
 	lkProcess    *LiveKitProcess
+	registry     *HandlerRegistry
+	permChecker  *permissions.Checker
 
 	seq       uint64           // atomic monotonic sequence counter
 	replayBuf *EventRingBuffer // recent broadcast events for reconnection replay
@@ -47,6 +50,13 @@ type Hub struct {
 // NewHub creates a Hub ready to be started with Run.
 // It also initializes the settings cache from the database.
 func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
+	reg := NewHandlerRegistry()
+	registerChatHandlers(reg)
+	registerPresenceHandlers(reg)
+	registerReactionHandlers(reg)
+	registerVoiceHandlers(reg)
+	registerPingHandler(reg)
+
 	h := &Hub{
 		clients:      make(map[int64]*Client),
 		db:           database,
@@ -56,6 +66,8 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
 		unregister:   make(chan *Client, 32),
 		stop:         make(chan struct{}),
 		replayBuf:    NewEventRingBuffer(1000),
+		registry:     reg,
+		permChecker:  permissions.NewChecker(database),
 		settingsName: "OwnCord Server",
 		settingsMotd: "Welcome!",
 	}

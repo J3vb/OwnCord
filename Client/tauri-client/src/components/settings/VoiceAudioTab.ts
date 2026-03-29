@@ -194,7 +194,7 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
   const qualitySelect = createElement("select", {
     class: "form-input",
     style: "width:100%;margin-bottom:16px",
-  }) as HTMLSelectElement;
+  });
   const qualityOptions: Array<[string, string]> = [
     ["low", "Low (360p cam / 720p screen)"],
     ["medium", "Medium (720p)"],
@@ -318,7 +318,7 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
         previewVideo.srcObject = stream;
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Camera unavailable";
-        previewErrorEl = createElement("div", { class: "setting-desc" }, msg) as HTMLDivElement;
+        previewErrorEl = createElement("div", { class: "setting-desc" }, msg);
         previewWrap.appendChild(previewErrorEl);
       }
     })();

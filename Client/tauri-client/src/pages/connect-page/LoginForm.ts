@@ -180,15 +180,15 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     // Host
     const hostGroup = buildFormGroup("host", "Server Address", "text", "localhost:8443");
-    hostInput = qs("input", hostGroup) as HTMLInputElement;
+    hostInput = qs("input", hostGroup)!;
 
     // Username
     const usernameGroup = buildFormGroup("username", "Username", "text", "");
-    usernameInput = qs("input", usernameGroup) as HTMLInputElement;
+    usernameInput = qs("input", usernameGroup)!;
 
     // Password
     const passwordGroup = buildFormGroup("password", "Password", "password", "");
-    passwordInput = qs("input", passwordGroup) as HTMLInputElement;
+    passwordInput = qs("input", passwordGroup)!;
 
     // Remember password checkbox
     const rememberGroup = createElement("div", { class: "form-group remember-password-group" });
@@ -205,7 +205,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     // Invite code (register only, hidden by default)
     inviteGroup = buildFormGroup("invite", "Invite Code", "text", "");
     inviteGroup.classList.add("form-group--hidden");
-    inviteInput = qs("input", inviteGroup) as HTMLInputElement;
+    inviteInput = qs("input", inviteGroup)!;
 
     // Submit button
     submitBtn = createElement("button", {
@@ -220,7 +220,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     // Toggle mode link
     const formSwitch = createElement("div", { class: "form-switch" });
-    toggleModeBtn = createElement("a", {}, "Need an account? Register") as HTMLAnchorElement;
+    toggleModeBtn = createElement("a", {}, "Need an account? Register");
     formSwitch.appendChild(toggleModeBtn);
 
     appendChildren(form, hostGroup, usernameGroup, passwordGroup, rememberGroup, inviteGroup, submitBtn, formSwitch);

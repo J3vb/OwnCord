@@ -176,7 +176,7 @@ export function createVideoGrid(): VideoGridComponent {
         value: "100",
         class: "tile-volume-slider",
         "aria-label": "Volume",
-      }) as HTMLInputElement;
+      });
 
       volumeSlider.addEventListener("input", () => {
         currentVolume = Number(volumeSlider.value);
@@ -198,7 +198,7 @@ export function createVideoGrid(): VideoGridComponent {
       const muteBtn = createElement("button", {
         class: "tile-mute-btn",
         "aria-label": "Mute",
-      }) as HTMLButtonElement;
+      });
       muteBtn.appendChild(volumeIcon());
 
       muteBtn.addEventListener("click", () => {

@@ -68,7 +68,7 @@ export function createEditChannelModal(
       type: "text",
       value: channelName,
       "data-testid": "edit-channel-name-input",
-    }) as HTMLInputElement;
+    });
     nameInput.value = channelName;
     appendChildren(nameGroup, nameLabel, nameInput);
 
