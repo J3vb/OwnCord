@@ -82,7 +82,7 @@ test.describe("Settings — Account Tab", () => {
   });
 
   test("shows account avatar", async ({ page }) => {
-    const avatar = page.locator(".ac-avatar");
+    const avatar = page.locator(".account-avatar-large");
     await expect(avatar).toBeVisible();
   });
 

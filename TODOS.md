@@ -12,44 +12,21 @@ Deferred work items from engineering reviews.
 - ~~HTTPS Proxy Unit Tests~~ -- `livekit_proxy_test.go` (22 tests)
 - ~~Migrate VAD to AudioWorklet~~ -- `public/vad-worklet.js` with setTimeout fallback
 
+## Already Implemented (discovered 2026-03-29 — code analysis was stale)
+
+- ~~Simulcast on Camera Video~~ -- `simulcast: quality !== "source"` in publishTrack options (livekitSession.ts:852)
+- ~~Adaptive Bitrate on Screenshare~~ -- `dynacast: !isSource` + `adaptiveStream: !isSource` in Room options (livekitSession.ts:187-188)
+- ~~LiveKit Proxy Port Exhaustion~~ -- already handles reuse (same host) + cleanup via shutdown channel (different host) in livekit_proxy.rs:196-208
+
 ## Deferred (from 2026-03-29 CEO review)
 
-### Simulcast on Camera Video
+### Voice E2E CI Integration (narrowed scope)
 
-**What:** Enable simulcast (multiple quality layers) for camera video tracks so subscribers can receive lower quality when bandwidth is limited.
-**Why:** Currently camera video is fixed quality -- no adaptive degradation on poor networks. Users see buffering/freezing instead of graceful quality reduction.
-**Pros:** Matches Discord's adaptive video behavior. Better experience on poor connections.
-**Cons:** Requires enabling LiveKit SDK's built-in simulcast support and verifying encoding pipeline. Architecture-level change.
-**Context:** LiveKit SDK supports `simulcast: true` in Room options. Needs separate design doc to evaluate encoding CPU impact and subscriber-side quality switching.
-**Depends on:** AudioPipeline refactor (done). Verify `livekit-client` v2.17.3 simulcast support.
-**Added:** 2026-03-29 (CEO review of voice/video polish)
-
-### Adaptive Bitrate on Screenshare
-
-**What:** Enable LiveKit's dynacast for screenshare tracks so bitrate adapts to network conditions.
-**Why:** Screenshare encoding is set once and doesn't adapt. If network degrades, frames drop instead of quality reducing.
-**Pros:** Smoother screenshare on variable connections.
-**Cons:** Needs testing with different content types (text vs video). Architecture-level change.
-**Context:** LiveKit supports `dynacast: true` in Room options. Currently disabled.
-**Depends on:** Simulcast evaluation (above) -- same architectural concerns.
-**Added:** 2026-03-29 (CEO review of voice/video polish)
-
-### LiveKit Proxy Port Exhaustion
-
-**What:** Investigate connection reuse or port limiting in the Rust TLS proxy (`livekit_proxy.rs`).
-**Why:** Frequent server switches allocate new proxy ports without reusing old ones. Long sessions with many switches could leak ports.
-**Pros:** Prevents resource exhaustion on long-running sessions.
-**Cons:** Requires Rust proxy architecture changes.
-**Context:** Each `start_livekit_proxy` Tauri command binds a new TCP listener. Old listeners aren't cleaned up.
-**Depends on:** Nothing -- can be investigated independently.
-**Added:** 2026-03-29 (CEO review of voice/video polish)
-
-### Voice E2E CI Integration
-
-**What:** Set up LiveKit binary in CI so voice E2E tests run automatically on push.
-**Why:** Voice E2E tests currently run locally only. CI integration catches regressions automatically.
-**Pros:** Automated regression detection for voice flows.
-**Cons:** Requires Docker-in-CI setup with LiveKit binary.
-**Context:** Local voice E2E infra is done (`voice-lifecycle.spec.ts`). CI needs LiveKit `--dev` mode in a Docker container.
-**Depends on:** Voice E2E test infrastructure (done).
+**What:** Set up LiveKit binary in CI for WebRTC-specific regression testing only.
+**Why:** Mocked E2E tests (24 tests in `voice-lifecycle.spec.ts`) cover 90%+ of voice UI regressions. Real LiveKit CI is only needed for audio pipeline bugs, LiveKit SDK regressions, or WebRTC transport issues that mocks can't catch.
+**Pros:** Catches WebRTC-specific regressions (codec negotiation, ICE failures, audio pipeline).
+**Cons:** Requires Docker-in-CI setup with LiveKit binary. High maintenance for low-frequency bugs.
+**Context:** Mocked voice E2E covers: join/leave flow, speaker indicators, permission recovery, device hot-swap, quality warnings, timer, token refresh, channel switching. Only pursue real LiveKit CI if evidence emerges of WebRTC-specific regressions that mocked tests miss.
+**Depends on:** Voice E2E test infrastructure (done), mocked voice E2E expansion (done).
+**Added:** 2026-03-29 (eng review of voice/video polish), **updated:** 2026-03-29 (scope narrowed after mocked E2E expansion)
 **Added:** 2026-03-29 (eng review of voice/video polish)

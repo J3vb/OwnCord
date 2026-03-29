@@ -124,8 +124,12 @@ test.describe("Connect Page", () => {
     const logo = page.locator(".form-logo");
     await expect(logo).toBeVisible();
 
-    const logoMark = page.locator(".form-logo-mark");
-    await expect(logoMark).toBeVisible();
+    // The logo contains an SVG with the "OC" text and an h1 with "OwnCord"
+    const logoSvg = logo.locator("svg.oc-logo");
+    await expect(logoSvg).toBeVisible();
+
+    const logoTitle = logo.locator("h1");
+    await expect(logoTitle).toHaveText("OwnCord");
   });
 
   test("status bar exists at bottom of form", async ({ page }) => {

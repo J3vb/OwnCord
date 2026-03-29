@@ -88,7 +88,13 @@ test.describe("Message Delete Flow", () => {
   test("clicking Delete marks the message as deleted", async ({ page }) => {
     const ownMessage = page.locator("[data-testid='message-101']");
     await ownMessage.hover();
-    await page.locator("[data-testid='msg-delete-101']").click();
+    const deleteBtn = page.locator("[data-testid='msg-delete-101']");
+
+    // Delete uses a double-click confirmation pattern:
+    // first click = "pending" (shows toast "Click delete again to confirm"),
+    // second click = "confirmed" (sends chat_delete WS message).
+    await deleteBtn.click();
+    await deleteBtn.click();
 
     // Soft-delete: message stays in DOM but shows "[message deleted]"
     await expect(

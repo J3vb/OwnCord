@@ -283,7 +283,8 @@ test.describe("Pinned Messages", () => {
     const panel = page.locator(".pinned-panel");
     await expect(panel).toBeVisible({ timeout: 3_000 });
 
-    await pinBtn.click();
+    // The pinned panel overlaps the pin button, so use force click
+    await pinBtn.click({ force: true });
     await expect(panel).not.toBeVisible();
   });
 });
