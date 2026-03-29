@@ -19,9 +19,10 @@ import (
 	"github.com/owncord/server/ws"
 )
 
-// NewRouter builds and returns the fully configured HTTP handler and the
-// WebSocket hub (so the caller can call hub.GracefulStop on shutdown).
-func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.RingBuffer) (http.Handler, *ws.Hub) {
+// NewRouter builds and returns the fully configured HTTP handler, the
+// WebSocket hub (so the caller can call hub.GracefulStop on shutdown), and a
+// cleanup function that stops background goroutines (e.g. rate-limiter cleanup).
+func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.RingBuffer) (http.Handler, *ws.Hub, func()) {
 	r := chi.NewRouter()
 
 	// Middleware stack.
@@ -71,7 +72,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	MountInviteRoutes(r, database)
 
 	// Channel and message REST routes.
-	MountChannelRoutes(r, database)
+	MountChannelRoutes(r, database, limiter, cfg.Server.TrustedProxies)
 
 	// DM REST routes are mounted after hub creation (below) so the hub can
 	// be passed as a DMBroadcaster for real-time close events.
@@ -173,7 +174,19 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Client auto-update endpoint (unauthenticated).
 	MountClientUpdateRoute(r, u)
 
-	return r, hub
+	// Issue 15: Warn if AllowedOrigins contains wildcard.
+	for _, o := range cfg.Server.AllowedOrigins {
+		if o == "*" {
+			slog.Warn("AllowedOrigins contains wildcard '*' — consider restricting to specific origins for production use")
+			break
+		}
+	}
+
+	cleanup := func() {
+		close(limiterStopCh)
+	}
+
+	return r, hub, cleanup
 }
 
 // serverStartTime records when the process started; used for uptime in /health.

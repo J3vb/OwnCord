@@ -35,8 +35,12 @@ func newAuthTestDB(t *testing.T) *db.DB {
 
 // buildAuthRouter returns a chi router with auth routes mounted on /api/v1/auth.
 func buildAuthRouter(database *db.DB, limiter *auth.RateLimiter) http.Handler {
+	return buildAuthRouterWithProxies(database, limiter, nil)
+}
+
+func buildAuthRouterWithProxies(database *db.DB, limiter *auth.RateLimiter, trustedProxies []string) http.Handler {
 	r := chi.NewRouter()
-	api.MountAuthRoutes(r, database, limiter, nil)
+	api.MountAuthRoutes(r, database, limiter, trustedProxies)
 	return r
 }
 
@@ -169,6 +173,34 @@ func TestRegister_InviteUsedUp(t *testing.T) {
 	}
 }
 
+func TestRegister_DuplicateUsername_DoesNotConsumeInvite(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	ownerID, _ := database.CreateUser("owner4", "hash", 1)
+	_, _ = database.CreateUser("takenuser", "hash", 4)
+	code, _ := database.CreateInvite(ownerID, 1, nil)
+
+	duplicate := postJSON(t, router, "/api/v1/auth/register", map[string]string{
+		"username":    "takenuser",
+		"password":    "securePass1",
+		"invite_code": code,
+	})
+	if duplicate.Code != http.StatusBadRequest {
+		t.Fatalf("duplicate username status = %d, want 400; body = %s", duplicate.Code, duplicate.Body.String())
+	}
+
+	success := postJSON(t, router, "/api/v1/auth/register", map[string]string{
+		"username":    "freshuser",
+		"password":    "securePass2",
+		"invite_code": code,
+	})
+	if success.Code != http.StatusCreated {
+		t.Fatalf("invite should remain usable after failed registration, status = %d, want 201; body = %s", success.Code, success.Body.String())
+	}
+}
+
 func TestRegister_MissingFields(t *testing.T) {
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
@@ -254,6 +286,31 @@ func TestLogin_UnknownUser(t *testing.T) {
 
 	if rr.Code != http.StatusUnauthorized {
 		t.Errorf("Login unknown user status = %d, want 401", rr.Code)
+	}
+}
+
+func TestLogin_LockoutUsesTrustedForwardedIP(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouterWithProxies(database, limiter, []string{"127.0.0.0/8"})
+
+	for i := 0; i < 10; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader([]byte(`{"username":"nobody","password":"wrongpass123"}`)))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Forwarded-For", "198.51.100.10")
+		req.RemoteAddr = "127.0.0.1:9999"
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader([]byte(`{"username":"nobody","password":"wrongpass123"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-For", "198.51.100.11")
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("different forwarded client should not inherit another client's lockout, got %d", rr.Code)
 	}
 }
 

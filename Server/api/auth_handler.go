@@ -68,7 +68,7 @@ func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, t
 			Post("/register", handleRegister(database))
 
 		r.With(RateLimitMiddleware(loginLimiter, 60, time.Minute, trustedProxies)).
-			Post("/login", handleLogin(database, limiter))
+			Post("/login", handleLogin(database, limiter, trustedProxies))
 
 		r.With(AuthMiddleware(database)).
 			Post("/logout", handleLogout(database))
@@ -105,6 +105,15 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 			return
 		}
 
+		// Validate username format (length, no control/invisible chars).
+		if err := auth.ValidateUsername(req.Username); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error:   "INVALID_INPUT",
+				Message: err.Error(),
+			})
+			return
+		}
+
 		// Validate password strength before anything else.
 		if err := auth.ValidatePasswordStrength(req.Password); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{
@@ -125,21 +134,18 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		// Validate and consume invite atomically to prevent TOCTOU races.
-		if err := database.UseInviteAtomic(req.InviteCode); err != nil {
-			writeJSON(w, http.StatusBadRequest, genericAuthError)
-			return
-		}
-
-		// Create user with default Member role.
-		uid, err := database.CreateUser(req.Username, hash, int(permissions.MemberRoleID))
+		// Atomically consume the invite and create the user so failed
+		// registrations do not burn a valid invite code.
+		uid, err := database.CreateUserWithInvite(req.Username, hash, int(permissions.MemberRoleID), req.InviteCode)
 		if err != nil {
 			// UNIQUE constraint violation → duplicate username → 400.
 			// Any other DB error → 500.
-			if strings.Contains(err.Error(), "UNIQUE constraint") {
+			if db.IsUniqueConstraintError(err) {
+				writeJSON(w, http.StatusBadRequest, genericAuthError)
+			} else if errors.Is(err, db.ErrNotFound) {
 				writeJSON(w, http.StatusBadRequest, genericAuthError)
 			} else {
-				slog.Error("CreateUser failed", "err", err, "username", req.Username)
+				slog.Error("CreateUserWithInvite failed", "err", err, "username", req.Username)
 				writeJSON(w, http.StatusInternalServerError, errorResponse{
 					Error:   "SERVER_ERROR",
 					Message: "registration failed — please try again",
@@ -189,7 +195,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 }
 
 // handleLogin processes POST /api/v1/auth/login.
-func handleLogin(database *db.DB, limiter *auth.RateLimiter) http.HandlerFunc {
+func handleLogin(database *db.DB, limiter *auth.RateLimiter, trustedProxies []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req loginRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -212,7 +218,7 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter) http.HandlerFunc {
 			return
 		}
 
-		ip := clientIP(r)
+		ip := clientIPWithProxies(r, trustedProxies)
 
 		// Check lockout first.
 		lockKey := "login_lock:" + ip

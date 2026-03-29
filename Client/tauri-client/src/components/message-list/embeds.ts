@@ -10,7 +10,7 @@ import {
 import { observeMedia } from "@lib/media-visibility";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { createLogger } from "@lib/logger";
-import { isSafeUrl } from "./attachments";
+import { isSafeUrl, isTrustedServerUrl } from "./attachments";
 
 const log = createLogger("embeds");
 
@@ -82,21 +82,58 @@ export function parseOgTags(html: string): OgMeta {
 
 /** Block link previews to private/internal IP ranges to prevent SSRF.
  *  The connected OwnCord server host is NOT blocked (it's trusted). */
-function isPrivateHost(hostname: string): boolean {
-  // Block localhost variants
-  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]") return true;
-  // Block link-local, RFC1918, and cloud metadata endpoints
-  if (hostname.startsWith("10.") || hostname.startsWith("192.168.") || hostname === "169.254.169.254") return true;
-  if (hostname.startsWith("172.")) {
-    const second = parseInt(hostname.split(".")[1] ?? "", 10);
-    if (second >= 16 && second <= 31) return true;
+function parseIPv4Literal(hostname: string): readonly [number, number, number, number] | null {
+  const parts = hostname.split(".");
+  if (parts.length !== 4) return null;
+
+  const octets = parts.map((part) => {
+    if (!/^\d+$/.test(part)) return NaN;
+    return Number(part);
+  });
+  if (octets.some((octet) => Number.isNaN(octet) || octet < 0 || octet > 255)) {
+    return null;
   }
+
+  return [octets[0], octets[1], octets[2], octets[3]];
+}
+
+function isPrivateHost(hostname: string): boolean {
+  const h = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  const isIPv6Literal = h.includes(":");
+  const ipv4 = parseIPv4Literal(h);
+
+  // Block localhost variants and unspecified address
+  if (h === "localhost") return true;
+
+  if (isIPv6Literal) {
+    if (h === "::" || h === "::1") return true;
+    // IPv6 private ranges: fc00::/7 (fc.. and fd..), link-local fe80::/10.
+    if (h.startsWith("fc") || h.startsWith("fd") || /^fe[89ab]/.test(h)) return true;
+    // IPv4-mapped IPv6 addresses (::ffff:x.x.x.x).
+    if (h.startsWith("::ffff:")) return true;
+    return false;
+  }
+
+  if (ipv4 !== null) {
+    const [first, second] = ipv4;
+    // Block loopback, unspecified, RFC1918, link-local, CGNAT, and benchmarking ranges.
+    if (first === 0 || first === 10 || first === 127) return true;
+    if (first === 169 && second === 254) return true;
+    if (first === 172 && second >= 16 && second <= 31) return true;
+    if (first === 192 && second === 168) return true;
+    if (first === 100 && second >= 64 && second <= 127) return true;
+    if (first === 198 && (second === 18 || second === 19)) return true;
+  }
+
   return false;
 }
 
 function isBlockedForPreview(url: string): boolean {
   try {
     const parsed = new URL(url);
+    if (isTrustedServerUrl(parsed.toString())) {
+      return false;
+    }
     return isPrivateHost(parsed.hostname);
   } catch {
     return true; // Malformed URLs are blocked
@@ -129,11 +166,14 @@ function fetchOgMeta(url: string): Promise<OgMeta> {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 5000);
-      const res = await tauriFetch(url, {
+      const fetchOpts: RequestInit = {
         signal: controller.signal,
         headers: { "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)" },
-        danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
-      } as RequestInit);
+      };
+      if (isTrustedServerUrl(url)) {
+        fetchOpts.danger = { acceptInvalidCerts: true, acceptInvalidHostnames: false };
+      }
+      const res = await tauriFetch(url, fetchOpts);
       clearTimeout(timer);
 
       if (!res.ok) {
@@ -247,7 +287,7 @@ export function applyOgMeta(
         imgSrc = `${base.origin}${imgSrc}`;
       } catch { /* keep as-is */ }
     }
-    if (isSafeUrl(imgSrc)) {
+    if (isSafeUrl(imgSrc) && !isBlockedForPreview(imgSrc)) {
       const isGif = imgSrc.toLowerCase().endsWith(".gif");
       const attrs: Record<string, string> = {
         class: "msg-embed-link-img",
@@ -263,8 +303,8 @@ export function applyOgMeta(
         imageWrap.style.display = "none";
       });
       if (isGif) {
-        (img as HTMLImageElement).addEventListener("load", () => {
-          observeMedia(img as HTMLImageElement, imgSrc, imageWrap);
+        (img).addEventListener("load", () => {
+          observeMedia(img, imgSrc, imageWrap);
         }, { once: true });
       }
       imageWrap.appendChild(img);

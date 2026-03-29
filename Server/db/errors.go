@@ -1,6 +1,9 @@
 package db
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
 
 // Sentinel errors for the db package. Use errors.Is() to check.
 var (
@@ -21,3 +24,10 @@ var (
 	// without an administrator.
 	ErrLastAdmin = errors.New("last admin cannot be deleted")
 )
+
+// IsUniqueConstraintError reports whether err is a SQLite UNIQUE constraint
+// violation. This centralizes the fragile string check so callers don't
+// scatter strings.Contains calls throughout the codebase.
+func IsUniqueConstraintError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint")
+}

@@ -5,7 +5,6 @@
 
 import {
   createElement,
-  setText,
   appendChildren,
 } from "@lib/dom";
 import { createIcon } from "@lib/icons";
@@ -27,7 +26,7 @@ let _serverHost: string | null = null;
 
 /** Set the server host (called once from MainPage on connect). */
 export function setServerHost(host: string): void {
-  _serverHost = host;
+  _serverHost = host.toLowerCase();
 }
 
 /** Resolve a potentially relative URL to a full URL using the server host. */
@@ -66,8 +65,38 @@ export function isSafeUrl(url: string): boolean {
 // Image cache: memory + IndexedDB for persistence across restarts
 // ---------------------------------------------------------------------------
 
-/** In-memory cache for instant re-render. */
+/** In-memory cache for instant re-render (LRU eviction at CACHE_MAX). */
 const memoryCache = new Map<string, string>();
+const CACHE_MAX = 200;
+
+/** Safe MIME types allowed in data: URIs — blocks script injection via crafted Content-Type. */
+const SAFE_MIME_TYPES = new Set([
+  "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml",
+  "image/avif", "image/bmp", "video/mp4", "video/webm", "audio/mpeg",
+  "audio/ogg", "audio/wav", "application/pdf",
+]);
+
+/** Sanitize a Content-Type header value for use in a data: URI. */
+function sanitizeContentType(raw: string): string {
+  const mime = raw.split(";")[0]?.trim() ?? "";
+  return SAFE_MIME_TYPES.has(mime) ? raw : "application/octet-stream";
+}
+
+/** Check if a URL points to the configured OwnCord server. */
+function isServerUrl(url: string): boolean {
+  if (_serverHost === null) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.host === _serverHost;
+  } catch {
+    return false;
+  }
+}
+
+/** Report whether a URL targets the configured OwnCord server host. */
+export function isTrustedServerUrl(url: string): boolean {
+  return isServerUrl(url);
+}
 
 /** In-flight fetch promises to prevent duplicate concurrent requests. */
 const inFlight = new Map<string, Promise<string | null>>();
@@ -151,6 +180,10 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
     // 3. IndexedDB cache (persists across restarts)
     const idbCached = await idbGet(url);
     if (idbCached !== null) {
+      if (memoryCache.size >= CACHE_MAX) {
+        const firstKey = memoryCache.keys().next().value;
+        if (firstKey !== undefined) memoryCache.delete(firstKey);
+      }
       memoryCache.set(url, idbCached);
       return idbCached;
     }
@@ -162,17 +195,24 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
     // chat messages containing internal URLs. Mitigated by: (1) isSafeUrl only allows
     // http/https, (2) responses are only used as image data, not executed.
     try {
-      const res = await tauriFetch(url, {
-        danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
-      } as RequestInit);
+      const useInsecure = isServerUrl(url);
+      const fetchOpts: RequestInit = useInsecure
+        ? { danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } } as RequestInit
+        : {};
+      const res = await tauriFetch(url, fetchOpts);
       if (!res.ok) return null;
 
-      const contentType = res.headers.get("content-type") ?? "image/png";
+      const rawCt = res.headers.get("content-type") ?? "";
+      const contentType = sanitizeContentType(rawCt);
       const buffer = await res.arrayBuffer();
       const base64 = uint8ToBase64(new Uint8Array(buffer));
       const dataUrl = `data:${contentType};base64,${base64}`;
 
-      // Store in both caches
+      // Store in both caches (LRU eviction)
+      if (memoryCache.size >= CACHE_MAX) {
+        const firstKey = memoryCache.keys().next().value;
+        if (firstKey !== undefined) memoryCache.delete(firstKey);
+      }
       memoryCache.set(url, dataUrl);
       void idbPut(url, dataUrl);
 
@@ -300,10 +340,12 @@ async function downloadFile(url: string, filename: string): Promise<void> {
     const filePath = await save({ defaultPath: filename });
     if (filePath === null) return; // User cancelled
 
-    // Fetch file data
-    const res = await tauriFetch(url, {
-      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
-    } as RequestInit);
+    // Fetch file data — only accept invalid certs for the OwnCord server
+    const useInsecure = isServerUrl(url);
+    const fetchOpts: RequestInit = useInsecure
+      ? { danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } } as RequestInit
+      : {};
+    const res = await tauriFetch(url, fetchOpts);
     if (!res.ok) return;
 
     const buffer = await res.arrayBuffer();

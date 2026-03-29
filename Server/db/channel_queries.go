@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // ListChannels returns all channels ordered by position.
@@ -201,4 +202,42 @@ func nullableString(s string) any {
 		return nil
 	}
 	return s
+}
+
+// GetChannelTypes returns a map of channel ID → type string for the given IDs
+// in a single query, avoiding N+1 lookups.
+func (d *DB) GetChannelTypes(ids []int64) (map[int64]string, error) {
+	if len(ids) == 0 {
+		return map[int64]string{}, nil
+	}
+
+	// Build placeholders and args.
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(
+		`SELECT id, type FROM channels WHERE id IN (%s)`,
+		strings.Join(placeholders, ","),
+	)
+
+	rows, err := d.sqlDB.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("GetChannelTypes query: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[int64]string, len(ids))
+	for rows.Next() {
+		var id int64
+		var chType string
+		if err := rows.Scan(&id, &chType); err != nil {
+			return nil, fmt.Errorf("GetChannelTypes scan: %w", err)
+		}
+		result[id] = chType
+	}
+	return result, rows.Err()
 }

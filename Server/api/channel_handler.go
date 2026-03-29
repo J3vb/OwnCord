@@ -4,8 +4,11 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 )
@@ -15,9 +18,39 @@ const (
 	maxMessageLimit     = 100
 )
 
+func isInvalidSearchQueryError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "fts5") ||
+		strings.Contains(msg, "unterminated string") ||
+		strings.Contains(msg, "malformed") ||
+		strings.Contains(msg, "syntax error")
+}
+
+func searchRateLimitMiddleware(limiter *auth.RateLimiter, limit int, window time.Duration, trustedProxies []string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := clientIPWithProxies(r, trustedProxies)
+			if !limiter.Allow("search:"+ip, limit, window) {
+				w.Header().Set("Retry-After", strconv.Itoa(int(window.Seconds())))
+				writeJSON(w, http.StatusTooManyRequests, errorResponse{
+					Error:   "RATE_LIMITED",
+					Message: "too many requests, please slow down",
+				})
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // MountChannelRoutes registers all channel-related routes onto r.
-// All routes require authentication.
-func MountChannelRoutes(r chi.Router, database *db.DB) {
+// All routes require authentication. The limiter is used to rate-limit
+// expensive endpoints like search.
+func MountChannelRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, trustedProxies []string) {
 	r.Route("/api/v1/channels", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
 		r.Get("/", handleListChannels(database))
@@ -26,7 +59,10 @@ func MountChannelRoutes(r chi.Router, database *db.DB) {
 		r.Post("/{id}/pins/{messageId}", handleSetPinned(database, true))
 		r.Delete("/{id}/pins/{messageId}", handleSetPinned(database, false))
 	})
-	r.With(AuthMiddleware(database)).Get("/api/v1/search", handleSearch(database))
+	r.With(
+		AuthMiddleware(database),
+		searchRateLimitMiddleware(limiter, 30, time.Minute, trustedProxies),
+	).Get("/api/v1/search", handleSearch(database))
 }
 
 // hasChannelPermREST checks whether the role has the given permission on the channel,
@@ -264,6 +300,13 @@ func handleSearch(database *db.DB) http.HandlerFunc {
 
 		results, err := database.SearchMessages(q, channelID, limit)
 		if err != nil {
+			if isInvalidSearchQueryError(err) {
+				writeJSON(w, http.StatusBadRequest, errorResponse{
+					Error:   "BAD_REQUEST",
+					Message: "invalid search query",
+				})
+				return
+			}
 			slog.Error("handleSearch SearchMessages", "err", err, "query", q)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL",
@@ -281,26 +324,40 @@ func handleSearch(database *db.DB) http.HandlerFunc {
 			overrides, oErr = database.GetAllChannelPermissionsForRole(role.ID)
 			if oErr != nil {
 				slog.Error("handleSearch GetAllChannelPermissionsForRole", "err", oErr)
+				writeJSON(w, http.StatusInternalServerError, errorResponse{
+					Error:   "INTERNAL",
+					Message: "search failed",
+				})
+				return
 			}
 		}
 
-		// Build a cache of channel types so we can detect DM channels without
-		// repeated queries for the same channel ID.
-		channelTypeCache := map[int64]string{}
+		// Batch-fetch channel types in a single query to avoid N+1 lookups.
+		uniqueIDs := make(map[int64]struct{}, len(results))
 		for _, res := range results {
-			if _, seen := channelTypeCache[res.ChannelID]; !seen {
-				ch, chErr := database.GetChannel(res.ChannelID)
-				if chErr != nil || ch == nil {
-					channelTypeCache[res.ChannelID] = ""
-					continue
-				}
-				channelTypeCache[res.ChannelID] = ch.Type
-			}
+			uniqueIDs[res.ChannelID] = struct{}{}
+		}
+		channelIDs := make([]int64, 0, len(uniqueIDs))
+		for id := range uniqueIDs {
+			channelIDs = append(channelIDs, id)
+		}
+		channelTypeCache, ctErr := database.GetChannelTypes(channelIDs)
+		if ctErr != nil {
+			slog.Error("handleSearch GetChannelTypes", "err", ctErr)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error:   "INTERNAL",
+				Message: "search failed",
+			})
+			return
 		}
 
 		var filtered []db.MessageSearchResult
 		for _, res := range results {
-			chType := channelTypeCache[res.ChannelID]
+			chType, ok := channelTypeCache[res.ChannelID]
+			if !ok {
+				// Fail closed if we cannot determine the channel type.
+				continue
+			}
 			if chType == "dm" {
 				// DM channels require participant-based auth.
 				if user == nil {
