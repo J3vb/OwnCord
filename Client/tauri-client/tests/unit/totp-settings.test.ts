@@ -552,7 +552,7 @@ describe("TOTP Settings", () => {
       // Disable button should reappear
       expect(disableBtn.style.display).toBe("");
       // The confirm area (parent of password input) should be hidden
-      expect(pwInput.closest("div[style*='display']")!.style.display).toBe("none");
+      expect((pwInput.closest("div[style*='display']") as HTMLElement).style.display).toBe("none");
 
       overlay.destroy?.();
     });

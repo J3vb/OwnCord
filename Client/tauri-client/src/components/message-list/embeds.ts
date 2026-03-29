@@ -94,7 +94,7 @@ function parseIPv4Literal(hostname: string): readonly [number, number, number, n
     return null;
   }
 
-  return [octets[0], octets[1], octets[2], octets[3]];
+  return [octets[0]!, octets[1]!, octets[2]!, octets[3]!];
 }
 
 function isPrivateHost(hostname: string): boolean {
@@ -178,7 +178,7 @@ function fetchOgMeta(url: string): Promise<OgMeta> {
         headers: { "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)" },
       };
       if (isTrustedServerUrl(url)) {
-        fetchOpts.danger = { acceptInvalidCerts: true, acceptInvalidHostnames: false };
+        (fetchOpts as RequestInit & { danger?: { acceptInvalidCerts: boolean; acceptInvalidHostnames: boolean } }).danger = { acceptInvalidCerts: true, acceptInvalidHostnames: false };
       }
       const res = await tauriFetch(url, fetchOpts);
       clearTimeout(timer);
