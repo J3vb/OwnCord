@@ -1,73 +1,55 @@
 # TODOS
 
-Deferred work items from engineering review (2026-03-21).
+Deferred work items from engineering reviews.
 
-## Voice E2E Test Infrastructure
+## Completed (2026-03-29 voice/video polish pass)
 
-**What:** Add E2E test infrastructure for voice flows (voice_join → LiveKit connect → audio → voice_leave).
-**Why:** The voice path is critical UX with zero automated E2E coverage. Unit tests cover handlers and controllers, but nothing tests the full integration.
-**Pros:** Catches integration bugs between server + LiveKit + client.
-**Cons:** Requires LiveKit binary in CI, WebRTC support in test browser, ~200 lines of test infra.
-**Context:** The existing native E2E infrastructure (WebView2 CDP) could be extended. Needs CI setup first.
-**Depends on:** LiveKit binary available in CI environment.
-**Added:** 2026-03-21 (eng review of feature/livekit-migration)
+- ~~Voice E2E Test Infrastructure~~ -- `tests/e2e/voice-lifecycle.spec.ts` (11 tests)
+- ~~Voice Session Metrics~~ -- `voice_sessions` counter on `/api/v1/metrics`
+- ~~Create DESIGN.md~~ -- full design system documentation at repo root
+- ~~Extract AudioPipeline Class~~ -- `audioPipeline.ts`, `audioElements.ts`, `deviceManager.ts` (facade pattern)
+- ~~Audio Pipeline + Event Handler Tests~~ -- `audio-pipeline.test.ts` (30 tests), `audio-elements.test.ts` (25 tests)
+- ~~HTTPS Proxy Unit Tests~~ -- `livekit_proxy_test.go` (22 tests)
+- ~~Migrate VAD to AudioWorklet~~ -- `public/vad-worklet.js` with setTimeout fallback
 
-## Voice Session Metrics
+## Deferred (from 2026-03-29 CEO review)
 
-**What:** Add voice session count and duration metrics to the /metrics endpoint.
-**Why:** No way to know how many voice sessions happen or how long they last without reading logs. Useful for understanding usage patterns and catching degradation.
-**Pros:** Visibility into voice health (shorter sessions = potential problem).
-**Cons:** Requires tracking join/leave timestamps in memory (~10 LOC).
-**Context:** /metrics already has connected users and LiveKit health. This adds voice-specific counters.
-**Depends on:** /metrics endpoint (already implemented).
-**Added:** 2026-03-22 (CEO review of feature/livekit-migration)
+### Simulcast on Camera Video
 
-## Create DESIGN.md
+**What:** Enable simulcast (multiple quality layers) for camera video tracks so subscribers can receive lower quality when bandwidth is limited.
+**Why:** Currently camera video is fixed quality -- no adaptive degradation on poor networks. Users see buffering/freezing instead of graceful quality reduction.
+**Pros:** Matches Discord's adaptive video behavior. Better experience on poor connections.
+**Cons:** Requires enabling LiveKit SDK's built-in simulcast support and verifying encoding pipeline. Architecture-level change.
+**Context:** LiveKit SDK supports `simulcast: true` in Room options. Needs separate design doc to evaluate encoding CPU impact and subscriber-side quality switching.
+**Depends on:** AudioPipeline refactor (done). Verify `livekit-client` v2.17.3 simulcast support.
+**Added:** 2026-03-29 (CEO review of voice/video polish)
 
-**What:** Run /design-consultation to generate DESIGN.md from the existing tokens.css and ui-mockup.html.
-**Why:** The 114-token design system exists in CSS but the reasoning, usage guidelines, and component vocabulary aren't documented. Future contributors (including AI) will guess which tokens to use.
-**Pros:** Prevents design drift, makes the design language explicit, helps AI tools generate consistent UI.
-**Cons:** ~15 min CC time. Must be kept up-to-date as tokens evolve.
-**Context:** tokens.css was extracted from ui-mockup.html. Discord-inspired dark theme with Windows-first typography (Segoe UI Variable).
-**Depends on:** feature/livekit-migration merged to main.
-**Added:** 2026-03-22 (design review of feature/livekit-migration)
+### Adaptive Bitrate on Screenshare
 
-## Extract AudioPipeline Class
+**What:** Enable LiveKit's dynacast for screenshare tracks so bitrate adapts to network conditions.
+**Why:** Screenshare encoding is set once and doesn't adapt. If network degrades, frames drop instead of quality reducing.
+**Pros:** Smoother screenshare on variable connections.
+**Cons:** Needs testing with different content types (text vs video). Architecture-level change.
+**Context:** LiveKit supports `dynacast: true` in Room options. Currently disabled.
+**Depends on:** Simulcast evaluation (above) -- same architectural concerns.
+**Added:** 2026-03-29 (CEO review of voice/video polish)
 
-**What:** Extract ~200 lines of audio pipeline code (setupAudioPipeline, teardownAudioPipeline, VAD polling, volume control) from LiveKitSession into a separate AudioPipeline class in audioprocessing.ts.
-**Why:** livekitSession.ts is 837 lines (exceeds 800-line max). The audio pipeline is independently testable but currently untested because it's entangled with session lifecycle. This is also a prerequisite for AudioWorklet migration.
-**Pros:** Brings livekitSession.ts under 800 lines, enables independent testing, cleaner separation of concerns.
-**Cons:** Requires careful interface design between LiveKitSession and AudioPipeline (~30 min CC).
-**Context:** The audio pipeline was the source of prior regressions (commits c496f83, d498e8f). Extracting it makes both testing and future AudioWorklet migration easier.
-**Depends on:** Nothing — can be done immediately.
-**Added:** 2026-03-26 (eng review of feature/livekit-migration)
+### LiveKit Proxy Port Exhaustion
 
-## Audio Pipeline + Event Handler Tests
+**What:** Investigate connection reuse or port limiting in the Rust TLS proxy (`livekit_proxy.rs`).
+**Why:** Frequent server switches allocate new proxy ports without reusing old ones. Long sessions with many switches could leak ports.
+**Pros:** Prevents resource exhaustion on long-running sessions.
+**Cons:** Requires Rust proxy architecture changes.
+**Context:** Each `start_livekit_proxy` Tauri command binds a new TCP listener. Old listeners aren't cleaned up.
+**Depends on:** Nothing -- can be investigated independently.
+**Added:** 2026-03-29 (CEO review of voice/video polish)
 
-**What:** Write unit tests for setupAudioPipeline, VAD polling, teardownAudioPipeline, and Room event handlers (TrackSubscribed, TrackUnsubscribed, Disconnected, ActiveSpeakersChanged) using AudioContext mocks.
-**Why:** These are the most regression-prone codepaths with zero test coverage. Audio pipeline bugs caused two prior fix commits on this branch.
-**Pros:** Catches regressions in the most bug-prone voice code. Enables confident refactoring.
-**Cons:** Requires AudioContext mock infrastructure (~50 lines of test setup).
-**Context:** The public API of LiveKitSession is well-tested (~80%), but the internal audio processing and event handling is entirely untested.
-**Depends on:** AudioPipeline extraction (above) — tests will be much cleaner against the extracted class.
-**Added:** 2026-03-26 (eng review of feature/livekit-migration)
+### Voice E2E CI Integration
 
-## HTTPS Proxy Unit Tests
-
-**What:** Add unit tests for the LiveKit HTTPS proxy (livekit_proxy in API package) covering WebSocket upgrade detection, header/subprotocol forwarding, bidirectional copy, and error paths.
-**Why:** The proxy is the critical path for all non-localhost voice connections. A broken proxy means voice doesn't work for remote clients.
-**Pros:** Validates the proxy works correctly for WebSocket upgrades and data forwarding.
-**Cons:** Requires httptest-based WebSocket test setup (~100 lines).
-**Context:** The proxy terminates TLS and forwards to LiveKit's local WebSocket port. It's used when clients connect over HTTPS (non-localhost).
-**Depends on:** Nothing — can be done immediately.
-**Added:** 2026-03-26 (eng review of feature/livekit-migration)
-
-## Migrate VAD to AudioWorklet
-
-**What:** Move voice activity detection from requestAnimationFrame polling on the main thread to an AudioWorklet running on the audio thread.
-**Why:** rAF pauses when the browser/Tauri window is backgrounded — VAD stops working, mic stays stuck in its last gated/ungated state. For a gaming chat app, the window is often backgrounded. AudioWorklet runs independently of the main thread and tab focus.
-**Pros:** VAD works correctly when app is backgrounded. Zero main-thread CPU cost. Proper architecture for audio processing.
-**Cons:** Requires separate AudioWorklet JS file, MessagePort communication, more complex setup (~300 lines total).
-**Context:** Current VAD polls at ~60 FPS via rAF (3-7x more than needed). AudioWorklet can process every audio frame natively. This is the industry-standard approach for browser audio processing.
-**Depends on:** AudioPipeline extraction (above) — AudioWorklet replaces the VAD polling inside the extracted class.
-**Added:** 2026-03-26 (eng review of feature/livekit-migration)
+**What:** Set up LiveKit binary in CI so voice E2E tests run automatically on push.
+**Why:** Voice E2E tests currently run locally only. CI integration catches regressions automatically.
+**Pros:** Automated regression detection for voice flows.
+**Cons:** Requires Docker-in-CI setup with LiveKit binary.
+**Context:** Local voice E2E infra is done (`voice-lifecycle.spec.ts`). CI needs LiveKit `--dev` mode in a Docker container.
+**Depends on:** Voice E2E test infrastructure (done).
+**Added:** 2026-03-29 (eng review of voice/video polish)
