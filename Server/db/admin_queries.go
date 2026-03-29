@@ -297,6 +297,17 @@ func (d *DB) GetAllSettings() (map[string]string, error) {
 	return result, nil
 }
 
+// CountUsersWithoutTOTP returns the number of non-banned users that do not
+// currently have a confirmed TOTP secret.
+func (d *DB) CountUsersWithoutTOTP() (int, error) {
+	var count int
+	err := d.sqlDB.QueryRow(`SELECT COUNT(*) FROM users WHERE banned = 0 AND totp_secret IS NULL`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("CountUsersWithoutTOTP: %w", err)
+	}
+	return count, nil
+}
+
 // ─── Backup ───────────────────────────────────────────────────────────────────
 
 // BackupTo creates an online backup of the database using SQLite's VACUUM INTO.

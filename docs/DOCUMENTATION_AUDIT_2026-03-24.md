@@ -3,6 +3,7 @@
 **Auditor:** Claude Code Documentation Specialist
 **Branch:** feature/livekit-migration
 **Status:** Complete
+**Updated:** 2026-03-29 — TOTP 2FA implementation marked as resolved
 
 ## Summary
 
@@ -12,24 +13,31 @@ Performed comprehensive documentation review against current codebase state. Fou
 
 ## Critical Discrepancies Found & Fixed
 
-### 1. API Endpoints Mismatch (HIGH PRIORITY)
+### 1. API Endpoints Mismatch (HIGH PRIORITY) — [RESOLVED 2026-03-29]
 
-**Issue:** API.md documented endpoints that don't exist in the codebase.
+**Original Issue:** API.md documented endpoints that don't exist in the codebase.
 
-**Documented but Not Implemented:**
+**Status:** TOTP 2FA endpoints are now FULLY IMPLEMENTED. User management endpoints remain unimplemented.
+
+**Documented but Not Implemented (as of audit date 2026-03-24):**
 - GET `/api/v1/users/me` — Actually: `GET /api/v1/auth/me`
-- PATCH `/api/v1/users/me` — Not implemented
-- PUT `/api/v1/users/me/password` — Not implemented
-- POST/DELETE `/api/v1/users/me/totp/*` — TOTP endpoints not exposed via REST API
-- GET/DELETE `/api/v1/users/me/sessions*` — Session management endpoints not implemented
+- PATCH `/api/v1/users/me` — Not implemented *(still pending)*
+- PUT `/api/v1/users/me/password` — Not implemented *(still pending)*
+- ~~POST/DELETE `/api/v1/users/me/totp/*` — TOTP endpoints not exposed via REST API~~ **RESOLVED** ✓
+- GET/DELETE `/api/v1/users/me/sessions*` — Session management endpoints not implemented *(still pending)*
 
-**Actual Endpoints Implemented:**
-- POST `/api/v1/auth/register` ✓
-- POST `/api/v1/auth/login` ✓
-- GET `/api/v1/auth/me` ✓
-- POST `/api/v1/auth/logout` ✓
+**TOTP Endpoints Now Implemented (as of 2026-03-29):**
+- POST `/api/v1/auth/login` — Returns `requires_2fa: true` + `partial_token` when TOTP enabled ✓
+- POST `/api/v1/auth/verify-totp` — Complete 2FA challenge with partial_token ✓
+- POST `/api/v1/users/me/totp/enable` — Start TOTP enrollment ✓
+- POST `/api/v1/users/me/totp/confirm` — Confirm enrollment and persist secret ✓
+- DELETE `/api/v1/users/me/totp` — Disable TOTP ✓
+- Server-wide `require_2fa` policy enforcement ✓
+- 5 comprehensive server-side integration tests ✓
 
-**Root Cause:** TOTP 2FA schema exists in DB (`totp_secret` column) but API endpoints were never exposed. User management endpoints were planned but not implemented in current phase.
+**Root Cause (Original):** TOTP 2FA schema existed in DB (`totp_secret` column) but API endpoints were never exposed. User management endpoints were planned but not implemented in current phase.
+
+**Resolution:** All TOTP endpoints wired in `Server/api/auth_handler.go` via `MountAuthRoutes()`. Client-side login TOTP overlay also working.
 
 **Fix Applied:**
 - Updated `docs/brain/06-Specs/API.md` to document actual endpoints
@@ -92,8 +100,9 @@ Performed comprehensive documentation review against current codebase state. Fou
 
 ## Minor Issues Found & Fixed
 
-### 1. CHATSERVER.md Phase 2 Notes
-- **Updated:** Clarified that TOTP 2FA is in schema but endpoints not exposed
+### 1. CHATSERVER.md Phase 2 Notes [Updated 2026-03-29]
+- **Previous:** Clarified that TOTP 2FA is in schema but endpoints not exposed
+- **Now:** TOTP 2FA endpoints fully implemented (as of 2026-03-29)
 - **Updated:** Added note about "allow-wins" permission semantics
 - **Updated:** Added rate limiter brute-force lockout details
 
@@ -164,7 +173,7 @@ Performed comprehensive documentation review against current codebase state. Fou
 
 ### Server
 - [ ] User profile update endpoints (`PATCH /api/v1/users/me`, password change, etc.)
-- [ ] TOTP 2FA API endpoints (schema ready, endpoints not exposed)
+- [x] ~~TOTP 2FA API endpoints (schema ready, endpoints not exposed)~~ **IMPLEMENTED 2026-03-29**
 - [ ] Session management endpoints
 - [ ] Screen sharing (LiveKit support planned)
 - [ ] Windows Firewall integration
@@ -236,7 +245,7 @@ All changes reflected in updated documentation.
 1. **Endpoint Implementation:** When user management endpoints are added, update API.md promptly
 2. **Version Bumps:** Update version string in CLAUDE.md, SETUP.md, and README.md when releasing new versions
 3. **Config Changes:** Keep config defaults in README.md in sync with config.go defaults() function
-4. **TOTP Rollout:** When TOTP endpoints are exposed, add them to API.md and CHATSERVER.md Phase 2 section
+4. **TOTP Rollout:** ✓ COMPLETED 2026-03-29 — TOTP endpoints fully implemented and documented in API.md
 5. **Automated Docs:** Consider adding a CI check that validates build commands in documentation work
 6. **Regular Audits:** Run documentation audit after each major feature branch merge
 

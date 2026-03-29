@@ -222,6 +222,9 @@ export function createConnectPage(
       onLogout: () => { /* no-op on connect page */ },
       onDeleteAccount: async () => { /* no-op on connect page */ },
       onStatusChange: () => { /* no-op on connect page */ },
+      onEnableTotp: () => Promise.reject(new Error("Not authenticated")),
+      onConfirmTotp: () => Promise.reject(new Error("Not authenticated")),
+      onDisableTotp: () => Promise.reject(new Error("Not authenticated")),
     });
     settingsOverlay.mount(rootEl);
 

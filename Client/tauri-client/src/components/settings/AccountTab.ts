@@ -6,7 +6,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { UserStatus } from "@lib/types";
-import { authStore } from "@stores/auth.store";
+import { authStore, updateUser } from "@stores/auth.store";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 import { loadPref, savePref } from "./helpers";
 
@@ -121,6 +121,287 @@ function buildPasswordSection(
   }, { signal });
 
   appendChildren(wrapper, separator, pwHeader, oldPw, newPw, confirmPw, pwError, pwBtn);
+  return wrapper;
+}
+
+// ---------------------------------------------------------------------------
+// TOTP section builder
+// ---------------------------------------------------------------------------
+
+function buildTotpEnrollForm(
+  options: SettingsOverlayOptions,
+  signal: AbortSignal,
+  onEnrolled: () => void,
+): HTMLDivElement {
+  const wrapper = createElement("div", {});
+
+  const description = createElement("div", {
+    style: "color:var(--text-muted);font-size:13px;margin-bottom:12px",
+  }, "Add an extra layer of security to your account.");
+
+  const enableBtn = createElement("button", {
+    class: "ac-btn",
+    "data-testid": "totp-enable-btn",
+  }, "Enable 2FA");
+
+  const formArea = createElement("div", { style: "display:none" });
+  const pwInput = createElement("input", {
+    class: "form-input", type: "password",
+    placeholder: "Enter your password", style: "margin-bottom:12px",
+    "data-testid": "totp-password-input",
+  });
+  const errorEl = createElement("div", {
+    style: "color:var(--red);font-size:13px;margin-bottom:8px",
+    "data-testid": "totp-error",
+  });
+  const submitBtn = createElement("button", { class: "ac-btn" }, "Submit");
+
+  appendChildren(formArea, pwInput, errorEl, submitBtn);
+
+  const enrollArea = createElement("div", { style: "display:none" });
+
+  enableBtn.addEventListener("click", () => {
+    enableBtn.style.display = "none";
+    formArea.style.display = "block";
+    pwInput.value = "";
+    setText(errorEl, "");
+    pwInput.focus();
+  }, { signal });
+
+  submitBtn.addEventListener("click", () => {
+    const pw = pwInput.value;
+    if (pw.length === 0) {
+      setText(errorEl, "Password is required.");
+      return;
+    }
+    setText(errorEl, "");
+    submitBtn.disabled = true;
+    setText(submitBtn, "Requesting...");
+
+    void options.onEnableTotp(pw).then((result) => {
+      formArea.style.display = "none";
+      buildTotpConfirmArea(enrollArea, options, pw, result, signal, onEnrolled);
+      enrollArea.style.display = "block";
+      submitBtn.disabled = false;
+      setText(submitBtn, "Submit");
+    }).catch((err: unknown) => {
+      setText(errorEl, err instanceof Error ? err.message : "Failed to enable 2FA.");
+      submitBtn.disabled = false;
+      setText(submitBtn, "Submit");
+    });
+  }, { signal });
+
+  appendChildren(wrapper, description, enableBtn, formArea, enrollArea);
+  return wrapper;
+}
+
+function buildTotpConfirmArea(
+  container: HTMLDivElement,
+  options: SettingsOverlayOptions,
+  password: string,
+  result: { qr_uri: string; backup_codes: string[] },
+  signal: AbortSignal,
+  onEnrolled: () => void,
+): void {
+  // Clear previous content immutably (remove children)
+  while (container.firstChild) {
+    container.removeChild(container.firstChild);
+  }
+
+  const qrLabel = createElement("div", {
+    style: "color:var(--text-muted);font-size:13px;margin-bottom:8px",
+  }, "Scan this URI with your authenticator app, or copy it manually:");
+
+  const qrUri = createElement("code", {
+    style: "display:block;background:var(--bg-active);padding:8px 12px;border-radius:6px;" +
+      "font-family:monospace;font-size:12px;word-break:break-all;margin-bottom:12px;" +
+      "color:var(--text-primary);user-select:all",
+    "data-testid": "totp-qr-uri",
+  }, result.qr_uri);
+
+  const elements: HTMLElement[] = [qrLabel, qrUri];
+
+  if (result.backup_codes.length > 0) {
+    const backupLabel = createElement("div", {
+      style: "color:var(--text-muted);font-size:13px;margin-bottom:8px",
+    }, "Save these backup codes in a safe place:");
+    const backupList = createElement("code", {
+      style: "display:block;background:var(--bg-active);padding:8px 12px;border-radius:6px;" +
+        "font-family:monospace;font-size:12px;white-space:pre-wrap;margin-bottom:12px;" +
+        "color:var(--text-primary);user-select:all",
+    }, result.backup_codes.join("\n"));
+    elements.push(backupLabel, backupList);
+  }
+
+  const codeInput = createElement("input", {
+    class: "form-input", type: "text",
+    placeholder: "6-digit code", maxlength: "6",
+    style: "margin-bottom:12px",
+    "data-testid": "totp-code-input",
+  });
+
+  const confirmError = createElement("div", {
+    style: "color:var(--red);font-size:13px;margin-bottom:8px",
+    "data-testid": "totp-error",
+  });
+
+  const confirmBtn = createElement("button", {
+    class: "ac-btn",
+    "data-testid": "totp-confirm-btn",
+  }, "Verify & Activate");
+
+  confirmBtn.addEventListener("click", () => {
+    const code = codeInput.value.trim();
+    if (code.length === 0) {
+      setText(confirmError, "Please enter the 6-digit code.");
+      return;
+    }
+    setText(confirmError, "");
+    confirmBtn.disabled = true;
+    setText(confirmBtn, "Verifying...");
+
+    void options.onConfirmTotp(password, code).then(() => {
+      updateUser({ totp_enabled: true });
+      onEnrolled();
+    }).catch((err: unknown) => {
+      setText(confirmError, err instanceof Error ? err.message : "Invalid verification code.");
+      confirmBtn.disabled = false;
+      setText(confirmBtn, "Verify & Activate");
+    });
+  }, { signal });
+
+  elements.push(codeInput, confirmError, confirmBtn);
+  appendChildren(container, ...elements);
+}
+
+function buildTotpDisableView(
+  options: SettingsOverlayOptions,
+  signal: AbortSignal,
+  onDisabled: () => void,
+): HTMLDivElement {
+  const wrapper = createElement("div", {});
+
+  const description = createElement("div", {
+    style: "color:var(--text-muted);font-size:13px;margin-bottom:12px",
+  }, "Your account is protected with 2FA.");
+
+  const disableBtn = createElement("button", {
+    class: "ac-btn account-delete-btn",
+    "data-testid": "totp-disable-btn",
+  }, "Disable 2FA");
+
+  const confirmArea = createElement("div", { style: "display:none" });
+  const pwInput = createElement("input", {
+    class: "form-input", type: "password",
+    placeholder: "Enter your password", style: "margin-bottom:12px",
+    "data-testid": "totp-password-input",
+  });
+  const errorEl = createElement("div", {
+    style: "color:var(--red);font-size:13px;margin-bottom:8px",
+    "data-testid": "totp-error",
+  });
+  const btnRow = createElement("div", { style: "display:flex;gap:8px" });
+  const confirmBtn = createElement("button", { class: "ac-btn account-delete-btn" }, "Confirm Disable");
+  const cancelBtn = createElement("button", {
+    class: "ac-btn", style: "background:var(--bg-active)",
+  }, "Cancel");
+  appendChildren(btnRow, confirmBtn, cancelBtn);
+  appendChildren(confirmArea, pwInput, errorEl, btnRow);
+
+  disableBtn.addEventListener("click", () => {
+    disableBtn.style.display = "none";
+    confirmArea.style.display = "block";
+    pwInput.value = "";
+    setText(errorEl, "");
+    pwInput.focus();
+  }, { signal });
+
+  cancelBtn.addEventListener("click", () => {
+    confirmArea.style.display = "none";
+    disableBtn.style.display = "";
+    pwInput.value = "";
+    setText(errorEl, "");
+  }, { signal });
+
+  confirmBtn.addEventListener("click", () => {
+    const pw = pwInput.value;
+    if (pw.length === 0) {
+      setText(errorEl, "Password is required.");
+      return;
+    }
+    setText(errorEl, "");
+    confirmBtn.disabled = true;
+    setText(confirmBtn, "Disabling...");
+
+    void options.onDisableTotp(pw).then(() => {
+      updateUser({ totp_enabled: false });
+      onDisabled();
+    }).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : "Failed to disable 2FA.";
+      const is403Required = msg.toLowerCase().includes("required");
+      setText(errorEl, is403Required
+        ? "2FA is required by this server and cannot be disabled"
+        : msg);
+      confirmBtn.disabled = false;
+      setText(confirmBtn, "Confirm Disable");
+    });
+  }, { signal });
+
+  appendChildren(wrapper, description, disableBtn, confirmArea);
+  return wrapper;
+}
+
+function buildTotpSection(
+  options: SettingsOverlayOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const wrapper = createElement("div", { "data-testid": "totp-section" });
+
+  const separator = createElement("div", { class: "settings-separator" });
+  const headerRow = createElement("div", {
+    style: "display:flex;align-items:center;gap:8px;margin-bottom:4px",
+  });
+  const header = createElement("div", {
+    class: "settings-section-title",
+    style: "margin-bottom:0",
+  }, "Two-Factor Authentication");
+
+  const statusBadge = createElement("span", {
+    "data-testid": "totp-status-badge",
+    style: "font-size:12px;padding:2px 8px;border-radius:4px;font-weight:600",
+  });
+
+  appendChildren(headerRow, header, statusBadge);
+
+  const contentArea = createElement("div", {});
+
+  function render(): void {
+    const enabled = authStore.getState().user?.totp_enabled === true;
+
+    if (enabled) {
+      statusBadge.textContent = "Enabled";
+      statusBadge.style.background = "var(--green, #3ba55d)";
+      statusBadge.style.color = "#fff";
+    } else {
+      statusBadge.textContent = "Disabled";
+      statusBadge.style.background = "var(--bg-active)";
+      statusBadge.style.color = "var(--text-muted)";
+    }
+
+    while (contentArea.firstChild) {
+      contentArea.removeChild(contentArea.firstChild);
+    }
+
+    if (enabled) {
+      contentArea.appendChild(buildTotpDisableView(options, signal, render));
+    } else {
+      contentArea.appendChild(buildTotpEnrollForm(options, signal, render));
+    }
+  }
+
+  render();
+
+  appendChildren(wrapper, separator, headerRow, contentArea);
   return wrapper;
 }
 
@@ -358,6 +639,9 @@ export function buildAccountTab(
 
   // Password section
   section.appendChild(buildPasswordSection(options, signal));
+
+  // Two-factor authentication section
+  section.appendChild(buildTotpSection(options, signal));
 
   // Delete account (danger zone)
   section.appendChild(buildDeleteAccountSection(options, signal));

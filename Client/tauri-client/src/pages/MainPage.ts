@@ -236,6 +236,37 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         clearAuth();
         showToast("Account deleted successfully", "success");
       },
+      onEnableTotp: async (password) => {
+        try {
+          return await api.enableTotp(password);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Failed to enable 2FA";
+          showToast(msg, "error");
+          throw err;
+        }
+      },
+      onConfirmTotp: async (password, code) => {
+        try {
+          await api.confirmTotp(password, code);
+          updateUser({ totp_enabled: true });
+          showToast("Two-factor authentication enabled", "success");
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Failed to confirm 2FA";
+          showToast(msg, "error");
+          throw err;
+        }
+      },
+      onDisableTotp: async (password) => {
+        try {
+          await api.disableTotp(password);
+          updateUser({ totp_enabled: false });
+          showToast("Two-factor authentication disabled", "success");
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Failed to disable 2FA";
+          showToast(msg, "error");
+          throw err;
+        }
+      },
       onStatusChange: (status) => {
         const userId = getCurrentUserId();
         if (userId !== 0) {

@@ -39,9 +39,10 @@ vi.mock("@lib/livekitSession", () => ({
 vi.mock("@stores/auth.store", () => ({
   authStore: {
     getState: () => ({
-      user: { id: 1, username: "testuser" },
+      user: { id: 1, username: "testuser", totp_enabled: false },
     }),
   },
+  updateUser: vi.fn(),
 }));
 
 function clickEl(el: Element | null): void {
@@ -66,6 +67,9 @@ describe("SettingsOverlay", () => {
     onLogout: vi.fn(),
     onDeleteAccount: vi.fn().mockResolvedValue(undefined),
     onStatusChange: vi.fn(),
+    onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "otpauth://test", backup_codes: [] }),
+    onConfirmTotp: vi.fn().mockResolvedValue(undefined),
+    onDisableTotp: vi.fn().mockResolvedValue(undefined),
   };
 
   beforeEach(() => {

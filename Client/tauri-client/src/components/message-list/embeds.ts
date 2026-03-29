@@ -109,6 +109,8 @@ function isPrivateHost(hostname: string): boolean {
     if (h === "::" || h === "::1") return true;
     // IPv6 private ranges: fc00::/7 (fc.. and fd..), link-local fe80::/10.
     if (h.startsWith("fc") || h.startsWith("fd") || /^fe[89ab]/.test(h)) return true;
+    if (h.startsWith("ff")) return true;
+    if (h.startsWith("2001:db8")) return true;
     // IPv4-mapped IPv6 addresses (::ffff:x.x.x.x).
     if (h.startsWith("::ffff:")) return true;
     return false;
@@ -121,8 +123,13 @@ function isPrivateHost(hostname: string): boolean {
     if (first === 169 && second === 254) return true;
     if (first === 172 && second >= 16 && second <= 31) return true;
     if (first === 192 && second === 168) return true;
+    if (first === 192 && second === 0) return true;
+    if (first === 192 && second === 0 && ipv4[2] === 2) return true;
     if (first === 100 && second >= 64 && second <= 127) return true;
     if (first === 198 && (second === 18 || second === 19)) return true;
+    if (first === 198 && second === 51 && ipv4[2] === 100) return true;
+    if (first === 203 && second === 0 && ipv4[2] === 113) return true;
+    if (first >= 224) return true;
   }
 
   return false;

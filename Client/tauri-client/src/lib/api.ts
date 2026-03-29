@@ -270,16 +270,16 @@ export function createApiClient(
       );
     },
 
-    enableTotp(signal?: AbortSignal): Promise<{ qr_uri: string; backup_codes: string[] }> {
-      return request("POST", "/users/me/totp/enable", undefined, signal);
+    enableTotp(password: string, signal?: AbortSignal): Promise<{ qr_uri: string; backup_codes: string[] }> {
+      return request("POST", "/users/me/totp/enable", { password }, signal);
     },
 
-    confirmTotp(code: string, signal?: AbortSignal): Promise<void> {
-      return request<void>("POST", "/users/me/totp/confirm", { code }, signal);
+    confirmTotp(password: string, code: string, signal?: AbortSignal): Promise<void> {
+      return request<void>("POST", "/users/me/totp/confirm", { password, code }, signal);
     },
 
-    disableTotp(signal?: AbortSignal): Promise<void> {
-      return request<void>("DELETE", "/users/me/totp", undefined, signal);
+    disableTotp(password: string, signal?: AbortSignal): Promise<void> {
+      return request<void>("DELETE", "/users/me/totp", { password }, signal);
     },
 
     getSessions(signal?: AbortSignal): Promise<SessionResponse[]> {

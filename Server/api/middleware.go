@@ -141,6 +141,10 @@ func RequirePermission(perm int64) func(http.Handler) http.Handler {
 // the supplied trustedProxies CIDRs — pass nil to always use RemoteAddr.
 // Returns 429 with Retry-After when the limit is exceeded.
 func RateLimitMiddleware(limiter *auth.RateLimiter, limit int, window time.Duration, trustedProxies ...[]string) func(http.Handler) http.Handler {
+	return rateLimitMiddlewareWithPrefix(limiter, "", limit, window, trustedProxies...)
+}
+
+func rateLimitMiddlewareWithPrefix(limiter *auth.RateLimiter, prefix string, limit int, window time.Duration, trustedProxies ...[]string) func(http.Handler) http.Handler {
 	var proxies []string
 	if len(trustedProxies) > 0 {
 		proxies = trustedProxies[0]
@@ -148,8 +152,9 @@ func RateLimitMiddleware(limiter *auth.RateLimiter, limit int, window time.Durat
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ip := clientIPWithProxies(r, proxies)
+			key := prefix + ip
 
-			if !limiter.Allow(ip, limit, window) {
+			if !limiter.Allow(key, limit, window) {
 				w.Header().Set("Retry-After", fmt.Sprintf("%d", int(window.Seconds())))
 				writeJSON(w, http.StatusTooManyRequests, errorResponse{
 					Error:   "RATE_LIMITED",

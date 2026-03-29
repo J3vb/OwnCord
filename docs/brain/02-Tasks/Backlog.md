@@ -3,7 +3,7 @@
 **Goal:** Ship v1.2, then build gaming-native features that
 differentiate OwnCord from Discord/TeamSpeak/Mumble.
 
-Last task ID: T-191. New tasks start at T-192.
+Last task ID: T-201. New tasks start at T-202.
 
 ---
 
@@ -33,6 +33,34 @@ Last task ID: T-191. New tasks start at T-192.
 
 - [x] **T-190:** Propagate `context.Context` from WS upgrade through all handlers — added ctx to Client struct, updated MessageHandler signature, threaded ctx through all 17 WS handlers across 9 files. Added ExecContext/QueryRowContext/QueryContext/BeginTx to DB wrapper. — 2026-03-29
 - [x] **T-191:** Add ESLint v9 config with `@typescript-eslint/no-floating-promises`, `no-unused-vars`, `consistent-return` — installed eslint v9.39.4 + typescript-eslint, created flat config, fixed 61 lint violations across 22 files — 2026-03-29
+
+---
+
+## 2FA Client Integration — 2026-03-29
+
+### High Priority
+
+- [x] **T-192:** Client 2FA enrollment/disable settings UI — AccountTab TOTP section, auth store state, SettingsOverlay wiring — 2026-03-29
+- [x] **T-193:** Client 2FA test coverage — Unit tests for TOTP settings flows, api.ts TOTP methods, auth store totp_enabled state — 2026-03-29
+- [x] **T-194:** Full regression validation pass — `go test ./...`, `npm test`, `golangci-lint`, `npm run lint` — 2026-03-29
+
+### Medium Priority
+
+- [ ] **T-195:** User profile/password/session management endpoints — PATCH /users/me, PUT /users/me/password, GET/DELETE /users/me/sessions (server-side)
+- [ ] **T-196:** DM sidebar incremental DOM update — Replace full DOM rebuild at SidebarArea.ts:753 with reconciliation
+
+## Code Review Findings — 2026-03-29
+
+### High Priority
+
+- [ ] **T-197:** Fix double `updateUser` call on TOTP confirm/disable — Remove duplicate `updateUser({ totp_enabled })` from MainPage.ts callbacks; AccountTab.ts already handles it via onEnrolled/onDisabled
+- [ ] **T-198:** Add TOTP audit log events — `handleVerifyTOTP`, `handleConfirmTOTP`, `handleDisableTOTP` produce no audit entries; add `database.LogAudit(...)` calls for totp_verified, totp_enabled, totp_disabled
+- [ ] **T-199:** Safe default for `registration_open` on upgrade — New enforcement in `handleRegister` breaks existing servers with no `registration_open` DB row; `getBooleanSetting` should default to `true` or add a migration seeding the row
+- [ ] **T-200:** Extract TOTP handlers to `totp_handler.go` — `auth_handler.go` at 829 lines exceeds 800-line convention; move TOTP handlers + helpers to dedicated file
+
+### Medium Priority
+
+- [ ] **T-201:** TOTP constant-time code comparison — `totp.go:207` uses `==` for code comparison; use `subtle.ConstantTimeCompare` for defense-in-depth
 
 ---
 
@@ -178,7 +206,7 @@ Last task ID: T-191. New tasks start at T-192.
 - [ ] **T-062**: Implement DM Profile Sidebar
 - [ ] **T-063**: Implement Soundboard component (protocol types exist, no UI)
 - [ ] **T-024**: Implement screen sharing
-- [ ] **T-023**: Add TOTP 2FA support
+- [ ] **T-023**: Add TOTP 2FA support — Login challenge flow: DONE; Server enable/confirm/disable endpoints: DONE; Client enrollment UI: IN PROGRESS (see [[02-Tasks/In Progress|T-192]]); Client test coverage: TODO (see T-193)
 - [ ] **T-027**: Code signing certificate for SmartScreen
 - [ ] **T-028**: Windows Service mode
 - [ ] **T-029**: Custom emoji support

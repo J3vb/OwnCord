@@ -5,8 +5,9 @@ Base URL: `https://{server}:{port}/api/v1`
 ## Authentication
 
 All authenticated endpoints require a session token delivered via the
-`Authorization: Bearer {token}` header. Tokens are obtained from `POST /api/v1/auth/login`
-or `POST /api/v1/auth/register`.
+`Authorization: Bearer {token}` header. Tokens are obtained from `POST /api/v1/auth/login`,
+`POST /api/v1/auth/register`, or `POST /api/v1/auth/verify-totp` after a partial
+2FA challenge.
 
 The server validates the token by SHA-256 hashing it and looking up the
 corresponding session row. If the session is expired or the user is banned,
@@ -101,6 +102,7 @@ Create a new account using an invite code. The first user is created via
     "avatar": "",
     "status": "offline",
     "role_id": 4,
+    "totp_enabled": false,
     "created_at": "2026-03-24T12:00:00Z"
   }
 }
@@ -115,6 +117,7 @@ Note: `status` is `"offline"` at registration time. It changes to
 | ------ | ---- | ----- |
 | 400 | `INVALID_INPUT` | Missing username/password/invite_code, or weak password |
 | 400 | `INVALID_CREDENTIALS` | Bad invite code, expired/revoked invite, or duplicate username |
+| 403 | `FORBIDDEN` | Registration is closed or unavailable while server-wide 2FA is required |
 | 429 | `RATE_LIMITED` | Exceeded 3 registrations/minute from this IP |
 | 500 | `SERVER_ERROR` | Hashing failure, session creation failure, or DB error |
 
@@ -146,17 +149,30 @@ limit is intentionally high to support automated E2E testing; the
 
 #### Response 200 OK
 
+If the account does not have TOTP enabled, login returns a normal session:
+
 ```json
 {
   "token": "raw-session-token-64-chars",
+  "requires_2fa": false,
   "user": {
     "id": 1,
     "username": "alex",
     "avatar": "uuid.png",
     "status": "offline",
     "role_id": 4,
+    "totp_enabled": false,
     "created_at": "2026-03-24T12:00:00Z"
   }
+}
+```
+
+If the account has TOTP enabled, login returns a partial challenge instead of a full session:
+
+```json
+{
+  "partial_token": "opaque-partial-token",
+  "requires_2fa": true
 }
 ```
 
@@ -169,7 +185,7 @@ Status changes to `"online"` when the user opens a WebSocket connection.
 | ------ | ---- | ----- |
 | 400 | `INVALID_INPUT` | Missing username or password |
 | 401 | `UNAUTHORIZED` | Wrong username or password (constant-time comparison prevents timing attacks) |
-| 403 | `FORBIDDEN` | Account is banned/suspended |
+| 403 | `FORBIDDEN` | Account is banned/suspended, or server policy requires TOTP enrollment before login |
 | 429 | `RATE_LIMITED` | IP locked out after 10 consecutive failures (15 min cooldown) |
 | 500 | `SERVER_ERROR` | Session creation failure |
 
@@ -179,6 +195,49 @@ Status changes to `"online"` when the user opens a WebSocket connection.
   exist, preventing timing-based username enumeration.
 - Failure tracking is per-IP, not per-username.
 - Successful login resets the failure counter for that IP.
+
+---
+
+### POST /api/v1/auth/verify-totp
+
+Complete a TOTP login challenge started by `POST /api/v1/auth/login`.
+
+**Auth:** Required with the `partial_token` from the login response
+**Rate limit:** 10 requests/minute per IP, plus a 5-attempt budget per partial challenge
+
+#### Request
+
+```json
+{
+  "code": "123456"
+}
+```
+
+#### Response 200 OK
+
+```json
+{
+  "token": "raw-session-token-64-chars",
+  "requires_2fa": false,
+  "user": {
+    "id": 1,
+    "username": "alex",
+    "avatar": "uuid.png",
+    "status": "offline",
+    "role_id": 4,
+    "totp_enabled": true,
+    "created_at": "2026-03-24T12:00:00Z"
+  }
+}
+```
+
+#### Errors
+
+| Status | Code | Cause |
+| ------ | ---- | ----- |
+| 400 | `INVALID_INPUT` | Malformed request body |
+| 401 | `UNAUTHORIZED` | Missing/expired challenge, invalid TOTP code, or challenge consumed after too many failures |
+| 500 | `SERVER_ERROR` | Session creation failure |
 
 ---
 
@@ -198,6 +257,7 @@ Get the current authenticated user's profile.
   "avatar": "uuid.png",
   "status": "online",
   "role_id": 2,
+  "totp_enabled": true,
   "created_at": "2026-03-24T12:00:00Z"
 }
 ```
@@ -209,6 +269,7 @@ Get the current authenticated user's profile.
 | `avatar` | string | Avatar filename (UUID) or empty string |
 | `status` | string | One of: `online`, `idle`, `dnd`, `offline` |
 | `role_id` | int64 | Numeric role ID (1=Owner, 2=Admin, 3=Moderator, 4=Member) |
+| `totp_enabled` | bool | Whether the user has a confirmed TOTP secret |
 | `created_at` | string | ISO 8601 timestamp |
 
 #### Errors
@@ -236,6 +297,100 @@ No response body.
 | ------ | ---- | ----- |
 | 401 | `UNAUTHORIZED` | Not authenticated |
 | 500 | `SERVER_ERROR` | Failed to delete session from DB |
+
+---
+
+### POST /api/v1/users/me/totp/enable
+
+Start TOTP enrollment for the authenticated user.
+
+**Auth:** Required (full session token)
+**Rate limit:** 5 requests/minute per IP
+
+#### Request
+
+```json
+{
+  "password": "MyStr0ng!Pass"
+}
+```
+
+#### Response 200 OK
+
+```json
+{
+  "qr_uri": "otpauth://totp/OwnCord:alex?...",
+  "backup_codes": []
+}
+```
+
+Notes:
+- The secret is not persisted until `POST /api/v1/users/me/totp/confirm` succeeds.
+- `backup_codes` is currently always an empty array.
+
+#### Errors
+
+| Status | Code | Cause |
+| ------ | ---- | ----- |
+| 400 | `INVALID_INPUT` | Missing or incorrect password |
+| 401 | `UNAUTHORIZED` | Missing or invalid session token |
+| 500 | `SERVER_ERROR` | Failed to generate the TOTP secret |
+
+---
+
+### POST /api/v1/users/me/totp/confirm
+
+Confirm a pending TOTP enrollment and persist the secret on the user account.
+
+**Auth:** Required (full session token)
+**Rate limit:** 5 requests/minute per IP
+
+#### Request
+
+```json
+{
+  "password": "MyStr0ng!Pass",
+  "code": "123456"
+}
+```
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code | Cause |
+| ------ | ---- | ----- |
+| 400 | `INVALID_INPUT` | Malformed request, missing/incorrect password, or no pending enrollment |
+| 401 | `UNAUTHORIZED` | Invalid TOTP code or missing session token |
+| 500 | `SERVER_ERROR` | Failed to persist the TOTP secret |
+
+---
+
+### DELETE /api/v1/users/me/totp
+
+Disable TOTP for the authenticated user.
+
+**Auth:** Required (full session token)
+**Rate limit:** 5 requests/minute per IP
+
+#### Request
+
+```json
+{
+  "password": "MyStr0ng!Pass"
+}
+```
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code | Cause |
+| ------ | ---- | ----- |
+| 400 | `INVALID_INPUT` | Missing or incorrect password |
+| 401 | `UNAUTHORIZED` | Missing or invalid session token |
+| 403 | `FORBIDDEN` | Server policy currently requires TOTP for all accounts |
+| 500 | `SERVER_ERROR` | Failed to clear the TOTP secret |
 
 ---
 

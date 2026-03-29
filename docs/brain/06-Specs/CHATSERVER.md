@@ -1126,14 +1126,26 @@ DEBUG level via a `MultiHandler`.
 
 ### Login Flow
 
-1. Rate limit check (5 attempts/min/IP)
+1. Rate limit check (60 attempts/min/IP)
 2. Check lockout status (`login_lock:{ip}`)
 3. Constant-time lookup: always attempt bcrypt compare
 4. On failure: track via `login_fail:{ip}`, lockout after 10 failures
    (15-minute lockout)
 5. On success: reset failure counter, check ban status
-6. Issue session token, log audit event
-7. Return token + user object
+6. **2FA Check**: If user has `totp_enabled = true` OR server enforces
+   `require_2fa` policy:
+   - Issue a **partial token** (10-minute TTL, stored as UUID)
+   - Return `requires_2fa: true` + `partial_token` to client
+   - Client shows TOTP overlay (QR code during enrollment, or code input
+     for login challenge)
+7. **2FA Verification** (if required): On receipt of TOTP code:
+   - Validate code against user's `totp_secret` (6-digit, 30s window ±1)
+   - Rate limit: 5 attempts per challenge, 10 req/min per IP
+   - On success: exchange partial token for full session token
+   - On failure: return error, remain in challenge state
+8. On success (no 2FA or after 2FA): reset failure counter, issue session
+   token, log audit event
+9. Return token + user object
 
 ### WebSocket Authentication
 
@@ -1229,8 +1241,10 @@ in a single query to eliminate N+1 patterns.
 | Feature | Key Pattern | Limit | Window |
 |---------|-------------|-------|--------|
 | Registration | per-IP | 3 | 1 min |
-| Login | per-IP | 5 | 1 min |
+| Login | per-IP | 60 | 1 min |
 | Login failure lockout | `login_lock:{ip}` | lockout | 15 min |
+| 2FA challenge attempts | per-challenge | 5 | per challenge |
+| 2FA challenge requests | per-IP | 10 | 1 min |
 | Chat messages | `chat:{userID}` | 10 | 1 sec |
 | Chat edits | `chat_edit:{userID}` | 10 | 1 sec |
 | Chat deletes | `chat_delete:{userID}` | 10 | 1 sec |

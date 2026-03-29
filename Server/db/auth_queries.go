@@ -128,6 +128,15 @@ func (d *DB) UpdateUserStatus(id int64, status string) error {
 	return nil
 }
 
+// UpdateUserTOTPSecret sets or clears the TOTP secret for a user.
+func (d *DB) UpdateUserTOTPSecret(id int64, secret *string) error {
+	_, err := d.sqlDB.Exec(`UPDATE users SET totp_secret = ? WHERE id = ?`, secret, id)
+	if err != nil {
+		return fmt.Errorf("UpdateUserTOTPSecret: %w", err)
+	}
+	return nil
+}
+
 // ResetAllUserStatuses sets all users to "offline". Called on server startup
 // to clear stale statuses from a previous run or crash.
 func (d *DB) ResetAllUserStatuses() error {

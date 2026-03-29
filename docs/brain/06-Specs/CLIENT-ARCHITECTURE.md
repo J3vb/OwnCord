@@ -551,7 +551,7 @@ via `queueMicrotask`.
 
 | Store | State Fields | WS Events Handled | Key Actions |
 |-------|-------------|-------------------|-------------|
-| **auth** | token, user (UserWithRole), serverName, motd, isAuthenticated | `auth_ok`, `auth_error` | setAuth, clearAuth, updateUser |
+| **auth** | token, user (UserWithRole; includes totp_enabled), serverName, motd, isAuthenticated | `auth_ok`, `auth_error` | setAuth, clearAuth, updateUser |
 | **channels** | channels (Map<id, Channel>), activeChannelId | `ready`, `channel_create/update/delete` | setChannels, addChannel, updateChannel, removeChannel, setActiveChannel, incrementUnread, clearUnread |
 | **dm** | channels (DmChannel[]) | `dm_channel_open`, `dm_channel_close`, `dm_channels` in ready | setDmChannels, addDmChannel, removeDmChannel, updateDmLastMessage, clearDmUnread |
 | **messages** | messagesByChannel (Map<id, Message[]>), pendingSends (Map<corrId, channelId>), loadedChannels (Set), hasMore (Map) | `chat_message`, `chat_edited`, `chat_deleted`, `chat_send_ok`, `reaction_update` | addMessage, setMessages, prependMessages, editMessage, deleteMessage, updateReaction, addPendingSend, confirmSend |
@@ -1188,7 +1188,7 @@ Tab navigation:
 
 | Tab | File | Purpose |
 |-----|------|---------|
-| Account | `AccountTab.ts` | Username, avatar, password change, TOTP 2FA, active sessions |
+| Account | `AccountTab.ts` | Username, avatar, password change, TOTP 2FA enrollment/disable, active sessions |
 | Appearance | `AppearanceTab.ts` | Theme picker, accent color, font size, compact mode |
 | Voice & Audio | `VoiceAudioTab.ts` | Input/output device, volume, echo cancel, noise suppress, AGC, stream quality |
 | Keybinds | `KeybindsTab.ts` | Push-to-talk key capture and configuration |
@@ -1197,6 +1197,36 @@ Tab navigation:
 | Accessibility | `AccessibilityTab.ts` | Reduced motion, OS motion preference sync |
 | Advanced | `AdvancedTab.ts` | Developer/debug options |
 | Logs | `LogsTab.ts` | In-memory log viewer (from logger.ts circular buffer) |
+
+### SettingsOverlayOptions Interface
+
+Callbacks passed to all tab builders from MainPage:
+
+```typescript
+interface SettingsOverlayOptions {
+  onClose(): void;
+  onChangePassword(oldPassword: string, newPassword: string): Promise<void>;
+  onUpdateProfile(username: string): Promise<void>;
+  onLogout(): void;
+  onDeleteAccount(password: string): Promise<void>;
+  onStatusChange(status: UserStatus): void;
+  onEnableTotp(password: string): Promise<{ qr_uri: string; backup_codes: string[] }>;
+  onConfirmTotp(password: string, code: string): Promise<void>;
+  onDisableTotp(password: string): Promise<void>;
+}
+```
+
+### AccountTab TOTP Components
+
+`AccountTab.ts` includes the following TOTP helper functions:
+
+- `buildTotpSection()` — Main 2FA control panel (enabled/disabled view switcher)
+- `buildTotpEnrollForm()` — Password + submit form to initiate enrollment
+- `buildTotpConfirmArea()` — QR code display, backup code backup, verification code input
+- `buildTotpDisableView()` — Password confirmation + disable button for existing 2FA
+
+State updates via `updateUser({ totp_enabled: true/false })` after successful
+enrollment or disable operations.
 
 ### Preference Persistence
 

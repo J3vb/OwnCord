@@ -58,6 +58,7 @@ export interface MessageUser {
 /** User object with role, used in auth_ok and member_join. */
 export interface UserWithRole extends MessageUser {
   readonly role: string;
+  readonly totp_enabled?: boolean;
 }
 
 /** Attachment on a chat message. */

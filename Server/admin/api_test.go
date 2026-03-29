@@ -772,7 +772,7 @@ func TestAdminAPI_PatchSettings_RejectsMixedKeys(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	body := map[string]string{
-		"server_name": "valid",
+		"server_name":  "valid",
 		"injected_key": "should block the whole request",
 	}
 	w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
@@ -806,13 +806,20 @@ func TestAdminAPI_PatchSettings_AcceptsAllWhitelistedKeys(t *testing.T) {
 		"backup_retention",
 	}
 
+	// Boolean-typed settings require valid boolean values; others accept any string.
+	booleanKeys := map[string]bool{"require_2fa": true, "registration_open": true}
+
 	for _, key := range whitelistedKeys {
 		t.Run(key, func(t *testing.T) {
 			database := openAdminTestDB(t)
 			handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil)
 			token := createAdminUser(t, database)
 
-			body := map[string]string{key: "testvalue"}
+			value := "testvalue"
+			if booleanKeys[key] {
+				value = "0"
+			}
+			body := map[string]string{key: value}
 			w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
 
 			if w.Code != http.StatusOK {
@@ -834,6 +841,57 @@ func TestAdminAPI_PatchSettings_EmptyPayloadIsOK(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAdminAPI_PatchSettings_RejectsRequire2FAWhenUsersNotEnrolled(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil)
+	token := createAdminUser(t, database)
+
+	body := map[string]string{
+		"registration_open": "false",
+		"require_2fa":       "true",
+	}
+	w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAdminAPI_PatchSettings_AllowsRequire2FAWhenAllUsersEnrolledAndRegistrationClosed(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil)
+	token := createAdminUser(t, database)
+
+	if _, err := database.Exec(`UPDATE users SET totp_secret = ? WHERE id = 1`, "JBSWY3DPEHPK3PXP"); err != nil {
+		t.Fatalf("enroll admin user: %v", err)
+	}
+
+	body := map[string]string{
+		"registration_open": "false",
+		"require_2fa":       "true",
+	}
+	w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAdminAPI_PatchSettings_RejectsInvalidBooleanValue(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil)
+	token := createAdminUser(t, database)
+
+	body := map[string]string{
+		"require_2fa": "banana",
+	}
+	w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -969,13 +1027,13 @@ func TestAdminAPI_PatchUser_NoTOTPSecret(t *testing.T) {
 
 // mockHub records which broadcast methods were called and with what arguments.
 type mockHub struct {
-	restartCalls      []restartCall
-	channelCreates    []*db.Channel
-	channelUpdates    []*db.Channel
-	channelDeleteIDs  []int64
-	memberBanIDs      []int64
-	memberUpdates     []memberUpdateCall
-	clientCount       int
+	restartCalls     []restartCall
+	channelCreates   []*db.Channel
+	channelUpdates   []*db.Channel
+	channelDeleteIDs []int64
+	memberBanIDs     []int64
+	memberUpdates    []memberUpdateCall
+	clientCount      int
 }
 
 type memberUpdateCall struct {
@@ -1129,4 +1187,3 @@ func TestAdminAPI_DeleteChannel_NilHubDoesNotPanic(t *testing.T) {
 func itoa(n int64) string {
 	return fmt.Sprint(n)
 }
-

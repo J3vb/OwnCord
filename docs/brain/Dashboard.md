@@ -28,6 +28,7 @@
 
 ### Recent Milestones
 
+- 2026-03-29: Client 2FA integration session — TOTP enrollment/disable UI in AccountTab, api.ts method signature fixes, totp_enabled in UserWithRole, SettingsOverlay wiring, documentation sync, 5 new tasks created (T-192–T-196)
 - 2026-03-29: Code quality session — ESLint v9 setup (61 fixes across 22 files), context.Context propagation through all 17 WS handlers, livekitSession refactor (-267 lines), 7 new delete-account tests
 - 2026-03-29: Full-project security + code quality audit — 3 agents, 55 findings, 27 fixed (15 Go server, 12 TS client), 0 dependency vulnerabilities, 3 deferred refactors
 - 2026-03-28: Observability & debugging branch — structured logging (server, client, Rust), JSONL log persistence with 5-day rotation, ICE candidate logging, WS disconnect stats, LiveKit webhook logging, diagnostics endpoint, cache clear UI
@@ -146,4 +147,4 @@ All issues created on GitHub with `agent-ready` label.
 
 <!-- END AUTO-GENERATED -->
 
-Last updated by Claude Code: 2026-03-29 (Phase 5 doc pass: Documentation hub linked, cross-links added, file references verified)
+Last updated by Claude Code: 2026-03-29 (2FA client integration session: TOTP enrollment UI, api.ts fixes, 5 new tasks T-192–T-196)

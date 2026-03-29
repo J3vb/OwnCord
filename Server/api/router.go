@@ -139,7 +139,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		// is handled by the LiveKit JWT (access_token query param) which the
 		// LiveKit server validates. Users can only obtain a valid JWT through
 		// the authenticated voice_join WS flow. Rate limiting prevents abuse.
-		r.With(RateLimitMiddleware(limiter, 30, time.Minute)).
+		r.With(rateLimitMiddlewareWithPrefix(limiter, "livekit_proxy:", 30, time.Minute, cfg.Server.TrustedProxies)).
 			Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins)))
 	}
 

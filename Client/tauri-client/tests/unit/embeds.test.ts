@@ -85,6 +85,30 @@ describe("renderGenericLinkPreview", () => {
     expect(card.querySelector(".msg-embed-link-title")?.textContent).toBe("127.0.0.2");
   });
 
+  it("blocks previews for multicast, reserved, and documentation addresses", async () => {
+    const blockedUrls = [
+      "https://224.0.0.1/",
+      "https://239.255.255.250/",
+      "https://240.0.0.1/",
+      "https://255.255.255.255/",
+      "https://192.0.2.1/",
+      "https://198.51.100.10/",
+      "https://203.0.113.7/",
+      "https://[ff02::1]/",
+      "https://[2001:db8::1]/",
+    ];
+
+    for (const url of blockedUrls) {
+      document.body.innerHTML = "";
+      const card = renderGenericLinkPreview(url);
+      document.body.appendChild(card);
+      await Promise.resolve();
+      expect(card.querySelector(".msg-embed-link-title")?.textContent).toBeTruthy();
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("allows previews for the configured OwnCord server even on private hosts", async () => {
     setServerHost("LOCALHOST:8080");
     fetchMock.mockResolvedValue(mockHtmlResponse("<html><head><title>OwnCord Local</title></head></html>"));

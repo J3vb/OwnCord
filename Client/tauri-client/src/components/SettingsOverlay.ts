@@ -35,6 +35,9 @@ export interface SettingsOverlayOptions {
   onLogout(): void;
   onDeleteAccount(password: string): Promise<void>;
   onStatusChange(status: UserStatus): void;
+  onEnableTotp(password: string): Promise<{ qr_uri: string; backup_codes: string[] }>;
+  onConfirmTotp(password: string, code: string): Promise<void>;
+  onDisableTotp(password: string): Promise<void>;
 }
 
 export type TabName = "Account" | "Appearance" | "Notifications" | "Text & Images" | "Accessibility" | "Voice & Audio" | "Keybinds" | "Advanced" | "Logs";

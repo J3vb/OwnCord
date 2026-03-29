@@ -321,35 +321,6 @@ func categorizeSource(r slog.Record) string {
 	}
 }
 
-// authenticateAdmin validates a raw token string and returns the user
-// if they have ADMINISTRATOR permission. Used by both adminAuthMiddleware
-// and the SSE log stream endpoint.
-func authenticateAdmin(database *db.DB, rawToken string) (*db.User, error) {
-	if rawToken == "" {
-		return nil, fmt.Errorf("missing token")
-	}
-	hash := auth.HashToken(rawToken)
-	sess, err := database.GetSessionByTokenHash(hash)
-	if err != nil || sess == nil {
-		return nil, fmt.Errorf("invalid session")
-	}
-	if auth.IsSessionExpired(sess.ExpiresAt) {
-		return nil, fmt.Errorf("session expired")
-	}
-	user, err := database.GetUserByID(sess.UserID)
-	if err != nil || user == nil {
-		return nil, fmt.Errorf("user not found")
-	}
-	role, err := database.GetRoleByID(user.RoleID)
-	if err != nil || role == nil {
-		return nil, fmt.Errorf("role not found")
-	}
-	if !permissions.HasAdmin(role.Permissions) {
-		return nil, fmt.Errorf("administrator permission required")
-	}
-	return user, nil
-}
-
 // handleLogStream serves an SSE endpoint that streams log entries in real-time.
 // Auth is via query param ?ticket= — a short-lived single-use ticket obtained
 // from POST /admin/api/logs/ticket (which requires normal admin auth).
@@ -416,6 +387,9 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 
 		// Send backfill.
 		for _, entry := range ringBuf.Snapshot() {
+			if !sessionStillAuthorized() {
+				return
+			}
 			if data, err := json.Marshal(entry); err == nil {
 				_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 			}

@@ -184,4 +184,80 @@ describe("API Client", () => {
       expect(method).toBe("DELETE");
     });
   });
+
+  describe("TOTP management endpoints", () => {
+    it("enableTotp sends POST /users/me/totp/enable with password", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ qr_uri: "otpauth://totp/test", backup_codes: ["abc"] }),
+      );
+      const result = await api.enableTotp("mypassword");
+      const url = mockFetch.mock.calls[0]?.[0] as string;
+      const opts = mockFetch.mock.calls[0]?.[1];
+      const method = opts?.method as string;
+      const body = JSON.parse(opts?.body as string);
+
+      expect(url).toBe("https://localhost:8443/api/v1/users/me/totp/enable");
+      expect(method).toBe("POST");
+      expect(body).toEqual({ password: "mypassword" });
+      expect(result).toEqual({
+        qr_uri: "otpauth://totp/test",
+        backup_codes: ["abc"],
+      });
+    });
+
+    it("confirmTotp sends POST /users/me/totp/confirm with password and code", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await api.confirmTotp("mypassword", "123456");
+      const url = mockFetch.mock.calls[0]?.[0] as string;
+      const opts = mockFetch.mock.calls[0]?.[1];
+      const method = opts?.method as string;
+      const body = JSON.parse(opts?.body as string);
+
+      expect(url).toBe("https://localhost:8443/api/v1/users/me/totp/confirm");
+      expect(method).toBe("POST");
+      expect(body).toEqual({ password: "mypassword", code: "123456" });
+    });
+
+    it("disableTotp sends DELETE /users/me/totp with password", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await api.disableTotp("mypassword");
+      const url = mockFetch.mock.calls[0]?.[0] as string;
+      const opts = mockFetch.mock.calls[0]?.[1];
+      const method = opts?.method as string;
+      const body = JSON.parse(opts?.body as string);
+
+      expect(url).toBe("https://localhost:8443/api/v1/users/me/totp");
+      expect(method).toBe("DELETE");
+      expect(body).toEqual({ password: "mypassword" });
+    });
+
+    it("enableTotp throws ApiClientError on bad password", async () => {
+      mockFetch.mockResolvedValue(
+        errorResponse(401, "INVALID_PASSWORD", "Wrong password"),
+      );
+      await expect(api.enableTotp("wrongpw")).rejects.toThrow(ApiClientError);
+      await expect(api.enableTotp("wrongpw")).rejects.toMatchObject({
+        status: 401,
+      });
+    });
+
+    it("confirmTotp throws ApiClientError on invalid code", async () => {
+      mockFetch.mockResolvedValue(
+        errorResponse(400, "INVALID_CODE", "Invalid verification code"),
+      );
+      await expect(api.confirmTotp("pw", "000000")).rejects.toThrow(
+        ApiClientError,
+      );
+    });
+
+    it("disableTotp throws ApiClientError when 2FA is required", async () => {
+      mockFetch.mockResolvedValue(
+        errorResponse(403, "TOTP_REQUIRED", "2FA is required by server policy"),
+      );
+      await expect(api.disableTotp("pw")).rejects.toThrow(ApiClientError);
+      await expect(api.disableTotp("pw")).rejects.toMatchObject({
+        status: 403,
+      });
+    });
+  });
 });
