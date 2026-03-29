@@ -4,12 +4,15 @@ package admin_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/owncord/server/admin"
+	"github.com/owncord/server/auth"
 )
 
 // ─── handlePatchUser — self-modification guard ─────────────────────────────
@@ -334,6 +337,102 @@ func TestAdminAPI_PatchUser_BanNilHubDoesNotPanic(t *testing.T) {
 	user, _ := database.GetUserByID(targetUID)
 	if !user.Banned {
 		t.Error("user should be banned even with nil hub")
+	}
+}
+
+// TestAdminAPI_LogStreamTicketFlow verifies that the admin API issues
+// single-use log stream tickets and rejects both ticket reuse and the old
+// token-in-query flow.
+func TestAdminAPI_LogStreamTicketFlow(t *testing.T) {
+	database := openAdminTestDB(t)
+	logBuf := admin.NewRingBuffer(8)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, logBuf)
+	token := createAdminUser(t, database)
+
+	ticketResp := doRequest(t, handler, http.MethodPost, "/logs/ticket", token, nil)
+	if ticketResp.Code != http.StatusOK {
+		t.Fatalf("POST /logs/ticket status = %d, want 200; body: %s", ticketResp.Code, ticketResp.Body.String())
+	}
+
+	var payload struct {
+		Ticket string `json:"ticket"`
+	}
+	if err := json.Unmarshal(ticketResp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal ticket response: %v", err)
+	}
+	if payload.Ticket == "" {
+		t.Fatal("expected non-empty log stream ticket")
+	}
+	if err := database.DeleteSession(auth.HashToken(token)); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/logs/stream?ticket="+payload.Ticket, nil)
+	if err != nil {
+		t.Fatalf("NewRequestWithContext: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		t.Fatalf("GET /logs/stream?ticket=... after session revocation status = %d, want 401; body: %s", resp.StatusCode, string(body))
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !bytes.Contains(body, []byte("invalid or expired session")) {
+		_ = resp.Body.Close()
+		t.Fatalf("expected revoked-session error body, got: %s", string(body))
+	}
+	cancel()
+	_ = resp.Body.Close()
+
+	reuseResp, err := http.Get(srv.URL + "/logs/stream?ticket=" + payload.Ticket)
+	if err != nil {
+		t.Fatalf("reuse request failed: %v", err)
+	}
+	defer reuseResp.Body.Close()
+	if reuseResp.StatusCode != http.StatusUnauthorized {
+		body, _ := io.ReadAll(reuseResp.Body)
+		t.Fatalf("reused ticket status = %d, want 401; body: %s", reuseResp.StatusCode, string(body))
+	}
+
+	legacyResp, err := http.Get(srv.URL + "/logs/stream?token=" + token)
+	if err != nil {
+		t.Fatalf("legacy request failed: %v", err)
+	}
+	defer legacyResp.Body.Close()
+	if legacyResp.StatusCode != http.StatusUnauthorized {
+		body, _ := io.ReadAll(legacyResp.Body)
+		t.Fatalf("legacy token stream status = %d, want 401; body: %s", legacyResp.StatusCode, string(body))
+	}
+
+	if _, err := database.CreateSession(1, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	ticketResp = doRequest(t, handler, http.MethodPost, "/logs/ticket", token, nil)
+	if ticketResp.Code != http.StatusOK {
+		t.Fatalf("POST /logs/ticket after restoring session status = %d, want 200; body: %s", ticketResp.Code, ticketResp.Body.String())
+	}
+	if err := json.Unmarshal(ticketResp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal restored ticket response: %v", err)
+	}
+	if err := database.UpdateUserRole(1, 3); err != nil {
+		t.Fatalf("UpdateUserRole: %v", err)
+	}
+	demotedResp, err := http.Get(srv.URL + "/logs/stream?ticket=" + payload.Ticket)
+	if err != nil {
+		t.Fatalf("demoted-role request failed: %v", err)
+	}
+	defer demotedResp.Body.Close()
+	if demotedResp.StatusCode != http.StatusForbidden {
+		body, _ := io.ReadAll(demotedResp.Body)
+		t.Fatalf("demoted-role ticket status = %d, want 403; body: %s", demotedResp.StatusCode, string(body))
 	}
 }
 

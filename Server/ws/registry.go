@@ -1,11 +1,14 @@
 package ws
 
-import "encoding/json"
+import (
+	"context"
+	"encoding/json"
+)
 
 // MessageHandler is the function signature for all WebSocket message handlers.
-// It receives the hub, the sending client, the request ID from the envelope,
-// and the raw JSON payload.
-type MessageHandler func(h *Hub, c *Client, reqID string, payload json.RawMessage)
+// It receives a context (derived from the client's WS connection), the hub,
+// the sending client, the request ID from the envelope, and the raw JSON payload.
+type MessageHandler func(ctx context.Context, h *Hub, c *Client, reqID string, payload json.RawMessage)
 
 // HandlerRegistry maps message type strings to their handler functions.
 // It is not safe for concurrent use after initialization; all Register
@@ -28,12 +31,12 @@ func (r *HandlerRegistry) Register(msgType string, handler MessageHandler) {
 
 // Dispatch looks up the handler for msgType and invokes it. Returns true if a
 // handler was found and called, false if no handler is registered for the type.
-func (r *HandlerRegistry) Dispatch(msgType string, h *Hub, c *Client, reqID string, payload json.RawMessage) bool {
+func (r *HandlerRegistry) Dispatch(ctx context.Context, msgType string, h *Hub, c *Client, reqID string, payload json.RawMessage) bool {
 	handler, ok := r.handlers[msgType]
 	if !ok {
 		return false
 	}
-	handler(h, c, reqID, payload)
+	handler(ctx, h, c, reqID, payload)
 	return true
 }
 

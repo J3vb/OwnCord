@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -10,16 +11,16 @@ import (
 
 // registerReactionHandlers registers reaction_add and reaction_remove handlers.
 func registerReactionHandlers(r *HandlerRegistry) {
-	r.Register(MsgTypeReactionAdd, func(h *Hub, c *Client, _ string, payload json.RawMessage) {
-		h.handleReaction(c, true, payload)
+	r.Register(MsgTypeReactionAdd, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
+		h.handleReaction(ctx, c, true, payload)
 	})
-	r.Register(MsgTypeReactionRemove, func(h *Hub, c *Client, _ string, payload json.RawMessage) {
-		h.handleReaction(c, false, payload)
+	r.Register(MsgTypeReactionRemove, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
+		h.handleReaction(ctx, c, false, payload)
 	})
 }
 
 // handleReaction processes reaction_add and reaction_remove messages.
-func (h *Hub) handleReaction(c *Client, add bool, payload json.RawMessage) {
+func (h *Hub) handleReaction(ctx context.Context, c *Client, add bool, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("reaction:%d", c.userID)
 	if !h.limiter.Allow(ratKey, reactionRateLimit, reactionWindow) {
 		c.sendMsg(buildRateLimitError("too many reactions", reactionWindow.Seconds()))

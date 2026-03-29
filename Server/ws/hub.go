@@ -23,19 +23,19 @@ type broadcastMsg struct {
 // Hub manages all active WebSocket clients and routes messages between them.
 // All exported methods are safe to call from multiple goroutines.
 type Hub struct {
-	clients      map[int64]*Client
-	mu           sync.RWMutex
-	db           *db.DB
-	limiter      *auth.RateLimiter
-	broadcast    chan broadcastMsg
-	register     chan *Client
-	unregister   chan *Client
-	stop         chan struct{}
-	stopOnce     sync.Once
-	livekit      *LiveKitClient
-	lkProcess    *LiveKitProcess
-	registry     *HandlerRegistry
-	permChecker  *permissions.Checker
+	clients     map[int64]*Client
+	mu          sync.RWMutex
+	db          *db.DB
+	limiter     *auth.RateLimiter
+	broadcast   chan broadcastMsg
+	register    chan *Client
+	unregister  chan *Client
+	stop        chan struct{}
+	stopOnce    sync.Once
+	livekit     *LiveKitClient
+	lkProcess   *LiveKitProcess
+	registry    *HandlerRegistry
+	permChecker *permissions.Checker
 
 	seq       uint64           // atomic monotonic sequence counter
 	replayBuf *EventRingBuffer // recent broadcast events for reconnection replay
@@ -175,24 +175,9 @@ func (h *Hub) Run() {
 				case <-h.stop:
 					return
 				case c := <-h.register:
-					h.mu.Lock()
-					if old, exists := h.clients[c.userID]; exists {
-						// Kick the stale connection atomically before registering
-						// the new one — prevents TOCTOU races on duplicate login.
-						slog.Warn("hub: kicking stale connection for re-registering user",
-							"user_id", c.userID)
-						old.closeSend()
-					}
-					h.clients[c.userID] = c
-					slog.Info("hub: client registered", "user_id", c.userID, "total_clients", len(h.clients))
-					h.mu.Unlock()
+					h.registerNow(c)
 				case c := <-h.unregister:
-					h.mu.Lock()
-					if current, ok := h.clients[c.userID]; ok && current == c {
-						delete(h.clients, c.userID)
-						slog.Info("hub: client unregistered", "user_id", c.userID, "total_clients", len(h.clients))
-					}
-					h.mu.Unlock()
+					h.unregisterNow(c)
 				case bm := <-h.broadcast:
 					h.deliverBroadcast(bm)
 				case <-staleTicker.C:
@@ -258,7 +243,9 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 
 	// Clean up DB state and LiveKit for each participant.
 	for _, vs := range states {
-		_ = h.db.LeaveVoiceChannel(vs.UserID)
+		if err := h.db.LeaveVoiceChannel(vs.UserID); err != nil {
+			slog.Error("CleanupVoiceForChannel LeaveVoiceChannel", "err", err, "user_id", vs.UserID, "channel_id", channelID)
+		}
 
 		// Clear client voice state.
 		h.mu.RLock()
@@ -304,6 +291,33 @@ func (h *Hub) Register(c *Client) {
 // Unregister queues a client for removal from the hub.
 func (h *Hub) Unregister(c *Client) {
 	h.unregister <- c
+}
+
+func (h *Hub) registerNow(c *Client) {
+	h.mu.Lock()
+	if old, exists := h.clients[c.userID]; exists {
+		oldVoiceChID := old.clearVoiceChID()
+		if c.getVoiceChID() == 0 {
+			c.setVoiceChID(oldVoiceChID)
+		}
+		// Kick the stale connection atomically before registering
+		// the new one — prevents TOCTOU races on duplicate login.
+		slog.Warn("hub: kicking stale connection for re-registering user",
+			"user_id", c.userID)
+		old.closeSend()
+	}
+	h.clients[c.userID] = c
+	slog.Info("hub: client registered", "user_id", c.userID, "total_clients", len(h.clients))
+	h.mu.Unlock()
+}
+
+func (h *Hub) unregisterNow(c *Client) {
+	h.mu.Lock()
+	if current, ok := h.clients[c.userID]; ok && current == c {
+		delete(h.clients, c.userID)
+		slog.Info("hub: client unregistered", "user_id", c.userID, "total_clients", len(h.clients))
+	}
+	h.mu.Unlock()
 }
 
 // BroadcastToChannel enqueues msg for delivery to all clients subscribed to

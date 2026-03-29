@@ -107,7 +107,8 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 	}
 
 	// ── 5. Build HTTP router ───────────────────────────────────────────────
-	router, hub := api.NewRouter(cfg, database, version, logBuf)
+	router, hub, routerCleanup := api.NewRouter(cfg, database, version, logBuf)
+	defer routerCleanup()
 
 	// ── 6. Start server ────────────────────────────────────────────────────
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

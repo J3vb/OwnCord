@@ -102,6 +102,15 @@ func handleDeleteBackup(database *db.DB) http.Handler {
 			return
 		}
 
+		// Resolve to absolute path and verify it stays within the backups directory
+		// to prevent path traversal via Windows drive-letter prefixes (e.g. "C:evil.db").
+		absDir, _ := filepath.Abs(filepath.Join("data", "backups"))
+		target := filepath.Join(absDir, name)
+		if !strings.HasPrefix(target, absDir+string(filepath.Separator)) {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
+			return
+		}
+
 		backupPath := filepath.Join("data", "backups", name)
 		if _, err := os.Stat(backupPath); os.IsNotExist(err) {
 			writeErr(w, http.StatusNotFound, "NOT_FOUND", "backup not found")
@@ -125,6 +134,15 @@ func handleRestoreBackup(database *db.DB) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := chi.URLParam(r, "name")
 		if name == "" || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
+			return
+		}
+
+		// Resolve to absolute path and verify it stays within the backups directory
+		// to prevent path traversal via Windows drive-letter prefixes (e.g. "C:evil.db").
+		absDir, _ := filepath.Abs(filepath.Join("data", "backups"))
+		target := filepath.Join(absDir, name)
+		if !strings.HasPrefix(target, absDir+string(filepath.Separator)) {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
 			return
 		}

@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"log/slog"
 	"time"
 )
@@ -9,7 +10,7 @@ import (
 // 1. Gets old voiceChID from clearVoiceChID().
 // 2. If was in voice: remove from DB (with retry), broadcast voice_leave.
 // 3. Call livekit.RemoveParticipant (ignore errors — participant may already be gone).
-func (h *Hub) handleVoiceLeave(c *Client) {
+func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
 	oldChID := c.clearVoiceChID()
 	if oldChID == 0 {
 		slog.Debug("handleVoiceLeave no-op (already cleared)", "user_id", c.userID)
@@ -42,33 +43,45 @@ func (h *Hub) handleVoiceLeave(c *Client) {
 	}
 }
 
-// leaveVoiceChannelWithRetry attempts to remove the voice state from the DB
-// with up to 3 retries and exponential backoff (100ms, 200ms, 400ms).
-// Returns nil on success, the last error on exhaustion.
+// leaveVoiceChannelWithRetry attempts to remove the voice state from the DB.
+// The first attempt is synchronous. If it fails, subsequent retries run in a
+// background goroutine with exponential backoff so the caller (readPump) is
+// not blocked by time.Sleep.
+// Returns nil on first-attempt success, the first error otherwise (retries
+// continue in the background).
 func leaveVoiceChannelWithRetry(h *Hub, userID int64, channelID int64) error {
-	const maxRetries = 3
-	delay := 100 * time.Millisecond
+	// Synchronous first attempt.
+	if err := h.db.LeaveVoiceChannel(userID); err != nil {
+		slog.Warn("LeaveVoiceChannel failed, retrying in background",
+			"err", err, "user_id", userID, "channel_id", channelID,
+			"attempt", 1, "max_retries", 3)
 
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		if err := h.db.LeaveVoiceChannel(userID); err != nil {
-			slog.Warn("LeaveVoiceChannel failed, retrying",
-				"err", err, "user_id", userID, "channel_id", channelID,
-				"attempt", attempt, "max_retries", maxRetries)
-			if attempt < maxRetries {
+		// Background retries so the readPump goroutine is not blocked.
+		go func() {
+			const maxRetries = 3
+			delay := 200 * time.Millisecond
+
+			for attempt := 2; attempt <= maxRetries; attempt++ {
 				time.Sleep(delay)
 				delay *= 2
-			} else {
-				slog.Error("LeaveVoiceChannel exhausted retries — ghost state may persist",
-					"err", err, "user_id", userID, "channel_id", channelID)
-				return err
+
+				if retryErr := h.db.LeaveVoiceChannel(userID); retryErr != nil {
+					slog.Warn("LeaveVoiceChannel retry failed",
+						"err", retryErr, "user_id", userID, "channel_id", channelID,
+						"attempt", attempt, "max_retries", maxRetries)
+					if attempt == maxRetries {
+						slog.Error("LeaveVoiceChannel exhausted retries — ghost state may persist",
+							"err", retryErr, "user_id", userID, "channel_id", channelID)
+					}
+				} else {
+					slog.Info("LeaveVoiceChannel succeeded on retry",
+						"user_id", userID, "attempt", attempt)
+					return
+				}
 			}
-		} else {
-			if attempt > 1 {
-				slog.Info("LeaveVoiceChannel succeeded on retry",
-					"user_id", userID, "attempt", attempt)
-			}
-			return nil
-		}
+		}()
+
+		return err
 	}
 	return nil
 }

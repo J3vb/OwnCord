@@ -285,7 +285,7 @@ const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
   usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditCache:[],settingsChanged:false,backupRunning:false,updateApplying:false,
   cachedStats:null,cachedUpdate:null,
   logEntries:[],logLevels:{DEBUG:true,INFO:true,WARN:true,ERROR:true},
-  logSearch:'',logAutoScroll:true,logPaused:false,logEventSource:null,logMaxLines:2000};
+  logSearch:'',logAutoScroll:true,logPaused:false,logEventSource:null,logReconnectTimer:null,logConnectSeq:0,logMaxLines:2000};
 
 /* ═══ API ═══ */
 async function api(method,path,body){
@@ -388,11 +388,11 @@ function renderNav(){
 }
 
 function navigateTo(id){
-  if(state.logEventSource&&state.section==='logs'&&id!=='logs'){state.logEventSource.close();state.logEventSource=null}
+  if(state.section==='logs'&&id!=='logs'){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}}
   state.section=id;renderNav();renderContent();
 }
 
-function doLogout(){state.token='';localStorage.removeItem('admin_token');showOverlay('loginOverlay')}
+function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}state.token='';localStorage.removeItem('admin_token');showOverlay('loginOverlay')}
 
 /* ═══ Content Router ═══ */
 function renderContent(){
@@ -662,14 +662,24 @@ function toggleLogPause(){
   const btn=document.getElementById('pauseBtn');if(btn)btn.textContent=state.logPaused?'▶ Resume':'⏸ Pause';
   const dot=document.getElementById('logDot');if(dot)dot.className=state.logPaused?'dot-off':'dot-live';
   const txt=document.getElementById('logStatusText');
-  if(state.logPaused){if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(txt)txt.textContent='Paused'}
+  if(state.logPaused){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}if(txt)txt.textContent='Paused'}
   else{connectLogStream()}
 }
 
-function connectLogStream(){
-  if(state.logEventSource){state.logEventSource.close()}
+function scheduleLogReconnect(){
+  if(state.logPaused||state.section!=='logs'||state.logReconnectTimer)return;
+  state.logReconnectTimer=setTimeout(function(){state.logReconnectTimer=null;connectLogStream()},1500);
+}
+
+async function connectLogStream(){
+  if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}
+  if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}
   if(state.logPaused||state.section!=='logs')return;
-  const es=new EventSource('/admin/api/logs/stream?token='+encodeURIComponent(state.token));
+  const connectSeq=++state.logConnectSeq;
+  let ticket;
+  try{const res=await api('POST','/logs/ticket');ticket=res.ticket}catch(err){const t=document.getElementById('logStatusText');const d=document.getElementById('logDot');const msg=(err&&err.message)||'';if(/authorization|invalid or expired session|session has expired|missing or invalid|administrator permission required/i.test(msg)){state.logPaused=true;state.logConnectSeq++;if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}state.token='';localStorage.removeItem('admin_token');if(t)t.textContent='Session expired';if(d)d.className='dot-off';showOverlay('loginOverlay');return}if(t)t.textContent='Reconnect failed';if(d)d.className='dot-off';scheduleLogReconnect();return}
+  if(connectSeq!==state.logConnectSeq||state.logPaused||state.section!=='logs')return;
+  const es=new EventSource('/admin/api/logs/stream?ticket='+encodeURIComponent(ticket));
   state.logEventSource=es;
   es.onopen=function(){const t=document.getElementById('logStatusText');if(t)t.textContent='Connected'};
   es.onmessage=function(e){
@@ -679,7 +689,7 @@ function connectLogStream(){
       const c=document.getElementById('logCount');if(c)c.textContent=state.logEntries.length+' entries';
     }catch(err){}
   };
-  es.onerror=function(){const t=document.getElementById('logStatusText');if(t)t.textContent='Reconnecting...';const d=document.getElementById('logDot');if(d)d.className='dot-off'};
+  es.onerror=function(){if(state.logEventSource===es){state.logEventSource.close();state.logEventSource=null}const t=document.getElementById('logStatusText');if(t)t.textContent='Reconnecting...';const d=document.getElementById('logDot');if(d)d.className='dot-off';scheduleLogReconnect()};
 }
 
 function matchesLogFilter(entry){

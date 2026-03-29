@@ -84,44 +84,80 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 			return
 		}
 
+		// Wrap role + ban updates in a transaction so both succeed or fail atomically.
+		tx, txErr := database.Begin()
+		if txErr != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to begin transaction")
+			return
+		}
+		committed := false
+		defer func() {
+			if !committed {
+				_ = tx.Rollback()
+			}
+		}()
+
 		if req.RoleID != nil {
-			if err := database.UpdateUserRole(id, *req.RoleID); err != nil {
+			if _, err := tx.Exec(`UPDATE users SET role_id = ? WHERE id = ?`, *req.RoleID, id); err != nil {
 				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update role")
 				return
 			}
 			slog.Info("role changed", "actor_id", actor, "target_user", user.Username, "new_role_id", *req.RoleID)
+		}
+
+		banReason := ""
+		if req.Banned != nil {
+			if req.BanReason != nil {
+				banReason = *req.BanReason
+			}
+			if *req.Banned {
+				var expiresStr *string
+				if _, err := tx.Exec(
+					`UPDATE users SET banned = 1, ban_reason = ?, ban_expires = ? WHERE id = ?`,
+					banReason, expiresStr, id,
+				); err != nil {
+					writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to ban user")
+					return
+				}
+				slog.Warn("user banned", "actor_id", actor, "target_user", user.Username, "reason", banReason)
+			} else {
+				if _, err := tx.Exec(
+					`UPDATE users SET banned = 0, ban_reason = NULL, ban_expires = NULL WHERE id = ?`,
+					id,
+				); err != nil {
+					writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to unban user")
+					return
+				}
+				slog.Info("user unbanned", "actor_id", actor, "target_user", user.Username)
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to commit user update")
+			return
+		}
+		committed = true
+
+		// Post-commit side effects: audit logging and broadcasts.
+		// These run outside the transaction to avoid SQLite write-lock
+		// contention (LogAudit uses the main *sql.DB, not the tx).
+		if req.RoleID != nil {
 			_ = database.LogAudit(actor, "role_change", "user", id,
 				fmt.Sprintf("changed %s role to %d", user.Username, *req.RoleID))
-			// Broadcast member_update with the new role name.
 			if role, err := database.GetRoleByID(*req.RoleID); err == nil && role != nil {
 				if hub != nil {
 					hub.BroadcastMemberUpdate(id, role.Name)
 				}
 			}
 		}
-
 		if req.Banned != nil {
-			reason := ""
-			if req.BanReason != nil {
-				reason = *req.BanReason
-			}
 			if *req.Banned {
-				if err := database.BanUser(id, reason, nil); err != nil {
-					writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to ban user")
-					return
-				}
-				slog.Warn("user banned", "actor_id", actor, "target_user", user.Username, "reason", reason)
 				_ = database.LogAudit(actor, "user_ban", "user", id,
-					fmt.Sprintf("banned %s: %s", user.Username, reason))
+					fmt.Sprintf("banned %s: %s", user.Username, banReason))
 				if hub != nil {
 					hub.BroadcastMemberBan(id)
 				}
 			} else {
-				if err := database.UnbanUser(id); err != nil {
-					writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to unban user")
-					return
-				}
-				slog.Info("user unbanned", "actor_id", actor, "target_user", user.Username)
 				_ = database.LogAudit(actor, "user_unban", "user", id,
 					fmt.Sprintf("unbanned %s", user.Username))
 			}

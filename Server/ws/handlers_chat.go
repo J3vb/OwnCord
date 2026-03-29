@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -11,19 +12,19 @@ import (
 
 // registerChatHandlers registers all chat-related message handlers.
 func registerChatHandlers(r *HandlerRegistry) {
-	r.Register(MsgTypeChatSend, func(h *Hub, c *Client, reqID string, payload json.RawMessage) {
-		h.handleChatSend(c, reqID, payload)
+	r.Register(MsgTypeChatSend, func(ctx context.Context, h *Hub, c *Client, reqID string, payload json.RawMessage) {
+		h.handleChatSend(ctx, c, reqID, payload)
 	})
-	r.Register(MsgTypeChatEdit, func(h *Hub, c *Client, reqID string, payload json.RawMessage) {
-		h.handleChatEdit(c, reqID, payload)
+	r.Register(MsgTypeChatEdit, func(ctx context.Context, h *Hub, c *Client, reqID string, payload json.RawMessage) {
+		h.handleChatEdit(ctx, c, reqID, payload)
 	})
-	r.Register(MsgTypeChatDelete, func(h *Hub, c *Client, reqID string, payload json.RawMessage) {
-		h.handleChatDelete(c, reqID, payload)
+	r.Register(MsgTypeChatDelete, func(ctx context.Context, h *Hub, c *Client, reqID string, payload json.RawMessage) {
+		h.handleChatDelete(ctx, c, reqID, payload)
 	})
 }
 
 // handleChatSend processes a chat_send message.
-func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
+func (h *Hub) handleChatSend(ctx context.Context, c *Client, reqID string, payload json.RawMessage) {
 	// Rate limit.
 	ratKey := fmt.Sprintf("chat:%d", c.userID)
 	if !h.limiter.Allow(ratKey, chatRateLimit, chatWindow) {
@@ -203,7 +204,7 @@ func (h *Hub) handleChatSend(c *Client, reqID string, payload json.RawMessage) {
 }
 
 // handleChatEdit processes a chat_edit message.
-func (h *Hub) handleChatEdit(c *Client, _ string, payload json.RawMessage) {
+func (h *Hub) handleChatEdit(ctx context.Context, c *Client, _ string, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("chat_edit:%d", c.userID)
 	if !h.limiter.Allow(ratKey, chatRateLimit, chatWindow) {
 		c.sendMsg(buildRateLimitError("too many edits", chatWindow.Seconds()))
@@ -289,7 +290,7 @@ func (h *Hub) handleChatEdit(c *Client, _ string, payload json.RawMessage) {
 }
 
 // handleChatDelete processes a chat_delete message.
-func (h *Hub) handleChatDelete(c *Client, _ string, payload json.RawMessage) {
+func (h *Hub) handleChatDelete(ctx context.Context, c *Client, _ string, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("chat_delete:%d", c.userID)
 	if !h.limiter.Allow(ratKey, chatRateLimit, chatWindow) {
 		c.sendMsg(buildRateLimitError("too many deletes", chatWindow.Seconds()))

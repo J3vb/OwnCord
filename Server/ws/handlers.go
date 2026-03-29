@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -38,7 +39,7 @@ func (h *Hub) HandleMessageForTest(c *Client, raw []byte) {
 // disconnect-triggered cleanup without an explicit voice_leave message.
 // Exported for ws_test package use only.
 func (h *Hub) HandleVoiceLeaveForTest(c *Client) {
-	h.handleVoiceLeave(c)
+	h.handleVoiceLeave(context.Background(), c)
 }
 
 // handleMessage parses the envelope and dispatches to the appropriate handler.
@@ -101,7 +102,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 
 	reqLog.Debug("ws ← client message")
 
-	if !h.registry.Dispatch(env.Type, h, c, env.ID, env.Payload) {
+	if !h.registry.Dispatch(c.ctx, env.Type, h, c, env.ID, env.Payload) {
 		reqLog.Warn("ws handleMessage unknown type")
 		c.sendMsg(buildErrorMsg(ErrCodeUnknownType, fmt.Sprintf("unknown message type: %s", env.Type)))
 	}

@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -10,19 +11,19 @@ import (
 
 // registerPresenceHandlers registers presence, typing, and channel focus handlers.
 func registerPresenceHandlers(r *HandlerRegistry) {
-	r.Register(MsgTypeTypingStart, func(h *Hub, c *Client, _ string, payload json.RawMessage) {
-		h.handleTyping(c, payload)
+	r.Register(MsgTypeTypingStart, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
+		h.handleTyping(ctx, c, payload)
 	})
-	r.Register(MsgTypePresenceUpdate, func(h *Hub, c *Client, _ string, payload json.RawMessage) {
-		h.handlePresence(c, payload)
+	r.Register(MsgTypePresenceUpdate, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
+		h.handlePresence(ctx, c, payload)
 	})
-	r.Register(MsgTypeChannelFocus, func(h *Hub, c *Client, _ string, payload json.RawMessage) {
-		h.handleChannelFocus(c, payload)
+	r.Register(MsgTypeChannelFocus, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
+		h.handleChannelFocus(ctx, c, payload)
 	})
 }
 
 // handleTyping processes a typing_start message.
-func (h *Hub) handleTyping(c *Client, payload json.RawMessage) {
+func (h *Hub) handleTyping(ctx context.Context, c *Client, payload json.RawMessage) {
 	channelID, err := parseChannelID(payload)
 	if err != nil || channelID <= 0 {
 		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "channel_id must be positive integer"))
@@ -64,7 +65,7 @@ func (h *Hub) handleTyping(c *Client, payload json.RawMessage) {
 }
 
 // handlePresence processes a presence_update message.
-func (h *Hub) handlePresence(c *Client, payload json.RawMessage) {
+func (h *Hub) handlePresence(ctx context.Context, c *Client, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("presence:%d", c.userID)
 	if !h.limiter.Allow(ratKey, presenceRateLimit, presenceWindow) {
 		c.sendMsg(buildRateLimitError("too many presence updates", presenceWindow.Seconds()))
@@ -96,7 +97,7 @@ func (h *Hub) handlePresence(c *Client, payload json.RawMessage) {
 // handleChannelFocus sets which channel the client is currently viewing,
 // so channel-scoped broadcasts (chat messages, typing) reach them.
 // Also updates read_states so unread counts decrease when the user views a channel.
-func (h *Hub) handleChannelFocus(c *Client, payload json.RawMessage) {
+func (h *Hub) handleChannelFocus(ctx context.Context, c *Client, payload json.RawMessage) {
 	chID, err := parseChannelID(payload)
 	if err != nil || chID <= 0 {
 		slog.Debug("handleChannelFocus: invalid channel_id", "user_id", c.userID, "err", err)

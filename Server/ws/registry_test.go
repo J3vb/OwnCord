@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
 	"testing"
@@ -10,14 +11,14 @@ func TestHandlerRegistry_RegisterAndDispatch(t *testing.T) {
 	r := NewHandlerRegistry()
 
 	called := false
-	r.Register("test_type", func(h *Hub, c *Client, reqID string, payload json.RawMessage) {
+	r.Register("test_type", func(ctx context.Context, h *Hub, c *Client, reqID string, payload json.RawMessage) {
 		called = true
 		if reqID != "req-1" {
 			t.Errorf("expected reqID %q, got %q", "req-1", reqID)
 		}
 	})
 
-	ok := r.Dispatch("test_type", nil, nil, "req-1", nil)
+	ok := r.Dispatch(context.Background(), "test_type", nil, nil, "req-1", nil)
 	if !ok {
 		t.Fatal("Dispatch returned false for registered type")
 	}
@@ -29,7 +30,7 @@ func TestHandlerRegistry_RegisterAndDispatch(t *testing.T) {
 func TestHandlerRegistry_DispatchUnknownType(t *testing.T) {
 	r := NewHandlerRegistry()
 
-	ok := r.Dispatch("nonexistent", nil, nil, "", nil)
+	ok := r.Dispatch(context.Background(), "nonexistent", nil, nil, "", nil)
 	if ok {
 		t.Fatal("Dispatch returned true for unregistered type")
 	}

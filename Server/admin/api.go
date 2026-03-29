@@ -20,15 +20,20 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	r.Get("/setup/status", handleSetupStatus(database))
 	r.Post("/setup", handleSetup(database))
 
-	// SSE log stream — does its own auth via query param token because
-	// EventSource cannot send Authorization headers.
+	// SSE log stream — auth is via a single-use ticket from POST /logs/ticket.
+	// EventSource cannot send Authorization headers, so the client first
+	// obtains a short-lived ticket via the authenticated ticket endpoint,
+	// then passes it as ?ticket= to the SSE stream.
 	if logBuf != nil {
-		r.Get("/logs/stream", handleLogStream(logBuf, database))
+		r.Get("/logs/stream", handleLogStream(database, logBuf))
 	}
 
 	// All remaining routes require authentication and ADMINISTRATOR permission.
 	r.Group(func(r chi.Router) {
 		r.Use(adminAuthMiddleware(database))
+
+		// Log stream ticket — issues a single-use, 30s TTL ticket for SSE auth.
+		r.Post("/logs/ticket", handleLogTicket(database))
 
 		r.Get("/stats", handleGetStats(database, hub))
 		r.Get("/users", handleListUsers(database))

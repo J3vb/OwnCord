@@ -343,6 +343,256 @@ func TestServeWS_ValidAuth_FullHandshake(t *testing.T) {
 	}
 }
 
+// TestServeWS_ImmediateDisconnect_DoesNotLeaveGhostClient verifies that a
+// client that drops immediately after sending auth does not remain registered
+// or stuck online.
+func TestServeWS_ImmediateDisconnect_DoesNotLeaveGhostClient(t *testing.T) {
+	database := openServeTestDB(t)
+	limiter := auth.NewRateLimiter()
+	hub := ws.NewHub(database, limiter)
+	go hub.Run()
+	defer hub.Stop()
+
+	userID, err := database.CreateUser("abruptclose", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token := "abrupt-close-token"
+	tokenHash := auth.HashToken(token)
+	if _, err := database.CreateSession(userID, tokenHash, "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	handler := ws.ServeWS(hub, database, []string{"*"})
+	srv := httptest.NewServer(http.HandlerFunc(handler))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("websocket.Dial: %v", err)
+	}
+	defer conn.CloseNow()
+
+	authMsg := map[string]any{
+		"type":    "auth",
+		"payload": map[string]string{"token": token},
+	}
+	raw, err := json.Marshal(authMsg)
+	if err != nil {
+		t.Fatalf("marshal auth: %v", err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, raw); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	conn.CloseNow()
+
+	deadline := time.Now().Add(2 * time.Second)
+	cleanedUp := false
+	for time.Now().Before(deadline) {
+		user, getErr := database.GetUserByID(userID)
+		if getErr != nil {
+			t.Fatalf("GetUserByID: %v", getErr)
+		}
+		if hub.ClientCount() == 0 && user.Status == "offline" {
+			cleanedUp = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if !cleanedUp {
+		user, getErr := database.GetUserByID(userID)
+		if getErr != nil {
+			t.Fatalf("GetUserByID final: %v", getErr)
+		}
+		t.Fatalf("immediate disconnect left stale state: client_count=%d user_status=%q", hub.ClientCount(), user.Status)
+	}
+}
+
+// TestServeWS_DuplicateLogin_KeepsUserOnline verifies that replacing an
+// existing connection does not broadcast or persist a false offline state for
+// the still-connected replacement session.
+func TestServeWS_DuplicateLogin_KeepsUserOnline(t *testing.T) {
+	database := openServeTestDB(t)
+	limiter := auth.NewRateLimiter()
+	hub := ws.NewHub(database, limiter)
+	go hub.Run()
+	defer hub.Stop()
+
+	userID, err := database.CreateUser("ws-reconnect-user", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	tokenHash := auth.HashToken(token)
+	if _, err := database.CreateSession(userID, tokenHash, "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	handler := ws.ServeWS(hub, database, []string{"*"})
+	srv := httptest.NewServer(http.HandlerFunc(handler))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dialAndAuth := func() *websocket.Conn {
+		conn, _, dialErr := websocket.Dial(ctx, wsURL, nil)
+		if dialErr != nil {
+			t.Fatalf("websocket.Dial: %v", dialErr)
+		}
+		authMsg := map[string]any{
+			"type":    "auth",
+			"payload": map[string]string{"token": token},
+		}
+		raw, marshalErr := json.Marshal(authMsg)
+		if marshalErr != nil {
+			t.Fatalf("marshal auth: %v", marshalErr)
+		}
+		if writeErr := conn.Write(ctx, websocket.MessageText, raw); writeErr != nil {
+			t.Fatalf("write auth: %v", writeErr)
+		}
+		for i := 0; i < 2; i++ {
+			if _, _, readErr := conn.Read(ctx); readErr != nil {
+				t.Fatalf("read handshake message %d: %v", i, readErr)
+			}
+		}
+		return conn
+	}
+
+	conn1 := dialAndAuth()
+	defer func() { _ = conn1.Close(websocket.StatusNormalClosure, "") }()
+	conn2 := dialAndAuth()
+	defer func() { _ = conn2.Close(websocket.StatusNormalClosure, "") }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		user, getErr := database.GetUserByID(userID)
+		if getErr != nil {
+			t.Fatalf("GetUserByID: %v", getErr)
+		}
+		if hub.ClientCount() == 1 && user.Status == "online" {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	user, getErr := database.GetUserByID(userID)
+	if getErr != nil {
+		t.Fatalf("GetUserByID final: %v", getErr)
+	}
+	t.Fatalf("duplicate login left wrong state: client_count=%d user_status=%q", hub.ClientCount(), user.Status)
+}
+
+// TestServeWS_DuplicateLogin_DoesNotBroadcastVoiceLeave verifies that
+// replacing a connection does not emit a spurious voice_leave for the same
+// still-connected user.
+func TestServeWS_DuplicateLogin_DoesNotBroadcastVoiceLeave(t *testing.T) {
+	database := openServeTestDB(t)
+	limiter := auth.NewRateLimiter()
+	hub := ws.NewHub(database, limiter)
+	go hub.Run()
+	defer hub.Stop()
+
+	userID, err := database.CreateUser("ws-voice-reconnect", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	tokenHash := auth.HashToken(token)
+	if _, err := database.CreateSession(userID, tokenHash, "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	handler := ws.ServeWS(hub, database, []string{"*"})
+	srv := httptest.NewServer(http.HandlerFunc(handler))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dialAndAuth := func() *websocket.Conn {
+		conn, _, dialErr := websocket.Dial(ctx, wsURL, nil)
+		if dialErr != nil {
+			t.Fatalf("websocket.Dial: %v", dialErr)
+		}
+		authMsg := map[string]any{
+			"type":    "auth",
+			"payload": map[string]string{"token": token},
+		}
+		raw, marshalErr := json.Marshal(authMsg)
+		if marshalErr != nil {
+			t.Fatalf("marshal auth: %v", marshalErr)
+		}
+		if writeErr := conn.Write(ctx, websocket.MessageText, raw); writeErr != nil {
+			t.Fatalf("write auth: %v", writeErr)
+		}
+		for i := 0; i < 2; i++ {
+			if _, _, readErr := conn.Read(ctx); readErr != nil {
+				t.Fatalf("read handshake message %d: %v", i, readErr)
+			}
+		}
+		return conn
+	}
+
+	conn1 := dialAndAuth()
+	defer func() { _ = conn1.Close(websocket.StatusNormalClosure, "") }()
+
+	var originalClient *ws.Client
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		originalClient = hub.GetClient(userID)
+		if originalClient != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if originalClient == nil {
+		t.Fatal("expected first client to be registered")
+	}
+	ws.SetClientVoiceChID(originalClient, 99)
+
+	conn2 := dialAndAuth()
+	defer func() { _ = conn2.Close(websocket.StatusNormalClosure, "") }()
+
+	replacementClient := hub.GetClient(userID)
+	if replacementClient == nil {
+		t.Fatal("expected replacement client to be registered")
+	}
+	if got := ws.GetClientVoiceChIDForTest(replacementClient); got != 99 {
+		t.Fatalf("replacement client voiceChID = %d, want 99", got)
+	}
+
+	readDeadline := time.Now().Add(400 * time.Millisecond)
+	for time.Now().Before(readDeadline) {
+		readCtx, readCancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		_, raw, readErr := conn2.Read(readCtx)
+		readCancel()
+		if readErr != nil {
+			break
+		}
+		var msg map[string]any
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			continue
+		}
+		if msg["type"] == "voice_leave" {
+			t.Fatalf("duplicate login should not broadcast voice_leave for replacement connection: %s", string(raw))
+		}
+	}
+}
+
 // TestServeWS_writePump_MessageDelivered verifies that messages queued on the
 // hub are written through writePump to the connected client.
 func TestServeWS_writePump_MessageDelivered(t *testing.T) {
@@ -728,4 +978,3 @@ func TestServeWS_BannedUser_ReceivesError(t *testing.T) {
 		}
 	}
 }
-

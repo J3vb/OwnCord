@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -19,6 +20,7 @@ const SessionCheckInterval = 10
 type Client struct {
 	hub        *Hub
 	conn       wsConn   // interface — nil in unit tests
+	ctx        context.Context // derived from WS upgrade request; cancelled on disconnect
 	userID     int64
 	user       *db.User
 	channelID  int64  // currently viewed channel for channel-scoped broadcasts
@@ -47,11 +49,12 @@ type wsConn interface {
 }
 
 // newClient creates a real client wrapping a WebSocket connection (set by serve.go).
-func newClient(hub *Hub, conn wsConn, user *db.User, tokenHash string) *Client {
+func newClient(hub *Hub, conn wsConn, user *db.User, tokenHash string, ctx context.Context) *Client {
 	now := time.Now()
 	return &Client{
 		hub:          hub,
 		conn:         conn,
+		ctx:          ctx,
 		userID:       user.ID,
 		user:         user,
 		tokenHash:    tokenHash,
@@ -72,6 +75,7 @@ func (c *Client) GetTokenHash() string {
 func NewTestClient(hub *Hub, userID int64, send chan []byte) *Client {
 	return &Client{
 		hub:    hub,
+		ctx:    context.Background(),
 		userID: userID,
 		send:   send,
 	}
@@ -81,6 +85,7 @@ func NewTestClient(hub *Hub, userID int64, send chan []byte) *Client {
 func NewTestClientWithChannel(hub *Hub, userID, channelID int64, send chan []byte) *Client {
 	return &Client{
 		hub:       hub,
+		ctx:       context.Background(),
 		userID:    userID,
 		channelID: channelID,
 		send:      send,
@@ -92,6 +97,7 @@ func NewTestClientWithChannel(hub *Hub, userID, channelID int64, send chan []byt
 func NewTestClientWithUser(hub *Hub, user *db.User, channelID int64, send chan []byte) *Client {
 	return &Client{
 		hub:       hub,
+		ctx:       context.Background(),
 		userID:    user.ID,
 		user:      user,
 		channelID: channelID,
@@ -111,6 +117,7 @@ func SetClientVoiceChID(c *Client, channelID int64) {
 func NewTestClientWithTokenHash(hub *Hub, user *db.User, tokenHash string, channelID int64, send chan []byte) *Client {
 	return &Client{
 		hub:       hub,
+		ctx:       context.Background(),
 		userID:    user.ID,
 		user:      user,
 		tokenHash: tokenHash,
