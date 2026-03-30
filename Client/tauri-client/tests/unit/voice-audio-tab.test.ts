@@ -77,7 +77,7 @@ describe("VoiceAudioTab camera preview", () => {
     const preview = element.querySelector("video") as HTMLVideoElement;
 
     ac.abort();
-    resolveVideo?.(videoStream);
+    (resolveVideo as ((stream: MediaStream) => void) | null)?.(videoStream);
 
     await vi.waitFor(() => {
       expect(stopVideoTrack).toHaveBeenCalledTimes(1);
@@ -118,7 +118,7 @@ describe("VoiceAudioTab camera preview", () => {
     const preview = element.querySelector("video") as HTMLVideoElement;
 
     tab.cleanup();
-    resolveVideo?.(videoStream);
+    (resolveVideo as ((stream: MediaStream) => void) | null)?.(videoStream);
 
     await vi.waitFor(() => {
       expect(stopVideoTrack).toHaveBeenCalledTimes(1);
@@ -208,7 +208,7 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     const sliders = el.querySelectorAll('input[type="range"]') as NodeListOf<HTMLInputElement>;
-    const inputSlider = sliders[0];
+    const inputSlider = sliders[0]!;
     inputSlider.value = "75";
     inputSlider.dispatchEvent(new Event("input"));
 
@@ -224,7 +224,7 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     const sliders = el.querySelectorAll('input[type="range"]') as NodeListOf<HTMLInputElement>;
-    const outputSlider = sliders[1];
+    const outputSlider = sliders[1]!;
     outputSlider.value = "80";
     outputSlider.dispatchEvent(new Event("input"));
 
@@ -241,7 +241,7 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     const sliders = el.querySelectorAll('input[type="range"]') as NodeListOf<HTMLInputElement>;
-    expect(sliders[0].value).toBe("75");
+    expect(sliders[0]!.value).toBe("75");
     ac.abort();
   });
 
@@ -254,7 +254,7 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     const sliders = el.querySelectorAll('input[type="range"]') as NodeListOf<HTMLInputElement>;
-    expect(sliders[1].value).toBe("60");
+    expect(sliders[1]!.value).toBe("60");
     ac.abort();
   });
 
@@ -275,11 +275,11 @@ describe("VoiceAudioTab UI structure", () => {
       const selects = el.querySelectorAll("select");
       const inputSelect = selects[0];
       // Default + 2 mics = 3 options
-      expect(inputSelect.querySelectorAll("option").length).toBe(3);
+      expect(inputSelect!.querySelectorAll("option").length).toBe(3);
     });
 
     const selects = el.querySelectorAll("select");
-    const outputSelect = selects[1];
+    const outputSelect = selects[1]!;
     // Default + 1 speaker = 2 options
     expect(outputSelect.querySelectorAll("option").length).toBe(2);
 
@@ -297,7 +297,7 @@ describe("VoiceAudioTab UI structure", () => {
 
     await vi.waitFor(() => {
       const selects = el.querySelectorAll("select");
-      expect(selects[0].querySelectorAll("option").length).toBeGreaterThan(1);
+      expect(selects[0]!.querySelectorAll("option").length).toBeGreaterThan(1);
     });
 
     const inputSelect = el.querySelectorAll("select")[0] as HTMLSelectElement;
@@ -319,7 +319,7 @@ describe("VoiceAudioTab UI structure", () => {
 
     await vi.waitFor(() => {
       const selects = el.querySelectorAll("select");
-      expect(selects[1].querySelectorAll("option").length).toBeGreaterThan(1);
+      expect(selects[1]!.querySelectorAll("option").length).toBeGreaterThan(1);
     });
 
     const outputSelect = el.querySelectorAll("select")[1] as HTMLSelectElement;
@@ -390,7 +390,7 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     await vi.waitFor(() => {
-      const inputSelect = el.querySelectorAll("select")[0];
+      const inputSelect = el.querySelectorAll("select")[0]!;
       const options = inputSelect.querySelectorAll("option");
       // Should have default + error option
       const texts = Array.from(options).map(o => o.textContent);
@@ -610,10 +610,10 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     await vi.waitFor(() => {
-      const inputSelect = el.querySelectorAll("select")[0];
+      const inputSelect = el.querySelectorAll("select")[0]!;
       const options = inputSelect.querySelectorAll("option");
       expect(options.length).toBe(2); // default + 1 device
-      expect(options[1].textContent).toContain("Microphone");
+      expect(options[1]!.textContent).toContain("Microphone");
     });
 
     ac.abort();

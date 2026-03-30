@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { fetchMock } = vi.hoisted(() => ({
-  fetchMock: vi.fn(),
+  fetchMock: vi.fn<any>(),
 }));
 
 vi.mock("@tauri-apps/plugin-http", () => ({
@@ -37,7 +37,7 @@ describe("media cache clearing", () => {
   });
 
   it("replaces a stale loading title with a fallback when the cache is cleared mid-fetch", async () => {
-    let resolveFetch: ((value: ReturnType<typeof oembedResponse>) => void) | null = null;
+    let resolveFetch: ((value: ReturnType<typeof oembedResponse>) => void) | undefined;
     fetchMock.mockImplementationOnce(() => new Promise((resolve) => {
       resolveFetch = resolve;
     }));

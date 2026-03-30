@@ -398,3 +398,37 @@ async fn handle_connection(
 
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cert_store_key_strips_default_port() {
+        assert_eq!(cert_store_key("example.com:443"), "example.com");
+    }
+
+    #[test]
+    fn cert_store_key_keeps_non_default_port() {
+        assert_eq!(cert_store_key("example.com:8443"), "example.com:8443");
+    }
+
+    #[test]
+    fn cert_store_key_no_port() {
+        assert_eq!(cert_store_key("example.com"), "example.com");
+    }
+
+    #[test]
+    fn cert_store_key_ipv4_default_port() {
+        assert_eq!(cert_store_key("192.168.1.1:443"), "192.168.1.1");
+    }
+
+    #[test]
+    fn cert_store_key_ipv4_custom_port() {
+        assert_eq!(cert_store_key("192.168.1.1:7880"), "192.168.1.1:7880");
+    }
+}

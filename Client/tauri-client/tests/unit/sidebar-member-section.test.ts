@@ -52,10 +52,10 @@ function resetStores(): void {
   }));
   rolesStore.setState(() => ({
     roles: [
-      { id: 1, name: "owner", permissions: 0 },
-      { id: 2, name: "admin", permissions: 0 },
-      { id: 3, name: "moderator", permissions: 0 },
-      { id: 4, name: "member", permissions: 0 },
+      { id: 1, name: "owner", color: null, permissions: 0 },
+      { id: 2, name: "admin", color: null, permissions: 0 },
+      { id: 3, name: "moderator", color: null, permissions: 0 },
+      { id: 4, name: "member", color: null, permissions: 0 },
     ],
   }));
   localStorage.removeItem(LS_KEY_HEIGHT);

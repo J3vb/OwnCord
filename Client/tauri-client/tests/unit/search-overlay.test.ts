@@ -391,7 +391,8 @@ describe("createSearchOverlay", () => {
   });
 
   it("aborts previous search when a new search starts", async () => {
-    let abortedSignal: AbortSignal | null = null;
+    let abortedSignal: AbortSignal | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const onSearch = vi.fn().mockImplementation((_q: string, _ch: number | undefined, signal: AbortSignal) => {
       abortedSignal = signal;
       return new Promise(() => {}); // Never resolves — stalled search
@@ -422,7 +423,8 @@ describe("createSearchOverlay", () => {
   });
 
   it("shows 'Searching...' status during search", async () => {
-    let resolveSearch: ((results: SearchResultItem[]) => void) | null = null;
+    let resolveSearch: ((results: SearchResultItem[]) => void) | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const onSearch = vi.fn().mockImplementation(() =>
       new Promise<SearchResultItem[]>((resolve) => { resolveSearch = resolve; }),
     );

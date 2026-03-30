@@ -195,3 +195,58 @@ pub fn delete_credential(host: String) -> Result<(), String> {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn target_name_encodes_host_as_utf16() {
+        let result = target_name("localhost:8443");
+        let expected: Vec<u16> = "OwnCord/localhost:8443"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn target_name_empty_host() {
+        let result = target_name("");
+        let expected: Vec<u16> = "OwnCord/"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn to_wide_ascii() {
+        let result = to_wide("hello");
+        let expected: Vec<u16> = "hello"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        assert_eq!(result, expected);
+        // Last element must be null terminator
+        assert_eq!(*result.last().unwrap(), 0u16);
+    }
+
+    #[test]
+    fn to_wide_empty_string() {
+        let result = to_wide("");
+        assert_eq!(result, vec![0u16]);
+    }
+
+    #[test]
+    fn to_wide_unicode() {
+        let result = to_wide("日本語");
+        assert_eq!(*result.last().unwrap(), 0u16);
+        // 3 CJK chars + null terminator = 4 elements
+        assert_eq!(result.len(), 4);
+    }
+}

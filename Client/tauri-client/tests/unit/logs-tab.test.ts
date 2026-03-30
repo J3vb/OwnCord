@@ -6,11 +6,12 @@ const {
   mockClearLogBuffer,
   mockAddLogListener,
   mockSetLogLevel,
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 } = vi.hoisted(() => ({
-  mockGetLogBuffer: vi.fn(),
-  mockClearLogBuffer: vi.fn(),
-  mockAddLogListener: vi.fn(),
-  mockSetLogLevel: vi.fn(),
+  mockGetLogBuffer: vi.fn<any>(),
+  mockClearLogBuffer: vi.fn<any>(),
+  mockAddLogListener: vi.fn<any>(),
+  mockSetLogLevel: vi.fn<any>(),
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -320,11 +321,12 @@ describe("LogsTab", () => {
 
   it("live log listener updates entries when on the Logs tab", () => {
     mockGetLogBuffer.mockReturnValue([]);
-    let logCallback: (() => void) | null = null;
-    mockAddLogListener.mockImplementation((cb: () => void) => {
+    let logCallback: (() => void) | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockAddLogListener.mockImplementation(((cb: any) => {
       logCallback = cb;
-      return () => { logCallback = null; };
-    });
+      return () => { logCallback = undefined; };
+    }) as any);
 
     const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
     const el = handle.build();
@@ -339,11 +341,12 @@ describe("LogsTab", () => {
 
   it("live log listener does NOT update when on a different tab", () => {
     mockGetLogBuffer.mockReturnValue([]);
-    let logCallback: (() => void) | null = null;
-    mockAddLogListener.mockImplementation((cb: () => void) => {
+    let logCallback: (() => void) | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockAddLogListener.mockImplementation(((cb: any) => {
       logCallback = cb;
-      return () => { logCallback = null; };
-    });
+      return () => { logCallback = undefined; };
+    }) as any);
 
     const handle = createLogsTab(() => "Account" as TabName, controller.signal);
     const el = handle.build();

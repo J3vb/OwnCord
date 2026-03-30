@@ -665,7 +665,7 @@ describe("ChannelSidebar", () => {
     editItem.click();
 
     expect(onEditChannel).toHaveBeenCalledTimes(1);
-    const calledWith = onEditChannel.mock.calls[0][0];
+    const calledWith = onEditChannel.mock.calls[0]![0];
     expect(calledWith.id).toBe(1);
     expect(calledWith.name).toBe("general");
   });
@@ -694,7 +694,7 @@ describe("ChannelSidebar", () => {
     deleteItem.click();
 
     expect(onDeleteChannel).toHaveBeenCalledTimes(1);
-    expect(onDeleteChannel.mock.calls[0][0].id).toBe(1);
+    expect(onDeleteChannel.mock.calls[0]![0].id).toBe(1);
   });
 
   it("does not show context menu for non-admin users", () => {

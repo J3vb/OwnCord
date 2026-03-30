@@ -15,6 +15,7 @@ import { membersStore } from "@stores/members.store";
 import { messagesStore, addPendingSend, addMessage } from "@stores/messages.store";
 import { voiceStore } from "@stores/voice.store";
 import { authStore, setAuth } from "@stores/auth.store";
+import { dmStore } from "@stores/dm.store";
 
 // ── Mock WsClient ───────────────────────────────────────────────────
 
@@ -134,6 +135,9 @@ function resetAllStores(): void {
     serverName: null,
     motd: null,
     isAuthenticated: false,
+  }));
+  dmStore.setState(() => ({
+    channels: [],
   }));
 }
 
@@ -591,6 +595,141 @@ describe("Store integration via dispatcher", () => {
 
       expect(voiceStore.getState().voiceUsers.get(3)!.get(1)?.speaking).toBe(false);
       expect(voiceStore.getState().voiceUsers.get(3)!.get(2)?.speaking).toBe(false);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────
+  // 7. Channel CRUD events
+  // ────────────────────────────────────────────────────────────────
+
+  describe("channel lifecycle events", () => {
+    it("adds channel on channel_create event", () => {
+      ws.simulate("channel_create", {
+        id: 10,
+        name: "new-channel",
+        type: "text",
+        position: 5,
+      });
+
+      const channels = channelsStore.getState().channels;
+      expect(channels.has(10)).toBe(true);
+      expect(channels.get(10)!.name).toBe("new-channel");
+    });
+
+    it("updates channel name on channel_update event", () => {
+      ws.simulate("channel_create", {
+        id: 11,
+        name: "old-name",
+        type: "text",
+        position: 1,
+      });
+      ws.simulate("channel_update", {
+        id: 11,
+        name: "new-name",
+      });
+
+      expect(channelsStore.getState().channels.get(11)!.name).toBe("new-name");
+    });
+
+    it("removes channel and redirects active on channel_delete event", () => {
+      // Seed two channels
+      ws.simulate("channel_create", { id: 20, name: "keep", type: "text", position: 0 });
+      ws.simulate("channel_create", { id: 21, name: "delete-me", type: "text", position: 1 });
+      setActiveChannel(21);
+      expect(channelsStore.getState().activeChannelId).toBe(21);
+
+      ws.simulate("channel_delete", { id: 21 });
+
+      expect(channelsStore.getState().channels.has(21)).toBe(false);
+      // Active should redirect to remaining channel
+      expect(channelsStore.getState().activeChannelId).toBe(20);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────
+  // 8. Member join/leave/update events
+  // ────────────────────────────────────────────────────────────────
+
+  describe("member lifecycle events", () => {
+    it("adds member on member_join event", () => {
+      ws.simulate("member_join", {
+        user: { id: 50, username: "new-user", avatar: null, role: "member", status: "online" },
+      });
+
+      const members = membersStore.getState().members;
+      expect(members.has(50)).toBe(true);
+      expect(members.get(50)!.username).toBe("new-user");
+    });
+
+    it("removes member on member_leave event", () => {
+      ws.simulate("member_join", {
+        user: { id: 51, username: "leaving-user", avatar: null, role: "member", status: "online" },
+      });
+      expect(membersStore.getState().members.has(51)).toBe(true);
+
+      ws.simulate("member_leave", { user_id: 51 });
+      expect(membersStore.getState().members.has(51)).toBe(false);
+    });
+
+    it("updates member role on member_update event", () => {
+      ws.simulate("member_join", {
+        user: { id: 52, username: "role-user", avatar: null, role: "member", status: "online" },
+      });
+
+      ws.simulate("member_update", { user_id: 52, role: "admin" });
+      expect(membersStore.getState().members.get(52)!.role).toBe("admin");
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────
+  // 9. DM channel lifecycle
+  // ────────────────────────────────────────────────────────────────
+
+  describe("DM channel events", () => {
+    it("adds DM channel on dm_channel_open event", () => {
+      ws.simulate("dm_channel_open", {
+        channel_id: 100,
+        recipient: { id: 60, username: "dm-friend", avatar: "", status: "online" },
+        last_message_id: null,
+        last_message: "",
+        last_message_at: "",
+        unread_count: 0,
+      });
+
+      const dms = dmStore.getState().channels;
+      expect(dms.length).toBe(1);
+      expect(dms[0]!.channelId).toBe(100);
+      expect(dms[0]!.recipient.username).toBe("dm-friend");
+    });
+
+    it("removes DM channel on dm_channel_close event", () => {
+      ws.simulate("dm_channel_open", {
+        channel_id: 101,
+        recipient: { id: 61, username: "closed-dm", avatar: "", status: "online" },
+        last_message_id: null,
+        last_message: "",
+        last_message_at: "",
+        unread_count: 0,
+      });
+      expect(dmStore.getState().channels.length).toBe(1);
+
+      ws.simulate("dm_channel_close", { channel_id: 101 });
+      expect(dmStore.getState().channels.length).toBe(0);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────
+  // 10. Presence updates
+  // ────────────────────────────────────────────────────────────────
+
+  describe("presence events", () => {
+    it("updates member status on presence event", () => {
+      ws.simulate("member_join", {
+        user: { id: 70, username: "presence-user", avatar: null, role: "member", status: "online" },
+      });
+
+      ws.simulate("presence", { user_id: 70, status: "idle" });
+      expect(membersStore.getState().members.get(70)!.status).toBe("idle");
     });
   });
 });

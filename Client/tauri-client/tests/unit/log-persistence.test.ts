@@ -150,7 +150,7 @@ describe("log persistence", () => {
       await initLogPersistence();
 
       expect(mockAddLogListener).toHaveBeenCalledTimes(1);
-      expect(typeof mockAddLogListener.mock.calls[0][0]).toBe("function");
+      expect(typeof mockAddLogListener.mock.calls[0]![0]).toBe("function");
     });
 
     it("returns a no-op cleanup if already initialized", async () => {
@@ -255,7 +255,7 @@ describe("log persistence", () => {
       await vi.advanceTimersByTimeAsync(2000);
 
       expect(mockWriteTextFile).toHaveBeenCalledTimes(1);
-      const [filePath, content, opts] = mockWriteTextFile.mock.calls[0];
+      const [filePath, content, opts] = mockWriteTextFile.mock.calls[0]!;
       expect(filePath).toBe("/mock/logs/client-logs/2025-06-15.jsonl");
       expect(content).toBe(JSON.stringify(entry) + "\n");
       expect(opts).toEqual({ append: true });
@@ -277,12 +277,12 @@ describe("log persistence", () => {
       await vi.advanceTimersByTimeAsync(2000);
 
       expect(mockWriteTextFile).toHaveBeenCalledTimes(1);
-      const content = mockWriteTextFile.mock.calls[0][1] as string;
+      const content = mockWriteTextFile.mock.calls[0]![1] as string;
       const lines = content.trimEnd().split("\n");
       expect(lines).toHaveLength(3);
-      expect(JSON.parse(lines[0]).message).toBe("one");
-      expect(JSON.parse(lines[1]).message).toBe("two");
-      expect(JSON.parse(lines[2]).message).toBe("three");
+      expect(JSON.parse(lines[0]!).message).toBe("one");
+      expect(JSON.parse(lines[1]!).message).toBe("two");
+      expect(JSON.parse(lines[2]!).message).toBe("three");
     });
 
     it("does not schedule a second timer while one is pending", async () => {
@@ -304,7 +304,7 @@ describe("log persistence", () => {
       // The first flush fires with the first entry only.
       // The second entry triggers a new timer after the first fires.
       expect(mockWriteTextFile).toHaveBeenCalledTimes(1);
-      const content = mockWriteTextFile.mock.calls[0][1] as string;
+      const content = mockWriteTextFile.mock.calls[0]![1] as string;
       expect(content).toContain("first");
       expect(content).toContain("second");
     });
@@ -355,7 +355,7 @@ describe("log persistence", () => {
       await flushLogs();
 
       expect(mockWriteTextFile).toHaveBeenCalledTimes(1);
-      const content = mockWriteTextFile.mock.calls[0][1] as string;
+      const content = mockWriteTextFile.mock.calls[0]![1] as string;
       expect(content).toContain("urgent");
 
       // Advancing past the original timer should NOT cause a second write
@@ -462,7 +462,7 @@ describe("log persistence", () => {
       await vi.advanceTimersByTimeAsync(2000);
 
       expect(mockWriteTextFile).toHaveBeenCalledTimes(1);
-      expect(mockWriteTextFile.mock.calls[0][0]).toContain("2025-06-15");
+      expect(mockWriteTextFile.mock.calls[0]![0]).toContain("2025-06-15");
 
       // Advance the system clock to the next day
       vi.setSystemTime(new Date("2025-06-16T08:00:00.000Z"));
@@ -483,7 +483,7 @@ describe("log persistence", () => {
 
       // Should have written to the new date file
       expect(mockWriteTextFile).toHaveBeenCalledTimes(2);
-      expect(mockWriteTextFile.mock.calls[1][0]).toContain("2025-06-16");
+      expect(mockWriteTextFile.mock.calls[1]![0]).toContain("2025-06-16");
 
       // Should have removed the oldest files (7 files, keep 5 => remove 2)
       expect(mockRemove).toHaveBeenCalledTimes(2);
@@ -621,9 +621,9 @@ describe("log persistence", () => {
 
       // Files should be read in sorted order: 13, 14, 15
       expect(mockReadTextFile).toHaveBeenCalledTimes(3);
-      expect(mockReadTextFile.mock.calls[0][0]).toContain("2025-06-13");
-      expect(mockReadTextFile.mock.calls[1][0]).toContain("2025-06-14");
-      expect(mockReadTextFile.mock.calls[2][0]).toContain("2025-06-15");
+      expect(mockReadTextFile.mock.calls[0]![0]).toContain("2025-06-13");
+      expect(mockReadTextFile.mock.calls[1]![0]).toContain("2025-06-14");
+      expect(mockReadTextFile.mock.calls[2]![0]).toContain("2025-06-15");
 
       expect(result).toBe('{"day":"13"}\n{"day":"14"}\n{"day":"15"}\n');
     });
@@ -706,11 +706,11 @@ describe("log persistence", () => {
 
       await vi.advanceTimersByTimeAsync(2000);
 
-      const content = mockWriteTextFile.mock.calls[0][1] as string;
+      const content = mockWriteTextFile.mock.calls[0]![1] as string;
       const lines = content.trimEnd().split("\n");
       expect(lines).toHaveLength(1);
 
-      const parsed = JSON.parse(lines[0]);
+      const parsed = JSON.parse(lines[0]!);
       expect(parsed.level).toBe("info");
       expect(parsed.message).toBe("hello");
       expect(parsed.data).toEqual({ key: "value" });
@@ -724,7 +724,7 @@ describe("log persistence", () => {
       getListener()!(makeEntry());
       await vi.advanceTimersByTimeAsync(2000);
 
-      const content = mockWriteTextFile.mock.calls[0][1] as string;
+      const content = mockWriteTextFile.mock.calls[0]![1] as string;
       expect(content.endsWith("\n")).toBe(true);
     });
   });
@@ -835,7 +835,7 @@ describe("log persistence", () => {
 
       // All should be in a single write
       expect(mockWriteTextFile).toHaveBeenCalledTimes(1);
-      const content = mockWriteTextFile.mock.calls[0][1] as string;
+      const content = mockWriteTextFile.mock.calls[0]![1] as string;
       const lines = content.trimEnd().split("\n");
       expect(lines).toHaveLength(10);
     });
@@ -849,7 +849,7 @@ describe("log persistence", () => {
       getListener()!(makeEntry());
       await vi.advanceTimersByTimeAsync(2000);
 
-      expect(mockWriteTextFile.mock.calls[0][0]).toBe(
+      expect(mockWriteTextFile.mock.calls[0]![0]).toBe(
         "/mock/logs/client-logs/2024-01-01.jsonl",
       );
     });

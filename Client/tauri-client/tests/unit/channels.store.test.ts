@@ -369,16 +369,16 @@ describe('channels store', () => {
   describe('setRoles', () => {
     it('stores roles from ready payload', () => {
       const roles = [
-        { id: 1, name: 'admin', color: '#ff0000', position: 0 },
-        { id: 2, name: 'member', color: '#00ff00', position: 1 },
+        { id: 1, name: 'admin', color: '#ff0000', permissions: 0 },
+        { id: 2, name: 'member', color: '#00ff00', permissions: 0 },
       ];
       setRoles(roles);
       expect(channelsStore.getState().roles).toEqual(roles);
     });
 
     it('replaces existing roles', () => {
-      setRoles([{ id: 1, name: 'admin', color: '#ff0000', position: 0 }]);
-      setRoles([{ id: 2, name: 'member', color: '#00ff00', position: 0 }]);
+      setRoles([{ id: 1, name: 'admin', color: '#ff0000', permissions: 0 }]);
+      setRoles([{ id: 2, name: 'member', color: '#00ff00', permissions: 0 }]);
       expect(channelsStore.getState().roles).toHaveLength(1);
       expect(channelsStore.getState().roles[0]!.name).toBe('member');
     });
@@ -387,8 +387,8 @@ describe('channels store', () => {
   describe('getRoleIdByName', () => {
     it('returns role id for matching name (case-insensitive)', () => {
       setRoles([
-        { id: 1, name: 'Admin', color: '#ff0000', position: 0 },
-        { id: 2, name: 'Member', color: '#00ff00', position: 1 },
+        { id: 1, name: 'Admin', color: '#ff0000', permissions: 0 },
+        { id: 2, name: 'Member', color: '#00ff00', permissions: 0 },
       ]);
       expect(getRoleIdByName('admin')).toBe(1);
       expect(getRoleIdByName('ADMIN')).toBe(1);
@@ -396,7 +396,7 @@ describe('channels store', () => {
     });
 
     it('returns undefined for non-existent role', () => {
-      setRoles([{ id: 1, name: 'admin', color: '#ff0000', position: 0 }]);
+      setRoles([{ id: 1, name: 'admin', color: '#ff0000', permissions: 0 }]);
       expect(getRoleIdByName('moderator')).toBeUndefined();
     });
 

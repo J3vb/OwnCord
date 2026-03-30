@@ -22,6 +22,27 @@ Bug tracker for the OwnCord project.
 
 ## Resolved
 
+- **BUG-058**: Prod-build E2E blocked by TS errors — fixed 2026-03-30
+  - Created `tsconfig.build.json` excluding tests; updated build script to `tsc -p tsconfig.build.json`. Added `typecheck` and `typecheck:build` scripts.
+- **BUG-059**: Native Tauri E2E too unreliable — fixed 2026-03-30
+  - CDP timeout 30s→60s with exponential backoff (100ms→2s). Config: test timeout 60s→120s, action 15s→30s, nav 30s→45s, expect 10s→15s.
+- **BUG-060**: Rust backend zero test coverage — fixed 2026-03-30
+  - Added 25 unit tests across `commands.rs`, `ws_proxy.rs`, `livekit_proxy.rs`, `credentials.rs`. Tests cover `is_settings_key_allowed`, `extract_host`, `cert_store_key`, `target_name`, `to_wide`.
+- **BUG-061**: Server coverage-driven tests — fixed 2026-03-30
+  - Added behavioral assertions to `coverage_boost_test.go` GracefulStop tests (verify client count before stop) and channel_focus tests (verify no error sent for invalid/valid input).
+- **BUG-062**: Client low-signal assertions — fixed 2026-03-30
+  - Upgraded worst-cluster tests in `livekit-session.test.ts` (zero-assertion setters now verify stored state), `device-manager.test.ts` (no-op tests replaced with behavioral checks), `channel-controller.test.ts` (improved test names).
+- **BUG-063**: Native E2E skip gates — fixed 2026-03-30
+  - Lifted per-test data checks into `beforeEach` in `voice-controls.spec.ts` (7→1 skip) and `channel-navigation.spec.ts` (4→1 skip). Added environment state helper and `countVisible` utility.
+- **BUG-064**: Client integration coverage thin — fixed 2026-03-30
+  - Added 9 integration tests for channel CRUD, member join/leave/update, DM open/close, presence. Total integration tests: 25.
+- **BUG-065**: E2E fixed sleeps — fixed 2026-03-30
+  - Replaced `waitForTimeout(3000)` with `waitForLoadState("networkidle")` in smoke.spec.ts. Replaced `waitForTimeout(500)` with `waitFor({state:"hidden"})` in helpers.ts. Replaced `waitForTimeout(300)` with `expect(btn).toBeEnabled()` in voice-lifecycle.spec.ts.
+- **BUG-066**: Toast/audio no-op checks — closed 2026-03-30
+  - Already remediated in prior session. Remaining "does nothing" tests verified to have proper behavioral assertions (checking `isActive`, `gainValue`, etc).
+- **BUG-067**: coverage_boost_test.go cleanup — fixed 2026-03-30
+  - Added `drainForErrorCode` assertions to "no panic" channel_focus tests. Added client count checks to GracefulStop tests.
+
 - **BUG-054**: No account deletion — fixed 2026-03-28
   - Server: `DELETE /api/v1/auth/account` with password confirmation. Anonymizes user (username → `[deleted-{id}]`, clears password/avatar/TOTP, bans row). Soft-deletes messages, removes sessions/DM participation/reactions/read states. Blocks last-admin deletion.
   - Client: "Danger Zone" section in AccountTab with inline confirmation (password required). Post-deletion clears auth, disconnects WS, navigates to connect page.

@@ -423,6 +423,7 @@ describe("ConnectPage", () => {
     page.updateHealthStatus("localhost:8443", {
       status: "online",
       latencyMs: 42,
+      version: null,
       onlineUsers: 5,
     });
 

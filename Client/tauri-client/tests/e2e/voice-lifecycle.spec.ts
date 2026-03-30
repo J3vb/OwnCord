@@ -396,10 +396,9 @@ test.describe("Voice WS flow — failure", () => {
     // joinVoiceChannel is called synchronously, so the widget shows immediately
     await expect(widget).toHaveClass(/visible/, { timeout: 10_000 });
 
-    // Wait for the error event to be processed (mock sends it after 50ms)
-    await page.waitForTimeout(300);
-
-    // The app should still be functional — disconnect should work
+    // Wait for the error event to be processed — verify app is still functional
+    // by checking the disconnect button remains clickable
+    await expect(disconnectBtn).toBeEnabled({ timeout: 5_000 });
     await disconnectBtn.click();
     await expect(widget).not.toHaveClass(/visible/, { timeout: 5_000 });
   });

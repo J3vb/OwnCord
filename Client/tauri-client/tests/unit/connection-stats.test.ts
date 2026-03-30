@@ -196,7 +196,7 @@ describe("createConnectionStatsPoller", () => {
     await vi.advanceTimersByTimeAsync(2100);
 
     expect(cb).toHaveBeenCalled();
-    const stats = cb.mock.calls[0][0];
+    const stats = cb.mock.calls[0]![0];
     expect(stats.rtt).toBe(50); // 0.05 * 1000
     expect(stats.quality).toBe("excellent");
   });
@@ -211,7 +211,7 @@ describe("createConnectionStatsPoller", () => {
     poller.start();
     await vi.advanceTimersByTimeAsync(2100);
 
-    const stats = cb.mock.calls[0][0];
+    const stats = cb.mock.calls[0]![0];
     expect(stats.quality).toBe("fair");
   });
 
@@ -225,7 +225,7 @@ describe("createConnectionStatsPoller", () => {
     poller.start();
     await vi.advanceTimersByTimeAsync(2100);
 
-    const stats = cb.mock.calls[0][0];
+    const stats = cb.mock.calls[0]![0];
     expect(stats.quality).toBe("poor");
   });
 
@@ -239,7 +239,7 @@ describe("createConnectionStatsPoller", () => {
     poller.start();
     await vi.advanceTimersByTimeAsync(2100);
 
-    const stats = cb.mock.calls[0][0];
+    const stats = cb.mock.calls[0]![0];
     expect(stats.quality).toBe("bad");
   });
 
@@ -255,7 +255,7 @@ describe("createConnectionStatsPoller", () => {
     poller.start();
     await vi.advanceTimersByTimeAsync(2100);
 
-    const stats = cb.mock.calls[0][0];
+    const stats = cb.mock.calls[0]![0];
     // outPackets and inPackets are accumulated from both publisher and subscriber PCs
     expect(stats.outPackets).toBeGreaterThanOrEqual(500);
     expect(stats.inPackets).toBeGreaterThanOrEqual(300);
@@ -278,7 +278,7 @@ describe("createConnectionStatsPoller", () => {
     await vi.advanceTimersByTimeAsync(2100);
 
     // Rates should be >= 0 (exact value depends on timing)
-    const stats = cb.mock.calls[cb.mock.calls.length - 1][0];
+    const stats = cb.mock.calls[cb.mock.calls.length - 1]![0];
     expect(stats.outRate).toBeGreaterThanOrEqual(0);
     expect(stats.inRate).toBeGreaterThanOrEqual(0);
   });
@@ -434,7 +434,7 @@ describe("createConnectionStatsPoller", () => {
     poller.start();
     await vi.advanceTimersByTimeAsync(2100);
     expect(cb).toHaveBeenCalled();
-    expect(cb.mock.calls[0][0].rtt).toBe(50);
+    expect(cb.mock.calls[0]![0].rtt).toBe(50);
   });
 
   it("handles room with only subscriber PC", async () => {
@@ -462,8 +462,8 @@ describe("createConnectionStatsPoller", () => {
     poller.start();
     await vi.advanceTimersByTimeAsync(2100);
     expect(cb).toHaveBeenCalled();
-    expect(cb.mock.calls[0][0].rtt).toBe(120);
-    expect(cb.mock.calls[0][0].quality).toBe("fair");
+    expect(cb.mock.calls[0]![0].rtt).toBe(120);
+    expect(cb.mock.calls[0]![0].quality).toBe("fair");
   });
 
   it("ignores candidate-pair entries with non-numeric or zero RTT", async () => {
@@ -477,8 +477,8 @@ describe("createConnectionStatsPoller", () => {
     poller.start();
     await vi.advanceTimersByTimeAsync(2100);
     expect(cb).toHaveBeenCalled();
-    expect(cb.mock.calls[0][0].rtt).toBe(0);
-    expect(cb.mock.calls[0][0].quality).toBe("excellent"); // rtt 0 = excellent
+    expect(cb.mock.calls[0]![0].rtt).toBe(0);
+    expect(cb.mock.calls[0]![0].quality).toBe("excellent"); // rtt 0 = excellent
   });
 
   it("picks the lowest RTT when multiple candidate-pairs exist", async () => {
@@ -491,7 +491,7 @@ describe("createConnectionStatsPoller", () => {
     poller.onUpdate(cb);
     poller.start();
     await vi.advanceTimersByTimeAsync(2100);
-    expect(cb.mock.calls[0][0].rtt).toBe(50);
+    expect(cb.mock.calls[0]![0].rtt).toBe(50);
   });
 
   it("clamps outRate and inRate to non-negative", async () => {
@@ -536,7 +536,7 @@ describe("createConnectionStatsPoller", () => {
     poller.start();
     await vi.advanceTimersByTimeAsync(2100); // First poll
     await vi.advanceTimersByTimeAsync(2100); // Second poll
-    const lastStats = cb.mock.calls[cb.mock.calls.length - 1][0];
+    const lastStats = cb.mock.calls[cb.mock.calls.length - 1]![0];
     // outRate uses Math.max(0, ...) so should be >= 0
     expect(lastStats.outRate).toBeGreaterThanOrEqual(0);
     expect(lastStats.inRate).toBeGreaterThanOrEqual(0);
@@ -598,7 +598,7 @@ describe("createConnectionStatsPoller", () => {
     poller.start();
     await vi.advanceTimersByTimeAsync(2100);
     expect(cb).toHaveBeenCalled();
-    const stats = cb.mock.calls[0][0];
+    const stats = cb.mock.calls[0]![0];
     expect(stats.totalUp).toBe(0);
     expect(stats.totalDown).toBe(0);
   });
@@ -614,7 +614,7 @@ describe("createConnectionStatsPoller", () => {
     poller.start();
     await vi.advanceTimersByTimeAsync(2100);
     expect(cb).toHaveBeenCalled();
-    expect(cb.mock.calls[0][0].outPackets).toBe(0);
+    expect(cb.mock.calls[0]![0].outPackets).toBe(0);
   });
 
   it("handles inbound-rtp without packetsReceived", async () => {
@@ -628,6 +628,6 @@ describe("createConnectionStatsPoller", () => {
     poller.start();
     await vi.advanceTimersByTimeAsync(2100);
     expect(cb).toHaveBeenCalled();
-    expect(cb.mock.calls[0][0].inPackets).toBe(0);
+    expect(cb.mock.calls[0]![0].inPackets).toBe(0);
   });
 });

@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { fetchMock, putSpy } = vi.hoisted(() => ({
-  fetchMock: vi.fn(),
-  putSpy: vi.fn(),
+  fetchMock: vi.fn<any>(),
+  putSpy: vi.fn<any>(),
 }));
 
 vi.mock("@tauri-apps/plugin-http", () => ({
@@ -87,7 +87,7 @@ describe("attachment cache clearing", () => {
   });
 
   it("does not repopulate caches from an in-flight fetch after clear", async () => {
-    let resolveFetch: ((value: ReturnType<typeof imageResponse>) => void) | null = null;
+    let resolveFetch: ((value: ReturnType<typeof imageResponse>) => void) | undefined;
     fetchMock.mockImplementationOnce(() => new Promise((resolve) => {
       resolveFetch = resolve;
     }));
@@ -108,8 +108,8 @@ describe("attachment cache clearing", () => {
   });
 
   it("keeps replacement requests deduplicated after a clear", async () => {
-    let resolveFirst: ((value: ReturnType<typeof imageResponse>) => void) | null = null;
-    let resolveSecond: ((value: ReturnType<typeof imageResponse>) => void) | null = null;
+    let resolveFirst: ((value: ReturnType<typeof imageResponse>) => void) | undefined;
+    let resolveSecond: ((value: ReturnType<typeof imageResponse>) => void) | undefined;
     fetchMock
       .mockImplementationOnce(() => new Promise((resolve) => {
         resolveFirst = resolve;
@@ -141,12 +141,13 @@ describe("attachment cache clearing", () => {
   });
 
   it("stops showing a loading placeholder when a mid-fetch clear invalidates the result", async () => {
-    let resolveFetch: ((value: ReturnType<typeof imageResponse>) => void) | null = null;
+    let resolveFetch: ((value: ReturnType<typeof imageResponse>) => void) | undefined;
     fetchMock.mockImplementationOnce(() => new Promise((resolve) => {
       resolveFetch = resolve;
     }));
 
     const element = renderAttachment({
+      id: "att-1",
       url: "https://example.com/image.png",
       filename: "image.png",
       size: 1,

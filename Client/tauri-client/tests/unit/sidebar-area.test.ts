@@ -1832,9 +1832,9 @@ describe("SidebarArea", () => {
       channelsStore.setState((prev) => ({
         ...prev,
         roles: [
-          { id: 1, name: "owner", permissions: 0 },
-          { id: 2, name: "admin", permissions: 0 },
-          { id: 4, name: "member", permissions: 0 },
+          { id: 1, name: "owner", color: null, permissions: 0 },
+          { id: 2, name: "admin", color: null, permissions: 0 },
+          { id: 4, name: "member", color: null, permissions: 0 },
         ],
       }));
 
@@ -1858,7 +1858,7 @@ describe("SidebarArea", () => {
 
       channelsStore.setState((prev) => ({
         ...prev,
-        roles: [{ id: 2, name: "admin", permissions: 0 }],
+        roles: [{ id: 2, name: "admin", color: null, permissions: 0 }],
       }));
 
       const result = createSidebarArea(opts);
@@ -1880,7 +1880,7 @@ describe("SidebarArea", () => {
 
       channelsStore.setState((prev) => ({
         ...prev,
-        roles: [{ id: 2, name: "admin", permissions: 0 }],
+        roles: [{ id: 2, name: "admin", color: null, permissions: 0 }],
       }));
 
       const result = createSidebarArea(opts);

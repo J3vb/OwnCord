@@ -8,7 +8,7 @@ const {
   mockApplyThemeByName,
 } = vi.hoisted(() => ({
   mockGetActiveThemeName: vi.fn(() => "neon-glow"),
-  mockLoadCustomTheme: vi.fn(() => null),
+  mockLoadCustomTheme: vi.fn((): { name: string; author: string; version: string; colors: Record<string, string> } | null => null),
   mockRestoreTheme: vi.fn(),
   mockApplyThemeByName: vi.fn(),
 }));

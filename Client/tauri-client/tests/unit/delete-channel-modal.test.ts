@@ -118,8 +118,8 @@ describe("DeleteChannelModal", () => {
   });
 
   it("disables button and shows 'Deleting...' during delete", async () => {
-    let resolveDelete: (() => void) | null = null;
-    const onConfirm = vi.fn(() => new Promise<void>((resolve) => { resolveDelete = resolve; }));
+    let resolveDelete: (() => void) | undefined;
+    const onConfirm = vi.fn<any>(() => new Promise<void>((resolve) => { resolveDelete = resolve; }));
     const { modal } = makeModal({ onConfirm });
 
     const deleteBtn = container.querySelector("[data-testid='delete-channel-confirm']") as HTMLButtonElement;

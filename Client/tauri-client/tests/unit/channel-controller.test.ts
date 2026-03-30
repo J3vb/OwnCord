@@ -22,7 +22,7 @@ const {
   mockMessageInputDestroy: vi.fn(),
   mockTypingMount: vi.fn(),
   mockTypingDestroy: vi.fn(),
-  mockGetChannelMessages: vi.fn((): Array<{ id: number; content?: string; user?: { id: number; username: string } }> => []),
+  mockGetChannelMessages: vi.fn((): Array<{ id: number; content?: string; user?: { id: number; username: string }; deleted?: boolean }> => []),
   mockSetReplyTo: vi.fn(),
   mockStartEdit: vi.fn(),
   mockScrollToMessage: vi.fn(() => true),
@@ -93,7 +93,7 @@ vi.mock("../../src/pages/main-page/ChatHeader", () => ({
 }));
 
 const { mockDmStoreGetState, mockMembersStoreGetState } = vi.hoisted(() => ({
-  mockDmStoreGetState: vi.fn(() => ({ channels: [] })),
+  mockDmStoreGetState: vi.fn(() => ({ channels: [] as Array<{ channelId: number; recipient: { id: number; username: string; avatar: string; status: string }; lastMessageId: number | null; lastMessage: string; lastMessageAt: string; unreadCount: number }> })),
   mockMembersStoreGetState: vi.fn(() => ({ members: new Map() })),
 }));
 
@@ -429,7 +429,7 @@ describe("createChannelController", () => {
       expect(mockStartEdit).toHaveBeenCalledWith(5, "hello");
     });
 
-    it("onEditClick does nothing for unknown message", () => {
+    it("onEditClick skips startEdit when message id is not found in channel", () => {
       mockGetChannelMessages.mockReturnValue([]);
       const opts = makeOpts();
       const ctrl = createChannelController(opts);

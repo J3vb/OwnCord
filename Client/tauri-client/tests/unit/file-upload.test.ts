@@ -287,8 +287,8 @@ describe("FileUpload", () => {
   // ── Cancel button aborts upload ──
 
   it("cancel button aborts in-flight upload and resets preview", async () => {
-    let resolveUpload: (() => void) | null = null;
-    const onUpload = vi.fn(() => new Promise<void>((resolve) => {
+    let resolveUpload: (() => void) | undefined;
+    const onUpload = vi.fn<any>(() => new Promise<void>((resolve) => {
       resolveUpload = resolve;
     }));
     const upload = makeUpload({ onUpload });
@@ -403,8 +403,8 @@ describe("FileUpload", () => {
   // ── Destroy aborts in-flight upload ──
 
   it("destroy aborts in-flight upload", async () => {
-    let resolveUpload: (() => void) | null = null;
-    const onUpload = vi.fn(() => new Promise<void>((resolve) => {
+    let resolveUpload: (() => void) | undefined;
+    const onUpload = vi.fn<any>(() => new Promise<void>((resolve) => {
       resolveUpload = resolve;
     }));
     const upload = makeUpload({ onUpload });

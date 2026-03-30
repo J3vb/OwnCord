@@ -27,9 +27,9 @@ import { defineConfig } from "@playwright/test";
  * Usage:  npm run test:e2e:native
  */
 export default defineConfig({
-  timeout: 60_000,
+  timeout: 120_000,
   expect: {
-    timeout: 10_000,
+    timeout: 15_000,
   },
   // Native tests run sequentially — one app instance at a time
   fullyParallel: false,
@@ -40,8 +40,8 @@ export default defineConfig({
     : "html",
 
   use: {
-    actionTimeout: 15_000,
-    navigationTimeout: 30_000,
+    actionTimeout: 30_000,
+    navigationTimeout: 45_000,
     screenshot: "only-on-failure",
     trace: "on-first-retry",
     video: "on-first-retry",

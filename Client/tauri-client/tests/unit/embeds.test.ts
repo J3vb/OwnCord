@@ -8,7 +8,8 @@ import {
 } from "vitest";
 
 const { fetchMock } = vi.hoisted(() => ({
-  fetchMock: vi.fn(),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  fetchMock: vi.fn<any>(),
 }));
 
 vi.mock("@tauri-apps/plugin-http", () => ({
@@ -51,17 +52,18 @@ describe("renderGenericLinkPreview", () => {
   });
 
   it("does not reuse OG metadata that resolves after the cache was cleared", async () => {
-    let resolveFetch: ((value: ReturnType<typeof mockHtmlResponse>) => void) | null = null;
-    fetchMock.mockImplementationOnce(() => new Promise((resolve) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let resolveFetch: ((value: any) => void) | null = null;
+    fetchMock.mockImplementationOnce((() => new Promise((resolve) => {
       resolveFetch = resolve;
-    }));
+    })) as any);
 
     const first = renderGenericLinkPreview("https://news.example.com/post");
     document.body.appendChild(first);
 
     await Promise.resolve();
     clearEmbedCaches();
-    resolveFetch?.(mockHtmlResponse("<html><head><title>Fresh</title></head></html>"));
+    (resolveFetch as any)?.(mockHtmlResponse("<html><head><title>Fresh</title></head></html>"));
     await Promise.resolve();
     await Promise.resolve();
 
@@ -75,17 +77,18 @@ describe("renderGenericLinkPreview", () => {
   });
 
   it("does not reuse an EMPTY_OG result that resolves after the cache was cleared", async () => {
-    let resolveFetch: ((value: { ok: boolean; headers: { get(name: string): string | null } }) => void) | null = null;
-    fetchMock.mockImplementationOnce(() => new Promise((resolve) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let resolveFetch: ((value: any) => void) | null = null;
+    fetchMock.mockImplementationOnce((() => new Promise((resolve) => {
       resolveFetch = resolve;
-    }));
+    })) as any);
 
     const first = renderGenericLinkPreview("https://news.example.com/empty");
     document.body.appendChild(first);
 
     await Promise.resolve();
     clearEmbedCaches();
-    resolveFetch?.({
+    (resolveFetch as any)?.({
       ok: false,
       headers: { get: () => null },
     });
@@ -102,15 +105,17 @@ describe("renderGenericLinkPreview", () => {
   });
 
   it("keeps replacement preview requests deduplicated after a clear", async () => {
-    let resolveFirst: ((value: ReturnType<typeof mockHtmlResponse>) => void) | null = null;
-    let resolveSecond: ((value: ReturnType<typeof mockHtmlResponse>) => void) | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let resolveFirst: ((value: any) => void) | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let resolveSecond: ((value: any) => void) | null = null;
     fetchMock
-      .mockImplementationOnce(() => new Promise((resolve) => {
+      .mockImplementationOnce((() => new Promise((resolve) => {
         resolveFirst = resolve;
-      }))
-      .mockImplementationOnce(() => new Promise((resolve) => {
+      })) as any)
+      .mockImplementationOnce((() => new Promise((resolve) => {
         resolveSecond = resolve;
-      }));
+      })) as any);
 
     const first = renderGenericLinkPreview("https://news.example.com/race");
     document.body.appendChild(first);
@@ -124,7 +129,7 @@ describe("renderGenericLinkPreview", () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
-    resolveFirst?.(mockHtmlResponse("<html><head><title>Old</title></head></html>"));
+    (resolveFirst as any)?.(mockHtmlResponse("<html><head><title>Old</title></head></html>"));
     await Promise.resolve();
     await Promise.resolve();
 
@@ -132,7 +137,7 @@ describe("renderGenericLinkPreview", () => {
     document.body.appendChild(third);
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
-    resolveSecond?.(mockHtmlResponse("<html><head><title>New</title></head></html>"));
+    (resolveSecond as any)?.(mockHtmlResponse("<html><head><title>New</title></head></html>"));
     await vi.waitFor(() => {
       expect(second.querySelector(".msg-embed-link-title")?.textContent).toBe("New");
     });
@@ -717,7 +722,7 @@ describe("renderGenericLinkPreview — cache stale during non-HTML response", ()
     clearEmbedCaches();
 
     // Resolve with non-HTML content type
-    resolveFetch?.({
+    (resolveFetch as any)?.({
       ok: true,
       headers: { get: (name: string) => name.toLowerCase() === "content-type" ? "application/json" : null },
       text: vi.fn().mockResolvedValue("{}"),
@@ -750,7 +755,7 @@ describe("renderGenericLinkPreview — cache stale during non-HTML response", ()
     clearEmbedCaches();
 
     // Reject the fetch
-    rejectFetch?.(new Error("network error"));
+    (rejectFetch as any)?.(new Error("network error"));
 
     await Promise.resolve();
     await Promise.resolve();

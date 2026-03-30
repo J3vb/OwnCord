@@ -117,7 +117,7 @@ describe("preferences", () => {
       savePref("fontSize", 16);
 
       expect(handler).toHaveBeenCalledOnce();
-      const event = handler.mock.calls[0][0] as CustomEvent;
+      const event = handler.mock.calls[0]![0] as CustomEvent;
       expect(event.detail).toEqual({ key: "fontSize" });
 
       window.removeEventListener("owncord:pref-change", handler);

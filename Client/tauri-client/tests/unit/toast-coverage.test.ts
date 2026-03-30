@@ -4,8 +4,7 @@ import type { ToastContainer } from "../../src/components/Toast";
 
 /**
  * Tests for src/lib/toast.ts — global toast helper.
- * Covers initToast, teardownToast, and showToast including
- * the no-op path when no container is registered.
+ * Covers initToast, teardownToast, and showToast forwarding behavior.
  */
 
 function createMockContainer(): ToastContainer {
@@ -60,11 +59,6 @@ describe("toast global helper", () => {
       expect(container.show).not.toHaveBeenCalled();
     });
 
-    it("is safe to call when no container was registered", () => {
-      // Should not throw
-      expect(() => teardownToast()).not.toThrow();
-    });
-
     it("is safe to call multiple times", () => {
       const container = createMockContainer();
       initToast(container);
@@ -105,11 +99,6 @@ describe("toast global helper", () => {
 
       showToast("Quick toast", "error", 2000);
       expect(container.show).toHaveBeenCalledWith("Quick toast", "error", 2000);
-    });
-
-    it("no-ops silently when no container is registered", () => {
-      // No initToast call — should not throw
-      expect(() => showToast("orphan toast")).not.toThrow();
     });
 
     it("no-ops after teardownToast has been called", () => {

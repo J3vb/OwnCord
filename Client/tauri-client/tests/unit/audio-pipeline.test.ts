@@ -35,6 +35,7 @@ vi.mock("livekit-client", () => ({
 }));
 
 import { AudioPipeline } from "../../src/lib/audioPipeline";
+import { createRNNoiseProcessor } from "../../src/lib/noise-suppression";
 
 describe("AudioPipeline", () => {
   let pipeline: AudioPipeline;
@@ -75,13 +76,26 @@ describe("AudioPipeline", () => {
   });
 
   describe("setRoom", () => {
-    it("accepts null without throwing", () => {
-      expect(() => pipeline.setRoom(null)).not.toThrow();
+    it("clears the current room when set to null", () => {
+      pipeline.setRoom({ localParticipant: {} } as any);
+      pipeline.setRoom(null);
+
+      pipeline.setupAudioPipeline();
+      expect(pipeline.isActive).toBe(false);
     });
 
-    it("accepts a room-like object", () => {
-      const mockRoom = { localParticipant: {} } as any;
-      expect(() => pipeline.setRoom(mockRoom)).not.toThrow();
+    it("stores a room-like object for later setup", () => {
+      const getTrackPublication = vi.fn().mockReturnValue(undefined);
+      const mockRoom = {
+        localParticipant: {
+          getTrackPublication,
+        },
+      } as any;
+      pipeline.setRoom(mockRoom);
+
+      pipeline.setupAudioPipeline();
+      expect(pipeline.isActive).toBe(false);
+      expect(getTrackPublication).toHaveBeenCalled();
     });
   });
 
@@ -121,8 +135,9 @@ describe("AudioPipeline", () => {
       expect(mockSavePref).toHaveBeenCalledWith("voiceSensitivity", 100);
     });
 
-    it("does not throw when no pipeline is active", () => {
-      expect(() => pipeline.setVoiceSensitivity(50)).not.toThrow();
+    it("updates persisted sensitivity even when no pipeline is active", () => {
+      pipeline.setVoiceSensitivity(50);
+      expect(pipeline.isVadGated).toBe(false);
     });
   });
 
@@ -130,23 +145,28 @@ describe("AudioPipeline", () => {
     it("does nothing when no room is set", () => {
       pipeline.setupAudioPipeline();
       expect(pipeline.isActive).toBe(false);
+      expect(pipeline.gainValue).toBeNull();
+      expect(pipeline.ctxState).toBeNull();
     });
 
     it("does nothing when room has no mic track", () => {
+      const getTrackPublication = vi.fn().mockReturnValue(undefined);
       const mockRoom = {
         localParticipant: {
-          getTrackPublication: vi.fn().mockReturnValue(undefined),
+          getTrackPublication,
         },
       } as any;
       pipeline.setRoom(mockRoom);
       pipeline.setupAudioPipeline();
       expect(pipeline.isActive).toBe(false);
+      expect(getTrackPublication).toHaveBeenCalled();
     });
   });
 
   describe("teardownAudioPipeline", () => {
-    it("does not throw when no pipeline exists", () => {
-      expect(() => pipeline.teardownAudioPipeline()).not.toThrow();
+    it("leaves the pipeline inactive when nothing was created", () => {
+      pipeline.teardownAudioPipeline();
+      expect(pipeline.isActive).toBe(false);
     });
 
     it("resets VAD gated state", () => {
@@ -158,20 +178,25 @@ describe("AudioPipeline", () => {
   });
 
   describe("updatePipelineGain", () => {
-    it("does not throw when no pipeline exists", () => {
-      expect(() => pipeline.updatePipelineGain()).not.toThrow();
+    it("leaves gainValue null when no pipeline exists", () => {
+      pipeline.updatePipelineGain();
+      expect(pipeline.gainValue).toBeNull();
     });
   });
 
   describe("startVadPolling", () => {
-    it("does not throw when no pipeline exists", () => {
-      expect(() => pipeline.startVadPolling()).not.toThrow();
+    it("does not activate VAD without an analyser", () => {
+      pipeline.startVadPolling();
+      expect(pipeline.vadUsingWorklet).toBe(false);
+      expect(pipeline.lastVadRms).toBe(0);
     });
   });
 
   describe("stopVadPolling", () => {
-    it("does not throw when no VAD is running", () => {
-      expect(() => pipeline.stopVadPolling()).not.toThrow();
+    it("is idempotent when no VAD is running", () => {
+      pipeline.stopVadPolling();
+      pipeline.stopVadPolling();
+      expect(pipeline.lastVadRms).toBe(0);
     });
 
     it("resets lastVadRms to 0", () => {
@@ -189,39 +214,49 @@ describe("AudioPipeline", () => {
 
   describe("applyNoiseSuppressor", () => {
     it("does nothing when no room is set", async () => {
+      vi.mocked(createRNNoiseProcessor).mockClear();
       await expect(pipeline.applyNoiseSuppressor()).resolves.toBeUndefined();
+      expect(createRNNoiseProcessor).not.toHaveBeenCalled();
     });
 
     it("does nothing when no mic track exists", async () => {
+      const getTrackPublication = vi.fn().mockReturnValue(undefined);
       const mockRoom = {
         localParticipant: {
-          getTrackPublication: vi.fn().mockReturnValue(undefined),
+          getTrackPublication,
         },
       } as any;
       pipeline.setRoom(mockRoom);
+      vi.mocked(createRNNoiseProcessor).mockClear();
       await expect(pipeline.applyNoiseSuppressor()).resolves.toBeUndefined();
+      expect(getTrackPublication).toHaveBeenCalledOnce();
+      expect(createRNNoiseProcessor).not.toHaveBeenCalled();
     });
   });
 
   describe("removeNoiseSuppressor", () => {
     it("does nothing when no room is set", async () => {
       await expect(pipeline.removeNoiseSuppressor()).resolves.toBeUndefined();
+      expect(pipeline.isActive).toBe(false);
     });
   });
 
   describe("reapplyAudioProcessing", () => {
     it("does nothing when no room is set", async () => {
       await expect(pipeline.reapplyAudioProcessing()).resolves.toBeUndefined();
+      expect(pipeline.isActive).toBe(false);
     });
 
     it("does nothing when room has no mic track", async () => {
+      const getTrackPublication = vi.fn().mockReturnValue(undefined);
       const mockRoom = {
         localParticipant: {
-          getTrackPublication: vi.fn().mockReturnValue(undefined),
+          getTrackPublication,
         },
       } as any;
       pipeline.setRoom(mockRoom);
       await expect(pipeline.reapplyAudioProcessing()).resolves.toBeUndefined();
+      expect(getTrackPublication).toHaveBeenCalledOnce();
     });
 
     it("calls onError callback on failure", async () => {
@@ -256,13 +291,15 @@ describe("AudioPipeline", () => {
     });
 
     it("does nothing when mic track is undefined", async () => {
+      const getTrackPublication = vi.fn().mockReturnValue({ track: undefined });
       const mockRoom = {
         localParticipant: {
-          getTrackPublication: vi.fn().mockReturnValue({ track: undefined }),
+          getTrackPublication,
         },
       } as any;
       pipeline.setRoom(mockRoom);
       await expect(pipeline.reapplyAudioProcessing()).resolves.toBeUndefined();
+      expect(getTrackPublication).toHaveBeenCalledOnce();
     });
   });
 

@@ -403,3 +403,42 @@ pub fn accept_cert_fingerprint<R: Runtime>(
         .map_err(|e| format!("failed to persist cert fingerprint: {e}"))?;
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_host_basic_wss_url() {
+        assert_eq!(extract_host("wss://example.com/chat"), "example.com");
+    }
+
+    #[test]
+    fn extract_host_with_port() {
+        assert_eq!(extract_host("wss://example.com:8443/chat"), "example.com:8443");
+    }
+
+    #[test]
+    fn extract_host_no_path() {
+        assert_eq!(extract_host("wss://example.com"), "example.com");
+    }
+
+    #[test]
+    fn extract_host_no_scheme() {
+        assert_eq!(extract_host("example.com/path"), "example.com");
+    }
+
+    #[test]
+    fn extract_host_empty() {
+        assert_eq!(extract_host(""), "");
+    }
+
+    #[test]
+    fn extract_host_with_port_and_deep_path() {
+        assert_eq!(extract_host("wss://myhost:9443/api/v1/ws"), "myhost:9443");
+    }
+}

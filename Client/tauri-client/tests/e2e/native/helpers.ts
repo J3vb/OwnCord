@@ -21,6 +21,32 @@ export function hasCredentials(): boolean {
   return TEST_USER.length > 0 && TEST_PASS.length > 0;
 }
 
+/**
+ * Log the native E2E environment state for diagnosing skipped tests.
+ * Call once in a globalSetup or first test to understand what's available.
+ */
+export function logEnvironmentState(): void {
+  const state = {
+    serverUrl: SERVER_URL,
+    hasCredentials: hasCredentials(),
+    skipServer: SKIP_SERVER,
+  };
+  console.log("[native-e2e] Environment:", JSON.stringify(state));
+  if (!hasCredentials()) {
+    console.log(
+      "[native-e2e] WARNING: Set OWNCORD_TEST_USER and OWNCORD_TEST_PASS to enable authenticated tests",
+    );
+  }
+}
+
+/**
+ * Count visible elements matching a selector. Useful for deciding whether
+ * a data-dependent test can run. Returns 0 if the selector isn't found.
+ */
+export async function countVisible(page: Page, selector: string): Promise<number> {
+  return page.locator(selector).count();
+}
+
 // ---------------------------------------------------------------------------
 // Login helpers
 // ---------------------------------------------------------------------------
@@ -77,8 +103,8 @@ export async function nativeLogin(page: Page, maxRetries = 3): Promise<void> {
         const errorBanner = page.locator(".error-banner");
         const hasBanner = await errorBanner.isVisible().catch(() => false);
         if (hasBanner) {
-          // Click dismiss or just wait for it to clear
-          await page.waitForTimeout(500);
+          // Wait for the error banner to disappear before retrying
+          await errorBanner.waitFor({ state: "hidden", timeout: 5_000 }).catch(() => {});
         }
       }
     }

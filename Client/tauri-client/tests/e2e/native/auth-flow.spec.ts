@@ -111,17 +111,20 @@ test.describe("Authentication Flow", () => {
   });
 
   test("clicking saved server auto-fills host field", async ({ nativePage }) => {
+    // Wait for sidebar to fully populate before checking visibility
+    await nativePage.waitForLoadState("networkidle");
     const serverItem = nativePage.locator(".server-item").first();
-    const hasSavedServer = await serverItem.isVisible().catch(() => false);
+    const hasSavedServer = await serverItem.isVisible({ timeout: 5_000 }).catch(() => false);
     test.skip(!hasSavedServer, "No saved server profiles");
 
     // Click the server item to auto-fill
     await serverItem.click();
 
-    // Host field should be filled with the server address
-    const hostValue = await nativePage.locator("#host").inputValue();
+    // Wait for the host field to be populated after click
+    const hostInput = nativePage.locator("#host");
+    await expect(hostInput).not.toHaveValue("", { timeout: 5_000 });
+    const hostValue = await hostInput.inputValue();
     expect(hostValue).toBeTruthy();
-    expect(hostValue.length).toBeGreaterThan(0);
   });
 
   test("can switch between login and register modes", async ({ nativePage }) => {

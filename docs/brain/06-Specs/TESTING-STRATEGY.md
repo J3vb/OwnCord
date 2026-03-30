@@ -270,7 +270,9 @@ From `package.json`:
   "test:e2e:native":   "playwright test --config playwright.config.native.ts",
   "test:e2e:ui":       "playwright test --ui",
   "test:watch":        "vitest",
-  "test:coverage":     "vitest run --coverage"
+  "test:coverage":     "vitest run --coverage",
+  "typecheck":         "tsc --noEmit",
+  "typecheck:build":   "tsc -p tsconfig.build.json --noEmit"
 }
 ```
 
@@ -285,6 +287,8 @@ From `package.json`:
 | `npm run test:e2e:ui` | Playwright UI mode (interactive) | Debugging E2E failures |
 | `npm run test:watch` | Vitest watch mode | Active development |
 | `npm run test:coverage` | Coverage report with V8 | Coverage audit |
+| `npm run typecheck` | Full typecheck (all sources) | CI, before commit |
+| `npm run typecheck:build` | Typecheck build-only tsconfig | Prod E2E gate |
 
 ---
 
@@ -930,9 +934,16 @@ export const chatMessageFixture = {
 ## 13. Rust Tests
 
 Rust tests live in `src-tauri/src/` using the standard `#[cfg(test)]`
-attribute.
+attribute. There are **25 unit tests** across 4 modules:
 
-### Credentials Test
+| Module | Tests | What They Cover |
+|--------|-------|-----------------|
+| `commands.rs` | IPC command handlers | Argument validation, return shapes |
+| `ws_proxy.rs` | WebSocket proxy | URL construction, TLS/plain branching, header forwarding |
+| `livekit_proxy.rs` | LiveKit proxy | URL schemes (ws/wss), path construction, error cases |
+| `credentials.rs` | Credential Manager | Save/load/delete round-trip, missing-credential handling |
+
+### Credentials Test (example)
 
 ```rust
 // src-tauri/src/credentials.rs

@@ -135,8 +135,8 @@ describe("EditChannelModal", () => {
   });
 
   it("disables save button and shows 'Saving...' during save", async () => {
-    let resolveSave: (() => void) | null = null;
-    const onSave = vi.fn(() => new Promise<void>((resolve) => { resolveSave = resolve; }));
+    let resolveSave: (() => void) | undefined;
+    const onSave = vi.fn<any>(() => new Promise<void>((resolve) => { resolveSave = resolve; }));
     const { modal } = makeModal({ onSave });
 
     const input = container.querySelector("[data-testid='edit-channel-name-input']") as HTMLInputElement;

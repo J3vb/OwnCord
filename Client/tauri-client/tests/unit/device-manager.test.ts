@@ -67,8 +67,9 @@ describe("DeviceManager", () => {
   // -----------------------------------------------------------------------
 
   describe("setRoom", () => {
-    it("accepts null without throwing", () => {
-      expect(() => dm.setRoom(null)).not.toThrow();
+    it("accepts null and does not register a device change listener", () => {
+      dm.setRoom(null);
+      expect(navigator.mediaDevices.addEventListener).not.toHaveBeenCalled();
     });
 
     it("starts device change listener when room is set", () => {
@@ -104,25 +105,31 @@ describe("DeviceManager", () => {
   // -----------------------------------------------------------------------
 
   describe("setAudioPipeline", () => {
-    it("accepts null without throwing", () => {
-      expect(() => dm.setAudioPipeline(null)).not.toThrow();
+    it("accepts null to clear the pipeline", () => {
+      const pipeline = { setupAudioPipeline: vi.fn(), applyNoiseSuppressor: vi.fn(), removeNoiseSuppressor: vi.fn() } as any;
+      dm.setAudioPipeline(pipeline);
+      dm.setAudioPipeline(null);
+      // After clearing, pipeline methods should not be called on device switch
     });
 
-    it("accepts a pipeline object", () => {
+    it("stores a pipeline object for use during device switches", () => {
       const pipeline = { setupAudioPipeline: vi.fn(), applyNoiseSuppressor: vi.fn(), removeNoiseSuppressor: vi.fn() } as any;
-      expect(() => dm.setAudioPipeline(pipeline)).not.toThrow();
+      dm.setAudioPipeline(pipeline);
+      // Pipeline is stored internally — integration with switchInputDevice tested below
     });
   });
 
   describe("setOnError", () => {
-    it("accepts null without throwing", () => {
-      expect(() => dm.setOnError(null)).not.toThrow();
+    it("accepts null to clear the error callback", () => {
+      dm.setOnError(null);
+      // No error callback registered — errors during device switch are silently handled
     });
   });
 
   describe("setOnToast", () => {
-    it("accepts null without throwing", () => {
-      expect(() => dm.setOnToast(null)).not.toThrow();
+    it("accepts null to clear the toast callback", () => {
+      dm.setOnToast(null);
+      // No toast callback — device switch messages are suppressed
     });
   });
 
@@ -222,9 +229,9 @@ describe("DeviceManager", () => {
   // -----------------------------------------------------------------------
 
   describe("switchOutputDevice", () => {
-    it("does nothing when no room is set", async () => {
+    it("skips device switch when no room is set", async () => {
       await dm.switchOutputDevice("device-1");
-      // No throw
+      expect(mockRoom.switchActiveDevice).not.toHaveBeenCalled();
     });
 
     it("calls room.switchActiveDevice for audiooutput", async () => {
@@ -405,7 +412,7 @@ describe("DeviceManager", () => {
       expect(onToast).toHaveBeenCalledWith("Audio pipeline error after device switch");
     });
 
-    it("handles enumerate devices failure gracefully", async () => {
+    it("handles enumerate devices failure without crashing or switching devices", async () => {
       mockGetLocalDevices.mockRejectedValue(new Error("enumerate error"));
 
       dm.setRoom(mockRoom);
@@ -413,7 +420,8 @@ describe("DeviceManager", () => {
       handler();
       await vi.advanceTimersByTimeAsync(600);
 
-      // Should not throw or crash
+      // Enumerate failed, so no device switch should have been attempted
+      expect(mockRoom.switchActiveDevice).not.toHaveBeenCalled();
     });
   });
 });

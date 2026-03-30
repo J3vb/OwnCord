@@ -622,7 +622,7 @@ describe("media.ts", () => {
       clearMediaCaches();
 
       // Resolve the fetch after cache clear
-      resolveFetch?.(oembedResponse("Stale Title"));
+      resolveFetch!(oembedResponse("Stale Title"));
 
       await vi.waitFor(() => {
         expect(title.textContent).toBe("YouTube Video");
@@ -639,7 +639,7 @@ describe("media.ts", () => {
       document.body.appendChild(embed);
 
       clearMediaCaches();
-      rejectFetch?.(new Error("Network error"));
+      rejectFetch!(new Error("Network error"));
 
       await vi.waitFor(() => {
         expect(embed.querySelector(".msg-embed-yt-title")?.textContent).toBe("YouTube Video");
@@ -746,7 +746,7 @@ describe("media.ts", () => {
       expect(img.style.transform).toContain("scale(");
       const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
       expect(scaleMatch).not.toBeNull();
-      const scale = parseFloat(scaleMatch![1]);
+      const scale = parseFloat(scaleMatch![1]!);
       expect(scale).toBeGreaterThan(1);
     });
 
@@ -759,7 +759,7 @@ describe("media.ts", () => {
 
       const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
       expect(scaleMatch).not.toBeNull();
-      const scale = parseFloat(scaleMatch![1]);
+      const scale = parseFloat(scaleMatch![1]!);
       expect(scale).toBeGreaterThan(1);
     });
 
@@ -772,7 +772,7 @@ describe("media.ts", () => {
 
       const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
       expect(scaleMatch).not.toBeNull();
-      const scale = parseFloat(scaleMatch![1]);
+      const scale = parseFloat(scaleMatch![1]!);
       expect(scale).toBeLessThan(1);
     });
 
@@ -827,7 +827,7 @@ describe("media.ts", () => {
       // Should zoom to scale 3
       const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
       expect(scaleMatch).not.toBeNull();
-      expect(parseFloat(scaleMatch![1])).toBe(3);
+      expect(parseFloat(scaleMatch![1]!)).toBe(3);
     });
 
     it("toggles zoom on image click (zoom out when zoomed in)", () => {
@@ -935,7 +935,7 @@ describe("media.ts", () => {
 
       const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
       expect(scaleMatch).not.toBeNull();
-      expect(parseFloat(scaleMatch![1])).toBeGreaterThan(1);
+      expect(parseFloat(scaleMatch![1]!)).toBeGreaterThan(1);
     });
 
     it("handles wheel zoom out", () => {
@@ -961,7 +961,7 @@ describe("media.ts", () => {
 
       const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
       expect(scaleMatch).not.toBeNull();
-      expect(parseFloat(scaleMatch![1])).toBeLessThan(1);
+      expect(parseFloat(scaleMatch![1]!)).toBeLessThan(1);
     });
 
     it("clamps wheel zoom to min scale 0.5", () => {
@@ -983,7 +983,7 @@ describe("media.ts", () => {
       }
 
       const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
-      expect(parseFloat(scaleMatch![1])).toBeGreaterThanOrEqual(0.5);
+      expect(parseFloat(scaleMatch![1]!)).toBeGreaterThanOrEqual(0.5);
     });
 
     it("clamps wheel zoom to max scale 10", () => {
@@ -1005,7 +1005,7 @@ describe("media.ts", () => {
       }
 
       const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
-      expect(parseFloat(scaleMatch![1])).toBeLessThanOrEqual(10);
+      expect(parseFloat(scaleMatch![1]!)).toBeLessThanOrEqual(10);
     });
 
     it("clamps keyboard zoom to max scale 10", () => {
@@ -1017,7 +1017,7 @@ describe("media.ts", () => {
       }
 
       const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
-      expect(parseFloat(scaleMatch![1])).toBeLessThanOrEqual(10);
+      expect(parseFloat(scaleMatch![1]!)).toBeLessThanOrEqual(10);
     });
 
     it("clamps keyboard zoom to min scale 0.5", () => {
@@ -1029,7 +1029,7 @@ describe("media.ts", () => {
       }
 
       const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
-      expect(parseFloat(scaleMatch![1])).toBeGreaterThanOrEqual(0.5);
+      expect(parseFloat(scaleMatch![1]!)).toBeGreaterThanOrEqual(0.5);
     });
 
     it("closes previous lightbox when opening a new one", () => {
@@ -1041,7 +1041,7 @@ describe("media.ts", () => {
       // Should have replaced the first one
       const lightboxes = document.body.querySelectorAll(".image-lightbox");
       expect(lightboxes.length).toBe(1);
-      const img = lightboxes[0].querySelector("img") as HTMLImageElement;
+      const img = lightboxes[0]!.querySelector("img") as HTMLImageElement;
       expect(img.getAttribute("src")).toBe("https://example.com/second.png");
     });
 

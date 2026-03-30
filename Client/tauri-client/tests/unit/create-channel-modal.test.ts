@@ -211,8 +211,8 @@ describe("CreateChannelModal", () => {
   });
 
   it("disables submit button and shows 'Creating...' while creating", async () => {
-    let resolveCreate: (() => void) | null = null;
-    const onCreate = vi.fn(() => new Promise<void>((resolve) => { resolveCreate = resolve; }));
+    let resolveCreate: (() => void) | undefined;
+    const onCreate = vi.fn<any>(() => new Promise<void>((resolve) => { resolveCreate = resolve; }));
     const { modal } = makeModal("Text Channels", { onCreate });
 
     const nameInput = container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement;
