@@ -943,6 +943,7 @@ describe("AudioPipeline", () => {
         createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
         createAnalyser: vi.fn().mockReturnValue({
           fftSize: 0, smoothingTimeConstant: 0, connect: vi.fn(), disconnect: vi.fn(),
+          getFloatTimeDomainData: vi.fn(),
         }),
         createGain: vi.fn().mockReturnValue({
           gain: { value: 1, setValueAtTime: vi.fn(), setTargetAtTime: vi.fn() },
@@ -1000,6 +1001,7 @@ describe("AudioPipeline", () => {
         createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
         createAnalyser: vi.fn().mockReturnValue({
           fftSize: 0, smoothingTimeConstant: 0, connect: vi.fn(), disconnect: vi.fn(),
+          getFloatTimeDomainData: vi.fn(),
         }),
         createGain: vi.fn().mockReturnValue({
           gain: { value: 1, setValueAtTime: vi.fn(), setTargetAtTime: vi.fn() },
