@@ -68,6 +68,13 @@ export function isSafeUrl(url: string): boolean {
 /** In-memory cache for instant re-render (LRU eviction at CACHE_MAX). */
 const memoryCache = new Map<string, string>();
 const CACHE_MAX = 200;
+let attachmentCacheGeneration = 0;
+
+export function clearAttachmentCaches(): void {
+  attachmentCacheGeneration += 1;
+  memoryCache.clear();
+  inFlight.clear();
+}
 
 /** Safe MIME types allowed in data: URIs — blocks script injection via crafted Content-Type. */
 const SAFE_MIME_TYPES = new Set([
@@ -125,6 +132,13 @@ export function openCacheDb(): Promise<IDBDatabase | null> {
   });
 }
 
+function closeDbAfterTransaction(tx: IDBTransaction, db: IDBDatabase): void {
+  const close = (): void => db.close();
+  tx.oncomplete = close;
+  tx.onabort = close;
+  tx.onerror = close;
+}
+
 /** Read a cached data URL from IndexedDB. */
 async function idbGet(url: string): Promise<string | null> {
   const db = await openCacheDb();
@@ -132,11 +146,13 @@ async function idbGet(url: string): Promise<string | null> {
   return new Promise((resolve) => {
     try {
       const tx = db.transaction(IDB_STORE, "readonly");
+      closeDbAfterTransaction(tx, db);
       const store = tx.objectStore(IDB_STORE);
       const req = store.get(url);
       req.onsuccess = () => resolve(typeof req.result === "string" ? req.result : null);
       req.onerror = () => resolve(null);
     } catch {
+      db.close();
       resolve(null);
     }
   });
@@ -148,8 +164,10 @@ async function idbPut(url: string, dataUrl: string): Promise<void> {
   if (db === null) return;
   try {
     const tx = db.transaction(IDB_STORE, "readwrite");
+    closeDbAfterTransaction(tx, db);
     tx.objectStore(IDB_STORE).put(dataUrl, url);
   } catch {
+    db.close();
     // IndexedDB full or unavailable — ignore
   }
 }
@@ -168,6 +186,8 @@ export function uint8ToBase64(bytes: Uint8Array): string {
 
 /** Fetch an image and return a data: URI. Uses memory → IndexedDB → network. */
 export function fetchImageAsDataUrl(url: string): Promise<string | null> {
+  const generation = attachmentCacheGeneration;
+
   // 1. Memory cache (instant)
   const cached = memoryCache.get(url);
   if (cached !== undefined) return Promise.resolve(cached);
@@ -180,6 +200,7 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
     // 3. IndexedDB cache (persists across restarts)
     const idbCached = await idbGet(url);
     if (idbCached !== null) {
+      if (generation !== attachmentCacheGeneration) return null;
       if (memoryCache.size >= CACHE_MAX) {
         const firstKey = memoryCache.keys().next().value;
         if (firstKey !== undefined) memoryCache.delete(firstKey);
@@ -208,6 +229,10 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
       const base64 = uint8ToBase64(new Uint8Array(buffer));
       const dataUrl = `data:${contentType};base64,${base64}`;
 
+      if (generation !== attachmentCacheGeneration) {
+        return null;
+      }
+
       // Store in both caches (LRU eviction)
       if (memoryCache.size >= CACHE_MAX) {
         const firstKey = memoryCache.keys().next().value;
@@ -224,7 +249,11 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
   })();
 
   inFlight.set(url, promise);
-  void promise.finally(() => inFlight.delete(url));
+  void promise.finally(() => {
+    if (inFlight.get(url) === promise) {
+      inFlight.delete(url);
+    }
+  });
 
   return promise;
 }
@@ -300,6 +329,8 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
             if (isGif) observeMedia(img, dataUrl, wrap, !loadPref("animateGifs", true));
           }, { once: true });
           placeholder.replaceWith(img);
+        } else {
+          placeholder.classList.remove("loading");
         }
       });
     }

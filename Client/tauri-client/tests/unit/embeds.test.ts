@@ -15,7 +15,7 @@ vi.mock("@tauri-apps/plugin-http", () => ({
   fetch: fetchMock,
 }));
 
-import { renderGenericLinkPreview } from "../../src/components/message-list/embeds";
+import { clearEmbedCaches, renderGenericLinkPreview } from "../../src/components/message-list/embeds";
 import { setServerHost } from "../../src/components/message-list/attachments";
 
 function mockHtmlResponse(html: string) {
@@ -39,6 +39,94 @@ describe("renderGenericLinkPreview", () => {
 
   afterEach(() => {
     document.body.innerHTML = "";
+  });
+
+  it("does not reuse OG metadata that resolves after the cache was cleared", async () => {
+    let resolveFetch: ((value: ReturnType<typeof mockHtmlResponse>) => void) | null = null;
+    fetchMock.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveFetch = resolve;
+    }));
+
+    const first = renderGenericLinkPreview("https://news.example.com/post");
+    document.body.appendChild(first);
+
+    await Promise.resolve();
+    clearEmbedCaches();
+    resolveFetch?.(mockHtmlResponse("<html><head><title>Fresh</title></head></html>"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    fetchMock.mockResolvedValueOnce(mockHtmlResponse("<html><head><title>Fresh</title></head></html>"));
+    const second = renderGenericLinkPreview("https://news.example.com/post");
+    document.body.appendChild(second);
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("does not reuse an EMPTY_OG result that resolves after the cache was cleared", async () => {
+    let resolveFetch: ((value: { ok: boolean; headers: { get(name: string): string | null } }) => void) | null = null;
+    fetchMock.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveFetch = resolve;
+    }));
+
+    const first = renderGenericLinkPreview("https://news.example.com/empty");
+    document.body.appendChild(first);
+
+    await Promise.resolve();
+    clearEmbedCaches();
+    resolveFetch?.({
+      ok: false,
+      headers: { get: () => null },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    fetchMock.mockResolvedValueOnce(mockHtmlResponse("<html><head><title>Recovered</title></head></html>"));
+    const second = renderGenericLinkPreview("https://news.example.com/empty");
+    document.body.appendChild(second);
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("keeps replacement preview requests deduplicated after a clear", async () => {
+    let resolveFirst: ((value: ReturnType<typeof mockHtmlResponse>) => void) | null = null;
+    let resolveSecond: ((value: ReturnType<typeof mockHtmlResponse>) => void) | null = null;
+    fetchMock
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveFirst = resolve;
+      }))
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveSecond = resolve;
+      }));
+
+    const first = renderGenericLinkPreview("https://news.example.com/race");
+    document.body.appendChild(first);
+    await Promise.resolve();
+
+    clearEmbedCaches();
+
+    const second = renderGenericLinkPreview("https://news.example.com/race");
+    document.body.appendChild(second);
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    resolveFirst?.(mockHtmlResponse("<html><head><title>Old</title></head></html>"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const third = renderGenericLinkPreview("https://news.example.com/race");
+    document.body.appendChild(third);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    resolveSecond?.(mockHtmlResponse("<html><head><title>New</title></head></html>"));
+    await vi.waitFor(() => {
+      expect(second.querySelector(".msg-embed-link-title")?.textContent).toBe("New");
+    });
   });
 
   it("fetches OG metadata for public domains that begin with fd", async () => {

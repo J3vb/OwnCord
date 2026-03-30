@@ -77,6 +77,21 @@ describe("themes", () => {
     applyThemeByName("neon-glow");
     expect(getActiveThemeName()).toBe("neon-glow");
   });
+
+  it("migrates the legacy settings theme key to the active theme key", () => {
+    localStorage.setItem("owncord:settings:theme", JSON.stringify("midnight"));
+
+    expect(getActiveThemeName()).toBe("midnight");
+    expect(localStorage.getItem("owncord:theme:active")).toBe("midnight");
+  });
+
+  it("ignores an invalid active theme when a valid legacy theme exists", () => {
+    localStorage.setItem("owncord:theme:active", "stale-theme");
+    localStorage.setItem("owncord:settings:theme", JSON.stringify("midnight"));
+
+    expect(getActiveThemeName()).toBe("midnight");
+    expect(localStorage.getItem("owncord:theme:active")).toBe("midnight");
+  });
 });
 
 describe("CSS injection prevention", () => {

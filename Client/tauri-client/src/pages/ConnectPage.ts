@@ -214,14 +214,15 @@ export function createConnectPage(
     const rootEl = buildRoot();
     container.appendChild(rootEl);
 
-    // Mount settings overlay on the connect page
+    // Mount settings overlay on the connect page (unauthenticated — account actions are no-ops)
     settingsOverlay = createSettingsOverlay({
+      isAuthenticated: false,
       onClose: () => closeSettings(),
-      onChangePassword: async () => { /* no-op on connect page */ },
-      onUpdateProfile: async () => { /* no-op on connect page */ },
-      onLogout: () => { /* no-op on connect page */ },
-      onDeleteAccount: async () => { /* no-op on connect page */ },
-      onStatusChange: () => { /* no-op on connect page */ },
+      onChangePassword: () => Promise.resolve(),
+      onUpdateProfile: () => Promise.resolve(),
+      onLogout: () => {},
+      onDeleteAccount: () => Promise.resolve(),
+      onStatusChange: () => {},
       onEnableTotp: () => Promise.reject(new Error("Not authenticated")),
       onConfirmTotp: () => Promise.reject(new Error("Not authenticated")),
       onDisableTotp: () => Promise.reject(new Error("Not authenticated")),

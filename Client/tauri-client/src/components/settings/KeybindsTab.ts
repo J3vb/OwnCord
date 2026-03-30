@@ -14,10 +14,11 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   const pttRow = createElement("div", { class: "keybind-row" });
   const pttLabel = createElement("span", { class: "setting-label" }, "Push to Talk");
   let currentVk = loadPref<number>("pttVk", 0);
-  const pttValue = createElement("span", {
+  const pttValue = createElement("button", {
     class: "kbd",
     style: "cursor: pointer; min-width: 80px; text-align: center;",
     title: "Click to set keybind",
+    "aria-label": "Push to Talk keybind — click to capture",
   }, currentVk !== 0 ? vkName(currentVk) : "Not set");
   const pttClear = createElement("button", {
     class: "ac-btn",

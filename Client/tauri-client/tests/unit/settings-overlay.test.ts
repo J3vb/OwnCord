@@ -165,7 +165,9 @@ describe("SettingsOverlay", () => {
 
     expect(midnight.classList.contains("active")).toBe(true);
     expect(document.documentElement.style.getPropertyValue("--bg-primary")).toBe("#1a1a2e");
-    expect(localStorage.getItem("owncord:settings:theme")).toBe('"midnight"');
+    // Theme persists only via themes.ts (owncord:theme:active), not via savePref
+    expect(localStorage.getItem("owncord:theme:active")).toBe("midnight");
+    expect(localStorage.getItem("owncord:settings:theme")).toBeNull();
     expect(mockSetTheme).toHaveBeenCalledWith("midnight");
 
     overlay.destroy?.();
@@ -527,6 +529,159 @@ describe("SettingsOverlay", () => {
 
     overlay.close();
     expect(root?.classList.contains("open")).toBe(false);
+
+    overlay.destroy?.();
+  });
+
+  // --- Username validation ---
+
+  it("rejects single-character username (min 2)", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    // Click "Edit" to open username edit form
+    const editBtn = container.querySelector(".account-field-edit") as HTMLElement;
+    editBtn.click();
+
+    // Type a single character
+    const editInput = container.querySelector("input.form-input[type='text']") as HTMLInputElement;
+    editInput.value = "A";
+
+    // Click Save
+    const saveBtn = Array.from(container.querySelectorAll(".ac-btn"))
+      .find((b) => b.textContent === "Save") as HTMLElement;
+    saveBtn.click();
+
+    // Should NOT call onUpdateProfile
+    expect(defaultOptions.onUpdateProfile).not.toHaveBeenCalled();
+
+    overlay.destroy?.();
+  });
+
+  it("accepts two-character username (min 2)", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    const editBtn = container.querySelector(".account-field-edit") as HTMLElement;
+    editBtn.click();
+
+    const editInput = container.querySelector("input.form-input[type='text']") as HTMLInputElement;
+    editInput.value = "AB";
+
+    const saveBtn = Array.from(container.querySelectorAll(".ac-btn"))
+      .find((b) => b.textContent === "Save") as HTMLElement;
+    saveBtn.click();
+
+    expect(defaultOptions.onUpdateProfile).toHaveBeenCalledWith("AB");
+
+    overlay.destroy?.();
+  });
+
+  // --- Status selector ---
+
+  it("labels the offline status as 'Offline' (not 'Invisible')", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    const statusLabels = container.querySelectorAll(".settings-status-label");
+    const labels = Array.from(statusLabels).map((el) => el.textContent);
+    expect(labels).toContain("Offline");
+    expect(labels).not.toContain("Invisible");
+
+    overlay.destroy?.();
+  });
+
+  it("status rows have role=button and tabindex for keyboard access", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    const rows = container.querySelectorAll(".settings-status-option");
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.getAttribute("role")).toBe("button");
+      expect(row.getAttribute("tabindex")).toBe("0");
+    }
+
+    overlay.destroy?.();
+  });
+
+  it("status row activates on Enter key", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    const rows = container.querySelectorAll(".settings-status-option");
+    const idleRow = Array.from(rows).find(
+      (r) => r.querySelector(".settings-status-label")?.textContent === "Idle",
+    ) as HTMLElement;
+    expect(idleRow).toBeDefined();
+    idleRow.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(idleRow.classList.contains("active")).toBe(true);
+    expect(defaultOptions.onStatusChange).toHaveBeenCalledWith("idle");
+
+    overlay.destroy?.();
+  });
+
+  it("status row activates on Space key", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    const rows = container.querySelectorAll(".settings-status-option");
+    const dndRow = Array.from(rows).find(
+      (r) => r.querySelector(".settings-status-label")?.textContent === "Do Not Disturb",
+    ) as HTMLElement;
+    expect(dndRow).toBeDefined();
+    dndRow.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+
+    expect(dndRow.classList.contains("active")).toBe(true);
+    expect(defaultOptions.onStatusChange).toHaveBeenCalledWith("dnd");
+
+    overlay.destroy?.();
+  });
+
+  // --- Connect page: Account tab gating ---
+
+  it("hides Account tab when isAuthenticated is false", () => {
+    const overlay = createSettingsOverlay({ ...defaultOptions, isAuthenticated: false });
+    overlay.mount(container);
+
+    const tabs = container.querySelectorAll(".settings-sidebar > button.settings-nav-item");
+    const tabNames = Array.from(tabs).map((t) => t.textContent);
+    expect(tabNames).not.toContain("Account");
+    // Should start on Appearance instead
+    const activeTab = container.querySelector(".settings-sidebar > button.settings-nav-item.active");
+    expect(activeTab?.textContent).toBe("Appearance");
+
+    overlay.destroy?.();
+  });
+
+  it("hides 'Edit Profile' link when isAuthenticated is false", () => {
+    const overlay = createSettingsOverlay({ ...defaultOptions, isAuthenticated: false });
+    overlay.mount(container);
+
+    const editLink = container.querySelector(".settings-sidebar-edit") as HTMLElement;
+    expect(editLink.style.display).toBe("none");
+
+    overlay.destroy?.();
+  });
+
+  it("hides the logout action when isAuthenticated is false", () => {
+    const overlay = createSettingsOverlay({ ...defaultOptions, isAuthenticated: false });
+    overlay.mount(container);
+
+    expect(container.querySelector(".settings-sidebar-logout")).toBeNull();
+    expect(container.querySelector(".settings-nav-item.danger")).toBeNull();
+
+    overlay.destroy?.();
+  });
+
+  it("shows Account tab by default (isAuthenticated not set)", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    const tabs = container.querySelectorAll(".settings-sidebar > button.settings-nav-item");
+    const tabNames = Array.from(tabs).map((t) => t.textContent);
+    expect(tabNames).toContain("Account");
 
     overlay.destroy?.();
   });

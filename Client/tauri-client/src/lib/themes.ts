@@ -7,6 +7,7 @@
  */
 
 const STORAGE_KEY_ACTIVE = "owncord:theme:active";
+const STORAGE_KEY_LEGACY = "owncord:settings:theme";
 const STORAGE_KEY_CUSTOM_PREFIX = "owncord:theme:custom:";
 
 export interface OwnCordTheme {
@@ -17,6 +18,10 @@ export interface OwnCordTheme {
 }
 
 const BUILT_IN_THEMES: readonly string[] = ["dark", "neon-glow", "midnight", "light"];
+
+function isKnownThemeName(name: string): boolean {
+  return BUILT_IN_THEMES.includes(name) || loadCustomTheme(name) !== null;
+}
 
 /** Returns all known theme names: built-ins first, then any saved custom themes. */
 export function listThemeNames(): readonly string[] {
@@ -82,7 +87,33 @@ export function applyThemeByName(name: string): void {
 
 /** Returns the currently active theme name, defaulting to "neon-glow". */
 export function getActiveThemeName(): string {
-  return localStorage.getItem(STORAGE_KEY_ACTIVE) ?? "neon-glow";
+  const active = localStorage.getItem(STORAGE_KEY_ACTIVE);
+  if (active !== null && active.length > 0 && isKnownThemeName(active)) {
+    return active;
+  }
+
+  if (active !== null) {
+    localStorage.removeItem(STORAGE_KEY_ACTIVE);
+  }
+
+  try {
+    const legacyRaw = localStorage.getItem(STORAGE_KEY_LEGACY);
+    if (legacyRaw !== null) {
+      const legacyName: unknown = JSON.parse(legacyRaw);
+      if (
+        typeof legacyName === "string" &&
+        legacyName.length > 0 &&
+        isKnownThemeName(legacyName)
+      ) {
+        localStorage.setItem(STORAGE_KEY_ACTIVE, legacyName);
+        return legacyName;
+      }
+    }
+  } catch {
+    // Ignore corrupted legacy settings and fall back to the default theme.
+  }
+
+  return "neon-glow";
 }
 
 /** Persists a custom theme to localStorage. */
@@ -117,8 +148,9 @@ export function loadCustomTheme(name: string): OwnCordTheme | null {
  * If it was the active theme, falls back to "dark".
  */
 export function deleteCustomTheme(name: string): void {
+  const wasActive = getActiveThemeName() === name;
   localStorage.removeItem(STORAGE_KEY_CUSTOM_PREFIX + name);
-  if (getActiveThemeName() === name) {
+  if (wasActive) {
     applyThemeByName("dark");
   }
 }

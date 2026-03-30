@@ -3,7 +3,7 @@
 **Goal:** Ship v1.2, then build gaming-native features that
 differentiate OwnCord from Discord/TeamSpeak/Mumble.
 
-Last task ID: T-201. New tasks start at T-202.
+Last task ID: T-202. New tasks start at T-203.
 
 ---
 
@@ -48,6 +48,12 @@ Last task ID: T-201. New tasks start at T-202.
 
 - [ ] **T-195:** User profile/password/session management endpoints — PATCH /users/me, PUT /users/me/password, GET/DELETE /users/me/sessions (server-side)
 - [ ] **T-196:** DM sidebar incremental DOM update — Replace full DOM rebuild at SidebarArea.ts:753 with reconciliation
+
+## Bugs — 2026-03-29
+
+### High Priority
+
+- [ ] **T-202:** Admin panel tab navigation broken — Clicking Audit Logs, Members, or other tabs in the `/admin` panel does not switch pages. Likely regression from recent `handlers_settings.go` or `logstream.go` changes. Investigate JS console errors and admin static files.
 
 ## Code Review Findings — 2026-03-29
 

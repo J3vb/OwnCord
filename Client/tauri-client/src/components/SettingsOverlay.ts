@@ -11,8 +11,9 @@ import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
 import { uiStore } from "@stores/ui.store";
 import { authStore } from "@stores/auth.store";
-import { loadPref, applyTheme } from "./settings/helpers";
+import { loadPref, applyTheme, THEMES } from "./settings/helpers";
 import type { ThemeName } from "./settings/helpers";
+import { getActiveThemeName, restoreTheme } from "@lib/themes";
 import { syncOsMotionListener } from "@lib/os-motion";
 import { buildAccountTab } from "./settings/AccountTab";
 import { buildAppearanceTab } from "./settings/AppearanceTab";
@@ -38,6 +39,8 @@ export interface SettingsOverlayOptions {
   onEnableTotp(password: string): Promise<{ qr_uri: string; backup_codes: string[] }>;
   onConfirmTotp(password: string, code: string): Promise<void>;
   onDisableTotp(password: string): Promise<void>;
+  /** When false, the Account tab is hidden (e.g. on the connect page). Defaults to true. */
+  isAuthenticated?: boolean;
 }
 
 export type TabName = "Account" | "Appearance" | "Notifications" | "Text & Images" | "Accessibility" | "Voice & Audio" | "Keybinds" | "Advanced" | "Logs";
@@ -63,7 +66,24 @@ const TAB_ICONS: Record<TabName, IconName> = {
  * Call at app startup so the UI doesn't flash default styles.
  */
 export function applyStoredAppearance(): void {
-  applyTheme(loadPref<ThemeName>("theme", "neon-glow"));
+  const activeThemeName = getActiveThemeName();
+  if (activeThemeName in THEMES) {
+    applyTheme(activeThemeName as ThemeName);
+  } else {
+    restoreTheme();
+  }
+  try {
+    const rawAccent = localStorage.getItem("owncord:settings:accentColor");
+    if (rawAccent !== null) {
+      const accent = JSON.parse(rawAccent);
+      if (typeof accent === "string" && /^#[\da-fA-F]{3,8}$/.test(accent)) {
+        document.documentElement.style.setProperty("--accent", accent);
+        document.body.style.setProperty("--accent", accent);
+      }
+    }
+  } catch {
+    // Corrupted localStorage — keep the theme default accent.
+  }
   document.documentElement.style.setProperty(
     "--font-size",
     `${loadPref<number>("fontSize", 16)}px`,
@@ -75,9 +95,6 @@ export function applyStoredAppearance(): void {
   document.documentElement.classList.toggle("reduced-motion", loadPref<boolean>("reducedMotion", false));
   document.documentElement.classList.toggle("high-contrast", loadPref<boolean>("highContrast", false));
   document.documentElement.classList.toggle("large-font", loadPref<boolean>("largeFont", false));
-  const storedAccent = loadPref<string>("accentColor", "#00c8ff");
-  document.documentElement.style.setProperty("--accent", storedAccent);
-  document.body.style.setProperty("--accent", storedAccent);
 
   syncOsMotionListener(loadPref<boolean>("syncOsMotion", false));
 }
@@ -90,10 +107,11 @@ export function createSettingsOverlay(
   options: SettingsOverlayOptions,
 ): MountableComponent & { open(): void; close(): void } {
   const ac = new AbortController();
+  const authenticated = options.isAuthenticated !== false;
   let root: HTMLDivElement | null = null;
   let contentArea: HTMLDivElement | null = null;
   let pageTitle: HTMLHeadingElement | null = null;
-  let activeTab: TabName = "Account";
+  let activeTab: TabName = authenticated ? "Account" : "Appearance";
   const tabButtons = new Map<TabName, HTMLButtonElement>();
   let unsubUi: (() => void) | null = null;
 
@@ -166,25 +184,31 @@ export function createSettingsOverlay(
     const profileName = createElement("div", { class: "settings-sidebar-name" },
       user?.username ?? "Unknown");
     const editProfileLink = createElement("div", { class: "settings-sidebar-edit" }, "Edit Profile");
-    editProfileLink.addEventListener("click", () => setActiveTab("Account"), { signal: ac.signal });
+    if (authenticated) {
+      editProfileLink.addEventListener("click", () => setActiveTab("Account"), { signal: ac.signal });
+    } else {
+      editProfileLink.style.display = "none";
+    }
     appendChildren(profileInfo, profileName, editProfileLink);
     appendChildren(profileSection, avatarEl, profileInfo);
     sidebar.appendChild(profileSection);
 
-    // "User Settings" category — only Account belongs here
-    const userSettingsCat = createElement("div", { class: "settings-cat" }, "User Settings");
-    sidebar.appendChild(userSettingsCat);
+    // "User Settings" category — only Account belongs here (hidden when not authenticated)
+    if (authenticated) {
+      const userSettingsCat = createElement("div", { class: "settings-cat" }, "User Settings");
+      sidebar.appendChild(userSettingsCat);
 
-    const accountBtn = createElement("button", {
-      class: `settings-nav-item${activeTab === "Account" ? " active" : ""}`,
-      role: "tab",
-      "aria-selected": activeTab === "Account" ? "true" : "false",
-    });
-    accountBtn.prepend(createIcon(TAB_ICONS["Account"], 18));
-    accountBtn.appendChild(document.createTextNode("Account"));
-    accountBtn.addEventListener("click", () => setActiveTab("Account"), { signal: ac.signal });
-    tabButtons.set("Account", accountBtn);
-    sidebar.appendChild(accountBtn);
+      const accountBtn = createElement("button", {
+        class: `settings-nav-item${activeTab === "Account" ? " active" : ""}`,
+        role: "tab",
+        "aria-selected": activeTab === "Account" ? "true" : "false",
+      });
+      accountBtn.prepend(createIcon(TAB_ICONS["Account"], 18));
+      accountBtn.appendChild(document.createTextNode("Account"));
+      accountBtn.addEventListener("click", () => setActiveTab("Account"), { signal: ac.signal });
+      tabButtons.set("Account", accountBtn);
+      sidebar.appendChild(accountBtn);
+    }
 
     // "App Settings" category — remaining tabs
     const appSettingsCat = createElement("div", { class: "settings-cat" }, "App Settings");
@@ -204,13 +228,15 @@ export function createSettingsOverlay(
       sidebar.appendChild(btn);
     }
 
-    // Separator + Log Out at sidebar bottom
-    const logoutWrap = createElement("div", { class: "settings-sidebar-logout" });
-    const logoutSep = createElement("div", { class: "settings-sep" });
-    const logoutBtn = createElement("button", { class: "settings-nav-item danger" }, "Log Out");
-    logoutBtn.addEventListener("click", () => options.onLogout(), { signal: ac.signal });
-    appendChildren(logoutWrap, logoutSep, logoutBtn);
-    sidebar.appendChild(logoutWrap);
+    if (authenticated) {
+      // Separator + Log Out at sidebar bottom
+      const logoutWrap = createElement("div", { class: "settings-sidebar-logout" });
+      const logoutSep = createElement("div", { class: "settings-sep" });
+      const logoutBtn = createElement("button", { class: "settings-nav-item danger" }, "Log Out");
+      logoutBtn.addEventListener("click", () => options.onLogout(), { signal: ac.signal });
+      appendChildren(logoutWrap, logoutSep, logoutBtn);
+      sidebar.appendChild(logoutWrap);
+    }
 
     // Page title (h1) at top of content area — created here, inserted in renderActiveTab
     pageTitle = createElement("h1", {}, activeTab);

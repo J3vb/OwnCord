@@ -38,4 +38,18 @@ describe("KeybindsTab", () => {
     const kbd = rows[0]!.querySelector(".kbd");
     expect(kbd!.textContent).toBe("Not set");
   });
+
+  it("PTT capture control is a <button> element", () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    const rows = el.querySelectorAll(".keybind-row");
+    const pttControl = rows[0]!.querySelector(".kbd");
+    expect(pttControl!.tagName).toBe("BUTTON");
+  });
+
+  it("PTT capture control has an accessible label", () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    const rows = el.querySelectorAll(".keybind-row");
+    const pttControl = rows[0]!.querySelector(".kbd");
+    expect(pttControl!.getAttribute("aria-label")).toBeTruthy();
+  });
 });

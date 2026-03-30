@@ -6,7 +6,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { UserStatus } from "@lib/types";
-import { authStore, updateUser } from "@stores/auth.store";
+import { authStore } from "@stores/auth.store";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 import { loadPref, savePref } from "./helpers";
 
@@ -261,7 +261,6 @@ function buildTotpConfirmArea(
     setText(confirmBtn, "Verifying...");
 
     void options.onConfirmTotp(password, code).then(() => {
-      updateUser({ totp_enabled: true });
       onEnrolled();
     }).catch((err: unknown) => {
       setText(confirmError, err instanceof Error ? err.message : "Invalid verification code.");
@@ -334,7 +333,6 @@ function buildTotpDisableView(
     setText(confirmBtn, "Disabling...");
 
     void options.onDisableTotp(pw).then(() => {
-      updateUser({ totp_enabled: false });
       onDisabled();
     }).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : "Failed to disable 2FA.";
@@ -420,7 +418,7 @@ const STATUS_OPTIONS: readonly StatusOption[] = [
   { value: "online",  label: "Online",          description: "",                                                    color: "#3ba55d" },
   { value: "idle",    label: "Idle",             description: "You will appear as idle",                            color: "#faa61a" },
   { value: "dnd",     label: "Do Not Disturb",   description: "You will not receive desktop notifications",         color: "#ed4245" },
-  { value: "offline", label: "Invisible",        description: "You will appear offline but still have full access", color: "#747f8d" },
+  { value: "offline", label: "Offline",            description: "You will appear offline but still have full access", color: "#747f8d" },
 ];
 
 function buildStatusSelector(
@@ -436,8 +434,12 @@ function buildStatusSelector(
   const rowElements = new Map<UserStatus, HTMLDivElement>();
 
   for (const opt of STATUS_OPTIONS) {
+    const isActive = opt.value === currentStatus;
     const row = createElement("div", {
-      class: `settings-status-option${opt.value === currentStatus ? " active" : ""}`,
+      class: `settings-status-option${isActive ? " active" : ""}`,
+      role: "button",
+      tabindex: "0",
+      "aria-pressed": isActive ? "true" : "false",
     });
 
     const dot = createElement("div", { class: "settings-status-dot" });
@@ -453,13 +455,23 @@ function buildStatusSelector(
 
     appendChildren(row, dot, labelWrap);
 
-    row.addEventListener("click", () => {
+    const selectStatus = (): void => {
       for (const [, el] of rowElements) {
         el.classList.remove("active");
+        el.setAttribute("aria-pressed", "false");
       }
       row.classList.add("active");
+      row.setAttribute("aria-pressed", "true");
       savePref("userStatus", opt.value);
       options.onStatusChange(opt.value);
+    };
+
+    row.addEventListener("click", selectStatus, { signal });
+    row.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        selectStatus();
+      }
     }, { signal });
 
     rowElements.set(opt.value, row);
@@ -621,8 +633,8 @@ export function buildAccountTab(
 
   saveBtn.addEventListener("click", () => {
     const newName = editInput.value.trim();
-    if (newName.length === 0 || newName.length > MAX_USERNAME_LEN) {
-      setText(usernameError, `Username must be 1\u2013${MAX_USERNAME_LEN} characters.`);
+    if (newName.length < 2 || newName.length > MAX_USERNAME_LEN) {
+      setText(usernameError, `Username must be 2\u2013${MAX_USERNAME_LEN} characters.`);
       return;
     }
     setText(usernameError, "");

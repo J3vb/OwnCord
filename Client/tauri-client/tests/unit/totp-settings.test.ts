@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
 import type { SettingsOverlayOptions } from "@components/SettingsOverlay";
+import { updateUser } from "@stores/auth.store";
 
 // Mock logger
 vi.mock("@lib/logger", () => ({
@@ -367,7 +368,12 @@ describe("TOTP Settings", () => {
 
     it("updates UI to disabled state after successful confirm", async () => {
       mockTotpEnabled = false;
-      const options = makeOptions();
+      // Simulate MainPage's onConfirmTotp: it calls updateUser after API success
+      const options = makeOptions({
+        onConfirmTotp: vi.fn().mockImplementation(async () => {
+          (updateUser as ReturnType<typeof vi.fn>)({ totp_enabled: true });
+        }),
+      });
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
 
@@ -559,7 +565,12 @@ describe("TOTP Settings", () => {
 
     it("updates UI to enrollment state after successful disable", async () => {
       mockTotpEnabled = true;
-      const options = makeOptions();
+      // Simulate MainPage's onDisableTotp: it calls updateUser after API success
+      const options = makeOptions({
+        onDisableTotp: vi.fn().mockImplementation(async () => {
+          (updateUser as ReturnType<typeof vi.fn>)({ totp_enabled: false });
+        }),
+      });
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
 
@@ -584,6 +595,82 @@ describe("TOTP Settings", () => {
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       expect(enableBtn).not.toBeNull();
       expect(enableBtn.textContent).toBe("Enable 2FA");
+
+      overlay.destroy?.();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Regression: store mutation ownership
+  // -----------------------------------------------------------------------
+  describe("TOTP store mutation ownership", () => {
+    it("AccountTab does NOT call updateUser on confirm — only the callback owner does", async () => {
+      mockTotpEnabled = false;
+      // The onConfirmTotp callback simulates MainPage: it calls updateUser itself
+      const options = makeOptions({
+        onConfirmTotp: vi.fn().mockImplementation(async () => {
+          // MainPage calls updateUser here — this is the single owner
+          (updateUser as ReturnType<typeof vi.fn>)({ totp_enabled: true });
+        }),
+      });
+      const overlay = createSettingsOverlay(options);
+      overlay.mount(container);
+
+      // Navigate through enable flow
+      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
+      enableBtn.click();
+      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      pwInput.value = "mypassword123";
+      const submitBtn = Array.from(container.querySelectorAll(".ac-btn"))
+        .find((b) => b.textContent === "Submit") as HTMLElement;
+      submitBtn.click();
+
+      await vi.waitFor(() => {
+        expect(container.querySelector("[data-testid='totp-qr-uri']")).not.toBeNull();
+      });
+
+      const codeInput = container.querySelector("[data-testid='totp-code-input']") as HTMLInputElement;
+      codeInput.value = "123456";
+      (updateUser as ReturnType<typeof vi.fn>).mockClear();
+
+      const confirmBtn = container.querySelector("[data-testid='totp-confirm-btn']") as HTMLElement;
+      confirmBtn.click();
+
+      await vi.waitFor(() => {
+        expect(options.onConfirmTotp).toHaveBeenCalled();
+      });
+
+      // updateUser should have been called exactly once (by the callback, not by AccountTab)
+      expect(updateUser).toHaveBeenCalledTimes(1);
+
+      overlay.destroy?.();
+    });
+
+    it("AccountTab does NOT call updateUser on disable — only the callback owner does", async () => {
+      mockTotpEnabled = true;
+      const options = makeOptions({
+        onDisableTotp: vi.fn().mockImplementation(async () => {
+          (updateUser as ReturnType<typeof vi.fn>)({ totp_enabled: false });
+        }),
+      });
+      const overlay = createSettingsOverlay(options);
+      overlay.mount(container);
+
+      const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
+      disableBtn.click();
+      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      pwInput.value = "mypassword123";
+      (updateUser as ReturnType<typeof vi.fn>).mockClear();
+
+      const confirmBtn = Array.from(container.querySelectorAll(".ac-btn"))
+        .find((b) => b.textContent === "Confirm Disable") as HTMLElement;
+      confirmBtn.click();
+
+      await vi.waitFor(() => {
+        expect(options.onDisableTotp).toHaveBeenCalled();
+      });
+
+      expect(updateUser).toHaveBeenCalledTimes(1);
 
       overlay.destroy?.();
     });

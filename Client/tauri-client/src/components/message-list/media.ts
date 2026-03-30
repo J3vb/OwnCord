@@ -27,6 +27,7 @@ const log = createLogger("media");
  */
 const imageHeightCache = new Map<string, number>();
 const MAX_IMAGE_HEIGHT_CACHE = 500;
+let mediaCacheGeneration = 0;
 
 function cacheImageHeight(url: string, h: number): void {
   if (imageHeightCache.size >= MAX_IMAGE_HEIGHT_CACHE) {
@@ -91,6 +92,12 @@ export function extractYouTubeId(url: string): string | null {
 const ytTitleCache = new Map<string, string>();
 const YT_TITLE_CACHE_MAX = 200;
 
+export function clearMediaCaches(): void {
+  mediaCacheGeneration += 1;
+  imageHeightCache.clear();
+  ytTitleCache.clear();
+}
+
 /** Strict pattern for YouTube video IDs (alphanumeric, hyphens, underscores). */
 const YOUTUBE_ID_RE = /^[\w-]{1,20}$/;
 
@@ -121,12 +128,17 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
     setText(titleLink, cached);
   } else {
     setText(titleLink, "Loading...");
+    const generation = mediaCacheGeneration;
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&format=json`;
     tauriFetch(oembedUrl, {
       signal: AbortSignal.timeout(5000),
     } as RequestInit)
       .then((res) => (res.ok ? (res.json() as Promise<{ title?: string } | null>) : null))
       .then((data) => {
+        if (generation !== mediaCacheGeneration) {
+          setText(titleLink, "YouTube Video");
+          return;
+        }
         const title = data?.title ?? "YouTube Video";
         if (ytTitleCache.size >= YT_TITLE_CACHE_MAX) {
           const firstKey = ytTitleCache.keys().next().value;
@@ -136,6 +148,10 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
         setText(titleLink, title);
       })
       .catch(() => {
+        if (generation !== mediaCacheGeneration) {
+          setText(titleLink, "YouTube Video");
+          return;
+        }
         if (ytTitleCache.size >= YT_TITLE_CACHE_MAX) {
           const firstKey = ytTitleCache.keys().next().value;
           if (firstKey !== undefined) ytTitleCache.delete(firstKey);

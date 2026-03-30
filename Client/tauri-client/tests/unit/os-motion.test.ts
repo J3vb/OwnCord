@@ -26,8 +26,9 @@ describe("syncOsMotionListener", () => {
       return mql;
     });
 
-    // Clean up any leftover class from previous tests
+    // Clean up any leftover class/storage from previous tests
     document.documentElement.classList.remove("reduced-motion");
+    localStorage.clear();
   });
 
   afterEach(() => {
@@ -50,17 +51,32 @@ describe("syncOsMotionListener", () => {
     expect(document.documentElement.classList.contains("reduced-motion")).toBe(false);
   });
 
-  it("removes reduced-motion class when disabled", () => {
+  it("restores manual preference when sync is disabled", () => {
+    // User manually set reducedMotion=false
+    localStorage.setItem("owncord:settings:reducedMotion", "false");
+
+    // OS says reduce motion → sync adds the class
     matchMediaMatches = true;
     syncOsMotionListener(true);
     expect(document.documentElement.classList.contains("reduced-motion")).toBe(true);
 
-    // Disabling should not automatically remove the class (it only tears down the listener),
-    // but calling again with enabled=true and no match should toggle it off
+    // Turn off sync → should restore manual preference (false)
     syncOsMotionListener(false);
+    expect(document.documentElement.classList.contains("reduced-motion")).toBe(false);
+  });
+
+  it("restores manual reduced-motion=true when sync is disabled", () => {
+    // User manually set reducedMotion=true
+    localStorage.setItem("owncord:settings:reducedMotion", "true");
+
+    // OS says NO reduce motion → sync removes the class
     matchMediaMatches = false;
     syncOsMotionListener(true);
     expect(document.documentElement.classList.contains("reduced-motion")).toBe(false);
+
+    // Turn off sync → should restore manual preference (true)
+    syncOsMotionListener(false);
+    expect(document.documentElement.classList.contains("reduced-motion")).toBe(true);
   });
 
   it("responds to media query change events", () => {

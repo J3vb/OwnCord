@@ -30,6 +30,13 @@ export interface OgMeta {
 const ogCache = new Map<string, OgMeta>();
 /** In-flight fetch promises keyed by URL — concurrent callers share the same promise. */
 const ogInFlight = new Map<string, Promise<OgMeta>>();
+let embedCacheGeneration = 0;
+
+export function clearEmbedCaches(): void {
+  embedCacheGeneration += 1;
+  ogCache.clear();
+  ogInFlight.clear();
+}
 
 // -- OG tag parsing -----------------------------------------------------------
 
@@ -154,6 +161,7 @@ const EMPTY_OG: OgMeta = { title: null, description: null, image: null, siteName
 /** Fetch OG metadata for a URL using the Tauri native HTTP client (no CORS).
  *  Concurrent requests for the same URL share the same in-flight promise. */
 function fetchOgMeta(url: string): Promise<OgMeta> {
+  const generation = embedCacheGeneration;
   const cached = ogCache.get(url);
   if (cached !== undefined) return Promise.resolve(cached);
 
@@ -184,6 +192,9 @@ function fetchOgMeta(url: string): Promise<OgMeta> {
       clearTimeout(timer);
 
       if (!res.ok) {
+        if (generation !== embedCacheGeneration) {
+          return EMPTY_OG;
+        }
         ogCache.set(url, EMPTY_OG);
         return EMPTY_OG;
       }
@@ -191,6 +202,9 @@ function fetchOgMeta(url: string): Promise<OgMeta> {
       // Only parse HTML responses (skip binary, JSON, etc.)
       const contentType = res.headers.get("content-type") ?? "";
       if (!contentType.includes("text/html")) {
+        if (generation !== embedCacheGeneration) {
+          return EMPTY_OG;
+        }
         ogCache.set(url, EMPTY_OG);
         return EMPTY_OG;
       }
@@ -198,16 +212,26 @@ function fetchOgMeta(url: string): Promise<OgMeta> {
       const html = await res.text();
       // Only parse the first 50KB to avoid parsing huge pages
       const meta = parseOgTags(html.slice(0, 50_000));
+      if (generation !== embedCacheGeneration) {
+        return EMPTY_OG;
+      }
       ogCache.set(url, meta);
       return meta;
     } catch {
+      if (generation !== embedCacheGeneration) {
+        return EMPTY_OG;
+      }
       ogCache.set(url, EMPTY_OG);
       return EMPTY_OG;
     }
   })();
 
   ogInFlight.set(url, promise);
-  void promise.finally(() => ogInFlight.delete(url));
+  void promise.finally(() => {
+    if (ogInFlight.get(url) === promise) {
+      ogInFlight.delete(url);
+    }
+  });
   return promise;
 }
 

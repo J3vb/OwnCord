@@ -182,4 +182,82 @@ describe("LogsTab", () => {
     levelSelect.dispatchEvent(new Event("change"));
     expect(mockSetLogLevel).toHaveBeenCalledWith("error");
   });
+
+  it("Copy All shows 'Failed to copy' on clipboard rejection", async () => {
+    mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "test")]);
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+    });
+
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+    const copyBtn = Array.from(el.querySelectorAll("button")).find(
+      (b) => b.textContent === "Copy All",
+    )!;
+    copyBtn.click();
+
+    await vi.waitFor(() => {
+      expect(copyBtn.textContent).toBe("Failed to copy");
+    });
+  });
+
+  it("Copy Diagnostics shows 'Failed to copy' on clipboard rejection", async () => {
+    mockGetLogBuffer.mockReturnValue([]);
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+    });
+
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+    const diagCopy = Array.from(el.querySelectorAll("button")).find(
+      (b) => b.textContent === "Copy Diagnostics",
+    )!;
+    diagCopy.click();
+
+    await vi.waitFor(() => {
+      expect(diagCopy.textContent).toBe("Failed to copy");
+    });
+  });
+
+  it("filter level persists via owncord:settings prefix", () => {
+    mockGetLogBuffer.mockReturnValue([]);
+    localStorage.clear();
+
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+    const filterSelect = el.querySelectorAll("select")[0]!;
+
+    filterSelect.value = "error";
+    filterSelect.dispatchEvent(new Event("change"));
+
+    // Should use owncord:settings: prefix (normalized)
+    expect(localStorage.getItem("owncord:settings:logs_filter_level")).toBe('"error"');
+  });
+
+  it("restores legacy unprefixed filter level and migrates it", () => {
+    mockGetLogBuffer.mockReturnValue([]);
+    localStorage.clear();
+    localStorage.setItem("logs_filter_level", "warn");
+
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+    const filterSelect = el.querySelectorAll("select")[0]!;
+
+    expect(filterSelect.value).toBe("warn");
+    expect(localStorage.getItem("owncord:settings:logs_filter_level")).toBe('"warn"');
+  });
+
+  it("restores legacy unprefixed min level and migrates it", () => {
+    mockGetLogBuffer.mockReturnValue([]);
+    localStorage.clear();
+    localStorage.setItem("logs_min_level", "error");
+
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+    const levelSelect = el.querySelectorAll("select")[1]!;
+
+    expect(levelSelect.value).toBe("error");
+    expect(mockSetLogLevel).toHaveBeenCalledWith("error");
+    expect(localStorage.getItem("owncord:settings:logs_min_level")).toBe('"error"');
+  });
 });

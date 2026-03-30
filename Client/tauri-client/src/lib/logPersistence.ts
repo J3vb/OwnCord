@@ -24,6 +24,18 @@ let currentDate: string | null = null;
 let buffer: string[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let initialized = false;
+let activeFlush: Promise<void> | null = null;
+
+export async function clearPendingPersistedLogs(): Promise<void> {
+  buffer = [];
+  if (flushTimer !== null) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  if (activeFlush !== null) {
+    await activeFlush;
+  }
+}
 
 /** Get today's date as YYYY-MM-DD. */
 function today(): string {
@@ -48,12 +60,23 @@ async function flushBuffer(): Promise<void> {
   const lines = buffer.join("\n") + "\n";
   buffer = [];
 
+  const flushPromise = (async () => {
+    try {
+      const filePath = logFilePath(logDir, currentDate);
+      await writeTextFile(filePath, lines, { append: true });
+    } catch (err) {
+      // Log persistence failure shouldn't crash the app.
+      log.error("flush failed", err);
+    }
+  })();
+
+  activeFlush = flushPromise;
   try {
-    const filePath = logFilePath(logDir, currentDate);
-    await writeTextFile(filePath, lines, { append: true });
-  } catch (err) {
-    // Log persistence failure shouldn't crash the app.
-    log.error("flush failed", err);
+    await flushPromise;
+  } finally {
+    if (activeFlush === flushPromise) {
+      activeFlush = null;
+    }
   }
 }
 
