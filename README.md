@@ -25,13 +25,23 @@ dependencies, works fully on LAN.
 ### Voice & Video
 
 - Voice channels powered by LiveKit SFU
-- Webcam video chat with responsive grid layout
+- Webcam video chat with Discord-style grid layout (fixed 16:9 aspect ratio)
+- Sidebar stream preview (hover to see live video thumbnail)
 - Mute, deafen, camera, and screenshare controls
 - Push-to-talk with global hotkey (non-consuming, works while unfocused)
 - Per-user volume control (right-click user in voice channel)
 - RNNoise ML noise suppression
-- Voice activity detection with speaker indicators
+- Voice activity detection with speaker indicators (pulsing green glow)
+- Connection quality indicator with expandable transport stats
+- Voice call duration timer (MM:SS / HH:MM:SS elapsed)
 - LiveKit server runs as a companion process alongside `chatserver.exe`
+
+### Direct Messages
+
+- One-on-one DM conversations with any server member
+- DM preview section in sidebar with unread bubble indicators
+- Auto-reopen DM channels on incoming message
+- DM header shows `@ username` with live online status
 
 ### Channels & Organization
 
@@ -66,14 +76,18 @@ dependencies, works fully on LAN.
 - Audit log with search, action type filter, copy, and CSV export
 - Database backup and restore with pre-restore safety backups
 - Server update checker and one-click apply (GitHub Releases)
+- Metrics endpoint with uptime, goroutines, heap, connected users
+- Diagnostics endpoint for connectivity checks
 
 ### Security
 
 - TLS encryption (self-signed, Let's Encrypt, or custom cert)
 - Trust-on-first-use certificate pinning in the client
+- Two-factor authentication (TOTP) with QR enrollment and backup codes
 - Ed25519-signed client auto-updates
 - Rate limiting on all endpoints
 - CSRF protection and security headers
+- Account deletion with password confirmation and data anonymization
 
 ### Desktop Client
 
@@ -82,8 +96,14 @@ dependencies, works fully on LAN.
 - Desktop notifications with taskbar flash and sound
 - In-app auto-update with progress notification
 - Credential storage via Windows Credential Manager
-- Custom emoji picker and soundboard
+- Auto-login with saved credentials (one-click connect)
+- Custom emoji picker
 - Compact mode for information-dense layouts
+- Discord-style settings panel with blurred backdrop
+- OC Neon Glow theme with custom theming system (JSON import/export)
+- Accent color picker
+- Quick-switch server overlay for multi-server users
+- Structured logging with JSONL persistence (5-day rotation)
 
 ## Quick Start
 
@@ -130,13 +150,15 @@ Two components: a **Go server** and a **Tauri v2 client**
 OwnCord/
 ├── Server/                  # Go server
 │   ├── api/                 #   REST handlers + middleware
-│   ├── ws/                  #   WebSocket hub + SFU
+│   ├── ws/                  #   WebSocket hub + handlers
 │   ├── db/                  #   SQLite queries + migrations
 │   ├── auth/                #   Authentication + rate limiting
 │   ├── config/              #   YAML config loading
 │   ├── updater/             #   GitHub Releases update checker
 │   ├── admin/               #   Web admin panel (static SPA)
-│   └── storage/             #   File upload storage
+│   ├── storage/             #   File upload storage
+│   ├── permissions/         #   Role-based permission system
+│   └── migrations/          #   Database migration files
 ├── Client/
 │   └── tauri-client/        # Tauri v2 desktop client
 │       ├── src-tauri/       #   Rust backend (plugins, commands)
@@ -163,7 +185,7 @@ OwnCord/
 
 ```bash
 cd Server
-go build -o chatserver.exe -ldflags "-s -w -X main.version=1.2.0" .
+go build -o chatserver.exe -ldflags "-s -w -X main.version=1.0.0" .
 ```
 
 ### Client
@@ -182,12 +204,21 @@ The installer is output to
 ```bash
 # Server
 cd Server && go test ./...
+cd Server && go test ./... -cover   # with coverage
 
 # Client
 cd Client/tauri-client
-npm test                    # unit tests (vitest)
-npm run test:e2e            # Playwright E2E tests
+npm test                    # all tests (vitest)
+npm run test:unit           # unit tests only
+npm run test:integration    # integration tests
+npm run test:e2e            # Playwright E2E (mocked Tauri)
+npm run test:e2e:native     # Playwright E2E (real Tauri exe + CDP)
 npm run test:coverage       # coverage report
+
+# Type checking & linting
+npm run typecheck           # full typecheck
+npm run lint                # ESLint check
+npm run lint:fix            # ESLint auto-fix
 ```
 
 ## Configuration
@@ -235,33 +266,6 @@ Detailed docs live in the `docs/brain/` Obsidian vault:
 - [Contributing](docs/brain/08-Guides/CONTRIBUTING.md)
 - [Security](docs/brain/08-Guides/SECURITY.md)
 
-## Repo Copilot Assets
-
-This repo includes project-shared Copilot instructions and skills under
-`.github/instructions/` and `.claude/skills/`.
-
-Auto-applied instructions cover:
-
-- admin panel workflows
-- database and migration rules
-- DM authorization rules
-- Go server conventions
-- protocol and API synchronization
-- Tauri frontend and Rust backend conventions
-- testing expectations
-- vault workflow and project-brain updates
-
-On-demand repo skills cover:
-
-- reconnection and replay bugs
-- LiveKit voice and video integration
-- E2E tier selection
-- config and secret-safe setup changes
-- observability and debugging workflows
-- Windows-specific desktop integration paths
-
-For the full list and one-line descriptions, see [CLAUDE.md](CLAUDE.md).
-
 ## Tech Stack
 
 | Component | Technology |
@@ -274,4 +278,4 @@ For the full list and one-line descriptions, see [CLAUDE.md](CLAUDE.md).
 
 ## License
 
-MIT
+AGPL-3.0
