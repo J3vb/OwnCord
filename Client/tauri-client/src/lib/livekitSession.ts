@@ -996,6 +996,19 @@ export class LiveKitSession {
     return null;
   }
 
+  /** Get a remote participant's video MediaStream by userId and track type. Returns null if not available. */
+  getRemoteVideoStream(userId: number, type: "camera" | "screenshare"): MediaStream | null {
+    if (this.room === null) return null;
+    const participant = this.room.getParticipantByIdentity(`user-${userId}`);
+    if (participant === undefined) return null;
+    // Self-guard: don't return local participant's stream via this method
+    if (participant === this.room.localParticipant) return null;
+    const source = type === "screenshare" ? Track.Source.ScreenShare : Track.Source.Camera;
+    const pub = participant.getTrackPublication(source);
+    if (pub?.track?.mediaStreamTrack) return new MediaStream([pub.track.mediaStreamTrack]);
+    return null;
+  }
+
   getRoom(): Room | null {
     return this.room;
   }
@@ -1161,6 +1174,7 @@ export const setVoiceSensitivity = session.setVoiceSensitivity.bind(session);
 export const reapplyAudioProcessing = session.reapplyAudioProcessing.bind(session);
 export const getLocalCameraStream = session.getLocalCameraStream.bind(session);
 export const getLocalScreenshareStream = session.getLocalScreenshareStream.bind(session);
+export const getRemoteVideoStream = session.getRemoteVideoStream.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
 export const setScreenshareAudioVolume = session.setScreenshareAudioVolume.bind(session);
 export const muteScreenshareAudio = session.muteScreenshareAudio.bind(session);

@@ -18,6 +18,18 @@ Deferred work items from engineering reviews.
 - ~~Adaptive Bitrate on Screenshare~~ -- `dynacast: !isSource` + `adaptiveStream: !isSource` in Room options (livekitSession.ts:187-188)
 - ~~LiveKit Proxy Port Exhaustion~~ -- already handles reuse (same host) + cleanup via shutdown channel (different host) in livekit_proxy.rs:196-208
 
+## Deferred (from 2026-03-30 eng review)
+
+### Remote Video Stream Reuse (getRemoteVideoStream)
+
+**What:** The `getRemoteVideoStream(userId, type)` accessor added for sidebar preview can be reused for PiP, mini-player, or notification previews.
+**Why:** Currently only used by stream preview hover. Future features (PiP mode, floating mini-player, notification thumbnails) would benefit from the same API.
+**Pros:** Zero additional work — the export already exists in livekitSession.ts. This TODO just tracks the reuse opportunity.
+**Cons:** None — purely informational. No code change needed.
+**Context:** Added during sidebar stream preview eng review (2026-03-30). The method is exported as a bound module-level function, consistent with getLocalCameraStream/getLocalScreenshareStream. Any future consumer can import it directly.
+**Depends on:** Sidebar stream preview feature (this PR).
+**Added:** 2026-03-30 (eng review of sidebar stream preview)
+
 ## Deferred (from 2026-03-29 CEO review)
 
 ### Voice E2E CI Integration (narrowed scope)

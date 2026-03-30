@@ -164,6 +164,51 @@
   flex-shrink: 0;
 }
 
+/* ── Inline stream preview (voice channel sidebar hover) ── */
+.vu-preview {
+  margin: 2px 0;
+  height: 0;
+  overflow: hidden;
+  transition: height var(--transition-slow) ease;
+}
+.vu-preview video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid rgba(0, 200, 255, 0.15);
+  box-shadow: 0 0 4px rgba(0, 200, 255, 0.08);
+  display: block;
+}
+.vu-preview video.preview-camera { object-fit: cover; }
+.vu-preview video.preview-screen { object-fit: cover; }
+.vu-preview-placeholder {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid rgba(0, 200, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--text-faint);
+  font-size: var(--font-size-xxs);
+  cursor: pointer;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Voice widget (above user bar, when connected) */
 .voice-widget {
   background: var(--bg-secondary); border-top: 1px solid var(--border);
@@ -1792,6 +1837,9 @@
 /* Voice */
 .compact-mode .voice-user-item { padding: 2px 8px; font-size: 12px; }
 .compact-mode .voice-user-item .vu-avatar { width: 16px; height: 16px; font-size: 7px; }
+.compact-mode .vu-preview { margin: 1px 0; }
+.compact-mode .vu-preview video,
+.compact-mode .vu-preview-placeholder { aspect-ratio: 16 / 9; }
 /* User bar */
 .compact-mode .user-bar { height: 42px; }
 .compact-mode .user-bar .ub-avatar { width: 28px; height: 28px; font-size: 12px; }

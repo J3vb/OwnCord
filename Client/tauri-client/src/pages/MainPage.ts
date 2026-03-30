@@ -46,6 +46,7 @@ import type { ChannelController } from "./main-page/ChannelController";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
 import { createSidebarArea } from "./main-page/SidebarArea";
 import { createChatArea } from "./main-page/ChatArea";
+import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 
 const log = createLogger("main-page");
 
@@ -327,7 +328,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     setVoiceOnError((msg) => showToast(msg, "error"));
 
     // Wire remote video callbacks to video grid
-    const SCREENSHARE_TILE_ID_OFFSET = 1_000_000;
     setOnRemoteVideo((userId, stream, isScreenshare) => {
       if (videoGrid === null) return;
       const voice = voiceStore.getState();

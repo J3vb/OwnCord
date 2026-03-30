@@ -5,6 +5,7 @@
 
 import { voiceStore } from "@stores/voice.store";
 import { getLocalCameraStream, getLocalScreenshareStream } from "@lib/livekitSession";
+import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import type { VideoGridComponent } from "@components/VideoGrid";
 
 // ---------------------------------------------------------------------------
@@ -54,7 +55,6 @@ export function createVideoModeController(
   let localTileAdded = false;
   let localScreenshareTileAdded = false;
   let focusedTileId: number | null = null;
-  const SCREENSHARE_TILE_ID_OFFSET = 1_000_000;
 
   function showVideoGrid(): void {
     if (videoMode) return;

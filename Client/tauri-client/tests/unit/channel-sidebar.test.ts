@@ -1,4 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+// Mock livekitSession (required by streamPreview)
+vi.mock("@lib/livekitSession", () => ({
+  setUserVolume: vi.fn(),
+  getUserVolume: vi.fn(() => 1),
+  getRemoteVideoStream: vi.fn(() => null),
+}));
+
+// Mock streamPreview to isolate sidebar tests from preview DOM logic
+const mockAttachStreamPreview = vi.fn();
+const mockAttachScrollCollapse = vi.fn();
+vi.mock("@lib/streamPreview", () => ({
+  attachStreamPreview: (...args: unknown[]) => mockAttachStreamPreview(...args),
+  attachScrollCollapse: (...args: unknown[]) => mockAttachScrollCollapse(...args),
+}));
+
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
 import {
   channelsStore,
@@ -425,7 +441,8 @@ describe("ChannelSidebar", () => {
     expect(voiceUserItem).not.toBeNull();
     voiceUserItem.click();
 
-    expect(onWatchStream).toHaveBeenCalledWith(30);
+    // User has screenshare: true, so tileId = userId + SCREENSHARE_TILE_ID_OFFSET
+    expect(onWatchStream).toHaveBeenCalledWith(30 + 1_000_000);
   });
 
   // ── Empty state ──
@@ -1025,5 +1042,140 @@ describe("ChannelSidebar", () => {
     // Plus LIVE badge
     const liveBadge = userRow!.querySelector(".vu-live-badge");
     expect(liveBadge).not.toBeNull();
+  });
+
+  // T1: Screenshare click → offset tileId
+  it("passes screenshare tile offset when clicking screensharing user", () => {
+    const onWatchStream = vi.fn();
+    const sidebarWithWatch = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onWatchStream });
+    setChannels(testChannels);
+    voiceStore.setState(() => ({
+      currentChannelId: 3,
+      voiceUsers: new Map([
+        [3, new Map([[99, { userId: 99, username: "Streamer", speaking: false, muted: false, deafened: false, camera: false, screenshare: true }]])],
+      ]),
+      voiceConfigs: new Map(),
+      localMuted: false,
+      localDeafened: false,
+      localCamera: false,
+      localScreenshare: false,
+      joinedAt: null,
+      listenOnly: false,
+    }));
+    sidebarWithWatch.mount(container);
+
+    const userRow = container.querySelector<HTMLElement>(".voice-user-item");
+    expect(userRow).not.toBeNull();
+    userRow!.click();
+
+    expect(onWatchStream).toHaveBeenCalledWith(99 + 1_000_000);
+    sidebarWithWatch.destroy?.();
+  });
+
+  // T2: Camera-only click → raw userId
+  it("passes raw userId when clicking camera-only user", () => {
+    const onWatchStream = vi.fn();
+    const sidebarWithWatch = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onWatchStream });
+    setChannels(testChannels);
+    voiceStore.setState(() => ({
+      currentChannelId: 3,
+      voiceUsers: new Map([
+        [3, new Map([[99, { userId: 99, username: "Cammer", speaking: false, muted: false, deafened: false, camera: true, screenshare: false }]])],
+      ]),
+      voiceConfigs: new Map(),
+      localMuted: false,
+      localDeafened: false,
+      localCamera: false,
+      localScreenshare: false,
+      joinedAt: null,
+      listenOnly: false,
+    }));
+    sidebarWithWatch.mount(container);
+
+    const userRow = container.querySelector<HTMLElement>(".voice-user-item");
+    expect(userRow).not.toBeNull();
+    userRow!.click();
+
+    expect(onWatchStream).toHaveBeenCalledWith(99);
+    sidebarWithWatch.destroy?.();
+  });
+
+  // T12: Self-user → no preview attached
+  it("does not attach stream preview for self user", () => {
+    mockAttachStreamPreview.mockClear();
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 42, username: "Me", avatar: null, role: "member" },
+      serverName: "Test Server",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    setChannels(testChannels);
+    voiceStore.setState(() => ({
+      currentChannelId: 3,
+      voiceUsers: new Map([
+        [3, new Map([[42, { userId: 42, username: "Me", speaking: false, muted: false, deafened: false, camera: true, screenshare: false }]])],
+      ]),
+      voiceConfigs: new Map(),
+      localMuted: false,
+      localDeafened: false,
+      localCamera: false,
+      localScreenshare: false,
+      joinedAt: null,
+      listenOnly: false,
+    }));
+    sidebar.mount(container);
+
+    // Should not have called attachStreamPreview for self
+    expect(mockAttachStreamPreview).not.toHaveBeenCalled();
+  });
+
+  // T20: Constant shared — sidebar uses SCREENSHARE_TILE_ID_OFFSET from constants
+  it("uses shared SCREENSHARE_TILE_ID_OFFSET constant", async () => {
+    // Verify the constant is imported and used by checking the offset value
+    const onWatchStream = vi.fn();
+    const sidebarWithWatch = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onWatchStream });
+    setChannels(testChannels);
+    voiceStore.setState(() => ({
+      currentChannelId: 3,
+      voiceUsers: new Map([
+        [3, new Map([[1, { userId: 1, username: "User", speaking: false, muted: false, deafened: false, camera: false, screenshare: true }]])],
+      ]),
+      voiceConfigs: new Map(),
+      localMuted: false,
+      localDeafened: false,
+      localCamera: false,
+      localScreenshare: false,
+      joinedAt: null,
+      listenOnly: false,
+    }));
+    sidebarWithWatch.mount(container);
+
+    container.querySelector<HTMLElement>(".voice-user-item")?.click();
+    // 1 + 1_000_000 = 1_000_001 — proves the shared constant is used
+    expect(onWatchStream).toHaveBeenCalledWith(1_000_001);
+    sidebarWithWatch.destroy?.();
+  });
+
+  // T14: attachScrollCollapse is called for voice users containers
+  it("attaches scroll collapse to voice-users-list containers", () => {
+    mockAttachScrollCollapse.mockClear();
+    setChannels(testChannels);
+    voiceStore.setState(() => ({
+      currentChannelId: 3,
+      voiceUsers: new Map([
+        [3, new Map([[99, { userId: 99, username: "User", speaking: false, muted: false, deafened: false, camera: true, screenshare: false }]])],
+      ]),
+      voiceConfigs: new Map(),
+      localMuted: false,
+      localDeafened: false,
+      localCamera: false,
+      localScreenshare: false,
+      joinedAt: null,
+      listenOnly: false,
+    }));
+    sidebar.mount(container);
+
+    expect(mockAttachScrollCollapse).toHaveBeenCalled();
   });
 });

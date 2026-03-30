@@ -28,6 +28,8 @@ import {
 } from "@stores/ui.store";
 import { voiceStore, getChannelVoiceUsers } from "@stores/voice.store";
 import { setUserVolume, getUserVolume } from "@lib/livekitSession";
+import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
+import { attachStreamPreview, attachScrollCollapse } from "@lib/streamPreview";
 
 // ---------------------------------------------------------------------------
 // Per-user volume context menu (right-click on voice user row)
@@ -310,13 +312,39 @@ function renderVoiceChannelItem(
           // Don't trigger if the right-click menu is open
           if (e.button !== 0) return;
           e.stopPropagation();
-          onWatchStream(user.userId);
+          const tileId = user.screenshare
+            ? user.userId + SCREENSHARE_TILE_ID_OFFSET
+            : user.userId;
+          onWatchStream(tileId);
         }, { signal });
         row.style.cursor = "pointer";
       }
 
+      // Hover/focus preview for remote users with video
+      if ((currentUser === null || currentUser.id !== user.userId)
+        && (user.camera || user.screenshare)) {
+        const tileId = user.screenshare
+          ? user.userId + SCREENSHARE_TILE_ID_OFFSET
+          : user.userId;
+        attachStreamPreview(
+          row,
+          user.userId,
+          user.username || "Unknown",
+          user.screenshare,
+          user.camera,
+          signal,
+          () => {
+            // Placeholder click: join voice channel and watch stream
+            onVoiceJoin(channel.id);
+            if (onWatchStream !== undefined) onWatchStream(tileId);
+          },
+          onWatchStream !== undefined ? () => onWatchStream(tileId) : undefined,
+        );
+      }
+
       usersContainer.appendChild(row);
     }
+    attachScrollCollapse(usersContainer, signal);
     wrapper.appendChild(usersContainer);
   }
 
