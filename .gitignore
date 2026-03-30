@@ -10,6 +10,10 @@ CLAUDE.md
 
 # AI-specific / internal planning docs
 docs/brain/
+docs/CODEMAPS/
+docs/designs/
+docs/research/
+docs/superpowers/
 skills/
 
 # Server runtime artifacts
