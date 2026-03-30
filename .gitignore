@@ -3,26 +3,14 @@
 Client/.claude/
 Server/.claude/
 
-# Claude Code skills
-skills/
-\
-
-#github copilot
-.github/
+# GitHub Copilot instructions (internal)
+.github/copilot-instructions.md
+.github/instructions/
 
 # AI-specific / internal planning docs
-Obsidian-Brain/
-IMPROVEMENTS.md
-STOAT-RESEARCH.md
-PROMPTS.md
-SKILL.md
-AUDIT.md
-LANGUAGE-REVIEW.md
-MIGRATION-PLAN.md
-TESTING-STRATEGY.md
-CLIENT-ARCHITECTURE.md
-docs/superpowers/
-docs/brain/
+docs/
+skills/
+
 # Server runtime artifacts
 Server/chatserver.exe
 Server/chatserver.exe~
@@ -45,7 +33,19 @@ Client/publish-release/
 # HTML mockups (large design reference files)
 Client/login-mockup.html
 Client/ui-mockup.html
+
+# Node modules
+node_modules/
+
+# AI tooling
 .gstack/
 .claude-flow/
 .mcp.json
 .superpowers/
+
+# Internal dev files
+SKILL.md
+TODOS.md
+CLAUDE.md
+DESIGN.md
+Client/CLIENT-REVIEW.md
