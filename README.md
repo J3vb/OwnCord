@@ -235,6 +235,33 @@ Detailed docs live in the `docs/brain/` Obsidian vault:
 - [Contributing](docs/brain/08-Guides/CONTRIBUTING.md)
 - [Security](docs/brain/08-Guides/SECURITY.md)
 
+## Repo Copilot Assets
+
+This repo includes project-shared Copilot instructions and skills under
+`.github/instructions/` and `.claude/skills/`.
+
+Auto-applied instructions cover:
+
+- admin panel workflows
+- database and migration rules
+- DM authorization rules
+- Go server conventions
+- protocol and API synchronization
+- Tauri frontend and Rust backend conventions
+- testing expectations
+- vault workflow and project-brain updates
+
+On-demand repo skills cover:
+
+- reconnection and replay bugs
+- LiveKit voice and video integration
+- E2E tier selection
+- config and secret-safe setup changes
+- observability and debugging workflows
+- Windows-specific desktop integration paths
+
+For the full list and one-line descriptions, see [CLAUDE.md](CLAUDE.md).
+
 ## Tech Stack
 
 | Component | Technology |
