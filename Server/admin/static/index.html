@@ -731,7 +731,7 @@ async function renderSettings(){
   try{settings=await api('GET','/settings')}catch(e){return'<div class="page-title">Settings</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
   state._settings={...settings};
   const v=k=>settings[k]||'';
-  const isOn=k=>v(k)==='true';
+  const isOn=k=>v(k)==='1'||v(k)==='true';
   let html='<div class="page-title">Server Settings</div><div class="page-desc">Configure your OwnCord server</div>';
   html+='<div class="section-card"><div class="section-card-header"><h3>General</h3></div><div class="section-card-body">';
   html+='<div class="setting-row"><div class="setting-info"><div class="setting-name">Server Name</div></div><div class="setting-ctrl"><input class="form-input" id="s-server_name" value="'+esc(v('server_name'))+'" style="width:240px" oninput="markSettingsChanged()"></div></div>';
