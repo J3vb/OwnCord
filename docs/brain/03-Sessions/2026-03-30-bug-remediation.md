@@ -23,6 +23,7 @@ assertion quality, integration coverage, and test hygiene.
 - **BUG-064:** Added 9 new integration tests (channel CRUD, member lifecycle, DM, presence)
 - **BUG-065:** Replaced 3 fixed sleeps with condition-based waits in E2E specs
 - **BUG-066:** Verified toast/audio tests already cleaned (no action needed)
+- **TS type errors:** Fixed 115 TypeScript errors across 21 test files — non-null assertions for strict indexing, mock typing (`vi.fn<any>()`), missing fields in test fixtures (`color`, `version`, `deleted`, `permissions`)
 - Updated docs: CLAUDE.md, CONTRIBUTING.md, TESTING-STRATEGY.md to reflect new `typecheck` scripts and expanded Rust test coverage
 
 ## Decisions Made
