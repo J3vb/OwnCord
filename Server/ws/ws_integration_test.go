@@ -375,7 +375,7 @@ func TestServeWS_ImmediateDisconnect_DoesNotLeaveGhostClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
-	defer conn.CloseNow()
+	defer conn.CloseNow() //nolint:errcheck
 
 	authMsg := map[string]any{
 		"type":    "auth",
@@ -388,7 +388,7 @@ func TestServeWS_ImmediateDisconnect_DoesNotLeaveGhostClient(t *testing.T) {
 	if err := conn.Write(ctx, websocket.MessageText, raw); err != nil {
 		t.Fatalf("write auth: %v", err)
 	}
-	conn.CloseNow()
+	_ = conn.CloseNow()
 
 	deadline := time.Now().Add(2 * time.Second)
 	cleanedUp := false

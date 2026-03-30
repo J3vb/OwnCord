@@ -140,7 +140,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to open database at %s: %v", *dbPath, err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	if err := db.Migrate(database); err != nil {
 		log.Fatalf("failed to run migrations: %v", err)

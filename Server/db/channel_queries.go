@@ -228,7 +228,7 @@ func (d *DB) GetChannelTypes(ids []int64) (map[int64]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GetChannelTypes query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	result := make(map[int64]string, len(ids))
 	for rows.Next() {
