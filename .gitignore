@@ -2,6 +2,7 @@
 .claude/
 Client/.claude/
 Server/.claude/
+CLAUDE.md
 
 # GitHub Copilot instructions (internal)
 .github/copilot-instructions.md
