@@ -7,6 +7,15 @@ voice/video, file sharing, and a web admin panel. Run your own
 server and keep everything under your control — zero cloud
 dependencies, works fully on LAN.
 
+<p align="center">
+  <img src=".github/images/Client.png" alt="OwnCord Client" width="700">
+</p>
+
+<p align="center">
+  <img src=".github/images/loginpage.png" alt="Login Page" width="340">
+  <img src=".github/images/Admin_Panel.png" alt="Admin Panel" width="340">
+</p>
+
 ## Features
 
 ### Chat
