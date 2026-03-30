@@ -19,10 +19,13 @@ import (
 )
 
 // tokenTTL is the validity duration for generated LiveKit access tokens.
-// Kept at 4h to limit exposure if a token is leaked — there is no server-side
-// revocation for LiveKit JWTs. The client can request a refresh via
-// voice_token_refresh before expiry.
-const tokenTTL = 4 * time.Hour
+// Set to 24h so sessions aren't fragile after network blips (LiveKit's JS SDK
+// cannot rotate tokens on active connections). Security mitigations:
+//   - Tokens are scoped to a single room
+//   - Server can revoke room access via LiveKit API on ban/kick
+//   - Tokens never leave the LiveKit SDK internals on the client
+// The client requests a refresh via voice_token_refresh before expiry.
+const tokenTTL = 24 * time.Hour
 
 // LiveKitClient provides token generation and room management via
 // the LiveKit server SDK.
@@ -34,12 +37,17 @@ type LiveKitClient struct {
 }
 
 // NewLiveKitClient creates a new LiveKit client from the voice config.
+// Returns an error if the credentials are missing or still set to the
+// well-known default dev values (which are public in the source code).
 func NewLiveKitClient(cfg *config.VoiceConfig) (*LiveKitClient, error) {
 	if cfg.LiveKitAPIKey == "" || cfg.LiveKitAPISecret == "" {
 		return nil, fmt.Errorf("livekit: api_key and api_secret are required")
 	}
 	if cfg.LiveKitURL == "" {
 		return nil, fmt.Errorf("livekit: url is required")
+	}
+	if config.IsDefaultVoiceCredentials(cfg) {
+		return nil, fmt.Errorf("livekit: refusing to start with default dev credentials — set voice.livekit_api_key and voice.livekit_api_secret in config.yaml")
 	}
 
 	// LiveKit room service client uses the HTTP URL (not WS).
@@ -108,12 +116,17 @@ func (c *LiveKitClient) URL() string {
 	return c.url
 }
 
+// lkTimeout is the maximum duration for LiveKit SDK calls (remove, list, etc.).
+const lkTimeout = 5 * time.Second
+
 // RemoveParticipant forcefully disconnects a participant from a room.
 func (c *LiveKitClient) RemoveParticipant(channelID int64, userID int64) error {
 	roomName := RoomName(channelID)
 	identity := fmt.Sprintf("user-%d", userID)
 
-	_, err := c.roomSvc.RemoveParticipant(context.Background(), &livekit.RoomParticipantIdentity{
+	ctx, cancel := context.WithTimeout(context.Background(), lkTimeout)
+	defer cancel()
+	_, err := c.roomSvc.RemoveParticipant(ctx, &livekit.RoomParticipantIdentity{
 		Room:     roomName,
 		Identity: identity,
 	})
@@ -131,7 +144,9 @@ func (c *LiveKitClient) RemoveParticipant(channelID int64, userID int64) error {
 func (c *LiveKitClient) ListParticipants(channelID int64) ([]*livekit.ParticipantInfo, error) {
 	roomName := RoomName(channelID)
 
-	resp, err := c.roomSvc.ListParticipants(context.Background(), &livekit.ListParticipantsRequest{
+	ctx, cancel := context.WithTimeout(context.Background(), lkTimeout)
+	defer cancel()
+	resp, err := c.roomSvc.ListParticipants(ctx, &livekit.ListParticipantsRequest{
 		Room: roomName,
 	})
 	if err != nil {

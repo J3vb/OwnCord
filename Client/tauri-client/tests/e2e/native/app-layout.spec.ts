@@ -5,18 +5,20 @@
  * to the real server with real data.
  */
 
-import { test, expect } from "../native-fixture";
-import { SKIP_SERVER, hasCredentials, nativeLoginAndReady } from "./helpers";
+import { test, expect } from "../native-fixture-persistent";
+import { SKIP_SERVER, hasCredentials, ensureLoggedIn } from "./helpers";
+
+test.describe.configure({ mode: "serial" });
 
 test.describe("App Layout (Logged In)", () => {
   test.beforeEach(async ({ nativePage }) => {
     test.skip(SKIP_SERVER, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
     test.skip(!hasCredentials(), "Skipped: OWNCORD_TEST_USER/OWNCORD_TEST_PASS not set");
-    await nativeLoginAndReady(nativePage);
+    await ensureLoggedIn(nativePage);
   });
 
   test("all major layout sections are visible", async ({ nativePage }) => {
-    await expect(nativePage.locator("[data-testid='server-strip']")).toBeVisible();
+    await expect(nativePage.locator("[data-testid='unified-sidebar']")).toBeVisible();
     await expect(nativePage.locator("[data-testid='channel-sidebar']")).toBeVisible();
     await expect(nativePage.locator("[data-testid='chat-area']")).toBeVisible();
     await expect(nativePage.locator("[data-testid='user-bar']")).toBeVisible();

@@ -125,9 +125,9 @@ func TestAuthMiddleware_MalformedAuthHeader(t *testing.T) {
 	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
 
 	cases := []string{
-		"Token abc",      // wrong scheme
-		"Bearer",         // missing token after Bearer
-		"abc",            // no space
+		"Token abc", // wrong scheme
+		"Bearer",    // missing token after Bearer
+		"abc",       // no space
 	}
 	for _, header := range cases {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -479,7 +479,7 @@ func TestSecurityHeaders_DoesNotOverrideExistingHeaders(t *testing.T) {
 
 func TestMaxBodySize_UnderLimit(t *testing.T) {
 	// A body smaller than the limit must be read successfully by the handler.
-	const limit = 10 // bytes
+	const limit = 10                   // bytes
 	body := strings.NewReader("hello") // 5 bytes — under limit
 
 	h := api.MaxBodySize(limit)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -635,4 +635,13 @@ CREATE TABLE IF NOT EXISTS invites (
 );
 
 CREATE INDEX IF NOT EXISTS idx_invites_code ON invites(code);
+
+CREATE TABLE IF NOT EXISTS settings (
+	key   TEXT PRIMARY KEY,
+	value TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO settings (key, value) VALUES
+	('require_2fa', 'false'),
+	('registration_open', 'true');
 `)

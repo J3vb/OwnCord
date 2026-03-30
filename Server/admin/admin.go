@@ -47,8 +47,6 @@ func NewHandler(database *db.DB, version string, hub HubBroadcaster, u *updater.
 	}
 	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		// The admin SPA uses inline <style> and <script> tags. Override the
-		// global CSP (default-src 'self') to allow them.
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
 		_, _ = w.Write(indexHTML)

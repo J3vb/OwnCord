@@ -1,7 +1,7 @@
 // GifPicker — searchable GIF selector powered by Tenor API.
 // Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
 
-import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
+import { createElement, setText, clearChildren } from "@lib/dom";
 import { searchGifs, getTrendingGifs } from "@lib/tenor";
 import type { TenorGif } from "@lib/tenor";
 

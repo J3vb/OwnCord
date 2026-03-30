@@ -267,6 +267,13 @@ export function unobserveMedia(img: HTMLImageElement): void {
   }
   tracked.delete(img);
   observer?.unobserve(img);
+  // Remove from allTracked to prevent unbounded WeakRef accumulation.
+  for (const ref of allTracked) {
+    const target = ref.deref();
+    if (target === img || target === undefined) {
+      allTracked.delete(ref);
+    }
+  }
 }
 
 /** Freeze all tracked GIFs (called on window hide/blur). */

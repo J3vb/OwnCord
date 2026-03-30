@@ -13,7 +13,7 @@ import type { InviteResponse } from "@lib/types";
 import { createPinnedMessages } from "@components/PinnedMessages";
 import type { PinnedMessage } from "@components/PinnedMessages";
 import { createSearchOverlay } from "@components/SearchOverlay";
-import type { ToastContainer } from "@components/Toast";
+import { showToast } from "@lib/toast";
 import { setActiveChannel } from "@stores/channels.store";
 
 const log = createLogger("overlays");
@@ -29,7 +29,7 @@ export function mapInviteResponse(r: InviteResponse): InviteItem {
     ? (extra["created_by"] as { username?: string }).username ?? "unknown"
     : "unknown";
   const uses = r.use_count
-    ?? (typeof extra["uses"] === "number" ? (extra["uses"] as number) : 0);
+    ?? (typeof extra["uses"] === "number" ? (extra["uses"]) : 0);
   return {
     code: r.code,
     createdBy,
@@ -135,7 +135,7 @@ export interface InviteManagerController {
 export function createInviteManagerController(opts: {
   readonly api: ApiClient;
   readonly getRoot: () => HTMLDivElement | null;
-  readonly getToast: () => ToastContainer | null;
+
 }): InviteManagerController {
   let instance: MountableComponent | null = null;
 
@@ -176,7 +176,7 @@ export function createInviteManagerController(opts: {
         onClose: close,
         onError: (message: string) => {
           log.error(message);
-          opts.getToast()?.show(message, "error");
+          showToast(message, "error");
         },
       });
       if (root !== null) {
@@ -184,7 +184,7 @@ export function createInviteManagerController(opts: {
       }
     } catch (err) {
       log.error("Failed to open invite manager", { error: String(err) });
-      opts.getToast()?.show("Failed to load invites", "error");
+      showToast("Failed to load invites", "error");
     }
   }
 
@@ -203,7 +203,7 @@ export interface PinnedPanelController {
 export function createPinnedPanelController(opts: {
   readonly api: ApiClient;
   readonly getRoot: () => HTMLDivElement | null;
-  readonly getToast: () => ToastContainer | null;
+
   readonly getCurrentChannelId: () => number | null;
   readonly onJumpToMessage?: (messageId: number) => boolean;
 }): PinnedPanelController {
@@ -236,7 +236,7 @@ export function createPinnedPanelController(opts: {
             if (found) {
               close();
             } else {
-              opts.getToast()?.show("Message not in loaded window", "info");
+              showToast("Message not in loaded window", "info");
             }
           } else {
             close();
@@ -247,7 +247,7 @@ export function createPinnedPanelController(opts: {
             close();
           }).catch((err: unknown) => {
             log.error("Failed to unpin message", { msgId, error: String(err) });
-            opts.getToast()?.show("Failed to unpin message", "error");
+            showToast("Failed to unpin message", "error");
           });
         },
         onClose: close,
@@ -257,7 +257,7 @@ export function createPinnedPanelController(opts: {
       }
     } catch (err) {
       log.error("Failed to load pinned messages", { error: String(err) });
-      opts.getToast()?.show("Failed to load pinned messages", "error");
+      showToast("Failed to load pinned messages", "error");
     }
   }
 
@@ -276,7 +276,7 @@ export interface SearchOverlayController {
 export function createSearchOverlayController(opts: {
   readonly api: ApiClient;
   readonly getRoot: () => HTMLDivElement | null;
-  readonly getToast: () => ToastContainer | null;
+
   readonly getCurrentChannelId: () => number | null;
   readonly onJumpToMessage?: (channelId: number, messageId: number) => boolean;
 }): SearchOverlayController {
@@ -304,7 +304,7 @@ export function createSearchOverlayController(opts: {
         } catch (err) {
           if (err instanceof DOMException && err.name === "AbortError") throw err;
           log.error("Search failed", { query, error: String(err) });
-          opts.getToast()?.show("Search failed", "error");
+          showToast("Search failed", "error");
           throw err;
         }
       },
@@ -315,7 +315,7 @@ export function createSearchOverlayController(opts: {
           requestAnimationFrame(() => {
             const found = opts.onJumpToMessage!(result.channel_id, result.message_id);
             if (!found) {
-              opts.getToast()?.show("Message not in loaded history", "info");
+              showToast("Message not in loaded history", "info");
             }
           });
         }

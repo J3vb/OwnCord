@@ -17,11 +17,14 @@ test.describe("Voice Channel Items", () => {
   });
 
   test("voice channels appear in sidebar with speaker icon", async ({ page }) => {
-    // Voice channels use 🔊 icon in .ch-icon span
-    const voiceIcon = page.locator(".ch-icon", { hasText: "🔊" });
-    await expect(voiceIcon.first()).toBeVisible({ timeout: 5000 });
+    // Voice channels use an SVG icon (createIcon("volume-2")) in .ch-icon span
+    const voiceItems = page.locator(".channel-item.voice");
+    await expect(voiceItems.first()).toBeVisible({ timeout: 5000 });
     // Should have at least 2 voice channels (Voice Chat, Music)
-    await expect(voiceIcon).toHaveCount(2);
+    await expect(voiceItems).toHaveCount(2);
+    // Each voice channel item has an SVG icon in its .ch-icon span
+    const firstIcon = voiceItems.first().locator(".ch-icon svg");
+    await expect(firstIcon).toBeAttached();
   });
 
   test("voice channel shows channel name", async ({ page }) => {

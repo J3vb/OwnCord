@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -46,7 +47,15 @@ func handleCreateInvite(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req createInviteRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			// Treat missing body as default values (all optional).
+			// An empty body is valid (all fields optional), but malformed
+			// JSON must be rejected so callers notice typos.
+			if err != io.EOF {
+				writeJSON(w, http.StatusBadRequest, errorResponse{
+					Error:   "BAD_REQUEST",
+					Message: "malformed JSON body",
+				})
+				return
+			}
 			req = createInviteRequest{}
 		}
 

@@ -34,7 +34,9 @@ test.describe("Message Input", () => {
   test("send button exists with arrow icon", async ({ page }) => {
     const sendBtn = page.locator("[data-testid='send-btn']");
     await expect(sendBtn).toBeAttached();
-    await expect(sendBtn).toHaveText("\u27A4");
+    // Send button uses an SVG icon (createIcon("send")) instead of text
+    const svgIcon = sendBtn.locator("svg");
+    await expect(svgIcon).toBeAttached();
   });
 
   test("emoji button exists", async ({ page }) => {

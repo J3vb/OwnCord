@@ -14,7 +14,7 @@ import { createIcon } from "@lib/icons";
 // ---------------------------------------------------------------------------
 
 /** Form state machine states. */
-export type FormState = "idle" | "loading" | "totp" | "connecting" | "error";
+export type FormState = "idle" | "loading" | "totp" | "connecting" | "error" | "auto-connecting";
 
 /** Form mode: login or register. */
 export type FormMode = "login" | "register";
@@ -40,6 +40,7 @@ export interface LoginFormOptions {
   ) => Promise<void>;
   readonly onTotpSubmit: (code: string) => Promise<void>;
   readonly onSettingsOpen: () => void;
+  readonly onAutoLoginCancel?: () => void;
 }
 
 export interface LoginFormApi {
@@ -49,8 +50,11 @@ export interface LoginFormApi {
   readonly statusBarElement: HTMLDivElement;
   /** The TOTP overlay element (mounted separately). */
   readonly totpOverlayElement: HTMLDivElement;
+  /** The auto-connecting overlay element (mounted separately). */
+  readonly autoConnectOverlayElement: HTMLDivElement;
   showTotp(): void;
   showConnecting(): void;
+  showAutoConnecting(serverName: string): void;
   showError(message: string): void;
   resetToIdle(): void;
   getRememberPassword(): boolean;
@@ -71,7 +75,7 @@ export interface LoginFormApi {
 // ---------------------------------------------------------------------------
 
 export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
-  const { signal, onLogin, onRegister, onTotpSubmit, onSettingsOpen } = opts;
+  const { signal, onLogin, onRegister, onTotpSubmit, onSettingsOpen, onAutoLoginCancel } = opts;
 
   // --- internal state ---
   let formState: FormState = "idle";
@@ -89,12 +93,10 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   let submitBtnText: HTMLSpanElement;
   let toggleModeBtn: HTMLAnchorElement;
   let errorBanner: HTMLDivElement;
-  let totpOverlay: HTMLDivElement;
   let totpInput: HTMLInputElement;
   let totpSubmitBtn: HTMLButtonElement;
   let rememberPasswordCheckbox: HTMLInputElement;
-  let statusBar: HTMLDivElement;
-  let statusBarFill: HTMLDivElement;
+  let autoConnectServerName: HTMLSpanElement;
 
   // ---------------------------------------------------------------------------
   // DOM construction
@@ -116,12 +118,48 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     // Form container
     const formContainer = createElement("div", { class: "form-container" });
 
-    // Logo section
+    // Logo section — OC neon glow SVG
     const formLogo = createElement("div", { class: "form-logo" });
-    const logoMark = createElement("div", { class: "form-logo-mark" }, "OC");
+    const logoSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    logoSvg.setAttribute("width", "70");
+    logoSvg.setAttribute("height", "42");
+    logoSvg.setAttribute("viewBox", "0 0 120 70");
+    logoSvg.setAttribute("class", "oc-logo");
+    const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+    const grad = document.createElementNS("http://www.w3.org/2000/svg", "linearGradient");
+    grad.setAttribute("id", "oc-grad-form");
+    grad.setAttribute("x1", "0%"); grad.setAttribute("y1", "0%");
+    grad.setAttribute("x2", "100%"); grad.setAttribute("y2", "0%");
+    for (const [offset, color] of [["0%","#f97316"],["30%","#ec4899"],["65%","#8b5cf6"],["100%","#06b6d4"]] as const) {
+      const stop = document.createElementNS("http://www.w3.org/2000/svg", "stop");
+      stop.setAttribute("offset", offset);
+      stop.setAttribute("style", `stop-color:${color}`);
+      grad.appendChild(stop);
+    }
+    const filter = document.createElementNS("http://www.w3.org/2000/svg", "filter");
+    filter.setAttribute("id", "oc-glow-form");
+    const blur = document.createElementNS("http://www.w3.org/2000/svg", "feGaussianBlur");
+    blur.setAttribute("stdDeviation", "4"); blur.setAttribute("result", "blur");
+    filter.appendChild(blur);
+    const comp = document.createElementNS("http://www.w3.org/2000/svg", "feComposite");
+    comp.setAttribute("in", "SourceGraphic"); comp.setAttribute("in2", "blur"); comp.setAttribute("operator", "over");
+    filter.appendChild(comp);
+    defs.appendChild(grad); defs.appendChild(filter);
+    logoSvg.appendChild(defs);
+    for (const [opacity, filterAttr] of [["0.4", "url(#oc-glow-form)"], [null, null]] as const) {
+      const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      t.setAttribute("x", "60"); t.setAttribute("y", "56"); t.setAttribute("text-anchor", "middle");
+      t.setAttribute("font-family", "'Segoe UI',system-ui,sans-serif");
+      t.setAttribute("font-size", "68"); t.setAttribute("font-weight", "900");
+      t.setAttribute("fill", "url(#oc-grad-form)"); t.setAttribute("letter-spacing", "-4");
+      if (opacity) { t.setAttribute("opacity", opacity); t.setAttribute("class", "oc-glow-layer"); }
+      if (filterAttr) t.setAttribute("filter", filterAttr);
+      t.textContent = "OC";
+      logoSvg.appendChild(t);
+    }
     const logoTitle = createElement("h1", {}, "OwnCord");
     const logoSubtitle = createElement("p", {}, "Connect to your server");
-    appendChildren(formLogo, logoMark, logoTitle, logoSubtitle);
+    appendChildren(formLogo, logoSvg, logoTitle, logoSubtitle);
 
     // Form title
     formTitle = createElement("h1", {}, "Login");
@@ -138,15 +176,15 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     // Host
     const hostGroup = buildFormGroup("host", "Server Address", "text", "localhost:8443");
-    hostInput = qs("input", hostGroup) as HTMLInputElement;
+    hostInput = qs("input", hostGroup)!;
 
     // Username
     const usernameGroup = buildFormGroup("username", "Username", "text", "");
-    usernameInput = qs("input", usernameGroup) as HTMLInputElement;
+    usernameInput = qs("input", usernameGroup)!;
 
     // Password
     const passwordGroup = buildFormGroup("password", "Password", "password", "");
-    passwordInput = qs("input", passwordGroup) as HTMLInputElement;
+    passwordInput = qs("input", passwordGroup)!;
 
     // Remember password checkbox
     const rememberGroup = createElement("div", { class: "form-group remember-password-group" });
@@ -163,7 +201,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     // Invite code (register only, hidden by default)
     inviteGroup = buildFormGroup("invite", "Invite Code", "text", "");
     inviteGroup.classList.add("form-group--hidden");
-    inviteInput = qs("input", inviteGroup) as HTMLInputElement;
+    inviteInput = qs("input", inviteGroup)!;
 
     // Submit button
     submitBtn = createElement("button", {
@@ -178,7 +216,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     // Toggle mode link
     const formSwitch = createElement("div", { class: "form-switch" });
-    toggleModeBtn = createElement("a", {}, "Need an account? Register") as HTMLAnchorElement;
+    toggleModeBtn = createElement("a", {}, "Need an account? Register");
     formSwitch.appendChild(toggleModeBtn);
 
     appendChildren(form, hostGroup, usernameGroup, passwordGroup, rememberGroup, inviteGroup, submitBtn, formSwitch);
@@ -279,7 +317,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          handleTotpSubmit();
+          void handleTotpSubmit();
         }
       },
       { signal },
@@ -289,6 +327,49 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     overlay.appendChild(card);
     return overlay;
   }
+
+  function buildAutoConnectOverlay(): HTMLDivElement {
+    const overlay = createElement("div", { class: "auto-connect-overlay auto-connect-overlay--hidden" });
+    const card = createElement("div", { class: "auto-connect-card" });
+
+    const spinner = createElement("div", { class: "auto-connect-spinner" });
+    const spinnerEl = createElement("div", { class: "spinner" });
+    spinner.appendChild(spinnerEl);
+
+    const title = createElement("h2", { class: "auto-connect-title" }, "Auto-connecting...");
+    autoConnectServerName = createElement("span", { class: "auto-connect-server" });
+
+    const cancelBtn = createElement("button", {
+      class: "btn-ghost auto-connect-cancel",
+      type: "button",
+    }, "Cancel");
+
+    cancelBtn.addEventListener("click", () => {
+      transitionTo("idle");
+      onAutoLoginCancel?.();
+    }, { signal });
+
+    appendChildren(card, spinner, title, autoConnectServerName, cancelBtn);
+    overlay.appendChild(card);
+    return overlay;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build elements (before state transition functions that reference them)
+  // ---------------------------------------------------------------------------
+
+  const panelEl = buildFormPanel();
+
+  // Status bar (hidden by default, shown with .visible class)
+  const statusBar = createElement("div", { class: "status-bar" });
+  const statusBarFill = createElement("div", { class: "status-bar-fill" });
+  statusBar.appendChild(statusBarFill);
+
+  // TOTP overlay (hidden by default)
+  const totpOverlay = buildTotpOverlay();
+
+  // Auto-connect overlay (hidden by default)
+  const autoConnectOverlay = buildAutoConnectOverlay();
 
   // ---------------------------------------------------------------------------
   // State transitions
@@ -303,15 +384,16 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     updateErrorBanner();
     updateStatusBar();
     updateTotpOverlay();
+    updateAutoConnectOverlay();
     updateFormInputsDisabled();
   }
 
   function updateSubmitButton(): void {
-    const isLoading = formState === "loading" || formState === "connecting";
+    const isLoading = formState === "loading" || formState === "connecting" || formState === "auto-connecting";
     submitBtn.disabled = isLoading;
     submitBtn.classList.toggle("loading", isLoading);
 
-    if (formState === "connecting") {
+    if (formState === "connecting" || formState === "auto-connecting") {
       setText(submitBtnText, "Connecting\u2026");
     } else if (formState === "loading") {
       setText(submitBtnText, formMode === "login" ? "Logging in\u2026" : "Registering\u2026");
@@ -338,19 +420,14 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   function updateStatusBar(): void {
     switch (formState) {
       case "idle":
+      case "totp":
+      case "error":
         statusBar.classList.remove("visible", "indeterminate");
         break;
       case "loading":
-        statusBar.classList.add("visible", "indeterminate");
-        break;
-      case "totp":
-        statusBar.classList.remove("visible", "indeterminate");
-        break;
       case "connecting":
+      case "auto-connecting":
         statusBar.classList.add("visible", "indeterminate");
-        break;
-      case "error":
-        statusBar.classList.remove("visible", "indeterminate");
         break;
     }
   }
@@ -365,8 +442,16 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     }
   }
 
+  function updateAutoConnectOverlay(): void {
+    if (formState === "auto-connecting") {
+      autoConnectOverlay.classList.remove("auto-connect-overlay--hidden");
+    } else {
+      autoConnectOverlay.classList.add("auto-connect-overlay--hidden");
+    }
+  }
+
   function updateFormInputsDisabled(): void {
-    const disable = formState === "loading" || formState === "connecting";
+    const disable = formState === "loading" || formState === "connecting" || formState === "auto-connecting";
     hostInput.disabled = disable;
     usernameInput.disabled = disable;
     passwordInput.disabled = disable;
@@ -492,20 +577,6 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   }
 
   // ---------------------------------------------------------------------------
-  // Build elements
-  // ---------------------------------------------------------------------------
-
-  const panelEl = buildFormPanel();
-
-  // Status bar (hidden by default, shown with .visible class)
-  statusBar = createElement("div", { class: "status-bar" });
-  statusBarFill = createElement("div", { class: "status-bar-fill" });
-  statusBar.appendChild(statusBarFill);
-
-  // TOTP overlay (hidden by default)
-  totpOverlay = buildTotpOverlay();
-
-  // ---------------------------------------------------------------------------
   // Public API
   // ---------------------------------------------------------------------------
 
@@ -513,6 +584,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     element: panelEl,
     statusBarElement: statusBar,
     totpOverlayElement: totpOverlay,
+    autoConnectOverlayElement: autoConnectOverlay,
 
     showTotp(): void {
       transitionTo("totp");
@@ -520,6 +592,11 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     showConnecting(): void {
       transitionTo("connecting");
+    },
+
+    showAutoConnecting(serverName: string): void {
+      setText(autoConnectServerName, serverName);
+      transitionTo("auto-connecting");
     },
 
     showError(message: string): void {

@@ -53,6 +53,9 @@ func (h *Hub) NewLiveKitWebhookHandler(apiKey, apiSecret string) http.HandlerFun
 			return
 		}
 
+		// Verify checks both the HMAC signature and the exp/nbf claims
+		// (via jwt.Claims.Validate with Time: time.Now() inside the SDK).
+		// Expired tokens are rejected with an error here.
 		if _, _, err := verifier.Verify(apiSecret); err != nil {
 			slog.Warn("livekit webhook: token verification failed", "error", err)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -66,6 +69,12 @@ func (h *Hub) NewLiveKitWebhookHandler(apiKey, apiSecret string) http.HandlerFun
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
+
+		slog.Info("livekit webhook received",
+			"event", event.Event,
+			"room", event.GetRoom().GetName(),
+			"participant", event.GetParticipant().GetIdentity(),
+		)
 
 		switch event.Event {
 		case "participant_joined":
@@ -158,8 +167,8 @@ func (h *Hub) handleWebhookParticipantLeft(event *livekit.WebhookEvent) {
 			c.clearVoiceChID()
 
 			if h.db != nil {
-				if err := h.db.LeaveVoiceChannel(userID); err != nil {
-					slog.Error("livekit webhook: LeaveVoiceChannel failed — ghost voice state may persist",
+				if err := leaveVoiceChannelWithRetry(h, userID, channelID); err != nil {
+					slog.Error("livekit webhook: LeaveVoiceChannel exhausted retries",
 						"error", err, "user_id", userID, "channel_id", channelID)
 				}
 			}
@@ -172,9 +181,9 @@ func (h *Hub) handleWebhookParticipantLeft(event *livekit.WebhookEvent) {
 	} else {
 		// Client already disconnected from WS — ensure DB is clean.
 		if h.db != nil {
-			if err := h.db.LeaveVoiceChannel(userID); err != nil {
-				slog.Error("livekit webhook: LeaveVoiceChannel failed (client gone) — ghost voice state may persist",
-					"error", err, "user_id", userID)
+			if err := leaveVoiceChannelWithRetry(h, userID, channelID); err != nil {
+				slog.Error("livekit webhook: LeaveVoiceChannel exhausted retries (client gone)",
+					"error", err, "user_id", userID, "channel_id", channelID)
 			}
 		}
 	}

@@ -18,9 +18,11 @@ test.describe("Channel Sidebar", () => {
   });
 
   test("sidebar header shows server name", async ({ page }) => {
-    const header = page.locator(".channel-sidebar-header h2");
-    await expect(header).toBeVisible();
-    await expect(header).toHaveText("Test Server");
+    // The channel-sidebar-header is hidden in the unified sidebar layout.
+    // The server name is shown in the unified sidebar header instead.
+    const serverName = page.locator(".unified-sidebar-header .server-name");
+    await expect(serverName).toBeVisible();
+    await expect(serverName).toHaveText("Test Server");
   });
 
   test("channel list shows channels", async ({ page }) => {

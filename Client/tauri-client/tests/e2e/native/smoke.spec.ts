@@ -120,9 +120,9 @@ test.describe("Native App Server Connection", () => {
       await hostInput.fill("localhost:8443");
       await hostInput.press("Tab");
 
-      // Give the health check time, then verify the form is still functional
-      // (no crash = real HTTP plugin loaded correctly)
-      await nativePage.waitForTimeout(3_000);
+      // Wait for network activity to settle (health check HTTP request),
+      // then verify the form is still functional (no crash = real HTTP plugin loaded)
+      await nativePage.waitForLoadState("networkidle");
       await expect(nativePage.locator("#host")).toHaveValue("localhost:8443");
     }
   });

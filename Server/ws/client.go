@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -19,18 +20,24 @@ const SessionCheckInterval = 10
 type Client struct {
 	hub        *Hub
 	conn       wsConn   // interface — nil in unit tests
+	ctx        context.Context // derived from WS upgrade request; cancelled on disconnect
 	userID     int64
 	user       *db.User
 	channelID  int64  // currently viewed channel for channel-scoped broadcasts
 	voiceChID  int64  // voice channel the user is in (0 = not in voice); guarded by voiceMu
 	roleName   string // cached role name for chat_message broadcasts
 	tokenHash  string // SHA-256 hex of the session token; used for periodic revalidation
+	connectedAt  time.Time // when the WS connection was established
+	remoteAddr   string    // client IP:port from the HTTP upgrade request
 	msgCount     int // count of messages processed; resets after session check
+	msgsReceived int64 // total messages received over the lifetime of this connection
+	msgsSent     int64 // total messages sent over the lifetime of this connection
+	msgsDropped  int64 // messages dropped due to full send buffer
 	invalidCount int // consecutive invalid messages; reset on valid parse
 	lastActivity time.Time  // last message received from this client; guarded by mu
 	sendClosed   bool       // true after the send channel has been closed
 	send         chan []byte
-	mu           sync.Mutex // guards sendClosed, msgCount, channelID, lastActivity
+	mu           sync.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
 	voiceMu      sync.Mutex // guards voiceChID
 }
 
@@ -42,14 +49,17 @@ type wsConn interface {
 }
 
 // newClient creates a real client wrapping a WebSocket connection (set by serve.go).
-func newClient(hub *Hub, conn wsConn, user *db.User, tokenHash string) *Client {
+func newClient(hub *Hub, conn wsConn, user *db.User, tokenHash string, ctx context.Context) *Client {
+	now := time.Now()
 	return &Client{
 		hub:          hub,
 		conn:         conn,
+		ctx:          ctx,
 		userID:       user.ID,
 		user:         user,
 		tokenHash:    tokenHash,
-		lastActivity: time.Now(),
+		connectedAt:  now,
+		lastActivity: now,
 		send:         make(chan []byte, sendBufSize),
 	}
 }
@@ -65,6 +75,7 @@ func (c *Client) GetTokenHash() string {
 func NewTestClient(hub *Hub, userID int64, send chan []byte) *Client {
 	return &Client{
 		hub:    hub,
+		ctx:    context.Background(),
 		userID: userID,
 		send:   send,
 	}
@@ -74,6 +85,7 @@ func NewTestClient(hub *Hub, userID int64, send chan []byte) *Client {
 func NewTestClientWithChannel(hub *Hub, userID, channelID int64, send chan []byte) *Client {
 	return &Client{
 		hub:       hub,
+		ctx:       context.Background(),
 		userID:    userID,
 		channelID: channelID,
 		send:      send,
@@ -85,6 +97,7 @@ func NewTestClientWithChannel(hub *Hub, userID, channelID int64, send chan []byt
 func NewTestClientWithUser(hub *Hub, user *db.User, channelID int64, send chan []byte) *Client {
 	return &Client{
 		hub:       hub,
+		ctx:       context.Background(),
 		userID:    user.ID,
 		user:      user,
 		channelID: channelID,
@@ -104,6 +117,7 @@ func SetClientVoiceChID(c *Client, channelID int64) {
 func NewTestClientWithTokenHash(hub *Hub, user *db.User, tokenHash string, channelID int64, send chan []byte) *Client {
 	return &Client{
 		hub:       hub,
+		ctx:       context.Background(),
 		userID:    user.ID,
 		user:      user,
 		tokenHash: tokenHash,
@@ -112,10 +126,11 @@ func NewTestClientWithTokenHash(hub *Hub, user *db.User, tokenHash string, chann
 	}
 }
 
-// touch updates the last activity timestamp to now.
+// touch updates the last activity timestamp and increments the received counter.
 func (c *Client) touch() {
 	c.mu.Lock()
 	c.lastActivity = time.Now()
+	c.msgsReceived++
 	c.mu.Unlock()
 }
 
@@ -166,8 +181,9 @@ func (c *Client) sendMsg(msg []byte) {
 	}
 	select {
 	case c.send <- msg:
+		c.msgsSent++
 	default:
-		// Buffer full — drop rather than block the hub.
+		c.msgsDropped++
 	}
 }
 
@@ -181,8 +197,10 @@ func (c *Client) trySendMsg(msg []byte) bool {
 	}
 	select {
 	case c.send <- msg:
+		c.msgsSent++
 		return true
 	default:
+		c.msgsDropped++
 		return false
 	}
 }

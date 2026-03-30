@@ -9,7 +9,6 @@ import {
   voiceStore,
   joinVoiceChannel,
   leaveVoiceChannel,
-  setLocalScreenshare,
 } from "@stores/voice.store";
 import {
   leaveVoice as voiceSessionLeave,
@@ -17,6 +16,8 @@ import {
   setDeafened as voiceSessionSetDeafened,
   enableCamera,
   disableCamera,
+  enableScreenshare,
+  disableScreenshare,
 } from "@lib/livekitSession";
 
 const log = createLogger("voice-callbacks");
@@ -106,8 +107,14 @@ export function createVoiceWidgetCallbacks(
     onScreenshareToggle: () => {
       if (!limiters.voiceVideo.tryConsume()) return;
       const next = !voiceStore.getState().localScreenshare;
-      setLocalScreenshare(next);
-      ws.send({ type: "voice_screenshare", payload: { enabled: next } });
+      const handleScreenshareError = (err: unknown) => {
+        log.error("Screenshare toggle failed", { error: String(err) });
+      };
+      if (next) {
+        enableScreenshare().catch(handleScreenshareError);
+      } else {
+        disableScreenshare().catch(handleScreenshareError);
+      }
     },
   };
 }

@@ -82,7 +82,7 @@ test.describe("Settings — Account Tab", () => {
   });
 
   test("shows account avatar", async ({ page }) => {
-    const avatar = page.locator(".ac-avatar");
+    const avatar = page.locator(".account-avatar-large");
     await expect(avatar).toBeVisible();
   });
 
@@ -132,12 +132,12 @@ test.describe("Settings — Appearance Tab", () => {
   });
 
   test("shows compact mode toggle", async ({ page }) => {
-    const toggle = page.locator(".toggle").first();
+    const toggle = page.locator(".setting-row", { hasText: "Compact Mode" }).locator(".toggle");
     await expect(toggle).toBeVisible();
   });
 
   test("toggling compact mode changes toggle state", async ({ page }) => {
-    const toggle = page.locator(".toggle").first();
+    const toggle = page.locator(".setting-row", { hasText: "Compact Mode" }).locator(".toggle");
     const initialOn = await toggle.evaluate((el) => el.classList.contains("on"));
 
     await toggle.click();

@@ -57,7 +57,10 @@ export type IconName =
   | "bell"
   | "keyboard"
   | "scroll-text"
-  | "image";
+  | "image"
+  | "signal"
+  | "log-out"
+  | "zap";
 
 // ---------------------------------------------------------------------------
 // SVG inner content (innerHTML) — Lucide 0.x path data
@@ -190,6 +193,15 @@ const ICON_PATHS: Record<IconName, string> = {
 
   // Image / photo
   image: `<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>`,
+
+  // Signal strength (4 bars)
+  signal: `<rect x="2" y="12" width="3" height="4" rx="0.5" fill="currentColor"/><rect x="7" y="8" width="3" height="8" rx="0.5" fill="currentColor"/><rect x="12" y="4" width="3" height="12" rx="0.5" fill="currentColor"/><rect x="17" y="0" width="3" height="16" rx="0.5" fill="currentColor"/>`,
+
+  // Log out / exit door with arrow
+  "log-out": `<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/>`,
+
+  // Lightning bolt (auto-login indicator)
+  zap: `<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>`,
 };
 
 // ---------------------------------------------------------------------------
@@ -223,6 +235,43 @@ export function createIcon(name: IconName, size = 24): SVGSVGElement {
   // Safe: path data comes entirely from the static ICON_PATHS constant above,
   // never from user-provided input.
   svg.innerHTML = ICON_PATHS[name];
+
+  return svg;
+}
+
+/** Create a signal-strength icon with per-bar coloring based on quality level.
+ *  Bars are colored by the quality thresholds; unfilled bars use --bg-active. */
+export function createSignalIcon(
+  barsLit: number,
+  color: string,
+  size = 16,
+): SVGSVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("width", String(size));
+  svg.setAttribute("height", String(size));
+  svg.setAttribute("viewBox", "0 0 22 16");
+  svg.setAttribute("fill", "none");
+
+  const bars = [
+    { x: 2, y: 12, w: 3, h: 4 },
+    { x: 7, y: 8, w: 3, h: 8 },
+    { x: 12, y: 4, w: 3, h: 12 },
+    { x: 17, y: 0, w: 3, h: 16 },
+  ];
+
+  const dimColor = "var(--bg-active, #383a40)";
+
+  for (let i = 0; i < bars.length; i++) {
+    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    const b = bars[i]!;
+    rect.setAttribute("x", String(b.x));
+    rect.setAttribute("y", String(b.y));
+    rect.setAttribute("width", String(b.w));
+    rect.setAttribute("height", String(b.h));
+    rect.setAttribute("rx", "0.5");
+    rect.setAttribute("fill", i < barsLit ? color : dimColor);
+    svg.appendChild(rect);
+  }
 
   return svg;
 }

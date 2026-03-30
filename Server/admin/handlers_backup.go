@@ -34,12 +34,13 @@ func handleBackup(database *db.DB) http.Handler {
 		}
 
 		actor := actorFromContext(r)
-		slog.Info("database backup created", "actor_id", actor, "path", backupPath)
+		backupName := filepath.Base(backupPath)
+		slog.Info("database backup created", "actor_id", actor, "name", backupName)
 		_ = database.LogAudit(actor, "backup_create", "server", 0,
-			fmt.Sprintf("backup saved to %s", backupPath))
+			fmt.Sprintf("backup saved: %s", backupName))
 
 		writeJSON(w, http.StatusOK, map[string]string{
-			"path":    backupPath,
+			"path":    filepath.Base(backupPath),
 			"created": timestamp,
 		})
 	})
@@ -101,6 +102,15 @@ func handleDeleteBackup(database *db.DB) http.Handler {
 			return
 		}
 
+		// Resolve to absolute path and verify it stays within the backups directory
+		// to prevent path traversal via Windows drive-letter prefixes (e.g. "C:evil.db").
+		absDir, _ := filepath.Abs(filepath.Join("data", "backups"))
+		target := filepath.Join(absDir, name)
+		if !strings.HasPrefix(target, absDir+string(filepath.Separator)) {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
+			return
+		}
+
 		backupPath := filepath.Join("data", "backups", name)
 		if _, err := os.Stat(backupPath); os.IsNotExist(err) {
 			writeErr(w, http.StatusNotFound, "NOT_FOUND", "backup not found")
@@ -124,6 +134,15 @@ func handleRestoreBackup(database *db.DB) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := chi.URLParam(r, "name")
 		if name == "" || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
+			return
+		}
+
+		// Resolve to absolute path and verify it stays within the backups directory
+		// to prevent path traversal via Windows drive-letter prefixes (e.g. "C:evil.db").
+		absDir, _ := filepath.Abs(filepath.Join("data", "backups"))
+		target := filepath.Join(absDir, name)
+		if !strings.HasPrefix(target, absDir+string(filepath.Separator)) {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
 			return
 		}
@@ -176,6 +195,10 @@ func copyFile(src, dst string) error {
 	if _, err := io.Copy(out, in); err != nil {
 		_ = out.Close()
 		return fmt.Errorf("copy: %w", err)
+	}
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("sync: %w", err)
 	}
 	return out.Close()
 }

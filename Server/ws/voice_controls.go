@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -12,7 +13,13 @@ import (
 // 1. Parses muted bool.
 // 2. Updates DB.
 // 3. Broadcasts voice_state update to channel.
-func (h *Hub) handleVoiceMute(c *Client, payload json.RawMessage) {
+func (h *Hub) handleVoiceMute(ctx context.Context, c *Client, payload json.RawMessage) {
+	ratKey := fmt.Sprintf("voice_mute:%d", c.userID)
+	if !h.limiter.Allow(ratKey, voiceMuteRateLimit, voiceMuteWindow) {
+		c.sendMsg(buildRateLimitError("too many mute toggles", voiceMuteWindow.Seconds()))
+		return
+	}
+
 	if c.getVoiceChID() == 0 {
 		c.sendMsg(buildErrorMsg(ErrCodeVoiceError, "not in a voice channel"))
 		return
@@ -31,7 +38,7 @@ func (h *Hub) handleVoiceMute(c *Client, payload json.RawMessage) {
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to update mute state"))
 		return
 	}
-	slog.Debug("voice mute changed", "user_id", c.userID, "muted", p.Muted)
+	slog.Debug("voice mute changed", "user_id", c.userID, "muted", p.Muted, "channel_id", c.getVoiceChID())
 
 	h.broadcastVoiceStateUpdate(c)
 }
@@ -40,7 +47,13 @@ func (h *Hub) handleVoiceMute(c *Client, payload json.RawMessage) {
 // 1. Parses deafened bool.
 // 2. Updates DB.
 // 3. Broadcasts voice_state update to channel.
-func (h *Hub) handleVoiceDeafen(c *Client, payload json.RawMessage) {
+func (h *Hub) handleVoiceDeafen(ctx context.Context, c *Client, payload json.RawMessage) {
+	ratKey := fmt.Sprintf("voice_deafen:%d", c.userID)
+	if !h.limiter.Allow(ratKey, voiceDeafenRateLimit, voiceDeafenWindow) {
+		c.sendMsg(buildRateLimitError("too many deafen toggles", voiceDeafenWindow.Seconds()))
+		return
+	}
+
 	if c.getVoiceChID() == 0 {
 		c.sendMsg(buildErrorMsg(ErrCodeVoiceError, "not in a voice channel"))
 		return
@@ -59,7 +72,7 @@ func (h *Hub) handleVoiceDeafen(c *Client, payload json.RawMessage) {
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to update deafen state"))
 		return
 	}
-	slog.Debug("voice deafen changed", "user_id", c.userID, "deafened", p.Deafened)
+	slog.Debug("voice deafen changed", "user_id", c.userID, "deafened", p.Deafened, "channel_id", c.getVoiceChID())
 
 	h.broadcastVoiceStateUpdate(c)
 }
@@ -71,7 +84,7 @@ func (h *Hub) handleVoiceDeafen(c *Client, payload json.RawMessage) {
 // 4. Enforces MaxVideo limit via DB count (race-free).
 // 5. Updates DB.
 // 6. Broadcasts voice_state update to channel.
-func (h *Hub) handleVoiceCamera(c *Client, payload json.RawMessage) {
+func (h *Hub) handleVoiceCamera(ctx context.Context, c *Client, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("voice_camera:%d", c.userID)
 	if !h.limiter.Allow(ratKey, voiceCameraRateLimit, voiceCameraWindow) {
 		c.sendMsg(buildRateLimitError("too many camera toggles", voiceCameraWindow.Seconds()))
@@ -119,7 +132,7 @@ func (h *Hub) handleVoiceCamera(c *Client, payload json.RawMessage) {
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to update camera state"))
 		return
 	}
-	slog.Debug("voice camera changed", "user_id", c.userID, "enabled", p.Enabled)
+	slog.Debug("voice camera changed", "user_id", c.userID, "enabled", p.Enabled, "channel_id", voiceChID)
 
 	h.broadcastVoiceStateUpdate(c)
 }
@@ -130,7 +143,7 @@ func (h *Hub) handleVoiceCamera(c *Client, payload json.RawMessage) {
 // 3. Parses enabled bool.
 // 4. Updates DB.
 // 5. Broadcasts voice_state update to channel.
-func (h *Hub) handleVoiceScreenshare(c *Client, payload json.RawMessage) {
+func (h *Hub) handleVoiceScreenshare(ctx context.Context, c *Client, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("voice_screenshare:%d", c.userID)
 	if !h.limiter.Allow(ratKey, voiceScreenshareRateLimit, voiceScreenshareWindow) {
 		c.sendMsg(buildRateLimitError("too many screenshare toggles", voiceScreenshareWindow.Seconds()))
@@ -160,7 +173,7 @@ func (h *Hub) handleVoiceScreenshare(c *Client, payload json.RawMessage) {
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to update screenshare state"))
 		return
 	}
-	slog.Debug("voice screenshare changed", "user_id", c.userID, "enabled", p.Enabled)
+	slog.Debug("voice screenshare changed", "user_id", c.userID, "enabled", p.Enabled, "channel_id", voiceChID)
 
 	h.broadcastVoiceStateUpdate(c)
 }

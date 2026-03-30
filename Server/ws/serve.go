@@ -43,17 +43,8 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 			return
 		}
 
-		// Reject duplicate connections — prevent ping-pong reconnect loops.
-		if hub.IsUserConnected(user.ID) {
-			slog.Warn("ws duplicate login rejected", "user_id", user.ID, "remote", r.RemoteAddr)
-			ctx := r.Context()
-			_ = conn.Write(ctx, websocket.MessageText, buildAuthError("already connected from another client"))
-			_ = conn.Close(websocket.StatusPolicyViolation, "already connected")
-			return
-		}
-
-		c := newClient(hub, conn, user, tokenHash)
-		hub.Register(c)
+		c := newClient(hub, conn, user, tokenHash, r.Context())
+		c.remoteAddr = r.RemoteAddr
 
 		// Look up role name for protocol-compliant payloads and cache on client.
 		roleName := "member"
@@ -67,6 +58,13 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 			"WebSocket connected from "+r.RemoteAddr)
 
 		ctx := r.Context()
+		startPumps := func() {
+			writeCtx, writeCancel := context.WithCancel(ctx)
+			go writePump(writeCtx, conn, c)
+			readPump(ctx, conn, hub, c)
+			c.closeSend()
+			writeCancel()
+		}
 
 		// Reconnection with state recovery: if the client sent a last_seq,
 		// try to replay missed events from the ring buffer instead of
@@ -76,11 +74,20 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 			if events != nil {
 				// Replay succeeded — send auth_ok then missed events.
 				slog.Info("ws sending auth_ok (reconnect)", "user_id", user.ID, "username", user.Username, "role", roleName)
-				_ = conn.Write(ctx, websocket.MessageText, hub.buildAuthOK(user, roleName))
+				if err := conn.Write(ctx, websocket.MessageText, hub.buildAuthOK(user, roleName)); err != nil {
+					slog.Warn("ws: failed to send auth_ok (reconnect)", "user_id", user.ID, "err", err)
+					_ = conn.Close(websocket.StatusInternalError, "handshake failed")
+					return
+				}
 				for _, evt := range events {
-					_ = conn.Write(ctx, websocket.MessageText, evt)
+					if err := conn.Write(ctx, websocket.MessageText, evt); err != nil {
+						slog.Warn("ws: failed to send replay event", "user_id", user.ID, "err", err)
+						_ = conn.Close(websocket.StatusInternalError, "handshake failed")
+						return
+					}
 				}
 				slog.Info("ws replay completed", "user_id", user.ID, "events_replayed", len(events), "from_seq", lastSeq)
+				hub.registerNow(c)
 
 				// Update presence but skip member_join — user was already known.
 				if updateErr := database.UpdateUserStatus(user.ID, "online"); updateErr != nil {
@@ -89,11 +96,7 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 				hub.BroadcastToAll(buildPresenceMsg(user.ID, "online"))
 
 				// Start pumps.
-				writeCtx, writeCancel := context.WithCancel(ctx)
-				go writePump(writeCtx, conn, c)
-				readPump(ctx, conn, hub, c)
-				c.closeSend()
-				writeCancel()
+				startPumps()
 				return
 			}
 			// Replay failed (seq too old) — fall through to full ready payload.
@@ -101,19 +104,28 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 		}
 
 		// Fresh connection or replay fallback: full auth_ok + ready flow.
-		if updateErr := database.UpdateUserStatus(user.ID, "online"); updateErr != nil {
-			slog.Warn("ws UpdateUserStatus", "err", updateErr)
-		}
-
 		slog.Info("ws sending auth_ok", "user_id", user.ID, "username", user.Username, "role", roleName)
-		_ = conn.Write(ctx, websocket.MessageText, hub.buildAuthOK(user, roleName))
+		if err := conn.Write(ctx, websocket.MessageText, hub.buildAuthOK(user, roleName)); err != nil {
+			slog.Warn("ws: failed to send auth_ok", "user_id", user.ID, "err", err)
+			_ = conn.Close(websocket.StatusInternalError, "handshake failed")
+			return
+		}
 		if ready, readyErr := hub.buildReady(database, user.ID); readyErr == nil {
 			slog.Info("ws sending ready payload", "user_id", user.ID, "payload_bytes", len(ready))
-			_ = conn.Write(ctx, websocket.MessageText, ready)
+			if err := conn.Write(ctx, websocket.MessageText, ready); err != nil {
+				slog.Warn("ws: failed to send ready payload", "user_id", user.ID, "err", err)
+				_ = conn.Close(websocket.StatusInternalError, "handshake failed")
+				return
+			}
 		} else {
 			slog.Error("buildReady failed", "user_id", user.ID, "err", readyErr)
 			_ = conn.Write(ctx, websocket.MessageText,
 				buildErrorMsg(ErrCodeInternal, "failed to build ready payload"))
+		}
+		hub.registerNow(c)
+
+		if updateErr := database.UpdateUserStatus(user.ID, "online"); updateErr != nil {
+			slog.Warn("ws UpdateUserStatus", "err", updateErr)
 		}
 
 		slog.Info("ws broadcasting member_join and presence", "user_id", user.ID, "username", user.Username)
@@ -123,11 +135,7 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 		// writePump runs in background; readPump blocks.
 		// When readPump returns (disconnect), close the send channel first
 		// so writePump drains any remaining messages, then cancel its context.
-		writeCtx, writeCancel := context.WithCancel(ctx)
-		go writePump(writeCtx, conn, c)
-		readPump(ctx, conn, hub, c)
-		c.closeSend()
-		writeCancel()
+		startPumps()
 	}
 }
 
@@ -155,19 +163,53 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 
 // readPump reads from the WebSocket and dispatches messages. Blocks until disconnect.
 func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
+	var lastReadErr error
 	defer func() {
-		hub.Unregister(c)
-		hub.handleVoiceLeave(c)
+		hub.unregisterNow(c)
 		if c.user != nil {
-			slog.Info("websocket disconnected", "username", c.user.Username, "user_id", c.userID)
-			_ = hub.db.UpdateUserStatus(c.userID, "offline")
-			hub.BroadcastToAll(buildPresenceMsg(c.userID, "offline"))
+			replaced := hub.IsUserConnected(c.userID)
+			voiceChID := c.getVoiceChID()
+			if !replaced {
+				hub.handleVoiceLeave(ctx, c)
+			}
+			c.mu.Lock()
+			received := c.msgsReceived
+			sent := c.msgsSent
+			dropped := c.msgsDropped
+			c.mu.Unlock()
+			duration := time.Since(c.connectedAt)
+
+			attrs := []any{
+				"username", c.user.Username,
+				"user_id", c.userID,
+				"remote", c.remoteAddr,
+				"duration_s", int64(duration.Seconds()),
+				"msgs_received", received,
+				"msgs_sent", sent,
+				"msgs_dropped", dropped,
+			}
+			if voiceChID > 0 {
+				attrs = append(attrs, "voice_channel_id", voiceChID)
+			}
+			if replaced {
+				attrs = append(attrs, "replaced", true)
+			}
+			if lastReadErr != nil {
+				attrs = append(attrs, "last_error", lastReadErr.Error())
+			}
+			slog.Info("websocket disconnected", attrs...)
+
+			if !replaced {
+				_ = hub.db.UpdateUserStatus(c.userID, "offline")
+				hub.BroadcastToAll(buildPresenceMsg(c.userID, "offline"))
+			}
 		}
 	}()
 
 	for {
 		_, msg, err := conn.Read(ctx)
 		if err != nil {
+			lastReadErr = err
 			return
 		}
 		c.touch()
@@ -189,11 +231,11 @@ func authenticateConn(conn *websocket.Conn, database *db.DB) (*db.User, string, 
 
 	var env envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
-		_ = conn.Write(ctx, websocket.MessageText, buildAuthError( "invalid message"))
+		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("invalid message"))
 		return nil, "", 0, fmt.Errorf("auth: invalid JSON: %w", err)
 	}
 	if env.Type != "auth" {
-		_ = conn.Write(ctx, websocket.MessageText, buildAuthError( "first message must be auth"))
+		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("first message must be auth"))
 		return nil, "", 0, fmt.Errorf("auth: unexpected type %q", env.Type)
 	}
 
@@ -202,25 +244,25 @@ func authenticateConn(conn *websocket.Conn, database *db.DB) (*db.User, string, 
 		LastSeq uint64 `json:"last_seq"`
 	}
 	if err := json.Unmarshal(env.Payload, &p); err != nil || p.Token == "" {
-		_ = conn.Write(ctx, websocket.MessageText, buildAuthError( "missing token"))
+		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("missing token"))
 		return nil, "", 0, fmt.Errorf("auth: missing token")
 	}
 
 	hash := auth.HashToken(p.Token)
 	sess, err := database.GetSessionByTokenHash(hash)
 	if err != nil || sess == nil {
-		_ = conn.Write(ctx, websocket.MessageText, buildAuthError( "invalid token"))
+		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("invalid token"))
 		return nil, "", 0, fmt.Errorf("auth: invalid session")
 	}
 
 	if auth.IsSessionExpired(sess.ExpiresAt) {
-		_ = conn.Write(ctx, websocket.MessageText, buildAuthError( "session expired"))
+		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("session expired"))
 		return nil, "", 0, fmt.Errorf("auth: session expired")
 	}
 
 	user, err := database.GetUserByID(sess.UserID)
 	if err != nil || user == nil {
-		_ = conn.Write(ctx, websocket.MessageText, buildAuthError( "user not found"))
+		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("user not found"))
 		return nil, "", 0, fmt.Errorf("auth: user not found")
 	}
 
@@ -243,7 +285,7 @@ func (h *Hub) buildAuthOK(user *db.User, roleName string) []byte {
 	serverName, motd := h.getCachedSettings()
 
 	return buildJSON(map[string]any{
-		"type": "auth_ok",
+		"type": MsgTypeAuthOK,
 		"payload": map[string]any{
 			"user": map[string]any{
 				"id":       user.ID,
@@ -313,15 +355,23 @@ func (h *Hub) buildReady(database *db.DB, userID int64) ([]byte, error) {
 		voiceStates = []db.VoiceState{}
 	}
 
+	// Load open DM channels for this user.
+	dmChannels, err := database.GetUserDMChannels(userID)
+	if err != nil {
+		slog.Warn("buildReady GetUserDMChannels", "err", err)
+		dmChannels = []db.DMChannelInfo{}
+	}
+
 	serverName, motd := h.getCachedSettings()
 
 	return buildJSON(map[string]any{
-		"type": "ready",
+		"type": MsgTypeReady,
 		"payload": map[string]any{
 			"channels":     channelPayloads,
 			"members":      members,
 			"voice_states": voiceStates,
 			"roles":        roles,
+			"dm_channels":  dmChannels,
 			"server_name":  serverName,
 			"motd":         motd,
 		},

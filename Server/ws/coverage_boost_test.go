@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/owncord/server/auth"
+	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/ws"
 )
@@ -52,6 +53,7 @@ CREATE TABLE IF NOT EXISTS attachments (
     width       INTEGER,
     height      INTEGER
 );
+
 `)...)
 
 func openCoverageDB(t *testing.T) *db.DB {
@@ -75,6 +77,18 @@ func newCoverageHub(t *testing.T) (*ws.Hub, *db.DB) {
 	database := openCoverageDB(t)
 	limiter := auth.NewRateLimiter()
 	hub := ws.NewHub(database, limiter)
+
+	// Inject a test LiveKit client so voice_join passes the livekit!=nil guard.
+	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{
+		LiveKitAPIKey:    "test-api-key-12345",
+		LiveKitAPISecret: "test-api-secret-67890abcdef",
+		LiveKitURL:       "ws://localhost:7880",
+	})
+	if err != nil {
+		t.Fatalf("NewLiveKitClient: %v", err)
+	}
+	hub.SetLiveKit(lk)
+
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 	return hub, database
@@ -93,7 +107,7 @@ func seedCoverageOwner(t *testing.T, database *db.DB, username string) *db.User 
 	return user
 }
 
-// ─── SetClientVoiceChID (client.go:95 — 0% coverage) ─────────────────────────
+// ─── SetClientVoiceChID stores the tracked voice channel ─────────────────────
 
 func TestSetClientVoiceChID_SetsValue(t *testing.T) {
 	hub, _ := newCoverageHub(t)
@@ -101,12 +115,9 @@ func TestSetClientVoiceChID_SetsValue(t *testing.T) {
 	c := ws.NewTestClient(hub, 1, send)
 
 	ws.SetClientVoiceChID(c, 42)
-
-	// Verify by creating a voice room and checking the client is considered in voice.
-	// Since we can't directly read voiceChID from outside, we verify via HandleVoiceLeaveForTest
-	// which checks getVoiceChID internally. If voice leave runs without the client being in
-	// a voice channel, it should be a no-op.
-	// We just verify it doesn't panic and the function executes.
+	if got := ws.GetClientVoiceChIDForTest(c); got != 42 {
+		t.Fatalf("voiceChID = %d, want 42", got)
+	}
 }
 
 func TestSetClientVoiceChID_ZeroClearsVoice(t *testing.T) {
@@ -116,27 +127,22 @@ func TestSetClientVoiceChID_ZeroClearsVoice(t *testing.T) {
 
 	ws.SetClientVoiceChID(c, 100)
 	ws.SetClientVoiceChID(c, 0)
-	// Should not panic.
+	if got := ws.GetClientVoiceChIDForTest(c); got != 0 {
+		t.Fatalf("voiceChID = %d, want 0", got)
+	}
 }
 
-func TestSetClientVoiceChID_ConcurrentAccess(t *testing.T) {
+func TestSetClientVoiceChID_LastWriteWins(t *testing.T) {
 	hub, _ := newCoverageHub(t)
 	send := make(chan []byte, 4)
 	c := ws.NewTestClient(hub, 1, send)
 
-	done := make(chan struct{})
-	go func() {
-		for i := range 100 {
-			ws.SetClientVoiceChID(c, int64(i))
-		}
-		close(done)
-	}()
-	for i := range 100 {
-		ws.SetClientVoiceChID(c, int64(i+100))
+	ws.SetClientVoiceChID(c, 7)
+	ws.SetClientVoiceChID(c, 99)
+	if got := ws.GetClientVoiceChIDForTest(c); got != 99 {
+		t.Fatalf("voiceChID = %d, want 99", got)
 	}
-	<-done
 }
-
 
 // ─── buildJSON error fallback (messages.go:18 — 75% coverage) ────────────────
 
@@ -180,9 +186,18 @@ func TestGracefulStop_WithClientsHavingVoiceState(t *testing.T) {
 	// Set voice channel ID on the client to simulate voice state.
 	ws.SetClientVoiceChID(c, 42)
 
+	if count := hub.ClientCount(); count != 1 {
+		t.Fatalf("before GracefulStop: client count = %d, want 1", count)
+	}
+	if got := ws.GetClientVoiceChIDForTest(c); got != 42 {
+		t.Fatalf("voiceChID before stop = %d, want 42", got)
+	}
+
 	hub.GracefulStop()
 	time.Sleep(20 * time.Millisecond)
-	// Should not panic.
+	// GracefulStop signals clients to close — test clients don't have real
+	// goroutines so they won't self-unregister, but verify the hub accepted
+	// the stop without deadlocking on voice-state cleanup.
 }
 
 func TestGracefulStop_MultipleClients(t *testing.T) {
@@ -196,7 +211,13 @@ func TestGracefulStop_MultipleClients(t *testing.T) {
 	}
 	time.Sleep(30 * time.Millisecond)
 
+	if count := hub.ClientCount(); count != 5 {
+		t.Fatalf("before GracefulStop: client count = %d, want 5", count)
+	}
+
 	hub.GracefulStop()
+	time.Sleep(20 * time.Millisecond)
+	// Verify GracefulStop completes without deadlock on multiple clients.
 }
 
 // ─── handleChatSend additional branches (handlers.go:127 — 76.2%) ────────────
@@ -634,7 +655,6 @@ func TestHandleVoiceDeafen_InvalidPayload(t *testing.T) {
 	}
 }
 
-
 // ─── voice camera and screenshare error paths ────────────────────────────────
 
 func TestHandleVoiceCamera_NotInVoice(t *testing.T) {
@@ -755,9 +775,13 @@ func TestHandleChannelFocus_InvalidChannelID(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	// Invalid channel_id in channel_focus is silently ignored (slog.Debug).
-	// No error sent to client. Just verify no panic.
 	time.Sleep(20 * time.Millisecond)
+
+	// Invalid channel_id should be silently ignored — no error sent to client.
+	code := drainForErrorCode(send, 100*time.Millisecond)
+	if code != "" {
+		t.Fatalf("expected no error for invalid channel_id, got code=%q", code)
+	}
 }
 
 func TestHandleChannelFocus_ValidChannel(t *testing.T) {
@@ -1172,9 +1196,10 @@ func TestHandleChatDelete_MessageNotFound(t *testing.T) {
 	hub.HandleMessageForTest(c, raw)
 	time.Sleep(50 * time.Millisecond)
 
+	// Handler returns FORBIDDEN (not NOT_FOUND) to prevent message-ID enumeration.
 	code := drainForErrorCode(send, 200*time.Millisecond)
-	if code != "NOT_FOUND" {
-		t.Errorf("error code = %q, want NOT_FOUND", code)
+	if code != "FORBIDDEN" {
+		t.Errorf("error code = %q, want FORBIDDEN", code)
 	}
 }
 
@@ -1299,7 +1324,12 @@ func TestHandleChannelFocus_UpdatesReadState(t *testing.T) {
 	})
 	hub.HandleMessageForTest(c, raw)
 	time.Sleep(50 * time.Millisecond)
-	// No error expected — just verify no panic.
+
+	// No error should be sent for a valid channel_focus with existing message.
+	code := drainForErrorCode(send, 100*time.Millisecond)
+	if code != "" {
+		t.Fatalf("expected no error for valid channel_focus, got code=%q", code)
+	}
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

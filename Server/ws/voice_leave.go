@@ -1,25 +1,37 @@
 package ws
 
-import "log/slog"
+import (
+	"context"
+	"log/slog"
+	"time"
+)
 
 // handleVoiceLeave processes an explicit voice_leave message or a disconnect.
 // 1. Gets old voiceChID from clearVoiceChID().
-// 2. If was in voice: remove from DB, broadcast voice_leave.
+// 2. If was in voice: remove from DB (with retry), broadcast voice_leave.
 // 3. Call livekit.RemoveParticipant (ignore errors — participant may already be gone).
-func (h *Hub) handleVoiceLeave(c *Client) {
+func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
 	oldChID := c.clearVoiceChID()
 	if oldChID == 0 {
 		slog.Debug("handleVoiceLeave no-op (already cleared)", "user_id", c.userID)
 		return
 	}
 
-	slog.Info("voice leave", "user_id", c.userID, "channel_id", oldChID)
-
-	if leaveErr := h.db.LeaveVoiceChannel(c.userID); leaveErr != nil {
-		slog.Error("ws handleVoiceLeave LeaveVoiceChannel — ghost session may remain in DB",
-			"err", leaveErr, "user_id", c.userID, "channel_id", oldChID)
-		c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice leave partially failed — please rejoin if issues persist"))
+	username := ""
+	if c.user != nil {
+		username = c.user.Username
 	}
+	slog.Info("voice leave",
+		"user_id", c.userID,
+		"username", username,
+		"channel_id", oldChID,
+		"remote", c.remoteAddr,
+	)
+
+	if err := leaveVoiceChannelWithRetry(h, c.userID, oldChID); err != nil {
+		c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice leave failed — please rejoin if issues persist"))
+	}
+
 	h.BroadcastToAll(buildVoiceLeave(oldChID, c.userID))
 
 	// Remove from LiveKit (best-effort).
@@ -29,4 +41,47 @@ func (h *Hub) handleVoiceLeave(c *Client) {
 				"err", err, "user_id", c.userID, "channel_id", oldChID)
 		}
 	}
+}
+
+// leaveVoiceChannelWithRetry attempts to remove the voice state from the DB.
+// The first attempt is synchronous. If it fails, subsequent retries run in a
+// background goroutine with exponential backoff so the caller (readPump) is
+// not blocked by time.Sleep.
+// Returns nil on first-attempt success, the first error otherwise (retries
+// continue in the background).
+func leaveVoiceChannelWithRetry(h *Hub, userID int64, channelID int64) error {
+	// Synchronous first attempt.
+	if err := h.db.LeaveVoiceChannel(userID); err != nil {
+		slog.Warn("LeaveVoiceChannel failed, retrying in background",
+			"err", err, "user_id", userID, "channel_id", channelID,
+			"attempt", 1, "max_retries", 3)
+
+		// Background retries so the readPump goroutine is not blocked.
+		go func() {
+			const maxRetries = 3
+			delay := 200 * time.Millisecond
+
+			for attempt := 2; attempt <= maxRetries; attempt++ {
+				time.Sleep(delay)
+				delay *= 2
+
+				if retryErr := h.db.LeaveVoiceChannel(userID); retryErr != nil {
+					slog.Warn("LeaveVoiceChannel retry failed",
+						"err", retryErr, "user_id", userID, "channel_id", channelID,
+						"attempt", attempt, "max_retries", maxRetries)
+					if attempt == maxRetries {
+						slog.Error("LeaveVoiceChannel exhausted retries — ghost state may persist",
+							"err", retryErr, "user_id", userID, "channel_id", channelID)
+					}
+				} else {
+					slog.Info("LeaveVoiceChannel succeeded on retry",
+						"user_id", userID, "attempt", attempt)
+					return
+				}
+			}
+		}()
+
+		return err
+	}
+	return nil
 }

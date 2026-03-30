@@ -1,12 +1,40 @@
 package auth
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/owncord/server/db"
 )
+
+// ValidateUsername checks that a (pre-trimmed) username meets naming rules:
+//   - Length 2-32 runes (after trim)
+//   - Only printable characters (no control chars, no zero-width chars)
+//
+// Returns a descriptive error on failure, nil on success.
+func ValidateUsername(username string) error {
+	username = strings.TrimSpace(username)
+	n := len([]rune(username))
+	if n < 2 {
+		return fmt.Errorf("username must be at least 2 characters")
+	}
+	if n > 32 {
+		return fmt.Errorf("username must be at most 32 characters")
+	}
+	for _, r := range username {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("username must not contain control characters")
+		}
+		// Block zero-width and other invisible formatting characters.
+		if unicode.In(r, unicode.Cf) {
+			return fmt.Errorf("username must not contain invisible characters")
+		}
+	}
+	return nil
+}
 
 // ExtractBearerToken parses the "Authorization: Bearer <token>" header from r
 // and returns the token and true. Returns "", false if the header is absent,

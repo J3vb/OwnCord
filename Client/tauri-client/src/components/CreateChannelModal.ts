@@ -92,7 +92,7 @@ export function createCreateChannelModal(
       type: "text",
       placeholder: isVoiceCategory(category) ? "lounge" : "general",
       "data-testid": "channel-name-input",
-    }) as HTMLInputElement;
+    });
     appendChildren(nameGroup, nameLabel, nameInput);
 
     // Channel type
@@ -101,7 +101,7 @@ export function createCreateChannelModal(
     const typeSelect = createElement("select", {
       class: "form-input",
       "data-testid": "channel-type-select",
-    }) as HTMLSelectElement;
+    });
 
     for (const t of allowedTypes) {
       const opt = createElement(

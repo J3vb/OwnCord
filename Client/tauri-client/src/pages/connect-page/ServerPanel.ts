@@ -36,7 +36,7 @@ function getIconColor(name: string): string {
 }
 
 function getIconInitials(name: string): string {
-  return name.slice(0, 2).toUpperCase();
+  return name.charAt(0).toUpperCase();
 }
 
 // ---------------------------------------------------------------------------
@@ -51,6 +51,8 @@ export interface ServerPanelOptions {
   readonly onCredentialLoaded: (host: string, username: string, password?: string) => void;
   readonly onAddProfile?: (name: string, host: string) => void;
   readonly onDeleteProfile?: (profileId: string) => void;
+  /** Called when the user toggles auto-login on a server profile. */
+  readonly onToggleAutoLogin?: (profileId: string, enabled: boolean) => void;
 }
 
 export interface ServerPanelApi {
@@ -68,10 +70,10 @@ export function createServerPanel(
   opts: ServerPanelOptions,
   initialProfiles: readonly SimpleProfile[],
 ): ServerPanelApi {
-  const { signal, onServerClick, onCredentialLoaded, onAddProfile, onDeleteProfile } = opts;
+  const { signal, onServerClick, onCredentialLoaded, onAddProfile, onDeleteProfile, onToggleAutoLogin } = opts;
 
   // Map of host -> DOM elements for health status updates
-  const healthElements = new Map<string, { dot: HTMLDivElement; latency: HTMLSpanElement }>();
+  const healthElements = new Map<string, { dot: HTMLDivElement; latency: HTMLSpanElement; onlineUsers: HTMLSpanElement }>();
 
   // Cached DOM references
   let serverListEl: HTMLDivElement;
@@ -120,16 +122,16 @@ export function createServerPanel(
       });
       setText(icon, getIconInitials(profile.name));
 
-      // Health status dot on the icon
+      // Health status dot — placed as sibling after info, not inside icon
       const statusDot = createElement("div", { class: "srv-status-dot unknown" });
-      icon.appendChild(statusDot);
 
       const info = createElement("div", { class: "srv-info" });
       const name = createElement("div", { class: "srv-name" }, profile.name);
       const meta = createElement("div", { class: "srv-meta" });
       const host = createElement("span", { class: "srv-host" }, profile.host);
       const latency = createElement("span", { class: "srv-latency" });
-      appendChildren(meta, host, latency);
+      const onlineUsersEl = createElement("span", { class: "srv-online-users" });
+      appendChildren(meta, host, latency, onlineUsersEl);
 
       // Show username if available (full profile has it)
       const fullProfile = profile as Partial<ServerProfile>;
@@ -140,10 +142,34 @@ export function createServerPanel(
 
       appendChildren(info, name, meta);
 
-      healthElements.set(profile.host, { dot: statusDot, latency });
+      healthElements.set(profile.host, { dot: statusDot, latency, onlineUsers: onlineUsersEl });
+
+      // Action buttons (auto-login toggle + delete)
+      const actions = createElement("div", { class: "srv-actions" });
+
+      // Auto-login toggle (only for full profiles)
+      if (fullProfile.id && onToggleAutoLogin) {
+        const isAutoLogin = fullProfile.autoConnect === true;
+        const autoLoginBtn = createElement("button", {
+          class: `srv-btn auto-login${isAutoLogin ? " active" : ""}`,
+          type: "button",
+          "aria-label": isAutoLogin ? "Disable auto-login" : "Enable auto-login",
+          title: isAutoLogin ? "Auto-login enabled" : "Enable auto-login",
+        });
+        autoLoginBtn.textContent = "";
+        autoLoginBtn.appendChild(createIcon("zap", 14));
+        autoLoginBtn.addEventListener(
+          "click",
+          (e) => {
+            e.stopPropagation();
+            onToggleAutoLogin(fullProfile.id!, !isAutoLogin);
+          },
+          { signal },
+        );
+        actions.appendChild(autoLoginBtn);
+      }
 
       // Delete button (only for full profiles that have an id)
-      const actions = createElement("div", { class: "srv-actions" });
       if (fullProfile.id && onDeleteProfile) {
         const deleteBtn = createElement("button", {
           class: "srv-btn danger",
@@ -163,7 +189,7 @@ export function createServerPanel(
         actions.appendChild(deleteBtn);
       }
 
-      appendChildren(item, icon, info, actions);
+      appendChildren(item, icon, info, statusDot, actions);
 
       item.addEventListener(
         "click",
@@ -201,6 +227,15 @@ export function createServerPanel(
     } else {
       setText(els.latency, "");
       els.latency.className = "srv-latency";
+    }
+
+    // Update online users count
+    if (status.onlineUsers !== null && status.onlineUsers >= 0) {
+      setText(els.onlineUsers, `${status.onlineUsers} online`);
+      els.onlineUsers.className = `srv-online-users ${status.onlineUsers > 0 ? "has-users" : ""}`;
+    } else {
+      setText(els.onlineUsers, "");
+      els.onlineUsers.className = "srv-online-users";
     }
   }
 
@@ -257,9 +292,17 @@ export function createServerPanel(
     }
 
     function handleSave(): void {
-      const name = (nameInput as HTMLInputElement).value.trim();
-      const addr = (hostAddrInput as HTMLInputElement).value.trim();
+      const name = nameInput.value.trim();
+      const addr = hostAddrInput.value.trim();
       if (!name || !addr) return;
+      // Validate address: must be a valid hostname:port — no paths, no special chars
+      if (!/^[\w.-]+(:\d+)?$/.test(addr)) {
+        // Show inline validation error via the host input
+        hostAddrInput.setCustomValidity("Invalid server address (expected host or host:port)");
+        hostAddrInput.reportValidity();
+        return;
+      }
+      hostAddrInput.setCustomValidity("");
       onAddProfile!(name, addr);
       closeModal();
     }
@@ -276,13 +319,13 @@ export function createServerPanel(
 
     // Enter key submits
     hostAddrInput.addEventListener("keydown", (e) => {
-      if ((e as KeyboardEvent).key === "Enter") handleSave();
+      if ((e).key === "Enter") handleSave();
     }, { signal });
 
     // Mount onto the panel's closest connect-page root
     const root = panelEl.closest(".connect-page") ?? document.body;
     root.appendChild(overlay);
-    (nameInput as HTMLInputElement).focus();
+    nameInput.focus();
   }
 
   // ---------------------------------------------------------------------------

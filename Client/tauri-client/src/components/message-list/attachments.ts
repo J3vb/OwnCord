@@ -5,14 +5,16 @@
 
 import {
   createElement,
-  setText,
   appendChildren,
 } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@components/settings/helpers";
+import { createLogger } from "@lib/logger";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { save } from "@tauri-apps/plugin-dialog";
+
+const log = createLogger("attachments");
 import { writeFile } from "@tauri-apps/plugin-fs";
 import type { Attachment } from "@lib/types";
 import { openImageLightbox } from "./media";
@@ -24,7 +26,7 @@ let _serverHost: string | null = null;
 
 /** Set the server host (called once from MainPage on connect). */
 export function setServerHost(host: string): void {
-  _serverHost = host;
+  _serverHost = host.toLowerCase();
 }
 
 /** Resolve a potentially relative URL to a full URL using the server host. */
@@ -63,8 +65,45 @@ export function isSafeUrl(url: string): boolean {
 // Image cache: memory + IndexedDB for persistence across restarts
 // ---------------------------------------------------------------------------
 
-/** In-memory cache for instant re-render. */
+/** In-memory cache for instant re-render (LRU eviction at CACHE_MAX). */
 const memoryCache = new Map<string, string>();
+const CACHE_MAX = 200;
+let attachmentCacheGeneration = 0;
+
+export function clearAttachmentCaches(): void {
+  attachmentCacheGeneration += 1;
+  memoryCache.clear();
+  inFlight.clear();
+}
+
+/** Safe MIME types allowed in data: URIs — blocks script injection via crafted Content-Type. */
+const SAFE_MIME_TYPES = new Set([
+  "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml",
+  "image/avif", "image/bmp", "video/mp4", "video/webm", "audio/mpeg",
+  "audio/ogg", "audio/wav", "application/pdf",
+]);
+
+/** Sanitize a Content-Type header value for use in a data: URI. */
+function sanitizeContentType(raw: string): string {
+  const mime = raw.split(";")[0]?.trim() ?? "";
+  return SAFE_MIME_TYPES.has(mime) ? raw : "application/octet-stream";
+}
+
+/** Check if a URL points to the configured OwnCord server. */
+function isServerUrl(url: string): boolean {
+  if (_serverHost === null) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.host === _serverHost;
+  } catch {
+    return false;
+  }
+}
+
+/** Report whether a URL targets the configured OwnCord server host. */
+export function isTrustedServerUrl(url: string): boolean {
+  return isServerUrl(url);
+}
 
 /** In-flight fetch promises to prevent duplicate concurrent requests. */
 const inFlight = new Map<string, Promise<string | null>>();
@@ -93,6 +132,13 @@ export function openCacheDb(): Promise<IDBDatabase | null> {
   });
 }
 
+function closeDbAfterTransaction(tx: IDBTransaction, db: IDBDatabase): void {
+  const close = (): void => db.close();
+  tx.oncomplete = close;
+  tx.onabort = close;
+  tx.onerror = close;
+}
+
 /** Read a cached data URL from IndexedDB. */
 async function idbGet(url: string): Promise<string | null> {
   const db = await openCacheDb();
@@ -100,11 +146,13 @@ async function idbGet(url: string): Promise<string | null> {
   return new Promise((resolve) => {
     try {
       const tx = db.transaction(IDB_STORE, "readonly");
+      closeDbAfterTransaction(tx, db);
       const store = tx.objectStore(IDB_STORE);
       const req = store.get(url);
       req.onsuccess = () => resolve(typeof req.result === "string" ? req.result : null);
       req.onerror = () => resolve(null);
     } catch {
+      db.close();
       resolve(null);
     }
   });
@@ -116,8 +164,10 @@ async function idbPut(url: string, dataUrl: string): Promise<void> {
   if (db === null) return;
   try {
     const tx = db.transaction(IDB_STORE, "readwrite");
+    closeDbAfterTransaction(tx, db);
     tx.objectStore(IDB_STORE).put(dataUrl, url);
   } catch {
+    db.close();
     // IndexedDB full or unavailable — ignore
   }
 }
@@ -136,6 +186,8 @@ export function uint8ToBase64(bytes: Uint8Array): string {
 
 /** Fetch an image and return a data: URI. Uses memory → IndexedDB → network. */
 export function fetchImageAsDataUrl(url: string): Promise<string | null> {
+  const generation = attachmentCacheGeneration;
+
   // 1. Memory cache (instant)
   const cached = memoryCache.get(url);
   if (cached !== undefined) return Promise.resolve(cached);
@@ -148,35 +200,60 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
     // 3. IndexedDB cache (persists across restarts)
     const idbCached = await idbGet(url);
     if (idbCached !== null) {
+      if (generation !== attachmentCacheGeneration) return null;
+      if (memoryCache.size >= CACHE_MAX) {
+        const firstKey = memoryCache.keys().next().value;
+        if (firstKey !== undefined) memoryCache.delete(firstKey);
+      }
       memoryCache.set(url, idbCached);
       return idbCached;
     }
 
     // 4. Network fetch via Tauri HTTP plugin
+    // acceptInvalidCerts is required for self-hosted OwnCord servers with self-signed
+    // TLS certificates. This means the client will accept any certificate from any server
+    // for image fetching, which could enable SSRF to internal endpoints via malicious
+    // chat messages containing internal URLs. Mitigated by: (1) isSafeUrl only allows
+    // http/https, (2) responses are only used as image data, not executed.
     try {
-      const res = await tauriFetch(url, {
-        danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
-      } as RequestInit);
+      const useInsecure = isServerUrl(url);
+      const fetchOpts: RequestInit = useInsecure
+        ? { danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } } as RequestInit
+        : {};
+      const res = await tauriFetch(url, fetchOpts);
       if (!res.ok) return null;
 
-      const contentType = res.headers.get("content-type") ?? "image/png";
+      const rawCt = res.headers.get("content-type") ?? "";
+      const contentType = sanitizeContentType(rawCt);
       const buffer = await res.arrayBuffer();
       const base64 = uint8ToBase64(new Uint8Array(buffer));
       const dataUrl = `data:${contentType};base64,${base64}`;
 
-      // Store in both caches
+      if (generation !== attachmentCacheGeneration) {
+        return null;
+      }
+
+      // Store in both caches (LRU eviction)
+      if (memoryCache.size >= CACHE_MAX) {
+        const firstKey = memoryCache.keys().next().value;
+        if (firstKey !== undefined) memoryCache.delete(firstKey);
+      }
       memoryCache.set(url, dataUrl);
       void idbPut(url, dataUrl);
 
       return dataUrl;
     } catch (err) {
-      console.error("Failed to fetch attachment image:", url, err);
+      log.error("Failed to fetch attachment image", { url, error: String(err) });
       return null;
     }
   })();
 
   inFlight.set(url, promise);
-  void promise.finally(() => inFlight.delete(url));
+  void promise.finally(() => {
+    if (inFlight.get(url) === promise) {
+      inFlight.delete(url);
+    }
+  });
 
   return promise;
 }
@@ -228,7 +305,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
       const img = createElement("img", {
         src: cached,
         alt: att.filename,
-      }) as HTMLImageElement;
+      });
       attachLightbox(img);
       img.addEventListener("load", () => {
         clearReservation();
@@ -245,13 +322,15 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
           const img = createElement("img", {
             src: dataUrl,
             alt: att.filename,
-          }) as HTMLImageElement;
+          });
           attachLightbox(img);
           img.addEventListener("load", () => {
             clearReservation();
             if (isGif) observeMedia(img, dataUrl, wrap, !loadPref("animateGifs", true));
           }, { once: true });
           placeholder.replaceWith(img);
+        } else {
+          placeholder.classList.remove("loading");
         }
       });
     }
@@ -282,22 +361,27 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
   return wrap;
 }
 
-/** Download a file via Tauri HTTP plugin and save to disk with native dialog. */
+/** Download a file via Tauri HTTP plugin and save to disk with native dialog.
+ *  NOTE: This requires fs:allow-write-file with path "**" in capabilities because
+ *  the user chooses the save location via the native OS dialog — the destination is
+ *  not under our control. The dialog itself is the security boundary. */
 async function downloadFile(url: string, filename: string): Promise<void> {
   try {
     // Show native save dialog with suggested filename
     const filePath = await save({ defaultPath: filename });
     if (filePath === null) return; // User cancelled
 
-    // Fetch file data
-    const res = await tauriFetch(url, {
-      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
-    } as RequestInit);
+    // Fetch file data — only accept invalid certs for the OwnCord server
+    const useInsecure = isServerUrl(url);
+    const fetchOpts: RequestInit = useInsecure
+      ? { danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } } as RequestInit
+      : {};
+    const res = await tauriFetch(url, fetchOpts);
     if (!res.ok) return;
 
     const buffer = await res.arrayBuffer();
     await writeFile(filePath, new Uint8Array(buffer));
   } catch (err) {
-    console.error("Download failed:", err);
+    log.error("Download failed", { filename, error: String(err) });
   }
 }

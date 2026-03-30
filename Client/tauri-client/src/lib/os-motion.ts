@@ -13,7 +13,17 @@ export function syncOsMotionListener(enabled: boolean): void {
     ac.abort();
     ac = null;
   }
-  if (!enabled) return;
+  if (!enabled) {
+    // Restore the user's manual reducedMotion preference from settings.
+    // Value is stored via JSON.stringify by savePref, so parse it safely.
+    const raw = localStorage.getItem("owncord:settings:reducedMotion");
+    let manual = false;
+    if (raw !== null) {
+      try { manual = JSON.parse(raw) === true; } catch { /* corrupted — default false */ }
+    }
+    document.documentElement.classList.toggle("reduced-motion", manual);
+    return;
+  }
 
   ac = new AbortController();
   const mq = window.matchMedia("(prefers-reduced-motion: reduce)");

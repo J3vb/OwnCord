@@ -4,8 +4,11 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 )
@@ -15,9 +18,39 @@ const (
 	maxMessageLimit     = 100
 )
 
+func isInvalidSearchQueryError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "fts5") ||
+		strings.Contains(msg, "unterminated string") ||
+		strings.Contains(msg, "malformed") ||
+		strings.Contains(msg, "syntax error")
+}
+
+func searchRateLimitMiddleware(limiter *auth.RateLimiter, limit int, window time.Duration, trustedProxies []string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := clientIPWithProxies(r, trustedProxies)
+			if !limiter.Allow("search:"+ip, limit, window) {
+				w.Header().Set("Retry-After", strconv.Itoa(int(window.Seconds())))
+				writeJSON(w, http.StatusTooManyRequests, errorResponse{
+					Error:   "RATE_LIMITED",
+					Message: "too many requests, please slow down",
+				})
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // MountChannelRoutes registers all channel-related routes onto r.
-// All routes require authentication.
-func MountChannelRoutes(r chi.Router, database *db.DB) {
+// All routes require authentication. The limiter is used to rate-limit
+// expensive endpoints like search.
+func MountChannelRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, trustedProxies []string) {
 	r.Route("/api/v1/channels", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
 		r.Get("/", handleListChannels(database))
@@ -26,7 +59,10 @@ func MountChannelRoutes(r chi.Router, database *db.DB) {
 		r.Post("/{id}/pins/{messageId}", handleSetPinned(database, true))
 		r.Delete("/{id}/pins/{messageId}", handleSetPinned(database, false))
 	})
-	r.With(AuthMiddleware(database)).Get("/api/v1/search", handleSearch(database))
+	r.With(
+		AuthMiddleware(database),
+		searchRateLimitMiddleware(limiter, 30, time.Minute, trustedProxies),
+	).Get("/api/v1/search", handleSearch(database))
 }
 
 // hasChannelPermREST checks whether the role has the given permission on the channel,
@@ -82,6 +118,11 @@ func handleListChannels(database *db.DB) http.HandlerFunc {
 			overrides, oErr = database.GetAllChannelPermissionsForRole(role.ID)
 			if oErr != nil {
 				slog.Error("handleListChannels GetAllChannelPermissionsForRole", "err", oErr)
+				writeJSON(w, http.StatusInternalServerError, errorResponse{
+					Error:   "INTERNAL",
+					Message: "failed to fetch channel permissions",
+				})
+				return
 			}
 		}
 
@@ -125,14 +166,33 @@ func handleGetMessages(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		// Permission check: user must have READ_MESSAGES on this channel.
-		role, _ := r.Context().Value(RoleKey).(*db.Role)
-		if !hasChannelPermREST(database, role, channelID, permissions.ReadMessages) {
-			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error:   "FORBIDDEN",
-				Message: "no permission to view this channel",
-			})
-			return
+		// DM channels use participant-based auth instead of role-based permissions.
+		if ch.Type == "dm" {
+			user, _ := r.Context().Value(UserKey).(*db.User)
+			if user == nil {
+				writeJSON(w, http.StatusUnauthorized, errorResponse{
+					Error:   "UNAUTHORIZED",
+					Message: "authentication required",
+				})
+				return
+			}
+			ok, dmErr := database.IsDMParticipant(user.ID, channelID)
+			if dmErr != nil || !ok {
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "not a participant in this DM",
+				})
+				return
+			}
+		} else {
+			role, _ := r.Context().Value(RoleKey).(*db.Role)
+			if !hasChannelPermREST(database, role, channelID, permissions.ReadMessages) {
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "no permission to view this channel",
+				})
+				return
+			}
 		}
 
 		// Parse query params.
@@ -240,6 +300,13 @@ func handleSearch(database *db.DB) http.HandlerFunc {
 
 		results, err := database.SearchMessages(q, channelID, limit)
 		if err != nil {
+			if isInvalidSearchQueryError(err) {
+				writeJSON(w, http.StatusBadRequest, errorResponse{
+					Error:   "BAD_REQUEST",
+					Message: "invalid search query",
+				})
+				return
+			}
 			slog.Error("handleSearch SearchMessages", "err", err, "query", q)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL",
@@ -250,19 +317,62 @@ func handleSearch(database *db.DB) http.HandlerFunc {
 
 		// Batch-fetch overrides and post-filter results by READ_MESSAGES.
 		role, _ := r.Context().Value(RoleKey).(*db.Role)
+		user, _ := r.Context().Value(UserKey).(*db.User)
 		overrides := map[int64]db.ChannelOverride{}
 		if role != nil && !permissions.HasAdmin(role.Permissions) {
 			var oErr error
 			overrides, oErr = database.GetAllChannelPermissionsForRole(role.ID)
 			if oErr != nil {
 				slog.Error("handleSearch GetAllChannelPermissionsForRole", "err", oErr)
+				writeJSON(w, http.StatusInternalServerError, errorResponse{
+					Error:   "INTERNAL",
+					Message: "search failed",
+				})
+				return
 			}
 		}
+
+		// Batch-fetch channel types in a single query to avoid N+1 lookups.
+		uniqueIDs := make(map[int64]struct{}, len(results))
+		for _, res := range results {
+			uniqueIDs[res.ChannelID] = struct{}{}
+		}
+		channelIDs := make([]int64, 0, len(uniqueIDs))
+		for id := range uniqueIDs {
+			channelIDs = append(channelIDs, id)
+		}
+		channelTypeCache, ctErr := database.GetChannelTypes(channelIDs)
+		if ctErr != nil {
+			slog.Error("handleSearch GetChannelTypes", "err", ctErr)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error:   "INTERNAL",
+				Message: "search failed",
+			})
+			return
+		}
+
 		var filtered []db.MessageSearchResult
 		for _, res := range results {
-			if hasChannelPermBatch(role, overrides, res.ChannelID, permissions.ReadMessages) {
-				filtered = append(filtered, res)
+			chType, ok := channelTypeCache[res.ChannelID]
+			if !ok {
+				// Fail closed if we cannot determine the channel type.
+				continue
 			}
+			if chType == "dm" {
+				// DM channels require participant-based auth.
+				if user == nil {
+					continue
+				}
+				ok, dmErr := database.IsDMParticipant(user.ID, res.ChannelID)
+				if dmErr != nil || !ok {
+					continue
+				}
+			} else {
+				if !hasChannelPermBatch(role, overrides, res.ChannelID, permissions.ReadMessages) {
+					continue
+				}
+			}
+			filtered = append(filtered, res)
 		}
 		if filtered == nil {
 			filtered = []db.MessageSearchResult{}
@@ -300,14 +410,34 @@ func handleGetPins(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		// Permission check: user must have READ_MESSAGES on this channel.
-		role, _ := r.Context().Value(RoleKey).(*db.Role)
-		if !hasChannelPermREST(database, role, channelID, permissions.ReadMessages) {
-			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error:   "FORBIDDEN",
-				Message: "no permission to view this channel",
-			})
-			return
+		// DM channels use participant-based auth instead of role-based permissions.
+		if ch.Type == "dm" {
+			user, _ := r.Context().Value(UserKey).(*db.User)
+			if user == nil {
+				writeJSON(w, http.StatusUnauthorized, errorResponse{
+					Error:   "UNAUTHORIZED",
+					Message: "authentication required",
+				})
+				return
+			}
+			ok, dmErr := database.IsDMParticipant(user.ID, channelID)
+			if dmErr != nil || !ok {
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "not a participant in this DM",
+				})
+				return
+			}
+		} else {
+			// Permission check: user must have READ_MESSAGES on this channel.
+			role, _ := r.Context().Value(RoleKey).(*db.Role)
+			if !hasChannelPermREST(database, role, channelID, permissions.ReadMessages) {
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "no permission to view this channel",
+				})
+				return
+			}
 		}
 
 		// Extract requesting user ID for reaction "me" flag.
@@ -351,14 +481,52 @@ func handleSetPinned(database *db.DB, pinned bool) http.HandlerFunc {
 			return
 		}
 
-		// Permission check: user must have MANAGE_MESSAGES on this channel.
-		role, _ := r.Context().Value(RoleKey).(*db.Role)
-		if !hasChannelPermREST(database, role, channelID, permissions.ManageMessages) {
-			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error:   "FORBIDDEN",
-				Message: "no permission to manage messages in this channel",
+		// Look up the channel to check if it's a DM.
+		ch, chErr := database.GetChannel(channelID)
+		if chErr != nil {
+			slog.Error("handleSetPinned GetChannel", "err", chErr, "channel_id", channelID)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error:   "INTERNAL",
+				Message: "failed to look up channel",
 			})
 			return
+		}
+		if ch == nil {
+			writeJSON(w, http.StatusNotFound, errorResponse{
+				Error:   "NOT_FOUND",
+				Message: "channel not found",
+			})
+			return
+		}
+
+		// DM channels use participant-based auth instead of role-based permissions.
+		if ch.Type == "dm" {
+			user, _ := r.Context().Value(UserKey).(*db.User)
+			if user == nil {
+				writeJSON(w, http.StatusUnauthorized, errorResponse{
+					Error:   "UNAUTHORIZED",
+					Message: "authentication required",
+				})
+				return
+			}
+			ok, dmErr := database.IsDMParticipant(user.ID, channelID)
+			if dmErr != nil || !ok {
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "not a participant in this DM",
+				})
+				return
+			}
+		} else {
+			// Permission check: user must have MANAGE_MESSAGES on this channel.
+			role, _ := r.Context().Value(RoleKey).(*db.Role)
+			if !hasChannelPermREST(database, role, channelID, permissions.ManageMessages) {
+				writeJSON(w, http.StatusForbidden, errorResponse{
+					Error:   "FORBIDDEN",
+					Message: "no permission to manage messages in this channel",
+				})
+				return
+			}
 		}
 
 		// Verify message exists and belongs to this channel.

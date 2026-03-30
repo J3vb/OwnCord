@@ -129,17 +129,22 @@ func (s *Storage) Save(uuid string, r io.Reader) error {
 	// Reconstruct the full stream: header bytes we already read + remainder.
 	maxBytes := int64(s.maxSizeMB) * 1024 * 1024
 	full := io.MultiReader(bytes.NewReader(headerSlice), r)
-	written, err := io.Copy(f, io.LimitReader(full, maxBytes+1))
+	limited := io.LimitReader(full, maxBytes)
+	written, err := io.Copy(f, limited)
 	if err != nil {
 		return fmt.Errorf("writing file: %w", err)
 	}
-	if written > maxBytes {
-		// File exceeds limit — remove the partial write and reject.
-		_ = f.Close()
-		if removeErr := os.Remove(dst); removeErr != nil {
-			slog.Error("storage: failed to remove oversized file", "path", dst, "err", removeErr)
+	// Probe for one more byte to detect if the file exceeds the limit.
+	if written == maxBytes {
+		var probe [1]byte
+		if n, _ := full.Read(probe[:]); n > 0 {
+			// File exceeds limit — remove the partial write and reject.
+			_ = f.Close()
+			if removeErr := os.Remove(dst); removeErr != nil {
+				slog.Error("storage: failed to remove oversized file", "path", dst, "err", removeErr)
+			}
+			return fmt.Errorf("file exceeds maximum size of %d MB", s.maxSizeMB)
 		}
-		return fmt.Errorf("file exceeds maximum size of %d MB", s.maxSizeMB)
 	}
 	return nil
 }

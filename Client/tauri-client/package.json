@@ -1,11 +1,11 @@
 {
   "name": "owncord-client",
   "private": true,
-  "version": "1.3.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc -p tsconfig.build.json && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
@@ -16,14 +16,21 @@
     "test:e2e:native": "playwright test --config playwright.config.native.ts",
     "test:e2e:ui": "playwright test --ui",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "typecheck:build": "tsc -p tsconfig.build.json --noEmit",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@playwright/test": "^1",
     "@tauri-apps/cli": "^2",
     "@vitest/coverage-v8": "^3",
+    "eslint": "^9.39.4",
     "jsdom": "^29.0.0",
     "typescript": "^5.7",
+    "typescript-eslint": "^8.57.2",
     "vite": "^6",
     "vitest": "^3"
   },

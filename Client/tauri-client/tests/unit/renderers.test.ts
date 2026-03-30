@@ -2,11 +2,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   formatTime,
   formatFullDate,
+  formatMessageTimestamp,
   isSameDay,
   shouldGroup,
   renderDayDivider,
   renderMessage,
   renderMentions,
+  renderMentionSegment,
+  renderInlineContent,
+  renderMessageContent,
+  getUserRole,
+  roleColorVar,
   GROUP_THRESHOLD_MS,
 } from "../../src/components/message-list/renderers";
 import type { Message } from "../../src/stores/messages.store";
@@ -256,6 +262,32 @@ describe("renderers", () => {
 
       const actionsBar = container.querySelector(".msg-actions-bar");
       expect(actionsBar).not.toBeNull();
+
+      ac.abort();
+    });
+
+    it("gives icon-only action buttons explicit accessible names", () => {
+      const msg = makeMessage();
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector("[data-testid='msg-react-1']")?.getAttribute("aria-label")).toBe("React");
+      expect(container.querySelector("[data-testid='msg-reply-1']")?.getAttribute("aria-label")).toBe("Reply");
+      expect(container.querySelector("[data-testid='msg-pin-1']")?.getAttribute("aria-label")).toBe("Pin");
+      expect(container.querySelector("[data-testid='msg-edit-1']")?.getAttribute("aria-label")).toBe("Edit");
+      expect(container.querySelector("[data-testid='msg-delete-1']")?.getAttribute("aria-label")).toBe("Delete");
+
+      ac.abort();
+    });
+
+    it("updates the pin button accessible name for pinned messages", () => {
+      const msg = makeMessage({ pinned: true });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector("[data-testid='msg-pin-1']")?.getAttribute("aria-label")).toBe("Unpin");
 
       ac.abort();
     });
@@ -580,6 +612,596 @@ describe("renderers", () => {
 
       ac.abort();
     });
+  });
+
+  // ---------------------------------------------------------------------------
+  // System messages
+  // ---------------------------------------------------------------------------
+
+  describe("renderSystemMessage (via renderMessage)", () => {
+    it("renders system message with icon, text, and time", () => {
+      const msg = makeMessage({
+        user: { id: 0, username: "System", avatar: null },
+        content: "@alice joined the server",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(".system-msg")).not.toBeNull();
+      expect(container.querySelector(".sm-icon")).not.toBeNull();
+      expect(container.querySelector(".sm-text")).not.toBeNull();
+      expect(container.querySelector(".sm-time")).not.toBeNull();
+
+      ac.abort();
+    });
+
+    it("renders mentions inside system message text", () => {
+      const msg = makeMessage({
+        user: { id: 0, username: "System", avatar: null },
+        content: "@alice was promoted to admin",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const mention = el.querySelector(".mention");
+      expect(mention).not.toBeNull();
+      expect(mention!.textContent).toBe("@alice");
+
+      ac.abort();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Reply reference — unknown message
+  // ---------------------------------------------------------------------------
+
+  describe("renderReplyRef — unknown message", () => {
+    it("renders 'Reply to unknown message' when referenced message is missing", () => {
+      const reply = makeMessage({ id: 2, replyTo: 999, content: "replying" });
+      const ac = new AbortController();
+      const el = renderMessage(reply, false, [reply], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const replyRef = container.querySelector(".msg-reply-ref");
+      expect(replyRef).not.toBeNull();
+      expect(replyRef!.textContent).toBe("Reply to unknown message");
+
+      ac.abort();
+    });
+
+    it("renders '[message deleted]' preview for deleted referenced message", () => {
+      const original = makeMessage({ id: 1, content: "Original", deleted: true });
+      const reply = makeMessage({ id: 2, replyTo: 1, content: "reply" });
+      const ac = new AbortController();
+      const el = renderMessage(reply, false, [original, reply], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const replyText = container.querySelector(".rr-text");
+      expect(replyText).not.toBeNull();
+      expect(replyText!.textContent).toBe("[message deleted]");
+
+      ac.abort();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Developer mode — copy ID button
+  // ---------------------------------------------------------------------------
+
+  describe("developer mode — Copy ID button", () => {
+    it("renders Copy ID button when developerMode is enabled", () => {
+      // loadPref reads from localStorage with the "owncord:settings:" prefix
+      localStorage.setItem("owncord:settings:developerMode", "true");
+      // Dispatch pref-change to invalidate the cached developerModeEnabled value
+      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
+        detail: { key: "developerMode" },
+      }));
+
+      const msg = makeMessage();
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const copyIdBtn = container.querySelector("[data-testid='msg-copy-id-1']");
+      expect(copyIdBtn).not.toBeNull();
+      expect(copyIdBtn!.getAttribute("aria-label")).toBe("Copy ID");
+
+      // Clean up: restore developer mode to false
+      localStorage.setItem("owncord:settings:developerMode", "false");
+      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
+        detail: { key: "developerMode" },
+      }));
+      ac.abort();
+    });
+
+    it("Copy ID button calls clipboard.writeText on click", () => {
+      localStorage.setItem("owncord:settings:developerMode", "true");
+      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
+        detail: { key: "developerMode" },
+      }));
+
+      const writeTextMock = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, { clipboard: { writeText: writeTextMock } });
+
+      const msg = makeMessage({ id: 42 });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const copyIdBtn = container.querySelector("[data-testid='msg-copy-id-42']") as HTMLElement;
+      expect(copyIdBtn).not.toBeNull();
+      copyIdBtn.click();
+
+      expect(writeTextMock).toHaveBeenCalledWith("42");
+
+      // Clean up
+      localStorage.setItem("owncord:settings:developerMode", "false");
+      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
+        detail: { key: "developerMode" },
+      }));
+      ac.abort();
+    });
+
+    it("Copy ID button handles clipboard failure gracefully", () => {
+      localStorage.setItem("owncord:settings:developerMode", "true");
+      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
+        detail: { key: "developerMode" },
+      }));
+
+      Object.assign(navigator, {
+        clipboard: { writeText: vi.fn().mockRejectedValue(new Error("clipboard unavailable")) },
+      });
+
+      const msg = makeMessage({ id: 42 });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const copyIdBtn = container.querySelector("[data-testid='msg-copy-id-42']") as HTMLElement;
+      // Should not throw
+      expect(() => copyIdBtn.click()).not.toThrow();
+
+      // Clean up
+      localStorage.setItem("owncord:settings:developerMode", "false");
+      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
+        detail: { key: "developerMode" },
+      }));
+      ac.abort();
+    });
+
+    it("does not render Copy ID button when developerMode is disabled", () => {
+      localStorage.setItem("owncord:settings:developerMode", "false");
+      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
+        detail: { key: "developerMode" },
+      }));
+
+      const msg = makeMessage();
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const copyIdBtn = container.querySelector("[data-testid='msg-copy-id-1']");
+      expect(copyIdBtn).toBeNull();
+
+      ac.abort();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Deleted messages — no action bar, no embeds
+  // ---------------------------------------------------------------------------
+
+  describe("deleted message edge cases", () => {
+    it("does not render embeds for deleted messages", () => {
+      const msg = makeMessage({
+        deleted: true,
+        content: "https://example.com/photo.png",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(".msg-image")).toBeNull();
+      expect(container.querySelector(".msg-embed-link")).toBeNull();
+      expect(container.querySelector(".msg-actions-bar")).toBeNull();
+
+      ac.abort();
+    });
+
+    it("does not render (edited) tag for deleted messages", () => {
+      const msg = makeMessage({
+        deleted: true,
+        editedAt: "2025-01-15T13:00:00Z",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(".msg-edited")).toBeNull();
+
+      ac.abort();
+    });
+
+    it("does not render reactions for deleted messages", () => {
+      const msg = makeMessage({
+        deleted: true,
+        reactions: [{ emoji: "\uD83D\uDC4D", count: 1, me: false }],
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(".reaction-chip")).toBeNull();
+
+      ac.abort();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Action button callbacks
+  // ---------------------------------------------------------------------------
+
+  describe("action button callbacks", () => {
+    it("calls onReplyClick when reply button is clicked", () => {
+      const opts = makeOpts();
+      const msg = makeMessage();
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], opts, ac.signal);
+      container.appendChild(el);
+
+      const replyBtn = container.querySelector("[data-testid='msg-reply-1']") as HTMLElement;
+      replyBtn.click();
+      expect(opts.onReplyClick).toHaveBeenCalledWith(1);
+
+      ac.abort();
+    });
+
+    it("calls onReactionClick when react button is clicked", () => {
+      const opts = makeOpts();
+      const msg = makeMessage();
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], opts, ac.signal);
+      container.appendChild(el);
+
+      const reactBtn = container.querySelector("[data-testid='msg-react-1']") as HTMLElement;
+      reactBtn.click();
+      expect(opts.onReactionClick).toHaveBeenCalledWith(1, "");
+
+      ac.abort();
+    });
+
+    it("calls onPinClick with correct arguments", () => {
+      const opts = makeOpts();
+      const msg = makeMessage({ pinned: false });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], opts, ac.signal);
+      container.appendChild(el);
+
+      const pinBtn = container.querySelector("[data-testid='msg-pin-1']") as HTMLElement;
+      pinBtn.click();
+      expect(opts.onPinClick).toHaveBeenCalledWith(1, 1, false);
+
+      ac.abort();
+    });
+
+    it("calls onEditClick when edit button is clicked", () => {
+      const opts = makeOpts();
+      const msg = makeMessage();
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], opts, ac.signal);
+      container.appendChild(el);
+
+      const editBtn = container.querySelector("[data-testid='msg-edit-1']") as HTMLElement;
+      editBtn.click();
+      expect(opts.onEditClick).toHaveBeenCalledWith(1);
+
+      ac.abort();
+    });
+
+    it("calls onDeleteClick when delete button is clicked", () => {
+      const opts = makeOpts();
+      const msg = makeMessage();
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], opts, ac.signal);
+      container.appendChild(el);
+
+      const deleteBtn = container.querySelector("[data-testid='msg-delete-1']") as HTMLElement;
+      deleteBtn.click();
+      expect(opts.onDeleteClick).toHaveBeenCalledWith(1);
+
+      ac.abort();
+    });
+
+    it("does not render edit/delete buttons for other users' messages", () => {
+      const opts = makeOpts({ currentUserId: 999 });
+      const msg = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], opts, ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector("[data-testid='msg-edit-1']")).toBeNull();
+      expect(container.querySelector("[data-testid='msg-delete-1']")).toBeNull();
+      // But react, reply, pin should still be present
+      expect(container.querySelector("[data-testid='msg-react-1']")).not.toBeNull();
+      expect(container.querySelector("[data-testid='msg-reply-1']")).not.toBeNull();
+      expect(container.querySelector("[data-testid='msg-pin-1']")).not.toBeNull();
+
+      ac.abort();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Grouped message hover time
+  // ---------------------------------------------------------------------------
+
+  describe("grouped message hover time", () => {
+    it("renders hover time element for grouped messages", () => {
+      const msg = makeMessage();
+      const ac = new AbortController();
+      const el = renderMessage(msg, true, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const hoverTime = container.querySelector(".msg-hover-time");
+      expect(hoverTime).not.toBeNull();
+      expect(hoverTime!.textContent).toMatch(/^\d{2}:\d{2}$/);
+
+      ac.abort();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // formatMessageTimestamp
+  // ---------------------------------------------------------------------------
+
+  describe("formatMessageTimestamp", () => {
+    it("returns 'Today at ...' for today's timestamps", () => {
+      const now = new Date();
+      const iso = now.toISOString();
+      const result = formatMessageTimestamp(iso);
+      expect(result).toMatch(/^Today at /);
+    });
+
+    it("returns 'Yesterday at ...' for yesterday's timestamps", () => {
+      const yesterday = new Date(Date.now() - 86_400_000);
+      const iso = yesterday.toISOString();
+      const result = formatMessageTimestamp(iso);
+      expect(result).toMatch(/^Yesterday at /);
+    });
+
+    it("returns MM/DD/YYYY format for older timestamps", () => {
+      const result = formatMessageTimestamp("2020-06-15T12:00:00Z");
+      expect(result).toMatch(/^\d{2}\/\d{2}\/\d{4} /);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // getUserRole / roleColorVar
+  // ---------------------------------------------------------------------------
+
+  describe("getUserRole", () => {
+    it("returns 'member' for unknown userId", () => {
+      expect(getUserRole(999999)).toBe("member");
+    });
+
+    it("returns role for known member", () => {
+      membersStore.setState((prev) => ({
+        ...prev,
+        members: new Map([[42, { id: 42, username: "admin", avatar: null, role: "admin", status: "online" }]]),
+      }));
+      expect(getUserRole(42)).toBe("admin");
+    });
+  });
+
+  describe("roleColorVar", () => {
+    afterEach(() => {
+      // Restore roleColors to default (true)
+      localStorage.setItem("owncord:settings:roleColors", "true");
+      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
+        detail: { key: "roleColors" },
+      }));
+    });
+
+    it("returns owner color for 'owner' role", () => {
+      expect(roleColorVar("owner")).toBe("var(--role-owner)");
+    });
+
+    it("returns admin color for 'admin' role", () => {
+      expect(roleColorVar("admin")).toBe("var(--role-admin)");
+    });
+
+    it("returns mod color for 'moderator' role", () => {
+      expect(roleColorVar("moderator")).toBe("var(--role-mod)");
+    });
+
+    it("returns member color for unknown role", () => {
+      expect(roleColorVar("custom")).toBe("var(--role-member)");
+    });
+
+    it("returns member color for 'member' role", () => {
+      expect(roleColorVar("member")).toBe("var(--role-member)");
+    });
+
+    it("returns member color for all roles when roleColors is disabled", () => {
+      localStorage.setItem("owncord:settings:roleColors", "false");
+      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
+        detail: { key: "roleColors" },
+      }));
+
+      expect(roleColorVar("owner")).toBe("var(--role-member)");
+      expect(roleColorVar("admin")).toBe("var(--role-member)");
+      expect(roleColorVar("moderator")).toBe("var(--role-member)");
+      expect(roleColorVar("member")).toBe("var(--role-member)");
+    });
+
+    it("re-enables role colors when pref changes back to true", () => {
+      localStorage.setItem("owncord:settings:roleColors", "false");
+      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
+        detail: { key: "roleColors" },
+      }));
+      expect(roleColorVar("owner")).toBe("var(--role-member)");
+
+      localStorage.setItem("owncord:settings:roleColors", "true");
+      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
+        detail: { key: "roleColors" },
+      }));
+      expect(roleColorVar("owner")).toBe("var(--role-owner)");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // renderMentionSegment
+  // ---------------------------------------------------------------------------
+
+  describe("renderMentionSegment", () => {
+    it("renders plain text without mentions", () => {
+      const fragment = renderMentionSegment("just text");
+      container.appendChild(fragment);
+      expect(container.textContent).toBe("just text");
+      expect(container.querySelector(".mention")).toBeNull();
+    });
+
+    it("renders @mention at start of text", () => {
+      const fragment = renderMentionSegment("@alice hello");
+      container.appendChild(fragment);
+      const mention = container.querySelector(".mention");
+      expect(mention).not.toBeNull();
+      expect(mention!.textContent).toBe("@alice");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // renderInlineContent
+  // ---------------------------------------------------------------------------
+
+  describe("renderInlineContent", () => {
+    it("renders inline code segments", () => {
+      const fragment = renderInlineContent("use `npm install` to install");
+      container.appendChild(fragment);
+      const code = container.querySelector("code");
+      expect(code).not.toBeNull();
+      expect(code!.textContent).toBe("npm install");
+    });
+
+    it("renders text with no inline code", () => {
+      const fragment = renderInlineContent("plain text");
+      container.appendChild(fragment);
+      expect(container.textContent).toBe("plain text");
+      expect(container.querySelector("code")).toBeNull();
+    });
+
+    it("renders mention inside non-code text", () => {
+      const fragment = renderInlineContent("hello @alice and `code`");
+      container.appendChild(fragment);
+      expect(container.querySelector(".mention")).not.toBeNull();
+      expect(container.querySelector("code")).not.toBeNull();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // renderMessageContent — code blocks
+  // ---------------------------------------------------------------------------
+
+  describe("renderMessageContent", () => {
+    it("renders code blocks with copy button", () => {
+      const fragment = renderMessageContent("```console.log('hi')```");
+      container.appendChild(fragment);
+
+      const codeBlock = container.querySelector(".msg-codeblock");
+      expect(codeBlock).not.toBeNull();
+      expect(codeBlock!.textContent).toBe("console.log('hi')");
+
+      const copyBtn = container.querySelector(".msg-codeblock-copy");
+      expect(copyBtn).not.toBeNull();
+      expect(copyBtn!.textContent).toBe("Copy");
+    });
+
+    it("renders prose and code blocks together", () => {
+      const fragment = renderMessageContent("Hello```code here```world");
+      container.appendChild(fragment);
+
+      expect(container.querySelector(".msg-text")).not.toBeNull();
+      expect(container.querySelector(".msg-codeblock")).not.toBeNull();
+    });
+
+    it("renders empty content as a single msg-text", () => {
+      const fragment = renderMessageContent("");
+      container.appendChild(fragment);
+
+      // Empty string content: parts = [""], single prose segment
+      const textEls = container.querySelectorAll(".msg-text");
+      expect(textEls.length).toBeLessThanOrEqual(1);
+    });
+
+    it("handles code block copy button click with clipboard", async () => {
+      const writeTextMock = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, {
+        clipboard: { writeText: writeTextMock },
+      });
+
+      const fragment = renderMessageContent("```test code```");
+      container.appendChild(fragment);
+
+      const copyBtn = container.querySelector(".msg-codeblock-copy") as HTMLElement;
+      copyBtn.click();
+
+      await vi.waitFor(() => {
+        expect(writeTextMock).toHaveBeenCalledWith("test code");
+      });
+    });
+
+    it("handles code block copy button click when clipboard fails", async () => {
+      Object.assign(navigator, {
+        clipboard: { writeText: vi.fn().mockRejectedValue(new Error("fail")) },
+      });
+
+      const fragment = renderMessageContent("```some code```");
+      container.appendChild(fragment);
+
+      const copyBtn = container.querySelector(".msg-codeblock-copy") as HTMLElement;
+      copyBtn.click();
+
+      await vi.waitFor(() => {
+        expect(copyBtn.textContent).toBe("Failed");
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // renderMentions — URL handling
+  // ---------------------------------------------------------------------------
+
+  describe("renderMentions — URL linkification", () => {
+    it("creates a clickable link for safe URLs", () => {
+      const fragment = renderMentions("check https://example.com out");
+      container.appendChild(fragment);
+
+      const link = container.querySelector("a.msg-link");
+      expect(link).not.toBeNull();
+      expect(link!.getAttribute("href")).toBe("https://example.com");
+      expect(link!.getAttribute("target")).toBe("_blank");
+    });
+
+    it("renders unsafe URLs as plain text", () => {
+      const fragment = renderMentions("see javascript:alert(1) here");
+      container.appendChild(fragment);
+
+      // No anchor tag for javascript: URL (doesn't match URL_REGEX at all)
+      expect(container.querySelector("a")).toBeNull();
+    });
+
+    it("handles URLs between text segments", () => {
+      const fragment = renderMentions("before https://a.com after");
+      container.appendChild(fragment);
+
+      const link = container.querySelector("a.msg-link");
+      expect(link).not.toBeNull();
+      // Text before and after the link
+      expect(container.textContent).toContain("before");
+      expect(container.textContent).toContain("after");
+    });
+
   });
 
   // ---------------------------------------------------------------------------

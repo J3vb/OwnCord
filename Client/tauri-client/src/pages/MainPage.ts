@@ -14,13 +14,14 @@ import type { ServerBannerControl } from "@components/ServerBanner";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
 import { createToastContainer } from "@components/Toast";
 import type { ToastContainer } from "@components/Toast";
+import { initToast, teardownToast, showToast } from "@lib/toast";
 import { authStore, clearAuth, updateUser } from "@stores/auth.store";
 import { closeSettings } from "@stores/ui.store";
 import { updatePresence } from "@stores/members.store";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
+import { dmStore } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import {
-  leaveVoice as voiceSessionLeave,
   cleanupAll as voiceCleanupAll,
   setOnRemoteVideo,
   setOnRemoteVideoRemoved,
@@ -28,7 +29,6 @@ import {
   setWsClient,
   setServerHost as setLiveKitServerHost,
   setOnError as setVoiceOnError,
-  clearOnError as clearVoiceOnError,
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
@@ -46,6 +46,7 @@ import type { ChannelController } from "./main-page/ChannelController";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
 import { createSidebarArea } from "./main-page/SidebarArea";
 import { createChatArea } from "./main-page/ChatArea";
+import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 
 const log = createLogger("main-page");
 
@@ -110,6 +111,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     return authStore.getState().user?.id ?? 0;
   }
 
+  /** Resolve display name for a channel — for DMs, use recipient username from DM store. */
+  function resolveChannelName(channelId: number, channelName: string, channelType?: string): string {
+    if (channelType === "dm" && (!channelName || channelName === "")) {
+      const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+      if (dm !== undefined) return dm.recipient.username;
+    }
+    return channelName;
+  }
+
   // ---------------------------------------------------------------------------
   // Mount / Destroy
   // ---------------------------------------------------------------------------
@@ -163,11 +173,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       limiters,
       getRoot: () => root,
       getToast: () => toast,
+      onWatchStream: (userId) => {
+        if (videoModeCtrl === null) return;
+        videoModeCtrl.showVideoGrid();
+        videoModeCtrl.setFocus(userId);
+      },
     });
     children.push(...sidebar.children);
     unsubscribers.push(...sidebar.unsubscribers);
 
-    // --- Chat area + member list ---
+    // --- Chat area ---
     const chatAreaResult = createChatArea({
       api,
       getRoot: () => root,
@@ -187,10 +202,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     appendChildren(
       app,
-      sidebar.serverStripSlot,
       sidebar.sidebarWrapper,
       chatAreaResult.chatArea,
-      chatAreaResult.memberListSlot,
     );
     root.appendChild(app);
 
@@ -200,10 +213,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onChangePassword: async (oldPassword, newPassword) => {
         try {
           await api.changePassword(oldPassword, newPassword);
-          toast?.show("Password changed successfully", "success");
+          showToast("Password changed successfully", "success");
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Failed to change password";
-          toast?.show(msg, "error");
+          showToast(msg, "error");
           throw err;
         }
       },
@@ -211,20 +224,58 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         try {
           const updated = await api.updateProfile({ username });
           updateUser({ username: updated.username });
-          toast?.show("Profile updated", "success");
+          showToast("Profile updated", "success");
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Failed to update profile";
-          toast?.show(msg, "error");
+          showToast(msg, "error");
           throw err;
         }
       },
       onLogout: () => clearAuth(),
+      onDeleteAccount: async (password) => {
+        await api.deleteAccount(password);
+        clearAuth();
+        showToast("Account deleted successfully", "success");
+      },
+      onEnableTotp: async (password) => {
+        try {
+          return await api.enableTotp(password);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Failed to enable 2FA";
+          showToast(msg, "error");
+          throw err;
+        }
+      },
+      onConfirmTotp: async (password, code) => {
+        try {
+          await api.confirmTotp(password, code);
+          updateUser({ totp_enabled: true });
+          showToast("Two-factor authentication enabled", "success");
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Failed to confirm 2FA";
+          showToast(msg, "error");
+          throw err;
+        }
+      },
+      onDisableTotp: async (password) => {
+        try {
+          await api.disableTotp(password);
+          updateUser({ totp_enabled: false });
+          showToast("Two-factor authentication disabled", "success");
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Failed to disable 2FA";
+          showToast(msg, "error");
+          throw err;
+        }
+      },
       onStatusChange: (status) => {
         const userId = getCurrentUserId();
         if (userId !== 0) {
           updatePresence(userId, status);
         }
-        ws.send({ type: "presence_update", payload: { status } });
+        if (limiters.presence.tryConsume()) {
+          ws.send({ type: "presence_update", payload: { status } });
+        }
       },
     });
     settingsOverlay.mount(root);
@@ -238,11 +289,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     toast = createToastContainer();
     toast.mount(root);
     children.push(toast);
+    initToast(toast);
 
     // Message loading controller
     msgCtrl = createMessageController({
       api,
-      showError: (msg) => toast?.show(msg, "error"),
+      showError: (msg) => showToast(msg, "error"),
     });
 
     // Reaction controller
@@ -250,18 +302,18 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       ws,
       reactionsLimiter: limiters.reactions,
       getChannelId: () => channelCtrl?.currentChannelId ?? 0,
-      showError: (msg) => toast?.show(msg, "error"),
+      showError: (msg) => showToast(msg, "error"),
     });
 
     // Channel controller (mount/destroy MessageList, TypingIndicator, MessageInput per channel)
     channelCtrl = createChannelController({
       ws,
       api,
-      msgCtrl: msgCtrl!,
+      msgCtrl: msgCtrl,
       pendingDeleteManager,
-      reactionCtrl: reactionCtrl!,
+      reactionCtrl: reactionCtrl,
       typingLimiter: limiters.typing,
-      showToast: (msg, type) => toast?.show(msg, type as "success" | "error" | "info"),
+      showToast: (msg, type) => showToast(msg, type as "success" | "error" | "info"),
       getCurrentUserId,
       slots: {
         messagesSlot: chatAreaResult.slots.messagesSlot,
@@ -269,48 +321,56 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         inputSlot: chatAreaResult.slots.inputSlot,
       },
       chatHeaderName: chatAreaResult.chatHeaderName,
+      chatHeaderRefs: chatAreaResult.chatHeaderRefs,
     });
 
     // Wire voice error callback to toast
-    setVoiceOnError((msg) => toast?.show(msg, "error"));
+    setVoiceOnError((msg) => showToast(msg, "error"));
 
     // Wire remote video callbacks to video grid
-    setOnRemoteVideo((userId, stream) => {
+    setOnRemoteVideo((userId, stream, isScreenshare) => {
       if (videoGrid === null) return;
       const voice = voiceStore.getState();
       const channelId = voice.currentChannelId;
       if (channelId === null) return;
       const channelUsers = voice.voiceUsers.get(channelId);
       const user = channelUsers?.get(userId);
-      const username = user?.username ?? `User ${userId}`;
-      videoGrid.addStream(userId, username, stream);
+      const tileId = isScreenshare ? userId + SCREENSHARE_TILE_ID_OFFSET : userId;
+      const username = isScreenshare
+        ? (user?.username ? `${user.username} (Screen)` : `User ${userId} (Screen)`)
+        : (user?.username ?? `User ${userId}`);
+      videoGrid.addStream(tileId, username, stream, {
+        isSelf: false,
+        audioUserId: userId,
+        isScreenshare,
+      });
       videoModeCtrl?.checkVideoMode();
     });
-    setOnRemoteVideoRemoved((userId) => {
-      videoGrid?.removeStream(userId);
+    setOnRemoteVideoRemoved((userId, isScreenshare) => {
+      const tileId = isScreenshare ? userId + SCREENSHARE_TILE_ID_OFFSET : userId;
+      videoGrid?.removeStream(tileId);
       videoModeCtrl?.checkVideoMode();
     });
     unsubscribers.push(() => clearOnRemoteVideo());
 
-    // Subscribe to voice store for camera state changes only (not speaking ticks)
-    let prevLocalCamera = voiceStore.getState().localCamera;
-    let prevCameraSignature = "";
+    // Subscribe to voice store for camera/screenshare state changes only (not speaking ticks)
+    let prevVideoSignature = "";
     unsubscribers.push(voiceStore.subscribe((state) => {
       try {
-        // Build a lightweight signature of camera-relevant state
-        let sig = state.localCamera ? "1" : "0";
+        // Build a lightweight signature of video-relevant state (camera + screenshare)
+        let sig = (state.localCamera ? "c" : "") + (state.localScreenshare ? "s" : "");
         const channelId = state.currentChannelId;
         if (channelId !== null) {
           const users = state.voiceUsers.get(channelId);
           if (users) {
             for (const [uid, u] of users) {
-              if (u.camera) sig += `:${uid}`;
+              if (u.camera) sig += `:c${uid}`;
+              if (u.screenshare) sig += `:s${uid}`;
             }
           }
         }
-        if (sig !== prevCameraSignature || state.localCamera !== prevLocalCamera) {
-          prevCameraSignature = sig;
-          prevLocalCamera = state.localCamera;
+        if (sig !== prevVideoSignature) {
+          prevVideoSignature = sig;
           videoModeCtrl?.checkVideoMode();
         }
       } catch (err) {
@@ -332,9 +392,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const unsubChannels = channelsStore.subscribeSelector(
       (s) => s.activeChannelId,
       () => {
-        const active = getActiveChannel();
-        if (active !== null) {
-          channelCtrl!.mountChannel(active.id, active.name);
+        try {
+          const active = getActiveChannel();
+          if (active !== null) {
+            if (active.type === "text") {
+              videoModeCtrl?.showChat();
+            }
+            channelCtrl?.mountChannel(active.id, resolveChannelName(active.id, active.name, active.type), active.type);
+          }
+        } catch (err) {
+          log.error("Channel mount failed", err);
         }
       },
     );
@@ -342,13 +409,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     const active = getActiveChannel();
     if (active !== null) {
-      channelCtrl!.mountChannel(active.id, active.name);
+      channelCtrl?.mountChannel(active.id, resolveChannelName(active.id, active.name, active.type), active.type);
     }
   }
 
   function destroy(): void {
     log.info("MainPage destroying");
     try {
+      teardownToast();
       // Full voice cleanup — tears down room, callbacks, ws ref, serverHost.
       // Prevents stale module-level state persisting across logout/reconnect cycles.
       voiceCleanupAll();

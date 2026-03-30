@@ -11,7 +11,6 @@
 import {
   createElement,
   setText,
-  clearChildren,
   appendChildren,
 } from "@lib/dom";
 import { createIcon } from "@lib/icons";
@@ -36,6 +35,8 @@ export interface DmSidebarOptions {
   readonly onCloseDm?: (userId: number) => void;
   readonly onFriendsClick?: () => void;
   readonly friendsActive?: boolean;
+  readonly onBack?: () => void;
+  readonly serverName?: string;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -131,6 +132,24 @@ export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
   function mount(container: Element): void {
     // Reuse channel-sidebar container class per mockup
     root = createElement("div", { class: "channel-sidebar" });
+
+    // Back to server header (optional)
+    if (options.onBack !== undefined) {
+      const backFn = options.onBack;
+      const backHeader = createElement("div", {
+        class: "dm-back-header",
+        "data-testid": "dm-back-header",
+      });
+      const arrow = createElement("span", { class: "dm-back-arrow" }, "\u2190");
+      const backInfo = createElement("div", { class: "dm-back-info" });
+      const backTitle = createElement("div", { class: "dm-back-title" },
+        `Back to ${options.serverName ?? "Server"}`);
+      const backSub = createElement("div", { class: "dm-back-subtitle" }, "Return to channels");
+      appendChildren(backInfo, backTitle, backSub);
+      appendChildren(backHeader, arrow, backInfo);
+      backHeader.addEventListener("click", () => backFn(), { signal: ac.signal });
+      root.appendChild(backHeader);
+    }
 
     // Search header
     const header = createElement("div", { class: "dm-sidebar-header" });

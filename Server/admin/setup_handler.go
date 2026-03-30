@@ -3,13 +3,24 @@ package admin
 import (
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 )
+
+// setupLimiter restricts setup attempts to prevent brute-force attacks
+// against the initial owner account creation endpoint.
+var setupLimiter = auth.NewRateLimiter()
+
+// ResetSetupLimiter resets the setup rate limiter. Exported for tests only.
+func ResetSetupLimiter() {
+	setupLimiter = auth.NewRateLimiter()
+}
 
 // setupSanitizer strips all HTML from user input during setup.
 var setupSanitizer = bluemonday.StrictPolicy()
@@ -52,6 +63,19 @@ func handleSetupStatus(database *db.DB) http.HandlerFunc {
 // exist in the database, preventing abuse after initial setup.
 func handleSetup(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Rate limit: 5 attempts per minute per IP.
+		// Strip the port so that different source ports from the same IP
+		// are correctly grouped under a single rate-limit bucket.
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			host = r.RemoteAddr
+		}
+		setupKey := "setup:" + host
+		if !setupLimiter.Allow(setupKey, 5, time.Minute) {
+			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many setup attempts, try again later")
+			return
+		}
+
 		// Gate: only allow when no users exist.
 		count, err := database.UserCount()
 		if err != nil {
@@ -72,6 +96,12 @@ func handleSetup(database *db.DB) http.HandlerFunc {
 		req.Username = strings.TrimSpace(setupSanitizer.Sanitize(req.Username))
 		if req.Username == "" || req.Password == "" {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "username and password are required")
+			return
+		}
+
+		// Validate username format (length, no control/invisible chars).
+		if err := auth.ValidateUsername(req.Username); err != nil {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 			return
 		}
 
@@ -102,8 +132,7 @@ func handleSetup(database *db.DB) http.HandlerFunc {
 		}
 
 		device := r.Header.Get("User-Agent")
-		ip := r.RemoteAddr
-		if _, err := database.CreateSession(uid, auth.HashToken(token), device, ip); err != nil {
+		if _, err := database.CreateSession(uid, auth.HashToken(token), device, host); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create session")
 			return
 		}

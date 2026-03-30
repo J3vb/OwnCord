@@ -12,6 +12,7 @@ import { createIcon } from "@lib/icons";
 import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@components/settings/helpers";
+import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { isSafeUrl } from "./attachments";
 import { CODE_BLOCK_REGEX, INLINE_CODE_REGEX, URL_REGEX } from "./content-parser";
 import { renderGenericLinkPreview } from "./embeds";
@@ -26,6 +27,7 @@ const log = createLogger("media");
  */
 const imageHeightCache = new Map<string, number>();
 const MAX_IMAGE_HEIGHT_CACHE = 500;
+let mediaCacheGeneration = 0;
 
 function cacheImageHeight(url: string, h: number): void {
   if (imageHeightCache.size >= MAX_IMAGE_HEIGHT_CACHE) {
@@ -86,8 +88,15 @@ export function extractYouTubeId(url: string): string | null {
   return null;
 }
 
-/** Cache for YouTube video titles to avoid re-fetching on every re-render. */
+/** Cache for YouTube video titles to avoid re-fetching on every re-render (LRU at 200). */
 const ytTitleCache = new Map<string, string>();
+const YT_TITLE_CACHE_MAX = 200;
+
+export function clearMediaCaches(): void {
+  mediaCacheGeneration += 1;
+  imageHeightCache.clear();
+  ytTitleCache.clear();
+}
 
 /** Strict pattern for YouTube video IDs (alphanumeric, hyphens, underscores). */
 const YOUTUBE_ID_RE = /^[\w-]{1,20}$/;
@@ -119,15 +128,34 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
     setText(titleLink, cached);
   } else {
     setText(titleLink, "Loading...");
+    const generation = mediaCacheGeneration;
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&format=json`;
-    fetch(oembedUrl, { signal: AbortSignal.timeout(5000) })
+    tauriFetch(oembedUrl, {
+      signal: AbortSignal.timeout(5000),
+    } as RequestInit)
       .then((res) => (res.ok ? (res.json() as Promise<{ title?: string } | null>) : null))
       .then((data) => {
+        if (generation !== mediaCacheGeneration) {
+          setText(titleLink, "YouTube Video");
+          return;
+        }
         const title = data?.title ?? "YouTube Video";
+        if (ytTitleCache.size >= YT_TITLE_CACHE_MAX) {
+          const firstKey = ytTitleCache.keys().next().value;
+          if (firstKey !== undefined) ytTitleCache.delete(firstKey);
+        }
         ytTitleCache.set(videoId, title);
         setText(titleLink, title);
       })
       .catch(() => {
+        if (generation !== mediaCacheGeneration) {
+          setText(titleLink, "YouTube Video");
+          return;
+        }
+        if (ytTitleCache.size >= YT_TITLE_CACHE_MAX) {
+          const firstKey = ytTitleCache.keys().next().value;
+          if (firstKey !== undefined) ytTitleCache.delete(firstKey);
+        }
         ytTitleCache.set(videoId, "YouTube Video");
         setText(titleLink, "YouTube Video");
       });
@@ -205,7 +233,7 @@ export function renderInlineImage(url: string): HTMLDivElement {
   // Measure synchronously — deferring to rAF loses the race with
   // ResizeObserver which can rebuild the DOM before the rAF fires.
   img.addEventListener("load", () => {
-    log.info("Image loaded", { url: url.slice(0, 80), naturalW: (img as HTMLImageElement).naturalWidth, naturalH: (img as HTMLImageElement).naturalHeight });
+    log.info("Image loaded", { url: url.slice(0, 80), naturalW: (img).naturalWidth, naturalH: (img).naturalHeight });
     wrap.style.minHeight = "";
     const h = wrap.offsetHeight;
     if (h > 0) cacheImageHeight(url, h);
@@ -241,15 +269,22 @@ export function renderInlineImage(url: string): HTMLDivElement {
 
 // -- Lightbox -----------------------------------------------------------------
 
+// Store the cleanup function for the active lightbox so rapid reopens
+// properly remove document-level listeners from the previous instance.
+let activeLightboxClose: (() => void) | null = null;
+
 /** Open a full-screen lightbox overlay with zoom and pan. */
 export function openImageLightbox(src: string, alt: string): void {
-  // Close any existing lightbox to prevent stacking on rapid clicks
-  document.querySelector(".image-lightbox")?.remove();
+  // Close any existing lightbox (including its document listeners)
+  if (activeLightboxClose !== null) {
+    activeLightboxClose();
+    activeLightboxClose = null;
+  }
 
   const overlay = createElement("div", { class: "image-lightbox" });
 
   const imgWrap = createElement("div", { class: "image-lightbox-wrap" });
-  const img = createElement("img", { src, alt }) as HTMLImageElement;
+  const img = createElement("img", { src, alt });
   imgWrap.appendChild(img);
   overlay.appendChild(imgWrap);
 
@@ -294,9 +329,8 @@ export function openImageLightbox(src: string, alt: string): void {
 
   function close(): void {
     overlay.remove();
-    document.removeEventListener("keydown", onKey);
-    document.removeEventListener("mousemove", onMove);
-    document.removeEventListener("mouseup", onUp);
+    ac.abort();
+    if (activeLightboxClose === close) activeLightboxClose = null;
   }
 
   // Mouse wheel zoom
@@ -356,8 +390,10 @@ export function openImageLightbox(src: string, alt: string): void {
     }
   });
 
-  document.addEventListener("mousemove", onMove);
-  document.addEventListener("mouseup", onUp);
+  // Use AbortController for cleanup of document-level listeners to prevent leaks
+  const ac = new AbortController();
+  document.addEventListener("mousemove", onMove, { signal: ac.signal });
+  document.addEventListener("mouseup", onUp, { signal: ac.signal });
 
   closeBtn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -380,8 +416,9 @@ export function openImageLightbox(src: string, alt: string): void {
     }
     if (e.key === "0") resetZoom();
   }
-  document.addEventListener("keydown", onKey);
+  document.addEventListener("keydown", onKey, { signal: ac.signal });
 
+  activeLightboxClose = close;
   document.body.appendChild(overlay);
 }
 

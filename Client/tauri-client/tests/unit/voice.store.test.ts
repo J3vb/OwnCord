@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   voiceStore,
+  resetVoiceStore,
   setVoiceStates,
   updateVoiceState,
   removeVoiceUser,
@@ -10,8 +11,10 @@ import {
   setLocalDeafened,
   setLocalCamera,
   setLocalScreenshare,
+  setListenOnly,
   setLocalSpeaking,
   setSpeakers,
+  setVoiceConfig,
   getChannelVoiceUsers,
 } from "../../src/stores/voice.store";
 import type {
@@ -30,6 +33,8 @@ function resetStore(): void {
     localDeafened: false,
     localCamera: false,
     localScreenshare: false,
+    joinedAt: null,
+    listenOnly: false,
   }));
 }
 
@@ -364,6 +369,227 @@ describe("voice store", () => {
       // Server says nobody is speaking — remote user updated, local unchanged
       setSpeakers({ channel_id: 10, speakers: [], threshold_mode: "forwarding" });
       expect(voiceStore.getState().voiceUsers.get(10)?.get(2)?.speaking).toBe(false);
+    });
+  });
+
+  describe("setListenOnly", () => {
+    it("sets listenOnly to true", () => {
+      setListenOnly(true);
+      expect(voiceStore.getState().listenOnly).toBe(true);
+    });
+
+    it("sets listenOnly back to false", () => {
+      setListenOnly(true);
+      setListenOnly(false);
+      expect(voiceStore.getState().listenOnly).toBe(false);
+    });
+  });
+
+  describe("setVoiceConfig", () => {
+    it("stores voice config for a channel", () => {
+      setVoiceConfig({
+        channel_id: 10,
+        quality: "high",
+        bitrate: 128000,
+        threshold_mode: "forwarding",
+        mixing_threshold: 5,
+        top_speakers: 3,
+        max_users: 50,
+      });
+
+      const config = voiceStore.getState().voiceConfigs.get(10);
+      expect(config).toEqual({
+        quality: "high",
+        bitrate: 128000,
+        threshold_mode: "forwarding",
+        mixing_threshold: 5,
+        top_speakers: 3,
+        max_users: 50,
+      });
+    });
+
+    it("overwrites existing config for the same channel", () => {
+      setVoiceConfig({
+        channel_id: 10,
+        quality: "low",
+        bitrate: 64000,
+        threshold_mode: "mixing",
+        mixing_threshold: 3,
+        top_speakers: 2,
+        max_users: 25,
+      });
+      setVoiceConfig({
+        channel_id: 10,
+        quality: "high",
+        bitrate: 128000,
+        threshold_mode: "forwarding",
+        mixing_threshold: 5,
+        top_speakers: 3,
+        max_users: 50,
+      });
+
+      const config = voiceStore.getState().voiceConfigs.get(10);
+      expect(config?.quality).toBe("high");
+      expect(config?.bitrate).toBe(128000);
+    });
+
+    it("does not affect other channels' configs", () => {
+      setVoiceConfig({
+        channel_id: 10,
+        quality: "low",
+        bitrate: 64000,
+        threshold_mode: "mixing",
+        mixing_threshold: 3,
+        top_speakers: 2,
+        max_users: 25,
+      });
+      setVoiceConfig({
+        channel_id: 20,
+        quality: "high",
+        bitrate: 128000,
+        threshold_mode: "forwarding",
+        mixing_threshold: 5,
+        top_speakers: 3,
+        max_users: 50,
+      });
+
+      expect(voiceStore.getState().voiceConfigs.get(10)?.quality).toBe("low");
+      expect(voiceStore.getState().voiceConfigs.get(20)?.quality).toBe("high");
+    });
+  });
+
+  describe("joinVoiceChannel — same channel no-op", () => {
+    it("does not reset joinedAt when re-joining the same channel", () => {
+      joinVoiceChannel(42);
+      const firstJoinedAt = voiceStore.getState().joinedAt;
+      expect(firstJoinedAt).not.toBeNull();
+
+      // Re-join same channel
+      joinVoiceChannel(42);
+      expect(voiceStore.getState().joinedAt).toBe(firstJoinedAt);
+    });
+
+    it("resets joinedAt when joining a different channel", () => {
+      joinVoiceChannel(42);
+      const firstJoinedAt = voiceStore.getState().joinedAt;
+
+      // Small delay to ensure different timestamp
+      joinVoiceChannel(99);
+      expect(voiceStore.getState().joinedAt).not.toBeNull();
+      expect(voiceStore.getState().currentChannelId).toBe(99);
+    });
+  });
+
+  describe("leaveVoiceChannel — clears user from voiceUsers", () => {
+    it("removes current user from the channel's voiceUsers map", () => {
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 1, username: "me", avatar: "", role: "member" },
+        serverName: "s",
+        motd: "",
+        isAuthenticated: true,
+      }));
+      setVoiceStates([VOICE_STATE_1, VOICE_STATE_2]);
+      joinVoiceChannel(10);
+
+      leaveVoiceChannel();
+
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+      expect(voiceStore.getState().joinedAt).toBeNull();
+      // User 1 should be removed from channel 10
+      const ch10 = voiceStore.getState().voiceUsers.get(10);
+      expect(ch10?.has(1)).toBe(false);
+      // User 2 should still be present
+      expect(ch10?.has(2)).toBe(true);
+
+      authStore.setState(() => ({
+        token: null, user: null, serverName: null, motd: null, isAuthenticated: false,
+      }));
+    });
+
+    it("removes the channel entry when current user is the last user", () => {
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 3, username: "me", avatar: "", role: "member" },
+        serverName: "s",
+        motd: "",
+        isAuthenticated: true,
+      }));
+      setVoiceStates([VOICE_STATE_3]); // User 3 alone in channel 20
+      joinVoiceChannel(20);
+
+      leaveVoiceChannel();
+
+      expect(voiceStore.getState().voiceUsers.has(20)).toBe(false);
+
+      authStore.setState(() => ({
+        token: null, user: null, serverName: null, motd: null, isAuthenticated: false,
+      }));
+    });
+  });
+
+  describe("setVoiceStates — auto-join for current user", () => {
+    it("auto-joins current user's channel from ready payload", () => {
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 1, username: "me", avatar: "", role: "member" },
+        serverName: "s",
+        motd: "",
+        isAuthenticated: true,
+      }));
+
+      setVoiceStates([VOICE_STATE_1, VOICE_STATE_2]);
+
+      // Current user (id=1) is in channel 10
+      expect(voiceStore.getState().currentChannelId).toBe(10);
+
+      authStore.setState(() => ({
+        token: null, user: null, serverName: null, motd: null, isAuthenticated: false,
+      }));
+    });
+
+    it("preserves currentChannelId when current user is not in the payload", () => {
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 999, username: "me", avatar: "", role: "member" },
+        serverName: "s",
+        motd: "",
+        isAuthenticated: true,
+      }));
+
+      joinVoiceChannel(42);
+      setVoiceStates([VOICE_STATE_1, VOICE_STATE_2]); // Neither is user 999
+
+      // Should preserve the existing channel since user isn't in the payload
+      expect(voiceStore.getState().currentChannelId).toBe(42);
+
+      authStore.setState(() => ({
+        token: null, user: null, serverName: null, motd: null, isAuthenticated: false,
+      }));
+    });
+  });
+
+  describe("resetVoiceStore", () => {
+    it("resets all fields to initial state", () => {
+      joinVoiceChannel(42);
+      setLocalMuted(true);
+      setLocalDeafened(true);
+      setLocalCamera(true);
+      setLocalScreenshare(true);
+      setListenOnly(true);
+
+      resetVoiceStore();
+
+      const state = voiceStore.getState();
+      expect(state.currentChannelId).toBeNull();
+      expect(state.localMuted).toBe(false);
+      expect(state.localDeafened).toBe(false);
+      expect(state.localCamera).toBe(false);
+      expect(state.localScreenshare).toBe(false);
+      expect(state.joinedAt).toBeNull();
+      expect(state.listenOnly).toBe(false);
+      expect(state.voiceUsers.size).toBe(0);
+      expect(state.voiceConfigs.size).toBe(0);
     });
   });
 

@@ -37,7 +37,9 @@ function typingKey(channelId: number, userId: number): string {
   return `${channelId}:${userId}`;
 }
 
-/** Bulk set members from the ready payload. */
+/** Bulk set members from the ready payload.
+ *  Also clears typing state and timers — a fresh ready means all typing
+ *  indicators from the previous session are stale. */
 export function setMembers(members: readonly ReadyMember[]): void {
   const map = new Map<number, Member>();
   for (const m of members) {
@@ -49,9 +51,14 @@ export function setMembers(members: readonly ReadyMember[]): void {
       status: m.status,
     });
   }
-  membersStore.setState((prev) => ({
-    ...prev,
+  // Clear all outstanding typing timers
+  for (const timer of typingTimers.values()) {
+    clearTimeout(timer);
+  }
+  typingTimers.clear();
+  membersStore.setState(() => ({
     members: map,
+    typingUsers: new Map(),
   }));
 }
 

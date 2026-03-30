@@ -10,11 +10,13 @@ export interface UiState {
   readonly memberListVisible: boolean;
   readonly settingsOpen: boolean;
   readonly activeModal: string | null;
-  readonly theme: "dark" | "midnight" | "light";
+  readonly theme: "dark" | "neon-glow" | "midnight" | "light";
   readonly connectionStatus: "connected" | "reconnecting" | "disconnected";
   readonly transientError: string | null;
   readonly persistentError: string | null;
   readonly collapsedCategories: ReadonlySet<string>;
+  readonly sidebarMode: "channels" | "dms";
+  readonly activeDmUserId: number | null;
 }
 
 const INITIAL_STATE: UiState = {
@@ -22,11 +24,13 @@ const INITIAL_STATE: UiState = {
   memberListVisible: true,
   settingsOpen: false,
   activeModal: null,
-  theme: "dark",
+  theme: "neon-glow",
   connectionStatus: "disconnected",
   transientError: null,
   persistentError: null,
   collapsedCategories: new Set(),
+  sidebarMode: "channels",
+  activeDmUserId: null,
 };
 
 export const uiStore = createStore<UiState>(INITIAL_STATE);
@@ -80,7 +84,7 @@ export function closeModal(): void {
 }
 
 /** Set the UI theme. */
-export function setTheme(theme: "dark" | "midnight" | "light"): void {
+export function setTheme(theme: "dark" | "neon-glow" | "midnight" | "light"): void {
   uiStore.setState((prev) => ({
     ...prev,
     theme,
@@ -113,7 +117,51 @@ export function setPersistentError(msg: string | null): void {
   }));
 }
 
-/** Toggle a category's collapsed state. */
+// ---------------------------------------------------------------------------
+// Per-server collapsed category persistence
+// ---------------------------------------------------------------------------
+
+const COLLAPSED_KEY_PREFIX = "owncord:collapsed:";
+
+/** The server host currently used for persistence. Set via loadCollapsedCategories. */
+let currentServerHost: string | null = null;
+
+/** Load collapsed categories from localStorage for a given server host
+ *  and set them in the store. */
+export function loadCollapsedCategories(serverHost: string): void {
+  currentServerHost = serverHost;
+  try {
+    const raw = localStorage.getItem(COLLAPSED_KEY_PREFIX + serverHost);
+    if (raw === null) {
+      uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
+      return;
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed) || !parsed.every((s) => typeof s === "string")) {
+      uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
+      return;
+    }
+    const loaded: ReadonlySet<string> = new Set(parsed);
+    uiStore.setState((prev) => ({ ...prev, collapsedCategories: loaded }));
+  } catch {
+    uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
+  }
+}
+
+/** Save collapsed categories to localStorage for the current server host. */
+function saveCollapsedCategories(categories: ReadonlySet<string>): void {
+  if (currentServerHost === null) return;
+  try {
+    localStorage.setItem(
+      COLLAPSED_KEY_PREFIX + currentServerHost,
+      JSON.stringify([...categories]),
+    );
+  } catch {
+    // localStorage may be unavailable or full — silently ignore
+  }
+}
+
+/** Toggle a category's collapsed state. Persists to localStorage for the current server. */
 export function toggleCategory(category: string): void {
   uiStore.setState((prev) => {
     const next = new Set(prev.collapsedCategories);
@@ -122,6 +170,7 @@ export function toggleCategory(category: string): void {
     } else {
       next.add(category);
     }
+    saveCollapsedCategories(next);
     return { ...prev, collapsedCategories: next };
   });
 }
@@ -129,4 +178,22 @@ export function toggleCategory(category: string): void {
 /** Selector: check if a category is collapsed. */
 export function isCategoryCollapsed(category: string): boolean {
   return uiStore.select((s) => s.collapsedCategories.has(category));
+}
+
+/** Switch the sidebar between channel mode and DM mode.
+ *  Switching back to "channels" clears the active DM user. */
+export function setSidebarMode(mode: "channels" | "dms"): void {
+  uiStore.setState((prev) => ({
+    ...prev,
+    sidebarMode: mode,
+    activeDmUserId: mode === "channels" ? null : prev.activeDmUserId,
+  }));
+}
+
+/** Set the currently active DM conversation user ID. */
+export function setActiveDmUser(userId: number | null): void {
+  uiStore.setState((prev) => ({
+    ...prev,
+    activeDmUserId: userId,
+  }));
 }

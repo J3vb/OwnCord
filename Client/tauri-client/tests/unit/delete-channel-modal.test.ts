@@ -83,4 +83,63 @@ describe("DeleteChannelModal", () => {
     modal.destroy?.();
     expect(container.querySelector("[data-testid='delete-channel-modal']")).toBeNull();
   });
+
+  it("shows error and re-enables button when onConfirm rejects with Error", async () => {
+    const onConfirm = vi.fn().mockRejectedValue(new Error("Permission denied"));
+    const { modal } = makeModal({ onConfirm });
+
+    const deleteBtn = container.querySelector("[data-testid='delete-channel-confirm']") as HTMLButtonElement;
+    deleteBtn.click();
+
+    await vi.waitFor(() => {
+      const error = container.querySelector("[data-testid='delete-channel-error']");
+      expect(error?.textContent).toBe("Permission denied");
+    });
+
+    expect(deleteBtn.hasAttribute("disabled")).toBe(false);
+    expect(deleteBtn.textContent).toBe("Delete Channel");
+
+    modal.destroy?.();
+  });
+
+  it("shows generic error when onConfirm rejects with non-Error", async () => {
+    const onConfirm = vi.fn().mockRejectedValue(42);
+    const { modal } = makeModal({ onConfirm });
+
+    const deleteBtn = container.querySelector("[data-testid='delete-channel-confirm']") as HTMLButtonElement;
+    deleteBtn.click();
+
+    await vi.waitFor(() => {
+      const error = container.querySelector("[data-testid='delete-channel-error']");
+      expect(error?.textContent).toBe("Failed to delete channel");
+    });
+
+    modal.destroy?.();
+  });
+
+  it("disables button and shows 'Deleting...' during delete", async () => {
+    let resolveDelete: (() => void) | undefined;
+    const onConfirm = vi.fn<any>(() => new Promise<void>((resolve) => { resolveDelete = resolve; }));
+    const { modal } = makeModal({ onConfirm });
+
+    const deleteBtn = container.querySelector("[data-testid='delete-channel-confirm']") as HTMLButtonElement;
+    deleteBtn.click();
+
+    expect(deleteBtn.hasAttribute("disabled")).toBe(true);
+    expect(deleteBtn.textContent).toBe("Deleting...");
+
+    resolveDelete?.();
+    modal.destroy?.();
+  });
+
+  it("calls onClose on backdrop click", () => {
+    const onClose = vi.fn();
+    const { modal } = makeModal({ onClose });
+
+    const overlay = container.querySelector("[data-testid='delete-channel-modal']") as HTMLDivElement;
+    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(onClose).toHaveBeenCalled();
+    modal.destroy?.();
+  });
 });

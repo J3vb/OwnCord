@@ -172,7 +172,7 @@ func newChannelTestDB(t *testing.T) *db.DB {
 
 func buildChannelRouter(database *db.DB) http.Handler {
 	r := chi.NewRouter()
-	api.MountChannelRoutes(r, database)
+	api.MountChannelRoutes(r, database, auth.NewRateLimiter(), nil)
 	return r
 }
 
@@ -499,6 +499,20 @@ func TestSearch_InvalidLimit(t *testing.T) {
 	}
 }
 
+func TestSearch_InvalidFTSQuery(t *testing.T) {
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "badfts", 1)
+	user, _ := database.GetUserByUsername("badfts")
+	chID, _ := database.CreateChannel("fts", "text", "", "", 0)
+	_, _ = database.CreateMessage(chID, user.ID, "search seed", nil)
+
+	rr := chGet(t, router, "/api/v1/search?q=%22", token)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestSearch_ZeroLimit(t *testing.T) {
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
@@ -522,6 +536,84 @@ func TestSearch_LimitCappedAt100(t *testing.T) {
 	}
 }
 
+func TestSearch_ChannelTypeLookupFailure_FailsClosed(t *testing.T) {
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "searchfailclosed", 1)
+	user, _ := database.GetUserByUsername("searchfailclosed")
+	chID, _ := database.CreateChannel("searchable", "text", "", "", 0)
+	_, _ = database.CreateMessage(chID, user.ID, "closedlookupterm", nil)
+
+	_, err := database.Exec(`ALTER TABLE channels RENAME TO channels_with_type`)
+	if err != nil {
+		t.Fatalf("rename channels: %v", err)
+	}
+	_, err = database.Exec(`CREATE TABLE channels (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL
+	)`)
+	if err != nil {
+		t.Fatalf("recreate channels without type: %v", err)
+	}
+	_, err = database.Exec(`INSERT INTO channels (id, name) SELECT id, name FROM channels_with_type`)
+	if err != nil {
+		t.Fatalf("copy channels: %v", err)
+	}
+
+	rr := chGet(t, router, "/api/v1/search?q=closedlookupterm", token)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSearch_ChannelOverrideLookupFailure_ReturnsError(t *testing.T) {
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "searchoverridefail", 4)
+	user, _ := database.GetUserByUsername("searchoverridefail")
+	chID, _ := database.CreateChannel("searchable", "text", "", "", 0)
+	_, _ = database.CreateMessage(chID, user.ID, "overridefailterm", nil)
+
+	_, err := database.Exec(`DROP TABLE channel_overrides`)
+	if err != nil {
+		t.Fatalf("drop channel_overrides: %v", err)
+	}
+
+	rr := chGet(t, router, "/api/v1/search?q=overridefailterm", token)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSearch_TrustedProxyRateLimitUsesForwardedIP(t *testing.T) {
+	database := newChannelTestDB(t)
+	r := chi.NewRouter()
+	limiter := auth.NewRateLimiter()
+	api.MountChannelRoutes(r, database, limiter, []string{"127.0.0.0/8"})
+	token := chTestCreateToken(t, database, "proxysearch", 1)
+
+	for i := 0; i < 30; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/search?q=test", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("198.51.100.%d", i+1))
+		req.RemoteAddr = "127.0.0.1:9999"
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("request %d status = %d, want 200; body: %s", i, rr.Code, rr.Body.String())
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/search?q=test", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Forwarded-For", "198.51.100.200")
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("independent forwarded client should not be throttled by shared proxy IP, got %d", rr.Code)
+	}
+}
 
 // ─── Messages — before/after cursor ─────────────────────────────────────────
 
@@ -554,4 +646,3 @@ func TestChannelMessages_InvalidLimit(t *testing.T) {
 		t.Errorf("invalid limit status = %d, want 400", rr.Code)
 	}
 }
-

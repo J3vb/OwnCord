@@ -12,10 +12,22 @@ import (
 
 // ─── Category-Type Validation ────────────────────────────────────────────────
 
-// isVoiceCategory returns true if the category name indicates a voice section.
-// Uses case-insensitive substring matching for "voice".
+// voiceCategoryNames is the set of canonical category names treated as voice
+// sections. Matching is case-insensitive but requires an exact name match
+// (not a substring) to prevent false positives like "Invoice Channels".
+var voiceCategoryNames = []string{
+	"Voice Channels",
+}
+
+// isVoiceCategory returns true if the category name is an exact
+// (case-insensitive) match for a known voice category name.
 func isVoiceCategory(category string) bool {
-	return strings.Contains(strings.ToLower(category), "voice")
+	for _, name := range voiceCategoryNames {
+		if strings.EqualFold(category, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // allowedChannelTypes returns the set of channel types valid for a category.

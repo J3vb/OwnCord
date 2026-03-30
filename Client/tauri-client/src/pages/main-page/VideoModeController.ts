@@ -4,7 +4,8 @@
  */
 
 import { voiceStore } from "@stores/voice.store";
-import { getLocalCameraStream } from "@lib/livekitSession";
+import { getLocalCameraStream, getLocalScreenshareStream } from "@lib/livekitSession";
+import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import type { VideoGridComponent } from "@components/VideoGrid";
 
 // ---------------------------------------------------------------------------
@@ -33,6 +34,10 @@ export interface VideoModeController {
   showVideoGrid(): void;
   /** Whether video grid is currently visible. */
   isVideoMode(): boolean;
+  /** Set focus on a specific video tile (focus mode). */
+  setFocus(tileId: number): void;
+  /** Get the currently focused tile ID, or null if none. */
+  getFocusedTileId(): number | null;
   /** Reset state on teardown. */
   destroy(): void;
 }
@@ -48,6 +53,8 @@ export function createVideoModeController(
   let videoMode = false;
   /** Track whether we've already added the local self-view tile. */
   let localTileAdded = false;
+  let localScreenshareTileAdded = false;
+  let focusedTileId: number | null = null;
 
   function showVideoGrid(): void {
     if (videoMode) return;
@@ -61,6 +68,9 @@ export function createVideoModeController(
   function showChat(): void {
     if (!videoMode) return;
     videoMode = false;
+    focusedTileId = null;
+    localTileAdded = false;
+    localScreenshareTileAdded = false;
     slots.messagesSlot.style.display = "";
     slots.typingSlot.style.display = "";
     slots.inputSlot.style.display = "";
@@ -80,19 +90,18 @@ export function createVideoModeController(
       return;
     }
 
-    // Check if any camera is active
-    let anyCameraOn = voice.localCamera;
-    if (!anyCameraOn) {
+    // Check if any camera or screenshare is active
+    let anyVideoOn = voice.localCamera || voice.localScreenshare;
+    if (!anyVideoOn) {
       for (const user of channelUsers.values()) {
-        if (user.camera) {
-          anyCameraOn = true;
+        if (user.camera || user.screenshare) {
+          anyVideoOn = true;
           break;
         }
       }
     }
-    if (anyCameraOn && !videoMode) {
-      showVideoGrid();
-    } else if (!anyCameraOn && videoMode) {
+    // Auto-close video grid when no streams remain
+    if (!anyVideoOn && videoMode) {
       showChat();
     }
 
@@ -107,6 +116,7 @@ export function createVideoModeController(
             currentUserId,
             me?.username ? `${me.username} (You)` : "You",
             localStream,
+            { isSelf: true, audioUserId: currentUserId, isScreenshare: false },
           );
           localTileAdded = true;
         }
@@ -116,10 +126,31 @@ export function createVideoModeController(
       localTileAdded = false;
     }
 
-    // Remove remote video tiles for users who turned off their camera
+    // Manage local screenshare self-view tile
+    const screenshareUserId = currentUserId + SCREENSHARE_TILE_ID_OFFSET;
+    if (voice.localScreenshare) {
+      if (!localScreenshareTileAdded) {
+        const localStream = getLocalScreenshareStream();
+        if (localStream !== null) {
+          const me = channelUsers.get(currentUserId);
+          videoGrid.addStream(
+            screenshareUserId,
+            me?.username ? `${me.username} (Screen)` : "Your Screen",
+            localStream,
+            { isSelf: true, audioUserId: currentUserId, isScreenshare: true },
+          );
+          localScreenshareTileAdded = true;
+        }
+      }
+    } else {
+      videoGrid.removeStream(screenshareUserId);
+      localScreenshareTileAdded = false;
+    }
+
+    // Remove remote video tiles for users who turned off their camera or screenshare
     if (channelUsers) {
       for (const user of channelUsers.values()) {
-        if (!user.camera && user.userId !== currentUserId) {
+        if (!user.camera && !user.screenshare && user.userId !== currentUserId) {
           videoGrid.removeStream(user.userId);
         }
       }
@@ -130,9 +161,20 @@ export function createVideoModeController(
     return videoMode;
   }
 
+  function setFocus(tileId: number): void {
+    focusedTileId = tileId;
+    videoGrid.setFocusedTile(tileId);
+  }
+
+  function getFocusedTileId(): number | null {
+    return focusedTileId;
+  }
+
   function destroy(): void {
     if (videoMode) showChat();
+    focusedTileId = null;
     localTileAdded = false;
+    localScreenshareTileAdded = false;
   }
 
   return {
@@ -140,6 +182,8 @@ export function createVideoModeController(
     showChat,
     showVideoGrid,
     isVideoMode: isVideoModeActive,
+    setFocus,
+    getFocusedTileId,
     destroy,
   };
 }

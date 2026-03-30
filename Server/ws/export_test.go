@@ -24,6 +24,11 @@ func (h *Hub) GetCachedSettingsForTest() (string, string) {
 	return h.getCachedSettings()
 }
 
+// GetClientVoiceChIDForTest exposes Client.getVoiceChID for external tests.
+func GetClientVoiceChIDForTest(c *Client) int64 {
+	return c.getVoiceChID()
+}
+
 // ExpireSettingsCacheForTest forces the settings cache to appear stale so that
 // the next call to getCachedSettings triggers a DB refresh.
 func (h *Hub) ExpireSettingsCacheForTest() {

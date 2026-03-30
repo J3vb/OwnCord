@@ -90,6 +90,10 @@ export function createMockWsClient() {
       return state;
     },
 
+    isReplaying(): boolean {
+      return false;
+    },
+
     // ---------------------------------------------------------------
     // Test-only helpers
     // ---------------------------------------------------------------

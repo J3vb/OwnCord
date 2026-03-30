@@ -33,6 +33,7 @@ const AUTH_INITIAL: AuthState = {
 const CHANNELS_INITIAL: ChannelsState = {
   channels: new Map(),
   activeChannelId: null,
+  roles: [],
 };
 
 const MEMBERS_INITIAL: MembersState = {
@@ -55,6 +56,8 @@ const VOICE_INITIAL: VoiceState = {
   localDeafened: false,
   localCamera: false,
   localScreenshare: false,
+  joinedAt: null,
+    listenOnly: false,
 };
 
 const UI_INITIAL: UiState = {
@@ -67,6 +70,8 @@ const UI_INITIAL: UiState = {
   transientError: null,
   persistentError: null,
   collapsedCategories: new Set(),
+  sidebarMode: "channels",
+  activeDmUserId: null,
 };
 
 // ---------------------------------------------------------------------------

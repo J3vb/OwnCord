@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -26,7 +27,7 @@ func validVoiceQuality(q string) bool {
 // 7. Sends existing voice states to the joiner.
 // 8. Broadcasts voice_state to all clients.
 // 9. Sends voice_config to the joiner.
-func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
+func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMessage) {
 	channelID, err := parseChannelID(payload)
 	if err != nil || channelID <= 0 {
 		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "channel_id must be a positive integer"))
@@ -37,10 +38,24 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 		return
 	}
 
-	// Guard: reject voice join if LiveKit is configured but the companion
-	// process is not running (e.g. crashed 10 times and gave up).
-	// When livekit is nil, voice still works — just without SFU tokens.
-	if h.livekit != nil && h.lkProcess != nil && !h.lkProcess.IsRunning() {
+	// Validate the target channel exists before any state changes (leaving
+	// the current voice channel, persisting join, etc.).
+	ch, err := h.db.GetChannel(channelID)
+	if err != nil || ch == nil {
+		c.sendMsg(buildErrorMsg(ErrCodeNotFound, "channel not found"))
+		return
+	}
+
+	// Hard-fail when LiveKit is not configured — without an SFU the client
+	// cannot connect to voice, so persisting state would create a ghost.
+	if h.livekit == nil {
+		c.sendMsg(buildErrorMsg(ErrCodeVoiceError, "voice is not configured on this server"))
+		return
+	}
+
+	// Guard: reject voice join if the companion LiveKit process is not running
+	// (e.g. crashed 10 times and gave up).
+	if h.lkProcess != nil && !h.lkProcess.IsRunning() {
 		slog.Warn("handleVoiceJoin: LiveKit process not running", "user_id", c.userID)
 		c.sendMsg(buildErrorMsg(ErrCodeVoiceError, "voice is temporarily unavailable — LiveKit is not running"))
 		return
@@ -56,13 +71,7 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 
 	// If user is already in a different voice channel, leave it first.
 	if currentChID > 0 {
-		h.handleVoiceLeave(c)
-	}
-
-	ch, err := h.db.GetChannel(channelID)
-	if err != nil || ch == nil {
-		c.sendMsg(buildErrorMsg(ErrCodeNotFound, "channel not found"))
-		return
+		h.handleVoiceLeave(ctx, c)
 	}
 
 	// Check channel capacity.
@@ -157,13 +166,26 @@ func (h *Hub) handleVoiceJoin(c *Client, payload json.RawMessage) {
 	bitrate := qualityBitrate(quality)
 	c.sendMsg(buildVoiceConfig(channelID, quality, bitrate, maxUsers))
 
-	slog.Info("voice join", "user_id", c.userID, "channel_id", channelID)
+	lkURL := ""
+	if h.livekit != nil {
+		lkURL = h.livekit.URL()
+	}
+	slog.Info("voice join",
+		"user_id", c.userID,
+		"username", c.user.Username,
+		"channel_id", channelID,
+		"remote", c.remoteAddr,
+		"livekit_url", lkURL,
+		"quality", quality,
+		"channel_users", len(existing),
+		"channel_max", maxUsers,
+	)
 }
 
 // handleVoiceTokenRefresh generates a fresh LiveKit token for a client
 // that is already in a voice channel. This lets clients request a new token
 // (e.g. before a manual reconnect) without leaving and rejoining voice.
-func (h *Hub) handleVoiceTokenRefresh(c *Client) {
+func (h *Hub) handleVoiceTokenRefresh(ctx context.Context, c *Client) {
 	ratKey := fmt.Sprintf("voice_token_refresh:%d", c.userID)
 	if !h.limiter.Allow(ratKey, 1, 60*time.Second) {
 		c.sendMsg(buildRateLimitError("token refresh rate limited", 60))

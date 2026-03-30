@@ -28,6 +28,8 @@ import {
 } from "@stores/ui.store";
 import { voiceStore, getChannelVoiceUsers } from "@stores/voice.store";
 import { setUserVolume, getUserVolume } from "@lib/livekitSession";
+import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
+import { attachStreamPreview, attachScrollCollapse } from "@lib/streamPreview";
 
 // ---------------------------------------------------------------------------
 // Per-user volume context menu (right-click on voice user row)
@@ -103,6 +105,7 @@ function showUserVolumeMenu(
   // Close on click outside
   const dismissAc = new AbortController();
   setTimeout(() => {
+    if (dismissAc.signal.aborted) return;
     document.addEventListener("mousedown", (e: MouseEvent) => {
       if (!menu.contains(e.target as Node)) {
         menu.remove();
@@ -134,6 +137,8 @@ export interface ChannelSidebarOptions {
   readonly onDeleteChannel?: (channel: Channel) => void;
   /** Called when the user drags a channel to a new position. */
   readonly onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void;
+  /** Called when the user clicks a voice user row to watch their stream. */
+  readonly onWatchStream?: (userId: number) => void;
 }
 
 // ── Drag state (mouse-based, avoids WebView2 HTML5 DnD issues) ──
@@ -203,6 +208,7 @@ function renderVoiceChannelItem(
   signal: AbortSignal,
   onVoiceJoin: (channelId: number) => void,
   onVoiceLeave: () => void,
+  onWatchStream?: (userId: number) => void,
 ): HTMLDivElement {
   const voiceState = voiceStore.getState();
   const isJoined = voiceState.currentChannelId === channel.id;
@@ -266,6 +272,15 @@ function renderVoiceChannelItem(
         row.appendChild(cameraIcon);
       }
 
+      if (user.screenshare) {
+        const screenIcon = createElement("span", { class: "vu-status" });
+        screenIcon.appendChild(createIcon("monitor", 14));
+        row.appendChild(screenIcon);
+
+        const liveBadge = createElement("span", { class: "vu-live-badge" }, "LIVE");
+        row.appendChild(liveBadge);
+      }
+
       if (user.deafened) {
         // Deafened: show both mic-off and headphones-off
         const muteIcon = createElement("span", { class: "vu-muted" });
@@ -291,8 +306,45 @@ function renderVoiceChannelItem(
         }, { signal });
       }
 
+      // Click to watch stream (if user has camera or screenshare)
+      if (onWatchStream !== undefined && (user.camera || user.screenshare)) {
+        row.addEventListener("click", (e) => {
+          // Don't trigger if the right-click menu is open
+          if (e.button !== 0) return;
+          e.stopPropagation();
+          const tileId = user.screenshare
+            ? user.userId + SCREENSHARE_TILE_ID_OFFSET
+            : user.userId;
+          onWatchStream(tileId);
+        }, { signal });
+        row.style.cursor = "pointer";
+      }
+
+      // Hover/focus preview for remote users with video
+      if ((currentUser === null || currentUser.id !== user.userId)
+        && (user.camera || user.screenshare)) {
+        const tileId = user.screenshare
+          ? user.userId + SCREENSHARE_TILE_ID_OFFSET
+          : user.userId;
+        attachStreamPreview(
+          row,
+          user.userId,
+          user.username || "Unknown",
+          user.screenshare,
+          user.camera,
+          signal,
+          () => {
+            // Placeholder click: join voice channel and watch stream
+            onVoiceJoin(channel.id);
+            if (onWatchStream !== undefined) onWatchStream(tileId);
+          },
+          onWatchStream !== undefined ? () => onWatchStream(tileId) : undefined,
+        );
+      }
+
       usersContainer.appendChild(row);
     }
+    attachScrollCollapse(usersContainer, signal);
     wrapper.appendChild(usersContainer);
   }
 
@@ -385,14 +437,18 @@ function attachChannelContextMenu(
   );
 }
 
-/** Global mousemove/mouseup handlers for drag reordering. Registered once. */
-let globalDragListenersAttached = false;
+/** Global mousemove/mouseup handlers for drag reordering. Registered once.
+ *  Reference-counted so multiple sidebar instances share the same listeners
+ *  and only the last destroy tears them down. */
+let globalDragAc: AbortController | null = null;
+let globalDragRefCount = 0;
 
 function ensureGlobalDragListeners(): void {
-  if (globalDragListenersAttached) {
+  globalDragRefCount++;
+  if (globalDragAc !== null) {
     return;
   }
-  globalDragListenersAttached = true;
+  globalDragAc = new AbortController();
 
   document.addEventListener("mousemove", (e) => {
     if (activeDrag === null) {
@@ -415,7 +471,7 @@ function ensureGlobalDragListeners(): void {
         break;
       }
     }
-  });
+  }, { signal: globalDragAc.signal });
 
   document.addEventListener("mouseup", (e) => {
     if (activeDrag === null) {
@@ -480,7 +536,7 @@ function ensureGlobalDragListeners(): void {
     if (reorders.length > 0) {
       drag.onReorder(reorders);
     }
-  });
+  }, { signal: globalDragAc.signal });
 }
 
 /** Make a channel element draggable via mousedown (admin/owner only). */
@@ -566,10 +622,11 @@ function renderChannelItem(
   containerEl?: HTMLElement,
   channels?: readonly Channel[],
   onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void,
+  onWatchStream?: (userId: number) => void,
 ): HTMLDivElement {
   let el: HTMLDivElement;
   if (channel.type === "voice") {
-    el = renderVoiceChannelItem(channel, signal, onVoiceJoin, onVoiceLeave);
+    el = renderVoiceChannelItem(channel, signal, onVoiceJoin, onVoiceLeave, onWatchStream);
   } else {
     el = renderTextChannelItem(channel, isActive, signal);
   }
@@ -591,6 +648,7 @@ function renderCategoryGroup(
   onEditChannel?: (channel: Channel) => void,
   onDeleteChannel?: (channel: Channel) => void,
   onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void,
+  onWatchStream?: (userId: number) => void,
 ): HTMLDivElement {
   const group = createElement("div", {});
 
@@ -644,7 +702,7 @@ function renderCategoryGroup(
       const channelsContainer = createElement("div", { class: "category-channels-container" });
       for (const ch of channels) {
         channelsContainer.appendChild(
-          renderChannelItem(ch, ch.id === activeChannelId, signal, onVoiceJoin, onVoiceLeave, onEditChannel, onDeleteChannel, channelsContainer, channels, onReorderChannel),
+          renderChannelItem(ch, ch.id === activeChannelId, signal, onVoiceJoin, onVoiceLeave, onEditChannel, onDeleteChannel, channelsContainer, channels, onReorderChannel, onWatchStream),
         );
       }
       group.appendChild(channelsContainer);
@@ -654,7 +712,7 @@ function renderCategoryGroup(
     const channelsContainer = createElement("div", { class: "category-channels-container" });
     for (const ch of channels) {
       channelsContainer.appendChild(
-        renderChannelItem(ch, ch.id === activeChannelId, signal, onVoiceJoin, onVoiceLeave, onEditChannel, onDeleteChannel, channelsContainer, channels, onReorderChannel),
+        renderChannelItem(ch, ch.id === activeChannelId, signal, onVoiceJoin, onVoiceLeave, onEditChannel, onDeleteChannel, channelsContainer, channels, onReorderChannel, onWatchStream),
       );
     }
     group.appendChild(channelsContainer);
@@ -664,7 +722,7 @@ function renderCategoryGroup(
 }
 
 export function createChannelSidebar(options: ChannelSidebarOptions): MountableComponent {
-  const { onVoiceJoin, onVoiceLeave, onCreateChannel, onEditChannel, onDeleteChannel, onReorderChannel } = options;
+  const { onVoiceJoin, onVoiceLeave, onCreateChannel, onEditChannel, onDeleteChannel, onReorderChannel, onWatchStream } = options;
   const ac = new AbortController();
   let root: HTMLDivElement | null = null;
   let channelList: HTMLDivElement | null = null;
@@ -692,7 +750,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
 
     for (const [category, channels] of grouped) {
       channelList.appendChild(
-        renderCategoryGroup(category, channels, state.activeChannelId, ac.signal, onVoiceJoin, onVoiceLeave, onCreateChannel, onEditChannel, onDeleteChannel, onReorderChannel),
+        renderCategoryGroup(category, channels, state.activeChannelId, ac.signal, onVoiceJoin, onVoiceLeave, onCreateChannel, onEditChannel, onDeleteChannel, onReorderChannel, onWatchStream),
       );
     }
   }
@@ -760,7 +818,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       for (const [chId, users] of state.voiceUsers) {
         structSig += `|${chId}`;
         for (const [uid, u] of users) {
-          structSig += `:${uid}${u.muted ? "m" : ""}${u.deafened ? "d" : ""}${u.camera ? "c" : ""}`;
+          structSig += `:${uid}${u.muted ? "m" : ""}${u.deafened ? "d" : ""}${u.camera ? "c" : ""}${u.screenshare ? "s" : ""}`;
         }
       }
       if (structSig !== prevVoiceStructureSig) {
@@ -785,6 +843,11 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
 
   function destroy(): void {
     ac.abort();
+    globalDragRefCount = Math.max(0, globalDragRefCount - 1);
+    if (globalDragRefCount === 0 && globalDragAc !== null) {
+      globalDragAc.abort();
+      globalDragAc = null;
+    }
     for (const unsub of unsubscribers) {
       unsub();
     }

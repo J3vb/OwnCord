@@ -166,6 +166,24 @@ describe("auth store", () => {
       expect(userBefore).not.toBe(userAfter);
       expect(userAfter?.avatar).toBe("new-avatar.png");
     });
+
+    it("sets totp_enabled to true", () => {
+      setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
+      updateUser({ totp_enabled: true });
+      expect(authStore.getState().user?.totp_enabled).toBe(true);
+    });
+
+    it("sets totp_enabled to false", () => {
+      setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
+      updateUser({ totp_enabled: true });
+      updateUser({ totp_enabled: false });
+      expect(authStore.getState().user?.totp_enabled).toBe(false);
+    });
+
+    it("initial user has no totp_enabled (undefined)", () => {
+      setAuth(TEST_TOKEN, TEST_USER, TEST_SERVER_NAME, TEST_MOTD);
+      expect(authStore.getState().user?.totp_enabled).toBeUndefined();
+    });
   });
 
   // 6. getCurrentUser returns current user

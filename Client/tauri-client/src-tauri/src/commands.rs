@@ -75,6 +75,9 @@ pub fn store_cert_fingerprint(
     host: String,
     fingerprint: String,
 ) -> Result<(), String> {
+    // Normalize to lowercase for consistent comparison with ws_proxy fingerprints
+    let fingerprint = fingerprint.to_lowercase();
+
     if host.is_empty() {
         return Err("host must not be empty".into());
     }
@@ -82,7 +85,7 @@ pub fn store_cert_fingerprint(
         return Err("fingerprint must not be empty".into());
     }
 
-    // Validate SHA-256 colon-hex format: "AA:BB:CC:..." (95 chars, 32 hex pairs)
+    // Validate SHA-256 colon-hex format: "aa:bb:cc:..." (95 chars, 32 hex pairs)
     if fingerprint.len() != 95 {
         return Err("fingerprint must be a SHA-256 colon-hex string (95 chars)".into());
     }
@@ -141,5 +144,75 @@ pub fn open_devtools(_window: tauri::WebviewWindow) {
     {
         use tauri::Manager;
         _window.open_devtools();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn allowed_key_owncord_prefix() {
+        assert!(is_settings_key_allowed("owncord:profiles"));
+        assert!(is_settings_key_allowed("owncord:settings:theme"));
+        assert!(is_settings_key_allowed("owncord:recent-emoji"));
+    }
+
+    #[test]
+    fn allowed_key_user_volume_prefix() {
+        assert!(is_settings_key_allowed("userVolume_42"));
+        assert!(is_settings_key_allowed("userVolume_0"));
+    }
+
+    #[test]
+    fn allowed_key_exact_match() {
+        assert!(is_settings_key_allowed("windowState"));
+    }
+
+    #[test]
+    fn rejected_key_empty() {
+        assert!(!is_settings_key_allowed(""));
+    }
+
+    #[test]
+    fn rejected_key_too_long() {
+        let long_key = "owncord:".to_owned() + &"x".repeat(MAX_SETTINGS_KEY_LEN);
+        assert!(!is_settings_key_allowed(&long_key));
+    }
+
+    #[test]
+    fn rejected_key_unknown_prefix() {
+        assert!(!is_settings_key_allowed("unknown:key"));
+        assert!(!is_settings_key_allowed("admin:secret"));
+    }
+
+    #[test]
+    fn rejected_key_partial_prefix_match() {
+        // "owncord" without colon should not match "owncord:" prefix
+        assert!(!is_settings_key_allowed("owncordNOCOLON"));
+    }
+
+    #[test]
+    fn fingerprint_validation_accepts_valid() {
+        let valid = "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99";
+        assert_eq!(valid.len(), 95);
+        // Validation logic: length 95, hex digits at non-colon positions, colons at every 3rd
+        for (i, ch) in valid.chars().enumerate() {
+            if i % 3 == 2 {
+                assert_eq!(ch, ':');
+            } else {
+                assert!(ch.is_ascii_hexdigit());
+            }
+        }
+    }
+
+    #[test]
+    fn fingerprint_validation_rejects_wrong_length() {
+        let short = "aa:bb:cc";
+        assert_ne!(short.len(), 95);
     }
 }

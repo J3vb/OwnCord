@@ -6,11 +6,12 @@ const {
   mockClearLogBuffer,
   mockAddLogListener,
   mockSetLogLevel,
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 } = vi.hoisted(() => ({
-  mockGetLogBuffer: vi.fn(),
-  mockClearLogBuffer: vi.fn(),
-  mockAddLogListener: vi.fn(),
-  mockSetLogLevel: vi.fn(),
+  mockGetLogBuffer: vi.fn<any>(),
+  mockClearLogBuffer: vi.fn<any>(),
+  mockAddLogListener: vi.fn<any>(),
+  mockSetLogLevel: vi.fn<any>(),
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -181,5 +182,219 @@ describe("LogsTab", () => {
     levelSelect.value = "error";
     levelSelect.dispatchEvent(new Event("change"));
     expect(mockSetLogLevel).toHaveBeenCalledWith("error");
+  });
+
+  it("Copy All shows 'Failed to copy' on clipboard rejection", async () => {
+    mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "test")]);
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+    });
+
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+    const copyBtn = Array.from(el.querySelectorAll("button")).find(
+      (b) => b.textContent === "Copy All",
+    )!;
+    copyBtn.click();
+
+    await vi.waitFor(() => {
+      expect(copyBtn.textContent).toBe("Failed to copy");
+    });
+  });
+
+  it("Copy Diagnostics shows 'Failed to copy' on clipboard rejection", async () => {
+    mockGetLogBuffer.mockReturnValue([]);
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+    });
+
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+    const diagCopy = Array.from(el.querySelectorAll("button")).find(
+      (b) => b.textContent === "Copy Diagnostics",
+    )!;
+    diagCopy.click();
+
+    await vi.waitFor(() => {
+      expect(diagCopy.textContent).toBe("Failed to copy");
+    });
+  });
+
+  it("filter level persists via owncord:settings prefix", () => {
+    mockGetLogBuffer.mockReturnValue([]);
+    localStorage.clear();
+
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+    const filterSelect = el.querySelectorAll("select")[0]!;
+
+    filterSelect.value = "error";
+    filterSelect.dispatchEvent(new Event("change"));
+
+    // Should use owncord:settings: prefix (normalized)
+    expect(localStorage.getItem("owncord:settings:logs_filter_level")).toBe('"error"');
+  });
+
+  it("restores legacy unprefixed filter level and migrates it", () => {
+    mockGetLogBuffer.mockReturnValue([]);
+    localStorage.clear();
+    localStorage.setItem("logs_filter_level", "warn");
+
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+    const filterSelect = el.querySelectorAll("select")[0]!;
+
+    expect(filterSelect.value).toBe("warn");
+    expect(localStorage.getItem("owncord:settings:logs_filter_level")).toBe('"warn"');
+  });
+
+  it("restores legacy unprefixed min level and migrates it", () => {
+    mockGetLogBuffer.mockReturnValue([]);
+    localStorage.clear();
+    localStorage.setItem("logs_min_level", "error");
+
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+    const levelSelect = el.querySelectorAll("select")[1]!;
+
+    expect(levelSelect.value).toBe("error");
+    expect(mockSetLogLevel).toHaveBeenCalledWith("error");
+    expect(localStorage.getItem("owncord:settings:logs_min_level")).toBe('"error"');
+  });
+
+  it("Copy All shows 'Copied!' on successful clipboard write", async () => {
+    mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "test")]);
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+    const copyBtn = Array.from(el.querySelectorAll("button")).find(
+      (b) => b.textContent === "Copy All",
+    )!;
+    copyBtn.click();
+
+    await vi.waitFor(() => {
+      expect(copyBtn.textContent).toBe("Copied!");
+    });
+  });
+
+  it("Copy Diagnostics shows 'Copied!' on successful clipboard write", async () => {
+    mockGetLogBuffer.mockReturnValue([]);
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+    const diagCopy = Array.from(el.querySelectorAll("button")).find(
+      (b) => b.textContent === "Copy Diagnostics",
+    )!;
+    diagCopy.click();
+
+    await vi.waitFor(() => {
+      expect(diagCopy.textContent).toBe("Copied!");
+    });
+  });
+
+  it("Refresh button re-renders log entries", () => {
+    mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "initial")]);
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+
+    expect(el.querySelectorAll(".log-entry").length).toBe(1);
+
+    // Add more entries
+    mockGetLogBuffer.mockReturnValue([
+      makeMockEntry("info", "initial"),
+      makeMockEntry("warn", "new entry"),
+    ]);
+
+    const refreshBtn = Array.from(el.querySelectorAll("button")).find(
+      (b) => b.textContent === "Refresh",
+    )!;
+    refreshBtn.click();
+
+    expect(el.querySelectorAll(".log-entry").length).toBe(2);
+  });
+
+  it("live log listener updates entries when on the Logs tab", () => {
+    mockGetLogBuffer.mockReturnValue([]);
+    let logCallback: (() => void) | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockAddLogListener.mockImplementation(((cb: any) => {
+      logCallback = cb;
+      return () => { logCallback = undefined; };
+    }) as any);
+
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+    expect(el.querySelectorAll(".log-entry").length).toBe(0);
+
+    // Simulate a new log entry arriving
+    mockGetLogBuffer.mockReturnValue([makeMockEntry("error", "live entry")]);
+    logCallback?.();
+
+    expect(el.querySelectorAll(".log-entry").length).toBe(1);
+  });
+
+  it("live log listener does NOT update when on a different tab", () => {
+    mockGetLogBuffer.mockReturnValue([]);
+    let logCallback: (() => void) | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockAddLogListener.mockImplementation(((cb: any) => {
+      logCallback = cb;
+      return () => { logCallback = undefined; };
+    }) as any);
+
+    const handle = createLogsTab(() => "Account" as TabName, controller.signal);
+    const el = handle.build();
+
+    mockGetLogBuffer.mockReturnValue([makeMockEntry("error", "live entry")]);
+    logCallback?.();
+
+    // Should not have updated since active tab is not "Logs"
+    expect(el.querySelectorAll(".log-entry").length).toBe(0);
+  });
+
+  it("Copy All includes data field in copied text", async () => {
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: { writeText: writeTextMock },
+    });
+    mockGetLogBuffer.mockReturnValue([
+      { ...makeMockEntry("info", "with data"), data: { key: "value" } },
+    ]);
+
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+    const copyBtn = Array.from(el.querySelectorAll("button")).find(
+      (b) => b.textContent === "Copy All",
+    )!;
+    copyBtn.click();
+
+    await vi.waitFor(() => {
+      expect(writeTextMock).toHaveBeenCalledTimes(1);
+    });
+
+    const copiedText = writeTextMock.mock.calls[0]![0] as string;
+    expect(copiedText).toContain("with data");
+    expect(copiedText).toContain('"key"');
+  });
+
+  it("Refresh Diagnostics button re-renders diagnostics panel", () => {
+    mockGetLogBuffer.mockReturnValue([]);
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+
+    const diagRefresh = Array.from(el.querySelectorAll("button")).find(
+      (b) => b.textContent === "Refresh Diagnostics",
+    )!;
+    // Should not throw
+    diagRefresh.click();
+
+    const diagPanel = el.querySelector("[style*='monospace']");
+    expect(diagPanel).not.toBeNull();
   });
 });

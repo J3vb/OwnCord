@@ -238,6 +238,7 @@ function buildReadyPayload(overrides?: {
   members?: unknown[];
   voice_states?: unknown[];
   roles?: unknown[];
+  dm_channels?: unknown[];
 }): unknown {
   return {
     type: "ready",
@@ -246,7 +247,151 @@ function buildReadyPayload(overrides?: {
       members: overrides?.members ?? MOCK_READY_PAYLOAD.payload.members,
       voice_states: overrides?.voice_states ?? [],
       roles: overrides?.roles ?? MOCK_ROLES,
+      dm_channels: overrides?.dm_channels ?? [],
     },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// WS handler registry helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Chat echo handlers for E2E testing.
+ * Returns wsHandler entries that simulate server-side chat_send, chat_edit,
+ * and chat_delete echo responses.
+ */
+export function chatEchoHandlers(): Array<{ type: string; handler: string }> {
+  return [
+    {
+      type: "chat_send",
+      handler: `
+        var p = parsed.payload;
+        var echo = {
+          type: "chat_message",
+          payload: {
+            id: Date.now(),
+            channel_id: p.channel_id,
+            user: { id: 1, username: "testuser", avatar: "" },
+            content: p.content,
+            timestamp: new Date().toISOString(),
+            edited_at: null,
+            attachments: p.attachments || [],
+            reactions: [],
+            reply_to: p.reply_to || null,
+            pinned: false,
+            deleted: false
+          }
+        };
+        setTimeout(function() {
+          __tauriEmitEvent("ws-message", JSON.stringify(echo));
+        }, 50);
+      `,
+    },
+    {
+      type: "chat_edit",
+      handler: `
+        var echo = {
+          type: "chat_edited",
+          payload: {
+            message_id: parsed.payload.message_id,
+            channel_id: parsed.payload.channel_id || 1,
+            content: parsed.payload.content,
+            edited_at: new Date().toISOString()
+          }
+        };
+        setTimeout(function() {
+          __tauriEmitEvent("ws-message", JSON.stringify(echo));
+        }, 50);
+      `,
+    },
+    {
+      type: "chat_delete",
+      handler: `
+        var echo = {
+          type: "chat_deleted",
+          payload: {
+            message_id: parsed.payload.message_id,
+            channel_id: parsed.payload.channel_id || 1
+          }
+        };
+        setTimeout(function() {
+          __tauriEmitEvent("ws-message", JSON.stringify(echo));
+        }, 50);
+      `,
+    },
+  ];
+}
+
+/**
+ * Voice WS flow handlers for E2E testing.
+ * Simulates the server-side voice protocol defined in:
+ *   docs/brain/06-Specs/PROTOCOL.md (voice_join, voice_leave, voice_token, voice_token_refresh)
+ *   docs/protocol-schema.json (message type schemas)
+ *
+ * When PROTOCOL.md voice message types change, update these handlers to match.
+ */
+export function voiceWsHandlers(): Array<{ type: string; handler: string }> {
+  return [
+    {
+      type: "voice_join",
+      handler: `
+        var p = parsed.payload;
+        setTimeout(function() {
+          __tauriEmitEvent("ws-message", JSON.stringify({
+            type: "voice_state",
+            payload: { user_id: 1, channel_id: p.channel_id, muted: false, deafened: false }
+          }));
+        }, 50);
+        setTimeout(function() {
+          __tauriEmitEvent("ws-message", JSON.stringify({
+            type: "voice_token",
+            payload: { token: "mock-livekit-token", url: "ws://localhost:7880", channel_id: p.channel_id, direct_url: "" }
+          }));
+        }, 100);
+      `,
+    },
+    {
+      type: "voice_leave",
+      handler: `
+        setTimeout(function() {
+          __tauriEmitEvent("ws-message", JSON.stringify({
+            type: "voice_leave",
+            payload: { user_id: 1, channel_id: 0 }
+          }));
+        }, 50);
+      `,
+    },
+    {
+      type: "voice_token_refresh",
+      handler: `
+        setTimeout(function() {
+          __tauriEmitEvent("ws-message", JSON.stringify({
+            type: "voice_token",
+            payload: { token: "mock-livekit-token-refreshed", url: "ws://localhost:7880", channel_id: 0, direct_url: "" }
+          }));
+        }, 50);
+      `,
+    },
+  ];
+}
+
+/**
+ * Voice join failure handler for E2E testing.
+ * Simulates a server error response when attempting to join a voice channel.
+ */
+export function voiceJoinFailureHandler(): { type: string; handler: string } {
+  return {
+    type: "voice_join",
+    handler: `
+      var p = parsed.payload;
+      setTimeout(function() {
+        __tauriEmitEvent("ws-message", JSON.stringify({
+          type: "error",
+          payload: { code: "VOICE_JOIN_FAILED", message: "Failed to join voice channel" }
+        }));
+      }, 50);
+    `,
   };
 }
 
@@ -258,13 +403,21 @@ export function buildTauriMockScript(opts: {
   httpRoutes: Array<{ pattern: string; status: number; body: unknown }>;
   simulateWsFlow: boolean;
   echoChatSend?: boolean;
+  wsHandlers?: Array<{ type: string; handler: string }>;
   readyOverrides?: {
     channels?: unknown[];
     members?: unknown[];
     voice_states?: unknown[];
+    dm_channels?: unknown[];
   };
 }): string {
   const readyPayload = buildReadyPayload(opts.readyOverrides);
+
+  // Merge explicit wsHandlers with auto-generated chat echo handlers
+  const allWsHandlers: Array<{ type: string; handler: string }> = [
+    ...(opts.wsHandlers ?? []),
+    ...(opts.echoChatSend ? chatEchoHandlers() : []),
+  ];
 
   return `
     // -----------------------------------------------------------------------
@@ -412,70 +565,31 @@ export function buildTauriMockScript(opts: {
         if (cmd === "ws_send") {
           ${opts.simulateWsFlow ? `
           try {
-            const parsed = JSON.parse(args?.message || "{}");
+            var parsed = JSON.parse(args?.message || "{}");
             if (parsed.type === "auth") {
-              setTimeout(() => {
+              setTimeout(function() {
                 __tauriEmitEvent("ws-message", JSON.stringify(${JSON.stringify(MOCK_AUTH_OK)}));
               }, 100);
-              setTimeout(() => {
+              setTimeout(function() {
                 __tauriEmitEvent("ws-message", JSON.stringify(${JSON.stringify(readyPayload)}));
               }, 200);
             }
-            ${opts.echoChatSend ? `
-            if (parsed.type === "chat_send") {
-              const p = parsed.payload;
-              const echo = {
-                type: "chat_message",
-                payload: {
-                  id: Date.now(),
-                  channel_id: p.channel_id,
-                  user: { id: 1, username: "testuser", avatar: "" },
-                  content: p.content,
-                  timestamp: new Date().toISOString(),
-                  edited_at: null,
-                  attachments: p.attachments || [],
-                  reactions: [],
-                  reply_to: p.reply_to || null,
-                  pinned: false,
-                  deleted: false,
-                },
-              };
-              setTimeout(() => {
-                __tauriEmitEvent("ws-message", JSON.stringify(echo));
-              }, 50);
+            var WS_HANDLERS = ${JSON.stringify(allWsHandlers)};
+            for (var i = 0; i < WS_HANDLERS.length; i++) {
+              var h = WS_HANDLERS[i];
+              if (parsed.type === h.type) {
+                (new Function('parsed', '__tauriEmitEvent', h.handler))(parsed, __tauriEmitEvent);
+              }
             }
-            if (parsed.type === "chat_edit") {
-              const echo = {
-                type: "chat_edited",
-                payload: {
-                  message_id: parsed.payload.message_id,
-                  channel_id: parsed.payload.channel_id || 1,
-                  content: parsed.payload.content,
-                  edited_at: new Date().toISOString(),
-                },
-              };
-              setTimeout(() => {
-                __tauriEmitEvent("ws-message", JSON.stringify(echo));
-              }, 50);
-            }
-            if (parsed.type === "chat_delete") {
-              const echo = {
-                type: "chat_deleted",
-                payload: {
-                  message_id: parsed.payload.message_id,
-                  channel_id: parsed.payload.channel_id || 1,
-                },
-              };
-              setTimeout(() => {
-                __tauriEmitEvent("ws-message", JSON.stringify(echo));
-              }, 50);
-            }
-            ` : ""}
           } catch (e) {}
           ` : ""}
           return;
         }
         if (cmd === "ws_disconnect") return;
+
+        // ---- LiveKit proxy ----
+        if (cmd === "start_livekit_proxy") return { port: 7880 };
+        if (cmd === "stop_livekit_proxy") return;
 
         // ---- Credentials ----
         if (cmd === "save_credential" || cmd === "delete_credential" || cmd === "load_credential") return null;
@@ -559,6 +673,24 @@ export async function mockTauriFullSessionWithVoice(page: Page): Promise<void> {
       { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
     ],
     simulateWsFlow: true,
+    wsHandlers: voiceWsHandlers(),
+    readyOverrides: {
+      channels: MOCK_CHANNELS_WITH_CATEGORIES,
+      members: MOCK_MEMBERS_MULTI_ROLE,
+      voice_states: MOCK_VOICE_STATE,
+    },
+  }));
+}
+
+export async function mockTauriFullSessionWithVoiceFailure(page: Page): Promise<void> {
+  await page.addInitScript(buildTauriMockScript({
+    httpRoutes: [
+      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+      { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+      { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+    ],
+    simulateWsFlow: true,
+    wsHandlers: [voiceJoinFailureHandler()],
     readyOverrides: {
       channels: MOCK_CHANNELS_WITH_CATEGORIES,
       members: MOCK_MEMBERS_MULTI_ROLE,

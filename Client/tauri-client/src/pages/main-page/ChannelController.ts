@@ -9,6 +9,7 @@ import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
 import type { ApiClient } from "@lib/api";
+import type { ChannelType } from "@lib/types";
 import { createMessageList } from "@components/MessageList";
 import type { MessageListComponent } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
@@ -18,6 +19,10 @@ import { getChannelMessages, setMessagePinned } from "@stores/messages.store";
 import type { MessageController } from "./MessageController";
 import type { PendingDeleteManager } from "./MessageController";
 import type { ReactionController } from "./ReactionController";
+import { updateChatHeaderForDm } from "./ChatHeader";
+import type { ChatHeaderRefs } from "./ChatHeader";
+import { dmStore } from "@stores/dm.store";
+import { membersStore } from "@stores/members.store";
 
 const log = createLogger("channel-ctrl");
 
@@ -40,11 +45,12 @@ export interface ChannelControllerOptions {
     readonly inputSlot: HTMLDivElement;
   };
   readonly chatHeaderName: HTMLSpanElement | null;
+  readonly chatHeaderRefs: ChatHeaderRefs | null;
 }
 
 export interface ChannelController {
   /** Mount components for a channel. No-op if same channel already mounted. */
-  mountChannel(channelId: number, channelName: string): void;
+  mountChannel(channelId: number, channelName: string, channelType?: ChannelType): void;
   /** Destroy current channel components and reset state. */
   destroyChannel(): void;
   /** Currently mounted channel ID, or null. */
@@ -71,6 +77,7 @@ export function createChannelController(
     getCurrentUserId,
     slots,
     chatHeaderName,
+    chatHeaderRefs,
   } = opts;
 
   let _currentChannelId: number | null = null;
@@ -106,7 +113,7 @@ export function createChannelController(
     _currentChannelId = null;
   }
 
-  function mountChannel(channelId: number, channelName: string): void {
+  function mountChannel(channelId: number, channelName: string, channelType?: ChannelType): void {
     if (_currentChannelId === channelId) return;
 
     destroyChannel();
@@ -129,6 +136,7 @@ export function createChannelController(
     messageList = createMessageList({
       channelId,
       channelName,
+      channelType,
       currentUserId: userId,
       onScrollTop: () => {
         if (channelAbort !== null) {
@@ -257,7 +265,22 @@ export function createChannelController(
     }, { signal });
 
     // Update header
-    if (chatHeaderName !== null) {
+    if (chatHeaderRefs !== null && channelType === "dm") {
+      // Look up the recipient's actual status from DM store or members store
+      const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
+      let recipientStatus = "Offline";
+      if (dmChannel !== undefined) {
+        const member = membersStore.getState().members.get(dmChannel.recipient.id);
+        recipientStatus = member?.status ?? dmChannel.recipient.status ?? "Offline";
+      }
+      const displayStatus = recipientStatus.charAt(0).toUpperCase() + recipientStatus.slice(1);
+      updateChatHeaderForDm(chatHeaderRefs, { username: channelName, status: displayStatus });
+    } else if (chatHeaderRefs !== null) {
+      updateChatHeaderForDm(chatHeaderRefs, null);
+      if (chatHeaderName !== null) {
+        setText(chatHeaderName, channelName);
+      }
+    } else if (chatHeaderName !== null) {
       setText(chatHeaderName, channelName);
     }
   }

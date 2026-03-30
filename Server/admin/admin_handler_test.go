@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/owncord/server/admin"
@@ -40,6 +41,17 @@ func TestNewHandler_ServesStaticRoot(t *testing.T) {
 	ct := w.Header().Get("Content-Type")
 	if ct == "" {
 		t.Error("Content-Type header missing on / response")
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "api('POST','/logs/ticket')") {
+		t.Error("admin root should request log stream tickets before opening EventSource")
+	}
+	if !strings.Contains(body, "/admin/api/logs/stream?ticket=") {
+		t.Error("admin root should connect to log stream with a ticket query parameter")
+	}
+	if strings.Contains(body, "/admin/api/logs/stream?token=") {
+		t.Error("admin root should not use the deprecated token-based log stream URL")
 	}
 }
 

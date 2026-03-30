@@ -1,9 +1,8 @@
 /**
- * ChatHeader — builds the channel header bar with name, topic, pins, search,
- * and member-list toggle.
+ * ChatHeader — builds the channel header bar with name, topic, pins, and search.
  */
 
-import { createElement, appendChildren } from "@lib/dom";
+import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 
 // ---------------------------------------------------------------------------
@@ -11,13 +10,13 @@ import { createIcon } from "@lib/icons";
 // ---------------------------------------------------------------------------
 
 export interface ChatHeaderRefs {
+  readonly hashEl: HTMLSpanElement;
   readonly nameEl: HTMLSpanElement;
   readonly topicEl: HTMLSpanElement;
 }
 
 export interface ChatHeaderOptions {
   readonly onTogglePins: () => void;
-  readonly onToggleMembers: () => void;
   readonly onSearchFocus?: () => void;
 }
 
@@ -54,18 +53,28 @@ export function buildChatHeader(
     const onFocus = opts.onSearchFocus;
     searchInput.addEventListener("focus", () => {
       onFocus();
-      (searchInput as HTMLInputElement).blur();
+      (searchInput).blur();
     });
   }
-  const membersToggle = createElement("button", {
-    type: "button",
-    "aria-label": "Toggle member list",
-    "data-testid": "members-toggle",
-  });
-  membersToggle.appendChild(createIcon("users", 18));
-  membersToggle.addEventListener("click", () => opts.onToggleMembers());
-  appendChildren(tools, searchInput, pinBtn, membersToggle);
+  appendChildren(tools, searchInput, pinBtn);
 
   appendChildren(header, hash, nameEl, divider, topicEl, tools);
-  return { element: header, refs: { nameEl, topicEl } };
+  return { element: header, refs: { hashEl: hash, nameEl, topicEl } };
+}
+
+// ---------------------------------------------------------------------------
+// DM mode helper
+// ---------------------------------------------------------------------------
+
+export function updateChatHeaderForDm(
+  refs: ChatHeaderRefs,
+  recipient: { username: string; status: string } | null,
+): void {
+  if (recipient !== null) {
+    setText(refs.hashEl, "@");
+    setText(refs.nameEl, recipient.username);
+    setText(refs.topicEl, recipient.status);
+  } else {
+    setText(refs.hashEl, "#");
+  }
 }

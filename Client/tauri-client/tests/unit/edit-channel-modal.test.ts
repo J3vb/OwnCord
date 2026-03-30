@@ -93,4 +93,98 @@ describe("EditChannelModal", () => {
     modal.destroy?.();
     expect(container.querySelector("[data-testid='edit-channel-modal']")).toBeNull();
   });
+
+  it("shows error message when onSave rejects with Error", async () => {
+    const onSave = vi.fn().mockRejectedValue(new Error("Server error"));
+    const { modal } = makeModal({ onSave });
+
+    const input = container.querySelector("[data-testid='edit-channel-name-input']") as HTMLInputElement;
+    input.value = "new-name";
+
+    const saveBtn = container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement;
+    saveBtn.click();
+
+    await vi.waitFor(() => {
+      const error = container.querySelector("[data-testid='edit-channel-error']");
+      expect(error?.textContent).toBe("Server error");
+    });
+
+    // Button should be re-enabled
+    expect(saveBtn.hasAttribute("disabled")).toBe(false);
+    expect(saveBtn.textContent).toBe("Save Changes");
+
+    modal.destroy?.();
+  });
+
+  it("shows generic error when onSave rejects with non-Error", async () => {
+    const onSave = vi.fn().mockRejectedValue("unknown");
+    const { modal } = makeModal({ onSave });
+
+    const input = container.querySelector("[data-testid='edit-channel-name-input']") as HTMLInputElement;
+    input.value = "new-name";
+
+    const saveBtn = container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement;
+    saveBtn.click();
+
+    await vi.waitFor(() => {
+      const error = container.querySelector("[data-testid='edit-channel-error']");
+      expect(error?.textContent).toBe("Failed to update channel");
+    });
+
+    modal.destroy?.();
+  });
+
+  it("disables save button and shows 'Saving...' during save", async () => {
+    let resolveSave: (() => void) | undefined;
+    const onSave = vi.fn<any>(() => new Promise<void>((resolve) => { resolveSave = resolve; }));
+    const { modal } = makeModal({ onSave });
+
+    const input = container.querySelector("[data-testid='edit-channel-name-input']") as HTMLInputElement;
+    input.value = "renamed";
+
+    const saveBtn = container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement;
+    saveBtn.click();
+
+    expect(saveBtn.hasAttribute("disabled")).toBe(true);
+    expect(saveBtn.textContent).toBe("Saving...");
+
+    resolveSave?.();
+    modal.destroy?.();
+  });
+
+  it("calls onClose when cancel button is clicked", () => {
+    const onClose = vi.fn();
+    const { modal } = makeModal({ onClose });
+
+    const cancelBtn = container.querySelector(".btn-modal-cancel") as HTMLButtonElement;
+    cancelBtn.click();
+
+    expect(onClose).toHaveBeenCalled();
+    modal.destroy?.();
+  });
+
+  it("calls onClose on backdrop click", () => {
+    const onClose = vi.fn();
+    const { modal } = makeModal({ onClose });
+
+    const overlay = container.querySelector("[data-testid='edit-channel-modal']") as HTMLDivElement;
+    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(onClose).toHaveBeenCalled();
+    modal.destroy?.();
+  });
+
+  it("adds error class to input on empty name validation", () => {
+    const onSave = vi.fn(async () => {});
+    const { modal } = makeModal({ onSave });
+
+    const input = container.querySelector("[data-testid='edit-channel-name-input']") as HTMLInputElement;
+    input.value = "   "; // whitespace only
+
+    const saveBtn = container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement;
+    saveBtn.click();
+
+    expect(input.classList.contains("error")).toBe(true);
+    modal.destroy?.();
+  });
 });

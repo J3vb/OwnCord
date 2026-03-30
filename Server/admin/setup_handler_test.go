@@ -50,6 +50,7 @@ func TestSetupStatus_NoSetupNeeded(t *testing.T) {
 }
 
 func TestSetup_CreatesOwner(t *testing.T) {
+	admin.ResetSetupLimiter()
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 
@@ -95,6 +96,7 @@ func TestSetup_CreatesOwner(t *testing.T) {
 }
 
 func TestSetup_BlockedAfterFirstUser(t *testing.T) {
+	admin.ResetSetupLimiter()
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 
@@ -118,6 +120,7 @@ func TestSetup_BlockedAfterFirstUser(t *testing.T) {
 }
 
 func TestSetup_WeakPassword(t *testing.T) {
+	admin.ResetSetupLimiter()
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 
@@ -131,6 +134,7 @@ func TestSetup_WeakPassword(t *testing.T) {
 }
 
 func TestSetup_MissingFields(t *testing.T) {
+	admin.ResetSetupLimiter()
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
 

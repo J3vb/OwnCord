@@ -3,6 +3,7 @@ import { createMemberList } from "@components/MemberList";
 import type { MemberListOptions } from "@components/MemberList";
 import { membersStore } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
+import { authStore } from "@stores/auth.store";
 import type { UserStatus } from "../../src/lib/types";
 
 function resetStore(): void {
@@ -181,5 +182,142 @@ describe("MemberList", () => {
     membersStore.flush();
 
     expect(container.querySelectorAll(".member-item").length).toBe(6);
+  });
+
+  it("shows empty state message when no members", () => {
+    memberList.mount(container);
+
+    const emptyState = container.querySelector(".member-list-empty");
+    expect(emptyState).not.toBeNull();
+    const emptyText = container.querySelector(".member-list-empty-text");
+    expect(emptyText?.textContent).toBe("No members online");
+  });
+
+  it("skips role groups that have no members", () => {
+    // Only add an owner — other groups should not render
+    setTestMembers([makeMember({ id: 1, username: "Alice", role: "owner", status: "online" as UserStatus })]);
+    memberList.mount(container);
+
+    const headers = container.querySelectorAll(".member-role-group");
+    expect(headers.length).toBe(1);
+    expect(headers[0]!.textContent).toContain("OWNER");
+  });
+
+  it("applies status color to the status dot", () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "Alice", role: "member", status: "online" as UserStatus }),
+      makeMember({ id: 2, username: "Bob", role: "member", status: "dnd" as UserStatus }),
+    ]);
+    memberList.mount(container);
+
+    const statusDots = container.querySelectorAll(".mi-status");
+    const aliceDot = statusDots[0] as HTMLDivElement;
+    const bobDot = statusDots[1] as HTMLDivElement;
+
+    expect(aliceDot.style.background).toBe("var(--green)");
+    expect(bobDot.style.background).toBe("var(--red)");
+  });
+
+  it("context menu does not appear for non-admin/non-owner roles", () => {
+    setTestMembers(testMembers);
+    const opts: MemberListOptions = {
+      currentUserRole: "member",
+      onKick: vi.fn().mockResolvedValue(undefined),
+      onBan: vi.fn().mockResolvedValue(undefined),
+      onChangeRole: vi.fn().mockResolvedValue(undefined),
+    };
+    memberList.destroy?.();
+    memberList = createMemberList(opts);
+    memberList.mount(container);
+
+    const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
+    memberItem.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+
+    // No context menu should be appended to body
+    const contextMenu = document.body.querySelector(".admin-context-menu, .context-menu");
+    expect(contextMenu).toBeNull();
+  });
+
+  it("context menu does not appear when right-clicking yourself", () => {
+    // Set authStore so current user is id=1 (Alice)
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 1, username: "Alice", avatar: null, role: "owner" },
+      serverName: "Test",
+      motd: null,
+      isAuthenticated: true,
+    }));
+
+    setTestMembers(testMembers);
+    const opts: MemberListOptions = {
+      currentUserRole: "owner",
+      onKick: vi.fn().mockResolvedValue(undefined),
+      onBan: vi.fn().mockResolvedValue(undefined),
+      onChangeRole: vi.fn().mockResolvedValue(undefined),
+    };
+    memberList.destroy?.();
+    memberList = createMemberList(opts);
+    memberList.mount(container);
+
+    // Right-click on Alice (user id 1 = self)
+    const selfItem = container.querySelector('[data-testid="member-1"]') as HTMLDivElement;
+    selfItem.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+
+    // No context menu should appear for yourself
+    const contextMenu = document.body.querySelector(".admin-context-menu, .context-menu");
+    expect(contextMenu).toBeNull();
+  });
+
+  it("displays member names with role-colored text", () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "OwnerUser", role: "owner", status: "online" as UserStatus }),
+    ]);
+    memberList.mount(container);
+
+    const nameEl = container.querySelector(".mi-name") as HTMLSpanElement;
+    expect(nameEl.textContent).toBe("OwnerUser");
+    // Owner role has specific color var
+    expect(nameEl.style.color).toBe("var(--role-owner, #e74c3c)");
+  });
+
+  it("uses '?' as avatar fallback for empty username", () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "", role: "member", status: "online" as UserStatus }),
+    ]);
+    memberList.mount(container);
+
+    const avatar = container.querySelector(".mi-avatar");
+    // Empty string charAt(0) is "", toUpperCase is "" => fallback "?"
+    expect(avatar?.textContent).toContain("?");
+  });
+
+  it("sorts dnd between idle and offline within a group", () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "Offline", role: "member", status: "offline" as UserStatus }),
+      makeMember({ id: 2, username: "Dnd", role: "member", status: "dnd" as UserStatus }),
+      makeMember({ id: 3, username: "Online", role: "member", status: "online" as UserStatus }),
+      makeMember({ id: 4, username: "Idle", role: "member", status: "idle" as UserStatus }),
+    ]);
+    memberList.mount(container);
+
+    const items = container.querySelectorAll(".member-item");
+    const names = Array.from(items).map((el) => el.querySelector(".mi-name")?.textContent);
+
+    // Expected order: Online (0), Idle (1), Dnd (2), Offline (3)
+    expect(names).toEqual(["Online", "Idle", "Dnd", "Offline"]);
+  });
+
+  it("re-renders when store updates to a different member set", () => {
+    setTestMembers(testMembers);
+    memberList.mount(container);
+
+    expect(container.querySelectorAll(".member-item").length).toBe(6);
+
+    // Remove all but one member
+    setTestMembers([makeMember({ id: 99, username: "Solo", role: "member", status: "online" as UserStatus })]);
+    membersStore.flush();
+
+    expect(container.querySelectorAll(".member-item").length).toBe(1);
+    expect(container.querySelector(".mi-name")?.textContent).toBe("Solo");
   });
 });

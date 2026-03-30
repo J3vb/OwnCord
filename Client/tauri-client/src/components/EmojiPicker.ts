@@ -1,7 +1,7 @@
 // EmojiPicker — grid-based emoji selector with search and scrollable categories.
 // Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
 
-import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
+import { createElement, setText, clearChildren } from "@lib/dom";
 
 // ---------------------------------------------------------------------------
 // Types

@@ -41,6 +41,10 @@ export interface VoiceState {
   readonly localDeafened: boolean;
   readonly localCamera: boolean;
   readonly localScreenshare: boolean;
+  /** Epoch ms when the local user joined the current voice channel (for elapsed timer). */
+  readonly joinedAt: number | null;
+  /** True when joined in listen-only mode (mic permission denied or no mic found). */
+  readonly listenOnly: boolean;
 }
 
 const INITIAL_STATE: VoiceState = {
@@ -51,6 +55,8 @@ const INITIAL_STATE: VoiceState = {
   localDeafened: false,
   localCamera: false,
   localScreenshare: false,
+  joinedAt: null,
+  listenOnly: false,
 };
 
 export const voiceStore = createStore<VoiceState>(INITIAL_STATE);
@@ -65,6 +71,8 @@ export function resetVoiceStore(): void {
     localDeafened: false,
     localCamera: false,
     localScreenshare: false,
+    joinedAt: null,
+    listenOnly: false,
   }));
 }
 
@@ -105,6 +113,10 @@ export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
   voiceStore.setState((prev) => ({
     ...prev,
     voiceUsers: channelMap,
+    // If user is in a voice channel per ready payload, use that channel.
+    // Otherwise preserve prev — user may be mid-join and server hasn't
+    // registered them yet. Stale IDs are cleared by leaveVoiceChannel()
+    // or resetVoiceStore() on logout.
     currentChannelId: autoJoinChannel ?? prev.currentChannelId,
   }));
 }
@@ -151,12 +163,18 @@ export function removeVoiceUser(payload: VoiceLeavePayload): void {
   });
 }
 
-/** Set the current voice channel (local join). */
+/** Set the current voice channel (local join) and record the join timestamp.
+ *  Only resets joinedAt if the user is joining a different channel (or was not in one). */
 export function joinVoiceChannel(channelId: number): void {
-  voiceStore.setState((prev) => ({
-    ...prev,
-    currentChannelId: channelId,
-  }));
+  voiceStore.setState((prev) => {
+    // Already in this channel — don't reset the timer
+    if (prev.currentChannelId === channelId) return prev;
+    return {
+      ...prev,
+      currentChannelId: channelId,
+      joinedAt: Date.now(),
+    };
+  });
 }
 
 /** Clear the current voice channel and remove current user from voice users. */
@@ -165,11 +183,11 @@ export function leaveVoiceChannel(): void {
   voiceStore.setState((prev) => {
     const channelId = prev.currentChannelId;
     if (channelId === null || currentUserId === 0) {
-      return { ...prev, currentChannelId: null };
+      return { ...prev, currentChannelId: null, joinedAt: null };
     }
     const existingChannel = prev.voiceUsers.get(channelId);
     if (!existingChannel || !existingChannel.has(currentUserId)) {
-      return { ...prev, currentChannelId: null };
+      return { ...prev, currentChannelId: null, joinedAt: null };
     }
     const nextChannels = new Map(prev.voiceUsers);
     const nextUsers = new Map(existingChannel);
@@ -179,7 +197,7 @@ export function leaveVoiceChannel(): void {
     } else {
       nextChannels.set(channelId, nextUsers);
     }
-    return { ...prev, currentChannelId: null, voiceUsers: nextChannels };
+    return { ...prev, currentChannelId: null, joinedAt: null, voiceUsers: nextChannels };
   });
 }
 
@@ -212,6 +230,14 @@ export function setLocalScreenshare(enabled: boolean): void {
   voiceStore.setState((prev) => ({
     ...prev,
     localScreenshare: enabled,
+  }));
+}
+
+/** Set listen-only mode (mic permission denied or no mic found). */
+export function setListenOnly(listenOnly: boolean): void {
+  voiceStore.setState((prev) => ({
+    ...prev,
+    listenOnly,
   }));
 }
 

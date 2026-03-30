@@ -121,4 +121,110 @@ describe("UserBar", () => {
 
     expect(container.querySelector(".user-bar")).toBeNull();
   });
+
+  it("renders disconnect button when onDisconnect is provided", () => {
+    setAuthState({ username: "alice" }, true);
+    const onDisconnect = vi.fn();
+    comp = createUserBar({ onDisconnect });
+    comp.mount(container);
+
+    const disconnectBtn = container.querySelector('[data-testid="disconnect-btn"]') as HTMLButtonElement;
+    expect(disconnectBtn).not.toBeNull();
+    expect(disconnectBtn.getAttribute("aria-label")).toBe("Switch server");
+  });
+
+  it("calls onDisconnect when disconnect button is clicked", () => {
+    setAuthState({ username: "alice" }, true);
+    const onDisconnect = vi.fn();
+    comp = createUserBar({ onDisconnect });
+    comp.mount(container);
+
+    const disconnectBtn = container.querySelector('[data-testid="disconnect-btn"]') as HTMLButtonElement;
+    disconnectBtn.click();
+    expect(onDisconnect).toHaveBeenCalledOnce();
+  });
+
+  it("does not render disconnect button when onDisconnect is not provided", () => {
+    setAuthState({ username: "alice" }, true);
+    comp = createUserBar();
+    comp.mount(container);
+
+    const disconnectBtn = container.querySelector('[data-testid="disconnect-btn"]');
+    expect(disconnectBtn).toBeNull();
+  });
+
+  it("updates username reactively when auth store changes", () => {
+    setAuthState({ username: "alice" }, true);
+    comp = createUserBar();
+    comp.mount(container);
+
+    expect(container.querySelector(".ub-name")?.textContent).toBe("alice");
+
+    // Update auth store with new username
+    authStore.setState((prev) => ({
+      ...prev,
+      user: prev.user ? { ...prev.user, username: "bob" } : null,
+    }));
+    authStore.flush();
+
+    expect(container.querySelector(".ub-name")?.textContent).toBe("bob");
+  });
+
+  it('shows "Unknown" and "U" avatar when user is null', () => {
+    setAuthState(null, false);
+    comp = createUserBar();
+    comp.mount(container);
+
+    const name = container.querySelector(".ub-name");
+    expect(name?.textContent).toBe("Unknown");
+
+    // "Unknown".charAt(0).toUpperCase() = "U"
+    const avatarSpan = container.querySelector(".ub-avatar span");
+    expect(avatarSpan?.textContent).toBe("U");
+  });
+
+  it("has data-testid on root element", () => {
+    setAuthState({ username: "alice" }, true);
+    comp = createUserBar();
+    comp.mount(container);
+
+    const root = container.querySelector('[data-testid="user-bar"]');
+    expect(root).not.toBeNull();
+  });
+
+  it("status changes from Online to Offline when logged out", () => {
+    setAuthState({ username: "alice" }, true);
+    comp = createUserBar();
+    comp.mount(container);
+
+    expect(container.querySelector(".ub-status")?.textContent).toBe("Online");
+
+    // Simulate logout
+    authStore.setState(() => ({
+      token: null,
+      user: null,
+      serverName: null,
+      motd: null,
+      isAuthenticated: false,
+    }));
+    authStore.flush();
+
+    expect(container.querySelector(".ub-status")?.textContent).toBe("Offline");
+  });
+
+  it("avatar initial updates when username changes", () => {
+    setAuthState({ username: "alice" }, true);
+    comp = createUserBar();
+    comp.mount(container);
+
+    expect(container.querySelector(".ub-avatar span")?.textContent).toBe("A");
+
+    authStore.setState((prev) => ({
+      ...prev,
+      user: prev.user ? { ...prev.user, username: "zara" } : null,
+    }));
+    authStore.flush();
+
+    expect(container.querySelector(".ub-avatar span")?.textContent).toBe("Z");
+  });
 });

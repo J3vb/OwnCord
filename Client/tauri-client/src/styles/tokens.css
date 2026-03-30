@@ -23,6 +23,12 @@
   --accent-hover:  #4752c4;
   --accent-active: #3c45a5;
 
+  /* Theme contract — overrideable by custom themes */
+  --accent-primary:   var(--accent);
+  --accent-secondary: var(--accent-hover);
+  --accent-gradient:  linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+  --border-glow:      transparent;
+
   /* Text */
   --text-normal:   #dbdee1;
   --text-muted:    #949ba4;
@@ -99,9 +105,7 @@
   --radius-circle: 50%;
 
   /* Spacing */
-  --strip-width:   72px;
   --sidebar-width: 240px;
-  --members-width: 240px;
   --header-height: 48px;
 
   /* Message layout */

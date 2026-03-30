@@ -33,18 +33,6 @@ export function buildTextImagesTab(signal: AbortSignal): HTMLDivElement {
       desc: "Play GIF animations automatically. When disabled, GIFs show as static images",
       fallback: true,
     },
-    {
-      key: "animateEmoji",
-      label: "Animate Emoji",
-      desc: "Play animated emoji automatically",
-      fallback: true,
-    },
-    {
-      key: "showSpoilers",
-      label: "Show Spoiler Content",
-      desc: "Always reveal spoiler content (click to reveal when disabled)",
-      fallback: false,
-    },
   ];
 
   for (const item of toggles) {

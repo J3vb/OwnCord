@@ -24,6 +24,7 @@ import { FenwickTree } from "./message-list/fenwick";
 export interface MessageListOptions {
   readonly channelId: number;
   readonly channelName: string;
+  readonly channelType?: string;
   readonly currentUserId: number;
   readonly onScrollTop: () => void;
   readonly onReplyClick: (messageId: number) => void;
@@ -112,15 +113,21 @@ function buildVirtualItems(messages: readonly Message[]): readonly VirtualItem[]
 
 // -- Empty state --------------------------------------------------------------
 
-function renderEmptyState(channelName: string): HTMLDivElement {
+function renderEmptyState(channelName: string, channelType?: string): HTMLDivElement {
+  const isDm = channelType === "dm";
+
   const icon = createElement("div", { class: "channel-welcome-icon" });
-  icon.textContent = "#";
+  icon.textContent = isDm ? "@" : "#";
 
   const title = createElement("h2", { class: "channel-welcome-title" });
-  title.textContent = `Welcome to #${channelName}!`;
+  title.textContent = isDm
+    ? channelName
+    : `Welcome to #${channelName}!`;
 
   const text = createElement("p", { class: "channel-welcome-text" });
-  text.textContent = `This is the start of the #${channelName} channel.`;
+  text.textContent = isDm
+    ? `This is the beginning of your direct message history with ${channelName}.`
+    : `This is the start of the #${channelName} channel.`;
 
   const wrapper = createElement("div", { class: "channel-welcome" });
   wrapper.appendChild(icon);
@@ -277,7 +284,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     if (virtualItems.length === 0) {
       clearChildren(contentContainer);
-      contentContainer.appendChild(renderEmptyState(options.channelName));
+      contentContainer.appendChild(renderEmptyState(options.channelName, options.channelType));
       topSpacer.style.height = "0px";
       bottomSpacer.style.height = "0px";
       renderedStart = 0;
@@ -302,7 +309,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // Scroll-driven spacer updates are cheap and don't need limiting.
       renderWindowCount++;
       if (renderWindowCount > 30) {
-        console.error("[MessageList] renderWindow REBUILD called >30 times in 2s — breaking loop");
+        log.error("[MessageList] renderWindow REBUILD called >30 times in 2s — breaking loop");
         return;
       }
       if (renderWindowResetTimer === 0) {
@@ -379,7 +386,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // within 2 seconds, something is wrong — bail out to prevent freeze.
     renderAllCount++;
     if (renderAllCount > 20) {
-      console.error("[MessageList] renderAll called >20 times in 2s — breaking loop");
+      log.error("[MessageList] renderAll called >20 times in 2s — breaking loop");
       return;
     }
     if (renderAllResetTimer === 0) {
@@ -452,7 +459,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
   let scrollRafId = 0;
   let resizeRafId = 0;
-  let resizeDirty = false;
+  // resizeDirty tracking removed — resize observer batches via RAF directly
   function handleScroll(): void {
     if (root === null) return;
 
@@ -490,7 +497,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     bottomSpacer = createElement("div", { class: "virtual-spacer-bottom" });
     const scrollAnchor = createElement("div", { class: "scroll-anchor" });
 
-    scrollToBottomBtn = createElement("button", { class: "scroll-to-bottom-btn" }) as HTMLButtonElement;
+    scrollToBottomBtn = createElement("button", { class: "scroll-to-bottom-btn" });
     scrollToBottomBtn.textContent = "↓";
     scrollToBottomBtn.addEventListener("click", () => {
       scrollToBottom();
@@ -512,12 +519,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // Batched via RAF with anchor-based scroll preservation.
     const resizeObserver = new ResizeObserver(() => {
       if (root === null || contentContainer === null) return;
-      resizeDirty = true;
       if (resizeRafId !== 0) return;
 
       resizeRafId = requestAnimationFrame(() => {
         resizeRafId = 0;
-        resizeDirty = false;
         if (root === null || contentContainer === null) return;
 
         const atBottom = isNearBottom();

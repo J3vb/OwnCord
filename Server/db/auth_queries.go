@@ -23,6 +23,56 @@ func (d *DB) CreateUser(username, passwordHash string, roleID int) (int64, error
 	return res.LastInsertId()
 }
 
+// CreateUserWithInvite atomically consumes an invite and creates the user in
+// the same transaction so a failed registration does not burn the invite.
+func (d *DB) CreateUserWithInvite(username, passwordHash string, roleID int, inviteCode string) (int64, error) {
+	tx, err := d.sqlDB.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("CreateUserWithInvite begin: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	result, err := tx.Exec(
+		`UPDATE invites SET use_count = use_count + 1
+		 WHERE code = ? AND revoked = 0
+		 AND (max_uses IS NULL OR use_count < max_uses)
+		 AND (expires_at IS NULL OR strftime('%s', expires_at) > strftime('%s', 'now'))`,
+		inviteCode,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("CreateUserWithInvite use invite: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("CreateUserWithInvite invite rows: %w", err)
+	}
+	if rows == 0 {
+		return 0, fmt.Errorf("CreateUserWithInvite invite unavailable: %w", ErrNotFound)
+	}
+
+	result, err = tx.Exec(
+		`INSERT INTO users (username, password, role_id) VALUES (?, ?, ?)`,
+		username, passwordHash, roleID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("CreateUserWithInvite create user: %w", err)
+	}
+	uid, err := result.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("CreateUserWithInvite last insert id: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("CreateUserWithInvite commit: %w", err)
+	}
+	committed = true
+	return uid, nil
+}
+
 // GetUserByUsername returns the user with the given username (case-insensitive),
 // or nil if not found.
 func (d *DB) GetUserByUsername(username string) (*User, error) {
@@ -74,6 +124,15 @@ func (d *DB) UpdateUserStatus(id int64, status string) error {
 	)
 	if err != nil {
 		return fmt.Errorf("UpdateUserStatus: %w", err)
+	}
+	return nil
+}
+
+// UpdateUserTOTPSecret sets or clears the TOTP secret for a user.
+func (d *DB) UpdateUserTOTPSecret(id int64, secret *string) error {
+	_, err := d.sqlDB.Exec(`UPDATE users SET totp_secret = ? WHERE id = ?`, secret, id)
+	if err != nil {
+		return fmt.Errorf("UpdateUserTOTPSecret: %w", err)
 	}
 	return nil
 }

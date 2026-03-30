@@ -11,6 +11,7 @@ import (
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 )
 
 // broadcastMsg is an internal message queued for delivery.
@@ -22,17 +23,19 @@ type broadcastMsg struct {
 // Hub manages all active WebSocket clients and routes messages between them.
 // All exported methods are safe to call from multiple goroutines.
 type Hub struct {
-	clients      map[int64]*Client
-	mu           sync.RWMutex
-	db           *db.DB
-	limiter      *auth.RateLimiter
-	broadcast    chan broadcastMsg
-	register     chan *Client
-	unregister   chan *Client
-	stop         chan struct{}
-	stopOnce     sync.Once
-	livekit      *LiveKitClient
-	lkProcess    *LiveKitProcess
+	clients     map[int64]*Client
+	mu          sync.RWMutex
+	db          *db.DB
+	limiter     *auth.RateLimiter
+	broadcast   chan broadcastMsg
+	register    chan *Client
+	unregister  chan *Client
+	stop        chan struct{}
+	stopOnce    sync.Once
+	livekit     *LiveKitClient
+	lkProcess   *LiveKitProcess
+	registry    *HandlerRegistry
+	permChecker *permissions.Checker
 
 	seq       uint64           // atomic monotonic sequence counter
 	replayBuf *EventRingBuffer // recent broadcast events for reconnection replay
@@ -47,6 +50,13 @@ type Hub struct {
 // NewHub creates a Hub ready to be started with Run.
 // It also initializes the settings cache from the database.
 func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
+	reg := NewHandlerRegistry()
+	registerChatHandlers(reg)
+	registerPresenceHandlers(reg)
+	registerReactionHandlers(reg)
+	registerVoiceHandlers(reg)
+	registerPingHandler(reg)
+
 	h := &Hub{
 		clients:      make(map[int64]*Client),
 		db:           database,
@@ -56,6 +66,8 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
 		unregister:   make(chan *Client, 32),
 		stop:         make(chan struct{}),
 		replayBuf:    NewEventRingBuffer(1000),
+		registry:     reg,
+		permChecker:  permissions.NewChecker(database),
 		settingsName: "OwnCord Server",
 		settingsMotd: "Welcome!",
 	}
@@ -137,12 +149,12 @@ func (h *Hub) Run() {
 
 			defer func() {
 				if r := recover(); r != nil {
-					panicCount++
 					now := time.Now()
 					if lastPanicReset.IsZero() || now.Sub(lastPanicReset) > 60*time.Second {
-						panicCount = 1
+						panicCount = 0
 						lastPanicReset = now
 					}
+					panicCount++
 
 					buf := make([]byte, 4096)
 					n := runtime.Stack(buf, false)
@@ -163,17 +175,9 @@ func (h *Hub) Run() {
 				case <-h.stop:
 					return
 				case c := <-h.register:
-					h.mu.Lock()
-					h.clients[c.userID] = c
-					slog.Info("hub: client registered", "user_id", c.userID, "total_clients", len(h.clients))
-					h.mu.Unlock()
+					h.registerNow(c)
 				case c := <-h.unregister:
-					h.mu.Lock()
-					if current, ok := h.clients[c.userID]; ok && current == c {
-						delete(h.clients, c.userID)
-						slog.Info("hub: client unregistered", "user_id", c.userID, "total_clients", len(h.clients))
-					}
-					h.mu.Unlock()
+					h.unregisterNow(c)
 				case bm := <-h.broadcast:
 					h.deliverBroadcast(bm)
 				case <-staleTicker.C:
@@ -239,7 +243,9 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 
 	// Clean up DB state and LiveKit for each participant.
 	for _, vs := range states {
-		_ = h.db.LeaveVoiceChannel(vs.UserID)
+		if err := h.db.LeaveVoiceChannel(vs.UserID); err != nil {
+			slog.Error("CleanupVoiceForChannel LeaveVoiceChannel", "err", err, "user_id", vs.UserID, "channel_id", channelID)
+		}
 
 		// Clear client voice state.
 		h.mu.RLock()
@@ -285,6 +291,33 @@ func (h *Hub) Register(c *Client) {
 // Unregister queues a client for removal from the hub.
 func (h *Hub) Unregister(c *Client) {
 	h.unregister <- c
+}
+
+func (h *Hub) registerNow(c *Client) {
+	h.mu.Lock()
+	if old, exists := h.clients[c.userID]; exists {
+		oldVoiceChID := old.clearVoiceChID()
+		if c.getVoiceChID() == 0 {
+			c.setVoiceChID(oldVoiceChID)
+		}
+		// Kick the stale connection atomically before registering
+		// the new one — prevents TOCTOU races on duplicate login.
+		slog.Warn("hub: kicking stale connection for re-registering user",
+			"user_id", c.userID)
+		old.closeSend()
+	}
+	h.clients[c.userID] = c
+	slog.Info("hub: client registered", "user_id", c.userID, "total_clients", len(h.clients))
+	h.mu.Unlock()
+}
+
+func (h *Hub) unregisterNow(c *Client) {
+	h.mu.Lock()
+	if current, ok := h.clients[c.userID]; ok && current == c {
+		delete(h.clients, c.userID)
+		slog.Info("hub: client unregistered", "user_id", c.userID, "total_clients", len(h.clients))
+	}
+	h.mu.Unlock()
 }
 
 // BroadcastToChannel enqueues msg for delivery to all clients subscribed to
@@ -361,6 +394,19 @@ func (h *Hub) ClientCount() int {
 	return len(h.clients)
 }
 
+// VoiceSessionCount returns the number of clients currently in a voice channel.
+func (h *Hub) VoiceSessionCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	count := 0
+	for _, c := range h.clients {
+		if c.getVoiceChID() != 0 {
+			count++
+		}
+	}
+	return count
+}
+
 // kickClient forcibly removes a client from the hub and closes its send channel,
 // which causes writePump to exit and the WebSocket connection to close.
 // It is safe to call from any goroutine.
@@ -387,14 +433,15 @@ func (h *Hub) ReplayBuffer() *EventRingBuffer {
 func wrapWithSeq(msg []byte, seq uint64) []byte {
 	// Fast path: inject seq after the opening brace.
 	// e.g., {"type":"chat_message",...} → {"seq":123,"type":"chat_message",...}
-	if len(msg) > 0 && msg[0] == '{' {
-		prefix := fmt.Sprintf(`{"seq":%d,`, seq)
-		result := make([]byte, 0, len(prefix)+len(msg)-1)
-		result = append(result, prefix...)
-		result = append(result, msg[1:]...) // skip opening brace
-		return result
+	// Guard: msg must be a non-empty JSON object (starts with '{' and has content).
+	if len(msg) < 2 || msg[0] != '{' {
+		return msg
 	}
-	return msg
+	prefix := fmt.Sprintf(`{"seq":%d,`, seq)
+	result := make([]byte, 0, len(prefix)+len(msg)-1)
+	result = append(result, prefix...)
+	result = append(result, msg[1:]...) // skip opening brace
+	return result
 }
 
 // staleClientTimeout is the maximum duration a client can go without sending

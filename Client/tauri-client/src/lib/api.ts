@@ -19,6 +19,8 @@ import type {
   UploadResponse,
   VoiceCredentialsResponse,
   MemberResponse,
+  DmChannelsResponse,
+  CreateDmResponse,
 } from "./types";
 
 /** Configuration for the API client. */
@@ -69,13 +71,15 @@ export function createApiClient(
     return h;
   }
 
-  async function request<T>(
+  async function doFetch<T>(
+    label: string,
+    urlBase: string,
     method: string,
     path: string,
     body?: unknown,
     signal?: AbortSignal,
   ): Promise<T> {
-    const url = `${baseUrl()}${path}`;
+    const url = `${urlBase}${path}`;
     const init: RequestInit & { danger?: { acceptInvalidCerts: boolean; acceptInvalidHostnames: boolean } } = {
       method,
       headers: headers(),
@@ -86,21 +90,20 @@ export function createApiClient(
       init.body = JSON.stringify(body);
     }
 
-    log.debug("API →", { method, path });
+    log.debug(`${label} →`, { method, path });
 
     let res: Response;
     try {
       res = await fetch(url, init as RequestInit);
     } catch (fetchErr) {
-      // Tauri plugin errors may not be standard Error instances
-      log.error("API fetch failed", { method, path, error: String(fetchErr) });
+      log.error(`${label} fetch failed`, { method, path, error: String(fetchErr) });
       if (fetchErr instanceof Error) {
         throw fetchErr;
       }
       throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr));
     }
 
-    log.debug("API ←", { method, path, status: res.status });
+    log.debug(`${label} ←`, { method, path, status: res.status });
 
     if (res.status === 401) {
       onUnauthorized?.();
@@ -110,7 +113,7 @@ export function createApiClient(
 
     if (!res.ok) {
       const err = await parseError(res);
-      log.warn("API error", { method, path, status: res.status, code: err.error, message: err.message });
+      log.warn(`${label} error`, { method, path, status: res.status, code: err.error, message: err.message });
       throw new ApiClientError(res.status, err.error, err.message);
     }
 
@@ -122,55 +125,12 @@ export function createApiClient(
     return res.json() as Promise<T>;
   }
 
-  async function adminRequest<T>(
-    method: string,
-    path: string,
-    body?: unknown,
-    signal?: AbortSignal,
-  ): Promise<T> {
-    const url = `${adminBaseUrl()}${path}`;
-    const init: RequestInit & { danger?: { acceptInvalidCerts: boolean; acceptInvalidHostnames: boolean } } = {
-      method,
-      headers: headers(),
-      signal,
-      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
-    };
-    if (body !== undefined) {
-      init.body = JSON.stringify(body);
-    }
+  function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+    return doFetch<T>("API", baseUrl(), method, path, body, signal);
+  }
 
-    log.debug("Admin API →", { method, path });
-
-    let res: Response;
-    try {
-      res = await fetch(url, init as RequestInit);
-    } catch (fetchErr) {
-      log.error("Admin API fetch failed", { method, path, error: String(fetchErr) });
-      if (fetchErr instanceof Error) {
-        throw fetchErr;
-      }
-      throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr));
-    }
-
-    log.debug("Admin API ←", { method, path, status: res.status });
-
-    if (res.status === 401) {
-      onUnauthorized?.();
-      const err = await parseError(res);
-      throw new ApiClientError(401, err.error, err.message);
-    }
-
-    if (!res.ok) {
-      const err = await parseError(res);
-      log.warn("Admin API error", { method, path, status: res.status, code: err.error, message: err.message });
-      throw new ApiClientError(res.status, err.error, err.message);
-    }
-
-    if (res.status === 204) {
-      return undefined as T;
-    }
-
-    return res.json() as Promise<T>;
+  function adminRequest<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+    return doFetch<T>("Admin API", adminBaseUrl(), method, path, body, signal);
   }
 
   async function parseError(res: Response): Promise<ApiError> {
@@ -232,22 +192,56 @@ export function createApiClient(
       return request<void>("POST", "/auth/logout", undefined, signal);
     },
 
-    verifyTotp(
+    async verifyTotp(
       code: string,
       partialToken: string,
       signal?: AbortSignal,
     ): Promise<AuthResponse> {
-      // Temporarily set token for this request; restore in .finally()
-      const prevToken = config.token;
-      config = { ...config, token: partialToken };
-      return request<AuthResponse>(
-        "POST",
-        "/auth/verify-totp",
-        { code },
+      // Don't mutate shared config — make direct fetch with the partial token
+      const url = `${baseUrl()}/auth/verify-totp`;
+      const init: RequestInit & { danger?: { acceptInvalidCerts: boolean; acceptInvalidHostnames: boolean } } = {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${partialToken}`,
+        },
+        body: JSON.stringify({ code }),
         signal,
-      ).finally(() => {
-        config = { ...config, token: prevToken };
-      });
+        danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
+      };
+
+      let res: Response;
+      try {
+        res = await fetch(url, init as RequestInit);
+      } catch (fetchErr) {
+        log.error("API fetch failed", { method: "POST", path: "/auth/verify-totp", error: String(fetchErr) });
+        if (fetchErr instanceof Error) {
+          throw fetchErr;
+        }
+        throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr));
+      }
+
+      if (res.status === 401) {
+        onUnauthorized?.();
+        const err = await parseError(res);
+        throw new ApiClientError(401, err.error, err.message);
+      }
+
+      if (!res.ok) {
+        const err = await parseError(res);
+        throw new ApiClientError(res.status, err.error, err.message);
+      }
+
+      return res.json() as Promise<AuthResponse>;
+    },
+
+    deleteAccount(password: string, signal?: AbortSignal): Promise<void> {
+      return request<void>(
+        "DELETE",
+        "/auth/account",
+        { password },
+        signal,
+      );
     },
 
     // ── Users ─────────────────────────────────────────────
@@ -276,16 +270,16 @@ export function createApiClient(
       );
     },
 
-    enableTotp(signal?: AbortSignal): Promise<{ qr_uri: string; backup_codes: string[] }> {
-      return request("POST", "/users/me/totp/enable", undefined, signal);
+    enableTotp(password: string, signal?: AbortSignal): Promise<{ qr_uri: string; backup_codes: string[] }> {
+      return request("POST", "/users/me/totp/enable", { password }, signal);
     },
 
-    confirmTotp(code: string, signal?: AbortSignal): Promise<void> {
-      return request<void>("POST", "/users/me/totp/confirm", { code }, signal);
+    confirmTotp(password: string, code: string, signal?: AbortSignal): Promise<void> {
+      return request<void>("POST", "/users/me/totp/confirm", { password, code }, signal);
     },
 
-    disableTotp(signal?: AbortSignal): Promise<void> {
-      return request<void>("DELETE", "/users/me/totp", undefined, signal);
+    disableTotp(password: string, signal?: AbortSignal): Promise<void> {
+      return request<void>("DELETE", "/users/me/totp", { password }, signal);
     },
 
     getSessions(signal?: AbortSignal): Promise<SessionResponse[]> {
@@ -445,6 +439,31 @@ export function createApiClient(
 
     deleteSound(soundId: number, signal?: AbortSignal): Promise<void> {
       return request<void>("DELETE", `/sounds/${soundId}`, undefined, signal);
+    },
+
+    // ── Direct Messages ─────────────────────────────────────
+
+    /** List user's open DM channels. */
+    getDmChannels(signal?: AbortSignal): Promise<DmChannelsResponse> {
+      return request<DmChannelsResponse>("GET", "/dms", undefined, signal);
+    },
+
+    /** Create or get a DM channel with a user. */
+    createDm(
+      recipientId: number,
+      signal?: AbortSignal,
+    ): Promise<CreateDmResponse> {
+      return request<CreateDmResponse>(
+        "POST",
+        "/dms",
+        { recipient_id: recipientId },
+        signal,
+      );
+    },
+
+    /** Close a DM (hide from sidebar). */
+    closeDm(channelId: number, signal?: AbortSignal): Promise<void> {
+      return request<void>("DELETE", `/dms/${channelId}`, undefined, signal);
     },
 
     // ── Voice ─────────────────────────────────────────────

@@ -155,7 +155,7 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
       class: "quick-switcher__input",
       type: "text",
       placeholder: "Where do you want to go?",
-    }) as HTMLInputElement;
+    });
 
     // Results list
     resultsDiv = createElement("div", { class: "quick-switcher__results" });

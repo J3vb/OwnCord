@@ -2,6 +2,8 @@ package admin
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -15,6 +17,86 @@ import (
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 )
+
+// ─── Ticket Store for SSE Log Stream ────────────────────────────────────────
+
+// ticketEntry holds a single-use ticket with a creation timestamp for TTL.
+type ticketEntry struct {
+	createdAt time.Time
+	tokenHash string
+}
+
+// ticketStore manages short-lived, single-use tickets for SSE authentication.
+type ticketStore struct {
+	mu      sync.Mutex
+	tickets map[string]ticketEntry
+}
+
+var logTickets = &ticketStore{
+	tickets: make(map[string]ticketEntry),
+}
+
+const ticketTTL = 30 * time.Second
+
+// issue creates a new single-use ticket and returns its hex string.
+func (ts *ticketStore) issue(tokenHash string) (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generating ticket: %w", err)
+	}
+	ticket := hex.EncodeToString(b)
+
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	// Opportunistic cleanup of expired tickets.
+	now := time.Now()
+	for k, v := range ts.tickets {
+		if now.Sub(v.createdAt) > ticketTTL {
+			delete(ts.tickets, k)
+		}
+	}
+
+	ts.tickets[ticket] = ticketEntry{createdAt: now, tokenHash: tokenHash}
+	return ticket, nil
+}
+
+// redeem validates and consumes a ticket.
+func (ts *ticketStore) redeem(ticket string) (ticketEntry, bool) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+
+	entry, ok := ts.tickets[ticket]
+	if !ok {
+		return ticketEntry{}, false
+	}
+	delete(ts.tickets, ticket) // single-use: delete immediately
+
+	if time.Since(entry.createdAt) > ticketTTL {
+		return ticketEntry{}, false
+	}
+	return entry, true
+}
+
+// handleLogTicket issues a short-lived, single-use ticket for the SSE log stream.
+// POST /admin/api/logs/ticket — requires normal admin auth (cookie/header).
+func handleLogTicket(database *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := r.Context().Value(adminSessionKey).(*db.Session)
+		if !ok || sess == nil || sess.TokenHash == "" {
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session")
+			return
+		}
+
+		ticket, err := logTickets.issue(sess.TokenHash)
+		if err != nil {
+			slog.Error("failed to issue log stream ticket", "err", err)
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to generate ticket")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"ticket": ticket})
+	}
+}
 
 // LogEntry holds a single structured log record for the ring buffer.
 type LogEntry struct {
@@ -239,43 +321,52 @@ func categorizeSource(r slog.Record) string {
 	}
 }
 
-// authenticateAdmin validates a raw token string and returns the user
-// if they have ADMINISTRATOR permission. Used by both adminAuthMiddleware
-// and the SSE log stream endpoint.
-func authenticateAdmin(database *db.DB, rawToken string) (*db.User, error) {
-	if rawToken == "" {
-		return nil, fmt.Errorf("missing token")
-	}
-	hash := auth.HashToken(rawToken)
-	sess, err := database.GetSessionByTokenHash(hash)
-	if err != nil || sess == nil {
-		return nil, fmt.Errorf("invalid session")
-	}
-	if auth.IsSessionExpired(sess.ExpiresAt) {
-		return nil, fmt.Errorf("session expired")
-	}
-	user, err := database.GetUserByID(sess.UserID)
-	if err != nil || user == nil {
-		return nil, fmt.Errorf("user not found")
-	}
-	role, err := database.GetRoleByID(user.RoleID)
-	if err != nil || role == nil {
-		return nil, fmt.Errorf("role not found")
-	}
-	if !permissions.HasAdmin(role.Permissions) {
-		return nil, fmt.Errorf("administrator permission required")
-	}
-	return user, nil
-}
-
 // handleLogStream serves an SSE endpoint that streams log entries in real-time.
-// Auth is via query param ?token= since EventSource cannot send headers.
-func handleLogStream(ringBuf *RingBuffer, database *db.DB) http.HandlerFunc {
+// Auth is via query param ?ticket= — a short-lived single-use ticket obtained
+// from POST /admin/api/logs/ticket (which requires normal admin auth).
+func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Authenticate via query param.
-		rawToken := r.URL.Query().Get("token")
-		if _, err := authenticateAdmin(database, rawToken); err != nil {
-			http.Error(w, `{"error":"UNAUTHORIZED","message":"`+err.Error()+`"}`, http.StatusUnauthorized)
+		// Authenticate via single-use ticket.
+		ticket := r.URL.Query().Get("ticket")
+		entry, ok := logTickets.redeem(ticket)
+		if ticket == "" || !ok {
+			errResp, _ := json.Marshal(map[string]string{
+				"error":   "UNAUTHORIZED",
+				"message": "invalid or expired ticket",
+			})
+			http.Error(w, string(errResp), http.StatusUnauthorized)
+			return
+		}
+		sess, err := database.GetSessionByTokenHash(entry.tokenHash)
+		if err != nil || sess == nil || auth.IsSessionExpired(sess.ExpiresAt) {
+			errResp, _ := json.Marshal(map[string]string{
+				"error":   "UNAUTHORIZED",
+				"message": "invalid or expired session",
+			})
+			http.Error(w, string(errResp), http.StatusUnauthorized)
+			return
+		}
+		sessionStillAuthorized := func() bool {
+			current, currentErr := database.GetSessionByTokenHash(entry.tokenHash)
+			if currentErr != nil || current == nil || auth.IsSessionExpired(current.ExpiresAt) {
+				return false
+			}
+			user, userErr := database.GetUserByID(current.UserID)
+			if userErr != nil || user == nil {
+				return false
+			}
+			role, roleErr := database.GetRoleByID(user.RoleID)
+			if roleErr != nil || role == nil {
+				return false
+			}
+			return permissions.HasAdmin(role.Permissions)
+		}
+		if !sessionStillAuthorized() {
+			errResp, _ := json.Marshal(map[string]string{
+				"error":   "FORBIDDEN",
+				"message": "administrator permission required",
+			})
+			http.Error(w, string(errResp), http.StatusForbidden)
 			return
 		}
 
@@ -296,6 +387,9 @@ func handleLogStream(ringBuf *RingBuffer, database *db.DB) http.HandlerFunc {
 
 		// Send backfill.
 		for _, entry := range ringBuf.Snapshot() {
+			if !sessionStillAuthorized() {
+				return
+			}
 			if data, err := json.Marshal(entry); err == nil {
 				_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 			}
@@ -314,11 +408,17 @@ func handleLogStream(ringBuf *RingBuffer, database *db.DB) http.HandlerFunc {
 		for {
 			select {
 			case entry := <-ch:
+				if !sessionStillAuthorized() {
+					return
+				}
 				if data, err := json.Marshal(entry); err == nil {
 					_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 					flusher.Flush()
 				}
 			case <-keepalive.C:
+				if !sessionStillAuthorized() {
+					return
+				}
 				_, _ = fmt.Fprint(w, ": keepalive\n\n")
 				flusher.Flush()
 			case <-ctx.Done():

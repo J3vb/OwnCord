@@ -6,28 +6,65 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, applyTheme, THEMES, createToggle } from "./helpers";
 import type { ThemeName } from "./helpers";
 import { setTheme } from "@stores/ui.store";
+import { getActiveThemeName, loadCustomTheme, restoreTheme } from "@lib/themes";
+
+const FALLBACK_ACCENT = "#5865f2";
+
+function getDefaultAccent(themeName: string): string {
+  if (themeName === "neon-glow") return "#00c8ff";
+  if (themeName in THEMES) return FALLBACK_ACCENT;
+
+  const customTheme = loadCustomTheme(themeName);
+  const accent = customTheme?.colors["--accent"];
+  return typeof accent === "string" && /^#[\da-fA-F]{3,8}$/.test(accent)
+    ? accent
+    : FALLBACK_ACCENT;
+}
 
 export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
-  const currentTheme = loadPref<ThemeName>("theme", "dark");
+  const activeThemeName = getActiveThemeName();
+  const currentTheme = activeThemeName in THEMES
+    ? activeThemeName as ThemeName
+    : null;
   const currentFontSize = loadPref<number>("fontSize", 16);
   const currentCompact = loadPref<boolean>("compactMode", false);
+  let hasStoredAccent = localStorage.getItem("owncord:settings:accentColor") !== null;
+  const defaultAccent = getDefaultAccent(activeThemeName);
 
   // Theme selector
   const themeHeader = createElement("h3", {}, "Theme");
-  const themeRow = createElement("div", { class: "theme-options" });
+  const themeRow = createElement("div", { class: "theme-options", role: "radiogroup" });
   for (const name of Object.keys(THEMES) as ThemeName[]) {
-    const btn = createElement("div", {
-      class: `theme-opt ${name}${name === currentTheme ? " active" : ""}`,
+    const isActive = name === currentTheme;
+    const btn = createElement("button", {
+      class: `theme-opt ${name}${isActive ? " active" : ""}`,
+      role: "radio",
+      tabindex: "0",
+      "aria-checked": isActive ? "true" : "false",
+      "aria-label": name.charAt(0).toUpperCase() + name.slice(1),
     }, name.charAt(0).toUpperCase() + name.slice(1));
 
-    btn.addEventListener("click", () => {
+    const activateTheme = (): void => {
       applyTheme(name);
-      savePref("theme", name);
       setTheme(name);
-      const prev = themeRow.querySelector(".theme-opt.active");
-      if (prev) prev.classList.remove("active");
+      for (const child of themeRow.children) {
+        child.classList.remove("active");
+        child.setAttribute("aria-checked", "false");
+      }
       btn.classList.add("active");
+      btn.setAttribute("aria-checked", "true");
+      if (!hasStoredAccent) {
+        syncDisplayedAccent(getDefaultAccent(name));
+      }
+    };
+
+    btn.addEventListener("click", activateTheme, { signal });
+    btn.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        activateTheme();
+      }
     }, { signal });
 
     themeRow.appendChild(btn);
@@ -69,7 +106,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
 
   // Accent color picker
   const ACCENT_PRESETS: readonly string[] = [
-    "#5865f2", // Discord blurple (default)
+    "#00c8ff", // OwnCord neon cyan
     "#57f287", // green
     "#fee75c", // yellow
     "#eb459e", // fuchsia/pink
@@ -77,17 +114,21 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     "#f47b67", // salmon
     "#e78b38", // orange
     "#3ba55d", // dark green
-    "#45ddff", // cyan
+    "#5865f2", // blurple
     "#b9bbbe", // grey
   ];
 
-  const currentAccent = loadPref<string>("accentColor", "#5865f2");
+  const currentAccent = loadPref<string>("accentColor", defaultAccent);
 
   function applyAccent(color: string): void {
+    // Set on both documentElement and body so the accent wins over
+    // theme class specificity (body.theme-neon-glow sets --accent)
     document.documentElement.style.setProperty("--accent", color);
+    document.body.style.setProperty("--accent", color);
   }
 
   function saveAccent(color: string): void {
+    hasStoredAccent = true;
     savePref("accentColor", color);
     applyAccent(color);
   }
@@ -102,10 +143,20 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     class: "form-input",
     type: "text",
     maxlength: "6",
-    placeholder: "5865f2",
+    placeholder: defaultAccent.replace("#", ""),
     value: currentAccent.replace("#", ""),
     style: "width:120px",
-  }) as HTMLInputElement;
+  });
+
+  function syncDisplayedAccent(color: string): void {
+    for (const child of swatchesRow.children) {
+      const isMatch = (child as HTMLElement).style.backgroundColor === hexToRgb(color);
+      child.classList.toggle("active", isMatch);
+      child.setAttribute("aria-checked", isMatch ? "true" : "false");
+    }
+    hexInput.value = color.replace("#", "");
+    hexInput.placeholder = color.replace("#", "");
+  }
 
   for (const color of ACCENT_PRESETS) {
     const swatch = createElement("div", {
@@ -122,14 +173,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
 
     const activateSwatch = (): void => {
       saveAccent(color);
-      // Update active state on all swatches
-      for (const child of swatchesRow.children) {
-        child.classList.remove("active");
-        child.setAttribute("aria-checked", "false");
-      }
-      swatch.classList.add("active");
-      swatch.setAttribute("aria-checked", "true");
-      hexInput.value = color.replace("#", "");
+      syncDisplayedAccent(color);
     };
 
     swatch.addEventListener("click", activateSwatch, { signal });
@@ -149,12 +193,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     if (raw.length === 6) {
       const color = `#${raw}`;
       saveAccent(color);
-      // Clear active preset swatches since it's a custom color
-      for (const child of swatchesRow.children) {
-        const isMatch = (child as HTMLElement).style.backgroundColor === hexToRgb(color);
-        child.classList.toggle("active", isMatch);
-        child.setAttribute("aria-checked", isMatch ? "true" : "false");
-      }
+      syncDisplayedAccent(color);
     }
   }, { signal });
 
@@ -162,10 +201,16 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   appendChildren(section, accentHeader, swatchesRow, hexInputRow);
 
   // Apply stored preferences on render
-  applyTheme(currentTheme);
+  if (currentTheme === null) {
+    restoreTheme();
+  } else {
+    applyTheme(currentTheme);
+  }
   document.documentElement.style.setProperty("--font-size", `${currentFontSize}px`);
   document.documentElement.classList.toggle("compact-mode", currentCompact);
-  applyAccent(currentAccent);
+  if (hasStoredAccent) {
+    applyAccent(currentAccent);
+  }
 
   return section;
 }

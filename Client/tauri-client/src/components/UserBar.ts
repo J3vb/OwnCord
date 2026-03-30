@@ -10,7 +10,9 @@ import { Disposable } from "@lib/disposable";
 import { authStore } from "@stores/auth.store";
 import { openSettings } from "@stores/ui.store";
 
-export type UserBarOptions = Record<string, never>;
+export interface UserBarOptions {
+  readonly onDisconnect?: () => void;
+}
 
 export function createUserBar(options?: UserBarOptions): MountableComponent {
   const disposable = new Disposable();
@@ -72,6 +74,20 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     });
 
     buttons.appendChild(settingsBtn);
+
+    if (options?.onDisconnect !== undefined) {
+      const disconnectFn = options.onDisconnect;
+      const disconnectBtn = createElement("button", {
+        class: "ub-ctrl-btn",
+        title: "Switch server",
+        "aria-label": "Switch server",
+        "data-testid": "disconnect-btn",
+      });
+      disconnectBtn.appendChild(createIcon("log-out", 18));
+      disposable.onEvent(disconnectBtn, "click", () => disconnectFn());
+      buttons.appendChild(disconnectBtn);
+    }
+
     appendChildren(root, avatarEl, info, buttons);
 
     // Initial render

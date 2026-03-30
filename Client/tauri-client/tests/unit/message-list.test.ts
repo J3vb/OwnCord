@@ -190,4 +190,135 @@ describe("MessageList", () => {
     const dividers = container.querySelectorAll(".msg-day-divider");
     expect(dividers.length).toBe(2);
   });
+
+  it("renders DM channel empty state differently from text channels", () => {
+    msgList.destroy?.();
+    const dmOptions: MessageListOptions = {
+      ...options,
+      channelName: "Bob",
+      channelType: "dm",
+    };
+    msgList = createMessageList(dmOptions);
+    msgList.mount(container);
+
+    const title = container.querySelector(".channel-welcome-title");
+    expect(title?.textContent).toBe("Bob");
+
+    const icon = container.querySelector(".channel-welcome-icon");
+    expect(icon?.textContent).toBe("@");
+
+    const text = container.querySelector(".channel-welcome-text");
+    expect(text?.textContent).toBe("This is the beginning of your direct message history with Bob.");
+  });
+
+  it("includes a scroll-to-bottom button", () => {
+    msgList.mount(container);
+    const btn = container.querySelector(".scroll-to-bottom-btn");
+    expect(btn).not.toBeNull();
+    expect(btn?.textContent).toBe("\u2193");
+  });
+
+  it("calls onScrollTop when scrolling near the top and there are more messages", () => {
+    setHasMore(1, true);
+    setMessages(1, [makeMessage({ id: 1 })]);
+    msgList.mount(container);
+
+    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    // jsdom scrollTop defaults to 0 which is already < SCROLL_TOP_THRESHOLD(50)
+    // Manually trigger the scroll event
+    root.dispatchEvent(new Event("scroll"));
+
+    expect(options.onScrollTop).toHaveBeenCalledOnce();
+  });
+
+  it("does not call onScrollTop when no more messages are available", () => {
+    setHasMore(1, false);
+    setMessages(1, [makeMessage({ id: 1 })]);
+    msgList.mount(container);
+
+    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    root.dispatchEvent(new Event("scroll"));
+
+    expect(options.onScrollTop).not.toHaveBeenCalled();
+  });
+
+  it("does not call onScrollTop twice without new messages arriving", () => {
+    setHasMore(1, true);
+    setMessages(1, [makeMessage({ id: 1 })]);
+    msgList.mount(container);
+
+    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    root.dispatchEvent(new Event("scroll"));
+    root.dispatchEvent(new Event("scroll"));
+
+    // loadingOlder guard prevents double-calling
+    expect(options.onScrollTop).toHaveBeenCalledTimes(1);
+  });
+
+  it("resets loadingOlder flag when new messages arrive after scroll-top", () => {
+    setHasMore(1, true);
+    setMessages(1, [makeMessage({ id: 1 })]);
+    msgList.mount(container);
+
+    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    root.dispatchEvent(new Event("scroll"));
+    expect(options.onScrollTop).toHaveBeenCalledTimes(1);
+
+    // Simulate new messages arriving (load-more response)
+    setMessages(1, [
+      makeMessage({ id: 0, content: "Older message" }),
+      makeMessage({ id: 1 }),
+    ]);
+    messagesStore.flush();
+
+    // Now scrolling to top again should trigger onScrollTop again
+    root.dispatchEvent(new Event("scroll"));
+    expect(options.onScrollTop).toHaveBeenCalledTimes(2);
+  });
+
+  it("scrollToMessage returns false before mount", () => {
+    // scrollToMessage should be safe to call before mount
+    const unmounted = createMessageList(options);
+    expect(unmounted.scrollToMessage(1)).toBe(false);
+    unmounted.destroy?.();
+  });
+
+  it("groups consecutive messages from the same user within threshold", () => {
+    // Two messages from same user within 5 minutes
+    const messages = [
+      makeMessage({
+        id: 1,
+        user: { id: 1, username: "Alice", avatar: null },
+        timestamp: "2024-01-15T12:00:00Z",
+        content: "First message",
+      }),
+      makeMessage({
+        id: 2,
+        user: { id: 1, username: "Alice", avatar: null },
+        timestamp: "2024-01-15T12:01:00Z",
+        content: "Second message",
+      }),
+    ];
+    setMessages(1, messages);
+    msgList.mount(container);
+
+    const content = container.querySelector(".virtual-content");
+    expect(content).not.toBeNull();
+    // Both messages should render; the second should be grouped (class "message grouped")
+    const grouped = content!.querySelectorAll(".message.grouped");
+    expect(grouped.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("destroys cleanly without errors even with loaded messages", () => {
+    setMessages(1, [
+      makeMessage({ id: 1 }),
+      makeMessage({ id: 2 }),
+    ]);
+    msgList.mount(container);
+    expect(container.querySelector(".messages-container")).not.toBeNull();
+
+    // destroy should not throw
+    expect(() => msgList.destroy?.()).not.toThrow();
+    expect(container.querySelector(".messages-container")).toBeNull();
+  });
 });

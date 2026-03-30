@@ -4,7 +4,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "./helpers";
-import { switchInputDevice, switchOutputDevice, setVoiceSensitivity, setInputVolume, setOutputVolume } from "@lib/livekitSession";
+import { switchInputDevice, switchOutputDevice, setVoiceSensitivity, setInputVolume, setOutputVolume, reapplyAudioProcessing } from "@lib/livekitSession";
 
 export interface VoiceAudioTabHandle {
   build(): HTMLDivElement;
@@ -16,9 +16,11 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
   let micAudioCtx: AudioContext | null = null;
   let micAnimFrame: number | null = null;
   let cameraPreviewStream: MediaStream | null = null;
+  let invalidateCameraPreviewRequest: (() => void) | null = null;
 
   function cleanupMic(): void {
     if (micAnimFrame !== null) { cancelAnimationFrame(micAnimFrame); micAnimFrame = null; }
+    invalidateCameraPreviewRequest?.();
     if (micStream !== null) {
       for (const track of micStream.getTracks()) track.stop();
       micStream = null;
@@ -44,6 +46,8 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
         for (const track of cameraPreviewStream.getTracks()) track.stop();
       }
       cameraPreviewStream = stream;
+    }, (invalidate) => {
+      invalidateCameraPreviewRequest = invalidate;
     });
   }
 
@@ -59,8 +63,14 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
 
 type MicRegistrar = (stream: MediaStream, ctx: AudioContext, frame: number) => void;
 type CameraRegistrar = (stream: MediaStream | null) => void;
+type CameraInvalidationRegistrar = (invalidate: () => void) => void;
 
-function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar, registerCamera: CameraRegistrar): HTMLDivElement {
+function buildVoiceAudioTabInner(
+  signal: AbortSignal,
+  registerMic: MicRegistrar,
+  registerCamera: CameraRegistrar,
+  registerCameraInvalidation: CameraInvalidationRegistrar,
+): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
 
   // Input device selector
@@ -96,6 +106,63 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
   appendChildren(inputVolumeRow, inputVolumeSlider, inputVolumeLabel);
   section.appendChild(inputVolumeRow);
 
+  // ── Mic level meter with draggable sensitivity threshold ────────
+  const sensitivityHeader = createElement("h3", {}, "Input Sensitivity");
+  section.appendChild(sensitivityHeader);
+
+  // Real-time mic level bar with embedded draggable threshold handle
+  const meterWrap = createElement("div", { class: "mic-meter-wrap" });
+  const meterBar = createElement("div", { class: "mic-meter-bar" });
+  const meterLevel = createElement("div", { class: "mic-meter-level" });
+  const meterThreshold = createElement("div", { class: "mic-meter-threshold" });
+  meterBar.appendChild(meterLevel);
+  meterBar.appendChild(meterThreshold);
+  meterWrap.appendChild(meterBar);
+  section.appendChild(meterWrap);
+
+  let currentSensitivity = loadPref<number>("voiceSensitivity", 50);
+
+  function updateThresholdIndicator(sensitivity: number): void {
+    // Invert: sensitivity 100 (no gating) → handle at LEFT (0%),
+    //         sensitivity 0 (max gating) → handle at RIGHT (100%).
+    // This matches Discord: drag LEFT = easier to pass, RIGHT = harder.
+    meterThreshold.style.left = `${100 - sensitivity}%`;
+  }
+  updateThresholdIndicator(currentSensitivity);
+
+  /** Compute sensitivity % from a mouse/touch X position relative to the meter bar. */
+  function sensitivityFromPointer(clientX: number): number {
+    const rect = meterBar.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    // Invert: clicking LEFT = high sensitivity, RIGHT = low sensitivity
+    return Math.round((1 - ratio) * 100);
+  }
+
+  function applySensitivity(val: number): void {
+    currentSensitivity = val;
+    savePref("voiceSensitivity", val);
+    setVoiceSensitivity(val);
+    updateThresholdIndicator(val);
+  }
+
+  // Drag the threshold handle
+  meterThreshold.addEventListener("pointerdown", (e: PointerEvent) => {
+    e.preventDefault();
+    meterThreshold.setPointerCapture(e.pointerId);
+    const onMove = (ev: PointerEvent): void => { applySensitivity(sensitivityFromPointer(ev.clientX)); };
+    const onUp = (): void => {
+      meterThreshold.removeEventListener("pointermove", onMove);
+      meterThreshold.removeEventListener("pointerup", onUp);
+    };
+    meterThreshold.addEventListener("pointermove", onMove, { signal });
+    meterThreshold.addEventListener("pointerup", onUp, { signal });
+  }, { signal });
+
+  // Click on the meter bar to jump the threshold
+  meterBar.addEventListener("click", (e: MouseEvent) => {
+    applySensitivity(sensitivityFromPointer(e.clientX));
+  }, { signal });
+
   // Output device selector
   const outputHeader = createElement("h3", {}, "Output Device");
   const outputSelect = createElement("select", {
@@ -128,6 +195,35 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
   }, { signal });
   appendChildren(outputVolumeRow, outputVolumeSlider, outputVolumeLabel);
   section.appendChild(outputVolumeRow);
+
+  // Stream quality selector
+  const qualityHeader = createElement("h3", {}, "Stream Quality");
+  const qualityDesc = createElement("p", {
+    style: "color:var(--text-muted);font-size:12px;margin:0 0 8px",
+  }, "Applies to camera and screenshare. Higher quality uses more bandwidth. Changes take effect on next voice join.");
+  const qualitySelect = createElement("select", {
+    class: "form-input",
+    style: "width:100%;margin-bottom:16px",
+  });
+  const qualityOptions: Array<[string, string]> = [
+    ["low", "Low (360p cam / 720p screen)"],
+    ["medium", "Medium (720p)"],
+    ["high", "High (1080p)"],
+    ["source", "Source (1080p max bitrate)"],
+  ];
+  const savedQuality = loadPref<string>("streamQuality", "high");
+  for (const [value, label] of qualityOptions) {
+    const opt = createElement("option", { value }, label);
+    if (value === savedQuality) opt.setAttribute("selected", "");
+    qualitySelect.appendChild(opt);
+  }
+  qualitySelect.value = savedQuality;
+  qualitySelect.addEventListener("change", () => {
+    savePref("streamQuality", qualitySelect.value);
+  }, { signal });
+  section.appendChild(qualityHeader);
+  section.appendChild(qualityDesc);
+  section.appendChild(qualitySelect);
 
   // Video device selector
   const videoHeader = createElement("h3", {}, "Video Device");
@@ -202,7 +298,14 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
     void switchOutputDevice(outputSelect.value);
   }, { signal });
 
+  // Race guard: prevent stale getUserMedia results from overwriting a newer request
+  let cameraRequestId = 0;
+  registerCameraInvalidation(() => {
+    cameraRequestId += 1;
+  });
+
   function stopCameraPreview(): void {
+    cameraRequestId += 1;
     registerCamera(null);
     previewVideo.srcObject = null;
   }
@@ -219,6 +322,7 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
   function startCameraPreview(deviceId: string): void {
     stopCameraPreview();
     clearPreviewError();
+    const thisRequest = ++cameraRequestId;
     void (async () => {
       try {
         const constraints: MediaStreamConstraints = {
@@ -228,11 +332,17 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
           audio: false,
         };
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        // Race guard: if a newer request was issued while we awaited, discard this result
+        if (signal.aborted || thisRequest !== cameraRequestId) {
+          for (const track of stream.getTracks()) track.stop();
+          return;
+        }
         registerCamera(stream);
         previewVideo.srcObject = stream;
       } catch (err) {
+        if (signal.aborted || thisRequest !== cameraRequestId) return;
         const msg = err instanceof Error ? err.message : "Camera unavailable";
-        previewErrorEl = createElement("div", { class: "setting-desc" }, msg) as HTMLDivElement;
+        previewErrorEl = createElement("div", { class: "setting-desc" }, msg);
         previewWrap.appendChild(previewErrorEl);
       }
     })();
@@ -252,49 +362,6 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
   signal.addEventListener("abort", () => {
     stopCameraPreview();
   });
-
-  // ── Mic level meter + sensitivity slider ──────────────────────────
-  const sensitivityHeader = createElement("h3", {}, "Input Sensitivity");
-  section.appendChild(sensitivityHeader);
-
-  // Real-time mic level bar
-  const meterWrap = createElement("div", { class: "mic-meter-wrap" });
-  const meterBar = createElement("div", { class: "mic-meter-bar" });
-  const meterLevel = createElement("div", { class: "mic-meter-level" });
-  const meterThreshold = createElement("div", { class: "mic-meter-threshold" });
-  meterBar.appendChild(meterLevel);
-  meterBar.appendChild(meterThreshold);
-  meterWrap.appendChild(meterBar);
-  section.appendChild(meterWrap);
-
-  // Sensitivity slider
-  const sensitivityRow = createElement("div", { class: "slider-row" });
-  const savedSensitivity = loadPref<number>("voiceSensitivity", 50);
-  const sensitivitySlider = createElement("input", {
-    class: "settings-slider",
-    type: "range",
-    min: "0",
-    max: "100",
-    value: String(savedSensitivity),
-  });
-  const sensitivityLabel = createElement("span", { class: "slider-val" }, `${savedSensitivity}%`);
-
-  // Position threshold indicator — matches slider direction:
-  // slider left (low sensitivity) = indicator left, slider right = indicator right
-  function updateThresholdIndicator(sensitivity: number): void {
-    meterThreshold.style.left = `${sensitivity}%`;
-  }
-  updateThresholdIndicator(savedSensitivity);
-
-  sensitivitySlider.addEventListener("input", () => {
-    const val = Number(sensitivitySlider.value);
-    setText(sensitivityLabel, `${val}%`);
-    savePref("voiceSensitivity", val);
-    setVoiceSensitivity(val);
-    updateThresholdIndicator(val);
-  }, { signal });
-  appendChildren(sensitivityRow, sensitivitySlider, sensitivityLabel);
-  section.appendChild(sensitivityRow);
 
   // Start mic level monitoring for visual feedback
   void (async () => {
@@ -330,7 +397,7 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
         meterLevel.style.width = `${visual * 100}%`;
 
         // Color: green if above threshold, yellow/red if below
-        const threshold = ((100 - Number(sensitivitySlider.value)) / 100) * 0.15;
+        const threshold = ((100 - currentSensitivity) / 100) * 0.15;
         if (rms >= threshold) {
           meterLevel.style.background = "#43b581"; // green — voice detected
         } else {
@@ -367,8 +434,8 @@ function buildVoiceAudioTabInner(signal: AbortSignal, registerMic: MicRegistrar,
       signal,
       onChange: (nowOn) => {
         savePref(item.key, nowOn);
-        const currentDevice = loadPref<string>("audioInputDevice", "");
-        void switchInputDevice(currentDevice);
+        // Reapply audio processing constraints to the live mic track
+        void reapplyAudioProcessing();
       },
     });
 

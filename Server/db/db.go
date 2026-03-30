@@ -3,6 +3,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
@@ -94,9 +95,19 @@ func (d *DB) QueryRow(query string, args ...any) *sql.Row {
 	return d.sqlDB.QueryRow(query, args...)
 }
 
+// QueryRowContext executes a query that returns at most one row, with context.
+func (d *DB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return d.sqlDB.QueryRowContext(ctx, query, args...)
+}
+
 // Exec executes a query that doesn't return rows.
 func (d *DB) Exec(query string, args ...any) (sql.Result, error) {
 	return d.sqlDB.Exec(query, args...)
+}
+
+// ExecContext executes a query that doesn't return rows, with context.
+func (d *DB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return d.sqlDB.ExecContext(ctx, query, args...)
 }
 
 // Query executes a query that returns multiple rows.
@@ -104,9 +115,19 @@ func (d *DB) Query(query string, args ...any) (*sql.Rows, error) {
 	return d.sqlDB.Query(query, args...)
 }
 
+// QueryContext executes a query that returns multiple rows, with context.
+func (d *DB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return d.sqlDB.QueryContext(ctx, query, args...)
+}
+
 // Begin starts a database transaction.
 func (d *DB) Begin() (*sql.Tx, error) {
 	return d.sqlDB.Begin()
+}
+
+// BeginTx starts a database transaction with context and options.
+func (d *DB) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+	return d.sqlDB.BeginTx(ctx, opts)
 }
 
 // SQLDb returns the underlying *sql.DB for cases requiring direct access.

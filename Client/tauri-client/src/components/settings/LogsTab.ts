@@ -7,6 +7,7 @@ import { getLogBuffer, clearLogBuffer, addLogListener, setLogLevel } from "@lib/
 import type { LogEntry, LogLevel } from "@lib/logger";
 import type { TabName } from "../SettingsOverlay";
 import { getSessionDebugInfo } from "@lib/livekitSession";
+import { loadPref, savePref } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -18,6 +19,9 @@ const LOG_LEVEL_COLORS: Record<LogLevel, string> = {
   warn: "#faa61a",
   error: "#ed4245",
 };
+
+const LOG_FILTER_LEVELS = ["all", "debug", "info", "warn", "error"] as const;
+const LOG_MIN_LEVELS = ["debug", "info", "warn", "error"] as const;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -47,6 +51,40 @@ function formatLogEntry(entry: LogEntry): HTMLDivElement {
   return row;
 }
 
+function readMigratedStringPref<T extends string>(
+  key: string,
+  fallback: T,
+  allowedValues: readonly T[],
+): T {
+  const currentRaw = localStorage.getItem(`owncord:settings:${key}`);
+  if (currentRaw !== null) {
+    try {
+      const currentValue: unknown = JSON.parse(currentRaw);
+      if (typeof currentValue === "string" && allowedValues.includes(currentValue as T)) {
+        return currentValue as T;
+      }
+    } catch {
+      // Ignore corrupted current storage and fall back below.
+    }
+  }
+
+  const legacyRaw = localStorage.getItem(key);
+  if (legacyRaw !== null) {
+    let legacyValue: unknown = legacyRaw;
+    try {
+      legacyValue = JSON.parse(legacyRaw);
+    } catch {
+      // Legacy values were previously stored as raw strings.
+    }
+    if (typeof legacyValue === "string" && allowedValues.includes(legacyValue as T)) {
+      savePref(key, legacyValue);
+      return legacyValue as T;
+    }
+  }
+
+  return fallback;
+}
+
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -61,7 +99,7 @@ export function createLogsTab(
   signal: AbortSignal,
 ): LogsTabHandle {
   let logListEl: HTMLDivElement | null = null;
-  let logFilterLevel: LogLevel | "all" = (localStorage.getItem("logs_filter_level") as LogLevel | "all") ?? "all";
+  let logFilterLevel: LogLevel | "all" = readMigratedStringPref("logs_filter_level", "all", LOG_FILTER_LEVELS);
   let unsubLogListener: (() => void) | null = null;
 
   function renderLogEntries(): void {
@@ -100,8 +138,7 @@ export function createLogsTab(
     const filterSelect = createElement("select", {
       style: "background: var(--bg-tertiary); color: var(--text-normal); border: 1px solid var(--bg-active); border-radius: 4px; padding: 4px 8px; font-size: 13px;",
     });
-    const levels: Array<LogLevel | "all"> = ["all", "debug", "info", "warn", "error"];
-    for (const lvl of levels) {
+    for (const lvl of LOG_FILTER_LEVELS) {
       const opt = createElement("option", { value: lvl }, lvl.toUpperCase());
       if (lvl === logFilterLevel) opt.setAttribute("selected", "");
       filterSelect.appendChild(opt);
@@ -109,7 +146,7 @@ export function createLogsTab(
     filterSelect.value = logFilterLevel;
     filterSelect.addEventListener("change", () => {
       logFilterLevel = filterSelect.value as LogLevel | "all";
-      localStorage.setItem("logs_filter_level", logFilterLevel);
+      savePref("logs_filter_level", logFilterLevel);
       renderLogEntries();
     }, { signal });
 
@@ -118,20 +155,19 @@ export function createLogsTab(
     const levelSelect = createElement("select", {
       style: "background: var(--bg-tertiary); color: var(--text-normal); border: 1px solid var(--bg-active); border-radius: 4px; padding: 4px 8px; font-size: 13px;",
     });
-    const minLevels: LogLevel[] = ["debug", "info", "warn", "error"];
-    for (const lvl of minLevels) {
+    for (const lvl of LOG_MIN_LEVELS) {
       const opt = createElement("option", { value: lvl }, lvl.toUpperCase());
       levelSelect.appendChild(opt);
     }
-    const savedMinLevel = localStorage.getItem("logs_min_level") as LogLevel | null;
-    if (savedMinLevel !== null) {
+    const savedMinLevel = readMigratedStringPref<LogLevel | "">("logs_min_level", "", ["", ...LOG_MIN_LEVELS]);
+    if (savedMinLevel !== "") {
       levelSelect.value = savedMinLevel;
       setLogLevel(savedMinLevel);
     }
     levelSelect.addEventListener("change", () => {
       const level = levelSelect.value as LogLevel;
       setLogLevel(level);
-      localStorage.setItem("logs_min_level", level);
+      savePref("logs_min_level", level);
     }, { signal });
 
     // Copy All button
@@ -154,6 +190,9 @@ export function createLogsTab(
       }).join("\n");
       void navigator.clipboard.writeText(text).then(() => {
         copyBtn.textContent = "Copied!";
+        setTimeout(() => { copyBtn.textContent = "Copy All"; }, 1500);
+      }).catch(() => {
+        copyBtn.textContent = "Failed to copy";
         setTimeout(() => { copyBtn.textContent = "Copy All"; }, 1500);
       });
     }, { signal });
@@ -193,6 +232,9 @@ export function createLogsTab(
     diagCopy.addEventListener("click", () => {
       void navigator.clipboard.writeText(diagPanel.textContent ?? "").then(() => {
         diagCopy.textContent = "Copied!";
+        setTimeout(() => { diagCopy.textContent = "Copy Diagnostics"; }, 1500);
+      }).catch(() => {
+        diagCopy.textContent = "Failed to copy";
         setTimeout(() => { diagCopy.textContent = "Copy Diagnostics"; }, 1500);
       });
     }, { signal });

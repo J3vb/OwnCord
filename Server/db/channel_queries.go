@@ -4,13 +4,18 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // ListChannels returns all channels ordered by position.
 func (d *DB) ListChannels() ([]Channel, error) {
 	rows, err := d.sqlDB.Query(
 		`SELECT id, name, type, COALESCE(category,''), COALESCE(topic,''),
-		        position, slow_mode, archived, created_at
+		        position, slow_mode, archived, created_at,
+		        COALESCE(voice_max_users, 0),
+		        voice_quality,
+		        mixing_threshold,
+		        COALESCE(voice_max_video, 0)
 		 FROM channels ORDER BY position ASC, id ASC`,
 	)
 	if err != nil {
@@ -172,12 +177,16 @@ func (d *DB) GetAllChannelPermissionsForRole(roleID int64) (map[int64]ChannelOve
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 // scanChannel scans a single channel row from *sql.Rows.
+// The query must select the 13 columns: id, name, type, category, topic,
+// position, slow_mode, archived, created_at, voice_max_users,
+// voice_quality, mixing_threshold, voice_max_video.
 func scanChannel(rows *sql.Rows) (Channel, error) {
 	var ch Channel
 	var archived int
 	err := rows.Scan(
 		&ch.ID, &ch.Name, &ch.Type, &ch.Category, &ch.Topic,
 		&ch.Position, &ch.SlowMode, &archived, &ch.CreatedAt,
+		&ch.VoiceMaxUsers, &ch.VoiceQuality, &ch.MixingThreshold, &ch.VoiceMaxVideo,
 	)
 	if err != nil {
 		return Channel{}, err
@@ -193,4 +202,42 @@ func nullableString(s string) any {
 		return nil
 	}
 	return s
+}
+
+// GetChannelTypes returns a map of channel ID → type string for the given IDs
+// in a single query, avoiding N+1 lookups.
+func (d *DB) GetChannelTypes(ids []int64) (map[int64]string, error) {
+	if len(ids) == 0 {
+		return map[int64]string{}, nil
+	}
+
+	// Build placeholders and args.
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(
+		`SELECT id, type FROM channels WHERE id IN (%s)`,
+		strings.Join(placeholders, ","),
+	)
+
+	rows, err := d.sqlDB.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("GetChannelTypes query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := make(map[int64]string, len(ids))
+	for rows.Next() {
+		var id int64
+		var chType string
+		if err := rows.Scan(&id, &chType); err != nil {
+			return nil, fmt.Errorf("GetChannelTypes scan: %w", err)
+		}
+		result[id] = chType
+	}
+	return result, rows.Err()
 }

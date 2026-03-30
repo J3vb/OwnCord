@@ -30,14 +30,15 @@ type uploadResponse struct {
 }
 
 // MountUploadRoutes registers upload and file-serving endpoints.
-func MountUploadRoutes(r chi.Router, database *db.DB, store *storage.Storage) {
+// allowedOrigins controls the Access-Control-Allow-Origin header on served files.
+func MountUploadRoutes(r chi.Router, database *db.DB, store *storage.Storage, allowedOrigins []string) {
 	// Upload requires authentication and a higher body size limit (100 MB).
 	r.With(
 		AuthMiddleware(database),
 		MaxBodySize(100<<20),
 	).Post("/api/v1/uploads", handleUpload(database, store))
 	// File serving is public (URLs are unguessable UUIDs).
-	r.Get("/api/v1/files/{id}", handleServeFile(database, store))
+	r.Get("/api/v1/files/{id}", handleServeFile(database, store, allowedOrigins))
 }
 
 func handleUpload(database *db.DB, store *storage.Storage) http.HandlerFunc {
@@ -64,15 +65,26 @@ func handleUpload(database *db.DB, store *storage.Storage) http.HandlerFunc {
 		// Generate UUID for storage.
 		fileID := uuid.New().String()
 
-		// Detect MIME type from the Content-Type header (set by the browser).
-		mime := header.Header.Get("Content-Type")
-		if mime == "" {
-			mime = "application/octet-stream"
+		// Detect MIME type from actual file bytes (never trust client header).
+		var sniffBuf [512]byte
+		n, readErr := file.Read(sniffBuf[:])
+		if readErr != nil && readErr.Error() != "EOF" && readErr.Error() != "unexpected EOF" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error":   "BAD_REQUEST",
+				"message": "failed to read uploaded file",
+			})
+			return
 		}
-		// Strip parameters (e.g., "image/png; charset=utf-8" → "image/png").
-		if idx := strings.Index(mime, ";"); idx != -1 {
-			mime = strings.TrimSpace(mime[:idx])
+		detectedMime := http.DetectContentType(sniffBuf[:n])
+		// Seek back so the full content is available for storage.
+		if _, seekErr := file.Seek(0, 0); seekErr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error":   "INTERNAL_ERROR",
+				"message": "failed to process uploaded file",
+			})
+			return
 		}
+		mime := detectedMime
 
 		// Store file on disk (validates file type via magic bytes).
 		if err := store.Save(fileID, file); err != nil {
@@ -127,7 +139,7 @@ func handleUpload(database *db.DB, store *storage.Storage) http.HandlerFunc {
 	}
 }
 
-func handleServeFile(database *db.DB, store *storage.Storage) http.HandlerFunc {
+func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fileID := chi.URLParam(r, "id")
 		if fileID == "" {
@@ -139,7 +151,10 @@ func handleServeFile(database *db.DB, store *storage.Storage) http.HandlerFunc {
 		att, err := database.GetAttachmentByID(fileID)
 		if err != nil {
 			slog.Error("failed to look up attachment", "id", fileID, "error", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error:   "INTERNAL_ERROR",
+				Message: "internal server error",
+			})
 			return
 		}
 		if att == nil {
@@ -159,11 +174,22 @@ func handleServeFile(database *db.DB, store *storage.Storage) http.HandlerFunc {
 		w.Header().Set("Content-Type", att.MimeType)
 		w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": att.Filename}))
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		// CORS: allow webview to read the response body.
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Expose-Headers", "Content-Type, Content-Length")
+		// CORS: allow webview to read the response body using configured origins.
+		if origin := r.Header.Get("Origin"); origin != "" {
+			for _, allowed := range allowedOrigins {
+				if allowed == "*" || strings.EqualFold(allowed, origin) {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Access-Control-Expose-Headers", "Content-Type, Content-Length")
+					break
+				}
+			}
+		}
 
-		modTime := time.Now()
+		// Use the actual file modification time so If-Modified-Since works correctly.
+		var modTime time.Time
+		if info, statErr := f.Stat(); statErr == nil {
+			modTime = info.ModTime()
+		}
 		http.ServeContent(w, r, att.Filename, modTime, f)
 	}
 }

@@ -98,8 +98,15 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 			}
 			if err := os.Rename(newPath, exePath); err != nil {
 				slog.Error("update: rename new to current failed", "error", err)
-				// Try to restore
-				_ = os.Rename(oldPath, exePath)
+				// Try to restore the original binary.
+				if restoreErr := os.Rename(oldPath, exePath); restoreErr != nil {
+					slog.Error("update: CRITICAL — recovery rename also failed, server binary may be missing",
+						"restore_error", restoreErr, "original_error", err,
+						"old_path", oldPath, "exe_path", exePath)
+					if hub != nil {
+						hub.BroadcastServerRestart("update_failed", 0)
+					}
+				}
 				return
 			}
 
