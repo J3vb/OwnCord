@@ -18,6 +18,7 @@ vi.mock("@lib/livekitSession", () => ({
 
 import {
   createVideoGrid,
+  computeGridLayout,
   type VideoGridComponent,
   type TileConfig,
 } from "../../src/components/VideoGrid";
@@ -50,6 +51,13 @@ describe("VideoGrid", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // ResizeObserver is not available in JSDOM
+    globalThis.ResizeObserver ??= class {
+      observe(): void { /* noop */ }
+      unobserve(): void { /* noop */ }
+      disconnect(): void { /* noop */ }
+    } as unknown as typeof ResizeObserver;
+
     container = document.createElement("div");
     grid = createVideoGrid();
     grid.mount(container);
@@ -119,59 +127,60 @@ describe("VideoGrid", () => {
     expect(grid.hasStreams()).toBe(true);
   });
 
-  describe("grid layout updates correctly for different user counts", () => {
-    function getGridColumns(): string {
-      const root = container.querySelector(".video-grid") as HTMLElement;
-      return root.style.gridTemplateColumns;
-    }
-
-    it("1 user: 1fr", () => {
-      grid.addStream(1, "Alice", fakeStream());
-      expect(getGridColumns()).toBe("1fr");
+  describe("computeGridLayout — Discord-style tile sizing", () => {
+    it("returns zero-sized tiles for 0 tile count", () => {
+      const layout = computeGridLayout(800, 600, 0);
+      expect(layout.tileW).toBe(0);
+      expect(layout.tileH).toBe(0);
     });
 
-    it("2 users: 1fr 1fr", () => {
-      grid.addStream(1, "Alice", fakeStream());
-      grid.addStream(2, "Bob", fakeStream());
-      expect(getGridColumns()).toBe("1fr 1fr");
+    it("1 tile fills the container (width-constrained)", () => {
+      // Wide container: tile should be width-limited
+      const layout = computeGridLayout(800, 600, 1);
+      expect(layout.cols).toBe(1);
+      expect(layout.rows).toBe(1);
+      expect(layout.tileW).toBeGreaterThan(0);
+      expect(layout.tileH).toBeGreaterThan(0);
+      // Verify 16:9 ratio (within 1px rounding)
+      expect(Math.abs(layout.tileW / layout.tileH - 16 / 9)).toBeLessThan(0.1);
     });
 
-    it("4 users: 1fr 1fr", () => {
-      for (let i = 1; i <= 4; i++) {
-        grid.addStream(i, `User${i}`, fakeStream());
+    it("1 tile in a tall container is height-constrained", () => {
+      // Tall container: tile should be height-limited
+      const layout = computeGridLayout(400, 800, 1);
+      expect(layout.cols).toBe(1);
+      expect(layout.tileH).toBeLessThanOrEqual(800 - 16); // minus padding
+    });
+
+    it("2 tiles use 2 columns in a wide container", () => {
+      const layout = computeGridLayout(1200, 400, 2);
+      expect(layout.cols).toBe(2);
+      expect(layout.rows).toBe(1);
+    });
+
+    it("4 tiles use 2x2 grid", () => {
+      const layout = computeGridLayout(800, 600, 4);
+      expect(layout.cols).toBe(2);
+      expect(layout.rows).toBe(2);
+    });
+
+    it("all tiles fit within the container", () => {
+      for (const count of [1, 2, 3, 4, 5, 6, 9, 10, 16]) {
+        const layout = computeGridLayout(800, 600, count);
+        const totalW = layout.cols * layout.tileW + (layout.cols - 1) * 4 + 16;
+        const totalH = layout.rows * layout.tileH + (layout.rows - 1) * 4 + 16;
+        expect(totalW).toBeLessThanOrEqual(800);
+        expect(totalH).toBeLessThanOrEqual(600);
       }
-      expect(getGridColumns()).toBe("1fr 1fr");
     });
 
-    it("5 users: 1fr 1fr 1fr", () => {
-      for (let i = 1; i <= 5; i++) {
-        grid.addStream(i, `User${i}`, fakeStream());
+    it("tiles maintain approximately 16:9 aspect ratio", () => {
+      for (const count of [1, 2, 4, 9]) {
+        const layout = computeGridLayout(800, 600, count);
+        if (layout.tileW === 0) continue;
+        const ratio = layout.tileW / layout.tileH;
+        expect(Math.abs(ratio - 16 / 9)).toBeLessThan(0.15);
       }
-      expect(getGridColumns()).toBe("1fr 1fr 1fr");
-    });
-
-    it("9 users: 1fr 1fr 1fr", () => {
-      for (let i = 1; i <= 9; i++) {
-        grid.addStream(i, `User${i}`, fakeStream());
-      }
-      expect(getGridColumns()).toBe("1fr 1fr 1fr");
-    });
-
-    it("10 users: 1fr 1fr 1fr 1fr", () => {
-      for (let i = 1; i <= 10; i++) {
-        grid.addStream(i, `User${i}`, fakeStream());
-      }
-      expect(getGridColumns()).toBe("1fr 1fr 1fr 1fr");
-    });
-
-    it("layout updates when streams are removed", () => {
-      for (let i = 1; i <= 5; i++) {
-        grid.addStream(i, `User${i}`, fakeStream());
-      }
-      expect(getGridColumns()).toBe("1fr 1fr 1fr");
-
-      grid.removeStream(5);
-      expect(getGridColumns()).toBe("1fr 1fr");
     });
   });
 

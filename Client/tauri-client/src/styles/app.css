@@ -2153,20 +2153,22 @@
 }
 
 .video-grid {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   padding: 8px;
   height: 100%;
   align-content: center;
+  justify-content: center;
   background: var(--bg-primary, #313338);
 }
 
 .video-cell {
   position: relative;
-  aspect-ratio: 16 / 9;
   overflow: hidden;
   border-radius: var(--radius-md);
   background: var(--bg-tertiary);
+  /* Size set by JS layout calculator — no fixed aspect-ratio */
 }
 
 .video-cell video {
@@ -2252,6 +2254,7 @@
 /* ── Video focus mode layout ── */
 .video-grid.focus-mode {
   display: flex;
+  flex-wrap: nowrap;
   flex-direction: column;
   height: 100%;
 }
