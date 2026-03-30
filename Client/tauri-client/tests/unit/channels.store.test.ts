@@ -2,8 +2,11 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   channelsStore,
   setChannels,
+  setRoles,
+  getRoleIdByName,
   addChannel,
   updateChannel,
+  updateChannelPosition,
   removeChannel,
   setActiveChannel,
   getActiveChannel,
@@ -360,6 +363,138 @@ describe('channels store', () => {
       clearUnread(999);
 
       expect(channelsStore.getState()).toBe(before);
+    });
+  });
+
+  describe('setRoles', () => {
+    it('stores roles from ready payload', () => {
+      const roles = [
+        { id: 1, name: 'admin', color: '#ff0000', position: 0 },
+        { id: 2, name: 'member', color: '#00ff00', position: 1 },
+      ];
+      setRoles(roles);
+      expect(channelsStore.getState().roles).toEqual(roles);
+    });
+
+    it('replaces existing roles', () => {
+      setRoles([{ id: 1, name: 'admin', color: '#ff0000', position: 0 }]);
+      setRoles([{ id: 2, name: 'member', color: '#00ff00', position: 0 }]);
+      expect(channelsStore.getState().roles).toHaveLength(1);
+      expect(channelsStore.getState().roles[0]!.name).toBe('member');
+    });
+  });
+
+  describe('getRoleIdByName', () => {
+    it('returns role id for matching name (case-insensitive)', () => {
+      setRoles([
+        { id: 1, name: 'Admin', color: '#ff0000', position: 0 },
+        { id: 2, name: 'Member', color: '#00ff00', position: 1 },
+      ]);
+      expect(getRoleIdByName('admin')).toBe(1);
+      expect(getRoleIdByName('ADMIN')).toBe(1);
+      expect(getRoleIdByName('member')).toBe(2);
+    });
+
+    it('returns undefined for non-existent role', () => {
+      setRoles([{ id: 1, name: 'admin', color: '#ff0000', position: 0 }]);
+      expect(getRoleIdByName('moderator')).toBeUndefined();
+    });
+
+    it('returns undefined when no roles set', () => {
+      expect(getRoleIdByName('admin')).toBeUndefined();
+    });
+  });
+
+  describe('updateChannelPosition', () => {
+    it('updates a channel position', () => {
+      setChannels(readyChannels);
+
+      updateChannelPosition(1, 5);
+
+      expect(channelsStore.getState().channels.get(1)?.position).toBe(5);
+    });
+
+    it('is a no-op for unknown channel id', () => {
+      setChannels(readyChannels);
+      const before = channelsStore.getState();
+
+      updateChannelPosition(999, 5);
+
+      expect(channelsStore.getState()).toBe(before);
+    });
+
+    it('is a no-op when position is already the same', () => {
+      setChannels(readyChannels);
+      const before = channelsStore.getState();
+
+      updateChannelPosition(1, 0); // position 0 is already set
+
+      expect(channelsStore.getState()).toBe(before);
+    });
+
+    it('produces a new channel object (immutable)', () => {
+      setChannels(readyChannels);
+      const before = channelsStore.getState().channels.get(1);
+
+      updateChannelPosition(1, 10);
+
+      const after = channelsStore.getState().channels.get(1);
+      expect(before).not.toBe(after);
+      expect(after?.position).toBe(10);
+    });
+  });
+
+  describe('getChannelsByCategory — DM filtering', () => {
+    it('excludes DM channels from category grouping', () => {
+      setChannels([
+        { id: 1, name: 'general', type: 'text', category: 'Text', position: 0 },
+        { id: 2, name: 'dm-channel', type: 'dm', category: null, position: 0 },
+      ]);
+
+      const grouped = getChannelsByCategory();
+      // DM channels should be filtered out
+      expect(grouped.size).toBe(1);
+      expect(grouped.has('Text')).toBe(true);
+      // Verify the DM is not in any group
+      for (const channels of grouped.values()) {
+        expect(channels.every((ch) => ch.type !== 'dm')).toBe(true);
+      }
+    });
+  });
+
+  describe('getChannelsByCategory — sort order', () => {
+    it('sorts channels within same category by position', () => {
+      setChannels([
+        { id: 1, name: 'c-channel', type: 'text', category: 'Text', position: 2 },
+        { id: 2, name: 'a-channel', type: 'text', category: 'Text', position: 0 },
+        { id: 3, name: 'b-channel', type: 'text', category: 'Text', position: 1 },
+      ]);
+
+      const grouped = getChannelsByCategory();
+      const textChannels = grouped.get('Text')!;
+      expect(textChannels[0]!.name).toBe('a-channel');
+      expect(textChannels[1]!.name).toBe('b-channel');
+      expect(textChannels[2]!.name).toBe('c-channel');
+    });
+  });
+
+  describe('setActiveChannel — edge case: unknown channel with unread=0', () => {
+    it('sets activeChannelId even for a channel not in the map', () => {
+      setActiveChannel(999);
+      expect(channelsStore.getState().activeChannelId).toBe(999);
+    });
+  });
+
+  describe('updateChannel — no changes', () => {
+    it('still creates new object when neither name nor position is provided', () => {
+      setChannels(readyChannels);
+
+      updateChannel({ id: 1 } as ChannelUpdatePayload);
+
+      // Channel should still exist with original values
+      const ch = channelsStore.getState().channels.get(1);
+      expect(ch?.name).toBe('general');
+      expect(ch?.position).toBe(0);
     });
   });
 });

@@ -1,6 +1,13 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+
+const mockInvoke = vi.fn();
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => mockInvoke(...args),
+}));
+
 import {
   createProfileManager,
+  createTauriBackend,
   type PersistenceBackend,
   type CreateProfileData,
   type ServerProfile,
@@ -188,6 +195,17 @@ describe("ProfileManager", () => {
       const m = mgr();
       // Should not throw
       m.setLastConnected("missing");
+    });
+
+    it("only updates lastConnected on the matching profile, not others", () => {
+      const m = mgr();
+      const p1 = m.addProfile(sampleData);
+      const p2 = m.addProfile(sampleData2);
+
+      m.setLastConnected(p1.id);
+
+      expect(m.getById(p1.id)!.lastConnected).not.toBeNull();
+      expect(m.getById(p2.id)!.lastConnected).toBeNull();
     });
   });
 
@@ -445,6 +463,29 @@ describe("ProfileManager", () => {
       expect(Array.isArray(exported.profiles)).toBe(true);
     });
 
+    it("defaults rememberPassword to false when undefined in import", () => {
+      const m = mgr();
+      const incoming = [
+        {
+          id: "ext-1",
+          name: "No Remember",
+          host: "no-remember.com:443",
+          username: "user",
+          color: "#000",
+          autoConnect: false,
+          // rememberPassword omitted (undefined)
+          lastConnected: null,
+        },
+      ];
+
+      const result = m.importProfiles(JSON.stringify(incoming));
+      expect(result.imported).toBe(1);
+
+      const imported = m.getAll().find((p) => p.host === "no-remember.com:443");
+      expect(imported).not.toBeUndefined();
+      expect(imported!.rememberPassword).toBe(false);
+    });
+
     it("imports new UUIDs rather than keeping originals", () => {
       const m1 = mgr();
       const created = m1.addProfile(sampleData);
@@ -511,6 +552,122 @@ describe("ProfileManager", () => {
     });
   });
 
+  // ── Auto-login ──────────────────────────────────────────
+
+  describe("setAutoLogin", () => {
+    it("sets auto-login on target profile and forces rememberPassword", () => {
+      const m = mgr();
+      const p1 = m.addProfile(sampleData); // autoConnect: false
+      m.setAutoLogin(p1.id);
+
+      const updated = m.getById(p1.id)!;
+      expect(updated.autoConnect).toBe(true);
+      expect(updated.rememberPassword).toBe(true);
+    });
+
+    it("clears auto-login from all other profiles", () => {
+      const m = mgr();
+      const p1 = m.addProfile(sampleData);
+      const p2 = m.addProfile(sampleData2); // autoConnect: true
+
+      m.setAutoLogin(p1.id);
+
+      expect(m.getById(p1.id)!.autoConnect).toBe(true);
+      expect(m.getById(p2.id)!.autoConnect).toBe(false);
+    });
+
+    it("clears auto-login on all profiles when passed null", () => {
+      const m = mgr();
+      m.addProfile(sampleData2); // autoConnect: true
+
+      m.setAutoLogin(null);
+
+      const all = m.getAll();
+      expect(all.every((p) => !p.autoConnect)).toBe(true);
+    });
+
+    it("does not modify profiles that already have autoConnect=false when clearing", () => {
+      const m = mgr();
+      const p1 = m.addProfile(sampleData); // autoConnect: false
+
+      const before = m.getById(p1.id)!;
+      m.setAutoLogin(null);
+      const after = m.getById(p1.id)!;
+
+      // Profile object reference should be the same (no unnecessary spread)
+      expect(after.autoConnect).toBe(false);
+      expect(after.name).toBe(before.name);
+    });
+
+    it("only one profile can be auto-login at a time", () => {
+      const m = mgr();
+      const p1 = m.addProfile(sampleData);
+      const p2 = m.addProfile(sampleData2);
+
+      m.setAutoLogin(p1.id);
+      m.setAutoLogin(p2.id);
+
+      expect(m.getById(p1.id)!.autoConnect).toBe(false);
+      expect(m.getById(p2.id)!.autoConnect).toBe(true);
+    });
+
+    it("does not spread non-autoConnect profiles when setting auto-login on a different profile", () => {
+      const m = mgr();
+      const p1 = m.addProfile(sampleData); // autoConnect: false
+      const p2 = m.addProfile(sampleData2); // autoConnect: true
+      const p3 = m.addProfile({ ...sampleData, name: "Third", host: "third.com:443" }); // autoConnect: false
+
+      m.setAutoLogin(p1.id);
+
+      // p3 was never auto-connect, so it should be returned as-is
+      expect(m.getById(p3.id)!.autoConnect).toBe(false);
+      // p2 was auto-connect, so it should be cleared
+      expect(m.getById(p2.id)!.autoConnect).toBe(false);
+      // p1 should now be auto-connect
+      expect(m.getById(p1.id)!.autoConnect).toBe(true);
+    });
+  });
+
+  // ── Health check — online_users parsing ────────────────
+
+  describe("health check — response parsing", () => {
+    it("parses online_users from health response", async () => {
+      const fetchFn = createMockFetch(async () =>
+        jsonResponse({ version: "1.2.3", online_users: 5 }),
+      );
+      const m = mgr(fetchFn);
+      const profile = m.addProfile(sampleData);
+
+      const result = await m.checkHealth(profile.id);
+
+      expect(result.onlineUsers).toBe(5);
+    });
+
+    it("returns null onlineUsers when field is missing", async () => {
+      const fetchFn = createMockFetch(async () =>
+        jsonResponse({ version: "1.2.3" }),
+      );
+      const m = mgr(fetchFn);
+      const profile = m.addProfile(sampleData);
+
+      const result = await m.checkHealth(profile.id);
+
+      expect(result.onlineUsers).toBeNull();
+    });
+
+    it("returns null version when field is not a string", async () => {
+      const fetchFn = createMockFetch(async () =>
+        jsonResponse({ version: 123 }),
+      );
+      const m = mgr(fetchFn);
+      const profile = m.addProfile(sampleData);
+
+      const result = await m.checkHealth(profile.id);
+
+      expect(result.version).toBeNull();
+    });
+  });
+
   // ── Reactive store ───────────────────────────────────────
 
   describe("reactive store", () => {
@@ -552,6 +709,86 @@ describe("ProfileManager", () => {
       const statuses = m.store.getState().healthStatuses;
       expect(statuses.get(profile.id)?.status).toBe("online");
       expect(statuses.get(profile.id)?.version).toBe("3.0.0");
+    });
+  });
+
+  // ── createTauriBackend ──────────────────────────────────
+
+  describe("createTauriBackend", () => {
+    beforeEach(() => {
+      mockInvoke.mockReset();
+    });
+
+    it("load returns null when no data is stored", async () => {
+      mockInvoke.mockResolvedValueOnce({});
+
+      const backend = createTauriBackend();
+      const result = await backend.load();
+
+      expect(result).toBeNull();
+      expect(mockInvoke).toHaveBeenCalledWith("get_settings");
+    });
+
+    it("load returns profiles when valid data is stored", async () => {
+      const storedData = {
+        schemaVersion: 1,
+        profiles: [
+          {
+            id: "test-1",
+            name: "Test",
+            host: "test.com:443",
+            username: "user",
+            color: "#000",
+            autoConnect: false,
+            rememberPassword: false,
+            lastConnected: null,
+          },
+        ],
+      };
+      mockInvoke.mockResolvedValueOnce({ "owncord:profiles": storedData });
+
+      const backend = createTauriBackend();
+      const result = await backend.load();
+
+      expect(result).not.toBeNull();
+      expect(result!.profiles).toHaveLength(1);
+      expect(result!.profiles[0]!.name).toBe("Test");
+    });
+
+    it("load returns null for invalid data shape", async () => {
+      mockInvoke.mockResolvedValueOnce({
+        "owncord:profiles": { invalid: true },
+      });
+
+      const backend = createTauriBackend();
+      const result = await backend.load();
+
+      expect(result).toBeNull();
+    });
+
+    it("save calls invoke with correct key and data", async () => {
+      mockInvoke.mockResolvedValueOnce(undefined);
+
+      const backend = createTauriBackend();
+      const data = {
+        schemaVersion: 1,
+        profiles: [] as readonly ServerProfile[],
+      };
+      await backend.save(data);
+
+      expect(mockInvoke).toHaveBeenCalledWith("save_settings", {
+        key: "owncord:profiles",
+        value: data,
+      });
+    });
+
+    it("load returns null when stored value is null", async () => {
+      mockInvoke.mockResolvedValueOnce({ "owncord:profiles": null });
+
+      const backend = createTauriBackend();
+      const result = await backend.load();
+
+      expect(result).toBeNull();
     });
   });
 });

@@ -17,7 +17,7 @@ const {
   mockClearAttachmentCaches: vi.fn(),
   mockClearEmbedCaches: vi.fn(),
   mockClearMediaCaches: vi.fn(),
-  deleteDbState: { mode: "success" as "success" | "blocked-then-success" | "blocked-stuck" | "error" },
+  deleteDbState: { mode: "success" as "success" | "blocked-then-success" | "blocked-stuck" | "error" | "blocked-double" | "success-then-blocked" },
 }));
 
 // Mock Tauri APIs
@@ -85,6 +85,19 @@ vi.stubGlobal("indexedDB", {
       } else if (deleteDbState.mode === "blocked-stuck") {
         const fn = fakeReq.onblocked as ((ev: Event) => void) | null;
         fn?.(new Event("blocked"));
+      } else if (deleteDbState.mode === "blocked-double") {
+        // Fire onblocked twice to test the blockedTimer guard
+        const fn = fakeReq.onblocked as ((ev: Event) => void) | null;
+        fn?.(new Event("blocked"));
+        fn?.(new Event("blocked"));
+      } else if (deleteDbState.mode === "success-then-blocked") {
+        // Fire onsuccess first, then onblocked — tests the settled guard
+        const successFn = fakeReq.onsuccess as ((ev: Event) => void) | null;
+        successFn?.(new Event("success"));
+        setTimeout(() => {
+          const blockedFn = fakeReq.onblocked as ((ev: Event) => void) | null;
+          blockedFn?.(new Event("blocked"));
+        }, 0);
       } else {
         fakeReq.error = new Error("delete failed");
         const fn = fakeReq.onerror as ((ev: Event) => void) | null;
@@ -121,6 +134,7 @@ describe("AdvancedTab — Clear All Cache", () => {
 
   afterEach(() => {
     container.remove();
+    vi.useRealTimers();
   });
 
   function getClearAllBtn(): HTMLButtonElement {
@@ -303,5 +317,407 @@ describe("AdvancedTab — Clear All Cache", () => {
       expect(btn.textContent).toBe("Cleared!");
     });
     expect(mockClearPendingPersistedLogs).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("AdvancedTab — Toggles & Structure", () => {
+  let container: HTMLDivElement;
+  const ac = new AbortController();
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    container.remove();
+  });
+
+  it("renders Developer Mode toggle defaulting to off", () => {
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+
+    const rows = container.querySelectorAll(".setting-row");
+    const devRow = rows[0]!;
+    const label = devRow.querySelector(".setting-label")!;
+    expect(label.textContent).toBe("Developer Mode");
+
+    const toggle = devRow.querySelector(".toggle")!;
+    expect(toggle.classList.contains("on")).toBe(false);
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("renders Hardware Acceleration toggle defaulting to on", () => {
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+
+    const rows = container.querySelectorAll(".setting-row");
+    const hwRow = rows[1]!;
+    const label = hwRow.querySelector(".setting-label")!;
+    expect(label.textContent).toBe("Hardware Acceleration");
+
+    const toggle = hwRow.querySelector(".toggle")!;
+    expect(toggle.classList.contains("on")).toBe(true);
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("toggles Developer Mode on and persists to localStorage", () => {
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+
+    const rows = container.querySelectorAll(".setting-row");
+    const toggle = rows[0]!.querySelector(".toggle") as HTMLElement;
+
+    toggle.click();
+    expect(toggle.classList.contains("on")).toBe(true);
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(localStorage.getItem("owncord:settings:developerMode")).toBe("true");
+
+    // Toggle off again
+    toggle.click();
+    expect(toggle.classList.contains("on")).toBe(false);
+    expect(localStorage.getItem("owncord:settings:developerMode")).toBe("false");
+  });
+
+  it("restores Developer Mode toggle state from localStorage", () => {
+    localStorage.setItem("owncord:settings:developerMode", "true");
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+
+    const rows = container.querySelectorAll(".setting-row");
+    const toggle = rows[0]!.querySelector(".toggle")!;
+    expect(toggle.classList.contains("on")).toBe(true);
+  });
+
+  it("toggles via keyboard Enter/Space on Developer Mode", () => {
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+
+    const rows = container.querySelectorAll(".setting-row");
+    const toggle = rows[0]!.querySelector(".toggle") as HTMLElement;
+
+    toggle.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(toggle.classList.contains("on")).toBe(true);
+
+    toggle.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    expect(toggle.classList.contains("on")).toBe(false);
+  });
+
+  it("renders DevTools button in Debug section", () => {
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+
+    const devtoolsBtn = Array.from(container.querySelectorAll("button.ac-btn")).find(
+      (b) => b.textContent === "Open DevTools",
+    );
+    expect(devtoolsBtn).toBeDefined();
+  });
+
+  it("DevTools button invokes open_devtools command", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+
+    const devtoolsBtn = Array.from(container.querySelectorAll("button.ac-btn")).find(
+      (b) => b.textContent === "Open DevTools",
+    ) as HTMLButtonElement;
+
+    devtoolsBtn.click();
+
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("open_devtools");
+    });
+  });
+
+  it("DevTools button handles invoke failure gracefully", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    (invoke as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("DevTools not supported"));
+
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+
+    const devtoolsBtn = Array.from(container.querySelectorAll("button.ac-btn")).find(
+      (b) => b.textContent === "Open DevTools",
+    ) as HTMLButtonElement;
+
+    // Should not throw
+    devtoolsBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(invoke).toHaveBeenCalledWith("open_devtools");
+  });
+
+  it("renders section titles for Debug and Storage & Cache", () => {
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+
+    const titles = container.querySelectorAll(".settings-section-title");
+    const titleTexts = Array.from(titles).map((t) => t.textContent);
+    expect(titleTexts).toContain("Debug");
+    expect(titleTexts).toContain("Storage & Cache");
+  });
+
+  it("renders separators between sections", () => {
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+
+    const separators = container.querySelectorAll(".settings-separator");
+    expect(separators.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("renders all three cache clear rows", () => {
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+
+    const labels = Array.from(container.querySelectorAll(".setting-label")).map((l) => l.textContent);
+    expect(labels).toContain("Clear Image Cache");
+    expect(labels).toContain("Clear Log Files");
+    expect(labels).toContain("Clear All Cache & Restart");
+  });
+
+  it("shows image cache clear success then resets button text after timeout", async () => {
+    vi.useFakeTimers();
+    deleteDbState.mode = "success";
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+    const clearBtns = Array.from(container.querySelectorAll("button.ac-btn")).filter(
+      (b) => b.textContent === "Clear",
+    );
+    const btn = clearBtns[0] as HTMLButtonElement;
+
+    btn.click();
+    // Flush microtasks for indexedDB mock
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(btn.textContent).toBe("Cleared!");
+    expect(btn.getAttribute("disabled")).toBe("");
+
+    // After 2 seconds, should reset
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(btn.textContent).toBe("Clear");
+    expect(btn.getAttribute("disabled")).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("shows image cache clear failure then resets button text after timeout", async () => {
+    vi.useFakeTimers();
+    deleteDbState.mode = "error";
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+    const clearBtns = Array.from(container.querySelectorAll("button.ac-btn")).filter(
+      (b) => b.textContent === "Clear",
+    );
+    const btn = clearBtns[0] as HTMLButtonElement;
+
+    btn.click();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(btn.textContent).toBe("Failed");
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(btn.textContent).toBe("Clear");
+    vi.useRealTimers();
+  });
+
+  it("shows log clear success then resets button text after timeout", async () => {
+    vi.useFakeTimers();
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+    const clearBtns = Array.from(container.querySelectorAll("button.ac-btn")).filter(
+      (b) => b.textContent === "Clear",
+    );
+    const btn = clearBtns[1] as HTMLButtonElement;
+
+    btn.click();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(btn.textContent).toBe("Cleared!");
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(btn.textContent).toBe("Clear");
+    vi.useRealTimers();
+  });
+
+  it("confirmation dialog resets after 3s timeout without second click", async () => {
+    vi.useFakeTimers();
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+    const buttons = container.querySelectorAll("button.ac-btn");
+    const btn = Array.from(buttons).find(
+      (b) => b.textContent === "Clear & Restart",
+    ) as HTMLButtonElement;
+
+    btn.click();
+    expect(btn.textContent).toBe("Are you sure? Click again");
+    expect(btn.classList.contains("ac-btn-danger")).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(btn.textContent).toBe("Clear & Restart");
+    expect(btn.classList.contains("ac-btn-danger")).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it("Clear All shows Failed when relaunch fails", async () => {
+    mockRelaunch.mockRejectedValue(new Error("Relaunch not supported"));
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+    const buttons = container.querySelectorAll("button.ac-btn");
+    const btn = Array.from(buttons).find(
+      (b) => b.textContent === "Clear & Restart",
+    ) as HTMLButtonElement;
+
+    btn.click();
+    btn.click();
+
+    await vi.waitFor(() => {
+      expect(btn.textContent).toBe("Failed");
+    });
+  });
+
+  it("deletes only .jsonl files when clearing log files, skips directories", async () => {
+    mockReadDir.mockResolvedValueOnce([
+      { name: "app.jsonl", isDirectory: false },
+      { name: "old.jsonl", isDirectory: false },
+      { name: "subdir", isDirectory: true },
+      { name: "readme.txt", isDirectory: false },
+    ]);
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+    const clearButtons = Array.from(container.querySelectorAll("button.ac-btn")).filter(
+      (b) => b.textContent === "Clear",
+    );
+    const btn = clearButtons[1] as HTMLButtonElement;
+
+    btn.click();
+
+    await vi.waitFor(() => {
+      expect(btn.textContent).toBe("Cleared!");
+    });
+    // Should have removed only the 2 .jsonl files
+    expect(mockRemove).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats ENOENT as missing-path (no throw)", async () => {
+    mockReadDir.mockRejectedValueOnce(new Error("ENOENT: no such file"));
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+    const clearButtons = Array.from(container.querySelectorAll("button.ac-btn")).filter(
+      (b) => b.textContent === "Clear",
+    );
+    const btn = clearButtons[1] as HTMLButtonElement;
+
+    btn.click();
+
+    await vi.waitFor(() => {
+      expect(btn.textContent).toBe("Cleared!");
+    });
+  });
+
+  it("treats 'cannot find the path' as missing-path (no throw)", async () => {
+    mockReadDir.mockRejectedValueOnce(new Error("cannot find the path"));
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+    const clearButtons = Array.from(container.querySelectorAll("button.ac-btn")).filter(
+      (b) => b.textContent === "Clear",
+    );
+    const btn = clearButtons[1] as HTMLButtonElement;
+
+    btn.click();
+
+    await vi.waitFor(() => {
+      expect(btn.textContent).toBe("Cleared!");
+    });
+  });
+
+  it("treats 'os error 2' as missing-path (no throw)", async () => {
+    mockReadDir.mockRejectedValueOnce(new Error("os error 2"));
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+    const clearButtons = Array.from(container.querySelectorAll("button.ac-btn")).filter(
+      (b) => b.textContent === "Clear",
+    );
+    const btn = clearButtons[1] as HTMLButtonElement;
+
+    btn.click();
+
+    await vi.waitFor(() => {
+      expect(btn.textContent).toBe("Cleared!");
+    });
+  });
+
+  it("treats non-Error throw as missing-path when message matches pattern", async () => {
+    mockReadDir.mockRejectedValueOnce("not found");
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+    const clearButtons = Array.from(container.querySelectorAll("button.ac-btn")).filter(
+      (b) => b.textContent === "Clear",
+    );
+    const btn = clearButtons[1] as HTMLButtonElement;
+
+    btn.click();
+
+    await vi.waitFor(() => {
+      expect(btn.textContent).toBe("Cleared!");
+    });
+  });
+
+  it("handles double onblocked without error", async () => {
+    vi.useFakeTimers();
+    deleteDbState.mode = "blocked-double";
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+    const clearBtns = Array.from(container.querySelectorAll("button.ac-btn")).filter(
+      (b) => b.textContent === "Clear",
+    );
+    const btn = clearBtns[0] as HTMLButtonElement;
+
+    btn.click();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    // Should still fail from the first blocked timer
+    expect(btn.textContent).toBe("Failed");
+    vi.useRealTimers();
+  });
+
+  it("handles success followed by blocked (settled guard)", async () => {
+    vi.useFakeTimers();
+    deleteDbState.mode = "success-then-blocked";
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+    const clearBtns = Array.from(container.querySelectorAll("button.ac-btn")).filter(
+      (b) => b.textContent === "Clear",
+    );
+    const btn = clearBtns[0] as HTMLButtonElement;
+
+    btn.click();
+    // Flush microtask for the initial promise resolution (onsuccess fires)
+    await vi.advanceTimersByTimeAsync(0);
+    // Flush the setTimeout(onblocked, 0)
+    await vi.advanceTimersByTimeAsync(0);
+    // Flush the blocked timer (1000ms) which calls finish() but should find settled=true
+    await vi.advanceTimersByTimeAsync(1000);
+
+    // Should succeed because onsuccess fired first; blocked timer callback is a no-op
+    expect(btn.textContent).toBe("Cleared!");
+    vi.useRealTimers();
+  });
+
+  it("DevTools handles non-Error rejection gracefully", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    (invoke as ReturnType<typeof vi.fn>).mockRejectedValueOnce("string rejection");
+
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+
+    const devtoolsBtn = Array.from(container.querySelectorAll("button.ac-btn")).find(
+      (b) => b.textContent === "Open DevTools",
+    ) as HTMLButtonElement;
+
+    // Should not throw
+    devtoolsBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(invoke).toHaveBeenCalledWith("open_devtools");
   });
 });

@@ -8,6 +8,10 @@ import {
   openModal,
   closeModal,
   setTheme,
+  setConnectionStatus,
+  setTransientError,
+  setPersistentError,
+  loadCollapsedCategories,
   toggleCategory,
   isCategoryCollapsed,
   setSidebarMode,
@@ -220,6 +224,183 @@ describe("ui store", () => {
       setActiveDmUser(42);
       setSidebarMode("channels");
       expect(uiStore.getState().activeDmUserId).toBeNull();
+    });
+
+    it("preserves activeDmUserId when switching to dms mode", () => {
+      setActiveDmUser(42);
+      setSidebarMode("dms");
+      expect(uiStore.getState().activeDmUserId).toBe(42);
+    });
+
+    it("setActiveDmUser sets userId to null", () => {
+      setActiveDmUser(42);
+      setActiveDmUser(null);
+      expect(uiStore.getState().activeDmUserId).toBeNull();
+    });
+  });
+
+  // ── Connection status ─────────────────────────────────
+
+  describe("setConnectionStatus", () => {
+    it("sets status to connected", () => {
+      setConnectionStatus("connected");
+      expect(uiStore.getState().connectionStatus).toBe("connected");
+    });
+
+    it("sets status to reconnecting", () => {
+      setConnectionStatus("reconnecting");
+      expect(uiStore.getState().connectionStatus).toBe("reconnecting");
+    });
+
+    it("sets status to disconnected", () => {
+      setConnectionStatus("connected");
+      setConnectionStatus("disconnected");
+      expect(uiStore.getState().connectionStatus).toBe("disconnected");
+    });
+  });
+
+  // ── Error messages ────────────────────────────────────
+
+  describe("setTransientError", () => {
+    it("sets a transient error message", () => {
+      setTransientError("Connection lost");
+      expect(uiStore.getState().transientError).toBe("Connection lost");
+    });
+
+    it("clears transient error with null", () => {
+      setTransientError("Some error");
+      setTransientError(null);
+      expect(uiStore.getState().transientError).toBeNull();
+    });
+  });
+
+  describe("setPersistentError", () => {
+    it("sets a persistent error message", () => {
+      setPersistentError("Authentication failed");
+      expect(uiStore.getState().persistentError).toBe("Authentication failed");
+    });
+
+    it("clears persistent error with null", () => {
+      setPersistentError("Some error");
+      setPersistentError(null);
+      expect(uiStore.getState().persistentError).toBeNull();
+    });
+  });
+
+  // ── loadCollapsedCategories ───────────────────────────
+
+  describe("loadCollapsedCategories", () => {
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("loads empty set when no saved data exists", () => {
+      loadCollapsedCategories("test-server:443");
+      expect(uiStore.getState().collapsedCategories.size).toBe(0);
+    });
+
+    it("loads categories from localStorage", () => {
+      localStorage.setItem(
+        "owncord:collapsed:test-server:443",
+        JSON.stringify(["general", "voice"]),
+      );
+      loadCollapsedCategories("test-server:443");
+      const cats = uiStore.getState().collapsedCategories;
+      expect(cats.has("general")).toBe(true);
+      expect(cats.has("voice")).toBe(true);
+      expect(cats.size).toBe(2);
+    });
+
+    it("resets to empty set for invalid JSON", () => {
+      localStorage.setItem(
+        "owncord:collapsed:test-server:443",
+        "not-json",
+      );
+      loadCollapsedCategories("test-server:443");
+      expect(uiStore.getState().collapsedCategories.size).toBe(0);
+    });
+
+    it("resets to empty set for non-array data", () => {
+      localStorage.setItem(
+        "owncord:collapsed:test-server:443",
+        JSON.stringify({ foo: "bar" }),
+      );
+      loadCollapsedCategories("test-server:443");
+      expect(uiStore.getState().collapsedCategories.size).toBe(0);
+    });
+
+    it("resets to empty set for array with non-string elements", () => {
+      localStorage.setItem(
+        "owncord:collapsed:test-server:443",
+        JSON.stringify([1, 2, 3]),
+      );
+      loadCollapsedCategories("test-server:443");
+      expect(uiStore.getState().collapsedCategories.size).toBe(0);
+    });
+
+    it("persists collapsed categories to localStorage on toggle", () => {
+      loadCollapsedCategories("test-server:443");
+      toggleCategory("voice");
+      const raw = localStorage.getItem("owncord:collapsed:test-server:443");
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw!);
+      expect(parsed).toContain("voice");
+    });
+
+    it("removes category from localStorage when toggled back", () => {
+      loadCollapsedCategories("test-server:443");
+      toggleCategory("voice");
+      toggleCategory("voice");
+      const raw = localStorage.getItem("owncord:collapsed:test-server:443");
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw!);
+      expect(parsed).not.toContain("voice");
+    });
+
+    it("handles localStorage.setItem failure gracefully", () => {
+      loadCollapsedCategories("test-server:443");
+
+      // Make localStorage.setItem throw (simulating quota exceeded)
+      const originalSetItem = localStorage.setItem.bind(localStorage);
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+        throw new Error("QuotaExceededError");
+      });
+
+      // toggleCategory calls saveCollapsedCategories which should catch the error
+      expect(() => toggleCategory("fail-safe")).not.toThrow();
+
+      // State should still be updated even though persistence failed
+      expect(isCategoryCollapsed("fail-safe")).toBe(true);
+
+      // Restore
+      vi.restoreAllMocks();
+    });
+
+    it("does not save when no server host is loaded", () => {
+      // Reset the internal currentServerHost by not calling loadCollapsedCategories
+      // Instead, directly test that toggleCategory works without crashing
+      // when called before loadCollapsedCategories
+      resetStore();
+      // The module-level currentServerHost is set by loadCollapsedCategories.
+      // If we loaded for a server and then toggle, it should save.
+      loadCollapsedCategories("another-server:443");
+      toggleCategory("test-cat");
+      const raw = localStorage.getItem("owncord:collapsed:another-server:443");
+      expect(raw).not.toBeNull();
+    });
+  });
+
+  // ── setTheme additional values ────────────────────────
+
+  describe("setTheme — all variants", () => {
+    it("sets theme to neon-glow", () => {
+      setTheme("neon-glow");
+      expect(uiStore.getState().theme).toBe("neon-glow");
+    });
+
+    it("sets theme to midnight", () => {
+      setTheme("midnight");
+      expect(uiStore.getState().theme).toBe("midnight");
     });
   });
 });

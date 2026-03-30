@@ -5,6 +5,7 @@ import {
   addDmChannel,
   removeDmChannel,
   updateDmLastMessage,
+  updateDmLastMessagePreview,
   clearDmUnread,
 } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
@@ -150,6 +151,77 @@ describe("dmStore", () => {
       updateDmLastMessage(5, 42, "hello", "2026-03-28T12:00:00Z");
       expect(dmStore.getState().channels[1]!.unreadCount).toBe(2);
       expect(dmStore.getState().channels[1]!.lastMessageId).toBeNull();
+    });
+  });
+
+  // ── updateDmLastMessagePreview ──────────────────────────
+
+  describe("updateDmLastMessagePreview", () => {
+    it("updates lastMessageId, lastMessage, lastMessageAt without incrementing unread", () => {
+      setDmChannels([makeDm({ channelId: 5, unreadCount: 3 })]);
+      updateDmLastMessagePreview(5, 99, "my own message", "2026-03-28T13:00:00Z");
+      const ch = dmStore.getState().channels[0]!;
+      expect(ch.lastMessageId).toBe(99);
+      expect(ch.lastMessage).toBe("my own message");
+      expect(ch.lastMessageAt).toBe("2026-03-28T13:00:00Z");
+      expect(ch.unreadCount).toBe(3); // unchanged
+    });
+
+    it("moves the updated channel to the front of the list", () => {
+      setDmChannels([
+        makeDm({ channelId: 1 }),
+        makeDm({ channelId: 2 }),
+        makeDm({ channelId: 3 }),
+      ]);
+      updateDmLastMessagePreview(3, 50, "latest", "2026-03-28T14:00:00Z");
+      const channels = dmStore.getState().channels;
+      expect(channels[0]!.channelId).toBe(3);
+      expect(channels[0]!.lastMessage).toBe("latest");
+      expect(channels).toHaveLength(3);
+    });
+
+    it("is a no-op for a non-matching channelId", () => {
+      setDmChannels([makeDm({ channelId: 5, unreadCount: 1 })]);
+      updateDmLastMessagePreview(999, 42, "nope", "2026-03-28T12:00:00Z");
+      const ch = dmStore.getState().channels[0]!;
+      expect(ch.unreadCount).toBe(1);
+      expect(ch.lastMessageId).toBeNull();
+    });
+
+    it("does not modify other channels", () => {
+      setDmChannels([
+        makeDm({ channelId: 5, unreadCount: 2 }),
+        makeDm({ channelId: 6, unreadCount: 4, lastMessage: "old" }),
+      ]);
+      updateDmLastMessagePreview(5, 10, "hello", "2026-03-28T15:00:00Z");
+      // Channel 6 should be untouched (now at index 1 because 5 moved to front)
+      const ch6 = dmStore.getState().channels.find((c) => c.channelId === 6)!;
+      expect(ch6.unreadCount).toBe(4);
+      expect(ch6.lastMessage).toBe("old");
+    });
+
+    it("returns prev state reference when channel not found (immutability)", () => {
+      setDmChannels([makeDm({ channelId: 5 })]);
+      const before = dmStore.getState();
+      updateDmLastMessagePreview(999, 1, "x", "2026-03-28T12:00:00Z");
+      const after = dmStore.getState();
+      expect(after).toBe(before);
+    });
+  });
+
+  // ── updateDmLastMessage — channel reordering ──────────
+
+  describe("updateDmLastMessage — reordering", () => {
+    it("moves the updated channel to the front of the list", () => {
+      setDmChannels([
+        makeDm({ channelId: 1 }),
+        makeDm({ channelId: 2 }),
+        makeDm({ channelId: 3 }),
+      ]);
+      updateDmLastMessage(3, 50, "new", "2026-03-28T14:00:00Z");
+      const channels = dmStore.getState().channels;
+      expect(channels[0]!.channelId).toBe(3);
+      expect(channels).toHaveLength(3);
     });
   });
 

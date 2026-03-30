@@ -205,6 +205,25 @@ describe("AudioElements", () => {
       expect(() => elements.setScreenshareAudioVolume(999, 0.5)).not.toThrow();
     });
 
+    it("setScreenshareAudioVolume sets volume on tracked elements", () => {
+      const audioEl = document.createElement("audio");
+      (elements as any).screenshareAudioElements = new Map([[42, new Set([audioEl])]]);
+
+      elements.setScreenshareAudioVolume(42, 0.7);
+      expect(audioEl.volume).toBe(0.7);
+    });
+
+    it("setScreenshareAudioVolume clamps to 0-1 range", () => {
+      const audioEl = document.createElement("audio");
+      (elements as any).screenshareAudioElements = new Map([[42, new Set([audioEl])]]);
+
+      elements.setScreenshareAudioVolume(42, -0.5);
+      expect(audioEl.volume).toBe(0);
+
+      elements.setScreenshareAudioVolume(42, 2.0);
+      expect(audioEl.volume).toBe(1);
+    });
+
     it("muteScreenshareAudio persists muted state", () => {
       elements.muteScreenshareAudio(42, true);
       expect(elements.getScreenshareAudioMuted(42)).toBe(true);
@@ -216,8 +235,34 @@ describe("AudioElements", () => {
       expect(elements.getScreenshareAudioMuted(42)).toBe(false);
     });
 
+    it("muteScreenshareAudio applies muted to tracked audio elements", () => {
+      const audioEl = document.createElement("audio");
+      (elements as any).screenshareAudioElements = new Map([[42, new Set([audioEl])]]);
+
+      elements.muteScreenshareAudio(42, true);
+      expect(audioEl.muted).toBe(true);
+
+      elements.muteScreenshareAudio(42, false);
+      expect(audioEl.muted).toBe(false);
+    });
+
     it("getScreenshareAudioMuted returns false for unknown userId", () => {
       expect(elements.getScreenshareAudioMuted(999)).toBe(false);
+    });
+
+    it("getScreenshareAudioMuted reads from audio element when no persisted state", () => {
+      const audioEl = document.createElement("audio");
+      audioEl.muted = true;
+      (elements as any).screenshareAudioElements = new Map([[42, new Set([audioEl])]]);
+      // No call to muteScreenshareAudio, so no persisted state for user 42
+
+      expect(elements.getScreenshareAudioMuted(42)).toBe(true);
+    });
+
+    it("getScreenshareAudioMuted returns false for empty audio element set", () => {
+      (elements as any).screenshareAudioElements = new Map([[42, new Set()]]);
+
+      expect(elements.getScreenshareAudioMuted(42)).toBe(false);
     });
   });
 
@@ -254,6 +299,191 @@ describe("AudioElements", () => {
       elements.applyRemoteAudioSubscriptionState(false);
 
       expect(mockPub.setSubscribed).toHaveBeenCalledWith(true);
+    });
+  });
+
+  describe("getEffectiveVolume", () => {
+    it("returns 1.0 for default user with default multiplier", () => {
+      expect(elements.getEffectiveVolume(42)).toBe(1.0);
+    });
+
+    it("returns outputVolumeMultiplier for userId <= 0", () => {
+      // userId <= 0 uses default 100, so effective = (100/100) * multiplier
+      expect(elements.getEffectiveVolume(0)).toBe(1.0);
+      expect(elements.getEffectiveVolume(-1)).toBe(1.0);
+    });
+
+    it("scales with output volume multiplier", () => {
+      elements.setOutputVolume(50);
+      expect(elements.getEffectiveVolume(42)).toBe(0.5);
+    });
+  });
+
+  describe("applyAllVolumes", () => {
+    it("does not throw when no room is set", () => {
+      expect(() => elements.applyAllVolumes()).not.toThrow();
+    });
+
+    it("applies effective volume to all remote participants", () => {
+      const mockParticipant1 = { identity: "user-10", setVolume: vi.fn() };
+      const mockParticipant2 = { identity: "user-20", setVolume: vi.fn() };
+      const mockRoom = {
+        remoteParticipants: new Map([
+          ["user-10", mockParticipant1],
+          ["user-20", mockParticipant2],
+        ]),
+      } as any;
+      elements.setRoom(mockRoom);
+
+      elements.applyAllVolumes();
+
+      expect(mockParticipant1.setVolume).toHaveBeenCalledWith(1.0);
+      expect(mockParticipant2.setVolume).toHaveBeenCalledWith(1.0);
+    });
+  });
+
+  describe("handleTrackUnsubscribedAudio — screenshare", () => {
+    it("removes screenshare audio elements and cleans up tracking", () => {
+      const audioEl = document.createElement("audio");
+      const { track } = createMockTrack("audio", "ss-track-1");
+      track.detach = vi.fn(() => [audioEl]);
+      const publication = { source: "screenShareAudio" };
+      const participant = { identity: "user-42", setVolume: vi.fn() };
+
+      // Set up screenshare elements manually
+      (elements as any).screenshareAudioElements = new Map([[42, new Set([audioEl])]]);
+
+      elements.handleTrackUnsubscribedAudio(track as any, publication as any, participant as any);
+
+      expect(track.detach).toHaveBeenCalled();
+      // Should clean up from tracking map
+      expect((elements as any).screenshareAudioElements.has(42)).toBe(false);
+    });
+
+    it("handles screenshare unsubscribe when no audio elements are tracked", () => {
+      const { track } = createMockTrack("audio", "ss-track-2");
+      const publication = { source: "screenShareAudio" };
+      const participant = { identity: "user-42", setVolume: vi.fn() };
+
+      // No screenshare elements tracked
+      expect(() => {
+        elements.handleTrackUnsubscribedAudio(track as any, publication as any, participant as any);
+      }).not.toThrow();
+    });
+  });
+
+  describe("handleTrackSubscribedAudio — mic with undefined sid", () => {
+    it("handles track with undefined sid gracefully", () => {
+      const audioEl = document.createElement("audio");
+      const track = {
+        kind: "audio",
+        sid: undefined,
+        detach: vi.fn(() => [audioEl]),
+        attach: vi.fn(() => audioEl),
+      };
+      const publication = { source: "microphone" };
+      const participant = { identity: "user-42", setVolume: vi.fn() };
+
+      expect(() => {
+        elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+      }).not.toThrow();
+    });
+  });
+
+  describe("handleTrackSubscribedAudio — with saved output device", () => {
+    it("calls setSinkId for mic audio when audioOutputDevice preference is set", () => {
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (key === "audioOutputDevice") return "device-123";
+        return defaultVal;
+      });
+
+      const audioEl = document.createElement("audio");
+      audioEl.setSinkId = vi.fn().mockResolvedValue(undefined);
+      const track = {
+        kind: "audio",
+        sid: "track-dev-1",
+        detach: vi.fn(() => [audioEl]),
+        attach: vi.fn(() => audioEl),
+      };
+      const publication = { source: "microphone" };
+      const participant = { identity: "user-42", setVolume: vi.fn() };
+
+      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+
+      expect(audioEl.setSinkId).toHaveBeenCalledWith("device-123");
+    });
+
+    it("calls setSinkId for screenshare audio when audioOutputDevice preference is set", () => {
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (key === "audioOutputDevice") return "device-456";
+        return defaultVal;
+      });
+
+      const audioEl = document.createElement("audio");
+      audioEl.setSinkId = vi.fn().mockResolvedValue(undefined);
+      const track = {
+        kind: "audio",
+        sid: "track-ss-dev-1",
+        detach: vi.fn(() => [audioEl]),
+        attach: vi.fn(() => audioEl),
+      };
+      const publication = { source: "screenShareAudio" };
+      const participant = { identity: "user-42", setVolume: vi.fn() };
+
+      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+
+      expect(audioEl.setSinkId).toHaveBeenCalledWith("device-456");
+    });
+
+    it("handles setSinkId failure gracefully for screenshare audio", () => {
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (key === "audioOutputDevice") return "bad-device";
+        return defaultVal;
+      });
+
+      const audioEl = document.createElement("audio");
+      audioEl.setSinkId = vi.fn().mockRejectedValue(new Error("Device not found"));
+      const track = {
+        kind: "audio",
+        sid: "track-ss-err",
+        detach: vi.fn(() => [audioEl]),
+        attach: vi.fn(() => audioEl),
+      };
+      const publication = { source: "screenShareAudio" };
+      const participant = { identity: "user-42", setVolume: vi.fn() };
+
+      expect(() => {
+        elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+      }).not.toThrow();
+    });
+
+    it("handles setSinkId failure gracefully for mic audio", () => {
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (key === "audioOutputDevice") return "bad-device";
+        return defaultVal;
+      });
+
+      const audioEl = document.createElement("audio");
+      audioEl.setSinkId = vi.fn().mockRejectedValue(new Error("Device not found"));
+      const track = {
+        kind: "audio",
+        sid: "track-mic-err",
+        detach: vi.fn(() => [audioEl]),
+        attach: vi.fn(() => audioEl),
+      };
+      const publication = { source: "microphone" };
+      const participant = { identity: "user-42", setVolume: vi.fn() };
+
+      expect(() => {
+        elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+      }).not.toThrow();
+    });
+  });
+
+  describe("setUserVolume — without room", () => {
+    it("saves volume even when no room is set", () => {
+      elements.setUserVolume(42, 120);
+      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 120);
     });
   });
 

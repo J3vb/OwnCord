@@ -6,16 +6,20 @@ import {
   prependMessages,
   editMessage,
   deleteMessage,
+  setMessagePinned,
+  updateReaction,
   addPendingSend,
   confirmSend,
   getChannelMessages,
   isChannelLoaded,
+  hasMoreMessages,
   clearChannelMessages,
 } from "../../src/stores/messages.store";
 import type {
   ChatMessagePayload,
   ChatEditedPayload,
   ChatDeletedPayload,
+  ReactionUpdatePayload,
   MessageResponse,
   MessageUser,
   Attachment,
@@ -470,6 +474,375 @@ describe("messages store", () => {
       setMessages(1, [], false);
       clearChannelMessages(1);
       expect(isChannelLoaded(1)).toBe(false);
+    });
+  });
+
+  // 11. hasMoreMessages selector
+  describe("hasMoreMessages", () => {
+    it("returns false for unknown channel", () => {
+      expect(hasMoreMessages(999)).toBe(false);
+    });
+
+    it("returns true when hasMore is set", () => {
+      setMessages(1, [], true);
+      expect(hasMoreMessages(1)).toBe(true);
+    });
+
+    it("returns false when hasMore is false", () => {
+      setMessages(1, [], false);
+      expect(hasMoreMessages(1)).toBe(false);
+    });
+  });
+
+  // 12. setMessagePinned
+  describe("setMessagePinned", () => {
+    it("sets a message as pinned", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+      expect(getChannelMessages(1)[0]!.pinned).toBe(false);
+
+      setMessagePinned(1, 100, true);
+
+      expect(getChannelMessages(1)[0]!.pinned).toBe(true);
+    });
+
+    it("sets a message as unpinned", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+      setMessagePinned(1, 100, true);
+      expect(getChannelMessages(1)[0]!.pinned).toBe(true);
+
+      setMessagePinned(1, 100, false);
+
+      expect(getChannelMessages(1)[0]!.pinned).toBe(false);
+    });
+
+    it("does not affect other messages", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+      addMessage(makeChatPayload({ id: 101, channel_id: 1 }));
+
+      setMessagePinned(1, 100, true);
+
+      expect(getChannelMessages(1)[0]!.pinned).toBe(true);
+      expect(getChannelMessages(1)[1]!.pinned).toBe(false);
+    });
+
+    it("is a no-op if the channel does not exist", () => {
+      const before = messagesStore.getState();
+      setMessagePinned(99, 100, true);
+      const after = messagesStore.getState();
+      expect(before).toBe(after);
+    });
+
+    it("produces a new message object (immutable update)", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+      const original = getChannelMessages(1)[0]!;
+
+      setMessagePinned(1, 100, true);
+      const updated = getChannelMessages(1)[0]!;
+
+      expect(original).not.toBe(updated);
+    });
+  });
+
+  // 13. updateReaction
+  describe("updateReaction", () => {
+    it("adds a new reaction to a message", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+
+      const payload: ReactionUpdatePayload = {
+        message_id: 100,
+        channel_id: 1,
+        emoji: "👍",
+        user_id: 2,
+        action: "add",
+      };
+      updateReaction(payload, 1);
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.reactions).toHaveLength(1);
+      expect(msg.reactions[0]).toEqual({ emoji: "👍", count: 1, me: false });
+    });
+
+    it("marks reaction as 'me' when current user reacts", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+
+      updateReaction({
+        message_id: 100,
+        channel_id: 1,
+        emoji: "❤️",
+        user_id: 1,
+        action: "add",
+      }, 1);
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.reactions[0]).toEqual({ emoji: "❤️", count: 1, me: true });
+    });
+
+    it("increments count on existing reaction", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+
+      updateReaction({
+        message_id: 100,
+        channel_id: 1,
+        emoji: "👍",
+        user_id: 2,
+        action: "add",
+      }, 1);
+
+      updateReaction({
+        message_id: 100,
+        channel_id: 1,
+        emoji: "👍",
+        user_id: 3,
+        action: "add",
+      }, 1);
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.reactions).toHaveLength(1);
+      expect(msg.reactions[0]!.count).toBe(2);
+    });
+
+    it("sets me=true when incrementing existing reaction by current user", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+
+      updateReaction({
+        message_id: 100,
+        channel_id: 1,
+        emoji: "👍",
+        user_id: 2,
+        action: "add",
+      }, 1);
+
+      updateReaction({
+        message_id: 100,
+        channel_id: 1,
+        emoji: "👍",
+        user_id: 1,
+        action: "add",
+      }, 1);
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.reactions[0]!.me).toBe(true);
+    });
+
+    it("removes a reaction (decrements count)", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+
+      // Add 2 reactions
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "add" }, 1);
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 3, action: "add" }, 1);
+
+      // Remove one
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 3, action: "remove" }, 1);
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.reactions).toHaveLength(1);
+      expect(msg.reactions[0]!.count).toBe(1);
+    });
+
+    it("removes reaction entirely when count reaches 0", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "add" }, 1);
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "remove" }, 1);
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.reactions).toHaveLength(0);
+    });
+
+    it("clears 'me' flag when current user removes their reaction", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 1, action: "add" }, 1);
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "add" }, 1);
+      expect(getChannelMessages(1)[0]!.reactions[0]!.me).toBe(true);
+
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 1, action: "remove" }, 1);
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.reactions[0]!.me).toBe(false);
+      expect(msg.reactions[0]!.count).toBe(1);
+    });
+
+    it("is a no-op if the channel does not exist", () => {
+      const before = messagesStore.getState();
+      updateReaction({ message_id: 999, channel_id: 99, emoji: "👍", user_id: 1, action: "add" }, 1);
+      const after = messagesStore.getState();
+      expect(before).toBe(after);
+    });
+
+    it("does not affect other messages in the channel", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+      addMessage(makeChatPayload({ id: 101, channel_id: 1 }));
+
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "🎉", user_id: 2, action: "add" }, 1);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs[0]!.reactions).toHaveLength(1);
+      expect(msgs[1]!.reactions).toHaveLength(0);
+    });
+
+    it("preserves 'me' when another user removes (not current user)", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 1, action: "add" }, 1);
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "add" }, 1);
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "remove" }, 1);
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.reactions[0]!.me).toBe(true);
+      expect(msg.reactions[0]!.count).toBe(1);
+    });
+
+    it("preserves other emoji reactions when incrementing one (non-matching branch)", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+
+      // Add two different emoji reactions
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "add" }, 1);
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "❤️", user_id: 3, action: "add" }, 1);
+
+      // Increment only 👍 — the ❤️ reaction should remain unchanged
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 4, action: "add" }, 1);
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.reactions).toHaveLength(2);
+      const thumbs = msg.reactions.find((r) => r.emoji === "👍");
+      const heart = msg.reactions.find((r) => r.emoji === "❤️");
+      expect(thumbs!.count).toBe(2);
+      expect(heart!.count).toBe(1);
+    });
+
+    it("preserves other emoji reactions when removing one (non-matching branch)", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+
+      // Add two different reactions
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "add" }, 1);
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "❤️", user_id: 3, action: "add" }, 1);
+
+      // Remove 👍 — ❤️ should remain unchanged
+      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "remove" }, 1);
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.reactions).toHaveLength(1);
+      expect(msg.reactions[0]!.emoji).toBe("❤️");
+      expect(msg.reactions[0]!.count).toBe(1);
+    });
+  });
+
+  // 14. addMessage eviction beyond MAX_MESSAGES_PER_CHANNEL
+  describe("addMessage eviction", () => {
+    it("evicts oldest messages when exceeding cap (500)", () => {
+      // Pre-load 500 messages using addMessage (since setMessages reverses)
+      for (let i = 1; i <= 500; i++) {
+        addMessage(makeChatPayload({ id: i, channel_id: 1 }));
+      }
+      expect(getChannelMessages(1)).toHaveLength(500);
+
+      // Adding one more should evict the oldest
+      addMessage(makeChatPayload({ id: 501, channel_id: 1 }));
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(500);
+      expect(msgs[0]!.id).toBe(2); // oldest (id=1) evicted
+      expect(msgs[msgs.length - 1]!.id).toBe(501);
+    });
+
+    it("sets hasMore to true when eviction occurs", () => {
+      for (let i = 1; i <= 500; i++) {
+        addMessage(makeChatPayload({ id: i, channel_id: 1 }));
+      }
+
+      addMessage(makeChatPayload({ id: 501, channel_id: 1 }));
+      expect(hasMoreMessages(1)).toBe(true);
+    });
+  });
+
+  // 15. setMessages trimming
+  describe("setMessages trimming", () => {
+    it("trims to MAX_MESSAGES_PER_CHANNEL when receiving more", () => {
+      const responses: MessageResponse[] = [];
+      for (let i = 1; i <= 510; i++) {
+        responses.push(makeMessageResponse({ id: i, channel_id: 1 }));
+      }
+      setMessages(1, responses, false);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(500);
+    });
+
+    it("sets hasMore to true when trimming occurs", () => {
+      const responses: MessageResponse[] = [];
+      for (let i = 1; i <= 510; i++) {
+        responses.push(makeMessageResponse({ id: i, channel_id: 1 }));
+      }
+      setMessages(1, responses, false);
+      expect(hasMoreMessages(1)).toBe(true);
+    });
+  });
+
+  // 16. prependMessages trimming
+  describe("prependMessages trimming", () => {
+    it("trims combined messages to MAX_MESSAGES_PER_CHANNEL", () => {
+      // Load 400 messages
+      const initial: MessageResponse[] = [];
+      for (let i = 101; i <= 500; i++) {
+        initial.push(makeMessageResponse({ id: i, channel_id: 1 }));
+      }
+      setMessages(1, initial, true);
+
+      // Prepend 200 more
+      const older: MessageResponse[] = [];
+      for (let i = 1; i <= 200; i++) {
+        older.push(makeMessageResponse({ id: i, channel_id: 1 }));
+      }
+      prependMessages(1, older, false);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(500);
+    });
+
+    it("sets hasMore to true when trimming on prepend", () => {
+      const initial: MessageResponse[] = [];
+      for (let i = 301; i <= 500; i++) {
+        initial.push(makeMessageResponse({ id: i, channel_id: 1 }));
+      }
+      setMessages(1, initial, false);
+
+      const older: MessageResponse[] = [];
+      for (let i = 1; i <= 400; i++) {
+        older.push(makeMessageResponse({ id: i, channel_id: 1 }));
+      }
+      prependMessages(1, older, false);
+
+      expect(hasMoreMessages(1)).toBe(true);
+    });
+  });
+
+  // 17. editMessage when message ID doesn't match
+  describe("editMessage edge cases", () => {
+    it("does not modify messages when message ID not found in channel", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1, content: "Original" }));
+
+      editMessage({
+        message_id: 999,
+        channel_id: 1,
+        content: "Should not appear",
+        edited_at: "2026-03-15T12:00:00Z",
+      });
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.content).toBe("Original");
+      expect(msg.editedAt).toBeNull();
+    });
+  });
+
+  // 18. deleteMessage when message ID doesn't match
+  describe("deleteMessage edge cases", () => {
+    it("does not modify messages when message ID not found in channel", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+
+      deleteMessage({ message_id: 999, channel_id: 1 });
+
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.deleted).toBe(false);
     });
   });
 });

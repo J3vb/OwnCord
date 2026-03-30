@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createStore } from '../../src/lib/store';
+import { createStore, shallowEqual } from '../../src/lib/store';
 
 interface TestState {
   count: number;
@@ -272,6 +272,176 @@ describe('subscribeSelector', () => {
 
     // New object ref with same content DOES fire with strict ===
     store.setState((prev) => ({ ...prev, name: 'changed' }));
+    store.flush();
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// shallowEqual
+// ---------------------------------------------------------------------------
+
+describe('shallowEqual', () => {
+  it('returns true for same reference', () => {
+    const obj = { a: 1 };
+    expect(shallowEqual(obj, obj)).toBe(true);
+  });
+
+  it('returns true for two identical plain objects', () => {
+    expect(shallowEqual({ a: 1, b: 2 }, { a: 1, b: 2 })).toBe(true);
+  });
+
+  it('returns false for objects with different values', () => {
+    expect(shallowEqual({ a: 1 }, { a: 2 })).toBe(false);
+  });
+
+  it('returns false for objects with different keys count', () => {
+    expect(shallowEqual({ a: 1 }, { a: 1, b: 2 })).toBe(false);
+  });
+
+  it('returns false when one side is null', () => {
+    expect(shallowEqual(null, { a: 1 })).toBe(false);
+    expect(shallowEqual({ a: 1 }, null)).toBe(false);
+  });
+
+  it('returns true for null === null', () => {
+    expect(shallowEqual(null, null)).toBe(true);
+  });
+
+  it('returns false for non-object types', () => {
+    expect(shallowEqual(1, 2)).toBe(false);
+    expect(shallowEqual('a', 'b')).toBe(false);
+  });
+
+  it('returns true for same primitive values', () => {
+    expect(shallowEqual(42, 42)).toBe(true);
+    expect(shallowEqual('hello', 'hello')).toBe(true);
+  });
+
+  it('returns false when comparing object with primitive', () => {
+    expect(shallowEqual({ a: 1 }, 42 as unknown)).toBe(false);
+    expect(shallowEqual(42 as unknown, { a: 1 })).toBe(false);
+  });
+
+  // Map comparison
+  it('returns true for identical Maps', () => {
+    const a = new Map([['x', 1], ['y', 2]]);
+    const b = new Map([['x', 1], ['y', 2]]);
+    expect(shallowEqual(a, b)).toBe(true);
+  });
+
+  it('returns false for Maps with different size', () => {
+    const a = new Map([['x', 1]]);
+    const b = new Map([['x', 1], ['y', 2]]);
+    expect(shallowEqual(a, b)).toBe(false);
+  });
+
+  it('returns false for Maps with different keys', () => {
+    const a = new Map([['x', 1]]);
+    const b = new Map([['y', 1]]);
+    expect(shallowEqual(a, b)).toBe(false);
+  });
+
+  it('returns false for Maps with different values', () => {
+    const a = new Map([['x', 1]]);
+    const b = new Map([['x', 2]]);
+    expect(shallowEqual(a, b)).toBe(false);
+  });
+
+  // Set comparison
+  it('returns true for identical Sets', () => {
+    const a = new Set([1, 2, 3]);
+    const b = new Set([1, 2, 3]);
+    expect(shallowEqual(a, b)).toBe(true);
+  });
+
+  it('returns false for Sets with different size', () => {
+    const a = new Set([1, 2]);
+    const b = new Set([1, 2, 3]);
+    expect(shallowEqual(a, b)).toBe(false);
+  });
+
+  it('returns false for Sets with different values', () => {
+    const a = new Set([1, 2]);
+    const b = new Set([1, 3]);
+    expect(shallowEqual(a, b)).toBe(false);
+  });
+
+  // Array comparison
+  it('returns true for identical arrays', () => {
+    expect(shallowEqual([1, 2, 3], [1, 2, 3])).toBe(true);
+  });
+
+  it('returns false for arrays with different length', () => {
+    expect(shallowEqual([1, 2], [1, 2, 3])).toBe(false);
+  });
+
+  it('returns false for arrays with different elements', () => {
+    expect(shallowEqual([1, 2], [1, 3])).toBe(false);
+  });
+
+  it('returns true for empty arrays', () => {
+    expect(shallowEqual([], [])).toBe(true);
+  });
+
+  it('returns true for empty Maps', () => {
+    expect(shallowEqual(new Map(), new Map())).toBe(true);
+  });
+
+  it('returns true for empty Sets', () => {
+    expect(shallowEqual(new Set(), new Set())).toBe(true);
+  });
+
+  it('returns true for empty objects', () => {
+    expect(shallowEqual({}, {})).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// flush edge cases
+// ---------------------------------------------------------------------------
+
+describe('flush edge cases', () => {
+  it('flush when no notification is scheduled does nothing', () => {
+    const store = freshStore();
+    const listener = vi.fn();
+    store.subscribe(listener);
+    // flush without any setState should not fire listeners
+    store.flush();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('double flush only fires once', () => {
+    const store = freshStore();
+    const listener = vi.fn();
+    store.subscribe(listener);
+
+    store.setState((prev) => ({ ...prev, count: 1 }));
+    store.flush();
+    store.flush(); // second flush should be no-op
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('subscribeSelector with Map values uses shallowEqual', () => {
+    interface MapState {
+      items: Map<string, number>;
+    }
+    const store = createStore<MapState>({ items: new Map([['a', 1]]) });
+    const listener = vi.fn();
+    store.subscribeSelector((s) => s.items, listener);
+
+    // Same map reference, no change
+    store.setState((prev) => ({ ...prev }));
+    store.flush();
+    expect(listener).not.toHaveBeenCalled();
+
+    // New map with same content -- shallowEqual returns true, so no fire
+    store.setState((prev) => ({ items: new Map([['a', 1]]) }));
+    store.flush();
+    expect(listener).not.toHaveBeenCalled();
+
+    // Different content
+    store.setState(() => ({ items: new Map([['a', 2]]) }));
     store.flush();
     expect(listener).toHaveBeenCalledTimes(1);
   });

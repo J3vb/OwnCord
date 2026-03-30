@@ -75,12 +75,34 @@ vi.mock("@components/TypingIndicator", () => ({
   })),
 }));
 
+const { mockSetMessagePinned } = vi.hoisted(() => ({
+  mockSetMessagePinned: vi.fn(),
+}));
+
 vi.mock("@stores/messages.store", () => ({
   getChannelMessages: mockGetChannelMessages,
+  setMessagePinned: mockSetMessagePinned,
+}));
+
+const { mockUpdateChatHeaderForDm } = vi.hoisted(() => ({
+  mockUpdateChatHeaderForDm: vi.fn(),
 }));
 
 vi.mock("../../src/pages/main-page/ChatHeader", () => ({
-  updateChatHeaderForDm: vi.fn(),
+  updateChatHeaderForDm: mockUpdateChatHeaderForDm,
+}));
+
+const { mockDmStoreGetState, mockMembersStoreGetState } = vi.hoisted(() => ({
+  mockDmStoreGetState: vi.fn(() => ({ channels: [] })),
+  mockMembersStoreGetState: vi.fn(() => ({ members: new Map() })),
+}));
+
+vi.mock("@stores/dm.store", () => ({
+  dmStore: { getState: mockDmStoreGetState },
+}));
+
+vi.mock("@stores/members.store", () => ({
+  membersStore: { getState: mockMembersStoreGetState },
 }));
 
 // ---------------------------------------------------------------------------
@@ -383,6 +405,17 @@ describe("createChannelController", () => {
       expect(mockSetReplyTo).toHaveBeenCalledWith(5, "alice");
     });
 
+    it("onReplyClick uses empty string for unknown message", () => {
+      mockGetChannelMessages.mockReturnValue([]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onReplyClick(999);
+
+      expect(mockSetReplyTo).toHaveBeenCalledWith(999, "");
+    });
+
     it("onEditClick starts edit with message content", () => {
       mockGetChannelMessages.mockReturnValue([
         { id: 5, content: "hello", user: { id: 1, username: "me" } },
@@ -394,6 +427,313 @@ describe("createChannelController", () => {
       capturedMessageListOpts!.onEditClick(5);
 
       expect(mockStartEdit).toHaveBeenCalledWith(5, "hello");
+    });
+
+    it("onEditClick does nothing for unknown message", () => {
+      mockGetChannelMessages.mockReturnValue([]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onEditClick(999);
+
+      expect(mockStartEdit).not.toHaveBeenCalled();
+    });
+
+    it("onPinClick pins a message and shows toast", async () => {
+      const opts = makeOpts();
+      (opts.api as unknown as { pinMessage: ReturnType<typeof vi.fn> }).pinMessage = vi.fn().mockResolvedValue(undefined);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onPinClick(5, 42, false);
+
+      await vi.waitFor(() => {
+        expect(mockSetMessagePinned).toHaveBeenCalledWith(42, 5, true);
+        expect(opts.showToast).toHaveBeenCalledWith("Message pinned", "success");
+      });
+    });
+
+    it("onPinClick unpins a message and shows toast", async () => {
+      const opts = makeOpts();
+      (opts.api as unknown as { unpinMessage: ReturnType<typeof vi.fn> }).unpinMessage = vi.fn().mockResolvedValue(undefined);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onPinClick(5, 42, true);
+
+      await vi.waitFor(() => {
+        expect(mockSetMessagePinned).toHaveBeenCalledWith(42, 5, false);
+        expect(opts.showToast).toHaveBeenCalledWith("Message unpinned", "success");
+      });
+    });
+
+    it("onPinClick shows error toast on failure", async () => {
+      const opts = makeOpts();
+      (opts.api as unknown as { pinMessage: ReturnType<typeof vi.fn> }).pinMessage = vi.fn().mockRejectedValue(new Error("network error"));
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onPinClick(5, 42, false);
+
+      await vi.waitFor(() => {
+        expect(opts.showToast).toHaveBeenCalledWith("Failed to pin/unpin message", "error");
+      });
+    });
+
+    it("onScrollTop does not load when channelAbort is null (after destroy)", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      // Capture the onScrollTop callback
+      const scrollTopCb = capturedMessageListOpts!.onScrollTop;
+
+      // Destroy channel (sets channelAbort to null)
+      ctrl.destroyChannel();
+      vi.clearAllMocks();
+
+      // Calling onScrollTop after destroy should not call loadOlderMessages
+      scrollTopCb();
+
+      expect(opts.msgCtrl.loadOlderMessages).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("MessageInput callbacks - additional", () => {
+    it("onEditMessage sends chat_edit when content changed", () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageInputOpts!.onEditMessage(5, "new content");
+
+      expect(opts.ws.send).toHaveBeenCalledWith({
+        type: "chat_edit",
+        payload: { message_id: 5, content: "new content" },
+      });
+      expect(opts.showToast).toHaveBeenCalledWith("Message edited", "success");
+    });
+
+    it("onEditMessage sends edit when message not found in store", () => {
+      mockGetChannelMessages.mockReturnValue([]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageInputOpts!.onEditMessage(999, "new content");
+
+      expect(opts.ws.send).toHaveBeenCalledWith({
+        type: "chat_edit",
+        payload: { message_id: 999, content: "new content" },
+      });
+    });
+
+    it("onSend includes reply_to and attachments", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageInputOpts.onSend("hello", 10, ["file1.png"]);
+
+      expect(opts.ws.send).toHaveBeenCalledWith({
+        type: "chat_send",
+        payload: {
+          channel_id: 42,
+          content: "hello",
+          reply_to: 10,
+          attachments: ["file1.png"],
+        },
+      });
+    });
+  });
+
+  describe("edit-last-message event", () => {
+    it("finds the last non-deleted message by current user and starts edit", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 1, content: "first", user: { id: 1, username: "me" }, deleted: false },
+        { id: 2, content: "other user", user: { id: 2, username: "them" }, deleted: false },
+        { id: 3, content: "my deleted", user: { id: 1, username: "me" }, deleted: true },
+        { id: 4, content: "my latest", user: { id: 1, username: "me" }, deleted: false },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      vi.clearAllMocks();
+
+      opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
+
+      expect(mockStartEdit).toHaveBeenCalledWith(4, "my latest");
+    });
+
+    it("skips deleted messages and finds earlier non-deleted message", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 1, content: "earliest", user: { id: 1, username: "me" }, deleted: false },
+        { id: 2, content: "deleted", user: { id: 1, username: "me" }, deleted: true },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      vi.clearAllMocks();
+
+      opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
+
+      expect(mockStartEdit).toHaveBeenCalledWith(1, "earliest");
+    });
+
+    it("does nothing when no own messages exist", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 1, content: "other", user: { id: 2, username: "them" }, deleted: false },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      vi.clearAllMocks();
+
+      opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
+
+      expect(mockStartEdit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("DM channel header", () => {
+    it("updates chat header for DM channel with recipient status", () => {
+      mockDmStoreGetState.mockReturnValue({
+        channels: [
+          {
+            channelId: 42,
+            recipient: { id: 5, username: "alice", avatar: "", status: "online" },
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+          },
+        ],
+      });
+      mockMembersStoreGetState.mockReturnValue({
+        members: new Map([[5, { id: 5, username: "alice", status: "idle" }]]),
+      });
+
+      const chatHeaderRefs = {
+        hashEl: document.createElement("span"),
+        nameEl: document.createElement("span"),
+        topicEl: document.createElement("span"),
+      };
+      const opts = makeOpts({ chatHeaderRefs });
+      const ctrl = createChannelController(opts);
+
+      ctrl.mountChannel(42, "alice", "dm");
+
+      // Should use member status ("idle") over DM recipient status ("online")
+      expect(mockUpdateChatHeaderForDm).toHaveBeenCalledWith(chatHeaderRefs, {
+        username: "alice",
+        status: "Idle",
+      });
+    });
+
+    it("uses DM recipient status when member not found in members store", () => {
+      mockDmStoreGetState.mockReturnValue({
+        channels: [
+          {
+            channelId: 42,
+            recipient: { id: 5, username: "bob", avatar: "", status: "dnd" },
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+          },
+        ],
+      });
+      mockMembersStoreGetState.mockReturnValue({
+        members: new Map(),
+      });
+
+      const chatHeaderRefs = {
+        hashEl: document.createElement("span"),
+        nameEl: document.createElement("span"),
+        topicEl: document.createElement("span"),
+      };
+      const opts = makeOpts({ chatHeaderRefs });
+      const ctrl = createChannelController(opts);
+
+      ctrl.mountChannel(42, "bob", "dm");
+
+      expect(mockUpdateChatHeaderForDm).toHaveBeenCalledWith(chatHeaderRefs, {
+        username: "bob",
+        status: "Dnd",
+      });
+    });
+
+    it("falls back to 'Offline' when DM channel not found in dmStore", () => {
+      mockDmStoreGetState.mockReturnValue({ channels: [] });
+
+      const chatHeaderRefs = {
+        hashEl: document.createElement("span"),
+        nameEl: document.createElement("span"),
+        topicEl: document.createElement("span"),
+      };
+      const opts = makeOpts({ chatHeaderRefs });
+      const ctrl = createChannelController(opts);
+
+      ctrl.mountChannel(42, "unknown", "dm");
+
+      expect(mockUpdateChatHeaderForDm).toHaveBeenCalledWith(chatHeaderRefs, {
+        username: "unknown",
+        status: "Offline",
+      });
+    });
+
+    it("resets header for non-DM channel when chatHeaderRefs is provided", () => {
+      const chatHeaderRefs = {
+        hashEl: document.createElement("span"),
+        nameEl: document.createElement("span"),
+        topicEl: document.createElement("span"),
+      };
+      const opts = makeOpts({ chatHeaderRefs });
+      const ctrl = createChannelController(opts);
+
+      ctrl.mountChannel(42, "general", "text");
+
+      expect(mockUpdateChatHeaderForDm).toHaveBeenCalledWith(chatHeaderRefs, null);
+      expect(opts.chatHeaderName!.textContent).toBe("general");
+    });
+
+    it("only sets chatHeaderName when no chatHeaderRefs", () => {
+      const opts = makeOpts({ chatHeaderRefs: null });
+      const ctrl = createChannelController(opts);
+
+      ctrl.mountChannel(42, "random");
+
+      expect(opts.chatHeaderName!.textContent).toBe("random");
+      expect(mockUpdateChatHeaderForDm).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("destroyChannel edge cases", () => {
+    it("destroyChannel is safe to call when no channel is mounted", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      // Should not throw
+      ctrl.destroyChannel();
+      expect(ctrl.currentChannelId).toBeNull();
+    });
+
+    it("destroyChannel aborts the channel signal", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      ctrl.destroyChannel();
+
+      // Verify edit-last-message listener is cleaned up (signal aborted)
+      // by dispatching the event and checking startEdit is not called
+      mockGetChannelMessages.mockReturnValue([
+        { id: 1, content: "msg", user: { id: 1, username: "me" }, deleted: false },
+      ]);
+      vi.clearAllMocks();
+      opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
+      expect(mockStartEdit).not.toHaveBeenCalled();
     });
   });
 });
