@@ -273,6 +273,80 @@ describe("VideoGrid", () => {
       expect(cell).not.toBeNull();
       expect(container.querySelector(".video-tile-overlay")).toBeNull();
     });
+
+    it("volume slider adjusts user volume for non-screenshare tiles", () => {
+      const config = makeTileConfig({ isSelf: false, audioUserId: 77, isScreenshare: false });
+      grid.addStream(77, "dave", fakeStream(), config);
+
+      const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
+      expect(slider).not.toBeNull();
+      expect(slider.value).toBe("100"); // default
+
+      // Slide to 50
+      slider.value = "50";
+      slider.dispatchEvent(new Event("input"));
+      expect(mockSetUserVolume).toHaveBeenCalledWith(77, 50);
+    });
+
+    it("volume slider at 0 triggers mute icon swap and calls setUserVolume(0)", () => {
+      const config = makeTileConfig({ isSelf: false, audioUserId: 77, isScreenshare: false });
+      grid.addStream(77, "dave", fakeStream(), config);
+
+      const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
+      const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
+
+      // Slide to 0
+      slider.value = "0";
+      slider.dispatchEvent(new Event("input"));
+
+      expect(mockSetUserVolume).toHaveBeenCalledWith(77, 0);
+      // Mute icon should change
+      expect(muteBtn.getAttribute("aria-label")).toBe("Unmute");
+
+      // Overlay should have muted class
+      const overlay = container.querySelector(".video-tile-overlay");
+      expect(overlay!.classList.contains("muted")).toBe(true);
+    });
+
+    it("volume slider for screenshare tiles calls muteScreenshareAudio", () => {
+      const config = makeTileConfig({ isSelf: false, audioUserId: 88, isScreenshare: true });
+      grid.addStream(88, "screen", fakeStream(), config);
+
+      const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
+
+      // Slide to 0 — should mute screenshare
+      slider.value = "0";
+      slider.dispatchEvent(new Event("input"));
+      expect(mockMuteScreenshareAudio).toHaveBeenCalledWith(88, true);
+
+      // Slide to 100 — should unmute screenshare
+      slider.value = "100";
+      slider.dispatchEvent(new Event("input"));
+      expect(mockMuteScreenshareAudio).toHaveBeenCalledWith(88, false);
+    });
+
+    it("mute button unmutes with previous volume when currentVolume was non-zero", () => {
+      const config = makeTileConfig({ isSelf: false, audioUserId: 77, isScreenshare: false });
+      grid.addStream(77, "dave", fakeStream(), config);
+
+      const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
+      const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
+
+      // Set volume to 150 via slider
+      slider.value = "150";
+      slider.dispatchEvent(new Event("input"));
+      mockSetUserVolume.mockClear();
+
+      // Mute via button
+      muteBtn.click();
+      expect(mockSetUserVolume).toHaveBeenCalledWith(77, 0);
+      expect(slider.value).toBe("0");
+
+      // Unmute via button — should restore to 150
+      muteBtn.click();
+      expect(mockSetUserVolume).toHaveBeenCalledWith(77, 150);
+      expect(slider.value).toBe("150");
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -362,6 +436,80 @@ describe("VideoGrid", () => {
 
       grid.setFocusedTile(1);
       expect(grid.getFocusedTileId()).toBe(1);
+    });
+
+    it("focus-mode class is added to root when a tile is focused", () => {
+      grid.addStream(1, "Alice", fakeStream());
+      grid.addStream(2, "Bob", fakeStream());
+
+      const root = container.querySelector(".video-grid") as HTMLElement;
+      expect(root.classList.contains("focus-mode")).toBe(false);
+
+      grid.setFocusedTile(1);
+      expect(root.classList.contains("focus-mode")).toBe(true);
+    });
+
+    it("strip area not shown when only one tile is focused (no thumbnails)", () => {
+      grid.addStream(1, "Alice", fakeStream());
+
+      grid.setFocusedTile(1);
+
+      const mainArea = container.querySelector(".video-focus-main");
+      expect(mainArea).not.toBeNull();
+      // Only one tile — no strip should be rendered
+      const stripArea = container.querySelector(".video-focus-strip");
+      expect(stripArea).toBeNull();
+    });
+
+    it("clicking mute button on a focused tile does not switch focus", () => {
+      const config = makeTileConfig({ isSelf: false, audioUserId: 1, isScreenshare: false });
+      grid.addStream(1, "Alice", fakeStream(), config);
+      grid.addStream(2, "Bob", fakeStream());
+
+      grid.setFocusedTile(1);
+      expect(grid.getFocusedTileId()).toBe(1);
+
+      // Click the mute button on Alice's tile
+      const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
+      muteBtn.click();
+
+      // Focus should remain on tile 1
+      expect(grid.getFocusedTileId()).toBe(1);
+    });
+
+    it("adding a stream during focus mode preserves focus layout", () => {
+      grid.addStream(1, "Alice", fakeStream());
+      grid.addStream(2, "Bob", fakeStream());
+
+      grid.setFocusedTile(1);
+
+      // Add a third stream
+      grid.addStream(3, "Charlie", fakeStream());
+
+      // Focus should still be on tile 1
+      expect(grid.getFocusedTileId()).toBe(1);
+
+      const mainArea = container.querySelector(".video-focus-main");
+      expect(mainArea).not.toBeNull();
+      expect(mainArea!.querySelector('[data-user-id="1"]')).not.toBeNull();
+
+      // Both Bob and Charlie should be in strip
+      const stripArea = container.querySelector(".video-focus-strip");
+      expect(stripArea).not.toBeNull();
+      expect(stripArea!.querySelectorAll(".video-cell").length).toBe(2);
+    });
+
+    it("removing non-focused tile preserves current focus", () => {
+      grid.addStream(1, "Alice", fakeStream());
+      grid.addStream(2, "Bob", fakeStream());
+      grid.addStream(3, "Charlie", fakeStream());
+
+      grid.setFocusedTile(1);
+      grid.removeStream(3);
+
+      expect(grid.getFocusedTileId()).toBe(1);
+      const mainArea = container.querySelector(".video-focus-main");
+      expect(mainArea!.querySelector('[data-user-id="1"]')).not.toBeNull();
     });
   });
 });

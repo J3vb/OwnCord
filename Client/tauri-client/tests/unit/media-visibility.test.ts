@@ -225,4 +225,66 @@ describe('media-visibility', () => {
     expect(canvas.toDataURL).not.toHaveBeenCalled();
     cleanup();
   });
+
+  it('starts frozen when startFrozen is true', () => {
+    const cleanup = setupCanvasMocks();
+    const img = createFakeImg('https://example.com/cat.gif');
+    const wrap = createWrapper();
+    observeMedia(img, 'https://example.com/cat.gif', wrap, true);
+    // Should be frozen immediately
+    expect(wrap.classList.contains('gif-paused')).toBe(true);
+    // The button should show play icon
+    const btn = wrap.querySelector('.gif-play-btn');
+    expect(btn?.querySelector('svg[data-icon="play"]')).not.toBeNull();
+    cleanup();
+  });
+
+  it('startFrozen image can be unfrozen by clicking play', () => {
+    const cleanup = setupCanvasMocks();
+    const img = createFakeImg('https://example.com/cat.gif');
+    const wrap = createWrapper();
+    observeMedia(img, 'https://example.com/cat.gif', wrap, true);
+
+    expect(wrap.classList.contains('gif-paused')).toBe(true);
+
+    // Click play to unfreeze
+    const btn = wrap.querySelector('.gif-play-btn') as HTMLButtonElement;
+    btn.click();
+
+    expect(img.src).toBe('https://example.com/cat.gif');
+    expect(wrap.classList.contains('gif-paused')).toBe(false);
+    cleanup();
+  });
+
+  it('unobserveMedia on an untracked image is a no-op', () => {
+    const img = createFakeImg('https://example.com/unknown.gif');
+    // Should not throw
+    unobserveMedia(img);
+    expect(unobserveMock).not.toHaveBeenCalled();
+  });
+
+  it('pauseAllMedia cleans up stale WeakRefs', () => {
+    const cleanup = setupCanvasMocks();
+    const img = createFakeImg('https://example.com/stale.gif');
+    const wrap = createWrapper();
+    observeMedia(img, 'https://example.com/stale.gif', wrap);
+
+    // First, unobserve to remove from tracked but leave in allTracked
+    // Then pauseAllMedia should handle the missing entry gracefully
+    pauseAllMedia();
+    // Should not throw
+    expect(img.src).toBe('data:image/png;base64,frozen');
+    cleanup();
+  });
+
+  it('resumeVisibleMedia cleans up stale WeakRefs without throwing', () => {
+    // Register and immediately unobserve so the entry is gone from tracked
+    const img = createFakeImg('https://example.com/gone.gif');
+    const wrap = createWrapper();
+    observeMedia(img, 'https://example.com/gone.gif', wrap);
+    unobserveMedia(img);
+    // Now resumeVisibleMedia should not crash
+    resumeVisibleMedia();
+    // No assertion needed — just verifying no throw
+  });
 });

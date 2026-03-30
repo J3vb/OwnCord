@@ -169,4 +169,112 @@ describe("CreateChannelModal", () => {
     modal.destroy?.();
     expect(container.querySelector("[data-testid='create-channel-modal']")).toBeNull();
   });
+
+  it("shows error message when onCreate rejects with Error", async () => {
+    const onCreate = vi.fn().mockRejectedValue(new Error("Name already exists"));
+    const { modal } = makeModal("Text Channels", { onCreate });
+
+    const nameInput = container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement;
+    nameInput.value = "duplicate";
+
+    const submitBtn = container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement;
+    submitBtn.click();
+
+    await vi.waitFor(() => {
+      const error = container.querySelector("[data-testid='channel-create-error']");
+      expect(error?.textContent).toBe("Name already exists");
+    });
+
+    // Button should be re-enabled
+    expect(submitBtn.hasAttribute("disabled")).toBe(false);
+    expect(submitBtn.textContent).toBe("Create Channel");
+
+    modal.destroy?.();
+  });
+
+  it("shows generic error when onCreate rejects with non-Error", async () => {
+    const onCreate = vi.fn().mockRejectedValue("string error");
+    const { modal } = makeModal("Text Channels", { onCreate });
+
+    const nameInput = container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement;
+    nameInput.value = "test";
+
+    const submitBtn = container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement;
+    submitBtn.click();
+
+    await vi.waitFor(() => {
+      const error = container.querySelector("[data-testid='channel-create-error']");
+      expect(error?.textContent).toBe("Failed to create channel");
+    });
+
+    modal.destroy?.();
+  });
+
+  it("disables submit button and shows 'Creating...' while creating", async () => {
+    let resolveCreate: (() => void) | null = null;
+    const onCreate = vi.fn(() => new Promise<void>((resolve) => { resolveCreate = resolve; }));
+    const { modal } = makeModal("Text Channels", { onCreate });
+
+    const nameInput = container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement;
+    nameInput.value = "new-channel";
+
+    const submitBtn = container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement;
+    submitBtn.click();
+
+    expect(submitBtn.hasAttribute("disabled")).toBe(true);
+    expect(submitBtn.textContent).toBe("Creating...");
+
+    resolveCreate?.();
+    modal.destroy?.();
+  });
+
+  it("calls onClose when cancel button is clicked", () => {
+    const onClose = vi.fn();
+    const { modal } = makeModal("Text Channels", { onClose });
+
+    const cancelBtn = container.querySelector(".btn-modal-cancel") as HTMLButtonElement;
+    cancelBtn.click();
+
+    expect(onClose).toHaveBeenCalled();
+    modal.destroy?.();
+  });
+
+  it("calls onClose on backdrop click", () => {
+    const onClose = vi.fn();
+    const { modal } = makeModal("Text Channels", { onClose });
+
+    const overlay = container.querySelector("[data-testid='create-channel-modal']") as HTMLDivElement;
+    // Simulate clicking the overlay backdrop directly
+    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(onClose).toHaveBeenCalled();
+    modal.destroy?.();
+  });
+
+  it("clears previous error when submitting valid data after error", async () => {
+    const onCreate = vi.fn()
+      .mockRejectedValueOnce(new Error("First error"))
+      .mockResolvedValueOnce(undefined);
+    const { modal } = makeModal("Text Channels", { onCreate });
+
+    const nameInput = container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement;
+    nameInput.value = "test";
+
+    const submitBtn = container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement;
+    submitBtn.click();
+
+    await vi.waitFor(() => {
+      expect(container.querySelector("[data-testid='channel-create-error']")?.textContent).toBe("First error");
+    });
+
+    // Try again with a valid name
+    nameInput.value = "valid-name";
+    submitBtn.click();
+
+    // Error should be hidden
+    const error = container.querySelector("[data-testid='channel-create-error']") as HTMLElement;
+    expect(error.style.display).toBe("none");
+
+    modal.destroy?.();
+  });
 });

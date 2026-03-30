@@ -371,6 +371,121 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
+  it("calls onChangePassword and clears inputs on success", async () => {
+    const onChangePassword = vi.fn().mockResolvedValue(undefined);
+    const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
+    overlay.mount(container);
+
+    const inputs = container.querySelectorAll("input[type='password']");
+    (inputs[0] as HTMLInputElement).value = "oldpass123";
+    (inputs[1] as HTMLInputElement).value = "newpassword123";
+    (inputs[2] as HTMLInputElement).value = "newpassword123";
+
+    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn"))
+      .find((b) => b.textContent === "Change Password") as HTMLElement;
+    changePwBtn.click();
+
+    await vi.waitFor(() => {
+      expect(onChangePassword).toHaveBeenCalledWith("oldpass123", "newpassword123");
+    });
+
+    // Inputs should be cleared after success
+    await vi.waitFor(() => {
+      expect((inputs[0] as HTMLInputElement).value).toBe("");
+      expect((inputs[1] as HTMLInputElement).value).toBe("");
+      expect((inputs[2] as HTMLInputElement).value).toBe("");
+    });
+
+    overlay.destroy?.();
+  });
+
+  it("shows error when password change fails", async () => {
+    const onChangePassword = vi.fn().mockRejectedValue(new Error("Incorrect old password"));
+    const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
+    overlay.mount(container);
+
+    const inputs = container.querySelectorAll("input[type='password']");
+    (inputs[0] as HTMLInputElement).value = "wrongold";
+    (inputs[1] as HTMLInputElement).value = "newpassword123";
+    (inputs[2] as HTMLInputElement).value = "newpassword123";
+
+    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn"))
+      .find((b) => b.textContent === "Change Password") as HTMLElement;
+    changePwBtn.click();
+
+    await vi.waitFor(() => {
+      // Find the error element near the password fields
+      const errorEls = container.querySelectorAll("div[style*='color:var(--red)']");
+      const pwError = Array.from(errorEls).find((el) => el.textContent === "Incorrect old password");
+      expect(pwError).not.toBeUndefined();
+    });
+
+    overlay.destroy?.();
+  });
+
+  it("shows error when username update fails", async () => {
+    const onUpdateProfile = vi.fn().mockRejectedValue(new Error("Username taken"));
+    const overlay = createSettingsOverlay({ ...defaultOptions, onUpdateProfile });
+    overlay.mount(container);
+
+    const editBtn = container.querySelector(".account-field-edit") as HTMLElement;
+    editBtn.click();
+
+    const editInput = container.querySelector("input.form-input[type='text']") as HTMLInputElement;
+    editInput.value = "taken-name";
+
+    const saveBtn = Array.from(container.querySelectorAll(".ac-btn"))
+      .find((b) => b.textContent === "Save") as HTMLElement;
+    saveBtn.click();
+
+    await vi.waitFor(() => {
+      const errorEls = container.querySelectorAll("div[style*='color:var(--red)']");
+      const nameError = Array.from(errorEls).find((el) => el.textContent === "Username taken");
+      expect(nameError).not.toBeUndefined();
+    });
+
+    overlay.destroy?.();
+  });
+
+  it("Edit User Profile button opens the same edit form", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    // Click "Edit User Profile" button instead of "Edit" button
+    const editProfileBtn = Array.from(container.querySelectorAll(".ac-btn"))
+      .find((b) => b.textContent === "Edit User Profile") as HTMLElement;
+    editProfileBtn.click();
+
+    const editInput = container.querySelector("input.form-input[type='text']") as HTMLInputElement;
+    expect(editInput).not.toBeNull();
+    // The edit form should be visible
+    const editForm = editInput.closest(".setting-row") as HTMLElement;
+    expect(editForm.style.display).toBe("flex");
+
+    overlay.destroy?.();
+  });
+
+  it("Cancel button hides the username edit form", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    // Open edit form
+    const editBtn = container.querySelector(".account-field-edit") as HTMLElement;
+    editBtn.click();
+
+    // Click cancel
+    const cancelBtn = Array.from(container.querySelectorAll(".ac-btn"))
+      .find((b) => b.textContent === "Cancel") as HTMLElement;
+    cancelBtn.click();
+
+    // Edit form should be hidden
+    const editInput = container.querySelector("input.form-input[type='text']") as HTMLInputElement;
+    const editForm = editInput.closest(".setting-row") as HTMLElement;
+    expect(editForm.style.display).toBe("none");
+
+    overlay.destroy?.();
+  });
+
   // --- Delete account tests ---
 
   it("shows confirmation area when Delete Account is clicked", () => {

@@ -174,4 +174,87 @@ describe("QuickSwitcher", () => {
     switcher.destroy?.();
     expect(container.querySelector(".quick-switcher-overlay")).toBeNull();
   });
+
+  it("ArrowDown wraps around to first item from last", () => {
+    switcher.mount(container);
+    const input = container.querySelector(".quick-switcher__input") as HTMLInputElement;
+
+    // Navigate to last item (4 channels, so press ArrowDown 3 times to reach last)
+    for (let i = 0; i < 3; i++) {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    }
+
+    const items = container.querySelectorAll(".quick-switcher__item");
+    expect(items[3]!.classList.contains("quick-switcher__item--active")).toBe(true);
+
+    // One more ArrowDown should wrap to first
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+
+    const itemsAfter = container.querySelectorAll(".quick-switcher__item");
+    expect(itemsAfter[0]!.classList.contains("quick-switcher__item--active")).toBe(true);
+  });
+
+  it("Ctrl+K closes the switcher when it is open", () => {
+    switcher.mount(container);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("Enter is a no-op when search returns no results", () => {
+    switcher.mount(container);
+    const input = container.querySelector(".quick-switcher__input") as HTMLInputElement;
+
+    // Search for something that won't match
+    input.value = "zzzznotachannel";
+    input.dispatchEvent(new Event("input"));
+
+    const items = container.querySelectorAll(".quick-switcher__item");
+    expect(items.length).toBe(0);
+
+    // Press Enter — should not crash or call onSelectChannel
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(onSelectChannel).not.toHaveBeenCalled();
+  });
+
+  it("updates results when channel store changes", () => {
+    switcher.mount(container);
+
+    // Initially 4 channels
+    expect(container.querySelectorAll(".quick-switcher__item").length).toBe(4);
+
+    // Add a new channel to the store
+    setChannels([
+      ...testChannels,
+      { id: 5, name: "new-channel", type: "text", category: "Text", position: 4, unread_count: 0 },
+    ]);
+    channelsStore.flush();
+
+    // Results should update
+    expect(container.querySelectorAll(".quick-switcher__item").length).toBe(5);
+  });
+
+  it("ArrowUp/ArrowDown are no-ops when results are empty", () => {
+    switcher.mount(container);
+    const input = container.querySelector(".quick-switcher__input") as HTMLInputElement;
+
+    // Filter to no results
+    input.value = "zzzznotachannel";
+    input.dispatchEvent(new Event("input"));
+
+    // Should not throw
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+
+    expect(container.querySelectorAll(".quick-switcher__item").length).toBe(0);
+  });
+
+  it("does not show category for channels without one", () => {
+    switcher.mount(container);
+
+    // Channel 4 (announcements) has category: null
+    const items = container.querySelectorAll(".quick-switcher__item");
+    const lastItem = items[3]!;
+    expect(lastItem.querySelector(".quick-switcher__name")?.textContent).toBe("announcements");
+    expect(lastItem.querySelector(".quick-switcher__category")).toBeNull();
+  });
 });
