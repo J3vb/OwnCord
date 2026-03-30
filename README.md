@@ -107,13 +107,46 @@ dependencies, works fully on LAN.
 
 ## Quick Start
 
-1. Download the latest release from
+1. Download `chatserver.exe` and the OwnCord installer from
    [GitHub Releases](https://github.com/J3vb/OwnCord/releases)
-2. Run `chatserver.exe` — generates `config.yaml` on first run
-3. Open `https://localhost:8443/admin` to access the admin panel
-4. Generate an invite code and share it with friends
-5. Friends download the client installer and connect
-   using your server address
+2. Run `chatserver.exe` — generates `config.yaml` and a `data/`
+   directory (database, TLS certs, uploads, backups) on first run
+3. Open `https://localhost:8443/admin` to create the Owner account
+4. Generate an invite code in the admin panel and share it
+5. Friends install the client, enter your server address
+   (`ip:8443`), and register with the invite code
+
+The client uses TOFU (Trust On First Use) for self-signed
+certificates — it prompts to trust the server on first
+connection, then pins it for future sessions.
+
+### Voice & Video Setup (Optional)
+
+Voice and video require [LiveKit Server](https://github.com/livekit/livekit/releases):
+
+1. Download `livekit-server` from the LiveKit releases page
+2. Edit `config.yaml` and set:
+   ```yaml
+   voice:
+     livekit_api_key: "devkey"           # any string
+     livekit_api_secret: "secret-min-32-characters-long!!"  # min 32 chars
+     livekit_binary: "C:/path/to/livekit-server.exe"
+   ```
+3. Restart `chatserver.exe` — it auto-starts LiveKit as a
+   companion process
+
+### Networking
+
+For friends outside your LAN, you need to forward these ports:
+
+| Port | Protocol | Purpose |
+| ---- | -------- | ------- |
+| `8443` | TCP | HTTPS, WebSocket, REST API |
+| `7881` | TCP | LiveKit signaling (voice/video) |
+| `50000-60000` | UDP | LiveKit WebRTC media (voice/video) |
+
+Alternatively, use Tailscale for zero-config networking
+with no port forwarding.
 
 ## Architecture
 
@@ -223,7 +256,18 @@ npm run lint:fix            # ESLint auto-fix
 
 ## Configuration
 
-The server generates a `config.yaml` on first run. Key settings:
+The server generates a `config.yaml` on first run. All runtime data
+is stored in a `data/` directory alongside the executable:
+
+```text
+data/
+├── owncord.db         # SQLite database
+├── certs/             # TLS certificates (auto-generated if self_signed)
+├── uploads/           # User-uploaded files
+└── backups/           # Database backups
+```
+
+Key settings:
 
 | Setting | Default | Description |
 | ------- | ------- | ----------- |
@@ -252,19 +296,27 @@ To enable signed releases in CI, add these GitHub repository secrets:
 
 ## Documentation
 
-Detailed docs live in the `docs/brain/` Obsidian vault:
+- [Quick Start Guide](docs/quick-start.md)
+- [Server Configuration](docs/server-configuration.md)
+- [LiveKit Setup (Voice/Video)](docs/livekit-setup.md)
+- [Deployment Guide](docs/deployment.md)
+- [Port Forwarding](docs/port-forwarding.md)
+- [Tailscale Guide](docs/tailscale.md)
+- [REST API Reference](docs/api.md)
+- [WebSocket Protocol](docs/protocol.md)
+- [Database Schema](docs/schema.md)
+- [Client Architecture](docs/client-architecture.md)
+- [Contributing](docs/contributing.md)
+- [Security Policy](docs/security.md)
 
-- [Quick Start Guide](docs/brain/08-Guides/quick-start.md)
-- [Port Forwarding Guide](docs/brain/08-Guides/port-forwarding.md)
-- [Tailscale Guide](docs/brain/08-Guides/tailscale.md)
-- [Client Architecture](docs/brain/06-Specs/CLIENT-ARCHITECTURE.md)
-- [Server Spec](docs/brain/06-Specs/CHATSERVER.md)
-- [WebSocket Protocol](docs/brain/06-Specs/PROTOCOL.md)
-- [REST API](docs/brain/06-Specs/API.md)
-- [Database Schema](docs/brain/06-Specs/SCHEMA.md)
-- [Testing Strategy](docs/brain/06-Specs/TESTING-STRATEGY.md)
-- [Contributing](docs/brain/08-Guides/CONTRIBUTING.md)
-- [Security](docs/brain/08-Guides/SECURITY.md)
+## Contributing
+
+1. Fork the repo and create a feature branch from `dev`
+2. Follow existing code style and conventions
+3. Write tests for new functionality
+4. Open a PR against `dev` with a clear description
+
+See [Contributing Guide](docs/contributing.md) for details.
 
 ## Tech Stack
 

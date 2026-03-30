@@ -9,7 +9,7 @@ CLAUDE.md
 .github/instructions/
 
 # AI-specific / internal planning docs
-docs/
+docs/brain/
 skills/
 
 # Server runtime artifacts
