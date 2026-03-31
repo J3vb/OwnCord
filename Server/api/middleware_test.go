@@ -1,6 +1,8 @@
 package api_test
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -573,6 +575,188 @@ func TestMaxBodySize_PassesThrough(t *testing.T) {
 
 	if rr.Code != http.StatusCreated {
 		t.Errorf("MaxBodySize pass-through: status = %d, want 201", rr.Code)
+	}
+}
+
+// ─── AdminIPRestrict tests ──────────────────────────────────────────────────
+
+func TestAdminIPRestrict_AllowedCIDR(t *testing.T) {
+	h := api.AdminIPRestrict([]string{"127.0.0.0/8"})(http.HandlerFunc(ok))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("AdminIPRestrict allowed CIDR status = %d, want 200", rr.Code)
+	}
+}
+
+func TestAdminIPRestrict_BlockedCIDR(t *testing.T) {
+	h := api.AdminIPRestrict([]string{"10.0.0.0/8"})(http.HandlerFunc(ok))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.168.1.1:9999" // not in 10.0.0.0/8
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("AdminIPRestrict blocked CIDR status = %d, want 403", rr.Code)
+	}
+}
+
+func TestAdminIPRestrict_EmptyAllowsAll(t *testing.T) {
+	h := api.AdminIPRestrict(nil)(http.HandlerFunc(ok))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "203.0.113.1:9999"
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("AdminIPRestrict empty list status = %d, want 200", rr.Code)
+	}
+}
+
+func TestAdminIPRestrict_InvalidCIDR(t *testing.T) {
+	// Invalid CIDR should fail closed (deny access since isTrustedProxy
+	// returns false on parse error).
+	h := api.AdminIPRestrict([]string{"not-a-cidr"})(http.HandlerFunc(ok))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("AdminIPRestrict invalid CIDR status = %d, want 403", rr.Code)
+	}
+}
+
+func TestAdminIPRestrict_MultipleCIDRs(t *testing.T) {
+	h := api.AdminIPRestrict([]string{"10.0.0.0/8", "192.168.0.0/16"})(http.HandlerFunc(ok))
+
+	// First CIDR matches.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.1.2.3:9999"
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("AdminIPRestrict multi-CIDR (10.x) status = %d, want 200", rr.Code)
+	}
+
+	// Second CIDR matches.
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.168.1.50:9999"
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("AdminIPRestrict multi-CIDR (192.168.x) status = %d, want 200", rr.Code)
+	}
+
+	// Neither matches.
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "172.16.0.1:9999"
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("AdminIPRestrict multi-CIDR (no match) status = %d, want 403", rr.Code)
+	}
+}
+
+// ─── SecurityHeadersWithTLS tests ───────────────────────────────────────────
+
+func TestSecurityHeadersWithTLS_HSTS(t *testing.T) {
+	h := api.SecurityHeadersWithTLS("auto")(http.HandlerFunc(ok))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if got := rr.Header().Get("Strict-Transport-Security"); got == "" {
+		t.Error("SecurityHeadersWithTLS: missing HSTS header when TLS enabled")
+	}
+}
+
+func TestSecurityHeadersWithTLS_NoHSTSWithoutTLS(t *testing.T) {
+	h := api.SecurityHeadersWithTLS("")(http.HandlerFunc(ok))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if got := rr.Header().Get("Strict-Transport-Security"); got != "" {
+		t.Errorf("SecurityHeadersWithTLS: unexpected HSTS header %q when TLS disabled", got)
+	}
+}
+
+// ─── handleLiveKitHealth tests ──────────────────────────────────────────────
+
+func TestLiveKitHealth_Healthy(t *testing.T) {
+	h := api.HandleLiveKitHealthForTest(func() (bool, error) {
+		return true, nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	if resp["status"] != "ok" {
+		t.Errorf("status = %v, want ok", resp["status"])
+	}
+	if resp["livekit_reachable"] != true {
+		t.Errorf("livekit_reachable = %v, want true", resp["livekit_reachable"])
+	}
+}
+
+func TestLiveKitHealth_Unhealthy(t *testing.T) {
+	h := api.HandleLiveKitHealthForTest(func() (bool, error) {
+		return false, fmt.Errorf("connection refused")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	if resp["status"] != "degraded" {
+		t.Errorf("status = %v, want degraded", resp["status"])
+	}
+	if resp["livekit_reachable"] != false {
+		t.Errorf("livekit_reachable = %v, want false", resp["livekit_reachable"])
+	}
+	if resp["error"] != "connection refused" {
+		t.Errorf("error = %v, want 'connection refused'", resp["error"])
+	}
+}
+
+func TestLiveKitHealth_UnhealthyNoError(t *testing.T) {
+	h := api.HandleLiveKitHealthForTest(func() (bool, error) {
+		return false, nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	if resp["error"] != "unknown" {
+		t.Errorf("error = %v, want 'unknown'", resp["error"])
 	}
 }
 
