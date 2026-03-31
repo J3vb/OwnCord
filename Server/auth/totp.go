@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/subtle"
 	"encoding/base32"
 	"encoding/binary"
 	"encoding/hex"
@@ -204,7 +205,7 @@ func VerifyTOTPCode(secret, code string, at time.Time) bool {
 	}
 	for _, offset := range []int{-1, 0, 1} {
 		candidate, err := GenerateTOTPCode(secret, at.Add(time.Duration(offset)*totpPeriod))
-		if err == nil && candidate == code {
+		if err == nil && subtle.ConstantTimeCompare([]byte(candidate), []byte(code)) == 1 {
 			return true
 		}
 	}

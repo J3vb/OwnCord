@@ -793,7 +793,7 @@ func isRequire2FAEnabled(database *db.DB) (bool, error) {
 }
 
 func isRegistrationOpen(database *db.DB) (bool, error) {
-	return getBooleanSetting(database, "registration_open", false)
+	return getBooleanSetting(database, "registration_open", true)
 }
 
 func getBooleanSetting(database *db.DB, key string, defaultValue bool) (bool, error) {
