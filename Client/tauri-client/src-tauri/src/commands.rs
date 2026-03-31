@@ -78,8 +78,12 @@ pub fn store_cert_fingerprint(
     // Normalize to lowercase for consistent comparison with ws_proxy fingerprints
     let fingerprint = fingerprint.to_lowercase();
 
-    if host.is_empty() {
-        return Err("host must not be empty".into());
+    if host.is_empty() || host.len() > 253 {
+        return Err("host must be 1-253 characters".into());
+    }
+    // Validate host format: alphanumeric, dots, hyphens, colons (port), brackets (IPv6)
+    if !host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']')) {
+        return Err("host contains invalid characters".into());
     }
     if fingerprint.is_empty() {
         return Err("fingerprint must not be empty".into());

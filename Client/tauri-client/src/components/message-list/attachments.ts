@@ -77,8 +77,11 @@ export function clearAttachmentCaches(): void {
 }
 
 /** Safe MIME types allowed in data: URIs — blocks script injection via crafted Content-Type. */
+// Note: image/svg+xml is intentionally excluded — SVGs can execute JS if
+// loaded in <object>, <embed>, or <iframe> contexts. Only raster formats
+// are considered safe for data: URI rendering via <img>.
 const SAFE_MIME_TYPES = new Set([
-  "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml",
+  "image/png", "image/jpeg", "image/gif", "image/webp",
   "image/avif", "image/bmp", "video/mp4", "video/webm", "audio/mpeg",
   "audio/ogg", "audio/wav", "application/pdf",
 ]);
@@ -377,11 +380,16 @@ async function downloadFile(url: string, filename: string): Promise<void> {
       ? { danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } } as RequestInit
       : {};
     const res = await tauriFetch(url, fetchOpts);
-    if (!res.ok) return;
+    if (!res.ok) {
+      log.error("Download failed", { filename, status: res.status });
+      alert(`Download failed: server returned ${res.status}`);
+      return;
+    }
 
     const buffer = await res.arrayBuffer();
     await writeFile(filePath, new Uint8Array(buffer));
   } catch (err) {
     log.error("Download failed", { filename, error: String(err) });
+    alert(`Download failed for ${filename} — check logs for details`);
   }
 }

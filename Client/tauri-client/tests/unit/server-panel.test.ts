@@ -238,7 +238,6 @@ describe("ServerPanel", () => {
       vi.mocked(loadCredential).mockResolvedValueOnce({
         username: "saveduser",
         token: "tok",
-        password: "savedpass",
       });
 
       const panel = createServerPanel(

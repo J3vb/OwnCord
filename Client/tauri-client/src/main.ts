@@ -85,7 +85,7 @@ if (!appEl) {
 
 // Create core services
 const router = createRouter("connect");
-const api = createApiClient({ host: "" }, () => {
+const api = createApiClient({ host: "", allowSelfSigned: true }, () => {
   log.warn("Session expired (401), clearing auth");
   clearAuth();
 });
@@ -291,12 +291,17 @@ function renderPage(pageId: "connect" | "main"): void {
           log.error("TOTP submit without pending partial token");
           return;
         }
-        const result = await api.verifyTotp(code, pendingTotpPartialToken);
-        if (result.token) {
-          const remember = connectPage.getRememberPassword();
-          const savedPassword = remember ? connectPage.getPassword() : undefined;
-          ensureProfileExists(pendingTotpHost, pendingTotpUsername, remember);
-          wirePostAuth(pendingTotpHost, result.token, pendingTotpUsername, savedPassword);
+        try {
+          const result = await api.verifyTotp(code, pendingTotpPartialToken);
+          if (result.token) {
+            const remember = connectPage.getRememberPassword();
+            const savedPassword = remember ? connectPage.getPassword() : undefined;
+            ensureProfileExists(pendingTotpHost, pendingTotpUsername, remember);
+            wirePostAuth(pendingTotpHost, result.token, pendingTotpUsername, savedPassword);
+          }
+        } finally {
+          // Clear sensitive partial token immediately after use (success or failure)
+          pendingTotpPartialToken = "";
         }
       },
       onAddProfile(name, host) {
@@ -370,35 +375,24 @@ function renderPage(pageId: "connect" | "main"): void {
         return; // Skip auto-login when switching servers
       }
 
-      // Auto-login: if a profile has autoConnect enabled, try to connect automatically.
+      // Auto-login: if a profile has autoConnect enabled, try to reconnect
+      // using the stored token (password is no longer returned from the
+      // credential store over IPC for security).
       const autoProfile = profileManager.getAutoConnectProfile();
       if (autoProfile) {
         try {
           const cred = await loadCredential(autoProfile.host);
-          if (cred?.username && cred?.password && !autoLoginCancelled) {
+          if (cred?.username && cred?.token && !autoLoginCancelled) {
             connectPage.selectServer(autoProfile.host, cred.username);
             connectPage.showAutoConnecting(autoProfile.name);
 
-            // Attempt login
-            api.setConfig({ host: autoProfile.host });
-            const result = await api.login(cred.username, cred.password);
-
             if (autoLoginCancelled) return;
 
-            if (result.requires_2fa) {
-              // Can't auto-login with 2FA — show TOTP overlay
-              pendingTotpHost = autoProfile.host;
-              pendingTotpPartialToken = result.partial_token ?? "";
-              pendingTotpUsername = cred.username;
-              connectPage.showTotp();
-              return;
-            }
-
-            if (result.token) {
-              ensureProfileExists(autoProfile.host, cred.username, true);
-              wirePostAuth(autoProfile.host, result.token, cred.username, cred.password);
-              return;
-            }
+            // Use stored token directly for reconnection
+            api.setConfig({ host: autoProfile.host });
+            ensureProfileExists(autoProfile.host, cred.username, false);
+            wirePostAuth(autoProfile.host, cred.token, cred.username);
+            return;
           }
         } catch (err) {
           if (!autoLoginCancelled) {

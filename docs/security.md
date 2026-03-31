@@ -39,9 +39,53 @@ Security-relevant actions are recorded in the `audit_log` table with actor, acti
 - **Content:** `channel_create`, `channel_update`, `channel_delete`, `message_delete`
 - **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `ws_connect`
 
+## Client Security Hardening
+
+The Tauri desktop client implements the following security measures:
+
+### Credential Storage
+- Credentials are stored in Windows Credential Manager via DPAPI (per-user scope, `CRED_PERSIST_ENTERPRISE`)
+- Plaintext passwords are **never** returned to the frontend over IPC — only tokens are accessible from JavaScript
+- Auto-login uses stored tokens for reconnection, not passwords
+
+### Tauri Capabilities (Least Privilege)
+- Filesystem write access is scoped to `$APPDATA/**` and `$APPLOG/**` only
+- DevTools command is gated behind the `devtools` feature flag (excluded from release builds)
+- HTTP fetch permissions are restricted to `https://` origins
+
+### TLS and Certificate Pinning (TOFU)
+- Self-signed certificates are supported via Trust-On-First-Use (TOFU) pinning
+- The WebSocket proxy (`ws_proxy`) pins the server certificate fingerprint on first connection
+- The LiveKit proxy (`livekit_proxy`) reuses the pinned fingerprint from the WS proxy
+- Certificate mismatch triggers a modal requiring user acknowledgment
+- Update downloads validate `server_url` uses `https://` and rejects URLs with userinfo
+
+### Input Validation
+- IPC commands validate host format, string lengths, and character allowlists
+- PTT virtual key codes are validated to the Win32 range (1–254)
+- LiveKit proxy `remote_host` is validated against CRLF injection
+- API client validates host format before constructing URLs
+- File uploads enforce a MIME type allowlist (images, video, audio, PDF, text)
+- Error messages from server responses are capped at 200 characters
+- Notification titles are sanitized (control chars stripped, length capped)
+
+### XSS Prevention
+- All user-generated content is rendered via `textContent`/`setText` — never `innerHTML`
+- The single `innerHTML` usage (SVG icons) operates on compile-time constants with a runtime guard
+- URLs are validated via `isSafeUrl` (rejects `javascript:`, `data:`, `vbscript:`)
+- YouTube embeds use `sandbox` attribute on iframes
+- `image/svg+xml` is excluded from safe MIME types for data URIs
+- Tenor GIF URLs are validated against trusted CDN origins
+- Linkified URLs strip trailing punctuation to prevent misleading destinations
+
+### Search and Rate Limiting
+- Client-side search requests are rate-limited (500ms minimum interval + 300ms debounce)
+
 ## Known Limitations
 
 - No code signing yet -- binaries are verified via SHA256 checksums only
+- The Tenor API key is hardcoded (Google's public anonymous key) — consider build-time injection for production
+- CSP `connect-src` allows `https:` to any host (necessary for self-hosted server URLs not known at build time)
 
 ## Security Hardening Checklist for Operators
 

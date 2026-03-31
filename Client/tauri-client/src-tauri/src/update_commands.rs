@@ -9,6 +9,21 @@ pub struct UpdateCheckResult {
     pub body: Option<String>,
 }
 
+/// Validate that a server URL is safe for the updater to connect to.
+fn validate_server_url(server_url: &str) -> Result<(), String> {
+    let trimmed = server_url.trim_end_matches('/');
+    if !trimmed.starts_with("https://") {
+        return Err("server_url must use https:// scheme".into());
+    }
+    // Reject URLs with userinfo (e.g. "https://evil@host")
+    if let Ok(parsed) = url::Url::parse(trimmed) {
+        if !parsed.username().is_empty() || parsed.password().is_some() {
+            return Err("server_url must not contain userinfo".into());
+        }
+    }
+    Ok(())
+}
+
 /// Check for a client update using the given server URL to build the endpoint
 /// dynamically. This is required because OwnCord is self-hosted and the
 /// server address varies per user.
@@ -17,6 +32,8 @@ pub async fn check_client_update(
     app: AppHandle,
     server_url: String,
 ) -> Result<UpdateCheckResult, String> {
+    validate_server_url(&server_url)?;
+
     let current_version = app
         .config()
         .version
@@ -71,6 +88,8 @@ pub async fn download_and_install_update(
     app: AppHandle,
     server_url: String,
 ) -> Result<(), String> {
+    validate_server_url(&server_url)?;
+
     let current_version = app
         .config()
         .version

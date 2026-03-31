@@ -52,10 +52,16 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   }
 
   const channelName = getChannelName(payload.channel_id);
-  const title = `${payload.user.username} in #${channelName}`;
-  const body = payload.content.length > 100
-    ? payload.content.slice(0, 100) + "..."
-    : payload.content;
+
+  // Sanitize notification strings: strip control characters and cap length
+  // to prevent abuse via server-provided usernames or channel names.
+  function sanitizeNotif(s: string, maxLen: number): string {
+    const cleaned = s.replace(/[\x00-\x1F\x7F]/g, "");
+    return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + "..." : cleaned;
+  }
+
+  const title = sanitizeNotif(`${payload.user.username} in #${channelName}`, 80);
+  const body = sanitizeNotif(payload.content, 100);
 
   // Desktop notification
   if (loadPref<boolean>("desktopNotifications", true)) {

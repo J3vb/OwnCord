@@ -201,7 +201,7 @@ export function createServerPanel(
           void (async () => {
             const cred = await loadCredential(requestedHost);
             if (cred) {
-              onCredentialLoaded(requestedHost, cred.username, cred.password);
+              onCredentialLoaded(requestedHost, cred.username, undefined);
             }
           })();
         },

@@ -57,9 +57,14 @@ pub fn ptt_stop() {
 }
 
 /// Set the PTT virtual key code. Pass 0 to disable.
+/// Valid range: 0 (disabled) or 1–254 (Windows virtual key codes).
 #[tauri::command]
-pub fn ptt_set_key(vk_code: i32) {
+pub fn ptt_set_key(vk_code: i32) -> Result<(), String> {
+    if vk_code != 0 && !(1..=254).contains(&vk_code) {
+        return Err(format!("invalid virtual key code: {vk_code} (must be 0 or 1-254)"));
+    }
     PTT_VKEY.store(vk_code, Ordering::SeqCst);
+    Ok(())
 }
 
 /// Get the current PTT virtual key code.

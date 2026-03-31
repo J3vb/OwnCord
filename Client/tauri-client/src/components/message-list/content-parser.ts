@@ -48,7 +48,11 @@ export function renderMentions(text: string): DocumentFragment {
     if (idx > lastIndex) {
       fragment.appendChild(renderMentionSegment(text.slice(lastIndex, idx)));
     }
-    const url = match[0];
+    // Strip trailing punctuation that is likely sentence-level, not part of the URL
+    const rawUrl = match[0];
+    const stripped = rawUrl.replace(/[.,;:!?)]+$/, "");
+    const trailing = rawUrl.slice(stripped.length);
+    const url = stripped || rawUrl; // fallback if stripping emptied it
     if (isSafeUrl(url)) {
       const link = createElement("a", {
         class: "msg-link",
@@ -58,10 +62,13 @@ export function renderMentions(text: string): DocumentFragment {
       });
       setText(link, url);
       fragment.appendChild(link);
+      if (trailing) {
+        fragment.appendChild(document.createTextNode(trailing));
+      }
     } else {
-      fragment.appendChild(document.createTextNode(url));
+      fragment.appendChild(document.createTextNode(rawUrl));
     }
-    lastIndex = idx + match[0].length;
+    lastIndex = idx + rawUrl.length;
   }
   if (lastIndex < text.length) {
     fragment.appendChild(renderMentionSegment(text.slice(lastIndex)));

@@ -186,6 +186,7 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
     iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
     iframe.setAttribute("allowfullscreen", "");
     iframe.setAttribute("allow", "autoplay; encrypted-media");
+    iframe.setAttribute("sandbox", "allow-scripts allow-same-origin allow-presentation allow-popups");
     iframe.className = "msg-embed-iframe";
     thumbWrap.replaceChildren(iframe);
   }, { once: true });

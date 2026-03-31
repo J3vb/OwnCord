@@ -232,9 +232,12 @@ export function createIcon(name: IconName, size = 24): SVGSVGElement {
   svg.setAttribute("data-icon", name);
   svg.classList.add("icon");
 
-  // Safe: path data comes entirely from the static ICON_PATHS constant above,
-  // never from user-provided input.
-  svg.innerHTML = ICON_PATHS[name];
+  // INVARIANT: ICON_PATHS values are static SVG path strings from Lucide.
+  // They must NEVER contain user data or dynamically-loaded content.
+  // This is the only safe use of innerHTML in the codebase — do not copy this pattern.
+  const pathData = ICON_PATHS[name];
+  if (pathData === undefined) return svg;
+  svg.innerHTML = pathData;
 
   return svg;
 }

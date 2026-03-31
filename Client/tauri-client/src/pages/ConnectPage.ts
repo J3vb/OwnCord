@@ -277,7 +277,8 @@ export function createConnectPage(
         try {
           const cred = await loadCredential(host);
           if (cred && loginForm.getHost() === host) {
-            loginForm.setCredentials(cred.username, cred.password);
+            // Password is no longer returned from credential store over IPC
+            loginForm.setCredentials(cred.username);
           }
         } catch {
           // Credential loading is best-effort; user can type manually

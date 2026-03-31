@@ -10,7 +10,8 @@ const log = createLogger("credentials");
 export interface SavedCredential {
   readonly username: string;
   readonly token: string;
-  readonly password?: string;
+  // Note: password is no longer returned from the Rust backend over IPC
+  // to limit credential exposure in the JS heap.
 }
 
 /** Dynamically import Tauri invoke to avoid errors in test/browser. */
@@ -68,7 +69,6 @@ export async function loadCredential(
         return {
           username: cred.username,
           token: cred.token,
-          ...(typeof cred.password === "string" ? { password: cred.password } : {}),
         };
       }
     }

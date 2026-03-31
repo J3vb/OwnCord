@@ -545,6 +545,10 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       } else {
         message = String(err);
       }
+      // Cap length to prevent phishing via server-controlled error messages
+      if (message.length > 200) {
+        message = message.slice(0, 200) + "...";
+      }
       transitionTo("error", message);
     }
   }

@@ -27,6 +27,8 @@ import type {
 export interface ApiClientConfig {
   readonly host: string;
   readonly token?: string;
+  /** Accept self-signed TLS certificates (for local/dev OwnCord servers). */
+  readonly allowSelfSigned?: boolean;
 }
 
 /** API client error with parsed error body. */
@@ -51,6 +53,11 @@ export function createApiClient(
   initialConfig: ApiClientConfig,
   onUnauthorized?: OnUnauthorized,
 ) {
+  /** Validate a host string to prevent URL authority injection. */
+  function isValidHost(host: string): boolean {
+    return /^[\w.-]+(:\d+)?$/.test(host) && host.length <= 253;
+  }
+
   let config = { ...initialConfig };
 
   function baseUrl(): string {
@@ -84,7 +91,9 @@ export function createApiClient(
       method,
       headers: headers(),
       signal,
-      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
+      ...(config.allowSelfSigned === true
+        ? { danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } }
+        : {}),
     };
     if (body !== undefined) {
       init.body = JSON.stringify(body);
@@ -151,6 +160,10 @@ export function createApiClient(
   return {
     /** Update the client config (e.g., after login). */
     setConfig(newConfig: Partial<ApiClientConfig>): void {
+      if (newConfig.host !== undefined && !isValidHost(newConfig.host)) {
+        log.error("setConfig rejected invalid host", { host: newConfig.host });
+        throw new Error("Invalid host format");
+      }
       config = { ...config, ...newConfig };
     },
 

@@ -5,9 +5,19 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 
+/** Default allowed MIME types for file uploads. */
+const DEFAULT_ALLOWED_TYPES = [
+  "image/jpeg", "image/png", "image/gif", "image/webp", "image/avif",
+  "video/mp4", "video/webm",
+  "audio/mpeg", "audio/ogg", "audio/wav",
+  "application/pdf",
+  "text/plain",
+];
+
 export interface FileUploadOptions {
   readonly onUpload: (file: File) => Promise<void>;
   readonly maxSizeMb?: number;
+  readonly allowedMimeTypes?: readonly string[];
 }
 
 const DEFAULT_MAX_SIZE_MB = 10;
@@ -69,6 +79,11 @@ export function createFileUpload(options: FileUploadOptions): FileUploadComponen
 
   async function handleFile(file: File): Promise<void> {
     errorDiv.classList.add("file-upload__error--hidden");
+    const allowed = options.allowedMimeTypes ?? DEFAULT_ALLOWED_TYPES;
+    if (file.type && !allowed.includes(file.type)) {
+      showError(`File type "${file.type}" is not allowed.`);
+      return;
+    }
     if (file.size > maxBytes) {
       showError(`File too large (${formatSize(file.size)}). Max ${options.maxSizeMb ?? DEFAULT_MAX_SIZE_MB} MB.`);
       return;
@@ -93,7 +108,12 @@ export function createFileUpload(options: FileUploadOptions): FileUploadComponen
     dropzone = createElement("div", { class: "file-upload__dropzone file-upload__dropzone--hidden" });
     appendChildren(dropzone, createElement("span", { class: "file-upload__droptext" }, "Drop files here"));
 
-    fileInput = createElement("input", { class: "file-upload__input", type: "file" });
+    const allowed = options.allowedMimeTypes ?? DEFAULT_ALLOWED_TYPES;
+    fileInput = createElement("input", {
+      class: "file-upload__input",
+      type: "file",
+      accept: allowed.join(","),
+    });
     fileInput.style.display = "none";
 
     preview = createElement("div", { class: "file-upload__preview file-upload__preview--hidden" });

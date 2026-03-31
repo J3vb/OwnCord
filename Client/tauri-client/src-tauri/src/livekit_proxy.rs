@@ -189,6 +189,16 @@ pub async fn start_livekit_proxy<R: Runtime>(
     state: tauri::State<'_, LiveKitProxyState>,
     remote_host: String,
 ) -> Result<u16, String> {
+    // Reject remote_host values containing CRLF or null bytes to prevent
+    // HTTP header injection in the proxy's header rewriting logic.
+    if remote_host.contains('\r') || remote_host.contains('\n') || remote_host.contains('\0') {
+        return Err("remote_host contains invalid characters".into());
+    }
+    // Basic hostname format: alphanumeric, dots, hyphens, colons (port), brackets (IPv6)
+    if !remote_host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']')) {
+        return Err("remote_host contains unexpected characters".into());
+    }
+
     let mut inner = state.inner.lock().await;
 
     info!("[livekit_proxy] start requested for {}", remote_host);

@@ -25,6 +25,8 @@ export interface SearchOverlayOptions {
 
 const DEBOUNCE_MS = 300;
 const MIN_QUERY_LEN = 2;
+/** Minimum interval between actual search API calls (rate limiting). */
+const MIN_SEARCH_INTERVAL_MS = 500;
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -42,6 +44,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   let results: readonly SearchResultItem[] = [];
   let debounceTimer: number | null = null;
   let searchAbort: AbortController | null = null;
+  let lastSearchTime = 0;
 
   function formatTimestamp(ts: string): string {
     try {
@@ -99,6 +102,10 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   }
 
   function doSearch(): void {
+    const now = Date.now();
+    if (now - lastSearchTime < MIN_SEARCH_INTERVAL_MS) return;
+    lastSearchTime = now;
+
     const query = input.value.trim();
     if (query.length < MIN_QUERY_LEN) {
       results = [];
