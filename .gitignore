@@ -51,6 +51,7 @@ node_modules/
 
 # Internal dev tools
 tools/
+.cache/
 
 # Internal dev files
 SKILL.md
