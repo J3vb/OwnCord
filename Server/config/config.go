@@ -79,7 +79,7 @@ func defaults() Config {
 			Port:           8443,
 			Name:           "OwnCord Server",
 			DataDir:        "data",
-			AllowedOrigins: []string{"*"},
+			AllowedOrigins: []string{},
 			TrustedProxies: []string{},
 			AdminAllowedCIDRs: []string{
 				"127.0.0.0/8",     // localhost IPv4
@@ -117,7 +117,7 @@ server:
   port: 8443
   name: "OwnCord Server"
   data_dir: "data"
-  # allowed_origins: ["*"]   # restrict WebSocket origins, e.g. ["https://example.com"]
+  # allowed_origins: []       # empty = deny cross-origin; set to ["*"] for dev or specific origins for prod
   # trusted_proxies: []       # CIDRs of trusted reverse proxies, e.g. ["10.0.0.0/8"]
   # admin_allowed_cidrs:      # CIDRs allowed to access /admin (default: private networks only)
   #   - "127.0.0.0/8"

@@ -116,12 +116,17 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 				return
 			}
 
-			// Exit current process. os.Exit skips deferred cleanup intentionally —
-			// the process must die to release the file lock on its own binary
-			// before the new process can replace it on Windows. SQLite WAL mode
-			// protects DB integrity on unclean shutdown.
-			slog.Info("update: new process spawned, exiting current process")
-			os.Exit(0)
+			// Signal the process to shut down gracefully before exiting.
+			// We use SIGTERM on Unix to trigger the graceful shutdown handler
+			// in main.go. On Windows, os.Exit is unavoidable because the
+			// process must release its file lock on the binary.
+			slog.Info("update: new process spawned, shutting down current process")
+			if p, err := os.FindProcess(os.Getpid()); err == nil {
+				_ = p.Signal(syscall.SIGTERM)
+				// Give graceful shutdown a few seconds before force-killing.
+				time.Sleep(10 * time.Second)
+			}
+			os.Exit(0) // fallback if SIGTERM handler didn't exit
 		}()
 	})
 }

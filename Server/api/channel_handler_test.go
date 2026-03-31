@@ -507,9 +507,11 @@ func TestSearch_InvalidFTSQuery(t *testing.T) {
 	chID, _ := database.CreateChannel("fts", "text", "", "", 0)
 	_, _ = database.CreateMessage(chID, user.ID, "search seed", nil)
 
+	// FTS5 operator characters are now stripped by sanitizeFTSQuery, so a
+	// bare quote becomes an empty query which returns 200 with no results.
 	rr := chGet(t, router, "/api/v1/search?q=%22", token)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
 }
 

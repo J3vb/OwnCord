@@ -45,18 +45,18 @@ func handleUpload(database *db.DB, store *storage.Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Parse multipart form — 10 MB in memory, rest on disk.
 		if err := r.ParseMultipartForm(10 << 20); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error":   "BAD_REQUEST",
-				"message": "invalid multipart form",
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error:   "BAD_REQUEST",
+				Message: "invalid multipart form",
 			})
 			return
 		}
 
 		file, header, err := r.FormFile("file")
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error":   "BAD_REQUEST",
-				"message": "missing file field",
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error:   "BAD_REQUEST",
+				Message: "missing file field",
 			})
 			return
 		}
@@ -69,18 +69,18 @@ func handleUpload(database *db.DB, store *storage.Storage) http.HandlerFunc {
 		var sniffBuf [512]byte
 		n, readErr := file.Read(sniffBuf[:])
 		if readErr != nil && readErr.Error() != "EOF" && readErr.Error() != "unexpected EOF" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error":   "BAD_REQUEST",
-				"message": "failed to read uploaded file",
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error:   "BAD_REQUEST",
+				Message: "failed to read uploaded file",
 			})
 			return
 		}
 		detectedMime := http.DetectContentType(sniffBuf[:n])
 		// Seek back so the full content is available for storage.
 		if _, seekErr := file.Seek(0, 0); seekErr != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{
-				"error":   "INTERNAL_ERROR",
-				"message": "failed to process uploaded file",
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error:   "INTERNAL_ERROR",
+				Message: "failed to process uploaded file",
 			})
 			return
 		}
@@ -89,9 +89,9 @@ func handleUpload(database *db.DB, store *storage.Storage) http.HandlerFunc {
 		// Store file on disk (validates file type via magic bytes).
 		if err := store.Save(fileID, file); err != nil {
 			slog.Warn("file upload rejected", "error", err)
-			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error":   "BAD_REQUEST",
-				"message": fmt.Sprintf("upload rejected: %s", err),
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error:   "BAD_REQUEST",
+				Message: fmt.Sprintf("upload rejected: %s", err),
 			})
 			return
 		}
@@ -118,9 +118,9 @@ func handleUpload(database *db.DB, store *storage.Storage) http.HandlerFunc {
 			// Clean up stored file on DB failure.
 			_ = store.Delete(fileID)
 			slog.Error("failed to create attachment record", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{
-				"error":   "INTERNAL_ERROR",
-				"message": "failed to save attachment",
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error:   "INTERNAL_ERROR",
+				Message: "failed to save attachment",
 			})
 			return
 		}
