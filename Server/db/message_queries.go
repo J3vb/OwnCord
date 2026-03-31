@@ -5,7 +5,26 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 )
+
+// sanitizeFTSQuery strips FTS5 operator characters from user input to prevent
+// query injection. Only allows letters, digits, spaces, and hyphens.
+func sanitizeFTSQuery(q string) string {
+	var sb strings.Builder
+	sb.Grow(len(q))
+	for _, r := range q {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ' || r == '-' {
+			sb.WriteRune(r)
+		}
+	}
+	result := strings.TrimSpace(sb.String())
+	// Enforce a maximum query length to bound FTS processing.
+	if len(result) > 200 {
+		result = result[:200]
+	}
+	return result
+}
 
 // CreateMessage inserts a new message and returns the assigned ID.
 // Content should already be sanitized before calling this function.
@@ -187,6 +206,10 @@ func (d *DB) GetReactions(messageID int64) ([]ReactionCount, error) {
 // When channelID is non-nil the search is scoped to that channel.
 // Deleted messages are excluded from results.
 func (d *DB) SearchMessages(query string, channelID *int64, limit int) ([]MessageSearchResult, error) {
+	if query == "" {
+		return []MessageSearchResult{}, nil
+	}
+	query = sanitizeFTSQuery(query)
 	if query == "" {
 		return []MessageSearchResult{}, nil
 	}

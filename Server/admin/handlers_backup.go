@@ -104,7 +104,11 @@ func handleDeleteBackup(database *db.DB) http.Handler {
 
 		// Resolve to absolute path and verify it stays within the backups directory
 		// to prevent path traversal via Windows drive-letter prefixes (e.g. "C:evil.db").
-		absDir, _ := filepath.Abs(filepath.Join("data", "backups"))
+		absDir, absErr := filepath.Abs(filepath.Join("data", "backups"))
+		if absErr != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to resolve backup directory")
+			return
+		}
 		target := filepath.Join(absDir, name)
 		if !strings.HasPrefix(target, absDir+string(filepath.Separator)) {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
@@ -140,7 +144,11 @@ func handleRestoreBackup(database *db.DB) http.Handler {
 
 		// Resolve to absolute path and verify it stays within the backups directory
 		// to prevent path traversal via Windows drive-letter prefixes (e.g. "C:evil.db").
-		absDir, _ := filepath.Abs(filepath.Join("data", "backups"))
+		absDir, absErr := filepath.Abs(filepath.Join("data", "backups"))
+		if absErr != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to resolve backup directory")
+			return
+		}
 		target := filepath.Join(absDir, name)
 		if !strings.HasPrefix(target, absDir+string(filepath.Separator)) {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
@@ -159,6 +167,12 @@ func handleRestoreBackup(database *db.DB) http.Handler {
 		preRestore := filepath.Join("data", "backups", "pre_restore_"+time.Now().UTC().Format("20060102_150405")+".db")
 		if err := database.BackupTo(preRestore); err != nil {
 			slog.Warn("pre-restore backup failed", "err", err)
+		}
+
+		// Checkpoint the WAL and close the database connection before overwriting
+		// to prevent corruption from concurrent writes.
+		if _, checkpointErr := database.SQLDb().Exec("PRAGMA wal_checkpoint(TRUNCATE)"); checkpointErr != nil {
+			slog.Warn("pre-restore WAL checkpoint failed", "err", checkpointErr)
 		}
 
 		// Stream the backup file over the live database to avoid loading

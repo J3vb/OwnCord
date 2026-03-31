@@ -132,7 +132,11 @@ func (rb *RingBuffer) Write(entry LogEntry) {
 	defer rb.mu.Unlock()
 
 	if len(rb.entries) >= rb.capacity {
-		rb.entries = rb.entries[1:]
+		// Copy to a new slice to release the backing array's first slot,
+		// preventing unbounded growth from repeated re-slicing.
+		fresh := make([]LogEntry, rb.capacity-1, rb.capacity)
+		copy(fresh, rb.entries[1:])
+		rb.entries = fresh
 	}
 	rb.entries = append(rb.entries, entry)
 
