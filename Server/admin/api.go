@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/updater"
 )
@@ -17,8 +18,9 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	r := chi.NewRouter()
 
 	// Setup endpoints — unauthenticated, only functional when no users exist.
+	setupLimiter := auth.NewRateLimiter()
 	r.Get("/setup/status", handleSetupStatus(database))
-	r.Post("/setup", handleSetup(database))
+	r.Post("/setup", handleSetup(database, setupLimiter))
 
 	// SSE log stream — auth is via a single-use ticket from POST /logs/ticket.
 	// EventSource cannot send Authorization headers, so the client first

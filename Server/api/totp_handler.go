@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"fmt"
+
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 )
@@ -35,7 +37,7 @@ type totpEnableResponse struct {
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
-func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore) http.HandlerFunc {
+func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limiter *auth.RateLimiter, usedTOTPCodes *auth.UsedTOTPCodeStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		partialToken, ok := auth.ExtractBearerToken(r)
 		if !ok {
@@ -51,6 +53,17 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore) http
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
 				Error:   "UNAUTHORIZED",
 				Message: "invalid or expired two-factor challenge",
+			})
+			return
+		}
+
+		// Per-user TOTP brute-force protection: lock out after 10 failures
+		// across all IPs within a 15-minute window.
+		totpKey := fmt.Sprintf("totp_fail:%d", challenge.UserID)
+		if !limiter.Allow(totpKey, 10, 15*time.Minute) {
+			writeJSON(w, http.StatusTooManyRequests, errorResponse{
+				Error:   "RATE_LIMITED",
+				Message: "too many failed attempts, try again later",
 			})
 			return
 		}
@@ -73,7 +86,7 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore) http
 			return
 		}
 
-		if !auth.VerifyTOTPCode(*user.TOTPSecret, strings.TrimSpace(req.Code), time.Now().UTC()) {
+		if !auth.VerifyTOTPCodeOnce(*user.TOTPSecret, strings.TrimSpace(req.Code), time.Now().UTC(), user.ID, usedTOTPCodes) {
 			partialStore.RegisterFailure(partialToken, 5)
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
 				Error:   "UNAUTHORIZED",
@@ -93,7 +106,7 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore) http
 		token, err := issueSession(database, user.ID, challenge.Device, challenge.IP)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to create session",
 			})
 			return
@@ -141,7 +154,7 @@ func handleEnableTOTP(pendingStore *auth.PendingTOTPStore) http.HandlerFunc {
 		secret, err := auth.GenerateTOTPSecret()
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to generate two-factor secret",
 			})
 			return
@@ -155,7 +168,7 @@ func handleEnableTOTP(pendingStore *auth.PendingTOTPStore) http.HandlerFunc {
 	}
 }
 
-func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore) http.HandlerFunc {
+func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, usedTOTPCodes *auth.UsedTOTPCodeStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
@@ -191,7 +204,7 @@ func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore) htt
 			return
 		}
 
-		if !auth.VerifyTOTPCode(secret, strings.TrimSpace(req.Code), time.Now().UTC()) {
+		if !auth.VerifyTOTPCodeOnce(secret, strings.TrimSpace(req.Code), time.Now().UTC(), user.ID, usedTOTPCodes) {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
 				Error:   "UNAUTHORIZED",
 				Message: "invalid two-factor code",
@@ -201,7 +214,7 @@ func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore) htt
 
 		if err := database.UpdateUserTOTPSecret(user.ID, &secret); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to enable two-factor authentication",
 			})
 			return
@@ -246,7 +259,7 @@ func handleDisableTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore) htt
 		require2FA, err := isRequire2FAEnabled(database)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to load authentication policy",
 			})
 			return
@@ -262,7 +275,7 @@ func handleDisableTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore) htt
 		pendingStore.Delete(user.ID)
 		if err := database.UpdateUserTOTPSecret(user.ID, nil); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to disable two-factor authentication",
 			})
 			return

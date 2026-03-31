@@ -105,7 +105,7 @@ func handleListChannels(database *db.DB) http.HandlerFunc {
 		if err != nil {
 			slog.Error("handleListChannels ListChannels", "err", err)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to list channels",
 			})
 			return
@@ -119,7 +119,7 @@ func handleListChannels(database *db.DB) http.HandlerFunc {
 			if oErr != nil {
 				slog.Error("handleListChannels GetAllChannelPermissionsForRole", "err", oErr)
 				writeJSON(w, http.StatusInternalServerError, errorResponse{
-					Error:   "INTERNAL",
+					Error:   "INTERNAL_ERROR",
 					Message: "failed to fetch channel permissions",
 				})
 				return
@@ -153,7 +153,7 @@ func handleGetMessages(database *db.DB) http.HandlerFunc {
 		if err != nil {
 			slog.Error("handleGetMessages GetChannel", "err", err, "channel_id", channelID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to look up channel",
 			})
 			return
@@ -236,7 +236,7 @@ func handleGetMessages(database *db.DB) http.HandlerFunc {
 		if err != nil {
 			slog.Error("handleGetMessages GetMessagesForAPI", "err", err, "channel_id", channelID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to fetch messages",
 			})
 			return
@@ -309,7 +309,7 @@ func handleSearch(database *db.DB) http.HandlerFunc {
 			}
 			slog.Error("handleSearch SearchMessages", "err", err, "query", q)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "search failed",
 			})
 			return
@@ -325,7 +325,7 @@ func handleSearch(database *db.DB) http.HandlerFunc {
 			if oErr != nil {
 				slog.Error("handleSearch GetAllChannelPermissionsForRole", "err", oErr)
 				writeJSON(w, http.StatusInternalServerError, errorResponse{
-					Error:   "INTERNAL",
+					Error:   "INTERNAL_ERROR",
 					Message: "search failed",
 				})
 				return
@@ -345,7 +345,7 @@ func handleSearch(database *db.DB) http.HandlerFunc {
 		if ctErr != nil {
 			slog.Error("handleSearch GetChannelTypes", "err", ctErr)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "search failed",
 			})
 			return
@@ -397,7 +397,7 @@ func handleGetPins(database *db.DB) http.HandlerFunc {
 		if err != nil {
 			slog.Error("handleGetPins GetChannel", "err", err, "channel_id", channelID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to look up channel",
 			})
 			return
@@ -450,7 +450,7 @@ func handleGetPins(database *db.DB) http.HandlerFunc {
 		if err != nil {
 			slog.Error("handleGetPins GetPinnedMessages", "err", err, "channel_id", channelID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to fetch pinned messages",
 			})
 			return
@@ -486,7 +486,7 @@ func handleSetPinned(database *db.DB, pinned bool) http.HandlerFunc {
 		if chErr != nil {
 			slog.Error("handleSetPinned GetChannel", "err", chErr, "channel_id", channelID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to look up channel",
 			})
 			return
@@ -534,7 +534,7 @@ func handleSetPinned(database *db.DB, pinned bool) http.HandlerFunc {
 		if err != nil {
 			slog.Error("handleSetPinned GetMessage", "err", err, "action", action, "message_id", messageID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to look up message",
 			})
 			return
@@ -550,7 +550,7 @@ func handleSetPinned(database *db.DB, pinned bool) http.HandlerFunc {
 		if err := database.SetMessagePinned(messageID, pinned); err != nil {
 			slog.Error("handleSetPinned SetMessagePinned", "err", err, "action", action, "message_id", messageID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to " + action + " message",
 			})
 			return

@@ -161,6 +161,54 @@ func (s *PendingTOTPStore) cleanupExpiredLocked() {
 	}
 }
 
+// UsedTOTPCodeStore tracks recently verified TOTP codes to prevent replay
+// attacks within the ±1 period validity window (~90 seconds).
+type UsedTOTPCodeStore struct {
+	mu      sync.Mutex
+	entries map[string]time.Time // key: "userID:code" → expiry
+}
+
+func NewUsedTOTPCodeStore() *UsedTOTPCodeStore {
+	return &UsedTOTPCodeStore{
+		entries: make(map[string]time.Time),
+	}
+}
+
+// MarkUsed records a TOTP code as used for the given user. Returns false if
+// the code was already used (replay detected).
+func (s *UsedTOTPCodeStore) MarkUsed(userID int64, code string) bool {
+	key := fmt.Sprintf("%d:%s", userID, code)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cleanupExpiredLocked()
+	if _, exists := s.entries[key]; exists {
+		return false
+	}
+	s.entries[key] = time.Now().Add(90 * time.Second)
+	return true
+}
+
+func (s *UsedTOTPCodeStore) cleanupExpiredLocked() {
+	now := time.Now()
+	for key, expiry := range s.entries {
+		if now.After(expiry) {
+			delete(s.entries, key)
+		}
+	}
+}
+
+// VerifyTOTPCodeOnce verifies a TOTP code and marks it as used to prevent
+// replay attacks. Returns false if the code is invalid or was already used.
+func VerifyTOTPCodeOnce(secret, code string, at time.Time, userID int64, usedStore *UsedTOTPCodeStore) bool {
+	if !VerifyTOTPCode(secret, code, at) {
+		return false
+	}
+	if usedStore == nil {
+		return true
+	}
+	return usedStore.MarkUsed(userID, code)
+}
+
 func GenerateTOTPSecret() (string, error) {
 	bytes := make([]byte, 20)
 	if _, err := rand.Read(bytes); err != nil {

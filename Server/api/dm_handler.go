@@ -88,7 +88,7 @@ func handleCreateDM(database *db.DB) http.HandlerFunc {
 		if err != nil {
 			slog.Error("handleCreateDM GetUserByID", "err", err, "recipient_id", req.RecipientID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to look up recipient",
 			})
 			return
@@ -107,7 +107,7 @@ func handleCreateDM(database *db.DB) http.HandlerFunc {
 			slog.Error("handleCreateDM GetOrCreateDMChannel", "err", err,
 				"user_id", user.ID, "recipient_id", req.RecipientID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to create DM channel",
 			})
 			return
@@ -154,7 +154,7 @@ func handleListDMs(database *db.DB) http.HandlerFunc {
 		if err != nil {
 			slog.Error("handleListDMs GetUserDMChannels", "err", err, "user_id", user.ID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to list DM channels",
 			})
 			return
@@ -187,7 +187,7 @@ func handleCloseDM(database *db.DB, broadcaster DMBroadcaster) http.HandlerFunc 
 			slog.Error("handleCloseDM IsDMParticipant", "err", err,
 				"user_id", user.ID, "channel_id", channelID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to verify DM participation",
 			})
 			return
@@ -204,7 +204,7 @@ func handleCloseDM(database *db.DB, broadcaster DMBroadcaster) http.HandlerFunc 
 			slog.Error("handleCloseDM CloseDM", "err", err,
 				"user_id", user.ID, "channel_id", channelID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to close DM",
 			})
 			return

@@ -13,15 +13,6 @@ import (
 	"github.com/owncord/server/db"
 )
 
-// setupLimiter restricts setup attempts to prevent brute-force attacks
-// against the initial owner account creation endpoint.
-var setupLimiter = auth.NewRateLimiter()
-
-// ResetSetupLimiter resets the setup rate limiter. Exported for tests only.
-func ResetSetupLimiter() {
-	setupLimiter = auth.NewRateLimiter()
-}
-
 // setupSanitizer strips all HTML from user input during setup.
 var setupSanitizer = bluemonday.StrictPolicy()
 
@@ -61,7 +52,7 @@ func handleSetupStatus(database *db.DB) http.HandlerFunc {
 
 // handleSetup creates the first owner account. It only works when no users
 // exist in the database, preventing abuse after initial setup.
-func handleSetup(database *db.DB) http.HandlerFunc {
+func handleSetup(database *db.DB, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Rate limit: 5 attempts per minute per IP.
 		// Strip the port so that different source ports from the same IP
@@ -71,7 +62,7 @@ func handleSetup(database *db.DB) http.HandlerFunc {
 			host = r.RemoteAddr
 		}
 		setupKey := "setup:" + host
-		if !setupLimiter.Allow(setupKey, 5, time.Minute) {
+		if !limiter.Allow(setupKey, 5, time.Minute) {
 			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many setup attempts, try again later")
 			return
 		}
@@ -132,6 +123,10 @@ func handleSetup(database *db.DB) http.HandlerFunc {
 		}
 
 		device := r.Header.Get("User-Agent")
+		const maxDeviceLen = 512
+		if len(device) > maxDeviceLen {
+			device = device[:maxDeviceLen]
+		}
 		if _, err := database.CreateSession(uid, auth.HashToken(token), device, host); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create session")
 			return

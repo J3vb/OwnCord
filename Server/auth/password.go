@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"sync"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -27,18 +28,28 @@ func HashPassword(password string) (string, error) {
 	return string(hash), nil
 }
 
-// dummyHash is a pre-computed bcrypt hash used to prevent timing side-channels
-// when the user does not exist. Comparing against this dummy ensures that
-// CheckPassword takes roughly constant time regardless of whether a valid hash
-// was supplied.
-var dummyHash []byte
+// dummyHash is a lazily-computed bcrypt hash used to prevent timing
+// side-channels when the user does not exist. Comparing against this dummy
+// ensures that CheckPassword takes roughly constant time regardless of
+// whether a valid hash was supplied.
+var (
+	dummyHash     []byte
+	dummyHashOnce sync.Once
+)
 
-func init() {
-	h, err := bcrypt.GenerateFromPassword([]byte("dummy-timing-pad"), bcryptCost)
-	if err != nil {
-		panic("auth: failed to generate dummy bcrypt hash: " + err.Error())
-	}
-	dummyHash = h
+// getDummyHash returns the pre-computed dummy bcrypt hash, initialising it
+// on first call via sync.Once.
+func getDummyHash() []byte {
+	dummyHashOnce.Do(func() {
+		h, err := bcrypt.GenerateFromPassword([]byte("dummy-timing-pad"), bcryptCost)
+		if err != nil {
+			// crypto/rand is required for the server to function; panic is
+			// appropriate here as there is no recovery path.
+			panic("auth: failed to generate dummy bcrypt hash: " + err.Error())
+		}
+		dummyHash = h
+	})
+	return dummyHash
 }
 
 // CheckPassword reports whether password matches hash. Returns false on any
@@ -52,7 +63,7 @@ func CheckPassword(hash, password string) bool {
 		// The error is intentionally discarded: we always return false here.
 		// The comparison is performed only to consume time and prevent
 		// timing-based username enumeration.
-		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
+		_ = bcrypt.CompareHashAndPassword(getDummyHash(), []byte(password))
 		return false
 	}
 	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
