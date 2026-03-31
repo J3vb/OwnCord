@@ -3,10 +3,12 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 )
 
@@ -74,26 +76,25 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		h.handleVoiceLeave(ctx, c)
 	}
 
-	// Check channel capacity.
+	// Check channel capacity and persist to DB atomically.
 	maxUsers := ch.VoiceMaxUsers
 	if maxUsers > 0 {
-		existing, qErr := h.db.GetChannelVoiceStates(channelID)
-		if qErr != nil {
-			slog.Error("ws handleVoiceJoin GetChannelVoiceStates", "err", qErr, "channel_id", channelID)
-			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to check channel capacity"))
+		if err := h.db.JoinVoiceChannelIfCapacity(c.userID, channelID, maxUsers); err != nil {
+			if errors.Is(err, db.ErrChannelFull) {
+				c.sendMsg(buildErrorMsg(ErrCodeChannelFull, "voice channel is full"))
+				return
+			}
+			slog.Error("ws handleVoiceJoin JoinVoiceChannelIfCapacity", "err", err, "user_id", c.userID)
+			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to join voice channel"))
 			return
 		}
-		if len(existing) >= maxUsers {
-			c.sendMsg(buildErrorMsg(ErrCodeChannelFull, "voice channel is full"))
+	} else {
+		// No capacity limit — use standard join.
+		if err := h.db.JoinVoiceChannel(c.userID, channelID); err != nil {
+			slog.Error("ws handleVoiceJoin JoinVoiceChannel", "err", err, "user_id", c.userID)
+			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to join voice channel"))
 			return
 		}
-	}
-
-	// Persist to DB.
-	if err := h.db.JoinVoiceChannel(c.userID, channelID); err != nil {
-		slog.Error("ws handleVoiceJoin JoinVoiceChannel", "err", err, "user_id", c.userID)
-		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to join voice channel"))
-		return
 	}
 
 	// Load the persisted row immediately so later cleanup can target this exact

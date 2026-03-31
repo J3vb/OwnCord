@@ -182,8 +182,9 @@ func (s *UsedTOTPCodeStore) MarkUsed(userID int64, code string) bool {
 	defer s.mu.Unlock()
 	s.cleanupExpiredLocked()
 	if _, exists := s.entries[key]; exists {
-		return false
+		return false // replay detected
 	}
+	// Codes are valid for at most 90 seconds (current period ± 1).
 	s.entries[key] = time.Now().Add(90 * time.Second)
 	return true
 }

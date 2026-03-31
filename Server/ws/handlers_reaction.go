@@ -55,6 +55,11 @@ func (h *Hub) handleReaction(ctx context.Context, c *Client, add bool, payload j
 			return
 		}
 	}
+	// Sanitize HTML to prevent stored XSS via emoji field.
+	if sanitized := sanitizer.Sanitize(p.Emoji); sanitized != p.Emoji {
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "emoji contains invalid characters"))
+		return
+	}
 
 	msg, err := h.db.GetMessage(msgID)
 	if err != nil || msg == nil {

@@ -353,8 +353,12 @@ func (h *Hub) handleChatDelete(ctx context.Context, c *Client, _ string, payload
 			return
 		}
 	} else {
-		// Ensure the user still has at least ReadMessages on this channel.
-		if !h.hasChannelPerm(c, msg.ChannelID, permissions.ReadMessages) {
+		// Mod override: ManageMessages allows deleting any message.
+		// Own-message delete requires SendMessages (a muted user cannot delete).
+		isMsgOwner := msg.UserID == c.userID
+		canManage := h.hasChannelPerm(c, msg.ChannelID, permissions.ManageMessages)
+		canDelete := canManage || (isMsgOwner && h.hasChannelPerm(c, msg.ChannelID, permissions.SendMessages))
+		if !canDelete {
 			c.sendMsg(buildErrorMsg(ErrCodeForbidden, "cannot delete this message"))
 			return
 		}

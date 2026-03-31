@@ -280,6 +280,41 @@ func handleSearch(database *db.DB) http.HandlerFunc {
 				return
 			}
 			channelID = &v
+
+			// Pre-check: verify the user can read this channel before running
+			// the FTS query, preventing timing-oracle information leakage.
+			ch, chErr := database.GetChannel(v)
+			if chErr != nil || ch == nil {
+				writeJSON(w, http.StatusNotFound, errorResponse{
+					Error:   "NOT_FOUND",
+					Message: "channel not found",
+				})
+				return
+			}
+			if ch.Type == "dm" {
+				user, _ := r.Context().Value(UserKey).(*db.User)
+				if user == nil {
+					writeJSON(w, http.StatusForbidden, errorResponse{
+						Error: "FORBIDDEN", Message: "no permission to search this channel",
+					})
+					return
+				}
+				ok, dmErr := database.IsDMParticipant(user.ID, v)
+				if dmErr != nil || !ok {
+					writeJSON(w, http.StatusForbidden, errorResponse{
+						Error: "FORBIDDEN", Message: "no permission to search this channel",
+					})
+					return
+				}
+			} else {
+				role, _ := r.Context().Value(RoleKey).(*db.Role)
+				if !hasChannelPermREST(database, role, v, permissions.ReadMessages) {
+					writeJSON(w, http.StatusForbidden, errorResponse{
+						Error: "FORBIDDEN", Message: "no permission to search this channel",
+					})
+					return
+				}
+			}
 		}
 
 		limit := defaultMessageLimit

@@ -8,6 +8,9 @@ import (
 	"time"
 )
 
+// ErrChannelFull is returned when a voice channel is at capacity.
+var ErrChannelFull = errors.New("voice channel is full")
+
 var voiceJoinSeq uint64
 
 func newVoiceJoinToken() string {
@@ -39,6 +42,36 @@ func (d *DB) JoinVoiceChannel(userID, channelID int64) error {
 	)
 	if err != nil {
 		return fmt.Errorf("JoinVoiceChannel: %w", err)
+	}
+	return nil
+}
+
+// JoinVoiceChannelIfCapacity atomically inserts a voice state only if the
+// channel has fewer than maxUsers participants. Returns ErrChannelFull when
+// the channel is at capacity. This prevents the TOCTOU race where two
+// concurrent joins both observe capacity and both succeed.
+func (d *DB) JoinVoiceChannelIfCapacity(userID, channelID int64, maxUsers int) error {
+	joinToken := newVoiceJoinToken()
+	res, err := d.sqlDB.Exec(
+		`INSERT INTO voice_states (user_id, channel_id, muted, deafened, speaking, camera, screenshare, joined_at)
+		 SELECT ?, ?, 0, 0, 0, 0, 0, ?
+		 WHERE (SELECT COUNT(*) FROM voice_states WHERE channel_id = ?) < ?
+		 ON CONFLICT(user_id) DO UPDATE SET
+		     channel_id  = excluded.channel_id,
+		     muted       = 0,
+		     deafened    = 0,
+		     speaking    = 0,
+		     camera      = 0,
+		     screenshare = 0,
+		     joined_at   = excluded.joined_at`,
+		userID, channelID, joinToken, channelID, maxUsers,
+	)
+	if err != nil {
+		return fmt.Errorf("JoinVoiceChannelIfCapacity: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrChannelFull
 	}
 	return nil
 }

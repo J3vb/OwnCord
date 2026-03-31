@@ -13,6 +13,7 @@ import (
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 )
 
 const authDeadline = 10 * time.Second
@@ -144,7 +145,12 @@ func (h *Hub) handleFreshConnect(
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
 		return err
 	}
-	if ready, readyErr := h.buildReady(database, c.userID); readyErr == nil {
+	// Look up role for permission-filtered ready payload.
+	var userRole *db.Role
+	if role, rErr := database.GetRoleByID(c.user.RoleID); rErr == nil {
+		userRole = role
+	}
+	if ready, readyErr := h.buildReady(database, c.userID, userRole); readyErr == nil {
 		slog.Info("ws sending ready payload", "user_id", c.userID, "payload_bytes", len(ready))
 		if err := conn.Write(ctx, websocket.MessageText, ready); err != nil {
 			slog.Warn("ws: failed to send ready payload", "user_id", c.userID, "err", err)
@@ -332,7 +338,7 @@ func (h *Hub) buildAuthOK(user *db.User, roleName string) []byte {
 // buildReady constructs the ready server→client message.
 // Per PROTOCOL.md, channels include unread_count and last_message_id per user,
 // and only protocol-specified fields (no slow_mode, archived, voice_* extras).
-func (h *Hub) buildReady(database *db.DB, userID int64) ([]byte, error) {
+func (h *Hub) buildReady(database *db.DB, userID int64, role *db.Role) ([]byte, error) {
 	channels, err := database.ListChannels()
 	if err != nil {
 		return nil, fmt.Errorf("buildReady ListChannels: %w", err)
@@ -348,6 +354,32 @@ func (h *Hub) buildReady(database *db.DB, userID int64) ([]byte, error) {
 		members = []db.MemberSummary{}
 	}
 
+	// Filter channels by READ_MESSAGES permission (mirrors REST handleListChannels).
+	overrides := map[int64]db.ChannelOverride{}
+	if role != nil && !permissions.HasAdmin(role.Permissions) {
+		var oErr error
+		overrides, oErr = database.GetAllChannelPermissionsForRole(role.ID)
+		if oErr != nil {
+			return nil, fmt.Errorf("buildReady GetAllChannelPermissionsForRole: %w", oErr)
+		}
+	}
+	var visibleChannels []db.Channel
+	for _, ch := range channels {
+		// When role is unavailable, include all channels (backwards compat).
+		if role == nil || permissions.HasAdmin(role.Permissions) {
+			visibleChannels = append(visibleChannels, ch)
+			continue
+		}
+		o := overrides[ch.ID]
+		effective := permissions.EffectivePerms(role.Permissions, o.Allow, o.Deny)
+		if effective&permissions.ReadMessages == permissions.ReadMessages {
+			visibleChannels = append(visibleChannels, ch)
+		}
+	}
+	if visibleChannels == nil {
+		visibleChannels = []db.Channel{}
+	}
+
 	// Per-user unread counts.
 	unreadMap, err := database.GetChannelUnreadCounts(userID)
 	if err != nil {
@@ -356,8 +388,8 @@ func (h *Hub) buildReady(database *db.DB, userID int64) ([]byte, error) {
 	}
 
 	// Build protocol-compliant channel objects (strip extra fields).
-	channelPayloads := make([]map[string]any, 0, len(channels))
-	for _, ch := range channels {
+	channelPayloads := make([]map[string]any, 0, len(visibleChannels))
+	for _, ch := range visibleChannels {
 		entry := map[string]any{
 			"id":       ch.ID,
 			"name":     ch.Name,

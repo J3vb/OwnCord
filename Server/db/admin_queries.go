@@ -60,7 +60,7 @@ func (d *DB) GetServerStats() (*ServerStats, error) {
 // limit=0 returns no rows.
 func (d *DB) ListAllUsers(limit, offset int) ([]UserWithRole, error) {
 	rows, err := d.sqlDB.Query(
-		`SELECT u.id, u.username, u.password, u.avatar, u.role_id, u.totp_secret,
+		`SELECT u.id, u.username, u.avatar, u.role_id,
 		        u.status, u.created_at, u.last_seen, u.banned, u.ban_reason, u.ban_expires,
 		        COALESCE(r.name, '') AS role_name
 		 FROM users u
@@ -79,8 +79,8 @@ func (d *DB) ListAllUsers(limit, offset int) ([]UserWithRole, error) {
 		var uwr UserWithRole
 		var banned int
 		err := rows.Scan(
-			&uwr.ID, &uwr.Username, &uwr.PasswordHash, &uwr.Avatar, &uwr.RoleID,
-			&uwr.TOTPSecret, &uwr.Status, &uwr.CreatedAt, &uwr.LastSeen,
+			&uwr.ID, &uwr.Username, &uwr.Avatar, &uwr.RoleID,
+			&uwr.Status, &uwr.CreatedAt, &uwr.LastSeen,
 			&banned, &uwr.BanReason, &uwr.BanExpires,
 			&uwr.RoleName,
 		)

@@ -53,6 +53,10 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 
 			// Check expiry.
 			if auth.IsSessionExpired(sess.ExpiresAt) {
+				// Clean up expired session in background to prevent accumulation.
+				go func(h string) {
+					_ = database.DeleteSession(h)
+				}(hash)
 				writeJSON(w, http.StatusUnauthorized, errorResponse{
 					Error:   "UNAUTHORIZED",
 					Message: "session has expired",

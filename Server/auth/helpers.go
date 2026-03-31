@@ -48,7 +48,7 @@ func ExtractBearerToken(r *http.Request) (string, bool) {
 	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") || parts[1] == "" {
 		return "", false
 	}
-	return parts[1], true
+	return strings.TrimSpace(parts[1]), true
 }
 
 // IsEffectivelyBanned reports whether u is currently banned, accounting for
