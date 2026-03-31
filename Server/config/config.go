@@ -208,7 +208,9 @@ func Load(cfgPath string) (*Config, error) {
 
 	// Apply voice defaults for zero-value fields (koanf loses defaults when
 	// the YAML section is present but fields are commented out / omitted).
-	applyVoiceDefaults(&cfg.Voice)
+	if err := applyVoiceDefaults(&cfg.Voice); err != nil {
+		return nil, fmt.Errorf("applying voice defaults: %w", err)
+	}
 
 	// Warn if using default dev credentials — these are public and insecure.
 	// Clear credentials so downstream consumers (e.g. NewLiveKitClient) see
@@ -238,12 +240,12 @@ func IsDefaultVoiceCredentials(v *VoiceConfig) bool {
 }
 
 // generateRandomKey returns a crypto-random hex string of the given byte length.
-func generateRandomKey(byteLen int) string {
+func generateRandomKey(byteLen int) (string, error) {
 	b := make([]byte, byteLen)
 	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand failed: " + err.Error())
+		return "", fmt.Errorf("crypto/rand: %w", err)
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
 }
 
 // applyVoiceDefaults fills in zero-value voice fields with sensible defaults.
@@ -251,13 +253,21 @@ func generateRandomKey(byteLen int) string {
 // overwrites struct defaults with Go zero values.
 // When API key/secret are empty, unique random credentials are generated
 // so voice works out of the box without shipping known-public defaults.
-func applyVoiceDefaults(v *VoiceConfig) {
+func applyVoiceDefaults(v *VoiceConfig) error {
 	if v.LiveKitAPIKey == "" {
-		v.LiveKitAPIKey = "key-" + generateRandomKey(8)
+		key, err := generateRandomKey(8)
+		if err != nil {
+			return fmt.Errorf("generating LiveKit API key: %w", err)
+		}
+		v.LiveKitAPIKey = "key-" + key
 		slog.Warn("generated random LiveKit API key — voice tokens will break on restart; set voice.livekit_api_key in config.yaml for stable operation")
 	}
 	if v.LiveKitAPISecret == "" {
-		v.LiveKitAPISecret = generateRandomKey(32) // 64 hex chars, well above 32-char minimum
+		secret, err := generateRandomKey(32)
+		if err != nil {
+			return fmt.Errorf("generating LiveKit API secret: %w", err)
+		}
+		v.LiveKitAPISecret = secret
 		slog.Warn("generated random LiveKit API secret — set voice.livekit_api_secret in config.yaml for stable operation")
 	}
 	if v.LiveKitURL == "" {
@@ -266,6 +276,7 @@ func applyVoiceDefaults(v *VoiceConfig) {
 	if v.Quality == "" {
 		v.Quality = "medium"
 	}
+	return nil
 }
 
 // validateYAML checks that raw bytes are valid YAML.

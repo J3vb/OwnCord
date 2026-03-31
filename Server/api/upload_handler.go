@@ -1,14 +1,17 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"io"
 	"log/slog"
 	"mime"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -27,6 +30,29 @@ type uploadResponse struct {
 	URL      string `json:"url"`
 	Width    *int   `json:"width,omitempty"`
 	Height   *int   `json:"height,omitempty"`
+}
+
+// sanitizeUploadFilename cleans an upload filename: strips control characters,
+// removes path separators, and truncates to a safe length.
+func sanitizeUploadFilename(name string) string {
+	// Strip path components — use only the base name.
+	name = filepath.Base(name)
+	// Remove control characters.
+	var sb strings.Builder
+	for _, r := range name {
+		if r >= 32 && r != 127 { // exclude control chars and DEL
+			sb.WriteRune(r)
+		}
+	}
+	name = strings.TrimSpace(sb.String())
+	// Truncate to 255 characters (filesystem limit).
+	if len(name) > 255 {
+		name = name[:255]
+	}
+	if name == "" || name == "." || name == ".." {
+		name = "unnamed"
+	}
+	return name
 }
 
 // MountUploadRoutes registers upload and file-serving endpoints.
@@ -68,7 +94,7 @@ func handleUpload(database *db.DB, store *storage.Storage) http.HandlerFunc {
 		// Detect MIME type from actual file bytes (never trust client header).
 		var sniffBuf [512]byte
 		n, readErr := file.Read(sniffBuf[:])
-		if readErr != nil && readErr.Error() != "EOF" && readErr.Error() != "unexpected EOF" {
+		if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
 				"error":   "BAD_REQUEST",
 				"message": "failed to read uploaded file",
@@ -114,7 +140,8 @@ func handleUpload(database *db.DB, store *storage.Storage) http.HandlerFunc {
 		}
 
 		// Insert attachment record in DB (unlinked — message_id is NULL).
-		if err := database.CreateAttachment(fileID, header.Filename, fileID, mime, header.Size, width, height); err != nil {
+		safeFilename := sanitizeUploadFilename(header.Filename)
+		if err := database.CreateAttachment(fileID, safeFilename, fileID, mime, header.Size, width, height); err != nil {
 			// Clean up stored file on DB failure.
 			_ = store.Delete(fileID)
 			slog.Error("failed to create attachment record", "error", err)
@@ -125,11 +152,11 @@ func handleUpload(database *db.DB, store *storage.Storage) http.HandlerFunc {
 			return
 		}
 
-		slog.Info("file uploaded", "id", fileID, "filename", header.Filename, "size", header.Size, "mime", mime)
+		slog.Info("file uploaded", "id", fileID, "filename", safeFilename, "size", header.Size, "mime", mime)
 
 		writeJSON(w, http.StatusCreated, uploadResponse{
 			ID:       fileID,
-			Filename: header.Filename,
+			Filename: safeFilename,
 			Size:     header.Size,
 			Mime:     mime,
 			URL:      "/api/v1/files/" + fileID,

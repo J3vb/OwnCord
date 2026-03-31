@@ -127,7 +127,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 		registrationOpen, err := isRegistrationOpen(database)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to load registration policy",
 			})
 			return
@@ -143,7 +143,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 		require2FA, err := isRequire2FAEnabled(database)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to load registration policy",
 			})
 			return
@@ -199,7 +199,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 		hash, err := auth.HashPassword(req.Password)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to process registration",
 			})
 			return
@@ -218,7 +218,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 			} else {
 				slog.Error("CreateUserWithInvite failed", "err", err, "username", req.Username)
 				writeJSON(w, http.StatusInternalServerError, errorResponse{
-					Error:   "SERVER_ERROR",
+					Error:   "INTERNAL_ERROR",
 					Message: "registration failed — please try again",
 				})
 			}
@@ -234,16 +234,16 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 		token, err := auth.GenerateToken()
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to create session",
 			})
 			return
 		}
 
-		device := r.Header.Get("User-Agent")
+		device := truncateDevice(r.Header.Get("User-Agent"))
 		if _, err := database.CreateSession(uid, auth.HashToken(token), device, ip); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to create session",
 			})
 			return
@@ -253,7 +253,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 		if err != nil || user == nil {
 			slog.Error("failed to fetch user after registration", "user_id", uid, "error", err)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "registration succeeded but user fetch failed",
 			})
 			return
@@ -315,7 +315,7 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 			// non-nil error here is a genuine DB failure.
 			slog.Error("login: GetUserByUsername failed", "err", err, "ip", ip)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "login temporarily unavailable",
 			})
 			return
@@ -352,16 +352,16 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 		require2FA, err := isRequire2FAEnabled(database)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to load authentication policy",
 			})
 			return
 		}
 		if user.TOTPSecret != nil {
-			partialToken, err := partialStore.Issue(user.ID, r.Header.Get("User-Agent"), ip)
+			partialToken, err := partialStore.Issue(user.ID, truncateDevice(r.Header.Get("User-Agent")), ip)
 			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, errorResponse{
-					Error:   "SERVER_ERROR",
+					Error:   "INTERNAL_ERROR",
 					Message: "failed to start two-factor challenge",
 				})
 				return
@@ -381,10 +381,10 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 		}
 
 		// Issue session.
-		token, err := issueSession(database, user.ID, r.Header.Get("User-Agent"), ip)
+		token, err := issueSession(database, user.ID, truncateDevice(r.Header.Get("User-Agent")), ip)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to create session",
 			})
 			return
@@ -463,7 +463,7 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore) http
 		token, err := issueSession(database, user.ID, challenge.Device, challenge.IP)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to create session",
 			})
 			return
@@ -507,7 +507,7 @@ func handleEnableTOTP(pendingStore *auth.PendingTOTPStore) http.HandlerFunc {
 		secret, err := auth.GenerateTOTPSecret()
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to generate two-factor secret",
 			})
 			return
@@ -567,7 +567,7 @@ func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore) htt
 
 		if err := database.UpdateUserTOTPSecret(user.ID, &secret); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to enable two-factor authentication",
 			})
 			return
@@ -607,7 +607,7 @@ func handleDisableTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore) htt
 		require2FA, err := isRequire2FAEnabled(database)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to load authentication policy",
 			})
 			return
@@ -623,7 +623,7 @@ func handleDisableTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore) htt
 		pendingStore.Delete(user.ID)
 		if err := database.UpdateUserTOTPSecret(user.ID, nil); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to disable two-factor authentication",
 			})
 			return
@@ -646,7 +646,7 @@ func handleLogout(database *db.DB) http.HandlerFunc {
 
 		if err := database.DeleteSession(sess.TokenHash); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to logout",
 			})
 			return
@@ -744,7 +744,7 @@ func handleDeleteAccount(database *db.DB, limiter *auth.RateLimiter) http.Handle
 			}
 			slog.Error("DeleteAccount failed", "err", err, "user_id", user.ID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to delete account",
 			})
 			return
@@ -775,6 +775,16 @@ func toUserResponse(u *db.User) *userResponse {
 		CreatedAt:   u.CreatedAt,
 	}
 	return resp
+}
+
+// truncateDevice truncates the User-Agent to prevent oversized session records.
+const maxDeviceLen = 512
+
+func truncateDevice(ua string) string {
+	if len(ua) > maxDeviceLen {
+		return ua[:maxDeviceLen]
+	}
+	return ua
 }
 
 func issueSession(database *db.DB, userID int64, device, ip string) (string, error) {

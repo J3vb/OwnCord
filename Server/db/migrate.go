@@ -111,10 +111,20 @@ func sqlFilenames(fsys fs.FS) ([]string, error) {
 // without executing them.  This is called once when upgrading a pre-tracking
 // database.
 func seedExistingDatabase(d *DB, filenames []string) error {
+	tx, err := d.sqlDB.Begin()
+	if err != nil {
+		return fmt.Errorf("begin seed tx: %w", err)
+	}
 	for _, name := range filenames {
-		if err := recordApplied(d, name); err != nil {
-			return fmt.Errorf("seeding %s: %w", name, err)
+		if _, execErr := tx.Exec(
+			"INSERT INTO schema_versions (version) VALUES (?)", name,
+		); execErr != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("seeding %s: %w", name, execErr)
 		}
+	}
+	if commitErr := tx.Commit(); commitErr != nil {
+		return fmt.Errorf("commit seed tx: %w", commitErr)
 	}
 	return nil
 }

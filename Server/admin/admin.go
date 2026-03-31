@@ -48,7 +48,7 @@ func NewHandler(database *db.DB, version string, hub HubBroadcaster, u *updater.
 	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Security-Policy",
-			"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
+			"default-src 'self'; style-src 'self'; script-src 'self'")
 		_, _ = w.Write(indexHTML)
 	})
 	r.Handle("/*", http.FileServer(http.FS(staticFS)))
