@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -859,6 +860,471 @@ func TestRegister_RateLimit(t *testing.T) {
 
 	if lastCode != http.StatusTooManyRequests {
 		t.Errorf("Register rate limit: last attempt status = %d, want 429", lastCode)
+	}
+}
+
+// ─── DeleteAccount tests ─────────────────────────────────────────────────────
+
+// deleteJSONWithToken sends a DELETE request with an Authorization header and JSON body.
+func deleteJSONWithToken(t *testing.T, router http.Handler, path, token string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodDelete, path, bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	return rr
+}
+
+func TestDeleteAccount_Success(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	// Create as Member (role_id=4) so the last-admin check does not block deletion.
+	uid, _ := database.CreateUser("deleteuser", hash, 4)
+	token, _ := auth.GenerateToken()
+	tokenHash := auth.HashToken(token)
+	_, _ = database.CreateSession(uid, tokenHash, "test", "127.0.0.1")
+
+	rr := deleteJSONWithToken(t, router, "/api/v1/auth/account", token, map[string]string{
+		"password": "correctPass1",
+	})
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("DeleteAccount status = %d, want 204; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// User should be anonymised (banned, username changed).
+	user, err := database.GetUserByID(uid)
+	if err != nil {
+		t.Fatalf("GetUserByID after delete: %v", err)
+	}
+	if user == nil {
+		t.Fatal("user row should still exist (soft-delete), got nil")
+	}
+	if !user.Banned {
+		t.Error("expected user to be banned after deletion")
+	}
+	if user.Username != "[deleted-1]" && user.Username != "[deleted-"+fmt.Sprintf("%d", uid)+"]" {
+		t.Errorf("expected anonymised username, got %q", user.Username)
+	}
+
+	// Session should be gone.
+	sess, _ := database.GetSessionByTokenHash(tokenHash)
+	if sess != nil {
+		t.Error("session should be deleted after account deletion")
+	}
+}
+
+func TestDeleteAccount_MissingPassword(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	uid, _ := database.CreateUser("delnopass", hash, 4)
+	token, _ := auth.GenerateToken()
+	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+
+	rr := deleteJSONWithToken(t, router, "/api/v1/auth/account", token, map[string]string{})
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("DeleteAccount missing password status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestDeleteAccount_WrongPassword(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	uid, _ := database.CreateUser("delwrong", hash, 4)
+	token, _ := auth.GenerateToken()
+	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+
+	rr := deleteJSONWithToken(t, router, "/api/v1/auth/account", token, map[string]string{
+		"password": "wrongPassword1",
+	})
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("DeleteAccount wrong password status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify user is NOT deleted.
+	user, _ := database.GetUserByID(uid)
+	if user == nil || user.Banned {
+		t.Error("user should not be deleted after wrong password")
+	}
+}
+
+func TestDeleteAccount_LastAdmin(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	// Create as Owner (role_id=1) — the only admin-class user.
+	uid, _ := database.CreateUser("lastadmin", hash, 1)
+	token, _ := auth.GenerateToken()
+	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+
+	rr := deleteJSONWithToken(t, router, "/api/v1/auth/account", token, map[string]string{
+		"password": "correctPass1",
+	})
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("DeleteAccount last admin status = %d, want 403; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// User should still be intact.
+	user, _ := database.GetUserByID(uid)
+	if user == nil || user.Banned {
+		t.Error("last admin should not be deleted")
+	}
+}
+
+func TestDeleteAccount_NoAuth(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/account", bytes.NewReader([]byte(`{"password":"x"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("DeleteAccount no auth status = %d, want 401", rr.Code)
+	}
+}
+
+func TestDeleteAccount_LockoutAfterRepeatedFailures(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	uid, _ := database.CreateUser("dellockout", hash, 4)
+	token, _ := auth.GenerateToken()
+	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+
+	// 3 failures should trigger lockout on the 4th attempt.
+	for i := 0; i < 4; i++ {
+		deleteJSONWithToken(t, router, "/api/v1/auth/account", token, map[string]string{
+			"password": "wrongPassword1",
+		})
+	}
+
+	// Even with correct password, should now be locked out.
+	rr := deleteJSONWithToken(t, router, "/api/v1/auth/account", token, map[string]string{
+		"password": "correctPass1",
+	})
+
+	if rr.Code != http.StatusTooManyRequests {
+		t.Errorf("DeleteAccount lockout status = %d, want 429; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+// ─── ConfirmTOTP additional tests ────────────────────────────────────────────
+
+func TestConfirmTOTP_InvalidCode(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	uid, _ := database.CreateUser("totpbadcode", hash, 4)
+	token, _ := auth.GenerateToken()
+	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+
+	// Enable TOTP first to get a pending secret.
+	enable := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token, map[string]string{"password": "correctPass1"})
+	if enable.Code != http.StatusOK {
+		t.Fatalf("enable status = %d, want 200; body = %s", enable.Code, enable.Body.String())
+	}
+
+	// Confirm with an invalid code.
+	confirm := postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", token, map[string]string{
+		"password": "correctPass1",
+		"code":     "000000",
+	})
+
+	if confirm.Code != http.StatusUnauthorized {
+		t.Errorf("ConfirmTOTP invalid code status = %d, want 401; body = %s", confirm.Code, confirm.Body.String())
+	}
+
+	// Secret should NOT be persisted.
+	user, _ := database.GetUserByID(uid)
+	if user.TOTPSecret != nil {
+		t.Error("TOTP secret should not be persisted after invalid code")
+	}
+}
+
+func TestConfirmTOTP_NoPendingSecret(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	uid, _ := database.CreateUser("totpnopending", hash, 4)
+	token, _ := auth.GenerateToken()
+	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+
+	// Confirm without enabling first — no pending secret.
+	confirm := postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", token, map[string]string{
+		"password": "correctPass1",
+		"code":     "123456",
+	})
+
+	if confirm.Code != http.StatusBadRequest {
+		t.Errorf("ConfirmTOTP no pending status = %d, want 400; body = %s", confirm.Code, confirm.Body.String())
+	}
+}
+
+func TestConfirmTOTP_MissingPassword(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	uid, _ := database.CreateUser("totpnoconfirmpass", hash, 4)
+	token, _ := auth.GenerateToken()
+	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+
+	// Enable TOTP first.
+	postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token, map[string]string{"password": "correctPass1"})
+
+	// Confirm without password.
+	confirm := postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", token, map[string]string{
+		"code": "123456",
+	})
+
+	if confirm.Code != http.StatusBadRequest {
+		t.Errorf("ConfirmTOTP missing password status = %d, want 400; body = %s", confirm.Code, confirm.Body.String())
+	}
+}
+
+func TestConfirmTOTP_WrongPassword(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	uid, _ := database.CreateUser("totpwrongconfirm", hash, 4)
+	token, _ := auth.GenerateToken()
+	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+
+	// Enable TOTP first.
+	postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token, map[string]string{"password": "correctPass1"})
+
+	// Confirm with wrong password.
+	confirm := postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", token, map[string]string{
+		"password": "wrongPass",
+		"code":     "123456",
+	})
+
+	if confirm.Code != http.StatusBadRequest {
+		t.Errorf("ConfirmTOTP wrong password status = %d, want 400; body = %s", confirm.Code, confirm.Body.String())
+	}
+}
+
+func TestConfirmTOTP_NoAuth(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/totp/confirm", bytes.NewReader([]byte(`{"password":"x","code":"123456"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("ConfirmTOTP no auth status = %d, want 401", rr.Code)
+	}
+}
+
+// ─── DisableTOTP additional tests ────────────────────────────────────────────
+
+func TestDisableTOTP_WrongPassword(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	uid, _ := database.CreateUser("disabletotpwrong", hash, 4)
+	token, _ := auth.GenerateToken()
+	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+
+	// Set TOTP secret directly.
+	if _, err := database.Exec(`UPDATE users SET totp_secret = 'JBSWY3DPEHPK3PXP' WHERE id = ?`, uid); err != nil {
+		t.Fatalf("set totp secret: %v", err)
+	}
+
+	deleteBody, _ := json.Marshal(map[string]string{"password": "wrongPass"})
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/users/me/totp", bytes.NewReader(deleteBody))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("DisableTOTP wrong password status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// TOTP should still be enabled.
+	user, _ := database.GetUserByID(uid)
+	if user.TOTPSecret == nil {
+		t.Error("TOTP secret should still be set after wrong password")
+	}
+}
+
+func TestDisableTOTP_Require2FABlocksDisable(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	// Enable require_2fa setting.
+	if _, err := database.Exec(`UPDATE settings SET value = 'true' WHERE key = 'require_2fa'`); err != nil {
+		t.Fatalf("enable require_2fa: %v", err)
+	}
+
+	hash, _ := auth.HashPassword("correctPass1")
+	uid, _ := database.CreateUser("disabletotpreq", hash, 4)
+	token, _ := auth.GenerateToken()
+	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+
+	// Set TOTP secret directly.
+	if _, err := database.Exec(`UPDATE users SET totp_secret = 'JBSWY3DPEHPK3PXP' WHERE id = ?`, uid); err != nil {
+		t.Fatalf("set totp secret: %v", err)
+	}
+
+	deleteBody, _ := json.Marshal(map[string]string{"password": "correctPass1"})
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/users/me/totp", bytes.NewReader(deleteBody))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("DisableTOTP require_2fa status = %d, want 403; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// TOTP should still be enabled.
+	user, _ := database.GetUserByID(uid)
+	if user.TOTPSecret == nil {
+		t.Error("TOTP secret should still be set when require_2fa is enabled")
+	}
+}
+
+func TestDisableTOTP_NoAuth(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/users/me/totp", bytes.NewReader([]byte(`{"password":"x"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("DisableTOTP no auth status = %d, want 401", rr.Code)
+	}
+}
+
+// ─── Logout additional tests ─────────────────────────────────────────────────
+
+func TestLogout_InvalidToken(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	rr := postJSONWithToken(t, router, "/api/v1/auth/logout", "invalid-token-value", nil)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("Logout invalid token status = %d, want 401", rr.Code)
+	}
+}
+
+func TestLogout_SessionGoneAfterLogout(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	uid, _ := database.CreateUser("logoutsess", hash, 4)
+	token, _ := auth.GenerateToken()
+	tokenHash := auth.HashToken(token)
+	_, _ = database.CreateSession(uid, tokenHash, "test", "127.0.0.1")
+
+	// First logout should succeed.
+	rr := postJSONWithToken(t, router, "/api/v1/auth/logout", token, nil)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("first logout status = %d, want 204", rr.Code)
+	}
+
+	// Second logout with the same token should fail (session already deleted).
+	rr2 := postJSONWithToken(t, router, "/api/v1/auth/logout", token, nil)
+	if rr2.Code != http.StatusUnauthorized {
+		t.Errorf("second logout status = %d, want 401", rr2.Code)
+	}
+}
+
+// ─── Me additional tests ─────────────────────────────────────────────────────
+
+func TestMe_ReturnsCorrectUserFields(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	uid, _ := database.CreateUser("medetailed", hash, 4)
+	token, _ := auth.GenerateToken()
+	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+
+	rr := getWithToken(t, router, "/api/v1/auth/me", token)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Me status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// Verify all expected fields are present.
+	for _, field := range []string{"id", "username", "status", "role_id", "totp_enabled", "created_at"} {
+		if _, ok := resp[field]; !ok {
+			t.Errorf("Me response missing field %q", field)
+		}
+	}
+	if resp["username"] != "medetailed" {
+		t.Errorf("username = %v, want medetailed", resp["username"])
+	}
+	if resp["totp_enabled"] != false {
+		t.Errorf("totp_enabled = %v, want false", resp["totp_enabled"])
+	}
+}
+
+func TestMe_InvalidToken(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	rr := getWithToken(t, router, "/api/v1/auth/me", "not-a-real-token")
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("Me invalid token status = %d, want 401", rr.Code)
 	}
 }
 

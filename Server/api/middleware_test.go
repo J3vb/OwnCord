@@ -644,4 +644,72 @@ CREATE TABLE IF NOT EXISTS settings (
 INSERT OR IGNORE INTO settings (key, value) VALUES
 	('require_2fa', 'false'),
 	('registration_open', 'true');
+
+CREATE TABLE IF NOT EXISTS channels (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    name             TEXT    NOT NULL,
+    type             TEXT    NOT NULL DEFAULT 'text',
+    category         TEXT,
+    topic            TEXT,
+    position         INTEGER NOT NULL DEFAULT 0,
+    slow_mode        INTEGER NOT NULL DEFAULT 0,
+    archived         INTEGER NOT NULL DEFAULT 0,
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+    voice_max_users  INTEGER NOT NULL DEFAULT 0,
+    voice_quality    TEXT,
+    mixing_threshold INTEGER,
+    voice_max_video  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    content    TEXT    NOT NULL,
+    reply_to   INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    edited_at  TEXT,
+    deleted    INTEGER NOT NULL DEFAULT 0,
+    pinned     INTEGER NOT NULL DEFAULT 0,
+    timestamp  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS dm_participants (
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (channel_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS dm_open_state (
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    opened_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, channel_id)
+);
+
+CREATE TABLE IF NOT EXISTS reactions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    emoji      TEXT    NOT NULL,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(message_id, user_id, emoji)
+);
+
+CREATE TABLE IF NOT EXISTS read_states (
+    user_id         INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    channel_id      INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    last_message_id INTEGER NOT NULL DEFAULT 0,
+    mention_count   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, channel_id)
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_id    INTEGER NOT NULL REFERENCES users(id),
+    action      TEXT    NOT NULL,
+    target_type TEXT    NOT NULL DEFAULT '',
+    target_id   INTEGER NOT NULL DEFAULT 0,
+    detail      TEXT    NOT NULL DEFAULT '',
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
 `)
