@@ -5,7 +5,7 @@ Production deployment guide for OwnCord server on Windows.
 ## Prerequisites
 
 - **Windows 10+** (x64)
-- **Go 1.22+** (only if building from source)
+- **Go 1.25+** (only if building from source)
 - **LiveKit Server** binary (for voice/video) -- see [LiveKit Setup](livekit-setup.md)
 - Ports available: `8443` (default), `7880` (LiveKit), `80` (if using ACME/Let's Encrypt)
 
@@ -115,10 +115,10 @@ The database uses SQLite WAL mode. Do NOT copy the `.db` file directly while the
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/admin/api/backups` | POST | Create a new backup |
+| `/admin/api/backup` | POST | Create a new backup (owner-only) |
 | `/admin/api/backups` | GET | List all backups (newest first) |
-| `/admin/api/backups/{name}` | DELETE | Delete a backup |
-| `/admin/api/backups/{name}/restore` | POST | Restore from backup (creates pre-restore safety backup first) |
+| `/admin/api/backups/{name}` | DELETE | Delete a backup (owner-only) |
+| `/admin/api/backups/{name}/restore` | POST | Restore from backup (owner-only; creates pre-restore safety backup first) |
 
 Backups are stored in `data/backups/` with timestamps.
 
@@ -128,7 +128,7 @@ Use Windows Task Scheduler with PowerShell:
 
 ```powershell
 $headers = @{ "Cookie" = "session=<admin-session-token>" }
-Invoke-RestMethod -Uri "https://localhost:8443/admin/api/backups" -Method POST -Headers $headers -SkipCertificateCheck
+Invoke-RestMethod -Uri "https://localhost:8443/admin/api/backup" -Method POST -Headers $headers -SkipCertificateCheck
 ```
 
 ### Restore

@@ -23,6 +23,21 @@ OwnCord supports TOTP-based 2FA:
 - `require_2fa` requires all users to have 2FA enabled and registration to be closed
 - Login flow returns `requires_2fa: true` with a `partial_token` (10-min TTL, 5-attempt limit)
 - Auth challenges are rate-limited to 10 req/min per IP
+- TOTP code verification uses constant-time comparison (`subtle.ConstantTimeCompare`) to prevent timing side-channel attacks
+
+## Account Deletion
+
+Users can delete their own account via `DELETE /api/v1/auth/account` with password confirmation. The last admin account cannot be deleted. After 3 failed password attempts, the endpoint locks out for 15 minutes.
+
+## Audit Logging
+
+Security-relevant actions are recorded in the `audit_log` table with actor, action, target, and detail:
+
+- **Auth:** `user_register`, `user_login`, `user_logout`, `login_blocked_banned`, `account_deleted`
+- **2FA:** `totp_enabled`, `totp_verified`, `totp_disabled`
+- **Admin:** `role_change`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`
+- **Content:** `channel_create`, `channel_update`, `channel_delete`, `message_delete`
+- **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `ws_connect`
 
 ## Known Limitations
 

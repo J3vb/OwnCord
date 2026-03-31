@@ -2,12 +2,18 @@ package ws_test
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/ws"
 )
+
 
 // ---------------------------------------------------------------------------
 // livekit.go tests
@@ -506,5 +512,353 @@ func TestWebhook_ParticipantLeft_OldToken_DoesNotTeardownReplacement(t *testing.
 	}
 	if vs.JoinedAt != newState.JoinedAt {
 		t.Fatalf("replacement join token = %q, want %q", vs.JoinedAt, newState.JoinedAt)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// livekit_process.go – generateConfig tests
+// ---------------------------------------------------------------------------
+
+func TestGenerateConfig_WritesYAML(t *testing.T) {
+	t.Parallel()
+
+	dataDir := t.TempDir()
+	cfg := &config.VoiceConfig{
+		LiveKitAPIKey:    "testkey",
+		LiveKitAPISecret: "testsecret",
+		LiveKitURL:       "ws://localhost:7880",
+	}
+	tlsCfg := &config.TLSConfig{}
+
+	proc := ws.NewLiveKitProcess(cfg, tlsCfg, dataDir)
+
+	cfgPath, err := proc.GenerateConfigForTest()
+	if err != nil {
+		t.Fatalf("generateConfig: %v", err)
+	}
+
+	content, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("reading config file: %v", err)
+	}
+
+	got := string(content)
+
+	for _, want := range []string{
+		"port: 7880",
+		`"testkey": "testsecret"`,
+		"port_range_start: 50000",
+		"port_range_end: 60000",
+		"use_external_ip: true",
+		"level: info",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("config missing %q.\nGot:\n%s", want, got)
+		}
+	}
+
+	if strings.Contains(got, "node_ip") {
+		t.Error("config should not contain node_ip when NodeIP is empty")
+	}
+}
+
+func TestGenerateConfig_WithNodeIP(t *testing.T) {
+	t.Parallel()
+
+	dataDir := t.TempDir()
+	cfg := &config.VoiceConfig{
+		LiveKitAPIKey:    "key1",
+		LiveKitAPISecret: "secret1",
+		LiveKitURL:       "ws://localhost:7880",
+		NodeIP:           "203.0.113.10",
+	}
+	tlsCfg := &config.TLSConfig{}
+
+	proc := ws.NewLiveKitProcess(cfg, tlsCfg, dataDir)
+
+	cfgPath, err := proc.GenerateConfigForTest()
+	if err != nil {
+		t.Fatalf("generateConfig: %v", err)
+	}
+
+	content, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("reading config file: %v", err)
+	}
+
+	got := string(content)
+	if !strings.Contains(got, `node_ip: "203.0.113.10"`) {
+		t.Errorf("expected node_ip in config.\nGot:\n%s", got)
+	}
+}
+
+func TestGenerateConfig_UnsafeCredentialChars(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		key    string
+		secret string
+	}{
+		{"colon in key", "bad:key", "secret"},
+		{"newline in secret", "key", "bad\nsecret"},
+		{"hash in key", "bad#key", "secret"},
+		{"brace in secret", "key", "bad{secret"},
+		{"backslash in key", `bad\key`, "secret"},
+		{"quote in secret", "key", `bad"secret`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := &config.VoiceConfig{
+				LiveKitAPIKey:    tt.key,
+				LiveKitAPISecret: tt.secret,
+				LiveKitURL:       "ws://localhost:7880",
+			}
+			tlsCfg := &config.TLSConfig{}
+			proc := ws.NewLiveKitProcess(cfg, tlsCfg, t.TempDir())
+
+			_, err := proc.GenerateConfigForTest()
+			if err == nil {
+				t.Error("expected error for unsafe YAML character, got nil")
+			}
+		})
+	}
+}
+
+func TestGenerateConfig_UnsafeNodeIPChars(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.VoiceConfig{
+		LiveKitAPIKey:    "safekey",
+		LiveKitAPISecret: "safesecret",
+		LiveKitURL:       "ws://localhost:7880",
+		NodeIP:           "192.168.1.1\n  evil: true",
+	}
+	tlsCfg := &config.TLSConfig{}
+	proc := ws.NewLiveKitProcess(cfg, tlsCfg, t.TempDir())
+
+	_, err := proc.GenerateConfigForTest()
+	if err == nil {
+		t.Error("expected error for unsafe node_ip character, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// livekit_process.go – Start guard tests
+// ---------------------------------------------------------------------------
+
+func TestStart_AlreadyRunningGuard(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.VoiceConfig{
+		LiveKitAPIKey:     "key",
+		LiveKitAPISecret:  "secret",
+		LiveKitURL:        "ws://localhost:7880",
+		LiveKitBinaryPath: "/nonexistent/livekit-server",
+	}
+	tlsCfg := &config.TLSConfig{}
+	proc := ws.NewLiveKitProcess(cfg, tlsCfg, t.TempDir())
+
+	proc.SetProcessCmdForTest()
+
+	err := proc.Start()
+	if err == nil {
+		t.Fatal("expected error when process already running, got nil")
+	}
+	if !strings.Contains(err.Error(), "already running") {
+		t.Errorf("expected 'already running' error, got: %v", err)
+	}
+}
+
+func TestStart_StoppedGuard(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.VoiceConfig{
+		LiveKitAPIKey:     "key",
+		LiveKitAPISecret:  "secret",
+		LiveKitURL:        "ws://localhost:7880",
+		LiveKitBinaryPath: "/nonexistent/livekit-server",
+	}
+	tlsCfg := &config.TLSConfig{}
+	proc := ws.NewLiveKitProcess(cfg, tlsCfg, t.TempDir())
+
+	proc.SetProcessStoppedForTest()
+
+	err := proc.Start()
+	if err != nil {
+		t.Fatalf("Start() on stopped process returned error: %v", err)
+	}
+
+	proc.Stop()
+	if proc.IsRunning() {
+		t.Error("expected IsRunning() = false after Stop()")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// livekit_process.go – HealthCheck tests
+// ---------------------------------------------------------------------------
+
+func TestHealthCheck_Success(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	wsURL := "ws://" + srv.Listener.Addr().String()
+
+	cfg := &config.VoiceConfig{
+		LiveKitAPIKey:    "key",
+		LiveKitAPISecret: "secret",
+		LiveKitURL:       wsURL,
+	}
+	tlsCfg := &config.TLSConfig{}
+
+	proc := ws.NewLiveKitProcess(cfg, tlsCfg, t.TempDir())
+
+	ok, err := proc.HealthCheck()
+	if err != nil {
+		t.Fatalf("HealthCheck: %v", err)
+	}
+	if !ok {
+		t.Error("expected HealthCheck to return true")
+	}
+}
+
+func TestHealthCheck_ServerDown(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.VoiceConfig{
+		LiveKitAPIKey:    "key",
+		LiveKitAPISecret: "secret",
+		LiveKitURL:       "ws://127.0.0.1:1",
+	}
+	tlsCfg := &config.TLSConfig{}
+
+	proc := ws.NewLiveKitProcess(cfg, tlsCfg, t.TempDir())
+
+	ok, err := proc.HealthCheck()
+	if err == nil {
+		t.Fatal("expected error for unreachable server, got nil")
+	}
+	if ok {
+		t.Error("expected HealthCheck to return false on error")
+	}
+}
+
+func TestHealthCheck_NonOKStatus(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	wsURL := "ws://" + srv.Listener.Addr().String()
+	cfg := &config.VoiceConfig{
+		LiveKitAPIKey:    "key",
+		LiveKitAPISecret: "secret",
+		LiveKitURL:       wsURL,
+	}
+	tlsCfg := &config.TLSConfig{}
+	proc := ws.NewLiveKitProcess(cfg, tlsCfg, t.TempDir())
+
+	ok, err := proc.HealthCheck()
+	if err != nil {
+		t.Fatalf("HealthCheck: %v", err)
+	}
+	if !ok {
+		t.Error("expected HealthCheck to return true even for 500 status")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// livekit_webhook.go – NewLiveKitWebhookHandler tests
+// ---------------------------------------------------------------------------
+
+func TestWebhookHandler_MissingAuthHeader(t *testing.T) {
+	t.Parallel()
+
+	hub := ws.NewHubForTest()
+	handler := hub.NewLiveKitWebhookHandler("api-key", "api-secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/livekit/webhook", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", rec.Code)
+	}
+}
+
+func TestWebhookHandler_InvalidToken(t *testing.T) {
+	t.Parallel()
+
+	hub := ws.NewHubForTest()
+	handler := hub.NewLiveKitWebhookHandler("api-key", "api-secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/livekit/webhook",
+		strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer not-a-valid-jwt-token")
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for invalid token, got %d", rec.Code)
+	}
+}
+
+func TestWebhookHandler_EmptyBody(t *testing.T) {
+	t.Parallel()
+
+	hub := ws.NewHubForTest()
+	handler := hub.NewLiveKitWebhookHandler("api-key", "api-secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/livekit/webhook",
+		strings.NewReader(""))
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for missing auth, got %d", rec.Code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// livekit_webhook.go – MountWebhookRoute tests
+// ---------------------------------------------------------------------------
+
+func TestMountWebhookRoute_RegistersRoute(t *testing.T) {
+	t.Parallel()
+
+	hub := ws.NewHubForTest()
+	handler := ws.MountWebhookRoute(hub, "key", "secret")
+
+	if handler == nil {
+		t.Fatal("MountWebhookRoute returned nil handler")
+	}
+
+	r := chi.NewRouter()
+	r.Post("/livekit/webhook", handler)
+
+	req := httptest.NewRequest(http.MethodPost, "/livekit/webhook",
+		strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+
+	r.ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusNotFound {
+		t.Error("expected route to be registered, got 404")
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 from mounted webhook handler, got %d", rec.Code)
 	}
 }

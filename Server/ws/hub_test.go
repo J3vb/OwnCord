@@ -518,6 +518,129 @@ func TestHub_CleanupVoiceForChannel_NoVoiceState_NoPanic(t *testing.T) {
 // the client map entry; voice cleanup for disconnects is handled by
 // handleVoiceLeave called from readPump/ICE monitor.
 
+// ─── sweepStaleClients ──────────────────────────────────────────────────────
+
+func TestHub_SweepStaleClients_RemovesInactiveClients(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	u1 := seedTestUser(t, database, "stale-alice")
+	u2 := seedTestUser(t, database, "fresh-bob")
+
+	s1 := make(chan []byte, 4)
+	s2 := make(chan []byte, 4)
+	c1 := ws.NewTestClient(hub, u1, s1)
+	c2 := ws.NewTestClient(hub, u2, s2)
+
+	hub.Register(c1)
+	hub.Register(c2)
+	time.Sleep(20 * time.Millisecond)
+
+	ws.SetClientLastActivityForTest(c1, time.Now().Add(-2*time.Minute))
+	ws.SetClientLastActivityForTest(c2, time.Now())
+
+	hub.SweepStaleClientsForTest()
+	time.Sleep(20 * time.Millisecond)
+
+	if hub.ClientCount() != 1 {
+		t.Errorf("ClientCount = %d after sweep, want 1", hub.ClientCount())
+	}
+	if hub.GetClient(u1) != nil {
+		t.Error("stale client should have been removed")
+	}
+	if hub.GetClient(u2) == nil {
+		t.Error("fresh client should still be present")
+	}
+}
+
+func TestHub_SweepStaleClients_NoClientsNoPanic(t *testing.T) {
+	hub, _ := newTestHub(t)
+	hub.SweepStaleClientsForTest()
+}
+
+func TestHub_SweepStaleClients_AllFresh(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	u1 := seedTestUser(t, database, "fresh-carol")
+	s1 := make(chan []byte, 4)
+	c1 := ws.NewTestClient(hub, u1, s1)
+	hub.Register(c1)
+	time.Sleep(20 * time.Millisecond)
+
+	ws.SetClientLastActivityForTest(c1, time.Now())
+	hub.SweepStaleClientsForTest()
+	time.Sleep(20 * time.Millisecond)
+
+	if hub.ClientCount() != 1 {
+		t.Errorf("ClientCount = %d after sweep of fresh clients, want 1", hub.ClientCount())
+	}
+}
+
+// ─── LiveKitHealthCheck ─────────────────────────────────────────────────────
+
+func TestHub_LiveKitHealthCheck_NilReturnsError(t *testing.T) {
+	hub, _ := newTestHub(t)
+	ok, err := hub.LiveKitHealthCheck()
+	if ok {
+		t.Error("expected ok=false when LiveKit is nil")
+	}
+	if err == nil {
+		t.Error("expected non-nil error when LiveKit is nil")
+	}
+}
+
+// ─── SetLiveKitProcess ──────────────────────────────────────────────────────
+
+func TestHub_SetLiveKitProcess(t *testing.T) {
+	hub, _ := newTestHub(t)
+	hub.SetLiveKitProcess(nil)
+	go hub.Run()
+	hub.GracefulStop()
+}
+
+// ─── VoiceSessionCount ─────────────────────────────────────────────────────
+
+func TestHub_VoiceSessionCount(t *testing.T) {
+	tests := []struct {
+		name      string
+		voiceChs  []int64
+		wantCount int
+	}{
+		{"no clients", nil, 0},
+		{"all in voice", []int64{100, 200, 300}, 3},
+		{"none in voice", []int64{0, 0}, 0},
+		{"mixed", []int64{100, 0, 200, 0}, 2},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			hub, database := newTestHub(t)
+			go hub.Run()
+			defer hub.Stop()
+
+			for i, vch := range tc.voiceChs {
+				username := fmt.Sprintf("voice-%s-%d", tc.name, i)
+				uid := seedTestUser(t, database, username)
+				send := make(chan []byte, 4)
+				c := ws.NewTestClient(hub, uid, send)
+				if vch != 0 {
+					ws.SetClientVoiceChID(c, vch)
+				}
+				hub.Register(c)
+			}
+			time.Sleep(30 * time.Millisecond)
+
+			got := hub.VoiceSessionCount()
+			if got != tc.wantCount {
+				t.Errorf("VoiceSessionCount() = %d, want %d", got, tc.wantCount)
+			}
+		})
+	}
+}
+
 // hubTestSchema is the minimal schema needed for hub tests.
 var hubTestSchema = []byte(`
 CREATE TABLE IF NOT EXISTS roles (

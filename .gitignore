@@ -8,6 +8,9 @@ CLAUDE.md
 .github/copilot-instructions.md
 .github/instructions/
 
+# Agent worktrees (Mission Control fleet isolation)
+.worktrees/
+
 # AI-specific / internal planning docs
 docs/brain/
 docs/CODEMAPS/
