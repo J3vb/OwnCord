@@ -214,6 +214,8 @@ export function createVideoGrid(): VideoGridComponent {
       if (label !== null) {
         label.textContent = username;
       }
+      // Sync stream type attribute in case it changed
+      existing.el.dataset.streamType = config?.isScreenshare ? "screenshare" : "camera";
       return;
     }
 
@@ -226,9 +228,11 @@ export function createVideoGrid(): VideoGridComponent {
 
     const label = createElement("div", { class: "video-username" }, username);
 
+    const streamType = config?.isScreenshare ? "screenshare" : "camera";
     const cell = createElement("div", {
       class: "video-cell",
       "data-user-id": String(userId),
+      "data-stream-type": streamType,
     });
     appendChildren(cell, video, label);
 

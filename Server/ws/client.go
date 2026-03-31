@@ -18,27 +18,29 @@ const SessionCheckInterval = 10
 // Client represents a single authenticated WebSocket connection.
 // The underlying transport (conn) is set by ServeWS; in tests it remains nil.
 type Client struct {
-	hub        *Hub
-	conn       wsConn   // interface — nil in unit tests
-	ctx        context.Context // derived from WS upgrade request; cancelled on disconnect
-	userID     int64
-	user       *db.User
-	channelID  int64  // currently viewed channel for channel-scoped broadcasts
-	voiceChID  int64  // voice channel the user is in (0 = not in voice); guarded by voiceMu
-	roleName   string // cached role name for chat_message broadcasts
-	tokenHash  string // SHA-256 hex of the session token; used for periodic revalidation
-	connectedAt  time.Time // when the WS connection was established
-	remoteAddr   string    // client IP:port from the HTTP upgrade request
-	msgCount     int // count of messages processed; resets after session check
-	msgsReceived int64 // total messages received over the lifetime of this connection
-	msgsSent     int64 // total messages sent over the lifetime of this connection
-	msgsDropped  int64 // messages dropped due to full send buffer
-	invalidCount int // consecutive invalid messages; reset on valid parse
-	lastActivity time.Time  // last message received from this client; guarded by mu
-	sendClosed   bool       // true after the send channel has been closed
-	send         chan []byte
-	mu           sync.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
-	voiceMu      sync.Mutex // guards voiceChID
+	hub            *Hub
+	conn           wsConn          // interface — nil in unit tests
+	ctx            context.Context // derived from WS upgrade request; cancelled on disconnect
+	userID         int64
+	user           *db.User
+	channelID      int64     // currently viewed channel for channel-scoped broadcasts
+	voiceChID      int64     // voice channel the user is in (0 = not in voice); guarded by voiceMu
+	voiceJoinToken string    // opaque join-instance token for the current voice session; guarded by voiceMu
+	roleName       string    // cached role name for chat_message broadcasts
+	tokenHash      string    // SHA-256 hex of the session token; used for periodic revalidation
+	lastSeq        uint64    // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
+	connectedAt    time.Time // when the WS connection was established
+	remoteAddr     string    // client IP:port from the HTTP upgrade request
+	msgCount       int       // count of messages processed; resets after session check
+	msgsReceived   int64     // total messages received over the lifetime of this connection
+	msgsSent       int64     // total messages sent over the lifetime of this connection
+	msgsDropped    int64     // messages dropped due to full send buffer
+	invalidCount   int       // consecutive invalid messages; reset on valid parse
+	lastActivity   time.Time // last message received from this client; guarded by mu
+	sendClosed     bool      // true after the send channel has been closed
+	send           chan []byte
+	mu             sync.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
+	voiceMu        sync.Mutex // guards voiceChID and voiceJoinToken
 }
 
 // wsConn is the subset of nhooyr.io/websocket.Conn used by writePump/readPump.
@@ -49,7 +51,7 @@ type wsConn interface {
 }
 
 // newClient creates a real client wrapping a WebSocket connection (set by serve.go).
-func newClient(hub *Hub, conn wsConn, user *db.User, tokenHash string, ctx context.Context) *Client {
+func newClient(hub *Hub, conn wsConn, user *db.User, tokenHash string, lastSeq uint64, ctx context.Context) *Client {
 	now := time.Now()
 	return &Client{
 		hub:          hub,
@@ -58,6 +60,7 @@ func newClient(hub *Hub, conn wsConn, user *db.User, tokenHash string, ctx conte
 		userID:       user.ID,
 		user:         user,
 		tokenHash:    tokenHash,
+		lastSeq:      lastSeq,
 		connectedAt:  now,
 		lastActivity: now,
 		send:         make(chan []byte, sendBufSize),
@@ -110,6 +113,18 @@ func SetClientVoiceChID(c *Client, channelID int64) {
 	c.voiceMu.Lock()
 	defer c.voiceMu.Unlock()
 	c.voiceChID = channelID
+	if channelID == 0 {
+		c.voiceJoinToken = ""
+	}
+}
+
+// SetClientVoiceStateForTest sets both the voice channel and join token.
+// For test use only.
+func SetClientVoiceStateForTest(c *Client, channelID int64, joinToken string) {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	c.voiceChID = channelID
+	c.voiceJoinToken = joinToken
 }
 
 // NewTestClientWithTokenHash creates a test client that carries a session token
@@ -155,20 +170,49 @@ func (c *Client) getVoiceChID() int64 {
 	return c.voiceChID
 }
 
+func (c *Client) getVoiceJoinToken() string {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	return c.voiceJoinToken
+}
+
+func (c *Client) getVoiceState() (int64, string) {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	return c.voiceChID, c.voiceJoinToken
+}
+
 // setVoiceChID sets the voice channel ID atomically.
 func (c *Client) setVoiceChID(chID int64) {
 	c.voiceMu.Lock()
 	defer c.voiceMu.Unlock()
 	c.voiceChID = chID
+	if chID == 0 {
+		c.voiceJoinToken = ""
+	}
+}
+
+func (c *Client) setVoiceState(chID int64, joinToken string) {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	c.voiceChID = chID
+	c.voiceJoinToken = joinToken
 }
 
 // clearVoiceChID clears the voice channel ID and returns the old value.
 func (c *Client) clearVoiceChID() int64 {
+	oldChID, _ := c.clearVoiceState()
+	return oldChID
+}
+
+func (c *Client) clearVoiceState() (int64, string) {
 	c.voiceMu.Lock()
 	defer c.voiceMu.Unlock()
 	oldChID := c.voiceChID
+	oldJoinToken := c.voiceJoinToken
 	c.voiceChID = 0
-	return oldChID
+	c.voiceJoinToken = ""
+	return oldChID, oldJoinToken
 }
 
 // sendMsg queues a message to this client's send buffer without blocking.

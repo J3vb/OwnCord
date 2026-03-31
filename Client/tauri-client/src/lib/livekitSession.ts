@@ -1180,6 +1180,11 @@ export const setScreenshareAudioVolume = session.setScreenshareAudioVolume.bind(
 export const muteScreenshareAudio = session.muteScreenshareAudio.bind(session);
 export const getScreenshareAudioMuted = session.getScreenshareAudioMuted.bind(session);
 
+/** True when the LiveKit session has an active room connection. */
+export function isVoiceConnected(): boolean {
+  return session.getRoom() !== null;
+}
+
 export function getRoomForStats(): Room | null {
   return session.getRoom();
 }

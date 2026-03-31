@@ -89,13 +89,26 @@ func (h *Hub) NewLiveKitWebhookHandler(apiKey, apiSecret string) http.HandlerFun
 	}
 }
 
-// parseIdentity extracts a user ID from a LiveKit participant identity
-// formatted as "user-{id}".
-func parseIdentity(identity string) (int64, error) {
+// parseParticipantIdentity extracts a user ID and optional join token from a
+// LiveKit participant identity formatted as "user-{id}" or
+// "user-{id}:{joinToken}".
+func parseParticipantIdentity(identity string) (int64, string, error) {
 	if !strings.HasPrefix(identity, "user-") {
-		return 0, fmt.Errorf("invalid identity format: %s", identity)
+		return 0, "", fmt.Errorf("invalid identity format: %s", identity)
 	}
-	return strconv.ParseInt(identity[5:], 10, 64)
+	body := identity[5:]
+	idPart, joinToken, _ := strings.Cut(body, ":")
+	userID, err := strconv.ParseInt(idPart, 10, 64)
+	if err != nil {
+		return 0, "", err
+	}
+	return userID, joinToken, nil
+}
+
+// parseIdentity extracts a user ID from a LiveKit participant identity.
+func parseIdentity(identity string) (int64, error) {
+	userID, _, err := parseParticipantIdentity(identity)
+	return userID, err
 }
 
 // parseRoomChannelID extracts a channel ID from a LiveKit room name
@@ -113,7 +126,7 @@ func (h *Hub) handleWebhookParticipantJoined(event *livekit.WebhookEvent) {
 		return
 	}
 
-	userID, err := parseIdentity(p.Identity)
+	userID, _, err := parseParticipantIdentity(p.Identity)
 	if err != nil {
 		slog.Warn("livekit webhook: participant_joined bad identity",
 			"identity", p.Identity, "error", err)
@@ -135,7 +148,7 @@ func (h *Hub) handleWebhookParticipantLeft(event *livekit.WebhookEvent) {
 		return
 	}
 
-	userID, err := parseIdentity(p.Identity)
+	userID, joinToken, err := parseParticipantIdentity(p.Identity)
 	if err != nil {
 		slog.Warn("livekit webhook: participant_left bad identity",
 			"identity", p.Identity, "error", err)
@@ -154,20 +167,19 @@ func (h *Hub) handleWebhookParticipantLeft(event *livekit.WebhookEvent) {
 		"channel_id", channelID)
 
 	// Clean up voice state if the user disconnected from LiveKit
-	// without sending a WS voice_leave (e.g. crash, network loss).
+	// without sending a WS voice_leave (e.g. crash, network loss, F5 reload).
 	h.mu.RLock()
 	c, exists := h.clients[userID]
 	h.mu.RUnlock()
 
 	if exists {
-		// Only clean up if the user is still in the channel that fired the
-		// webhook. If they've already moved or left, don't touch their state.
-		currentChID := c.getVoiceChID()
-		if currentChID == channelID {
-			c.clearVoiceChID()
+		currentChID, currentJoinToken := c.getVoiceState()
+		if currentChID == channelID && currentJoinToken != "" && currentJoinToken == joinToken {
+			// Client is still in the channel that fired the webhook — clean up.
+			c.clearVoiceState()
 
 			if h.db != nil {
-				if err := leaveVoiceChannelWithRetry(h, userID, channelID); err != nil {
+				if err := leaveVoiceChannelWithRetry(h, userID, channelID, joinToken); err != nil {
 					slog.Error("livekit webhook: LeaveVoiceChannel exhausted retries",
 						"error", err, "user_id", userID, "channel_id", channelID)
 				}
@@ -177,13 +189,31 @@ func (h *Hub) handleWebhookParticipantLeft(event *livekit.WebhookEvent) {
 			slog.Info("livekit webhook: cleaned up stale voice state",
 				"user_id", userID,
 				"channel_id", channelID)
+		} else {
+			// Client has voiceChID=0 or moved to a different channel (e.g.
+			// after F5 reload), or this webhook is for an older join instance.
+			if h.db != nil {
+				deleted, dbErr := h.db.LeaveVoiceChannelIfMatch(userID, channelID, joinToken)
+				if dbErr != nil {
+					slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed (stale DB row)",
+						"error", dbErr, "user_id", userID, "channel_id", channelID)
+				} else if deleted {
+					h.BroadcastToAll(buildVoiceLeave(channelID, userID))
+					slog.Info("livekit webhook: cleaned stale DB voice row after reconnect",
+						"user_id", userID, "channel_id", channelID)
+				}
+			}
 		}
 	} else {
-		// Client already disconnected from WS — ensure DB is clean.
+		// Client already disconnected from WS — use channel-conditional delete
+		// to avoid wiping a newer row if the user reconnected and rejoined.
 		if h.db != nil {
-			if err := leaveVoiceChannelWithRetry(h, userID, channelID); err != nil {
-				slog.Error("livekit webhook: LeaveVoiceChannel exhausted retries (client gone)",
-					"error", err, "user_id", userID, "channel_id", channelID)
+			deleted, dbErr := h.db.LeaveVoiceChannelIfMatch(userID, channelID, joinToken)
+			if dbErr != nil {
+				slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed (client gone)",
+					"error", dbErr, "user_id", userID, "channel_id", channelID)
+			} else if deleted {
+				h.BroadcastToAll(buildVoiceLeave(channelID, userID))
 			}
 		}
 	}

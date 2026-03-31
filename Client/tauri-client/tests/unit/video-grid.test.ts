@@ -359,6 +359,60 @@ describe("VideoGrid", () => {
   });
 
   // -----------------------------------------------------------------------
+  // Stream type attribute tests (Spec 3 — video scaling)
+  // -----------------------------------------------------------------------
+
+  describe("data-stream-type attribute", () => {
+    it("sets data-stream-type='screenshare' when isScreenshare is true", () => {
+      const config = makeTileConfig({ isScreenshare: true });
+      grid.addStream(1, "Alice (Screen)", fakeStream(), config);
+
+      const cell = container.querySelector(".video-cell") as HTMLElement;
+      expect(cell.dataset.streamType).toBe("screenshare");
+    });
+
+    it("sets data-stream-type='camera' when isScreenshare is false", () => {
+      const config = makeTileConfig({ isScreenshare: false });
+      grid.addStream(1, "Alice", fakeStream(), config);
+
+      const cell = container.querySelector(".video-cell") as HTMLElement;
+      expect(cell.dataset.streamType).toBe("camera");
+    });
+
+    it("defaults data-stream-type='camera' when no config is provided", () => {
+      grid.addStream(1, "Alice", fakeStream());
+
+      const cell = container.querySelector(".video-cell") as HTMLElement;
+      expect(cell.dataset.streamType).toBe("camera");
+    });
+
+    it("preserves data-stream-type when stream is updated in-place", () => {
+      const config = makeTileConfig({ isScreenshare: true });
+      grid.addStream(1, "Alice (Screen)", fakeStream(), config);
+
+      // Update stream (same userId)
+      grid.addStream(1, "Alice (Screen) v2", fakeStream(), config);
+
+      const cell = container.querySelector(".video-cell") as HTMLElement;
+      expect(cell.dataset.streamType).toBe("screenshare");
+    });
+
+    it("syncs data-stream-type when stream type changes on in-place update", () => {
+      const cameraConfig = makeTileConfig({ isScreenshare: false });
+      grid.addStream(1, "Alice", fakeStream(), cameraConfig);
+
+      const cell = container.querySelector(".video-cell") as HTMLElement;
+      expect(cell.dataset.streamType).toBe("camera");
+
+      // Re-add same userId as screenshare
+      const screenConfig = makeTileConfig({ isScreenshare: true });
+      grid.addStream(1, "Alice (Screen)", fakeStream(), screenConfig);
+
+      expect(cell.dataset.streamType).toBe("screenshare");
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Focus mode tests (Spec 2)
   // -----------------------------------------------------------------------
 
@@ -506,6 +560,32 @@ describe("VideoGrid", () => {
       const stripArea = container.querySelector(".video-focus-strip");
       expect(stripArea).not.toBeNull();
       expect(stripArea!.querySelectorAll(".video-cell").length).toBe(2);
+    });
+
+    it("focused cell retains data-stream-type attribute in focus layout", () => {
+      const config = makeTileConfig({ isScreenshare: true });
+      grid.addStream(1, "Alice (Screen)", fakeStream(), config);
+      grid.addStream(2, "Bob", fakeStream());
+
+      grid.setFocusedTile(1);
+
+      const mainArea = container.querySelector(".video-focus-main");
+      const focusedCell = mainArea!.querySelector(".video-cell") as HTMLElement;
+      expect(focusedCell.dataset.streamType).toBe("screenshare");
+    });
+
+    it("thumbnail cells retain data-stream-type attribute in strip", () => {
+      const cameraConfig = makeTileConfig({ isScreenshare: false });
+      grid.addStream(1, "Alice", fakeStream(), cameraConfig);
+
+      const screenConfig = makeTileConfig({ isScreenshare: true });
+      grid.addStream(2, "Bob (Screen)", fakeStream(), screenConfig);
+
+      grid.setFocusedTile(2);
+
+      const stripArea = container.querySelector(".video-focus-strip");
+      const thumbCell = stripArea!.querySelector(".video-cell") as HTMLElement;
+      expect(thumbCell.dataset.streamType).toBe("camera");
     });
 
     it("removing non-focused tile preserves current focus", () => {

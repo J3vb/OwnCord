@@ -24,6 +24,7 @@ import (
 //   - Tokens are scoped to a single room
 //   - Server can revoke room access via LiveKit API on ban/kick
 //   - Tokens never leave the LiveKit SDK internals on the client
+//
 // The client requests a refresh via voice_token_refresh before expiry.
 const tokenTTL = 24 * time.Hour
 
@@ -73,17 +74,25 @@ func RoomName(channelID int64) string {
 	return fmt.Sprintf("channel-%d", channelID)
 }
 
+func participantIdentity(userID int64, voiceJoinToken string) string {
+	if voiceJoinToken == "" {
+		return fmt.Sprintf("user-%d", userID)
+	}
+	return fmt.Sprintf("user-%d:%s", userID, voiceJoinToken)
+}
+
 // GenerateToken creates a LiveKit access token for the given user
 // to join the specified channel's voice room.
 func (c *LiveKitClient) GenerateToken(
 	userID int64,
 	username string,
 	channelID int64,
+	voiceJoinToken string,
 	canPublish bool,
 	canSubscribe bool,
 ) (string, error) {
 	roomName := RoomName(channelID)
-	identity := fmt.Sprintf("user-%d", userID)
+	identity := participantIdentity(userID, voiceJoinToken)
 
 	at := auth.NewAccessToken(c.apiKey, c.apiSecret)
 	grant := &auth.VideoGrant{
@@ -120,9 +129,9 @@ func (c *LiveKitClient) URL() string {
 const lkTimeout = 5 * time.Second
 
 // RemoveParticipant forcefully disconnects a participant from a room.
-func (c *LiveKitClient) RemoveParticipant(channelID int64, userID int64) error {
+func (c *LiveKitClient) RemoveParticipant(channelID int64, userID int64, voiceJoinToken string) error {
 	roomName := RoomName(channelID)
-	identity := fmt.Sprintf("user-%d", userID)
+	identity := participantIdentity(userID, voiceJoinToken)
 
 	ctx, cancel := context.WithTimeout(context.Background(), lkTimeout)
 	defer cancel()

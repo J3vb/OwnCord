@@ -18,7 +18,11 @@ vi.mock("@lib/livekitSession", () => ({
   handleVoiceToken: vi.fn(async () => {}),
   leaveVoice: vi.fn(),
   cleanupAll: vi.fn(),
+  isVoiceConnected: vi.fn(() => false),
 }));
+
+import { isVoiceConnected as _isVoiceConnected } from "../../src/lib/livekitSession";
+const mockIsVoiceConnected = vi.mocked(_isVoiceConnected);
 
 // Suppress console output
 vi.spyOn(console, "info").mockImplementation(() => {});
@@ -1048,6 +1052,88 @@ describe("WS Dispatcher", () => {
         user_id: 99,
       });
     }).not.toThrow();
+  });
+
+  it("ready sends voice_leave when user appears in voice_states but LiveKit is disconnected", () => {
+    mockIsVoiceConnected.mockReturnValue(false);
+
+    // Set up auth so the current user ID is 42
+    authStore.setState(() => ({
+      token: "test-token",
+      user: { id: 42, username: "ghost", avatar: null, role: "member" },
+      serverName: "Test",
+      motd: "",
+      isAuthenticated: true,
+    }));
+
+    mock.dispatch("ready", {
+      channels: [{ id: 1, name: "general", type: "text", category: "", position: 0 }],
+      members: [],
+      voice_states: [{ user_id: 42, channel_id: 10, muted: false, deafened: false }],
+      roles: [],
+      dm_channels: [],
+    });
+
+    // The dispatcher should detect stale voice state and send voice_leave
+    expect(mock.ws.send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "voice_leave", payload: {} }),
+    );
+    // And clear the local voice channel
+    expect(voiceStore.getState().currentChannelId).toBeNull();
+  });
+
+  it("ready does NOT send voice_leave when LiveKit IS connected", () => {
+    mockIsVoiceConnected.mockReturnValue(true);
+
+    authStore.setState(() => ({
+      token: "test-token",
+      user: { id: 42, username: "active", avatar: null, role: "member" },
+      serverName: "Test",
+      motd: "",
+      isAuthenticated: true,
+    }));
+
+    mock.dispatch("ready", {
+      channels: [{ id: 1, name: "general", type: "text", category: "", position: 0 }],
+      members: [],
+      voice_states: [{ user_id: 42, channel_id: 10, muted: false, deafened: false }],
+      roles: [],
+      dm_channels: [],
+    });
+
+    // voice_leave should NOT be sent — the LiveKit room is active
+    const sendCalls = (mock.ws.send as ReturnType<typeof vi.fn>).mock.calls;
+    const voiceLeaveSent = sendCalls.some(
+      ([msg]: [{ type: string }]) => msg.type === "voice_leave",
+    );
+    expect(voiceLeaveSent).toBe(false);
+  });
+
+  it("ready does NOT send voice_leave when user is NOT in voice_states", () => {
+    mockIsVoiceConnected.mockReturnValue(false);
+
+    authStore.setState(() => ({
+      token: "test-token",
+      user: { id: 42, username: "notinvoice", avatar: null, role: "member" },
+      serverName: "Test",
+      motd: "",
+      isAuthenticated: true,
+    }));
+
+    mock.dispatch("ready", {
+      channels: [{ id: 1, name: "general", type: "text", category: "", position: 0 }],
+      members: [],
+      voice_states: [{ user_id: 99, channel_id: 10, muted: false, deafened: false }],
+      roles: [],
+      dm_channels: [],
+    });
+
+    // voice_leave should NOT be sent — user 42 is not in voice_states
+    const sendCalls = (mock.ws.send as ReturnType<typeof vi.fn>).mock.calls;
+    const voiceLeaveSent = sendCalls.some(
+      ([msg]: [{ type: string }]) => msg.type === "voice_leave",
+    );
+    expect(voiceLeaveSent).toBe(false);
   });
 
   it("cleanup removes all listeners", () => {

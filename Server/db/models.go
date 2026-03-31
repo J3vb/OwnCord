@@ -98,12 +98,12 @@ type ReactionCount struct {
 
 // MessageSearchResult is a row returned by the FTS5 message search.
 type MessageSearchResult struct {
-	MessageID   int64          `json:"message_id"`
-	ChannelID   int64          `json:"channel_id"`
-	ChannelName string         `json:"channel_name"`
-	User        UserPublic     `json:"user"`
-	Content     string         `json:"content"`
-	Timestamp   string         `json:"timestamp"`
+	MessageID   int64      `json:"message_id"`
+	ChannelID   int64      `json:"channel_id"`
+	ChannelName string     `json:"channel_name"`
+	User        UserPublic `json:"user"`
+	Content     string     `json:"content"`
+	Timestamp   string     `json:"timestamp"`
 }
 
 // UserPublic is the public-facing user shape for API responses.
@@ -115,17 +115,17 @@ type UserPublic struct {
 
 // MessageAPIResponse matches the API.md shape for GET /channels/{id}/messages.
 type MessageAPIResponse struct {
-	ID          int64           `json:"id"`
-	ChannelID   int64           `json:"channel_id"`
-	User        UserPublic      `json:"user"`
-	Content     string          `json:"content"`
-	ReplyTo     *int64          `json:"reply_to"`
+	ID          int64            `json:"id"`
+	ChannelID   int64            `json:"channel_id"`
+	User        UserPublic       `json:"user"`
+	Content     string           `json:"content"`
+	ReplyTo     *int64           `json:"reply_to"`
 	Attachments []AttachmentInfo `json:"attachments"`
-	Reactions   []ReactionInfo  `json:"reactions"`
-	Pinned      bool            `json:"pinned"`
-	EditedAt    *string         `json:"edited_at"`
-	Deleted     bool            `json:"deleted"`
-	Timestamp   string          `json:"timestamp"`
+	Reactions   []ReactionInfo   `json:"reactions"`
+	Pinned      bool             `json:"pinned"`
+	EditedAt    *string          `json:"edited_at"`
+	Deleted     bool             `json:"deleted"`
+	Timestamp   string           `json:"timestamp"`
 }
 
 // AttachmentInfo is the attachment shape in API responses.
@@ -157,6 +157,7 @@ type VoiceState struct {
 	Speaking    bool   `json:"speaking"`
 	Camera      bool   `json:"camera"`
 	Screenshare bool   `json:"screenshare"`
+	JoinedAt    string `json:"-"`
 }
 
 // ChannelUnread holds per-user unread data for a single channel.

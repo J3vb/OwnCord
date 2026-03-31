@@ -19,6 +19,7 @@ skills/
 # Server runtime artifacts
 Server/chatserver.exe
 Server/chatserver.exe~
+Server/owncord-server.exe
 Server/config.yaml
 Server/data/
 
@@ -47,6 +48,9 @@ node_modules/
 .claude-flow/
 .mcp.json
 .superpowers/
+
+# Internal dev tools
+tools/
 
 # Internal dev files
 SKILL.md

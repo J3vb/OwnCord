@@ -4,8 +4,10 @@ package ws
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
+	"github.com/livekit/protocol/livekit"
 	"github.com/owncord/server/db"
 )
 
@@ -27,6 +29,11 @@ func (h *Hub) GetCachedSettingsForTest() (string, string) {
 // GetClientVoiceChIDForTest exposes Client.getVoiceChID for external tests.
 func GetClientVoiceChIDForTest(c *Client) int64 {
 	return c.getVoiceChID()
+}
+
+// GetClientVoiceJoinTokenForTest exposes Client.getVoiceJoinToken.
+func GetClientVoiceJoinTokenForTest(c *Client) string {
+	return c.getVoiceJoinToken()
 }
 
 // ExpireSettingsCacheForTest forces the settings cache to appear stale so that
@@ -52,6 +59,11 @@ func ParseIdentityForTest(identity string) (int64, error) {
 	return parseIdentity(identity)
 }
 
+// ParseParticipantIdentityForTest exposes parseParticipantIdentity for tests.
+func ParseParticipantIdentityForTest(identity string) (int64, string, error) {
+	return parseParticipantIdentity(identity)
+}
+
 // ParseRoomChannelIDForTest exposes parseRoomChannelID for external tests.
 func ParseRoomChannelIDForTest(roomName string) (int64, error) {
 	return parseRoomChannelID(roomName)
@@ -60,4 +72,32 @@ func ParseRoomChannelIDForTest(roomName string) (int64, error) {
 // WsToHTTPForTest exposes wsToHTTP for external tests.
 func WsToHTTPForTest(wsURL string) string {
 	return wsToHTTP(wsURL)
+}
+
+// RegisterNowForTest exposes registerNow for external tests so clients are
+// visible immediately (no channel round-trip through hub.Run).
+func (h *Hub) RegisterNowForTest(c *Client) {
+	h.registerNow(c)
+}
+
+// ClearVoiceStateForTest exposes clearVoiceState for external tests.
+func (c *Client) ClearVoiceStateForTest() {
+	c.clearVoiceState()
+}
+
+// HandleWebhookParticipantLeftForTest exposes handleWebhookParticipantLeft for
+// external tests so they can simulate LiveKit webhook events without HTTP.
+func (h *Hub) HandleWebhookParticipantLeftForTest(userID int64, channelID int64, joinToken string) {
+	identity := fmt.Sprintf("user-%d:%s", userID, joinToken)
+	roomName := fmt.Sprintf("channel-%d", channelID)
+	event := &livekit.WebhookEvent{
+		Event: "participant_left",
+		Participant: &livekit.ParticipantInfo{
+			Identity: identity,
+		},
+		Room: &livekit.Room{
+			Name: roomName,
+		},
+	}
+	h.handleWebhookParticipantLeft(event)
 }

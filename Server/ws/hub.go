@@ -146,6 +146,8 @@ func (h *Hub) Run() {
 		func() {
 			staleTicker := time.NewTicker(30 * time.Second)
 			defer staleTicker.Stop()
+			voiceSweepTicker := time.NewTicker(60 * time.Second)
+			defer voiceSweepTicker.Stop()
 
 			defer func() {
 				if r := recover(); r != nil {
@@ -182,6 +184,8 @@ func (h *Hub) Run() {
 					h.deliverBroadcast(bm)
 				case <-staleTicker.C:
 					h.sweepStaleClients()
+				case <-voiceSweepTicker.C:
+					h.sweepStaleVoiceStates()
 				}
 			}
 		}()
@@ -256,7 +260,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 
 		// Remove from LiveKit (best-effort).
 		if h.livekit != nil {
-			_ = h.livekit.RemoveParticipant(channelID, vs.UserID)
+			_ = h.livekit.RemoveParticipant(channelID, vs.UserID, vs.JoinedAt)
 		}
 	}
 
@@ -296,14 +300,23 @@ func (h *Hub) Unregister(c *Client) {
 func (h *Hub) registerNow(c *Client) {
 	h.mu.Lock()
 	if old, exists := h.clients[c.userID]; exists {
-		oldVoiceChID := old.clearVoiceChID()
-		if c.getVoiceChID() == 0 {
-			c.setVoiceChID(oldVoiceChID)
+		oldVoiceChID, oldVoiceJoinToken := old.clearVoiceState()
+		if c.lastSeq > 0 {
+			// Network reconnect — preserve voice state so the user stays
+			// in voice during brief WS drops.
+			if c.getVoiceChID() == 0 {
+				c.setVoiceState(oldVoiceChID, oldVoiceJoinToken)
+			}
 		}
+		// Fresh connections (lastSeq == 0): do NOT transfer voice state.
+		// Stale voice cleanup (DB + broadcast + LiveKit) is owned entirely
+		// by the handshake path in serve.go, which runs before registerNow.
+		// registerNow only handles in-memory client replacement.
+
 		// Kick the stale connection atomically before registering
 		// the new one — prevents TOCTOU races on duplicate login.
 		slog.Warn("hub: kicking stale connection for re-registering user",
-			"user_id", c.userID)
+			"user_id", c.userID, "last_seq", c.lastSeq)
 		old.closeSend()
 	}
 	h.clients[c.userID] = c
@@ -466,6 +479,63 @@ func (h *Hub) sweepStaleClients() {
 		slog.Warn("hub: closing stale connection (no activity)",
 			"user_id", c.userID, "last_activity", c.getLastActivity())
 		h.kickClient(c)
+	}
+}
+
+// sweepStaleVoiceStates queries all voice_states rows and removes any that
+// don't match a connected client's voiceChID. This catches ghost users that
+// slip through the primary cleanup paths (registerNow, readPump defer,
+// LiveKit webhook).
+func (h *Hub) sweepStaleVoiceStates() {
+	if h.db == nil {
+		return
+	}
+	allStates, err := h.db.GetAllVoiceStates()
+	if err != nil {
+		slog.Warn("sweepStaleVoiceStates: GetAllVoiceStates failed", "err", err)
+		return
+	}
+	if len(allStates) == 0 {
+		return
+	}
+
+	h.mu.RLock()
+	var stale []struct {
+		userID    int64
+		channelID int64
+		joinedAt  string
+	}
+	for _, vs := range allStates {
+		c, ok := h.clients[vs.UserID]
+		if !ok || c.getVoiceChID() != vs.ChannelID {
+			stale = append(stale, struct {
+				userID    int64
+				channelID int64
+				joinedAt  string
+			}{vs.UserID, vs.ChannelID, vs.JoinedAt})
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, s := range stale {
+		// Channel-conditional delete: only removes the row if it still points
+		// at the channel we snapshotted. If the user rejoined or moved between
+		// the snapshot and now, the delete is a no-op and we skip the broadcast.
+		deleted, err := h.db.LeaveVoiceChannelIfMatch(s.userID, s.channelID, s.joinedAt)
+		if err != nil {
+			slog.Error("sweepStaleVoiceStates: LeaveVoiceChannelIfMatch failed",
+				"err", err, "user_id", s.userID, "channel_id", s.channelID)
+			continue
+		}
+		if !deleted {
+			continue
+		}
+		slog.Warn("sweepStaleVoiceStates: removed ghost voice state",
+			"user_id", s.userID, "channel_id", s.channelID)
+		h.BroadcastToAll(buildVoiceLeave(s.channelID, s.userID))
+		if h.livekit != nil {
+			_ = h.livekit.RemoveParticipant(s.channelID, s.userID, s.joinedAt)
+		}
 	}
 }
 

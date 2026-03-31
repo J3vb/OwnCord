@@ -96,8 +96,18 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		return
 	}
 
+	// Load the persisted row immediately so later cleanup can target this exact
+	// join instance even if the user rejoins the same channel.
+	state, err := h.db.GetVoiceState(c.userID)
+	if err != nil || state == nil {
+		slog.Error("ws handleVoiceJoin GetVoiceState", "err", err, "user_id", c.userID)
+		h.rollbackVoiceJoin(c, channelID)
+		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to join voice channel"))
+		return
+	}
+
 	// Set voice channel on the client.
-	c.setVoiceChID(channelID)
+	c.setVoiceState(channelID, state.JoinedAt)
 
 	// Generate LiveKit token if LiveKit client is available.
 	// Token generation failure is fatal — without a token the client cannot
@@ -113,7 +123,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		// when client connects directly via direct_url.
 		canPublish := h.hasChannelPerm(c, channelID, permissions.SpeakVoice)
 		canSubscribe := true
-		token, tokenErr := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, canPublish, canSubscribe)
+		token, tokenErr := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, state.JoinedAt, canPublish, canSubscribe)
 		if tokenErr != nil {
 			slog.Error("ws handleVoiceJoin GenerateToken", "err", tokenErr, "user_id", c.userID)
 			h.rollbackVoiceJoin(c, channelID)
@@ -124,16 +134,6 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		// when on localhost (avoids self-signed TLS issues with WebView
 		// fetch) and falls back to the /livekit proxy for remote clients.
 		c.sendMsg(buildVoiceToken(channelID, token, "/livekit", h.livekit.URL()))
-	}
-
-	// Get and broadcast the joiner's state. Failure here means other users
-	// won't see the join (ghost state), so roll back to avoid inconsistency.
-	state, err := h.db.GetVoiceState(c.userID)
-	if err != nil || state == nil {
-		slog.Error("ws handleVoiceJoin GetVoiceState", "err", err, "user_id", c.userID)
-		h.rollbackVoiceJoin(c, channelID)
-		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to join voice channel"))
-		return
 	}
 
 	// Broadcast the joiner's state to all connected clients.
@@ -211,7 +211,18 @@ func (h *Hub) handleVoiceTokenRefresh(ctx context.Context, c *Client) {
 
 	canPublish := h.hasChannelPerm(c, channelID, permissions.SpeakVoice)
 	canSubscribe := true
-	token, err := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, canPublish, canSubscribe)
+	joinToken := c.getVoiceJoinToken()
+	if joinToken == "" {
+		state, stateErr := h.db.GetVoiceState(c.userID)
+		if stateErr != nil || state == nil {
+			slog.Error("ws handleVoiceTokenRefresh GetVoiceState", "err", stateErr, "user_id", c.userID)
+			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to refresh voice token"))
+			return
+		}
+		joinToken = state.JoinedAt
+		c.setVoiceState(channelID, joinToken)
+	}
+	token, err := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, joinToken, canPublish, canSubscribe)
 	if err != nil {
 		slog.Error("ws handleVoiceTokenRefresh GenerateToken", "err", err, "user_id", c.userID)
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to generate voice token"))

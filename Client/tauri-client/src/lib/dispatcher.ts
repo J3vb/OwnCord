@@ -49,7 +49,7 @@ import {
 } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import type { DmChannelPayload } from "./types";
-import { handleVoiceToken } from "@lib/livekitSession";
+import { handleVoiceToken, isVoiceConnected } from "@lib/livekitSession";
 import { notifyIncomingMessage } from "./notifications";
 import { createLogger } from "./logger";
 import { ServerMessageType as S } from "./protocolTypes";
@@ -112,6 +112,19 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
       setRoles(payload.roles ?? []);
       setMembers(payload.members);
       setVoiceStates(payload.voice_states);
+
+      // Defense-in-depth: if the ready payload shows us in a voice channel
+      // but we have no LiveKit room connection (e.g. after F5 reload),
+      // send voice_leave to clean up the stale state. The server should
+      // have already cleaned this up, but this handles edge cases.
+      const currentUserId = authStore.getState().user?.id ?? 0;
+      const inVoicePerReady = currentUserId !== 0 &&
+        payload.voice_states.some((vs) => vs.user_id === currentUserId);
+      if (inVoicePerReady && !isVoiceConnected()) {
+        log.warn("Stale voice state detected in ready payload — sending voice_leave");
+        ws.send({ type: "voice_leave", payload: {} });
+        leaveVoiceChannel();
+      }
 
       // Auto-select the first text channel if none is active
       const currentActive = channelsStore.select((s) => s.activeChannelId);

@@ -1,7 +1,9 @@
 package ws_test
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/ws"
@@ -126,7 +128,7 @@ func TestGenerateToken_ValidToken(t *testing.T) {
 		t.Fatalf("NewLiveKitClient: %v", err)
 	}
 
-	token, err := client.GenerateToken(123, "testuser", 456, true, true)
+	token, err := client.GenerateToken(123, "testuser", 456, "join-token-1", true, true)
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}
@@ -161,7 +163,7 @@ func TestGenerateToken_DifferentPermissions(t *testing.T) {
 	}
 
 	// Subscribe-only token (canPublish=false).
-	token, err := client.GenerateToken(1, "listener", 10, false, true)
+	token, err := client.GenerateToken(1, "listener", 10, "join-token-2", false, true)
 	if err != nil {
 		t.Fatalf("GenerateToken(subscribe-only): %v", err)
 	}
@@ -263,6 +265,21 @@ func TestParseIdentity_Valid(t *testing.T) {
 	}
 }
 
+func TestParseParticipantIdentity_WithJoinToken(t *testing.T) {
+	t.Parallel()
+
+	userID, joinToken, err := ws.ParseParticipantIdentityForTest("user-123:join-token-42")
+	if err != nil {
+		t.Fatalf("parseParticipantIdentity: unexpected error: %v", err)
+	}
+	if userID != 123 {
+		t.Fatalf("userID = %d, want 123", userID)
+	}
+	if joinToken != "join-token-42" {
+		t.Fatalf("joinToken = %q, want join-token-42", joinToken)
+	}
+}
+
 func TestParseIdentity_Invalid(t *testing.T) {
 	t.Parallel()
 
@@ -322,5 +339,172 @@ func TestParseRoomChannelID_Invalid(t *testing.T) {
 				t.Errorf("parseRoomChannelID(%q): expected error, got nil", tt.input)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Webhook idempotency regression tests
+// ---------------------------------------------------------------------------
+
+// countVoiceLeaves drains the send channel and returns how many voice_leave
+// messages it contained within the timeout.
+func countVoiceLeaves(ch <-chan []byte, timeout time.Duration) int {
+	count := 0
+	deadline := time.After(timeout)
+	for {
+		select {
+		case msg := <-ch:
+			var parsed struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(msg, &parsed) == nil && parsed.Type == "voice_leave" {
+				count++
+			}
+		case <-deadline:
+			return count
+		}
+	}
+}
+
+// TestWebhook_ParticipantLeft_NoDoubleBroadcast_AfterFreshCleanup proves that
+// after serve.go's fresh-reconnect cleanup clears the old client's voice state,
+// a subsequent participant_left webhook with the same join token does NOT
+// broadcast a second voice_leave.
+func TestWebhook_ParticipantLeft_NoDoubleBroadcast_AfterFreshCleanup(t *testing.T) {
+	t.Parallel()
+	hub, database := newVoiceHub(t)
+
+	user := seedVoiceOwner(t, database, "webhook-idem-user")
+	chanID := seedVoiceChannel(t, database, "webhook-idem-ch")
+
+	// Observer client to capture broadcasts.
+	observerSend := make(chan []byte, 64)
+	observer := ws.NewTestClient(hub, 99999, observerSend)
+	hub.RegisterNowForTest(observer)
+
+	// Insert the matching DB row first so the simulated client carries the
+	// same join token production would have persisted and handed to LiveKit.
+	if err := database.JoinVoiceChannel(user.ID, chanID); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	vs, err := database.GetVoiceState(user.ID)
+	if err != nil || vs == nil {
+		t.Fatalf("GetVoiceState: %v (nil=%v)", err, vs == nil)
+	}
+
+	// Simulate the old client being in voice with the persisted join token.
+	oldSend := make(chan []byte, 64)
+	oldClient := ws.NewTestClient(hub, user.ID, oldSend)
+	ws.SetClientVoiceStateForTest(oldClient, chanID, vs.JoinedAt)
+	hub.RegisterNowForTest(oldClient)
+
+	// --- Simulate what serve.go fresh-cleanup does (lines 150-172) ---
+	// 1. Delete the DB row.
+	deleted, err := database.LeaveVoiceChannelIfMatch(user.ID, chanID, vs.JoinedAt)
+	if err != nil || !deleted {
+		t.Fatalf("LeaveVoiceChannelIfMatch: err=%v deleted=%v", err, deleted)
+	}
+
+	// 2. Clear old client's in-memory voice state (the fix in serve.go).
+	oldClient.ClearVoiceStateForTest()
+
+	// 3. Broadcast voice_leave (serve.go does this).
+	hub.BroadcastToAll(ws.BuildJSONForTest(map[string]any{
+		"type":    "voice_leave",
+		"payload": map[string]any{"channel_id": chanID, "user_id": user.ID},
+	}))
+
+	// Give broadcast a moment to propagate.
+	time.Sleep(20 * time.Millisecond)
+
+	// Drain the first voice_leave from the observer.
+	first := countVoiceLeaves(observerSend, 50*time.Millisecond)
+	if first != 1 {
+		t.Fatalf("expected 1 initial voice_leave broadcast, got %d", first)
+	}
+
+	// --- Now simulate the webhook arriving for the same join token ---
+	hub.HandleWebhookParticipantLeftForTest(user.ID, chanID, vs.JoinedAt)
+
+	// The webhook should NOT produce a second voice_leave because:
+	// - The old client's in-memory voice state was cleared (token-match branch is a no-op).
+	// - The DB row was already deleted (else branch's LeaveVoiceChannelIfMatch returns deleted=false).
+	second := countVoiceLeaves(observerSend, 100*time.Millisecond)
+	if second != 0 {
+		t.Errorf("expected 0 additional voice_leave broadcasts after webhook, got %d", second)
+	}
+}
+
+// TestWebhook_ParticipantLeft_OldToken_DoesNotTeardownReplacement proves that
+// a participant_left webhook carrying an old join token does NOT tear down a
+// replacement voice session that has a different join token.
+func TestWebhook_ParticipantLeft_OldToken_DoesNotTeardownReplacement(t *testing.T) {
+	t.Parallel()
+	hub, database := newVoiceHub(t)
+
+	user := seedVoiceOwner(t, database, "webhook-old-token-user")
+	chanID := seedVoiceChannel(t, database, "webhook-old-token-ch")
+
+	// Observer to capture broadcasts.
+	observerSend := make(chan []byte, 64)
+	observer := ws.NewTestClient(hub, 88888, observerSend)
+	hub.RegisterNowForTest(observer)
+
+	// Create an old same-channel voice session, then rejoin the same channel so
+	// the DB carries a replacement join token like production would.
+	if err := database.JoinVoiceChannel(user.ID, chanID); err != nil {
+		t.Fatalf("JoinVoiceChannel(old): %v", err)
+	}
+	oldState, err := database.GetVoiceState(user.ID)
+	if err != nil || oldState == nil {
+		t.Fatalf("GetVoiceState(old): %v (nil=%v)", err, oldState == nil)
+	}
+
+	if err := database.JoinVoiceChannel(user.ID, chanID); err != nil {
+		t.Fatalf("JoinVoiceChannel(new): %v", err)
+	}
+	newState, err := database.GetVoiceState(user.ID)
+	if err != nil || newState == nil {
+		t.Fatalf("GetVoiceState(new): %v (nil=%v)", err, newState == nil)
+	}
+	if newState.JoinedAt == oldState.JoinedAt {
+		t.Fatalf("same-channel rejoin reused join token %q", newState.JoinedAt)
+	}
+
+	// The replacement client carries the current persisted join token.
+	newSend := make(chan []byte, 64)
+	newClient := ws.NewTestClient(hub, user.ID, newSend)
+	ws.SetClientVoiceStateForTest(newClient, chanID, newState.JoinedAt)
+	hub.RegisterNowForTest(newClient)
+
+	// --- Webhook arrives with the OLD join token ---
+	hub.HandleWebhookParticipantLeftForTest(user.ID, chanID, oldState.JoinedAt)
+
+	// The webhook should NOT broadcast voice_leave because:
+	// - Token-match branch: currentJoinToken != old join token -> skipped.
+	// - Else branch: LeaveVoiceChannelIfMatch with the old token won't match the new DB row → deleted=false.
+	leaves := countVoiceLeaves(observerSend, 100*time.Millisecond)
+	if leaves != 0 {
+		t.Errorf("expected 0 voice_leave broadcasts for old-token webhook, got %d", leaves)
+	}
+
+	// The new client's voice state should be untouched.
+	if got := ws.GetClientVoiceChIDForTest(newClient); got != chanID {
+		t.Errorf("new client voiceChID = %d, want %d (should be untouched)", got, chanID)
+	}
+	if got := ws.GetClientVoiceJoinTokenForTest(newClient); got != newState.JoinedAt {
+		t.Errorf("new client voiceJoinToken = %q, want %q", got, newState.JoinedAt)
+	}
+
+	// DB row should still exist.
+	vs, err := database.GetVoiceState(user.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if vs == nil {
+		t.Fatal("replacement voice state was deleted by old-token webhook — should have been preserved")
+	}
+	if vs.JoinedAt != newState.JoinedAt {
+		t.Fatalf("replacement join token = %q, want %q", vs.JoinedAt, newState.JoinedAt)
 	}
 }

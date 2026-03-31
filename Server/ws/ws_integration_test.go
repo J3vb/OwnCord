@@ -492,10 +492,10 @@ func TestServeWS_DuplicateLogin_KeepsUserOnline(t *testing.T) {
 	t.Fatalf("duplicate login left wrong state: client_count=%d user_status=%q", hub.ClientCount(), user.Status)
 }
 
-// TestServeWS_DuplicateLogin_DoesNotBroadcastVoiceLeave verifies that
-// replacing a connection does not emit a spurious voice_leave for the same
-// still-connected user.
-func TestServeWS_DuplicateLogin_DoesNotBroadcastVoiceLeave(t *testing.T) {
+// TestServeWS_Reconnect_PreservesVoiceState verifies that replacing a
+// connection via network reconnect (last_seq > 0) preserves voice state:
+// no voice_leave broadcast, voiceChID transferred, DB row intact.
+func TestServeWS_Reconnect_PreservesVoiceState(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
 	hub := ws.NewHub(database, limiter)
@@ -515,6 +515,12 @@ func TestServeWS_DuplicateLogin_DoesNotBroadcastVoiceLeave(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
+	// Create a voice channel.
+	chID, err := database.CreateChannel("voice-reconnect", "voice", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+
 	handler := ws.ServeWS(hub, database, []string{"*"})
 	srv := httptest.NewServer(http.HandlerFunc(handler))
 	defer srv.Close()
@@ -523,14 +529,15 @@ func TestServeWS_DuplicateLogin_DoesNotBroadcastVoiceLeave(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	dialAndAuth := func() *websocket.Conn {
+	dialAndAuth := func(lastSeq uint64) *websocket.Conn {
+		t.Helper()
 		conn, _, dialErr := websocket.Dial(ctx, wsURL, nil)
 		if dialErr != nil {
 			t.Fatalf("websocket.Dial: %v", dialErr)
 		}
 		authMsg := map[string]any{
 			"type":    "auth",
-			"payload": map[string]string{"token": token},
+			"payload": map[string]any{"token": token, "last_seq": lastSeq},
 		}
 		raw, marshalErr := json.Marshal(authMsg)
 		if marshalErr != nil {
@@ -539,6 +546,7 @@ func TestServeWS_DuplicateLogin_DoesNotBroadcastVoiceLeave(t *testing.T) {
 		if writeErr := conn.Write(ctx, websocket.MessageText, raw); writeErr != nil {
 			t.Fatalf("write auth: %v", writeErr)
 		}
+		// Read auth_ok + ready
 		for i := 0; i < 2; i++ {
 			if _, _, readErr := conn.Read(ctx); readErr != nil {
 				t.Fatalf("read handshake message %d: %v", i, readErr)
@@ -547,7 +555,8 @@ func TestServeWS_DuplicateLogin_DoesNotBroadcastVoiceLeave(t *testing.T) {
 		return conn
 	}
 
-	conn1 := dialAndAuth()
+	// First connection: fresh
+	conn1 := dialAndAuth(0)
 	defer func() { _ = conn1.Close(websocket.StatusNormalClosure, "") }()
 
 	var originalClient *ws.Client
@@ -562,19 +571,57 @@ func TestServeWS_DuplicateLogin_DoesNotBroadcastVoiceLeave(t *testing.T) {
 	if originalClient == nil {
 		t.Fatal("expected first client to be registered")
 	}
-	ws.SetClientVoiceChID(originalClient, 99)
 
-	conn2 := dialAndAuth()
+	// Simulate voice join AFTER conn1 is established — both in-memory and DB.
+	// (Setting it before conn1 would cause serve.go's fresh-connect cleanup
+	// to delete the DB row during conn1's handshake.)
+	if err := database.JoinVoiceChannel(userID, chID); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	vsBeforeReconnect, err := database.GetVoiceState(userID)
+	if err != nil {
+		t.Fatalf("GetVoiceState(before reconnect): %v", err)
+	}
+	if vsBeforeReconnect == nil {
+		t.Fatal("expected voice state row after JoinVoiceChannel")
+	}
+	ws.SetClientVoiceStateForTest(originalClient, chID, vsBeforeReconnect.JoinedAt)
+
+	// Second connection: reconnect (lastSeq > 0) — voice state should transfer
+	conn2 := dialAndAuth(1)
 	defer func() { _ = conn2.Close(websocket.StatusNormalClosure, "") }()
 
-	replacementClient := hub.GetClient(userID)
+	var replacementClient *ws.Client
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		replacementClient = hub.GetClient(userID)
+		if replacementClient != nil && ws.GetClientVoiceChIDForTest(replacementClient) == chID {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	if replacementClient == nil {
 		t.Fatal("expected replacement client to be registered")
 	}
-	if got := ws.GetClientVoiceChIDForTest(replacementClient); got != 99 {
-		t.Fatalf("replacement client voiceChID = %d, want 99", got)
+
+	// Assert: voiceChID transferred
+	if got := ws.GetClientVoiceChIDForTest(replacementClient); got != chID {
+		t.Fatalf("replacement client voiceChID = %d, want %d", got, chID)
 	}
 
+	// Assert: DB row still intact
+	vs, vsErr := database.GetVoiceState(userID)
+	if vsErr != nil {
+		t.Fatalf("GetVoiceState: %v", vsErr)
+	}
+	if vs == nil {
+		t.Fatal("reconnect: DB voice_state row was deleted, expected it to be preserved")
+	}
+	if vs.ChannelID != chID {
+		t.Fatalf("reconnect: DB voice_state channel_id = %d, want %d", vs.ChannelID, chID)
+	}
+
+	// Assert: no voice_leave broadcast
 	readDeadline := time.Now().Add(400 * time.Millisecond)
 	for time.Now().Before(readDeadline) {
 		readCtx, readCancel := context.WithTimeout(ctx, 100*time.Millisecond)
@@ -588,8 +635,229 @@ func TestServeWS_DuplicateLogin_DoesNotBroadcastVoiceLeave(t *testing.T) {
 			continue
 		}
 		if msg["type"] == "voice_leave" {
-			t.Fatalf("duplicate login should not broadcast voice_leave for replacement connection: %s", string(raw))
+			t.Fatalf("reconnect must not broadcast voice_leave: %s", string(raw))
 		}
+	}
+}
+
+// TestServeWS_FreshReconnect_CleansStaleVoiceState verifies that when a user
+// presses F5 (fresh connection, lastSeq = 0) while in voice, the server:
+//  1. cleans the DB voice_state row before building ready
+//  2. does NOT include the user in ready.payload.voice_states
+//  3. sets replacement client voiceChID = 0
+//  4. broadcasts exactly one voice_leave visible to an observer client
+func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
+	database := openServeTestDB(t)
+	limiter := auth.NewRateLimiter()
+	hub := ws.NewHub(database, limiter)
+	go hub.Run()
+	defer hub.Stop()
+
+	// Create two users: the voice user who F5-reloads, and an observer.
+	userID, err := database.CreateUser("ws-voice-f5", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	tokenHash := auth.HashToken(token)
+	if _, err := database.CreateSession(userID, tokenHash, "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	observerID, err := database.CreateUser("ws-observer", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser (observer): %v", err)
+	}
+	obsToken, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken (observer): %v", err)
+	}
+	obsTokenHash := auth.HashToken(obsToken)
+	if _, err := database.CreateSession(observerID, obsTokenHash, "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession (observer): %v", err)
+	}
+
+	// Create a voice channel for the user to be "in".
+	chID, err := database.CreateChannel("voice-test", "voice", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+
+	handler := ws.ServeWS(hub, database, []string{"*"})
+	srv := httptest.NewServer(http.HandlerFunc(handler))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dialAndAuthFresh := func(tok string) *websocket.Conn {
+		t.Helper()
+		conn, _, dialErr := websocket.Dial(ctx, wsURL, nil)
+		if dialErr != nil {
+			t.Fatalf("websocket.Dial: %v", dialErr)
+		}
+		authMsg := map[string]any{
+			"type":    "auth",
+			"payload": map[string]string{"token": tok},
+		}
+		raw, marshalErr := json.Marshal(authMsg)
+		if marshalErr != nil {
+			t.Fatalf("marshal auth: %v", marshalErr)
+		}
+		if writeErr := conn.Write(ctx, websocket.MessageText, raw); writeErr != nil {
+			t.Fatalf("write auth: %v", writeErr)
+		}
+		// Read auth_ok + ready
+		for i := 0; i < 2; i++ {
+			if _, _, readErr := conn.Read(ctx); readErr != nil {
+				t.Fatalf("read handshake message %d: %v", i, readErr)
+			}
+		}
+		return conn
+	}
+
+	// dialAndReadReady dials, authenticates with lastSeq=0, and returns the
+	// conn plus the parsed ready payload so the caller can inspect voice_states.
+	dialAndReadReady := func(tok string) (*websocket.Conn, map[string]any) {
+		t.Helper()
+		conn, _, dialErr := websocket.Dial(ctx, wsURL, nil)
+		if dialErr != nil {
+			t.Fatalf("websocket.Dial: %v", dialErr)
+		}
+		authMsg := map[string]any{
+			"type":    "auth",
+			"payload": map[string]string{"token": tok},
+		}
+		raw, marshalErr := json.Marshal(authMsg)
+		if marshalErr != nil {
+			t.Fatalf("marshal auth: %v", marshalErr)
+		}
+		if writeErr := conn.Write(ctx, websocket.MessageText, raw); writeErr != nil {
+			t.Fatalf("write auth: %v", writeErr)
+		}
+		// Read auth_ok (skip it)
+		if _, _, readErr := conn.Read(ctx); readErr != nil {
+			t.Fatalf("read auth_ok: %v", readErr)
+		}
+		// Read ready — parse it
+		_, readyRaw, readErr := conn.Read(ctx)
+		if readErr != nil {
+			t.Fatalf("read ready: %v", readErr)
+		}
+		var readyMsg map[string]any
+		if err := json.Unmarshal(readyRaw, &readyMsg); err != nil {
+			t.Fatalf("unmarshal ready: %v", err)
+		}
+		return conn, readyMsg
+	}
+
+	// First connection: user joins voice
+	conn1 := dialAndAuthFresh(token)
+	defer func() { _ = conn1.Close(websocket.StatusNormalClosure, "") }()
+
+	var originalClient *ws.Client
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		originalClient = hub.GetClient(userID)
+		if originalClient != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if originalClient == nil {
+		t.Fatal("expected first client to be registered")
+	}
+
+	// Simulate voice join — both in-memory and DB
+	if err := database.JoinVoiceChannel(userID, chID); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	vsBeforeReload, err := database.GetVoiceState(userID)
+	if err != nil {
+		t.Fatalf("GetVoiceState(before reload): %v", err)
+	}
+	if vsBeforeReload == nil {
+		t.Fatal("expected voice state row after JoinVoiceChannel")
+	}
+	ws.SetClientVoiceStateForTest(originalClient, chID, vsBeforeReload.JoinedAt)
+
+	// Connect the observer (will receive broadcasts).
+	// Do NOT drain the observer — nhooyr.io/websocket closes the conn
+	// when a Read context expires. Instead, collect all messages below
+	// and filter for voice_leave in the assertion.
+	obsConn := dialAndAuthFresh(obsToken)
+	defer func() { _ = obsConn.Close(websocket.StatusNormalClosure, "") }()
+
+	// F5 reload: fresh connection (lastSeq = 0)
+	conn2, readyMsg := dialAndReadReady(token)
+	defer func() { _ = conn2.Close(websocket.StatusNormalClosure, "") }()
+
+	// Wait for replacement to register fully and broadcasts to propagate.
+	time.Sleep(500 * time.Millisecond)
+
+	// Assert 1: replacement client voiceChID == 0
+	replacementClient := hub.GetClient(userID)
+	if replacementClient == nil {
+		t.Fatal("expected replacement client to be registered")
+	}
+	if got := ws.GetClientVoiceChIDForTest(replacementClient); got != 0 {
+		t.Fatalf("fresh reconnect: replacement client voiceChID = %d, want 0", got)
+	}
+
+	// Assert 2: DB voice row is gone
+	vs, vsErr := database.GetVoiceState(userID)
+	if vsErr != nil {
+		t.Fatalf("GetVoiceState: %v", vsErr)
+	}
+	if vs != nil {
+		t.Fatalf("fresh reconnect: stale voice state still in DB: channel_id=%d", vs.ChannelID)
+	}
+
+	// Assert 3: ready.payload.voice_states does not include the reconnecting user
+	payload, _ := readyMsg["payload"].(map[string]any)
+	voiceStates, _ := payload["voice_states"].([]any)
+	for _, vsRaw := range voiceStates {
+		vsMap, _ := vsRaw.(map[string]any)
+		vsUserID, _ := vsMap["user_id"].(float64)
+		if int64(vsUserID) == userID {
+			t.Fatalf("ready payload must not include stale voice state for user %d: %+v", userID, vsMap)
+		}
+	}
+
+	// Assert 4: observer saw exactly one voice_leave for our user+channel.
+	// Read all pending messages — the observer may have received
+	// member_join/presence/voice_leave since connecting.
+	voiceLeaveCount := 0
+	for {
+		readCtx, readCancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		_, raw, readErr := obsConn.Read(readCtx)
+		readCancel()
+		if readErr != nil {
+			break
+		}
+		var msg map[string]any
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			continue
+		}
+		msgType, _ := msg["type"].(string)
+		if msgType == "voice_leave" {
+			msgPayload, _ := msg["payload"].(map[string]any)
+			msgUserID, _ := msgPayload["user_id"].(float64)
+			msgChID, _ := msgPayload["channel_id"].(float64)
+			if int64(msgUserID) == userID && int64(msgChID) == chID {
+				voiceLeaveCount++
+			}
+		}
+	}
+	if voiceLeaveCount == 0 {
+		t.Fatal("fresh reconnect: observer never received voice_leave for the ghost user")
+	}
+	if voiceLeaveCount > 1 {
+		t.Fatalf("fresh reconnect: observer received %d voice_leave messages, want exactly 1", voiceLeaveCount)
 	}
 }
 
