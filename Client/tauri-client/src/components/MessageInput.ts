@@ -183,9 +183,9 @@ export function createMessageInput(
       return;
     }
 
-    // Validate file type (allow empty type for files without MIME info)
-    if (file.type !== "" && !ALLOWED_TYPES.some((t) => file.type.startsWith(t))) {
-      showUploadError(`Unsupported file type: ${file.type}`);
+    // Validate file type — reject files with unknown/empty MIME type
+    if (file.type === "" || !ALLOWED_TYPES.some((t) => file.type.startsWith(t))) {
+      showUploadError(`${file.name} is not a supported file type`);
       return;
     }
 
@@ -204,8 +204,10 @@ export function createMessageInput(
       });
       item.appendChild(img);
       readFileAsDataUrl(file).then((dataUrl) => {
+        if (signal.aborted) return;
         img.src = dataUrl;
       }).catch(() => {
+        if (signal.aborted) return;
         // Fallback: show filename
         const nameEl = createElement("span", { class: "attachment-preview-name" }, file.name);
         img.replaceWith(nameEl);
@@ -240,11 +242,14 @@ export function createMessageInput(
     pendingUploadCount++;
     try {
       const result = await options.onUploadFile(file);
-      // Replace temp ID with real server ID
-      const att = pendingAttachments.find((a) => a.id === tempId);
-      if (att !== undefined) {
-        att.id = result.id;
-        att.filename = result.filename;
+      // Replace temp ID with real server ID (immutable update)
+      const attIdx = pendingAttachments.findIndex((a) => a.id === tempId);
+      if (attIdx !== -1) {
+        pendingAttachments[attIdx] = {
+          ...pendingAttachments[attIdx]!,
+          id: result.id,
+          filename: result.filename,
+        };
         item.classList.remove("uploading");
         spinner.remove();
       }
@@ -428,7 +433,9 @@ export function createMessageInput(
       // Defer so this click doesn't immediately close it
       const t1 = setTimeout(() => {
         activeTimers.delete(t1);
-        document.addEventListener("mousedown", handleClickOutside);
+        if (!signal.aborted) {
+          document.addEventListener("mousedown", handleClickOutside);
+        }
       }, 0);
       activeTimers.add(t1);
     }
@@ -477,7 +484,9 @@ export function createMessageInput(
       root?.appendChild(gifPicker.element);
       const t2 = setTimeout(() => {
         activeTimers.delete(t2);
-        document.addEventListener("mousedown", handleGifClickOutside);
+        if (!signal.aborted) {
+          document.addEventListener("mousedown", handleGifClickOutside);
+        }
       }, 0);
       activeTimers.add(t2);
     }

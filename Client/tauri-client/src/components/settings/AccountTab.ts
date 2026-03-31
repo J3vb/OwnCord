@@ -252,8 +252,8 @@ function buildTotpConfirmArea(
 
   confirmBtn.addEventListener("click", () => {
     const code = codeInput.value.trim();
-    if (code.length === 0) {
-      setText(confirmError, "Please enter the 6-digit code.");
+    if (!/^\d{6}$/.test(code)) {
+      setText(confirmError, "Please enter a valid 6-digit code.");
       return;
     }
     setText(confirmError, "");
