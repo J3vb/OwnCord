@@ -1378,27 +1378,18 @@ describe("LiveKitSession", () => {
       expect(url).toBe("ws://127.0.0.1:7880/livekit");
     });
 
-    it("returns directUrl when serverHost is ::1 (no port)", async () => {
-      // serverHost "::1" splits on ":" to ["", "", "1"], [0] is "" — NOT "::1".
-      // So ::1 is only detected as local when the host part equals "::1",
-      // which requires serverHost to have no port (split(":")[0] === "").
-      // This test documents that ::1 with port is NOT detected as local.
+    it("returns directUrl when serverHost is bare ::1", async () => {
       session.setServerHost("::1");
       const url = await (session as any).resolveLiveKitUrl("/livekit", "ws://[::1]:7880/livekit");
-      // split(":")[0] of "::1" is "" which does not match "::1", so it falls through.
-      // This means ::1 is effectively NOT handled as local by the current implementation.
-      // The proxy path kicks in instead.
-      expect(url).toBe("ws://127.0.0.1:7881/livekit");
+      // Bare IPv6 with multiple colons — detected as local, returns directUrl
+      expect(url).toBe("ws://[::1]:7880/livekit");
     });
 
-    it("treats ::1 with port as non-local and routes through proxy", async () => {
-      session.setServerHost("::1:7880");
+    it("returns directUrl when serverHost is bracketed [::1]:7880", async () => {
+      session.setServerHost("[::1]:7880");
       const url = await (session as any).resolveLiveKitUrl("/livekit", "ws://[::1]:7880/livekit");
-      // split(":")[0] of "::1:7880" is "" — not matched as local
-      expect(mockInvoke).toHaveBeenCalledWith("start_livekit_proxy", {
-        remoteHost: "::1:7880",
-      });
-      expect(url).toBe("ws://127.0.0.1:7881/livekit");
+      // Bracketed IPv6 — host extracted as "::1", detected as local
+      expect(url).toBe("ws://[::1]:7880/livekit");
     });
 
     it("calls ensureLiveKitProxy and returns proxy URL for remote host with slash path", async () => {

@@ -281,7 +281,17 @@ export class LiveKitSession {
 
   private async resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise<string> {
     if (this.serverHost !== null) {
-      const host = this.serverHost.split(":")[0] ?? "";
+      // Extract hostname, handling IPv6 bracket notation (e.g. "[::1]:7880")
+      // and bare IPv6 (e.g. "::1").
+      let host: string;
+      if (this.serverHost.startsWith("[")) {
+        host = this.serverHost.slice(1, this.serverHost.indexOf("]"));
+      } else if ((this.serverHost.match(/:/g) ?? []).length > 1) {
+        // Bare IPv6 address (multiple colons, no brackets) — use as-is
+        host = this.serverHost;
+      } else {
+        host = this.serverHost.split(":")[0] ?? "";
+      }
       const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
       if (isLocal && directUrl) {
         log.debug("LiveKit URL resolved via direct (local)", { url: directUrl });
@@ -310,7 +320,17 @@ export class LiveKitSession {
     // Ensure host:port format — default to 443 (standard HTTPS) when the
     // server is behind a reverse proxy. Without an explicit port, the Rust
     // proxy would default to 8443 which may not be exposed.
-    const hostWithPort = this.serverHost.includes(":") ? this.serverHost : `${this.serverHost}:443`;
+    // Handle IPv6: "[::1]:7880" has port, "[::1]" and bare "::1" do not.
+    let hostWithPort: string;
+    if (this.serverHost.startsWith("[")) {
+      // Bracketed IPv6 — check for "]:port" suffix
+      hostWithPort = this.serverHost.includes("]:") ? this.serverHost : `${this.serverHost}:443`;
+    } else if ((this.serverHost.match(/:/g) ?? []).length > 1) {
+      // Bare IPv6 (multiple colons) — wrap in brackets and add default port
+      hostWithPort = `[${this.serverHost}]:443`;
+    } else {
+      hostWithPort = this.serverHost.includes(":") ? this.serverHost : `${this.serverHost}:443`;
+    }
     this.liveKitProxyPort = await invoke<number>("start_livekit_proxy", {
       remoteHost: hostWithPort,
     });
