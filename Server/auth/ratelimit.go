@@ -96,6 +96,38 @@ func (r *RateLimiter) IsLockedOut(key string) bool {
 	return false
 }
 
+// Check reports whether a request from key would be permitted given the limit
+// and window, WITHOUT recording a new timestamp. Use this for read-only
+// rate-limit checks where the caller wants to record (via Allow) only on
+// specific outcomes such as verification failures.
+func (r *RateLimiter) Check(key string, limit int, window time.Duration) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if lo, ok := r.lockouts[key]; ok {
+		if time.Now().Before(lo.expiresAt) {
+			return false
+		}
+		delete(r.lockouts, key)
+	}
+
+	cutoff := time.Now().Add(-window)
+
+	e, ok := r.windows[key]
+	if !ok {
+		return true
+	}
+
+	count := 0
+	for _, ts := range e.timestamps {
+		if ts.After(cutoff) {
+			count++
+		}
+	}
+
+	return count < limit
+}
+
 // Reset clears all rate-limit state (timestamps and lockout) for key.
 func (r *RateLimiter) Reset(key string) {
 	r.mu.Lock()

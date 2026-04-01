@@ -104,18 +104,41 @@ export function createStore<T>(initialState: T): Store<T> {
   const listeners: Set<(state: T) => void> = new Set();
   let notifyScheduled = false;
 
+  /** Re-entrancy guard: true while a subscriber notification is running. */
+  let updating = false;
+  /** Updaters queued by re-entrant setState calls during notification. */
+  const pendingUpdates: Array<(prev: T) => T> = [];
+
   function getState(): T {
     return state;
   }
 
   function setState(updater: (prev: T) => T): void {
+    if (updating) {
+      // Re-entrant call from within a subscriber — queue for later.
+      pendingUpdates.push(updater);
+      return;
+    }
     state = updater(state);
     if (!notifyScheduled) {
       notifyScheduled = true;
       queueMicrotask(() => {
         notifyScheduled = false;
-        for (const listener of listeners) {
-          listener(state);
+        updating = true;
+        try {
+          for (const listener of listeners) {
+            listener(state);
+          }
+          // Drain any updates queued by re-entrant setState during notification.
+          while (pendingUpdates.length > 0) {
+            const queued = pendingUpdates.shift()!;
+            state = queued(state);
+            for (const listener of listeners) {
+              listener(state);
+            }
+          }
+        } finally {
+          updating = false;
         }
       });
     }

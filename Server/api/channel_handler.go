@@ -333,90 +333,111 @@ func handleSearch(database *db.DB) http.HandlerFunc {
 			limit = v
 		}
 
-		results, err := database.SearchMessages(q, channelID, limit)
-		if err != nil {
-			if isInvalidSearchQueryError(err) {
-				writeJSON(w, http.StatusBadRequest, errorResponse{
-					Error:   "BAD_REQUEST",
-					Message: "invalid search query",
-				})
-				return
-			}
-			slog.Error("handleSearch SearchMessages", "err", err, "query", q)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "search failed",
-			})
-			return
-		}
+		var results []db.MessageSearchResult
 
-		// Batch-fetch overrides and post-filter results by READ_MESSAGES.
-		role, _ := r.Context().Value(RoleKey).(*db.Role)
-		user, _ := r.Context().Value(UserKey).(*db.User)
-		overrides := map[int64]db.ChannelOverride{}
-		if role != nil && !permissions.HasAdmin(role.Permissions) {
-			var oErr error
-			overrides, oErr = database.GetAllChannelPermissionsForRole(role.ID)
-			if oErr != nil {
-				slog.Error("handleSearch GetAllChannelPermissionsForRole", "err", oErr)
+		if channelID != nil {
+			// Single-channel search: permission already checked above.
+			var err error
+			results, err = database.SearchMessages(q, channelID, limit)
+			if err != nil {
+				if isInvalidSearchQueryError(err) {
+					writeJSON(w, http.StatusBadRequest, errorResponse{
+						Error:   "BAD_REQUEST",
+						Message: "invalid search query",
+					})
+					return
+				}
+				slog.Error("handleSearch SearchMessages", "err", err, "query", q)
 				writeJSON(w, http.StatusInternalServerError, errorResponse{
 					Error:   "INTERNAL_ERROR",
 					Message: "search failed",
 				})
 				return
 			}
-		}
+		} else {
+			// Global search: pre-compute the set of accessible channel IDs
+			// so the DB query never touches restricted content.
+			role, _ := r.Context().Value(RoleKey).(*db.Role)
+			user, _ := r.Context().Value(UserKey).(*db.User)
 
-		// Batch-fetch channel types in a single query to avoid N+1 lookups.
-		uniqueIDs := make(map[int64]struct{}, len(results))
-		for _, res := range results {
-			uniqueIDs[res.ChannelID] = struct{}{}
-		}
-		channelIDs := make([]int64, 0, len(uniqueIDs))
-		for id := range uniqueIDs {
-			channelIDs = append(channelIDs, id)
-		}
-		channelTypeCache, ctErr := database.GetChannelTypes(channelIDs)
-		if ctErr != nil {
-			slog.Error("handleSearch GetChannelTypes", "err", ctErr)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "search failed",
-			})
-			return
-		}
-
-		var filtered []db.MessageSearchResult
-		for _, res := range results {
-			chType, ok := channelTypeCache[res.ChannelID]
-			if !ok {
-				// Fail closed if we cannot determine the channel type.
-				continue
+			// 1. Guild channels the user can read.
+			allChannels, chErr := database.ListChannels()
+			if chErr != nil {
+				slog.Error("handleSearch ListChannels", "err", chErr)
+				writeJSON(w, http.StatusInternalServerError, errorResponse{
+					Error:   "INTERNAL_ERROR",
+					Message: "search failed",
+				})
+				return
 			}
-			if chType == "dm" {
-				// DM channels require participant-based auth.
-				if user == nil {
-					continue
+
+			overrides := map[int64]db.ChannelOverride{}
+			if role != nil && !permissions.HasAdmin(role.Permissions) {
+				var oErr error
+				overrides, oErr = database.GetAllChannelPermissionsForRole(role.ID)
+				if oErr != nil {
+					slog.Error("handleSearch GetAllChannelPermissionsForRole", "err", oErr)
+					writeJSON(w, http.StatusInternalServerError, errorResponse{
+						Error:   "INTERNAL_ERROR",
+						Message: "search failed",
+					})
+					return
 				}
-				ok, dmErr := database.IsDMParticipant(user.ID, res.ChannelID)
-				if dmErr != nil || !ok {
-					continue
+			}
+
+			var accessibleIDs []int64
+			for _, ch := range allChannels {
+				if ch.Type == "dm" {
+					continue // DM channels handled separately below.
 				}
+				if hasChannelPermBatch(role, overrides, ch.ID, permissions.ReadMessages) {
+					accessibleIDs = append(accessibleIDs, ch.ID)
+				}
+			}
+
+			// 2. DM channels the user participates in.
+			if user != nil {
+				dmChannels, dmErr := database.GetUserDMChannels(user.ID)
+				if dmErr != nil {
+					slog.Error("handleSearch GetUserDMChannels", "err", dmErr)
+					writeJSON(w, http.StatusInternalServerError, errorResponse{
+						Error:   "INTERNAL_ERROR",
+						Message: "search failed",
+					})
+					return
+				}
+				for _, dm := range dmChannels {
+					accessibleIDs = append(accessibleIDs, dm.ChannelID)
+				}
+			}
+
+			if len(accessibleIDs) == 0 {
+				results = []db.MessageSearchResult{}
 			} else {
-				if !hasChannelPermBatch(role, overrides, res.ChannelID, permissions.ReadMessages) {
-					continue
+				var err error
+				results, err = database.SearchMessagesInChannels(q, accessibleIDs, limit)
+				if err != nil {
+					if isInvalidSearchQueryError(err) {
+						writeJSON(w, http.StatusBadRequest, errorResponse{
+							Error:   "BAD_REQUEST",
+							Message: "invalid search query",
+						})
+						return
+					}
+					slog.Error("handleSearch SearchMessagesInChannels", "err", err, "query", q)
+					writeJSON(w, http.StatusInternalServerError, errorResponse{
+						Error:   "INTERNAL_ERROR",
+						Message: "search failed",
+					})
+					return
 				}
 			}
-			filtered = append(filtered, res)
-		}
-		if filtered == nil {
-			filtered = []db.MessageSearchResult{}
 		}
 
 		type response struct {
 			Results []db.MessageSearchResult `json:"results"`
 		}
-		writeJSON(w, http.StatusOK, response{Results: filtered})
+		writeJSON(w, http.StatusOK, response{Results: results})
 	}
 }
 

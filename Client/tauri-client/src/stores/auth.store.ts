@@ -7,6 +7,7 @@ import { createStore } from "@lib/store";
 import type { UserWithRole } from "@lib/types";
 import { resetVoiceStore } from "@stores/voice.store";
 import { leaveVoice } from "@lib/livekitSession";
+import { cleanupNotificationAudio } from "@lib/notifications";
 
 export interface AuthState {
   readonly token: string | null;
@@ -48,6 +49,7 @@ export function setAuth(
 export function clearAuth(): void {
   leaveVoice(false);
   resetVoiceStore();
+  cleanupNotificationAudio();
   authStore.setState(() => ({ ...INITIAL_STATE }));
 }
 

@@ -269,6 +269,67 @@ func (d *DB) SearchMessages(query string, channelID *int64, limit int) ([]Messag
 	return results, nil
 }
 
+// SearchMessagesInChannels performs a full-text search scoped to the given
+// channel IDs. This prevents information leakage by filtering at the DB level
+// rather than post-filtering in application code.
+func (d *DB) SearchMessagesInChannels(query string, channelIDs []int64, limit int) ([]MessageSearchResult, error) {
+	if query == "" || len(channelIDs) == 0 {
+		return []MessageSearchResult{}, nil
+	}
+	query = sanitizeFTSQuery(query)
+	if query == "" {
+		return []MessageSearchResult{}, nil
+	}
+	if limit < 1 {
+		return []MessageSearchResult{}, nil
+	}
+
+	// Build IN clause placeholders.
+	placeholders := make([]string, len(channelIDs))
+	args := make([]any, 0, len(channelIDs)+2)
+	args = append(args, query)
+	for i, id := range channelIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	args = append(args, limit)
+
+	rows, err := d.sqlDB.Query(
+		fmt.Sprintf(
+			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content, m.timestamp
+			 FROM messages_fts f
+			 JOIN messages m ON f.rowid = m.id
+			 JOIN channels c ON m.channel_id = c.id
+			 JOIN users u ON m.user_id = u.id
+			 WHERE messages_fts MATCH ? AND m.channel_id IN (%s) AND m.deleted = 0
+			 ORDER BY rank LIMIT ?`,
+			strings.Join(placeholders, ",")),
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("SearchMessagesInChannels: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var results []MessageSearchResult
+	for rows.Next() {
+		var r MessageSearchResult
+		if scanErr := rows.Scan(&r.MessageID, &r.ChannelID, &r.ChannelName,
+			&r.User.ID, &r.User.Username, &r.User.Avatar,
+			&r.Content, &r.Timestamp); scanErr != nil {
+			return nil, fmt.Errorf("SearchMessagesInChannels scan: %w", scanErr)
+		}
+		results = append(results, r)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("SearchMessagesInChannels rows: %w", rows.Err())
+	}
+	if results == nil {
+		results = []MessageSearchResult{}
+	}
+	return results, nil
+}
+
 // GetMessagesForAPI returns messages in the API.md response shape, including
 // user object, reactions (with me flag), and attachments.
 func (d *DB) GetMessagesForAPI(channelID, before int64, limit int, requestingUserID int64) ([]MessageAPIResponse, error) {

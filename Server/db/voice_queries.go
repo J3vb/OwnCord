@@ -259,6 +259,26 @@ func (d *DB) UpdateVoiceCamera(userID int64, camera bool) error {
 	return nil
 }
 
+// EnableCameraIfUnderLimit atomically enables a user's camera only if the
+// channel has not yet reached maxVideo active cameras. Returns true if the
+// camera was enabled, false if the limit was already reached.
+func (d *DB) EnableCameraIfUnderLimit(userID, channelID int64, maxVideo int) (bool, error) {
+	res, err := d.sqlDB.Exec(
+		`UPDATE voice_states SET camera = 1
+		 WHERE user_id = ? AND channel_id = ?
+		   AND (SELECT COUNT(*) FROM voice_states WHERE channel_id = ? AND camera = 1) < ?`,
+		userID, channelID, channelID, maxVideo,
+	)
+	if err != nil {
+		return false, fmt.Errorf("EnableCameraIfUnderLimit: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("EnableCameraIfUnderLimit RowsAffected: %w", err)
+	}
+	return rows > 0, nil
+}
+
 // UpdateVoiceScreenshare sets the screenshare field for the given user's voice state.
 func (d *DB) UpdateVoiceScreenshare(userID int64, screenshare bool) error {
 	_, err := d.sqlDB.Exec(

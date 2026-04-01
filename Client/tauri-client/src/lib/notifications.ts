@@ -129,6 +129,14 @@ function flashTaskbar(): void {
 // Simple notification sound using Web Audio API
 let notifAudioCtx: AudioContext | null = null;
 
+/** Close and release the notification AudioContext. Call on logout/cleanup. */
+export function cleanupNotificationAudio(): void {
+  if (notifAudioCtx !== null) {
+    notifAudioCtx.close().catch(() => {});
+    notifAudioCtx = null;
+  }
+}
+
 /** Play a brief notification chime. */
 function playNotificationSound(): void {
   try {

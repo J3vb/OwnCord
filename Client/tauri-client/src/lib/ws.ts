@@ -7,6 +7,10 @@ import { createLogger } from "./logger";
 
 const log = createLogger("ws");
 
+/** Monotonic generation counter — incremented on each connect() to invalidate
+ *  stale event listeners from a previous connection attempt. */
+let wsGeneration = 0;
+
 // Tauri IPC imports — resolved at runtime in Tauri context
 let tauriInvoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null = null;
 let tauriListen: ((event: string, handler: (e: { payload: unknown }) => void) => Promise<() => void>) | null = null;
@@ -257,14 +261,19 @@ export function createWsClient() {
   async function setupEventListeners(): Promise<void> {
     if (tauriListen === null) return;
 
+    // Capture generation so stale listeners from a previous connect() are no-ops.
+    const gen = wsGeneration;
+
     // Server messages
     const unsubMsg = await tauriListen("ws-message", (e) => {
+      if (gen !== wsGeneration) return;
       handleMessage(e.payload as string);
     });
     eventUnsubs.push(unsubMsg);
 
     // Connection state changes from Rust
     const unsubState = await tauriListen("ws-state", (e) => {
+      if (gen !== wsGeneration) return;
       const rustState = e.payload as string;
       log.debug("Rust WS state", { state: rustState });
 
@@ -301,12 +310,14 @@ export function createWsClient() {
 
     // Errors
     const unsubErr = await tauriListen("ws-error", (e) => {
+      if (gen !== wsGeneration) return;
       log.warn("WebSocket error (proxy)", { error: e.payload });
     });
     eventUnsubs.push(unsubErr);
 
     // TOFU certificate events
     const unsubCert = await tauriListen("cert-tofu", (e) => {
+      if (gen !== wsGeneration) return;
       const raw = e.payload as CertTofuEvent;
       log.info("TOFU cert event", { host: raw.host, status: raw.status });
 
@@ -347,6 +358,7 @@ export function createWsClient() {
   }
 
   async function connect(cfg: WsClientConfig): Promise<void> {
+    wsGeneration++;
     config = cfg;
     intentionalClose = false;
     cancelReconnect();

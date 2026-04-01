@@ -208,7 +208,8 @@ export class AudioElements {
 
   // --- Cleanup ---
 
-  /** Remove all remote audio elements from the DOM and clear tracking maps. */
+  /** Remove all remote audio elements from the DOM and clear tracking maps.
+   *  Preserves screenshare mute state so reconnecting tracks inherit user intent. */
   cleanupAllAudioElements(): void {
     for (const el of this.remoteMicAudioElements.values()) el.remove();
     this.remoteMicAudioElements.clear();
@@ -216,6 +217,11 @@ export class AudioElements {
       for (const el of audioEls) el.remove();
     }
     this.screenshareAudioElements.clear();
+  }
+
+  /** Full cleanup including screenshare mute state — used on intentional leave. */
+  cleanupAllAudioElementsFull(): void {
+    this.cleanupAllAudioElements();
     this.screenshareAudioMutedByUser.clear();
   }
 }

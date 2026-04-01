@@ -96,6 +96,13 @@ type PendingVoiceJoin = {
   readonly directUrl?: string;
 };
 
+/** Read pendingJoin from an instance — bypasses TS control-flow narrowing
+ *  that incorrectly assumes the field is still null after an async interleave. */
+function getPendingJoin(session: LiveKitSession): PendingVoiceJoin | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TS narrowing workaround
+  return (session as any).pendingJoin as PendingVoiceJoin | null;
+}
+
 // --- LiveKitSession class ---
 
 export class LiveKitSession {
@@ -677,17 +684,112 @@ export class LiveKitSession {
     } finally {
       this.connecting = false;
     }
-    // Dispatch pending join *after* the try/finally so that a throw inside
-    // the recursive call doesn't interfere with the outer finally's flag reset.
-    const pendingJoin = this.pendingJoin;
+    // Drain pending joins iteratively to avoid unbounded recursion when
+    // rapid channel switches queue multiple requests.
+    let pendingJoin = this.pendingJoin;
     this.pendingJoin = null;
-    if (pendingJoin !== null) {
-      await this.handleVoiceToken(
-        pendingJoin.token,
-        pendingJoin.url,
-        pendingJoin.channelId,
-        pendingJoin.directUrl,
-      );
+    while (pendingJoin !== null) {
+      const { token: pToken, url: pUrl, channelId: pChannelId, directUrl: pDirectUrl } = pendingJoin;
+      // Re-enter the connect logic for the queued join (non-recursive).
+      if (this.room !== null && this.currentChannelId === pChannelId
+          && this.room.state === "connected") {
+        this.handleVoiceTokenRefresh(pToken);
+        pendingJoin = this.pendingJoin;
+        this.pendingJoin = null;
+        continue;
+      }
+      if (this.room !== null) this.leaveVoice(false);
+      this.connecting = true;
+      let pResolvedUrl = "";
+      try {
+        this.room = this.createRoom();
+        this.syncModuleRooms();
+        pResolvedUrl = await this.resolveLiveKitUrl(pUrl, pDirectUrl);
+        const MAX_RETRIES = 3;
+        const RETRY_DELAY_MS = 2000;
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            await this.room.connect(pResolvedUrl, pToken);
+            // Re-read pendingJoin: it may have been set by a concurrent
+            // handleVoiceToken call during the await above. TS narrows
+            // this.pendingJoin to null from the assignment before the loop,
+            // but async interleaving can change it — read via helper to bypass.
+            const queuedJoin = getPendingJoin(this);
+            if (queuedJoin !== null
+                && (queuedJoin.token !== pToken
+                  || queuedJoin.url !== pUrl
+                  || queuedJoin.channelId !== pChannelId
+                  || queuedJoin.directUrl !== pDirectUrl)) {
+              log.info("Discarding stale voice join in favor of queued request", {
+                channelId: pChannelId,
+                queuedChannelId: queuedJoin.channelId,
+              });
+              if (this.room !== null) {
+                const room = this.room;
+                this.room = null;
+                this.syncModuleRooms();
+                room.removeAllListeners();
+                room.disconnect().catch((err) => log.debug("Failed to disconnect room during cleanup", err));
+              }
+              break;
+            }
+            break;
+          } catch (connectErr) {
+            if (attempt < MAX_RETRIES) {
+              log.warn("LiveKit connect failed, retrying", { attempt, maxRetries: MAX_RETRIES, url: pResolvedUrl, error: connectErr });
+              await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+              if (this.room === null) throw connectErr;
+              this.room.removeAllListeners();
+              this.room = this.createRoom();
+              this.syncModuleRooms();
+            } else {
+              throw connectErr;
+            }
+          }
+        }
+        if (this.room !== null) {
+          log.info("Connected to LiveKit room", { channelId: pChannelId, url: pResolvedUrl });
+          this.logIceConnectionInfo();
+          this.currentChannelId = pChannelId;
+          this.latestToken = pToken;
+          this.lastUrl = pUrl;
+          this.lastDirectUrl = pDirectUrl;
+          this.room.startAudio().catch(() => {
+            log.debug("Optimistic startAudio failed — waiting for user gesture");
+          });
+          await this.restoreLocalVoiceState("join");
+          const savedInput = loadPref<string>("audioInputDevice", "");
+          if (savedInput) {
+            try {
+              await this.room.switchActiveDevice("audioinput", savedInput);
+            } catch (err) {
+              log.warn("Saved input device unavailable, using default", err);
+            }
+          }
+          const savedOutput = loadPref<string>("audioOutputDevice", "");
+          if (savedOutput) {
+            try {
+              await this.room.switchActiveDevice("audiooutput", savedOutput);
+            } catch (err) {
+              log.warn("Saved output device unavailable, using default", err);
+            }
+          }
+          this._audioPipeline.setupAudioPipeline();
+          this.reapplyMuteGain();
+          this.startTokenRefreshTimer();
+          log.info("Voice session active", { channelId: pChannelId });
+        }
+      } catch (err) {
+        log.error("Failed to connect to LiveKit", { url: pResolvedUrl, error: err });
+        if (this.room !== null) {
+          this.onErrorCallback?.("Failed to join voice — connection error");
+        }
+        this.leaveVoice(false);
+      } finally {
+        this.connecting = false;
+      }
+      pendingJoin = this.pendingJoin;
+      this.pendingJoin = null;
     }
   }
 
@@ -729,7 +831,8 @@ export class LiveKitSession {
     }
     // Remove orphaned remote audio elements (normally cleaned up by
     // TrackUnsubscribed, but may be missed during rapid reconnection).
-    this._audioElements.cleanupAllAudioElements();
+    // Full cleanup: also clears screenshare mute state on intentional leave.
+    this._audioElements.cleanupAllAudioElementsFull();
     if (this.room !== null) {
       const r = this.room;
       this.room = null;

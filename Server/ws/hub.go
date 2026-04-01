@@ -167,6 +167,7 @@ func (h *Hub) Run() {
 
 					if panicCount >= 3 {
 						slog.Error("hub: too many panics in 60s, stopping")
+						h.Stop()
 						return
 					}
 				}
@@ -324,13 +325,16 @@ func (h *Hub) registerNow(c *Client) {
 	h.mu.Unlock()
 }
 
-func (h *Hub) unregisterNow(c *Client) {
+func (h *Hub) unregisterNow(c *Client) bool {
 	h.mu.Lock()
-	if current, ok := h.clients[c.userID]; ok && current == c {
+	defer h.mu.Unlock()
+	current, exists := h.clients[c.userID]
+	if exists && current == c {
 		delete(h.clients, c.userID)
 		slog.Info("hub: client unregistered", "user_id", c.userID, "total_clients", len(h.clients))
+		return false // not replaced
 	}
-	h.mu.Unlock()
+	return true // different client registered = was replaced
 }
 
 // BroadcastToChannel enqueues msg for delivery to all clients subscribed to

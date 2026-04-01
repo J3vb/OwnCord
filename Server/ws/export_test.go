@@ -55,7 +55,7 @@ func TouchForTest(c *Client) {
 
 // RollbackVoiceJoinForTest exposes Hub.rollbackVoiceJoin for external tests.
 func (h *Hub) RollbackVoiceJoinForTest(c *Client, channelID int64) {
-	h.rollbackVoiceJoin(c, channelID)
+	h.rollbackVoiceJoin(c, channelID, true)
 }
 
 // LeaveVoiceChannelWithRetryForTest exposes leaveVoiceChannelWithRetry for external tests.

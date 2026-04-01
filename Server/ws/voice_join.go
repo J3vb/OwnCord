@@ -102,21 +102,20 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	state, err := h.db.GetVoiceState(c.userID)
 	if err != nil || state == nil {
 		slog.Error("ws handleVoiceJoin GetVoiceState", "err", err, "user_id", c.userID)
-		h.rollbackVoiceJoin(c, channelID)
+		h.rollbackVoiceJoin(c, channelID, false)
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to join voice channel"))
 		return
 	}
 
-	// Set voice channel on the client.
-	c.setVoiceState(channelID, state.JoinedAt)
-
 	// Generate LiveKit token if LiveKit client is available.
 	// Token generation failure is fatal — without a token the client cannot
 	// connect to the SFU, so we must roll back the DB join.
+	// NOTE: setVoiceState is deferred until after token send succeeds, so
+	// rollback does not broadcast a spurious voice_leave for an unannounced join.
 	if h.livekit != nil {
 		if c.user == nil {
 			slog.Error("handleVoiceJoin: nil user on client", "user_id", c.userID)
-			h.rollbackVoiceJoin(c, channelID)
+			h.rollbackVoiceJoin(c, channelID, false)
 			c.sendMsg(buildErrorMsg(ErrCodeInternal, "not authenticated"))
 			return
 		}
@@ -127,7 +126,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		token, tokenErr := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, state.JoinedAt, canPublish, canSubscribe)
 		if tokenErr != nil {
 			slog.Error("ws handleVoiceJoin GenerateToken", "err", tokenErr, "user_id", c.userID)
-			h.rollbackVoiceJoin(c, channelID)
+			h.rollbackVoiceJoin(c, channelID, false)
 			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to generate voice token"))
 			return
 		}
@@ -136,6 +135,9 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		// fetch) and falls back to the /livekit proxy for remote clients.
 		c.sendMsg(buildVoiceToken(channelID, token, "/livekit", h.livekit.URL()))
 	}
+
+	// Set voice channel on the client AFTER token is sent successfully.
+	c.setVoiceState(channelID, state.JoinedAt)
 
 	// Broadcast the joiner's state to all connected clients.
 	h.BroadcastToAll(buildVoiceState(*state))
@@ -237,11 +239,13 @@ func (h *Hub) handleVoiceTokenRefresh(ctx context.Context, c *Client) {
 // rollbackVoiceJoin undoes a partially-completed voice join: clears the
 // client's voice channel ID, removes the DB voice state row, and broadcasts
 // voice_leave so other clients don't see a ghost participant.
-func (h *Hub) rollbackVoiceJoin(c *Client, channelID int64) {
+func (h *Hub) rollbackVoiceJoin(c *Client, channelID int64, broadcast bool) {
 	c.clearVoiceChID()
 	if err := h.db.LeaveVoiceChannel(c.userID); err != nil {
 		slog.Error("ws rollbackVoiceJoin LeaveVoiceChannel", "err", err,
 			"user_id", c.userID, "channel_id", channelID)
 	}
-	h.BroadcastToAll(buildVoiceLeave(channelID, c.userID))
+	if broadcast {
+		h.BroadcastToAll(buildVoiceLeave(channelID, c.userID))
+	}
 }

@@ -55,7 +55,7 @@ func (rb *EventRingBuffer) EventsSince(afterSeq uint64) [][]byte {
 		return nil
 	}
 
-	var result [][]byte
+	result := make([][]byte, 0)
 	for i := 0; i < rb.count; i++ {
 		idx := (oldestIdx + i) % rb.size
 		e := rb.entries[idx]

@@ -138,6 +138,22 @@ func (h *Hub) handleReconnect(
 func (h *Hub) handleFreshConnect(
 	ctx context.Context, conn *websocket.Conn, c *Client, database *db.DB,
 ) error {
+	// Clean stale voice state BEFORE building ready and registering.
+	// When a user F5-reloads while in voice, the DB row from the previous
+	// session must be removed so the ready payload doesn't include it and
+	// other clients see a voice_leave broadcast.
+	if vs, err := database.GetVoiceState(c.userID); err == nil && vs != nil {
+		slog.Info("ws fresh connect: cleaning stale voice state",
+			"user_id", c.userID, "channel_id", vs.ChannelID)
+		if _, delErr := database.LeaveVoiceChannelIfMatch(c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
+			slog.Warn("ws fresh connect: LeaveVoiceChannelIfMatch failed", "err", delErr)
+		}
+		h.BroadcastToAll(buildVoiceLeave(vs.ChannelID, c.userID))
+		if h.livekit != nil {
+			go h.livekit.RemoveParticipant(vs.ChannelID, c.userID, vs.JoinedAt)
+		}
+	}
+
 	// Fresh connection or replay fallback: full auth_ok + ready flow.
 	slog.Info("ws sending auth_ok", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
 	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(c.user, c.roleName)); err != nil {
@@ -201,11 +217,13 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 	var lastReadErr error
 	defer func() {
-		hub.unregisterNow(c)
+		// Snapshot voice state BEFORE unregister to avoid TOCTOU with replacement connections.
+		voiceChID := c.getVoiceChID()
+		replaced := hub.unregisterNow(c)
 		if c.user != nil {
-			replaced := hub.IsUserConnected(c.userID)
-			voiceChID := c.getVoiceChID()
-			if !replaced {
+			// Always clean up voice state — LeaveVoiceChannelIfMatch uses a
+			// join_token guard so it won't remove a replacement client's session.
+			if voiceChID != 0 {
 				hub.handleVoiceLeave(ctx, c)
 			}
 			c.mu.Lock()

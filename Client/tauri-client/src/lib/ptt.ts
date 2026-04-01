@@ -12,6 +12,7 @@ import { createLogger } from "./logger";
 const log = createLogger("ptt");
 
 let listening = false;
+let pttUnsubscribe: (() => void) | null = null;
 
 // Well-known virtual key code names for display
 const VK_NAMES: ReadonlyMap<number, string> = new Map([
@@ -56,8 +57,12 @@ export async function initPtt(): Promise<void> {
     await invoke("ptt_set_key", { vkCode: vk });
     await invoke("ptt_start");
 
+    // Clean up previous listener if any
+    pttUnsubscribe?.();
+    pttUnsubscribe = null;
+
     // Listen for press/release events
-    await listen<boolean>("ptt-state", (event) => {
+    const unsub = await listen<boolean>("ptt-state", (event) => {
       // Only toggle mute when in a voice channel
       const channelId = voiceStore.getState().currentChannelId;
       if (channelId === null) return;
@@ -65,6 +70,7 @@ export async function initPtt(): Promise<void> {
       setMuted(!event.payload);
       log.debug(event.payload ? "PTT pressed — unmuted" : "PTT released — muted");
     });
+    pttUnsubscribe = unsub;
 
     listening = true;
     log.info("PTT started", { vk, name: vkName(vk) });
@@ -78,6 +84,8 @@ export async function initPtt(): Promise<void> {
 export async function stopPtt(): Promise<void> {
   if (!listening) return;
   try {
+    pttUnsubscribe?.();
+    pttUnsubscribe = null;
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("ptt_stop");
     listening = false;

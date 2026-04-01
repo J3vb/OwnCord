@@ -22,18 +22,19 @@ import (
 // RoomEvent.ActiveSpeakersChanged (lower latency than webhooks).
 func (h *Hub) NewLiveKitWebhookHandler(apiKey, apiSecret string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(io.LimitReader(r.Body, 64*1024))
-		if err != nil {
-			slog.Error("livekit webhook: read body failed", "error", err)
-			http.Error(w, "bad request", http.StatusBadRequest)
-			return
-		}
-
-		// Verify the webhook token from the Authorization header.
+		// Check Authorization header BEFORE reading the body to avoid
+		// allocating memory for unauthenticated requests.
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
 			slog.Warn("livekit webhook: missing Authorization header")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		body, err := io.ReadAll(io.LimitReader(r.Body, 64*1024))
+		if err != nil {
+			slog.Error("livekit webhook: read body failed", "error", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
 

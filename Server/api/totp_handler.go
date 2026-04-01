@@ -57,22 +57,20 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 			return
 		}
 
-		// Per-user TOTP brute-force protection: lock out after 10 failures
-		// across all IPs within a 15-minute window.
-		totpKey := fmt.Sprintf("totp_fail:%d", challenge.UserID)
-		if !limiter.Allow(totpKey, 10, 15*time.Minute) {
-			writeJSON(w, http.StatusTooManyRequests, errorResponse{
-				Error:   "RATE_LIMITED",
-				Message: "too many failed attempts, try again later",
-			})
-			return
-		}
-
 		var req verifyTotpRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error:   "INVALID_INPUT",
 				Message: "malformed request body",
+			})
+			return
+		}
+
+		totpKey := fmt.Sprintf("totp_fail:%d", challenge.UserID)
+		if !limiter.Check(totpKey, 10, 15*time.Minute) {
+			writeJSON(w, http.StatusTooManyRequests, errorResponse{
+				Error:   "RATE_LIMITED",
+				Message: "too many failed attempts, try again later",
 			})
 			return
 		}
@@ -87,6 +85,7 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 		}
 
 		if !auth.VerifyTOTPCodeOnce(*user.TOTPSecret, strings.TrimSpace(req.Code), time.Now().UTC(), user.ID, usedTOTPCodes) {
+			limiter.Allow(totpKey, 10, 15*time.Minute)
 			partialStore.RegisterFailure(partialToken, 5)
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
 				Error:   "UNAUTHORIZED",
@@ -94,6 +93,8 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 			})
 			return
 		}
+
+		limiter.Reset(totpKey)
 
 		if _, ok := partialStore.Consume(partialToken); !ok {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
@@ -131,6 +132,14 @@ func handleEnableTOTP(pendingStore *auth.PendingTOTPStore) http.HandlerFunc {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
 				Error:   "UNAUTHORIZED",
 				Message: "not authenticated",
+			})
+			return
+		}
+
+		if user.TOTPSecret != nil && *user.TOTPSecret != "" {
+			writeJSON(w, http.StatusConflict, errorResponse{
+				Error:   "TOTP_ALREADY_ENABLED",
+				Message: "disable 2FA before re-enabling",
 			})
 			return
 		}

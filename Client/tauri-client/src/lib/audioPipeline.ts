@@ -19,6 +19,9 @@ const log = createLogger("audioPipeline");
 export class AudioPipeline {
   private room: Room | null = null;
 
+  /** Monotonic counter incremented on teardown — used to discard stale async results. */
+  private _pipelineGeneration = 0;
+
   // Pipeline nodes
   private audioPipelineCtx: AudioContext | null = null;
   private audioPipelineGain: GainNode | null = null;
@@ -140,6 +143,7 @@ export class AudioPipeline {
 
   /** Tear down the audio pipeline and restore the original sender track. */
   teardownAudioPipeline(): void {
+    this._pipelineGeneration++;
     this.stopVadPolling();
 
     // Restore original mic track on the WebRTC sender
@@ -222,10 +226,13 @@ export class AudioPipeline {
     const threshold = ((100 - sensitivity) / 100) * 0.10;
 
     // Try AudioWorklet first
+    const gen = this._pipelineGeneration;
     this.audioPipelineCtx.audioWorklet.addModule("/vad-worklet.js").then(() => {
-      if (this.audioPipelineCtx === null) return; // Torn down while loading
+      if (gen !== this._pipelineGeneration) return; // Torn down while loading
+      if (this.audioPipelineCtx === null) return;
       this.startVadWorklet(threshold);
     }).catch((err) => {
+      if (gen !== this._pipelineGeneration) return;
       log.warn("AudioWorklet unavailable, falling back to setTimeout VAD", err);
       this.startVadFallback(threshold);
     });

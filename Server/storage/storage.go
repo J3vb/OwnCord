@@ -124,7 +124,12 @@ func (s *Storage) Save(uuid string, r io.Reader) error {
 	if err != nil {
 		return fmt.Errorf("creating file %s: %w", dst, err)
 	}
-	defer f.Close() //nolint:errcheck
+	closed := false
+	defer func() {
+		if !closed {
+			_ = f.Close()
+		}
+	}()
 
 	// Reconstruct the full stream: header bytes we already read + remainder.
 	maxBytes := int64(s.maxSizeMB) * 1024 * 1024
@@ -138,13 +143,16 @@ func (s *Storage) Save(uuid string, r io.Reader) error {
 	if written == maxBytes {
 		var probe [1]byte
 		if n, _ := full.Read(probe[:]); n > 0 {
-			// File exceeds limit — remove the partial write and reject.
 			_ = f.Close()
+			closed = true
 			if removeErr := os.Remove(dst); removeErr != nil {
 				slog.Error("storage: failed to remove oversized file", "path", dst, "err", removeErr)
 			}
 			return fmt.Errorf("file exceeds maximum size of %d MB", s.maxSizeMB)
 		}
+	}
+	if syncErr := f.Sync(); syncErr != nil {
+		return fmt.Errorf("syncing file %s: %w", dst, syncErr)
 	}
 	return nil
 }

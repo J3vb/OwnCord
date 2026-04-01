@@ -411,7 +411,7 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error 
 	// Cap download at 500 MiB to prevent unbounded disk usage from a
 	// malicious or corrupted release asset.
 	const maxBinarySize = 500 * 1024 * 1024
-	limitedReader := io.LimitReader(resp.Body, maxBinarySize+1)
+	limitedReader := io.LimitReader(resp.Body, maxBinarySize)
 
 	n, err := io.Copy(f, limitedReader)
 	if err != nil {
@@ -419,10 +419,14 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error 
 		_ = os.Remove(destPath)
 		return fmt.Errorf("writing downloaded file: %w", err)
 	}
-	if n > maxBinarySize {
-		_ = f.Close()
-		_ = os.Remove(destPath)
-		return fmt.Errorf("downloaded file exceeds maximum size of %d bytes", maxBinarySize)
+	// Probe for one more byte to detect if the file exceeds the limit.
+	if n == maxBinarySize {
+		var probe [1]byte
+		if extra, _ := resp.Body.Read(probe[:]); extra > 0 {
+			_ = f.Close()
+			_ = os.Remove(destPath)
+			return fmt.Errorf("downloaded file exceeds maximum size of %d bytes", maxBinarySize)
+		}
 	}
 
 	return nil

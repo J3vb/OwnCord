@@ -348,7 +348,7 @@ func (d *DB) BackupToSafe(path, safeRoot string) error {
 	// Defence-in-depth: only allow safe characters (alphanumeric, path separators,
 	// hyphen, underscore, dot, space, colon, tilde). This is a strict allowlist —
 	// anything else is rejected to prevent SQL injection via the interpolated path.
-	for _, ch := range clean {
+	for _, ch := range absClean {
 		switch {
 		case ch >= 'a' && ch <= 'z',
 			ch >= 'A' && ch <= 'Z',
@@ -362,11 +362,11 @@ func (d *DB) BackupToSafe(path, safeRoot string) error {
 
 	// Reject SQL comment sequences that could break the VACUUM INTO statement,
 	// even though individual hyphens are allowed for filenames.
-	if strings.Contains(clean, "--") {
+	if strings.Contains(absClean, "--") {
 		return fmt.Errorf("BackupToSafe: path contains forbidden sequence %q", "--")
 	}
 
-	_, err = d.sqlDB.Exec(fmt.Sprintf("VACUUM INTO '%s'", clean))
+	_, err = d.sqlDB.Exec(fmt.Sprintf("VACUUM INTO '%s'", absClean))
 	if err != nil {
 		return fmt.Errorf("BackupToSafe: %w", err)
 	}
