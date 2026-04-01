@@ -85,6 +85,13 @@ jobs:
           }
           $lines -join "`n" | Out-File -FilePath checksums.sha256 -Encoding utf8 -NoNewline
 
+      - name: Install root dependencies (changelogen)
+        run: npm ci
+
+      - name: Generate changelog
+        shell: bash
+        run: npx changelogen --output CHANGELOG.md
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -103,5 +110,5 @@ jobs:
             ASSETS+=("${{ steps.artifacts.outputs.nsis_sig }}")
           fi
           gh release create ${{ github.ref_name }} \
-            --generate-notes \
+            --notes-file CHANGELOG.md \
             "${ASSETS[@]}"

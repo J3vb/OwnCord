@@ -43,6 +43,10 @@ Client/publish-release/
 Client/login-mockup.html
 Client/ui-mockup.html
 
+# Tauri typegen (auto-generated IPC bindings)
+Client/tauri-client/src/generated/
+.typecache
+
 # Node modules
 node_modules/
 

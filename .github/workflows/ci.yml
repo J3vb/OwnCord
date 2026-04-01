@@ -24,12 +24,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
+          cache-dependency-path: Server/go.sum
 
       - name: Build server
         run: go build -o chatserver.exe -ldflags "-s -w" .
 
-      - name: Run tests with coverage
-        run: go test ./... -coverprofile=coverage.out -cover
+      - name: Go vulnerability check
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...
+
+      - name: Run tests with race detection and coverage
+        run: go test -race ./... -coverprofile=coverage.out -cover
 
       - name: Upload Go coverage
         if: always()
@@ -63,8 +67,23 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Security audit (npm)
+        run: npm audit --audit-level=high
+
+      - name: Oxlint (fast correctness checks)
+        run: npx oxlint src/
+
       - name: TypeScript check
         run: npx tsc --noEmit
+
+      - name: ESLint (type-aware rules)
+        run: npx eslint src/
+
+      - name: Prettier format check
+        run: npx prettier --check "src/**/*.ts" "tests/**/*.ts"
+
+      - name: Knip (unused code & deps)
+        run: npx knip || true
 
       - name: Run unit tests with coverage
         run: npx vitest run --coverage --reporter=default
@@ -97,6 +116,8 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -105,6 +126,23 @@ jobs:
 
       - name: Install npm dependencies
         run: npm ci
+
+      - name: Install tauri-typegen
+        run: cargo install tauri-typegen --quiet
+
+      - name: Generate TypeScript IPC bindings
+        working-directory: Client/tauri-client/
+        run: cargo tauri-typegen generate
+
+      - name: Clippy lint (Rust)
+        working-directory: Client/tauri-client/src-tauri/
+        run: cargo clippy -- -D warnings
+
+      - name: Security audit (Rust dependencies)
+        working-directory: Client/tauri-client/src-tauri/
+        run: |
+          cargo install cargo-audit --quiet
+          cargo audit
 
       - name: Build Tauri app
         env:
