@@ -54,9 +54,13 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   const dmList = createElement("div", { class: "category-channels sidebar-dm-list" });
 
   // --- "View All" button ---
-  const viewAllBtn = createElement("button", {
-    class: "sidebar-dm-view-all",
-  }, "View all messages");
+  const viewAllBtn = createElement(
+    "button",
+    {
+      class: "sidebar-dm-view-all",
+    },
+    "View all messages",
+  );
 
   viewAllBtn.addEventListener("click", () => {
     setSidebarMode("dms");
@@ -72,20 +76,29 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
         class: "channel-item",
         "data-testid": "dm-entry",
       });
-      const statusColor = dm.recipient.status === "online" ? "var(--green)"
-        : dm.recipient.status === "idle" ? "var(--yellow)"
-        : dm.recipient.status === "dnd" ? "var(--red)"
-        : "var(--text-micro)";
+      const statusColor =
+        dm.recipient.status === "online"
+          ? "var(--green)"
+          : dm.recipient.status === "idle"
+            ? "var(--yellow)"
+            : dm.recipient.status === "dnd"
+              ? "var(--red)"
+              : "var(--text-micro)";
       const statusDot = createElement("span", {
         style: `display:inline-block;width:8px;height:8px;border-radius:50%;background:${statusColor};flex-shrink:0;`,
       });
       const name = createElement("span", { class: "ch-name" }, dm.recipient.username);
       const parts: Element[] = [statusDot, name];
       if (dm.unreadCount > 0) {
-        const badge = createElement("span", {
-          class: "dm-unread-badge",
-          style: "margin-left:auto;background:var(--red);color:white;border-radius:10px;padding:1px 6px;font-size:0.7rem;",
-        }, String(dm.unreadCount));
+        const badge = createElement(
+          "span",
+          {
+            class: "dm-unread-badge",
+            style:
+              "margin-left:auto;background:var(--red);color:white;border-radius:10px;padding:1px 6px;font-size:0.7rem;",
+          },
+          String(dm.unreadCount),
+        );
         parts.push(badge);
       }
       appendChildren(dmItem, ...parts);
@@ -120,7 +133,9 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   // --- Store subscription ---
   const unsubDmSection = dmStore.subscribeSelector(
     (s) => s.channels,
-    () => { renderDmListItems(); },
+    () => {
+      renderDmListItems();
+    },
   );
   unsubs.push(unsubDmSection);
 
@@ -130,7 +145,11 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     dmHeader.classList.toggle("collapsed", dmCollapsed);
     dmArrow.textContent = dmCollapsed ? "\u25B6" : "\u25BC";
     dmList.style.display = dmCollapsed ? "none" : "";
-    viewAllBtn.style.display = dmCollapsed ? "none" : (dmStore.getState().channels.length > 3 ? "" : "none");
+    viewAllBtn.style.display = dmCollapsed
+      ? "none"
+      : dmStore.getState().channels.length > 3
+        ? ""
+        : "none";
   });
 
   // --- Add DM button ---

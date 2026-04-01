@@ -57,8 +57,13 @@ vi.mock("livekit-client", () => ({
     h1080fps30: { resolution: { width: 1920, height: 1080 } },
   },
   DisconnectReason: { CLIENT_INITIATED: 0 },
-  createLocalVideoTrack: vi.fn(async () => ({ kind: "video", mediaStreamTrack: new MediaStreamTrack() })),
-  createLocalScreenTracks: vi.fn(async () => [{ kind: "video", mediaStreamTrack: new MediaStreamTrack() }]),
+  createLocalVideoTrack: vi.fn(async () => ({
+    kind: "video",
+    mediaStreamTrack: new MediaStreamTrack(),
+  })),
+  createLocalScreenTracks: vi.fn(async () => [
+    { kind: "video", mediaStreamTrack: new MediaStreamTrack() },
+  ]),
 }));
 
 vi.mock("@stores/voice.store", () => ({
@@ -114,7 +119,12 @@ vi.mock("@lib/noise-suppression", () => ({
 
 // Now import
 import { parseUserId, LiveKitSession, getRoomForStats } from "../../src/lib/livekitSession";
-import { setLocalMuted, setLocalDeafened, setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
+import {
+  setLocalMuted,
+  setLocalDeafened,
+  setLocalCamera,
+  setLocalScreenshare,
+} from "@stores/voice.store";
 
 function createDeferred<T>(): {
   promise: Promise<T>;
@@ -341,7 +351,10 @@ describe("LiveKitSession", () => {
       const mockWs = { send: vi.fn() } as any;
       session.setWsClient(mockWs);
       await session.disableCamera();
-      expect(mockWs.send).toHaveBeenCalledWith({ type: "voice_camera", payload: { enabled: false } });
+      expect(mockWs.send).toHaveBeenCalledWith({
+        type: "voice_camera",
+        payload: { enabled: false },
+      });
     });
   });
 
@@ -407,7 +420,9 @@ describe("LiveKitSession", () => {
 
     it("updates existing screenshare audio elements when master output changes", () => {
       const screenshareAudio = document.createElement("audio");
-      (session as any)._audioElements.screenshareAudioElements = new Map([[42, new Set([screenshareAudio])]]);
+      (session as any)._audioElements.screenshareAudioElements = new Map([
+        [42, new Set([screenshareAudio])],
+      ]);
 
       session.setOutputVolume(80);
 
@@ -416,7 +431,9 @@ describe("LiveKitSession", () => {
 
     it("clamps existing screenshare audio elements to the browser volume range", () => {
       const screenshareAudio = document.createElement("audio");
-      (session as any)._audioElements.screenshareAudioElements = new Map([[42, new Set([screenshareAudio])]]);
+      (session as any)._audioElements.screenshareAudioElements = new Map([
+        [42, new Set([screenshareAudio])],
+      ]);
 
       session.setOutputVolume(150);
 
@@ -462,7 +479,9 @@ describe("LiveKitSession", () => {
 
       await session.handleVoiceToken("test-token", "/livekit", 1);
 
-      expect(mockInvoke).toHaveBeenCalledWith("start_livekit_proxy", { remoteHost: "example.com:443" });
+      expect(mockInvoke).toHaveBeenCalledWith("start_livekit_proxy", {
+        remoteHost: "example.com:443",
+      });
       expect(mockRoom.connect).toHaveBeenCalledWith("ws://127.0.0.1:7881/livekit", "test-token");
     });
 
@@ -477,7 +496,9 @@ describe("LiveKitSession", () => {
 
       await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880");
 
-      expect(errorCb).toHaveBeenCalledWith("Microphone permission denied — joined in listen-only mode");
+      expect(errorCb).toHaveBeenCalledWith(
+        "Microphone permission denied — joined in listen-only mode",
+      );
     });
 
     it("handles mic not found gracefully", async () => {
@@ -517,7 +538,12 @@ describe("LiveKitSession", () => {
 
       // handleVoiceToken has retry logic with setTimeout delays.
       // We need to advance fake timers to let the retries proceed.
-      const tokenPromise = session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880");
+      const tokenPromise = session.handleVoiceToken(
+        "test-token",
+        "/livekit",
+        1,
+        "ws://localhost:7880",
+      );
 
       // Advance through all retry delays (3 retries x 2000ms each)
       for (let i = 0; i < 3; i++) {
@@ -538,7 +564,12 @@ describe("LiveKitSession", () => {
         .mockImplementationOnce(() => firstConnect.promise)
         .mockResolvedValueOnce(undefined);
 
-      const firstJoin = session.handleVoiceToken("first-token", "/livekit-one", 1, "ws://localhost:7881");
+      const firstJoin = session.handleVoiceToken(
+        "first-token",
+        "/livekit-one",
+        1,
+        "ws://localhost:7881",
+      );
       await Promise.resolve();
 
       await session.handleVoiceToken("second-token", "/livekit-two", 2, "ws://localhost:7882");
@@ -634,7 +665,12 @@ describe("LiveKitSession", () => {
         return mockRoom;
       });
 
-      const tokenPromise = session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880");
+      const tokenPromise = session.handleVoiceToken(
+        "test-token",
+        "/livekit",
+        1,
+        "ws://localhost:7880",
+      );
       await Promise.resolve(); // Let handleVoiceToken reach room.connect()
 
       // Simulate LiveKit emitting Disconnected with JOIN_FAILURE (reason 7)
@@ -678,7 +714,9 @@ describe("LiveKitSession", () => {
       const publication = { source: "screenShareAudio" };
       const participant = { identity: "user-42" };
 
-      expect(() => (session as any).handleTrackSubscribed(track, publication, participant)).not.toThrow();
+      expect(() =>
+        (session as any)._eventHandlers.handleTrackSubscribed(track, publication, participant),
+      ).not.toThrow();
       expect(audioEl.volume).toBe(1);
     });
 
@@ -700,14 +738,16 @@ describe("LiveKitSession", () => {
       const publication = { source: "screenShareAudio" };
       const participant = { identity: "user-42" };
 
-      (session as any).handleTrackSubscribed(firstTrack, publication, participant);
-      (session as any).handleTrackSubscribed(secondTrack, publication, participant);
-      (session as any).handleTrackUnsubscribed(firstTrack, publication, participant);
+      (session as any)._eventHandlers.handleTrackSubscribed(firstTrack, publication, participant);
+      (session as any)._eventHandlers.handleTrackSubscribed(secondTrack, publication, participant);
+      (session as any)._eventHandlers.handleTrackUnsubscribed(firstTrack, publication, participant);
 
       session.muteScreenshareAudio(42, true);
 
       expect(secondAudioEl.muted).toBe(true);
-      expect((session as any)._audioElements.screenshareAudioElements.get(42)).toEqual(new Set([secondAudioEl]));
+      expect((session as any)._audioElements.screenshareAudioElements.get(42)).toEqual(
+        new Set([secondAudioEl]),
+      );
     });
 
     it("applies the stored mute state to replacement screenshare audio tracks", () => {
@@ -728,10 +768,10 @@ describe("LiveKitSession", () => {
       const publication = { source: "screenShareAudio" };
       const participant = { identity: "user-42" };
 
-      (session as any).handleTrackSubscribed(firstTrack, publication, participant);
+      (session as any)._eventHandlers.handleTrackSubscribed(firstTrack, publication, participant);
       session.muteScreenshareAudio(42, true);
 
-      (session as any).handleTrackSubscribed(secondTrack, publication, participant);
+      (session as any)._eventHandlers.handleTrackSubscribed(secondTrack, publication, participant);
 
       expect(secondAudioEl.muted).toBe(true);
       expect(session.getScreenshareAudioMuted(42)).toBe(true);
@@ -785,7 +825,10 @@ describe("LiveKitSession", () => {
       const mockWs = { send: vi.fn() } as any;
       session.setWsClient(mockWs);
       await session.disableScreenshare();
-      expect(mockWs.send).toHaveBeenCalledWith({ type: "voice_screenshare", payload: { enabled: false } });
+      expect(mockWs.send).toHaveBeenCalledWith({
+        type: "voice_screenshare",
+        payload: { enabled: false },
+      });
     });
   });
 
