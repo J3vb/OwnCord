@@ -10,7 +10,7 @@ import (
 // 1. Gets old voiceChID from clearVoiceChID().
 // 2. If was in voice: remove from DB (with retry), broadcast voice_leave.
 // 3. Call livekit.RemoveParticipant (ignore errors — participant may already be gone).
-func (h *Hub) handleVoiceLeave(_ context.Context, c *Client) {
+func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
 	oldChID, oldJoinToken := c.clearVoiceState()
 	if oldChID == 0 {
 		slog.Debug("handleVoiceLeave no-op (already cleared)", "user_id", c.userID)
@@ -28,7 +28,7 @@ func (h *Hub) handleVoiceLeave(_ context.Context, c *Client) {
 		"remote", c.remoteAddr,
 	)
 
-	if err := leaveVoiceChannelWithRetry(h, c.userID, oldChID, oldJoinToken); err != nil {
+	if err := leaveVoiceChannelWithRetry(h, c.userID, oldChID, oldJoinToken, ctx); err != nil {
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice leave failed — please rejoin if issues persist"))
 	}
 
@@ -51,10 +51,11 @@ func (h *Hub) handleVoiceLeave(_ context.Context, c *Client) {
 //
 // The first attempt is synchronous. If it fails, subsequent retries run in a
 // background goroutine with exponential backoff so the caller (readPump) is
-// not blocked by time.Sleep.
+// not blocked by time.Sleep. The goroutine respects ctx and the hub's stop
+// channel to avoid leaking after shutdown (BUG-086).
 // Returns nil on first-attempt success, the first error otherwise (retries
 // continue in the background).
-func leaveVoiceChannelWithRetry(h *Hub, userID int64, channelID int64, joinToken string) error {
+func leaveVoiceChannelWithRetry(h *Hub, userID int64, channelID int64, joinToken string, ctx context.Context) error { //nolint:revive // ctx not first param for backwards compat
 	if joinToken == "" {
 		slog.Warn("LeaveVoiceChannelIfMatch skipped due to missing join token",
 			"user_id", userID, "channel_id", channelID)
@@ -67,13 +68,23 @@ func leaveVoiceChannelWithRetry(h *Hub, userID int64, channelID int64, joinToken
 			"err", err, "user_id", userID, "channel_id", channelID,
 			"attempt", 1, "max_retries", 3)
 
-		// Background retries so the readPump goroutine is not blocked.
+		// Background retries — cancellable via ctx or hub stop.
 		go func() {
 			const maxRetries = 3
 			delay := 200 * time.Millisecond
 
 			for attempt := 2; attempt <= maxRetries; attempt++ {
-				time.Sleep(delay)
+				select {
+				case <-ctx.Done():
+					slog.Info("LeaveVoiceChannelIfMatch retry cancelled (context)",
+						"user_id", userID, "channel_id", channelID, "attempt", attempt)
+					return
+				case <-h.stop:
+					slog.Info("LeaveVoiceChannelIfMatch retry cancelled (hub stop)",
+						"user_id", userID, "channel_id", channelID, "attempt", attempt)
+					return
+				case <-time.After(delay):
+				}
 				delay *= 2
 
 				if _, retryErr := h.db.LeaveVoiceChannelIfMatch(userID, channelID, joinToken); retryErr != nil {

@@ -152,7 +152,23 @@ func (h *Hub) handleFreshConnect(
 		}
 		h.BroadcastToAll(buildVoiceLeave(vs.ChannelID, c.userID))
 		if h.livekit != nil {
-			go h.livekit.RemoveParticipant(vs.ChannelID, c.userID, vs.JoinedAt) //nolint:errcheck,gosec,contextcheck // fire-and-forget cleanup on disconnect; G118: no request-scoped context available for background goroutine
+			// BUG-089: Capture stale join token so the goroutine only removes
+			// the exact stale participant. The identity includes joinedAt, so
+			// even if the user rejoins voice quickly, the new session has a
+			// different identity and won't be removed. Use a hub-stop-aware
+			// context to avoid goroutine leaks on shutdown.
+			staleChID, staleUserID, staleJoinToken := vs.ChannelID, c.userID, vs.JoinedAt
+			go func() {
+				select {
+				case <-h.stop:
+					return
+				default:
+				}
+				if err := h.livekit.RemoveParticipant(staleChID, staleUserID, staleJoinToken); err != nil {
+					slog.Warn("ws fresh connect: RemoveParticipant failed (may already be gone)",
+						"err", err, "user_id", staleUserID, "channel_id", staleChID)
+				}
+			}()
 		}
 	}
 

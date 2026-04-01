@@ -3,6 +3,7 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -60,7 +61,7 @@ func (h *Hub) RollbackVoiceJoinForTest(c *Client, channelID int64) {
 
 // LeaveVoiceChannelWithRetryForTest exposes leaveVoiceChannelWithRetry for external tests.
 func LeaveVoiceChannelWithRetryForTest(h *Hub, userID int64, channelID int64, joinToken string) error {
-	return leaveVoiceChannelWithRetry(h, userID, channelID, joinToken)
+	return leaveVoiceChannelWithRetry(h, userID, channelID, joinToken, context.Background())
 }
 
 // ─── livekit process/webhook helpers ───────────────────────────────────────

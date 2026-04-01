@@ -564,7 +564,9 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	skipped := 0
 	for _, c := range h.clients {
 		// channelID == 0 → broadcast to everyone.
-		if bm.channelID != 0 && c.getChannelID() != bm.channelID && c.getVoiceChID() != bm.channelID {
+		// c.getChannelID() == 0 → client hasn't focused yet; deliver all
+		// channel messages so they don't silently miss events (BUG-084).
+		if bm.channelID != 0 && c.getChannelID() != 0 && c.getChannelID() != bm.channelID && c.getVoiceChID() != bm.channelID {
 			skipped++
 			continue
 		}
