@@ -25,7 +25,40 @@ import {
 
 /** Minimal MediaStream stub for testing. */
 function fakeStream(): MediaStream {
-  return { getTracks: () => [] } as unknown as MediaStream;
+  return { getTracks: () => [], getVideoTracks: () => [] } as unknown as MediaStream;
+}
+
+/**
+ * MediaStream stub with a controllable video track.
+ * Allows testing track lifecycle (ended/mute events).
+ */
+function fakeStreamWithTrack(): {
+  stream: MediaStream;
+  track: { listeners: Record<string, Array<() => void>>; dispatchEvent(type: string): void };
+} {
+  const listeners: Record<string, Array<() => void>> = {};
+  const track = {
+    listeners,
+    id: `track-${Math.random()}`,
+    addEventListener(type: string, fn: () => void) {
+      (listeners[type] ??= []).push(fn);
+    },
+    removeEventListener(type: string, fn: () => void) {
+      const arr = listeners[type];
+      if (arr) {
+        const idx = arr.indexOf(fn);
+        if (idx >= 0) arr.splice(idx, 1);
+      }
+    },
+    dispatchEvent(type: string) {
+      for (const fn of listeners[type] ?? []) fn();
+    },
+  };
+  const stream = {
+    getTracks: () => [track],
+    getVideoTracks: () => [track],
+  } as unknown as MediaStream;
+  return { stream, track };
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +231,102 @@ describe("VideoGrid", () => {
 
     expect(container.querySelector(".video-grid")).toBeNull();
     expect(grid.hasStreams()).toBe(false);
+  });
+
+  // -----------------------------------------------------------------------
+  // Autoplay / .play() tests (Bug fix: black window in WebView2)
+  // -----------------------------------------------------------------------
+
+  describe("video autoplay", () => {
+    it("addStream calls .play() on the video element", () => {
+      const playMock = vi.fn().mockResolvedValue(undefined);
+      const origCreate = document.createElement.bind(document);
+      vi.spyOn(document, "createElement").mockImplementation(
+        (tag: string, opts?: ElementCreationOptions) => {
+          const el = origCreate(tag, opts);
+          if (tag === "video") {
+            (el as HTMLVideoElement).play = playMock;
+          }
+          return el;
+        },
+      );
+
+      grid.addStream(1, "Alice", fakeStream());
+
+      expect(playMock).toHaveBeenCalledTimes(1);
+
+      vi.restoreAllMocks();
+    });
+
+    it("addStream calls .play() when replacing srcObject on existing tile", () => {
+      const playMock = vi.fn().mockResolvedValue(undefined);
+      const origCreate = document.createElement.bind(document);
+      vi.spyOn(document, "createElement").mockImplementation(
+        (tag: string, opts?: ElementCreationOptions) => {
+          const el = origCreate(tag, opts);
+          if (tag === "video") {
+            (el as HTMLVideoElement).play = playMock;
+          }
+          return el;
+        },
+      );
+
+      const { stream: s1 } = fakeStreamWithTrack();
+      const { stream: s2 } = fakeStreamWithTrack();
+
+      grid.addStream(1, "Alice", s1);
+      playMock.mockClear();
+
+      // Different tracks → srcObject replaced → should call play again
+      grid.addStream(1, "Alice", s2);
+      expect(playMock).toHaveBeenCalledTimes(1);
+
+      vi.restoreAllMocks();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Track lifecycle tests (Bug fix: stale black tiles)
+  // -----------------------------------------------------------------------
+
+  describe("track lifecycle", () => {
+    it("removes tile when video track fires 'ended' event", () => {
+      const { stream, track } = fakeStreamWithTrack();
+      grid.addStream(1, "Alice", stream);
+      expect(grid.hasStreams()).toBe(true);
+
+      track.dispatchEvent("ended");
+      expect(grid.hasStreams()).toBe(false);
+    });
+
+    it("removes tile when video track fires 'mute' event", () => {
+      const { stream, track } = fakeStreamWithTrack();
+      grid.addStream(1, "Alice", stream);
+      expect(grid.hasStreams()).toBe(true);
+
+      track.dispatchEvent("mute");
+      expect(grid.hasStreams()).toBe(false);
+    });
+
+    it("cleans up track listeners when tile is removed via removeStream", () => {
+      const { stream, track } = fakeStreamWithTrack();
+      grid.addStream(1, "Alice", stream);
+      grid.removeStream(1);
+
+      // Dispatching ended after removal should not throw or cause issues
+      expect(() => track.dispatchEvent("ended")).not.toThrow();
+      expect(grid.hasStreams()).toBe(false);
+    });
+
+    it("cleans up track listeners on destroy", () => {
+      const { stream, track } = fakeStreamWithTrack();
+      grid.addStream(1, "Alice", stream);
+      grid.destroy!();
+
+      // Verify listeners were removed
+      expect(track.listeners["ended"]?.length ?? 0).toBe(0);
+      expect(track.listeners["mute"]?.length ?? 0).toBe(0);
+    });
   });
 
   // -----------------------------------------------------------------------

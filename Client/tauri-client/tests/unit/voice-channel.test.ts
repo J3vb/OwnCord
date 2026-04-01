@@ -1,4 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// ---------------------------------------------------------------------------
+// Mocks — must be declared before importing VoiceChannel
+// ---------------------------------------------------------------------------
+
+const mockAttachStreamPreview = vi.fn();
+const mockAttachScrollCollapse = vi.fn();
+
+vi.mock("@lib/streamPreview", () => ({
+  attachStreamPreview: (...args: unknown[]) => mockAttachStreamPreview(...args),
+  attachScrollCollapse: (...args: unknown[]) => mockAttachScrollCollapse(...args),
+}));
+
+// ---------------------------------------------------------------------------
+// Imports
+// ---------------------------------------------------------------------------
+
 import { createVoiceChannel } from "../../src/components/VoiceChannel";
 import { voiceStore } from "../../src/stores/voice.store";
 import { membersStore } from "../../src/stores/members.store";
@@ -61,6 +78,8 @@ describe("VoiceChannel", () => {
 
   beforeEach(() => {
     resetStores();
+    mockAttachStreamPreview.mockClear();
+    mockAttachScrollCollapse.mockClear();
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -735,6 +754,151 @@ describe("VoiceChannel", () => {
     expect(result.element.querySelector(".vu-name")?.textContent).toBe("NewName");
 
     result.destroy();
+  });
+
+  // ── Stream preview attachment ──
+
+  describe("stream preview", () => {
+    it("attaches stream preview for remote user with active camera", () => {
+      authStore.setState(() => ({
+        token: "tok",
+        user: { id: 99, username: "Me", avatar: null, role: "member" },
+        serverName: null,
+        motd: null,
+        isAuthenticated: true,
+      }));
+
+      addMember(10, "Alice");
+      setVoiceUsers(1, [
+        {
+          userId: 10,
+          username: "Alice",
+          muted: false,
+          deafened: false,
+          speaking: false,
+          camera: true,
+          screenshare: false,
+        },
+      ]);
+
+      const onWatch = vi.fn();
+      const result = createVoiceChannel({
+        channelId: 1,
+        channelName: "Voice Lobby",
+        onJoin: vi.fn(),
+        onClickWatch: onWatch,
+      });
+      container.appendChild(result.element);
+
+      expect(mockAttachStreamPreview).toHaveBeenCalledTimes(1);
+      // Verify key args: row element, userId, username, screenshare, camera
+      const args = mockAttachStreamPreview.mock.calls[0]!;
+      expect(args[1]).toBe(10); // userId
+      expect(args[2]).toBe("Alice"); // username
+      expect(args[3]).toBe(false); // hasScreenshare
+      expect(args[4]).toBe(true); // hasCamera
+
+      result.destroy();
+    });
+
+    it("does not attach stream preview for own user", () => {
+      authStore.setState(() => ({
+        token: "tok",
+        user: { id: 10, username: "Alice", avatar: null, role: "member" },
+        serverName: null,
+        motd: null,
+        isAuthenticated: true,
+      }));
+
+      addMember(10, "Alice");
+      setVoiceUsers(1, [
+        {
+          userId: 10,
+          username: "Alice",
+          muted: false,
+          deafened: false,
+          speaking: false,
+          camera: true,
+          screenshare: false,
+        },
+      ]);
+
+      const result = createVoiceChannel({
+        channelId: 1,
+        channelName: "Voice Lobby",
+        onJoin: vi.fn(),
+        onClickWatch: vi.fn(),
+      });
+      container.appendChild(result.element);
+
+      expect(mockAttachStreamPreview).not.toHaveBeenCalled();
+
+      result.destroy();
+    });
+
+    it("does not attach stream preview when user has no camera or screenshare", () => {
+      authStore.setState(() => ({
+        token: "tok",
+        user: { id: 99, username: "Me", avatar: null, role: "member" },
+        serverName: null,
+        motd: null,
+        isAuthenticated: true,
+      }));
+
+      addMember(10, "Alice");
+      setVoiceUsers(1, [
+        {
+          userId: 10,
+          username: "Alice",
+          muted: false,
+          deafened: false,
+          speaking: false,
+          camera: false,
+          screenshare: false,
+        },
+      ]);
+
+      const result = createVoiceChannel({
+        channelId: 1,
+        channelName: "Voice Lobby",
+        onJoin: vi.fn(),
+        onClickWatch: vi.fn(),
+      });
+      container.appendChild(result.element);
+
+      expect(mockAttachStreamPreview).not.toHaveBeenCalled();
+
+      result.destroy();
+    });
+
+    it("attaches scroll collapse on voice-users-list container", () => {
+      setVoiceUsers(1, [
+        {
+          userId: 10,
+          username: "Alice",
+          muted: false,
+          deafened: false,
+          speaking: false,
+          camera: true,
+          screenshare: false,
+        },
+      ]);
+
+      const result = createVoiceChannel({
+        channelId: 1,
+        channelName: "Voice Lobby",
+        onJoin: vi.fn(),
+        onClickWatch: vi.fn(),
+      });
+      container.appendChild(result.element);
+
+      expect(mockAttachScrollCollapse).toHaveBeenCalledTimes(1);
+      const args = mockAttachScrollCollapse.mock.calls[0]!;
+      expect(args[0]).toBeInstanceOf(HTMLElement);
+      expect((args[0] as HTMLElement).classList.contains("voice-users-list")).toBe(true);
+
+      result.destroy();
+    });
   });
 
   // ── User both muted and deafened ──

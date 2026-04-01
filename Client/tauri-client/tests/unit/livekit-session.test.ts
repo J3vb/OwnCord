@@ -203,6 +203,18 @@ describe("parseUserId", () => {
   it("parses single digit user IDs", () => {
     expect(parseUserId("user-1")).toBe(1);
   });
+
+  it("parses identity with voiceJoinToken suffix", () => {
+    expect(parseUserId("user-42:abc123def")).toBe(42);
+  });
+
+  it("parses identity with long token suffix", () => {
+    expect(parseUserId("user-999:a1b2c3d4-e5f6-7890-abcd-ef1234567890")).toBe(999);
+  });
+
+  it("returns 0 for colon with no token", () => {
+    expect(parseUserId("user-:token")).toBe(0);
+  });
 });
 
 describe("LiveKitSession", () => {
@@ -1607,7 +1619,7 @@ describe("LiveKitSession", () => {
       firstConnect.resolve(undefined);
       await firstJoin;
 
-      const lastCall = mockRoom.connect.mock.calls[mockRoom.connect.mock.calls.length - 1];
+      const lastCall = mockRoom.connect.mock.calls[mockRoom.connect.mock.calls.length - 1]!;
       expect(lastCall[1]).toBe("token-3");
     });
   });

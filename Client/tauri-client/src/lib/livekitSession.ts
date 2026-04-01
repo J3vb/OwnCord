@@ -48,9 +48,9 @@ const log = createLogger("livekitSession");
 
 // --- Pure helpers (no instance state) ---
 
-/** Parse userId from LiveKit participant identity "user-{id}". Returns 0 if unparseable. */
+/** Parse userId from LiveKit participant identity "user-{id}" or "user-{id}:{token}". Returns 0 if unparseable. */
 export function parseUserId(identity: string): number {
-  const match = identity.match(/^user-(\d+)$/);
+  const match = identity.match(/^user-(\d+)(?::|$)/);
   if (match !== null && match[1] !== undefined) return parseInt(match[1], 10);
   return 0;
 }
