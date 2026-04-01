@@ -22,11 +22,7 @@ function jsonResponse(data: unknown, status = 200): Response {
   } as unknown as Response;
 }
 
-function errorResponse(
-  status: number,
-  code: string,
-  message: string,
-): Response {
+function errorResponse(status: number, code: string, message: string): Response {
   return {
     ok: false,
     status,
@@ -54,10 +50,7 @@ describe("API Client", () => {
   beforeEach(() => {
     mockFetch.mockReset();
     onUnauthorized = vi.fn();
-    api = createApiClient(
-      { host: "localhost:8443", token: "test-token" },
-      onUnauthorized,
-    );
+    api = createApiClient({ host: "localhost:8443", token: "test-token" }, onUnauthorized);
   });
 
   afterEach(() => {
@@ -76,17 +69,13 @@ describe("API Client", () => {
 
   describe("API base path uses /api/v1/", () => {
     it("login calls /api/v1/auth/login", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ token: "t", requires_2fa: false }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ token: "t", requires_2fa: false }));
       await api.login("user", "pass");
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/auth/login");
     });
 
     it("getMessages calls /api/v1/channels/{id}/messages", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ messages: [], has_more: false }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ messages: [], has_more: false }));
       await api.getMessages(5);
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/channels/5/messages");
     });
@@ -98,9 +87,7 @@ describe("API Client", () => {
     });
 
     it("getHealth calls /api/v1/health", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ status: "ok", version: "1.0.0", uptime: 100 }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ status: "ok", version: "1.0.0", uptime: 100 }));
       await api.getHealth();
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/health");
     });
@@ -142,9 +129,7 @@ describe("API Client", () => {
 
   describe("error handling", () => {
     it("throws ApiClientError on non-ok response", async () => {
-      mockFetch.mockResolvedValue(
-        errorResponse(403, "FORBIDDEN", "No permission"),
-      );
+      mockFetch.mockResolvedValue(errorResponse(403, "FORBIDDEN", "No permission"));
       await expect(api.getMe()).rejects.toThrow(ApiClientError);
       await expect(api.getMe()).rejects.toMatchObject({
         status: 403,
@@ -153,17 +138,13 @@ describe("API Client", () => {
     });
 
     it("calls onUnauthorized on 401", async () => {
-      mockFetch.mockResolvedValue(
-        errorResponse(401, "UNAUTHORIZED", "Invalid session"),
-      );
+      mockFetch.mockResolvedValue(errorResponse(401, "UNAUTHORIZED", "Invalid session"));
       await expect(api.getMe()).rejects.toThrow();
       expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
 
     it("does not call onUnauthorized on other errors", async () => {
-      mockFetch.mockResolvedValue(
-        errorResponse(500, "SERVER_ERROR", "Internal error"),
-      );
+      mockFetch.mockResolvedValue(errorResponse(500, "SERVER_ERROR", "Internal error"));
       await expect(api.getMe()).rejects.toThrow();
       expect(onUnauthorized).not.toHaveBeenCalled();
     });
@@ -185,9 +166,7 @@ describe("API Client", () => {
     });
 
     it("parseError falls back to statusText when JSON body is not parseable", async () => {
-      mockFetch.mockResolvedValue(
-        brokenJsonErrorResponse(502, "Bad Gateway"),
-      );
+      mockFetch.mockResolvedValue(brokenJsonErrorResponse(502, "Bad Gateway"));
       await expect(api.getMe()).rejects.toMatchObject({
         status: 502,
         code: "UNKNOWN",
@@ -243,18 +222,14 @@ describe("API Client", () => {
 
   describe("pagination", () => {
     it("getMessages passes before and limit params", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ messages: [], has_more: false }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ messages: [], has_more: false }));
       await api.getMessages(5, { before: 100, limit: 25 });
       expect(fetchCallUrl()).toContain("before=100");
       expect(fetchCallUrl()).toContain("limit=25");
     });
 
     it("getMessages works without options (no query string)", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ messages: [], has_more: false }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ messages: [], has_more: false }));
       await api.getMessages(3);
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/channels/3/messages");
     });
@@ -374,9 +349,7 @@ describe("API Client", () => {
     });
 
     it("enableTotp throws ApiClientError on bad password", async () => {
-      mockFetch.mockResolvedValue(
-        errorResponse(401, "INVALID_PASSWORD", "Wrong password"),
-      );
+      mockFetch.mockResolvedValue(errorResponse(401, "INVALID_PASSWORD", "Wrong password"));
       await expect(api.enableTotp("wrongpw")).rejects.toThrow(ApiClientError);
       await expect(api.enableTotp("wrongpw")).rejects.toMatchObject({
         status: 401,
@@ -384,12 +357,8 @@ describe("API Client", () => {
     });
 
     it("confirmTotp throws ApiClientError on invalid code", async () => {
-      mockFetch.mockResolvedValue(
-        errorResponse(400, "INVALID_CODE", "Invalid verification code"),
-      );
-      await expect(api.confirmTotp("pw", "000000")).rejects.toThrow(
-        ApiClientError,
-      );
+      mockFetch.mockResolvedValue(errorResponse(400, "INVALID_CODE", "Invalid verification code"));
+      await expect(api.confirmTotp("pw", "000000")).rejects.toThrow(ApiClientError);
     });
 
     it("disableTotp throws ApiClientError when 2FA is required", async () => {
@@ -405,9 +374,7 @@ describe("API Client", () => {
 
   describe("verifyTotp", () => {
     it("sends POST /auth/verify-totp with partial token in header", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ token: "full-token", user: { id: 1 } }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ token: "full-token", user: { id: 1 } }));
       const result = await api.verifyTotp("123456", "partial-tok");
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/auth/verify-totp");
       expect(fetchCallOpts().method).toBe("POST");
@@ -419,9 +386,7 @@ describe("API Client", () => {
     });
 
     it("throws ApiClientError on 401 and calls onUnauthorized", async () => {
-      mockFetch.mockResolvedValue(
-        errorResponse(401, "INVALID_TOTP", "Bad code"),
-      );
+      mockFetch.mockResolvedValue(errorResponse(401, "INVALID_TOTP", "Bad code"));
       await expect(api.verifyTotp("000000", "pt")).rejects.toMatchObject({
         status: 401,
         code: "INVALID_TOTP",
@@ -430,9 +395,7 @@ describe("API Client", () => {
     });
 
     it("throws ApiClientError on non-ok non-401", async () => {
-      mockFetch.mockResolvedValue(
-        errorResponse(429, "RATE_LIMITED", "Too many attempts"),
-      );
+      mockFetch.mockResolvedValue(errorResponse(429, "RATE_LIMITED", "Too many attempts"));
       await expect(api.verifyTotp("000000", "pt")).rejects.toMatchObject({
         status: 429,
         code: "RATE_LIMITED",
@@ -456,19 +419,26 @@ describe("API Client", () => {
     });
 
     it("passes AbortSignal to fetch", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ token: "t", user: { id: 1 } }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ token: "t", user: { id: 1 } }));
       const controller = new AbortController();
       await api.verifyTotp("123456", "pt", controller.signal);
       expect(fetchCallOpts().signal).toBe(controller.signal);
     });
 
-    it("sets danger.acceptInvalidCerts for self-signed certs", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ token: "t", user: { id: 1 } }),
-      );
+    it("does not set danger.acceptInvalidCerts without allowSelfSigned", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ token: "t", user: { id: 1 } }));
       await api.verifyTotp("123456", "pt");
+      const opts = fetchCallOpts();
+      expect((opts as Record<string, unknown>).danger).toBeUndefined();
+    });
+
+    it("sets danger.acceptInvalidCerts when allowSelfSigned is true", async () => {
+      const selfSignedApi = createApiClient(
+        { host: "localhost:8443", token: "test-token", allowSelfSigned: true },
+        onUnauthorized,
+      );
+      mockFetch.mockResolvedValue(jsonResponse({ token: "t", user: { id: 1 } }));
+      await selfSignedApi.verifyTotp("123456", "pt");
       const opts = fetchCallOpts();
       expect((opts as Record<string, unknown>).danger).toEqual({
         acceptInvalidCerts: true,
@@ -541,9 +511,7 @@ describe("API Client", () => {
     });
 
     it("uploadFile throws ApiClientError on non-ok", async () => {
-      mockFetch.mockResolvedValue(
-        errorResponse(413, "FILE_TOO_LARGE", "File exceeds limit"),
-      );
+      mockFetch.mockResolvedValue(errorResponse(413, "FILE_TOO_LARGE", "File exceeds limit"));
       const file = new File(["x"], "big.bin");
       await expect(api.uploadFile(file)).rejects.toMatchObject({
         status: 413,
@@ -553,9 +521,7 @@ describe("API Client", () => {
 
     it("uploadFile omits Authorization header when no token set", async () => {
       const noTokenApi = createApiClient({ host: "localhost:8443" });
-      mockFetch.mockResolvedValue(
-        jsonResponse({ url: "https://cdn/f.png", filename: "f.png" }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ url: "https://cdn/f.png", filename: "f.png" }));
       const file = new File(["data"], "f.png");
       await noTokenApi.uploadFile(file);
       const headers = fetchCallOpts().headers as Record<string, string>;
@@ -563,18 +529,14 @@ describe("API Client", () => {
     });
 
     it("uploadFile passes AbortSignal", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ url: "u", filename: "f" }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ url: "u", filename: "f" }));
       const controller = new AbortController();
       await api.uploadFile(new File(["x"], "f"), controller.signal);
       expect(fetchCallOpts().signal).toBe(controller.signal);
     });
 
     it("uploadFile parseError fallback on non-JSON error body", async () => {
-      mockFetch.mockResolvedValue(
-        brokenJsonErrorResponse(500, "Internal Server Error"),
-      );
+      mockFetch.mockResolvedValue(brokenJsonErrorResponse(500, "Internal Server Error"));
       const file = new File(["x"], "f");
       await expect(api.uploadFile(file)).rejects.toMatchObject({
         status: 500,
@@ -594,9 +556,7 @@ describe("API Client", () => {
     });
 
     it("createInvite calls POST /invites with data", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ id: 1, code: "abc123", max_uses: 5 }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ id: 1, code: "abc123", max_uses: 5 }));
       const result = await api.createInvite({ max_uses: 5, expires_in_hours: 24 });
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/invites");
       expect(fetchCallOpts().method).toBe("POST");
@@ -657,9 +617,7 @@ describe("API Client", () => {
     });
 
     it("createDm calls POST /dms with recipient_id", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ channel: { id: 10, type: "dm" } }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ channel: { id: 10, type: "dm" } }));
       const result = await api.createDm(42);
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms");
       expect(fetchCallOpts().method).toBe("POST");
@@ -678,9 +636,7 @@ describe("API Client", () => {
 
   describe("voice endpoints", () => {
     it("getVoiceCredentials calls GET /voice/credentials", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ url: "wss://lk", token: "vt" }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ url: "wss://lk", token: "vt" }));
       const result = await api.getVoiceCredentials();
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/voice/credentials");
       expect(fetchCallOpts().method).toBe("GET");
@@ -690,17 +646,13 @@ describe("API Client", () => {
 
   describe("health endpoint", () => {
     it("getHealth uses custom host when provided", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ status: "ok", version: "1.0.0", uptime: 50 }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ status: "ok", version: "1.0.0", uptime: 50 }));
       await api.getHealth("other-host:9443");
       expect(fetchCallUrl()).toBe("https://other-host:9443/api/v1/health");
     });
 
     it("getHealth falls back to config host when no host arg", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ status: "ok", version: "1.0.0", uptime: 50 }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ status: "ok", version: "1.0.0", uptime: 50 }));
       await api.getHealth();
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/health");
     });
@@ -721,9 +673,7 @@ describe("API Client", () => {
 
     it("getHealth clears timeout on success", async () => {
       const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
-      mockFetch.mockResolvedValue(
-        jsonResponse({ status: "ok", version: "1.0.0", uptime: 0 }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ status: "ok", version: "1.0.0", uptime: 0 }));
       await api.getHealth();
       expect(clearTimeoutSpy).toHaveBeenCalled();
       clearTimeoutSpy.mockRestore();
@@ -745,20 +695,26 @@ describe("API Client", () => {
 
     it("getHealth sets abort timeout with provided timeoutMs", async () => {
       const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
-      mockFetch.mockResolvedValue(
-        jsonResponse({ status: "ok", version: "1.0.0", uptime: 0 }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ status: "ok", version: "1.0.0", uptime: 0 }));
       await api.getHealth(undefined, 5000);
       // setTimeout should have been called with the timeout value
       expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 5000);
       setTimeoutSpy.mockRestore();
     });
 
-    it("getHealth sets danger.acceptInvalidCerts", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ status: "ok", version: "1.0.0", uptime: 0 }),
-      );
+    it("getHealth does not set danger without allowSelfSigned", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ status: "ok", version: "1.0.0", uptime: 0 }));
       await api.getHealth();
+      expect((fetchCallOpts() as Record<string, unknown>).danger).toBeUndefined();
+    });
+
+    it("getHealth sets danger.acceptInvalidCerts when allowSelfSigned", async () => {
+      const selfSignedApi = createApiClient(
+        { host: "localhost:8443", token: "test-token", allowSelfSigned: true },
+        onUnauthorized,
+      );
+      mockFetch.mockResolvedValue(jsonResponse({ status: "ok", version: "1.0.0", uptime: 0 }));
+      await selfSignedApi.getHealth();
       expect((fetchCallOpts() as Record<string, unknown>).danger).toEqual({
         acceptInvalidCerts: true,
         acceptInvalidHostnames: false,
@@ -768,9 +724,7 @@ describe("API Client", () => {
 
   describe("admin channel endpoints", () => {
     it("adminCreateChannel calls POST /admin/api/channels", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ id: 1, name: "general", type: "text" }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ id: 1, name: "general", type: "text" }));
       const result = await api.adminCreateChannel({
         name: "general",
         type: "text",
@@ -792,9 +746,7 @@ describe("API Client", () => {
     });
 
     it("adminUpdateChannel calls PATCH /admin/api/channels/{id}", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ id: 5, name: "renamed", topic: "new topic" }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ id: 5, name: "renamed", topic: "new topic" }));
       const result = await api.adminUpdateChannel(5, {
         name: "renamed",
         topic: "new topic",
@@ -869,9 +821,19 @@ describe("API Client", () => {
   });
 
   describe("doFetch danger option", () => {
-    it("all regular requests set danger.acceptInvalidCerts", async () => {
+    it("regular requests without allowSelfSigned do not set danger", async () => {
       mockFetch.mockResolvedValue(jsonResponse({}));
       await api.getMe();
+      expect((fetchCallOpts() as Record<string, unknown>).danger).toBeUndefined();
+    });
+
+    it("requests with allowSelfSigned set danger.acceptInvalidCerts", async () => {
+      const selfSignedApi = createApiClient(
+        { host: "localhost:8443", token: "test-token", allowSelfSigned: true },
+        onUnauthorized,
+      );
+      mockFetch.mockResolvedValue(jsonResponse({}));
+      await selfSignedApi.getMe();
       expect((fetchCallOpts() as Record<string, unknown>).danger).toEqual({
         acceptInvalidCerts: true,
         acceptInvalidHostnames: false,
@@ -882,9 +844,7 @@ describe("API Client", () => {
   describe("client without onUnauthorized callback", () => {
     it("does not throw when onUnauthorized is undefined and 401 received", async () => {
       const apiNoCallback = createApiClient({ host: "localhost:8443", token: "t" });
-      mockFetch.mockResolvedValue(
-        errorResponse(401, "UNAUTHORIZED", "No session"),
-      );
+      mockFetch.mockResolvedValue(errorResponse(401, "UNAUTHORIZED", "No session"));
       await expect(apiNoCallback.getMe()).rejects.toMatchObject({
         status: 401,
         code: "UNAUTHORIZED",
@@ -900,9 +860,7 @@ describe("API Client", () => {
     });
 
     it("serializes body as JSON for POST requests", async () => {
-      mockFetch.mockResolvedValue(
-        jsonResponse({ token: "t", requires_2fa: false }),
-      );
+      mockFetch.mockResolvedValue(jsonResponse({ token: "t", requires_2fa: false }));
       await api.login("u", "p");
       expect(typeof fetchCallOpts().body).toBe("string");
       expect(JSON.parse(fetchCallOpts().body as string)).toEqual({
