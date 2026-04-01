@@ -571,7 +571,7 @@ describe("notifyIncomingMessage", () => {
       notifyIncomingMessage(payload);
 
       await vi.waitFor(() => {
-        const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0][0];
+        const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0]![0];
         expect(call.title).toBe(`${"U".repeat(68)} in #general`);
         expect(call.title.length).toBe(80);
         // Should NOT end with "..."
@@ -598,7 +598,7 @@ describe("notifyIncomingMessage", () => {
       notifyIncomingMessage(payload);
 
       await vi.waitFor(() => {
-        const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0][0];
+        const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0]![0];
         expect(call.title.endsWith("...")).toBe(true);
         // Truncated to 80 chars + "..." = 83
         expect(call.title.length).toBe(83);
@@ -622,7 +622,7 @@ describe("notifyIncomingMessage", () => {
       notifyIncomingMessage(payload);
 
       await vi.waitFor(() => {
-        const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0][0];
+        const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0]![0];
         expect(call.body).toBe("B".repeat(100));
         expect(call.body.endsWith("...")).toBe(false);
       });
@@ -645,7 +645,7 @@ describe("notifyIncomingMessage", () => {
       notifyIncomingMessage(payload);
 
       await vi.waitFor(() => {
-        const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0][0];
+        const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0]![0];
         expect(call.body.endsWith("...")).toBe(true);
         expect(call.body.length).toBe(103); // 100 + "..."
       });
@@ -667,7 +667,7 @@ describe("notifyIncomingMessage", () => {
       notifyIncomingMessage(payload);
 
       await vi.waitFor(() => {
-        const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0][0];
+        const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0]![0];
         expect(call.title).toBe("EvilUser in #general");
         expect(call.body).toBe("HelloWorld!");
       });
@@ -691,7 +691,7 @@ describe("notifyIncomingMessage", () => {
       notifyIncomingMessage(payload);
 
       await vi.waitFor(() => {
-        const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0][0];
+        const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0]![0];
         expect(call.body).toBe("C".repeat(100));
         expect(call.body.endsWith("...")).toBe(false);
       });

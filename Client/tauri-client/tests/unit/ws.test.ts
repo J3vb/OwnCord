@@ -2541,7 +2541,7 @@ describe("cleanupEventListeners edge cases", () => {
   afterEach(() => {
     client.disconnect();
     // Restore the original mockListen implementation so later tests work
-    mockListen.mockImplementation(originalMockListenImpl);
+    mockListen.mockImplementation(originalMockListenImpl!);
     vi.useRealTimers();
   });
 
