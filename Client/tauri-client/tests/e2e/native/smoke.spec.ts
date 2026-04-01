@@ -21,10 +21,7 @@ test.describe("Native App Smoke Tests", () => {
 
   test("app renders the connect page on first launch", async ({ nativePage }) => {
     // On first launch (no saved credentials), the app should show the connect page.
-    // Wait for the page to fully render.
-    await nativePage.waitForLoadState("networkidle");
-
-    // The connect page should have the host/username/password fields
+    // Wait for the connect form to render rather than relying on networkidle.
     const hostInput = nativePage.locator("#host");
     await expect(hostInput).toBeVisible({ timeout: 15_000 });
 
@@ -59,7 +56,8 @@ test.describe("Native App Smoke Tests", () => {
   });
 
   test("CSS and styles load correctly in production", async ({ nativePage }) => {
-    await nativePage.waitForLoadState("networkidle");
+    // Wait for the app container to be present before checking styles
+    await nativePage.waitForSelector("#app", { timeout: 15_000 });
 
     // Verify that stylesheets are loaded (production build bundles CSS)
     const styleSheetCount = await nativePage.evaluate(() => {
@@ -97,7 +95,9 @@ test.describe("Native App Server Connection", () => {
     // Skip if OWNCORD_SKIP_SERVER_TESTS is set.
     test.skip(!!process.env.OWNCORD_SKIP_SERVER_TESTS, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
 
-    await nativePage.waitForLoadState("networkidle");
+    // Wait for the connect form to be ready before interacting
+    const hostInput = nativePage.locator("#host");
+    await expect(hostInput).toBeVisible({ timeout: 15_000 });
 
     // The connect page auto-pings saved servers on load.
     // If a saved server profile exists (e.g. "localhost:8443"), the sidebar
@@ -112,15 +112,13 @@ test.describe("Native App Server Connection", () => {
       await expect(latencyBadge).toHaveText(/\d+ms/, { timeout: 10_000 });
     } else {
       // No saved server — fill in host and verify server-side response.
-      // The health check happens when the server profile is pinged.
-      const hostInput = nativePage.locator("#host");
+      // Wait for host input to be editable before filling
+      await expect(hostInput).toBeEditable({ timeout: 5_000 });
       await hostInput.fill("localhost:8443");
       await hostInput.press("Tab");
 
-      // Wait for network activity to settle (health check HTTP request),
-      // then verify the form is still functional (no crash = real HTTP plugin loaded)
-      await nativePage.waitForLoadState("networkidle");
-      await expect(nativePage.locator("#host")).toHaveValue("localhost:8443");
+      // Verify the form accepted the value (no crash = real HTTP plugin loaded)
+      await expect(hostInput).toHaveValue("localhost:8443", { timeout: 5_000 });
     }
   });
 
@@ -131,7 +129,8 @@ test.describe("Native App Server Connection", () => {
     // Skip if OWNCORD_SKIP_SERVER_TESTS is set.
     test.skip(!!process.env.OWNCORD_SKIP_SERVER_TESTS, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
 
-    await nativePage.waitForLoadState("networkidle");
+    // Wait for the connect form to be ready
+    await expect(nativePage.locator("#host")).toBeVisible({ timeout: 15_000 });
 
     // Fill login form — use env vars for real creds, or dummy creds to prove API round-trip
     const serverUrl = process.env.OWNCORD_SERVER_URL ?? "localhost:8443";

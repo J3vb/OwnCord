@@ -34,10 +34,13 @@ const TAURI_EXE = path.resolve(__dirname, "../../src-tauri/target/release/owncor
 const CDP_PORT = parseInt(process.env.CDP_PORT ?? "9222", 10);
 
 /** Max time to wait for WebView2 to start accepting CDP connections. */
-const CDP_CONNECT_TIMEOUT = 30_000;
+const CDP_CONNECT_TIMEOUT = 60_000;
 
-/** Polling interval when waiting for CDP endpoint. */
-const CDP_POLL_INTERVAL = 500;
+/** Initial polling interval when waiting for CDP endpoint (exponential backoff). */
+const CDP_POLL_INTERVAL_INITIAL = 100;
+
+/** Maximum polling interval cap. */
+const CDP_POLL_INTERVAL_MAX = 2_000;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -49,6 +52,7 @@ const CDP_POLL_INTERVAL = 500;
 async function waitForCdpEndpoint(port: number, timeout: number): Promise<void> {
   const start = Date.now();
   const url = `http://127.0.0.1:${port}/json/version`;
+  let pollInterval = CDP_POLL_INTERVAL_INITIAL;
 
   while (Date.now() - start < timeout) {
     try {
@@ -57,7 +61,8 @@ async function waitForCdpEndpoint(port: number, timeout: number): Promise<void> 
     } catch {
       // Connection refused — WebView2 not ready yet
     }
-    await new Promise((r) => setTimeout(r, CDP_POLL_INTERVAL));
+    await new Promise((r) => setTimeout(r, pollInterval));
+    pollInterval = Math.min(pollInterval * 1.5, CDP_POLL_INTERVAL_MAX);
   }
 
   throw new Error(

@@ -76,10 +76,12 @@ export async function nativeLogin(page: Page, maxRetries = 3): Promise<void> {
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      await page.waitForLoadState("networkidle");
+      // Wait for the connect form to be ready instead of relying on networkidle
+      const hostInput = page.locator("#host");
+      await expect(hostInput).toBeVisible({ timeout: 15_000 });
+      await expect(hostInput).toBeEditable({ timeout: 5_000 });
 
       // Fill the connect form
-      const hostInput = page.locator("#host");
       await hostInput.clear();
       await hostInput.fill(SERVER_URL);
 
@@ -88,8 +90,9 @@ export async function nativeLogin(page: Page, maxRetries = 3): Promise<void> {
       await page.locator("button.btn-primary[type='submit']").click();
 
       // Wait for the main app layout to appear (real server + WS handshake).
+      // Use 60s timeout to accommodate server rate limiting and slow connections.
       const appLayout = page.locator("[data-testid='app-layout']");
-      await expect(appLayout).toBeVisible({ timeout: 30_000 });
+      await expect(appLayout).toBeVisible({ timeout: 60_000 });
       return; // success
     } catch (error: unknown) {
       lastError = error;
@@ -174,4 +177,22 @@ export async function openSettings(page: Page): Promise<void> {
 export async function waitForMessages(page: Page): Promise<void> {
   const container = page.locator(".messages-container");
   await expect(container).toBeVisible({ timeout: 10_000 });
+}
+
+/**
+ * Count text channels visible in the sidebar.
+ * Useful for data-dependent test gating.
+ */
+export async function countTextChannels(page: Page): Promise<number> {
+  return page
+    .locator(".channel-item")
+    .filter({ has: page.locator(".ch-icon", { hasText: "#" }) })
+    .count();
+}
+
+/**
+ * Count voice channels visible in the sidebar.
+ */
+export async function countVoiceChannels(page: Page): Promise<number> {
+  return page.locator(".channel-item .ch-icon", { hasText: "\u{1F50A}" }).count();
 }

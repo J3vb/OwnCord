@@ -101,14 +101,17 @@ test.describe("Chat Operations", () => {
     const textarea = nativePage.locator("[data-testid='msg-textarea']");
     const timestamp = Date.now();
 
-    // Send 3 messages with sufficient wait between sends
+    // Send 3 messages, waiting for each to appear before sending the next
     for (let i = 0; i < 3; i++) {
       const msg = `native-seq-${timestamp}-${i}`;
       await textarea.fill(msg);
       await textarea.press("Enter");
       await expect(textarea).toHaveValue("", { timeout: 5_000 });
-      // Small delay between sends to avoid rate limiting
-      if (i < 2) await nativePage.waitForTimeout(500);
+      // Wait for the sent message to appear in the list before sending the next
+      if (i < 2) {
+        const sentMsg = nativePage.locator(".message .msg-text", { hasText: msg });
+        await expect(sentMsg).toBeVisible({ timeout: 10_000 });
+      }
     }
 
     // All 3 should appear
