@@ -65,18 +65,18 @@ type authSuccessResponse struct {
 func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, trustedProxies []string) {
 	registerLimiter := limiter
 	loginLimiter := limiter
-	partialStore := auth.NewPartialAuthStore(10 * time.Minute)
-	pendingTOTPStore := auth.NewPendingTOTPStore(10 * time.Minute)
+	partialStore := auth.NewPartialAuthStore(partialAuthStoreTTL)
+	pendingTOTPStore := auth.NewPendingTOTPStore(pendingTOTPStoreTTL)
 	usedTOTPCodes := auth.NewUsedTOTPCodeStore()
 
 	r.Route("/api/v1/auth", func(r chi.Router) {
-		r.With(RateLimitMiddleware(registerLimiter, 3, time.Minute, trustedProxies)).
+		r.With(RateLimitMiddleware(registerLimiter, registerRateLimitPerMinute, time.Minute, trustedProxies)).
 			Post("/register", handleRegister(database))
 
-		r.With(RateLimitMiddleware(loginLimiter, 60, time.Minute, trustedProxies)).
+		r.With(RateLimitMiddleware(loginLimiter, loginRateLimitPerMinute, time.Minute, trustedProxies)).
 			Post("/login", handleLogin(database, limiter, partialStore, trustedProxies))
 
-		r.With(RateLimitMiddleware(limiter, 10, time.Minute, trustedProxies)).
+		r.With(RateLimitMiddleware(limiter, verifyTOTPRateLimitPerMinute, time.Minute, trustedProxies)).
 			Post("/verify-totp", handleVerifyTOTP(database, partialStore, limiter, usedTOTPCodes))
 
 		r.With(AuthMiddleware(database)).
@@ -86,20 +86,20 @@ func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, t
 			Get("/me", handleMe())
 
 		r.With(AuthMiddleware(database),
-			RateLimitMiddleware(limiter, 5, time.Minute, trustedProxies)).
+			RateLimitMiddleware(limiter, sensitiveEndpointRateLimitPerMinute, time.Minute, trustedProxies)).
 			Delete("/account", handleDeleteAccount(database, limiter))
 	})
 
 	r.With(AuthMiddleware(database),
-		RateLimitMiddleware(limiter, 5, time.Minute, trustedProxies)).
+		RateLimitMiddleware(limiter, sensitiveEndpointRateLimitPerMinute, time.Minute, trustedProxies)).
 		Post("/api/v1/users/me/totp/enable", handleEnableTOTP(pendingTOTPStore))
 
 	r.With(AuthMiddleware(database),
-		RateLimitMiddleware(limiter, 5, time.Minute, trustedProxies)).
+		RateLimitMiddleware(limiter, sensitiveEndpointRateLimitPerMinute, time.Minute, trustedProxies)).
 		Post("/api/v1/users/me/totp/confirm", handleConfirmTOTP(database, pendingTOTPStore, usedTOTPCodes))
 
 	r.With(AuthMiddleware(database),
-		RateLimitMiddleware(limiter, 5, time.Minute, trustedProxies)).
+		RateLimitMiddleware(limiter, sensitiveEndpointRateLimitPerMinute, time.Minute, trustedProxies)).
 		Delete("/api/v1/users/me/totp", handleDisableTOTP(database, pendingTOTPStore))
 }
 
@@ -193,11 +193,12 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 		if err != nil {
 			// UNIQUE constraint violation → duplicate username → 400.
 			// Any other DB error → 500.
-			if db.IsUniqueConstraintError(err) {
+			switch {
+			case db.IsUniqueConstraintError(err):
 				writeJSON(w, http.StatusBadRequest, genericAuthError)
-			} else if errors.Is(err, db.ErrNotFound) {
+			case errors.Is(err, db.ErrNotFound):
 				writeJSON(w, http.StatusBadRequest, genericAuthError)
-			} else {
+			default:
 				slog.Error("CreateUserWithInvite failed", "err", err, "username", req.Username)
 				writeJSON(w, http.StatusInternalServerError, errorResponse{
 					Error:   "INTERNAL_ERROR",
@@ -306,8 +307,8 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 		failKey := "login_fail:" + ip
 		if user == nil || !auth.CheckPassword(user.PasswordHash, req.Password) {
 			// Track failures; lockout on the 10th failure.
-			if !limiter.Allow(failKey, 9, 15*time.Minute) {
-				limiter.Lockout(lockKey, 15*time.Minute)
+			if !limiter.Allow(failKey, loginFailureThreshold, loginFailureWindow) {
+				limiter.Lockout(lockKey, loginLockoutDuration)
 			}
 			slog.Info("login failed", "ip", ip, "username_len", len(req.Username))
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
@@ -478,8 +479,8 @@ func handleDeleteAccount(database *db.DB, limiter *auth.RateLimiter) http.Handle
 		// Verify the supplied password matches the stored hash.
 		failKey := fmt.Sprintf("delete_fail:%d", user.ID)
 		if !auth.CheckPassword(user.PasswordHash, req.Password) {
-			if !limiter.Allow(failKey, 3, 15*time.Minute) {
-				limiter.Lockout(lockKey, 15*time.Minute)
+			if !limiter.Allow(failKey, deleteAccountFailureThreshold, deleteAccountFailureWindow) {
+				limiter.Lockout(lockKey, deleteAccountLockoutDuration)
 			}
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error:   "INVALID_INPUT",

@@ -3,13 +3,12 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
-
-	"fmt"
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
@@ -67,7 +66,7 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 		}
 
 		totpKey := fmt.Sprintf("totp_fail:%d", challenge.UserID)
-		if !limiter.Check(totpKey, 10, 15*time.Minute) {
+		if !limiter.Check(totpKey, totpFailureRateLimit, totpFailureWindow) {
 			writeJSON(w, http.StatusTooManyRequests, errorResponse{
 				Error:   "RATE_LIMITED",
 				Message: "too many failed attempts, try again later",
@@ -85,8 +84,8 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 		}
 
 		if !auth.VerifyTOTPCodeOnce(*user.TOTPSecret, strings.TrimSpace(req.Code), time.Now().UTC(), user.ID, usedTOTPCodes) {
-			limiter.Allow(totpKey, 10, 15*time.Minute)
-			partialStore.RegisterFailure(partialToken, 5)
+			limiter.Allow(totpKey, totpFailureRateLimit, totpFailureWindow)
+			partialStore.RegisterFailure(partialToken, partialAuthMaxFailures)
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
 				Error:   "UNAUTHORIZED",
 				Message: "invalid two-factor code",

@@ -18,11 +18,11 @@ import (
 func ValidateUsername(username string) error {
 	username = strings.TrimSpace(username)
 	n := len([]rune(username))
-	if n < 2 {
-		return fmt.Errorf("username must be at least 2 characters")
+	if n < minUsernameLength {
+		return fmt.Errorf("username must be at least %d characters", minUsernameLength)
 	}
-	if n > 32 {
-		return fmt.Errorf("username must be at most 32 characters")
+	if n > maxUsernameLength {
+		return fmt.Errorf("username must be at most %d characters", maxUsernameLength)
 	}
 	for _, r := range username {
 		if unicode.IsControl(r) {

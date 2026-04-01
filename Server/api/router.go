@@ -34,7 +34,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	r.Use(middleware.Recoverer)
 	r.Use(requestLogger) // structured request/response logging
 	r.Use(SecurityHeadersWithTLS(cfg.TLS.Mode))
-	r.Use(MaxBodySizeUnless(1<<20, "/api/v1/uploads")) // 1 MiB default; upload route exempt
+	r.Use(MaxBodySizeUnless(defaultMaxBodySize, "/api/v1/uploads")) // upload route exempt
 
 	// Health check — unauthenticated, no versioning prefix.
 	// The online user count callback is set after hub creation below.
@@ -52,7 +52,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Start background cleanup of stale rate-limiter entries to prevent
 	// unbounded memory growth. The goroutine exits when stopCh is closed.
 	limiterStopCh := make(chan struct{})
-	go limiter.StartCleanup(5*time.Minute, 15*time.Minute, limiterStopCh)
+	go limiter.StartCleanup(rateLimiterCleanupInterval, rateLimiterCleanupMaxWindow, limiterStopCh)
 
 	// Versioned API routes.
 	r.Route("/api/v1", func(r chi.Router) {
@@ -139,7 +139,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		// is handled by the LiveKit JWT (access_token query param) which the
 		// LiveKit server validates. Users can only obtain a valid JWT through
 		// the authenticated voice_join WS flow. Rate limiting prevents abuse.
-		r.With(rateLimitMiddlewareWithPrefix(limiter, "livekit_proxy:", 30, time.Minute, cfg.Server.TrustedProxies)).
+		r.With(rateLimitMiddlewareWithPrefix(limiter, "livekit_proxy:", livekitProxyRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)).
 			Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins)))
 	}
 
@@ -235,7 +235,7 @@ type livekitHealthResponse struct {
 
 func handleLiveKitHealth(hub *ws.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ok, err := hub.LiveKitHealthCheck()
+		ok, err := hub.LiveKitHealthCheck() //nolint:contextcheck // TODO: propagate context through this call path
 		if ok {
 			writeJSON(w, http.StatusOK, livekitHealthResponse{
 				Status:           "ok",

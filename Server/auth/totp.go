@@ -3,7 +3,7 @@ package auth
 import (
 	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha1"
+	"crypto/sha1" //nolint:gosec // G505: SHA1 required by TOTP/HOTP RFC 6238/4226
 	"crypto/subtle"
 	"encoding/base32"
 	"encoding/binary"
@@ -185,7 +185,7 @@ func (s *UsedTOTPCodeStore) MarkUsed(userID int64, code string) bool {
 		return false // replay detected
 	}
 	// Codes are valid for at most 90 seconds (current period ± 1).
-	s.entries[key] = time.Now().Add(90 * time.Second)
+	s.entries[key] = time.Now().Add(usedTOTPCodeTTL)
 	return true
 }
 
@@ -211,7 +211,7 @@ func VerifyTOTPCodeOnce(secret, code string, at time.Time, userID int64, usedSto
 }
 
 func GenerateTOTPSecret() (string, error) {
-	bytes := make([]byte, 20)
+	bytes := make([]byte, totpSecretBytes)
 	if _, err := rand.Read(bytes); err != nil {
 		return "", fmt.Errorf("GenerateTOTPSecret: %w", err)
 	}
@@ -236,7 +236,7 @@ func GenerateTOTPCode(secret string, at time.Time) (string, error) {
 		return "", fmt.Errorf("GenerateTOTPCode: %w", err)
 	}
 
-	counter := uint64(at.UTC().Unix() / int64(totpPeriod.Seconds()))
+	counter := uint64(at.UTC().Unix() / int64(totpPeriod.Seconds())) //nolint:gosec // G115: TOTP counter is always positive
 	buf := make([]byte, 8)
 	binary.BigEndian.PutUint64(buf, counter)
 
@@ -262,7 +262,7 @@ func VerifyTOTPCode(secret, code string, at time.Time) bool {
 }
 
 func generateOpaqueToken() (string, error) {
-	bytes := make([]byte, 32)
+	bytes := make([]byte, opaqueTokenBytes)
 	if _, err := rand.Read(bytes); err != nil {
 		return "", fmt.Errorf("generateOpaqueToken: %w", err)
 	}

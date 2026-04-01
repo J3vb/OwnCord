@@ -46,8 +46,8 @@ func sanitizeUploadFilename(name string) string {
 	}
 	name = strings.TrimSpace(sb.String())
 	// Truncate to 255 characters (filesystem limit).
-	if len(name) > 255 {
-		name = name[:255]
+	if len(name) > maxUploadFilenameLength {
+		name = name[:maxUploadFilenameLength]
 	}
 	if name == "" || name == "." || name == ".." {
 		name = "unnamed"
@@ -61,7 +61,7 @@ func MountUploadRoutes(r chi.Router, database *db.DB, store *storage.Storage, al
 	// Upload requires authentication and a higher body size limit (100 MB).
 	r.With(
 		AuthMiddleware(database),
-		MaxBodySize(100<<20),
+		MaxBodySize(uploadMaxBodySize),
 	).Post("/api/v1/uploads", handleUpload(database, store))
 	// File serving is public (URLs are unguessable UUIDs).
 	r.Get("/api/v1/files/{id}", handleServeFile(database, store, allowedOrigins))
@@ -69,8 +69,11 @@ func MountUploadRoutes(r chi.Router, database *db.DB, store *storage.Storage, al
 
 func handleUpload(database *db.DB, store *storage.Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Limit request body size to prevent abuse.
+		r.Body = http.MaxBytesReader(w, r.Body, uploadMaxBodySize)
+
 		// Parse multipart form — 10 MB in memory, rest on disk.
-		if err := r.ParseMultipartForm(10 << 20); err != nil {
+		if err := r.ParseMultipartForm(multipartMemoryLimit); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error:   "BAD_REQUEST",
 				Message: "invalid multipart form",
@@ -200,7 +203,7 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 		// Set headers before ServeContent to ensure correct MIME type.
 		w.Header().Set("Content-Type", att.MimeType)
 		w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": att.Filename}))
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d, immutable", fileCacheMaxAgeSeconds))
 		// CORS: allow webview to read the response body using configured origins.
 		if origin := r.Header.Get("Origin"); origin != "" {
 			for _, allowed := range allowedOrigins {

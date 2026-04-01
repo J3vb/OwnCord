@@ -61,7 +61,7 @@ func MountChannelRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter
 	})
 	r.With(
 		AuthMiddleware(database),
-		searchRateLimitMiddleware(limiter, 30, time.Minute, trustedProxies),
+		searchRateLimitMiddleware(limiter, searchRateLimitPerMinute, time.Minute, trustedProxies),
 	).Get("/api/v1/search", handleSearch(database))
 }
 
@@ -128,9 +128,9 @@ func handleListChannels(database *db.DB) http.HandlerFunc {
 
 		// Filter channels by READ_MESSAGES permission.
 		var visible []db.Channel
-		for _, ch := range channels {
-			if hasChannelPermBatch(role, overrides, ch.ID, permissions.ReadMessages) {
-				visible = append(visible, ch)
+		for i := range channels {
+			if hasChannelPermBatch(role, overrides, channels[i].ID, permissions.ReadMessages) {
+				visible = append(visible, channels[i])
 			}
 		}
 		if visible == nil {
@@ -386,12 +386,12 @@ func handleSearch(database *db.DB) http.HandlerFunc {
 			}
 
 			var accessibleIDs []int64
-			for _, ch := range allChannels {
-				if ch.Type == "dm" {
+			for i := range allChannels {
+				if allChannels[i].Type == "dm" {
 					continue // DM channels handled separately below.
 				}
-				if hasChannelPermBatch(role, overrides, ch.ID, permissions.ReadMessages) {
-					accessibleIDs = append(accessibleIDs, ch.ID)
+				if hasChannelPermBatch(role, overrides, allChannels[i].ID, permissions.ReadMessages) {
+					accessibleIDs = append(accessibleIDs, allChannels[i].ID)
 				}
 			}
 
