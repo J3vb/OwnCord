@@ -227,18 +227,84 @@ func applyMigration(database *DB, name, rawSQL string) error {
 	return nil
 }
 
-// splitStatements splits raw SQL into individual statements on semicolons.
+// splitStatements splits raw SQL into individual statements on semicolons,
+// correctly handling BEGIN...END blocks used by CREATE TRIGGER definitions.
 // Empty/comment-only fragments are discarded.
 func splitStatements(raw string) []string {
-	parts := strings.Split(raw, ";")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		s := strings.TrimSpace(p)
-		if s == "" || isCommentOnly(s) {
+	out := make([]string, 0)
+	var buf strings.Builder
+	depth := 0
+
+	for _, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(line)
+
+		// Track BEGIN...END depth for trigger bodies.
+		upperTrimmed := strings.ToUpper(trimmed)
+		if depth > 0 && (upperTrimmed == "END;" || upperTrimmed == "END") {
+			depth--
+			buf.WriteString(line)
+			buf.WriteString("\n")
+			if depth == 0 {
+				// END; closes the trigger — flush the entire block as one statement.
+				s := strings.TrimSpace(buf.String())
+				// Strip trailing semicolons so the executor doesn't choke.
+				s = strings.TrimRight(s, ";")
+				s = strings.TrimSpace(s)
+				if s != "" && !isCommentOnly(s) {
+					out = append(out, s)
+				}
+				buf.Reset()
+			}
 			continue
 		}
+
+		// Detect BEGIN that opens a trigger body. The keyword appears at
+		// the end of a CREATE TRIGGER line (e.g. "... BEGIN") or on its
+		// own line inside a trigger definition.
+		if strings.HasSuffix(upperTrimmed, " BEGIN") || upperTrimmed == "BEGIN" {
+			depth++
+			buf.WriteString(line)
+			buf.WriteString("\n")
+			continue
+		}
+
+		if depth > 0 {
+			// Inside a BEGIN...END block — accumulate without splitting.
+			buf.WriteString(line)
+			buf.WriteString("\n")
+			continue
+		}
+
+		// Outside any block — split on semicolons within this line.
+		buf.WriteString(line)
+		buf.WriteString("\n")
+
+		// Check whether the accumulated buffer contains a semicolon to split on.
+		// We split the full buffer content, not just the current line, because a
+		// statement may span multiple lines before its terminating semicolon.
+		content := buf.String()
+		if strings.Contains(content, ";") {
+			parts := strings.Split(content, ";")
+			// All parts except the last are complete statements.
+			for _, p := range parts[:len(parts)-1] {
+				s := strings.TrimSpace(p)
+				if s == "" || isCommentOnly(s) {
+					continue
+				}
+				out = append(out, s)
+			}
+			// The last part is the remainder after the final semicolon.
+			buf.Reset()
+			buf.WriteString(parts[len(parts)-1])
+		}
+	}
+
+	// Flush any remaining content (statement without trailing semicolon).
+	s := strings.TrimSpace(buf.String())
+	if s != "" && !isCommentOnly(s) {
 		out = append(out, s)
 	}
+
 	return out
 }
 
