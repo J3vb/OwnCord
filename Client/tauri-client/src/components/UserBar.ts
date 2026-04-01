@@ -9,9 +9,13 @@ import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
 import { authStore } from "@stores/auth.store";
 import { openSettings } from "@stores/ui.store";
+import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
+import type { UserStatus } from "@lib/types";
+import type { WsClient } from "@lib/ws";
 
 export interface UserBarOptions {
   readonly onDisconnect?: () => void;
+  readonly ws?: WsClient | null;
 }
 
 export function createUserBar(options?: UserBarOptions): MountableComponent {
@@ -23,6 +27,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
   let avatarTextEl: HTMLSpanElement | null = null;
   let nameEl: HTMLSpanElement | null = null;
   let statusEl: HTMLSpanElement | null = null;
+  let statusPicker: StatusPickerComponent | null = null;
 
   function updateFromState(): void {
     const state = authStore.getState();
@@ -44,15 +49,16 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
   function mount(container: Element): void {
     root = createElement("div", { class: "user-bar", "data-testid": "user-bar" });
 
-    avatarEl = createElement(
-      "div",
-      { class: "ub-avatar", style: "background: var(--accent); position: relative;" },
-    );
+    avatarEl = createElement("div", {
+      class: "ub-avatar",
+      style: "background: var(--accent); position: relative;",
+    });
     avatarTextEl = createElement("span", {});
     avatarEl.appendChild(avatarTextEl);
     const statusDot = createElement("div", {
       class: "status-dot",
-      style: "background: var(--green); width: 10px; height: 10px; border-radius: 50%; position: absolute; bottom: 0; right: 0;",
+      style:
+        "background: var(--green); width: 10px; height: 10px; border-radius: 50%; position: absolute; bottom: 0; right: 0;",
     });
     avatarEl.appendChild(statusDot);
 
@@ -61,12 +67,52 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     statusEl = createElement("span", { class: "ub-status" });
     appendChildren(info, nameEl, statusEl);
 
+    // Status picker — anchored below username, opens upward
+    const statusPickerWrap = createElement("div", {
+      class: "ub-status-picker-wrap",
+      "data-testid": "status-picker-wrap",
+    });
+
+    const isWsConnected = (): boolean => {
+      const ws = options?.ws;
+      return ws !== undefined && ws !== null && ws.getState() === "connected";
+    };
+
+    statusPicker = createStatusPicker({
+      currentStatus: "online" as UserStatus,
+      onStatusChange: (status: UserStatus) => {
+        const ws = options?.ws;
+        if (ws !== null && ws !== undefined && isWsConnected()) {
+          ws.send({ type: "presence_update", payload: { status } } as never);
+        }
+      },
+    });
+    statusPicker.mount(statusPickerWrap);
+
+    // Disable picker when WS is disconnected
+    const updatePickerDisabled = (): void => {
+      const ws = options?.ws;
+      const connected = ws !== undefined && ws !== null && ws.getState() === "connected";
+      statusPickerWrap.classList.toggle("ub-status-picker--disabled", !connected);
+      if (!connected) {
+        statusPickerWrap.title = "Offline";
+      } else {
+        statusPickerWrap.title = "";
+      }
+    };
+    updatePickerDisabled();
+
+    // Subscribe to WS state changes if ws is provided
+    if (options?.ws !== undefined && options?.ws !== null) {
+      const unsub = options.ws.onStateChange(() => updatePickerDisabled());
+      disposable.addCleanup(unsub);
+    }
+
+    info.appendChild(statusPickerWrap);
+
     const buttons = createElement("div", { class: "ub-controls" });
 
-    const settingsBtn = createElement(
-      "button",
-      { title: "Settings", "aria-label": "Settings" },
-    );
+    const settingsBtn = createElement("button", { title: "Settings", "aria-label": "Settings" });
     settingsBtn.appendChild(createIcon("settings", 18));
 
     disposable.onEvent(settingsBtn, "click", () => {
@@ -104,6 +150,8 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
   }
 
   function destroy(): void {
+    statusPicker?.destroy();
+    statusPicker = null;
     disposable.destroy();
     if (root !== null) {
       root.remove();

@@ -34,10 +34,10 @@ interface StatusDef {
 }
 
 const STATUS_DEFS: readonly StatusDef[] = [
-  { value: "online",  label: "Online",          color: "#3ba55d" },
-  { value: "idle",    label: "Idle",             color: "#faa61a" },
-  { value: "dnd",     label: "Do Not Disturb",   color: "#ed4245" },
-  { value: "offline", label: "Invisible",         color: "#747f8d" },
+  { value: "online", label: "Online", color: "#3ba55d" },
+  { value: "idle", label: "Idle", color: "#faa61a" },
+  { value: "dnd", label: "Do Not Disturb", color: "#ed4245" },
+  { value: "offline", label: "Invisible", color: "#747f8d" },
 ];
 
 function colorForStatus(status: UserStatus): string {
@@ -48,9 +48,7 @@ function colorForStatus(status: UserStatus): string {
 // Component factory
 // ---------------------------------------------------------------------------
 
-export function createStatusPicker(
-  options: StatusPickerOptions,
-): StatusPickerComponent {
+export function createStatusPicker(options: StatusPickerOptions): StatusPickerComponent {
   const ac = new AbortController();
   const { signal } = ac;
 
@@ -122,18 +120,26 @@ export function createStatusPicker(
 
     appendChildren(row, optDot, label, check);
 
-    row.addEventListener("click", () => {
-      applyStatus(def.value);
-      closeDropdown();
-      options.onStatusChange(def.value);
-    }, { signal });
+    row.addEventListener(
+      "click",
+      () => {
+        applyStatus(def.value);
+        closeDropdown();
+        options.onStatusChange(def.value);
+      },
+      { signal },
+    );
 
-    row.addEventListener("keydown", (e: KeyboardEvent) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        row.click();
-      }
-    }, { signal });
+    row.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          row.click();
+        }
+      },
+      { signal },
+    );
 
     return row;
   }
@@ -153,16 +159,24 @@ export function createStatusPicker(
       "aria-expanded": "false",
     });
     dotEl.style.background = colorForStatus(currentStatus);
-    dotEl.addEventListener("click", (e: MouseEvent) => {
-      e.stopPropagation();
-      toggleDropdown();
-    }, { signal });
-    dotEl.addEventListener("keydown", (e: KeyboardEvent) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
+    dotEl.addEventListener(
+      "click",
+      (e: MouseEvent) => {
+        e.stopPropagation();
         toggleDropdown();
-      }
-    }, { signal });
+      },
+      { signal },
+    );
+    dotEl.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          toggleDropdown();
+        }
+      },
+      { signal },
+    );
 
     // Dropdown menu
     dropdownEl = createElement("div", {
@@ -177,19 +191,27 @@ export function createStatusPicker(
     container.appendChild(root);
 
     // Close on outside click
-    document.addEventListener("click", (e: MouseEvent) => {
-      if (isOpen() && root !== null && !root.contains(e.target as Node)) {
-        closeDropdown();
-      }
-    }, { signal });
+    document.addEventListener(
+      "click",
+      (e: MouseEvent) => {
+        if (isOpen() && root !== null && !root.contains(e.target as Node)) {
+          closeDropdown();
+        }
+      },
+      { signal },
+    );
 
     // Close on Escape
-    document.addEventListener("keydown", (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen()) {
-        closeDropdown();
-        dotEl?.focus();
-      }
-    }, { signal });
+    document.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key === "Escape" && isOpen()) {
+          closeDropdown();
+          dotEl?.focus();
+        }
+      },
+      { signal },
+    );
   }
 
   function destroy(): void {

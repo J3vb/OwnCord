@@ -12,10 +12,7 @@ import { createVideoGrid } from "@components/VideoGrid";
 import type { VideoGridComponent } from "@components/VideoGrid";
 import { buildChatHeader } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
-import {
-  createPinnedPanelController,
-  createSearchOverlayController,
-} from "./OverlayManagers";
+import { createPinnedPanelController, createSearchOverlayController } from "./OverlayManagers";
 import type { SearchOverlayController } from "./OverlayManagers";
 import type { ChannelController } from "./ChannelController";
 
@@ -28,6 +25,7 @@ export interface ChatAreaOptions {
   readonly getRoot: () => HTMLDivElement | null;
   readonly getToast: () => ToastContainer | null;
   readonly getChannelCtrl: () => ChannelController | null;
+  readonly onToggleDmProfile?: () => void;
 }
 
 export interface ChatAreaResult {
@@ -48,6 +46,8 @@ export interface ChatAreaResult {
   readonly chatHeaderRefs: ChatHeaderRefs;
   /** The search overlay controller. */
   readonly searchCtrl: SearchOverlayController;
+  /** Slot for the DM profile sidebar (right panel, sibling of chat area). */
+  readonly dmProfileSlot: HTMLDivElement;
   /** All child MountableComponents for cleanup. */
   readonly children: readonly MountableComponent[];
   /** Unsubscribe / cleanup functions. */
@@ -75,7 +75,9 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
       return ctrl.messageList.scrollToMessage(msgId);
     },
   });
-  unsubscribers.push(() => { pinnedCtrl.cleanup(); });
+  unsubscribers.push(() => {
+    pinnedCtrl.cleanup();
+  });
 
   const searchCtrl = createSearchOverlayController({
     api,
@@ -87,12 +89,19 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
       return ctrl.messageList.scrollToMessage(msgId);
     },
   });
-  unsubscribers.push(() => { searchCtrl.cleanup(); });
+  unsubscribers.push(() => {
+    searchCtrl.cleanup();
+  });
 
   // --- Chat header ---
   const chatHeader = buildChatHeader({
-    onTogglePins: () => { void pinnedCtrl.toggle(); },
-    onSearchFocus: () => { searchCtrl.open(); },
+    onTogglePins: () => {
+      void pinnedCtrl.toggle();
+    },
+    onSearchFocus: () => {
+      searchCtrl.open();
+    },
+    onToggleDmProfile: opts.onToggleDmProfile,
   });
   const chatHeaderName = chatHeader.refs.nameEl;
 
@@ -129,6 +138,12 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
 
   appendChildren(chatArea, messagesSlot, typingSlot, inputSlot, videoGridSlot);
 
+  // --- DM profile sidebar slot (sits beside chatArea in the .app flex row) ---
+  const dmProfileSlot = createElement("div", {
+    class: "dm-profile-slot",
+    "data-testid": "dm-profile-slot",
+  });
+
   return {
     chatArea,
     slots: { messagesSlot, typingSlot, inputSlot, videoGridSlot },
@@ -136,6 +151,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     chatHeaderName,
     chatHeaderRefs: chatHeader.refs,
     searchCtrl,
+    dmProfileSlot,
     children,
     unsubscribers,
   };
