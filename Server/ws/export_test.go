@@ -61,7 +61,7 @@ func (h *Hub) RollbackVoiceJoinForTest(c *Client, channelID int64) {
 
 // LeaveVoiceChannelWithRetryForTest exposes leaveVoiceChannelWithRetry for external tests.
 func LeaveVoiceChannelWithRetryForTest(h *Hub, userID int64, channelID int64, joinToken string) error {
-	return leaveVoiceChannelWithRetry(h, userID, channelID, joinToken, context.Background())
+	return leaveVoiceChannelWithRetry(context.Background(), h, userID, channelID, joinToken)
 }
 
 // ─── livekit process/webhook helpers ───────────────────────────────────────

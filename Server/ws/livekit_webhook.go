@@ -181,7 +181,7 @@ func (h *Hub) handleWebhookParticipantLeft(event *livekit.WebhookEvent) {
 			c.clearVoiceState()
 
 			if h.db != nil {
-				if err := leaveVoiceChannelWithRetry(h, userID, channelID, joinToken, context.Background()); err != nil {
+				if err := leaveVoiceChannelWithRetry(context.Background(), h, userID, channelID, joinToken); err != nil {
 					slog.Error("livekit webhook: LeaveVoiceChannel exhausted retries",
 						"error", err, "user_id", userID, "channel_id", channelID)
 				}

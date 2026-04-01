@@ -28,7 +28,7 @@ func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
 		"remote", c.remoteAddr,
 	)
 
-	if err := leaveVoiceChannelWithRetry(h, c.userID, oldChID, oldJoinToken, ctx); err != nil {
+	if err := leaveVoiceChannelWithRetry(ctx, h, c.userID, oldChID, oldJoinToken); err != nil {
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice leave failed — please rejoin if issues persist"))
 	}
 
@@ -55,7 +55,7 @@ func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
 // channel to avoid leaking after shutdown (BUG-086).
 // Returns nil on first-attempt success, the first error otherwise (retries
 // continue in the background).
-func leaveVoiceChannelWithRetry(h *Hub, userID int64, channelID int64, joinToken string, ctx context.Context) error { //nolint:revive // ctx not first param for backwards compat
+func leaveVoiceChannelWithRetry(ctx context.Context, h *Hub, userID int64, channelID int64, joinToken string) error {
 	if joinToken == "" {
 		slog.Warn("LeaveVoiceChannelIfMatch skipped due to missing join token",
 			"user_id", userID, "channel_id", channelID)

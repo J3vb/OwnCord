@@ -80,7 +80,14 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		// background), the old row persists and JoinVoiceChannelIfCapacity's
 		// COUNT(*) may produce an incorrect result. Fail the switch so the
 		// user can retry cleanly.
-		if vs, err := h.db.GetVoiceState(c.userID); err == nil && vs != nil {
+		vs, err := h.db.GetVoiceState(c.userID)
+		if err != nil {
+			slog.Warn("handleVoiceJoin: could not verify voice state cleared",
+				"user_id", c.userID, "err", err)
+			c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice channel switch failed — please try again"))
+			return
+		}
+		if vs != nil {
 			slog.Warn("handleVoiceJoin: stale voice state persists after leave, aborting switch",
 				"user_id", c.userID, "stale_channel", vs.ChannelID, "target_channel", channelID)
 			// Restore client voice state so the user knows they're still in the old channel.
