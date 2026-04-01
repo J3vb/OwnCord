@@ -342,7 +342,7 @@ func TestValidateFileType_ErrorMessageContainsFormat(t *testing.T) {
 func TestSave_BlocksExecutable(t *testing.T) {
 	s := newTestStorage(t)
 	// Construct content with PE magic followed by padding.
-	content := append([]byte("MZ"), bytes.Repeat([]byte{0x00}, 100)...)
+	content := append([]byte("MZ"), make([]byte, 100)...)
 	err := s.Save("malware.exe", bytes.NewReader(content))
 	if err == nil {
 		t.Error("Save(PE executable) = nil, want error")
@@ -352,7 +352,7 @@ func TestSave_BlocksExecutable(t *testing.T) {
 // TestSave_BlocksELF verifies Save rejects ELF binary content.
 func TestSave_BlocksELF(t *testing.T) {
 	s := newTestStorage(t)
-	content := append([]byte("\x7fELF"), bytes.Repeat([]byte{0x00}, 100)...)
+	content := append([]byte("\x7fELF"), make([]byte, 100)...)
 	err := s.Save("linux-binary", bytes.NewReader(content))
 	if err == nil {
 		t.Error("Save(ELF binary) = nil, want error")
@@ -372,7 +372,7 @@ func TestSave_BlocksShellScript(t *testing.T) {
 // TestSave_AllowsPNG verifies Save still accepts legitimate image content after magic check.
 func TestSave_AllowsPNG(t *testing.T) {
 	s := newTestStorage(t)
-	content := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte{0x00}, 100)...)
+	content := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 100)...)
 	err := s.Save("image.png", bytes.NewReader(content))
 	if err != nil {
 		t.Errorf("Save(PNG) = %v, want nil", err)

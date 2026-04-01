@@ -354,7 +354,7 @@ func TestHub_ChatSend_RateLimit(t *testing.T) {
 
 	// Drain all messages, count errors.
 	errCount := 0
-	drainLoop:
+drainLoop:
 	for {
 		select {
 		case got := <-send:

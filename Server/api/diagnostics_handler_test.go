@@ -12,11 +12,6 @@ import (
 	"github.com/owncord/server/db"
 )
 
-// hashTokenForTest is a package-level helper wrapping auth.HashToken.
-func hashTokenForTest(token string) string {
-	return auth.HashToken(token)
-}
-
 // setupDiagnosticsRouter creates a full router with an authenticated user for
 // diagnostics testing.
 func setupDiagnosticsRouter(t *testing.T) (http.Handler, string) {

@@ -204,7 +204,7 @@ func TestGracefulStop_MultipleClients(t *testing.T) {
 	hub, database := newCoverageHub(t)
 
 	for i := range 5 {
-		user := seedCoverageOwner(t, database, strings.ReplaceAll("graceful-multi-"+string(rune('a'+i)), "", ""))
+		user := seedCoverageOwner(t, database, "graceful-multi-"+string(rune('a'+i)))
 		send := make(chan []byte, 16)
 		c := ws.NewTestClientWithUser(hub, user, 0, send)
 		hub.Register(c)
@@ -2692,5 +2692,3 @@ func TestBroadcastToAll_DropsWhenFull(t *testing.T) {
 		hub.BroadcastToAll([]byte(`{"type":"test"}`))
 	}
 }
-
-

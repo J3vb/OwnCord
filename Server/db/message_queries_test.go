@@ -172,7 +172,7 @@ func TestGetMessages_BeforePagination(t *testing.T) {
 	userID := seedUser(t, database, "frank")
 	chID := seedChannel(t, database, "ch")
 
-	var ids []int64
+	ids := make([]int64, 0, 5)
 	for range 5 {
 		id, _ := database.CreateMessage(chID, userID, "msg", nil)
 		ids = append(ids, id)
@@ -568,7 +568,7 @@ func TestGetMessagesForAPI_BeforePagination(t *testing.T) {
 	userID := seedUser(t, database, "apipage")
 	chID := seedChannel(t, database, "apich")
 
-	var ids []int64
+	ids := make([]int64, 0, 5)
 	for range 5 {
 		id, _ := database.CreateMessage(chID, userID, "msg", nil)
 		ids = append(ids, id)

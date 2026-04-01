@@ -198,8 +198,10 @@ func TestMessageAPIResponse_JSONKeys(t *testing.T) {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 
-	required := []string{"id", "channel_id", "user", "content", "reply_to",
-		"attachments", "reactions", "pinned", "edited_at", "deleted", "timestamp"}
+	required := []string{
+		"id", "channel_id", "user", "content", "reply_to",
+		"attachments", "reactions", "pinned", "edited_at", "deleted", "timestamp",
+	}
 	for _, k := range required {
 		if _, ok := raw[k]; !ok {
 			t.Errorf("missing required JSON key %q", k)

@@ -31,7 +31,7 @@ func TestServeWS_InvalidUpgrade_ReturnsError(t *testing.T) {
 	defer hub.Stop()
 
 	handler := ws.ServeWS(hub, database, []string{"*"})
-	srv := httptest.NewServer(http.HandlerFunc(handler))
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
 	// Plain GET without WebSocket upgrade headers should fail gracefully.
@@ -59,14 +59,17 @@ func TestAuthenticateConn_NoAuthMessage_ServerClosesConn(t *testing.T) {
 	defer hub.Stop()
 
 	handler := ws.ServeWS(hub, database, []string{"*"})
-	srv := httptest.NewServer(http.HandlerFunc(handler))
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	conn, dialResp, err := websocket.Dial(ctx, wsURL, nil)
+	if dialResp != nil && dialResp.Body != nil {
+		defer dialResp.Body.Close() //nolint:errcheck // test cleanup
+	}
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
@@ -94,14 +97,17 @@ func TestAuthenticateConn_InvalidJSON_ReceivesAuthError(t *testing.T) {
 	defer hub.Stop()
 
 	handler := ws.ServeWS(hub, database, []string{"*"})
-	srv := httptest.NewServer(http.HandlerFunc(handler))
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	conn, dialResp2, err := websocket.Dial(ctx, wsURL, nil)
+	if dialResp2 != nil && dialResp2.Body != nil {
+		defer dialResp2.Body.Close() //nolint:errcheck // test cleanup
+	}
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
@@ -137,14 +143,17 @@ func TestAuthenticateConn_WrongMessageType_ReceivesAuthError(t *testing.T) {
 	defer hub.Stop()
 
 	handler := ws.ServeWS(hub, database, []string{"*"})
-	srv := httptest.NewServer(http.HandlerFunc(handler))
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
@@ -183,14 +192,17 @@ func TestAuthenticateConn_MissingToken_ReceivesAuthError(t *testing.T) {
 	defer hub.Stop()
 
 	handler := ws.ServeWS(hub, database, []string{"*"})
-	srv := httptest.NewServer(http.HandlerFunc(handler))
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
@@ -228,14 +240,17 @@ func TestAuthenticateConn_InvalidToken_ReceivesAuthError(t *testing.T) {
 	defer hub.Stop()
 
 	handler := ws.ServeWS(hub, database, []string{"*"})
-	srv := httptest.NewServer(http.HandlerFunc(handler))
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
@@ -287,14 +302,17 @@ func TestServeWS_ValidAuth_FullHandshake(t *testing.T) {
 	}
 
 	handler := ws.ServeWS(hub, database, []string{"*"})
-	srv := httptest.NewServer(http.HandlerFunc(handler))
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
@@ -364,14 +382,17 @@ func TestServeWS_ImmediateDisconnect_DoesNotLeaveGhostClient(t *testing.T) {
 	}
 
 	handler := ws.ServeWS(hub, database, []string{"*"})
-	srv := httptest.NewServer(http.HandlerFunc(handler))
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
@@ -437,7 +458,7 @@ func TestServeWS_DuplicateLogin_KeepsUserOnline(t *testing.T) {
 	}
 
 	handler := ws.ServeWS(hub, database, []string{"*"})
-	srv := httptest.NewServer(http.HandlerFunc(handler))
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
@@ -445,7 +466,10 @@ func TestServeWS_DuplicateLogin_KeepsUserOnline(t *testing.T) {
 	defer cancel()
 
 	dialAndAuth := func() *websocket.Conn {
-		conn, _, dialErr := websocket.Dial(ctx, wsURL, nil)
+		conn, dialResp, dialErr := websocket.Dial(ctx, wsURL, nil)
+		if dialResp != nil && dialResp.Body != nil {
+			dialResp.Body.Close()
+		}
 		if dialErr != nil {
 			t.Fatalf("websocket.Dial: %v", dialErr)
 		}
@@ -522,7 +546,7 @@ func TestServeWS_Reconnect_PreservesVoiceState(t *testing.T) {
 	}
 
 	handler := ws.ServeWS(hub, database, []string{"*"})
-	srv := httptest.NewServer(http.HandlerFunc(handler))
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
@@ -531,7 +555,10 @@ func TestServeWS_Reconnect_PreservesVoiceState(t *testing.T) {
 
 	dialAndAuth := func(lastSeq uint64) *websocket.Conn {
 		t.Helper()
-		conn, _, dialErr := websocket.Dial(ctx, wsURL, nil)
+		conn, dialResp, dialErr := websocket.Dial(ctx, wsURL, nil)
+		if dialResp != nil && dialResp.Body != nil {
+			dialResp.Body.Close()
+		}
 		if dialErr != nil {
 			t.Fatalf("websocket.Dial: %v", dialErr)
 		}
@@ -687,7 +714,7 @@ func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
 	}
 
 	handler := ws.ServeWS(hub, database, []string{"*"})
-	srv := httptest.NewServer(http.HandlerFunc(handler))
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
@@ -696,7 +723,10 @@ func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
 
 	dialAndAuthFresh := func(tok string) *websocket.Conn {
 		t.Helper()
-		conn, _, dialErr := websocket.Dial(ctx, wsURL, nil)
+		conn, dialResp, dialErr := websocket.Dial(ctx, wsURL, nil)
+		if dialResp != nil && dialResp.Body != nil {
+			dialResp.Body.Close()
+		}
 		if dialErr != nil {
 			t.Fatalf("websocket.Dial: %v", dialErr)
 		}
@@ -724,7 +754,10 @@ func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
 	// conn plus the parsed ready payload so the caller can inspect voice_states.
 	dialAndReadReady := func(tok string) (*websocket.Conn, map[string]any) {
 		t.Helper()
-		conn, _, dialErr := websocket.Dial(ctx, wsURL, nil)
+		conn, dialResp, dialErr := websocket.Dial(ctx, wsURL, nil)
+		if dialResp != nil && dialResp.Body != nil {
+			dialResp.Body.Close()
+		}
 		if dialErr != nil {
 			t.Fatalf("websocket.Dial: %v", dialErr)
 		}
@@ -885,14 +918,17 @@ func TestServeWS_writePump_MessageDelivered(t *testing.T) {
 	}
 
 	handler := ws.ServeWS(hub, database, []string{"*"})
-	srv := httptest.NewServer(http.HandlerFunc(handler))
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
@@ -993,7 +1029,7 @@ func TestIntegration_MessageRoundTrip(t *testing.T) {
 	}
 
 	handler := ws.ServeWS(hub, database, []string{"*"})
-	srv := httptest.NewServer(http.HandlerFunc(handler))
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 
@@ -1002,7 +1038,10 @@ func TestIntegration_MessageRoundTrip(t *testing.T) {
 		t.Helper()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		conn, _, dialErr := websocket.Dial(ctx, wsURL, nil)
+		conn, dialResp, dialErr := websocket.Dial(ctx, wsURL, nil)
+		if dialResp != nil && dialResp.Body != nil {
+			dialResp.Body.Close()
+		}
 		if dialErr != nil {
 			t.Fatalf("%s dial: %v", label, dialErr)
 		}
@@ -1117,14 +1156,17 @@ func TestIntegration_SequenceNumbers(t *testing.T) {
 	}
 
 	handler := ws.ServeWS(hub, database, []string{"*"})
-	srv := httptest.NewServer(http.HandlerFunc(handler))
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
@@ -1212,14 +1254,17 @@ func TestServeWS_BannedUser_ReceivesError(t *testing.T) {
 	}
 
 	handler := ws.ServeWS(hub, database, []string{"*"})
-	srv := httptest.NewServer(http.HandlerFunc(handler))
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		t.Fatalf("websocket.Dial: %v", err)
 	}

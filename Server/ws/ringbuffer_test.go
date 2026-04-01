@@ -249,11 +249,11 @@ func TestOldestSeq_AfterWraparound(t *testing.T) {
 
 func TestConcurrent_PushAndEventsSince(t *testing.T) {
 	const (
-		cap      = 64
-		writers  = 4
-		pushes   = 500
-		readers  = 4
-		reads    = 500
+		cap     = 64
+		writers = 4
+		pushes  = 500
+		readers = 4
+		reads   = 500
 	)
 	rb := ws.NewEventRingBuffer(cap)
 
@@ -295,11 +295,11 @@ func TestConcurrent_PushAndEventsSince(t *testing.T) {
 
 func TestEventsSince_CapacityBoundaries(t *testing.T) {
 	tests := []struct {
-		name     string
-		cap      int
-		pushes   int
-		afterSeq uint64
-		wantLen  int    // -1 means nil
+		name      string
+		cap       int
+		pushes    int
+		afterSeq  uint64
+		wantLen   int // -1 means nil
 		wantFirst string
 	}{
 		{
@@ -310,11 +310,11 @@ func TestEventsSince_CapacityBoundaries(t *testing.T) {
 			wantLen:  -1,
 		},
 		{
-			name:     "exactly at capacity, from oldest",
-			cap:      4,
-			pushes:   4,
-			afterSeq: 1,
-			wantLen:  3,
+			name:      "exactly at capacity, from oldest",
+			cap:       4,
+			pushes:    4,
+			afterSeq:  1,
+			wantLen:   3,
 			wantFirst: "e2",
 		},
 		{
@@ -325,19 +325,19 @@ func TestEventsSince_CapacityBoundaries(t *testing.T) {
 			wantLen:  -1,
 		},
 		{
-			name:     "one past capacity, valid afterSeq",
-			cap:      4,
-			pushes:   5,
-			afterSeq: 2,
-			wantLen:  3,
+			name:      "one past capacity, valid afterSeq",
+			cap:       4,
+			pushes:    5,
+			afterSeq:  2,
+			wantLen:   3,
 			wantFirst: "e3",
 		},
 		{
-			name:     "double capacity",
-			cap:      4,
-			pushes:   8,
-			afterSeq: 5,
-			wantLen:  3,
+			name:      "double capacity",
+			cap:       4,
+			pushes:    8,
+			afterSeq:  5,
+			wantLen:   3,
 			wantFirst: "e6",
 		},
 		{

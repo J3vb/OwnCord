@@ -14,9 +14,11 @@ type mockDB struct {
 	dmErr          error
 }
 
-type chanRoleKey struct{ channelID, roleID int64 }
-type chanPerm struct{ allow, deny int64 }
-type dmKey struct{ userID, channelID int64 }
+type (
+	chanRoleKey struct{ channelID, roleID int64 }
+	chanPerm    struct{ allow, deny int64 }
+	dmKey       struct{ userID, channelID int64 }
+)
 
 func newMockDB() *mockDB {
 	return &mockDB{

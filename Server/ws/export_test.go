@@ -171,6 +171,21 @@ func (c *Client) ClearVoiceStateForTest() {
 	c.clearVoiceState()
 }
 
+// QualityBitrateForTest exposes qualityBitrate for external tests.
+func QualityBitrateForTest(quality string) int {
+	return qualityBitrate(quality)
+}
+
+// BuildDMChannelOpenForTest exposes buildDMChannelOpen for external tests.
+func BuildDMChannelOpenForTest(channelID int64, recipient *db.User) []byte {
+	return buildDMChannelOpen(channelID, recipient)
+}
+
+// BroadcastVoiceStateUpdateForTest exposes broadcastVoiceStateUpdate for external tests.
+func (h *Hub) BroadcastVoiceStateUpdateForTest(c *Client) {
+	h.broadcastVoiceStateUpdate(c)
+}
+
 // HandleWebhookParticipantLeftForTest exposes handleWebhookParticipantLeft for
 // external tests so they can simulate LiveKit webhook events without HTTP.
 func (h *Hub) HandleWebhookParticipantLeftForTest(userID int64, channelID int64, joinToken string) {

@@ -268,4 +268,3 @@ func TestListInvites_IncludesRevokedAndActive(t *testing.T) {
 		t.Errorf("ListInvites status = %d, want 200", rr2.Code)
 	}
 }
-

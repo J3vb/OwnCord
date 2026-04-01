@@ -1,6 +1,7 @@
 package updater
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -353,7 +354,7 @@ func TestDownloadFile_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading downloaded file: %v", err)
 	}
-	if string(got) != string(content) {
+	if !bytes.Equal(got, content) {
 		t.Errorf("content = %q, want %q", got, content)
 	}
 }
@@ -412,7 +413,7 @@ func TestDownloadAndVerify_Success(t *testing.T) {
 
 	// File should exist and be correct.
 	got, _ := os.ReadFile(dest)
-	if string(got) != string(content) {
+	if !bytes.Equal(got, content) {
 		t.Errorf("downloaded content mismatch")
 	}
 }

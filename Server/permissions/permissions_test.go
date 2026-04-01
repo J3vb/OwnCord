@@ -280,8 +280,8 @@ func TestHasPerm_CombinedBitsAllPresent(t *testing.T) {
 
 func TestEffectivePerms_DenyAllThenAllowOne(t *testing.T) {
 	base := permissions.SendMessages | permissions.ReadMessages | permissions.ConnectVoice
-	deny := int64(0x7FFFFFFF)           // deny everything
-	allow := permissions.ReadMessages    // re-allow just ReadMessages
+	deny := int64(0x7FFFFFFF)         // deny everything
+	allow := permissions.ReadMessages // re-allow just ReadMessages
 
 	eff := permissions.EffectivePerms(base, allow, deny)
 	if eff != permissions.ReadMessages {
@@ -308,8 +308,8 @@ func TestEffectivePerms_MultipleDenyMultipleAllow(t *testing.T) {
 // ─── Role hierarchy simulation ──────────────────────────────────────────────
 
 func TestRoleHierarchy_OwnerHasMorePermsThanAdmin(t *testing.T) {
-	ownerPerms := int64(0x7FFFFFFF)  // Owner default
-	adminPerms := int64(0x3FFFFFFF)  // Admin default (no Administrator bit)
+	ownerPerms := int64(0x7FFFFFFF) // Owner default
+	adminPerms := int64(0x3FFFFFFF) // Admin default (no Administrator bit)
 
 	if !permissions.HasAdmin(ownerPerms) {
 		t.Error("owner should be admin")
@@ -346,7 +346,7 @@ func TestRoleHierarchy_MemberLacksModPerms(t *testing.T) {
 }
 
 func TestRoleHierarchy_MemberHasBasicPerms(t *testing.T) {
-	memberPerms := int64(1635) // 0x663 = SendMessages|ReadMessages|AttachFiles|AddReactions|ConnectVoice|SpeakVoice
+	memberPerms := int64(1635) //nolint:gocritic // documenting the bitmask composition, not commented-out code
 
 	basicPerms := []struct {
 		name string
