@@ -176,36 +176,85 @@ func MigrateFS(database *DB, fsys fs.FS) error {
 			continue
 		}
 
-		tx, txErr := database.sqlDB.Begin()
-		if txErr != nil {
-			return fmt.Errorf("begin tx for %s: %w", name, txErr)
-		}
-
 		raw, readErr := fs.ReadFile(fsys, name)
 		if readErr != nil {
-			_ = tx.Rollback() // error ignored: already handling the triggering error
 			return fmt.Errorf("reading migration %s: %w", name, readErr)
 		}
 
-		if _, execErr := tx.Exec(string(raw)); execErr != nil {
-			_ = tx.Rollback() // error ignored: already handling the triggering error
-			return fmt.Errorf("executing migration %s: %w", name, execErr)
-		}
-
-		// Record the migration inside the same transaction so the migration
-		// and its tracking record are atomic. A crash between commit and
-		// record would otherwise cause re-application on next startup.
-		if _, execErr := tx.Exec(
-			"INSERT INTO schema_versions (version) VALUES (?)", name,
-		); execErr != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("recording migration %s: %w", name, execErr)
-		}
-
-		if commitErr := tx.Commit(); commitErr != nil {
-			return fmt.Errorf("commit migration %s: %w", name, commitErr)
+		if err := applyMigration(database, name, string(raw)); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+// applyMigration executes a single migration and records it. If the
+// migration contains multiple statements (e.g. several ALTER TABLE ADD
+// COLUMN), each is executed individually so that "duplicate column" errors
+// from a prior partial run can be skipped — the column already exists and
+// the intent is satisfied.
+func applyMigration(database *DB, name, rawSQL string) error {
+	stmts := splitStatements(rawSQL)
+
+	tx, txErr := database.sqlDB.Begin()
+	if txErr != nil {
+		return fmt.Errorf("begin tx for %s: %w", name, txErr)
+	}
+
+	for _, stmt := range stmts {
+		if _, execErr := tx.Exec(stmt); execErr != nil {
+			if isDuplicateColumn(execErr) {
+				continue // column already exists — skip
+			}
+			_ = tx.Rollback()
+			return fmt.Errorf("executing migration %s: %w", name, execErr)
+		}
+	}
+
+	// Record the migration inside the same transaction so the migration
+	// and its tracking record are atomic.
+	if _, execErr := tx.Exec(
+		"INSERT INTO schema_versions (version) VALUES (?)", name,
+	); execErr != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("recording migration %s: %w", name, execErr)
+	}
+
+	if commitErr := tx.Commit(); commitErr != nil {
+		return fmt.Errorf("commit migration %s: %w", name, commitErr)
+	}
+	return nil
+}
+
+// splitStatements splits raw SQL into individual statements on semicolons.
+// Empty/comment-only fragments are discarded.
+func splitStatements(raw string) []string {
+	parts := strings.Split(raw, ";")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		s := strings.TrimSpace(p)
+		if s == "" || isCommentOnly(s) {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// isCommentOnly returns true if every line is a SQL comment or blank.
+func isCommentOnly(s string) bool {
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "--") {
+			return false
+		}
+	}
+	return true
+}
+
+// isDuplicateColumn reports whether a SQLite error indicates a duplicate
+// column name from an ALTER TABLE ADD COLUMN statement.
+func isDuplicateColumn(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "duplicate column name")
 }
