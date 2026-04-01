@@ -150,7 +150,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
   }
 
   function destroy(): void {
-    statusPicker?.destroy();
+    statusPicker?.destroy?.();
     statusPicker = null;
     disposable.destroy();
     if (root !== null) {

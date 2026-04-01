@@ -55,7 +55,7 @@ describe("UserProfilePopup", () => {
     expect(popupEl?.getAttribute("role")).toBe("dialog");
     expect(popupEl?.getAttribute("aria-label")).toBe("User profile");
 
-    popup.destroy();
+    popup.destroy?.();
   });
 
   it("displays content correctly including status and join date", () => {
@@ -89,7 +89,7 @@ describe("UserProfilePopup", () => {
     const callBtn = container.querySelector('[data-testid="upp-call-btn"]');
     expect(callBtn).not.toBeNull();
 
-    popup.destroy();
+    popup.destroy?.();
   });
 
   it("outside click closes the popup", () => {
@@ -138,7 +138,7 @@ describe("UserProfilePopup", () => {
     const avatar = container.querySelector(".upp-avatar") as HTMLElement;
     expect(avatar.style.background).toBe("rgb(78, 80, 88)"); // #4e5058
 
-    popup.destroy();
+    popup.destroy?.();
   });
 
   it("Escape key closes the popup", () => {

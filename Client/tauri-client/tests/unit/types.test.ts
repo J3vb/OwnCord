@@ -214,11 +214,7 @@ describe("ClientMessage types", () => {
     };
     expect(reactionAdd.type).toBe("reaction_add");
 
-    const soundboard: ClientMessage = {
-      type: "soundboard_play",
-      payload: { sound_id: "uuid-123" },
-    };
-    expect(soundboard.type).toBe("soundboard_play");
+    // soundboard_play type removed — see TODOS.md
   });
 
   it("includes voice mute type", () => {

@@ -95,7 +95,7 @@ describe("StatusPicker wired to UserBar", () => {
     (options[1] as HTMLElement).click(); // "Idle"
 
     expect(ws.send).toHaveBeenCalledOnce();
-    const sentMsg = (ws.send as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const sentMsg = (ws.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(sentMsg.type).toBe("presence_update");
     expect(sentMsg.payload.status).toBe("idle");
   });

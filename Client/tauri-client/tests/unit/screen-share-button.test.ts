@@ -64,7 +64,18 @@ function setVoiceConnected(screenshare = false): void {
   channelsStore.setState((prev) => ({
     ...prev,
     channels: new Map([
-      [1, { id: 1, name: "Voice", type: "voice" as const, category: null, position: 0 }],
+      [
+        1,
+        {
+          id: 1,
+          name: "Voice",
+          type: "voice" as const,
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          lastMessageId: null,
+        },
+      ],
     ]),
   }));
   voiceStore.setState((prev) => ({

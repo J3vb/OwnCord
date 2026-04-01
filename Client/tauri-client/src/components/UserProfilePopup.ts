@@ -209,7 +209,7 @@ export function createUserProfilePopup(
     // Role badge
     const roleBadge = createElement("span", { class: "upp-role-badge" });
     const roleDot = createElement("span", { class: "upp-role-dot" });
-    roleDot.style.background = ROLE_COLORS[user.role] ?? ROLE_COLORS.member;
+    roleDot.style.background = ROLE_COLORS[user.role] ?? ROLE_COLORS.member ?? "";
     const roleLabel = createElement(
       "span",
       {},
