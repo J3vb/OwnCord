@@ -13,6 +13,7 @@ import {
 import { loadPref, savePref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import { parseUserId } from "@lib/livekitSession";
+import { voiceStore } from "@stores/voice.store";
 
 const log = createLogger("audioElements");
 
@@ -64,6 +65,14 @@ export class AudioElements {
     publication: RemoteTrackPublication,
     participant: RemoteParticipant,
   ): void {
+    // Guard: do not attach any remote audio while locally deafened.
+    // applyRemoteAudioSubscriptionState() only covers participants present at
+    // the time of deafen — this guard catches participants who join afterward.
+    if (voiceStore.getState().localDeafened) {
+      publication.setSubscribed(false);
+      return;
+    }
+
     const userId = parseUserId(participant.identity);
     if (publication.source === Track.Source.ScreenShareAudio) {
       // Screenshare audio: manage via HTMLAudioElement volume (not participant.setVolume)

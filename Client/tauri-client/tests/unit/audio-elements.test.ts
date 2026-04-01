@@ -30,6 +30,17 @@ vi.mock("livekit-client", () => ({
   },
 }));
 
+const mockVoiceStoreState = {
+  localDeafened: false,
+  currentChannelId: null as number | null,
+};
+
+vi.mock("@stores/voice.store", () => ({
+  voiceStore: {
+    getState: () => mockVoiceStoreState,
+  },
+}));
+
 vi.mock("@lib/livekitSession", () => ({
   parseUserId: (identity: string) => {
     const match = identity.match(/^user-(\d+)$/);
@@ -58,6 +69,8 @@ describe("AudioElements", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockVoiceStoreState.localDeafened = false;
+    mockVoiceStoreState.currentChannelId = null;
     elements = new AudioElements();
   });
 
@@ -484,6 +497,49 @@ describe("AudioElements", () => {
     it("saves volume even when no room is set", () => {
       elements.setUserVolume(42, 120);
       expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 120);
+    });
+  });
+
+  describe("deafen guard — handleTrackSubscribedAudio", () => {
+    it("does not attach mic audio when locally deafened", () => {
+      mockVoiceStoreState.localDeafened = true;
+
+      const { track, audioEl } = createMockTrack("audio", "track-deaf-1");
+      const publication = { source: "microphone", setSubscribed: vi.fn() };
+      const participant = { identity: "user-42", setVolume: vi.fn() };
+
+      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+
+      // Should NOT attach any audio element
+      expect(track.attach).not.toHaveBeenCalled();
+      // Should unsubscribe the publication
+      expect(publication.setSubscribed).toHaveBeenCalledWith(false);
+    });
+
+    it("does not attach screenshare audio when locally deafened", () => {
+      mockVoiceStoreState.localDeafened = true;
+
+      const { track, audioEl } = createMockTrack("audio", "track-deaf-ss");
+      const publication = { source: "screenShareAudio", setSubscribed: vi.fn() };
+      const participant = { identity: "user-42", setVolume: vi.fn() };
+
+      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+
+      expect(track.attach).not.toHaveBeenCalled();
+      expect(publication.setSubscribed).toHaveBeenCalledWith(false);
+    });
+
+    it("attaches mic audio normally when not deafened", () => {
+      mockVoiceStoreState.localDeafened = false;
+
+      const { track } = createMockTrack("audio", "track-ok-1");
+      const publication = { source: "microphone", setSubscribed: vi.fn() };
+      const participant = { identity: "user-42", setVolume: vi.fn() };
+
+      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+
+      expect(track.attach).toHaveBeenCalled();
+      expect(publication.setSubscribed).not.toHaveBeenCalled();
     });
   });
 
