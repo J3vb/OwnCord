@@ -90,7 +90,7 @@ async function rotateOldFiles(): Promise<void> {
     const jsonlFiles = entries
       .filter((e) => e.name?.endsWith(".jsonl") && !e.isDirectory)
       .map((e) => e.name)
-      .sort((a, b) => a.localeCompare(b));
+      .toSorted((a, b) => a.localeCompare(b));
 
     if (jsonlFiles.length > MAX_LOG_FILES) {
       const toRemove = jsonlFiles.slice(0, jsonlFiles.length - MAX_LOG_FILES);
@@ -183,7 +183,7 @@ export async function readAllPersistedLogs(): Promise<string> {
     const jsonlFiles = entries
       .filter((e) => e.name?.endsWith(".jsonl") && !e.isDirectory)
       .map((e) => e.name)
-      .sort((a, b) => a.localeCompare(b));
+      .toSorted((a, b) => a.localeCompare(b));
 
     const parts: string[] = [];
     for (const file of jsonlFiles) {

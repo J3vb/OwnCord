@@ -190,7 +190,7 @@ export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
     sectionLabel.appendChild(addBtn);
 
     // Conversation list
-    const sorted = [...options.conversations].sort(
+    const sorted = [...options.conversations].toSorted(
       (a, b) => (b.unread ? 1 : 0) - (a.unread ? 1 : 0),
     );
 

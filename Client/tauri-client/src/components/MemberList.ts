@@ -174,7 +174,7 @@ function renderList(root: HTMLDivElement, opts: MemberListOptions, signal: Abort
   for (const group of ROLE_GROUPS) {
     const groupMembers = allMembers
       .filter((m) => m.role.toLowerCase() === group.role)
-      .sort((a, b) => statusPriority(a.status) - statusPriority(b.status));
+      .toSorted((a, b) => statusPriority(a.status) - statusPriority(b.status));
 
     if (groupMembers.length === 0) continue;
 

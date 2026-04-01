@@ -6,9 +6,7 @@
     "perf": "warn"
   },
   "rules": {
-    "no-map-spread": "off",
-    "no-array-sort": "off",
-    "no-array-reverse": "off"
+    "no-map-spread": "off"
   },
   "ignorePatterns": ["dist", "node_modules", "public"]
 }

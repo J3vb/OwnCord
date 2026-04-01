@@ -30,7 +30,7 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
   function getFilteredChannels(query: string): readonly Channel[] {
     const state = channelsStore.getState();
     const all = Array.from(state.channels.values());
-    const sorted = [...all].sort((a, b) => a.position - b.position);
+    const sorted = [...all].toSorted((a, b) => a.position - b.position);
 
     if (query.length === 0) return sorted;
 

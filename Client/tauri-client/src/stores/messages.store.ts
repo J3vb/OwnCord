@@ -134,7 +134,7 @@ export function setMessages(
   messages: readonly MessageResponse[],
   hasMore: boolean,
 ): void {
-  const converted = messages.map(messageResponseToMessage).reverse();
+  const converted = messages.map(messageResponseToMessage).toReversed();
   const trimmed =
     converted.length > MAX_MESSAGES_PER_CHANNEL
       ? converted.slice(converted.length - MAX_MESSAGES_PER_CHANNEL)
@@ -165,7 +165,7 @@ export function prependMessages(
   messages: readonly MessageResponse[],
   hasMore: boolean,
 ): void {
-  const converted = messages.map(messageResponseToMessage).reverse();
+  const converted = messages.map(messageResponseToMessage).toReversed();
   messagesStore.setState((prev) => {
     const existing = prev.messagesByChannel.get(channelId) ?? [];
     let combined = [...converted, ...existing];
