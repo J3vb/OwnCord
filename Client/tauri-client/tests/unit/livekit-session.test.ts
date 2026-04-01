@@ -248,24 +248,28 @@ describe("LiveKitSession", () => {
       expect(mockWs.send).toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
     });
 
-    it("setServerHost stores the host for voice token connections", () => {
+    it("setServerHost stores the host and session remains functional", () => {
       session.setServerHost("myhost:9443");
-      // Stored host is used in handleVoiceToken — verified indirectly via
-      // the proxy URL construction. Setter is a simple field assignment;
-      // integration with handleVoiceToken is tested in the voice token suite.
-      expect(() => session.setServerHost("another:8080")).not.toThrow();
+      // Overwriting with a new host should succeed
+      session.setServerHost("another:8080");
+      // Verify the session is still in a valid disconnected state after setting host
+      expect(isVoiceConnected()).toBe(false);
+      // leaveVoice should still work (no room to disconnect from)
+      session.leaveVoice(false);
+      expect(setLocalCamera).toHaveBeenCalledWith(false);
     });
 
     it("setOnError stores callback and clearOnError removes it", () => {
       const cb = vi.fn();
       session.setOnError(cb);
-      // Trigger an error path — leaveVoice with no room is silent,
-      // but we can verify the callback was passed to deviceManager
-      // by checking deviceManager.setOnError was called.
+      // Callback should not be invoked by the setter itself
       expect(cb).not.toHaveBeenCalled();
       session.clearOnError();
-      // After clear, the callback should no longer be stored
-      // (deviceManager.setOnError(null) called internally)
+      // After clear, leaveVoice (which touches error paths) should not invoke cb
+      session.leaveVoice(false);
+      expect(cb).not.toHaveBeenCalled();
+      // Verify the session is still usable after clearing error callback
+      expect(isVoiceConnected()).toBe(false);
     });
 
     it("setOnRemoteVideo stores callbacks and clearOnRemoteVideo removes them", () => {
@@ -273,11 +277,13 @@ describe("LiveKitSession", () => {
       const removedCb = vi.fn();
       session.setOnRemoteVideo(videoCb);
       session.setOnRemoteVideoRemoved(removedCb);
-      // Callbacks are stored for use in handleTrackSubscribed/handleTrackUnsubscribed
       session.clearOnRemoteVideo();
-      // After clear, remote video events should not invoke the old callbacks
+      // After clear, leaving voice (which cleans up tracks) should not invoke old callbacks
+      session.leaveVoice(false);
       expect(videoCb).not.toHaveBeenCalled();
       expect(removedCb).not.toHaveBeenCalled();
+      // Verify the session state is consistent after clearing callbacks
+      expect(isVoiceConnected()).toBe(false);
     });
   });
 
@@ -308,7 +314,7 @@ describe("LiveKitSession", () => {
   });
 
   describe("cleanupAll", () => {
-    it("cleans up all state without throwing", () => {
+    it("resets session to disconnected state after cleanup", () => {
       const mockWs = { send: vi.fn() } as any;
       session.setWsClient(mockWs);
       session.setServerHost("localhost:8080");
@@ -316,7 +322,13 @@ describe("LiveKitSession", () => {
       session.setOnRemoteVideo(vi.fn());
       session.setOnRemoteVideoRemoved(vi.fn());
 
-      expect(() => session.cleanupAll()).not.toThrow();
+      session.cleanupAll();
+
+      // After cleanup, voice should be disconnected
+      expect(isVoiceConnected()).toBe(false);
+      // Camera and screenshare state should be reset
+      expect(setLocalCamera).toHaveBeenCalledWith(false);
+      expect(setLocalScreenshare).toHaveBeenCalledWith(false);
     });
   });
 

@@ -105,7 +105,7 @@ describe("DeviceManager", () => {
   // -----------------------------------------------------------------------
 
   describe("setAudioPipeline", () => {
-    it("accepts null to clear the pipeline", () => {
+    it("clears the pipeline so device switches skip pipeline setup", async () => {
       const pipeline = {
         setupAudioPipeline: vi.fn(),
         applyNoiseSuppressor: vi.fn(),
@@ -113,31 +113,53 @@ describe("DeviceManager", () => {
       } as any;
       dm.setAudioPipeline(pipeline);
       dm.setAudioPipeline(null);
-      // After clearing, pipeline methods should not be called on device switch
+      // Verify pipeline methods are NOT called on a subsequent device switch
+      dm.setRoom(mockRoom);
+      await dm.switchInputDevice("device-1");
+      expect(pipeline.setupAudioPipeline).not.toHaveBeenCalled();
     });
 
-    it("stores a pipeline object for use during device switches", () => {
+    it("stores a pipeline that is invoked during device switches", async () => {
       const pipeline = {
         setupAudioPipeline: vi.fn(),
-        applyNoiseSuppressor: vi.fn(),
-        removeNoiseSuppressor: vi.fn(),
+        applyNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
+        removeNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
       } as any;
+      dm.setRoom(mockRoom);
       dm.setAudioPipeline(pipeline);
-      // Pipeline is stored internally — integration with switchInputDevice tested below
+      await dm.switchInputDevice("device-1");
+      expect(pipeline.setupAudioPipeline).toHaveBeenCalled();
     });
   });
 
   describe("setOnError", () => {
-    it("accepts null to clear the error callback", () => {
+    it("clears the error callback so device switch errors are suppressed", async () => {
+      const onError = vi.fn();
+      dm.setOnError(onError);
       dm.setOnError(null);
-      // No error callback registered — errors during device switch are silently handled
+      dm.setRoom(mockRoom);
+      mockRoom.switchActiveDevice.mockRejectedValue(new Error("device error"));
+      await dm.switchInputDevice("device-1");
+      expect(onError).not.toHaveBeenCalled();
     });
   });
 
   describe("setOnToast", () => {
-    it("accepts null to clear the toast callback", () => {
+    it("clears the toast callback so device switch toasts are suppressed", async () => {
+      const onToast = vi.fn();
+      const pipeline = {
+        setupAudioPipeline: vi.fn(() => {
+          throw new Error("pipeline error");
+        }),
+        applyNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
+        removeNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
+      } as any;
+      dm.setOnToast(onToast);
       dm.setOnToast(null);
-      // No toast callback — device switch messages are suppressed
+      dm.setRoom(mockRoom);
+      dm.setAudioPipeline(pipeline);
+      await dm.switchInputDevice("device-1");
+      expect(onToast).not.toHaveBeenCalled();
     });
   });
 
@@ -256,7 +278,7 @@ describe("DeviceManager", () => {
   // -----------------------------------------------------------------------
 
   describe("handleDeviceChange", () => {
-    it("does nothing if room is null when change fires", async () => {
+    it("skips device enumeration when room is null at change time", async () => {
       dm.setRoom(mockRoom);
       // Capture the handler
       const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
@@ -265,7 +287,9 @@ describe("DeviceManager", () => {
       // Trigger the handler (simulates device change event)
       handler();
       await vi.advanceTimersByTimeAsync(600);
-      // No crash expected
+      // With room null, getLocalDevices should never be called
+      expect(mockGetLocalDevices).not.toHaveBeenCalled();
+      expect(mockRoom.switchActiveDevice).not.toHaveBeenCalled();
     });
 
     it("falls back to default input when saved device is removed", async () => {

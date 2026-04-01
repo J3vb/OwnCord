@@ -135,9 +135,12 @@ describe("AudioPipeline", () => {
       expect(mockSavePref).toHaveBeenCalledWith("voiceSensitivity", 100);
     });
 
-    it("updates persisted sensitivity even when no pipeline is active", () => {
+    it("persists sensitivity value even when no pipeline is active", () => {
       pipeline.setVoiceSensitivity(50);
+      expect(mockSavePref).toHaveBeenCalledWith("voiceSensitivity", 50);
+      // Pipeline is not active so VAD gating remains off
       expect(pipeline.isVadGated).toBe(false);
+      expect(pipeline.isActive).toBe(false);
     });
   });
 
