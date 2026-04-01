@@ -120,7 +120,7 @@ export function createVideoGrid(): VideoGridComponent {
     }
   }
 
-  /** Attach ended/mute listeners on the first video track to auto-remove stale tiles. */
+  /** Attach ended/mute/unmute listeners on the first video track to handle stale tiles. */
   function attachTrackLifecycle(userId: number, stream: MediaStream): void {
     // Clean up previous listeners for this tile
     const prev = cells.get(userId);
@@ -132,17 +132,28 @@ export function createVideoGrid(): VideoGridComponent {
     const track = stream.getVideoTracks()[0];
     if (track === undefined) return;
 
-    const onTrackDead = (): void => {
+    const onTrackEnded = (): void => {
       removeStream(userId);
     };
-    track.addEventListener("ended", onTrackDead);
-    track.addEventListener("mute", onTrackDead);
+    const onTrackMute = (): void => {
+      // Temporarily hide video — track may unmute after network recovery
+      const cell = cells.get(userId);
+      if (cell !== undefined) cell.el.classList.add("track-muted");
+    };
+    const onTrackUnmute = (): void => {
+      const cell = cells.get(userId);
+      if (cell !== undefined) cell.el.classList.remove("track-muted");
+    };
+    track.addEventListener("ended", onTrackEnded);
+    track.addEventListener("mute", onTrackMute);
+    track.addEventListener("unmute", onTrackUnmute);
 
     const entry = cells.get(userId);
     if (entry !== undefined) {
       entry.trackCleanup = () => {
-        track.removeEventListener("ended", onTrackDead);
-        track.removeEventListener("mute", onTrackDead);
+        track.removeEventListener("ended", onTrackEnded);
+        track.removeEventListener("mute", onTrackMute);
+        track.removeEventListener("unmute", onTrackUnmute);
       };
     }
   }

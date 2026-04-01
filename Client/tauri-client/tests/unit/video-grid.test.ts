@@ -299,13 +299,28 @@ describe("VideoGrid", () => {
       expect(grid.hasStreams()).toBe(false);
     });
 
-    it("removes tile when video track fires 'mute' event", () => {
+    it("hides tile when video track fires 'mute' event (does not remove)", () => {
       const { stream, track } = fakeStreamWithTrack();
       grid.addStream(1, "Alice", stream);
       expect(grid.hasStreams()).toBe(true);
 
       track.dispatchEvent("mute");
-      expect(grid.hasStreams()).toBe(false);
+      // Tile should still exist but have track-muted class
+      expect(grid.hasStreams()).toBe(true);
+      const cell = container.querySelector(".video-cell") as HTMLElement;
+      expect(cell.classList.contains("track-muted")).toBe(true);
+    });
+
+    it("restores tile when video track fires 'unmute' after mute", () => {
+      const { stream, track } = fakeStreamWithTrack();
+      grid.addStream(1, "Alice", stream);
+
+      track.dispatchEvent("mute");
+      const cell = container.querySelector(".video-cell") as HTMLElement;
+      expect(cell.classList.contains("track-muted")).toBe(true);
+
+      track.dispatchEvent("unmute");
+      expect(cell.classList.contains("track-muted")).toBe(false);
     });
 
     it("cleans up track listeners when tile is removed via removeStream", () => {
@@ -326,6 +341,7 @@ describe("VideoGrid", () => {
       // Verify listeners were removed
       expect(track.listeners["ended"]?.length ?? 0).toBe(0);
       expect(track.listeners["mute"]?.length ?? 0).toBe(0);
+      expect(track.listeners["unmute"]?.length ?? 0).toBe(0);
     });
   });
 
