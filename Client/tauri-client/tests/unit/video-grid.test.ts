@@ -53,9 +53,15 @@ describe("VideoGrid", () => {
     vi.clearAllMocks();
     // ResizeObserver is not available in JSDOM
     globalThis.ResizeObserver ??= class {
-      observe(): void { /* noop */ }
-      unobserve(): void { /* noop */ }
-      disconnect(): void { /* noop */ }
+      observe(): void {
+        /* noop */
+      }
+      unobserve(): void {
+        /* noop */
+      }
+      disconnect(): void {
+        /* noop */
+      }
     } as unknown as typeof ResizeObserver;
 
     container = document.createElement("div");

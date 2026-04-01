@@ -75,9 +75,7 @@ export function createTestHarness(): TestHarness {
     click(selector: string): void {
       const el = container.querySelector(selector) as HTMLElement | null;
       if (el === null) {
-        throw new Error(
-          `click("${selector}"): no element found in container`,
-        );
+        throw new Error(`click("${selector}"): no element found in container`);
       }
       el.click();
     },

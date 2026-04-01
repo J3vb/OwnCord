@@ -106,14 +106,22 @@ describe("DeviceManager", () => {
 
   describe("setAudioPipeline", () => {
     it("accepts null to clear the pipeline", () => {
-      const pipeline = { setupAudioPipeline: vi.fn(), applyNoiseSuppressor: vi.fn(), removeNoiseSuppressor: vi.fn() } as any;
+      const pipeline = {
+        setupAudioPipeline: vi.fn(),
+        applyNoiseSuppressor: vi.fn(),
+        removeNoiseSuppressor: vi.fn(),
+      } as any;
       dm.setAudioPipeline(pipeline);
       dm.setAudioPipeline(null);
       // After clearing, pipeline methods should not be called on device switch
     });
 
     it("stores a pipeline object for use during device switches", () => {
-      const pipeline = { setupAudioPipeline: vi.fn(), applyNoiseSuppressor: vi.fn(), removeNoiseSuppressor: vi.fn() } as any;
+      const pipeline = {
+        setupAudioPipeline: vi.fn(),
+        applyNoiseSuppressor: vi.fn(),
+        removeNoiseSuppressor: vi.fn(),
+      } as any;
       dm.setAudioPipeline(pipeline);
       // Pipeline is stored internally — integration with switchInputDevice tested below
     });
@@ -212,7 +220,9 @@ describe("DeviceManager", () => {
     it("shows toast when pipeline setup fails", async () => {
       const onToast = vi.fn();
       const pipeline = {
-        setupAudioPipeline: vi.fn(() => { throw new Error("pipeline error"); }),
+        setupAudioPipeline: vi.fn(() => {
+          throw new Error("pipeline error");
+        }),
         applyNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
         removeNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
       } as any;
@@ -338,7 +348,9 @@ describe("DeviceManager", () => {
       await vi.advanceTimersByTimeAsync(600);
 
       expect(mockSavePref).toHaveBeenCalledWith("audioOutputDevice", "");
-      expect(onToast).toHaveBeenCalledWith("Audio output device disconnected — switched to default");
+      expect(onToast).toHaveBeenCalledWith(
+        "Audio output device disconnected — switched to default",
+      );
     });
 
     it("calls onError when mic fallback fails", async () => {
@@ -397,7 +409,9 @@ describe("DeviceManager", () => {
       });
 
       const pipeline = {
-        setupAudioPipeline: vi.fn(() => { throw new Error("pipeline error"); }),
+        setupAudioPipeline: vi.fn(() => {
+          throw new Error("pipeline error");
+        }),
       } as any;
       const onToast = vi.fn();
 

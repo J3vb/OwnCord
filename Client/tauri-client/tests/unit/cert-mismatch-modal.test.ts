@@ -13,9 +13,7 @@ describe("parseStoredFingerprint", () => {
       "Stored:  51:32:d1:f9:61:47:e4:cc:26:6f:3a:87\n" +
       "Current: 23:e4:00:61:11:f7:e5:12:eb:b9:2d:19\n" +
       "This may indicate a man-in-the-middle attack.";
-    expect(parseStoredFingerprint(msg)).toBe(
-      "51:32:d1:f9:61:47:e4:cc:26:6f:3a:87",
-    );
+    expect(parseStoredFingerprint(msg)).toBe("51:32:d1:f9:61:47:e4:cc:26:6f:3a:87");
   });
 
   it("returns undefined for undefined message", () => {

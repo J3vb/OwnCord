@@ -37,10 +37,16 @@ vi.stubGlobal("indexedDB", {
       close: vi.fn(),
       transaction: () => {
         const tx: Record<string, unknown> = {
-          oncomplete: null, onabort: null, onerror: null,
+          oncomplete: null,
+          onabort: null,
+          onerror: null,
           objectStore: () => ({
             get: () => {
-              const req: Record<string, unknown> = { onsuccess: null, onerror: null, result: undefined };
+              const req: Record<string, unknown> = {
+                onsuccess: null,
+                onerror: null,
+                result: undefined,
+              };
               Promise.resolve().then(() => {
                 const fn = req.onsuccess as ((ev: Event) => void) | null;
                 fn?.(new Event("success"));
@@ -59,7 +65,10 @@ vi.stubGlobal("indexedDB", {
     };
 
     const req: Record<string, unknown> = {
-      result: db, onsuccess: null, onerror: null, onupgradeneeded: null,
+      result: db,
+      onsuccess: null,
+      onerror: null,
+      onupgradeneeded: null,
     };
     Promise.resolve().then(() => {
       const upgrade = req.onupgradeneeded as ((ev: Event) => void) | null;
@@ -95,11 +104,15 @@ describe("resolveServerUrl", () => {
   });
 
   it("returns absolute https URLs unchanged", () => {
-    expect(resolveServerUrl("https://cdn.example.com/file.png")).toBe("https://cdn.example.com/file.png");
+    expect(resolveServerUrl("https://cdn.example.com/file.png")).toBe(
+      "https://cdn.example.com/file.png",
+    );
   });
 
   it("prepends server host for relative paths", () => {
-    expect(resolveServerUrl("/api/v1/attachments/1.png")).toBe("https://myserver.local:8443/api/v1/attachments/1.png");
+    expect(resolveServerUrl("/api/v1/attachments/1.png")).toBe(
+      "https://myserver.local:8443/api/v1/attachments/1.png",
+    );
   });
 
   it("returns the path as-is when no server host is set", () => {

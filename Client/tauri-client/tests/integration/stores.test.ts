@@ -46,10 +46,7 @@ function createMockWsClient(): MockWsClient {
       return crypto.randomUUID();
     },
 
-    on<T extends ServerMessage["type"]>(
-      type: T,
-      listener: WsListener<T>,
-    ): () => void {
+    on<T extends ServerMessage["type"]>(type: T, listener: WsListener<T>): () => void {
       if (!listeners.has(type)) {
         listeners.set(type, new Set());
       }
@@ -166,8 +163,24 @@ describe("Store integration via dispatcher", () => {
     it("populates channels, members, and voice stores from ready event", () => {
       ws.simulate("ready", {
         channels: [
-          { id: 1, name: "general", type: "text", category: "Text Channels", position: 0, unread_count: 3, last_message_id: 100 },
-          { id: 2, name: "random", type: "text", category: "Text Channels", position: 1, unread_count: 0, last_message_id: 50 },
+          {
+            id: 1,
+            name: "general",
+            type: "text",
+            category: "Text Channels",
+            position: 0,
+            unread_count: 3,
+            last_message_id: 100,
+          },
+          {
+            id: 2,
+            name: "random",
+            type: "text",
+            category: "Text Channels",
+            position: 1,
+            unread_count: 0,
+            last_message_id: 50,
+          },
           { id: 3, name: "Voice Chat", type: "voice", category: "Voice Channels", position: 0 },
         ],
         members: [
@@ -180,7 +193,7 @@ describe("Store integration via dispatcher", () => {
           { channel_id: 3, user_id: 2, muted: true, deafened: false },
         ],
         roles: [
-          { id: 1, name: "Admin", color: "#f1c40f", permissions: 0x3FFFFFFF },
+          { id: 1, name: "Admin", color: "#f1c40f", permissions: 0x3fffffff },
           { id: 2, name: "Member", color: null, permissions: 0x3 },
         ],
       });
@@ -222,9 +235,7 @@ describe("Store integration via dispatcher", () => {
           { id: 1, name: "general", type: "text", category: null, position: 0, unread_count: 0 },
           { id: 2, name: "random", type: "text", category: null, position: 1, unread_count: 0 },
         ],
-        members: [
-          { id: 10, username: "sender", avatar: null, role: "member", status: "online" },
-        ],
+        members: [{ id: 10, username: "sender", avatar: null, role: "member", status: "online" }],
         voice_states: [],
         roles: [],
       });
@@ -435,10 +446,7 @@ describe("Store integration via dispatcher", () => {
       addPendingSend(correlationId, 1);
 
       // Simulate without an id
-      ws.simulate(
-        "chat_send_ok",
-        { message_id: 501, timestamp: "2026-03-15T13:01:00Z" },
-      );
+      ws.simulate("chat_send_ok", { message_id: 501, timestamp: "2026-03-15T13:01:00Z" });
 
       // Pending send remains because no correlation ID was provided
       expect(messagesStore.getState().pendingSends.has(correlationId)).toBe(true);

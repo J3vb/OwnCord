@@ -1,5 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { mockTauriFullSession, navigateToMainPage, openSettings, switchSettingsTab } from "./helpers";
+import {
+  mockTauriFullSession,
+  navigateToMainPage,
+  openSettings,
+  switchSettingsTab,
+} from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Tests: Settings Overlay — structure

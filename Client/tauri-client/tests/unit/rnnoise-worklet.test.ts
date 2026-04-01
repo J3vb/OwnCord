@@ -4,20 +4,22 @@ const REGISTERED_NAME = "rnnoise-processor";
 
 describe("rnnoise-worklet", () => {
   let registerProcessorMock: ReturnType<typeof vi.fn>;
-  let processorCtor: (new () => {
-    _processFrame(): void;
-    _outAvailable: number;
-    _outReadPos: number;
-    _outWritePos: number;
-    _outSampleOffset: number;
-    _inputPtr: number;
-    _outputPtr: number;
-    _state: number;
-    _inputRing: Float32Array;
-    _outBuffer: Float32Array;
-    _heapF32: Float32Array | null;
-    _instance: { exports: { rnnoise_process_frame: ReturnType<typeof vi.fn> } } | null;
-  }) | null;
+  let processorCtor:
+    | (new () => {
+        _processFrame(): void;
+        _outAvailable: number;
+        _outReadPos: number;
+        _outWritePos: number;
+        _outSampleOffset: number;
+        _inputPtr: number;
+        _outputPtr: number;
+        _state: number;
+        _inputRing: Float32Array;
+        _outBuffer: Float32Array;
+        _heapF32: Float32Array | null;
+        _instance: { exports: { rnnoise_process_frame: ReturnType<typeof vi.fn> } } | null;
+      })
+    | null;
 
   beforeEach(() => {
     vi.resetModules();

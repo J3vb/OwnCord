@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /** Captured emoji picker callbacks so tests can simulate selection. */
-let lastEmojiPickerOptions: { onSelect: (emoji: string) => void; onClose: () => void } | null = null;
+let lastEmojiPickerOptions: { onSelect: (emoji: string) => void; onClose: () => void } | null =
+  null;
 
 vi.mock("@components/EmojiPicker", () => ({
   createEmojiPicker: (opts: { onSelect: (emoji: string) => void; onClose: () => void }) => {
@@ -24,10 +25,7 @@ vi.mock("@components/GifPicker", () => ({
   },
 }));
 
-import {
-  createMessageInput,
-  type MessageInputOptions,
-} from "@components/MessageInput";
+import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
 
 function makeOptions(overrides: Partial<MessageInputOptions> = {}): MessageInputOptions {
   return {
@@ -100,9 +98,7 @@ describe("MessageInput", () => {
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "Enter message";
 
-    textarea.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
+    textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 
     expect(opts.onSend).toHaveBeenCalledWith("Enter message", null, []);
 
@@ -333,9 +329,7 @@ describe("MessageInput", () => {
     comp.startEdit(88, "editing");
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-    textarea.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-    );
+    textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 
     // Edit bar should be hidden
     const bars = container.querySelectorAll(".reply-bar");
@@ -354,9 +348,7 @@ describe("MessageInput", () => {
     comp.setReplyTo(44, "replyuser");
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-    textarea.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-    );
+    textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 
     const replyBar = container.querySelector(".reply-bar") as HTMLDivElement;
     expect(replyBar.classList.contains("visible")).toBe(false);
@@ -377,9 +369,7 @@ describe("MessageInput", () => {
     const listener = vi.fn();
     container.addEventListener("edit-last-message", listener);
 
-    textarea.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }),
-    );
+    textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
 
     expect(listener).toHaveBeenCalledTimes(1);
 
@@ -397,9 +387,7 @@ describe("MessageInput", () => {
     const listener = vi.fn();
     container.addEventListener("edit-last-message", listener);
 
-    textarea.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }),
-    );
+    textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
 
     expect(listener).not.toHaveBeenCalled();
 
@@ -501,7 +489,7 @@ describe("MessageInput", () => {
     expect(onUploadFile).not.toHaveBeenCalled();
     const error = container.querySelector(".attachment-upload-error");
     expect(error).not.toBeNull();
-    expect(error!.textContent).toContain("Unsupported file type");
+    expect(error!.textContent).toContain("is not a supported file type");
 
     comp.destroy?.();
   });
@@ -532,9 +520,12 @@ describe("MessageInput", () => {
   it("blocks send while uploads are still in flight", async () => {
     // Create an upload that never resolves during the test
     let resolveUpload: ((v: { id: string; url: string; filename: string }) => void) | null = null;
-    const onUploadFile = vi.fn(() => new Promise<{ id: string; url: string; filename: string }>((res) => {
-      resolveUpload = res;
-    }));
+    const onUploadFile = vi.fn(
+      () =>
+        new Promise<{ id: string; url: string; filename: string }>((res) => {
+          resolveUpload = res;
+        }),
+    );
     const opts = makeOptions({ onUploadFile });
     const comp = createMessageInput(opts);
     comp.mount(container);
@@ -567,9 +558,12 @@ describe("MessageInput", () => {
   it("remove button removes attachment preview while upload is pending", async () => {
     // Use a long-running upload so we can click remove while it's still pending
     let resolveUpload: ((v: { id: string; url: string; filename: string }) => void) | null = null;
-    const onUploadFile = vi.fn(() => new Promise<{ id: string; url: string; filename: string }>((res) => {
-      resolveUpload = res;
-    }));
+    const onUploadFile = vi.fn(
+      () =>
+        new Promise<{ id: string; url: string; filename: string }>((res) => {
+          resolveUpload = res;
+        }),
+    );
     const opts = makeOptions({ onUploadFile });
     const comp = createMessageInput(opts);
     comp.mount(container);
@@ -822,7 +816,11 @@ describe("MessageInput", () => {
   // ── Paste file handling ──
 
   it("pasting an image file triggers upload", async () => {
-    const onUploadFile = vi.fn(async () => ({ id: "paste-1", url: "http://x", filename: "paste.png" }));
+    const onUploadFile = vi.fn(async () => ({
+      id: "paste-1",
+      url: "http://x",
+      filename: "paste.png",
+    }));
     const opts = makeOptions({ onUploadFile });
     const comp = createMessageInput(opts);
     comp.mount(container);
@@ -837,11 +835,13 @@ describe("MessageInput", () => {
     };
     Object.defineProperty(pasteEvent, "clipboardData", {
       value: {
-        items: [{
-          kind: "file",
-          type: "image/png",
-          getAsFile: () => file,
-        }],
+        items: [
+          {
+            kind: "file",
+            type: "image/png",
+            getAsFile: () => file,
+          },
+        ],
       },
     });
 
@@ -854,9 +854,9 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  // ── Files with empty MIME type are accepted ──
+  // ── Files with empty MIME type are rejected (security hardening) ──
 
-  it("files with empty MIME type bypass type validation", async () => {
+  it("files with empty MIME type are rejected", async () => {
     const onUploadFile = vi.fn(async () => ({ id: "unk-1", url: "http://x", filename: "data" }));
     const opts = makeOptions({ onUploadFile });
     const comp = createMessageInput(opts);
@@ -867,9 +867,12 @@ describe("MessageInput", () => {
     Object.defineProperty(fileInput, "files", { value: [noTypeFile], writable: true });
     fileInput.dispatchEvent(new Event("change", { bubbles: true }));
 
-    await vi.waitFor(() => {
-      expect(onUploadFile).toHaveBeenCalledWith(noTypeFile);
-    });
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(onUploadFile).not.toHaveBeenCalled();
+    const error = container.querySelector(".attachment-upload-error");
+    expect(error).not.toBeNull();
+    expect(error!.textContent).toContain("is not a supported file type");
 
     comp.destroy?.();
   });

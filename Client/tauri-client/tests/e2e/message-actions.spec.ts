@@ -3,10 +3,7 @@
  * Tests: reply, edit, delete buttons on message hover.
  */
 import { test, expect } from "@playwright/test";
-import {
-  mockTauriFullSessionWithMessagesAndEcho,
-  navigateToMainPage,
-} from "./helpers";
+import { mockTauriFullSessionWithMessagesAndEcho, navigateToMainPage } from "./helpers";
 
 test.describe("Message Actions Bar", () => {
   test.beforeEach(async ({ page }) => {
@@ -69,9 +66,7 @@ test.describe("Message Actions Bar", () => {
     await expect(replyBar).toBeVisible({ timeout: 3000 });
   });
 
-  test("clicking Edit populates textarea with message content", async ({
-    page,
-  }) => {
+  test("clicking Edit populates textarea with message content", async ({ page }) => {
     const ownMessage = page.locator("[data-testid='message-101']");
     await ownMessage.hover();
 
@@ -99,9 +94,7 @@ test.describe("Message Reactions", () => {
     await navigateToMainPage(page);
   });
 
-  test("reaction chips are visible on messages with reactions", async ({
-    page,
-  }) => {
+  test("reaction chips are visible on messages with reactions", async ({ page }) => {
     const reactions = page.locator(".msg-reactions");
     await expect(reactions.first()).toBeVisible();
   });

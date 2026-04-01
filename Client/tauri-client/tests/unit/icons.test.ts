@@ -110,7 +110,7 @@ describe("createIcon", () => {
       const svg = createIcon(name);
       expect(
         svg.innerHTML.trim().length,
-        `Expected non-empty innerHTML for icon "${name}"`
+        `Expected non-empty innerHTML for icon "${name}"`,
       ).toBeGreaterThan(0);
     }
   });

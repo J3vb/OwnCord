@@ -28,10 +28,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /** Path to the built Tauri exe (release build). */
-const TAURI_EXE = path.resolve(
-  __dirname,
-  "../../src-tauri/target/release/owncord-client.exe",
-);
+const TAURI_EXE = path.resolve(__dirname, "../../src-tauri/target/release/owncord-client.exe");
 
 /** CDP port for WebView2 remote debugging. */
 const CDP_PORT = parseInt(process.env.CDP_PORT ?? "9222", 10);
@@ -65,7 +62,7 @@ async function waitForCdpEndpoint(port: number, timeout: number): Promise<void> 
 
   throw new Error(
     `CDP endpoint at port ${port} did not become available within ${timeout}ms. ` +
-    `Make sure the Tauri app was built (npm run tauri build) and the exe exists at: ${TAURI_EXE}`,
+      `Make sure the Tauri app was built (npm run tauri build) and the exe exists at: ${TAURI_EXE}`,
   );
 }
 
@@ -119,7 +116,7 @@ async function acquirePersistentPage(workerIndex: number): Promise<PersistentSta
   if (!fs.existsSync(TAURI_EXE)) {
     throw new Error(
       `Tauri exe not found at: ${TAURI_EXE}\n` +
-      `Run 'npm run tauri build' first to create the production build.`,
+        `Run 'npm run tauri build' first to create the production build.`,
     );
   }
 

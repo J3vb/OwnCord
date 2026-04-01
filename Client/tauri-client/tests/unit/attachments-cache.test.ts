@@ -32,7 +32,11 @@ vi.stubGlobal("indexedDB", {
           onerror: null,
           objectStore: () => ({
             get: () => {
-              const req: Record<string, unknown> = { onsuccess: null, onerror: null, result: undefined };
+              const req: Record<string, unknown> = {
+                onsuccess: null,
+                onerror: null,
+                result: undefined,
+              };
               Promise.resolve().then(() => {
                 const fn = req.onsuccess as ((ev: Event) => void) | null;
                 fn?.(new Event("success"));
@@ -68,7 +72,11 @@ vi.stubGlobal("indexedDB", {
   },
 });
 
-import { clearAttachmentCaches, fetchImageAsDataUrl, renderAttachment } from "../../src/components/message-list/attachments";
+import {
+  clearAttachmentCaches,
+  fetchImageAsDataUrl,
+  renderAttachment,
+} from "../../src/components/message-list/attachments";
 
 function imageResponse() {
   return {
@@ -88,9 +96,12 @@ describe("attachment cache clearing", () => {
 
   it("does not repopulate caches from an in-flight fetch after clear", async () => {
     let resolveFetch: ((value: ReturnType<typeof imageResponse>) => void) | undefined;
-    fetchMock.mockImplementationOnce(() => new Promise((resolve) => {
-      resolveFetch = resolve;
-    }));
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
 
     const pending = fetchImageAsDataUrl("https://example.com/image.png");
     await vi.waitFor(() => {
@@ -111,12 +122,18 @@ describe("attachment cache clearing", () => {
     let resolveFirst: ((value: ReturnType<typeof imageResponse>) => void) | undefined;
     let resolveSecond: ((value: ReturnType<typeof imageResponse>) => void) | undefined;
     fetchMock
-      .mockImplementationOnce(() => new Promise((resolve) => {
-        resolveFirst = resolve;
-      }))
-      .mockImplementationOnce(() => new Promise((resolve) => {
-        resolveSecond = resolve;
-      }));
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
 
     const first = fetchImageAsDataUrl("https://example.com/image.png");
     await vi.waitFor(() => {
@@ -142,9 +159,12 @@ describe("attachment cache clearing", () => {
 
   it("stops showing a loading placeholder when a mid-fetch clear invalidates the result", async () => {
     let resolveFetch: ((value: ReturnType<typeof imageResponse>) => void) | undefined;
-    fetchMock.mockImplementationOnce(() => new Promise((resolve) => {
-      resolveFetch = resolve;
-    }));
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
 
     const element = renderAttachment({
       id: "att-1",

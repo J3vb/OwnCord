@@ -357,7 +357,10 @@ describe("AudioPipeline", () => {
       };
 
       vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
-      vi.stubGlobal("MediaStream", vi.fn().mockImplementation(() => ({})));
+      vi.stubGlobal(
+        "MediaStream",
+        vi.fn().mockImplementation(() => ({})),
+      );
 
       mockRoom = {
         localParticipant: {
@@ -508,9 +511,10 @@ describe("AudioPipeline", () => {
       pipeline.setInputVolume(50);
 
       expect(mockGainNode.gain.setTargetAtTime).toHaveBeenCalled();
-      const call = mockGainNode.gain.setTargetAtTime.mock.calls[
-        mockGainNode.gain.setTargetAtTime.mock.calls.length - 1
-      ];
+      const call =
+        mockGainNode.gain.setTargetAtTime.mock.calls[
+          mockGainNode.gain.setTargetAtTime.mock.calls.length - 1
+        ];
       expect(call[0]).toBe(0.5); // inputGain = 50/100 = 0.5, not vadGated
     });
 
@@ -521,14 +525,20 @@ describe("AudioPipeline", () => {
       (pipeline as any).vadGated = true;
       pipeline.updatePipelineGain();
 
-      const call = mockGainNode.gain.setTargetAtTime.mock.calls[
-        mockGainNode.gain.setTargetAtTime.mock.calls.length - 1
-      ];
+      const call =
+        mockGainNode.gain.setTargetAtTime.mock.calls[
+          mockGainNode.gain.setTargetAtTime.mock.calls.length - 1
+        ];
       expect(call[0]).toBe(0);
     });
 
     it("handles AudioContext constructor failure gracefully", () => {
-      vi.stubGlobal("AudioContext", vi.fn(() => { throw new Error("AudioContext not supported"); }));
+      vi.stubGlobal(
+        "AudioContext",
+        vi.fn(() => {
+          throw new Error("AudioContext not supported");
+        }),
+      );
       pipeline.setRoom(mockRoom);
       // Should not throw
       expect(() => pipeline.setupAudioPipeline()).not.toThrow();
@@ -552,7 +562,9 @@ describe("AudioPipeline", () => {
       } as any;
       pipeline.setRoom(mockRoom);
       await pipeline.applyNoiseSuppressor();
-      expect(mockRoom.localParticipant.getTrackPublication().track.setProcessor).not.toHaveBeenCalled();
+      expect(
+        mockRoom.localParticipant.getTrackPublication().track.setProcessor,
+      ).not.toHaveBeenCalled();
     });
 
     it("attaches processor when track has none", async () => {
@@ -587,7 +599,9 @@ describe("AudioPipeline", () => {
       } as any;
       pipeline.setRoom(mockRoom);
       await pipeline.removeNoiseSuppressor();
-      expect(mockRoom.localParticipant.getTrackPublication().track.stopProcessor).not.toHaveBeenCalled();
+      expect(
+        mockRoom.localParticipant.getTrackPublication().track.stopProcessor,
+      ).not.toHaveBeenCalled();
     });
 
     it("removes processor when track has one", async () => {
@@ -648,11 +662,14 @@ describe("AudioPipeline", () => {
     function setupPipelineWithWorklet(workletBehavior: "success" | "fail"): void {
       mockGainNode = {
         gain: { value: 1, setValueAtTime: vi.fn(), setTargetAtTime: vi.fn() },
-        connect: vi.fn(), disconnect: vi.fn(),
+        connect: vi.fn(),
+        disconnect: vi.fn(),
       };
       mockAnalyserNode = {
-        fftSize: 0, smoothingTimeConstant: 0,
-        connect: vi.fn(), disconnect: vi.fn(),
+        fftSize: 0,
+        smoothingTimeConstant: 0,
+        connect: vi.fn(),
+        disconnect: vi.fn(),
         getFloatTimeDomainData: vi.fn(),
       };
       mockDestNode = {
@@ -670,23 +687,30 @@ describe("AudioPipeline", () => {
         close: vi.fn().mockResolvedValue(undefined),
         state: "running",
         audioWorklet: {
-          addModule: workletBehavior === "success"
-            ? vi.fn().mockResolvedValue(undefined)
-            : vi.fn().mockRejectedValue(new Error("no worklet")),
+          addModule:
+            workletBehavior === "success"
+              ? vi.fn().mockResolvedValue(undefined)
+              : vi.fn().mockRejectedValue(new Error("no worklet")),
         },
       };
 
       // Mock AudioWorkletNode
-      vi.stubGlobal("AudioWorkletNode", vi.fn().mockImplementation(() => ({
-        port: {
-          postMessage: vi.fn(),
-          onmessage: null as ((event: MessageEvent) => void) | null,
-        },
-        connect: vi.fn(),
-        disconnect: vi.fn(),
-      })));
+      vi.stubGlobal(
+        "AudioWorkletNode",
+        vi.fn().mockImplementation(() => ({
+          port: {
+            postMessage: vi.fn(),
+            onmessage: null as ((event: MessageEvent) => void) | null,
+          },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        })),
+      );
       vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
-      vi.stubGlobal("MediaStream", vi.fn().mockImplementation(() => ({})));
+      vi.stubGlobal(
+        "MediaStream",
+        vi.fn().mockImplementation(() => ({})),
+      );
 
       mockRoom = {
         localParticipant: {
@@ -694,7 +718,9 @@ describe("AudioPipeline", () => {
             track: {
               mediaStreamTrack: { id: "track" },
               sender: { replaceTrack: vi.fn().mockResolvedValue(undefined) },
-              getProcessor: vi.fn(), setProcessor: vi.fn(), stopProcessor: vi.fn(),
+              getProcessor: vi.fn(),
+              setProcessor: vi.fn(),
+              stopProcessor: vi.fn(),
             },
           }),
         },
@@ -789,9 +815,12 @@ describe("AudioPipeline", () => {
     it("falls back to setTimeout when AudioWorkletNode constructor throws", async () => {
       setupPipelineWithWorklet("success");
       // Override AudioWorkletNode to throw
-      vi.stubGlobal("AudioWorkletNode", vi.fn().mockImplementation(() => {
-        throw new Error("AudioWorkletNode not supported");
-      }));
+      vi.stubGlobal(
+        "AudioWorkletNode",
+        vi.fn().mockImplementation(() => {
+          throw new Error("AudioWorkletNode not supported");
+        }),
+      );
 
       pipeline.setRoom(mockRoom);
       pipeline.setupAudioPipeline();
@@ -819,15 +848,18 @@ describe("AudioPipeline", () => {
       dataArray.fill(0);
 
       const mockAnalyser = {
-        fftSize: 2048, smoothingTimeConstant: 0.3,
-        connect: vi.fn(), disconnect: vi.fn(),
+        fftSize: 2048,
+        smoothingTimeConstant: 0.3,
+        connect: vi.fn(),
+        disconnect: vi.fn(),
         getFloatTimeDomainData: vi.fn().mockImplementation((arr: Float32Array) => {
           arr.set(dataArray);
         }),
       };
       const mockGainNode = {
         gain: { value: 1, setValueAtTime: vi.fn(), setTargetAtTime: vi.fn() },
-        connect: vi.fn(), disconnect: vi.fn(),
+        connect: vi.fn(),
+        disconnect: vi.fn(),
       };
       const mockAudioCtx = {
         resume: vi.fn().mockResolvedValue(undefined),
@@ -845,7 +877,10 @@ describe("AudioPipeline", () => {
       };
 
       vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
-      vi.stubGlobal("MediaStream", vi.fn().mockImplementation(() => ({})));
+      vi.stubGlobal(
+        "MediaStream",
+        vi.fn().mockImplementation(() => ({})),
+      );
 
       mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
         if (key === "voiceSensitivity") return 50;
@@ -859,7 +894,9 @@ describe("AudioPipeline", () => {
             track: {
               mediaStreamTrack: { id: "track" },
               sender: { replaceTrack: vi.fn().mockResolvedValue(undefined) },
-              getProcessor: vi.fn(), setProcessor: vi.fn(), stopProcessor: vi.fn(),
+              getProcessor: vi.fn(),
+              setProcessor: vi.fn(),
+              stopProcessor: vi.fn(),
             },
           }),
         },
@@ -882,8 +919,10 @@ describe("AudioPipeline", () => {
       vi.useFakeTimers();
       let isSilent = true;
       const mockAnalyser = {
-        fftSize: 2048, smoothingTimeConstant: 0.3,
-        connect: vi.fn(), disconnect: vi.fn(),
+        fftSize: 2048,
+        smoothingTimeConstant: 0.3,
+        connect: vi.fn(),
+        disconnect: vi.fn(),
         getFloatTimeDomainData: vi.fn().mockImplementation((arr: Float32Array) => {
           if (isSilent) {
             arr.fill(0);
@@ -895,7 +934,8 @@ describe("AudioPipeline", () => {
       };
       const mockGainNode = {
         gain: { value: 1, setValueAtTime: vi.fn(), setTargetAtTime: vi.fn() },
-        connect: vi.fn(), disconnect: vi.fn(),
+        connect: vi.fn(),
+        disconnect: vi.fn(),
       };
       const mockAudioCtx = {
         resume: vi.fn().mockResolvedValue(undefined),
@@ -913,7 +953,10 @@ describe("AudioPipeline", () => {
       };
 
       vi.stubGlobal("AudioContext", vi.fn().mockReturnValue(mockAudioCtx));
-      vi.stubGlobal("MediaStream", vi.fn().mockImplementation(() => ({})));
+      vi.stubGlobal(
+        "MediaStream",
+        vi.fn().mockImplementation(() => ({})),
+      );
 
       mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
         if (key === "voiceSensitivity") return 50;
@@ -927,7 +970,9 @@ describe("AudioPipeline", () => {
             track: {
               mediaStreamTrack: { id: "track" },
               sender: { replaceTrack: vi.fn().mockResolvedValue(undefined) },
-              getProcessor: vi.fn(), setProcessor: vi.fn(), stopProcessor: vi.fn(),
+              getProcessor: vi.fn(),
+              setProcessor: vi.fn(),
+              stopProcessor: vi.fn(),
             },
           }),
         },
@@ -975,27 +1020,37 @@ describe("AudioPipeline", () => {
       } as any;
 
       // Stub AudioContext for setupAudioPipeline called internally
-      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue({
-        resume: vi.fn().mockResolvedValue(undefined),
-        createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
-        createAnalyser: vi.fn().mockReturnValue({
-          fftSize: 0, smoothingTimeConstant: 0, connect: vi.fn(), disconnect: vi.fn(),
-          getFloatTimeDomainData: vi.fn(),
+      vi.stubGlobal(
+        "AudioContext",
+        vi.fn().mockReturnValue({
+          resume: vi.fn().mockResolvedValue(undefined),
+          createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
+          createAnalyser: vi.fn().mockReturnValue({
+            fftSize: 0,
+            smoothingTimeConstant: 0,
+            connect: vi.fn(),
+            disconnect: vi.fn(),
+            getFloatTimeDomainData: vi.fn(),
+          }),
+          createGain: vi.fn().mockReturnValue({
+            gain: { value: 1, setValueAtTime: vi.fn(), setTargetAtTime: vi.fn() },
+            connect: vi.fn(),
+            disconnect: vi.fn(),
+          }),
+          createMediaStreamDestination: vi.fn().mockReturnValue({
+            stream: { getAudioTracks: vi.fn().mockReturnValue([]) },
+            disconnect: vi.fn(),
+          }),
+          currentTime: 0,
+          close: vi.fn().mockResolvedValue(undefined),
+          state: "running",
+          audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no worklet")) },
         }),
-        createGain: vi.fn().mockReturnValue({
-          gain: { value: 1, setValueAtTime: vi.fn(), setTargetAtTime: vi.fn() },
-          connect: vi.fn(), disconnect: vi.fn(),
-        }),
-        createMediaStreamDestination: vi.fn().mockReturnValue({
-          stream: { getAudioTracks: vi.fn().mockReturnValue([]) },
-          disconnect: vi.fn(),
-        }),
-        currentTime: 0,
-        close: vi.fn().mockResolvedValue(undefined),
-        state: "running",
-        audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no worklet")) },
-      }));
-      vi.stubGlobal("MediaStream", vi.fn().mockImplementation(() => ({})));
+      );
+      vi.stubGlobal(
+        "MediaStream",
+        vi.fn().mockImplementation(() => ({})),
+      );
 
       pipeline.setRoom(mockRoom);
       await pipeline.reapplyAudioProcessing();
@@ -1033,27 +1088,37 @@ describe("AudioPipeline", () => {
         },
       } as any;
 
-      vi.stubGlobal("AudioContext", vi.fn().mockReturnValue({
-        resume: vi.fn().mockResolvedValue(undefined),
-        createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
-        createAnalyser: vi.fn().mockReturnValue({
-          fftSize: 0, smoothingTimeConstant: 0, connect: vi.fn(), disconnect: vi.fn(),
-          getFloatTimeDomainData: vi.fn(),
+      vi.stubGlobal(
+        "AudioContext",
+        vi.fn().mockReturnValue({
+          resume: vi.fn().mockResolvedValue(undefined),
+          createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
+          createAnalyser: vi.fn().mockReturnValue({
+            fftSize: 0,
+            smoothingTimeConstant: 0,
+            connect: vi.fn(),
+            disconnect: vi.fn(),
+            getFloatTimeDomainData: vi.fn(),
+          }),
+          createGain: vi.fn().mockReturnValue({
+            gain: { value: 1, setValueAtTime: vi.fn(), setTargetAtTime: vi.fn() },
+            connect: vi.fn(),
+            disconnect: vi.fn(),
+          }),
+          createMediaStreamDestination: vi.fn().mockReturnValue({
+            stream: { getAudioTracks: vi.fn().mockReturnValue([]) },
+            disconnect: vi.fn(),
+          }),
+          currentTime: 0,
+          close: vi.fn().mockResolvedValue(undefined),
+          state: "running",
+          audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no worklet")) },
         }),
-        createGain: vi.fn().mockReturnValue({
-          gain: { value: 1, setValueAtTime: vi.fn(), setTargetAtTime: vi.fn() },
-          connect: vi.fn(), disconnect: vi.fn(),
-        }),
-        createMediaStreamDestination: vi.fn().mockReturnValue({
-          stream: { getAudioTracks: vi.fn().mockReturnValue([]) },
-          disconnect: vi.fn(),
-        }),
-        currentTime: 0,
-        close: vi.fn().mockResolvedValue(undefined),
-        state: "running",
-        audioWorklet: { addModule: vi.fn().mockRejectedValue(new Error("no worklet")) },
-      }));
-      vi.stubGlobal("MediaStream", vi.fn().mockImplementation(() => ({})));
+      );
+      vi.stubGlobal(
+        "MediaStream",
+        vi.fn().mockImplementation(() => ({})),
+      );
 
       pipeline.setRoom(mockRoom);
       await pipeline.reapplyAudioProcessing();

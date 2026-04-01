@@ -13,6 +13,7 @@ import type { ServerMessage } from "../../src/lib/types";
 // Mock notifications and livekitSession to avoid side effects
 vi.mock("@lib/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
+  cleanupNotificationAudio: vi.fn(),
 }));
 vi.mock("@lib/livekitSession", () => ({
   handleVoiceToken: vi.fn(async () => {}),
@@ -40,10 +41,7 @@ function createMockWs() {
     connect: vi.fn(),
     disconnect: vi.fn(),
     send: vi.fn(() => "test-id"),
-    on<T extends ServerMessage["type"]>(
-      type: T,
-      listener: WsListener<T>,
-    ): () => void {
+    on<T extends ServerMessage["type"]>(type: T, listener: WsListener<T>): () => void {
       if (!listeners.has(type)) {
         listeners.set(type, new Set());
       }
@@ -110,7 +108,7 @@ describe("WS Dispatcher", () => {
       localCamera: false,
       localScreenshare: false,
       joinedAt: null,
-    listenOnly: false,
+      listenOnly: false,
     }));
     dmStore.setState(() => ({ channels: [] }));
     uiStore.setState((prev) => ({ ...prev, transientError: null }));
@@ -148,12 +146,8 @@ describe("WS Dispatcher", () => {
         { id: 1, name: "general", type: "text", category: null, position: 0 },
         { id: 2, name: "voice", type: "voice", category: null, position: 1 },
       ],
-      members: [
-        { id: 1, username: "alex", avatar: null, role: "admin", status: "online" },
-      ],
-      voice_states: [
-        { channel_id: 2, user_id: 1, muted: false, deafened: false },
-      ],
+      members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
+      voice_states: [{ channel_id: 2, user_id: 1, muted: false, deafened: false }],
       roles: [],
     });
 
@@ -286,7 +280,13 @@ describe("WS Dispatcher", () => {
   it("wires member_ban to remove member from members store", () => {
     membersStore.setState((prev) => {
       const m = new Map(prev.members);
-      m.set(77, { id: 77, username: "banned-user", avatar: null, role: "member", status: "online" as const });
+      m.set(77, {
+        id: 77,
+        username: "banned-user",
+        avatar: null,
+        role: "member",
+        status: "online" as const,
+      });
       return { ...prev, members: m };
     });
 
@@ -297,7 +297,13 @@ describe("WS Dispatcher", () => {
   it("wires member_leave to members store", () => {
     membersStore.setState((prev) => {
       const m = new Map(prev.members);
-      m.set(99, { id: 99, username: "bye", avatar: null, role: "member", status: "online" as const });
+      m.set(99, {
+        id: 99,
+        username: "bye",
+        avatar: null,
+        role: "member",
+        status: "online" as const,
+      });
       return { ...prev, members: m };
     });
 
@@ -323,12 +329,10 @@ describe("WS Dispatcher", () => {
 
   it("wires ready with DM channels in payload", () => {
     mock.dispatch("ready", {
-      channels: [
-        { id: 1, name: "general", type: "text", category: null, position: 0 },
-      ],
+      channels: [{ id: 1, name: "general", type: "text", category: null, position: 0 }],
       members: [],
       voice_states: [],
-      roles: [{ id: 1, name: "admin", permissions: 0x7FFFFFFF }],
+      roles: [{ id: 1, name: "admin", permissions: 0x7fffffff }],
       dm_channels: [
         {
           channel_id: 100,
@@ -369,9 +373,7 @@ describe("WS Dispatcher", () => {
     }));
 
     mock.dispatch("ready", {
-      channels: [
-        { id: 1, name: "general", type: "text", category: null, position: 0 },
-      ],
+      channels: [{ id: 1, name: "general", type: "text", category: null, position: 0 }],
       members: [],
       voice_states: [],
       roles: [],
@@ -382,9 +384,7 @@ describe("WS Dispatcher", () => {
 
   it("ready with no text channels does not set active", () => {
     mock.dispatch("ready", {
-      channels: [
-        { id: 5, name: "voice-only", type: "voice", category: null, position: 0 },
-      ],
+      channels: [{ id: 5, name: "voice-only", type: "voice", category: null, position: 0 }],
       members: [],
       voice_states: [],
       roles: [],
@@ -564,7 +564,13 @@ describe("WS Dispatcher", () => {
   it("wires member_update to update role", () => {
     membersStore.setState((prev) => {
       const m = new Map(prev.members);
-      m.set(42, { id: 42, username: "alice", avatar: null, role: "member", status: "online" as const });
+      m.set(42, {
+        id: 42,
+        username: "alice",
+        avatar: null,
+        role: "member",
+        status: "online" as const,
+      });
       return { ...prev, members: m };
     });
 
@@ -1104,7 +1110,7 @@ describe("WS Dispatcher", () => {
     // voice_leave should NOT be sent — the LiveKit room is active
     const sendCalls = (mock.ws.send as ReturnType<typeof vi.fn>).mock.calls;
     const voiceLeaveSent = sendCalls.some(
-      ([msg]: [{ type: string }]) => msg.type === "voice_leave",
+      (args: unknown[]) => (args[0] as Record<string, unknown>)?.type === "voice_leave",
     );
     expect(voiceLeaveSent).toBe(false);
   });
@@ -1131,7 +1137,7 @@ describe("WS Dispatcher", () => {
     // voice_leave should NOT be sent — user 42 is not in voice_states
     const sendCalls = (mock.ws.send as ReturnType<typeof vi.fn>).mock.calls;
     const voiceLeaveSent = sendCalls.some(
-      ([msg]: [{ type: string }]) => msg.type === "voice_leave",
+      (args: unknown[]) => (args[0] as Record<string, unknown>)?.type === "voice_leave",
     );
     expect(voiceLeaveSent).toBe(false);
   });

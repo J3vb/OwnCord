@@ -507,9 +507,15 @@ describe("AudioElements", () => {
       expect(removeSs).toHaveBeenCalled();
     });
 
-    it("clears muted-by-user state", () => {
+    it("preserves muted-by-user state for reconnecting tracks", () => {
       elements.muteScreenshareAudio(42, true);
       elements.cleanupAllAudioElements();
+      expect(elements.getScreenshareAudioMuted(42)).toBe(true);
+    });
+
+    it("clears muted-by-user state with full cleanup", () => {
+      elements.muteScreenshareAudio(42, true);
+      elements.cleanupAllAudioElementsFull();
       expect(elements.getScreenshareAudioMuted(42)).toBe(false);
     });
   });

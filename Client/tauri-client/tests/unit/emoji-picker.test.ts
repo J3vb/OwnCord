@@ -118,9 +118,7 @@ describe("EmojiPicker", () => {
 
   it("renders custom emoji when provided", () => {
     const { picker } = makePicker({
-      customEmoji: [
-        { shortcode: "test_emoji", url: "https://example.com/emoji.png" },
-      ],
+      customEmoji: [{ shortcode: "test_emoji", url: "https://example.com/emoji.png" }],
     });
 
     const labels = picker.element.querySelectorAll(".ep-category-label");

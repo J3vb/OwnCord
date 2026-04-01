@@ -108,7 +108,9 @@ describe("SettingsOverlay", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
 
-    const activeTab = container.querySelector(".settings-sidebar > button.settings-nav-item.active");
+    const activeTab = container.querySelector(
+      ".settings-sidebar > button.settings-nav-item.active",
+    );
     expect(activeTab?.textContent).toBe("Account");
 
     overlay.destroy?.();
@@ -344,8 +346,9 @@ describe("SettingsOverlay", () => {
     (inputs[1] as HTMLInputElement).value = "short";
     (inputs[2] as HTMLInputElement).value = "short";
 
-    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn"))
-      .find((b) => b.textContent === "Change Password") as HTMLElement;
+    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+      (b) => b.textContent === "Change Password",
+    ) as HTMLElement;
     changePwBtn.click();
 
     expect(defaultOptions.onChangePassword).not.toHaveBeenCalled();
@@ -362,8 +365,9 @@ describe("SettingsOverlay", () => {
     (inputs[1] as HTMLInputElement).value = "newpassword123";
     (inputs[2] as HTMLInputElement).value = "differentpassword";
 
-    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn"))
-      .find((b) => b.textContent === "Change Password") as HTMLElement;
+    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+      (b) => b.textContent === "Change Password",
+    ) as HTMLElement;
     changePwBtn.click();
 
     expect(defaultOptions.onChangePassword).not.toHaveBeenCalled();
@@ -381,8 +385,9 @@ describe("SettingsOverlay", () => {
     (inputs[1] as HTMLInputElement).value = "newpassword123";
     (inputs[2] as HTMLInputElement).value = "newpassword123";
 
-    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn"))
-      .find((b) => b.textContent === "Change Password") as HTMLElement;
+    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+      (b) => b.textContent === "Change Password",
+    ) as HTMLElement;
     changePwBtn.click();
 
     await vi.waitFor(() => {
@@ -409,14 +414,17 @@ describe("SettingsOverlay", () => {
     (inputs[1] as HTMLInputElement).value = "newpassword123";
     (inputs[2] as HTMLInputElement).value = "newpassword123";
 
-    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn"))
-      .find((b) => b.textContent === "Change Password") as HTMLElement;
+    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+      (b) => b.textContent === "Change Password",
+    ) as HTMLElement;
     changePwBtn.click();
 
     await vi.waitFor(() => {
       // Find the error element near the password fields
       const errorEls = container.querySelectorAll("div[style*='color:var(--red)']");
-      const pwError = Array.from(errorEls).find((el) => el.textContent === "Incorrect old password");
+      const pwError = Array.from(errorEls).find(
+        (el) => el.textContent === "Incorrect old password",
+      );
       expect(pwError).not.toBeUndefined();
     });
 
@@ -434,8 +442,9 @@ describe("SettingsOverlay", () => {
     const editInput = container.querySelector("input.form-input[type='text']") as HTMLInputElement;
     editInput.value = "taken-name";
 
-    const saveBtn = Array.from(container.querySelectorAll(".ac-btn"))
-      .find((b) => b.textContent === "Save") as HTMLElement;
+    const saveBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+      (b) => b.textContent === "Save",
+    ) as HTMLElement;
     saveBtn.click();
 
     await vi.waitFor(() => {
@@ -452,8 +461,9 @@ describe("SettingsOverlay", () => {
     overlay.mount(container);
 
     // Click "Edit User Profile" button instead of "Edit" button
-    const editProfileBtn = Array.from(container.querySelectorAll(".ac-btn"))
-      .find((b) => b.textContent === "Edit User Profile") as HTMLElement;
+    const editProfileBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+      (b) => b.textContent === "Edit User Profile",
+    ) as HTMLElement;
     editProfileBtn.click();
 
     const editInput = container.querySelector("input.form-input[type='text']") as HTMLInputElement;
@@ -474,8 +484,9 @@ describe("SettingsOverlay", () => {
     editBtn.click();
 
     // Click cancel
-    const cancelBtn = Array.from(container.querySelectorAll(".ac-btn"))
-      .find((b) => b.textContent === "Cancel") as HTMLElement;
+    const cancelBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+      (b) => b.textContent === "Cancel",
+    ) as HTMLElement;
     cancelBtn.click();
 
     // Edit form should be hidden
@@ -492,10 +503,14 @@ describe("SettingsOverlay", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
 
-    const triggerBtn = container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement;
+    const triggerBtn = container.querySelector(
+      "[data-testid='delete-account-trigger']",
+    ) as HTMLElement;
     expect(triggerBtn).not.toBeNull();
 
-    const confirmArea = container.querySelector("[data-testid='delete-account-confirm-area']") as HTMLElement;
+    const confirmArea = container.querySelector(
+      "[data-testid='delete-account-confirm-area']",
+    ) as HTMLElement;
     expect(confirmArea.style.display).toBe("none");
 
     triggerBtn.click();
@@ -510,10 +525,14 @@ describe("SettingsOverlay", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
 
-    const triggerBtn = container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement;
+    const triggerBtn = container.querySelector(
+      "[data-testid='delete-account-trigger']",
+    ) as HTMLElement;
     triggerBtn.click();
 
-    const confirmArea = container.querySelector("[data-testid='delete-account-confirm-area']") as HTMLElement;
+    const confirmArea = container.querySelector(
+      "[data-testid='delete-account-confirm-area']",
+    ) as HTMLElement;
     expect(confirmArea.style.display).toBe("block");
 
     const cancelBtn = confirmArea.querySelector("button:not(.account-delete-btn)") as HTMLElement;
@@ -529,10 +548,14 @@ describe("SettingsOverlay", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
 
-    const triggerBtn = container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement;
+    const triggerBtn = container.querySelector(
+      "[data-testid='delete-account-trigger']",
+    ) as HTMLElement;
     triggerBtn.click();
 
-    const confirmBtn = container.querySelector("[data-testid='delete-account-confirm']") as HTMLElement;
+    const confirmBtn = container.querySelector(
+      "[data-testid='delete-account-confirm']",
+    ) as HTMLElement;
     confirmBtn.click();
 
     const errorEl = container.querySelector("[data-testid='delete-account-error']") as HTMLElement;
@@ -546,13 +569,19 @@ describe("SettingsOverlay", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
 
-    const triggerBtn = container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement;
+    const triggerBtn = container.querySelector(
+      "[data-testid='delete-account-trigger']",
+    ) as HTMLElement;
     triggerBtn.click();
 
-    const passwordInput = container.querySelector("[data-testid='delete-account-password']") as HTMLInputElement;
+    const passwordInput = container.querySelector(
+      "[data-testid='delete-account-password']",
+    ) as HTMLInputElement;
     passwordInput.value = "mypassword123";
 
-    const confirmBtn = container.querySelector("[data-testid='delete-account-confirm']") as HTMLButtonElement;
+    const confirmBtn = container.querySelector(
+      "[data-testid='delete-account-confirm']",
+    ) as HTMLButtonElement;
     confirmBtn.click();
 
     expect(defaultOptions.onDeleteAccount).toHaveBeenCalledWith("mypassword123");
@@ -564,13 +593,19 @@ describe("SettingsOverlay", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
 
-    const triggerBtn = container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement;
+    const triggerBtn = container.querySelector(
+      "[data-testid='delete-account-trigger']",
+    ) as HTMLElement;
     triggerBtn.click();
 
-    const passwordInput = container.querySelector("[data-testid='delete-account-password']") as HTMLInputElement;
+    const passwordInput = container.querySelector(
+      "[data-testid='delete-account-password']",
+    ) as HTMLInputElement;
     passwordInput.value = "mypassword123";
 
-    const confirmBtn = container.querySelector("[data-testid='delete-account-confirm']") as HTMLButtonElement;
+    const confirmBtn = container.querySelector(
+      "[data-testid='delete-account-confirm']",
+    ) as HTMLButtonElement;
     confirmBtn.click();
 
     expect(confirmBtn.disabled).toBe(true);
@@ -588,13 +623,19 @@ describe("SettingsOverlay", () => {
     const overlay = createSettingsOverlay(failOptions);
     overlay.mount(container);
 
-    const triggerBtn = container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement;
+    const triggerBtn = container.querySelector(
+      "[data-testid='delete-account-trigger']",
+    ) as HTMLElement;
     triggerBtn.click();
 
-    const passwordInput = container.querySelector("[data-testid='delete-account-password']") as HTMLInputElement;
+    const passwordInput = container.querySelector(
+      "[data-testid='delete-account-password']",
+    ) as HTMLInputElement;
     passwordInput.value = "wrongpassword";
 
-    const confirmBtn = container.querySelector("[data-testid='delete-account-confirm']") as HTMLButtonElement;
+    const confirmBtn = container.querySelector(
+      "[data-testid='delete-account-confirm']",
+    ) as HTMLButtonElement;
     confirmBtn.click();
 
     // Wait for the rejected promise to settle
@@ -613,14 +654,20 @@ describe("SettingsOverlay", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
 
-    const triggerBtn = container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement;
+    const triggerBtn = container.querySelector(
+      "[data-testid='delete-account-trigger']",
+    ) as HTMLElement;
     triggerBtn.click();
 
-    const passwordInput = container.querySelector("[data-testid='delete-account-password']") as HTMLInputElement;
+    const passwordInput = container.querySelector(
+      "[data-testid='delete-account-password']",
+    ) as HTMLInputElement;
     passwordInput.value = "typed-something";
 
     // Cancel and reopen
-    const confirmArea = container.querySelector("[data-testid='delete-account-confirm-area']") as HTMLElement;
+    const confirmArea = container.querySelector(
+      "[data-testid='delete-account-confirm-area']",
+    ) as HTMLElement;
     const cancelBtn = confirmArea.querySelector("button:not(.account-delete-btn)") as HTMLElement;
     cancelBtn.click();
     triggerBtn.click();
@@ -663,8 +710,9 @@ describe("SettingsOverlay", () => {
     editInput.value = "A";
 
     // Click Save
-    const saveBtn = Array.from(container.querySelectorAll(".ac-btn"))
-      .find((b) => b.textContent === "Save") as HTMLElement;
+    const saveBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+      (b) => b.textContent === "Save",
+    ) as HTMLElement;
     saveBtn.click();
 
     // Should NOT call onUpdateProfile
@@ -683,8 +731,9 @@ describe("SettingsOverlay", () => {
     const editInput = container.querySelector("input.form-input[type='text']") as HTMLInputElement;
     editInput.value = "AB";
 
-    const saveBtn = Array.from(container.querySelectorAll(".ac-btn"))
-      .find((b) => b.textContent === "Save") as HTMLElement;
+    const saveBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+      (b) => b.textContent === "Save",
+    ) as HTMLElement;
     saveBtn.click();
 
     expect(defaultOptions.onUpdateProfile).toHaveBeenCalledWith("AB");
@@ -764,7 +813,9 @@ describe("SettingsOverlay", () => {
     const tabNames = Array.from(tabs).map((t) => t.textContent);
     expect(tabNames).not.toContain("Account");
     // Should start on Appearance instead
-    const activeTab = container.querySelector(".settings-sidebar > button.settings-nav-item.active");
+    const activeTab = container.querySelector(
+      ".settings-sidebar > button.settings-nav-item.active",
+    );
     expect(activeTab?.textContent).toBe("Appearance");
 
     overlay.destroy?.();

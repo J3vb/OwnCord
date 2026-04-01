@@ -84,8 +84,12 @@ const mockGain = {
 class MockAudioContext {
   readonly currentTime = 0;
   readonly destination = {};
-  createOscillator() { return mockOscillator; }
-  createGain() { return mockGain; }
+  createOscillator() {
+    return mockOscillator;
+  }
+  createGain() {
+    return mockGain;
+  }
 }
 
 // Set up AudioContext mock globally
@@ -106,7 +110,20 @@ describe("notifyIncomingMessage", () => {
 
     // Set up channels store
     channelsStore.setState(() => ({
-      channels: new Map([[1, { id: 1, name: "general", type: "text" as const, category: null, position: 0, unreadCount: 0, lastMessageId: null }]]),
+      channels: new Map([
+        [
+          1,
+          {
+            id: 1,
+            name: "general",
+            type: "text" as const,
+            category: null,
+            position: 0,
+            unreadCount: 0,
+            lastMessageId: null,
+          },
+        ],
+      ]),
       activeChannelId: 1,
       roles: [],
     }));
@@ -423,7 +440,9 @@ describe("notifyIncomingMessage", () => {
     // Remove Notification entirely to trigger the inner catch
     const originalNotification = globalThis.Notification;
     Object.defineProperty(globalThis, "Notification", {
-      get() { throw new Error("Notification not available"); },
+      get() {
+        throw new Error("Notification not available");
+      },
       configurable: true,
     });
 

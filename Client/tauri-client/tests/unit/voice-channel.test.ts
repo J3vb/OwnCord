@@ -421,9 +421,7 @@ describe("VoiceChannel", () => {
     const userItems = result.element.querySelectorAll(".voice-user-item");
     expect(userItems.length).toBe(2);
 
-    const names = Array.from(userItems).map(
-      (el) => el.querySelector(".vu-name")?.textContent,
-    );
+    const names = Array.from(userItems).map((el) => el.querySelector(".vu-name")?.textContent);
     expect(names).toContain("Alice");
     expect(names).toContain("Bob");
 
@@ -573,11 +571,13 @@ describe("VoiceChannel", () => {
     container.appendChild(result.element);
 
     const userRow = result.element.querySelector(".voice-user-item") as HTMLElement;
-    userRow.dispatchEvent(new MouseEvent("contextmenu", {
-      bubbles: true,
-      clientX: 200,
-      clientY: 300,
-    }));
+    userRow.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        clientX: 200,
+        clientY: 300,
+      }),
+    );
 
     // Menu should be appended to document.body
     const menu = document.body.querySelector(".context-menu");
@@ -629,11 +629,13 @@ describe("VoiceChannel", () => {
     container.appendChild(result.element);
 
     const userRow = result.element.querySelector(".voice-user-item") as HTMLElement;
-    userRow.dispatchEvent(new MouseEvent("contextmenu", {
-      bubbles: true,
-      clientX: 200,
-      clientY: 300,
-    }));
+    userRow.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        clientX: 200,
+        clientY: 300,
+      }),
+    );
 
     // No context menu should appear
     const menu = document.body.querySelector(".context-menu");
@@ -675,11 +677,13 @@ describe("VoiceChannel", () => {
 
     // Open context menu
     const userRow = result.element.querySelector(".voice-user-item") as HTMLElement;
-    userRow.dispatchEvent(new MouseEvent("contextmenu", {
-      bubbles: true,
-      clientX: 200,
-      clientY: 300,
-    }));
+    userRow.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        clientX: 200,
+        clientY: 300,
+      }),
+    );
 
     expect(document.body.querySelector(".context-menu")).not.toBeNull();
 

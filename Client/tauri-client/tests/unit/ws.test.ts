@@ -114,14 +114,17 @@ describe("WebSocket Client (Tauri proxy)", () => {
     const states: ConnectionState[] = [];
     client.onStateChange((s) => states.push(s));
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok",
-      payload: {
-        user: { id: 1, username: "alex", avatar: null, role: "admin" },
-        server_name: "Test",
-        motd: "Hello",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        payload: {
+          user: { id: 1, username: "alex", avatar: null, role: "admin" },
+          server_name: "Test",
+          motd: "Hello",
+        },
+      }),
+    );
 
     expect(states).toContain("connected");
   });
@@ -134,16 +137,21 @@ describe("WebSocket Client (Tauri proxy)", () => {
     const messages: unknown[] = [];
     client.on("chat_message", (payload) => messages.push(payload));
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "chat_message",
-      payload: {
-        id: 1, channel_id: 5,
-        user: { id: 1, username: "alex", avatar: null },
-        content: "Hello",
-        reply_to: null, attachments: [],
-        timestamp: "2026-03-14T10:00:00Z",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "chat_message",
+        payload: {
+          id: 1,
+          channel_id: 5,
+          user: { id: 1, username: "alex", avatar: null },
+          content: "Hello",
+          reply_to: null,
+          attachments: [],
+          timestamp: "2026-03-14T10:00:00Z",
+        },
+      }),
+    );
 
     expect(messages).toHaveLength(1);
   });
@@ -157,16 +165,21 @@ describe("WebSocket Client (Tauri proxy)", () => {
     const unsub = client.on("chat_message", (payload) => messages.push(payload));
     unsub();
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "chat_message",
-      payload: {
-        id: 1, channel_id: 5,
-        user: { id: 1, username: "alex", avatar: null },
-        content: "Hello",
-        reply_to: null, attachments: [],
-        timestamp: "2026-03-14T10:00:00Z",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "chat_message",
+        payload: {
+          id: 1,
+          channel_id: 5,
+          user: { id: 1, username: "alex", avatar: null },
+          content: "Hello",
+          reply_to: null,
+          attachments: [],
+          timestamp: "2026-03-14T10:00:00Z",
+        },
+      }),
+    );
 
     expect(messages).toHaveLength(0);
   });
@@ -179,10 +192,13 @@ describe("WebSocket Client (Tauri proxy)", () => {
     const authErrors: unknown[] = [];
     client.on("auth_error", (payload) => authErrors.push(payload));
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_error",
-      payload: { message: "Invalid token" },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_error",
+        payload: { message: "Invalid token" },
+      }),
+    );
 
     await vi.advanceTimersByTimeAsync(60_000);
 
@@ -195,13 +211,17 @@ describe("WebSocket Client (Tauri proxy)", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok",
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     const states: ConnectionState[] = [];
     client.onStateChange((s) => states.push(s));
@@ -245,10 +265,12 @@ describe("WebSocket Client (Tauri proxy)", () => {
     const bigData = JSON.stringify({
       type: "chat_message",
       payload: {
-        id: 1, channel_id: 1,
+        id: 1,
+        channel_id: 1,
         user: { id: 1, username: "a", avatar: null },
         content: "x".repeat(100),
-        reply_to: null, attachments: [],
+        reply_to: null,
+        attachments: [],
         timestamp: "2026-01-01T00:00:00Z",
       },
     });
@@ -305,7 +327,10 @@ describe("lastSeq tracking", () => {
     emitTauriEvent("ws-state", "open");
 
     const authCall = mockInvoke.mock.calls.find(
-      (c) => c[0] === "ws_send" && typeof c[1]?.message === "string" && (c[1].message as string).includes('"type":"auth"'),
+      (c) =>
+        c[0] === "ws_send" &&
+        typeof c[1]?.message === "string" &&
+        (c[1].message as string).includes('"type":"auth"'),
     );
     expect(authCall).toBeDefined();
     const authMsg = JSON.parse((authCall![1] as { message: string }).message);
@@ -318,26 +343,36 @@ describe("lastSeq tracking", () => {
     emitTauriEvent("ws-state", "open");
 
     // Send auth_ok so we're connected
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok",
-      seq: 1,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     // Send a message with seq 42
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "chat_message",
-      seq: 42,
-      payload: {
-        id: 1, channel_id: 1,
-        user: { id: 1, username: "a", avatar: null },
-        content: "hi", reply_to: null, attachments: [],
-        timestamp: "2026-01-01T00:00:00Z",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "chat_message",
+        seq: 42,
+        payload: {
+          id: 1,
+          channel_id: 1,
+          user: { id: 1, username: "a", avatar: null },
+          content: "hi",
+          reply_to: null,
+          attachments: [],
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
 
     // Now simulate a disconnect + reconnect to verify lastSeq was updated
     emitTauriEvent("ws-state", "closed");
@@ -347,7 +382,10 @@ describe("lastSeq tracking", () => {
     emitTauriEvent("ws-state", "open");
 
     const authCall = mockInvoke.mock.calls.find(
-      (c) => c[0] === "ws_send" && typeof c[1]?.message === "string" && (c[1].message as string).includes('"type":"auth"'),
+      (c) =>
+        c[0] === "ws_send" &&
+        typeof c[1]?.message === "string" &&
+        (c[1].message as string).includes('"type":"auth"'),
     );
     expect(authCall).toBeDefined();
     const authMsg = JSON.parse((authCall![1] as { message: string }).message);
@@ -359,14 +397,18 @@ describe("lastSeq tracking", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok",
-      seq: 5,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 5,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     // Disconnect unexpectedly
     emitTauriEvent("ws-state", "closed");
@@ -376,7 +418,10 @@ describe("lastSeq tracking", () => {
     emitTauriEvent("ws-state", "open");
 
     const authCall = mockInvoke.mock.calls.find(
-      (c) => c[0] === "ws_send" && typeof c[1]?.message === "string" && (c[1].message as string).includes('"type":"auth"'),
+      (c) =>
+        c[0] === "ws_send" &&
+        typeof c[1]?.message === "string" &&
+        (c[1].message as string).includes('"type":"auth"'),
     );
     expect(authCall).toBeDefined();
     const authMsg = JSON.parse((authCall![1] as { message: string }).message);
@@ -388,13 +433,18 @@ describe("lastSeq tracking", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok", seq: 10,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 10,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     // First auto-reconnect
     emitTauriEvent("ws-state", "closed");
@@ -402,22 +452,34 @@ describe("lastSeq tracking", () => {
     emitTauriEvent("ws-state", "open");
 
     // Receive more messages with higher seq
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok", seq: 11,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "chat_message", seq: 25,
-      payload: {
-        id: 2, channel_id: 1,
-        user: { id: 1, username: "a", avatar: null },
-        content: "hello", reply_to: null, attachments: [],
-        timestamp: "2026-01-01T00:00:00Z",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 11,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "chat_message",
+        seq: 25,
+        payload: {
+          id: 2,
+          channel_id: 1,
+          user: { id: 1, username: "a", avatar: null },
+          content: "hello",
+          reply_to: null,
+          attachments: [],
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
 
     // Second auto-reconnect
     emitTauriEvent("ws-state", "closed");
@@ -426,7 +488,10 @@ describe("lastSeq tracking", () => {
     emitTauriEvent("ws-state", "open");
 
     const authCall = mockInvoke.mock.calls.find(
-      (c) => c[0] === "ws_send" && typeof c[1]?.message === "string" && (c[1].message as string).includes('"type":"auth"'),
+      (c) =>
+        c[0] === "ws_send" &&
+        typeof c[1]?.message === "string" &&
+        (c[1].message as string).includes('"type":"auth"'),
     );
     const authMsg = JSON.parse((authCall![1] as { message: string }).message);
     expect(authMsg.payload.last_seq).toBe(25);
@@ -437,13 +502,18 @@ describe("lastSeq tracking", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok", seq: 50,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 50,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     // Intentional disconnect (e.g. logout)
     client.disconnect();
@@ -455,7 +525,10 @@ describe("lastSeq tracking", () => {
     emitTauriEvent("ws-state", "open");
 
     const authCall = mockInvoke.mock.calls.find(
-      (c) => c[0] === "ws_send" && typeof c[1]?.message === "string" && (c[1].message as string).includes('"type":"auth"'),
+      (c) =>
+        c[0] === "ws_send" &&
+        typeof c[1]?.message === "string" &&
+        (c[1].message as string).includes('"type":"auth"'),
     );
     expect(authCall).toBeDefined();
     const authMsg = JSON.parse((authCall![1] as { message: string }).message);
@@ -485,13 +558,18 @@ describe("cert mismatch blocking", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok", seq: 1,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     // Cert mismatch event fires
     emitTauriEvent("cert-tofu", {
@@ -509,9 +587,7 @@ describe("cert mismatch blocking", () => {
     // Wait well beyond normal backoff — should NOT reconnect
     mockInvoke.mockClear();
     await vi.advanceTimersByTimeAsync(60_000);
-    const reconnectCalls = mockInvoke.mock.calls.filter(
-      (c) => c[0] === "ws_connect",
-    );
+    const reconnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
     expect(reconnectCalls).toHaveLength(0);
   });
 
@@ -520,13 +596,18 @@ describe("cert mismatch blocking", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok", seq: 1,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     emitTauriEvent("cert-tofu", {
       host: "localhost:8443",
@@ -556,13 +637,18 @@ describe("cert mismatch blocking", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok", seq: 1,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     // Trigger mismatch
     emitTauriEvent("cert-tofu", {
@@ -647,34 +733,53 @@ describe("message handling edge cases", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok", seq: 10,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 10,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     // seq=50 then seq=30 — should keep 50
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "chat_message", seq: 50,
-      payload: {
-        id: 1, channel_id: 1,
-        user: { id: 1, username: "a", avatar: null },
-        content: "hi", reply_to: null, attachments: [],
-        timestamp: "2026-01-01T00:00:00Z",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "chat_message",
+        seq: 50,
+        payload: {
+          id: 1,
+          channel_id: 1,
+          user: { id: 1, username: "a", avatar: null },
+          content: "hi",
+          reply_to: null,
+          attachments: [],
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "chat_message", seq: 30,
-      payload: {
-        id: 2, channel_id: 1,
-        user: { id: 1, username: "a", avatar: null },
-        content: "hello", reply_to: null, attachments: [],
-        timestamp: "2026-01-01T00:00:00Z",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "chat_message",
+        seq: 30,
+        payload: {
+          id: 2,
+          channel_id: 1,
+          user: { id: 1, username: "a", avatar: null },
+          content: "hello",
+          reply_to: null,
+          attachments: [],
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
 
     // Disconnect and reconnect to verify lastSeq
     emitTauriEvent("ws-state", "closed");
@@ -683,7 +788,10 @@ describe("message handling edge cases", () => {
     emitTauriEvent("ws-state", "open");
 
     const authCall = mockInvoke.mock.calls.find(
-      (c) => c[0] === "ws_send" && typeof c[1]?.message === "string" && (c[1].message as string).includes('"type":"auth"'),
+      (c) =>
+        c[0] === "ws_send" &&
+        typeof c[1]?.message === "string" &&
+        (c[1].message as string).includes('"type":"auth"'),
     );
     const authMsg = JSON.parse((authCall![1] as { message: string }).message);
     expect(authMsg.payload.last_seq).toBe(50);
@@ -697,16 +805,22 @@ describe("message handling edge cases", () => {
     const messages: unknown[] = [];
     client.on("chat_message", (p) => messages.push(p));
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "chat_message",
-      // no seq field
-      payload: {
-        id: 1, channel_id: 1,
-        user: { id: 1, username: "a", avatar: null },
-        content: "no seq", reply_to: null, attachments: [],
-        timestamp: "2026-01-01T00:00:00Z",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "chat_message",
+        // no seq field
+        payload: {
+          id: 1,
+          channel_id: 1,
+          user: { id: 1, username: "a", avatar: null },
+          content: "no seq",
+          reply_to: null,
+          attachments: [],
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
 
     expect(messages).toHaveLength(1);
   });
@@ -717,13 +831,17 @@ describe("message handling edge cases", () => {
     emitTauriEvent("ws-state", "open");
 
     // Send a message with no listener registered — should log "no listeners"
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok",
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     // No crash means the "no listeners" debug log path executed
     expect(client.getState()).toBe("connected");
@@ -743,15 +861,21 @@ describe("message handling edge cases", () => {
     const messages: unknown[] = [];
     client.on("chat_message", (p) => messages.push(p));
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "chat_message",
-      payload: {
-        id: 1, channel_id: 1,
-        user: { id: 1, username: "a", avatar: null },
-        content: "test", reply_to: null, attachments: [],
-        timestamp: "2026-01-01T00:00:00Z",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "chat_message",
+        payload: {
+          id: 1,
+          channel_id: 1,
+          user: { id: 1, username: "a", avatar: null },
+          content: "test",
+          reply_to: null,
+          attachments: [],
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
 
     // Second listener should still receive the message
     expect(messages).toHaveLength(1);
@@ -847,23 +971,36 @@ describe("reconnection dedup", () => {
     emitTauriEvent("ws-state", "open");
 
     // Auth and get some messages to advance lastSeq
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok", seq: 1,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "chat_message", seq: 5, id: "msg-5",
-      payload: {
-        id: 1, channel_id: 1,
-        user: { id: 1, username: "a", avatar: null },
-        content: "original", reply_to: null, attachments: [],
-        timestamp: "2026-01-01T00:00:00Z",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "chat_message",
+        seq: 5,
+        id: "msg-5",
+        payload: {
+          id: 1,
+          channel_id: 1,
+          user: { id: 1, username: "a", avatar: null },
+          content: "original",
+          reply_to: null,
+          attachments: [],
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
 
     // Disconnect unexpectedly
     emitTauriEvent("ws-state", "closed");
@@ -879,26 +1016,42 @@ describe("reconnection dedup", () => {
     client.on("chat_message", (p) => messages.push(p));
 
     // Send a message during replay -- first occurrence passes
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "chat_message", seq: 5, id: "msg-5",
-      payload: {
-        id: 1, channel_id: 1,
-        user: { id: 1, username: "a", avatar: null },
-        content: "original", reply_to: null, attachments: [],
-        timestamp: "2026-01-01T00:00:00Z",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "chat_message",
+        seq: 5,
+        id: "msg-5",
+        payload: {
+          id: 1,
+          channel_id: 1,
+          user: { id: 1, username: "a", avatar: null },
+          content: "original",
+          reply_to: null,
+          attachments: [],
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
 
     // Send the SAME message ID again — should be deduped
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "chat_message", seq: 5, id: "msg-5",
-      payload: {
-        id: 1, channel_id: 1,
-        user: { id: 1, username: "a", avatar: null },
-        content: "original", reply_to: null, attachments: [],
-        timestamp: "2026-01-01T00:00:00Z",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "chat_message",
+        seq: 5,
+        id: "msg-5",
+        payload: {
+          id: 1,
+          channel_id: 1,
+          user: { id: 1, username: "a", avatar: null },
+          content: "original",
+          reply_to: null,
+          attachments: [],
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
 
     // Only the first occurrence should pass through
     expect(messages).toHaveLength(1);
@@ -910,13 +1063,18 @@ describe("reconnection dedup", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok", seq: 5,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 5,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     // Disconnect
     emitTauriEvent("ws-state", "closed");
@@ -929,13 +1087,18 @@ describe("reconnection dedup", () => {
     client.on("auth_ok", (p) => authPayloads.push(p));
 
     // auth_ok during replay should NOT be deduped
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok", seq: 6,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 6,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     expect(authPayloads).toHaveLength(1);
     // After auth_ok, replay dedup should be cleared
@@ -947,18 +1110,27 @@ describe("reconnection dedup", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok", seq: 1,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "presence", seq: 10,
-      payload: { user_id: 1, status: "idle" },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "presence",
+        seq: 10,
+        payload: { user_id: 1, status: "idle" },
+      }),
+    );
 
     // Disconnect
     emitTauriEvent("ws-state", "closed");
@@ -969,22 +1141,34 @@ describe("reconnection dedup", () => {
     client.on("presence", (p) => presences.push(p));
 
     // First presence during replay — passes through
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "presence", seq: 10,
-      payload: { user_id: 1, status: "idle" },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "presence",
+        seq: 10,
+        payload: { user_id: 1, status: "idle" },
+      }),
+    );
 
     // Same type:seq — should be deduped
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "presence", seq: 10,
-      payload: { user_id: 1, status: "idle" },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "presence",
+        seq: 10,
+        payload: { user_id: 1, status: "idle" },
+      }),
+    );
 
     // Different seq — should pass through
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "presence", seq: 11,
-      payload: { user_id: 1, status: "online" },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "presence",
+        seq: 11,
+        payload: { user_id: 1, status: "online" },
+      }),
+    );
 
     expect(presences).toHaveLength(2);
     expect((presences[0] as { status: string }).status).toBe("idle");
@@ -1023,13 +1207,18 @@ describe("heartbeat", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok", seq: 1,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     mockInvoke.mockClear();
 
@@ -1037,7 +1226,10 @@ describe("heartbeat", () => {
     await vi.advanceTimersByTimeAsync(30_000);
 
     const pingSends = mockInvoke.mock.calls.filter(
-      (c) => c[0] === "ws_send" && typeof c[1]?.message === "string" && (c[1].message as string).includes('"type":"ping"'),
+      (c) =>
+        c[0] === "ws_send" &&
+        typeof c[1]?.message === "string" &&
+        (c[1].message as string).includes('"type":"ping"'),
     );
     expect(pingSends.length).toBeGreaterThanOrEqual(1);
   });
@@ -1047,13 +1239,18 @@ describe("heartbeat", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok", seq: 1,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     client.disconnect();
     mockInvoke.mockClear();
@@ -1062,7 +1259,10 @@ describe("heartbeat", () => {
     await vi.advanceTimersByTimeAsync(60_000);
 
     const pingSends = mockInvoke.mock.calls.filter(
-      (c) => c[0] === "ws_send" && typeof c[1]?.message === "string" && (c[1].message as string).includes('"type":"ping"'),
+      (c) =>
+        c[0] === "ws_send" &&
+        typeof c[1]?.message === "string" &&
+        (c[1].message as string).includes('"type":"ping"'),
     );
     expect(pingSends).toHaveLength(0);
   });
@@ -1116,13 +1316,18 @@ describe("send edge cases", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok", seq: 1,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     // Drop connection
     emitTauriEvent("ws-state", "closed");
@@ -1131,13 +1336,18 @@ describe("send edge cases", () => {
     await vi.advanceTimersByTimeAsync(1100);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok", seq: 2,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 2,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     // Drop again
     emitTauriEvent("ws-state", "closed");
@@ -1155,13 +1365,18 @@ describe("send edge cases", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok", seq: 1,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     // Make ws_send reject
     mockInvoke.mockImplementation(async (cmd: string) => {
@@ -1185,13 +1400,18 @@ describe("send edge cases", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok", seq: 1,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     // Make ws_disconnect throw
     mockInvoke.mockImplementation(async (cmd: string) => {
@@ -1214,26 +1434,36 @@ describe("send edge cases", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent("ws-message", JSON.stringify({
-      type: "auth_ok", seq: 1,
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S", motd: "",
-      },
-    }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
 
     // Force multiple reconnect attempts to ramp up backoff
     for (let i = 0; i < 5; i++) {
       emitTauriEvent("ws-state", "closed");
       await vi.advanceTimersByTimeAsync(10_000); // well past any backoff
       emitTauriEvent("ws-state", "open");
-      emitTauriEvent("ws-message", JSON.stringify({
-        type: "auth_ok", seq: i + 2,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S", motd: "",
-        },
-      }));
+      emitTauriEvent(
+        "ws-message",
+        JSON.stringify({
+          type: "auth_ok",
+          seq: i + 2,
+          payload: {
+            user: { id: 1, username: "a", avatar: null, role: "admin" },
+            server_name: "S",
+            motd: "",
+          },
+        }),
+      );
     }
 
     // At this point, the reconnect delay should be capped at 5000ms

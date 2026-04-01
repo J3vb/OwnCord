@@ -25,21 +25,27 @@ const sampleReady = {
   payload: {
     channels: [
       {
-        id: 1, name: "general", type: "text" as const,
-        category: "Main", position: 0, unread_count: 3, last_message_id: 1040,
+        id: 1,
+        name: "general",
+        type: "text" as const,
+        category: "Main",
+        position: 0,
+        unread_count: 3,
+        last_message_id: 1040,
       },
       {
-        id: 10, name: "voice-chat", type: "voice" as const,
-        category: "Main", position: 1,
+        id: 10,
+        name: "voice-chat",
+        type: "voice" as const,
+        category: "Main",
+        position: 1,
       },
     ],
     members: [
       { id: 1, username: "alex", avatar: "uuid.png", role: "admin", status: "online" as const },
       { id: 2, username: "jordan", avatar: null, role: "member", status: "idle" as const },
     ],
-    voice_states: [
-      { channel_id: 10, user_id: 2, muted: false, deafened: false },
-    ],
+    voice_states: [{ channel_id: 10, user_id: 2, muted: false, deafened: false }],
     roles: [
       { id: 1, name: "Owner", color: "#E74C3C", permissions: 2147483647 },
       { id: 2, name: "Admin", color: "#F39C12", permissions: 1073741823 },
@@ -51,14 +57,20 @@ const sampleReady = {
 const sampleChatMessage = {
   type: "chat_message" as const,
   payload: {
-    id: 1042, channel_id: 5,
+    id: 1042,
+    channel_id: 5,
     user: { id: 1, username: "alex", avatar: "uuid.png" },
     content: "Hello everyone!",
     reply_to: null,
-    attachments: [{
-      id: "upload-uuid-1", filename: "photo.jpg",
-      size: 204800, mime: "image/jpeg", url: "/files/upload-uuid-1",
-    }],
+    attachments: [
+      {
+        id: "upload-uuid-1",
+        filename: "photo.jpg",
+        size: 204800,
+        mime: "image/jpeg",
+        url: "/files/upload-uuid-1",
+      },
+    ],
     timestamp: "2026-03-14T10:30:00Z",
   },
 };
@@ -66,9 +78,13 @@ const sampleChatMessage = {
 const sampleVoiceConfig = {
   type: "voice_config" as const,
   payload: {
-    channel_id: 10, quality: "medium" as const, bitrate: 64000,
-    threshold_mode: "forwarding" as const, mixing_threshold: 10,
-    top_speakers: 3, max_users: 50,
+    channel_id: 10,
+    quality: "medium" as const,
+    bitrate: 64000,
+    threshold_mode: "forwarding" as const,
+    mixing_threshold: 10,
+    top_speakers: 3,
+    max_users: 50,
   },
 };
 
@@ -153,13 +169,32 @@ describe("AUDIT Critical: no channel_focus message type", () => {
     // This test documents that channel_focus is intentionally excluded.
     // If someone accidentally adds it, this comment serves as a warning.
     const validTypes = [
-      "auth_ok", "auth_error", "ready", "chat_message", "chat_send_ok",
-      "chat_edited", "chat_deleted", "reaction_update", "typing", "presence",
-      "channel_create", "channel_update", "channel_delete",
-      "voice_state", "voice_leave", "voice_config", "voice_speakers",
-      "voice_offer", "voice_answer", "voice_ice",
-      "member_join", "member_leave", "member_update", "member_ban",
-      "server_restart", "error",
+      "auth_ok",
+      "auth_error",
+      "ready",
+      "chat_message",
+      "chat_send_ok",
+      "chat_edited",
+      "chat_deleted",
+      "reaction_update",
+      "typing",
+      "presence",
+      "channel_create",
+      "channel_update",
+      "channel_delete",
+      "voice_state",
+      "voice_leave",
+      "voice_config",
+      "voice_speakers",
+      "voice_offer",
+      "voice_answer",
+      "voice_ice",
+      "member_join",
+      "member_leave",
+      "member_update",
+      "member_ban",
+      "server_restart",
+      "error",
     ];
     expect(validTypes).not.toContain("channel_focus");
   });
@@ -219,7 +254,7 @@ describe("Permission bitfield", () => {
   });
 
   it("ADMINISTRATOR bit can be checked with bitwise AND", () => {
-    const ownerPerms = 0x7FFFFFFF;
+    const ownerPerms = 0x7fffffff;
     expect(ownerPerms & P.ADMINISTRATOR).toBeTruthy();
 
     const memberPerms = 0x00000663;

@@ -120,8 +120,12 @@ describe("Voice disconnect — logout cleanup", () => {
     const wsDisconnect = vi.fn();
     const callOrder: string[] = [];
 
-    wsSend.mockImplementation(() => { callOrder.push("send"); });
-    wsDisconnect.mockImplementation(() => { callOrder.push("disconnect"); });
+    wsSend.mockImplementation(() => {
+      callOrder.push("send");
+    });
+    wsDisconnect.mockImplementation(() => {
+      callOrder.push("disconnect");
+    });
 
     // User is authenticated and in a voice channel
     authStore.setState((prev) => ({

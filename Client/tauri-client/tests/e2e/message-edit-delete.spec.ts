@@ -3,10 +3,7 @@
  * Covers: edit → save, edit → cancel, delete.
  */
 import { test, expect } from "@playwright/test";
-import {
-  mockTauriFullSessionWithMessagesAndEcho,
-  navigateToMainPage,
-} from "./helpers";
+import { mockTauriFullSessionWithMessagesAndEcho, navigateToMainPage } from "./helpers";
 
 test.describe("Message Edit Flow", () => {
   test.beforeEach(async ({ page }) => {
@@ -97,8 +94,8 @@ test.describe("Message Delete Flow", () => {
     await deleteBtn.click();
 
     // Soft-delete: message stays in DOM but shows "[message deleted]"
-    await expect(
-      ownMessage.locator(".msg-text", { hasText: "[message deleted]" }),
-    ).toBeVisible({ timeout: 5000 });
+    await expect(ownMessage.locator(".msg-text", { hasText: "[message deleted]" })).toBeVisible({
+      timeout: 5000,
+    });
   });
 });

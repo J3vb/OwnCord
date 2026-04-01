@@ -4,11 +4,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mocks
 // ---------------------------------------------------------------------------
 
-const { mockVoiceStoreGetState, mockGetLocalCameraStream, mockGetLocalScreenshareStream } = vi.hoisted(() => ({
-  mockVoiceStoreGetState: vi.fn(),
-  mockGetLocalCameraStream: vi.fn((): MediaStream | null => null),
-  mockGetLocalScreenshareStream: vi.fn((): MediaStream | null => null),
-}));
+const { mockVoiceStoreGetState, mockGetLocalCameraStream, mockGetLocalScreenshareStream } =
+  vi.hoisted(() => ({
+    mockVoiceStoreGetState: vi.fn(),
+    mockGetLocalCameraStream: vi.fn((): MediaStream | null => null),
+    mockGetLocalScreenshareStream: vi.fn((): MediaStream | null => null),
+  }));
 
 vi.mock("@stores/voice.store", () => ({
   voiceStore: { getState: mockVoiceStoreGetState },
@@ -54,7 +55,10 @@ interface VoiceStateStub {
   currentChannelId: number | null;
   localCamera: boolean;
   localScreenshare: boolean;
-  voiceUsers: Map<number, Map<number, { userId: number; camera: boolean; screenshare: boolean; username: string }>>;
+  voiceUsers: Map<
+    number,
+    Map<number, { userId: number; camera: boolean; screenshare: boolean; username: string }>
+  >;
 }
 
 function makeVoiceState(overrides: Partial<VoiceStateStub> = {}): VoiceStateStub {
@@ -181,7 +185,11 @@ describe("createVideoModeController", () => {
     });
     ctrl.checkVideoMode();
 
-    expect(vg.addStream).toHaveBeenCalledWith(1, "me (You)", fakeStream, { isSelf: true, audioUserId: 1, isScreenshare: false });
+    expect(vg.addStream).toHaveBeenCalledWith(1, "me (You)", fakeStream, {
+      isSelf: true,
+      audioUserId: 1,
+      isScreenshare: false,
+    });
   });
 
   it("removes local tile when local camera is off", () => {
@@ -305,7 +313,11 @@ describe("createVideoModeController", () => {
     ctrl.checkVideoMode();
 
     // screenshareUserId = currentUserId + 1_000_000 = 1 + 1_000_000 = 1_000_001
-    expect(vg.addStream).toHaveBeenCalledWith(1_000_001, "me (Screen)", fakeStream, { isSelf: true, audioUserId: 1, isScreenshare: true });
+    expect(vg.addStream).toHaveBeenCalledWith(1_000_001, "me (Screen)", fakeStream, {
+      isSelf: true,
+      audioUserId: 1,
+      isScreenshare: true,
+    });
   });
 
   it("removes local screenshare tile when screenshare is turned off", () => {
@@ -313,7 +325,11 @@ describe("createVideoModeController", () => {
 
     // First call: screenshare on — tile added
     mockVoiceStoreGetState.mockReturnValue(
-      makeVoiceState({ currentChannelId: 10, localScreenshare: true, voiceUsers: new Map([[10, users]]) }),
+      makeVoiceState({
+        currentChannelId: 10,
+        localScreenshare: true,
+        voiceUsers: new Map([[10, users]]),
+      }),
     );
     const fakeStream = { getTracks: () => [] } as unknown as MediaStream;
     mockGetLocalScreenshareStream.mockReturnValue(fakeStream);
@@ -325,11 +341,19 @@ describe("createVideoModeController", () => {
       getCurrentUserId: () => 1,
     });
     ctrl.checkVideoMode();
-    expect(vg.addStream).toHaveBeenCalledWith(1_000_001, "me (Screen)", fakeStream, { isSelf: true, audioUserId: 1, isScreenshare: true });
+    expect(vg.addStream).toHaveBeenCalledWith(1_000_001, "me (Screen)", fakeStream, {
+      isSelf: true,
+      audioUserId: 1,
+      isScreenshare: true,
+    });
 
     // Second call: screenshare off — tile removed
     mockVoiceStoreGetState.mockReturnValue(
-      makeVoiceState({ currentChannelId: 10, localScreenshare: false, voiceUsers: new Map([[10, users]]) }),
+      makeVoiceState({
+        currentChannelId: 10,
+        localScreenshare: false,
+        voiceUsers: new Map([[10, users]]),
+      }),
     );
     ctrl.checkVideoMode();
     expect(vg.removeStream).toHaveBeenCalledWith(1_000_001);

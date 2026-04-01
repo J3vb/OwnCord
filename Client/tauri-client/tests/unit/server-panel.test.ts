@@ -193,10 +193,7 @@ describe("ServerPanel", () => {
   describe("server click", () => {
     it("calls onServerClick with host when a server item is clicked", () => {
       const onServerClick = vi.fn();
-      const panel = createServerPanel(
-        makeOpts({ onServerClick }),
-        [SIMPLE_PROFILES[0]!],
-      );
+      const panel = createServerPanel(makeOpts({ onServerClick }), [SIMPLE_PROFILES[0]!]);
       container.appendChild(panel.element);
 
       const item = container.querySelector(".server-item") as HTMLElement;
@@ -208,10 +205,7 @@ describe("ServerPanel", () => {
     it("calls onServerClick with host AND username for full profiles", () => {
       const onServerClick = vi.fn();
       const fp = fullProfile();
-      const panel = createServerPanel(
-        makeOpts({ onServerClick }),
-        [fp],
-      );
+      const panel = createServerPanel(makeOpts({ onServerClick }), [fp]);
       container.appendChild(panel.element);
 
       const item = container.querySelector(".server-item") as HTMLElement;
@@ -240,21 +234,15 @@ describe("ServerPanel", () => {
         token: "tok",
       });
 
-      const panel = createServerPanel(
-        makeOpts({ onCredentialLoaded }),
-        [SIMPLE_PROFILES[0]!],
-      );
+      const panel = createServerPanel(makeOpts({ onCredentialLoaded }), [SIMPLE_PROFILES[0]!]);
       container.appendChild(panel.element);
 
       const item = container.querySelector(".server-item") as HTMLElement;
       item.click();
 
+      // Password is no longer returned from credential store over IPC (security hardening)
       await vi.waitFor(() => {
-        expect(onCredentialLoaded).toHaveBeenCalledWith(
-          "localhost:8443",
-          "saveduser",
-          "savedpass",
-        );
+        expect(onCredentialLoaded).toHaveBeenCalledWith("localhost:8443", "saveduser", undefined);
       });
     });
 
@@ -262,10 +250,7 @@ describe("ServerPanel", () => {
       const onCredentialLoaded = vi.fn();
       vi.mocked(loadCredential).mockResolvedValueOnce(null);
 
-      const panel = createServerPanel(
-        makeOpts({ onCredentialLoaded }),
-        [SIMPLE_PROFILES[0]!],
-      );
+      const panel = createServerPanel(makeOpts({ onCredentialLoaded }), [SIMPLE_PROFILES[0]!]);
       container.appendChild(panel.element);
 
       const item = container.querySelector(".server-item") as HTMLElement;
@@ -338,10 +323,7 @@ describe("ServerPanel", () => {
     it("calls onToggleAutoLogin with profile id and toggled state", () => {
       const onToggleAutoLogin = vi.fn();
       const fp = fullProfile({ autoConnect: false });
-      const panel = createServerPanel(
-        makeOpts({ onToggleAutoLogin }),
-        [fp],
-      );
+      const panel = createServerPanel(makeOpts({ onToggleAutoLogin }), [fp]);
       container.appendChild(panel.element);
 
       const autoLoginBtn = container.querySelector(".auto-login") as HTMLElement;
@@ -354,10 +336,7 @@ describe("ServerPanel", () => {
       const onServerClick = vi.fn();
       const onToggleAutoLogin = vi.fn();
       const fp = fullProfile();
-      const panel = createServerPanel(
-        makeOpts({ onServerClick, onToggleAutoLogin }),
-        [fp],
-      );
+      const panel = createServerPanel(makeOpts({ onServerClick, onToggleAutoLogin }), [fp]);
       container.appendChild(panel.element);
 
       const autoLoginBtn = container.querySelector(".auto-login") as HTMLElement;
@@ -416,10 +395,7 @@ describe("ServerPanel", () => {
     it("calls onDeleteProfile with profile id on click", () => {
       const onDeleteProfile = vi.fn();
       const fp = fullProfile();
-      const panel = createServerPanel(
-        makeOpts({ onDeleteProfile }),
-        [fp],
-      );
+      const panel = createServerPanel(makeOpts({ onDeleteProfile }), [fp]);
       container.appendChild(panel.element);
 
       const deleteBtn = container.querySelector(".srv-btn.danger") as HTMLElement;
@@ -432,10 +408,7 @@ describe("ServerPanel", () => {
       const onServerClick = vi.fn();
       const onDeleteProfile = vi.fn();
       const fp = fullProfile();
-      const panel = createServerPanel(
-        makeOpts({ onServerClick, onDeleteProfile }),
-        [fp],
-      );
+      const panel = createServerPanel(makeOpts({ onServerClick, onDeleteProfile }), [fp]);
       container.appendChild(panel.element);
 
       const deleteBtn = container.querySelector(".srv-btn.danger") as HTMLElement;

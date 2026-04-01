@@ -50,7 +50,9 @@ describe("DeleteChannelModal", () => {
   it("calls onConfirm when delete button is clicked", async () => {
     const onConfirm = vi.fn(async () => {});
     const { modal } = makeModal({ onConfirm });
-    const deleteBtn = container.querySelector("[data-testid='delete-channel-confirm']") as HTMLButtonElement;
+    const deleteBtn = container.querySelector(
+      "[data-testid='delete-channel-confirm']",
+    ) as HTMLButtonElement;
     deleteBtn.click();
 
     await vi.waitFor(() => {
@@ -88,7 +90,9 @@ describe("DeleteChannelModal", () => {
     const onConfirm = vi.fn().mockRejectedValue(new Error("Permission denied"));
     const { modal } = makeModal({ onConfirm });
 
-    const deleteBtn = container.querySelector("[data-testid='delete-channel-confirm']") as HTMLButtonElement;
+    const deleteBtn = container.querySelector(
+      "[data-testid='delete-channel-confirm']",
+    ) as HTMLButtonElement;
     deleteBtn.click();
 
     await vi.waitFor(() => {
@@ -106,7 +110,9 @@ describe("DeleteChannelModal", () => {
     const onConfirm = vi.fn().mockRejectedValue(42);
     const { modal } = makeModal({ onConfirm });
 
-    const deleteBtn = container.querySelector("[data-testid='delete-channel-confirm']") as HTMLButtonElement;
+    const deleteBtn = container.querySelector(
+      "[data-testid='delete-channel-confirm']",
+    ) as HTMLButtonElement;
     deleteBtn.click();
 
     await vi.waitFor(() => {
@@ -119,10 +125,17 @@ describe("DeleteChannelModal", () => {
 
   it("disables button and shows 'Deleting...' during delete", async () => {
     let resolveDelete: (() => void) | undefined;
-    const onConfirm = vi.fn<any>(() => new Promise<void>((resolve) => { resolveDelete = resolve; }));
+    const onConfirm = vi.fn<any>(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDelete = resolve;
+        }),
+    );
     const { modal } = makeModal({ onConfirm });
 
-    const deleteBtn = container.querySelector("[data-testid='delete-channel-confirm']") as HTMLButtonElement;
+    const deleteBtn = container.querySelector(
+      "[data-testid='delete-channel-confirm']",
+    ) as HTMLButtonElement;
     deleteBtn.click();
 
     expect(deleteBtn.hasAttribute("disabled")).toBe(true);
@@ -136,7 +149,9 @@ describe("DeleteChannelModal", () => {
     const onClose = vi.fn();
     const { modal } = makeModal({ onClose });
 
-    const overlay = container.querySelector("[data-testid='delete-channel-modal']") as HTMLDivElement;
+    const overlay = container.querySelector(
+      "[data-testid='delete-channel-modal']",
+    ) as HTMLDivElement;
     overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
     expect(onClose).toHaveBeenCalled();

@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-import { reconcileList } from '../../src/lib/reconcile';
+import { describe, it, expect, vi } from "vitest";
+import { reconcileList } from "../../src/lib/reconcile";
 
 interface Item {
   id: string;
@@ -7,7 +7,7 @@ interface Item {
 }
 
 function makeContainer(): HTMLDivElement {
-  return document.createElement('div');
+  return document.createElement("div");
 }
 
 function makeItem(id: string, label: string): Item {
@@ -15,9 +15,9 @@ function makeItem(id: string, label: string): Item {
 }
 
 function createEl(item: Item): HTMLDivElement {
-  const el = document.createElement('div');
+  const el = document.createElement("div");
   el.textContent = item.label;
-  el.setAttribute('data-reconcile-key', item.id);
+  el.setAttribute("data-reconcile-key", item.id);
   return el;
 }
 
@@ -26,15 +26,13 @@ function updateEl(el: Element, item: Item): void {
 }
 
 function getKeys(container: Element): string[] {
-  return Array.from(container.children).map(
-    (c) => c.getAttribute('data-reconcile-key') ?? '',
-  );
+  return Array.from(container.children).map((c) => c.getAttribute("data-reconcile-key") ?? "");
 }
 
-describe('reconcileList', () => {
-  it('inserts new items into empty container', () => {
+describe("reconcileList", () => {
+  it("inserts new items into empty container", () => {
     const container = makeContainer();
-    const items = [makeItem('a', 'A'), makeItem('b', 'B')];
+    const items = [makeItem("a", "A"), makeItem("b", "B")];
 
     reconcileList({
       container,
@@ -45,14 +43,14 @@ describe('reconcileList', () => {
     });
 
     expect(container.children.length).toBe(2);
-    expect(getKeys(container)).toEqual(['a', 'b']);
-    expect(container.children[0]!.textContent).toBe('A');
-    expect(container.children[1]!.textContent).toBe('B');
+    expect(getKeys(container)).toEqual(["a", "b"]);
+    expect(container.children[0]!.textContent).toBe("A");
+    expect(container.children[1]!.textContent).toBe("B");
   });
 
-  it('removes deleted items', () => {
+  it("removes deleted items", () => {
     const container = makeContainer();
-    const items = [makeItem('a', 'A'), makeItem('b', 'B'), makeItem('c', 'C')];
+    const items = [makeItem("a", "A"), makeItem("b", "B"), makeItem("c", "C")];
 
     reconcileList({
       container,
@@ -66,19 +64,19 @@ describe('reconcileList', () => {
     // Remove 'b'
     reconcileList({
       container,
-      items: [makeItem('a', 'A'), makeItem('c', 'C')],
+      items: [makeItem("a", "A"), makeItem("c", "C")],
       key: (i) => i.id,
       create: createEl,
       update: updateEl,
     });
 
     expect(container.children.length).toBe(2);
-    expect(getKeys(container)).toEqual(['a', 'c']);
+    expect(getKeys(container)).toEqual(["a", "c"]);
   });
 
-  it('reorders moved items', () => {
+  it("reorders moved items", () => {
     const container = makeContainer();
-    const items = [makeItem('a', 'A'), makeItem('b', 'B'), makeItem('c', 'C')];
+    const items = [makeItem("a", "A"), makeItem("b", "B"), makeItem("c", "C")];
 
     reconcileList({
       container,
@@ -91,18 +89,18 @@ describe('reconcileList', () => {
     // Reverse order
     reconcileList({
       container,
-      items: [makeItem('c', 'C'), makeItem('b', 'B'), makeItem('a', 'A')],
+      items: [makeItem("c", "C"), makeItem("b", "B"), makeItem("a", "A")],
       key: (i) => i.id,
       create: createEl,
       update: updateEl,
     });
 
-    expect(getKeys(container)).toEqual(['c', 'b', 'a']);
+    expect(getKeys(container)).toEqual(["c", "b", "a"]);
   });
 
-  it('updates changed items in-place (preserves DOM reference)', () => {
+  it("updates changed items in-place (preserves DOM reference)", () => {
     const container = makeContainer();
-    const items = [makeItem('a', 'A'), makeItem('b', 'B')];
+    const items = [makeItem("a", "A"), makeItem("b", "B")];
 
     reconcileList({
       container,
@@ -118,7 +116,7 @@ describe('reconcileList', () => {
     // Update label for 'a'
     reconcileList({
       container,
-      items: [makeItem('a', 'A-updated'), makeItem('b', 'B')],
+      items: [makeItem("a", "A-updated"), makeItem("b", "B")],
       key: (i) => i.id,
       create: createEl,
       update: updateEl,
@@ -127,10 +125,10 @@ describe('reconcileList', () => {
     // SAME DOM elements — not rebuilt
     expect(container.children[0]).toBe(origA);
     expect(container.children[1]).toBe(origB);
-    expect(origA.textContent).toBe('A-updated');
+    expect(origA.textContent).toBe("A-updated");
   });
 
-  it('handles empty → items', () => {
+  it("handles empty → items", () => {
     const container = makeContainer();
 
     reconcileList({
@@ -144,21 +142,21 @@ describe('reconcileList', () => {
 
     reconcileList({
       container,
-      items: [makeItem('x', 'X')],
+      items: [makeItem("x", "X")],
       key: (i) => i.id,
       create: createEl,
       update: updateEl,
     });
     expect(container.children.length).toBe(1);
-    expect(getKeys(container)).toEqual(['x']);
+    expect(getKeys(container)).toEqual(["x"]);
   });
 
-  it('handles items → empty', () => {
+  it("handles items → empty", () => {
     const container = makeContainer();
 
     reconcileList({
       container,
-      items: [makeItem('a', 'A'), makeItem('b', 'B')],
+      items: [makeItem("a", "A"), makeItem("b", "B")],
       key: (i) => i.id,
       create: createEl,
       update: updateEl,
@@ -175,9 +173,9 @@ describe('reconcileList', () => {
     expect(container.children.length).toBe(0);
   });
 
-  it('no-op when identical items', () => {
+  it("no-op when identical items", () => {
     const container = makeContainer();
-    const items = [makeItem('a', 'A'), makeItem('b', 'B')];
+    const items = [makeItem("a", "A"), makeItem("b", "B")];
     const createSpy = vi.fn(createEl);
 
     reconcileList({
@@ -195,7 +193,7 @@ describe('reconcileList', () => {
     // Same items again
     reconcileList({
       container,
-      items: [makeItem('a', 'A'), makeItem('b', 'B')],
+      items: [makeItem("a", "A"), makeItem("b", "B")],
       key: (i) => i.id,
       create: createSpy,
       update: updateEl,
@@ -208,12 +206,12 @@ describe('reconcileList', () => {
     expect(container.children[1]).toBe(origB);
   });
 
-  it('handles simultaneous add, remove, and reorder', () => {
+  it("handles simultaneous add, remove, and reorder", () => {
     const container = makeContainer();
 
     reconcileList({
       container,
-      items: [makeItem('a', 'A'), makeItem('b', 'B'), makeItem('c', 'C')],
+      items: [makeItem("a", "A"), makeItem("b", "B"), makeItem("c", "C")],
       key: (i) => i.id,
       create: createEl,
       update: updateEl,
@@ -224,13 +222,13 @@ describe('reconcileList', () => {
     // Remove 'a', add 'd', reorder: c, d, b
     reconcileList({
       container,
-      items: [makeItem('c', 'C'), makeItem('d', 'D'), makeItem('b', 'B')],
+      items: [makeItem("c", "C"), makeItem("d", "D"), makeItem("b", "B")],
       key: (i) => i.id,
       create: createEl,
       update: updateEl,
     });
 
-    expect(getKeys(container)).toEqual(['c', 'd', 'b']);
+    expect(getKeys(container)).toEqual(["c", "d", "b"]);
     expect(container.children.length).toBe(3);
     // 'c' element preserved
     expect(container.children[0]).toBe(origC);

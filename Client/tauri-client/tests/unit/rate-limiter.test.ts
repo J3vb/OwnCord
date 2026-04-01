@@ -34,9 +34,7 @@ describe("RateLimiter", () => {
   });
 
   it("throws when windowMs < 1", () => {
-    expect(() => new RateLimiter({ maxTokens: 1, windowMs: 0 })).toThrow(
-      "windowMs must be >= 1",
-    );
+    expect(() => new RateLimiter({ maxTokens: 1, windowMs: 0 })).toThrow("windowMs must be >= 1");
   });
 
   // -- tryConsume -----------------------------------------------------------

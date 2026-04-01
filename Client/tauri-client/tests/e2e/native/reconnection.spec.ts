@@ -7,11 +7,7 @@
  */
 
 import { test, expect } from "../native-fixture-persistent";
-import {
-  SKIP_SERVER,
-  hasCredentials,
-  ensureLoggedIn,
-} from "./helpers";
+import { SKIP_SERVER, hasCredentials, ensureLoggedIn } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Tests: Connection State
@@ -29,11 +25,9 @@ test.describe("Reconnection (Native)", () => {
   test("reconnecting banner is NOT visible when connected", async ({ nativePage }) => {
     const banner = nativePage.locator(".reconnecting-banner");
 
-    if (await banner.count() > 0) {
+    if ((await banner.count()) > 0) {
       // Banner element may exist in the DOM but should not be visible
-      const isVisible = await banner.evaluate((el) =>
-        el.classList.contains("visible"),
-      );
+      const isVisible = await banner.evaluate((el) => el.classList.contains("visible"));
       expect(isVisible).toBe(false);
     }
     // If the banner element doesn't exist at all, that's also fine
@@ -91,7 +85,9 @@ test.describe("Reconnection (Native)", () => {
     }
 
     // 2. Message input is usable
-    const input = nativePage.locator("[data-testid='message-input'], .message-input-field, textarea.msg-box");
+    const input = nativePage.locator(
+      "[data-testid='message-input'], .message-input-field, textarea.msg-box",
+    );
     if (await input.isVisible().catch(() => false)) {
       await input.focus();
       // Input should accept focus without errors
@@ -99,10 +95,8 @@ test.describe("Reconnection (Native)", () => {
 
     // 3. No error banners visible
     const banner = nativePage.locator(".reconnecting-banner");
-    if (await banner.count() > 0) {
-      const bannerVisible = await banner.evaluate((el) =>
-        el.classList.contains("visible"),
-      );
+    if ((await banner.count()) > 0) {
+      const bannerVisible = await banner.evaluate((el) => el.classList.contains("visible"));
       expect(bannerVisible).toBe(false);
     }
   });

@@ -95,10 +95,7 @@ test.describe("Native App Server Connection", () => {
   test("health check via real Tauri HTTP plugin", async ({ nativePage }) => {
     // This test requires chatserver.exe to be running.
     // Skip if OWNCORD_SKIP_SERVER_TESTS is set.
-    test.skip(
-      !!process.env.OWNCORD_SKIP_SERVER_TESTS,
-      "Skipped: OWNCORD_SKIP_SERVER_TESTS is set",
-    );
+    test.skip(!!process.env.OWNCORD_SKIP_SERVER_TESTS, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
 
     await nativePage.waitForLoadState("networkidle");
 
@@ -132,10 +129,7 @@ test.describe("Native App Server Connection", () => {
     // It does NOT require valid credentials — an "invalid credentials" error
     // from the server proves the round-trip works.
     // Skip if OWNCORD_SKIP_SERVER_TESTS is set.
-    test.skip(
-      !!process.env.OWNCORD_SKIP_SERVER_TESTS,
-      "Skipped: OWNCORD_SKIP_SERVER_TESTS is set",
-    );
+    test.skip(!!process.env.OWNCORD_SKIP_SERVER_TESTS, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
 
     await nativePage.waitForLoadState("networkidle");
 
@@ -152,14 +146,14 @@ test.describe("Native App Server Connection", () => {
     // Wait for either: successful login OR server error response.
     // Both prove the real HTTP plugin made a round-trip to the server.
     const appLayout = nativePage.locator("[data-testid='app-layout']");
-    const errorBanner = nativePage.locator(".error-banner, .error-message, .toast-error, [role='alert']");
+    const errorBanner = nativePage.locator(
+      ".error-banner, .error-message, .toast-error, [role='alert']",
+    );
 
     // Use Promise.race — whichever appears first
     const result = await Promise.race([
-      appLayout.waitFor({ state: "visible", timeout: 20_000 })
-        .then(() => "login-success" as const),
-      errorBanner.waitFor({ state: "visible", timeout: 20_000 })
-        .then(() => "login-error" as const),
+      appLayout.waitFor({ state: "visible", timeout: 20_000 }).then(() => "login-success" as const),
+      errorBanner.waitFor({ state: "visible", timeout: 20_000 }).then(() => "login-error" as const),
     ]).catch(() => "timeout" as const);
 
     // Either outcome proves the real Tauri HTTP plugin works
@@ -173,10 +167,9 @@ test.describe("Native App Credential Store", () => {
     // (save_credential, load_credential, delete_credential)
     const canInvoke = await nativePage.evaluate(async () => {
       try {
-        const result = await (window as any).__TAURI_INTERNALS__.invoke(
-          "load_credential",
-          { host: "e2e-test-nonexistent" },
-        );
+        const result = await (window as any).__TAURI_INTERNALS__.invoke("load_credential", {
+          host: "e2e-test-nonexistent",
+        });
         // Should return null for nonexistent host, not throw
         return result === null || result === undefined;
       } catch (e: any) {

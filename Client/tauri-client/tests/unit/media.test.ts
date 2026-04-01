@@ -108,7 +108,10 @@ function fireImgError(parent: HTMLElement): void {
 }
 
 /** Create a MouseEvent with specified client coordinates. */
-function mouseEvent(type: string, opts: { clientX?: number; clientY?: number; deltaY?: number } = {}): MouseEvent {
+function mouseEvent(
+  type: string,
+  opts: { clientX?: number; clientY?: number; deltaY?: number } = {},
+): MouseEvent {
   return new MouseEvent(type, {
     bubbles: true,
     cancelable: true,
@@ -204,12 +207,9 @@ describe("media.ts", () => {
   // =========================================================================
 
   describe("isDirectImageUrl", () => {
-    it.each([".gif", ".png", ".jpg", ".jpeg", ".webp"])(
-      "returns true for %s extension",
-      (ext) => {
-        expect(isDirectImageUrl(`https://example.com/photo${ext}`)).toBe(true);
-      },
-    );
+    it.each([".gif", ".png", ".jpg", ".jpeg", ".webp"])("returns true for %s extension", (ext) => {
+      expect(isDirectImageUrl(`https://example.com/photo${ext}`)).toBe(true);
+    });
 
     it("returns true for uppercase extensions", () => {
       expect(isDirectImageUrl("https://example.com/PHOTO.PNG")).toBe(true);
@@ -574,9 +574,7 @@ describe("media.ts", () => {
 
       await vi.waitFor(() => {
         // Last video should have its title
-        const last = document.body.querySelector(
-          `[href="https://www.youtube.com/watch?v=vid200"]`,
-        );
+        const last = document.body.querySelector(`[href="https://www.youtube.com/watch?v=vid200"]`);
         expect(last?.textContent).toBe("Title 200");
       });
     });
@@ -609,7 +607,10 @@ describe("media.ts", () => {
     it("uses fallback title when cache generation changes during successful fetch", async () => {
       let resolveFetch: ((value: ReturnType<typeof oembedResponse>) => void) | null = null;
       fetchMock.mockImplementationOnce(
-        () => new Promise((resolve) => { resolveFetch = resolve; }),
+        () =>
+          new Promise((resolve) => {
+            resolveFetch = resolve;
+          }),
       );
 
       const embed = renderYouTubeEmbed("gen1", "https://www.youtube.com/watch?v=gen1");
@@ -632,7 +633,10 @@ describe("media.ts", () => {
     it("uses fallback title when cache generation changes during failed fetch", async () => {
       let rejectFetch: ((reason: Error) => void) | null = null;
       fetchMock.mockImplementationOnce(
-        () => new Promise((_resolve, reject) => { rejectFetch = reject; }),
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectFetch = reject;
+          }),
       );
 
       const embed = renderYouTubeEmbed("gen2", "https://www.youtube.com/watch?v=gen2");
@@ -811,18 +815,22 @@ describe("media.ts", () => {
       });
 
       // Simulate mousedown then click at same position (no drag)
-      img.dispatchEvent(new MouseEvent("mousedown", {
-        clientX: 200,
-        clientY: 150,
-        bubbles: true,
-        cancelable: true,
-      }));
-      img.dispatchEvent(new MouseEvent("click", {
-        clientX: 200,
-        clientY: 150,
-        bubbles: true,
-        cancelable: true,
-      }));
+      img.dispatchEvent(
+        new MouseEvent("mousedown", {
+          clientX: 200,
+          clientY: 150,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      img.dispatchEvent(
+        new MouseEvent("click", {
+          clientX: 200,
+          clientY: 150,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
 
       // Should zoom to scale 3
       const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
@@ -836,17 +844,42 @@ describe("media.ts", () => {
       const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
 
       vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
-        left: 0, top: 0, width: 400, height: 300,
-        right: 400, bottom: 300, x: 0, y: 0, toJSON: () => ({}),
+        left: 0,
+        top: 0,
+        width: 400,
+        height: 300,
+        right: 400,
+        bottom: 300,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
       });
 
       // Zoom in first
-      img.dispatchEvent(new MouseEvent("mousedown", { clientX: 200, clientY: 150, bubbles: true, cancelable: true }));
-      img.dispatchEvent(new MouseEvent("click", { clientX: 200, clientY: 150, bubbles: true, cancelable: true }));
+      img.dispatchEvent(
+        new MouseEvent("mousedown", {
+          clientX: 200,
+          clientY: 150,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      img.dispatchEvent(
+        new MouseEvent("click", { clientX: 200, clientY: 150, bubbles: true, cancelable: true }),
+      );
 
       // Now click again to zoom out (scale > 1.1 so it resets)
-      img.dispatchEvent(new MouseEvent("mousedown", { clientX: 200, clientY: 150, bubbles: true, cancelable: true }));
-      img.dispatchEvent(new MouseEvent("click", { clientX: 200, clientY: 150, bubbles: true, cancelable: true }));
+      img.dispatchEvent(
+        new MouseEvent("mousedown", {
+          clientX: 200,
+          clientY: 150,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      img.dispatchEvent(
+        new MouseEvent("click", { clientX: 200, clientY: 150, bubbles: true, cancelable: true }),
+      );
 
       expect(img.style.transform).toContain("scale(1)");
     });
@@ -857,8 +890,17 @@ describe("media.ts", () => {
       const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
 
       // Mousedown at one position, click at another (moved > 5px)
-      img.dispatchEvent(new MouseEvent("mousedown", { clientX: 100, clientY: 100, bubbles: true, cancelable: true }));
-      img.dispatchEvent(new MouseEvent("click", { clientX: 120, clientY: 100, bubbles: true, cancelable: true }));
+      img.dispatchEvent(
+        new MouseEvent("mousedown", {
+          clientX: 100,
+          clientY: 100,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      img.dispatchEvent(
+        new MouseEvent("click", { clientX: 120, clientY: 100, bubbles: true, cancelable: true }),
+      );
 
       // Should remain at scale(1) because dx=20 > 5
       expect(img.style.transform).toBe("");
@@ -871,20 +913,45 @@ describe("media.ts", () => {
       const overlay = document.body.querySelector(".image-lightbox") as HTMLElement;
 
       vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
-        left: 0, top: 0, width: 400, height: 300,
-        right: 400, bottom: 300, x: 0, y: 0, toJSON: () => ({}),
+        left: 0,
+        top: 0,
+        width: 400,
+        height: 300,
+        right: 400,
+        bottom: 300,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
       });
 
       // Zoom in first
-      img.dispatchEvent(new MouseEvent("mousedown", { clientX: 200, clientY: 150, bubbles: true, cancelable: true }));
-      img.dispatchEvent(new MouseEvent("click", { clientX: 200, clientY: 150, bubbles: true, cancelable: true }));
+      img.dispatchEvent(
+        new MouseEvent("mousedown", {
+          clientX: 200,
+          clientY: 150,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      img.dispatchEvent(
+        new MouseEvent("click", { clientX: 200, clientY: 150, bubbles: true, cancelable: true }),
+      );
 
       // Now start panning (mousedown while zoomed)
-      img.dispatchEvent(new MouseEvent("mousedown", { clientX: 200, clientY: 150, bubbles: true, cancelable: true }));
+      img.dispatchEvent(
+        new MouseEvent("mousedown", {
+          clientX: 200,
+          clientY: 150,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
       expect(overlay.classList.contains("dragging")).toBe(true);
 
       // Move mouse
-      document.dispatchEvent(new MouseEvent("mousemove", { clientX: 250, clientY: 200, bubbles: true }));
+      document.dispatchEvent(
+        new MouseEvent("mousemove", { clientX: 250, clientY: 200, bubbles: true }),
+      );
 
       // Transform should reflect pan offset
       expect(img.style.transform).toContain("translate(");
@@ -908,7 +975,9 @@ describe("media.ts", () => {
       const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
 
       // mousemove without prior drag should not alter transform
-      document.dispatchEvent(new MouseEvent("mousemove", { clientX: 300, clientY: 300, bubbles: true }));
+      document.dispatchEvent(
+        new MouseEvent("mousemove", { clientX: 300, clientY: 300, bubbles: true }),
+      );
       expect(img.style.transform).toBe("");
     });
 
@@ -919,8 +988,15 @@ describe("media.ts", () => {
       const imgWrap = document.body.querySelector(".image-lightbox-wrap") as HTMLElement;
 
       vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
-        left: 0, top: 0, width: 400, height: 300,
-        right: 400, bottom: 300, x: 0, y: 0, toJSON: () => ({}),
+        left: 0,
+        top: 0,
+        width: 400,
+        height: 300,
+        right: 400,
+        bottom: 300,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
       });
 
       // Scroll up (negative deltaY = zoom in)
@@ -945,8 +1021,15 @@ describe("media.ts", () => {
       const imgWrap = document.body.querySelector(".image-lightbox-wrap") as HTMLElement;
 
       vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
-        left: 0, top: 0, width: 400, height: 300,
-        right: 400, bottom: 300, x: 0, y: 0, toJSON: () => ({}),
+        left: 0,
+        top: 0,
+        width: 400,
+        height: 300,
+        right: 400,
+        bottom: 300,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
       });
 
       // Scroll down (positive deltaY = zoom out)
@@ -971,15 +1054,28 @@ describe("media.ts", () => {
       const imgWrap = document.body.querySelector(".image-lightbox-wrap") as HTMLElement;
 
       vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
-        left: 0, top: 0, width: 400, height: 300,
-        right: 400, bottom: 300, x: 0, y: 0, toJSON: () => ({}),
+        left: 0,
+        top: 0,
+        width: 400,
+        height: 300,
+        right: 400,
+        bottom: 300,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
       });
 
       // Zoom out many times
       for (let i = 0; i < 20; i++) {
-        imgWrap.dispatchEvent(new WheelEvent("wheel", {
-          deltaY: 100, clientX: 200, clientY: 150, bubbles: true, cancelable: true,
-        }));
+        imgWrap.dispatchEvent(
+          new WheelEvent("wheel", {
+            deltaY: 100,
+            clientX: 200,
+            clientY: 150,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
       }
 
       const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
@@ -993,15 +1089,28 @@ describe("media.ts", () => {
       const imgWrap = document.body.querySelector(".image-lightbox-wrap") as HTMLElement;
 
       vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
-        left: 0, top: 0, width: 400, height: 300,
-        right: 400, bottom: 300, x: 0, y: 0, toJSON: () => ({}),
+        left: 0,
+        top: 0,
+        width: 400,
+        height: 300,
+        right: 400,
+        bottom: 300,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
       });
 
       // Zoom in many times
       for (let i = 0; i < 50; i++) {
-        imgWrap.dispatchEvent(new WheelEvent("wheel", {
-          deltaY: -100, clientX: 200, clientY: 150, bubbles: true, cancelable: true,
-        }));
+        imgWrap.dispatchEvent(
+          new WheelEvent("wheel", {
+            deltaY: -100,
+            clientX: 200,
+            clientY: 150,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
       }
 
       const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
@@ -1053,7 +1162,9 @@ describe("media.ts", () => {
 
       // After close, key events should not error or affect anything
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      document.dispatchEvent(new MouseEvent("mousemove", { clientX: 100, clientY: 100, bubbles: true }));
+      document.dispatchEvent(
+        new MouseEvent("mousemove", { clientX: 100, clientY: 100, bubbles: true }),
+      );
       document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     });
   });

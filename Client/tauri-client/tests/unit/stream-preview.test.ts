@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from "vitest";
 
 // Mock livekitSession before importing streamPreview
-const mockGetRemoteVideoStream = vi.fn<(uid: number, type: "camera" | "screenshare") => MediaStream | null>();
+const mockGetRemoteVideoStream =
+  vi.fn<(uid: number, type: "camera" | "screenshare") => MediaStream | null>();
 vi.mock("@lib/livekitSession", () => ({
-  getRemoteVideoStream: (uid: number, type: "camera" | "screenshare") => mockGetRemoteVideoStream(uid, type),
+  getRemoteVideoStream: (uid: number, type: "camera" | "screenshare") =>
+    mockGetRemoteVideoStream(uid, type),
   setUserVolume: vi.fn(),
   getUserVolume: vi.fn(() => 1),
 }));
@@ -27,7 +29,7 @@ beforeAll(() => {
 /** Get the preview sibling div after a row (preview is inserted as next sibling). */
 function getPreview(row: HTMLElement): HTMLElement | null {
   const next = row.nextElementSibling;
-  return (next !== null && next.classList.contains("vu-preview")) ? next as HTMLElement : null;
+  return next !== null && next.classList.contains("vu-preview") ? (next as HTMLElement) : null;
 }
 
 function createRow(userId: number): HTMLElement {
