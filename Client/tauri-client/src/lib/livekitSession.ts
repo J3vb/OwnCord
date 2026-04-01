@@ -230,6 +230,7 @@ export class LiveKitSession {
         attempt,
         maxAttempts: LiveKitSession.MAX_RECONNECT_ATTEMPTS,
       });
+      // eslint-disable-next-line no-await-in-loop -- intentional sequential polling with backoff delay
       await new Promise((r) => setTimeout(r, LiveKitSession.RECONNECT_DELAY_MS));
       // If user manually left or joined a different channel during the delay, abort.
       if (signal.aborted || this.currentChannelId !== channelId) {
@@ -239,13 +240,16 @@ export class LiveKitSession {
       try {
         this.room = this.createRoom();
         this.syncModuleRooms();
+        // eslint-disable-next-line no-await-in-loop -- sequential reconnect: resolve URL then connect
         const resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
+        // eslint-disable-next-line no-await-in-loop -- sequential reconnect: must connect before restoring state
         await this.room.connect(resolvedUrl, token);
         log.info("Auto-reconnect succeeded", { attempt, channelId, url: resolvedUrl });
         logIceConnectionInfo(this.room);
         this.room
           .startAudio()
           .catch((err) => log.debug("Failed to start audio after reconnect", err));
+        // eslint-disable-next-line no-await-in-loop -- sequential reconnect: must restore voice state after connect
         await this.restoreLocalVoiceState("reconnect");
         this._audioPipeline.setupAudioPipeline();
         this.reapplyMuteGain();
@@ -262,7 +266,9 @@ export class LiveKitSession {
           this.room.removeAllListeners();
           this.room
             .disconnect()
-            .catch((err) => log.warn("Failed to disconnect room after reconnect failure", err));
+            .catch((disconnectErr) =>
+              log.warn("Failed to disconnect room after reconnect failure", disconnectErr),
+            );
           this.room = null;
           this.syncModuleRooms();
         }
@@ -487,6 +493,7 @@ export class LiveKitSession {
       const RETRY_DELAY_MS = 2000;
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
+          // eslint-disable-next-line no-await-in-loop -- sequential retry: must attempt connect before checking result
           await this.room.connect(resolvedUrl, token);
           // Check if a newer join was queued during the async connect.
           const queuedJoin = getPendingJoin(this);
@@ -521,6 +528,7 @@ export class LiveKitSession {
               url: resolvedUrl,
               error: connectErr,
             });
+            // eslint-disable-next-line no-await-in-loop -- intentional backoff delay between retry attempts
             await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
             if (this.room === null) throw connectErr;
             this.room.removeAllListeners();
@@ -620,6 +628,7 @@ export class LiveKitSession {
       ) {
         this.handleVoiceTokenRefresh(pToken);
       } else {
+        // eslint-disable-next-line no-await-in-loop -- sequential drain of pending joins to avoid unbounded recursion
         await this.connectAndSetup(pToken, pUrl, pChannelId, pDirectUrl);
       }
       pendingJoin = this.pendingJoin;

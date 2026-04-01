@@ -50,6 +50,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   let searchAbort: AbortController | null = null;
   let lastSearchTime = 0;
 
+  // eslint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
   function formatTimestamp(ts: string): string {
     try {
       const d = new Date(ts);

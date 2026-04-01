@@ -183,11 +183,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   }
 
   /** Read a File as a data: URL (more reliable than createObjectURL in WebView2). */
+  // eslint-disable-next-line consistent-function-scoping -- co-located with handlePasteFile for readability
   function readFileAsDataUrl(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(new Error("Failed to read file"));
+      reader.addEventListener("load", () => resolve(reader.result as string));
+      reader.addEventListener("error", () => reject(new Error("Failed to read file")));
       reader.readAsDataURL(file);
     });
   }

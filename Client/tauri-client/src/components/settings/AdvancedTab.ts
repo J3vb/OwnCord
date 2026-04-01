@@ -257,8 +257,11 @@ async function clearImageCache(): Promise<void> {
       callback();
     }
 
+    // eslint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
     req.onsuccess = () => finish(resolve);
+    // eslint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
     req.onerror = () => finish(() => reject(req.error));
+    // eslint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
     req.onblocked = () => {
       if (blockedTimer !== null) return;
       blockedTimer = setTimeout(() => {
@@ -306,6 +309,7 @@ async function clearLogFiles(): Promise<void> {
     const entries = await readDir(logDir);
     for (const entry of entries) {
       if (entry.name?.endsWith(".jsonl") && !entry.isDirectory) {
+        // eslint-disable-next-line no-await-in-loop -- sequential file deletion to avoid overwhelming the filesystem
         await remove(`${logDir}/${entry.name}`);
       }
     }

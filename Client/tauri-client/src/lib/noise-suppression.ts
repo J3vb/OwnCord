@@ -90,11 +90,13 @@ async function createWorkletPipeline(
   });
 
   const initPromise = new Promise<void>((resolve, reject) => {
+    // eslint-disable-next-line prefer-add-event-listener -- MessagePort does not support addEventListener
     workletNode.port.onmessage = (event: MessageEvent) => {
       if (event.data.type === "ready") resolve();
       else if (event.data.type === "error") reject(new Error(event.data.message));
     };
   });
+  // eslint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
   workletNode.port.postMessage({ type: "init", wasmBytes }, [wasmBytes]);
   await initPromise;
 
@@ -106,6 +108,7 @@ async function createWorkletPipeline(
   return {
     processedTrack: dest.stream.getAudioTracks()[0]!,
     destroy() {
+      // eslint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
       workletNode.port.postMessage({ type: "destroy" });
       workletNode.disconnect();
       source.disconnect();

@@ -169,9 +169,9 @@ export function createConnectionStatsPoller(getRoom: () => Room | null): Connect
       if (qualityDebounceTimer !== null) clearTimeout(qualityDebounceTimer);
       qualityDebounceTimer = setTimeout(() => {
         if (current.quality !== lastQuality) {
-          const prev = lastQuality;
+          const prevQuality = lastQuality;
           lastQuality = current.quality;
-          qualityChangeListeners.forEach((cb) => cb(current.quality, prev));
+          qualityChangeListeners.forEach((cb) => cb(current.quality, prevQuality));
         }
       }, QUALITY_DEBOUNCE_MS);
     }

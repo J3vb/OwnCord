@@ -50,7 +50,7 @@ const log = createLogger("api");
 
 /** Create the REST API client. */
 export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?: OnUnauthorized) {
-  /** Validate a host string to prevent URL authority injection. */
+  // eslint-disable-next-line consistent-function-scoping -- co-located with createApiClient for encapsulation
   function isValidHost(host: string): boolean {
     return /^[\w.-]+(:\d+)?$/.test(host) && host.length <= 253;
   }
@@ -108,7 +108,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       if (fetchErr instanceof Error) {
         throw fetchErr;
       }
-      throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr));
+      throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr), {
+        cause: fetchErr,
+      });
     }
 
     log.debug(`${label} ←`, { method, path, status: res.status });
@@ -157,6 +159,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     return doFetch<T>("Admin API", adminBaseUrl(), method, path, body, signal);
   }
 
+  // eslint-disable-next-line consistent-function-scoping -- co-located with doFetch for encapsulation
   async function parseError(res: Response): Promise<ApiError> {
     try {
       const body = await res.json();
@@ -245,7 +248,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         if (fetchErr instanceof Error) {
           throw fetchErr;
         }
-        throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr));
+        throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr), {
+          cause: fetchErr,
+        });
       }
 
       if (res.status === 401) {

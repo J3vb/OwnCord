@@ -204,6 +204,7 @@ export async function enableScreenshare(
     state.manualScreenTracks = screenTracks;
     for (const track of screenTracks) {
       const isVideo = track.kind === Track.Kind.Video;
+      // eslint-disable-next-line no-await-in-loop -- tracks must be published sequentially to maintain correct order
       await room.localParticipant.publishTrack(track, {
         source: isVideo ? Track.Source.ScreenShare : Track.Source.ScreenShareAudio,
         simulcast: false,

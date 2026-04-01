@@ -21,8 +21,8 @@ export const ALLOWED_TYPES = [
 export function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.addEventListener("load", () => resolve(reader.result as string));
+    reader.addEventListener("error", () => reject(new Error("Failed to read file")));
     reader.readAsDataURL(file);
   });
 }

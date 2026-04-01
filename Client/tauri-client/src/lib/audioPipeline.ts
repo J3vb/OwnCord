@@ -280,8 +280,10 @@ export class AudioPipeline {
       }
       // Don't connect workletNode output to anything — it's analysis-only
 
+      // eslint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
       workletNode.port.postMessage({ type: "config", threshold });
 
+      // eslint-disable-next-line prefer-add-event-listener -- MessagePort does not support addEventListener
       workletNode.port.onmessage = (event: MessageEvent) => {
         if (event.data.type === "gate") {
           const gated = event.data.gated as boolean;
@@ -376,6 +378,7 @@ export class AudioPipeline {
     }
     // Stop AudioWorklet
     if (this.vadWorkletNode !== null) {
+      // eslint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
       this.vadWorkletNode.port.postMessage({ type: "stop" });
       this.vadWorkletNode.disconnect();
       this.vadWorkletNode = null;

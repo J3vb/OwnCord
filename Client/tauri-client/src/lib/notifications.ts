@@ -53,8 +53,7 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
 
   const channelName = getChannelName(payload.channel_id);
 
-  // Sanitize notification strings: strip control characters and cap length
-  // to prevent abuse via server-provided usernames or channel names.
+  // eslint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
   function sanitizeNotif(s: string, maxLen: number): string {
     // eslint-disable-next-line no-control-regex -- intentional: strip control chars from user-provided strings
     const cleaned = s.replace(/[\x00-\x1F\x7F]/g, "");
@@ -100,11 +99,11 @@ function fireDesktopNotification(title: string, body: string): void {
       // Fallback to Web Notification API (dev mode / non-Tauri)
       try {
         if (Notification.permission === "granted") {
-          new Notification(title, { body });
+          void new Notification(title, { body });
         } else if (Notification.permission !== "denied") {
           const result = await Notification.requestPermission();
           if (result === "granted") {
-            new Notification(title, { body });
+            void new Notification(title, { body });
           }
         }
       } catch {

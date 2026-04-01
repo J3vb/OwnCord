@@ -48,6 +48,7 @@ export function createFileUpload(options: FileUploadOptions): FileUploadComponen
   let errorDiv: HTMLDivElement;
   let uploadAbort: AbortController | null = null;
 
+  // eslint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
   function formatSize(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -79,7 +80,7 @@ export function createFileUpload(options: FileUploadOptions): FileUploadComponen
       const url = URL.createObjectURL(file);
       thumb.src = url;
       thumb.style.display = "block";
-      thumb.onload = () => URL.revokeObjectURL(url);
+      thumb.addEventListener("load", () => URL.revokeObjectURL(url));
     }
     preview.classList.remove("file-upload__preview--hidden");
   }

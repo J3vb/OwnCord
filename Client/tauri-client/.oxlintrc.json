@@ -5,5 +5,10 @@
     "suspicious": "warn",
     "perf": "warn"
   },
+  "rules": {
+    "no-map-spread": "off",
+    "no-array-sort": "off",
+    "no-array-reverse": "off"
+  },
   "ignorePatterns": ["dist", "node_modules", "public"]
 }

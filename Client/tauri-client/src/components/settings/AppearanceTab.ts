@@ -128,6 +128,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
 
   const currentAccent = loadPref<string>("accentColor", defaultAccent);
 
+  // eslint-disable-next-line consistent-function-scoping -- co-located with saveAccent for readability
   function applyAccent(color: string): void {
     // Set on both documentElement and body so the accent wins over
     // theme class specificity (body.theme-neon-glow sets --accent)
