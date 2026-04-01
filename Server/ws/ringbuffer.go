@@ -50,8 +50,9 @@ func (rb *EventRingBuffer) EventsSince(afterSeq uint64) [][]byte {
 	oldestIdx := (rb.pos - rb.count + rb.size) % rb.size
 	oldestSeq := rb.entries[oldestIdx].seq
 
-	// If the requested seq is older than our oldest, we can't replay.
-	if afterSeq < oldestSeq {
+	// If the requested seq is at or older than our oldest, we can't guarantee
+	// full coverage — return nil to trigger a full ready payload.
+	if afterSeq <= oldestSeq {
 		return nil
 	}
 

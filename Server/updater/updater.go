@@ -407,7 +407,12 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error 
 	if err != nil {
 		return fmt.Errorf("creating destination file: %w", err)
 	}
-	defer f.Close() //nolint:errcheck
+	closed := false
+	defer func() {
+		if !closed {
+			_ = f.Close()
+		}
+	}()
 
 	// Cap download at 500 MiB to prevent unbounded disk usage from a
 	// malicious or corrupted release asset.
@@ -417,6 +422,7 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error 
 	n, err := io.Copy(f, limitedReader)
 	if err != nil {
 		_ = f.Close()
+		closed = true
 		_ = os.Remove(destPath)
 		return fmt.Errorf("writing downloaded file: %w", err)
 	}
@@ -425,6 +431,7 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error 
 		var probe [1]byte
 		if extra, _ := resp.Body.Read(probe[:]); extra > 0 {
 			_ = f.Close()
+			closed = true
 			_ = os.Remove(destPath)
 			return fmt.Errorf("downloaded file exceeds maximum size of %d bytes", maxBinarySize)
 		}

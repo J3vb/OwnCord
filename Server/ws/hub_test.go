@@ -504,6 +504,33 @@ func TestHub_GracefulStop_NoPanic(t *testing.T) {
 	hub.GracefulStop()
 }
 
+func TestHub_GracefulStop_Idempotent(t *testing.T) {
+	// BUG-087: GracefulStop must be safe to call concurrently/twice.
+	// Without sync.Once protection, double lkProcess.Stop() can panic.
+	hub, _ := newTestHub(t)
+	go hub.Run()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for range 2 {
+		go func() {
+			defer wg.Done()
+			hub.GracefulStop()
+		}()
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		// Success: no panic from concurrent GracefulStop.
+	case <-time.After(15 * time.Second):
+		t.Fatal("concurrent GracefulStop calls deadlocked")
+	}
+}
+
 // ─── CleanupVoiceForChannel ───────────────────────────────────────────────────
 
 func TestHub_CleanupVoiceForChannel_NoVoiceState_NoPanic(t *testing.T) {

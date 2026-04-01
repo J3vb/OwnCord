@@ -24,19 +24,20 @@ type broadcastMsg struct {
 // Hub manages all active WebSocket clients and routes messages between them.
 // All exported methods are safe to call from multiple goroutines.
 type Hub struct {
-	clients     map[int64]*Client
-	mu          syncutil.RWMutex
-	db          *db.DB
-	limiter     *auth.RateLimiter
-	broadcast   chan broadcastMsg
-	register    chan *Client
-	unregister  chan *Client
-	stop        chan struct{}
-	stopOnce    sync.Once
-	livekit     *LiveKitClient
-	lkProcess   *LiveKitProcess
-	registry    *HandlerRegistry
-	permChecker *permissions.Checker
+	clients      map[int64]*Client
+	mu           syncutil.RWMutex
+	db           *db.DB
+	limiter      *auth.RateLimiter
+	broadcast    chan broadcastMsg
+	register     chan *Client
+	unregister   chan *Client
+	stop         chan struct{}
+	stopOnce     sync.Once
+	gracefulOnce sync.Once
+	livekit      *LiveKitClient
+	lkProcess    *LiveKitProcess
+	registry     *HandlerRegistry
+	permChecker  *permissions.Checker
 
 	seq       uint64           // atomic monotonic sequence counter
 	replayBuf *EventRingBuffer // recent broadcast events for reconnection replay
@@ -211,27 +212,30 @@ func (h *Hub) Stop() {
 }
 
 // GracefulStop stops the LiveKit process (if managed) and then stops the hub.
+// Safe to call multiple times concurrently.
 func (h *Hub) GracefulStop() {
-	// Broadcast restart notice to all connected clients.
-	h.BroadcastServerRestart("shutdown", 5)
+	h.gracefulOnce.Do(func() {
+		// Broadcast restart notice to all connected clients.
+		h.BroadcastServerRestart("shutdown", 5)
 
-	// Stop LiveKit process.
-	if h.lkProcess != nil {
-		h.lkProcess.Stop()
-	}
+		// Stop LiveKit process.
+		if h.lkProcess != nil {
+			h.lkProcess.Stop()
+		}
 
-	// Give clients 5 seconds to disconnect gracefully.
-	time.Sleep(5 * time.Second)
+		// Give clients 5 seconds to disconnect gracefully.
+		time.Sleep(5 * time.Second)
 
-	// Close all remaining client connections.
-	h.mu.Lock()
-	for _, c := range h.clients {
-		c.closeSend()
-	}
-	h.mu.Unlock()
+		// Close all remaining client connections.
+		h.mu.Lock()
+		for _, c := range h.clients {
+			c.closeSend()
+		}
+		h.mu.Unlock()
 
-	// Stop the hub dispatch loop.
-	h.stopOnce.Do(func() { close(h.stop) })
+		// Stop the hub dispatch loop.
+		h.stopOnce.Do(func() { close(h.stop) })
+	})
 }
 
 // CleanupVoiceForChannel removes all voice participants from the given channel.

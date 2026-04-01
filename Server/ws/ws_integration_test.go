@@ -614,8 +614,11 @@ func TestServeWS_Reconnect_PreservesVoiceState(t *testing.T) {
 	}
 	ws.SetClientVoiceStateForTest(originalClient, chID, vsBeforeReconnect.JoinedAt)
 
-	// Second connection: reconnect (lastSeq > 0) — voice state should transfer
-	conn2 := dialAndAuth(1)
+	// Second connection: reconnect (lastSeq > oldestSeq) — voice state should transfer.
+	// Use lastSeq=2 because conn1's join produces at least 2 broadcasts
+	// (member_join seq=1, presence seq=2), and afterSeq must be > oldestSeq
+	// for EventsSince to return a replay instead of nil (BUG-085).
+	conn2 := dialAndAuth(2)
 	defer func() { _ = conn2.Close(websocket.StatusNormalClosure, "") }()
 
 	var replacementClient *ws.Client

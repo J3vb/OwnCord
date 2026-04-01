@@ -20,8 +20,9 @@ func sanitizeFTSQuery(q string) string {
 	}
 	result := strings.TrimSpace(sb.String())
 	// Enforce a maximum query length to bound FTS processing.
-	if len(result) > 200 {
-		result = result[:200]
+	// Use rune count to avoid splitting multi-byte characters.
+	if runes := []rune(result); len(runes) > 200 {
+		result = string(runes[:200])
 	}
 	return result
 }
