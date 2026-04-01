@@ -172,8 +172,21 @@ func TestBroadcastVoiceStateUpdate_NotInVoice(t *testing.T) {
 	hub.Register(c)
 	time.Sleep(20 * time.Millisecond)
 
-	// User not in voice — should be a no-op, no crash.
+	// User not in voice — should be a no-op.
 	hub.BroadcastVoiceStateUpdateForTest(c)
+	time.Sleep(20 * time.Millisecond)
+
+	// No voice_state message should have been sent since user is not in voice.
+	for len(send) > 0 {
+		msg := <-send
+		var m struct {
+			Type string `json:"type"`
+		}
+		_ = json.Unmarshal(msg, &m)
+		if m.Type == "voice_state" {
+			t.Error("expected no voice_state broadcast when user is not in voice")
+		}
+	}
 }
 
 func TestBroadcastVoiceStateUpdate_InVoice(t *testing.T) {

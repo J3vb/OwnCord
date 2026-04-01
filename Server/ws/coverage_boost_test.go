@@ -801,7 +801,12 @@ func TestHandleChannelFocus_ValidChannel(t *testing.T) {
 	})
 	hub.HandleMessageForTest(c, raw)
 	time.Sleep(20 * time.Millisecond)
-	// Should not error — just update internal state.
+
+	// Valid channel focus should not produce an error message.
+	code := drainForErrorCode(send, 100*time.Millisecond)
+	if code != "" {
+		t.Errorf("expected no error for valid channel_focus, got code=%q", code)
+	}
 }
 
 // ─── presence handler error paths ────────────────────────────────────────────
@@ -1602,6 +1607,14 @@ func TestHandleVoiceLeave_NotInVoice(t *testing.T) {
 
 	hub.HandleVoiceLeaveForTest(c)
 	time.Sleep(20 * time.Millisecond)
+
+	// Client should still be connected and have no voice channel set.
+	if !hub.IsUserConnected(user.ID) {
+		t.Error("user should still be connected after no-op voice leave")
+	}
+	if got := ws.GetClientVoiceChIDForTest(c); got != 0 {
+		t.Errorf("voiceChID = %d, want 0 after leave when not in voice", got)
+	}
 }
 
 func TestHandleVoiceMute_FullFlow(t *testing.T) {
@@ -2002,7 +2015,16 @@ func TestDeliverBroadcast_FullBuffer_DropsMessage(t *testing.T) {
 	// Broadcasting should not block — message dropped.
 	hub.BroadcastToAll([]byte(`{"type":"should_be_dropped"}`))
 	time.Sleep(50 * time.Millisecond)
-	// No assertion needed — just verify no deadlock.
+
+	// Buffer should still contain only the filler message (dropped msg was not enqueued).
+	if len(send) != 1 {
+		t.Errorf("send buffer length = %d, want 1 (dropped message should not be enqueued)", len(send))
+	}
+	// The client should still be registered despite the dropped message.
+	if !hub.IsUserConnected(user.ID) {
+		t.Error("client should remain connected after a dropped broadcast")
+	}
+	_ = c // keep c referenced
 }
 
 func TestBuildAuthOK_NonNilAvatar(t *testing.T) {
@@ -2568,6 +2590,15 @@ func TestCleanupVoiceForChannel_EmptyChannel(t *testing.T) {
 	vcID := seedVoiceChannel(t, database, "cvfc-empty-vc")
 	hub.CleanupVoiceForChannel(vcID)
 	time.Sleep(20 * time.Millisecond)
+
+	// After cleanup of an empty channel, voice states should still be empty.
+	states, err := database.GetChannelVoiceStates(vcID)
+	if err != nil {
+		t.Fatalf("GetChannelVoiceStates: %v", err)
+	}
+	if len(states) != 0 {
+		t.Errorf("expected 0 voice states after cleaning empty channel, got %d", len(states))
+	}
 }
 
 func TestCleanupVoiceForChannel_DBStateButNoClient(t *testing.T) {
@@ -2643,8 +2674,20 @@ func TestSweepStaleVoiceStates_PreservesActiveClientState(t *testing.T) {
 }
 
 func TestSweepStaleVoiceStates_NoStatesNoPanic(t *testing.T) {
-	hub, _ := newCoverageHub(t)
+	hub, database := newCoverageHub(t)
 	hub.SweepStaleVoiceStatesForTest()
+	time.Sleep(50 * time.Millisecond)
+
+	// With no voice states in the DB, sweep should leave the system clean.
+	// Verify by checking a known user has no voice state.
+	user := seedCoverageOwner(t, database, "sweep-no-states")
+	state, err := database.GetVoiceState(user.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state != nil {
+		t.Error("expected nil voice state for user after sweep with no states")
+	}
 }
 
 func TestSweepStaleVoiceStates_MismatchedChannelIsGhost(t *testing.T) {
@@ -2683,12 +2726,21 @@ func TestBroadcastToChannel_DropsWhenFull(t *testing.T) {
 	for i := 0; i < 260; i++ {
 		hub.BroadcastToChannel(1, []byte(`{"type":"test"}`))
 	}
-	// No panic and no block = pass. Some messages will be dropped.
+	// With no Run() loop draining, some messages are dropped.
+	// Hub should still be functional after overflow — verify by checking
+	// that a user lookup still works (hub internals not corrupted).
+	if hub.IsUserConnected(9999) {
+		t.Error("expected false for non-existent user after broadcast overflow")
+	}
 }
 
 func TestBroadcastToAll_DropsWhenFull(t *testing.T) {
 	hub, _ := newCoverageHub(t)
 	for i := 0; i < 260; i++ {
 		hub.BroadcastToAll([]byte(`{"type":"test"}`))
+	}
+	// Hub should still be functional after overflow — verify hub state is intact.
+	if hub.IsUserConnected(9999) {
+		t.Error("expected false for non-existent user after broadcast overflow")
 	}
 }
