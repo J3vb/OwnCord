@@ -8,9 +8,9 @@ import (
 )
 
 const (
-	bcryptCost  = 12
-	minPassLen  = 8
-	maxPassLen  = 72 // bcrypt silently truncates beyond 72 bytes
+	bcryptCost = 12
+	minPassLen = 8
+	maxPassLen = 72 // bcrypt silently truncates beyond 72 bytes
 )
 
 // ErrPasswordTooShort is returned when the password is below the minimum length.

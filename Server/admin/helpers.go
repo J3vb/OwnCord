@@ -29,7 +29,7 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, errorResponse{Error: code, Message: msg})
 }
 
-func pathInt64(r *http.Request, param string) (int64, error) {
+func pathInt64(r *http.Request, param string) (int64, error) { //nolint:unparam // kept generic for future URL params
 	raw := chi.URLParam(r, param)
 	return strconv.ParseInt(raw, 10, 64)
 }

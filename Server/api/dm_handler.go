@@ -35,9 +35,9 @@ type createDMRequest struct {
 
 // createDMResponse is the JSON response for POST /api/v1/dms.
 type createDMResponse struct {
-	ChannelID int64   `json:"channel_id"`
+	ChannelID int64     `json:"channel_id"`
 	Recipient db.DMUser `json:"recipient"`
-	Created   bool    `json:"created"`
+	Created   bool      `json:"created"`
 }
 
 // listDMsResponse is the JSON response for GET /api/v1/dms.
@@ -102,7 +102,7 @@ func handleCreateDM(database *db.DB) http.HandlerFunc {
 		}
 
 		// Get or create the DM channel.
-		ch, created, err := database.GetOrCreateDMChannel(user.ID, req.RecipientID)
+		ch, created, err := database.GetOrCreateDMChannel(user.ID, req.RecipientID) //nolint:contextcheck // TODO: propagate context through this call path
 		if err != nil {
 			slog.Error("handleCreateDM GetOrCreateDMChannel", "err", err,
 				"user_id", user.ID, "recipient_id", req.RecipientID)

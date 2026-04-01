@@ -46,7 +46,7 @@ func handleDiagnosticsConnectivity(
 		clientAddr := clientIP(r)
 
 		lkHealthy := false
-		if ok, _ := hub.LiveKitHealthCheck(); ok {
+		if ok, _ := hub.LiveKitHealthCheck(); ok { //nolint:contextcheck // TODO: propagate context through this call path
 			lkHealthy = true
 		}
 

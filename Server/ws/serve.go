@@ -16,9 +16,11 @@ import (
 	"github.com/owncord/server/permissions"
 )
 
-const authDeadline = 10 * time.Second
-const writeTimeout = 10 * time.Second
-const settingsCacheTTL = 30 * time.Second
+const (
+	authDeadline     = 10 * time.Second
+	writeTimeout     = 10 * time.Second
+	settingsCacheTTL = 30 * time.Second
+)
 
 // ServeWS upgrades an HTTP connection to WebSocket, performs in-band auth,
 // then drives the client's read/write loops.
@@ -77,7 +79,7 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 func (h *Hub) upgradeAndAuth(
 	conn *websocket.Conn, database *db.DB, r *http.Request,
 ) (*Client, uint64, error) {
-	user, tokenHash, lastSeq, err := authenticateConn(conn, database)
+	user, tokenHash, lastSeq, err := authenticateConn(conn, database) //nolint:contextcheck // TODO: propagate context through this call path
 	if err != nil {
 		slog.Warn("ws auth failed", "err", err, "remote", r.RemoteAddr)
 		_ = conn.Close(websocket.StatusPolicyViolation, "authentication failed")
@@ -150,7 +152,7 @@ func (h *Hub) handleFreshConnect(
 		}
 		h.BroadcastToAll(buildVoiceLeave(vs.ChannelID, c.userID))
 		if h.livekit != nil {
-			go h.livekit.RemoveParticipant(vs.ChannelID, c.userID, vs.JoinedAt)
+			go h.livekit.RemoveParticipant(vs.ChannelID, c.userID, vs.JoinedAt) //nolint:errcheck,gosec,contextcheck // fire-and-forget cleanup on disconnect; G118: no request-scoped context available for background goroutine
 		}
 	}
 
@@ -382,16 +384,16 @@ func (h *Hub) buildReady(database *db.DB, userID int64, role *db.Role) ([]byte, 
 		}
 	}
 	var visibleChannels []db.Channel
-	for _, ch := range channels {
+	for i := range channels {
 		// When role is unavailable, include all channels (backwards compat).
 		if role == nil || permissions.HasAdmin(role.Permissions) {
-			visibleChannels = append(visibleChannels, ch)
+			visibleChannels = append(visibleChannels, channels[i])
 			continue
 		}
-		o := overrides[ch.ID]
+		o := overrides[channels[i].ID]
 		effective := permissions.EffectivePerms(role.Permissions, o.Allow, o.Deny)
 		if effective&permissions.ReadMessages == permissions.ReadMessages {
-			visibleChannels = append(visibleChannels, ch)
+			visibleChannels = append(visibleChannels, channels[i])
 		}
 	}
 	if visibleChannels == nil {
@@ -407,16 +409,16 @@ func (h *Hub) buildReady(database *db.DB, userID int64, role *db.Role) ([]byte, 
 
 	// Build protocol-compliant channel objects (strip extra fields).
 	channelPayloads := make([]map[string]any, 0, len(visibleChannels))
-	for _, ch := range visibleChannels {
+	for i := range visibleChannels {
 		entry := map[string]any{
-			"id":       ch.ID,
-			"name":     ch.Name,
-			"type":     ch.Type,
-			"category": ch.Category,
-			"position": ch.Position,
+			"id":       visibleChannels[i].ID,
+			"name":     visibleChannels[i].Name,
+			"type":     visibleChannels[i].Type,
+			"category": visibleChannels[i].Category,
+			"position": visibleChannels[i].Position,
 		}
-		if ch.Type == "text" {
-			if u, ok := unreadMap[ch.ID]; ok {
+		if visibleChannels[i].Type == "text" {
+			if u, ok := unreadMap[visibleChannels[i].ID]; ok {
 				entry["unread_count"] = u.UnreadCount
 				entry["last_message_id"] = u.LastMessageID
 			} else {

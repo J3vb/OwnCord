@@ -22,7 +22,7 @@ const (
 	MsgTypeVoiceCamera       = "voice_camera"
 	MsgTypeVoiceScreenshare  = "voice_screenshare"
 	MsgTypePing              = "ping"
-	MsgTypeVoiceTokenRefresh = "voice_token_refresh"
+	MsgTypeVoiceTokenRefresh = "voice_token_refresh" //nolint:gosec // G101: false positive — message type constant, not a credential
 )
 
 // Server → Client message types (sent in broadcasts/responses).

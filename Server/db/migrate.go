@@ -18,6 +18,7 @@ package db
 // filename without executing the SQL, so subsequent runs treat them as done.
 
 import (
+	"database/sql"
 	"fmt"
 	"io/fs"
 	"sort"
@@ -46,8 +47,10 @@ func isExistingDatabase(d *DB) (bool, error) {
 		"SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
 	).Scan(&name)
 	if err != nil {
-		// sql.ErrNoRows means the table does not exist.
-		return false, nil
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("isExistingDatabase: %w", err)
 	}
 	return true, nil
 }
@@ -59,7 +62,10 @@ func schemaVersionsExists(d *DB) (bool, error) {
 		"SELECT name FROM sqlite_master WHERE type='table' AND name='schema_versions'",
 	).Scan(&name)
 	if err != nil {
-		return false, nil
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("schemaVersionsExists: %w", err)
 	}
 	return true, nil
 }
@@ -71,20 +77,12 @@ func isApplied(d *DB, filename string) (bool, error) {
 		"SELECT version FROM schema_versions WHERE version = ?", filename,
 	).Scan(&v)
 	if err != nil {
-		return false, nil
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("isApplied: %w", err)
 	}
 	return true, nil
-}
-
-// recordApplied inserts a migration filename into schema_versions.
-func recordApplied(d *DB, filename string) error {
-	_, err := d.sqlDB.Exec(
-		"INSERT INTO schema_versions (version) VALUES (?)", filename,
-	)
-	if err != nil {
-		return fmt.Errorf("recording migration %s: %w", filename, err)
-	}
-	return nil
 }
 
 // sqlFilenames returns all .sql entries from the FS sorted lexicographically.

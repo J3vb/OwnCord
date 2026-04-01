@@ -37,8 +37,8 @@ func handleListUsers(database *db.DB) http.HandlerFunc {
 		}
 
 		safe := make([]adminUserResponse, len(users))
-		for i, u := range users {
-			safe[i] = toAdminUserResponse(u)
+		for i := range users {
+			safe[i] = toAdminUserResponse(users[i])
 		}
 		writeJSON(w, http.StatusOK, safe)
 	}

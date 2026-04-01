@@ -34,12 +34,12 @@ type GitHubConfig struct {
 
 // VoiceConfig holds LiveKit server connection and voice quality settings.
 type VoiceConfig struct {
-	LiveKitAPIKey    string `koanf:"livekit_api_key"`    // LiveKit API key
-	LiveKitAPISecret string `koanf:"livekit_api_secret"` // LiveKit API secret
-	LiveKitURL       string `koanf:"livekit_url"`        // LiveKit server WebSocket URL (e.g. ws://localhost:7880)
-	LiveKitBinaryPath string `koanf:"livekit_binary"`    // path to livekit-server binary; empty = don't auto-start
-	NodeIP           string `koanf:"node_ip"`            // public IP for WebRTC ICE candidates; empty = auto-detect
-	Quality          string `koanf:"quality"`            // low | medium | high
+	LiveKitAPIKey     string `koanf:"livekit_api_key"`    // LiveKit API key
+	LiveKitAPISecret  string `koanf:"livekit_api_secret"` // LiveKit API secret
+	LiveKitURL        string `koanf:"livekit_url"`        // LiveKit server WebSocket URL (e.g. ws://localhost:7880)
+	LiveKitBinaryPath string `koanf:"livekit_binary"`     // path to livekit-server binary; empty = don't auto-start
+	NodeIP            string `koanf:"node_ip"`            // public IP for WebRTC ICE candidates; empty = auto-detect
+	Quality           string `koanf:"quality"`            // low | medium | high
 }
 
 // ServerConfig holds HTTP server settings.
@@ -82,12 +82,12 @@ func defaults() Config {
 			AllowedOrigins: []string{},
 			TrustedProxies: []string{},
 			AdminAllowedCIDRs: []string{
-				"127.0.0.0/8",     // localhost IPv4
-				"::1/128",         // localhost IPv6
-				"10.0.0.0/8",      // private class A
-				"172.16.0.0/12",   // private class B
-				"192.168.0.0/16",  // private class C
-				"fc00::/7",        // IPv6 unique local
+				"127.0.0.0/8",    // localhost IPv4
+				"::1/128",        // localhost IPv6
+				"10.0.0.0/8",     // private class A
+				"172.16.0.0/12",  // private class B
+				"192.168.0.0/16", // private class C
+				"fc00::/7",       // IPv6 unique local
 			},
 		},
 		Database: DatabaseConfig{
@@ -229,7 +229,7 @@ func Load(cfgPath string) (*Config, error) {
 // production — NewLiveKitClient rejects them.
 const (
 	DefaultLiveKitAPIKey    = "devkey"
-	DefaultLiveKitAPISecret = "owncord-dev-secret-key-min-32chars"
+	DefaultLiveKitAPISecret = "owncord-dev-secret-key-min-32chars" //nolint:gosec // G101: false positive — config key name, not a credential
 )
 
 // IsDefaultVoiceCredentials returns true when the voice config still uses

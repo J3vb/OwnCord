@@ -383,7 +383,7 @@ func (d *DB) getReactionsBatch(msgIDs []int64, requestingUserID int64) (map[int6
 	placeholders := sb.String()
 
 	// Query: aggregate count + check if requesting user reacted.
-	query := fmt.Sprintf(
+	query := fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
 		`SELECT r.message_id, r.emoji, COUNT(*) as cnt,
 		        MAX(CASE WHEN r.user_id = ? THEN 1 ELSE 0 END) as me
 		 FROM reactions r

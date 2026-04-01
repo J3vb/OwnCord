@@ -190,32 +190,28 @@ func (h *Hub) handleWebhookParticipantLeft(event *livekit.WebhookEvent) {
 			slog.Info("livekit webhook: cleaned up stale voice state",
 				"user_id", userID,
 				"channel_id", channelID)
-		} else {
+		} else if h.db != nil {
 			// Client has voiceChID=0 or moved to a different channel (e.g.
 			// after F5 reload), or this webhook is for an older join instance.
-			if h.db != nil {
-				deleted, dbErr := h.db.LeaveVoiceChannelIfMatch(userID, channelID, joinToken)
-				if dbErr != nil {
-					slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed (stale DB row)",
-						"error", dbErr, "user_id", userID, "channel_id", channelID)
-				} else if deleted {
-					h.BroadcastToAll(buildVoiceLeave(channelID, userID))
-					slog.Info("livekit webhook: cleaned stale DB voice row after reconnect",
-						"user_id", userID, "channel_id", channelID)
-				}
-			}
-		}
-	} else {
-		// Client already disconnected from WS — use channel-conditional delete
-		// to avoid wiping a newer row if the user reconnected and rejoined.
-		if h.db != nil {
 			deleted, dbErr := h.db.LeaveVoiceChannelIfMatch(userID, channelID, joinToken)
 			if dbErr != nil {
-				slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed (client gone)",
+				slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed (stale DB row)",
 					"error", dbErr, "user_id", userID, "channel_id", channelID)
 			} else if deleted {
 				h.BroadcastToAll(buildVoiceLeave(channelID, userID))
+				slog.Info("livekit webhook: cleaned stale DB voice row after reconnect",
+					"user_id", userID, "channel_id", channelID)
 			}
+		}
+	} else if h.db != nil {
+		// Client already disconnected from WS — use channel-conditional delete
+		// to avoid wiping a newer row if the user reconnected and rejoined.
+		deleted, dbErr := h.db.LeaveVoiceChannelIfMatch(userID, channelID, joinToken)
+		if dbErr != nil {
+			slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed (client gone)",
+				"error", dbErr, "user_id", userID, "channel_id", channelID)
+		} else if deleted {
+			h.BroadcastToAll(buildVoiceLeave(channelID, userID))
 		}
 	}
 }

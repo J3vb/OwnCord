@@ -219,7 +219,7 @@ func (d *DB) GetChannelTypes(ids []int64) (map[int64]string, error) {
 		args[i] = id
 	}
 
-	query := fmt.Sprintf(
+	query := fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
 		`SELECT id, type FROM channels WHERE id IN (%s)`,
 		strings.Join(placeholders, ","),
 	)

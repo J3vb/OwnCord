@@ -401,7 +401,7 @@ func (m *mockHubWB) BroadcastChannelUpdate(ch *db.Channel)                  {}
 func (m *mockHubWB) BroadcastChannelDelete(channelID int64)                 {}
 func (m *mockHubWB) BroadcastMemberBan(userID int64)                        {}
 func (m *mockHubWB) BroadcastMemberUpdate(userID int64, roleName string)    {}
-func (m *mockHubWB) ClientCount() int                                        { return 0 }
+func (m *mockHubWB) ClientCount() int                                       { return 0 }
 
 // TestSpawnDetached_ValidExecutable verifies that spawnDetached can start a
 // real executable (the Go test binary itself) with a flag that causes immediate

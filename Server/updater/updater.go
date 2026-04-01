@@ -21,22 +21,22 @@ import (
 )
 
 const (
-	defaultBaseURL  = "https://api.github.com"
-	cacheTTL        = 1 * time.Hour
-	errorCacheTTL   = 5 * time.Minute
-	binaryAsset     = "chatserver.exe"
-	checksumAsset   = "checksums.sha256"
+	defaultBaseURL = "https://api.github.com"
+	cacheTTL       = 1 * time.Hour
+	errorCacheTTL  = 5 * time.Minute
+	binaryAsset    = "chatserver.exe"
+	checksumAsset  = "checksums.sha256"
 )
 
 // UpdateInfo holds the result of a version check.
 type UpdateInfo struct {
-	Current         string `json:"current"`
-	Latest          string `json:"latest"`
-	UpdateAvailable bool   `json:"update_available"`
-	ReleaseURL      string `json:"release_url"`
-	DownloadURL     string `json:"download_url"`
-	ChecksumURL     string `json:"checksum_url"`
-	ReleaseNotes    string `json:"release_notes"`
+	Current         string  `json:"current"`
+	Latest          string  `json:"latest"`
+	UpdateAvailable bool    `json:"update_available"`
+	ReleaseURL      string  `json:"release_url"`
+	DownloadURL     string  `json:"download_url"`
+	ChecksumURL     string  `json:"checksum_url"`
+	ReleaseNotes    string  `json:"release_notes"`
 	Assets          []Asset `json:"assets,omitempty"`
 }
 

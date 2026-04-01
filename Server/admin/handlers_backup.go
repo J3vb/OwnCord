@@ -116,12 +116,12 @@ func handleDeleteBackup(database *db.DB) http.Handler {
 		}
 
 		backupPath := filepath.Join("data", "backups", name)
-		if _, err := os.Stat(backupPath); os.IsNotExist(err) {
+		if _, err := os.Stat(backupPath); os.IsNotExist(err) { //nolint:gosec // G703: path is sanitized above
 			writeErr(w, http.StatusNotFound, "NOT_FOUND", "backup not found")
 			return
 		}
 
-		if err := os.Remove(backupPath); err != nil {
+		if err := os.Remove(backupPath); err != nil { //nolint:gosec // G703: path is sanitized above
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete backup")
 			return
 		}
@@ -156,7 +156,7 @@ func handleRestoreBackup(database *db.DB) http.Handler {
 		}
 
 		backupPath := filepath.Join("data", "backups", name)
-		if _, err := os.Stat(backupPath); os.IsNotExist(err) {
+		if _, err := os.Stat(backupPath); os.IsNotExist(err) { //nolint:gosec // G703: path is sanitized above
 			writeErr(w, http.StatusNotFound, "NOT_FOUND", "backup not found")
 			return
 		}
@@ -195,7 +195,7 @@ func handleRestoreBackup(database *db.DB) http.Handler {
 
 // copyFile streams src to dst without loading the entire file into memory.
 func copyFile(src, dst string) error {
-	in, err := os.Open(src)
+	in, err := os.Open(src) //nolint:gosec // G703: src is from sanitized backup path
 	if err != nil {
 		return fmt.Errorf("open source: %w", err)
 	}

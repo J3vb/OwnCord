@@ -13,7 +13,7 @@ import (
 // 1. Parses muted bool.
 // 2. Updates DB.
 // 3. Broadcasts voice_state update to channel.
-func (h *Hub) handleVoiceMute(ctx context.Context, c *Client, payload json.RawMessage) {
+func (h *Hub) handleVoiceMute(_ context.Context, c *Client, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("voice_mute:%d", c.userID)
 	if !h.limiter.Allow(ratKey, voiceMuteRateLimit, voiceMuteWindow) {
 		c.sendMsg(buildRateLimitError("too many mute toggles", voiceMuteWindow.Seconds()))
@@ -47,7 +47,7 @@ func (h *Hub) handleVoiceMute(ctx context.Context, c *Client, payload json.RawMe
 // 1. Parses deafened bool.
 // 2. Updates DB.
 // 3. Broadcasts voice_state update to channel.
-func (h *Hub) handleVoiceDeafen(ctx context.Context, c *Client, payload json.RawMessage) {
+func (h *Hub) handleVoiceDeafen(_ context.Context, c *Client, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("voice_deafen:%d", c.userID)
 	if !h.limiter.Allow(ratKey, voiceDeafenRateLimit, voiceDeafenWindow) {
 		c.sendMsg(buildRateLimitError("too many deafen toggles", voiceDeafenWindow.Seconds()))
@@ -84,7 +84,7 @@ func (h *Hub) handleVoiceDeafen(ctx context.Context, c *Client, payload json.Raw
 // 4. Enforces MaxVideo limit via DB count (race-free).
 // 5. Updates DB.
 // 6. Broadcasts voice_state update to channel.
-func (h *Hub) handleVoiceCamera(ctx context.Context, c *Client, payload json.RawMessage) {
+func (h *Hub) handleVoiceCamera(_ context.Context, c *Client, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("voice_camera:%d", c.userID)
 	if !h.limiter.Allow(ratKey, voiceCameraRateLimit, voiceCameraWindow) {
 		c.sendMsg(buildRateLimitError("too many camera toggles", voiceCameraWindow.Seconds()))
@@ -149,7 +149,7 @@ func (h *Hub) handleVoiceCamera(ctx context.Context, c *Client, payload json.Raw
 // 3. Parses enabled bool.
 // 4. Updates DB.
 // 5. Broadcasts voice_state update to channel.
-func (h *Hub) handleVoiceScreenshare(ctx context.Context, c *Client, payload json.RawMessage) {
+func (h *Hub) handleVoiceScreenshare(_ context.Context, c *Client, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("voice_screenshare:%d", c.userID)
 	if !h.limiter.Allow(ratKey, voiceScreenshareRateLimit, voiceScreenshareWindow) {
 		c.sendMsg(buildRateLimitError("too many screenshare toggles", voiceScreenshareWindow.Seconds()))

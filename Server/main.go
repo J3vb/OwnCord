@@ -69,7 +69,7 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 	}
 
 	// ── 2. Ensure data directory exists ────────────────────────────────────
-	if mkdirErr := os.MkdirAll(cfg.Server.DataDir, 0o755); mkdirErr != nil {
+	if mkdirErr := os.MkdirAll(cfg.Server.DataDir, 0o750); mkdirErr != nil {
 		return fmt.Errorf("creating data dir %s: %w", cfg.Server.DataDir, mkdirErr)
 	}
 
@@ -333,4 +333,3 @@ func getOutboundIP() string {
 	addr := conn.LocalAddr().(*net.UDPAddr)
 	return addr.IP.String()
 }
-

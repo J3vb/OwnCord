@@ -57,6 +57,7 @@ func NewHandler(database *db.DB, version string, hub HubBroadcaster, u *updater.
 }
 
 // Handler returns the admin panel http.Handler using a nil database.
+//
 // Deprecated: use NewHandler instead. Kept for backwards-compat with any
 // caller that already imported this symbol before Phase 6.
 func Handler() http.Handler {

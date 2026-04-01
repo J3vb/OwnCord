@@ -20,7 +20,7 @@ func registerReactionHandlers(r *HandlerRegistry) {
 }
 
 // handleReaction processes reaction_add and reaction_remove messages.
-func (h *Hub) handleReaction(ctx context.Context, c *Client, add bool, payload json.RawMessage) {
+func (h *Hub) handleReaction(_ context.Context, c *Client, add bool, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("reaction:%d", c.userID)
 	if !h.limiter.Allow(ratKey, reactionRateLimit, reactionWindow) {
 		c.sendMsg(buildRateLimitError("too many reactions", reactionWindow.Seconds()))
@@ -79,10 +79,8 @@ func (h *Hub) handleReaction(ctx context.Context, c *Client, add bool, payload j
 			c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "reaction failed"))
 			return
 		}
-	} else {
-		if !h.requireChannelPerm(c, msg.ChannelID, permissions.AddReactions, "ADD_REACTIONS") {
-			return
-		}
+	} else if !h.requireChannelPerm(c, msg.ChannelID, permissions.AddReactions, "ADD_REACTIONS") {
+		return
 	}
 
 	action := "add"

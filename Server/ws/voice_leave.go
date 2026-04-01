@@ -10,7 +10,7 @@ import (
 // 1. Gets old voiceChID from clearVoiceChID().
 // 2. If was in voice: remove from DB (with retry), broadcast voice_leave.
 // 3. Call livekit.RemoveParticipant (ignore errors — participant may already be gone).
-func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
+func (h *Hub) handleVoiceLeave(_ context.Context, c *Client) {
 	oldChID, oldJoinToken := c.clearVoiceState()
 	if oldChID == 0 {
 		slog.Debug("handleVoiceLeave no-op (already cleared)", "user_id", c.userID)
@@ -36,7 +36,7 @@ func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
 
 	// Remove from LiveKit (best-effort).
 	if h.livekit != nil {
-		if err := h.livekit.RemoveParticipant(oldChID, c.userID, oldJoinToken); err != nil {
+		if err := h.livekit.RemoveParticipant(oldChID, c.userID, oldJoinToken); err != nil { //nolint:contextcheck // TODO: propagate context through this call path
 			slog.Warn("handleVoiceLeave RemoveParticipant failed (may already be gone)",
 				"err", err, "user_id", c.userID, "channel_id", oldChID)
 		}

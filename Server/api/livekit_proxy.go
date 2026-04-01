@@ -129,9 +129,12 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL, all
 	backendURL.RawQuery = r.URL.RawQuery
 
 	// Connect to LiveKit backend.
-	backConn, _, err := websocket.Dial(r.Context(), backendURL.String(), &websocket.DialOptions{
+	backConn, dialResp, err := websocket.Dial(r.Context(), backendURL.String(), &websocket.DialOptions{
 		Subprotocols: r.Header.Values("Sec-WebSocket-Protocol"),
 	})
+	if dialResp != nil && dialResp.Body != nil {
+		defer dialResp.Body.Close() //nolint:errcheck // best-effort close
+	}
 	if err != nil {
 		slog.Warn("livekit proxy: backend dial failed", "host", backendURL.Host, "path", backendURL.Path, "err", err)
 		writeJSON(w, http.StatusBadGateway, errorResponse{
@@ -188,11 +191,11 @@ func copyWS(ctx context.Context, dst, src *websocket.Conn) error {
 		if err != nil {
 			return err
 		}
-		if _, err = io.Copy(writer, reader); err != nil {
-			return err
+		if _, copyErr := io.Copy(writer, reader); copyErr != nil {
+			return copyErr
 		}
-		if err = writer.Close(); err != nil {
-			return err
+		if closeErr := writer.Close(); closeErr != nil {
+			return closeErr
 		}
 	}
 }

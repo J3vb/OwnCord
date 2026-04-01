@@ -133,7 +133,7 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 
 // spawnDetached starts a new process that is not attached to the current one.
 func spawnDetached(exePath string, args []string) error {
-	cmd := exec.Command(exePath, args...)
+	cmd := exec.Command(exePath, args...) //nolint:gosec // G204: command path from trusted server config
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 

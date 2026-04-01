@@ -202,8 +202,8 @@ func NewMultiHandler(stdout slog.Handler, buf *RingBuffer, minLevel slog.Leveler
 	}
 }
 
-func (h *multiHandler) Enabled(_ context.Context, level slog.Level) bool {
-	return h.stdout.Enabled(context.Background(), level) || h.ring.Enabled(level)
+func (h *multiHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.stdout.Enabled(ctx, level) || h.ring.Enabled(level)
 }
 
 func (h *multiHandler) Handle(ctx context.Context, r slog.Record) error {

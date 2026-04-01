@@ -43,15 +43,15 @@ type memberJoinPayload struct {
 }
 
 type chatMessagePayload struct {
-	ID          int64              `json:"id"`
-	ChannelID   int64              `json:"channel_id"`
-	User        memberUserPayload  `json:"user"`
-	Content     string             `json:"content"`
-	ReplyTo     *int64             `json:"reply_to"`
-	Timestamp   string             `json:"timestamp"`
-	Attachments []map[string]any   `json:"attachments"`
-	Reactions   []any              `json:"reactions"`
-	Pinned      bool               `json:"pinned"`
+	ID          int64             `json:"id"`
+	ChannelID   int64             `json:"channel_id"`
+	User        memberUserPayload `json:"user"`
+	Content     string            `json:"content"`
+	ReplyTo     *int64            `json:"reply_to"`
+	Timestamp   string            `json:"timestamp"`
+	Attachments []map[string]any  `json:"attachments"`
+	Reactions   []any             `json:"reactions"`
+	Pinned      bool              `json:"pinned"`
 }
 
 type memberUpdatePayload struct {
@@ -147,7 +147,7 @@ type serverRestartPayload struct {
 
 // dmChannelOpenPayload is sent when a DM is opened/reopened for a user.
 type dmChannelOpenPayload struct {
-	ChannelID int64     `json:"channel_id"`
+	ChannelID int64         `json:"channel_id"`
 	Recipient dmUserPayload `json:"recipient"`
 }
 
@@ -370,7 +370,7 @@ func buildVoiceConfig(channelID int64, quality string, bitrate int, maxUsers int
 // buildVoiceToken constructs a voice_token message with a LiveKit token and URL.
 // url is the proxy path ("/livekit") for remote clients; direct_url is the raw
 // LiveKit URL (e.g. "ws://localhost:7880") for localhost clients.
-func buildVoiceToken(channelID int64, token string, proxyPath string, directURL string) []byte {
+func buildVoiceToken(channelID int64, token string, proxyPath string, directURL string) []byte { //nolint:unparam // kept configurable for proxy path flexibility
 	return buildJSON(wsMsg{
 		Type: MsgTypeVoiceToken,
 		Payload: voiceTokenPayload{

@@ -64,7 +64,7 @@ func (d *DB) LinkAttachmentsToMessage(messageID int64, attachmentIDs []string) (
 		args = append(args, id)
 	}
 
-	query := fmt.Sprintf(
+	query := fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
 		`UPDATE attachments SET message_id = ? WHERE id IN (%s) AND message_id IS NULL`,
 		strings.Join(placeholders, ","),
 	)
@@ -88,7 +88,7 @@ func (d *DB) GetAttachmentsByMessageIDs(msgIDs []int64) (map[int64][]AttachmentI
 		args[i] = id
 	}
 
-	query := fmt.Sprintf(
+	query := fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
 		`SELECT id, message_id, filename, size, mime_type, width, height
 		 FROM attachments WHERE message_id IN (%s)`,
 		strings.Join(placeholders, ","),

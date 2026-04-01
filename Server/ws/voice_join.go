@@ -188,7 +188,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 // handleVoiceTokenRefresh generates a fresh LiveKit token for a client
 // that is already in a voice channel. This lets clients request a new token
 // (e.g. before a manual reconnect) without leaving and rejoining voice.
-func (h *Hub) handleVoiceTokenRefresh(ctx context.Context, c *Client) {
+func (h *Hub) handleVoiceTokenRefresh(_ context.Context, c *Client) {
 	ratKey := fmt.Sprintf("voice_token_refresh:%d", c.userID)
 	if !h.limiter.Allow(ratKey, 1, 60*time.Second) {
 		c.sendMsg(buildRateLimitError("token refresh rate limited", 60))

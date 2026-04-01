@@ -1,8 +1,42 @@
 version: "2"
 
 linters:
+  enable:
+    - gocritic       # opinionated checks for bugs, performance, style
+    - gosec          # security-focused static analysis (SQL injection, hardcoded creds, weak crypto)
+    - errcheck       # ensures all errors are checked
+    - bodyclose      # detects unclosed HTTP response bodies
+    - contextcheck   # verifies context.Context propagation
+    - nilerr         # detects returning nil when err is not nil
+    - prealloc       # suggests pre-allocating slices for performance
+    - unconvert      # removes unnecessary type conversions
+    - unparam        # finds unused function parameters
+    - wastedassign   # finds wasted assignments
+    - staticcheck    # advanced static analysis (correctness, performance, deprecation)
+
   settings:
     staticcheck:
       checks:
         - "all"
         - "-SA1019"  # suppress deprecated usage warnings (websocket library migration tracked separately)
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        - hugeParam   # too noisy for struct-heavy code
+    gosec:
+      excludes:
+        - G104  # unhandled errors — errcheck covers this better
+        - G304  # file path from variable — expected in file storage code
+        - G706  # log injection — false positive with slog structured logging (values are typed key-value pairs, not interpolated)
+
+  exclusions:
+    # Suppress noisy linters in test files
+    rules:
+      - linters: [unparam]
+        path: _test\.go
+      - linters: [gosec]
+        path: _test\.go
+      - linters: [errcheck]
+        path: _test\.go

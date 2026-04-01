@@ -32,7 +32,7 @@ type chatSendPayload struct {
 }
 
 // handleChatSend processes a chat_send message.
-func (h *Hub) handleChatSend(ctx context.Context, c *Client, reqID string, payload json.RawMessage) {
+func (h *Hub) handleChatSend(_ context.Context, c *Client, reqID string, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("chat:%d", c.userID)
 	if !h.limiter.Allow(ratKey, chatRateLimit, chatWindow) {
 		c.sendMsg(buildRateLimitError("too many messages", chatWindow.Seconds()))
@@ -229,7 +229,7 @@ func (h *Hub) broadcastChatMessage(c *Client, channelID int64, isDM bool, broadc
 }
 
 // handleChatEdit processes a chat_edit message.
-func (h *Hub) handleChatEdit(ctx context.Context, c *Client, _ string, payload json.RawMessage) {
+func (h *Hub) handleChatEdit(_ context.Context, c *Client, _ string, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("chat_edit:%d", c.userID)
 	if !h.limiter.Allow(ratKey, chatRateLimit, chatWindow) {
 		c.sendMsg(buildRateLimitError("too many edits", chatWindow.Seconds()))
@@ -278,12 +278,10 @@ func (h *Hub) handleChatEdit(ctx context.Context, c *Client, _ string, payload j
 			c.sendMsg(buildErrorMsg(ErrCodeForbidden, "cannot edit this message"))
 			return
 		}
-	} else {
+	} else if !h.hasChannelPerm(c, msg.ChannelID, permissions.SendMessages) {
 		// Re-check that the user still has SendMessages permission on this channel.
-		if !h.hasChannelPerm(c, msg.ChannelID, permissions.SendMessages) {
-			c.sendMsg(buildErrorMsg(ErrCodeForbidden, "cannot edit this message"))
-			return
-		}
+		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "cannot edit this message"))
+		return
 	}
 
 	// EditMessage checks ownership internally.
@@ -315,7 +313,7 @@ func (h *Hub) handleChatEdit(ctx context.Context, c *Client, _ string, payload j
 }
 
 // handleChatDelete processes a chat_delete message.
-func (h *Hub) handleChatDelete(ctx context.Context, c *Client, _ string, payload json.RawMessage) {
+func (h *Hub) handleChatDelete(_ context.Context, c *Client, _ string, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("chat_delete:%d", c.userID)
 	if !h.limiter.Allow(ratKey, chatRateLimit, chatWindow) {
 		c.sendMsg(buildRateLimitError("too many deletes", chatWindow.Seconds()))

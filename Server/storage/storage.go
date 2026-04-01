@@ -17,11 +17,11 @@ var blockedMagic = []struct {
 	name  string
 	magic []byte
 }{
-	{"PE executable", []byte("MZ")},             // Windows .exe / .dll
-	{"ELF binary", []byte("\x7fELF")},            // Linux binaries
-	{"Mach-O 64", []byte("\xcf\xfa\xed\xfe")},   // macOS 64-bit
-	{"Mach-O 32", []byte("\xce\xfa\xed\xfe")},   // macOS 32-bit
-	{"shell script", []byte("#!")},               // Shebang scripts (.sh, .py, etc.)
+	{"PE executable", []byte("MZ")},           // Windows .exe / .dll
+	{"ELF binary", []byte("\x7fELF")},         // Linux binaries
+	{"Mach-O 64", []byte("\xcf\xfa\xed\xfe")}, // macOS 64-bit
+	{"Mach-O 32", []byte("\xce\xfa\xed\xfe")}, // macOS 32-bit
+	{"shell script", []byte("#!")},            // Shebang scripts (.sh, .py, etc.)
 }
 
 // ValidateFileType checks the first few bytes of a file against known blocked
@@ -45,7 +45,7 @@ type Storage struct {
 // New creates a Storage instance that stores files in dir.
 // dir is created if it does not exist.
 func New(dir string, maxSizeMB int) (*Storage, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("creating storage dir %s: %w", dir, err)
 	}
 	return &Storage{dir: dir, maxSizeMB: maxSizeMB}, nil
