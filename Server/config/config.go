@@ -50,6 +50,8 @@ type ServerConfig struct {
 	AllowedOrigins    []string `koanf:"allowed_origins"`
 	TrustedProxies    []string `koanf:"trusted_proxies"`
 	AdminAllowedCIDRs []string `koanf:"admin_allowed_cidrs"`
+	WAFEnabled        bool     `koanf:"waf_enabled"`        // Enable Coraza WAF (default: false)
+	WAFParanoiaLevel  int      `koanf:"waf_paranoia_level"` // OWASP CRS paranoia level 1-4 (default: 2)
 }
 
 // DatabaseConfig holds database settings.

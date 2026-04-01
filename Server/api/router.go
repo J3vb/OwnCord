@@ -36,6 +36,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	r.Use(SecurityHeadersWithTLS(cfg.TLS.Mode))
 	r.Use(MaxBodySizeUnless(defaultMaxBodySize, "/api/v1/uploads")) // upload route exempt
 
+	// Coraza WAF — opt-in via config.
+	if cfg.Server.WAFEnabled {
+		r.Use(NewWAFMiddleware(cfg.Server.WAFParanoiaLevel))
+	}
+
 	// Health check — unauthenticated, no versioning prefix.
 	// The online user count callback is set after hub creation below.
 	var getOnlineUsers func() int
