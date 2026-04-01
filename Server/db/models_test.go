@@ -72,7 +72,9 @@ func TestRole_NilColor(t *testing.T) {
 	data, _ := json.Marshal(role)
 
 	var raw map[string]interface{}
-	json.Unmarshal(data, &raw) //nolint:errcheck
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
 
 	if raw["color"] != nil {
 		t.Errorf("nil Color should serialize as null, got %v", raw["color"])
@@ -126,7 +128,9 @@ func TestChannel_OmitEmptyFields(t *testing.T) {
 	data, _ := json.Marshal(ch)
 
 	var raw map[string]json.RawMessage
-	json.Unmarshal(data, &raw) //nolint:errcheck
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
 
 	// voice_quality and mixing_threshold have omitempty — should be absent when nil.
 	if _, ok := raw["voice_quality"]; ok {
@@ -149,7 +153,9 @@ func TestVoiceState_JoinedAtOmittedFromJSON(t *testing.T) {
 
 	data, _ := json.Marshal(vs)
 	var raw map[string]json.RawMessage
-	json.Unmarshal(data, &raw) //nolint:errcheck
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
 
 	if _, ok := raw["JoinedAt"]; ok {
 		t.Error("JoinedAt has json:\"-\" tag and should not appear in JSON output")
@@ -164,7 +170,9 @@ func TestVoiceState_BoolDefaults(t *testing.T) {
 	data, _ := json.Marshal(vs)
 
 	var decoded db.VoiceState
-	json.Unmarshal(data, &decoded) //nolint:errcheck
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
 
 	if decoded.Muted || decoded.Deafened || decoded.Speaking || decoded.Camera || decoded.Screenshare {
 		t.Error("zero-value VoiceState bools should all be false")
@@ -186,7 +194,9 @@ func TestMessageAPIResponse_JSONKeys(t *testing.T) {
 
 	data, _ := json.Marshal(resp)
 	var raw map[string]json.RawMessage
-	json.Unmarshal(data, &raw) //nolint:errcheck
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
 
 	required := []string{"id", "channel_id", "user", "content", "reply_to",
 		"attachments", "reactions", "pinned", "edited_at", "deleted", "timestamp"}
@@ -206,7 +216,9 @@ func TestAttachmentInfo_OmitsNilDimensions(t *testing.T) {
 	data, _ := json.Marshal(att)
 
 	var raw map[string]json.RawMessage
-	json.Unmarshal(data, &raw) //nolint:errcheck
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
 
 	if _, ok := raw["width"]; ok {
 		t.Error("nil Width should be omitted")
@@ -225,7 +237,9 @@ func TestAttachmentInfo_IncludesDimensions(t *testing.T) {
 	data, _ := json.Marshal(att)
 
 	var raw map[string]json.RawMessage
-	json.Unmarshal(data, &raw) //nolint:errcheck
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
 
 	if _, ok := raw["width"]; !ok {
 		t.Error("non-nil Width should be present")
@@ -242,7 +256,9 @@ func TestUserPublic_OmitsNilAvatar(t *testing.T) {
 	data, _ := json.Marshal(u)
 
 	var raw map[string]json.RawMessage
-	json.Unmarshal(data, &raw) //nolint:errcheck
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
 
 	if _, ok := raw["avatar"]; ok {
 		t.Error("nil Avatar should be omitted")
@@ -255,7 +271,9 @@ func TestUserPublic_IncludesAvatar(t *testing.T) {
 	data, _ := json.Marshal(u)
 
 	var raw map[string]json.RawMessage
-	json.Unmarshal(data, &raw) //nolint:errcheck
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
 
 	if _, ok := raw["avatar"]; !ok {
 		t.Error("non-nil Avatar should be present")
@@ -299,7 +317,9 @@ func TestAuditEntry_JSONKeys(t *testing.T) {
 
 	data, _ := json.Marshal(entry)
 	var raw map[string]json.RawMessage
-	json.Unmarshal(data, &raw) //nolint:errcheck
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
 
 	required := []string{"id", "actor_id", "actor_name", "action", "target_type", "target_id", "detail", "created_at"}
 	for _, k := range required {

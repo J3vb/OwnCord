@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -418,25 +419,13 @@ func deleteWithToken(t *testing.T, router http.Handler, path, token string, body
 // extractSecretFromURI parses a TOTP otpauth:// URI and returns the secret parameter.
 func extractSecretFromURI(t *testing.T, uri string) string {
 	t.Helper()
-	// URI format: otpauth://totp/OwnCord:username?secret=XXX&issuer=OwnCord
-	// Simple parse — find "secret=" and extract until next '&' or end.
-	const marker = "secret="
-	idx := 0
-	for i := 0; i+len(marker) <= len(uri); i++ {
-		if uri[i:i+len(marker)] == marker {
-			idx = i + len(marker)
-			break
-		}
+	u, err := url.Parse(uri)
+	if err != nil {
+		t.Fatalf("parse otpauth URI: %v", err)
 	}
-	if idx == 0 {
-		t.Fatalf("no secret= found in URI: %s", uri)
+	s := u.Query().Get("secret")
+	if s == "" {
+		t.Fatalf("no secret param in URI: %s", uri)
 	}
-	end := len(uri)
-	for i := idx; i < len(uri); i++ {
-		if uri[i] == '&' {
-			end = i
-			break
-		}
-	}
-	return uri[idx:end]
+	return s
 }
