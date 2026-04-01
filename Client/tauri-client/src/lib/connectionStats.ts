@@ -190,6 +190,12 @@ export function createConnectionStatsPoller(getRoom: () => Room | null): Connect
     log.info("Stopping connection stats poller");
     clearInterval(intervalId);
     intervalId = null;
+    // BUG-071B: Clear pending quality debounce timer to prevent it firing
+    // after the poller is stopped (would call listeners against a dead room).
+    if (qualityDebounceTimer !== null) {
+      clearTimeout(qualityDebounceTimer);
+      qualityDebounceTimer = null;
+    }
     current = EMPTY_STATS;
     prev = { timestamp: Date.now(), outBytes: 0, inBytes: 0 };
   }
