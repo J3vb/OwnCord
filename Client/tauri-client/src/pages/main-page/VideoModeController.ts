@@ -88,7 +88,9 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
       return;
     }
 
-    // Check if any camera or screenshare is active
+    // Check if any camera or screenshare is active.
+    // Check both voice store state AND whether the grid has tiles, because
+    // LiveKit track delivery can race ahead of the WS voice_state update.
     let anyVideoOn = voice.localCamera || voice.localScreenshare;
     if (!anyVideoOn) {
       for (const user of channelUsers.values()) {
@@ -97,6 +99,9 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
           break;
         }
       }
+    }
+    if (!anyVideoOn) {
+      anyVideoOn = videoGrid.hasStreams();
     }
     // Auto-close video grid when no streams remain
     if (!anyVideoOn && videoMode) {
@@ -145,14 +150,11 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
       localScreenshareTileAdded = false;
     }
 
-    // Remove remote video tiles for users who turned off their camera or screenshare
-    if (channelUsers) {
-      for (const user of channelUsers.values()) {
-        if (!user.camera && !user.screenshare && user.userId !== currentUserId) {
-          videoGrid.removeStream(user.userId);
-        }
-      }
-    }
+    // Remote video tiles are managed exclusively by the onRemoteVideo /
+    // onRemoteVideoRemoved callbacks (driven by LiveKit TrackSubscribed /
+    // TrackUnsubscribed). Do NOT remove remote tiles here based on voice
+    // store state — the WS voice_state update can lag behind LiveKit track
+    // delivery, causing tiles to be removed immediately after being added.
   }
 
   function isVideoModeActive(): boolean {

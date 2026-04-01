@@ -11,11 +11,14 @@ import type { VoiceUser } from "@stores/voice.store";
 import { membersStore } from "@stores/members.store";
 import { setUserVolume, getUserVolume } from "@lib/livekitSession";
 import { authStore } from "@stores/auth.store";
+import { attachStreamPreview, attachScrollCollapse } from "@lib/streamPreview";
+import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 
 export interface VoiceChannelOptions {
   channelId: number;
   channelName: string;
   onJoin(): void;
+  onClickWatch?(tileId: number): void;
 }
 
 export interface VoiceChannelResult {
@@ -233,7 +236,34 @@ export function createVoiceChannel(options: VoiceChannelOptions): VoiceChannelRe
       const username = (member as { username?: string } | undefined)?.username ?? "Unknown";
       const row = createUserRow(user, username);
       usersContainer.appendChild(row);
+
+      // Attach stream preview for remote users with active video
+      const currentUser = authStore.getState().user;
+      if (
+        (currentUser === null || currentUser.id !== user.userId) &&
+        (user.camera || user.screenshare)
+      ) {
+        const tileId = user.screenshare ? user.userId + SCREENSHARE_TILE_ID_OFFSET : user.userId;
+        attachStreamPreview(
+          row,
+          user.userId,
+          username,
+          user.screenshare,
+          user.camera,
+          ac.signal,
+          () => {
+            // Only join if not already in this channel
+            if (voiceStore.getState().currentChannelId !== options.channelId) {
+              options.onJoin();
+            }
+            if (options.onClickWatch !== undefined) options.onClickWatch(tileId);
+          },
+          options.onClickWatch !== undefined ? () => options.onClickWatch!(tileId) : undefined,
+        );
+      }
     }
+
+    attachScrollCollapse(usersContainer, ac.signal);
 
     // Mark channel-item active if there are users
     if (channelUsers.size > 0) {

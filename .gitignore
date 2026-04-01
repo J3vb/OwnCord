@@ -23,6 +23,7 @@ skills/
 Server/chatserver.exe
 Server/chatserver.exe~
 Server/owncord-server.exe
+Server/server.exe
 Server/config.yaml
 Server/data/
 

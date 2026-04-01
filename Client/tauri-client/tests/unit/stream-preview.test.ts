@@ -10,6 +10,16 @@ vi.mock("@lib/livekitSession", () => ({
   getUserVolume: vi.fn(() => 1),
 }));
 
+const mockVoiceStoreState = {
+  currentChannelId: null as number | null,
+  localDeafened: false,
+};
+vi.mock("@stores/voice.store", () => ({
+  voiceStore: {
+    getState: () => mockVoiceStoreState,
+  },
+}));
+
 vi.mock("@lib/icons", () => ({
   createIcon: (name: string, size: number) => {
     const el = document.createElement("span");
@@ -57,6 +67,8 @@ describe("streamPreview", () => {
   beforeEach(() => {
     ac = new AbortController();
     mockGetRemoteVideoStream.mockReset();
+    mockVoiceStoreState.currentChannelId = null;
+    mockVoiceStoreState.localDeafened = false;
     vi.useFakeTimers();
   });
 
@@ -292,6 +304,110 @@ describe("streamPreview", () => {
 
     expect(getPreview(row)?.querySelector("video") ?? null).toBeNull();
     expect(getPreview(row)?.querySelector(".vu-preview-placeholder") ?? null).not.toBeNull();
+  });
+});
+
+describe("streamPreview — channel-aware placeholder", () => {
+  let ac: AbortController;
+
+  beforeEach(() => {
+    ac = new AbortController();
+    mockGetRemoteVideoStream.mockReset();
+    mockVoiceStoreState.currentChannelId = null;
+    mockVoiceStoreState.localDeafened = false;
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    ac.abort();
+    vi.useRealTimers();
+    document.body.innerHTML = "";
+  });
+
+  it("shows 'Join to preview' when NOT in a voice channel and stream is null", () => {
+    mockGetRemoteVideoStream.mockReturnValue(null);
+    mockVoiceStoreState.currentChannelId = null;
+
+    const row = createRow(42);
+    attachStreamPreview(row, 42, "Alice", false, true, ac.signal);
+
+    row.dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(300);
+
+    const placeholder = row.nextElementSibling?.querySelector(".vu-preview-placeholder");
+    expect(placeholder?.textContent).toContain("Join to preview");
+  });
+
+  it("does NOT show 'Join to preview' when already in a voice channel and stream is null", () => {
+    mockGetRemoteVideoStream.mockReturnValue(null);
+    mockVoiceStoreState.currentChannelId = 1;
+
+    const row = createRow(42);
+    attachStreamPreview(row, 42, "Alice", false, true, ac.signal);
+
+    row.dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(300);
+
+    const placeholder = row.nextElementSibling?.querySelector(".vu-preview-placeholder");
+    expect(placeholder).not.toBeNull();
+    // Should NOT say "Join to preview" when already in channel
+    expect(placeholder?.textContent).not.toContain("Join to preview");
+  });
+
+  it("shows 'Stream unavailable' when in channel but no stream available", () => {
+    mockGetRemoteVideoStream.mockReturnValue(null);
+    mockVoiceStoreState.currentChannelId = 1;
+
+    const row = createRow(42);
+    attachStreamPreview(row, 42, "Alice", false, true, ac.signal);
+
+    row.dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(300);
+
+    const placeholder = row.nextElementSibling?.querySelector(".vu-preview-placeholder");
+    expect(placeholder?.textContent).toContain("Stream unavailable");
+  });
+
+  it("uses onClickWatch when in channel and stream is null but onClickWatch provided", () => {
+    mockGetRemoteVideoStream.mockReturnValue(null);
+    mockVoiceStoreState.currentChannelId = 1;
+
+    const onClickJoin = vi.fn();
+    const onClickWatch = vi.fn();
+    const row = createRow(42);
+    attachStreamPreview(row, 42, "Alice", false, true, ac.signal, onClickJoin, onClickWatch);
+
+    row.dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(300);
+
+    const placeholder = row.nextElementSibling?.querySelector(
+      ".vu-preview-placeholder",
+    ) as HTMLElement;
+    placeholder?.click();
+
+    expect(onClickWatch).toHaveBeenCalledOnce();
+    expect(onClickJoin).not.toHaveBeenCalled();
+  });
+
+  it("uses onClickJoin when NOT in channel and stream is null", () => {
+    mockGetRemoteVideoStream.mockReturnValue(null);
+    mockVoiceStoreState.currentChannelId = null;
+
+    const onClickJoin = vi.fn();
+    const onClickWatch = vi.fn();
+    const row = createRow(42);
+    attachStreamPreview(row, 42, "Alice", false, true, ac.signal, onClickJoin, onClickWatch);
+
+    row.dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(300);
+
+    const placeholder = row.nextElementSibling?.querySelector(
+      ".vu-preview-placeholder",
+    ) as HTMLElement;
+    placeholder?.click();
+
+    expect(onClickJoin).toHaveBeenCalledOnce();
+    expect(onClickWatch).not.toHaveBeenCalled();
   });
 });
 

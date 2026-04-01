@@ -12,6 +12,7 @@
 import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { getRemoteVideoStream } from "@lib/livekitSession";
+import { voiceStore } from "@stores/voice.store";
 
 /** Internal state tracked per voice-user-item row for cleanup. */
 interface PreviewState {
@@ -118,7 +119,12 @@ function showPreview(
     }
     previewDiv.appendChild(video);
   } else {
-    previewDiv.appendChild(createPlaceholder(onClickJoin));
+    const isInChannel = voiceStore.getState().currentChannelId !== null;
+    if (isInChannel) {
+      previewDiv.appendChild(createUnavailablePlaceholder(onClickWatch));
+    } else {
+      previewDiv.appendChild(createPlaceholder(onClickJoin));
+    }
   }
 
   // Screen reader announcement
@@ -164,6 +170,26 @@ function createPlaceholder(onClickJoin?: () => void): HTMLElement {
     placeholder.addEventListener("click", (e) => {
       e.stopPropagation();
       onClickJoin();
+    });
+  }
+  return placeholder;
+}
+
+function createUnavailablePlaceholder(onClickWatch?: () => void): HTMLElement {
+  const placeholder = createElement("div", {
+    class: "vu-preview-placeholder",
+    role: "button",
+    "aria-label": "Stream unavailable",
+  });
+  const icon = createIcon("monitor-off", 14);
+  icon.style.color = "var(--text-faint)";
+  placeholder.appendChild(icon);
+  const text = createElement("span", {}, "Stream unavailable");
+  placeholder.appendChild(text);
+  if (onClickWatch !== undefined) {
+    placeholder.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onClickWatch();
     });
   }
   return placeholder;

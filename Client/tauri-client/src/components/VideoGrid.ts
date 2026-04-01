@@ -97,7 +97,10 @@ export function computeGridLayout(
 
 export function createVideoGrid(): VideoGridComponent {
   let root: HTMLDivElement | null = null;
-  const cells = new Map<number, { el: HTMLDivElement; config?: TileConfig }>();
+  const cells = new Map<
+    number,
+    { el: HTMLDivElement; config?: TileConfig; trackCleanup?: () => void }
+  >();
   let focusedTileId: number | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let resizeRafId = 0;
@@ -114,6 +117,33 @@ export function createVideoGrid(): VideoGridComponent {
     for (const entry of cells.values()) {
       entry.el.style.width = `${layout.tileW}px`;
       entry.el.style.height = `${layout.tileH}px`;
+    }
+  }
+
+  /** Attach ended/mute listeners on the first video track to auto-remove stale tiles. */
+  function attachTrackLifecycle(userId: number, stream: MediaStream): void {
+    // Clean up previous listeners for this tile
+    const prev = cells.get(userId);
+    if (prev?.trackCleanup) {
+      prev.trackCleanup();
+      prev.trackCleanup = undefined;
+    }
+
+    const track = stream.getVideoTracks()[0];
+    if (track === undefined) return;
+
+    const onTrackDead = (): void => {
+      removeStream(userId);
+    };
+    track.addEventListener("ended", onTrackDead);
+    track.addEventListener("mute", onTrackDead);
+
+    const entry = cells.get(userId);
+    if (entry !== undefined) {
+      entry.trackCleanup = () => {
+        track.removeEventListener("ended", onTrackDead);
+        track.removeEventListener("mute", onTrackDead);
+      };
     }
   }
 
@@ -216,6 +246,8 @@ export function createVideoGrid(): VideoGridComponent {
           oldTracks.every((t, i) => t.id === newTracks[i]?.id);
         if (!tracksMatch) {
           video.srcObject = stream;
+          video.play()?.catch(() => {});
+          attachTrackLifecycle(userId, stream);
         }
       }
       // Update username label in case it changed
@@ -234,6 +266,7 @@ export function createVideoGrid(): VideoGridComponent {
     });
     video.muted = true;
     video.srcObject = stream;
+    video.play()?.catch(() => {});
 
     const label = createElement("div", { class: "video-username" }, username);
 
@@ -323,6 +356,7 @@ export function createVideoGrid(): VideoGridComponent {
     }
 
     cells.set(userId, { el: cell, config });
+    attachTrackLifecycle(userId, stream);
     root.appendChild(cell);
     if (focusedTileId !== null) {
       rebuildFocusLayout();
@@ -334,6 +368,11 @@ export function createVideoGrid(): VideoGridComponent {
   function removeStream(userId: number): void {
     const entry = cells.get(userId);
     if (entry === undefined) return;
+
+    if (entry.trackCleanup) {
+      entry.trackCleanup();
+      entry.trackCleanup = undefined;
+    }
 
     const video = entry.el.querySelector("video");
     if (video !== null) video.srcObject = null;
@@ -383,6 +422,10 @@ export function createVideoGrid(): VideoGridComponent {
     }
 
     for (const [, entry] of cells) {
+      if (entry.trackCleanup) {
+        entry.trackCleanup();
+        entry.trackCleanup = undefined;
+      }
       const video = entry.el.querySelector("video");
       if (video !== null) video.srcObject = null;
     }

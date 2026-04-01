@@ -230,7 +230,10 @@ function renderVoiceChannelItem(
           signal,
           () => {
             // Placeholder click: join voice channel and watch stream
-            onVoiceJoin(channel.id);
+            // Only join if not already in this channel
+            if (voiceStore.getState().currentChannelId !== channel.id) {
+              onVoiceJoin(channel.id);
+            }
             if (onWatchStream !== undefined) onWatchStream(tileId);
           },
           onWatchStream !== undefined ? () => onWatchStream(tileId) : undefined,

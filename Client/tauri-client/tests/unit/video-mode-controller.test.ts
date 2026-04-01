@@ -46,6 +46,7 @@ function makeVideoGrid(): VideoModeControllerOptions["videoGrid"] {
     destroy: vi.fn(),
     addStream: vi.fn(),
     removeStream: vi.fn(),
+    hasStreams: vi.fn(() => false),
     setFocusedTile: vi.fn(),
     getFocusedTileId: vi.fn(() => null),
   } as unknown as VideoModeControllerOptions["videoGrid"];
@@ -213,7 +214,7 @@ describe("createVideoModeController", () => {
     expect(vg.removeStream).toHaveBeenCalledWith(1);
   });
 
-  it("removes remote tile when remote user turns off camera", () => {
+  it("does NOT remove remote tiles in checkVideoMode (delegated to onRemoteVideoRemoved)", () => {
     const users = new Map([
       [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
       [2, { userId: 2, camera: false, screenshare: false, username: "bob" }],
@@ -233,7 +234,9 @@ describe("createVideoModeController", () => {
     });
     ctrl.checkVideoMode();
 
-    expect(vg.removeStream).toHaveBeenCalledWith(2);
+    // Remote tile removal is handled by onRemoteVideoRemoved (LiveKit TrackUnsubscribed),
+    // not by checkVideoMode, to avoid race conditions with voice store updates.
+    expect(vg.removeStream).not.toHaveBeenCalledWith(2);
   });
 
   it("showChat switches back to chat mode", () => {
