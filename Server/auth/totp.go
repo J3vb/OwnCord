@@ -11,8 +11,9 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/owncord/server/syncutil"
 )
 
 const (
@@ -31,13 +32,13 @@ type PartialAuthChallenge struct {
 }
 
 type PartialAuthStore struct {
-	mu      sync.Mutex
+	mu      syncutil.Mutex
 	entries map[string]PartialAuthChallenge
 	ttl     time.Duration
 }
 
 type PendingTOTPStore struct {
-	mu      sync.Mutex
+	mu      syncutil.Mutex
 	entries map[int64]pendingTOTPEnrollment
 	ttl     time.Duration
 }
@@ -164,7 +165,7 @@ func (s *PendingTOTPStore) cleanupExpiredLocked() {
 // UsedTOTPCodeStore tracks recently verified TOTP codes to prevent replay
 // attacks within the ±1 period validity window (~90 seconds).
 type UsedTOTPCodeStore struct {
-	mu      sync.Mutex
+	mu      syncutil.Mutex
 	entries map[string]time.Time // key: "userID:code" → expiry
 }
 

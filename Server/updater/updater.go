@@ -14,8 +14,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/owncord/server/syncutil"
 
 	"golang.org/x/mod/semver"
 )
@@ -78,7 +79,7 @@ type Updater struct {
 	cacheExpiry    time.Time
 	cachedErr      error
 	errCacheExpiry time.Time
-	mu             sync.Mutex
+	mu             syncutil.Mutex
 	httpClient     *http.Client
 }
 

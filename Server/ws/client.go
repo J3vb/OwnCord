@@ -2,10 +2,10 @@ package ws
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/syncutil"
 )
 
 const sendBufSize = 256
@@ -39,8 +39,8 @@ type Client struct {
 	lastActivity   time.Time // last message received from this client; guarded by mu
 	sendClosed     bool      // true after the send channel has been closed
 	send           chan []byte
-	mu             sync.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
-	voiceMu        sync.Mutex // guards voiceChID and voiceJoinToken
+	mu             syncutil.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
+	voiceMu        syncutil.Mutex // guards voiceChID and voiceJoinToken
 }
 
 // wsConn is the subset of nhooyr.io/websocket.Conn used by writePump/readPump.

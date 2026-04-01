@@ -1,6 +1,6 @@
 package ws
 
-import "sync"
+import "github.com/owncord/server/syncutil"
 
 // eventEntry stores a broadcast event for potential replay.
 type eventEntry struct {
@@ -10,7 +10,7 @@ type eventEntry struct {
 
 // EventRingBuffer is a bounded, thread-safe ring buffer for recent broadcast events.
 type EventRingBuffer struct {
-	mu      sync.RWMutex
+	mu      syncutil.RWMutex
 	entries []eventEntry
 	size    int
 	pos     int // next write position

@@ -10,12 +10,12 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/syncutil"
 )
 
 // ─── Ticket Store for SSE Log Stream ────────────────────────────────────────
@@ -28,7 +28,7 @@ type ticketEntry struct {
 
 // ticketStore manages short-lived, single-use tickets for SSE authentication.
 type ticketStore struct {
-	mu      sync.Mutex
+	mu      syncutil.Mutex
 	tickets map[string]ticketEntry
 }
 
@@ -110,7 +110,7 @@ type LogEntry struct {
 // RingBuffer is a bounded, thread-safe circular buffer of log entries
 // with fan-out to SSE subscriber channels.
 type RingBuffer struct {
-	mu          sync.Mutex
+	mu          syncutil.Mutex
 	entries     []LogEntry
 	capacity    int
 	subscribers map[*chan LogEntry]struct{}

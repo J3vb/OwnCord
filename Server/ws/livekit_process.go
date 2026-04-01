@@ -13,10 +13,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/owncord/server/config"
+	"github.com/owncord/server/syncutil"
 )
 
 // LiveKitProcess manages the companion livekit-server binary.
@@ -26,7 +26,7 @@ type LiveKitProcess struct {
 	dataDir    string
 	httpClient *http.Client // for health checks — no redirect following
 
-	mu       sync.Mutex
+	mu       syncutil.Mutex
 	cmd      *exec.Cmd
 	cancel   context.CancelFunc
 	stopped  bool

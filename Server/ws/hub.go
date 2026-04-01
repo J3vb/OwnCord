@@ -12,6 +12,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/syncutil"
 )
 
 // broadcastMsg is an internal message queued for delivery.
@@ -24,7 +25,7 @@ type broadcastMsg struct {
 // All exported methods are safe to call from multiple goroutines.
 type Hub struct {
 	clients     map[int64]*Client
-	mu          sync.RWMutex
+	mu          syncutil.RWMutex
 	db          *db.DB
 	limiter     *auth.RateLimiter
 	broadcast   chan broadcastMsg
@@ -41,7 +42,7 @@ type Hub struct {
 	replayBuf *EventRingBuffer // recent broadcast events for reconnection replay
 
 	// Settings cache — avoids per-connection DB queries for server_name/motd.
-	settingsMu         sync.RWMutex
+	settingsMu         syncutil.RWMutex
 	settingsName       string
 	settingsMotd       string
 	settingsLastUpdate time.Time

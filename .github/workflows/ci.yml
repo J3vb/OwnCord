@@ -35,6 +35,9 @@ jobs:
       - name: Run tests with race detection and coverage
         run: go test -race ./... -coverprofile=coverage.out -cover
 
+      - name: Run tests with deadlock detection
+        run: go test -tags deadlock -count=1 ./...
+
       - name: Upload Go coverage
         if: always()
         uses: actions/upload-artifact@v4

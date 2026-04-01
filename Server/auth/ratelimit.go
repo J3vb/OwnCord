@@ -1,8 +1,9 @@
 package auth
 
 import (
-	"sync"
 	"time"
+
+	"github.com/owncord/server/syncutil"
 )
 
 // entry records individual request timestamps for sliding-window limiting.
@@ -18,7 +19,7 @@ type lockoutEntry struct {
 // RateLimiter is an in-memory, thread-safe sliding-window rate limiter with
 // optional IP lockout support.
 type RateLimiter struct {
-	mu       sync.Mutex
+	mu       syncutil.Mutex
 	windows  map[string]*entry
 	lockouts map[string]*lockoutEntry
 }
