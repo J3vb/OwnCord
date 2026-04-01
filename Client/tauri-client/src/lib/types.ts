@@ -124,25 +124,25 @@ export interface ReadyRole {
 // -----------------------------------------------------------------------------
 
 export enum Permission {
-  SEND_MESSAGES   = 0x1,
-  READ_MESSAGES   = 0x2,
-  ATTACH_FILES    = 0x20,
-  ADD_REACTIONS   = 0x40,
-  USE_SOUNDBOARD  = 0x100,
-  CONNECT_VOICE   = 0x200,
-  SPEAK_VOICE     = 0x400,
-  USE_VIDEO       = 0x800,
-  SHARE_SCREEN    = 0x1000,
+  SEND_MESSAGES = 0x1,
+  READ_MESSAGES = 0x2,
+  ATTACH_FILES = 0x20,
+  ADD_REACTIONS = 0x40,
+  USE_SOUNDBOARD = 0x100,
+  CONNECT_VOICE = 0x200,
+  SPEAK_VOICE = 0x400,
+  USE_VIDEO = 0x800,
+  SHARE_SCREEN = 0x1000,
   MANAGE_MESSAGES = 0x10000,
   MANAGE_CHANNELS = 0x20000,
-  KICK_MEMBERS    = 0x40000,
-  BAN_MEMBERS     = 0x80000,
-  MUTE_MEMBERS    = 0x100000,
-  MANAGE_ROLES    = 0x1000000,
-  MANAGE_SERVER   = 0x2000000,
-  MANAGE_INVITES  = 0x4000000,
-  VIEW_AUDIT_LOG  = 0x8000000,
-  ADMINISTRATOR   = 0x40000000,
+  KICK_MEMBERS = 0x40000,
+  BAN_MEMBERS = 0x80000,
+  MUTE_MEMBERS = 0x100000,
+  MANAGE_ROLES = 0x1000000,
+  MANAGE_SERVER = 0x2000000,
+  MANAGE_INVITES = 0x4000000,
+  VIEW_AUDIT_LOG = 0x8000000,
+  ADMINISTRATOR = 0x40000000,
 }
 
 // -----------------------------------------------------------------------------
@@ -415,9 +415,7 @@ export interface VoiceScreensharePayload {
   readonly enabled: boolean;
 }
 
-export interface SoundboardPlayPayload {
-  readonly sound_id: string;
-}
+// Soundboard feature deferred — see TODOS.md
 
 // -----------------------------------------------------------------------------
 // Discriminated Union: Server → Client Messages
@@ -471,7 +469,6 @@ export type ClientMessage =
   | (WsEnvelope<VoiceDeafenPayload> & { readonly type: "voice_deafen" })
   | (WsEnvelope<VoiceCameraPayload> & { readonly type: "voice_camera" })
   | (WsEnvelope<VoiceScreensharePayload> & { readonly type: "voice_screenshare" })
-  | (WsEnvelope<SoundboardPlayPayload> & { readonly type: "soundboard_play" })
   | (WsEnvelope<Record<string, never>> & { readonly type: "voice_token_refresh" });
 
 // -----------------------------------------------------------------------------

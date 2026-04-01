@@ -13,7 +13,9 @@ let wsGeneration = 0;
 
 // Tauri IPC imports — resolved at runtime in Tauri context
 let tauriInvoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null = null;
-let tauriListen: ((event: string, handler: (e: { payload: unknown }) => void) => Promise<() => void>) | null = null;
+let tauriListen:
+  | ((event: string, handler: (e: { payload: unknown }) => void) => Promise<() => void>)
+  | null = null;
 
 // Dynamically load Tauri APIs (avoids import errors in test/browser env)
 async function ensureTauriApis(): Promise<void> {
@@ -197,7 +199,12 @@ export function createWsClient() {
     log.debug("WS ←", { type: msg.type, id: msg.id });
 
     // Deduplication during reconnection replay
-    if (replayDedup !== null && msg.type !== "auth_ok" && msg.type !== "auth_error" && msg.type !== "ready") {
+    if (
+      replayDedup !== null &&
+      msg.type !== "auth_ok" &&
+      msg.type !== "auth_error" &&
+      msg.type !== "ready"
+    ) {
       const dedupKey = msg.id ?? `${msg.type}:${seq}`;
       if (replayDedup.has(dedupKey)) {
         log.debug("Dedup: skipping duplicate message", { type: msg.type, key: dedupKey });
@@ -248,10 +255,7 @@ export function createWsClient() {
     }
     for (const listener of typeListeners) {
       try {
-        (listener)(
-          msg.payload,
-          msg.id,
-        );
+        listener(msg.payload, msg.id);
       } catch (err) {
         log.error(`Listener error for ${msg.type}`, err);
       }
@@ -348,7 +352,9 @@ export function createWsClient() {
         // was already invalidated after disconnect — safe to ignore.
         const result = unsub() as unknown;
         if (result instanceof Promise) {
-          result.catch(() => {});
+          result.catch((err) => {
+            log.warn("Failed to unsubscribe Tauri event listener", err);
+          });
         }
       } catch {
         // Sync errors also safe to ignore.
@@ -451,10 +457,7 @@ export function createWsClient() {
       return send(msg);
     },
 
-    on<T extends ServerMessage["type"]>(
-      type: T,
-      listener: WsListener<T>,
-    ): () => void {
+    on<T extends ServerMessage["type"]>(type: T, listener: WsListener<T>): () => void {
       if (!listeners.has(type)) {
         listeners.set(type, new Set());
       }

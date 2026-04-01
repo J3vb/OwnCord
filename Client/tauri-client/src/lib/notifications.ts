@@ -56,6 +56,7 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // Sanitize notification strings: strip control characters and cap length
   // to prevent abuse via server-provided usernames or channel names.
   function sanitizeNotif(s: string, maxLen: number): string {
+    // eslint-disable-next-line no-control-regex -- intentional: strip control chars from user-provided strings
     const cleaned = s.replace(/[\x00-\x1F\x7F]/g, "");
     return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + "..." : cleaned;
   }
@@ -132,7 +133,9 @@ let notifAudioCtx: AudioContext | null = null;
 /** Close and release the notification AudioContext. Call on logout/cleanup. */
 export function cleanupNotificationAudio(): void {
   if (notifAudioCtx !== null) {
-    notifAudioCtx.close().catch(() => {});
+    notifAudioCtx.close().catch((err) => {
+      log.warn("Failed to close notification AudioContext", err);
+    });
     notifAudioCtx = null;
   }
 }
