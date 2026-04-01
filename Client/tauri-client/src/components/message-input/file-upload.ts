@@ -53,14 +53,16 @@ export function buildPreviewItem(
       alt: file.name,
     });
     item.appendChild(img);
-    readFileAsDataUrl(file).then((dataUrl) => {
-      if (signal.aborted) return;
-      img.src = dataUrl;
-    }).catch(() => {
-      if (signal.aborted) return;
-      const nameEl = createElement("span", { class: "attachment-preview-name" }, file.name);
-      img.replaceWith(nameEl);
-    });
+    readFileAsDataUrl(file)
+      .then((dataUrl) => {
+        if (signal.aborted) return;
+        img.src = dataUrl;
+      })
+      .catch(() => {
+        if (signal.aborted) return;
+        const nameEl = createElement("span", { class: "attachment-preview-name" }, file.name);
+        img.replaceWith(nameEl);
+      });
   } else {
     const icon = createElement("div", { class: "attachment-preview-file" });
     icon.appendChild(createIcon("file-text", 16));
@@ -78,10 +80,14 @@ export function buildPreviewItem(
     "data-testid": "attachment-remove",
   });
   removeBtn.appendChild(createIcon("x", 14));
-  removeBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    onRemove();
-  }, { signal });
+  removeBtn.addEventListener(
+    "click",
+    (e) => {
+      e.stopPropagation();
+      onRemove();
+    },
+    { signal },
+  );
   item.appendChild(removeBtn);
 
   return item;

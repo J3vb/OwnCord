@@ -33,7 +33,11 @@ export function createPickerToggle(opts: PickerToggleOptions): PickerToggleHandl
   function handleClickOutside(e: MouseEvent): void {
     if (instance === null) return;
     const target = e.target as Node;
-    if (!instance.element.contains(target) && target !== opts.triggerEl && !opts.triggerEl.contains(target)) {
+    if (
+      !instance.element.contains(target) &&
+      target !== opts.triggerEl &&
+      !opts.triggerEl.contains(target)
+    ) {
       close();
     }
   }

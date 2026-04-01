@@ -54,9 +54,7 @@ export async function saveCredential(
  * Load a credential from Windows Credential Manager.
  * Returns null if not found or Tauri unavailable.
  */
-export async function loadCredential(
-  host: string,
-): Promise<SavedCredential | null> {
+export async function loadCredential(host: string): Promise<SavedCredential | null> {
   const invoke = await getInvoke();
   if (!invoke) {
     return null;

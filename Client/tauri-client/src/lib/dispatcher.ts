@@ -87,12 +87,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
 
   unsubs.push(
     ws.on(S.AUTH_OK, (payload) => {
-      setAuth(
-        authStore.getState().token ?? "",
-        payload.user,
-        payload.server_name,
-        payload.motd,
-      );
+      setAuth(authStore.getState().token ?? "", payload.user, payload.server_name, payload.motd);
     }),
   );
 
@@ -118,8 +113,8 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
       // send voice_leave to clean up the stale state. The server should
       // have already cleaned this up, but this handles edge cases.
       const currentUserId = authStore.getState().user?.id ?? 0;
-      const inVoicePerReady = currentUserId !== 0 &&
-        payload.voice_states.some((vs) => vs.user_id === currentUserId);
+      const inVoicePerReady =
+        currentUserId !== 0 && payload.voice_states.some((vs) => vs.user_id === currentUserId);
       if (inVoicePerReady && !isVoiceConnected()) {
         log.warn("Stale voice state detected in ready payload — sending voice_leave");
         ws.send({ type: "voice_leave", payload: {} });
@@ -176,9 +171,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
         user: payload.user.username,
       });
       addMessage(payload);
-      const activeId = channelsStore.select(
-        (s) => s.activeChannelId,
-      );
+      const activeId = channelsStore.select((s) => s.activeChannelId);
 
       // Check if this is a DM channel and whether the message is from self.
       const dmChannels = dmStore.getState().channels;
@@ -209,12 +202,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
             payload.timestamp,
           );
         } else {
-          updateDmLastMessage(
-            payload.channel_id,
-            payload.id,
-            payload.content,
-            payload.timestamp,
-          );
+          updateDmLastMessage(payload.channel_id, payload.id, payload.content, payload.timestamp);
         }
       }
 

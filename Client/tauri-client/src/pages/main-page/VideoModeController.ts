@@ -46,9 +46,7 @@ export interface VideoModeController {
 // Factory
 // ---------------------------------------------------------------------------
 
-export function createVideoModeController(
-  opts: VideoModeControllerOptions,
-): VideoModeController {
+export function createVideoModeController(opts: VideoModeControllerOptions): VideoModeController {
   const { slots, videoGrid, getCurrentUserId } = opts;
   let videoMode = false;
   /** Track whether we've already added the local self-view tile. */

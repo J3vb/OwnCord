@@ -28,12 +28,7 @@ const INITIAL_STATE: AuthState = {
 export const authStore = createStore<AuthState>(INITIAL_STATE);
 
 /** Populate auth state after a successful auth_ok message. */
-export function setAuth(
-  token: string,
-  user: UserWithRole,
-  serverName: string,
-  motd: string,
-): void {
+export function setAuth(token: string, user: UserWithRole, serverName: string, motd: string): void {
   authStore.setState(() => ({
     token,
     user,

@@ -53,9 +53,11 @@ async function loadRNNoise(): Promise<RNNoiseModule> {
 /** Check if AudioWorklet is available in this browser context. */
 function supportsAudioWorklet(): boolean {
   try {
-    return typeof AudioWorkletNode !== "undefined"
-      && typeof AudioContext !== "undefined"
-      && "audioWorklet" in AudioContext.prototype;
+    return (
+      typeof AudioWorkletNode !== "undefined" &&
+      typeof AudioContext !== "undefined" &&
+      "audioWorklet" in AudioContext.prototype
+    );
   } catch {
     return false;
   }
@@ -127,7 +129,7 @@ async function createScriptProcessorPipeline(
   let inputRingOffset = 0;
 
   const OUT_RING_CAPACITY = 50;
-  const outRing: Float32Array[] = new Array(OUT_RING_CAPACITY);
+  const outRing: Float32Array[] = Array.from({ length: OUT_RING_CAPACITY });
   let outWriteIdx = 0;
   let outReadIdx = 0;
   let outCount = 0;

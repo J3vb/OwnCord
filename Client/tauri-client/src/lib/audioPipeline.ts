@@ -151,14 +151,28 @@ export class AudioPipeline {
       const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
       if (micPub?.track?.sender !== undefined) {
         const originalTrack = micPub.track.mediaStreamTrack;
-        void micPub.track.sender.replaceTrack(originalTrack).catch((err) => log.debug("Failed to replace track during teardown", err));
+        void micPub.track.sender
+          .replaceTrack(originalTrack)
+          .catch((err) => log.debug("Failed to replace track during teardown", err));
       }
     }
 
-    if (this.audioPipelineGain !== null) { this.audioPipelineGain.disconnect(); this.audioPipelineGain = null; }
-    if (this.audioPipelineAnalyser !== null) { this.audioPipelineAnalyser.disconnect(); this.audioPipelineAnalyser = null; }
-    if (this.audioPipelineDest !== null) { this.audioPipelineDest.disconnect(); this.audioPipelineDest = null; }
-    if (this.audioPipelineCtx !== null) { void this.audioPipelineCtx.close(); this.audioPipelineCtx = null; }
+    if (this.audioPipelineGain !== null) {
+      this.audioPipelineGain.disconnect();
+      this.audioPipelineGain = null;
+    }
+    if (this.audioPipelineAnalyser !== null) {
+      this.audioPipelineAnalyser.disconnect();
+      this.audioPipelineAnalyser = null;
+    }
+    if (this.audioPipelineDest !== null) {
+      this.audioPipelineDest.disconnect();
+      this.audioPipelineDest = null;
+    }
+    if (this.audioPipelineCtx !== null) {
+      void this.audioPipelineCtx.close();
+      this.audioPipelineCtx = null;
+    }
     this.vadGated = false;
   }
 
@@ -167,7 +181,11 @@ export class AudioPipeline {
   updatePipelineGain(): void {
     if (this.audioPipelineGain === null || this.audioPipelineCtx === null) return;
     const effectiveGain = this.vadGated ? 0 : this.currentInputGain;
-    this.audioPipelineGain.gain.setTargetAtTime(effectiveGain, this.audioPipelineCtx.currentTime, 0.015);
+    this.audioPipelineGain.gain.setTargetAtTime(
+      effectiveGain,
+      this.audioPipelineCtx.currentTime,
+      0.015,
+    );
   }
 
   // --- Volume/sensitivity ---
@@ -192,7 +210,10 @@ export class AudioPipeline {
     this.stopVadPolling();
     if (clamped >= 100) {
       // Ensure ungated
-      if (this.vadGated) { this.vadGated = false; this.updatePipelineGain(); }
+      if (this.vadGated) {
+        this.vadGated = false;
+        this.updatePipelineGain();
+      }
     } else {
       this.startVadPolling();
     }
@@ -211,9 +232,13 @@ export class AudioPipeline {
   private _vadUsingWorklet = false;
 
   /** Latest RMS value from VAD (for UI indicator bar). */
-  get lastVadRms(): number { return this._lastVadRms; }
+  get lastVadRms(): number {
+    return this._lastVadRms;
+  }
   /** Whether VAD is using AudioWorklet (true) or setTimeout fallback (false). */
-  get vadUsingWorklet(): boolean { return this._vadUsingWorklet; }
+  get vadUsingWorklet(): boolean {
+    return this._vadUsingWorklet;
+  }
 
   /** Start VAD — tries AudioWorklet first, falls back to setTimeout polling. */
   startVadPolling(): void {
@@ -223,19 +248,22 @@ export class AudioPipeline {
     const sensitivity = loadPref<number>("voiceSensitivity", 50);
     if (sensitivity >= 100) return;
 
-    const threshold = ((100 - sensitivity) / 100) * 0.10;
+    const threshold = ((100 - sensitivity) / 100) * 0.1;
 
     // Try AudioWorklet first
     const gen = this._pipelineGeneration;
-    this.audioPipelineCtx.audioWorklet.addModule("/vad-worklet.js").then(() => {
-      if (gen !== this._pipelineGeneration) return; // Torn down while loading
-      if (this.audioPipelineCtx === null) return;
-      this.startVadWorklet(threshold);
-    }).catch((err) => {
-      if (gen !== this._pipelineGeneration) return;
-      log.warn("AudioWorklet unavailable, falling back to setTimeout VAD", err);
-      this.startVadFallback(threshold);
-    });
+    this.audioPipelineCtx.audioWorklet
+      .addModule("/vad-worklet.js")
+      .then(() => {
+        if (gen !== this._pipelineGeneration) return; // Torn down while loading
+        if (this.audioPipelineCtx === null) return;
+        this.startVadWorklet(threshold);
+      })
+      .catch((err) => {
+        if (gen !== this._pipelineGeneration) return;
+        log.warn("AudioWorklet unavailable, falling back to setTimeout VAD", err);
+        this.startVadFallback(threshold);
+      });
   }
 
   /** Start VAD via AudioWorklet (preferred — runs on audio thread). */

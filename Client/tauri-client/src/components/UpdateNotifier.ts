@@ -32,17 +32,26 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
 
     banner = createElement("div", { class: "update-banner" });
 
-    const text = createElement("span", { class: "update-banner-text" },
-      `Update v${version} available`);
+    const text = createElement(
+      "span",
+      { class: "update-banner-text" },
+      `Update v${version} available`,
+    );
 
-    const updateBtn = createElement("button", { class: "update-banner-btn update-banner-install" },
-      "Update Now");
+    const updateBtn = createElement(
+      "button",
+      { class: "update-banner-btn update-banner-install" },
+      "Update Now",
+    );
     updateBtn.addEventListener("click", () => {
       void installUpdate();
     });
 
-    const laterBtn = createElement("button", { class: "update-banner-btn update-banner-later" },
-      "Later");
+    const laterBtn = createElement(
+      "button",
+      { class: "update-banner-btn update-banner-later" },
+      "Later",
+    );
     laterBtn.addEventListener("click", () => {
       dismissed = true;
       removeBanner();
@@ -57,8 +66,11 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
 
     // Replace banner content with progress indicator
     while (banner.firstChild) banner.removeChild(banner.firstChild);
-    const progress = createElement("span", { class: "update-banner-text" },
-      "Downloading update...");
+    const progress = createElement(
+      "span",
+      { class: "update-banner-text" },
+      "Downloading update...",
+    );
     banner.appendChild(progress);
 
     try {
@@ -67,10 +79,16 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     } catch (err) {
       log.error("Update install failed", { error: String(err) });
       while (banner.firstChild) banner.removeChild(banner.firstChild);
-      const errorText = createElement("span", { class: "update-banner-text" },
-        "Update failed. Please try again later.");
-      const dismissBtn = createElement("button", { class: "update-banner-btn update-banner-later" },
-        "Dismiss");
+      const errorText = createElement(
+        "span",
+        { class: "update-banner-text" },
+        "Update failed. Please try again later.",
+      );
+      const dismissBtn = createElement(
+        "button",
+        { class: "update-banner-btn update-banner-later" },
+        "Dismiss",
+      );
       dismissBtn.addEventListener("click", () => {
         dismissed = true;
         removeBanner();
@@ -89,7 +107,9 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
   function mount(target: Element): void {
     container = target;
     // Delay the check slightly so the main UI renders first
-    setTimeout(() => { void performCheck(); }, 3000);
+    setTimeout(() => {
+      void performCheck();
+    }, 3000);
   }
 
   function destroy(): void {

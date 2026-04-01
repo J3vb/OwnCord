@@ -124,7 +124,10 @@ export class AudioElements {
         for (const el of detachedEls) audioEls.delete(el);
         if (audioEls.size === 0) this.screenshareAudioElements.delete(userId);
       }
-      log.debug("Screenshare audio track unsubscribed and detached", { userId, trackSid: track.sid });
+      log.debug("Screenshare audio track unsubscribed and detached", {
+        userId,
+        trackSid: track.sid,
+      });
     } else {
       for (const el of track.detach()) el.remove();
       if (track.sid !== undefined) this.remoteMicAudioElements.delete(track.sid);
@@ -166,7 +169,9 @@ export class AudioElements {
     }
   }
 
-  getUserVolume(userId: number): number { return getSavedUserVolume(userId); }
+  getUserVolume(userId: number): number {
+    return getSavedUserVolume(userId);
+  }
 
   setOutputVolume(volume: number): void {
     const clamped = Math.max(0, Math.min(200, volume));

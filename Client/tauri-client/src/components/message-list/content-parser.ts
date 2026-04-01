@@ -3,10 +3,7 @@
  * inline code, code blocks, @mentions, and URL linkification.
  */
 
-import {
-  createElement,
-  setText,
-} from "@lib/dom";
+import { createElement, setText } from "@lib/dom";
 import { isSafeUrl } from "./attachments";
 
 // -- Regex constants ----------------------------------------------------------
@@ -108,7 +105,7 @@ export function renderMessageContent(content: string): DocumentFragment {
     const segment = parts[i]!;
     if (i % 2 === 0) {
       // Prose segment
-      const trimmed = i === 0 ? segment : (i === parts.length - 1 ? segment.trim() : segment);
+      const trimmed = i === 0 ? segment : i === parts.length - 1 ? segment.trim() : segment;
       if (trimmed.length > 0) {
         const text = createElement("div", { class: "msg-text" });
         text.appendChild(renderInlineContent(trimmed));
@@ -123,13 +120,16 @@ export function renderMessageContent(content: string): DocumentFragment {
       const copyBtn = createElement("button", { class: "msg-codeblock-copy" });
       setText(copyBtn, "Copy");
       copyBtn.addEventListener("click", () => {
-        void navigator.clipboard.writeText(codeContent).then(() => {
-          setText(copyBtn, "Copied!");
-          setTimeout(() => setText(copyBtn, "Copy"), 2000);
-        }).catch(() => {
-          setText(copyBtn, "Failed");
-          setTimeout(() => setText(copyBtn, "Copy"), 2000);
-        });
+        void navigator.clipboard
+          .writeText(codeContent)
+          .then(() => {
+            setText(copyBtn, "Copied!");
+            setTimeout(() => setText(copyBtn, "Copy"), 2000);
+          })
+          .catch(() => {
+            setText(copyBtn, "Failed");
+            setTimeout(() => setText(copyBtn, "Copy"), 2000);
+          });
       });
       codeWrap.appendChild(codeBlock);
       codeWrap.appendChild(copyBtn);

@@ -43,7 +43,16 @@ export interface SettingsOverlayOptions {
   isAuthenticated?: boolean;
 }
 
-export type TabName = "Account" | "Appearance" | "Notifications" | "Text & Images" | "Accessibility" | "Voice & Audio" | "Keybinds" | "Advanced" | "Logs";
+export type TabName =
+  | "Account"
+  | "Appearance"
+  | "Notifications"
+  | "Text & Images"
+  | "Accessibility"
+  | "Voice & Audio"
+  | "Keybinds"
+  | "Advanced"
+  | "Logs";
 
 const TAB_ICONS: Record<TabName, IconName> = {
   Account: "user",
@@ -92,8 +101,14 @@ export function applyStoredAppearance(): void {
     "compact-mode",
     loadPref<boolean>("compactMode", false),
   );
-  document.documentElement.classList.toggle("reduced-motion", loadPref<boolean>("reducedMotion", false));
-  document.documentElement.classList.toggle("high-contrast", loadPref<boolean>("highContrast", false));
+  document.documentElement.classList.toggle(
+    "reduced-motion",
+    loadPref<boolean>("reducedMotion", false),
+  );
+  document.documentElement.classList.toggle(
+    "high-contrast",
+    loadPref<boolean>("highContrast", false),
+  );
   document.documentElement.classList.toggle("large-font", loadPref<boolean>("largeFont", false));
 
   syncOsMotionListener(loadPref<boolean>("syncOsMotion", false));
@@ -178,14 +193,26 @@ export function createSettingsOverlay(
     // User profile section at top of sidebar
     const user = authStore.getState().user;
     const profileSection = createElement("div", { class: "settings-sidebar-profile" });
-    const avatarEl = createElement("div", { class: "settings-sidebar-avatar" },
-      (user?.username ?? "U").charAt(0).toUpperCase());
+    const avatarEl = createElement(
+      "div",
+      { class: "settings-sidebar-avatar" },
+      (user?.username ?? "U").charAt(0).toUpperCase(),
+    );
     const profileInfo = createElement("div", {});
-    const profileName = createElement("div", { class: "settings-sidebar-name" },
-      user?.username ?? "Unknown");
-    const editProfileLink = createElement("div", { class: "settings-sidebar-edit" }, "Edit Profile");
+    const profileName = createElement(
+      "div",
+      { class: "settings-sidebar-name" },
+      user?.username ?? "Unknown",
+    );
+    const editProfileLink = createElement(
+      "div",
+      { class: "settings-sidebar-edit" },
+      "Edit Profile",
+    );
     if (authenticated) {
-      editProfileLink.addEventListener("click", () => setActiveTab("Account"), { signal: ac.signal });
+      editProfileLink.addEventListener("click", () => setActiveTab("Account"), {
+        signal: ac.signal,
+      });
     } else {
       editProfileLink.style.display = "none";
     }
@@ -214,7 +241,16 @@ export function createSettingsOverlay(
     const appSettingsCat = createElement("div", { class: "settings-cat" }, "App Settings");
     sidebar.appendChild(appSettingsCat);
 
-    const appTabs: readonly TabName[] = ["Appearance", "Notifications", "Text & Images", "Accessibility", "Voice & Audio", "Keybinds", "Advanced", "Logs"];
+    const appTabs: readonly TabName[] = [
+      "Appearance",
+      "Notifications",
+      "Text & Images",
+      "Accessibility",
+      "Voice & Audio",
+      "Keybinds",
+      "Advanced",
+      "Logs",
+    ];
     for (const name of appTabs) {
       const btn = createElement("button", {
         class: `settings-nav-item${name === activeTab ? " active" : ""}`,
@@ -248,27 +284,39 @@ export function createSettingsOverlay(
     const closeWrap = createElement("div", { class: "settings-close-wrap" });
     const closeBtn = createElement("button", { class: "settings-close-btn" });
     closeBtn.appendChild(createIcon("x", 18));
-    closeBtn.addEventListener("click", () => {
-      options.onClose();
-    }, { signal: ac.signal });
+    closeBtn.addEventListener(
+      "click",
+      () => {
+        options.onClose();
+      },
+      { signal: ac.signal },
+    );
     const escLabel = createElement("div", { class: "settings-esc-label" }, "ESC");
     appendChildren(closeWrap, closeBtn, escLabel);
 
     // Escape key
-    document.addEventListener("keydown", (e: KeyboardEvent) => {
-      if (e.key === "Escape" && root?.classList.contains("open")) {
-        options.onClose();
-      }
-    }, { signal: ac.signal });
+    document.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key === "Escape" && root?.classList.contains("open")) {
+          options.onClose();
+        }
+      },
+      { signal: ac.signal },
+    );
 
     // Inner panel (Discord-style centered card)
     const panel = createElement("div", { class: "settings-panel" });
     appendChildren(panel, sidebar, contentArea, closeWrap);
 
     // Click backdrop (outside panel) to close
-    root.addEventListener("click", (e: MouseEvent) => {
-      if (e.target === root) options.onClose();
-    }, { signal: ac.signal });
+    root.addEventListener(
+      "click",
+      (e: MouseEvent) => {
+        if (e.target === root) options.onClose();
+      },
+      { signal: ac.signal },
+    );
 
     root.appendChild(panel);
     renderActiveTab();

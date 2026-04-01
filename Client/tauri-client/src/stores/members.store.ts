@@ -4,11 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
-import type {
-  ReadyMember,
-  MemberJoinPayload,
-  UserStatus,
-} from "@lib/types";
+import type { ReadyMember, MemberJoinPayload, UserStatus } from "@lib/types";
 
 export interface Member {
   readonly id: number;

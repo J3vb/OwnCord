@@ -68,10 +68,14 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
 
       appendChildren(item, ...parts);
 
-      item.addEventListener("click", () => {
-        options.onSelectChannel(ch.id);
-        options.onClose();
-      }, { signal });
+      item.addEventListener(
+        "click",
+        () => {
+          options.onSelectChannel(ch.id);
+          options.onClose();
+        },
+        { signal },
+      );
 
       resultsDiv.appendChild(item);
     }
@@ -144,7 +148,8 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
     // Overlay backdrop
     root = createElement("div", {
       class: "quick-switcher-overlay",
-      style: "position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; display: flex; justify-content: center; padding-top: 20vh;",
+      style:
+        "position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; display: flex; justify-content: center; padding-top: 20vh;",
     });
 
     // Modal container
@@ -175,10 +180,7 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
     document.addEventListener("keydown", handleGlobalKeydown, { signal });
 
     // Subscribe to store changes
-    unsubscribe = channelsStore.subscribeSelector(
-      (s) => s.channels,
-      refreshFromStore,
-    );
+    unsubscribe = channelsStore.subscribeSelector((s) => s.channels, refreshFromStore);
 
     // Auto-focus
     requestAnimationFrame(() => input.focus());

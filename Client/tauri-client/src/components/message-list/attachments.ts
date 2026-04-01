@@ -3,10 +3,7 @@
  * Also owns the server host state and URL resolution used by other modules.
  */
 
-import {
-  createElement,
-  appendChildren,
-} from "@lib/dom";
+import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@components/settings/helpers";
@@ -81,9 +78,18 @@ export function clearAttachmentCaches(): void {
 // loaded in <object>, <embed>, or <iframe> contexts. Only raster formats
 // are considered safe for data: URI rendering via <img>.
 const SAFE_MIME_TYPES = new Set([
-  "image/png", "image/jpeg", "image/gif", "image/webp",
-  "image/avif", "image/bmp", "video/mp4", "video/webm", "audio/mpeg",
-  "audio/ogg", "audio/wav", "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+  "image/bmp",
+  "video/mp4",
+  "video/webm",
+  "audio/mpeg",
+  "audio/ogg",
+  "audio/wav",
+  "application/pdf",
 ]);
 
 /** Sanitize a Content-Type header value for use in a data: URI. */
@@ -221,7 +227,7 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
     try {
       const useInsecure = isServerUrl(url);
       const fetchOpts: RequestInit = useInsecure
-        ? { danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } } as RequestInit
+        ? ({ danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } } as RequestInit)
         : {};
       const res = await tauriFetch(url, fetchOpts);
       if (!res.ok) return null;
@@ -270,7 +276,8 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
 
     // Reserve space using server-provided dimensions to prevent layout shift.
     if (att.width != null && att.height != null && att.width > 0 && att.height > 0) {
-      const maxW = 400, maxH = 350;
+      const maxW = 400,
+        maxH = 350;
       const scale = Math.min(1, maxW / att.width, maxH / att.height);
       const w = Math.round(att.width * scale);
       const h = Math.round(att.height * scale);
@@ -310,10 +317,14 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
         alt: att.filename,
       });
       attachLightbox(img);
-      img.addEventListener("load", () => {
-        clearReservation();
-        if (isGif) observeMedia(img, cached, wrap, !loadPref("animateGifs", true));
-      }, { once: true });
+      img.addEventListener(
+        "load",
+        () => {
+          clearReservation();
+          if (isGif) observeMedia(img, cached, wrap, !loadPref("animateGifs", true));
+        },
+        { once: true },
+      );
       wrap.appendChild(img);
     } else {
       // Show loading placeholder, then replace with image
@@ -327,10 +338,14 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
             alt: att.filename,
           });
           attachLightbox(img);
-          img.addEventListener("load", () => {
-            clearReservation();
-            if (isGif) observeMedia(img, dataUrl, wrap, !loadPref("animateGifs", true));
-          }, { once: true });
+          img.addEventListener(
+            "load",
+            () => {
+              clearReservation();
+              if (isGif) observeMedia(img, dataUrl, wrap, !loadPref("animateGifs", true));
+            },
+            { once: true },
+          );
           placeholder.replaceWith(img);
         } else {
           placeholder.classList.remove("loading");
@@ -377,7 +392,7 @@ async function downloadFile(url: string, filename: string): Promise<void> {
     // Fetch file data — only accept invalid certs for the OwnCord server
     const useInsecure = isServerUrl(url);
     const fetchOpts: RequestInit = useInsecure
-      ? { danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } } as RequestInit
+      ? ({ danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } } as RequestInit)
       : {};
     const res = await tauriFetch(url, fetchOpts);
     if (!res.ok) {

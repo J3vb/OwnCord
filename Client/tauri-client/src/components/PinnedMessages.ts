@@ -3,10 +3,7 @@
  * with avatars, hover actions, and entry animation.
  */
 
-import {
-  createElement,
-  appendChildren,
-} from "@lib/dom";
+import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 
@@ -92,9 +89,7 @@ function renderEmptyState(): HTMLDivElement {
   return empty;
 }
 
-export function createPinnedMessages(
-  options: PinnedMessagesOptions,
-): MountableComponent {
+export function createPinnedMessages(options: PinnedMessagesOptions): MountableComponent {
   const ac = new AbortController();
   let root: HTMLDivElement | null = null;
 

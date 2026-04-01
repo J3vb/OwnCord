@@ -7,9 +7,16 @@ import type { MountableComponent } from "@lib/safe-render";
 
 /** Default allowed MIME types for file uploads. */
 const DEFAULT_ALLOWED_TYPES = [
-  "image/jpeg", "image/png", "image/gif", "image/webp", "image/avif",
-  "video/mp4", "video/webm",
-  "audio/mpeg", "audio/ogg", "audio/wav",
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+  "video/mp4",
+  "video/webm",
+  "audio/mpeg",
+  "audio/ogg",
+  "audio/wav",
   "application/pdf",
   "text/plain",
 ];
@@ -85,7 +92,9 @@ export function createFileUpload(options: FileUploadOptions): FileUploadComponen
       return;
     }
     if (file.size > maxBytes) {
-      showError(`File too large (${formatSize(file.size)}). Max ${options.maxSizeMb ?? DEFAULT_MAX_SIZE_MB} MB.`);
+      showError(
+        `File too large (${formatSize(file.size)}). Max ${options.maxSizeMb ?? DEFAULT_MAX_SIZE_MB} MB.`,
+      );
       return;
     }
     showPreview(file);
@@ -105,8 +114,13 @@ export function createFileUpload(options: FileUploadOptions): FileUploadComponen
   function buildDom(): void {
     root = createElement("div", { class: "file-upload" });
 
-    dropzone = createElement("div", { class: "file-upload__dropzone file-upload__dropzone--hidden" });
-    appendChildren(dropzone, createElement("span", { class: "file-upload__droptext" }, "Drop files here"));
+    dropzone = createElement("div", {
+      class: "file-upload__dropzone file-upload__dropzone--hidden",
+    });
+    appendChildren(
+      dropzone,
+      createElement("span", { class: "file-upload__droptext" }, "Drop files here"),
+    );
 
     const allowed = options.allowedMimeTypes ?? DEFAULT_ALLOWED_TYPES;
     fileInput = createElement("input", {
@@ -135,38 +149,64 @@ export function createFileUpload(options: FileUploadOptions): FileUploadComponen
   }
 
   function attachListeners(): void {
-    fileInput.addEventListener("change", () => {
-      const file = fileInput.files?.[0];
-      if (file) { void handleFile(file); fileInput.value = ""; }
-    }, { signal });
+    fileInput.addEventListener(
+      "change",
+      () => {
+        const file = fileInput.files?.[0];
+        if (file) {
+          void handleFile(file);
+          fileInput.value = "";
+        }
+      },
+      { signal },
+    );
 
-    cancelBtn.addEventListener("click", () => {
-      if (uploadAbort !== null) uploadAbort.abort();
-      resetPreview();
-    }, { signal });
+    cancelBtn.addEventListener(
+      "click",
+      () => {
+        if (uploadAbort !== null) uploadAbort.abort();
+        resetPreview();
+      },
+      { signal },
+    );
 
     let dragCounter = 0;
-    root!.addEventListener("dragenter", (e) => {
-      e.preventDefault();
-      dragCounter++;
-      dropzone.classList.remove("file-upload__dropzone--hidden");
-    }, { signal });
+    root!.addEventListener(
+      "dragenter",
+      (e) => {
+        e.preventDefault();
+        dragCounter++;
+        dropzone.classList.remove("file-upload__dropzone--hidden");
+      },
+      { signal },
+    );
 
-    root!.addEventListener("dragleave", (e) => {
-      e.preventDefault();
-      dragCounter--;
-      if (dragCounter <= 0) { dragCounter = 0; dropzone.classList.add("file-upload__dropzone--hidden"); }
-    }, { signal });
+    root!.addEventListener(
+      "dragleave",
+      (e) => {
+        e.preventDefault();
+        dragCounter--;
+        if (dragCounter <= 0) {
+          dragCounter = 0;
+          dropzone.classList.add("file-upload__dropzone--hidden");
+        }
+      },
+      { signal },
+    );
 
     root!.addEventListener("dragover", (e) => e.preventDefault(), { signal });
 
-    root!.addEventListener("drop", (e) => {
-      e.preventDefault();
-      dragCounter = 0;
-      dropzone.classList.add("file-upload__dropzone--hidden");
-      const file = e.dataTransfer?.files[0];
-      if (file) void handleFile(file);
-    }, { signal });
+    root!.addEventListener(
+      "drop",
+      (e) => {
+        e.preventDefault();
+        dragCounter = 0;
+        dropzone.classList.add("file-upload__dropzone--hidden");
+        const file = e.dataTransfer?.files[0];
+        if (file) void handleFile(file);
+      },
+      { signal },
+    );
   }
 
   function mount(container: Element): void {
@@ -182,7 +222,9 @@ export function createFileUpload(options: FileUploadOptions): FileUploadComponen
     root = null;
   }
 
-  function openPicker(): void { fileInput.click(); }
+  function openPicker(): void {
+    fileInput.click();
+  }
 
   return { mount, destroy, openPicker };
 }

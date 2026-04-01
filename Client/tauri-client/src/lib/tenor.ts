@@ -4,7 +4,8 @@
 // Tenor API key — defaults to Google's public anonymous test key from
 // https://developers.google.com/tenor/guides/quickstart
 // Override via VITE_TENOR_API_KEY at build time for production use.
-const TENOR_API_KEY = import.meta.env.VITE_TENOR_API_KEY ?? "AIzaSyAyimkuYQYF_FXVALexPuGQctUWRURdCYQ";
+const TENOR_API_KEY =
+  import.meta.env.VITE_TENOR_API_KEY ?? "AIzaSyAyimkuYQYF_FXVALexPuGQctUWRURdCYQ";
 const TENOR_BASE = "https://tenor.googleapis.com/v2";
 const DEFAULT_LIMIT = 20;
 
@@ -103,9 +104,7 @@ export async function searchGifs(
 /**
  * Fetch currently trending GIFs from Tenor.
  */
-export async function getTrendingGifs(
-  limit: number = DEFAULT_LIMIT,
-): Promise<readonly TenorGif[]> {
+export async function getTrendingGifs(limit: number = DEFAULT_LIMIT): Promise<readonly TenorGif[]> {
   const params = new URLSearchParams({
     key: TENOR_API_KEY,
     limit: String(limit),

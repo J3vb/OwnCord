@@ -22,20 +22,28 @@ export function showUserVolumeMenu(
 
   const menu = createElement("div", { class: "context-menu user-vol-menu" });
 
-  const header = createElement("div", {
-    class: "context-menu-item",
-    style: "font-weight:600;cursor:default;pointer-events:none",
-  }, username);
+  const header = createElement(
+    "div",
+    {
+      class: "context-menu-item",
+      style: "font-weight:600;cursor:default;pointer-events:none",
+    },
+    username,
+  );
   menu.appendChild(header);
 
   const sep = createElement("div", { class: "context-menu-sep" });
   menu.appendChild(sep);
 
   const currentVol = getUserVolume(userId);
-  const volLabel = createElement("div", {
-    class: "context-menu-item",
-    style: "font-size:12px;color:var(--text-muted);cursor:default;pointer-events:none",
-  }, `User Volume: ${currentVol}%`);
+  const volLabel = createElement(
+    "div",
+    {
+      class: "context-menu-item",
+      style: "font-size:12px;color:var(--text-muted);cursor:default;pointer-events:none",
+    },
+    `User Volume: ${currentVol}%`,
+  );
   menu.appendChild(volLabel);
 
   const sliderRow = createElement("div", {
@@ -49,10 +57,14 @@ export function showUserVolumeMenu(
     value: String(currentVol),
     style: "flex:1",
   });
-  const valLabel = createElement("span", {
-    class: "slider-val",
-    style: "min-width:40px;text-align:right;font-size:12px;color:var(--text-muted)",
-  }, `${currentVol}%`);
+  const valLabel = createElement(
+    "span",
+    {
+      class: "slider-val",
+      style: "min-width:40px;text-align:right;font-size:12px;color:var(--text-muted)",
+    },
+    `${currentVol}%`,
+  );
 
   slider.addEventListener("input", () => {
     const val = Number(slider.value);
@@ -82,12 +94,16 @@ export function showUserVolumeMenu(
   (menu as HTMLElement & { _dismissAc?: AbortController })._dismissAc = dismissAc;
   setTimeout(() => {
     if (dismissAc.signal.aborted) return;
-    document.addEventListener("mousedown", (e: MouseEvent) => {
-      if (!menu.contains(e.target as Node)) {
-        menu.remove();
-        dismissAc.abort();
-      }
-    }, { signal: dismissAc.signal });
+    document.addEventListener(
+      "mousedown",
+      (e: MouseEvent) => {
+        if (!menu.contains(e.target as Node)) {
+          menu.remove();
+          dismissAc.abort();
+        }
+      },
+      { signal: dismissAc.signal },
+    );
   }, 0);
 
   // Also clean up if the parent component is destroyed

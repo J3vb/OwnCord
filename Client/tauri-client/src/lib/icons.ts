@@ -244,11 +244,7 @@ export function createIcon(name: IconName, size = 24): SVGSVGElement {
 
 /** Create a signal-strength icon with per-bar coloring based on quality level.
  *  Bars are colored by the quality thresholds; unfilled bars use --bg-active. */
-export function createSignalIcon(
-  barsLit: number,
-  color: string,
-  size = 16,
-): SVGSVGElement {
+export function createSignalIcon(barsLit: number, color: string, size = 16): SVGSVGElement {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("width", String(size));
   svg.setAttribute("height", String(size));

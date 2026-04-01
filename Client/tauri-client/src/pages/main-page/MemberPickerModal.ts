@@ -39,8 +39,11 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
     // Build the content that goes inside the modal
     const content = createElement("div", { style: "padding:20px;" });
     const title = createElement("h3", {}, "New Direct Message");
-    const subtitle = createElement("p", { style: "color:var(--text-secondary);font-size:0.85rem;margin:0 0 8px;" },
-      "Select a member to start a conversation");
+    const subtitle = createElement(
+      "p",
+      { style: "color:var(--text-secondary);font-size:0.85rem;margin:0 0 8px;" },
+      "Select a member to start a conversation",
+    );
     const listContainer = createElement("div", {
       class: "dm-member-picker-list",
       style: "max-height:300px;overflow-y:auto;",
@@ -54,13 +57,18 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
       });
       const avatar = createElement("div", {
         class: "dm-avatar",
-        style: "width:28px;height:28px;border-radius:50%;background:#5865F2;display:flex;align-items:center;justify-content:center;font-size:0.75rem;color:white;flex-shrink:0;",
+        style:
+          "width:28px;height:28px;border-radius:50%;background:#5865F2;display:flex;align-items:center;justify-content:center;font-size:0.75rem;color:white;flex-shrink:0;",
       });
       setText(avatar, member.username.charAt(0).toUpperCase());
       const nameEl = createElement("span", {}, member.username);
-      const statusEl = createElement("span", {
-        style: `font-size:0.75rem;margin-left:auto;color:${member.status === "online" ? "var(--green)" : "var(--text-micro)"};`,
-      }, member.status);
+      const statusEl = createElement(
+        "span",
+        {
+          style: `font-size:0.75rem;margin-left:auto;color:${member.status === "online" ? "var(--green)" : "var(--text-micro)"};`,
+        },
+        member.status,
+      );
       appendChildren(item, avatar, nameEl, statusEl);
 
       item.addEventListener("click", () => {
@@ -72,10 +80,14 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
       listContainer.appendChild(item);
     }
 
-    const cancelBtn = createElement("button", {
-      class: "btn btn-secondary",
-      style: "margin-top:12px;width:100%;",
-    }, "Cancel");
+    const cancelBtn = createElement(
+      "button",
+      {
+        class: "btn btn-secondary",
+        style: "margin-top:12px;width:100%;",
+      },
+      "Cancel",
+    );
     cancelBtn.addEventListener("click", () => {
       if (modalInstance !== null) {
         modalInstance.close();

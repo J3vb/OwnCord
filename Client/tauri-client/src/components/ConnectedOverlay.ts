@@ -27,8 +27,14 @@ const READY_DELAY_MS = 800;
 
 function serverIconColor(name: string): string {
   const palette = [
-    "#5865f2", "#57f287", "#fee75c", "#eb459e",
-    "#ed4245", "#f0b232", "#2ecc71", "#e74c3c",
+    "#5865f2",
+    "#57f287",
+    "#fee75c",
+    "#eb459e",
+    "#ed4245",
+    "#f0b232",
+    "#2ecc71",
+    "#e74c3c",
   ] as const;
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
@@ -37,14 +43,15 @@ function serverIconColor(name: string): string {
   return palette[Math.abs(hash) % palette.length] ?? palette[0];
 }
 
-export function createConnectedOverlay(
-  options: ConnectedOverlayOptions,
-): ConnectedOverlayControl {
+export function createConnectedOverlay(options: ConnectedOverlayOptions): ConnectedOverlayControl {
   const { serverName, username, motd, onReady } = options;
   const ac = new AbortController();
 
   // Root overlay (hidden by default, .visible to show)
-  const overlay = createElement("div", { class: "connected-overlay", "data-testid": "connected-overlay" });
+  const overlay = createElement("div", {
+    class: "connected-overlay",
+    "data-testid": "connected-overlay",
+  });
 
   // Server icon with check badge
   const iconWrap = createElement("div", { class: "connected-icon-wrap" });
@@ -70,13 +77,21 @@ export function createConnectedOverlay(
   appendChildren(iconWrap, srvIcon, checkBadge);
 
   // Text elements
-  const connectedText = createElement("div", {
-    class: "connected-text",
-  }, "Connected!");
+  const connectedText = createElement(
+    "div",
+    {
+      class: "connected-text",
+    },
+    "Connected!",
+  );
 
-  const userText = createElement("div", {
-    class: "connected-user",
-  }, `Logged in as ${username}`);
+  const userText = createElement(
+    "div",
+    {
+      class: "connected-user",
+    },
+    `Logged in as ${username}`,
+  );
 
   const motdEl = createElement("div", { class: "connected-motd" });
   if (motd) {

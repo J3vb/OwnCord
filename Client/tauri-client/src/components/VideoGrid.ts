@@ -26,9 +26,13 @@ export interface VideoGridComponent extends MountableComponent {
 }
 
 /** Create a fresh volume icon element. */
-function volumeIcon(): SVGSVGElement { return createIcon("volume-2", 16); }
+function volumeIcon(): SVGSVGElement {
+  return createIcon("volume-2", 16);
+}
 /** Create a fresh volume-x (muted) icon element. */
-function volumeXIcon(): SVGSVGElement { return createIcon("volume-x", 16); }
+function volumeXIcon(): SVGSVGElement {
+  return createIcon("volume-x", 16);
+}
 /** Replace a button's icon child with a new one. */
 function setButtonIcon(btn: HTMLButtonElement, icon: SVGSVGElement): void {
   while (btn.firstChild) btn.removeChild(btn.firstChild);
@@ -191,7 +195,12 @@ export function createVideoGrid(): VideoGridComponent {
     applyGridSizes();
   }
 
-  function addStream(userId: number, username: string, stream: MediaStream, config?: TileConfig): void {
+  function addStream(
+    userId: number,
+    username: string,
+    stream: MediaStream,
+    config?: TileConfig,
+  ): void {
     if (root === null) return;
 
     // If a cell already exists for this user, update it in place
@@ -358,7 +367,9 @@ export function createVideoGrid(): VideoGridComponent {
     container.appendChild(root);
 
     // Observe container size changes to recalculate tile layout
-    resizeObserver = new ResizeObserver(() => { scheduleResize(); });
+    resizeObserver = new ResizeObserver(() => {
+      scheduleResize();
+    });
     resizeObserver.observe(root);
   }
 
@@ -384,5 +395,13 @@ export function createVideoGrid(): VideoGridComponent {
     }
   }
 
-  return { mount, destroy, addStream, removeStream, hasStreams, setFocusedTile, getFocusedTileId: getFocusedTileIdFn };
+  return {
+    mount,
+    destroy,
+    addStream,
+    removeStream,
+    hasStreams,
+    setFocusedTile,
+    getFocusedTileId: getFocusedTileIdFn,
+  };
 }

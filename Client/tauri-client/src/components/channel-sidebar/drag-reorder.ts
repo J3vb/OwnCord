@@ -32,97 +32,105 @@ export function ensureGlobalDragListeners(): void {
   }
   globalDragAc = new AbortController();
 
-  document.addEventListener("mousemove", (e) => {
-    if (activeDrag === null) {
-      return;
-    }
-    // Clear old indicators
-    activeDrag.containerEl.querySelectorAll(".channel-drop-indicator").forEach((x) => {
-      x.classList.remove("channel-drop-indicator");
-    });
+  document.addEventListener(
+    "mousemove",
+    (e) => {
+      if (activeDrag === null) {
+        return;
+      }
+      // Clear old indicators
+      activeDrag.containerEl.querySelectorAll(".channel-drop-indicator").forEach((x) => {
+        x.classList.remove("channel-drop-indicator");
+      });
 
-    // Find which channel item we're hovering over
-    const items = activeDrag.containerEl.querySelectorAll("[data-drag-channel-id]");
-    for (const item of items) {
-      const rect = item.getBoundingClientRect();
-      if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
-        const targetId = Number((item as HTMLElement).dataset.dragChannelId);
-        if (targetId !== activeDrag.channelId) {
-          item.classList.add("channel-drop-indicator");
+      // Find which channel item we're hovering over
+      const items = activeDrag.containerEl.querySelectorAll("[data-drag-channel-id]");
+      for (const item of items) {
+        const rect = item.getBoundingClientRect();
+        if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
+          const targetId = Number((item as HTMLElement).dataset.dragChannelId);
+          if (targetId !== activeDrag.channelId) {
+            item.classList.add("channel-drop-indicator");
+          }
+          break;
         }
-        break;
       }
-    }
-  }, { signal: globalDragAc.signal });
+    },
+    { signal: globalDragAc.signal },
+  );
 
-  document.addEventListener("mouseup", (e) => {
-    if (activeDrag === null) {
-      return;
-    }
-    const drag = activeDrag;
-    activeDrag = null;
-
-    // Clean up visual state
-    drag.sourceEl.classList.remove("dragging");
-    document.body.classList.remove("channel-reordering");
-    drag.containerEl.querySelectorAll(".channel-drop-indicator").forEach((x) => {
-      x.classList.remove("channel-drop-indicator");
-    });
-
-    // Find drop target
-    const items = drag.containerEl.querySelectorAll("[data-drag-channel-id]");
-    let dropTargetId: number | null = null;
-    let dropBefore = false;
-    for (const item of items) {
-      const rect = item.getBoundingClientRect();
-      if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
-        dropTargetId = Number((item as HTMLElement).dataset.dragChannelId);
-        dropBefore = e.clientY < rect.top + rect.height / 2;
-        break;
+  document.addEventListener(
+    "mouseup",
+    (e) => {
+      if (activeDrag === null) {
+        return;
       }
-    }
+      const drag = activeDrag;
+      activeDrag = null;
 
-    if (dropTargetId === null || dropTargetId === drag.channelId) {
-      return;
-    }
+      // Clean up visual state
+      drag.sourceEl.classList.remove("dragging");
+      document.body.classList.remove("channel-reordering");
+      drag.containerEl.querySelectorAll(".channel-drop-indicator").forEach((x) => {
+        x.classList.remove("channel-drop-indicator");
+      });
 
-    // Compute new order
-    const orderedIds = drag.channels.map((ch) => ch.id);
-    const dragIdx = orderedIds.indexOf(drag.channelId);
-    if (dragIdx === -1) {
-      return;
-    }
-    const withoutDrag = orderedIds.filter((id) => id !== drag.channelId);
-
-    const targetIdx = withoutDrag.indexOf(dropTargetId);
-    if (targetIdx === -1) {
-      return;
-    }
-    const insertIdx = dropBefore ? targetIdx : targetIdx + 1;
-    const reorderedIds = [
-      ...withoutDrag.slice(0, insertIdx),
-      drag.channelId,
-      ...withoutDrag.slice(insertIdx),
-    ];
-
-    // Build reorder data and update store immediately
-    const reorders: ChannelReorderData[] = [];
-    for (let i = 0; i < reorderedIds.length; i++) {
-      const id = reorderedIds[i];
-      if (id === undefined) {
-        continue;
+      // Find drop target
+      const items = drag.containerEl.querySelectorAll("[data-drag-channel-id]");
+      let dropTargetId: number | null = null;
+      let dropBefore = false;
+      for (const item of items) {
+        const rect = item.getBoundingClientRect();
+        if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
+          dropTargetId = Number((item as HTMLElement).dataset.dragChannelId);
+          dropBefore = e.clientY < rect.top + rect.height / 2;
+          break;
+        }
       }
-      const ch = drag.channels.find((c) => c.id === id);
-      if (ch !== undefined && ch.position !== i) {
-        reorders.push({ channelId: id, newPosition: i });
-        updateChannelPosition(id, i);
-      }
-    }
 
-    if (reorders.length > 0) {
-      drag.onReorder(reorders);
-    }
-  }, { signal: globalDragAc.signal });
+      if (dropTargetId === null || dropTargetId === drag.channelId) {
+        return;
+      }
+
+      // Compute new order
+      const orderedIds = drag.channels.map((ch) => ch.id);
+      const dragIdx = orderedIds.indexOf(drag.channelId);
+      if (dragIdx === -1) {
+        return;
+      }
+      const withoutDrag = orderedIds.filter((id) => id !== drag.channelId);
+
+      const targetIdx = withoutDrag.indexOf(dropTargetId);
+      if (targetIdx === -1) {
+        return;
+      }
+      const insertIdx = dropBefore ? targetIdx : targetIdx + 1;
+      const reorderedIds = [
+        ...withoutDrag.slice(0, insertIdx),
+        drag.channelId,
+        ...withoutDrag.slice(insertIdx),
+      ];
+
+      // Build reorder data and update store immediately
+      const reorders: ChannelReorderData[] = [];
+      for (let i = 0; i < reorderedIds.length; i++) {
+        const id = reorderedIds[i];
+        if (id === undefined) {
+          continue;
+        }
+        const ch = drag.channels.find((c) => c.id === id);
+        if (ch !== undefined && ch.position !== i) {
+          reorders.push({ channelId: id, newPosition: i });
+          updateChannelPosition(id, i);
+        }
+      }
+
+      if (reorders.length > 0) {
+        drag.onReorder(reorders);
+      }
+    },
+    { signal: globalDragAc.signal },
+  );
 }
 
 /** Make a channel element draggable via mousedown (admin/owner only). */

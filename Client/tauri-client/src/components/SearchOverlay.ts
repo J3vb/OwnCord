@@ -13,7 +13,11 @@ import type { SearchResultItem } from "@lib/types";
 // ---------------------------------------------------------------------------
 
 export interface SearchOverlayOptions {
-  readonly onSearch: (query: string, channelId?: number, signal?: AbortSignal) => Promise<readonly SearchResultItem[]>;
+  readonly onSearch: (
+    query: string,
+    channelId?: number,
+    signal?: AbortSignal,
+  ) => Promise<readonly SearchResultItem[]>;
   readonly onSelectResult: (result: SearchResultItem) => void;
   readonly onClose: () => void;
   readonly currentChannelId?: number;
@@ -49,8 +53,11 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   function formatTimestamp(ts: string): string {
     try {
       const d = new Date(ts);
-      return d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
-        + " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+      return (
+        d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
+        " " +
+        d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+      );
     } catch {
       return ts;
     }
@@ -65,9 +72,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       const isActive = i === activeIndex;
 
       const item = createElement("div", {
-        class: isActive
-          ? "search-result-item search-result-item--active"
-          : "search-result-item",
+        class: isActive ? "search-result-item search-result-item--active" : "search-result-item",
         role: "option",
         "aria-selected": isActive ? "true" : "false",
         "data-testid": `search-result-${i}`,
@@ -87,10 +92,14 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
 
       appendChildren(item, header, content);
 
-      item.addEventListener("click", () => {
-        options.onSelectResult(r);
-        options.onClose();
-      }, { signal });
+      item.addEventListener(
+        "click",
+        () => {
+          options.onSelectResult(r);
+          options.onClose();
+        },
+        { signal },
+      );
 
       resultsDiv.appendChild(item);
     }
@@ -122,7 +131,8 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
 
     setStatus("Searching...");
 
-    options.onSearch(query, options.currentChannelId, searchAbort.signal)
+    options
+      .onSearch(query, options.currentChannelId, searchAbort.signal)
       .then((items) => {
         results = items;
         activeIndex = 0;

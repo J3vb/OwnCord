@@ -11,12 +11,7 @@ import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 
 const log = createLogger("message-list");
-import {
-  shouldGroup,
-  isSameDay,
-  renderDayDivider,
-  renderMessage,
-} from "./message-list/renderers";
+import { shouldGroup, isSameDay, renderDayDivider, renderMessage } from "./message-list/renderers";
 import { FenwickTree } from "./message-list/fenwick";
 
 // -- Options ------------------------------------------------------------------
@@ -120,9 +115,7 @@ function renderEmptyState(channelName: string, channelType?: string): HTMLDivEle
   icon.textContent = isDm ? "@" : "#";
 
   const title = createElement("h2", { class: "channel-welcome-title" });
-  title.textContent = isDm
-    ? channelName
-    : `Welcome to #${channelName}!`;
+  title.textContent = isDm ? channelName : `Welcome to #${channelName}!`;
 
   const text = createElement("p", { class: "channel-welcome-text" });
   text.textContent = isDm
@@ -277,7 +270,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   let renderWindowResetTimer = 0;
 
   function renderWindow(): void {
-    if (root === null || contentContainer === null || topSpacer === null || bottomSpacer === null) return;
+    if (root === null || contentContainer === null || topSpacer === null || bottomSpacer === null)
+      return;
 
     const scrollTop = root.scrollTop;
     const clientHeight = root.clientHeight;
@@ -465,9 +459,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     // Load older messages when near top
     if (
-      root.scrollTop < SCROLL_TOP_THRESHOLD
-      && !loadingOlder
-      && hasMoreMessages(options.channelId)
+      root.scrollTop < SCROLL_TOP_THRESHOLD &&
+      !loadingOlder &&
+      hasMoreMessages(options.channelId)
     ) {
       loadingOlder = true;
       options.onScrollTop();
@@ -499,10 +493,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     scrollToBottomBtn = createElement("button", { class: "scroll-to-bottom-btn" });
     scrollToBottomBtn.textContent = "↓";
-    scrollToBottomBtn.addEventListener("click", () => {
-      scrollToBottom();
-      updateScrollToBottomBtn();
-    }, { signal: ac.signal });
+    scrollToBottomBtn.addEventListener(
+      "click",
+      () => {
+        scrollToBottom();
+        updateScrollToBottomBtn();
+      },
+      { signal: ac.signal },
+    );
 
     root.appendChild(topSpacer);
     root.appendChild(contentContainer);
@@ -555,21 +553,29 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const initialScrollRaf = requestAnimationFrame(() => scrollToBottom());
     ac.signal.addEventListener("abort", () => cancelAnimationFrame(initialScrollRaf));
 
-    unsubscribers.push(messagesStore.subscribeSelector(
-      (s) => s.messagesByChannel,
-      () => { renderAll(); },
-    ));
+    unsubscribers.push(
+      messagesStore.subscribeSelector(
+        (s) => s.messagesByChannel,
+        () => {
+          renderAll();
+        },
+      ),
+    );
 
     // Only re-render when member roles change, not on presence/typing updates.
     // Extract a role-only map so shallowEqual ignores status changes.
-    unsubscribers.push(membersStore.subscribeSelector(
-      (s) => {
-        const roles = new Map<number, string>();
-        for (const [id, m] of s.members) roles.set(id, m.role);
-        return roles;
-      },
-      () => { renderAll(); },
-    ));
+    unsubscribers.push(
+      membersStore.subscribeSelector(
+        (s) => {
+          const roles = new Map<number, string>();
+          for (const [id, m] of s.members) roles.set(id, m.role);
+          return roles;
+        },
+        () => {
+          renderAll();
+        },
+      ),
+    );
   }
 
   function destroy(): void {
@@ -591,11 +597,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       renderWindowResetTimer = 0;
     }
     unsubLoadingReset();
-    for (const unsub of unsubscribers) { unsub(); }
+    for (const unsub of unsubscribers) {
+      unsub();
+    }
     unsubscribers.length = 0;
     heightCache.clear();
     tree = null;
-    if (root !== null) { root.remove(); root = null; }
+    if (root !== null) {
+      root.remove();
+      root = null;
+    }
     contentContainer = null;
     topSpacer = null;
     bottomSpacer = null;
@@ -618,7 +629,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       const el = contentContainer.children[localIdx] as HTMLElement | undefined;
       if (el !== undefined) {
         el.classList.add("highlight-flash");
-        setTimeout(() => { el.classList.remove("highlight-flash"); }, 1500);
+        setTimeout(() => {
+          el.classList.remove("highlight-flash");
+        }, 1500);
       }
     }
 

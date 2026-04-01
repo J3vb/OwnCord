@@ -19,8 +19,8 @@ export class FenwickTree {
     const delta = value - prev;
     if (delta === 0) return;
     this.values[i] = value;
-    for (let x = i + 1; x <= this.size; x += x & (-x)) {
-      (this.tree)[x] = (this.tree[x] as number) + delta;
+    for (let x = i + 1; x <= this.size; x += x & -x) {
+      this.tree[x] = (this.tree[x] as number) + delta;
     }
   }
 
@@ -33,7 +33,7 @@ export class FenwickTree {
   prefixSum(i: number): number {
     if (i < 0) return 0;
     let s = 0;
-    for (let x = i + 1; x > 0; x -= x & (-x)) {
+    for (let x = i + 1; x > 0; x -= x & -x) {
       s += this.tree[x] as number;
     }
     return s;

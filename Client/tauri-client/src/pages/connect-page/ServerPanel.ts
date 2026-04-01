@@ -1,12 +1,7 @@
 // ServerPanel — server profile list sub-component for ConnectPage.
 // Pure extraction from ConnectPage.ts. No behavior changes.
 
-import {
-  createElement,
-  setText,
-  appendChildren,
-  clearChildren,
-} from "@lib/dom";
+import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { HealthStatus, ServerProfile } from "@lib/profiles";
 import { loadCredential } from "@lib/credentials";
@@ -23,8 +18,14 @@ export interface SimpleProfile {
 
 /** Color palette for server icons. */
 const ICON_COLORS = [
-  "#5865F2", "#57F287", "#FEE75C", "#EB459E", "#ED4245",
-  "#3BA55D", "#FAA61A", "#5865F2",
+  "#5865F2",
+  "#57F287",
+  "#FEE75C",
+  "#EB459E",
+  "#ED4245",
+  "#3BA55D",
+  "#FAA61A",
+  "#5865F2",
 ];
 
 function getIconColor(name: string): string {
@@ -70,10 +71,20 @@ export function createServerPanel(
   opts: ServerPanelOptions,
   initialProfiles: readonly SimpleProfile[],
 ): ServerPanelApi {
-  const { signal, onServerClick, onCredentialLoaded, onAddProfile, onDeleteProfile, onToggleAutoLogin } = opts;
+  const {
+    signal,
+    onServerClick,
+    onCredentialLoaded,
+    onAddProfile,
+    onDeleteProfile,
+    onToggleAutoLogin,
+  } = opts;
 
   // Map of host -> DOM elements for health status updates
-  const healthElements = new Map<string, { dot: HTMLDivElement; latency: HTMLSpanElement; onlineUsers: HTMLSpanElement }>();
+  const healthElements = new Map<
+    string,
+    { dot: HTMLDivElement; latency: HTMLSpanElement; onlineUsers: HTMLSpanElement }
+  >();
 
   // Cached DOM references
   let serverListEl: HTMLDivElement;
@@ -310,17 +321,25 @@ export function createServerPanel(
     closeBtn.addEventListener("click", closeModal, { signal });
     cancelBtn.addEventListener("click", closeModal, { signal });
     saveBtn.addEventListener("click", handleSave, { signal });
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) closeModal();
-    }, { signal });
+    overlay.addEventListener(
+      "click",
+      (e) => {
+        if (e.target === overlay) closeModal();
+      },
+      { signal },
+    );
 
     // Allow backdrop stop propagation on modal body
     modal.addEventListener("click", (e) => e.stopPropagation(), { signal });
 
     // Enter key submits
-    hostAddrInput.addEventListener("keydown", (e) => {
-      if ((e).key === "Enter") handleSave();
-    }, { signal });
+    hostAddrInput.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.key === "Enter") handleSave();
+      },
+      { signal },
+    );
 
     // Mount onto the panel's closest connect-page root
     const root = panelEl.closest(".connect-page") ?? document.body;

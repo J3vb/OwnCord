@@ -53,9 +53,7 @@ interface PrevSnapshot {
 
 /** Collect stats from both publisher and subscriber PeerConnections.
  *  RTT is typically on the subscriber PC in LiveKit's SFU model. */
-async function collectAllStats(
-  room: Room,
-): Promise<RTCStatsReport[]> {
+async function collectAllStats(room: Room): Promise<RTCStatsReport[]> {
   try {
     const engine = room.engine as unknown as Record<string, unknown>;
     const pcManager = engine.pcManager as
@@ -103,8 +101,10 @@ function extractMetrics(reports: RTCStatsReport[]): {
           rtt = rawRtt * 1000;
         }
         // Use max across candidate-pairs (avoid double-counting across PCs)
-        if (typeof entry.bytesSent === "number" && entry.bytesSent > totalUp) totalUp = entry.bytesSent;
-        if (typeof entry.bytesReceived === "number" && entry.bytesReceived > totalDown) totalDown = entry.bytesReceived;
+        if (typeof entry.bytesSent === "number" && entry.bytesSent > totalUp)
+          totalUp = entry.bytesSent;
+        if (typeof entry.bytesReceived === "number" && entry.bytesReceived > totalDown)
+          totalDown = entry.bytesReceived;
       }
 
       if (entry.type === "outbound-rtp") {
@@ -122,14 +122,14 @@ function extractMetrics(reports: RTCStatsReport[]): {
   return { rtt, totalUp, totalDown, outPackets, inPackets, outBytes, inBytes };
 }
 
-export function createConnectionStatsPoller(
-  getRoom: () => Room | null,
-): ConnectionStatsPoller {
+export function createConnectionStatsPoller(getRoom: () => Room | null): ConnectionStatsPoller {
   let current: ConnectionStats = EMPTY_STATS;
   let prev: PrevSnapshot = { timestamp: Date.now(), outBytes: 0, inBytes: 0 };
   let intervalId: ReturnType<typeof setInterval> | null = null;
   const listeners = new Set<(stats: ConnectionStats) => void>();
-  const qualityChangeListeners = new Set<(quality: QualityLevel, prevQuality: QualityLevel) => void>();
+  const qualityChangeListeners = new Set<
+    (quality: QualityLevel, prevQuality: QualityLevel) => void
+  >();
   let lastQuality: QualityLevel = "excellent";
   let qualityDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   const QUALITY_DEBOUNCE_MS = 3000;
@@ -205,9 +205,13 @@ export function createConnectionStatsPoller(
     };
   }
 
-  function onQualityChanged(cb: (quality: QualityLevel, prevQuality: QualityLevel) => void): () => void {
+  function onQualityChanged(
+    cb: (quality: QualityLevel, prevQuality: QualityLevel) => void,
+  ): () => void {
     qualityChangeListeners.add(cb);
-    return () => { qualityChangeListeners.delete(cb); };
+    return () => {
+      qualityChangeListeners.delete(cb);
+    };
   }
 
   return { start, stop, getStats, onUpdate, onQualityChanged };

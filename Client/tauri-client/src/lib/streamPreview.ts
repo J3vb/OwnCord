@@ -122,11 +122,15 @@ function showPreview(
   }
 
   // Screen reader announcement
-  const announcement = createElement("span", {
-    role: "status",
-    "aria-live": "polite",
-    class: "sr-only",
-  }, `Showing stream preview for ${username}`);
+  const announcement = createElement(
+    "span",
+    {
+      role: "status",
+      "aria-live": "polite",
+      class: "sr-only",
+    },
+    `Showing stream preview for ${username}`,
+  );
   previewDiv.appendChild(announcement);
 
   // Close when mouse leaves the preview div (but not if moving back to row)
@@ -177,7 +181,8 @@ function hidePreview(row: HTMLElement): void {
 
   // Preview is a sibling after the row
   const next = row.nextElementSibling;
-  const previewDiv = (next !== null && next.classList.contains("vu-preview")) ? next as HTMLElement : null;
+  const previewDiv =
+    next !== null && next.classList.contains("vu-preview") ? (next as HTMLElement) : null;
   if (previewDiv === null) {
     previewTimers.delete(row);
     return;
@@ -236,7 +241,11 @@ export function attachStreamPreview(
       state.animation = window.setTimeout(() => {
         // Check if mouse is now over the preview sibling
         const preview = row.nextElementSibling;
-        if (preview !== null && preview.classList.contains("vu-preview") && preview.matches(":hover")) {
+        if (
+          preview !== null &&
+          preview.classList.contains("vu-preview") &&
+          preview.matches(":hover")
+        ) {
           return; // Mouse moved to preview — keep it open
         }
         hidePreview(row);
@@ -266,18 +275,19 @@ export function attachStreamPreview(
  * any open previews when the user scrolls. WebView2 doesn't always
  * fire mouseleave on scroll.
  */
-export function attachScrollCollapse(
-  container: HTMLElement,
-  signal: AbortSignal,
-): void {
-  container.addEventListener("scroll", () => {
-    const openPreviews = container.querySelectorAll<HTMLElement>(".vu-preview");
-    for (const preview of openPreviews) {
-      // Preview is a sibling after the row — get the preceding voice-user-item
-      const row = preview.previousElementSibling;
-      if (row !== null && row.classList.contains("voice-user-item")) {
-        hidePreview(row as HTMLElement);
+export function attachScrollCollapse(container: HTMLElement, signal: AbortSignal): void {
+  container.addEventListener(
+    "scroll",
+    () => {
+      const openPreviews = container.querySelectorAll<HTMLElement>(".vu-preview");
+      for (const preview of openPreviews) {
+        // Preview is a sibling after the row — get the preceding voice-user-item
+        const row = preview.previousElementSibling;
+        if (row !== null && row.classList.contains("voice-user-item")) {
+          hidePreview(row as HTMLElement);
+        }
       }
-    }
-  }, { signal, passive: true });
+    },
+    { signal, passive: true },
+  );
 }

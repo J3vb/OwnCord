@@ -3,11 +3,7 @@
  * inline image rendering, lightbox overlay, and URL embed orchestration.
  */
 
-import {
-  createElement,
-  setText,
-  appendChildren,
-} from "@lib/dom";
+import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
@@ -106,7 +102,11 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
   // Validate videoId to prevent injection into iframe src / img src.
   if (!YOUTUBE_ID_RE.test(videoId)) {
     const fallback = createElement("div", { class: "msg-embed" });
-    const link = createElement("a", { href: originalUrl, target: "_blank", rel: "noopener noreferrer" });
+    const link = createElement("a", {
+      href: originalUrl,
+      target: "_blank",
+      rel: "noopener noreferrer",
+    });
     setText(link, originalUrl);
     fallback.appendChild(link);
     return fallback;
@@ -181,15 +181,22 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
   wrap.appendChild(thumbWrap);
 
   // On click thumbnail, replace with iframe player
-  thumbWrap.addEventListener("click", () => {
-    const iframe = document.createElement("iframe");
-    iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
-    iframe.setAttribute("allowfullscreen", "");
-    iframe.setAttribute("allow", "autoplay; encrypted-media");
-    iframe.setAttribute("sandbox", "allow-scripts allow-same-origin allow-presentation allow-popups");
-    iframe.className = "msg-embed-iframe";
-    thumbWrap.replaceChildren(iframe);
-  }, { once: true });
+  thumbWrap.addEventListener(
+    "click",
+    () => {
+      const iframe = document.createElement("iframe");
+      iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
+      iframe.setAttribute("allowfullscreen", "");
+      iframe.setAttribute("allow", "autoplay; encrypted-media");
+      iframe.setAttribute(
+        "sandbox",
+        "allow-scripts allow-same-origin allow-presentation allow-popups",
+      );
+      iframe.className = "msg-embed-iframe";
+      thumbWrap.replaceChildren(iframe);
+    },
+    { once: true },
+  );
 
   return wrap;
 }
@@ -221,7 +228,8 @@ export function renderInlineImage(url: string): HTMLDivElement {
   const attrs: Record<string, string> = {
     src: url,
     alt: "Image",
-    style: "max-width: 100%; max-height: 350px; display: block; border-radius: 4px; cursor: pointer;",
+    style:
+      "max-width: 100%; max-height: 350px; display: block; border-radius: 4px; cursor: pointer;",
   };
   // Enable CORS for GIFs so canvas capture works for freeze/unfreeze
   if (isGifUrl(url)) {
@@ -233,31 +241,47 @@ export function renderInlineImage(url: string): HTMLDivElement {
   // height so future virtual-scroll rebuilds start at the correct size.
   // Measure synchronously — deferring to rAF loses the race with
   // ResizeObserver which can rebuild the DOM before the rAF fires.
-  img.addEventListener("load", () => {
-    log.info("Image loaded", { url: url.slice(0, 80), naturalW: (img).naturalWidth, naturalH: (img).naturalHeight });
-    wrap.style.minHeight = "";
-    const h = wrap.offsetHeight;
-    if (h > 0) cacheImageHeight(url, h);
-    log.debug("Image height cached", { url: url.slice(0, 80), h });
-  }, { once: true });
+  img.addEventListener(
+    "load",
+    () => {
+      log.info("Image loaded", {
+        url: url.slice(0, 80),
+        naturalW: img.naturalWidth,
+        naturalH: img.naturalHeight,
+      });
+      wrap.style.minHeight = "";
+      const h = wrap.offsetHeight;
+      if (h > 0) cacheImageHeight(url, h);
+      log.debug("Image height cached", { url: url.slice(0, 80), h });
+    },
+    { once: true },
+  );
 
   // On error: clear min-height so the wrapper collapses instead of
   // holding a 200px empty reservation that can oscillate with virtual scroll.
-  img.addEventListener("error", () => {
-    log.error("Image failed to load", { url });
-    wrap.style.minHeight = "";
-  }, { once: true });
+  img.addEventListener(
+    "error",
+    () => {
+      log.error("Image failed to load", { url });
+      wrap.style.minHeight = "";
+    },
+    { once: true },
+  );
 
   // Observe GIFs for visibility-based freeze/unfreeze + play/pause button.
   // When the animateGifs pref is disabled, start frozen so the first frame is
   // shown by default; the user can still click the play button to animate.
   if (isGifUrl(url)) {
-    img.addEventListener("load", () => {
-      log.debug("Calling observeMedia for GIF", { url: url.slice(0, 80) });
-      const startFrozen = !loadPref("animateGifs", true);
-      observeMedia(img, url, wrap, startFrozen);
-      log.debug("observeMedia complete", { startFrozen });
-    }, { once: true });
+    img.addEventListener(
+      "load",
+      () => {
+        log.debug("Calling observeMedia for GIF", { url: url.slice(0, 80) });
+        const startFrozen = !loadPref("animateGifs", true);
+        observeMedia(img, url, wrap, startFrozen);
+        log.debug("observeMedia complete", { startFrozen });
+      },
+      { once: true },
+    );
   }
 
   img.addEventListener("click", () => {
@@ -460,7 +484,12 @@ export function renderUrlEmbeds(content: string): DocumentFragment {
     // Direct image/GIF URL — render inline
     const isDirect = isDirectImageUrl(url);
     const isSafe = isSafeUrl(url);
-    log.debug("URL classification", { url: url.slice(0, 80), isDirect, isSafe, isGif: isGifUrl(url) });
+    log.debug("URL classification", {
+      url: url.slice(0, 80),
+      isDirect,
+      isSafe,
+      isGif: isGifUrl(url),
+    });
     if (isDirect && isSafe) {
       if (!inlineMedia) continue;
       fragment.appendChild(renderInlineImage(url));

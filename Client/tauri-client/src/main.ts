@@ -136,7 +136,17 @@ let currentPage: { destroy?(): void } | null = null;
 
 /** Run health checks for a list of profiles and update the connect page. */
 function runHealthChecks(
-  connectPage: { updateHealthStatus(host: string, status: { status: string; latencyMs: number | null; version: string | null; onlineUsers: number | null }): void },
+  connectPage: {
+    updateHealthStatus(
+      host: string,
+      status: {
+        status: string;
+        latencyMs: number | null;
+        version: string | null;
+        onlineUsers: number | null;
+      },
+    ): void;
+  },
   profiles: readonly { host: string }[],
 ): void {
   for (const profile of profiles) {
@@ -190,14 +200,16 @@ function renderPage(pageId: "connect" | "main"): void {
     log.info("Dispatcher wired, connecting WS");
 
     // Save credential for auto-reconnect. Warn user if it fails.
-    saveCredential(host, username, token, password).then((ok) => {
-      if (!ok) {
-        log.warn("Credential save failed — auto-login will not work for this server");
-        setTransientError("Could not save credentials — auto-login won't work");
-      }
-    }).catch(() => {
-      // saveCredential already catches internally; this is defence-in-depth
-    });
+    saveCredential(host, username, token, password)
+      .then((ok) => {
+        if (!ok) {
+          log.warn("Credential save failed — auto-login will not work for this server");
+          setTransientError("Could not save credentials — auto-login won't work");
+        }
+      })
+      .catch(() => {
+        // saveCredential already catches internally; this is defence-in-depth
+      });
 
     const unsubState = ws.onStateChange((wsState) => {
       log.debug("WS state change", { state: wsState });
@@ -232,7 +244,12 @@ function renderPage(pageId: "connect" | "main"): void {
 
   if (pageId === "connect") {
     // Helper to get the profile list for the ConnectPage
-    function getProfileList(): readonly { name: string; host: string; id?: string; username?: string }[] {
+    function getProfileList(): readonly {
+      name: string;
+      host: string;
+      id?: string;
+      username?: string;
+    }[] {
       const saved = profileManager.getAll();
       if (saved.length > 0) return saved;
       // Fallback: show a default local server entry
@@ -260,78 +277,81 @@ function renderPage(pageId: "connect" | "main"): void {
       void profileManager.saveProfiles();
     }
 
-    const connectPage = createConnectPage({
-      async onLogin(host, username, password) {
-        api.setConfig({ host });
-        const result = await api.login(username, password);
-        if (result.requires_2fa) {
-          pendingTotpHost = host;
-          pendingTotpPartialToken = result.partial_token ?? "";
-          pendingTotpUsername = username;
-          connectPage.showTotp();
-          return;
-        }
-        if (result.token) {
+    const connectPage = createConnectPage(
+      {
+        async onLogin(host, username, password) {
+          api.setConfig({ host });
+          const result = await api.login(username, password);
+          if (result.requires_2fa) {
+            pendingTotpHost = host;
+            pendingTotpPartialToken = result.partial_token ?? "";
+            pendingTotpUsername = username;
+            connectPage.showTotp();
+            return;
+          }
+          if (result.token) {
+            const remember = connectPage.getRememberPassword();
+            const savedPassword = remember ? password : undefined;
+            ensureProfileExists(host, username, remember);
+            wirePostAuth(host, result.token, username, savedPassword);
+          }
+        },
+        async onRegister(host, username, password, inviteCode) {
+          api.setConfig({ host });
+          const result = await api.register(username, password, inviteCode);
           const remember = connectPage.getRememberPassword();
           const savedPassword = remember ? password : undefined;
           ensureProfileExists(host, username, remember);
           wirePostAuth(host, result.token, username, savedPassword);
-        }
-      },
-      async onRegister(host, username, password, inviteCode) {
-        api.setConfig({ host });
-        const result = await api.register(username, password, inviteCode);
-        const remember = connectPage.getRememberPassword();
-        const savedPassword = remember ? password : undefined;
-        ensureProfileExists(host, username, remember);
-        wirePostAuth(host, result.token, username, savedPassword);
-      },
-      async onTotpSubmit(code) {
-        if (!pendingTotpPartialToken) {
-          log.error("TOTP submit without pending partial token");
-          return;
-        }
-        try {
-          const result = await api.verifyTotp(code, pendingTotpPartialToken);
-          if (result.token) {
-            const remember = connectPage.getRememberPassword();
-            const savedPassword = remember ? connectPage.getPassword() : undefined;
-            ensureProfileExists(pendingTotpHost, pendingTotpUsername, remember);
-            wirePostAuth(pendingTotpHost, result.token, pendingTotpUsername, savedPassword);
+        },
+        async onTotpSubmit(code) {
+          if (!pendingTotpPartialToken) {
+            log.error("TOTP submit without pending partial token");
+            return;
           }
-        } finally {
-          // Clear sensitive partial token immediately after use (success or failure)
-          pendingTotpPartialToken = "";
-        }
+          try {
+            const result = await api.verifyTotp(code, pendingTotpPartialToken);
+            if (result.token) {
+              const remember = connectPage.getRememberPassword();
+              const savedPassword = remember ? connectPage.getPassword() : undefined;
+              ensureProfileExists(pendingTotpHost, pendingTotpUsername, remember);
+              wirePostAuth(pendingTotpHost, result.token, pendingTotpUsername, savedPassword);
+            }
+          } finally {
+            // Clear sensitive partial token immediately after use (success or failure)
+            pendingTotpPartialToken = "";
+          }
+        },
+        onAddProfile(name, host) {
+          profileManager.addProfile({
+            name,
+            host,
+            username: "",
+            autoConnect: false,
+            rememberPassword: false,
+            color: "#5865F2",
+          });
+          void profileManager.saveProfiles();
+          connectPage.refreshProfiles(getProfileList());
+          // Check health for the new profile
+          runHealthChecks(connectPage, getProfileList());
+        },
+        onDeleteProfile(profileId) {
+          profileManager.removeProfile(profileId);
+          void profileManager.saveProfiles();
+          connectPage.refreshProfiles(getProfileList());
+        },
+        onToggleAutoLogin(profileId, enabled) {
+          profileManager.setAutoLogin(enabled ? profileId : null);
+          void profileManager.saveProfiles();
+          connectPage.refreshProfiles(getProfileList());
+        },
+        onAutoLoginCancel() {
+          autoLoginCancelled = true;
+        },
       },
-      onAddProfile(name, host) {
-        profileManager.addProfile({
-          name,
-          host,
-          username: "",
-          autoConnect: false,
-          rememberPassword: false,
-          color: "#5865F2",
-        });
-        void profileManager.saveProfiles();
-        connectPage.refreshProfiles(getProfileList());
-        // Check health for the new profile
-        runHealthChecks(connectPage, getProfileList());
-      },
-      onDeleteProfile(profileId) {
-        profileManager.removeProfile(profileId);
-        void profileManager.saveProfiles();
-        connectPage.refreshProfiles(getProfileList());
-      },
-      onToggleAutoLogin(profileId, enabled) {
-        profileManager.setAutoLogin(enabled ? profileId : null);
-        void profileManager.saveProfiles();
-        connectPage.refreshProfiles(getProfileList());
-      },
-      onAutoLoginCancel() {
-        autoLoginCancelled = true;
-      },
-    }, getProfileList());
+      getProfileList(),
+    );
 
     let autoLoginCancelled = false;
 
@@ -368,10 +388,7 @@ function renderPage(pageId: "connect" | "main"): void {
       if (quickSwitchTarget !== null) {
         sessionStorage.removeItem("owncord:quick-switch-target");
         const targetProfile = profileManager.getAll().find((p) => p.host === quickSwitchTarget);
-        connectPage.selectServer(
-          quickSwitchTarget,
-          targetProfile?.username ?? undefined,
-        );
+        connectPage.selectServer(quickSwitchTarget, targetProfile?.username ?? undefined);
         return; // Skip auto-login when switching servers
       }
 

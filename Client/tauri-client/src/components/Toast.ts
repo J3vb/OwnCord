@@ -93,6 +93,7 @@ export function createToastContainer(): ToastContainer {
   }
 
   function clear(): void {
+    // oxlint-disable-next-line no-useless-spread -- snapshot needed: removeToast splices the array during iteration
     for (const entry of [...toasts]) {
       removeToast(entry);
     }

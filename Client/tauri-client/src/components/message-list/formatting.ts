@@ -101,9 +101,13 @@ export function roleColorVar(role: string): string {
     return "var(--role-member)";
   }
   switch (role) {
-    case "owner": return "var(--role-owner)";
-    case "admin": return "var(--role-admin)";
-    case "moderator": return "var(--role-mod)";
-    default: return "var(--role-member)";
+    case "owner":
+      return "var(--role-owner)";
+    case "admin":
+      return "var(--role-admin)";
+    case "moderator":
+      return "var(--role-mod)";
+    default:
+      return "var(--role-member)";
   }
 }

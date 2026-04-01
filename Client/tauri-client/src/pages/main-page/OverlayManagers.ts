@@ -24,12 +24,11 @@ const log = createLogger("overlays");
 
 export function mapInviteResponse(r: InviteResponse): InviteItem {
   const extra = r as unknown as Record<string, unknown>;
-  const createdBy = typeof extra["created_by"] === "object"
-    && extra["created_by"] !== null
-    ? (extra["created_by"] as { username?: string }).username ?? "unknown"
-    : "unknown";
-  const uses = r.use_count
-    ?? (typeof extra["uses"] === "number" ? (extra["uses"]) : 0);
+  const createdBy =
+    typeof extra["created_by"] === "object" && extra["created_by"] !== null
+      ? ((extra["created_by"] as { username?: string }).username ?? "unknown")
+      : "unknown";
+  const uses = r.use_count ?? (typeof extra["uses"] === "number" ? extra["uses"] : 0);
   return {
     code: r.code,
     createdBy,
@@ -135,7 +134,6 @@ export interface InviteManagerController {
 export function createInviteManagerController(opts: {
   readonly api: ApiClient;
   readonly getRoot: () => HTMLDivElement | null;
-
 }): InviteManagerController {
   let instance: MountableComponent | null = null;
 
@@ -243,12 +241,15 @@ export function createPinnedPanelController(opts: {
           }
         },
         onUnpin: (msgId: number) => {
-          void opts.api.unpinMessage(channelId, msgId).then(() => {
-            close();
-          }).catch((err: unknown) => {
-            log.error("Failed to unpin message", { msgId, error: String(err) });
-            showToast("Failed to unpin message", "error");
-          });
+          void opts.api
+            .unpinMessage(channelId, msgId)
+            .then(() => {
+              close();
+            })
+            .catch((err: unknown) => {
+              log.error("Failed to unpin message", { msgId, error: String(err) });
+              showToast("Failed to unpin message", "error");
+            });
         },
         onClose: close,
       });
