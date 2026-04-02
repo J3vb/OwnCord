@@ -1,12 +1,51 @@
+use std::sync::Arc;
 use serde::Serialize;
 use tauri::AppHandle;
 use tauri_plugin_updater::UpdaterExt;
+
+use crate::livekit_proxy::{cert_store_key, load_stored_fingerprint, PinnedVerifier};
 
 #[derive(Serialize)]
 pub struct UpdateCheckResult {
     pub available: bool,
     pub version: Option<String>,
     pub body: Option<String>,
+}
+
+/// Extract the host (with port if non-443) from an https:// URL for cert store lookup.
+fn extract_host_for_cert_store(server_url: &str) -> Result<String, String> {
+    let parsed = url::Url::parse(server_url)
+        .map_err(|e| format!("failed to parse server URL: {e}"))?;
+    let host = parsed.host_str()
+        .ok_or_else(|| "server URL has no host".to_string())?;
+    let port = parsed.port().unwrap_or(443);
+    let raw = if port == 443 {
+        host.to_string()
+    } else {
+        format!("{host}:{port}")
+    };
+    Ok(cert_store_key(&raw))
+}
+
+/// Build a rustls ClientConfig that validates the server cert against the
+/// TOFU-pinned fingerprint. Falls back to system certs if no fingerprint
+/// is stored (server uses a real CA cert).
+fn build_tls_config(app: &AppHandle, server_url: &str) -> Result<Option<rustls::ClientConfig>, String> {
+    let store_key = extract_host_for_cert_store(server_url)?;
+    let fingerprint = load_stored_fingerprint(app, &store_key)?;
+    match fingerprint {
+        Some(fp) => {
+            let config = rustls::ClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(PinnedVerifier::new(fp)))
+                .with_no_client_auth();
+            Ok(Some(config))
+        }
+        None => {
+            // No TOFU fingerprint stored — use system TLS (works for CA-signed certs).
+            Ok(None)
+        }
+    }
 }
 
 /// Validate that a server URL is safe for the updater to connect to.
@@ -50,14 +89,20 @@ pub async fn check_client_update(
         .parse()
         .map_err(|e: url::ParseError| format!("bad endpoint URL: {e}"))?;
 
-    // OwnCord is self-hosted and commonly uses self-signed TLS certs.
-    // The updater connects to the user's own server, so accept invalid certs
-    // (the update artifact itself is verified via Ed25519 signature).
-    let updater = app
+    // Use TOFU-pinned certificate for self-signed servers, or system certs
+    // for CA-signed servers. Never blindly accept invalid certs (BUG-134).
+    let tls_config = build_tls_config(&app, &server_url)?;
+    let mut builder = app
         .updater_builder()
         .endpoints(vec![url])
-        .map_err(|e| format!("failed to set endpoints: {e}"))?
-        .configure_client(|client| client.danger_accept_invalid_certs(true))
+        .map_err(|e| format!("failed to set endpoints: {e}"))?;
+    if let Some(config) = tls_config {
+        let config = Arc::new(config);
+        builder = builder.configure_client(move |client| {
+            client.use_preconfigured_tls((*config).clone())
+        });
+    }
+    let updater = builder
         .build()
         .map_err(|e| format!("failed to build updater: {e}"))?;
 
@@ -106,11 +151,19 @@ pub async fn download_and_install_update(
         .parse()
         .map_err(|e: url::ParseError| format!("bad endpoint URL: {e}"))?;
 
-    let updater = app
+    // Use TOFU-pinned certificate for self-signed servers (BUG-134).
+    let tls_config = build_tls_config(&app, &server_url)?;
+    let mut builder = app
         .updater_builder()
         .endpoints(vec![url])
-        .map_err(|e| format!("failed to set endpoints: {e}"))?
-        .configure_client(|client| client.danger_accept_invalid_certs(true))
+        .map_err(|e| format!("failed to set endpoints: {e}"))?;
+    if let Some(config) = tls_config {
+        let config = Arc::new(config);
+        builder = builder.configure_client(move |client| {
+            client.use_preconfigured_tls((*config).clone())
+        });
+    }
+    let updater = builder
         .build()
         .map_err(|e| format!("failed to build updater: {e}"))?;
 
