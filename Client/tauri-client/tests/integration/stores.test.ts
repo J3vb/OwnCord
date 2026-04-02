@@ -63,6 +63,10 @@ function createMockWsClient(): MockWsClient {
       return () => stateListeners.delete(listener);
     },
 
+    onCertFirstTrust(): () => void {
+      return () => {};
+    },
+
     onCertMismatch(): () => void {
       return () => {};
     },

@@ -59,6 +59,7 @@ export function parseStoredFingerprint(message?: string): string | undefined {
 }
 
 export type CertMismatchListener = (event: CertTofuEvent) => void;
+export type CertFirstTrustListener = (event: CertTofuEvent) => void;
 
 export interface WsClientConfig {
   readonly host: string;
@@ -102,6 +103,9 @@ export function createWsClient() {
 
   // TOFU cert mismatch listeners
   const certMismatchListeners = new Set<CertMismatchListener>();
+
+  // TOFU first-trust listeners (BUG-133)
+  const certFirstTrustListeners = new Set<CertFirstTrustListener>();
 
   function setState(newState: ConnectionState): void {
     if (state !== newState) {
@@ -325,7 +329,15 @@ export function createWsClient() {
       const raw = e.payload as CertTofuEvent;
       log.info("TOFU cert event", { host: raw.host, status: raw.status });
 
-      if (raw.status === "mismatch") {
+      if (raw.status === "trusted_first_use") {
+        log.warn("TOFU: first-use certificate trust", {
+          host: raw.host,
+          fingerprint: raw.fingerprint,
+        });
+        for (const listener of certFirstTrustListeners) {
+          listener(raw);
+        }
+      } else if (raw.status === "mismatch") {
         const evt: CertTofuEvent = {
           ...raw,
           storedFingerprint: parseStoredFingerprint(raw.message),
@@ -471,6 +483,12 @@ export function createWsClient() {
     onStateChange(listener: (state: ConnectionState) => void): () => void {
       stateListeners.add(listener);
       return () => stateListeners.delete(listener);
+    },
+
+    /** Register a listener for TOFU first-trust events (BUG-133). */
+    onCertFirstTrust(listener: CertFirstTrustListener): () => void {
+      certFirstTrustListeners.add(listener);
+      return () => certFirstTrustListeners.delete(listener);
     },
 
     /** Register a listener for TOFU certificate mismatch events. */

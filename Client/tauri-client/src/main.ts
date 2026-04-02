@@ -96,6 +96,34 @@ let connectedOverlay: ConnectedOverlayControl | null = null;
 let lastConnectHost = "";
 let lastConnectToken = "";
 
+// Certificate first-trust notification (BUG-133).
+// Show a brief banner so the user is aware a new server cert was pinned.
+ws.onCertFirstTrust((evt: CertTofuEvent) => {
+  log.warn("TOFU: first-use certificate pinned", {
+    host: evt.host,
+    fingerprint: evt.fingerprint,
+  });
+  const banner = document.createElement("div");
+  Object.assign(banner.style, {
+    position: "fixed",
+    top: "12px",
+    left: "50%",
+    transform: "translateX(-50%)",
+    background: "#2d5a27",
+    color: "#e0e0e0",
+    padding: "10px 20px",
+    borderRadius: "8px",
+    fontSize: "13px",
+    zIndex: "10000",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
+    cursor: "default",
+  });
+  banner.textContent = `New server certificate trusted for ${evt.host}`;
+  banner.title = `SHA-256: ${evt.fingerprint}`;
+  document.body.appendChild(banner);
+  setTimeout(() => banner.remove(), 8000);
+});
+
 // Certificate mismatch modal handler
 let certModalActive = false;
 ws.onCertMismatch((evt: CertTofuEvent) => {

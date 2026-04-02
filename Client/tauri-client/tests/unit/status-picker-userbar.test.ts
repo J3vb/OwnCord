@@ -31,6 +31,7 @@ function createMockWs(state: "connected" | "disconnected" = "connected"): WsClie
       stateListeners.add(listener);
       return () => stateListeners.delete(listener);
     }),
+    onCertFirstTrust: vi.fn().mockReturnValue(() => {}),
     onCertMismatch: vi.fn().mockReturnValue(() => {}),
     acceptCertFingerprint: vi.fn(),
     getState: vi.fn(() => currentState),
