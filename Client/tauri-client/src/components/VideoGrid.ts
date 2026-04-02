@@ -5,7 +5,11 @@
 
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { muteScreenshareAudio, setUserVolume } from "@lib/livekitSession";
+import {
+  muteScreenshareAudio,
+  setScreenshareAudioVolume,
+  setUserVolume,
+} from "@lib/livekitSession";
 import type { MountableComponent } from "@lib/safe-render";
 
 export interface TileConfig {
@@ -320,7 +324,9 @@ export function createVideoGrid(): VideoGridComponent {
         const wasMuted = muted;
         muted = currentVolume === 0;
         if (config.isScreenshare) {
+          // BUG-102: Set actual volume, not just mute toggle.
           muteScreenshareAudio(config.audioUserId, muted);
+          setScreenshareAudioVolume(config.audioUserId, currentVolume / 200);
         } else {
           setUserVolume(config.audioUserId, currentVolume);
         }

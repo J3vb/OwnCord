@@ -56,6 +56,9 @@ export function createVoiceChannel(options: VoiceChannelOptions): VoiceChannelRe
 
   appendChildren(root, channelItem, usersContainer);
 
+  // BUG-104: Attach scroll collapse once (not per-update) to avoid listener accumulation.
+  attachScrollCollapse(usersContainer, ac.signal);
+
   // Click to join
   channelItem.addEventListener("click", options.onJoin, { signal: ac.signal });
 
@@ -262,8 +265,6 @@ export function createVoiceChannel(options: VoiceChannelOptions): VoiceChannelRe
         );
       }
     }
-
-    attachScrollCollapse(usersContainer, ac.signal);
 
     // Mark channel-item active if there are users
     if (channelUsers.size > 0) {

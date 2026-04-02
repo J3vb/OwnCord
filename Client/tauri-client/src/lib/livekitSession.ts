@@ -256,6 +256,23 @@ export class LiveKitSession {
           .catch((err) => log.debug("Failed to start audio after reconnect", err));
         // eslint-disable-next-line no-await-in-loop -- sequential reconnect: must restore voice state after connect
         await this.restoreLocalVoiceState("reconnect");
+        // BUG-099: Reapply saved audio devices after reconnect (matches initial join path).
+        const savedInput = loadPref<string>("audioInputDevice", "");
+        if (savedInput) {
+          try {
+            await this.room.switchActiveDevice("audioinput", savedInput);
+          } catch (err) {
+            log.warn("Reconnect: saved input device unavailable, using default", err);
+          }
+        }
+        const savedOutput = loadPref<string>("audioOutputDevice", "");
+        if (savedOutput) {
+          try {
+            await this.room.switchActiveDevice("audiooutput", savedOutput);
+          } catch (err) {
+            log.warn("Reconnect: saved output device unavailable, using default", err);
+          }
+        }
         this._audioPipeline.setupAudioPipeline();
         this.reapplyMuteGain();
         this.startTokenRefreshTimer();
