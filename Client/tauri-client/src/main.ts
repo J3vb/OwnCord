@@ -216,7 +216,13 @@ function renderPage(pageId: "connect" | "main"): void {
   appEl!.textContent = "";
 
   // Shared helper for post-auth WS connect + overlay flow
-  function wirePostAuth(host: string, token: string, username: string, password?: string): void {
+  function wirePostAuth(
+    host: string,
+    token: string,
+    username: string,
+    password?: string,
+    rememberPassword = true,
+  ): void {
     log.info("Post-auth wiring", { host, username });
     api.setConfig({ token });
     // Store token in authStore so the dispatcher's auth_ok handler has it
@@ -227,17 +233,19 @@ function renderPage(pageId: "connect" | "main"): void {
     dispatcherCleanup = wireDispatcher(ws);
     log.info("Dispatcher wired, connecting WS");
 
-    // Save credential for auto-reconnect. Warn user if it fails.
-    saveCredential(host, username, token, password)
-      .then((ok) => {
-        if (!ok) {
-          log.warn("Credential save failed — auto-login will not work for this server");
-          setTransientError("Could not save credentials — auto-login won't work");
-        }
-      })
-      .catch(() => {
-        // saveCredential already catches internally; this is defence-in-depth
-      });
+    // BUG-135: Only persist credentials when the user opted in.
+    if (rememberPassword) {
+      saveCredential(host, username, token, password)
+        .then((ok) => {
+          if (!ok) {
+            log.warn("Credential save failed — auto-login will not work for this server");
+            setTransientError("Could not save credentials — auto-login won't work");
+          }
+        })
+        .catch(() => {
+          // saveCredential already catches internally; this is defence-in-depth
+        });
+    }
 
     const unsubState = ws.onStateChange((wsState) => {
       log.debug("WS state change", { state: wsState });
@@ -321,7 +329,7 @@ function renderPage(pageId: "connect" | "main"): void {
             const remember = connectPage.getRememberPassword();
             const savedPassword = remember ? password : undefined;
             ensureProfileExists(host, username, remember);
-            wirePostAuth(host, result.token, username, savedPassword);
+            wirePostAuth(host, result.token, username, savedPassword, remember);
           }
         },
         async onRegister(host, username, password, inviteCode) {
@@ -330,7 +338,7 @@ function renderPage(pageId: "connect" | "main"): void {
           const remember = connectPage.getRememberPassword();
           const savedPassword = remember ? password : undefined;
           ensureProfileExists(host, username, remember);
-          wirePostAuth(host, result.token, username, savedPassword);
+          wirePostAuth(host, result.token, username, savedPassword, remember);
         },
         async onTotpSubmit(code) {
           if (!pendingTotpPartialToken) {
@@ -343,7 +351,13 @@ function renderPage(pageId: "connect" | "main"): void {
               const remember = connectPage.getRememberPassword();
               const savedPassword = remember ? connectPage.getPassword() : undefined;
               ensureProfileExists(pendingTotpHost, pendingTotpUsername, remember);
-              wirePostAuth(pendingTotpHost, result.token, pendingTotpUsername, savedPassword);
+              wirePostAuth(
+                pendingTotpHost,
+                result.token,
+                pendingTotpUsername,
+                savedPassword,
+                remember,
+              );
             }
           } finally {
             // Clear sensitive partial token immediately after use (success or failure)
