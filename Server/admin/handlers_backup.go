@@ -134,7 +134,7 @@ func handleDeleteBackup(database *db.DB) http.Handler {
 	})
 }
 
-func handleRestoreBackup(database *db.DB) http.Handler {
+func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := chi.URLParam(r, "name")
 		if name == "" || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
@@ -169,25 +169,35 @@ func handleRestoreBackup(database *db.DB) http.Handler {
 			slog.Warn("pre-restore backup failed", "err", err)
 		}
 
+		// Notify clients that the server is restarting.
+		hub.BroadcastServerRestart("backup_restore", 5)
+
 		// Checkpoint the WAL and close the database connection before overwriting
-		// to prevent corruption from concurrent writes.
+		// to prevent corruption from concurrent writes (BUG-096).
 		if _, checkpointErr := database.SQLDb().Exec("PRAGMA wal_checkpoint(TRUNCATE)"); checkpointErr != nil {
 			slog.Warn("pre-restore WAL checkpoint failed", "err", checkpointErr)
 		}
 
-		// Stream the backup file over the live database to avoid loading
+		actor := actorFromContext(r)
+		slog.Warn("database restored from backup — closing DB", "actor_id", actor, "backup", name)
+
+		if err := database.Close(); err != nil {
+			slog.Error("failed to close database before restore", "err", err)
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to close database")
+			return
+		}
+
+		// Stream the backup file over the (now closed) database to avoid loading
 		// the entire DB into memory (could be hundreds of MiB).
 		if err := copyFile(backupPath, dbPath); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to restore database file")
 			return
 		}
 
-		actor := actorFromContext(r)
-		slog.Warn("database restored from backup", "actor_id", actor, "backup", name)
-		_ = database.LogAudit(actor, "backup_restore", "server", 0, "restored from "+name)
+		slog.Warn("database file replaced — server must restart to use restored data", "backup", name)
 
 		writeJSON(w, http.StatusOK, map[string]string{
-			"message": "database restored — server restart recommended",
+			"message": "database restored — server restarting",
 			"backup":  name,
 		})
 	})
