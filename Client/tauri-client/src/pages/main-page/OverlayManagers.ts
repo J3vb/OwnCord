@@ -158,11 +158,7 @@ export function createInviteManagerController(opts: {
         },
         onRevokeInvite: async (code: string) => {
           try {
-            const raw2 = await opts.api.getInvites();
-            const match = raw2.find((i) => i.code === code);
-            if (match !== undefined) {
-              await opts.api.revokeInvite(match.id);
-            }
+            await opts.api.revokeInvite(code);
           } catch (err) {
             log.error("Invite revoke failed", { code, error: String(err) });
             throw err;

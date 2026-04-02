@@ -956,13 +956,8 @@ describe("createInviteManagerController (additional)", () => {
     expect(mockShowToast).toHaveBeenCalledWith("Something went wrong", "error");
   });
 
-  it("onRevokeInvite succeeds when invite code is not found in re-fetch", async () => {
-    const api = makeMockApi({
-      getInvites: vi
-        .fn()
-        .mockResolvedValueOnce([makeInviteResponse()]) // initial load
-        .mockResolvedValueOnce([]), // re-fetch returns empty
-    });
+  it("onRevokeInvite passes invite code directly to API", async () => {
+    const api = makeMockApi();
 
     const controller = createInviteManagerController({
       api: api as never,
@@ -975,9 +970,8 @@ describe("createInviteManagerController (additional)", () => {
       onRevokeInvite: (code: string) => Promise<void>;
     };
 
-    // Should not throw and should not call revokeInvite since no match
-    await expect(opts.onRevokeInvite("nonexistent")).resolves.toBeUndefined();
-    expect(api.revokeInvite).not.toHaveBeenCalled();
+    await expect(opts.onRevokeInvite("abc123xyz")).resolves.toBeUndefined();
+    expect(api.revokeInvite).toHaveBeenCalledWith("abc123xyz");
   });
 });
 

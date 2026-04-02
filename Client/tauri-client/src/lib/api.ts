@@ -408,8 +408,8 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request<InviteResponse>("POST", "/invites", data, signal);
     },
 
-    revokeInvite(inviteId: number, signal?: AbortSignal): Promise<void> {
-      return request<void>("DELETE", `/invites/${inviteId}`, undefined, signal);
+    revokeInvite(code: string, signal?: AbortSignal): Promise<void> {
+      return request<void>("DELETE", `/invites/${code}`, undefined, signal);
     },
 
     // ── Emoji ─────────────────────────────────────────────
