@@ -53,15 +53,22 @@ func TestGenerateSelfSignedProducesValidCert(t *testing.T) {
 		t.Fatalf("x509.ParseCertificate error: %v", err)
 	}
 
-	// Verify validity period is at least 9 years in the future (10y cert).
-	minExpiry := time.Now().Add(9 * 365 * 24 * time.Hour)
+	// Verify validity period is ~2 years (not the old 10y).
+	minExpiry := time.Now().Add(1 * 365 * 24 * time.Hour)
+	maxExpiry := time.Now().Add(3 * 365 * 24 * time.Hour)
 	if leaf.NotAfter.Before(minExpiry) {
-		t.Errorf("cert expires %v, expected at least 9 years from now (%v)", leaf.NotAfter, minExpiry)
+		t.Errorf("cert expires %v, expected at least 1 year from now (%v)", leaf.NotAfter, minExpiry)
+	}
+	if leaf.NotAfter.After(maxExpiry) {
+		t.Errorf("cert expires %v, expected at most 3 years from now (%v)", leaf.NotAfter, maxExpiry)
 	}
 
-	// Verify it is a CA/self-signed cert.
-	if !leaf.IsCA {
-		t.Error("expected IsCA = true for self-signed cert")
+	// BUG-138: Leaf cert must NOT be a CA — prevents signing other certs on key compromise.
+	if leaf.IsCA {
+		t.Error("expected IsCA = false for self-signed leaf cert")
+	}
+	if leaf.KeyUsage&x509.KeyUsageCertSign != 0 {
+		t.Error("leaf cert should not have KeyUsageCertSign")
 	}
 }
 
