@@ -19,7 +19,7 @@
         "decorations": true,
         "resizable": true,
         "center": true,
-        "additionalBrowserArgs": "--autoplay-policy=no-user-gesture-required"
+        "additionalBrowserArgs": "--autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream"
       }
     ],
     "withGlobalTauri": true,
