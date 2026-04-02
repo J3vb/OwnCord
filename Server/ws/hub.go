@@ -391,9 +391,25 @@ func (h *Hub) BroadcastChannelDelete(channelID int64) {
 	h.BroadcastToAll(buildChannelDelete(channelID))
 }
 
-// BroadcastMemberBan sends a member_ban message to all connected clients.
+// BroadcastMemberBan sends a member_ban message to all connected clients
+// and immediately disconnects the banned user's WebSocket connection (BUG-113).
 func (h *Hub) BroadcastMemberBan(userID int64) {
 	h.BroadcastToAll(buildMemberBan(userID))
+	h.DisconnectUser(userID)
+}
+
+// DisconnectUser forcibly disconnects the client identified by userID.
+// No-op if the user is not currently connected.
+func (h *Hub) DisconnectUser(userID int64) {
+	h.mu.RLock()
+	c, ok := h.clients[userID]
+	h.mu.RUnlock()
+	if !ok {
+		return
+	}
+	slog.Info("hub: disconnecting user", "user_id", userID)
+	c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
+	h.kickClient(c)
 }
 
 // BroadcastMemberUpdate sends a member_update message to all connected clients.
