@@ -581,7 +581,7 @@ func TestMaxBodySize_PassesThrough(t *testing.T) {
 // ─── AdminIPRestrict tests ──────────────────────────────────────────────────
 
 func TestAdminIPRestrict_AllowedCIDR(t *testing.T) {
-	h := api.AdminIPRestrict([]string{"127.0.0.0/8"})(http.HandlerFunc(ok))
+	h := api.AdminIPRestrict([]string{"127.0.0.0/8"}, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "127.0.0.1:9999"
@@ -594,7 +594,7 @@ func TestAdminIPRestrict_AllowedCIDR(t *testing.T) {
 }
 
 func TestAdminIPRestrict_BlockedCIDR(t *testing.T) {
-	h := api.AdminIPRestrict([]string{"10.0.0.0/8"})(http.HandlerFunc(ok))
+	h := api.AdminIPRestrict([]string{"10.0.0.0/8"}, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "192.168.1.1:9999" // not in 10.0.0.0/8
@@ -607,7 +607,7 @@ func TestAdminIPRestrict_BlockedCIDR(t *testing.T) {
 }
 
 func TestAdminIPRestrict_EmptyAllowsAll(t *testing.T) {
-	h := api.AdminIPRestrict(nil)(http.HandlerFunc(ok))
+	h := api.AdminIPRestrict(nil, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "203.0.113.1:9999"
@@ -622,7 +622,7 @@ func TestAdminIPRestrict_EmptyAllowsAll(t *testing.T) {
 func TestAdminIPRestrict_InvalidCIDR(t *testing.T) {
 	// Invalid CIDR should fail closed (deny access since isTrustedProxy
 	// returns false on parse error).
-	h := api.AdminIPRestrict([]string{"not-a-cidr"})(http.HandlerFunc(ok))
+	h := api.AdminIPRestrict([]string{"not-a-cidr"}, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "127.0.0.1:9999"
@@ -635,7 +635,7 @@ func TestAdminIPRestrict_InvalidCIDR(t *testing.T) {
 }
 
 func TestAdminIPRestrict_MultipleCIDRs(t *testing.T) {
-	h := api.AdminIPRestrict([]string{"10.0.0.0/8", "192.168.0.0/16"})(http.HandlerFunc(ok))
+	h := api.AdminIPRestrict([]string{"10.0.0.0/8", "192.168.0.0/16"}, nil)(http.HandlerFunc(ok))
 
 	// First CIDR matches.
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -662,6 +662,100 @@ func TestAdminIPRestrict_MultipleCIDRs(t *testing.T) {
 	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("AdminIPRestrict multi-CIDR (no match) status = %d, want 403", rr.Code)
+	}
+}
+
+// ─── AdminIPRestrict proxy-aware tests (BUG-116) ─────────────────────────────
+
+// TestAdminIPRestrict_TrustedProxy_UsesXForwardedFor verifies that when the
+// connecting IP is a trusted proxy, the real client IP is extracted from
+// X-Forwarded-For and checked against admin CIDRs.
+func TestAdminIPRestrict_TrustedProxy_UsesXForwardedFor(t *testing.T) {
+	// Admin allowed: only 203.0.113.0/24. Trusted proxy: 127.0.0.1.
+	h := api.AdminIPRestrict(
+		[]string{"203.0.113.0/24"},
+		[]string{"127.0.0.0/8"},
+	)(http.HandlerFunc(ok))
+
+	// Request from proxy (127.0.0.1) with real client in XFF → allowed.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	req.Header.Set("X-Forwarded-For", "203.0.113.50")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("trusted proxy + allowed XFF status = %d, want 200", rr.Code)
+	}
+
+	// Request from proxy with disallowed real client → blocked.
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	req.Header.Set("X-Forwarded-For", "198.51.100.1")
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("trusted proxy + blocked XFF status = %d, want 403", rr.Code)
+	}
+}
+
+// TestAdminIPRestrict_TrustedProxy_UsesXRealIP verifies X-Real-IP is preferred
+// over X-Forwarded-For when both are present from a trusted proxy.
+func TestAdminIPRestrict_TrustedProxy_UsesXRealIP(t *testing.T) {
+	h := api.AdminIPRestrict(
+		[]string{"203.0.113.0/24"},
+		[]string{"127.0.0.0/8"},
+	)(http.HandlerFunc(ok))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	req.Header.Set("X-Real-IP", "203.0.113.50")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("trusted proxy + X-Real-IP status = %d, want 200", rr.Code)
+	}
+}
+
+// TestAdminIPRestrict_UntrustedProxy_IgnoresHeaders verifies that proxy headers
+// are ignored when the connecting IP is NOT a trusted proxy.
+func TestAdminIPRestrict_UntrustedProxy_IgnoresHeaders(t *testing.T) {
+	h := api.AdminIPRestrict(
+		[]string{"203.0.113.0/24"},
+		[]string{"10.0.0.0/8"}, // only 10.x is trusted
+	)(http.HandlerFunc(ok))
+
+	// Untrusted proxy at 192.168.1.1 tries to spoof XFF.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.168.1.1:9999"
+	req.Header.Set("X-Forwarded-For", "203.0.113.50") // spoofed
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("untrusted proxy spoofed XFF status = %d, want 403 (should use RemoteAddr)", rr.Code)
+	}
+}
+
+// TestAdminIPRestrict_ProxyCollapse_WithoutTrusted verifies the original bug:
+// without trusted proxies, a proxy on localhost makes everything appear local.
+func TestAdminIPRestrict_ProxyCollapse_WithoutTrusted(t *testing.T) {
+	// Admin CIDR: private networks. No trusted proxies.
+	h := api.AdminIPRestrict(
+		[]string{"127.0.0.0/8", "10.0.0.0/8"},
+		nil, // no trusted proxies
+	)(http.HandlerFunc(ok))
+
+	// External client behind nginx on localhost — RemoteAddr is 127.0.0.1.
+	// XFF has the real external IP, but it's ignored (no trusted proxies).
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	req.Header.Set("X-Forwarded-For", "198.51.100.1") // real external IP
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	// Without trusted proxies, 127.0.0.1 is used — passes the private CIDR check.
+	// This is the documented limitation: operators MUST configure trusted_proxies.
+	if rr.Code != http.StatusOK {
+		t.Errorf("no trusted proxies, proxy on localhost status = %d, want 200 (known limitation)", rr.Code)
 	}
 }
 

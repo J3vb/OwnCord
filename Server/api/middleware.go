@@ -249,7 +249,11 @@ func isTrustedProxy(remoteIP string, cidrList []string) (bool, error) {
 // AdminIPRestrict returns middleware that blocks requests from IPs not in the
 // allowed CIDR list. Returns 403 Forbidden for disallowed IPs. If the CIDR
 // list is empty, all requests are allowed (no restriction).
-func AdminIPRestrict(allowedCIDRs []string) func(http.Handler) http.Handler {
+//
+// trustedProxyCIDRs specifies which connecting IPs are trusted reverse proxies.
+// When the connecting IP matches a trusted proxy, the real client IP is read
+// from X-Real-IP or X-Forwarded-For headers (BUG-116).
+func AdminIPRestrict(allowedCIDRs, trustedProxyCIDRs []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if len(allowedCIDRs) == 0 {
@@ -257,7 +261,7 @@ func AdminIPRestrict(allowedCIDRs []string) func(http.Handler) http.Handler {
 				return
 			}
 
-			ip := clientIP(r)
+			ip := clientIPWithProxies(r, trustedProxyCIDRs)
 			allowed, _ := isTrustedProxy(ip, allowedCIDRs)
 			if !allowed {
 				writeJSON(w, http.StatusForbidden, errorResponse{

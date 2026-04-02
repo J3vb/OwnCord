@@ -127,12 +127,12 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// LiveKit webhook endpoint (no auth middleware — uses LiveKit JWT verification).
 	if lkErr == nil {
-		r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs)).
+		r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies)).
 			Post("/api/v1/livekit/webhook",
 				ws.MountWebhookRoute(hub, cfg.Voice.LiveKitAPIKey, cfg.Voice.LiveKitAPISecret))
 
 		// LiveKit health check — admin-IP-restricted.
-		r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs)).
+		r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies)).
 			Get("/api/v1/livekit/health", handleLiveKitHealth(hub))
 
 		// Reverse proxy LiveKit signaling through OwnCord's HTTPS server.
@@ -160,7 +160,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins))
 
 	// Metrics endpoint — admin-IP-restricted, returns runtime stats as JSON.
-	r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs)).
+	r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies)).
 		Get("/api/v1/metrics", handleMetrics(
 			func() int { return hub.ClientCount() },
 			func() int { return hub.VoiceSessionCount() },
@@ -172,7 +172,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, "J3vb", "OwnCord")
 	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins)
 	r.Group(func(r chi.Router) {
-		r.Use(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs))
+		r.Use(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
 		r.Mount("/admin", adminHandler)
 	})
 
