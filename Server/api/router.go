@@ -153,8 +153,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	MountDMRoutes(r, database, hub)
 
 	// Connectivity diagnostics — any authenticated user can check.
-	r.With(AuthMiddleware(database)).Get("/api/v1/diagnostics/connectivity",
-		handleDiagnosticsConnectivity(cfg, ver, hub))
+	// BUG-121: Rate limit 5 req/min as documented.
+	r.With(AuthMiddleware(database),
+		RateLimitMiddleware(limiter, 5, time.Minute, cfg.Server.TrustedProxies)).
+		Get("/api/v1/diagnostics/connectivity",
+			handleDiagnosticsConnectivity(cfg, ver, hub))
 
 	go hub.Run()
 	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins))

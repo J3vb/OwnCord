@@ -225,10 +225,19 @@ export class AudioElements {
   /** Remove all remote audio elements from the DOM and clear tracking maps.
    *  Preserves screenshare mute state so reconnecting tracks inherit user intent. */
   cleanupAllAudioElements(): void {
-    for (const el of this.remoteMicAudioElements.values()) el.remove();
+    // BUG-107: Fully release audio elements — pause, clear srcObject, then remove.
+    for (const el of this.remoteMicAudioElements.values()) {
+      el.pause();
+      el.srcObject = null;
+      el.remove();
+    }
     this.remoteMicAudioElements.clear();
     for (const audioEls of this.screenshareAudioElements.values()) {
-      for (const el of audioEls) el.remove();
+      for (const el of audioEls) {
+        el.pause();
+        el.srcObject = null;
+        el.remove();
+      }
     }
     this.screenshareAudioElements.clear();
   }
