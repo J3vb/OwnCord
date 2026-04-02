@@ -111,22 +111,29 @@ func (h *Hub) handleReconnect(
 		return false
 	}
 
+	// Register BEFORE writing replay data so broadcasts that arrive during
+	// the write window are queued in the client's send buffer instead of
+	// being lost (BUG-123). writePump hasn't started yet, so queued messages
+	// will be drained once the pumps begin.
+	h.registerNow(c)
+
 	// Replay succeeded — send auth_ok then missed events.
 	slog.Info("ws sending auth_ok (reconnect)", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
 	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(c.user, c.roleName)); err != nil {
 		slog.Warn("ws: failed to send auth_ok (reconnect)", "user_id", c.userID, "err", err)
+		h.unregisterNow(c)
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
 		return true
 	}
 	for _, evt := range events {
 		if err := conn.Write(ctx, websocket.MessageText, evt); err != nil {
 			slog.Warn("ws: failed to send replay event", "user_id", c.userID, "err", err)
+			h.unregisterNow(c)
 			_ = conn.Close(websocket.StatusInternalError, "handshake failed")
 			return true
 		}
 	}
 	slog.Info("ws replay completed", "user_id", c.userID, "events_replayed", len(events), "from_seq", lastSeq)
-	h.registerNow(c)
 
 	// Update presence but skip member_join — user was already known.
 	if updateErr := database.UpdateUserStatus(c.userID, "online"); updateErr != nil {
@@ -172,13 +179,6 @@ func (h *Hub) handleFreshConnect(
 		}
 	}
 
-	// Fresh connection or replay fallback: full auth_ok + ready flow.
-	slog.Info("ws sending auth_ok", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
-	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(c.user, c.roleName)); err != nil {
-		slog.Warn("ws: failed to send auth_ok", "user_id", c.userID, "err", err)
-		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
-		return err
-	}
 	// Look up role for permission-filtered ready payload.
 	// Fail closed: if the role lookup fails, disconnect rather than serving
 	// a permissive ready payload with nil role (BUG-094).
@@ -188,10 +188,26 @@ func (h *Hub) handleFreshConnect(
 		_ = conn.Close(websocket.StatusInternalError, "role lookup failed")
 		return fmt.Errorf("role lookup failed for user %d: %w", c.userID, roleErr)
 	}
+
+	// Register BEFORE writing auth_ok + ready so broadcasts that arrive during
+	// the write window are queued in the client's send buffer instead of
+	// being lost (BUG-123). writePump hasn't started yet, so queued messages
+	// will be drained once the pumps begin.
+	h.registerNow(c)
+
+	// Fresh connection or replay fallback: full auth_ok + ready flow.
+	slog.Info("ws sending auth_ok", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
+	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(c.user, c.roleName)); err != nil {
+		slog.Warn("ws: failed to send auth_ok", "user_id", c.userID, "err", err)
+		h.unregisterNow(c)
+		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
+		return err
+	}
 	if ready, readyErr := h.buildReady(database, c.userID, userRole); readyErr == nil {
 		slog.Info("ws sending ready payload", "user_id", c.userID, "payload_bytes", len(ready))
 		if err := conn.Write(ctx, websocket.MessageText, ready); err != nil {
 			slog.Warn("ws: failed to send ready payload", "user_id", c.userID, "err", err)
+			h.unregisterNow(c)
 			_ = conn.Close(websocket.StatusInternalError, "handshake failed")
 			return err
 		}
@@ -200,7 +216,6 @@ func (h *Hub) handleFreshConnect(
 		_ = conn.Write(ctx, websocket.MessageText,
 			buildErrorMsg(ErrCodeInternal, "failed to build ready payload"))
 	}
-	h.registerNow(c)
 
 	if updateErr := database.UpdateUserStatus(c.userID, "online"); updateErr != nil {
 		slog.Warn("ws UpdateUserStatus", "err", updateErr)

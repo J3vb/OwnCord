@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/owncord/server/db"
@@ -217,6 +218,8 @@ func (c *Client) clearVoiceState() (int64, string) {
 
 // sendMsg queues a message to this client's send buffer without blocking.
 // It is a no-op if the send channel has already been closed.
+// If the buffer is full, the client is disconnected to force a reconnect
+// with replay recovery instead of silently losing messages (BUG-124).
 func (c *Client) sendMsg(msg []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -228,11 +231,16 @@ func (c *Client) sendMsg(msg []byte) {
 		c.msgsSent++
 	default:
 		c.msgsDropped++
+		slog.Warn("ws: client send buffer full, closing connection to force reconnect",
+			"user_id", c.userID)
+		c.sendClosed = true
+		close(c.send)
 	}
 }
 
 // trySendMsg queues a message and returns true if it was accepted, false if
 // the buffer is full or the channel is closed.
+// On buffer overflow, the client is disconnected to force a reconnect (BUG-124).
 func (c *Client) trySendMsg(msg []byte) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -245,6 +253,10 @@ func (c *Client) trySendMsg(msg []byte) bool {
 		return true
 	default:
 		c.msgsDropped++
+		slog.Warn("ws: client send buffer full (trySend), closing connection to force reconnect",
+			"user_id", c.userID)
+		c.sendClosed = true
+		close(c.send)
 		return false
 	}
 }
