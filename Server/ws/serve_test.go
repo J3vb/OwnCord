@@ -389,6 +389,7 @@ func TestCollectAllVoiceStates_SkipsTextChannels(t *testing.T) {
 
 func TestCollectAllVoiceStates_IncludesVoiceParticipants(t *testing.T) {
 	hub, database := newServeHub(t)
+	role := ownerRole(t, database)
 
 	user1 := seedServeUser(t, database, "collect-voice-u1")
 	user2 := seedServeUser(t, database, "collect-voice-u2")
@@ -407,9 +408,9 @@ func TestCollectAllVoiceStates_IncludesVoiceParticipants(t *testing.T) {
 		t.Fatalf("JoinVoiceChannel user2: %v", err)
 	}
 
-	msg, err := hub.BuildReadyForTest(database, requester.ID)
+	msg, err := hub.BuildReadyWithRoleForTest(database, requester.ID, role)
 	if err != nil {
-		t.Fatalf("BuildReadyForTest: %v", err)
+		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
 	}
 	var env struct {
 		Payload struct {
@@ -429,6 +430,78 @@ func TestCollectAllVoiceStates_IncludesVoiceParticipants(t *testing.T) {
 		if vs.ChannelID != chID {
 			t.Errorf("voice_state channel_id = %d, want %d", vs.ChannelID, chID)
 		}
+	}
+}
+
+// ─── Voice state filtering by channel visibility (BUG-095) ───────────────────
+
+func TestBuildReady_VoiceStatesFilteredByVisibility(t *testing.T) {
+	hub, database := newServeHub(t)
+
+	// Create a member user (role 4, permissions=1635, includes ReadMessages).
+	_, err := database.CreateUser("vs-member", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	member, err := database.GetUserByUsername("vs-member")
+	if err != nil || member == nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	memberRole, err := database.GetRoleByID(4)
+	if err != nil || memberRole == nil {
+		t.Fatalf("GetRoleByID: %v", err)
+	}
+
+	// Create two voice channels: one visible, one denied.
+	visibleCh, err := database.CreateChannel("public-voice", "voice", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel visible: %v", err)
+	}
+	hiddenCh, err := database.CreateChannel("hidden-voice", "voice", "", "", 1)
+	if err != nil {
+		t.Fatalf("CreateChannel hidden: %v", err)
+	}
+
+	// Deny READ_MESSAGES on the hidden channel for Member role (role 4).
+	_, err = database.Exec(
+		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, 4, 0, 2)`,
+		hiddenCh,
+	)
+	if err != nil {
+		t.Fatalf("insert channel_override: %v", err)
+	}
+
+	// Create users in both voice channels.
+	u1 := seedServeUser(t, database, "vs-visible-user")
+	u2 := seedServeUser(t, database, "vs-hidden-user")
+	if err := database.JoinVoiceChannel(u1.ID, visibleCh); err != nil {
+		t.Fatalf("JoinVoiceChannel visible: %v", err)
+	}
+	if err := database.JoinVoiceChannel(u2.ID, hiddenCh); err != nil {
+		t.Fatalf("JoinVoiceChannel hidden: %v", err)
+	}
+
+	// Build ready for the member — should only see voice states for visible channel.
+	msg, err := hub.BuildReadyWithRoleForTest(database, member.ID, memberRole)
+	if err != nil {
+		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
+	}
+
+	var env struct {
+		Payload struct {
+			VoiceStates []struct {
+				ChannelID int64 `json:"channel_id"`
+			} `json:"voice_states"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(env.Payload.VoiceStates) != 1 {
+		t.Fatalf("voice_states count = %d, want 1 (only visible channel)", len(env.Payload.VoiceStates))
+	}
+	if env.Payload.VoiceStates[0].ChannelID != visibleCh {
+		t.Errorf("voice_state channel_id = %d, want %d (visible)", env.Payload.VoiceStates[0].ChannelID, visibleCh)
 	}
 }
 

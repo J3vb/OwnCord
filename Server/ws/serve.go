@@ -456,12 +456,22 @@ func (h *Hub) buildReady(database *db.DB, userID int64, role *db.Role) ([]byte, 
 		channelPayloads = append(channelPayloads, entry)
 	}
 
-	// Collect all active voice states across every voice channel.
-	voiceStates, err := collectAllVoiceStates(database, channels)
+	// Collect voice states, filtered to only visible channels (BUG-095).
+	allVoiceStates, err := collectAllVoiceStates(database, channels)
 	if err != nil {
 		// Non-fatal: send empty list rather than failing the whole ready payload.
 		slog.Warn("buildReady collectAllVoiceStates", "err", err)
-		voiceStates = []db.VoiceState{}
+		allVoiceStates = []db.VoiceState{}
+	}
+	visibleSet := make(map[int64]struct{}, len(visibleChannels))
+	for i := range visibleChannels {
+		visibleSet[visibleChannels[i].ID] = struct{}{}
+	}
+	voiceStates := make([]db.VoiceState, 0, len(allVoiceStates))
+	for i := range allVoiceStates {
+		if _, ok := visibleSet[allVoiceStates[i].ChannelID]; ok {
+			voiceStates = append(voiceStates, allVoiceStates[i])
+		}
 	}
 
 	// Load open DM channels for this user.

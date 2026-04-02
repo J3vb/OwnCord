@@ -484,6 +484,10 @@ func TestHandleMessage_Ping_ReturnsPong(t *testing.T) {
 func TestBuildReady_VoiceChannelWithParticipants(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "ready-voice-user")
+	role, rErr := database.GetRoleByID(1)
+	if rErr != nil || role == nil {
+		t.Fatalf("GetRoleByID: %v", rErr)
+	}
 
 	// Create a voice channel.
 	vcID, err := database.CreateChannel("voice-room", "voice", "", "", 0)
@@ -497,9 +501,9 @@ func TestBuildReady_VoiceChannelWithParticipants(t *testing.T) {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
 
-	msg, err := hub.BuildReadyForTest(database, user.ID)
+	msg, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
 	if err != nil {
-		t.Fatalf("BuildReadyForTest: %v", err)
+		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
 	}
 
 	var env struct {
