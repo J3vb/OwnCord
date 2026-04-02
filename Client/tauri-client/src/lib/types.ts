@@ -296,6 +296,12 @@ export interface MemberUpdatePayload {
   readonly role: string;
 }
 
+export interface UserUpdatePayload {
+  readonly user_id: number;
+  readonly username: string;
+  readonly avatar: string | null;
+}
+
 export interface MemberBanPayload {
   readonly user_id: number;
 }
@@ -443,6 +449,7 @@ export type ServerMessage =
   | (WsEnvelope<MemberJoinPayload> & { readonly type: "member_join" })
   | (WsEnvelope<MemberLeavePayload> & { readonly type: "member_leave" })
   | (WsEnvelope<MemberUpdatePayload> & { readonly type: "member_update" })
+  | (WsEnvelope<UserUpdatePayload> & { readonly type: "user_update" })
   | (WsEnvelope<MemberBanPayload> & { readonly type: "member_ban" })
   | (WsEnvelope<DmChannelOpenPayload> & { readonly type: "dm_channel_open" })
   | (WsEnvelope<DmChannelClosePayload> & { readonly type: "dm_channel_close" })

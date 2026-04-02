@@ -16,6 +16,7 @@ const mockRoom = vi.hoisted(() => ({
     setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),
     setCameraEnabled: vi.fn().mockResolvedValue(undefined),
     getTrackPublication: vi.fn().mockReturnValue(undefined),
+    unpublishTrack: vi.fn().mockResolvedValue(undefined),
     trackPublications: new Map(),
     identity: "user-1",
   },

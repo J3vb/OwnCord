@@ -247,6 +247,17 @@ function renderPage(pageId: "connect" | "main"): void {
         });
     }
 
+    // Update saved credentials when the current user changes their username.
+    ws.on("user_update", (payload) => {
+      const currentUserId = authStore.getState().user?.id ?? 0;
+      if (payload.user_id === currentUserId) {
+        const currentToken = authStore.getState().token;
+        if (currentToken) {
+          void saveCredential(host, payload.username, currentToken);
+        }
+      }
+    });
+
     const unsubState = ws.onStateChange((wsState) => {
       log.debug("WS state change", { state: wsState });
       if (wsState === "connected") {

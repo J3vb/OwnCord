@@ -59,6 +59,12 @@ type memberUpdatePayload struct {
 	Role   string `json:"role"`
 }
 
+type userUpdatePayload struct {
+	UserID   int64   `json:"user_id"`
+	Username string  `json:"username"`
+	Avatar   *string `json:"avatar"`
+}
+
 type memberBanPayload struct {
 	UserID int64 `json:"user_id"`
 }
@@ -267,6 +273,14 @@ func buildMemberUpdate(userID int64, roleName string) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeMemberUpdate,
 		Payload: memberUpdatePayload{UserID: userID, Role: roleName},
+	})
+}
+
+// buildUserUpdate constructs a user_update broadcast for profile changes.
+func buildUserUpdate(userID int64, username string, avatar *string) []byte {
+	return buildJSON(wsMsg{
+		Type:    MsgTypeUserUpdate,
+		Payload: userUpdatePayload{UserID: userID, Username: username, Avatar: avatar},
 	})
 }
 

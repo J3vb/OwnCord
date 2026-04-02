@@ -27,6 +27,7 @@ import {
   addMember,
   removeMember,
   updateMemberRole,
+  updateMemberProfile,
   updatePresence,
   setTyping,
 } from "@stores/members.store";
@@ -314,6 +315,24 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
     ws.on(S.MEMBER_UPDATE, (payload) => {
       log.info("Member role updated", { userId: payload.user_id, role: payload.role });
       updateMemberRole(payload.user_id, payload.role);
+    }),
+  );
+
+  unsubs.push(
+    ws.on(S.USER_UPDATE, (payload) => {
+      log.info("User profile updated", { userId: payload.user_id, username: payload.username });
+      updateMemberProfile(payload.user_id, payload.username, payload.avatar);
+
+      // Update auth store if the current user changed their own profile.
+      const currentUser = authStore.getState().user;
+      if (currentUser && payload.user_id === currentUser.id) {
+        setAuth(
+          authStore.getState().token ?? "",
+          { ...currentUser, username: payload.username, avatar: payload.avatar },
+          authStore.getState().serverName ?? "",
+          authStore.getState().motd ?? "",
+        );
+      }
     }),
   );
 

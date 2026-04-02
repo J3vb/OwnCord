@@ -83,8 +83,8 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Auth routes: register, login, logout, me.
 	MountAuthRoutes(r, database, limiter, cfg.Server.TrustedProxies, totpKey)
 
-	// Profile routes: update profile, change password, session management.
-	MountProfileRoutes(r, database, limiter, cfg.Server.TrustedProxies)
+	// Profile routes are mounted after hub creation (below) so the hub can
+	// broadcast user_update events for real-time profile changes.
 
 	// Invite management routes (require MANAGE_INVITES permission).
 	MountInviteRoutes(r, database)
@@ -166,6 +166,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		r.With(rateLimitMiddlewareWithPrefix(limiter, "livekit_proxy:", livekitProxyRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)).
 			Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins)))
 	}
+
+	// Profile routes: update profile, change password, session management.
+	// Mounted after hub creation so the hub can broadcast user_update events.
+	MountProfileRoutes(r, database, limiter, cfg.Server.TrustedProxies, hub)
 
 	// DM (direct message) REST routes — mounted after hub creation so the
 	// hub can send real-time dm_channel_close events to WebSocket clients.

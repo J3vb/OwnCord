@@ -748,7 +748,7 @@ func buildCombinedRouter(t *testing.T) (http.Handler, *auth.RateLimiter, string)
 
 	r := chi.NewRouter()
 	api.MountAuthRoutes(r, database, limiter, nil, testTOTPKey)
-	api.MountProfileRoutes(r, database, limiter, nil)
+	api.MountProfileRoutes(r, database, limiter, nil, nil)
 	api.MountInviteRoutes(r, database)
 
 	token := loginAndGetToken(t, r, database, "combined1", 2)

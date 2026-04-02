@@ -48,6 +48,7 @@ const (
 	MsgTypeMemberJoin     = "member_join"
 	MsgTypeMemberLeave    = "member_leave"
 	MsgTypeMemberUpdate   = "member_update"
+	MsgTypeUserUpdate     = "user_update"
 	MsgTypeMemberBan      = "member_ban"
 	MsgTypeServerRestart  = "server_restart"
 	MsgTypeError          = "error"

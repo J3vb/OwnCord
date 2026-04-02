@@ -45,13 +45,19 @@ type sessionsListResponse struct {
 
 // ─── Route mounting ──────────────────────────────────────────────────────────
 
+// ProfileBroadcaster is the interface the profile handler uses to notify
+// connected WebSocket clients about profile changes.
+type ProfileBroadcaster interface {
+	BroadcastUserUpdate(userID int64, username string, avatar *string)
+}
+
 // MountProfileRoutes registers user profile management endpoints.
 // All routes require authentication. trustedProxies is used for rate limiting.
-func MountProfileRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, trustedProxies []string) {
+func MountProfileRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster) {
 	r.Route("/api/v1/users/me", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
 
-		r.Patch("/", handleUpdateProfile(database))
+		r.Patch("/", handleUpdateProfile(database, broadcaster))
 
 		r.With(RateLimitMiddleware(limiter, profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
 			Put("/password", handleChangePassword(database, limiter))
@@ -64,7 +70,7 @@ func MountProfileRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
 // handleUpdateProfile processes PATCH /api/v1/users/me.
-func handleUpdateProfile(database *db.DB) http.HandlerFunc {
+func handleUpdateProfile(database *db.DB, broadcaster ProfileBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
@@ -137,6 +143,11 @@ func handleUpdateProfile(database *db.DB) http.HandlerFunc {
 
 		slog.Info("profile updated", "user_id", user.ID, "new_username", req.Username)
 		_ = database.LogAudit(user.ID, "profile_update", "user", user.ID, "profile updated")
+
+		// Broadcast profile change to all connected WebSocket clients.
+		if broadcaster != nil {
+			broadcaster.BroadcastUserUpdate(updated.ID, updated.Username, updated.Avatar)
+		}
 
 		writeJSON(w, http.StatusOK, toUserResponse(updated))
 	}
