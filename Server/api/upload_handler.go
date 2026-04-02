@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/storage"
 )
 
@@ -63,8 +64,8 @@ func MountUploadRoutes(r chi.Router, database *db.DB, store *storage.Storage, al
 		AuthMiddleware(database),
 		MaxBodySize(uploadMaxBodySize),
 	).Post("/api/v1/uploads", handleUpload(database, store))
-	// File serving is public (URLs are unguessable UUIDs).
-	r.Get("/api/v1/files/{id}", handleServeFile(database, store, allowedOrigins))
+	// File serving requires authentication for channel-level access control.
+	r.With(AuthMiddleware(database)).Get("/api/v1/files/{id}", handleServeFile(database, store, allowedOrigins))
 }
 
 func handleUpload(database *db.DB, store *storage.Storage) http.HandlerFunc {
@@ -143,8 +144,9 @@ func handleUpload(database *db.DB, store *storage.Storage) http.HandlerFunc {
 		}
 
 		// Insert attachment record in DB (unlinked — message_id is NULL).
+		user := r.Context().Value(UserKey).(*db.User)
 		safeFilename := sanitizeUploadFilename(header.Filename)
-		if err := database.CreateAttachment(fileID, safeFilename, fileID, mime, header.Size, width, height); err != nil {
+		if err := database.CreateAttachment(fileID, user.ID, safeFilename, fileID, mime, header.Size, width, height); err != nil {
 			// Clean up stored file on DB failure.
 			_ = store.Delete(fileID)
 			slog.Error("failed to create attachment record", "error", err)
@@ -177,8 +179,11 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 			return
 		}
 
-		// Look up attachment metadata.
-		att, err := database.GetAttachmentByID(fileID)
+		user, _ := r.Context().Value(UserKey).(*db.User)
+		role, _ := r.Context().Value(RoleKey).(*db.Role)
+
+		// Look up attachment metadata with channel context.
+		aa, err := database.GetAttachmentWithChannel(fileID)
 		if err != nil {
 			slog.Error("failed to look up attachment", "id", fileID, "error", err)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
@@ -187,13 +192,59 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 			})
 			return
 		}
-		if att == nil {
+		if aa == nil {
 			http.NotFound(w, r)
 			return
 		}
 
+		// ── Access control ──────────────────────────────────────────────
+		isAdmin := role != nil && permissions.HasAdmin(role.Permissions)
+
+		if !isAdmin {
+			if aa.ChannelID == nil {
+				// Unlinked attachment — only the uploader may access.
+				// Legacy rows (NULL uploader_id) are allowed through with a warning.
+				if aa.UploaderID == nil {
+					slog.Warn("legacy attachment served without uploader_id", "id", fileID)
+				} else if user == nil || *aa.UploaderID != user.ID {
+					writeJSON(w, http.StatusForbidden, errorResponse{
+						Error:   "FORBIDDEN",
+						Message: "you do not have access to this file",
+					})
+					return
+				}
+			} else {
+				// Linked attachment — check channel permissions.
+				if aa.ChannelType == "dm" {
+					if user == nil {
+						writeJSON(w, http.StatusForbidden, errorResponse{
+							Error:   "FORBIDDEN",
+							Message: "you do not have access to this file",
+						})
+						return
+					}
+					ok, dmErr := database.IsDMParticipant(user.ID, *aa.ChannelID)
+					if dmErr != nil || !ok {
+						writeJSON(w, http.StatusForbidden, errorResponse{
+							Error:   "FORBIDDEN",
+							Message: "you do not have access to this file",
+						})
+						return
+					}
+				} else {
+					if !hasChannelPermREST(database, role, *aa.ChannelID, permissions.ReadMessages) {
+						writeJSON(w, http.StatusForbidden, errorResponse{
+							Error:   "FORBIDDEN",
+							Message: "you do not have access to this file",
+						})
+						return
+					}
+				}
+			}
+		}
+
 		// Open file from storage.
-		f, err := store.Open(att.StoredAs)
+		f, err := store.Open(aa.StoredAs)
 		if err != nil {
 			http.NotFound(w, r)
 			return
@@ -201,8 +252,8 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 		defer f.Close() //nolint:errcheck
 
 		// Set headers before ServeContent to ensure correct MIME type.
-		w.Header().Set("Content-Type", att.MimeType)
-		w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": att.Filename}))
+		w.Header().Set("Content-Type", aa.MimeType)
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": aa.Filename}))
 		w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d, immutable", fileCacheMaxAgeSeconds))
 		// CORS: allow webview to read the response body using configured origins.
 		if origin := r.Header.Get("Origin"); origin != "" {
@@ -220,6 +271,6 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 		if info, statErr := f.Stat(); statErr == nil {
 			modTime = info.ModTime()
 		}
-		http.ServeContent(w, r, att.Filename, modTime, f)
+		http.ServeContent(w, r, aa.Filename, modTime, f)
 	}
 }

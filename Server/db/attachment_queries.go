@@ -16,14 +16,25 @@ type Attachment struct {
 	MimeType   string
 	Size       int64
 	UploadedAt string
+	UploaderID *int64
+}
+
+// AttachmentAccess holds attachment metadata plus the channel context needed
+// for access control. ChannelID and ChannelType are empty when the attachment
+// is unlinked (message_id IS NULL or the message/channel was deleted).
+type AttachmentAccess struct {
+	Attachment
+	ChannelID   *int64
+	ChannelType string
 }
 
 // CreateAttachment inserts a new attachment record (initially unlinked to any message).
+// uploaderID records who uploaded the file for ownership checks on unlinked files.
 // width and height are optional image dimensions (pass nil for non-image files).
-func (d *DB) CreateAttachment(id, filename, storedAs, mimeType string, size int64, width, height *int) error {
+func (d *DB) CreateAttachment(id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error {
 	_, err := d.sqlDB.Exec(
-		`INSERT INTO attachments (id, filename, stored_as, mime_type, size, width, height) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, filename, storedAs, mimeType, size, width, height,
+		`INSERT INTO attachments (id, uploader_id, filename, stored_as, mime_type, size, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, uploaderID, filename, storedAs, mimeType, size, width, height,
 	)
 	if err != nil {
 		return fmt.Errorf("CreateAttachment: %w", err)
@@ -34,11 +45,11 @@ func (d *DB) CreateAttachment(id, filename, storedAs, mimeType string, size int6
 // GetAttachmentByID returns the attachment with the given ID, or nil if not found.
 func (d *DB) GetAttachmentByID(id string) (*Attachment, error) {
 	row := d.sqlDB.QueryRow(
-		`SELECT id, message_id, filename, stored_as, mime_type, size, uploaded_at
+		`SELECT id, message_id, filename, stored_as, mime_type, size, uploaded_at, uploader_id
 		 FROM attachments WHERE id = ?`, id,
 	)
 	a := &Attachment{}
-	err := row.Scan(&a.ID, &a.MessageID, &a.Filename, &a.StoredAs, &a.MimeType, &a.Size, &a.UploadedAt)
+	err := row.Scan(&a.ID, &a.MessageID, &a.Filename, &a.StoredAs, &a.MimeType, &a.Size, &a.UploadedAt, &a.UploaderID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -46,6 +57,37 @@ func (d *DB) GetAttachmentByID(id string) (*Attachment, error) {
 		return nil, fmt.Errorf("GetAttachmentByID: %w", err)
 	}
 	return a, nil
+}
+
+// GetAttachmentWithChannel returns the attachment plus the channel context
+// (channel ID and type) for access-control checks. Returns nil if the
+// attachment does not exist. ChannelID/ChannelType are nil/empty when the
+// attachment is unlinked or its message/channel was deleted.
+func (d *DB) GetAttachmentWithChannel(id string) (*AttachmentAccess, error) {
+	row := d.sqlDB.QueryRow(
+		`SELECT a.id, a.message_id, a.filename, a.stored_as, a.mime_type, a.size,
+		        a.uploaded_at, a.uploader_id, m.channel_id, c.type
+		 FROM attachments a
+		 LEFT JOIN messages m ON m.id = a.message_id
+		 LEFT JOIN channels c ON c.id = m.channel_id
+		 WHERE a.id = ?`, id,
+	)
+	aa := &AttachmentAccess{}
+	var chType *string
+	err := row.Scan(
+		&aa.ID, &aa.MessageID, &aa.Filename, &aa.StoredAs, &aa.MimeType,
+		&aa.Size, &aa.UploadedAt, &aa.UploaderID, &aa.ChannelID, &chType,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("GetAttachmentWithChannel: %w", err)
+	}
+	if chType != nil {
+		aa.ChannelType = *chType
+	}
+	return aa, nil
 }
 
 // LinkAttachmentsToMessage sets message_id on attachments that are currently

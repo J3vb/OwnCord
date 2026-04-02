@@ -383,8 +383,9 @@ func TestSetMessagePinned_DeletedMessage(t *testing.T) {
 
 func TestCreateAttachment_Success(t *testing.T) {
 	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "att-uploader")
 
-	err := database.CreateAttachment("att-001", "photo.png", "stored-001.png", "image/png", 12345, nil, nil)
+	err := database.CreateAttachment("att-001", userID, "photo.png", "stored-001.png", "image/png", 12345, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateAttachment: %v", err)
 	}
@@ -409,9 +410,10 @@ func TestCreateAttachment_Success(t *testing.T) {
 
 func TestCreateAttachment_WithDimensions(t *testing.T) {
 	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "att-dim-uploader")
 
 	w, h := 1920, 1080
-	err := database.CreateAttachment("att-dim", "photo.jpg", "stored-dim.jpg", "image/jpeg", 54321, &w, &h)
+	err := database.CreateAttachment("att-dim", userID, "photo.jpg", "stored-dim.jpg", "image/jpeg", 54321, &w, &h)
 	if err != nil {
 		t.Fatalf("CreateAttachment with dims: %v", err)
 	}
@@ -426,9 +428,10 @@ func TestCreateAttachment_WithDimensions(t *testing.T) {
 
 func TestDeleteOrphanedAttachments_RemovesOrphans(t *testing.T) {
 	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "orphan-uploader")
 
 	// Create an unlinked attachment (message_id IS NULL).
-	_ = database.CreateAttachment("orphan-1", "file.txt", "stored-orphan.txt", "text/plain", 100, nil, nil)
+	_ = database.CreateAttachment("orphan-1", userID, "file.txt", "stored-orphan.txt", "text/plain", 100, nil, nil)
 
 	// Use a cutoff far in the future so the attachment is considered old.
 	files, err := database.DeleteOrphanedAttachments("2099-01-01T00:00:00Z")
@@ -455,7 +458,7 @@ func TestDeleteOrphanedAttachments_KeepsLinked(t *testing.T) {
 	chID := seedChannel(t, database, "orphan-linked-ch")
 
 	// Create attachment and link it to a message.
-	_ = database.CreateAttachment("linked-1", "file.txt", "stored-linked.txt", "text/plain", 100, nil, nil)
+	_ = database.CreateAttachment("linked-1", userID, "file.txt", "stored-linked.txt", "text/plain", 100, nil, nil)
 	msgID, _ := database.CreateMessage(chID, userID, "with attachment", nil)
 	_, _ = database.LinkAttachmentsToMessage(msgID, []string{"linked-1"})
 
@@ -470,8 +473,9 @@ func TestDeleteOrphanedAttachments_KeepsLinked(t *testing.T) {
 
 func TestDeleteOrphanedAttachments_CutoffRespected(t *testing.T) {
 	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "cutoff-uploader")
 
-	_ = database.CreateAttachment("future-1", "file.txt", "stored-future.txt", "text/plain", 100, nil, nil)
+	_ = database.CreateAttachment("future-1", userID, "file.txt", "stored-future.txt", "text/plain", 100, nil, nil)
 
 	// Cutoff in the past — newly created attachment should NOT be deleted.
 	files, err := database.DeleteOrphanedAttachments("2000-01-01T00:00:00Z")

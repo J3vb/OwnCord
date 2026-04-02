@@ -64,6 +64,27 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 
+CREATE TABLE IF NOT EXISTS channels (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    name           TEXT    NOT NULL,
+    type           TEXT    NOT NULL DEFAULT 'text',
+    category       TEXT    NOT NULL DEFAULT '',
+    topic          TEXT    NOT NULL DEFAULT '',
+    position       INTEGER NOT NULL DEFAULT 0,
+    slow_mode      INTEGER NOT NULL DEFAULT 0,
+    archived       INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+    voice_max_users INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id  INTEGER NOT NULL REFERENCES channels(id),
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    content     TEXT    NOT NULL,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    edited_at   TEXT,
+    deleted     INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS attachments (
     id          TEXT    PRIMARY KEY,
     message_id  INTEGER,
@@ -73,7 +94,21 @@ CREATE TABLE IF NOT EXISTS attachments (
     size        INTEGER NOT NULL,
     uploaded_at TEXT    NOT NULL DEFAULT (datetime('now')),
     width       INTEGER,
-    height      INTEGER
+    height      INTEGER,
+    uploader_id INTEGER REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS dm_participants (
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    channel_id INTEGER NOT NULL REFERENCES channels(id),
+    opened     INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (user_id, channel_id)
+);
+CREATE TABLE IF NOT EXISTS channel_overrides (
+    channel_id INTEGER NOT NULL REFERENCES channels(id),
+    role_id    INTEGER NOT NULL REFERENCES roles(id),
+    allow      INTEGER NOT NULL DEFAULT 0,
+    deny       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (channel_id, role_id)
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -185,9 +220,12 @@ func doUpload(t *testing.T, router http.Handler, token, fieldName, filename stri
 	return rr
 }
 
-func doServeFile(t *testing.T, router http.Handler, fileID string, headers map[string]string) *httptest.ResponseRecorder {
+func doServeFile(t *testing.T, router http.Handler, fileID, token string, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/files/"+fileID, nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -217,7 +255,7 @@ func TestUpload_RoutesAreMounted(t *testing.T) {
 		t.Errorf("POST /api/v1/uploads returned %d, route not mounted", rr.Code)
 	}
 
-	// GET /api/v1/files/{id} should not return 405 (404 is valid for missing file).
+	// GET /api/v1/files/{id} should not return 405 (401 or 404 are valid).
 	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/files/some-id", nil)
 	req2.RemoteAddr = "127.0.0.1:9999"
 	rr2 := httptest.NewRecorder()
@@ -521,8 +559,8 @@ func TestServeFile_Success(t *testing.T) {
 	_ = json.NewDecoder(rr.Body).Decode(&uploadResp)
 	fileID := uploadResp["id"].(string)
 
-	// Serve the file (no auth required).
-	rr2 := doServeFile(t, router, fileID, nil)
+	// Serve the file (uploader is also the requester — allowed for unlinked files).
+	rr2 := doServeFile(t, router, fileID, token, nil)
 	if rr2.Code != http.StatusOK {
 		t.Fatalf("serve status = %d, want 200; body: %s", rr2.Code, rr2.Body.String())
 	}
@@ -562,7 +600,7 @@ func TestServeFile_Success_PNG(t *testing.T) {
 	_ = json.NewDecoder(rr.Body).Decode(&uploadResp)
 	fileID := uploadResp["id"].(string)
 
-	rr2 := doServeFile(t, router, fileID, nil)
+	rr2 := doServeFile(t, router, fileID, token, nil)
 	if rr2.Code != http.StatusOK {
 		t.Fatalf("serve status = %d, want 200", rr2.Code)
 	}
@@ -577,8 +615,9 @@ func TestServeFile_NotFound(t *testing.T) {
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "notfounduser", 1)
 
-	rr := doServeFile(t, router, "nonexistent-uuid-12345", nil)
+	rr := doServeFile(t, router, "nonexistent-uuid-12345", token, nil)
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rr.Code)
 	}
@@ -617,7 +656,7 @@ func TestServeFile_CORS_MatchingOrigin(t *testing.T) {
 	fileID := uploadResp["id"].(string)
 
 	// Serve with matching origin.
-	rr2 := doServeFile(t, router, fileID, map[string]string{
+	rr2 := doServeFile(t, router, fileID, token, map[string]string{
 		"Origin": "https://app.example.com",
 	})
 	if rr2.Code != http.StatusOK {
@@ -644,7 +683,7 @@ func TestServeFile_CORS_NonMatchingOrigin(t *testing.T) {
 	_ = json.NewDecoder(rr.Body).Decode(&uploadResp)
 	fileID := uploadResp["id"].(string)
 
-	rr2 := doServeFile(t, router, fileID, map[string]string{
+	rr2 := doServeFile(t, router, fileID, token, map[string]string{
 		"Origin": "https://evil.example.com",
 	})
 	if rr2.Code != http.StatusOK {
@@ -671,7 +710,7 @@ func TestServeFile_CORS_WildcardOrigin(t *testing.T) {
 	_ = json.NewDecoder(rr.Body).Decode(&uploadResp)
 	fileID := uploadResp["id"].(string)
 
-	rr2 := doServeFile(t, router, fileID, map[string]string{
+	rr2 := doServeFile(t, router, fileID, token, map[string]string{
 		"Origin": "https://anything.example.com",
 	})
 	if rr2.Code != http.StatusOK {
@@ -699,7 +738,7 @@ func TestServeFile_CORS_NoOriginHeader(t *testing.T) {
 	fileID := uploadResp["id"].(string)
 
 	// No Origin header — CORS headers should not be set.
-	rr2 := doServeFile(t, router, fileID, nil)
+	rr2 := doServeFile(t, router, fileID, token, nil)
 	if rr2.Code != http.StatusOK {
 		t.Fatalf("serve status = %d, want 200", rr2.Code)
 	}
@@ -713,9 +752,10 @@ func TestServeFile_DBRecordMissing_ReturnsNotFound(t *testing.T) {
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "dbmissing", 1)
 
 	// No file uploaded — DB has no record.
-	rr := doServeFile(t, router, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", nil)
+	rr := doServeFile(t, router, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", token, nil)
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rr.Code)
 	}
@@ -743,7 +783,7 @@ func TestServeFile_StorageFileMissing_ReturnsNotFound(t *testing.T) {
 	}
 
 	// Serve should return 404 because the file is missing from disk.
-	rr2 := doServeFile(t, router, fileID, nil)
+	rr2 := doServeFile(t, router, fileID, token, nil)
 	if rr2.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 for missing storage file", rr2.Code)
 	}
@@ -800,6 +840,7 @@ func TestUpload_ThenServe_RoundTrip(t *testing.T) {
 
 	// Serve using the URL from the upload response.
 	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.RemoteAddr = "127.0.0.1:9999"
 	rr2 := httptest.NewRecorder()
 	router.ServeHTTP(rr2, req)
@@ -834,6 +875,7 @@ func TestUpload_ThenServe_PNG_RoundTrip(t *testing.T) {
 	url := uploadResp["url"].(string)
 
 	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.RemoteAddr = "127.0.0.1:9999"
 	rr2 := httptest.NewRecorder()
 	router.ServeHTTP(rr2, req)
@@ -848,5 +890,262 @@ func TestUpload_ThenServe_PNG_RoundTrip(t *testing.T) {
 	// Verify served bytes match original.
 	if !bytes.Equal(rr2.Body.Bytes(), pngData) {
 		t.Error("served PNG bytes differ from uploaded bytes")
+	}
+}
+
+// ─── Access Control Tests (BUG-092) ────────────────────────────────────────
+
+func TestServeFile_Unauthenticated_Returns401(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "acl401uploader", 1)
+
+	// Upload a file.
+	content := []byte("private file content for unauthenticated access test")
+	rr := doUpload(t, router, token, "file", "private.txt", content)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	fileID := resp["id"].(string)
+
+	// Request without auth token.
+	rr2 := doServeFile(t, router, fileID, "", nil)
+	if rr2.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 for unauthenticated file request", rr2.Code)
+	}
+}
+
+func TestServeFile_UnlinkedFile_UploaderCanAccess(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "acluploader", 1)
+
+	content := []byte("file owned by uploader for ownership access test")
+	rr := doUpload(t, router, token, "file", "mine.txt", content)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	fileID := resp["id"].(string)
+
+	// Uploader can access their own unlinked file.
+	rr2 := doServeFile(t, router, fileID, token, nil)
+	if rr2.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 for uploader accessing own file", rr2.Code)
+	}
+}
+
+func TestServeFile_UnlinkedFile_OtherUserForbidden(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	uploaderToken := uploadCreateToken(t, database, "aclowner", 4) // Member role
+	otherToken := uploadCreateToken(t, database, "aclother", 4)    // Member role
+
+	content := []byte("private file content for other-user forbidden test")
+	rr := doUpload(t, router, uploaderToken, "file", "secret.txt", content)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	fileID := resp["id"].(string)
+
+	// Other user cannot access unlinked file.
+	rr2 := doServeFile(t, router, fileID, otherToken, nil)
+	if rr2.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 for other user accessing unlinked file", rr2.Code)
+	}
+}
+
+func TestServeFile_AdminBypassesAllChecks(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	uploaderToken := uploadCreateToken(t, database, "acluploaderadmin", 4) // Member
+	adminToken := uploadCreateToken(t, database, "acladmin", 1)            // Owner (admin)
+
+	content := []byte("file for admin bypass test content with sufficient bytes")
+	rr := doUpload(t, router, uploaderToken, "file", "restricted.txt", content)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	fileID := resp["id"].(string)
+
+	// Admin can access any file regardless of ownership.
+	rr2 := doServeFile(t, router, fileID, adminToken, nil)
+	if rr2.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 for admin bypass", rr2.Code)
+	}
+}
+
+func TestServeFile_LinkedToGuildChannel_MemberWithPerm(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "guildmember", 4) // Member role (perms=1635, includes ReadMessages=0x0002)
+
+	// Upload a file.
+	content := []byte("guild channel attachment content for permission test")
+	rr := doUpload(t, router, token, "file", "guild.txt", content)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	fileID := resp["id"].(string)
+
+	// Create a guild channel and link the attachment via a message.
+	_, err := database.Exec(`INSERT INTO channels (id, name, type) VALUES (1, 'general', 'text')`)
+	if err != nil {
+		t.Fatalf("insert channel: %v", err)
+	}
+	// Get the uploader's user ID.
+	var userID int64
+	if err := database.QueryRow(`SELECT id FROM users WHERE username = 'guildmember'`).Scan(&userID); err != nil {
+		t.Fatalf("get user id: %v", err)
+	}
+	_, err = database.Exec(`INSERT INTO messages (id, channel_id, user_id, content) VALUES (1, 1, ?, 'test')`, userID)
+	if err != nil {
+		t.Fatalf("insert message: %v", err)
+	}
+	_, err = database.Exec(`UPDATE attachments SET message_id = 1 WHERE id = ?`, fileID)
+	if err != nil {
+		t.Fatalf("link attachment: %v", err)
+	}
+
+	// Member with ReadMessages should be able to access.
+	rr2 := doServeFile(t, router, fileID, token, nil)
+	if rr2.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 for guild member with READ_MESSAGES", rr2.Code)
+	}
+}
+
+func TestServeFile_LinkedToGuildChannel_MemberWithoutPerm(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	uploaderToken := uploadCreateToken(t, database, "guilduploader2", 1) // Owner (to upload)
+	memberToken := uploadCreateToken(t, database, "guildnoperm", 4)      // Member
+
+	// Upload a file.
+	content := []byte("guild channel attachment content for denied permission test")
+	rr := doUpload(t, router, uploaderToken, "file", "restricted.txt", content)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	fileID := resp["id"].(string)
+
+	// Create channel and link.
+	_, err := database.Exec(`INSERT INTO channels (id, name, type) VALUES (1, 'secret', 'text')`)
+	if err != nil {
+		t.Fatalf("insert channel: %v", err)
+	}
+	var uploaderID int64
+	if err := database.QueryRow(`SELECT id FROM users WHERE username = 'guilduploader2'`).Scan(&uploaderID); err != nil {
+		t.Fatalf("get user id: %v", err)
+	}
+	_, err = database.Exec(`INSERT INTO messages (id, channel_id, user_id, content) VALUES (1, 1, ?, 'test')`, uploaderID)
+	if err != nil {
+		t.Fatalf("insert message: %v", err)
+	}
+	_, err = database.Exec(`UPDATE attachments SET message_id = 1 WHERE id = ?`, fileID)
+	if err != nil {
+		t.Fatalf("link attachment: %v", err)
+	}
+	// Deny ReadMessages (0x0002) for role 4 (Member) on channel 1.
+	_, err = database.Exec(`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (1, 4, 0, 2)`)
+	if err != nil {
+		t.Fatalf("insert channel_override: %v", err)
+	}
+
+	// Member without ReadMessages should get 403.
+	rr2 := doServeFile(t, router, fileID, memberToken, nil)
+	if rr2.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 for guild member without READ_MESSAGES", rr2.Code)
+	}
+}
+
+func TestServeFile_LinkedToDM_ParticipantAllowed(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token1 := uploadCreateToken(t, database, "dmalice", 4)
+	_ = uploadCreateToken(t, database, "dmbob", 4)
+
+	// Upload a file.
+	content := []byte("dm attachment content for participant access test")
+	rr := doUpload(t, router, token1, "file", "dm.txt", content)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	fileID := resp["id"].(string)
+
+	// Create DM channel, add participants, link attachment.
+	_, err := database.Exec(`INSERT INTO channels (id, name, type) VALUES (1, 'dm-1', 'dm')`)
+	if err != nil {
+		t.Fatalf("insert channel: %v", err)
+	}
+	var aliceID, bobID int64
+	_ = database.QueryRow(`SELECT id FROM users WHERE username = 'dmalice'`).Scan(&aliceID)
+	_ = database.QueryRow(`SELECT id FROM users WHERE username = 'dmbob'`).Scan(&bobID)
+	_, _ = database.Exec(`INSERT INTO dm_participants (user_id, channel_id) VALUES (?, 1)`, aliceID)
+	_, _ = database.Exec(`INSERT INTO dm_participants (user_id, channel_id) VALUES (?, 1)`, bobID)
+	_, _ = database.Exec(`INSERT INTO messages (id, channel_id, user_id, content) VALUES (1, 1, ?, 'hi')`, aliceID)
+	_, _ = database.Exec(`UPDATE attachments SET message_id = 1 WHERE id = ?`, fileID)
+
+	// DM participant can access.
+	rr2 := doServeFile(t, router, fileID, token1, nil)
+	if rr2.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 for DM participant", rr2.Code)
+	}
+}
+
+func TestServeFile_LinkedToDM_NonParticipantForbidden(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token1 := uploadCreateToken(t, database, "dmowner", 4)
+	_ = uploadCreateToken(t, database, "dmpartner", 4)
+	outsiderToken := uploadCreateToken(t, database, "dmoutsider", 4)
+
+	// Upload a file.
+	content := []byte("dm attachment content for non-participant forbidden test")
+	rr := doUpload(t, router, token1, "file", "dmsecret.txt", content)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	fileID := resp["id"].(string)
+
+	// Create DM channel with two participants (not the outsider).
+	_, err := database.Exec(`INSERT INTO channels (id, name, type) VALUES (1, 'dm-1', 'dm')`)
+	if err != nil {
+		t.Fatalf("insert channel: %v", err)
+	}
+	var ownerID, partnerID int64
+	_ = database.QueryRow(`SELECT id FROM users WHERE username = 'dmowner'`).Scan(&ownerID)
+	_ = database.QueryRow(`SELECT id FROM users WHERE username = 'dmpartner'`).Scan(&partnerID)
+	_, _ = database.Exec(`INSERT INTO dm_participants (user_id, channel_id) VALUES (?, 1)`, ownerID)
+	_, _ = database.Exec(`INSERT INTO dm_participants (user_id, channel_id) VALUES (?, 1)`, partnerID)
+	_, _ = database.Exec(`INSERT INTO messages (id, channel_id, user_id, content) VALUES (1, 1, ?, 'hi')`, ownerID)
+	_, _ = database.Exec(`UPDATE attachments SET message_id = 1 WHERE id = ?`, fileID)
+
+	// Non-participant gets 403.
+	rr2 := doServeFile(t, router, fileID, outsiderToken, nil)
+	if rr2.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 for DM non-participant", rr2.Code)
 	}
 }
