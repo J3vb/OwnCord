@@ -57,16 +57,6 @@ Deferred work items from engineering reviews.
 
 ## Deferred (from 2026-04-01 eng review — Open Source Ready)
 
-### Soundboard Feature
-
-**What:** Full-stack soundboard: sound upload/storage, playback to voice channel, UI component.
-**Why:** Community feature for voice channels. Protocol type was pre-defined but nothing else existed.
-**Pros:** Fun social feature for voice users. LiveKit supports audio injection.
-**Cons:** Requires server-side audio mixing or LiveKit Ingress API. Significant scope (1-2 weeks human / 3-4h CC).
-**Context:** Dead `SoundboardPlayPayload` protocol type removed in this PR. Feature needs: upload endpoint, storage, DB schema for sounds, playback handler, broadcast to voice participants, UI picker component. Consider LiveKit Ingress API for server-side audio injection.
-**Depends on:** Voice infrastructure (done), LiveKit integration (done).
-**Added:** 2026-04-01 (eng review of Open Source Ready plan)
-
 ### DM Sidebar Incremental Reconciliation
 
 **What:** Replace O(n) DOM rebuild of DM sidebar with incremental reconciliation (differ/patch per DM item).

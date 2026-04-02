@@ -213,8 +213,6 @@ describe("ClientMessage types", () => {
       payload: { message_id: 1, emoji: "👍" },
     };
     expect(reactionAdd.type).toBe("reaction_add");
-
-    // soundboard_play type removed — see TODOS.md
   });
 
   it("includes voice mute type", () => {
@@ -232,7 +230,6 @@ describe("Permission bitfield", () => {
     expect(P.READ_MESSAGES).toBe(0x2);
     expect(P.ATTACH_FILES).toBe(0x20);
     expect(P.ADD_REACTIONS).toBe(0x40);
-    expect(P.USE_SOUNDBOARD).toBe(0x100);
     expect(P.CONNECT_VOICE).toBe(0x200);
     expect(P.SPEAK_VOICE).toBe(0x400);
     expect(P.USE_VIDEO).toBe(0x800);

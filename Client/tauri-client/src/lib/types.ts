@@ -128,7 +128,6 @@ export enum Permission {
   READ_MESSAGES = 0x2,
   ATTACH_FILES = 0x20,
   ADD_REACTIONS = 0x40,
-  USE_SOUNDBOARD = 0x100,
   CONNECT_VOICE = 0x200,
   SPEAK_VOICE = 0x400,
   USE_VIDEO = 0x800,
@@ -420,8 +419,6 @@ export interface VoiceCameraPayload {
 export interface VoiceScreensharePayload {
   readonly enabled: boolean;
 }
-
-// Soundboard feature deferred — see TODOS.md
 
 // -----------------------------------------------------------------------------
 // Discriminated Union: Server → Client Messages

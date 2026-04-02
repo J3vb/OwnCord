@@ -19,7 +19,6 @@ func TestPermissionBitValues(t *testing.T) {
 		{"ReadMessages", permissions.ReadMessages, 0x0002},
 		{"AttachFiles", permissions.AttachFiles, 0x0020},
 		{"AddReactions", permissions.AddReactions, 0x0040},
-		{"UseSoundboard", permissions.UseSoundboard, 0x0100},
 		{"ConnectVoice", permissions.ConnectVoice, 0x0200},
 		{"SpeakVoice", permissions.SpeakVoice, 0x0400},
 		{"UseVideo", permissions.UseVideo, 0x0800},
@@ -116,7 +115,7 @@ func TestHasPerm_AllBitsSet(t *testing.T) {
 	allPerms := int64(0x7FFFFFFF)
 	perms := []int64{
 		permissions.SendMessages, permissions.ReadMessages, permissions.AttachFiles,
-		permissions.AddReactions, permissions.UseSoundboard, permissions.ConnectVoice,
+		permissions.AddReactions, permissions.ConnectVoice,
 		permissions.SpeakVoice, permissions.UseVideo, permissions.ShareScreen,
 		permissions.ManageMessages, permissions.ManageChannels, permissions.KickMembers,
 		permissions.BanMembers, permissions.MuteMembers, permissions.ManageRoles,
@@ -370,7 +369,7 @@ func TestRoleHierarchy_MemberHasBasicPerms(t *testing.T) {
 func TestPermissionBits_AreDistinctPowersOfTwo(t *testing.T) {
 	bits := []int64{
 		permissions.SendMessages, permissions.ReadMessages, permissions.AttachFiles,
-		permissions.AddReactions, permissions.UseSoundboard, permissions.ConnectVoice,
+		permissions.AddReactions, permissions.ConnectVoice,
 		permissions.SpeakVoice, permissions.UseVideo, permissions.ShareScreen,
 		permissions.ManageMessages, permissions.ManageChannels, permissions.KickMembers,
 		permissions.BanMembers, permissions.MuteMembers, permissions.ManageRoles,

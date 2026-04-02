@@ -10,7 +10,6 @@ const (
 	ReadMessages   = int64(0x0002)     // bit 1
 	AttachFiles    = int64(0x0020)     // bit 5
 	AddReactions   = int64(0x0040)     // bit 6
-	UseSoundboard  = int64(0x0100)     // bit 8
 	ConnectVoice   = int64(0x0200)     // bit 9
 	SpeakVoice     = int64(0x0400)     // bit 10
 	UseVideo       = int64(0x0800)     // bit 11

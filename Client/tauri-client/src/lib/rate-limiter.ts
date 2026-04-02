@@ -169,11 +169,6 @@ export function createVideoCameraLimiter(): RateLimiter {
   return createRateLimiter(2, 1_000);
 }
 
-/** Soundboard: 1 per 3 seconds. */
-export function createSoundboardLimiter(): RateLimiter {
-  return createRateLimiter(1, 3_000);
-}
-
 // ---------------------------------------------------------------------------
 // Bundled set of all protocol limiters
 // ---------------------------------------------------------------------------
@@ -185,7 +180,6 @@ export interface RateLimiterSet {
   readonly reactions: RateLimiter;
   readonly voice: RateLimiter;
   readonly voiceVideo: RateLimiter;
-  readonly soundboard: RateLimiter;
 }
 
 export function createRateLimiterSet(): RateLimiterSet {
@@ -196,6 +190,5 @@ export function createRateLimiterSet(): RateLimiterSet {
     reactions: createReactionLimiter(),
     voice: createVoiceLimiter(),
     voiceVideo: createVideoCameraLimiter(),
-    soundboard: createSoundboardLimiter(),
   });
 }
