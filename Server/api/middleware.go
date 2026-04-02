@@ -211,15 +211,20 @@ func clientIPWithProxies(r *http.Request, trustedCIDRs []string) string {
 	}
 
 	// Prefer X-Real-IP when coming from a trusted proxy.
+	// BUG-112: Validate extracted IP to prevent spoofed rate-limit keys.
 	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-		return xri
+		if net.ParseIP(xri) != nil {
+			return xri
+		}
 	}
 
 	// Fall back to the leftmost (client) entry in X-Forwarded-For.
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		parts := strings.SplitN(xff, ",", 2)
 		if client := strings.TrimSpace(parts[0]); client != "" {
-			return client
+			if net.ParseIP(client) != nil {
+				return client
+			}
 		}
 	}
 

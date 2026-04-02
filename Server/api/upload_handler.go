@@ -57,6 +57,22 @@ func sanitizeUploadFilename(name string) string {
 	return name
 }
 
+// isUnsafeInlineMIME returns true for MIME types that could execute active
+// content (scripts, markup) if served inline under the OwnCord origin.
+func isUnsafeInlineMIME(mimeType string) bool {
+	// Normalize: take the base type before any parameters (e.g. "text/html; charset=utf-8").
+	base := strings.SplitN(mimeType, ";", 2)[0]
+	base = strings.TrimSpace(strings.ToLower(base))
+	switch base {
+	case "text/html", "application/xhtml+xml",
+		"image/svg+xml", "text/xml", "application/xml",
+		"application/pdf",
+		"text/xsl", "text/xslt":
+		return true
+	}
+	return false
+}
+
 // MountUploadRoutes registers upload and file-serving endpoints.
 // allowedOrigins controls the Access-Control-Allow-Origin header on served files.
 func MountUploadRoutes(r chi.Router, database *db.DB, store *storage.Storage, limiter *auth.RateLimiter, allowedOrigins []string) {
@@ -267,7 +283,13 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 
 		// Set headers before ServeContent to ensure correct MIME type.
 		w.Header().Set("Content-Type", aa.MimeType)
-		w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": aa.Filename}))
+		// BUG-118: Force download for MIME types that could execute content
+		// under the OwnCord origin (HTML, SVG, XML, PDF).
+		disposition := "inline"
+		if isUnsafeInlineMIME(aa.MimeType) {
+			disposition = "attachment"
+		}
+		w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": aa.Filename}))
 		w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d, immutable", fileCacheMaxAgeSeconds))
 		// CORS: allow webview to read the response body using configured origins.
 		if origin := r.Header.Get("Origin"); origin != "" {
