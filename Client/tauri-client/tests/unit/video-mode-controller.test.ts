@@ -104,7 +104,7 @@ describe("createVideoModeController", () => {
     expect(ctrl.isVideoMode()).toBe(false);
   });
 
-  it("checkVideoMode does NOT auto-switch to video grid when remote has camera", () => {
+  it("checkVideoMode auto-opens video grid when remote has camera (BUG-105)", () => {
     const users = new Map([[2, { userId: 2, camera: true, screenshare: false, username: "bob" }]]);
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, users]]) }),
@@ -118,8 +118,7 @@ describe("createVideoModeController", () => {
     });
     ctrl.checkVideoMode();
 
-    // Auto-open was removed — video mode requires manual activation
-    expect(ctrl.isVideoMode()).toBe(false);
+    expect(ctrl.isVideoMode()).toBe(true);
   });
 
   it("checkVideoMode auto-closes video grid when no streams remain", () => {
@@ -146,7 +145,7 @@ describe("createVideoModeController", () => {
     expect(slots.messagesSlot.style.display).toBe("");
   });
 
-  it("checkVideoMode does NOT auto-switch when local camera is on", () => {
+  it("checkVideoMode auto-opens when local camera is on (BUG-105)", () => {
     const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({
@@ -162,8 +161,7 @@ describe("createVideoModeController", () => {
       getCurrentUserId: () => 1,
     });
     ctrl.checkVideoMode();
-    // Auto-open removed — must be activated manually
-    expect(ctrl.isVideoMode()).toBe(false);
+    expect(ctrl.isVideoMode()).toBe(true);
   });
 
   it("adds local self-view tile when local camera is on", () => {
@@ -271,7 +269,7 @@ describe("createVideoModeController", () => {
     expect(slots.videoGridSlot.style.display).toBe("none");
   });
 
-  it("checkVideoMode does NOT auto-switch when local screenshare is on", () => {
+  it("checkVideoMode auto-opens when local screenshare is on (BUG-105)", () => {
     const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({
@@ -290,8 +288,7 @@ describe("createVideoModeController", () => {
     });
     ctrl.checkVideoMode();
 
-    // Auto-open removed — must be activated manually
-    expect(ctrl.isVideoMode()).toBe(false);
+    expect(ctrl.isVideoMode()).toBe(true);
   });
 
   it("adds local screenshare self-view tile when local screenshare is on", () => {
@@ -362,7 +359,7 @@ describe("createVideoModeController", () => {
     expect(vg.removeStream).toHaveBeenCalledWith(1_000_001);
   });
 
-  it("checkVideoMode does NOT auto-switch when remote has screenshare on", () => {
+  it("checkVideoMode auto-opens when remote has screenshare on (BUG-105)", () => {
     const users = new Map([
       [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
       [2, { userId: 2, camera: false, screenshare: true, username: "bob" }],
@@ -378,8 +375,7 @@ describe("createVideoModeController", () => {
     });
     ctrl.checkVideoMode();
 
-    // Auto-open removed — must be activated manually
-    expect(ctrl.isVideoMode()).toBe(false);
+    expect(ctrl.isVideoMode()).toBe(true);
   });
 
   // -----------------------------------------------------------------------

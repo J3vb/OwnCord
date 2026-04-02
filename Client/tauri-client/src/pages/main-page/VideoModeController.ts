@@ -107,6 +107,10 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     if (!anyVideoOn && videoMode) {
       showChat();
     }
+    // BUG-105: Auto-open video grid when any video stream becomes active.
+    if (anyVideoOn && !videoMode) {
+      showVideoGrid();
+    }
 
     // Manage local self-view tile — only add once, skip if already showing
     const currentUserId = getCurrentUserId();
