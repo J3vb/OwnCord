@@ -40,6 +40,22 @@ certificates — it prompts to trust the server on first
 connection, then pins it for future sessions.
 
 
+### Voice & Video Setup (Optional)
+
+Voice and video require [LiveKit Server](https://github.com/livekit/livekit/releases):
+
+1. Download `livekit-server` from the LiveKit releases page
+2. Edit `config.yaml` and set:
+   ```yaml
+   voice:
+     livekit_api_key: "devkey"           # any string
+     livekit_api_secret: "secret-min-32-characters-long!!"  # min 32 chars
+     livekit_binary: "C:/path/to/livekit-server.exe"
+   ```
+3. Restart `chatserver.exe` — it auto-starts LiveKit as a
+   companion process
+
+
 ## Features
 
 ### Chat
@@ -138,20 +154,6 @@ connection, then pins it for future sessions.
 - Quick-switch server overlay for multi-server users
 - Structured logging with JSONL persistence (5-day rotation)
 
-### Voice & Video Setup (Optional)
-
-Voice and video require [LiveKit Server](https://github.com/livekit/livekit/releases):
-
-1. Download `livekit-server` from the LiveKit releases page
-2. Edit `config.yaml` and set:
-   ```yaml
-   voice:
-     livekit_api_key: "devkey"           # any string
-     livekit_api_secret: "secret-min-32-characters-long!!"  # min 32 chars
-     livekit_binary: "C:/path/to/livekit-server.exe"
-   ```
-3. Restart `chatserver.exe` — it auto-starts LiveKit as a
-   companion process
 
 ### Networking
 
