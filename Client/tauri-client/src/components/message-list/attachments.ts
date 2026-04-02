@@ -133,9 +133,9 @@ export function openCacheDb(): Promise<IDBDatabase | null> {
           db.createObjectStore(IDB_STORE);
         }
       };
-      // eslint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
+      // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
       req.onsuccess = () => resolve(req.result);
-      // eslint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
+      // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
       req.onerror = () => resolve(null);
     } catch {
       resolve(null);
@@ -145,11 +145,11 @@ export function openCacheDb(): Promise<IDBDatabase | null> {
 
 function closeDbAfterTransaction(tx: IDBTransaction, db: IDBDatabase): void {
   const close = (): void => db.close();
-  // eslint-disable-next-line prefer-add-event-listener -- IDBTransaction does not support addEventListener
+  // oxlint-disable-next-line prefer-add-event-listener -- IDBTransaction does not support addEventListener
   tx.oncomplete = close;
-  // eslint-disable-next-line prefer-add-event-listener -- IDBTransaction does not support addEventListener
+  // oxlint-disable-next-line prefer-add-event-listener -- IDBTransaction does not support addEventListener
   tx.onabort = close;
-  // eslint-disable-next-line prefer-add-event-listener -- IDBTransaction does not support addEventListener
+  // oxlint-disable-next-line prefer-add-event-listener -- IDBTransaction does not support addEventListener
   tx.onerror = close;
 }
 
@@ -163,9 +163,9 @@ async function idbGet(url: string): Promise<string | null> {
       closeDbAfterTransaction(tx, db);
       const store = tx.objectStore(IDB_STORE);
       const req = store.get(url);
-      // eslint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
+      // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
       req.onsuccess = () => resolve(typeof req.result === "string" ? req.result : null);
-      // eslint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
+      // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
       req.onerror = () => resolve(null);
     } catch {
       db.close();

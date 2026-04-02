@@ -53,7 +53,7 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
 
   const channelName = getChannelName(payload.channel_id);
 
-  // eslint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
+  // oxlint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
   function sanitizeNotif(s: string, maxLen: number): string {
     // eslint-disable-next-line no-control-regex -- intentional: strip control chars from user-provided strings
     const cleaned = s.replace(/[\x00-\x1F\x7F]/g, "");

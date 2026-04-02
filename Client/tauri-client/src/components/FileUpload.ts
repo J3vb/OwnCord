@@ -48,7 +48,7 @@ export function createFileUpload(options: FileUploadOptions): FileUploadComponen
   let errorDiv: HTMLDivElement;
   let uploadAbort: AbortController | null = null;
 
-  // eslint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
+  // oxlint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
   function formatSize(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
