@@ -135,6 +135,11 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
     deps.reapplyAudioPipeline();
     log.info("Camera enabled", { quality, maxBitrate: CAMERA_PUBLISH_BITRATES[quality] });
   } catch (err) {
+    // BUG-100: Stop the created track to release the camera if publish failed.
+    if (state.manualCameraTrack !== null) {
+      state.manualCameraTrack.stop();
+      state.manualCameraTrack = null;
+    }
     setLocalCamera(false);
     log.error("Failed to enable camera", err);
     if (err instanceof DOMException && err.name === "NotAllowedError") {
@@ -218,10 +223,27 @@ export async function enableScreenshare(
           : {}),
       });
     }
+    // BUG-101: Listen for OS "Stop sharing" so the app runs the full disable path.
+    const videoTrack = screenTracks.find((t) => t.kind === Track.Kind.Video);
+    if (videoTrack) {
+      videoTrack.mediaStreamTrack.addEventListener(
+        "ended",
+        () => {
+          log.info("Screen track ended externally (OS stop-sharing)");
+          void disableScreenshare(state, deps);
+        },
+        { once: true },
+      );
+    }
     ws.send({ type: "voice_screenshare", payload: { enabled: true } });
     deps.reapplyAudioPipeline();
     log.info("Screenshare enabled", { quality, maxBitrate: SCREENSHARE_PUBLISH_BITRATES[quality] });
   } catch (err) {
+    // BUG-100: Stop created tracks to release screen capture if publish failed.
+    for (const t of state.manualScreenTracks) {
+      t.stop();
+    }
+    state.manualScreenTracks = [];
     setLocalScreenshare(false);
     log.error("Failed to enable screenshare", err);
     if (err instanceof DOMException && err.name === "NotAllowedError") {

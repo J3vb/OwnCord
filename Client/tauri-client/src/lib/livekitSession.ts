@@ -647,8 +647,15 @@ export class LiveKitSession {
     try {
       await this.room.localParticipant.setMicrophoneEnabled(true);
       setListenOnly(false);
-      setLocalMuted(false);
-      log.info("Microphone permission granted — exited listen-only mode");
+      // BUG-103: Honor deafened state — keep mic muted if user is deafened.
+      const { localDeafened } = voiceStore.getState();
+      if (localDeafened) {
+        await this.applyMicMuteState(true);
+        log.info("Microphone acquired but muted (user is deafened)");
+      } else {
+        setLocalMuted(false);
+        log.info("Microphone permission granted — exited listen-only mode");
+      }
       // Set up audio pipeline for the new mic track
       this._audioPipeline.setupAudioPipeline();
       if (loadPref<boolean>("enhancedNoiseSuppression", false)) {
