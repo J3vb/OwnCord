@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -53,7 +54,7 @@ func MountProfileRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter
 		r.Patch("/", handleUpdateProfile(database))
 
 		r.With(RateLimitMiddleware(limiter, profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
-			Put("/password", handleChangePassword(database))
+			Put("/password", handleChangePassword(database, limiter))
 
 		r.Get("/sessions", handleListSessions(database))
 		r.Delete("/sessions/{id}", handleRevokeSession(database))
@@ -142,13 +143,23 @@ func handleUpdateProfile(database *db.DB) http.HandlerFunc {
 }
 
 // handleChangePassword processes PUT /api/v1/users/me/password.
-func handleChangePassword(database *db.DB) http.HandlerFunc {
+func handleChangePassword(database *db.DB, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
 				Error:   "UNAUTHORIZED",
 				Message: "not authenticated",
+			})
+			return
+		}
+
+		// BUG-111: Per-user lockout to prevent password brute-force via stolen session.
+		lockKey := fmt.Sprintf("pw_confirm_lock:%d", user.ID)
+		if limiter.IsLockedOut(lockKey) {
+			writeJSON(w, http.StatusTooManyRequests, errorResponse{
+				Error:   "RATE_LIMITED",
+				Message: "too many failed attempts, try again later",
 			})
 			return
 		}
@@ -171,13 +182,18 @@ func handleChangePassword(database *db.DB) http.HandlerFunc {
 		}
 
 		// Verify old password using constant-time bcrypt comparison.
+		failKey := fmt.Sprintf("pw_confirm_fail:%d", user.ID)
 		if !auth.CheckPassword(user.PasswordHash, req.OldPassword) {
+			if !limiter.Allow(failKey, pwConfirmFailureThreshold, pwConfirmFailureWindow) {
+				limiter.Lockout(lockKey, pwConfirmLockoutDuration)
+			}
 			writeJSON(w, http.StatusForbidden, errorResponse{
 				Error:   "FORBIDDEN",
 				Message: "incorrect password",
 			})
 			return
 		}
+		limiter.Reset(failKey)
 
 		// Reject same old/new password.
 		if req.OldPassword == req.NewPassword {

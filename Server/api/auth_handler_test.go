@@ -328,14 +328,16 @@ func TestLogin_LockoutUsesTrustedForwardedIP(t *testing.T) {
 		router.ServeHTTP(rr, req)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader([]byte(`{"username":"nobody","password":"wrongpass123"}`)))
+	// Use a different username AND IP to verify per-IP lockout isolation.
+	// (Same username would be locked by per-username lockout — BUG-110 fix.)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader([]byte(`{"username":"other","password":"wrongpass123"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Forwarded-For", "198.51.100.11")
 	req.RemoteAddr = "127.0.0.1:9999"
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("different forwarded client should not inherit another client's lockout, got %d", rr.Code)
+		t.Fatalf("different forwarded client+user should not inherit another client's lockout, got %d", rr.Code)
 	}
 }
 

@@ -92,15 +92,15 @@ func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, t
 
 	r.With(AuthMiddleware(database),
 		RateLimitMiddleware(limiter, sensitiveEndpointRateLimitPerMinute, time.Minute, trustedProxies)).
-		Post("/api/v1/users/me/totp/enable", handleEnableTOTP(pendingTOTPStore))
+		Post("/api/v1/users/me/totp/enable", handleEnableTOTP(pendingTOTPStore, limiter))
 
 	r.With(AuthMiddleware(database),
 		RateLimitMiddleware(limiter, sensitiveEndpointRateLimitPerMinute, time.Minute, trustedProxies)).
-		Post("/api/v1/users/me/totp/confirm", handleConfirmTOTP(database, pendingTOTPStore, usedTOTPCodes))
+		Post("/api/v1/users/me/totp/confirm", handleConfirmTOTP(database, pendingTOTPStore, usedTOTPCodes, limiter))
 
 	r.With(AuthMiddleware(database),
 		RateLimitMiddleware(limiter, sensitiveEndpointRateLimitPerMinute, time.Minute, trustedProxies)).
-		Delete("/api/v1/users/me/totp", handleDisableTOTP(database, pendingTOTPStore))
+		Delete("/api/v1/users/me/totp", handleDisableTOTP(database, pendingTOTPStore, limiter))
 }
 
 // handleRegister processes POST /api/v1/auth/register.
@@ -275,9 +275,19 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 
 		ip := clientIPWithProxies(r, trustedProxies)
 
-		// Check lockout first.
+		// Check per-IP lockout first.
 		lockKey := "login_lock:" + ip
 		if limiter.IsLockedOut(lockKey) {
+			writeJSON(w, http.StatusTooManyRequests, errorResponse{
+				Error:   "RATE_LIMITED",
+				Message: "account temporarily locked due to too many failed attempts",
+			})
+			return
+		}
+
+		// BUG-110: Also check per-username lockout to prevent distributed brute force.
+		userLockKey := "login_user_lock:" + req.Username
+		if limiter.IsLockedOut(userLockKey) {
 			writeJSON(w, http.StatusTooManyRequests, errorResponse{
 				Error:   "RATE_LIMITED",
 				Message: "account temporarily locked due to too many failed attempts",
@@ -305,10 +315,15 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 		}
 
 		failKey := "login_fail:" + ip
+		userFailKey := "login_user_fail:" + req.Username
 		if user == nil || !auth.CheckPassword(user.PasswordHash, req.Password) {
-			// Track failures; lockout on the 10th failure.
+			// Track failures per-IP; lockout on threshold.
 			if !limiter.Allow(failKey, loginFailureThreshold, loginFailureWindow) {
 				limiter.Lockout(lockKey, loginLockoutDuration)
+			}
+			// BUG-110: Track failures per-username; lockout on threshold.
+			if !limiter.Allow(userFailKey, loginUserFailureThreshold, loginUserFailureWindow) {
+				limiter.Lockout(userLockKey, loginUserLockoutDuration)
 			}
 			slog.Info("login failed", "ip", ip, "username_len", len(req.Username))
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
@@ -318,8 +333,9 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 			return
 		}
 
-		// Reset failure counter on success.
+		// Reset failure counters on success.
 		limiter.Reset(failKey)
+		limiter.Reset(userFailKey)
 
 		if auth.IsEffectivelyBanned(user) {
 			slog.Warn("banned user login attempt", "username", user.Username, "user_id", user.ID, "ip", ip)

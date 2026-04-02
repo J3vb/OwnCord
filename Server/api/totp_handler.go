@@ -124,13 +124,23 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 	}
 }
 
-func handleEnableTOTP(pendingStore *auth.PendingTOTPStore) http.HandlerFunc {
+func handleEnableTOTP(pendingStore *auth.PendingTOTPStore, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
 				Error:   "UNAUTHORIZED",
 				Message: "not authenticated",
+			})
+			return
+		}
+
+		// BUG-111: Per-user lockout for password confirmation.
+		lockKey := fmt.Sprintf("pw_confirm_lock:%d", user.ID)
+		if limiter.IsLockedOut(lockKey) {
+			writeJSON(w, http.StatusTooManyRequests, errorResponse{
+				Error:   "RATE_LIMITED",
+				Message: "too many failed attempts, try again later",
 			})
 			return
 		}
@@ -151,13 +161,18 @@ func handleEnableTOTP(pendingStore *auth.PendingTOTPStore) http.HandlerFunc {
 			})
 			return
 		}
+		failKey := fmt.Sprintf("pw_confirm_fail:%d", user.ID)
 		if err := requirePasswordConfirmation(user, req.Password); err != nil {
+			if !limiter.Allow(failKey, pwConfirmFailureThreshold, pwConfirmFailureWindow) {
+				limiter.Lockout(lockKey, pwConfirmLockoutDuration)
+			}
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error:   "INVALID_INPUT",
 				Message: err.Error(),
 			})
 			return
 		}
+		limiter.Reset(failKey)
 
 		secret, err := auth.GenerateTOTPSecret()
 		if err != nil {
@@ -176,13 +191,23 @@ func handleEnableTOTP(pendingStore *auth.PendingTOTPStore) http.HandlerFunc {
 	}
 }
 
-func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, usedTOTPCodes *auth.UsedTOTPCodeStore) http.HandlerFunc {
+func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, usedTOTPCodes *auth.UsedTOTPCodeStore, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
 				Error:   "UNAUTHORIZED",
 				Message: "not authenticated",
+			})
+			return
+		}
+
+		// BUG-111: Per-user lockout for password confirmation.
+		lockKey := fmt.Sprintf("pw_confirm_lock:%d", user.ID)
+		if limiter.IsLockedOut(lockKey) {
+			writeJSON(w, http.StatusTooManyRequests, errorResponse{
+				Error:   "RATE_LIMITED",
+				Message: "too many failed attempts, try again later",
 			})
 			return
 		}
@@ -195,13 +220,18 @@ func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, use
 			})
 			return
 		}
+		failKey := fmt.Sprintf("pw_confirm_fail:%d", user.ID)
 		if err := requirePasswordConfirmation(user, req.Password); err != nil {
+			if !limiter.Allow(failKey, pwConfirmFailureThreshold, pwConfirmFailureWindow) {
+				limiter.Lockout(lockKey, pwConfirmLockoutDuration)
+			}
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error:   "INVALID_INPUT",
 				Message: err.Error(),
 			})
 			return
 		}
+		limiter.Reset(failKey)
 
 		secret, ok := pendingStore.Lookup(user.ID)
 		if !ok {
@@ -245,13 +275,23 @@ func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, use
 	}
 }
 
-func handleDisableTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore) http.HandlerFunc {
+func handleDisableTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
 				Error:   "UNAUTHORIZED",
 				Message: "not authenticated",
+			})
+			return
+		}
+
+		// BUG-111: Per-user lockout for password confirmation.
+		lockKey := fmt.Sprintf("pw_confirm_lock:%d", user.ID)
+		if limiter.IsLockedOut(lockKey) {
+			writeJSON(w, http.StatusTooManyRequests, errorResponse{
+				Error:   "RATE_LIMITED",
+				Message: "too many failed attempts, try again later",
 			})
 			return
 		}
@@ -264,13 +304,18 @@ func handleDisableTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore) htt
 			})
 			return
 		}
+		failKey := fmt.Sprintf("pw_confirm_fail:%d", user.ID)
 		if err := requirePasswordConfirmation(user, req.Password); err != nil {
+			if !limiter.Allow(failKey, pwConfirmFailureThreshold, pwConfirmFailureWindow) {
+				limiter.Lockout(lockKey, pwConfirmLockoutDuration)
+			}
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error:   "INVALID_INPUT",
 				Message: err.Error(),
 			})
 			return
 		}
+		limiter.Reset(failKey)
 
 		require2FA, err := isRequire2FAEnabled(database)
 		if err != nil {

@@ -64,6 +64,29 @@ const (
 	// profilePasswordRateLimitPerMinute is the maximum password change attempts
 	// per IP per minute.
 	profilePasswordRateLimitPerMinute = 5
+
+	// loginUserFailureThreshold is the number of failed login attempts for a
+	// specific username (regardless of source IP) before the account is locked.
+	loginUserFailureThreshold = 9
+
+	// loginUserFailureWindow is the sliding window for per-username login failures.
+	loginUserFailureWindow = 15 * time.Minute
+
+	// loginUserLockoutDuration is how long a username is locked after exceeding
+	// loginUserFailureThreshold.
+	loginUserLockoutDuration = 15 * time.Minute
+
+	// pwConfirmFailureThreshold is the number of wrong-password attempts on
+	// password-confirmation endpoints before per-user lockout kicks in.
+	pwConfirmFailureThreshold = 3
+
+	// pwConfirmFailureWindow is the sliding window for per-user password
+	// confirmation failures.
+	pwConfirmFailureWindow = 15 * time.Minute
+
+	// pwConfirmLockoutDuration is how long password-confirmation endpoints are
+	// locked after exceeding pwConfirmFailureThreshold.
+	pwConfirmLockoutDuration = 15 * time.Minute
 )
 
 // ─── Timeouts & TTLs ────────────────────────────────────────────────────────
