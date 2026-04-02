@@ -2,6 +2,7 @@ package admin_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -140,5 +141,55 @@ func TestSetup_MissingFields(t *testing.T) {
 	})
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("missing fields = %d, want 400", rr.Code)
+	}
+}
+
+// TestSetup_ConcurrentRace fires many parallel setup requests at a fresh
+// server and asserts that exactly one owner is created (BUG-119).
+func TestSetup_ConcurrentRace(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil)
+
+	const goroutines = 20
+	results := make(chan int, goroutines)
+
+	// Launch goroutines simultaneously.
+	start := make(chan struct{})
+	for i := 0; i < goroutines; i++ {
+		go func(n int) {
+			<-start // wait for the gate
+			rr := doRequest(t, handler, "POST", "/setup", "", map[string]string{
+				"username": fmt.Sprintf("owner%d", n),
+				"password": "SecurePass123!",
+			})
+			results <- rr.Code
+		}(i)
+	}
+	close(start) // release all goroutines at once
+
+	created := 0
+	for i := 0; i < goroutines; i++ {
+		code := <-results
+		switch code {
+		case http.StatusCreated:
+			created++
+		case http.StatusForbidden, http.StatusTooManyRequests:
+			// expected for losers (already set up or rate-limited)
+		default:
+			t.Errorf("unexpected status %d", code)
+		}
+	}
+
+	if created != 1 {
+		t.Errorf("expected exactly 1 owner created, got %d", created)
+	}
+
+	// Verify only one user exists in the database.
+	count, err := database.UserCount()
+	if err != nil {
+		t.Fatalf("UserCount: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("user count = %d, want 1", count)
 	}
 }

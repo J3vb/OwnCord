@@ -23,6 +23,49 @@ func (d *DB) CreateUser(username, passwordHash string, roleID int) (int64, error
 	return res.LastInsertId()
 }
 
+// CreateOwnerIfEmpty atomically checks that no users exist and inserts the
+// first owner in a single transaction. Returns ErrConflict if any user already
+// exists, closing the TOCTOU race in the setup endpoint (BUG-119).
+func (d *DB) CreateOwnerIfEmpty(username, passwordHash string, roleID int) (int64, error) {
+	tx, err := d.sqlDB.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("CreateOwnerIfEmpty begin: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var count int64
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("CreateOwnerIfEmpty count: %w", err)
+	}
+	if count > 0 {
+		return 0, ErrConflict
+	}
+
+	res, err := tx.Exec(
+		`INSERT INTO users (username, password, role_id) VALUES (?, ?, ?)`,
+		username, passwordHash, roleID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("CreateOwnerIfEmpty insert: %w", err)
+	}
+
+	uid, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("CreateOwnerIfEmpty last_id: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("CreateOwnerIfEmpty commit: %w", err)
+	}
+	committed = true
+	return uid, nil
+}
+
 // CreateUserWithInvite atomically consumes an invite and creates the user in
 // the same transaction so a failed registration does not burn the invite.
 func (d *DB) CreateUserWithInvite(username, passwordHash string, roleID int, inviteCode string) (int64, error) {

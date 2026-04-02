@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -77,17 +78,6 @@ func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []st
 			return
 		}
 
-		// Gate: only allow when no users exist.
-		count, err := database.UserCount()
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check user count")
-			return
-		}
-		if count > 0 {
-			writeErr(w, http.StatusForbidden, "FORBIDDEN", "setup has already been completed")
-			return
-		}
-
 		var req setupRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
@@ -118,8 +108,13 @@ func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []st
 			return
 		}
 
-		// Create the owner account (role_id=1 is Owner).
-		uid, err := database.CreateUser(req.Username, hash, ownerRoleID)
+		// Atomically check no users exist and create the owner (BUG-119).
+		// This closes the TOCTOU race between UserCount() and CreateUser().
+		uid, err := database.CreateOwnerIfEmpty(req.Username, hash, ownerRoleID)
+		if errors.Is(err, db.ErrConflict) {
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", "setup has already been completed")
+			return
+		}
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create user")
 			return
