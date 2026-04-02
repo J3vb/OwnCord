@@ -1,7 +1,9 @@
 package updater
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,6 +13,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -37,6 +41,7 @@ func newTestRelease(tag, body, htmlURL string, assetDownloadBase string) ghRelea
 		HTMLURL: htmlURL,
 		Assets: []ghAsset{
 			{Name: "chatserver.exe", BrowserDownloadURL: assetDownloadBase + "/chatserver.exe"},
+			{Name: "chatserver-linux-amd64.tar.gz", BrowserDownloadURL: assetDownloadBase + "/chatserver-linux-amd64.tar.gz"},
 			{Name: "checksums.sha256", BrowserDownloadURL: assetDownloadBase + "/checksums.sha256"},
 		},
 	}
@@ -85,11 +90,16 @@ func TestCheckForUpdate_NewerVersionAvailable(t *testing.T) {
 	if info.Current != "v1.0.0" {
 		t.Errorf("expected Current=v1.0.0, got %s", info.Current)
 	}
-	if info.DownloadURL == "" {
-		t.Error("expected non-empty DownloadURL")
-	}
 	if info.ChecksumURL == "" {
 		t.Error("expected non-empty ChecksumURL")
+	}
+	// Server binary asset is only selected on Windows and Linux.
+	if want := serverDownloadAssetName(runtime.GOOS); want != "" {
+		if info.DownloadURL == "" {
+			t.Error("expected non-empty DownloadURL")
+		}
+	} else if info.DownloadURL != "" {
+		t.Error("expected empty DownloadURL on unsupported GOOS")
 	}
 }
 
@@ -244,6 +254,96 @@ func TestVerifyChecksum_Incorrect(t *testing.T) {
 	}
 }
 
+// TestUpdateChecksum_SHA256MatchesChecksumsFile checks the full checksum chain
+// used during server update: SHA-256 of the downloaded release artifact must
+// equal the hex in checksums.sha256 (same layout as CI: "hash  path/to/file"),
+// and VerifyChecksum must accept the on-disk file against that expected value.
+func TestUpdateChecksum_SHA256MatchesChecksumsFile(t *testing.T) {
+	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+
+	tests := []struct {
+		name    string
+		goos    string
+		assetFn func(*testing.T) []byte
+	}{
+		{
+			name: "windows_exe",
+			goos: "windows",
+			assetFn: func(*testing.T) []byte {
+				return []byte("windows server binary payload for checksum test")
+			},
+		},
+		{
+			name: "linux_tar_gz",
+			goos: "linux",
+			assetFn: func(t *testing.T) []byte {
+				return mustBuildChatserverTarGz(t, []byte("linux inner binary for checksum test"))
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			asset := tc.assetFn(t)
+			names := checksumEntryNamesForGOOS(tc.goos)
+			if len(names) == 0 {
+				t.Fatal("checksumEntryNamesForGOOS: empty names")
+			}
+
+			sum := sha256.Sum256(asset)
+			expectedHex := hex.EncodeToString(sum[:])
+
+			// Same line shape as release workflow: sha256sum prints "<hash>  <path>".
+			primaryPath := names[0]
+			checksumData := []byte(fmt.Sprintf("%s  %s\n", expectedHex, primaryPath))
+
+			parsed, err := u.parseChecksumFileAny(checksumData, names...)
+			if err != nil {
+				t.Fatalf("parseChecksumFileAny: %v", err)
+			}
+			if !strings.EqualFold(parsed, expectedHex) {
+				t.Fatalf("parsed hash %q, want %q", parsed, expectedHex)
+			}
+
+			tmp := filepath.Join(t.TempDir(), "release-asset")
+			if err := os.WriteFile(tmp, asset, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := u.VerifyChecksum(tmp, expectedHex); err != nil {
+				t.Fatalf("VerifyChecksum: %v", err)
+			}
+		})
+	}
+}
+
+// TestUpdateChecksum_FallbackChecksumLine verifies lookup when checksums.sha256
+// lists only the bare filename (second candidate in checksumEntryNamesForGOOS).
+func TestUpdateChecksum_FallbackChecksumLine(t *testing.T) {
+	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	asset := []byte("bare-name-line test")
+	sum := sha256.Sum256(asset)
+	expectedHex := hex.EncodeToString(sum[:])
+	// Only "chatserver.exe", no windows/ prefix — second entry in list must match.
+	checksumData := []byte(fmt.Sprintf("%s  chatserver.exe\n", expectedHex))
+
+	names := checksumEntryNamesForGOOS("windows")
+	parsed, err := u.parseChecksumFileAny(checksumData, names...)
+	if err != nil {
+		t.Fatalf("parseChecksumFileAny: %v", err)
+	}
+	if !strings.EqualFold(parsed, expectedHex) {
+		t.Fatalf("parsed %q, want %q", parsed, expectedHex)
+	}
+
+	tmp := filepath.Join(t.TempDir(), "chatserver.exe")
+	if err := os.WriteFile(tmp, asset, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := u.VerifyChecksum(tmp, expectedHex); err != nil {
+		t.Fatalf("VerifyChecksum: %v", err)
+	}
+}
+
 func TestParseChecksumFile_FindsFile(t *testing.T) {
 	data := []byte("abc123  readme.txt\ndef456  chatserver.exe\nghi789  other.dll\n")
 	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
@@ -262,6 +362,68 @@ func TestParseChecksumFile_FileNotFound(t *testing.T) {
 	_, err := u.ParseChecksumFile(data, "nonexistent.exe")
 	if err == nil {
 		t.Error("expected error for missing file in checksum data, got nil")
+	}
+}
+
+func TestParseChecksumFileAny_FirstMatch(t *testing.T) {
+	data := []byte("aaa  other\nbbb  linux/chatserver-linux-amd64.tar.gz\nccc  chatserver.exe\n")
+	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	h, err := u.parseChecksumFileAny(data, "linux/chatserver-linux-amd64.tar.gz", "chatserver.exe")
+	if err != nil {
+		t.Fatalf("parseChecksumFileAny: %v", err)
+	}
+	if h != "bbb" {
+		t.Errorf("hash = %q, want bbb (linux line first in list)", h)
+	}
+}
+
+func TestServerDownloadAssetName(t *testing.T) {
+	tests := []struct {
+		goos string
+		want string
+	}{
+		{"windows", "chatserver.exe"},
+		{"linux", "chatserver-linux-amd64.tar.gz"},
+		{"darwin", ""},
+		{"freebsd", ""},
+	}
+	for _, tc := range tests {
+		if got := serverDownloadAssetName(tc.goos); got != tc.want {
+			t.Errorf("serverDownloadAssetName(%q) = %q, want %q", tc.goos, got, tc.want)
+		}
+	}
+}
+
+func TestExtractChatserverFromTarGz(t *testing.T) {
+	inner := []byte("#!/bin/fake\n")
+	var gzbuf bytes.Buffer
+	gw := gzip.NewWriter(&gzbuf)
+	tw := tar.NewWriter(gw)
+	hdr := &tar.Header{Name: "chatserver", Mode: 0o755, Size: int64(len(inner)), Typeflag: tar.TypeReg}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(inner); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	tmpDir := t.TempDir()
+	dest := filepath.Join(tmpDir, "chatserver")
+	if err := extractChatserverFromTarGz(bytes.NewReader(gzbuf.Bytes()), dest); err != nil {
+		t.Fatalf("extractChatserverFromTarGz: %v", err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, inner) {
+		t.Errorf("extracted content mismatch")
 	}
 }
 
@@ -378,6 +540,17 @@ func TestDownloadFile_NonOKStatus(t *testing.T) {
 // ─── DownloadAndVerify ───────────────────────────────────────────────────────
 
 func TestDownloadAndVerify_Success(t *testing.T) {
+	switch runtime.GOOS {
+	case "windows":
+		testDownloadAndVerifySuccessWindows(t)
+	case "linux":
+		testDownloadAndVerifySuccessLinux(t)
+	default:
+		t.Skip("no DownloadAndVerify integration case for GOOS=" + runtime.GOOS)
+	}
+}
+
+func testDownloadAndVerifySuccessWindows(t *testing.T) {
 	content := []byte("real binary content for verification")
 	hash := sha256.Sum256(content)
 	checksumHex := hex.EncodeToString(hash[:])
@@ -411,11 +584,79 @@ func TestDownloadAndVerify_Success(t *testing.T) {
 		t.Fatalf("DownloadAndVerify: %v", err)
 	}
 
-	// File should exist and be correct.
 	got, _ := os.ReadFile(dest)
 	if !bytes.Equal(got, content) {
 		t.Errorf("downloaded content mismatch")
 	}
+}
+
+func testDownloadAndVerifySuccessLinux(t *testing.T) {
+	inner := []byte("linux binary payload")
+	tgz := mustBuildChatserverTarGz(t, inner)
+	hash := sha256.Sum256(tgz)
+	checksumHex := hex.EncodeToString(hash[:])
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/download/chatserver-linux-amd64.tar.gz", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(tgz)
+	})
+	mux.HandleFunc("/download/checksums.sha256", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, "%s  linux/chatserver-linux-amd64.tar.gz\n", checksumHex)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	dest := filepath.Join(tmpDir, "chatserver")
+
+	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	u.baseURL = srv.URL
+
+	downloadURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver-linux-amd64.tar.gz"
+	checksumURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/checksums.sha256"
+
+	u.httpClient = &http.Client{
+		Transport: &rewriteTransport{srv.URL},
+	}
+
+	err := u.DownloadAndVerify(context.Background(), downloadURL, checksumURL, dest)
+	if err != nil {
+		t.Fatalf("DownloadAndVerify: %v", err)
+	}
+
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, inner) {
+		t.Errorf("extracted binary mismatch")
+	}
+}
+
+func mustBuildChatserverTarGz(t *testing.T, inner []byte) []byte {
+	t.Helper()
+	var gzbuf bytes.Buffer
+	gw := gzip.NewWriter(&gzbuf)
+	tw := tar.NewWriter(gw)
+	hdr := &tar.Header{
+		Name:     "chatserver",
+		Mode:     0o755,
+		Size:     int64(len(inner)),
+		Typeflag: tar.TypeReg,
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(inner); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return gzbuf.Bytes()
 }
 
 func TestDownloadAndVerify_InvalidDownloadURL(t *testing.T) {
@@ -428,7 +669,7 @@ func TestDownloadAndVerify_InvalidDownloadURL(t *testing.T) {
 
 func TestDownloadAndVerify_InvalidChecksumURL(t *testing.T) {
 	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
-	downloadURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe"
+	downloadURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/" + serverDownloadAssetName(runtime.GOOS)
 	err := u.DownloadAndVerify(context.Background(), downloadURL, "https://evil.com/sum", "/tmp/out")
 	if err == nil {
 		t.Error("DownloadAndVerify should reject invalid checksum URL")
@@ -436,6 +677,17 @@ func TestDownloadAndVerify_InvalidChecksumURL(t *testing.T) {
 }
 
 func TestDownloadAndVerify_ChecksumMismatch(t *testing.T) {
+	switch runtime.GOOS {
+	case "windows":
+		testDownloadAndVerifyChecksumMismatchWindows(t)
+	case "linux":
+		testDownloadAndVerifyChecksumMismatchLinux(t)
+	default:
+		t.Skip("no checksum mismatch case for GOOS=" + runtime.GOOS)
+	}
+}
+
+func testDownloadAndVerifyChecksumMismatchWindows(t *testing.T) {
 	content := []byte("binary content")
 	wrongChecksum := "0000000000000000000000000000000000000000000000000000000000000000"
 
@@ -466,6 +718,39 @@ func TestDownloadAndVerify_ChecksumMismatch(t *testing.T) {
 	// File should be removed after mismatch.
 	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
 		t.Error("file should be removed after checksum mismatch")
+	}
+}
+
+func testDownloadAndVerifyChecksumMismatchLinux(t *testing.T) {
+	tgz := mustBuildChatserverTarGz(t, []byte("x"))
+	wrongChecksum := "0000000000000000000000000000000000000000000000000000000000000000"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/download/chatserver-linux-amd64.tar.gz", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(tgz)
+	})
+	mux.HandleFunc("/download/checksums.sha256", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, "%s  linux/chatserver-linux-amd64.tar.gz\n", wrongChecksum)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	dest := filepath.Join(tmpDir, "chatserver")
+
+	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	u.httpClient = &http.Client{Transport: &rewriteTransport{srv.URL}}
+
+	downloadURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver-linux-amd64.tar.gz"
+	checksumURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/checksums.sha256"
+
+	err := u.DownloadAndVerify(context.Background(), downloadURL, checksumURL, dest)
+	if err == nil {
+		t.Error("DownloadAndVerify should fail on checksum mismatch")
+	}
+
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Error("extracted file should not exist after checksum mismatch")
 	}
 }
 

@@ -3,6 +3,8 @@
 package updater
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,6 +15,7 @@ import (
 	neturl "net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -25,8 +28,10 @@ const (
 	defaultBaseURL = "https://api.github.com"
 	cacheTTL       = 1 * time.Hour
 	errorCacheTTL  = 5 * time.Minute
-	binaryAsset    = "chatserver.exe"
 	checksumAsset  = "checksums.sha256"
+
+	windowsServerBinary = "chatserver.exe"
+	linuxServerArchive  = "chatserver-linux-amd64.tar.gz"
 )
 
 // UpdateInfo holds the result of a version check.
@@ -189,12 +194,13 @@ func (u *Updater) fetchLatestRelease(ctx context.Context) (UpdateInfo, error) {
 
 	var downloadURL, checksumURL string
 	assets := make([]Asset, 0, len(release.Assets))
+	wantBinary := serverDownloadAssetName(runtime.GOOS)
 	for _, asset := range release.Assets {
 		assets = append(assets, Asset{
 			Name:        asset.Name,
 			DownloadURL: asset.BrowserDownloadURL,
 		})
-		if strings.EqualFold(asset.Name, binaryAsset) {
+		if wantBinary != "" && strings.EqualFold(asset.Name, wantBinary) {
 			downloadURL = asset.BrowserDownloadURL
 		} else if strings.EqualFold(asset.Name, checksumAsset) {
 			checksumURL = asset.BrowserDownloadURL
@@ -223,9 +229,11 @@ func (u *Updater) ValidateDownloadURL(url string) error {
 	return nil
 }
 
-// DownloadAndVerify downloads the binary from downloadURL, fetches the
-// checksum file from checksumURL, and verifies the SHA256 hash matches.
-// On checksum mismatch the downloaded file is removed.
+// DownloadAndVerify downloads the release artifact from downloadURL, fetches
+// the checksum file from checksumURL, and verifies the SHA256 hash matches.
+// On Windows the asset is a single executable; on Linux it is a tar.gz
+// archive containing a "chatserver" binary, which is extracted to destPath.
+// On checksum mismatch, partial files are removed.
 func (u *Updater) DownloadAndVerify(ctx context.Context, downloadURL, checksumURL, destPath string) error {
 	if err := u.ValidateDownloadURL(downloadURL); err != nil {
 		return err
@@ -234,31 +242,166 @@ func (u *Updater) DownloadAndVerify(ctx context.Context, downloadURL, checksumUR
 		return fmt.Errorf("validating checksum URL: %w", err)
 	}
 
-	// Fetch checksum file.
 	checksumData, err := u.fetchBody(ctx, checksumURL)
 	if err != nil {
 		return fmt.Errorf("fetching checksums: %w", err)
 	}
 
-	destFilename := filepath.Base(destPath)
-	expectedHash, err := u.ParseChecksumFile(checksumData, destFilename)
+	goos := runtime.GOOS
+	names := checksumEntryNamesForGOOS(goos)
+	if len(names) == 0 {
+		return fmt.Errorf("server auto-update is not supported on %s", goos)
+	}
+	expectedHash, err := u.parseChecksumFileAny(checksumData, names...)
 	if err != nil {
 		return fmt.Errorf("parsing checksum file: %w", err)
 	}
 
-	// Download the binary.
+	switch goos {
+	case "windows":
+		return u.downloadWindowsBinaryAndVerify(ctx, downloadURL, destPath, expectedHash)
+	case "linux":
+		return u.downloadLinuxTarballAndVerify(ctx, downloadURL, destPath, expectedHash)
+	default:
+		return fmt.Errorf("server auto-update is not supported on %s", goos)
+	}
+}
+
+func (u *Updater) downloadWindowsBinaryAndVerify(ctx context.Context, downloadURL, destPath, expectedHash string) error {
 	if err := u.downloadFile(ctx, downloadURL, destPath); err != nil {
 		return fmt.Errorf("downloading binary: %w", err)
 	}
-
-	// Verify hash.
 	if err := u.VerifyChecksum(destPath, expectedHash); err != nil {
-		// Remove the invalid file.
 		_ = os.Remove(destPath)
 		return err
 	}
-
 	return nil
+}
+
+func (u *Updater) downloadLinuxTarballAndVerify(ctx context.Context, downloadURL, destPath, expectedHash string) error {
+	tarPath := destPath + ".tar.gz.partial"
+	defer func() { _ = os.Remove(tarPath) }()
+
+	if err := u.downloadFile(ctx, downloadURL, tarPath); err != nil {
+		return fmt.Errorf("downloading archive: %w", err)
+	}
+	if err := u.VerifyChecksum(tarPath, expectedHash); err != nil {
+		return err
+	}
+
+	f, err := os.Open(tarPath)
+	if err != nil {
+		return fmt.Errorf("opening archive: %w", err)
+	}
+	defer f.Close() //nolint:errcheck
+
+	if err := extractChatserverFromTarGz(f, destPath); err != nil {
+		_ = os.Remove(destPath)
+		return fmt.Errorf("extracting archive: %w", err)
+	}
+	if err := os.Chmod(destPath, 0o755); err != nil {
+		return fmt.Errorf("chmod binary: %w", err)
+	}
+	return nil
+}
+
+func extractChatserverFromTarGz(r io.Reader, destPath string) error {
+	gr, err := gzip.NewReader(r)
+	if err != nil {
+		return fmt.Errorf("gzip: %w", err)
+	}
+	defer gr.Close() //nolint:errcheck
+
+	tr := tar.NewReader(gr)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return fmt.Errorf("archive contains no file named chatserver")
+		}
+		if err != nil {
+			return fmt.Errorf("tar: %w", err)
+		}
+		skipBody := func() error {
+			if _, err := io.Copy(io.Discard, io.LimitReader(tr, hdr.Size)); err != nil {
+				return err
+			}
+			return nil
+		}
+		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
+			if err := skipBody(); err != nil {
+				return err
+			}
+			continue
+		}
+		if strings.Contains(hdr.Name, "..") {
+			if err := skipBody(); err != nil {
+				return err
+			}
+			continue
+		}
+		if filepath.Base(hdr.Name) != "chatserver" {
+			if err := skipBody(); err != nil {
+				return err
+			}
+			continue
+		}
+
+		out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+		if err != nil {
+			return err
+		}
+		n, copyErr := io.Copy(out, io.LimitReader(tr, hdr.Size))
+		closeErr := out.Close()
+		if copyErr != nil {
+			_ = os.Remove(destPath)
+			return fmt.Errorf("writing binary: %w", copyErr)
+		}
+		if closeErr != nil {
+			_ = os.Remove(destPath)
+			return closeErr
+		}
+		if n != hdr.Size {
+			_ = os.Remove(destPath)
+			return fmt.Errorf("incomplete tar entry (%d of %d bytes)", n, hdr.Size)
+		}
+		return nil
+	}
+}
+
+// serverDownloadAssetName returns the GitHub release asset file name for the
+// server binary on the given GOOS (windows, linux). Other values return "".
+func serverDownloadAssetName(goos string) string {
+	switch goos {
+	case "windows":
+		return windowsServerBinary
+	case "linux":
+		return linuxServerArchive
+	default:
+		return ""
+	}
+}
+
+// checksumEntryNamesForGOOS returns sha256sum line suffixes to look up in
+// checksums.sha256 (matches GitHub Actions release layout).
+func checksumEntryNamesForGOOS(goos string) []string {
+	switch goos {
+	case "windows":
+		return []string{"windows/chatserver.exe", "chatserver.exe"}
+	case "linux":
+		return []string{"linux/chatserver-linux-amd64.tar.gz", "chatserver-linux-amd64.tar.gz"}
+	default:
+		return nil
+	}
+}
+
+func (u *Updater) parseChecksumFileAny(data []byte, names ...string) (string, error) {
+	for _, name := range names {
+		hash, err := u.ParseChecksumFile(data, name)
+		if err == nil {
+			return hash, nil
+		}
+	}
+	return "", fmt.Errorf("no checksum line for any of: %s", strings.Join(names, ", "))
 }
 
 // VerifyChecksum computes the SHA256 hash of the file at filePath and

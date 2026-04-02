@@ -13,8 +13,16 @@ concurrency:
 
 jobs:
   server-build-test:
-    name: Server Build & Test
-    runs-on: windows-latest
+    name: Server Build & Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            binary: chatserver.exe
+          - os: ubuntu-latest
+            binary: chatserver
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: Server/
@@ -27,7 +35,7 @@ jobs:
           cache-dependency-path: Server/go.sum
 
       - name: Build server
-        run: go build -o chatserver.exe -ldflags "-s -w" .
+        run: go build -o ${{ matrix.binary }} -ldflags "-s -w" .
 
       - name: Go vulnerability check
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4 && govulncheck ./...
@@ -42,7 +50,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: go-coverage
+          name: go-coverage-${{ matrix.os }}
           path: Server/coverage.out
           retention-days: 7
 

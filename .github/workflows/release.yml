@@ -6,17 +6,13 @@ on:
       - "v*"
 
 jobs:
-  release:
-    name: Build & Release
+  release-client:
+    name: Build Tauri (Windows)
     runs-on: windows-latest
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.25"
 
       - uses: actions/setup-node@v4
         with:
@@ -32,16 +28,6 @@ jobs:
         with:
           workspaces: Client/tauri-client/src-tauri
 
-      - name: Extract version from tag
-        shell: bash
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-
-      - name: Build server
-        shell: bash
-        run: cd Server && go build -o chatserver.exe -ldflags "-s -w -X main.version=$VERSION" .
-
       - name: Install npm dependencies
         working-directory: Client/tauri-client
         run: npm ci
@@ -53,62 +39,116 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build
 
-      - name: Locate artifacts
-        id: artifacts
+      - name: Stage Windows release assets
         shell: bash
         run: |
+          mkdir -p release-staging
           NSIS_DIR="Client/tauri-client/src-tauri/target/release/bundle/nsis"
           INSTALLER=$(find "$NSIS_DIR" -name "*.exe" | head -1)
-          echo "installer_path=$INSTALLER" >> "$GITHUB_OUTPUT"
-          echo "installer_name=$(basename $INSTALLER)" >> "$GITHUB_OUTPUT"
-          # Updater artifacts (produced when TAURI_SIGNING_PRIVATE_KEY is set)
+          cp "$INSTALLER" release-staging/
           NSIS_ZIP=$(find "$NSIS_DIR" -name "*_x64-setup.nsis.zip" ! -name "*.sig" | head -1)
+          if [ -n "$NSIS_ZIP" ] && [ -f "$NSIS_ZIP" ]; then cp "$NSIS_ZIP" release-staging/; fi
           NSIS_SIG=$(find "$NSIS_DIR" -name "*_x64-setup.nsis.zip.sig" | head -1)
-          echo "nsis_zip=${NSIS_ZIP:-}" >> "$GITHUB_OUTPUT"
-          echo "nsis_sig=${NSIS_SIG:-}" >> "$GITHUB_OUTPUT"
+          if [ -n "$NSIS_SIG" ] && [ -f "$NSIS_SIG" ]; then cp "$NSIS_SIG" release-staging/; fi
+
+      - name: Upload Windows release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-assets
+          path: release-staging/
+
+  release-server:
+    name: Build server (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: server-windows
+          - os: ubuntu-latest
+            artifact: server-linux
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Extract version from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Build server (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: cd Server && go build -o chatserver.exe -ldflags "-s -w -X main.version=$VERSION" .
+
+      - name: Build server (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: Server
+        env:
+          CGO_ENABLED: "0"
+        run: go build -o chatserver -ldflags "-s -w -X main.version=$VERSION" .
+
+      - name: Create tar.gz (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: Server
+        run: tar czf ../chatserver-linux-amd64.tar.gz chatserver
+
+      - name: Upload Windows binary
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: Server/chatserver.exe
+
+      - name: Upload Linux archive
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: chatserver-linux-amd64.tar.gz
+
+  publish:
+    name: Publish GitHub Release
+    needs: [release-client, release-server]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows client assets
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release-assets
+          path: windows
+
+      - name: Download Windows server binary
+        uses: actions/download-artifact@v4
+        with:
+          name: server-windows
+          path: windows
+
+      - name: Download Linux archive
+        uses: actions/download-artifact@v4
+        with:
+          name: server-linux
+          path: linux
 
       - name: Generate SHA256 checksums
-        shell: pwsh
         run: |
-          $lines = @()
-          $serverHash = (Get-FileHash -Path Server/chatserver.exe -Algorithm SHA256).Hash.ToLower()
-          $lines += "$serverHash  chatserver.exe"
-          $installerPath = "${{ steps.artifacts.outputs.installer_path }}"
-          $installerName = "${{ steps.artifacts.outputs.installer_name }}"
-          $clientHash = (Get-FileHash -Path $installerPath -Algorithm SHA256).Hash.ToLower()
-          $lines += "$clientHash  $installerName"
-          $nsisZip = "${{ steps.artifacts.outputs.nsis_zip }}"
-          if ($nsisZip -and (Test-Path $nsisZip)) {
-            $zipName = Split-Path $nsisZip -Leaf
-            $zipHash = (Get-FileHash -Path $nsisZip -Algorithm SHA256).Hash.ToLower()
-            $lines += "$zipHash  $zipName"
-          }
-          $lines -join "`n" | Out-File -FilePath checksums.sha256 -Encoding utf8 -NoNewline
-
-      - name: Install root dependencies (changelogen)
-        run: npm ci
-
-      - name: Generate changelog
-        shell: bash
-        run: npx changelogen --output CHANGELOG.md
+          find windows linux -type f -exec sha256sum {} \; > checksums.sha256
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
         run: |
-          ASSETS=(
-            Server/chatserver.exe
-            "${{ steps.artifacts.outputs.installer_path }}"
-            checksums.sha256
-          )
-          # Include updater artifacts if signing key was available
-          if [ -n "${{ steps.artifacts.outputs.nsis_zip }}" ]; then
-            ASSETS+=("${{ steps.artifacts.outputs.nsis_zip }}")
-          fi
-          if [ -n "${{ steps.artifacts.outputs.nsis_sig }}" ]; then
-            ASSETS+=("${{ steps.artifacts.outputs.nsis_sig }}")
-          fi
-          gh release create ${{ github.ref_name }} \
-            --notes-file CHANGELOG.md \
-            "${ASSETS[@]}"
+          mapfile -t assets < <(find windows linux -type f)
+          assets+=(checksums.sha256)
+          gh release create "${{ github.ref_name }}" \
+            --generate-notes \
+            "${assets[@]}"
