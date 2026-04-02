@@ -14,13 +14,13 @@ import (
 // NewAdminAPI returns a chi router with all /admin/api/* routes. All routes
 // are protected by adminAuthMiddleware which requires the ADMINISTRATOR bit,
 // except for the setup endpoints which are unauthenticated.
-func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer) http.Handler {
+func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string) http.Handler {
 	r := chi.NewRouter()
 
 	// Setup endpoints — unauthenticated, only functional when no users exist.
 	setupLimiter := auth.NewRateLimiter()
 	r.Get("/setup/status", handleSetupStatus(database))
-	r.Post("/setup", handleSetup(database, setupLimiter))
+	r.Post("/setup", handleSetup(database, setupLimiter, allowedOrigins))
 
 	// SSE log stream — auth is via a single-use ticket from POST /logs/ticket.
 	// EventSource cannot send Authorization headers, so the client first

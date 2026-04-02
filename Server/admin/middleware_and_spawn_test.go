@@ -248,7 +248,7 @@ func TestOwnerOnlyMiddleware_OwnerPassesThrough(t *testing.T) {
 // role_id has been set to a nonexistent value returns 401.
 func TestAdminAuthMiddleware_RoleNotFound(t *testing.T) {
 	database := openWhiteboxTestDB(t)
-	handler := NewAdminAPI(database, "1.0.0", nil, nil, nil)
+	handler := NewAdminAPI(database, "1.0.0", nil, nil, nil, nil)
 
 	uid, err := database.CreateUser("noroleuser", "$2a$12$x", 1)
 	if err != nil {

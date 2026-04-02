@@ -10,7 +10,7 @@ import (
 
 func TestSetupStatus_NeedsSetup(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil)
 
 	rr := doRequest(t, handler, "GET", "/setup/status", "", nil)
 	if rr.Code != http.StatusOK {
@@ -31,7 +31,7 @@ func TestSetupStatus_NeedsSetup(t *testing.T) {
 func TestSetupStatus_NoSetupNeeded(t *testing.T) {
 	database := openAdminTestDB(t)
 	createAdminUser(t, database) // Create a user first
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil)
 
 	rr := doRequest(t, handler, "GET", "/setup/status", "", nil)
 	if rr.Code != http.StatusOK {
@@ -51,7 +51,7 @@ func TestSetupStatus_NoSetupNeeded(t *testing.T) {
 
 func TestSetup_CreatesOwner(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil)
 
 	rr := doRequest(t, handler, "POST", "/setup", "", map[string]string{
 		"username": "myadmin",
@@ -96,7 +96,7 @@ func TestSetup_CreatesOwner(t *testing.T) {
 
 func TestSetup_BlockedAfterFirstUser(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil)
 
 	// First setup succeeds.
 	rr := doRequest(t, handler, "POST", "/setup", "", map[string]string{
@@ -119,7 +119,7 @@ func TestSetup_BlockedAfterFirstUser(t *testing.T) {
 
 func TestSetup_WeakPassword(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil)
 
 	rr := doRequest(t, handler, "POST", "/setup", "", map[string]string{
 		"username": "admin",
@@ -132,7 +132,7 @@ func TestSetup_WeakPassword(t *testing.T) {
 
 func TestSetup_MissingFields(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil)
 
 	rr := doRequest(t, handler, "POST", "/setup", "", map[string]string{
 		"username": "",

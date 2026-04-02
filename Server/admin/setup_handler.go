@@ -52,8 +52,18 @@ func handleSetupStatus(database *db.DB) http.HandlerFunc {
 
 // handleSetup creates the first owner account. It only works when no users
 // exist in the database, preventing abuse after initial setup.
-func handleSetup(database *db.DB, limiter *auth.RateLimiter) http.HandlerFunc {
+func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// CSRF protection: reject cross-origin requests (BUG-097).
+		// If Origin is present and doesn't match allowed origins, deny.
+		// No Origin header = same-origin or non-browser client (allow).
+		if origin := r.Header.Get("Origin"); origin != "" {
+			if !isSetupOriginAllowed(origin, allowedOrigins) {
+				writeErr(w, http.StatusForbidden, "FORBIDDEN", "cross-origin setup request blocked")
+				return
+			}
+		}
+
 		// Rate limit: 5 attempts per minute per IP.
 		// Strip the port so that different source ports from the same IP
 		// are correctly grouped under a single rate-limit bucket.
@@ -154,4 +164,16 @@ func handleSetup(database *db.DB, limiter *auth.RateLimiter) http.HandlerFunc {
 			InviteCode: inviteCode,
 		})
 	}
+}
+
+// isSetupOriginAllowed checks if the given origin is permitted by the
+// configured allowed_origins list. Wildcard "*" allows any origin.
+// An empty list denies all cross-origin requests (safe default).
+func isSetupOriginAllowed(origin string, allowed []string) bool {
+	for _, a := range allowed {
+		if a == "*" || strings.EqualFold(a, origin) {
+			return true
+		}
+	}
+	return false
 }
