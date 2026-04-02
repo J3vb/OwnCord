@@ -124,12 +124,22 @@ export class AudioPipeline {
       this.audioPipelineAnalyser = analyser;
       this.audioPipelineDest = dest;
 
-      // Replace the WebRTC sender's track with the pipeline output
+      // Replace the WebRTC sender's track with the pipeline output.
+      // BUG-106: Guard with generation counter to discard stale replaceTrack
+      // if teardown races ahead of this setup.
       const adjustedTrack = dest.stream.getAudioTracks()[0];
+      const gen = this._pipelineGeneration;
       if (adjustedTrack !== undefined && micPub.track.sender) {
-        void micPub.track.sender.replaceTrack(adjustedTrack).catch((err) => {
-          log.warn("Failed to replace sender track with pipeline output", err);
-        });
+        void micPub.track.sender
+          .replaceTrack(adjustedTrack)
+          .then(() => {
+            if (this._pipelineGeneration !== gen) {
+              log.debug("replaceTrack (setup) completed after generation change — stale");
+            }
+          })
+          .catch((err) => {
+            log.warn("Failed to replace sender track with pipeline output", err);
+          });
       }
 
       log.info("Audio pipeline created", { inputGain: this.currentInputGain });
@@ -146,13 +156,21 @@ export class AudioPipeline {
     this._pipelineGeneration++;
     this.stopVadPolling();
 
-    // Restore original mic track on the WebRTC sender
+    // Restore original mic track on the WebRTC sender.
+    // BUG-106: Guard with generation counter so a stale teardown replaceTrack
+    // cannot overwrite a subsequent setup's pipeline track.
+    const gen = this._pipelineGeneration;
     if (this.room !== null) {
       const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
       if (micPub?.track?.sender !== undefined) {
         const originalTrack = micPub.track.mediaStreamTrack;
         void micPub.track.sender
           .replaceTrack(originalTrack)
+          .then(() => {
+            if (this._pipelineGeneration !== gen) {
+              log.debug("replaceTrack (teardown) completed after generation change — stale");
+            }
+          })
           .catch((err) => log.debug("Failed to replace track during teardown", err));
       }
     }
