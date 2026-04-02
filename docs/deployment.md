@@ -183,8 +183,10 @@ Restoring replaces the live database file. A pre-restore safety backup is create
 The server checks GitHub Releases for updates:
 - Compares semver versions
 - Results are cached for 1 hour
-- Downloads `chatserver.exe` with SHA256 checksum verification
-- On restart, the old binary is cleaned up
+- Downloads `chatserver.exe` with detached Ed25519/minisign signature verification
+- Verifies a signed `server-update-manifest.json` that binds the binary hash to the release version
+- Cross-checks the binary SHA256 against `checksums.sha256`
+- On restart, the current binary is rotated to `chatserver.exe.old` before the new binary takes its place
 
 Set `github.token` in config for higher API rate limits (5000/hr vs 60/hr unauthenticated).
 
