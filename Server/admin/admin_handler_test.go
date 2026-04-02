@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -162,7 +163,11 @@ func TestOwnerOnlyMiddleware_OwnerAllowed(t *testing.T) {
 	if err := os.Chdir(tmpDir); err != nil {
 		t.Fatalf("os.Chdir: %v", err)
 	}
-	t.Cleanup(func() { _ = os.Chdir(origDir) })
+	admin.SetBackupBaseDir(filepath.Join(tmpDir, "data", "backups"))
+	t.Cleanup(func() {
+		_ = os.Chdir(origDir)
+		admin.SetBackupBaseDir(filepath.Join(origDir, "data", "backups"))
+	})
 
 	w := doRequest(t, handler, http.MethodPost, "/backup", ownerToken, nil)
 

@@ -29,7 +29,7 @@ func newTestStorage(t *testing.T) *storage.Storage {
 // TestSave_ValidUUID verifies that a normal UUID-style filename is accepted.
 func TestSave_ValidUUID(t *testing.T) {
 	s := newTestStorage(t)
-	err := s.Save("550e8400-e29b-41d4-a716-446655440000", strings.NewReader("hello"))
+	_, err := s.Save("550e8400-e29b-41d4-a716-446655440000", strings.NewReader("hello"))
 	if err != nil {
 		t.Errorf("Save valid uuid: unexpected error: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestSave_ValidUUID(t *testing.T) {
 // TestSave_PathTraversalDotDot rejects filenames containing "..".
 func TestSave_PathTraversalDotDot(t *testing.T) {
 	s := newTestStorage(t)
-	err := s.Save("../../etc/passwd", strings.NewReader("evil"))
+	_, err := s.Save("../../etc/passwd", strings.NewReader("evil"))
 	if err == nil {
 		t.Error("Save('../../etc/passwd') returned nil error, want path traversal error")
 	}
@@ -47,7 +47,7 @@ func TestSave_PathTraversalDotDot(t *testing.T) {
 // TestSave_DotDotFilename rejects the literal string "..".
 func TestSave_DotDotFilename(t *testing.T) {
 	s := newTestStorage(t)
-	err := s.Save("..", strings.NewReader("evil"))
+	_, err := s.Save("..", strings.NewReader("evil"))
 	if err == nil {
 		t.Error("Save('..') returned nil error, want error")
 	}
@@ -56,7 +56,7 @@ func TestSave_DotDotFilename(t *testing.T) {
 // TestSave_SingleDotFilename rejects the literal string ".".
 func TestSave_SingleDotFilename(t *testing.T) {
 	s := newTestStorage(t)
-	err := s.Save(".", strings.NewReader("evil"))
+	_, err := s.Save(".", strings.NewReader("evil"))
 	if err == nil {
 		t.Error("Save('.') returned nil error, want error")
 	}
@@ -65,7 +65,7 @@ func TestSave_SingleDotFilename(t *testing.T) {
 // TestSave_EmptyFilename rejects an empty string.
 func TestSave_EmptyFilename(t *testing.T) {
 	s := newTestStorage(t)
-	err := s.Save("", strings.NewReader("data"))
+	_, err := s.Save("", strings.NewReader("data"))
 	if err == nil {
 		t.Error("Save('') returned nil error, want error")
 	}
@@ -74,7 +74,7 @@ func TestSave_EmptyFilename(t *testing.T) {
 // TestSave_DotPrefixFilename rejects filenames starting with ".".
 func TestSave_DotPrefixFilename(t *testing.T) {
 	s := newTestStorage(t)
-	err := s.Save(".hidden", strings.NewReader("data"))
+	_, err := s.Save(".hidden", strings.NewReader("data"))
 	if err == nil {
 		t.Error("Save('.hidden') returned nil error, want error")
 	}
@@ -83,7 +83,7 @@ func TestSave_DotPrefixFilename(t *testing.T) {
 // TestSave_ForwardSlashRejected rejects filenames containing a forward slash.
 func TestSave_ForwardSlashRejected(t *testing.T) {
 	s := newTestStorage(t)
-	err := s.Save("sub/file", strings.NewReader("data"))
+	_, err := s.Save("sub/file", strings.NewReader("data"))
 	if err == nil {
 		t.Error("Save('sub/file') returned nil error, want path separator error")
 	}
@@ -92,7 +92,7 @@ func TestSave_ForwardSlashRejected(t *testing.T) {
 // TestSave_BackslashRejected rejects filenames containing a backslash.
 func TestSave_BackslashRejected(t *testing.T) {
 	s := newTestStorage(t)
-	err := s.Save(`sub\file`, strings.NewReader("data"))
+	_, err := s.Save(`sub\file`, strings.NewReader("data"))
 	if err == nil {
 		t.Error(`Save('sub\file') returned nil error, want path separator error`)
 	}
@@ -105,7 +105,7 @@ func TestSave_ResolvedPathStaysInDir(t *testing.T) {
 	s, _ := storage.New(dir, 10)
 
 	filename := "valid-file.dat"
-	if err := s.Save(filename, strings.NewReader("content")); err != nil {
+	if _, err := s.Save(filename, strings.NewReader("content")); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -118,7 +118,7 @@ func TestSave_ResolvedPathStaysInDir(t *testing.T) {
 // TestDelete_ValidUUID verifies that a saved file can be deleted by its UUID.
 func TestDelete_ValidUUID(t *testing.T) {
 	s := newTestStorage(t)
-	if err := s.Save("abc123", strings.NewReader("data")); err != nil {
+	if _, err := s.Save("abc123", strings.NewReader("data")); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	if err := s.Delete("abc123"); err != nil {
@@ -163,7 +163,7 @@ func TestDelete_DotPrefixFilename(t *testing.T) {
 func TestOpen_ValidUUID(t *testing.T) {
 	s := newTestStorage(t)
 	content := "hello storage"
-	if err := s.Save("myfile", strings.NewReader(content)); err != nil {
+	if _, err := s.Save("myfile", strings.NewReader(content)); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -227,7 +227,7 @@ func TestOpen_ForwardSlashRejected(t *testing.T) {
 func TestSave_RoundTrip(t *testing.T) {
 	s := newTestStorage(t)
 	payload := bytes.Repeat([]byte("abcdef"), 1000) // 6 KB
-	if err := s.Save("roundtrip", bytes.NewReader(payload)); err != nil {
+	if _, err := s.Save("roundtrip", bytes.NewReader(payload)); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -343,7 +343,7 @@ func TestSave_BlocksExecutable(t *testing.T) {
 	s := newTestStorage(t)
 	// Construct content with PE magic followed by padding.
 	content := append([]byte("MZ"), make([]byte, 100)...)
-	err := s.Save("malware.exe", bytes.NewReader(content))
+	_, err := s.Save("malware.exe", bytes.NewReader(content))
 	if err == nil {
 		t.Error("Save(PE executable) = nil, want error")
 	}
@@ -353,7 +353,7 @@ func TestSave_BlocksExecutable(t *testing.T) {
 func TestSave_BlocksELF(t *testing.T) {
 	s := newTestStorage(t)
 	content := append([]byte("\x7fELF"), make([]byte, 100)...)
-	err := s.Save("linux-binary", bytes.NewReader(content))
+	_, err := s.Save("linux-binary", bytes.NewReader(content))
 	if err == nil {
 		t.Error("Save(ELF binary) = nil, want error")
 	}
@@ -363,7 +363,7 @@ func TestSave_BlocksELF(t *testing.T) {
 func TestSave_BlocksShellScript(t *testing.T) {
 	s := newTestStorage(t)
 	content := []byte("#!/bin/bash\nrm -rf /\n")
-	err := s.Save("nasty.sh", bytes.NewReader(content))
+	_, err := s.Save("nasty.sh", bytes.NewReader(content))
 	if err == nil {
 		t.Error("Save(shell script) = nil, want error")
 	}
@@ -373,7 +373,7 @@ func TestSave_BlocksShellScript(t *testing.T) {
 func TestSave_AllowsPNG(t *testing.T) {
 	s := newTestStorage(t)
 	content := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 100)...)
-	err := s.Save("image.png", bytes.NewReader(content))
+	_, err := s.Save("image.png", bytes.NewReader(content))
 	if err != nil {
 		t.Errorf("Save(PNG) = %v, want nil", err)
 	}
@@ -382,7 +382,7 @@ func TestSave_AllowsPNG(t *testing.T) {
 // TestSave_EmptyFileAllowed verifies that an empty file (no content) is accepted.
 func TestSave_EmptyFileAllowed(t *testing.T) {
 	s := newTestStorage(t)
-	err := s.Save("empty-file", bytes.NewReader([]byte{}))
+	_, err := s.Save("empty-file", bytes.NewReader([]byte{}))
 	if err != nil {
 		t.Errorf("Save(empty) = %v, want nil", err)
 	}
@@ -424,7 +424,7 @@ func TestSave_ExceedsMaxSize(t *testing.T) {
 
 	// Create reader with >1MB of data.
 	bigData := bytes.Repeat([]byte("x"), 1024*1024+100)
-	err = s.Save("big-file", bytes.NewReader(bigData))
+	_, err = s.Save("big-file", bytes.NewReader(bigData))
 	if err == nil {
 		t.Error("Save should reject file exceeding max size")
 	}
@@ -437,7 +437,7 @@ func TestSave_ExceedsMaxSize(t *testing.T) {
 
 func TestSave_ReadError(t *testing.T) {
 	s := newTestStorage(t)
-	err := s.Save("read-err", &failReader{})
+	_, err := s.Save("read-err", &failReader{})
 	if err == nil {
 		t.Error("Save with failing reader should return error")
 	}
@@ -453,7 +453,7 @@ func (f *failReader) Read([]byte) (int, error) {
 
 func TestSave_HiddenFilename(t *testing.T) {
 	s := newTestStorage(t)
-	err := s.Save(".hidden", strings.NewReader("data"))
+	_, err := s.Save(".hidden", strings.NewReader("data"))
 	if err == nil {
 		t.Error("Save should reject hidden filenames starting with '.'")
 	}

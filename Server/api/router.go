@@ -93,6 +93,12 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// be passed as a DMBroadcaster for real-time close events.
 
 	// File upload and serving routes.
+	// L12: verify config upload size fits within the HTTP body limit.
+	if int64(cfg.Upload.MaxSizeMB)<<20 > uploadMaxBodySize {
+		slog.Warn("upload.max_size_mb exceeds HTTP body limit, capping",
+			"configured_mb", cfg.Upload.MaxSizeMB,
+			"http_limit_bytes", uploadMaxBodySize)
+	}
 	store, storeErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
 	if storeErr != nil {
 		slog.Error("failed to create file storage", "error", storeErr)

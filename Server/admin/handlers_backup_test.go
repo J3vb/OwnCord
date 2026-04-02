@@ -24,7 +24,12 @@ func chdirTemp(t *testing.T) string {
 	if err := os.Chdir(tmpDir); err != nil {
 		t.Fatalf("os.Chdir(%q): %v", tmpDir, err)
 	}
-	t.Cleanup(func() { _ = os.Chdir(origDir) })
+	// Update the package-level backup dir to match the new CWD (L14).
+	admin.SetBackupBaseDir(filepath.Join(tmpDir, "data", "backups"))
+	t.Cleanup(func() {
+		_ = os.Chdir(origDir)
+		admin.SetBackupBaseDir(filepath.Join(origDir, "data", "backups"))
+	})
 	return tmpDir
 }
 

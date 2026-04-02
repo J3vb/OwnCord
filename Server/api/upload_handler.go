@@ -147,11 +147,12 @@ func handleUpload(database *db.DB, store *storage.Storage, limiter *auth.RateLim
 		mime := detectedMime
 
 		// Store file on disk (validates file type via magic bytes).
-		if err := store.Save(fileID, file); err != nil {
-			slog.Warn("file upload rejected", "error", err)
+		writtenBytes, saveErr := store.Save(fileID, file)
+		if saveErr != nil {
+			slog.Warn("file upload rejected", "error", saveErr)
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error:   "BAD_REQUEST",
-				Message: fmt.Sprintf("upload rejected: %s", err),
+				Message: fmt.Sprintf("upload rejected: %s", saveErr),
 			})
 			return
 		}
@@ -176,7 +177,7 @@ func handleUpload(database *db.DB, store *storage.Storage, limiter *auth.RateLim
 		// Insert attachment record in DB (unlinked — message_id is NULL).
 		user, _ = r.Context().Value(UserKey).(*db.User)
 		safeFilename := sanitizeUploadFilename(header.Filename)
-		if err := database.CreateAttachment(fileID, user.ID, safeFilename, fileID, mime, header.Size, width, height); err != nil {
+		if err := database.CreateAttachment(fileID, user.ID, safeFilename, fileID, mime, writtenBytes, width, height); err != nil {
 			// Clean up stored file on DB failure.
 			_ = store.Delete(fileID)
 			slog.Error("failed to create attachment record", "error", err)
@@ -187,12 +188,12 @@ func handleUpload(database *db.DB, store *storage.Storage, limiter *auth.RateLim
 			return
 		}
 
-		slog.Info("file uploaded", "id", fileID, "filename", safeFilename, "size", header.Size, "mime", mime)
+		slog.Info("file uploaded", "id", fileID, "filename", safeFilename, "size", writtenBytes, "mime", mime)
 
 		writeJSON(w, http.StatusCreated, uploadResponse{
 			ID:       fileID,
 			Filename: safeFilename,
-			Size:     header.Size,
+			Size:     writtenBytes,
 			Mime:     mime,
 			URL:      "/api/v1/files/" + fileID,
 			Width:    width,

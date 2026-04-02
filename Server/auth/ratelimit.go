@@ -30,6 +30,11 @@ type LockoutPersister interface {
 // RateLimiter is an in-memory, thread-safe sliding-window rate limiter with
 // optional IP lockout support. When a LockoutStore is provided, lockout
 // entries are persisted so they survive server restarts.
+//
+// NOTE (L2): The sliding-window counters and the PartialAuthStore /
+// UsedTOTPCodeStore (in totp.go) are process-local. The server must run
+// as a single instance. Horizontal scaling requires migrating these
+// stores to a shared backend (e.g. Redis).
 type RateLimiter struct {
 	mu       syncutil.Mutex
 	windows  map[string]*entry

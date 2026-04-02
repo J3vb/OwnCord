@@ -79,7 +79,7 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 func (h *Hub) upgradeAndAuth(
 	conn *websocket.Conn, database *db.DB, r *http.Request,
 ) (*Client, uint64, error) {
-	user, tokenHash, lastSeq, err := authenticateConn(conn, database) //nolint:contextcheck // TODO: propagate context through this call path
+	user, tokenHash, lastSeq, err := authenticateConn(r.Context(), conn, database)
 	if err != nil {
 		slog.Warn("ws auth failed", "err", err, "remote", r.RemoteAddr)
 		_ = conn.Close(websocket.StatusPolicyViolation, "authentication failed")
@@ -378,8 +378,8 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 // authenticateConn reads the first WebSocket message and validates the session
 // token. Returns the authenticated user and the token hash (for later
 // periodic session revalidation).
-func authenticateConn(conn *websocket.Conn, database *db.DB) (*db.User, string, uint64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), authDeadline)
+func authenticateConn(parent context.Context, conn *websocket.Conn, database *db.DB) (*db.User, string, uint64, error) {
+	ctx, cancel := context.WithTimeout(parent, authDeadline)
 	defer cancel()
 
 	_, raw, err := conn.Read(ctx)

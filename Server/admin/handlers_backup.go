@@ -15,11 +15,27 @@ import (
 	"github.com/owncord/server/db"
 )
 
+// backupBaseDir is the directory for backup files, resolved to an absolute
+// path at package init time so handlers don't depend on the process CWD (L14).
+var backupBaseDir string
+
+func init() {
+	abs, err := filepath.Abs(filepath.Join("data", "backups"))
+	if err == nil {
+		backupBaseDir = abs
+	} else {
+		backupBaseDir = filepath.Join("data", "backups")
+	}
+}
+
+// SetBackupBaseDir overrides backupBaseDir. Intended for tests only.
+func SetBackupBaseDir(dir string) { backupBaseDir = dir }
+
 // ─── Backup Handlers ─────────────────────────────────────────────────────────
 
 func handleBackup(database *db.DB) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		backupDir := filepath.Join("data", "backups")
+		backupDir := backupBaseDir
 		if err := os.MkdirAll(backupDir, 0o750); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create backup directory")
 			return
@@ -55,7 +71,7 @@ type backupEntry struct {
 
 func handleListBackups() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		backupDir := filepath.Join("data", "backups")
+		backupDir := backupBaseDir
 		entries, err := os.ReadDir(backupDir)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -102,26 +118,18 @@ func handleDeleteBackup(database *db.DB) http.Handler {
 			return
 		}
 
-		// Resolve to absolute path and verify it stays within the backups directory
-		// to prevent path traversal via Windows drive-letter prefixes (e.g. "C:evil.db").
-		absDir, absErr := filepath.Abs(filepath.Join("data", "backups"))
-		if absErr != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to resolve backup directory")
-			return
-		}
-		target := filepath.Join(absDir, name)
-		if !strings.HasPrefix(target, absDir+string(filepath.Separator)) {
+		target := filepath.Join(backupBaseDir, name)
+		if !strings.HasPrefix(target, backupBaseDir+string(filepath.Separator)) {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
 			return
 		}
 
-		backupPath := filepath.Join("data", "backups", name)
-		if _, err := os.Stat(backupPath); os.IsNotExist(err) { //nolint:gosec // G703: path is sanitized above
+		if _, err := os.Stat(target); os.IsNotExist(err) {
 			writeErr(w, http.StatusNotFound, "NOT_FOUND", "backup not found")
 			return
 		}
 
-		if err := os.Remove(backupPath); err != nil { //nolint:gosec // G703: path is sanitized above
+		if err := os.Remove(target); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete backup")
 			return
 		}
@@ -142,21 +150,13 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 			return
 		}
 
-		// Resolve to absolute path and verify it stays within the backups directory
-		// to prevent path traversal via Windows drive-letter prefixes (e.g. "C:evil.db").
-		absDir, absErr := filepath.Abs(filepath.Join("data", "backups"))
-		if absErr != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to resolve backup directory")
-			return
-		}
-		target := filepath.Join(absDir, name)
-		if !strings.HasPrefix(target, absDir+string(filepath.Separator)) {
+		target := filepath.Join(backupBaseDir, name)
+		if !strings.HasPrefix(target, backupBaseDir+string(filepath.Separator)) {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
 			return
 		}
 
-		backupPath := filepath.Join("data", "backups", name)
-		if _, err := os.Stat(backupPath); os.IsNotExist(err) { //nolint:gosec // G703: path is sanitized above
+		if _, err := os.Stat(target); os.IsNotExist(err) {
 			writeErr(w, http.StatusNotFound, "NOT_FOUND", "backup not found")
 			return
 		}
@@ -189,7 +189,7 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 
 		// Stream the backup file over the (now closed) database to avoid loading
 		// the entire DB into memory (could be hundreds of MiB).
-		if err := copyFile(backupPath, dbPath); err != nil {
+		if err := copyFile(target, dbPath); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to restore database file")
 			return
 		}

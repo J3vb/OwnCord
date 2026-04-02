@@ -214,20 +214,23 @@ func (h *Hub) handleWebhookParticipantLeft(event *livekit.WebhookEvent) {
 	if exists {
 		currentChID, currentJoinToken := c.getVoiceState()
 		if currentChID == channelID && currentJoinToken != "" && currentJoinToken == joinToken {
-			// Client is still in the channel that fired the webhook — clean up.
-			c.clearVoiceState()
+			// Double-check voice state to guard against a concurrent voice_join
+			// that updated the state between the read above and clearVoiceState (L8).
+			if reChID, reJT := c.getVoiceState(); reChID == channelID && reJT == joinToken {
+				c.clearVoiceState()
 
-			if h.db != nil {
-				if err := leaveVoiceChannelWithRetry(context.Background(), h, userID, channelID, joinToken); err != nil {
-					slog.Error("livekit webhook: LeaveVoiceChannel exhausted retries",
-						"error", err, "user_id", userID, "channel_id", channelID)
+				if h.db != nil {
+					if err := leaveVoiceChannelWithRetry(context.Background(), h, userID, channelID, joinToken); err != nil {
+						slog.Error("livekit webhook: LeaveVoiceChannel exhausted retries",
+							"error", err, "user_id", userID, "channel_id", channelID)
+					}
 				}
-			}
 
-			h.BroadcastToAll(buildVoiceLeave(channelID, userID))
-			slog.Info("livekit webhook: cleaned up stale voice state",
-				"user_id", userID,
-				"channel_id", channelID)
+				h.BroadcastToAll(buildVoiceLeave(channelID, userID))
+				slog.Info("livekit webhook: cleaned up stale voice state",
+					"user_id", userID,
+					"channel_id", channelID)
+			}
 		} else if h.db != nil {
 			// Client has voiceChID=0 or moved to a different channel (e.g.
 			// after F5 reload), or this webhook is for an older join instance.
