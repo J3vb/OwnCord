@@ -2,6 +2,9 @@
 
 *The gaming chat platform you actually own.*
 
+> **Early Alpha — Building in the Open**
+> OwnCord is under active development and is not production-ready. Do not use it for sensitive communications. Security hardening is in progress. Contributions and [security reports](https://github.com/jevb/OwnCord/issues) are welcome.
+
 A self-hosted Windows chat platform with real-time messaging,
 voice/video, file sharing, and a web admin panel. Run your own
 server and keep everything under your control — zero cloud
