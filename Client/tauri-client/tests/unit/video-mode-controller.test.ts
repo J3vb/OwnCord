@@ -104,7 +104,7 @@ describe("createVideoModeController", () => {
     expect(ctrl.isVideoMode()).toBe(false);
   });
 
-  it("checkVideoMode auto-opens video grid when remote has camera (BUG-105)", () => {
+  it("checkVideoMode does NOT auto-open for remote camera (BUG-105)", () => {
     const users = new Map([[2, { userId: 2, camera: true, screenshare: false, username: "bob" }]]);
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, users]]) }),
@@ -118,7 +118,8 @@ describe("createVideoModeController", () => {
     });
     ctrl.checkVideoMode();
 
-    expect(ctrl.isVideoMode()).toBe(true);
+    // Remote streams require manual click — no auto-open
+    expect(ctrl.isVideoMode()).toBe(false);
   });
 
   it("checkVideoMode auto-closes video grid when no streams remain", () => {
@@ -359,7 +360,7 @@ describe("createVideoModeController", () => {
     expect(vg.removeStream).toHaveBeenCalledWith(1_000_001);
   });
 
-  it("checkVideoMode auto-opens when remote has screenshare on (BUG-105)", () => {
+  it("checkVideoMode does NOT auto-open for remote screenshare (BUG-105)", () => {
     const users = new Map([
       [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
       [2, { userId: 2, camera: false, screenshare: true, username: "bob" }],
@@ -375,7 +376,8 @@ describe("createVideoModeController", () => {
     });
     ctrl.checkVideoMode();
 
-    expect(ctrl.isVideoMode()).toBe(true);
+    // Remote streams require manual click — no auto-open
+    expect(ctrl.isVideoMode()).toBe(false);
   });
 
   // -----------------------------------------------------------------------

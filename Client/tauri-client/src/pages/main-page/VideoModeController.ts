@@ -107,8 +107,10 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     if (!anyVideoOn && videoMode) {
       showChat();
     }
-    // BUG-105: Auto-open video grid when any video stream becomes active.
-    if (anyVideoOn && !videoMode) {
+    // BUG-105: Auto-open video grid only for LOCAL camera/screenshare.
+    // Remote streams require manual click (Discord-style behavior).
+    const localVideoOn = voice.localCamera || voice.localScreenshare;
+    if (localVideoOn && !videoMode) {
       showVideoGrid();
     }
 
