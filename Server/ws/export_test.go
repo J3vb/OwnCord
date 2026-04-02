@@ -98,7 +98,7 @@ func (h *Hub) BuildAuthOKForTest(user *db.User, roleName string) []byte {
 }
 
 // BuildReadyForTest exposes Hub.buildReady for external tests.
-// Passes nil role so all channels are filtered out (safe default for tests).
+// Passes nil role so no channels are visible (fail-closed, BUG-094).
 func (h *Hub) BuildReadyForTest(database *db.DB, userID int64) ([]byte, error) {
 	return h.buildReady(database, userID, nil)
 }

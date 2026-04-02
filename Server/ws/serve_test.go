@@ -79,6 +79,16 @@ func seedServeUser(t *testing.T, database *db.DB, username string) *db.User {
 	return user
 }
 
+// ownerRole fetches the Owner role (ID=1) for permission-aware buildReady calls.
+func ownerRole(t *testing.T, database *db.DB) *db.Role {
+	t.Helper()
+	role, err := database.GetRoleByID(1)
+	if err != nil || role == nil {
+		t.Fatalf("ownerRole: %v", err)
+	}
+	return role
+}
+
 // ─── buildAuthOK ─────────────────────────────────────────────────────────────
 
 func TestBuildAuthOK_Type(t *testing.T) {
@@ -240,6 +250,7 @@ func TestBuildReady_ContainsRequiredFields(t *testing.T) {
 func TestBuildReady_IncludesSeededChannel(t *testing.T) {
 	hub, database := newServeHub(t)
 	user := seedServeUser(t, database, "ready-user3")
+	role := ownerRole(t, database)
 
 	// Seed a text channel.
 	chID, err := database.CreateChannel("general", "text", "", "", 0)
@@ -247,9 +258,9 @@ func TestBuildReady_IncludesSeededChannel(t *testing.T) {
 		t.Fatalf("CreateChannel: %v", err)
 	}
 
-	msg, err := hub.BuildReadyForTest(database, user.ID)
+	msg, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
 	if err != nil {
-		t.Fatalf("BuildReadyForTest: %v", err)
+		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
 	}
 
 	var env struct {
@@ -280,15 +291,16 @@ func TestBuildReady_IncludesSeededChannel(t *testing.T) {
 func TestBuildReady_TextChannelHasUnreadCount(t *testing.T) {
 	hub, database := newServeHub(t)
 	user := seedServeUser(t, database, "ready-user4")
+	role := ownerRole(t, database)
 
 	_, err := database.CreateChannel("unread-chan", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
 
-	msg, err := hub.BuildReadyForTest(database, user.ID)
+	msg, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
 	if err != nil {
-		t.Fatalf("BuildReadyForTest: %v", err)
+		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
 	}
 
 	var env struct {

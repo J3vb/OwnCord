@@ -180,9 +180,13 @@ func (h *Hub) handleFreshConnect(
 		return err
 	}
 	// Look up role for permission-filtered ready payload.
-	var userRole *db.Role
-	if role, rErr := database.GetRoleByID(c.user.RoleID); rErr == nil {
-		userRole = role
+	// Fail closed: if the role lookup fails, disconnect rather than serving
+	// a permissive ready payload with nil role (BUG-094).
+	userRole, roleErr := database.GetRoleByID(c.user.RoleID)
+	if roleErr != nil || userRole == nil {
+		slog.Error("ws: role lookup failed, disconnecting", "user_id", c.userID, "role_id", c.user.RoleID, "err", roleErr)
+		_ = conn.Close(websocket.StatusInternalError, "role lookup failed")
+		return fmt.Errorf("role lookup failed for user %d: %w", c.userID, roleErr)
 	}
 	if ready, readyErr := h.buildReady(database, c.userID, userRole); readyErr == nil {
 		slog.Info("ws sending ready payload", "user_id", c.userID, "payload_bytes", len(ready))
@@ -405,8 +409,11 @@ func (h *Hub) buildReady(database *db.DB, userID int64, role *db.Role) ([]byte, 
 		if channels[i].Type == "dm" {
 			continue
 		}
-		// When role is unavailable, include all channels (backwards compat).
-		if role == nil || permissions.HasAdmin(role.Permissions) {
+		// Nil role = zero access (fail closed). Admin role bypasses all checks.
+		if role == nil {
+			continue
+		}
+		if permissions.HasAdmin(role.Permissions) {
 			visibleChannels = append(visibleChannels, channels[i])
 			continue
 		}
