@@ -154,6 +154,11 @@ export class LiveKitSession {
       teardownForReconnect: () => {
         this._audioPipeline.teardownAudioPipeline();
         this.clearTokenRefreshTimer();
+        // BUG-098: Stop leaked camera/screen tracks before room is nulled.
+        stopManualCameraTrack(this._cameraState, this.room);
+        stopManualScreenTracks(this._screenState, this.room);
+        setLocalCamera(false);
+        setLocalScreenshare(false);
       },
       leaveVoice: (sendWs) => this.leaveVoice(sendWs),
       applyMicMuteState: (muted) => this.applyMicMuteState(muted),

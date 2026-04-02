@@ -682,6 +682,48 @@ describe("LiveKitSession", () => {
     });
   });
 
+  describe("teardownForReconnect video track cleanup (BUG-098)", () => {
+    it("stops manual camera and screen tracks on unexpected disconnect", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      mockRoom.localParticipant.unpublishTrack = vi.fn();
+
+      // Capture the Disconnected handler during room creation
+      let disconnectedHandler: ((reason?: number) => void) | undefined;
+      mockRoom.on.mockImplementation((event: string, handler: any) => {
+        if (event === "disconnected") disconnectedHandler = handler;
+        return mockRoom;
+      });
+
+      // Connect to create the room and register handlers
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880");
+      expect(disconnectedHandler).toBeDefined();
+
+      // Inject fake manual tracks as if camera/screen were enabled
+      const mockCamTrack = { stop: vi.fn(), mediaStreamTrack: { id: "cam" } };
+      const mockScreenTrack = { stop: vi.fn(), mediaStreamTrack: { id: "screen" } };
+      (session as any)._cameraState.manualCameraTrack = mockCamTrack;
+      (session as any)._screenState.manualScreenTracks = [mockScreenTrack];
+
+      // Clear mocks so we can assert only the teardown calls
+      (setLocalCamera as any).mockClear();
+      (setLocalScreenshare as any).mockClear();
+
+      // Fire unexpected disconnect (non-CLIENT_INITIATED triggers reconnect path)
+      disconnectedHandler!(/* SERVER_SHUTDOWN */ 1);
+
+      // Camera track stopped and state reset
+      expect(mockCamTrack.stop).toHaveBeenCalled();
+      expect((session as any)._cameraState.manualCameraTrack).toBeNull();
+      expect(setLocalCamera).toHaveBeenCalledWith(false);
+
+      // Screen track stopped and state reset
+      expect(mockScreenTrack.stop).toHaveBeenCalled();
+      expect((session as any)._screenState.manualScreenTracks).toEqual([]);
+      expect(setLocalScreenshare).toHaveBeenCalledWith(false);
+    });
+  });
+
   describe("handleDisconnected during initial connect", () => {
     it("does not null the room when connecting flag is true", async () => {
       session.setServerHost("localhost:7880");
