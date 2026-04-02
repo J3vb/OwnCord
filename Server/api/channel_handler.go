@@ -127,8 +127,12 @@ func handleListChannels(database *db.DB) http.HandlerFunc {
 		}
 
 		// Filter channels by READ_MESSAGES permission.
+		// DM channels are excluded — they are delivered via the separate DM endpoints.
 		var visible []db.Channel
 		for i := range channels {
+			if channels[i].Type == "dm" {
+				continue
+			}
 			if hasChannelPermBatch(role, overrides, channels[i].ID, permissions.ReadMessages) {
 				visible = append(visible, channels[i])
 			}

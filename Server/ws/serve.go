@@ -401,6 +401,10 @@ func (h *Hub) buildReady(database *db.DB, userID int64, role *db.Role) ([]byte, 
 	}
 	var visibleChannels []db.Channel
 	for i := range channels {
+		// DM channels are excluded — they are delivered via dm_channels field.
+		if channels[i].Type == "dm" {
+			continue
+		}
 		// When role is unavailable, include all channels (backwards compat).
 		if role == nil || permissions.HasAdmin(role.Permissions) {
 			visibleChannels = append(visibleChannels, channels[i])
