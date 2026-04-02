@@ -133,7 +133,7 @@ func TestGenerateToken_ValidToken(t *testing.T) {
 		t.Fatalf("NewLiveKitClient: %v", err)
 	}
 
-	token, err := client.GenerateToken(123, "testuser", 456, "join-token-1", true, true)
+	token, err := client.GenerateToken(123, "testuser", 456, "join-token-1", true, true, true, true)
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestGenerateToken_DifferentPermissions(t *testing.T) {
 	}
 
 	// Subscribe-only token (canPublish=false).
-	token, err := client.GenerateToken(1, "listener", 10, "join-token-2", false, true)
+	token, err := client.GenerateToken(1, "listener", 10, "join-token-2", false, true, false, false)
 	if err != nil {
 		t.Fatalf("GenerateToken(subscribe-only): %v", err)
 	}

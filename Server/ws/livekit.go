@@ -19,14 +19,13 @@ import (
 )
 
 // tokenTTL is the validity duration for generated LiveKit access tokens.
-// Set to 24h so sessions aren't fragile after network blips (LiveKit's JS SDK
-// cannot rotate tokens on active connections). Security mitigations:
+// Short-lived (5 min) to limit replay window (BUG-127). The client requests
+// a refresh via voice_token_refresh before expiry. Security mitigations:
 //   - Tokens are scoped to a single room
 //   - Server can revoke room access via LiveKit API on ban/kick
-//   - Tokens never leave the LiveKit SDK internals on the client
-//
-// The client requests a refresh via voice_token_refresh before expiry.
-const tokenTTL = 24 * time.Hour
+//   - Webhook participant_joined validates voice_states membership
+//   - CanPublishSources restricts track types per permission (BUG-128)
+const tokenTTL = 5 * time.Minute
 
 // LiveKitClient provides token generation and room management via
 // the LiveKit server SDK.
@@ -83,6 +82,11 @@ func participantIdentity(userID int64, voiceJoinToken string) string {
 
 // GenerateToken creates a LiveKit access token for the given user
 // to join the specified channel's voice room.
+//
+// canPublish controls audio publishing (SpeakVoice permission).
+// canVideo and canScreenShare control which additional track sources are
+// allowed at the SFU level via CanPublishSources, preventing users from
+// bypassing OwnCord's USE_VIDEO/SHARE_SCREEN checks via raw LiveKit (BUG-128).
 func (c *LiveKitClient) GenerateToken(
 	userID int64,
 	username string,
@@ -90,18 +94,36 @@ func (c *LiveKitClient) GenerateToken(
 	voiceJoinToken string,
 	canPublish bool,
 	canSubscribe bool,
+	canVideo bool,
+	canScreenShare bool,
 ) (string, error) {
 	roomName := RoomName(channelID)
 	identity := participantIdentity(userID, voiceJoinToken)
 
 	at := auth.NewAccessToken(c.apiKey, c.apiSecret)
 	grant := &auth.VideoGrant{
-		RoomJoin:       true,
-		Room:           roomName,
-		CanPublish:     &canPublish,
-		CanSubscribe:   &canSubscribe,
-		CanPublishData: &canPublish, // data channel follows publish permission
+		RoomJoin:     true,
+		Room:         roomName,
+		CanSubscribe: &canSubscribe,
 	}
+
+	if canPublish {
+		// Use CanPublishSources to restrict which track types the user may
+		// publish. This supersedes CanPublish and prevents SFU-level bypass.
+		sources := []string{"microphone"}
+		if canVideo {
+			sources = append(sources, "camera")
+		}
+		if canScreenShare {
+			sources = append(sources, "screen_share", "screen_share_audio")
+		}
+		grant.CanPublishSources = sources
+		grant.CanPublishData = &canPublish
+	} else {
+		grant.CanPublish = &canPublish
+		grant.CanPublishData = &canPublish
+	}
+
 	at.SetVideoGrant(grant).
 		SetIdentity(identity).
 		SetName(username).
@@ -115,7 +137,9 @@ func (c *LiveKitClient) GenerateToken(
 	slog.Debug("livekit: generated token",
 		"identity", identity,
 		"room", roomName,
-		"can_publish", canPublish)
+		"can_publish", canPublish,
+		"can_video", canVideo,
+		"can_screen_share", canScreenShare)
 
 	return token, nil
 }

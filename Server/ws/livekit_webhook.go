@@ -124,23 +124,60 @@ func parseRoomChannelID(roomName string) (int64, error) {
 
 func (h *Hub) handleWebhookParticipantJoined(event *livekit.WebhookEvent) {
 	p := event.GetParticipant()
-	if p == nil {
+	room := event.GetRoom()
+	if p == nil || room == nil {
 		return
 	}
 
-	userID, _, err := parseParticipantIdentity(p.Identity)
+	userID, joinToken, err := parseParticipantIdentity(p.Identity)
 	if err != nil {
 		slog.Warn("livekit webhook: participant_joined bad identity",
 			"identity", p.Identity, "error", err)
 		return
 	}
 
+	channelID, err := parseRoomChannelID(room.Name)
+	if err != nil {
+		slog.Warn("livekit webhook: participant_joined bad room",
+			"room", room.Name, "error", err)
+		return
+	}
+
 	slog.Info("livekit webhook: participant joined",
 		"user_id", userID,
-		"room", event.GetRoom().GetName())
+		"channel_id", channelID,
+		"room", room.Name)
 
-	// State is already persisted by handleVoiceJoin before the token is
-	// issued. This webhook confirms the client actually connected.
+	// Validate that the participant has a matching voice_states row (BUG-127).
+	// A replayed token from a previous session will not have a matching row,
+	// so we remove the rogue participant from LiveKit.
+	if h.db != nil {
+		state, stateErr := h.db.GetVoiceState(userID)
+		if stateErr != nil || state == nil || state.ChannelID != channelID {
+			slog.Warn("livekit webhook: rogue participant_joined — no matching voice state, removing",
+				"user_id", userID, "channel_id", channelID)
+			if h.livekit != nil {
+				if rmErr := h.livekit.RemoveParticipant(channelID, userID, joinToken); rmErr != nil {
+					slog.Error("livekit webhook: failed to remove rogue participant",
+						"error", rmErr, "user_id", userID, "channel_id", channelID)
+				}
+			}
+			return
+		}
+		// Verify join token matches to prevent token replay from old sessions.
+		if joinToken != "" && state.JoinedAt != joinToken {
+			slog.Warn("livekit webhook: stale join token on participant_joined, removing",
+				"user_id", userID, "channel_id", channelID,
+				"expected_token", state.JoinedAt, "got_token", joinToken)
+			if h.livekit != nil {
+				if rmErr := h.livekit.RemoveParticipant(channelID, userID, joinToken); rmErr != nil {
+					slog.Error("livekit webhook: failed to remove stale participant",
+						"error", rmErr, "user_id", userID, "channel_id", channelID)
+				}
+			}
+			return
+		}
+	}
 }
 
 func (h *Hub) handleWebhookParticipantLeft(event *livekit.WebhookEvent) {
