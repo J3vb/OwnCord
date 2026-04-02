@@ -15,7 +15,7 @@ import (
 // buildInviteRouter returns a chi router with invite routes and auth middleware.
 func buildInviteRouter(database *db.DB, limiter *auth.RateLimiter) http.Handler {
 	r := chi.NewRouter()
-	api.MountAuthRoutes(r, database, limiter, nil)
+	api.MountAuthRoutes(r, database, limiter, nil, testTOTPKey)
 	api.MountInviteRoutes(r, database)
 	return r
 }

@@ -611,7 +611,7 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	msg := wrapWithSeq(bm.msg, seq)
 
 	// Store in replay buffer for reconnection recovery.
-	h.replayBuf.Push(seq, msg)
+	h.replayBuf.Push(seq, bm.channelID, msg)
 
 	h.mu.RLock()
 	defer h.mu.RUnlock()

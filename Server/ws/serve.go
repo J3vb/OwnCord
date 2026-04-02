@@ -106,7 +106,16 @@ func (h *Hub) upgradeAndAuth(
 func (h *Hub) handleReconnect(
 	ctx context.Context, conn *websocket.Conn, c *Client, database *db.DB, lastSeq uint64,
 ) bool {
-	events := h.ReplayBuffer().EventsSince(lastSeq)
+	// Compute the set of channel IDs the reconnecting user can access so that
+	// channel-scoped replay events are filtered by current permissions (M3).
+	allowedChannelIDs, err := h.computeAllowedChannels(database, c.user)
+	if err != nil {
+		slog.Warn("ws handleReconnect: computeAllowedChannels failed, falling back to full ready",
+			"user_id", c.userID, "err", err)
+		return false
+	}
+
+	events := h.ReplayBuffer().EventsSinceFiltered(lastSeq, allowedChannelIDs)
 	if events == nil {
 		return false
 	}
@@ -142,6 +151,64 @@ func (h *Hub) handleReconnect(
 	h.BroadcastToAll(buildPresenceMsg(c.userID, "online"))
 
 	return true
+}
+
+// computeAllowedChannels returns the set of channel IDs a user may access,
+// including both server channels (filtered by ReadMessages permission) and
+// the user's open DM channels. This mirrors the buildReady logic so that
+// replay-buffer filtering matches the ready payload's visible channels.
+func (h *Hub) computeAllowedChannels(database *db.DB, user *db.User) (map[int64]bool, error) {
+	channels, err := database.ListChannels()
+	if err != nil {
+		return nil, fmt.Errorf("computeAllowedChannels ListChannels: %w", err)
+	}
+
+	role, err := database.GetRoleByID(user.RoleID)
+	if err != nil {
+		return nil, fmt.Errorf("computeAllowedChannels GetRoleByID: %w", err)
+	}
+
+	allowed := make(map[int64]bool)
+
+	// Nil role = zero access (fail closed, same as buildReady).
+	if role != nil {
+		if permissions.HasAdmin(role.Permissions) {
+			// Admin bypasses all channel permission checks.
+			for i := range channels {
+				if channels[i].Type != "dm" {
+					allowed[channels[i].ID] = true
+				}
+			}
+		} else {
+			overrides, oErr := database.GetAllChannelPermissionsForRole(role.ID)
+			if oErr != nil {
+				return nil, fmt.Errorf("computeAllowedChannels GetAllChannelPermissionsForRole: %w", oErr)
+			}
+			for i := range channels {
+				if channels[i].Type == "dm" {
+					continue
+				}
+				o := overrides[channels[i].ID]
+				effective := permissions.EffectivePerms(role.Permissions, o.Allow, o.Deny)
+				if effective&permissions.ReadMessages == permissions.ReadMessages {
+					allowed[channels[i].ID] = true
+				}
+			}
+		}
+	}
+
+	// Include the user's open DM channels.
+	dmChannels, dmErr := database.GetUserDMChannels(user.ID)
+	if dmErr != nil {
+		slog.Warn("computeAllowedChannels GetUserDMChannels", "err", dmErr)
+		// Non-fatal: DM events will simply be filtered out.
+	} else {
+		for i := range dmChannels {
+			allowed[dmChannels[i].ChannelID] = true
+		}
+	}
+
+	return allowed, nil
 }
 
 func (h *Hub) handleFreshConnect(

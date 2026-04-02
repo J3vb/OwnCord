@@ -42,9 +42,12 @@ func buildAuthRouter(database *db.DB, limiter *auth.RateLimiter) http.Handler {
 
 func buildAuthRouterWithProxies(database *db.DB, limiter *auth.RateLimiter, trustedProxies []string) http.Handler {
 	r := chi.NewRouter()
-	api.MountAuthRoutes(r, database, limiter, trustedProxies)
+	api.MountAuthRoutes(r, database, limiter, trustedProxies, testTOTPKey)
 	return r
 }
+
+// testTOTPKey is a fixed 32-byte AES-256 key used in tests.
+var testTOTPKey = make([]byte, 32)
 
 // postJSON is a test helper that POSTs JSON to the given router.
 func postJSON(t *testing.T, router http.Handler, path string, body any) *httptest.ResponseRecorder {

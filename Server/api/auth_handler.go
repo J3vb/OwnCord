@@ -61,8 +61,9 @@ type authSuccessResponse struct {
 // MountAuthRoutes registers all auth endpoints on the given router.
 // Rate limiters are applied per-endpoint as specified. trustedProxies is the
 // list of CIDRs whose X-Forwarded-For / X-Real-IP headers are honoured for
-// rate-limiting IP resolution.
-func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, trustedProxies []string) {
+// rate-limiting IP resolution. totpKey is the AES-256 key used to encrypt
+// TOTP secrets at rest (M1 security hardening).
+func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, trustedProxies []string, totpKey []byte) {
 	registerLimiter := limiter
 	loginLimiter := limiter
 	partialStore := auth.NewPartialAuthStore(partialAuthStoreTTL)
@@ -74,10 +75,10 @@ func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, t
 			Post("/register", handleRegister(database))
 
 		r.With(RateLimitMiddleware(loginLimiter, loginRateLimitPerMinute, time.Minute, trustedProxies)).
-			Post("/login", handleLogin(database, limiter, partialStore, trustedProxies))
+			Post("/login", handleLogin(database, limiter, partialStore, trustedProxies, totpKey))
 
 		r.With(RateLimitMiddleware(limiter, verifyTOTPRateLimitPerMinute, time.Minute, trustedProxies)).
-			Post("/verify-totp", handleVerifyTOTP(database, partialStore, limiter, usedTOTPCodes))
+			Post("/verify-totp", handleVerifyTOTP(database, partialStore, limiter, usedTOTPCodes, totpKey))
 
 		r.With(AuthMiddleware(database)).
 			Post("/logout", handleLogout(database))
@@ -96,7 +97,7 @@ func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, t
 
 	r.With(AuthMiddleware(database),
 		RateLimitMiddleware(limiter, sensitiveEndpointRateLimitPerMinute, time.Minute, trustedProxies)).
-		Post("/api/v1/users/me/totp/confirm", handleConfirmTOTP(database, pendingTOTPStore, usedTOTPCodes, limiter))
+		Post("/api/v1/users/me/totp/confirm", handleConfirmTOTP(database, pendingTOTPStore, usedTOTPCodes, limiter, totpKey))
 
 	r.With(AuthMiddleware(database),
 		RateLimitMiddleware(limiter, sensitiveEndpointRateLimitPerMinute, time.Minute, trustedProxies)).
@@ -250,7 +251,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 }
 
 // handleLogin processes POST /api/v1/auth/login.
-func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.PartialAuthStore, trustedProxies []string) http.HandlerFunc {
+func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.PartialAuthStore, trustedProxies []string, totpKey []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req loginRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

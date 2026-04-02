@@ -12,7 +12,7 @@ import (
 
 func TestPush_SingleEntry(t *testing.T) {
 	rb := ws.NewEventRingBuffer(8)
-	rb.Push(1, []byte("hello"))
+	rb.Push(1, 0, []byte("hello"))
 
 	// afterSeq=0 is before the oldest seq (1), so EventsSince returns nil
 	// (the buffer can't confirm it covers everything the caller missed).
@@ -33,7 +33,7 @@ func TestPush_SingleEntry(t *testing.T) {
 func TestPush_MultipleInOrder(t *testing.T) {
 	rb := ws.NewEventRingBuffer(8)
 	for i := uint64(1); i <= 5; i++ {
-		rb.Push(i, []byte(fmt.Sprintf("msg-%d", i)))
+		rb.Push(i, 0, []byte(fmt.Sprintf("msg-%d", i)))
 	}
 
 	// afterSeq == oldestSeq (1) → nil (BUG-085: conservative boundary).
@@ -60,7 +60,7 @@ func TestPush_WrapsAround(t *testing.T) {
 
 	// Push 6 events into a buffer with capacity 4 — first two are evicted.
 	for i := uint64(1); i <= 6; i++ {
-		rb.Push(i, []byte(fmt.Sprintf("e%d", i)))
+		rb.Push(i, 0, []byte(fmt.Sprintf("e%d", i)))
 	}
 
 	got := rb.EventsSince(0)
@@ -97,16 +97,16 @@ func TestPush_OverwritesOldest(t *testing.T) {
 	const cap = 3
 	rb := ws.NewEventRingBuffer(cap)
 
-	rb.Push(1, []byte("a"))
-	rb.Push(2, []byte("b"))
-	rb.Push(3, []byte("c"))
+	rb.Push(1, 0, []byte("a"))
+	rb.Push(2, 0, []byte("b"))
+	rb.Push(3, 0, []byte("c"))
 
 	if oldest := rb.OldestSeq(); oldest != 1 {
 		t.Fatalf("expected oldest seq 1, got %d", oldest)
 	}
 
 	// Overwrite seq 1.
-	rb.Push(4, []byte("d"))
+	rb.Push(4, 0, []byte("d"))
 	if oldest := rb.OldestSeq(); oldest != 2 {
 		t.Fatalf("expected oldest seq 2 after overwrite, got %d", oldest)
 	}
@@ -139,7 +139,7 @@ func TestEventsSince_EmptyBuffer(t *testing.T) {
 func TestEventsSince_AfterSpecificSeq(t *testing.T) {
 	rb := ws.NewEventRingBuffer(8)
 	for i := uint64(1); i <= 5; i++ {
-		rb.Push(i, []byte(fmt.Sprintf("m%d", i)))
+		rb.Push(i, 0, []byte(fmt.Sprintf("m%d", i)))
 	}
 
 	got := rb.EventsSince(3)
@@ -156,7 +156,7 @@ func TestEventsSince_TooOld(t *testing.T) {
 	rb := ws.NewEventRingBuffer(cap)
 
 	for i := uint64(1); i <= 6; i++ {
-		rb.Push(i, []byte("x"))
+		rb.Push(i, 0, []byte("x"))
 	}
 
 	// Oldest is seq 3. Requesting seq 1 should return nil.
@@ -169,7 +169,7 @@ func TestEventsSince_TooOld(t *testing.T) {
 func TestEventsSince_AtLatestSeq(t *testing.T) {
 	rb := ws.NewEventRingBuffer(8)
 	for i := uint64(1); i <= 5; i++ {
-		rb.Push(i, []byte("x"))
+		rb.Push(i, 0, []byte("x"))
 	}
 
 	got := rb.EventsSince(5)
@@ -185,7 +185,7 @@ func TestEventsSince_WraparoundOrder(t *testing.T) {
 
 	// Fill past capacity to force wrap.
 	for i := uint64(1); i <= 7; i++ {
-		rb.Push(i, []byte(fmt.Sprintf("v%d", i)))
+		rb.Push(i, 0, []byte(fmt.Sprintf("v%d", i)))
 	}
 
 	// afterSeq == oldestSeq (4) → nil (BUG-085).
@@ -211,7 +211,7 @@ func TestEventsSince_AfterSeqZero_ReturnsBehavior(t *testing.T) {
 	// the server can't confirm the buffer covers everything the client missed.
 	rb := ws.NewEventRingBuffer(8)
 	for i := uint64(1); i <= 3; i++ {
-		rb.Push(i, []byte(fmt.Sprintf("a%d", i)))
+		rb.Push(i, 0, []byte(fmt.Sprintf("a%d", i)))
 	}
 
 	got := rb.EventsSince(0)
@@ -221,9 +221,9 @@ func TestEventsSince_AfterSeqZero_ReturnsBehavior(t *testing.T) {
 
 	// If we start seqs from 0, afterSeq=0 equals oldest → nil (BUG-085).
 	rb2 := ws.NewEventRingBuffer(8)
-	rb2.Push(0, []byte("z0"))
-	rb2.Push(1, []byte("z1"))
-	rb2.Push(2, []byte("z2"))
+	rb2.Push(0, 0, []byte("z0"))
+	rb2.Push(1, 0, []byte("z1"))
+	rb2.Push(2, 0, []byte("z2"))
 
 	got = rb2.EventsSince(0)
 	if got != nil {
@@ -250,7 +250,7 @@ func TestEventsSince_AfterSeqEqualsOldest_ReturnsNil(t *testing.T) {
 
 	// Push 6 events: buffer holds seq 3,4,5,6. Oldest = 3.
 	for i := uint64(1); i <= 6; i++ {
-		rb.Push(i, []byte(fmt.Sprintf("e%d", i)))
+		rb.Push(i, 0, []byte(fmt.Sprintf("e%d", i)))
 	}
 
 	if oldest := rb.OldestSeq(); oldest != 3 {
@@ -280,8 +280,8 @@ func TestOldestSeq_Empty(t *testing.T) {
 
 func TestOldestSeq_AfterInitialPushes(t *testing.T) {
 	rb := ws.NewEventRingBuffer(8)
-	rb.Push(10, []byte("x"))
-	rb.Push(11, []byte("y"))
+	rb.Push(10, 0, []byte("x"))
+	rb.Push(11, 0, []byte("y"))
 
 	if got := rb.OldestSeq(); got != 10 {
 		t.Fatalf("expected oldest seq 10, got %d", got)
@@ -292,10 +292,10 @@ func TestOldestSeq_AfterWraparound(t *testing.T) {
 	const cap = 3
 	rb := ws.NewEventRingBuffer(cap)
 
-	rb.Push(10, []byte("a"))
-	rb.Push(20, []byte("b"))
-	rb.Push(30, []byte("c"))
-	rb.Push(40, []byte("d")) // evicts seq 10
+	rb.Push(10, 0, []byte("a"))
+	rb.Push(20, 0, []byte("b"))
+	rb.Push(30, 0, []byte("c"))
+	rb.Push(40, 0, []byte("d")) // evicts seq 10
 
 	if got := rb.OldestSeq(); got != 20 {
 		t.Fatalf("expected oldest seq 20 after wraparound, got %d", got)
@@ -322,7 +322,7 @@ func TestConcurrent_PushAndEventsSince(t *testing.T) {
 		go func(base uint64) {
 			defer wg.Done()
 			for i := uint64(0); i < pushes; i++ {
-				rb.Push(base+i, []byte("data"))
+				rb.Push(base+i, 0, []byte("data"))
 			}
 		}(uint64(w) * pushes)
 	}
@@ -438,7 +438,7 @@ func TestEventsSince_CapacityBoundaries(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			rb := ws.NewEventRingBuffer(tc.cap)
 			for i := 1; i <= tc.pushes; i++ {
-				rb.Push(uint64(i), []byte(fmt.Sprintf("e%d", i)))
+				rb.Push(uint64(i), 0, []byte(fmt.Sprintf("e%d", i)))
 			}
 
 			got := rb.EventsSince(tc.afterSeq)

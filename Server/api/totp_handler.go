@@ -36,7 +36,7 @@ type totpEnableResponse struct {
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
-func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limiter *auth.RateLimiter, usedTOTPCodes *auth.UsedTOTPCodeStore) http.HandlerFunc {
+func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limiter *auth.RateLimiter, usedTOTPCodes *auth.UsedTOTPCodeStore, totpKey []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		partialToken, ok := auth.ExtractBearerToken(r)
 		if !ok {
@@ -65,8 +65,8 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 			return
 		}
 
-		totpKey := fmt.Sprintf("totp_fail:%d", challenge.UserID)
-		if !limiter.Check(totpKey, totpFailureRateLimit, totpFailureWindow) {
+		totpRateLimitKey := fmt.Sprintf("totp_fail:%d", challenge.UserID)
+		if !limiter.Check(totpRateLimitKey, totpFailureRateLimit, totpFailureWindow) {
 			writeJSON(w, http.StatusTooManyRequests, errorResponse{
 				Error:   "RATE_LIMITED",
 				Message: "too many failed attempts, try again later",
@@ -83,8 +83,18 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 			return
 		}
 
-		if !auth.VerifyTOTPCodeOnce(*user.TOTPSecret, strings.TrimSpace(req.Code), time.Now().UTC(), user.ID, usedTOTPCodes) {
-			limiter.Allow(totpKey, totpFailureRateLimit, totpFailureWindow)
+		secret, decErr := auth.DecryptTOTPSecret(totpKey, *user.TOTPSecret)
+		if decErr != nil {
+			slog.Error("failed to decrypt TOTP secret", "user_id", user.ID, "error", decErr)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error:   "INTERNAL_ERROR",
+				Message: "failed to verify two-factor code",
+			})
+			return
+		}
+
+		if !auth.VerifyTOTPCodeOnce(secret, strings.TrimSpace(req.Code), time.Now().UTC(), user.ID, usedTOTPCodes) {
+			limiter.Allow(totpRateLimitKey, totpFailureRateLimit, totpFailureWindow)
 			partialStore.RegisterFailure(partialToken, partialAuthMaxFailures)
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
 				Error:   "UNAUTHORIZED",
@@ -93,7 +103,7 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 			return
 		}
 
-		limiter.Reset(totpKey)
+		limiter.Reset(totpRateLimitKey)
 
 		if _, ok := partialStore.Consume(partialToken); !ok {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
@@ -191,7 +201,7 @@ func handleEnableTOTP(pendingStore *auth.PendingTOTPStore, limiter *auth.RateLim
 	}
 }
 
-func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, usedTOTPCodes *auth.UsedTOTPCodeStore, limiter *auth.RateLimiter) http.HandlerFunc {
+func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, usedTOTPCodes *auth.UsedTOTPCodeStore, limiter *auth.RateLimiter, totpKey []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
@@ -250,7 +260,17 @@ func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, use
 			return
 		}
 
-		if err := database.UpdateUserTOTPSecret(user.ID, &secret); err != nil {
+		encryptedSecret, encErr := auth.EncryptTOTPSecret(totpKey, secret)
+		if encErr != nil {
+			slog.Error("failed to encrypt TOTP secret", "user_id", user.ID, "error", encErr)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error:   "INTERNAL_ERROR",
+				Message: "failed to enable two-factor authentication",
+			})
+			return
+		}
+
+		if err := database.UpdateUserTOTPSecret(user.ID, &encryptedSecret); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL_ERROR",
 				Message: "failed to enable two-factor authentication",

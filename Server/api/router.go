@@ -71,8 +71,17 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		r.Get("/info", handleInfo(cfg, ver))
 	})
 
+	// Load (or auto-generate) the AES-256 key for TOTP secret encryption (M1).
+	totpKey, totpKeyErr := auth.LoadOrGenerateTOTPKey(cfg.Server.DataDir)
+	if totpKeyErr != nil {
+		slog.Error("failed to load TOTP encryption key", "error", totpKeyErr)
+		// Fall through — handlers will still work but cannot encrypt/decrypt.
+		// This should not happen in practice since LoadOrGenerateTOTPKey
+		// auto-generates a key when none exists.
+	}
+
 	// Auth routes: register, login, logout, me.
-	MountAuthRoutes(r, database, limiter, cfg.Server.TrustedProxies)
+	MountAuthRoutes(r, database, limiter, cfg.Server.TrustedProxies, totpKey)
 
 	// Invite management routes (require MANAGE_INVITES permission).
 	MountInviteRoutes(r, database)
