@@ -85,6 +85,10 @@ func (s *PartialAuthStore) Lookup(token string) (PartialAuthChallenge, bool) {
 	defer s.mu.Unlock()
 	s.cleanupExpiredLocked()
 	entry, ok := s.entries[token]
+	if ok && time.Now().After(entry.ExpiresAt) {
+		delete(s.entries, token)
+		return PartialAuthChallenge{}, false
+	}
 	return entry, ok
 }
 
@@ -94,6 +98,10 @@ func (s *PartialAuthStore) Consume(token string) (PartialAuthChallenge, bool) {
 	s.cleanupExpiredLocked()
 	entry, ok := s.entries[token]
 	if !ok {
+		return PartialAuthChallenge{}, false
+	}
+	if time.Now().After(entry.ExpiresAt) {
+		delete(s.entries, token)
 		return PartialAuthChallenge{}, false
 	}
 	delete(s.entries, token)

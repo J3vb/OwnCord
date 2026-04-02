@@ -182,9 +182,9 @@ func handleGetMessages(database *db.DB) http.HandlerFunc {
 			}
 			ok, dmErr := database.IsDMParticipant(user.ID, channelID)
 			if dmErr != nil || !ok {
-				writeJSON(w, http.StatusForbidden, errorResponse{
-					Error:   "FORBIDDEN",
-					Message: "not a participant in this DM",
+				writeJSON(w, http.StatusNotFound, errorResponse{
+					Error:   "NOT_FOUND",
+					Message: "channel not found",
 				})
 				return
 			}
@@ -482,9 +482,9 @@ func handleGetPins(database *db.DB) http.HandlerFunc {
 			}
 			ok, dmErr := database.IsDMParticipant(user.ID, channelID)
 			if dmErr != nil || !ok {
-				writeJSON(w, http.StatusForbidden, errorResponse{
-					Error:   "FORBIDDEN",
-					Message: "not a participant in this DM",
+				writeJSON(w, http.StatusNotFound, errorResponse{
+					Error:   "NOT_FOUND",
+					Message: "channel not found",
 				})
 				return
 			}
@@ -571,9 +571,9 @@ func handleSetPinned(database *db.DB, pinned bool) http.HandlerFunc {
 			}
 			ok, dmErr := database.IsDMParticipant(user.ID, channelID)
 			if dmErr != nil || !ok {
-				writeJSON(w, http.StatusForbidden, errorResponse{
-					Error:   "FORBIDDEN",
-					Message: "not a participant in this DM",
+				writeJSON(w, http.StatusNotFound, errorResponse{
+					Error:   "NOT_FOUND",
+					Message: "channel not found",
 				})
 				return
 			}

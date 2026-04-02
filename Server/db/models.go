@@ -6,10 +6,10 @@ import "time"
 type User struct {
 	ID           int64
 	Username     string
-	PasswordHash string
+	PasswordHash string `json:"-"`
 	Avatar       *string
 	RoleID       int64
-	TOTPSecret   *string
+	TOTPSecret   *string `json:"-"`
 	Status       string
 	CreatedAt    string
 	LastSeen     *string
@@ -22,7 +22,7 @@ type User struct {
 type Session struct {
 	ID        int64
 	UserID    int64
-	TokenHash string
+	TokenHash string `json:"-"`
 	Device    string
 	IP        string
 	CreatedAt string

@@ -775,8 +775,8 @@ func TestGetPins_DMChannel_NonParticipantForbidden(t *testing.T) {
 	dmCh, _, _ := database.GetOrCreateDMChannel(user1.ID, user2.ID)
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/pins", dmCh.ID), outsiderToken)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403; body: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body: %s", rr.Code, rr.Body.String())
 	}
 }
 

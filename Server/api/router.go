@@ -51,8 +51,9 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		return 0
 	}))
 
-	// Shared rate limiter for auth endpoints.
-	limiter := auth.NewRateLimiter()
+	// Shared rate limiter for auth endpoints. Lockouts are persisted to the
+	// database so they survive server restarts (M2 security hardening).
+	limiter := auth.NewPersistentRateLimiter(database)
 
 	// Start background cleanup of stale rate-limiter entries to prevent
 	// unbounded memory growth. The goroutine exits when stopCh is closed.

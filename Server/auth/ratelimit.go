@@ -16,20 +16,50 @@ type lockoutEntry struct {
 	expiresAt time.Time
 }
 
+// LockoutPersister is an optional persistence backend for lockout entries.
+// When provided, lockouts survive server restarts. The interface uses only
+// stdlib types to avoid circular dependencies between packages.
+type LockoutPersister interface {
+	UpsertLockout(key string, expiresAt time.Time) error
+	DeleteLockout(key string) error
+	CleanupExpiredLockouts() error
+	// LoadActiveLockouts returns (keys, expiresAt) slices of equal length.
+	LoadActiveLockouts() (keys []string, expiresAt []time.Time, err error)
+}
+
 // RateLimiter is an in-memory, thread-safe sliding-window rate limiter with
-// optional IP lockout support.
+// optional IP lockout support. When a LockoutStore is provided, lockout
+// entries are persisted so they survive server restarts.
 type RateLimiter struct {
 	mu       syncutil.Mutex
 	windows  map[string]*entry
 	lockouts map[string]*lockoutEntry
+	store    LockoutPersister // nil = pure in-memory (tests, non-login limiters)
 }
 
-// NewRateLimiter returns an initialised RateLimiter.
+// NewRateLimiter returns an initialised RateLimiter with no persistence.
 func NewRateLimiter() *RateLimiter {
 	return &RateLimiter{
 		windows:  make(map[string]*entry),
 		lockouts: make(map[string]*lockoutEntry),
 	}
+}
+
+// NewPersistentRateLimiter returns a RateLimiter that persists lockouts via
+// the provided store. It loads any active lockouts from the store on creation.
+func NewPersistentRateLimiter(store LockoutPersister) *RateLimiter {
+	rl := &RateLimiter{
+		windows:  make(map[string]*entry),
+		lockouts: make(map[string]*lockoutEntry),
+		store:    store,
+	}
+	// Load surviving lockouts from the store.
+	if keys, expiresAt, err := store.LoadActiveLockouts(); err == nil {
+		for i, key := range keys {
+			rl.lockouts[key] = &lockoutEntry{expiresAt: expiresAt[i]}
+		}
+	}
+	return rl
 }
 
 // Allow reports whether a request from key is permitted given the limit and
@@ -75,11 +105,16 @@ func (r *RateLimiter) Allow(key string, limit int, window time.Duration) bool {
 }
 
 // Lockout prevents any requests from key for duration regardless of the
-// sliding-window counter.
+// sliding-window counter. When a LockoutStore is configured, the lockout
+// is persisted so it survives server restarts.
 func (r *RateLimiter) Lockout(key string, duration time.Duration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.lockouts[key] = &lockoutEntry{expiresAt: time.Now().Add(duration)}
+	expiresAt := time.Now().Add(duration)
+	r.lockouts[key] = &lockoutEntry{expiresAt: expiresAt}
+	if r.store != nil {
+		_ = r.store.UpsertLockout(key, expiresAt)
+	}
 }
 
 // IsLockedOut reports whether key is currently under a lockout.
@@ -135,6 +170,9 @@ func (r *RateLimiter) Reset(key string) {
 	defer r.mu.Unlock()
 	delete(r.windows, key)
 	delete(r.lockouts, key)
+	if r.store != nil {
+		_ = r.store.DeleteLockout(key)
+	}
 }
 
 // Cleanup evicts stale map entries to prevent unbounded memory growth.
@@ -171,6 +209,10 @@ func (r *RateLimiter) Cleanup(maxWindow time.Duration) {
 		if now.After(lo.expiresAt) {
 			delete(r.lockouts, key)
 		}
+	}
+
+	if r.store != nil {
+		_ = r.store.CleanupExpiredLockouts()
 	}
 }
 

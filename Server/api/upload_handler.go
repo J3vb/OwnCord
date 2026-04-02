@@ -302,6 +302,8 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 			}
 		}
 
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+
 		// Use the actual file modification time so If-Modified-Since works correctly.
 		var modTime time.Time
 		if info, statErr := f.Stat(); statErr == nil {

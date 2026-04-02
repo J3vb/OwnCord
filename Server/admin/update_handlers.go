@@ -23,7 +23,8 @@ func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 		}
 		info, err := u.CheckForUpdate(r.Context())
 		if err != nil {
-			writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", "failed to check for updates: "+err.Error())
+			slog.Error("update check failed", "err", err)
+			writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", "failed to check for updates — see server logs")
 			return
 		}
 		writeJSON(w, http.StatusOK, info)
@@ -41,7 +42,8 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 		// Check for available update.
 		info, err := u.CheckForUpdate(r.Context())
 		if err != nil {
-			writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", err.Error())
+			slog.Error("update check failed during apply", "err", err)
+			writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", "failed to check for updates — see server logs")
 			return
 		}
 		if !info.UpdateAvailable {
@@ -73,7 +75,8 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 		defer cancel()
 
 		if err := u.DownloadAndVerify(ctx, info.DownloadURL, info.ChecksumURL, newPath); err != nil {
-			writeErr(w, http.StatusBadGateway, "DOWNLOAD_FAILED", err.Error())
+			slog.Error("update download/verify failed", "err", err)
+			writeErr(w, http.StatusBadGateway, "DOWNLOAD_FAILED", "download or verification failed — see server logs")
 			return
 		}
 

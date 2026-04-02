@@ -900,8 +900,8 @@ func TestSetPinned_DMChannel_NonParticipantForbidden(t *testing.T) {
 	msgID, _ := database.CreateMessage(dmCh.ID, alice.ID, "secret msg", nil)
 
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", dmCh.ID, msgID), tokenCharlie)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("SetPinned DM non-participant: status = %d, want 403; body = %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("SetPinned DM non-participant: status = %d, want 404; body = %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -1094,8 +1094,8 @@ func TestGetMessages_DMChannel_NonParticipant(t *testing.T) {
 	dmCh, _, _ := database.GetOrCreateDMChannel(alice.ID, bob.ID)
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages", dmCh.ID), tokenCharlie)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("GetMessages DM non-participant: status = %d, want 403; body = %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("GetMessages DM non-participant: status = %d, want 404; body = %s", rr.Code, rr.Body.String())
 	}
 }
 

@@ -51,7 +51,9 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.Post("/backup", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			ownerOnlyMiddleware(database, handleBackup(database)).ServeHTTP(w, req)
 		}))
-		r.Get("/backups", handleListBackups())
+		r.Get("/backups", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			ownerOnlyMiddleware(database, handleListBackups()).ServeHTTP(w, req)
+		}))
 		r.Delete("/backups/{name}", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			ownerOnlyMiddleware(database, handleDeleteBackup(database)).ServeHTTP(w, req)
 		}))

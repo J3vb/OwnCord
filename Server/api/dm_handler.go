@@ -193,9 +193,9 @@ func handleCloseDM(database *db.DB, broadcaster DMBroadcaster) http.HandlerFunc 
 			return
 		}
 		if !isParticipant {
-			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error:   "FORBIDDEN",
-				Message: "you are not a participant in this DM",
+			writeJSON(w, http.StatusNotFound, errorResponse{
+				Error:   "NOT_FOUND",
+				Message: "channel not found",
 			})
 			return
 		}
