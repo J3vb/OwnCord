@@ -25,6 +25,11 @@ func (h *Hub) SweepStaleVoiceStatesForTest() {
 	h.sweepStaleVoiceStates()
 }
 
+// SweepRevokedSessionsForTest exposes sweepRevokedSessions for external tests.
+func (h *Hub) SweepRevokedSessionsForTest() {
+	h.sweepRevokedSessions()
+}
+
 // SetClientLastActivityForTest overwrites a client's lastActivity timestamp.
 func SetClientLastActivityForTest(c *Client, t time.Time) {
 	c.mu.Lock()

@@ -148,6 +148,8 @@ func (h *Hub) Run() {
 		func() {
 			staleTicker := time.NewTicker(30 * time.Second)
 			defer staleTicker.Stop()
+			sessionSweepTicker := time.NewTicker(30 * time.Second)
+			defer sessionSweepTicker.Stop()
 			voiceSweepTicker := time.NewTicker(60 * time.Second)
 			defer voiceSweepTicker.Stop()
 
@@ -187,6 +189,8 @@ func (h *Hub) Run() {
 					h.deliverBroadcast(bm)
 				case <-staleTicker.C:
 					h.sweepStaleClients()
+				case <-sessionSweepTicker.C:
+					h.sweepRevokedSessions()
 				case <-voiceSweepTicker.C:
 					h.sweepStaleVoiceStates()
 				}
@@ -488,6 +492,42 @@ func (h *Hub) sweepStaleClients() {
 		slog.Warn("hub: closing stale connection (no activity)",
 			"user_id", c.userID, "last_activity", c.getLastActivity())
 		h.kickClient(c)
+	}
+}
+
+// sweepRevokedSessions iterates all connected clients and kicks any whose
+// session has been deleted, expired, or whose user has been banned. This
+// provides time-based session enforcement for idle WebSocket connections
+// that never trigger the message-count-based check (BUG-109).
+func (h *Hub) sweepRevokedSessions() {
+	if h.db == nil {
+		return
+	}
+
+	h.mu.RLock()
+	snapshot := make([]*Client, 0, len(h.clients))
+	for _, c := range h.clients {
+		if c.tokenHash != "" {
+			snapshot = append(snapshot, c)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, c := range snapshot {
+		result, err := h.db.GetSessionWithBanStatus(c.tokenHash)
+		if err != nil || result == nil || auth.IsSessionExpired(result.ExpiresAt) {
+			slog.Info("session sweep: revoked/expired session, disconnecting",
+				"user_id", c.userID)
+			h.kickClient(c)
+			continue
+		}
+		tempUser := &db.User{Banned: result.Banned, BanExpires: result.BanExpires}
+		if auth.IsEffectivelyBanned(tempUser) {
+			slog.Info("session sweep: banned user, disconnecting",
+				"user_id", c.userID)
+			c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
+			h.kickClient(c)
+		}
 	}
 }
 

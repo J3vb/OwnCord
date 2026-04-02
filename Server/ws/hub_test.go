@@ -699,6 +699,99 @@ func TestHub_SweepStaleClients_AllFresh(t *testing.T) {
 	}
 }
 
+// ─── Session sweep (BUG-109) ──────────────────────────────────────────────
+
+// TestHub_SweepRevokedSessions_KicksRevokedClient verifies that the periodic
+// session sweep disconnects clients whose sessions have been deleted from the
+// database (e.g. after logout on another device).
+func TestHub_SweepRevokedSessions_KicksRevokedClient(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	// Create two users with sessions.
+	uid1, err := database.CreateUser("alice-revoke", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	uid2, err := database.CreateUser("bob-valid", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	u1, _ := database.GetUserByID(uid1)
+	u2, _ := database.GetUserByID(uid2)
+
+	token1 := "revoke-token-1"
+	token2 := "valid-token-2"
+	hash1 := auth.HashToken(token1)
+	hash2 := auth.HashToken(token2)
+
+	if _, err := database.CreateSession(uid1, hash1, "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession 1: %v", err)
+	}
+	if _, err := database.CreateSession(uid2, hash2, "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession 2: %v", err)
+	}
+
+	s1 := make(chan []byte, 4)
+	s2 := make(chan []byte, 4)
+	c1 := ws.NewTestClientWithTokenHash(hub, u1, hash1, 0, s1)
+	c2 := ws.NewTestClientWithTokenHash(hub, u2, hash2, 0, s2)
+
+	hub.Register(c1)
+	hub.Register(c2)
+	time.Sleep(20 * time.Millisecond)
+
+	// Delete alice's session (simulating logout from another device).
+	if err := database.DeleteSession(hash1); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+
+	// Run the session sweep.
+	hub.SweepRevokedSessionsForTest()
+	time.Sleep(20 * time.Millisecond)
+
+	// Alice should be kicked, Bob should remain.
+	if hub.GetClient(uid1) != nil {
+		t.Error("revoked client alice should have been kicked")
+	}
+	if hub.GetClient(uid2) == nil {
+		t.Error("valid client bob should still be connected")
+	}
+	if hub.ClientCount() != 1 {
+		t.Errorf("ClientCount = %d, want 1", hub.ClientCount())
+	}
+}
+
+// TestHub_SweepRevokedSessions_NoDBNoPanic verifies the sweep is a no-op
+// when the hub has no database (nil-safe).
+func TestHub_SweepRevokedSessions_NoDBNoPanic(t *testing.T) {
+	hub := ws.NewHubForTest()
+	hub.SweepRevokedSessionsForTest() // should not panic
+}
+
+// TestHub_SweepRevokedSessions_EmptyTokenHashSkipped verifies that clients
+// without a token hash (e.g. test clients) are not kicked by the sweep.
+func TestHub_SweepRevokedSessions_EmptyTokenHashSkipped(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	uid := seedTestUser(t, database, "no-hash-user")
+	s := make(chan []byte, 4)
+	c := ws.NewTestClient(hub, uid, s)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.SweepRevokedSessionsForTest()
+	time.Sleep(20 * time.Millisecond)
+
+	if hub.ClientCount() != 1 {
+		t.Errorf("ClientCount = %d, want 1 (client without token hash should survive)", hub.ClientCount())
+	}
+}
+
 // ─── LiveKitHealthCheck ─────────────────────────────────────────────────────
 
 func TestHub_LiveKitHealthCheck_NilReturnsError(t *testing.T) {
