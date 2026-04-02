@@ -174,6 +174,45 @@ func TestChangePassword_Success(t *testing.T) {
 	}
 }
 
+// BUG-108: Password change must revoke other sessions.
+func TestChangePassword_RevokesOtherSessions(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+
+	// Create user with two sessions.
+	token1 := profileCreateToken(t, database, "pw-revoke", 4)
+	user, _ := database.GetUserByUsername("pw-revoke")
+
+	// Create a second session for the same user.
+	token2, _ := auth.GenerateToken()
+	expiresAt := time.Now().Add(24 * time.Hour).UTC().Format("2006-01-02T15:04:05Z")
+	_, _ = database.Exec(
+		"INSERT INTO sessions (user_id, token, device, ip_address, expires_at) VALUES (?, ?, ?, ?, ?)",
+		user.ID, auth.HashToken(token2), "OtherDevice", "10.0.0.1", expiresAt,
+	)
+
+	// Change password using token1.
+	rr := putJSON(t, router, "/api/v1/users/me/password", token1, map[string]string{
+		"old_password": "securePass1",
+		"new_password": "newSecure2",
+	})
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// token1 (current session) should still work.
+	sess1, _ := database.GetSessionByTokenHash(auth.HashToken(token1))
+	if sess1 == nil {
+		t.Error("current session should survive password change")
+	}
+
+	// token2 (other session) should be revoked.
+	sess2, _ := database.GetSessionByTokenHash(auth.HashToken(token2))
+	if sess2 != nil {
+		t.Error("other session should be revoked after password change")
+	}
+}
+
 func TestChangePassword_WrongOldPassword(t *testing.T) {
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)

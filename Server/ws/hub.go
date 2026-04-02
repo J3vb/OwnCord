@@ -563,10 +563,13 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	delivered := 0
 	skipped := 0
 	for _, c := range h.clients {
-		// channelID == 0 → broadcast to everyone.
-		// c.getChannelID() == 0 → client hasn't focused yet; deliver all
-		// channel messages so they don't silently miss events (BUG-084).
-		if bm.channelID != 0 && c.getChannelID() != 0 && c.getChannelID() != bm.channelID && c.getVoiceChID() != bm.channelID {
+		// channelID == 0 → global broadcast, deliver to everyone.
+		// Otherwise, only deliver to clients viewing this channel
+		// (via channel_focus) or in voice on this channel.
+		// Clients that haven't focused any channel (channelID == 0)
+		// are intentionally excluded from channel-scoped broadcasts
+		// to prevent information leakage (BUG-122).
+		if bm.channelID != 0 && c.getChannelID() != bm.channelID && c.getVoiceChID() != bm.channelID {
 			skipped++
 			continue
 		}

@@ -69,6 +69,12 @@ func (h *Hub) handleReaction(_ context.Context, c *Client, add bool, payload jso
 		return
 	}
 
+	// BUG-126: Reject reactions on soft-deleted messages.
+	if msg.Deleted {
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "reaction failed"))
+		return
+	}
+
 	// Check channel type for DM-aware permission handling.
 	reactCh, chErr := h.db.GetChannel(msg.ChannelID)
 	reactIsDM := chErr == nil && reactCh != nil && reactCh.Type == "dm"

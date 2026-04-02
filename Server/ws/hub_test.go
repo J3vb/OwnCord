@@ -232,6 +232,99 @@ func TestHub_BroadcastToChannel_ZeroChannelSendsToAll(t *testing.T) {
 	assertReceived(t, s1, msg, "client")
 }
 
+// ─── BUG-122: Unfocused client must NOT receive channel-scoped broadcasts ────
+
+func TestHub_BroadcastToChannel_SkipsUnfocusedClient(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	chID := seedTestChannel(t, database, "secret")
+	u1 := seedTestUser(t, database, "focused")
+	u2 := seedTestUser(t, database, "unfocused")
+
+	s1 := make(chan []byte, 4)
+	s2 := make(chan []byte, 4)
+	c1 := ws.NewTestClientWithChannel(hub, u1, chID, s1) // focused on channel
+	c2 := ws.NewTestClient(hub, u2, s2)                  // channelID == 0 (unfocused)
+
+	hub.Register(c1)
+	hub.Register(c2)
+	time.Sleep(20 * time.Millisecond)
+
+	msg := []byte(`{"type":"chat_message","payload":{"content":"secret"}}`)
+	hub.BroadcastToChannel(chID, msg)
+	time.Sleep(20 * time.Millisecond)
+
+	assertReceived(t, s1, msg, "focused client")
+	assertNotReceived(t, s2, "unfocused client must NOT receive channel broadcast")
+}
+
+func TestHub_BroadcastToChannel_DeliversToVoiceClient(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	chID := seedTestChannel(t, database, "voice-text")
+	u1 := seedTestUser(t, database, "voiceuser")
+
+	s1 := make(chan []byte, 4)
+	c1 := ws.NewTestClient(hub, u1, s1) // channelID == 0
+	ws.SetClientVoiceChID(c1, chID)     // but in voice on this channel
+
+	hub.Register(c1)
+	time.Sleep(20 * time.Millisecond)
+
+	msg := []byte(`{"type":"chat_message","payload":{"content":"hello"}}`)
+	hub.BroadcastToChannel(chID, msg)
+	time.Sleep(20 * time.Millisecond)
+
+	assertReceived(t, s1, msg, "voice client should receive channel broadcast")
+}
+
+func TestHub_BroadcastToAll_StillDeliversToUnfocusedClient(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	u1 := seedTestUser(t, database, "globaluser")
+	s1 := make(chan []byte, 4)
+	c1 := ws.NewTestClient(hub, u1, s1) // channelID == 0 (unfocused)
+
+	hub.Register(c1)
+	time.Sleep(20 * time.Millisecond)
+
+	msg := []byte(`{"type":"presence","payload":{"status":"online"}}`)
+	hub.BroadcastToAll(msg)
+	time.Sleep(20 * time.Millisecond)
+
+	assertReceived(t, s1, msg, "unfocused client must still receive global broadcasts")
+}
+
+func TestHub_BroadcastToChannel_UnfocusedDoesNotReceiveAnyChannel(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	ch1 := seedTestChannel(t, database, "chan1")
+	ch2 := seedTestChannel(t, database, "chan2")
+	u1 := seedTestUser(t, database, "snooper")
+
+	s1 := make(chan []byte, 8)
+	c1 := ws.NewTestClient(hub, u1, s1) // unfocused
+
+	hub.Register(c1)
+	time.Sleep(20 * time.Millisecond)
+
+	msg1 := []byte(`{"type":"chat_message","payload":{"channel":"1"}}`)
+	msg2 := []byte(`{"type":"chat_message","payload":{"channel":"2"}}`)
+	hub.BroadcastToChannel(ch1, msg1)
+	hub.BroadcastToChannel(ch2, msg2)
+	time.Sleep(20 * time.Millisecond)
+
+	assertNotReceived(t, s1, "unfocused client must NOT receive ch1 broadcast")
+}
+
 // ─── SendToUser ───────────────────────────────────────────────────────────────
 
 func TestHub_SendToUser_ExistingClient(t *testing.T) {

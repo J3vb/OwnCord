@@ -216,6 +216,16 @@ func handleChangePassword(database *db.DB) http.HandlerFunc {
 			return
 		}
 
+		// BUG-108: Revoke all other sessions after password change.
+		if sess, ok := r.Context().Value(SessionKey).(*db.Session); ok && sess != nil {
+			n, err := database.DeleteOtherSessions(user.ID, sess.ID)
+			if err != nil {
+				slog.Error("DeleteOtherSessions after password change", "err", err, "user_id", user.ID)
+			} else if n > 0 {
+				slog.Info("revoked other sessions after password change", "user_id", user.ID, "revoked", n)
+			}
+		}
+
 		slog.Info("password changed", "user_id", user.ID)
 		_ = database.LogAudit(user.ID, "password_change", "user", user.ID, "password changed")
 

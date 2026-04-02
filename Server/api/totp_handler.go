@@ -229,6 +229,14 @@ func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, use
 		}
 		pendingStore.Delete(user.ID)
 
+		// BUG-108: Revoke all other sessions after 2FA state change.
+		if sess, ok := r.Context().Value(SessionKey).(*db.Session); ok && sess != nil {
+			n, _ := database.DeleteOtherSessions(user.ID, sess.ID)
+			if n > 0 {
+				slog.Info("revoked other sessions after totp enable", "user_id", user.ID, "revoked", n)
+			}
+		}
+
 		slog.Info("totp enabled", "user_id", user.ID)
 		_ = database.LogAudit(user.ID, "totp_enabled", "user", user.ID,
 			"two-factor authentication enrolled")
@@ -287,6 +295,14 @@ func handleDisableTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore) htt
 				Message: "failed to disable two-factor authentication",
 			})
 			return
+		}
+
+		// BUG-108: Revoke all other sessions after 2FA state change.
+		if sess, ok := r.Context().Value(SessionKey).(*db.Session); ok && sess != nil {
+			n, _ := database.DeleteOtherSessions(user.ID, sess.ID)
+			if n > 0 {
+				slog.Info("revoked other sessions after totp disable", "user_id", user.ID, "revoked", n)
+			}
 		}
 
 		slog.Info("totp disabled", "user_id", user.ID)

@@ -263,6 +263,21 @@ func (d *DB) DeleteSession(tokenHash string) error {
 	return nil
 }
 
+// DeleteOtherSessions removes all sessions for the given user except the one
+// with keepSessionID. Used after password change or 2FA state change to
+// invalidate all other sessions (BUG-108).
+func (d *DB) DeleteOtherSessions(userID, keepSessionID int64) (int64, error) {
+	result, err := d.sqlDB.Exec(
+		`DELETE FROM sessions WHERE user_id = ? AND id != ?`,
+		userID, keepSessionID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("DeleteOtherSessions: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	return n, nil
+}
+
 // DeleteExpiredSessions removes all sessions whose expires_at is in the past.
 // Compares using strftime to handle both ISO-8601 and SQLite datetime formats.
 func (d *DB) DeleteExpiredSessions() error {

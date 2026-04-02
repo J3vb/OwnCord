@@ -268,6 +268,12 @@ func (h *Hub) handleChatEdit(_ context.Context, c *Client, _ string, payload jso
 		return
 	}
 
+	// BUG-126: Reject edits on soft-deleted messages.
+	if msg.Deleted {
+		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "cannot edit this message"))
+		return
+	}
+
 	// Check channel type for DM-aware permission handling.
 	editCh, chErr := h.db.GetChannel(msg.ChannelID)
 	editIsDM := chErr == nil && editCh != nil && editCh.Type == "dm"
