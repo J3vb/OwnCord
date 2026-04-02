@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/storage"
@@ -58,18 +59,31 @@ func sanitizeUploadFilename(name string) string {
 
 // MountUploadRoutes registers upload and file-serving endpoints.
 // allowedOrigins controls the Access-Control-Allow-Origin header on served files.
-func MountUploadRoutes(r chi.Router, database *db.DB, store *storage.Storage, allowedOrigins []string) {
+func MountUploadRoutes(r chi.Router, database *db.DB, store *storage.Storage, limiter *auth.RateLimiter, allowedOrigins []string) {
 	// Upload requires authentication and a higher body size limit (100 MB).
 	r.With(
 		AuthMiddleware(database),
 		MaxBodySize(uploadMaxBodySize),
-	).Post("/api/v1/uploads", handleUpload(database, store))
+	).Post("/api/v1/uploads", handleUpload(database, store, limiter))
 	// File serving requires authentication for channel-level access control.
 	r.With(AuthMiddleware(database)).Get("/api/v1/files/{id}", handleServeFile(database, store, allowedOrigins))
 }
 
-func handleUpload(database *db.DB, store *storage.Storage) http.HandlerFunc {
+func handleUpload(database *db.DB, store *storage.Storage, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// BUG-131: Per-user upload rate limit to prevent disk exhaustion.
+		user, ok := r.Context().Value(UserKey).(*db.User)
+		if ok && user != nil {
+			uploadKey := fmt.Sprintf("upload:%d", user.ID)
+			if !limiter.Allow(uploadKey, uploadRateLimitPerMinute, time.Minute) {
+				writeJSON(w, http.StatusTooManyRequests, errorResponse{
+					Error:   "RATE_LIMITED",
+					Message: "upload rate limit exceeded, try again later",
+				})
+				return
+			}
+		}
+
 		// Limit request body size to prevent abuse.
 		r.Body = http.MaxBytesReader(w, r.Body, uploadMaxBodySize)
 
@@ -144,7 +158,7 @@ func handleUpload(database *db.DB, store *storage.Storage) http.HandlerFunc {
 		}
 
 		// Insert attachment record in DB (unlinked — message_id is NULL).
-		user := r.Context().Value(UserKey).(*db.User)
+		user, _ = r.Context().Value(UserKey).(*db.User)
 		safeFilename := sanitizeUploadFilename(header.Filename)
 		if err := database.CreateAttachment(fileID, user.ID, safeFilename, fileID, mime, header.Size, width, height); err != nil {
 			// Clean up stored file on DB failure.

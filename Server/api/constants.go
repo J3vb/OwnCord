@@ -87,6 +87,9 @@ const (
 	// pwConfirmLockoutDuration is how long password-confirmation endpoints are
 	// locked after exceeding pwConfirmFailureThreshold.
 	pwConfirmLockoutDuration = 15 * time.Minute
+
+	// uploadRateLimitPerMinute is the maximum file uploads per user per minute.
+	uploadRateLimitPerMinute = 10
 )
 
 // ─── Timeouts & TTLs ────────────────────────────────────────────────────────

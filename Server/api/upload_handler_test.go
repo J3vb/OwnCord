@@ -148,7 +148,8 @@ func newUploadTestStorage(t *testing.T) *storage.Storage {
 
 func buildUploadRouter(database *db.DB, store *storage.Storage, allowedOrigins []string) http.Handler {
 	r := chi.NewRouter()
-	api.MountUploadRoutes(r, database, store, allowedOrigins)
+	limiter := auth.NewRateLimiter()
+	api.MountUploadRoutes(r, database, store, limiter, allowedOrigins)
 	return r
 }
 

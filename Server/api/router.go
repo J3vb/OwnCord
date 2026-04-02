@@ -87,7 +87,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	if storeErr != nil {
 		slog.Error("failed to create file storage", "error", storeErr)
 	} else {
-		MountUploadRoutes(r, database, store, cfg.Server.AllowedOrigins)
+		MountUploadRoutes(r, database, store, limiter, cfg.Server.AllowedOrigins)
 	}
 
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
