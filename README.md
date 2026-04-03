@@ -44,6 +44,22 @@ certificates — it prompts to trust the server on first
 connection, then pins it for future sessions.
 
 
+### Voice & Video Setup (Optional)
+
+Voice and video require [LiveKit Server](https://github.com/livekit/livekit/releases):
+
+1. Download `livekit-server` from the LiveKit releases page
+2. Edit `config.yaml` and set:
+   ```yaml
+   voice:
+     livekit_api_key: "devkey"           # any string
+     livekit_api_secret: "secret-min-32-characters-long!!"  # min 32 chars
+     livekit_binary: "C:/path/to/livekit-server.exe"
+   ```
+3. Restart `chatserver.exe` — it auto-starts LiveKit as a
+   companion process
+
+
 ## Features
 
 ### Chat
@@ -142,20 +158,6 @@ connection, then pins it for future sessions.
 - Quick-switch server overlay for multi-server users
 - Structured logging with JSONL persistence (5-day rotation)
 
-### Voice & Video Setup (Optional)
-
-Voice and video require [LiveKit Server](https://github.com/livekit/livekit/releases):
-
-1. Download `livekit-server` from the LiveKit releases page
-2. Edit `config.yaml` and set:
-   ```yaml
-   voice:
-     livekit_api_key: "devkey"           # any string
-     livekit_api_secret: "secret-min-32-characters-long!!"  # min 32 chars
-     livekit_binary: "C:/path/to/livekit-server.exe"
-   ```
-3. Restart `chatserver.exe` — it auto-starts LiveKit as a
-   companion process
 
 ### Networking
 
@@ -308,13 +310,20 @@ Key settings:
 ## Auto-Updates
 
 The client checks for updates after connecting to the server.
-Updates are Ed25519-signed and verified before install.
+Client updates are Ed25519-signed and verified before install.
+Server auto-updates use a separate minisign/Ed25519 signing key, verify `chatserver.exe.sig`, and require a signed `server-update-manifest.json` that binds the binary hash to the release version before apply.
 
-To enable signed releases in CI, add these GitHub repository secrets:
+For maintainers publishing signed releases from GitHub Actions, configure these repository secrets:
 
-- `TAURI_SIGNING_PRIVATE_KEY` — Ed25519 private key
-  (via `npx tauri signer generate`)
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — key password
+- `TAURI_SIGNING_PRIVATE_KEY` — client updater private key
+   (via `npx tauri signer generate`)
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — client updater key password
+- `SERVER_UPDATE_SIGNING_PRIVATE_KEY` — server updater private key
+- `SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD` — server updater key password
+
+These are secret names only. Do not commit private key material or passphrases to the repository.
+
+When rotating the server updater key, also update [Server/updater/server_update_public_key.txt](Server/updater/server_update_public_key.txt). For live deployments that rely on server auto-update continuity, treat key rotation as a staged rollover rather than a one-step secret swap.
 
 ## Documentation
 
@@ -353,3 +362,7 @@ See [Contributing Guide](docs/contributing.md) for details.
 ## License
 
 AGPL-3.0
+
+---
+
+*Built with [Claude Code](https://claude.ai/code) and [GitHub Copilot](https://github.com/features/copilot).*

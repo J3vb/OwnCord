@@ -1,6 +1,8 @@
 package api_test
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -576,6 +578,282 @@ func TestMaxBodySize_PassesThrough(t *testing.T) {
 	}
 }
 
+// ─── AdminIPRestrict tests ──────────────────────────────────────────────────
+
+func TestAdminIPRestrict_AllowedCIDR(t *testing.T) {
+	h := api.AdminIPRestrict([]string{"127.0.0.0/8"}, nil)(http.HandlerFunc(ok))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("AdminIPRestrict allowed CIDR status = %d, want 200", rr.Code)
+	}
+}
+
+func TestAdminIPRestrict_BlockedCIDR(t *testing.T) {
+	h := api.AdminIPRestrict([]string{"10.0.0.0/8"}, nil)(http.HandlerFunc(ok))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.168.1.1:9999" // not in 10.0.0.0/8
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("AdminIPRestrict blocked CIDR status = %d, want 403", rr.Code)
+	}
+}
+
+func TestAdminIPRestrict_EmptyAllowsAll(t *testing.T) {
+	h := api.AdminIPRestrict(nil, nil)(http.HandlerFunc(ok))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "203.0.113.1:9999"
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("AdminIPRestrict empty list status = %d, want 200", rr.Code)
+	}
+}
+
+func TestAdminIPRestrict_InvalidCIDR(t *testing.T) {
+	// Invalid CIDR should fail closed (deny access since isTrustedProxy
+	// returns false on parse error).
+	h := api.AdminIPRestrict([]string{"not-a-cidr"}, nil)(http.HandlerFunc(ok))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("AdminIPRestrict invalid CIDR status = %d, want 403", rr.Code)
+	}
+}
+
+func TestAdminIPRestrict_MultipleCIDRs(t *testing.T) {
+	h := api.AdminIPRestrict([]string{"10.0.0.0/8", "192.168.0.0/16"}, nil)(http.HandlerFunc(ok))
+
+	// First CIDR matches.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.1.2.3:9999"
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("AdminIPRestrict multi-CIDR (10.x) status = %d, want 200", rr.Code)
+	}
+
+	// Second CIDR matches.
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.168.1.50:9999"
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("AdminIPRestrict multi-CIDR (192.168.x) status = %d, want 200", rr.Code)
+	}
+
+	// Neither matches.
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "172.16.0.1:9999"
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("AdminIPRestrict multi-CIDR (no match) status = %d, want 403", rr.Code)
+	}
+}
+
+// ─── AdminIPRestrict proxy-aware tests (BUG-116) ─────────────────────────────
+
+// TestAdminIPRestrict_TrustedProxy_UsesXForwardedFor verifies that when the
+// connecting IP is a trusted proxy, the real client IP is extracted from
+// X-Forwarded-For and checked against admin CIDRs.
+func TestAdminIPRestrict_TrustedProxy_UsesXForwardedFor(t *testing.T) {
+	// Admin allowed: only 203.0.113.0/24. Trusted proxy: 127.0.0.1.
+	h := api.AdminIPRestrict(
+		[]string{"203.0.113.0/24"},
+		[]string{"127.0.0.0/8"},
+	)(http.HandlerFunc(ok))
+
+	// Request from proxy (127.0.0.1) with real client in XFF → allowed.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	req.Header.Set("X-Forwarded-For", "203.0.113.50")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("trusted proxy + allowed XFF status = %d, want 200", rr.Code)
+	}
+
+	// Request from proxy with disallowed real client → blocked.
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	req.Header.Set("X-Forwarded-For", "198.51.100.1")
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("trusted proxy + blocked XFF status = %d, want 403", rr.Code)
+	}
+}
+
+// TestAdminIPRestrict_TrustedProxy_UsesXRealIP verifies X-Real-IP is preferred
+// over X-Forwarded-For when both are present from a trusted proxy.
+func TestAdminIPRestrict_TrustedProxy_UsesXRealIP(t *testing.T) {
+	h := api.AdminIPRestrict(
+		[]string{"203.0.113.0/24"},
+		[]string{"127.0.0.0/8"},
+	)(http.HandlerFunc(ok))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	req.Header.Set("X-Real-IP", "203.0.113.50")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("trusted proxy + X-Real-IP status = %d, want 200", rr.Code)
+	}
+}
+
+// TestAdminIPRestrict_UntrustedProxy_IgnoresHeaders verifies that proxy headers
+// are ignored when the connecting IP is NOT a trusted proxy.
+func TestAdminIPRestrict_UntrustedProxy_IgnoresHeaders(t *testing.T) {
+	h := api.AdminIPRestrict(
+		[]string{"203.0.113.0/24"},
+		[]string{"10.0.0.0/8"}, // only 10.x is trusted
+	)(http.HandlerFunc(ok))
+
+	// Untrusted proxy at 192.168.1.1 tries to spoof XFF.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.168.1.1:9999"
+	req.Header.Set("X-Forwarded-For", "203.0.113.50") // spoofed
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("untrusted proxy spoofed XFF status = %d, want 403 (should use RemoteAddr)", rr.Code)
+	}
+}
+
+// TestAdminIPRestrict_ProxyCollapse_WithoutTrusted verifies the original bug:
+// without trusted proxies, a proxy on localhost makes everything appear local.
+func TestAdminIPRestrict_ProxyCollapse_WithoutTrusted(t *testing.T) {
+	// Admin CIDR: private networks. No trusted proxies.
+	h := api.AdminIPRestrict(
+		[]string{"127.0.0.0/8", "10.0.0.0/8"},
+		nil, // no trusted proxies
+	)(http.HandlerFunc(ok))
+
+	// External client behind nginx on localhost — RemoteAddr is 127.0.0.1.
+	// XFF has the real external IP, but it's ignored (no trusted proxies).
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	req.Header.Set("X-Forwarded-For", "198.51.100.1") // real external IP
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	// Without trusted proxies, 127.0.0.1 is used — passes the private CIDR check.
+	// This is the documented limitation: operators MUST configure trusted_proxies.
+	if rr.Code != http.StatusOK {
+		t.Errorf("no trusted proxies, proxy on localhost status = %d, want 200 (known limitation)", rr.Code)
+	}
+}
+
+// ─── SecurityHeadersWithTLS tests ───────────────────────────────────────────
+
+func TestSecurityHeadersWithTLS_HSTS(t *testing.T) {
+	h := api.SecurityHeadersWithTLS("auto")(http.HandlerFunc(ok))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if got := rr.Header().Get("Strict-Transport-Security"); got == "" {
+		t.Error("SecurityHeadersWithTLS: missing HSTS header when TLS enabled")
+	}
+}
+
+func TestSecurityHeadersWithTLS_NoHSTSWithoutTLS(t *testing.T) {
+	h := api.SecurityHeadersWithTLS("")(http.HandlerFunc(ok))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if got := rr.Header().Get("Strict-Transport-Security"); got != "" {
+		t.Errorf("SecurityHeadersWithTLS: unexpected HSTS header %q when TLS disabled", got)
+	}
+}
+
+// ─── handleLiveKitHealth tests ──────────────────────────────────────────────
+
+func TestLiveKitHealth_Healthy(t *testing.T) {
+	h := api.HandleLiveKitHealthForTest(func() (bool, error) {
+		return true, nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	if resp["status"] != "ok" {
+		t.Errorf("status = %v, want ok", resp["status"])
+	}
+	if resp["livekit_reachable"] != true {
+		t.Errorf("livekit_reachable = %v, want true", resp["livekit_reachable"])
+	}
+}
+
+func TestLiveKitHealth_Unhealthy(t *testing.T) {
+	h := api.HandleLiveKitHealthForTest(func() (bool, error) {
+		return false, fmt.Errorf("connection refused")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	if resp["status"] != "degraded" {
+		t.Errorf("status = %v, want degraded", resp["status"])
+	}
+	if resp["livekit_reachable"] != false {
+		t.Errorf("livekit_reachable = %v, want false", resp["livekit_reachable"])
+	}
+	if resp["error"] != "connection refused" {
+		t.Errorf("error = %v, want 'connection refused'", resp["error"])
+	}
+}
+
+func TestLiveKitHealth_UnhealthyNoError(t *testing.T) {
+	h := api.HandleLiveKitHealthForTest(func() (bool, error) {
+		return false, nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	if resp["error"] != "unknown" {
+		t.Errorf("error = %v, want 'unknown'", resp["error"])
+	}
+}
+
 // apiTestSchema is the full schema needed for all api tests (middleware,
 // auth handler, and invite handler).
 var apiTestSchema = []byte(`
@@ -644,4 +922,72 @@ CREATE TABLE IF NOT EXISTS settings (
 INSERT OR IGNORE INTO settings (key, value) VALUES
 	('require_2fa', 'false'),
 	('registration_open', 'true');
+
+CREATE TABLE IF NOT EXISTS channels (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    name             TEXT    NOT NULL,
+    type             TEXT    NOT NULL DEFAULT 'text',
+    category         TEXT,
+    topic            TEXT,
+    position         INTEGER NOT NULL DEFAULT 0,
+    slow_mode        INTEGER NOT NULL DEFAULT 0,
+    archived         INTEGER NOT NULL DEFAULT 0,
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+    voice_max_users  INTEGER NOT NULL DEFAULT 0,
+    voice_quality    TEXT,
+    mixing_threshold INTEGER,
+    voice_max_video  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id),
+    content    TEXT    NOT NULL,
+    reply_to   INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    edited_at  TEXT,
+    deleted    INTEGER NOT NULL DEFAULT 0,
+    pinned     INTEGER NOT NULL DEFAULT 0,
+    timestamp  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS dm_participants (
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (channel_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS dm_open_state (
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    opened_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, channel_id)
+);
+
+CREATE TABLE IF NOT EXISTS reactions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    emoji      TEXT    NOT NULL,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(message_id, user_id, emoji)
+);
+
+CREATE TABLE IF NOT EXISTS read_states (
+    user_id         INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    channel_id      INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    last_message_id INTEGER NOT NULL DEFAULT 0,
+    mention_count   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, channel_id)
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_id    INTEGER NOT NULL REFERENCES users(id),
+    action      TEXT    NOT NULL,
+    target_type TEXT    NOT NULL DEFAULT '',
+    target_id   INTEGER NOT NULL DEFAULT 0,
+    detail      TEXT    NOT NULL DEFAULT '',
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
 `)

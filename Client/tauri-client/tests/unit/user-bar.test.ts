@@ -8,15 +8,10 @@ vi.mock("@stores/ui.store", () => ({
   uiStore: { getState: () => ({}), subscribe: () => () => {} },
 }));
 
-function setAuthState(
-  user: { username: string } | null,
-  isAuthenticated: boolean,
-): void {
+function setAuthState(user: { username: string } | null, isAuthenticated: boolean): void {
   authStore.setState(() => ({
     token: isAuthenticated ? "tok" : null,
-    user: user !== null
-      ? { id: 1, username: user.username, avatar: null, role: "member" }
-      : null,
+    user: user !== null ? { id: 1, username: user.username, avatar: null, role: "member" } : null,
     serverName: "TestServer",
     motd: null,
     isAuthenticated,
@@ -128,7 +123,9 @@ describe("UserBar", () => {
     comp = createUserBar({ onDisconnect });
     comp.mount(container);
 
-    const disconnectBtn = container.querySelector('[data-testid="disconnect-btn"]') as HTMLButtonElement;
+    const disconnectBtn = container.querySelector(
+      '[data-testid="disconnect-btn"]',
+    ) as HTMLButtonElement;
     expect(disconnectBtn).not.toBeNull();
     expect(disconnectBtn.getAttribute("aria-label")).toBe("Switch server");
   });
@@ -139,7 +136,9 @@ describe("UserBar", () => {
     comp = createUserBar({ onDisconnect });
     comp.mount(container);
 
-    const disconnectBtn = container.querySelector('[data-testid="disconnect-btn"]') as HTMLButtonElement;
+    const disconnectBtn = container.querySelector(
+      '[data-testid="disconnect-btn"]',
+    ) as HTMLButtonElement;
     disconnectBtn.click();
     expect(onDisconnect).toHaveBeenCalledOnce();
   });

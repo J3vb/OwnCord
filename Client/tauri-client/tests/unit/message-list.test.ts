@@ -3,9 +3,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // jsdom does not provide ResizeObserver — stub it so MessageList can mount.
 if (typeof globalThis.ResizeObserver === "undefined") {
   globalThis.ResizeObserver = class {
-    observe(): void { /* noop */ }
-    unobserve(): void { /* noop */ }
-    disconnect(): void { /* noop */ }
+    observe(): void {
+      /* noop */
+    }
+    unobserve(): void {
+      /* noop */
+    }
+    disconnect(): void {
+      /* noop */
+    }
   } as unknown as typeof ResizeObserver;
 }
 
@@ -208,7 +214,9 @@ describe("MessageList", () => {
     expect(icon?.textContent).toBe("@");
 
     const text = container.querySelector(".channel-welcome-text");
-    expect(text?.textContent).toBe("This is the beginning of your direct message history with Bob.");
+    expect(text?.textContent).toBe(
+      "This is the beginning of your direct message history with Bob.",
+    );
   });
 
   it("includes a scroll-to-bottom button", () => {
@@ -265,10 +273,7 @@ describe("MessageList", () => {
     expect(options.onScrollTop).toHaveBeenCalledTimes(1);
 
     // Simulate new messages arriving (load-more response)
-    setMessages(1, [
-      makeMessage({ id: 0, content: "Older message" }),
-      makeMessage({ id: 1 }),
-    ]);
+    setMessages(1, [makeMessage({ id: 0, content: "Older message" }), makeMessage({ id: 1 })]);
     messagesStore.flush();
 
     // Now scrolling to top again should trigger onScrollTop again
@@ -310,10 +315,7 @@ describe("MessageList", () => {
   });
 
   it("destroys cleanly without errors even with loaded messages", () => {
-    setMessages(1, [
-      makeMessage({ id: 1 }),
-      makeMessage({ id: 2 }),
-    ]);
+    setMessages(1, [makeMessage({ id: 1 }), makeMessage({ id: 2 })]);
     msgList.mount(container);
     expect(container.querySelector(".messages-container")).not.toBeNull();
 

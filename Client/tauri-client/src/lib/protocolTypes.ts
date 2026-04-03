@@ -31,6 +31,7 @@ export const ServerMessageType = {
   MEMBER_JOIN: "member_join",
   MEMBER_LEAVE: "member_leave",
   MEMBER_UPDATE: "member_update",
+  USER_UPDATE: "user_update",
   MEMBER_BAN: "member_ban",
   SERVER_RESTART: "server_restart",
   ERROR: "error",
@@ -40,8 +41,7 @@ export const ServerMessageType = {
   DM_CHANNEL_CLOSE: "dm_channel_close",
 } as const;
 
-export type ServerMessageTypeValue =
-  (typeof ServerMessageType)[keyof typeof ServerMessageType];
+export type ServerMessageTypeValue = (typeof ServerMessageType)[keyof typeof ServerMessageType];
 
 // ---------------------------------------------------------------------------
 // Client → Server message types
@@ -68,8 +68,7 @@ export const ClientMessageType = {
   VOICE_TOKEN_REFRESH: "voice_token_refresh",
 } as const;
 
-export type ClientMessageTypeValue =
-  (typeof ClientMessageType)[keyof typeof ClientMessageType];
+export type ClientMessageTypeValue = (typeof ClientMessageType)[keyof typeof ClientMessageType];
 
 // ---------------------------------------------------------------------------
 // Unified MessageType — all message types in one object for convenience
@@ -80,5 +79,4 @@ export const MessageType = {
   ...ClientMessageType,
 } as const;
 
-export type MessageTypeValue =
-  (typeof MessageType)[keyof typeof MessageType];
+export type MessageTypeValue = (typeof MessageType)[keyof typeof MessageType];

@@ -8,13 +8,10 @@
  * dm-name, dm-close, dm-unread.
  */
 
-import {
-  createElement,
-  setText,
-  appendChildren,
-} from "@lib/dom";
+import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
+import { isSafeUrl } from "./message-list/attachments";
 
 export interface DmConversation {
   readonly userId: number;
@@ -63,7 +60,7 @@ function renderDmItem(
   const avatar = createElement("div", { class: "dm-avatar" });
   avatar.style.background = avatarBg;
 
-  if (convo.avatar !== null) {
+  if (convo.avatar !== null && isSafeUrl(convo.avatar)) {
     const img = createElement("img", {
       src: convo.avatar,
       alt: convo.username,
@@ -111,16 +108,20 @@ function renderDmItem(
     item.appendChild(unreadDot);
   }
 
-  item.addEventListener("click", () => {
-    const parent = item.parentElement;
-    if (parent !== null) {
-      for (const sibling of parent.querySelectorAll(".dm-item.active")) {
-        sibling.classList.remove("active");
+  item.addEventListener(
+    "click",
+    () => {
+      const parent = item.parentElement;
+      if (parent !== null) {
+        for (const sibling of parent.querySelectorAll(".dm-item.active")) {
+          sibling.classList.remove("active");
+        }
       }
-    }
-    item.classList.add("active");
-    onSelect(convo.userId);
-  }, { signal });
+      item.classList.add("active");
+      onSelect(convo.userId);
+    },
+    { signal },
+  );
 
   return item;
 }
@@ -142,8 +143,11 @@ export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
       });
       const arrow = createElement("span", { class: "dm-back-arrow" }, "\u2190");
       const backInfo = createElement("div", { class: "dm-back-info" });
-      const backTitle = createElement("div", { class: "dm-back-title" },
-        `Back to ${options.serverName ?? "Server"}`);
+      const backTitle = createElement(
+        "div",
+        { class: "dm-back-title" },
+        `Back to ${options.serverName ?? "Server"}`,
+      );
       const backSub = createElement("div", { class: "dm-back-subtitle" }, "Return to channels");
       appendChildren(backInfo, backTitle, backSub);
       appendChildren(backHeader, arrow, backInfo);
@@ -187,7 +191,7 @@ export function createDmSidebar(options: DmSidebarOptions): MountableComponent {
     sectionLabel.appendChild(addBtn);
 
     // Conversation list
-    const sorted = [...options.conversations].sort(
+    const sorted = [...options.conversations].toSorted(
       (a, b) => (b.unread ? 1 : 0) - (a.unread ? 1 : 0),
     );
 

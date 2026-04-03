@@ -1,8 +1,9 @@
 package auth
 
 import (
-	"sync"
 	"time"
+
+	"github.com/owncord/server/syncutil"
 )
 
 // entry records individual request timestamps for sliding-window limiting.
@@ -15,20 +16,55 @@ type lockoutEntry struct {
 	expiresAt time.Time
 }
 
-// RateLimiter is an in-memory, thread-safe sliding-window rate limiter with
-// optional IP lockout support.
-type RateLimiter struct {
-	mu       sync.Mutex
-	windows  map[string]*entry
-	lockouts map[string]*lockoutEntry
+// LockoutPersister is an optional persistence backend for lockout entries.
+// When provided, lockouts survive server restarts. The interface uses only
+// stdlib types to avoid circular dependencies between packages.
+type LockoutPersister interface {
+	UpsertLockout(key string, expiresAt time.Time) error
+	DeleteLockout(key string) error
+	CleanupExpiredLockouts() error
+	// LoadActiveLockouts returns (keys, expiresAt) slices of equal length.
+	LoadActiveLockouts() (keys []string, expiresAt []time.Time, err error)
 }
 
-// NewRateLimiter returns an initialised RateLimiter.
+// RateLimiter is an in-memory, thread-safe sliding-window rate limiter with
+// optional IP lockout support. When a LockoutStore is provided, lockout
+// entries are persisted so they survive server restarts.
+//
+// NOTE (L2): The sliding-window counters and the PartialAuthStore /
+// UsedTOTPCodeStore (in totp.go) are process-local. The server must run
+// as a single instance. Horizontal scaling requires migrating these
+// stores to a shared backend (e.g. Redis).
+type RateLimiter struct {
+	mu       syncutil.Mutex
+	windows  map[string]*entry
+	lockouts map[string]*lockoutEntry
+	store    LockoutPersister // nil = pure in-memory (tests, non-login limiters)
+}
+
+// NewRateLimiter returns an initialised RateLimiter with no persistence.
 func NewRateLimiter() *RateLimiter {
 	return &RateLimiter{
 		windows:  make(map[string]*entry),
 		lockouts: make(map[string]*lockoutEntry),
 	}
+}
+
+// NewPersistentRateLimiter returns a RateLimiter that persists lockouts via
+// the provided store. It loads any active lockouts from the store on creation.
+func NewPersistentRateLimiter(store LockoutPersister) *RateLimiter {
+	rl := &RateLimiter{
+		windows:  make(map[string]*entry),
+		lockouts: make(map[string]*lockoutEntry),
+		store:    store,
+	}
+	// Load surviving lockouts from the store.
+	if keys, expiresAt, err := store.LoadActiveLockouts(); err == nil {
+		for i, key := range keys {
+			rl.lockouts[key] = &lockoutEntry{expiresAt: expiresAt[i]}
+		}
+	}
+	return rl
 }
 
 // Allow reports whether a request from key is permitted given the limit and
@@ -74,11 +110,16 @@ func (r *RateLimiter) Allow(key string, limit int, window time.Duration) bool {
 }
 
 // Lockout prevents any requests from key for duration regardless of the
-// sliding-window counter.
+// sliding-window counter. When a LockoutStore is configured, the lockout
+// is persisted so it survives server restarts.
 func (r *RateLimiter) Lockout(key string, duration time.Duration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.lockouts[key] = &lockoutEntry{expiresAt: time.Now().Add(duration)}
+	expiresAt := time.Now().Add(duration)
+	r.lockouts[key] = &lockoutEntry{expiresAt: expiresAt}
+	if r.store != nil {
+		_ = r.store.UpsertLockout(key, expiresAt)
+	}
 }
 
 // IsLockedOut reports whether key is currently under a lockout.
@@ -96,12 +137,47 @@ func (r *RateLimiter) IsLockedOut(key string) bool {
 	return false
 }
 
+// Check reports whether a request from key would be permitted given the limit
+// and window, WITHOUT recording a new timestamp. Use this for read-only
+// rate-limit checks where the caller wants to record (via Allow) only on
+// specific outcomes such as verification failures.
+func (r *RateLimiter) Check(key string, limit int, window time.Duration) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if lo, ok := r.lockouts[key]; ok {
+		if time.Now().Before(lo.expiresAt) {
+			return false
+		}
+		delete(r.lockouts, key)
+	}
+
+	cutoff := time.Now().Add(-window)
+
+	e, ok := r.windows[key]
+	if !ok {
+		return true
+	}
+
+	count := 0
+	for _, ts := range e.timestamps {
+		if ts.After(cutoff) {
+			count++
+		}
+	}
+
+	return count < limit
+}
+
 // Reset clears all rate-limit state (timestamps and lockout) for key.
 func (r *RateLimiter) Reset(key string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.windows, key)
 	delete(r.lockouts, key)
+	if r.store != nil {
+		_ = r.store.DeleteLockout(key)
+	}
 }
 
 // Cleanup evicts stale map entries to prevent unbounded memory growth.
@@ -138,6 +214,10 @@ func (r *RateLimiter) Cleanup(maxWindow time.Duration) {
 		if now.After(lo.expiresAt) {
 			delete(r.lockouts, key)
 		}
+	}
+
+	if r.store != nil {
+		_ = r.store.CleanupExpiredLockouts()
 	}
 }
 

@@ -39,9 +39,8 @@ function maskCode(code: string): string {
 }
 
 function formatInviteInfo(invite: InviteItem): string {
-  const uses = invite.maxUses !== null
-    ? `${invite.uses}/${invite.maxUses} uses`
-    : `${invite.uses} uses`;
+  const uses =
+    invite.maxUses !== null ? `${invite.uses}/${invite.maxUses} uses` : `${invite.uses} uses`;
   return `Created by ${invite.createdBy} \u00B7 ${uses}`;
 }
 
@@ -49,9 +48,7 @@ function formatInviteInfo(invite: InviteItem): string {
 // Factory
 // ---------------------------------------------------------------------------
 
-export function createInviteManager(
-  options: InviteManagerOptions,
-): MountableComponent {
+export function createInviteManager(options: InviteManagerOptions): MountableComponent {
   const ac = new AbortController();
   let root: HTMLDivElement | null = null;
   let listEl: HTMLDivElement | null = null;
@@ -80,21 +77,32 @@ export function createInviteManager(
       const copyBtn = createElement("button", { class: "invite-item__copy" });
       copyBtn.appendChild(createIcon("external-link", 14));
       copyBtn.appendChild(document.createTextNode(" Copy"));
-      copyBtn.addEventListener("click", () => {
-        options.onCopyLink(invite.code);
-      }, { signal: ac.signal });
+      copyBtn.addEventListener(
+        "click",
+        () => {
+          options.onCopyLink(invite.code);
+        },
+        { signal: ac.signal },
+      );
 
       const revokeBtn = createElement("button", { class: "invite-item__revoke" });
       revokeBtn.appendChild(createIcon("trash-2", 14));
       revokeBtn.appendChild(document.createTextNode(" Revoke"));
-      revokeBtn.addEventListener("click", () => {
-        void options.onRevokeInvite(invite.code).then(() => {
-          invites = invites.filter((i) => i.code !== invite.code);
-          renderList();
-        }).catch(() => {
-          options.onError?.("Failed to revoke invite");
-        });
-      }, { signal: ac.signal });
+      revokeBtn.addEventListener(
+        "click",
+        () => {
+          void options
+            .onRevokeInvite(invite.code)
+            .then(() => {
+              invites = invites.filter((i) => i.code !== invite.code);
+              renderList();
+            })
+            .catch(() => {
+              options.onError?.("Failed to revoke invite");
+            });
+        },
+        { signal: ac.signal },
+      );
 
       appendChildren(actions, copyBtn, revokeBtn);
       appendChildren(headerRow, code, actions);
@@ -135,29 +143,44 @@ export function createInviteManager(
     const createBtn = createElement("button", { class: "invite-manager__create btn-modal-save" });
     createBtn.appendChild(createIcon("external-link", 14));
     createBtn.appendChild(document.createTextNode(" Create Invite"));
-    createBtn.addEventListener("click", () => {
-      void options.onCreateInvite().then((newInvite) => {
-        invites = [...invites, newInvite];
-        renderList();
-      }).catch(() => {
-        options.onError?.("Failed to create invite");
-      });
-    }, { signal: ac.signal });
+    createBtn.addEventListener(
+      "click",
+      () => {
+        void options
+          .onCreateInvite()
+          .then((newInvite) => {
+            invites = [...invites, newInvite];
+            renderList();
+          })
+          .catch(() => {
+            options.onError?.("Failed to create invite");
+          });
+      },
+      { signal: ac.signal },
+    );
     footer.appendChild(createBtn);
 
     // Escape key
-    document.addEventListener("keydown", (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        options.onClose();
-      }
-    }, { signal: ac.signal });
+    document.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          options.onClose();
+        }
+      },
+      { signal: ac.signal },
+    );
 
     // Click overlay to close
-    root.addEventListener("click", (e) => {
-      if (e.target === root) {
-        options.onClose();
-      }
-    }, { signal: ac.signal });
+    root.addEventListener(
+      "click",
+      (e) => {
+        if (e.target === root) {
+          options.onClose();
+        }
+      },
+      { signal: ac.signal },
+    );
 
     appendChildren(modal, header, body, footer);
     root.appendChild(modal);

@@ -51,10 +51,7 @@ export function setText(el: Element, text: string): void {
 /**
  * Append multiple children to a parent element.
  */
-export function appendChildren(
-  parent: Element,
-  ...children: (Element | string)[]
-): void {
+export function appendChildren(parent: Element, ...children: (Element | string)[]): void {
   for (const child of children) {
     if (typeof child === "string") {
       parent.appendChild(document.createTextNode(child));

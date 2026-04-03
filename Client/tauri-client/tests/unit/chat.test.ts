@@ -9,9 +9,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // jsdom does not provide ResizeObserver — stub it so MessageList can mount.
 if (typeof globalThis.ResizeObserver === "undefined") {
   globalThis.ResizeObserver = class {
-    observe(): void { /* noop */ }
-    unobserve(): void { /* noop */ }
-    disconnect(): void { /* noop */ }
+    observe(): void {
+      /* noop */
+    }
+    unobserve(): void {
+      /* noop */
+    }
+    disconnect(): void {
+      /* noop */
+    }
   } as unknown as typeof ResizeObserver;
 }
 
@@ -20,11 +26,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 // ---------------------------------------------------------------------------
 
 import { createMessageList } from "../../src/components/MessageList";
-import {
-  messagesStore,
-  addMessage,
-  setMessages,
-} from "../../src/stores/messages.store";
+import { messagesStore, addMessage, setMessages } from "../../src/stores/messages.store";
 import { membersStore, setMembers } from "../../src/stores/members.store";
 
 // Reset stores before each test
@@ -105,14 +107,14 @@ describe("MessageList", () => {
     expect(messagesContainer).not.toBeNull();
     const welcome = messagesContainer?.querySelector(".channel-welcome");
     expect(welcome).not.toBeNull();
-    expect(welcome?.querySelector(".channel-welcome-title")?.textContent).toBe("Welcome to #general!");
+    expect(welcome?.querySelector(".channel-welcome-title")?.textContent).toBe(
+      "Welcome to #general!",
+    );
     list.destroy?.();
   });
 
   it("renders messages after store update", () => {
-    setMessages(1, [
-      makeMessage(1, 10, "Alice", "Hello", "2026-03-15T10:00:00Z"),
-    ], false);
+    setMessages(1, [makeMessage(1, 10, "Alice", "Hello", "2026-03-15T10:00:00Z")], false);
 
     const list = createMessageList({
       channelId: 1,
@@ -136,11 +138,15 @@ describe("MessageList", () => {
 
   describe("message grouping", () => {
     it("groups consecutive messages from same user within 5 minutes", () => {
-      setMessages(1, [
-        makeMessage(1, 10, "Alice", "Hi", "2026-03-15T10:00:00Z"),
-        makeMessage(2, 10, "Alice", "How are you?", "2026-03-15T10:02:00Z"),
-        makeMessage(3, 10, "Alice", "Anyone there?", "2026-03-15T10:04:00Z"),
-      ], false);
+      setMessages(
+        1,
+        [
+          makeMessage(1, 10, "Alice", "Hi", "2026-03-15T10:00:00Z"),
+          makeMessage(2, 10, "Alice", "How are you?", "2026-03-15T10:02:00Z"),
+          makeMessage(3, 10, "Alice", "Anyone there?", "2026-03-15T10:04:00Z"),
+        ],
+        false,
+      );
 
       const list = createMessageList({
         channelId: 1,
@@ -164,10 +170,14 @@ describe("MessageList", () => {
     });
 
     it("breaks group when user changes", () => {
-      setMessages(1, [
-        makeMessage(1, 10, "Alice", "Hi", "2026-03-15T10:00:00Z"),
-        makeMessage(2, 20, "Bob", "Hey!", "2026-03-15T10:01:00Z"),
-      ], false);
+      setMessages(
+        1,
+        [
+          makeMessage(1, 10, "Alice", "Hi", "2026-03-15T10:00:00Z"),
+          makeMessage(2, 20, "Bob", "Hey!", "2026-03-15T10:01:00Z"),
+        ],
+        false,
+      );
 
       const list = createMessageList({
         channelId: 1,
@@ -188,10 +198,14 @@ describe("MessageList", () => {
     });
 
     it("breaks group when gap exceeds 5 minutes", () => {
-      setMessages(1, [
-        makeMessage(1, 10, "Alice", "Hi", "2026-03-15T10:00:00Z"),
-        makeMessage(2, 10, "Alice", "Later", "2026-03-15T10:10:00Z"),
-      ], false);
+      setMessages(
+        1,
+        [
+          makeMessage(1, 10, "Alice", "Hi", "2026-03-15T10:00:00Z"),
+          makeMessage(2, 10, "Alice", "Later", "2026-03-15T10:10:00Z"),
+        ],
+        false,
+      );
 
       const list = createMessageList({
         channelId: 1,
@@ -214,10 +228,14 @@ describe("MessageList", () => {
 
   describe("day dividers", () => {
     it("inserts day divider between messages on different days", () => {
-      setMessages(1, [
-        makeMessage(1, 10, "Alice", "Day 1", "2026-03-10T12:00:00Z"),
-        makeMessage(2, 10, "Alice", "Day 2", "2026-03-15T12:00:00Z"),
-      ], false);
+      setMessages(
+        1,
+        [
+          makeMessage(1, 10, "Alice", "Day 1", "2026-03-10T12:00:00Z"),
+          makeMessage(2, 10, "Alice", "Day 2", "2026-03-15T12:00:00Z"),
+        ],
+        false,
+      );
 
       const list = createMessageList({
         channelId: 1,
@@ -240,9 +258,11 @@ describe("MessageList", () => {
 
   describe("@mention parsing", () => {
     it("wraps @username in .mention span", () => {
-      setMessages(1, [
-        makeMessage(1, 10, "Alice", "Hey @Bob check this", "2026-03-15T10:00:00Z"),
-      ], false);
+      setMessages(
+        1,
+        [makeMessage(1, 10, "Alice", "Hey @Bob check this", "2026-03-15T10:00:00Z")],
+        false,
+      );
 
       const list = createMessageList({
         channelId: 1,
@@ -264,9 +284,11 @@ describe("MessageList", () => {
     });
 
     it("handles multiple @mentions in one message", () => {
-      setMessages(1, [
-        makeMessage(1, 10, "Alice", "@Bob and @Charlie look", "2026-03-15T10:00:00Z"),
-      ], false);
+      setMessages(
+        1,
+        [makeMessage(1, 10, "Alice", "@Bob and @Charlie look", "2026-03-15T10:00:00Z")],
+        false,
+      );
 
       const list = createMessageList({
         channelId: 1,
@@ -289,9 +311,11 @@ describe("MessageList", () => {
 
   describe("deleted and edited messages", () => {
     it("shows [message deleted] for deleted messages", () => {
-      setMessages(1, [
-        makeMessage(1, 10, "Alice", "secret", "2026-03-15T10:00:00Z", { deleted: true }),
-      ], false);
+      setMessages(
+        1,
+        [makeMessage(1, 10, "Alice", "secret", "2026-03-15T10:00:00Z", { deleted: true })],
+        false,
+      );
 
       const list = createMessageList({
         channelId: 1,
@@ -312,11 +336,15 @@ describe("MessageList", () => {
     });
 
     it("shows (edited) indicator for edited messages", () => {
-      setMessages(1, [
-        makeMessage(1, 10, "Alice", "updated text", "2026-03-15T10:00:00Z", {
-          editedAt: "2026-03-15T10:05:00Z",
-        }),
-      ], false);
+      setMessages(
+        1,
+        [
+          makeMessage(1, 10, "Alice", "updated text", "2026-03-15T10:00:00Z", {
+            editedAt: "2026-03-15T10:05:00Z",
+          }),
+        ],
+        false,
+      );
 
       const list = createMessageList({
         channelId: 1,
@@ -339,9 +367,7 @@ describe("MessageList", () => {
 
   describe("system messages", () => {
     it("applies msg--system class to System user messages", () => {
-      setMessages(1, [
-        makeMessage(1, 0, "System", "Alice joined", "2026-03-15T10:00:00Z"),
-      ], false);
+      setMessages(1, [makeMessage(1, 0, "System", "Alice joined", "2026-03-15T10:00:00Z")], false);
 
       const list = createMessageList({
         channelId: 1,

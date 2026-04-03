@@ -23,10 +23,69 @@ OwnCord supports TOTP-based 2FA:
 - `require_2fa` requires all users to have 2FA enabled and registration to be closed
 - Login flow returns `requires_2fa: true` with a `partial_token` (10-min TTL, 5-attempt limit)
 - Auth challenges are rate-limited to 10 req/min per IP
+- TOTP code verification uses constant-time comparison (`subtle.ConstantTimeCompare`) to prevent timing side-channel attacks
+
+## Account Deletion
+
+Users can delete their own account via `DELETE /api/v1/auth/account` with password confirmation. The last admin account cannot be deleted. After 3 failed password attempts, the endpoint locks out for 15 minutes.
+
+## Audit Logging
+
+Security-relevant actions are recorded in the `audit_log` table with actor, action, target, and detail:
+
+- **Auth:** `user_register`, `user_login`, `user_logout`, `login_blocked_banned`, `account_deleted`
+- **2FA:** `totp_enabled`, `totp_verified`, `totp_disabled`
+- **Admin:** `role_change`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`
+- **Content:** `channel_create`, `channel_update`, `channel_delete`, `message_delete`
+- **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `ws_connect`
+
+## Client Security Hardening
+
+The Tauri desktop client implements the following security measures:
+
+### Credential Storage
+- Credentials are stored in Windows Credential Manager via DPAPI (per-user scope, `CRED_PERSIST_ENTERPRISE`)
+- Plaintext passwords are **never** returned to the frontend over IPC — only tokens are accessible from JavaScript
+- Auto-login uses stored tokens for reconnection, not passwords
+
+### Tauri Capabilities (Least Privilege)
+- Filesystem write access is scoped to `$APPDATA/**` and `$APPLOG/**` only
+- DevTools command is gated behind the `devtools` feature flag (excluded from release builds)
+- HTTP fetch permissions are restricted to `https://` origins
+
+### TLS and Certificate Pinning (TOFU)
+- Self-signed certificates are supported via Trust-On-First-Use (TOFU) pinning
+- The WebSocket proxy (`ws_proxy`) pins the server certificate fingerprint on first connection
+- The LiveKit proxy (`livekit_proxy`) reuses the pinned fingerprint from the WS proxy
+- Certificate mismatch triggers a modal requiring user acknowledgment
+- Update downloads validate `server_url` uses `https://` and rejects URLs with userinfo
+
+### Input Validation
+- IPC commands validate host format, string lengths, and character allowlists
+- PTT virtual key codes are validated to the Win32 range (1–254)
+- LiveKit proxy `remote_host` is validated against CRLF injection
+- API client validates host format before constructing URLs
+- File uploads enforce a MIME type allowlist (images, video, audio, PDF, text)
+- Error messages from server responses are capped at 200 characters
+- Notification titles are sanitized (control chars stripped, length capped)
+
+### XSS Prevention
+- All user-generated content is rendered via `textContent`/`setText` — never `innerHTML`
+- The single `innerHTML` usage (SVG icons) operates on compile-time constants with a runtime guard
+- URLs are validated via `isSafeUrl` (rejects `javascript:`, `data:`, `vbscript:`)
+- YouTube embeds use `sandbox` attribute on iframes
+- `image/svg+xml` is excluded from safe MIME types for data URIs
+- Tenor GIF URLs are validated against trusted CDN origins
+- Linkified URLs strip trailing punctuation to prevent misleading destinations
+
+### Search and Rate Limiting
+- Client-side search requests are rate-limited (500ms minimum interval + 300ms debounce)
 
 ## Known Limitations
 
-- No code signing yet -- binaries are verified via SHA256 checksums only
+- Server auto-updates depend on a dedicated pinned minisign/Ed25519 server release key in [Server/updater/server_update_public_key.txt](Server/updater/server_update_public_key.txt) and a signed release manifest that binds the shipped binary hash to the release version; Windows Authenticode/SmartScreen code signing is still separate work
+- The Tenor API key is hardcoded (Google's public anonymous key) — consider build-time injection for production
+- CSP `connect-src` allows `https:` to any host (necessary for self-hosted server URLs not known at build time)
 
 ## Security Hardening Checklist for Operators
 

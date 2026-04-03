@@ -1,12 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  createMemberContextMenu,
-  createChannelContextMenu,
-} from "@components/AdminActions";
-import type {
-  MemberContextMenuOptions,
-  ChannelContextMenuOptions,
-} from "@components/AdminActions";
+import { createMemberContextMenu, createChannelContextMenu } from "@components/AdminActions";
+import type { MemberContextMenuOptions, ChannelContextMenuOptions } from "@components/AdminActions";
 
 describe("AdminActions", () => {
   let container: HTMLDivElement;
@@ -86,7 +80,9 @@ describe("AdminActions", () => {
       const { result } = makeMenu({ onKick });
 
       const dangerItems = result.element.querySelectorAll(".context-menu__item--danger");
-      const kickItem = Array.from(dangerItems).find((i) => i.textContent === "Kick") as HTMLDivElement;
+      const kickItem = Array.from(dangerItems).find(
+        (i) => i.textContent === "Kick",
+      ) as HTMLDivElement;
 
       // First click changes text to confirmation
       kickItem.click();
@@ -104,7 +100,9 @@ describe("AdminActions", () => {
       const { result } = makeMenu({ onBan });
 
       const dangerItems = result.element.querySelectorAll(".context-menu__item--danger");
-      const banItem = Array.from(dangerItems).find((i) => i.textContent === "Ban") as HTMLDivElement;
+      const banItem = Array.from(dangerItems).find(
+        (i) => i.textContent === "Ban",
+      ) as HTMLDivElement;
 
       banItem.click();
       expect(banItem.textContent).toBe("Are you sure?");
@@ -165,7 +163,9 @@ describe("AdminActions", () => {
       const { result } = makeMenu({ onEdit });
 
       const items = result.element.querySelectorAll(".context-menu__item");
-      const editItem = Array.from(items).find((i) => i.textContent === "Edit Channel") as HTMLDivElement;
+      const editItem = Array.from(items).find(
+        (i) => i.textContent === "Edit Channel",
+      ) as HTMLDivElement;
       editItem.click();
 
       expect(onEdit).toHaveBeenCalledOnce();
@@ -177,7 +177,9 @@ describe("AdminActions", () => {
       const { result } = makeMenu({ onCreate });
 
       const items = result.element.querySelectorAll(".context-menu__item");
-      const createItem = Array.from(items).find((i) => i.textContent === "Create Channel") as HTMLDivElement;
+      const createItem = Array.from(items).find(
+        (i) => i.textContent === "Create Channel",
+      ) as HTMLDivElement;
       createItem.click();
 
       expect(onCreate).toHaveBeenCalledOnce();

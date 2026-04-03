@@ -7,7 +7,7 @@ import { getLogBuffer, clearLogBuffer, addLogListener, setLogLevel } from "@lib/
 import type { LogEntry, LogLevel } from "@lib/logger";
 import type { TabName } from "../SettingsOverlay";
 import { getSessionDebugInfo } from "@lib/livekitSession";
-import { loadPref, savePref } from "./helpers";
+import { savePref } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -35,16 +35,26 @@ function formatLogEntry(entry: LogEntry): HTMLDivElement {
   const time = entry.timestamp.slice(11, 23); // HH:MM:SS.mmm
   const level = entry.level.toUpperCase().padEnd(5);
   const text = `${time} ${level} [${entry.component}] ${entry.message}`;
-  const textEl = createElement("span", {
-    style: `color: ${LOG_LEVEL_COLORS[entry.level]}`,
-  }, text);
+  const textEl = createElement(
+    "span",
+    {
+      style: `color: ${LOG_LEVEL_COLORS[entry.level]}`,
+    },
+    text,
+  );
   row.appendChild(textEl);
 
   if (entry.data !== undefined) {
-    const dataStr = typeof entry.data === "string" ? entry.data : JSON.stringify(entry.data, null, 2);
-    const dataEl = createElement("pre", {
-      style: "margin: 2px 0 0 0; color: #999; font-size: 11px; white-space: pre-wrap; word-break: break-all;",
-    }, dataStr);
+    const dataStr =
+      typeof entry.data === "string" ? entry.data : JSON.stringify(entry.data, null, 2);
+    const dataEl = createElement(
+      "pre",
+      {
+        style:
+          "margin: 2px 0 0 0; color: #999; font-size: 11px; white-space: pre-wrap; word-break: break-all;",
+      },
+      dataStr,
+    );
     row.appendChild(dataEl);
   }
 
@@ -94,12 +104,13 @@ export interface LogsTabHandle {
   cleanup(): void;
 }
 
-export function createLogsTab(
-  getActiveTab: () => TabName,
-  signal: AbortSignal,
-): LogsTabHandle {
+export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal): LogsTabHandle {
   let logListEl: HTMLDivElement | null = null;
-  let logFilterLevel: LogLevel | "all" = readMigratedStringPref("logs_filter_level", "all", LOG_FILTER_LEVELS);
+  let logFilterLevel: LogLevel | "all" = readMigratedStringPref(
+    "logs_filter_level",
+    "all",
+    LOG_FILTER_LEVELS,
+  );
   let unsubLogListener: (() => void) | null = null;
 
   function renderLogEntries(): void {
@@ -120,13 +131,23 @@ export function createLogsTab(
     const section = createElement("div", { class: "settings-pane active" });
 
     // Version display
-    const versionEl = createElement("div", {
-      style: "font-size: 12px; color: var(--text-muted); margin: -8px 0 12px 0;",
-    }, "Client version: loading...");
+    const versionEl = createElement(
+      "div",
+      {
+        style: "font-size: 12px; color: var(--text-muted); margin: -8px 0 12px 0;",
+      },
+      "Client version: loading...",
+    );
     section.appendChild(versionEl);
-    void import("@tauri-apps/api/app").then(({ getVersion }) =>
-      getVersion().then((v) => { versionEl.textContent = `Client version: v${v}`; }),
-    ).catch(() => { versionEl.textContent = "Client version: unknown"; });
+    void import("@tauri-apps/api/app")
+      .then(({ getVersion }) =>
+        getVersion().then((v) => {
+          versionEl.textContent = `Client version: v${v}`;
+        }),
+      )
+      .catch(() => {
+        versionEl.textContent = "Client version: unknown";
+      });
 
     // Controls row
     const controls = createElement("div", {
@@ -134,9 +155,14 @@ export function createLogsTab(
     });
 
     // Filter dropdown
-    const filterLabel = createElement("span", { class: "setting-label", style: "margin: 0;" }, "Filter:");
+    const filterLabel = createElement(
+      "span",
+      { class: "setting-label", style: "margin: 0;" },
+      "Filter:",
+    );
     const filterSelect = createElement("select", {
-      style: "background: var(--bg-tertiary); color: var(--text-normal); border: 1px solid var(--bg-active); border-radius: 4px; padding: 4px 8px; font-size: 13px;",
+      style:
+        "background: var(--bg-tertiary); color: var(--text-normal); border: 1px solid var(--bg-active); border-radius: 4px; padding: 4px 8px; font-size: 13px;",
     });
     for (const lvl of LOG_FILTER_LEVELS) {
       const opt = createElement("option", { value: lvl }, lvl.toUpperCase());
@@ -144,71 +170,116 @@ export function createLogsTab(
       filterSelect.appendChild(opt);
     }
     filterSelect.value = logFilterLevel;
-    filterSelect.addEventListener("change", () => {
-      logFilterLevel = filterSelect.value as LogLevel | "all";
-      savePref("logs_filter_level", logFilterLevel);
-      renderLogEntries();
-    }, { signal });
+    filterSelect.addEventListener(
+      "change",
+      () => {
+        logFilterLevel = filterSelect.value as LogLevel | "all";
+        savePref("logs_filter_level", logFilterLevel);
+        renderLogEntries();
+      },
+      { signal },
+    );
 
     // Log level selector
-    const levelLabel = createElement("span", { class: "setting-label", style: "margin: 0 0 0 16px;" }, "Min Level:");
+    const levelLabel = createElement(
+      "span",
+      { class: "setting-label", style: "margin: 0 0 0 16px;" },
+      "Min Level:",
+    );
     const levelSelect = createElement("select", {
-      style: "background: var(--bg-tertiary); color: var(--text-normal); border: 1px solid var(--bg-active); border-radius: 4px; padding: 4px 8px; font-size: 13px;",
+      style:
+        "background: var(--bg-tertiary); color: var(--text-normal); border: 1px solid var(--bg-active); border-radius: 4px; padding: 4px 8px; font-size: 13px;",
     });
     for (const lvl of LOG_MIN_LEVELS) {
       const opt = createElement("option", { value: lvl }, lvl.toUpperCase());
       levelSelect.appendChild(opt);
     }
-    const savedMinLevel = readMigratedStringPref<LogLevel | "">("logs_min_level", "", ["", ...LOG_MIN_LEVELS]);
+    const savedMinLevel = readMigratedStringPref<LogLevel | "">("logs_min_level", "", [
+      "",
+      ...LOG_MIN_LEVELS,
+    ]);
     if (savedMinLevel !== "") {
       levelSelect.value = savedMinLevel;
       setLogLevel(savedMinLevel);
     }
-    levelSelect.addEventListener("change", () => {
-      const level = levelSelect.value as LogLevel;
-      setLogLevel(level);
-      savePref("logs_min_level", level);
-    }, { signal });
+    levelSelect.addEventListener(
+      "change",
+      () => {
+        const level = levelSelect.value as LogLevel;
+        setLogLevel(level);
+        savePref("logs_min_level", level);
+      },
+      { signal },
+    );
 
     // Copy All button
-    const copyBtn = createElement("button", {
-      class: "ac-btn",
-      style: "margin-left: auto;",
-    }, "Copy All");
-    copyBtn.addEventListener("click", () => {
-      const entries = getLogBuffer();
-      const filtered = logFilterLevel === "all"
-        ? entries
-        : entries.filter((e) => e.level === logFilterLevel);
-      const text = filtered.map((e) => {
-        const time = e.timestamp.slice(11, 23);
-        const level = e.level.toUpperCase().padEnd(5);
-        const base = `${time} ${level} [${e.component}] ${e.message}`;
-        if (e.data === undefined) return base;
-        const dataStr = typeof e.data === "string" ? e.data : JSON.stringify(e.data, null, 2);
-        return `${base}\n${dataStr}`;
-      }).join("\n");
-      void navigator.clipboard.writeText(text).then(() => {
-        copyBtn.textContent = "Copied!";
-        setTimeout(() => { copyBtn.textContent = "Copy All"; }, 1500);
-      }).catch(() => {
-        copyBtn.textContent = "Failed to copy";
-        setTimeout(() => { copyBtn.textContent = "Copy All"; }, 1500);
-      });
-    }, { signal });
+    const copyBtn = createElement(
+      "button",
+      {
+        class: "ac-btn",
+        style: "margin-left: auto;",
+      },
+      "Copy All",
+    );
+    copyBtn.addEventListener(
+      "click",
+      () => {
+        const entries = getLogBuffer();
+        const filtered =
+          logFilterLevel === "all" ? entries : entries.filter((e) => e.level === logFilterLevel);
+        const text = filtered
+          .map((e) => {
+            const time = e.timestamp.slice(11, 23);
+            const level = e.level.toUpperCase().padEnd(5);
+            const base = `${time} ${level} [${e.component}] ${e.message}`;
+            if (e.data === undefined) return base;
+            const dataStr = typeof e.data === "string" ? e.data : JSON.stringify(e.data, null, 2);
+            return `${base}\n${dataStr}`;
+          })
+          .join("\n");
+        void navigator.clipboard
+          .writeText(text)
+          .then(() => {
+            copyBtn.textContent = "Copied!";
+            setTimeout(() => {
+              copyBtn.textContent = "Copy All";
+            }, 1500);
+          })
+          .catch(() => {
+            copyBtn.textContent = "Failed to copy";
+            setTimeout(() => {
+              copyBtn.textContent = "Copy All";
+            }, 1500);
+          });
+      },
+      { signal },
+    );
 
     // Clear button
     const clearBtn = createElement("button", { class: "ac-btn" }, "Clear Logs");
-    clearBtn.addEventListener("click", () => {
-      clearLogBuffer();
-      renderLogEntries();
-    }, { signal });
+    clearBtn.addEventListener(
+      "click",
+      () => {
+        clearLogBuffer();
+        renderLogEntries();
+      },
+      { signal },
+    );
 
     // Refresh button
     const refreshBtn = createElement("button", { class: "ac-btn" }, "Refresh");
     refreshBtn.addEventListener("click", () => renderLogEntries(), { signal });
 
-    appendChildren(controls, filterLabel, filterSelect, levelLabel, levelSelect, copyBtn, clearBtn, refreshBtn);
+    appendChildren(
+      controls,
+      filterLabel,
+      filterSelect,
+      levelLabel,
+      levelSelect,
+      copyBtn,
+      clearBtn,
+      refreshBtn,
+    );
     section.appendChild(controls);
 
     // Voice diagnostics panel
@@ -216,7 +287,8 @@ export function createLogsTab(
     section.appendChild(diagHeader);
 
     const diagPanel = createElement("div", {
-      style: "background: var(--bg-tertiary); border-radius: 8px; padding: 10px; margin-bottom: 12px; font-family: monospace; font-size: 12px; line-height: 1.6; color: var(--text-muted);",
+      style:
+        "background: var(--bg-tertiary); border-radius: 8px; padding: 10px; margin-bottom: 12px; font-family: monospace; font-size: 12px; line-height: 1.6; color: var(--text-muted);",
     });
 
     function refreshDiag(): void {
@@ -225,19 +297,38 @@ export function createLogsTab(
     }
 
     refreshDiag();
-    const diagRefresh = createElement("button", { class: "ac-btn", style: "margin-top: 6px;" }, "Refresh Diagnostics");
+    const diagRefresh = createElement(
+      "button",
+      { class: "ac-btn", style: "margin-top: 6px;" },
+      "Refresh Diagnostics",
+    );
     diagRefresh.addEventListener("click", refreshDiag, { signal });
 
-    const diagCopy = createElement("button", { class: "ac-btn", style: "margin: 6px 0 0 6px;" }, "Copy Diagnostics");
-    diagCopy.addEventListener("click", () => {
-      void navigator.clipboard.writeText(diagPanel.textContent ?? "").then(() => {
-        diagCopy.textContent = "Copied!";
-        setTimeout(() => { diagCopy.textContent = "Copy Diagnostics"; }, 1500);
-      }).catch(() => {
-        diagCopy.textContent = "Failed to copy";
-        setTimeout(() => { diagCopy.textContent = "Copy Diagnostics"; }, 1500);
-      });
-    }, { signal });
+    const diagCopy = createElement(
+      "button",
+      { class: "ac-btn", style: "margin: 6px 0 0 6px;" },
+      "Copy Diagnostics",
+    );
+    diagCopy.addEventListener(
+      "click",
+      () => {
+        void navigator.clipboard
+          .writeText(diagPanel.textContent ?? "")
+          .then(() => {
+            diagCopy.textContent = "Copied!";
+            setTimeout(() => {
+              diagCopy.textContent = "Copy Diagnostics";
+            }, 1500);
+          })
+          .catch(() => {
+            diagCopy.textContent = "Failed to copy";
+            setTimeout(() => {
+              diagCopy.textContent = "Copy Diagnostics";
+            }, 1500);
+          });
+      },
+      { signal },
+    );
 
     section.appendChild(diagPanel);
     const diagBtns = createElement("div", { style: "display: flex; flex-wrap: wrap;" });
@@ -245,15 +336,20 @@ export function createLogsTab(
     section.appendChild(diagBtns);
 
     // Log count
-    const countEl = createElement("div", {
-      style: "font-size: 12px; color: #888; margin: 12px 0 4px 0;",
-    }, `${getLogBuffer().length} entries`);
+    const countEl = createElement(
+      "div",
+      {
+        style: "font-size: 12px; color: #888; margin: 12px 0 4px 0;",
+      },
+      `${getLogBuffer().length} entries`,
+    );
     section.appendChild(countEl);
 
     // Log list (scrollable)
     logListEl = createElement("div", {
       class: "log-viewer",
-      style: "max-height: 60vh; overflow-y: auto; background: var(--bg-tertiary); border-radius: 8px; padding: 8px;",
+      style:
+        "max-height: 60vh; overflow-y: auto; background: var(--bg-tertiary); border-radius: 8px; padding: 8px;",
     });
     section.appendChild(logListEl);
 

@@ -4,11 +4,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mocks
 // ---------------------------------------------------------------------------
 
-const { mockVoiceStoreGetState, mockGetLocalCameraStream, mockGetLocalScreenshareStream } = vi.hoisted(() => ({
-  mockVoiceStoreGetState: vi.fn(),
-  mockGetLocalCameraStream: vi.fn((): MediaStream | null => null),
-  mockGetLocalScreenshareStream: vi.fn((): MediaStream | null => null),
-}));
+const { mockVoiceStoreGetState, mockGetLocalCameraStream, mockGetLocalScreenshareStream } =
+  vi.hoisted(() => ({
+    mockVoiceStoreGetState: vi.fn(),
+    mockGetLocalCameraStream: vi.fn((): MediaStream | null => null),
+    mockGetLocalScreenshareStream: vi.fn((): MediaStream | null => null),
+  }));
 
 vi.mock("@stores/voice.store", () => ({
   voiceStore: { getState: mockVoiceStoreGetState },
@@ -17,6 +18,7 @@ vi.mock("@stores/voice.store", () => ({
 vi.mock("@lib/livekitSession", () => ({
   getLocalCameraStream: mockGetLocalCameraStream,
   getLocalScreenshareStream: mockGetLocalScreenshareStream,
+  setScreenshareAudioVolume: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -45,6 +47,7 @@ function makeVideoGrid(): VideoModeControllerOptions["videoGrid"] {
     destroy: vi.fn(),
     addStream: vi.fn(),
     removeStream: vi.fn(),
+    hasStreams: vi.fn(() => false),
     setFocusedTile: vi.fn(),
     getFocusedTileId: vi.fn(() => null),
   } as unknown as VideoModeControllerOptions["videoGrid"];
@@ -54,7 +57,10 @@ interface VoiceStateStub {
   currentChannelId: number | null;
   localCamera: boolean;
   localScreenshare: boolean;
-  voiceUsers: Map<number, Map<number, { userId: number; camera: boolean; screenshare: boolean; username: string }>>;
+  voiceUsers: Map<
+    number,
+    Map<number, { userId: number; camera: boolean; screenshare: boolean; username: string }>
+  >;
 }
 
 function makeVoiceState(overrides: Partial<VoiceStateStub> = {}): VoiceStateStub {
@@ -99,7 +105,7 @@ describe("createVideoModeController", () => {
     expect(ctrl.isVideoMode()).toBe(false);
   });
 
-  it("checkVideoMode does NOT auto-switch to video grid when remote has camera", () => {
+  it("checkVideoMode does NOT auto-open for remote camera (BUG-105)", () => {
     const users = new Map([[2, { userId: 2, camera: true, screenshare: false, username: "bob" }]]);
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, users]]) }),
@@ -113,7 +119,7 @@ describe("createVideoModeController", () => {
     });
     ctrl.checkVideoMode();
 
-    // Auto-open was removed — video mode requires manual activation
+    // Remote streams require manual click — no auto-open
     expect(ctrl.isVideoMode()).toBe(false);
   });
 
@@ -141,7 +147,7 @@ describe("createVideoModeController", () => {
     expect(slots.messagesSlot.style.display).toBe("");
   });
 
-  it("checkVideoMode does NOT auto-switch when local camera is on", () => {
+  it("checkVideoMode auto-opens when local camera is on (BUG-105)", () => {
     const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({
@@ -157,8 +163,7 @@ describe("createVideoModeController", () => {
       getCurrentUserId: () => 1,
     });
     ctrl.checkVideoMode();
-    // Auto-open removed — must be activated manually
-    expect(ctrl.isVideoMode()).toBe(false);
+    expect(ctrl.isVideoMode()).toBe(true);
   });
 
   it("adds local self-view tile when local camera is on", () => {
@@ -181,7 +186,11 @@ describe("createVideoModeController", () => {
     });
     ctrl.checkVideoMode();
 
-    expect(vg.addStream).toHaveBeenCalledWith(1, "me (You)", fakeStream, { isSelf: true, audioUserId: 1, isScreenshare: false });
+    expect(vg.addStream).toHaveBeenCalledWith(1, "me (You)", fakeStream, {
+      isSelf: true,
+      audioUserId: 1,
+      isScreenshare: false,
+    });
   });
 
   it("removes local tile when local camera is off", () => {
@@ -205,7 +214,7 @@ describe("createVideoModeController", () => {
     expect(vg.removeStream).toHaveBeenCalledWith(1);
   });
 
-  it("removes remote tile when remote user turns off camera", () => {
+  it("does NOT remove remote tiles in checkVideoMode (delegated to onRemoteVideoRemoved)", () => {
     const users = new Map([
       [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
       [2, { userId: 2, camera: false, screenshare: false, username: "bob" }],
@@ -225,7 +234,9 @@ describe("createVideoModeController", () => {
     });
     ctrl.checkVideoMode();
 
-    expect(vg.removeStream).toHaveBeenCalledWith(2);
+    // Remote tile removal is handled by onRemoteVideoRemoved (LiveKit TrackUnsubscribed),
+    // not by checkVideoMode, to avoid race conditions with voice store updates.
+    expect(vg.removeStream).not.toHaveBeenCalledWith(2);
   });
 
   it("showChat switches back to chat mode", () => {
@@ -260,7 +271,7 @@ describe("createVideoModeController", () => {
     expect(slots.videoGridSlot.style.display).toBe("none");
   });
 
-  it("checkVideoMode does NOT auto-switch when local screenshare is on", () => {
+  it("checkVideoMode auto-opens when local screenshare is on (BUG-105)", () => {
     const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({
@@ -279,8 +290,7 @@ describe("createVideoModeController", () => {
     });
     ctrl.checkVideoMode();
 
-    // Auto-open removed — must be activated manually
-    expect(ctrl.isVideoMode()).toBe(false);
+    expect(ctrl.isVideoMode()).toBe(true);
   });
 
   it("adds local screenshare self-view tile when local screenshare is on", () => {
@@ -305,7 +315,11 @@ describe("createVideoModeController", () => {
     ctrl.checkVideoMode();
 
     // screenshareUserId = currentUserId + 1_000_000 = 1 + 1_000_000 = 1_000_001
-    expect(vg.addStream).toHaveBeenCalledWith(1_000_001, "me (Screen)", fakeStream, { isSelf: true, audioUserId: 1, isScreenshare: true });
+    expect(vg.addStream).toHaveBeenCalledWith(1_000_001, "me (Screen)", fakeStream, {
+      isSelf: true,
+      audioUserId: 1,
+      isScreenshare: true,
+    });
   });
 
   it("removes local screenshare tile when screenshare is turned off", () => {
@@ -313,7 +327,11 @@ describe("createVideoModeController", () => {
 
     // First call: screenshare on — tile added
     mockVoiceStoreGetState.mockReturnValue(
-      makeVoiceState({ currentChannelId: 10, localScreenshare: true, voiceUsers: new Map([[10, users]]) }),
+      makeVoiceState({
+        currentChannelId: 10,
+        localScreenshare: true,
+        voiceUsers: new Map([[10, users]]),
+      }),
     );
     const fakeStream = { getTracks: () => [] } as unknown as MediaStream;
     mockGetLocalScreenshareStream.mockReturnValue(fakeStream);
@@ -325,17 +343,25 @@ describe("createVideoModeController", () => {
       getCurrentUserId: () => 1,
     });
     ctrl.checkVideoMode();
-    expect(vg.addStream).toHaveBeenCalledWith(1_000_001, "me (Screen)", fakeStream, { isSelf: true, audioUserId: 1, isScreenshare: true });
+    expect(vg.addStream).toHaveBeenCalledWith(1_000_001, "me (Screen)", fakeStream, {
+      isSelf: true,
+      audioUserId: 1,
+      isScreenshare: true,
+    });
 
     // Second call: screenshare off — tile removed
     mockVoiceStoreGetState.mockReturnValue(
-      makeVoiceState({ currentChannelId: 10, localScreenshare: false, voiceUsers: new Map([[10, users]]) }),
+      makeVoiceState({
+        currentChannelId: 10,
+        localScreenshare: false,
+        voiceUsers: new Map([[10, users]]),
+      }),
     );
     ctrl.checkVideoMode();
     expect(vg.removeStream).toHaveBeenCalledWith(1_000_001);
   });
 
-  it("checkVideoMode does NOT auto-switch when remote has screenshare on", () => {
+  it("checkVideoMode does NOT auto-open for remote screenshare (BUG-105)", () => {
     const users = new Map([
       [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
       [2, { userId: 2, camera: false, screenshare: true, username: "bob" }],
@@ -351,7 +377,7 @@ describe("createVideoModeController", () => {
     });
     ctrl.checkVideoMode();
 
-    // Auto-open removed — must be activated manually
+    // Remote streams require manual click — no auto-open
     expect(ctrl.isVideoMode()).toBe(false);
   });
 

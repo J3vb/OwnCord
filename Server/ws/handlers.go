@@ -104,7 +104,11 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 
 	if !h.registry.Dispatch(c.ctx, env.Type, h, c, env.ID, env.Payload) {
 		reqLog.Warn("ws handleMessage unknown type")
-		c.sendMsg(buildErrorMsg(ErrCodeUnknownType, fmt.Sprintf("unknown message type: %s", env.Type)))
+		truncType := env.Type
+		if len(truncType) > 64 {
+			truncType = truncType[:64]
+		}
+		c.sendMsg(buildErrorMsg(ErrCodeUnknownType, fmt.Sprintf("unknown message type: %s", truncType)))
 	}
 }
 

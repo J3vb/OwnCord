@@ -507,8 +507,8 @@ func TestCloseDM_Forbidden_NotParticipant(t *testing.T) {
 
 	// Charlie (not a participant) tries to close it.
 	rr := dmDelete(t, router, fmt.Sprintf("/api/v1/dms/%v", channelID), tokenCharlie)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("CloseDM forbidden: status = %d, want 403; body = %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("CloseDM not-found: status = %d, want 404; body = %s", rr.Code, rr.Body.String())
 	}
 }
 

@@ -4,12 +4,7 @@
  * Voice channels show connected users and join/leave on click.
  */
 
-import {
-  createElement,
-  setText,
-  clearChildren,
-  appendChildren,
-} from "@lib/dom";
+import { createElement, setText, clearChildren, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import {
@@ -17,109 +12,16 @@ import {
   getChannelsByCategory,
   setActiveChannel,
   clearUnread,
-  updateChannelPosition,
 } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
 import { authStore, getCurrentUser } from "@stores/auth.store";
-import {
-  uiStore,
-  toggleCategory,
-  isCategoryCollapsed,
-} from "@stores/ui.store";
+import { uiStore, toggleCategory, isCategoryCollapsed } from "@stores/ui.store";
 import { voiceStore, getChannelVoiceUsers } from "@stores/voice.store";
-import { setUserVolume, getUserVolume } from "@lib/livekitSession";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import { attachStreamPreview, attachScrollCollapse } from "@lib/streamPreview";
-
-// ---------------------------------------------------------------------------
-// Per-user volume context menu (right-click on voice user row)
-// ---------------------------------------------------------------------------
-
-function showUserVolumeMenu(
-  userId: number,
-  username: string,
-  x: number,
-  y: number,
-  signal: AbortSignal,
-): void {
-  // Remove any existing context menus
-  document.querySelectorAll(".user-vol-menu").forEach((el) => el.remove());
-
-  const menu = createElement("div", { class: "context-menu user-vol-menu" });
-
-  const header = createElement("div", {
-    class: "context-menu-item",
-    style: "font-weight:600;cursor:default;pointer-events:none",
-  }, username);
-  menu.appendChild(header);
-
-  const sep = createElement("div", { class: "context-menu-sep" });
-  menu.appendChild(sep);
-
-  const currentVol = getUserVolume(userId);
-  const volLabel = createElement("div", {
-    class: "context-menu-item",
-    style: "font-size:12px;color:var(--text-muted);cursor:default;pointer-events:none",
-  }, `User Volume: ${currentVol}%`);
-  menu.appendChild(volLabel);
-
-  const sliderRow = createElement("div", {
-    style: "padding:4px 10px;display:flex;align-items:center;gap:8px",
-  });
-  const slider = createElement("input", {
-    type: "range",
-    class: "settings-slider",
-    min: "0",
-    max: "200",
-    value: String(currentVol),
-    style: "flex:1",
-  });
-  const valLabel = createElement("span", {
-    class: "slider-val",
-    style: "min-width:40px;text-align:right;font-size:12px;color:var(--text-muted)",
-  }, `${currentVol}%`);
-
-  slider.addEventListener("input", () => {
-    const val = Number(slider.value);
-    setText(valLabel, `${val}%`);
-    setText(volLabel, `User Volume: ${val}%`);
-    setUserVolume(userId, val);
-  });
-
-  appendChildren(sliderRow, slider, valLabel);
-  menu.appendChild(sliderRow);
-
-  const resetBtn = createElement("div", { class: "context-menu-item" }, "Reset Volume");
-  resetBtn.addEventListener("click", () => {
-    setUserVolume(userId, 100);
-    slider.value = "100";
-    setText(valLabel, "100%");
-    setText(volLabel, "User Volume: 100%");
-  });
-  menu.appendChild(resetBtn);
-
-  menu.style.left = `${x}px`;
-  menu.style.top = `${y}px`;
-  document.body.appendChild(menu);
-
-  // Close on click outside
-  const dismissAc = new AbortController();
-  setTimeout(() => {
-    if (dismissAc.signal.aborted) return;
-    document.addEventListener("mousedown", (e: MouseEvent) => {
-      if (!menu.contains(e.target as Node)) {
-        menu.remove();
-        dismissAc.abort();
-      }
-    }, { signal: dismissAc.signal });
-  }, 0);
-
-  // Also clean up if the parent component is destroyed
-  signal.addEventListener("abort", () => {
-    menu.remove();
-    dismissAc.abort();
-  });
-}
+import { showUserVolumeMenu } from "./channel-sidebar/volume-menu";
+import { attachChannelContextMenu } from "./channel-sidebar/context-menu";
+import { attachDragHandlers, releaseGlobalDragListeners } from "./channel-sidebar/drag-reorder";
 
 export interface ChannelReorderData {
   readonly channelId: number;
@@ -140,16 +42,6 @@ export interface ChannelSidebarOptions {
   /** Called when the user clicks a voice user row to watch their stream. */
   readonly onWatchStream?: (userId: number) => void;
 }
-
-// ── Drag state (mouse-based, avoids WebView2 HTML5 DnD issues) ──
-interface DragState {
-  channelId: number;
-  sourceEl: HTMLElement;
-  containerEl: HTMLElement;
-  channels: readonly Channel[];
-  onReorder: (reorders: readonly ChannelReorderData[]) => void;
-}
-let activeDrag: DragState | null = null;
 
 const AVATAR_COLORS = ["#5865f2", "#57f287", "#fee75c", "#eb459e", "#ed4245"];
 
@@ -183,11 +75,7 @@ function renderTextChannelItem(
   appendChildren(item, prefix, name);
 
   if (channel.unreadCount > 0) {
-    const badge = createElement(
-      "span",
-      { class: "unread-badge" },
-      String(channel.unreadCount),
-    );
+    const badge = createElement("span", { class: "unread-badge" }, String(channel.unreadCount));
     item.appendChild(badge);
   }
 
@@ -215,9 +103,7 @@ function renderVoiceChannelItem(
 
   const wrapper = createElement("div", {});
 
-  const classes = ["channel-item", "voice", isJoined ? "active" : ""]
-    .filter(Boolean)
-    .join(" ");
+  const classes = ["channel-item", "voice", isJoined ? "active" : ""].filter(Boolean).join(" ");
 
   const item = createElement("div", { class: classes, "data-testid": `channel-${channel.id}` });
   item.dataset.channelId = String(channel.id);
@@ -247,23 +133,18 @@ function renderVoiceChannelItem(
   if (voiceUsers.length > 0) {
     const usersContainer = createElement("div", { class: "voice-users-list" });
     for (const user of voiceUsers) {
-      const rowClasses = user.speaking
-        ? "voice-user-item speaking"
-        : "voice-user-item";
-      const row = createElement("div", { class: rowClasses, "data-voice-uid": String(user.userId) });
+      const rowClasses = user.speaking ? "voice-user-item speaking" : "voice-user-item";
+      const row = createElement("div", {
+        class: rowClasses,
+        "data-voice-uid": String(user.userId),
+      });
 
-      const initial = user.username.length > 0
-        ? user.username.charAt(0).toUpperCase()
-        : "?";
+      const initial = user.username.length > 0 ? user.username.charAt(0).toUpperCase() : "?";
       const avatar = createElement("div", { class: "vu-avatar" }, initial);
       avatar.style.background = pickAvatarColor(user.username);
       row.appendChild(avatar);
 
-      const nameEl = createElement(
-        "span",
-        { class: "vu-name" },
-        user.username || "Unknown",
-      );
+      const nameEl = createElement("span", { class: "vu-name" }, user.username || "Unknown");
       row.appendChild(nameEl);
 
       if (user.camera) {
@@ -299,33 +180,47 @@ function renderVoiceChannelItem(
       // Right-click for per-user volume (skip for own user)
       const currentUser = getCurrentUser();
       if (currentUser === null || currentUser.id !== user.userId) {
-        row.addEventListener("contextmenu", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          showUserVolumeMenu(user.userId, user.username || "Unknown", e.clientX, e.clientY, signal);
-        }, { signal });
+        row.addEventListener(
+          "contextmenu",
+          (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            showUserVolumeMenu(
+              user.userId,
+              user.username || "Unknown",
+              e.clientX,
+              e.clientY,
+              signal,
+            );
+          },
+          { signal },
+        );
       }
 
       // Click to watch stream (if user has camera or screenshare)
       if (onWatchStream !== undefined && (user.camera || user.screenshare)) {
-        row.addEventListener("click", (e) => {
-          // Don't trigger if the right-click menu is open
-          if (e.button !== 0) return;
-          e.stopPropagation();
-          const tileId = user.screenshare
-            ? user.userId + SCREENSHARE_TILE_ID_OFFSET
-            : user.userId;
-          onWatchStream(tileId);
-        }, { signal });
+        row.addEventListener(
+          "click",
+          (e) => {
+            // Don't trigger if the right-click menu is open
+            if (e.button !== 0) return;
+            e.stopPropagation();
+            const tileId = user.screenshare
+              ? user.userId + SCREENSHARE_TILE_ID_OFFSET
+              : user.userId;
+            onWatchStream(tileId);
+          },
+          { signal },
+        );
         row.style.cursor = "pointer";
       }
 
       // Hover/focus preview for remote users with video
-      if ((currentUser === null || currentUser.id !== user.userId)
-        && (user.camera || user.screenshare)) {
-        const tileId = user.screenshare
-          ? user.userId + SCREENSHARE_TILE_ID_OFFSET
-          : user.userId;
+      if (
+        (currentUser === null || currentUser.id !== user.userId) &&
+        (user.camera || user.screenshare)
+      ) {
+        const tileId = user.screenshare ? user.userId + SCREENSHARE_TILE_ID_OFFSET : user.userId;
         attachStreamPreview(
           row,
           user.userId,
@@ -335,7 +230,10 @@ function renderVoiceChannelItem(
           signal,
           () => {
             // Placeholder click: join voice channel and watch stream
-            onVoiceJoin(channel.id);
+            // Only join if not already in this channel
+            if (voiceStore.getState().currentChannelId !== channel.id) {
+              onVoiceJoin(channel.id);
+            }
             if (onWatchStream !== undefined) onWatchStream(tileId);
           },
           onWatchStream !== undefined ? () => onWatchStream(tileId) : undefined,
@@ -349,266 +247,6 @@ function renderVoiceChannelItem(
   }
 
   return wrapper;
-}
-
-/** Attach a right-click context menu to a channel element for edit/delete. */
-function attachChannelContextMenu(
-  el: HTMLElement,
-  channel: Channel,
-  signal: AbortSignal,
-  onEdit?: (channel: Channel) => void,
-  onDelete?: (channel: Channel) => void,
-): void {
-  if (onEdit === undefined && onDelete === undefined) {
-    return;
-  }
-  const user = getCurrentUser();
-  const role = user?.role?.toLowerCase() ?? "";
-  if (role !== "owner" && role !== "admin") {
-    return;
-  }
-
-  el.addEventListener(
-    "contextmenu",
-    (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      // Remove any existing context menu
-      document.querySelector(".channel-ctx-menu")?.remove();
-
-      const menu = createElement("div", {
-        class: "context-menu channel-ctx-menu",
-        "data-testid": "channel-context-menu",
-      });
-      menu.style.left = `${e.clientX}px`;
-      menu.style.top = `${e.clientY}px`;
-
-      if (onEdit !== undefined) {
-        const editItem = createElement(
-          "div",
-          { class: "context-menu-item", "data-testid": "ctx-edit-channel" },
-          "Edit Channel",
-        );
-        editItem.addEventListener(
-          "click",
-          () => {
-            menu.remove();
-            onEdit(channel);
-          },
-          { signal },
-        );
-        menu.appendChild(editItem);
-      }
-
-      if (onDelete !== undefined) {
-        if (onEdit !== undefined) {
-          menu.appendChild(createElement("div", { class: "context-menu-sep" }));
-        }
-        const deleteItem = createElement(
-          "div",
-          { class: "context-menu-item danger", "data-testid": "ctx-delete-channel" },
-          "Delete Channel",
-        );
-        deleteItem.addEventListener(
-          "click",
-          () => {
-            menu.remove();
-            onDelete(channel);
-          },
-          { signal },
-        );
-        menu.appendChild(deleteItem);
-      }
-
-      document.body.appendChild(menu);
-
-      // Close menu on click elsewhere
-      const closeMenu = (): void => {
-        menu.remove();
-        document.removeEventListener("click", closeMenu);
-      };
-      // Defer so this click event doesn't immediately close it
-      setTimeout(() => {
-        document.addEventListener("click", closeMenu, { signal });
-      }, 0);
-    },
-    { signal },
-  );
-}
-
-/** Global mousemove/mouseup handlers for drag reordering. Registered once.
- *  Reference-counted so multiple sidebar instances share the same listeners
- *  and only the last destroy tears them down. */
-let globalDragAc: AbortController | null = null;
-let globalDragRefCount = 0;
-
-function ensureGlobalDragListeners(): void {
-  globalDragRefCount++;
-  if (globalDragAc !== null) {
-    return;
-  }
-  globalDragAc = new AbortController();
-
-  document.addEventListener("mousemove", (e) => {
-    if (activeDrag === null) {
-      return;
-    }
-    // Clear old indicators
-    activeDrag.containerEl.querySelectorAll(".channel-drop-indicator").forEach((x) => {
-      x.classList.remove("channel-drop-indicator");
-    });
-
-    // Find which channel item we're hovering over
-    const items = activeDrag.containerEl.querySelectorAll("[data-drag-channel-id]");
-    for (const item of items) {
-      const rect = item.getBoundingClientRect();
-      if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
-        const targetId = Number((item as HTMLElement).dataset.dragChannelId);
-        if (targetId !== activeDrag.channelId) {
-          item.classList.add("channel-drop-indicator");
-        }
-        break;
-      }
-    }
-  }, { signal: globalDragAc.signal });
-
-  document.addEventListener("mouseup", (e) => {
-    if (activeDrag === null) {
-      return;
-    }
-    const drag = activeDrag;
-    activeDrag = null;
-
-    // Clean up visual state
-    drag.sourceEl.classList.remove("dragging");
-    document.body.classList.remove("channel-reordering");
-    drag.containerEl.querySelectorAll(".channel-drop-indicator").forEach((x) => {
-      x.classList.remove("channel-drop-indicator");
-    });
-
-    // Find drop target
-    const items = drag.containerEl.querySelectorAll("[data-drag-channel-id]");
-    let dropTargetId: number | null = null;
-    let dropBefore = false;
-    for (const item of items) {
-      const rect = item.getBoundingClientRect();
-      if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
-        dropTargetId = Number((item as HTMLElement).dataset.dragChannelId);
-        dropBefore = e.clientY < rect.top + rect.height / 2;
-        break;
-      }
-    }
-
-    if (dropTargetId === null || dropTargetId === drag.channelId) {
-      return;
-    }
-
-    // Compute new order
-    const orderedIds = drag.channels.map((ch) => ch.id);
-    const dragIdx = orderedIds.indexOf(drag.channelId);
-    if (dragIdx === -1) {
-      return;
-    }
-    orderedIds.splice(dragIdx, 1);
-
-    const targetIdx = orderedIds.indexOf(dropTargetId);
-    if (targetIdx === -1) {
-      return;
-    }
-    const insertIdx = dropBefore ? targetIdx : targetIdx + 1;
-    orderedIds.splice(insertIdx, 0, drag.channelId);
-
-    // Build reorder data and update store immediately
-    const reorders: ChannelReorderData[] = [];
-    for (let i = 0; i < orderedIds.length; i++) {
-      const id = orderedIds[i];
-      if (id === undefined) {
-        continue;
-      }
-      const ch = drag.channels.find((c) => c.id === id);
-      if (ch !== undefined && ch.position !== i) {
-        reorders.push({ channelId: id, newPosition: i });
-        updateChannelPosition(id, i);
-      }
-    }
-
-    if (reorders.length > 0) {
-      drag.onReorder(reorders);
-    }
-  }, { signal: globalDragAc.signal });
-}
-
-/** Make a channel element draggable via mousedown (admin/owner only). */
-function attachDragHandlers(
-  el: HTMLElement,
-  channel: Channel,
-  containerEl: HTMLElement,
-  channels: readonly Channel[],
-  signal: AbortSignal,
-  onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void,
-): void {
-  if (onReorderChannel === undefined) {
-    return;
-  }
-  const user = getCurrentUser();
-  const role = user?.role?.toLowerCase() ?? "";
-  if (role !== "owner" && role !== "admin") {
-    return;
-  }
-
-  ensureGlobalDragListeners();
-
-  el.classList.add("channel-draggable");
-  el.dataset.dragChannelId = String(channel.id);
-
-  let pendingDrag: { startX: number; startY: number } | null = null;
-
-  el.addEventListener(
-    "mousedown",
-    (e) => {
-      if (e.button !== 0) {
-        return;
-      }
-      // Start tracking — only activate drag after movement threshold
-      pendingDrag = { startX: e.clientX, startY: e.clientY };
-    },
-    { signal },
-  );
-
-  el.addEventListener(
-    "mousemove",
-    (e) => {
-      if (pendingDrag === null || activeDrag !== null) {
-        return;
-      }
-      const dx = Math.abs(e.clientX - pendingDrag.startX);
-      const dy = Math.abs(e.clientY - pendingDrag.startY);
-      // Require 5px movement to start drag (avoids hijacking clicks)
-      if (dx + dy < 5) {
-        return;
-      }
-      pendingDrag = null;
-      activeDrag = {
-        channelId: channel.id,
-        sourceEl: el,
-        containerEl,
-        channels,
-        onReorder: onReorderChannel,
-      };
-      el.classList.add("dragging");
-      document.body.classList.add("channel-reordering");
-    },
-    { signal },
-  );
-
-  el.addEventListener(
-    "mouseup",
-    () => {
-      pendingDrag = null;
-    },
-    { signal },
-  );
 }
 
 function renderChannelItem(
@@ -671,11 +309,15 @@ function renderCategoryGroup(
       const canManageChannels = role === "owner" || role === "admin";
 
       if (canManageChannels) {
-        const addBtn = createElement("span", {
-          class: "category-add-btn",
-          title: "Create Channel",
-          "data-testid": `create-channel-${categoryName.toLowerCase().replace(/\s+/g, "-")}`,
-        }, "+");
+        const addBtn = createElement(
+          "span",
+          {
+            class: "category-add-btn",
+            title: "Create Channel",
+            "data-testid": `create-channel-${categoryName.toLowerCase().replace(/\s+/g, "-")}`,
+          },
+          "+",
+        );
         addBtn.addEventListener(
           "click",
           (e) => {
@@ -702,7 +344,19 @@ function renderCategoryGroup(
       const channelsContainer = createElement("div", { class: "category-channels-container" });
       for (const ch of channels) {
         channelsContainer.appendChild(
-          renderChannelItem(ch, ch.id === activeChannelId, signal, onVoiceJoin, onVoiceLeave, onEditChannel, onDeleteChannel, channelsContainer, channels, onReorderChannel, onWatchStream),
+          renderChannelItem(
+            ch,
+            ch.id === activeChannelId,
+            signal,
+            onVoiceJoin,
+            onVoiceLeave,
+            onEditChannel,
+            onDeleteChannel,
+            channelsContainer,
+            channels,
+            onReorderChannel,
+            onWatchStream,
+          ),
         );
       }
       group.appendChild(channelsContainer);
@@ -712,7 +366,19 @@ function renderCategoryGroup(
     const channelsContainer = createElement("div", { class: "category-channels-container" });
     for (const ch of channels) {
       channelsContainer.appendChild(
-        renderChannelItem(ch, ch.id === activeChannelId, signal, onVoiceJoin, onVoiceLeave, onEditChannel, onDeleteChannel, channelsContainer, channels, onReorderChannel, onWatchStream),
+        renderChannelItem(
+          ch,
+          ch.id === activeChannelId,
+          signal,
+          onVoiceJoin,
+          onVoiceLeave,
+          onEditChannel,
+          onDeleteChannel,
+          channelsContainer,
+          channels,
+          onReorderChannel,
+          onWatchStream,
+        ),
       );
     }
     group.appendChild(channelsContainer);
@@ -722,7 +388,15 @@ function renderCategoryGroup(
 }
 
 export function createChannelSidebar(options: ChannelSidebarOptions): MountableComponent {
-  const { onVoiceJoin, onVoiceLeave, onCreateChannel, onEditChannel, onDeleteChannel, onReorderChannel, onWatchStream } = options;
+  const {
+    onVoiceJoin,
+    onVoiceLeave,
+    onCreateChannel,
+    onEditChannel,
+    onDeleteChannel,
+    onReorderChannel,
+    onWatchStream,
+  } = options;
   const ac = new AbortController();
   let root: HTMLDivElement | null = null;
   let channelList: HTMLDivElement | null = null;
@@ -742,7 +416,11 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     if (grouped.size === 0) {
       const emptyState = createElement("div", { class: "channel-list-empty" });
       const msg = createElement("p", { class: "channel-list-empty-text" }, "No channels yet");
-      const hint = createElement("p", { class: "channel-list-empty-hint" }, "Right-click a category to create one");
+      const hint = createElement(
+        "p",
+        { class: "channel-list-empty-hint" },
+        "Right-click a category to create one",
+      );
       appendChildren(emptyState, msg, hint);
       channelList.appendChild(emptyState);
       return;
@@ -750,7 +428,19 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
 
     for (const [category, channels] of grouped) {
       channelList.appendChild(
-        renderCategoryGroup(category, channels, state.activeChannelId, ac.signal, onVoiceJoin, onVoiceLeave, onCreateChannel, onEditChannel, onDeleteChannel, onReorderChannel, onWatchStream),
+        renderCategoryGroup(
+          category,
+          channels,
+          state.activeChannelId,
+          ac.signal,
+          onVoiceJoin,
+          onVoiceLeave,
+          onCreateChannel,
+          onEditChannel,
+          onDeleteChannel,
+          onReorderChannel,
+          onWatchStream,
+        ),
       );
     }
   }
@@ -761,11 +451,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // Header
     const header = createElement("div", { class: "channel-sidebar-header" });
     const authState = authStore.getState();
-    serverNameEl = createElement(
-      "h2",
-      {},
-      authState.serverName ?? "Server Name",
-    );
+    serverNameEl = createElement("h2", {}, authState.serverName ?? "Server Name");
     header.appendChild(serverNameEl);
 
     // Channel list
@@ -831,7 +517,9 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       if (channelList === null) return;
       for (const [, users] of state.voiceUsers) {
         for (const [uid, u] of users) {
-          const row = channelList.querySelector<HTMLElement>(`.voice-user-item[data-voice-uid="${uid}"]`);
+          const row = channelList.querySelector<HTMLElement>(
+            `.voice-user-item[data-voice-uid="${uid}"]`,
+          );
           if (row !== null) {
             row.classList.toggle("speaking", u.speaking);
           }
@@ -843,11 +531,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
 
   function destroy(): void {
     ac.abort();
-    globalDragRefCount = Math.max(0, globalDragRefCount - 1);
-    if (globalDragRefCount === 0 && globalDragAc !== null) {
-      globalDragAc.abort();
-      globalDragAc = null;
-    }
+    releaseGlobalDragListeners(channelList ?? undefined);
     for (const unsub of unsubscribers) {
       unsub();
     }

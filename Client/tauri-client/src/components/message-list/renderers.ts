@@ -4,11 +4,7 @@
  * renderSystemMessage) that orchestrate pieces from the split modules.
  */
 
-import {
-  createElement,
-  setText,
-  appendChildren,
-} from "@lib/dom";
+import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { loadPref } from "@components/settings/helpers";
 import type { Message } from "@stores/messages.store";
@@ -58,11 +54,7 @@ export {
 } from "./media";
 
 export type { OgMeta } from "./embeds";
-export {
-  parseOgTags,
-  renderGenericLinkPreview,
-  applyOgMeta,
-} from "./embeds";
+export { parseOgTags, renderGenericLinkPreview, applyOgMeta } from "./embeds";
 
 export {
   formatFileSize,
@@ -100,19 +92,20 @@ export function renderDayDivider(iso: string): HTMLDivElement {
   return divider;
 }
 
-function renderReplyRef(
-  replyToId: number,
-  allMessages: readonly Message[],
-): HTMLDivElement {
+function renderReplyRef(replyToId: number, allMessages: readonly Message[]): HTMLDivElement {
   const ref = allMessages.find((m) => m.id === replyToId);
   const bar = createElement("div", { class: "msg-reply-ref" });
   if (ref) {
     const preview = ref.deleted ? "[message deleted]" : ref.content.slice(0, 100);
     const role = getUserRole(ref.user.id);
-    const miniAvatar = createElement("div", {
-      class: "rr-avatar",
-      style: `background: ${roleColorVar(role)}`,
-    }, ref.user.username.charAt(0).toUpperCase());
+    const miniAvatar = createElement(
+      "div",
+      {
+        class: "rr-avatar",
+        style: `background: ${roleColorVar(role)}`,
+      },
+      ref.user.username.charAt(0).toUpperCase(),
+    );
     appendChildren(
       bar,
       miniAvatar,
@@ -154,17 +147,25 @@ export function renderMessage(
 
   const role = getUserRole(msg.user.id);
   const initial = msg.user.username.charAt(0).toUpperCase();
-  const avatar = createElement("div", {
-    class: "msg-avatar",
-    style: `background: ${roleColorVar(role)}`,
-  }, initial);
+  const avatar = createElement(
+    "div",
+    {
+      class: "msg-avatar",
+      style: `background: ${roleColorVar(role)}`,
+    },
+    initial,
+  );
   el.appendChild(avatar);
 
   if (isGrouped) {
-    const hoverTime = createElement("div", {
-      class: "msg-hover-time",
-      title: formatFullDate(msg.timestamp),
-    }, formatTime(msg.timestamp));
+    const hoverTime = createElement(
+      "div",
+      {
+        class: "msg-hover-time",
+        title: formatFullDate(msg.timestamp),
+      },
+      formatTime(msg.timestamp),
+    );
     el.appendChild(hoverTime);
   }
 
@@ -173,11 +174,19 @@ export function renderMessage(
   }
 
   const header = createElement("div", { class: "msg-header" });
-  const author = createElement("span", {
-    class: "msg-author",
-    style: `color: ${roleColorVar(role)}`,
-  }, msg.user.username);
-  const time = createElement("span", { class: "msg-time", title: formatFullDate(msg.timestamp) }, formatMessageTimestamp(msg.timestamp));
+  const author = createElement(
+    "span",
+    {
+      class: "msg-author",
+      style: `color: ${roleColorVar(role)}`,
+    },
+    msg.user.username,
+  );
+  const time = createElement(
+    "span",
+    { class: "msg-time", title: formatFullDate(msg.timestamp) },
+    formatMessageTimestamp(msg.timestamp),
+  );
   appendChildren(header, author, time);
   el.appendChild(header);
 
@@ -235,11 +244,9 @@ export function renderMessage(
     });
     pinBtn.appendChild(createIcon(msg.pinned ? "pin-off" : "pin", 16));
     pinBtn.title = msg.pinned ? "Unpin" : "Pin";
-    pinBtn.addEventListener(
-      "click",
-      () => opts.onPinClick(msg.id, msg.channelId, msg.pinned),
-      { signal },
-    );
+    pinBtn.addEventListener("click", () => opts.onPinClick(msg.id, msg.channelId, msg.pinned), {
+      signal,
+    });
     actionsBar.appendChild(pinBtn);
 
     if (msg.user.id === opts.currentUserId) {
@@ -271,9 +278,15 @@ export function renderMessage(
       });
       copyIdBtn.appendChild(createIcon("hash", 16));
       copyIdBtn.title = "Copy ID";
-      copyIdBtn.addEventListener("click", () => {
-        void navigator.clipboard.writeText(String(msg.id)).catch(() => { /* clipboard unavailable */ });
-      }, { signal });
+      copyIdBtn.addEventListener(
+        "click",
+        () => {
+          void navigator.clipboard.writeText(String(msg.id)).catch(() => {
+            /* clipboard unavailable */
+          });
+        },
+        { signal },
+      );
       actionsBar.appendChild(copyIdBtn);
     }
 

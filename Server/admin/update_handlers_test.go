@@ -21,6 +21,9 @@ func TestAdminAPI_CheckUpdate_OK(t *testing.T) {
 			"assets": []map[string]any{
 				{"name": "chatserver.exe", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver.exe"},
 				{"name": "checksums.sha256", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/checksums.sha256"},
+				{"name": "chatserver.exe.sig", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver.exe.sig"},
+				{"name": "server-update-manifest.json", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/server-update-manifest.json"},
+				{"name": "server-update-manifest.json.sig", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/server-update-manifest.json.sig"},
 			},
 		})
 	}))
@@ -30,7 +33,7 @@ func TestAdminAPI_CheckUpdate_OK(t *testing.T) {
 	u.SetBaseURL(mockGH.URL)
 
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/updates", token, nil)
@@ -45,6 +48,45 @@ func TestAdminAPI_CheckUpdate_OK(t *testing.T) {
 	}
 	if info.Latest != "v2.0.0" {
 		t.Errorf("latest = %q, want v2.0.0", info.Latest)
+	}
+	if !info.RequiredAssetsPresent {
+		t.Error("expected required_assets_present = true")
+	}
+}
+
+func TestAdminAPI_CheckUpdate_IncompleteReleaseNotInstallable(t *testing.T) {
+	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tag_name": "v2.0.0",
+			"body":     "Missing manifest",
+			"html_url": "https://github.com/J3vb/OwnCord/releases/tag/v2.0.0",
+			"assets": []map[string]any{
+				{"name": "chatserver.exe", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver.exe"},
+				{"name": "checksums.sha256", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/checksums.sha256"},
+			},
+		})
+	}))
+	defer mockGH.Close()
+
+	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	u.SetBaseURL(mockGH.URL)
+
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil)
+	token := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodGet, "/updates", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	var info updater.UpdateInfo
+	_ = json.Unmarshal(w.Body.Bytes(), &info)
+	if info.UpdateAvailable {
+		t.Error("expected update_available = false for incomplete release")
+	}
+	if info.RequiredAssetsPresent {
+		t.Error("expected required_assets_present = false for incomplete release")
 	}
 }
 
@@ -63,7 +105,7 @@ func TestAdminAPI_CheckUpdate_UpToDate(t *testing.T) {
 	u.SetBaseURL(mockGH.URL)
 
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/updates", token, nil)
@@ -80,7 +122,7 @@ func TestAdminAPI_CheckUpdate_UpToDate(t *testing.T) {
 
 func TestAdminAPI_CheckUpdate_Unauthenticated(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil)
 
 	w := doRequest(t, handler, http.MethodGet, "/updates", "", nil)
 	if w.Code != http.StatusUnauthorized {
@@ -90,7 +132,7 @@ func TestAdminAPI_CheckUpdate_Unauthenticated(t *testing.T) {
 
 func TestAdminAPI_ApplyUpdate_RequiresOwner(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil)
 
 	// Create admin user (not owner - role 2)
 	adminUID, _ := database.CreateUser("adminonly2", "hash", 2)
@@ -110,7 +152,7 @@ func TestAdminAPI_ApplyUpdate_RequiresOwner(t *testing.T) {
 func TestAdminAPI_ApplyUpdate_NilUpdater(t *testing.T) {
 	database := openAdminTestDB(t)
 	// nil updater — the endpoint should return 503
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
@@ -123,7 +165,7 @@ func TestAdminAPI_ApplyUpdate_NilUpdater(t *testing.T) {
 // in the 503 response.
 func TestAdminAPI_ApplyUpdate_NilUpdater_ErrorCode(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
@@ -155,7 +197,7 @@ func TestAdminAPI_ApplyUpdate_NoUpdateAvailable(t *testing.T) {
 	u.SetBaseURL(mockGH.URL)
 
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
@@ -186,7 +228,7 @@ func TestAdminAPI_ApplyUpdate_CheckFails(t *testing.T) {
 	u.SetBaseURL(mockGH.URL)
 
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
@@ -197,7 +239,7 @@ func TestAdminAPI_ApplyUpdate_CheckFails(t *testing.T) {
 }
 
 // TestAdminAPI_ApplyUpdate_MissingAssets verifies that 502 is returned when the
-// release has no download URL or checksum URL.
+// release has no download URL, checksum URL, or detached signature URL.
 func TestAdminAPI_ApplyUpdate_MissingAssets(t *testing.T) {
 	// Return a newer version but with no assets (empty download/checksum URLs).
 	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -214,7 +256,7 @@ func TestAdminAPI_ApplyUpdate_MissingAssets(t *testing.T) {
 	u.SetBaseURL(mockGH.URL)
 
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
@@ -235,7 +277,7 @@ func TestAdminAPI_ApplyUpdate_MissingAssets(t *testing.T) {
 // unauthenticated requests to POST /updates/apply.
 func TestAdminAPI_ApplyUpdate_Unauthenticated(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", "", nil)
 	if w.Code != http.StatusUnauthorized {
@@ -268,6 +310,18 @@ func TestAdminAPI_ApplyUpdate_DownloadFails(t *testing.T) {
 					"name":                 "checksums.sha256",
 					"browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/checksums.sha256",
 				},
+				{
+					"name":                 "chatserver.exe.sig",
+					"browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver.exe.sig",
+				},
+				{
+					"name":                 "server-update-manifest.json",
+					"browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/server-update-manifest.json",
+				},
+				{
+					"name":                 "server-update-manifest.json.sig",
+					"browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/server-update-manifest.json.sig",
+				},
 			},
 		})
 		_ = mockGHURL // suppress unused warning
@@ -286,7 +340,7 @@ func TestAdminAPI_ApplyUpdate_DownloadFails(t *testing.T) {
 	// the important thing is that the code path is executed.
 
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil)
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)

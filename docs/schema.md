@@ -354,7 +354,6 @@ Permissions are stored as an integer bitfield (31 bits used) in `roles.permissio
 | 1 | `0x2` | `READ_MESSAGES` | View messages in text channels |
 | 5 | `0x20` | `ATTACH_FILES` | Upload file attachments |
 | 6 | `0x40` | `ADD_REACTIONS` | Add emoji reactions |
-| 8 | `0x100` | `USE_SOUNDBOARD` | Play sounds in voice channels |
 | 9 | `0x200` | `CONNECT_VOICE` | Join voice channels |
 | 10 | `0x400` | `SPEAK_VOICE` | Transmit audio in voice channels |
 | 11 | `0x800` | `USE_VIDEO` | Enable camera in voice channels |

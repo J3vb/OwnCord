@@ -13,6 +13,7 @@ import {
 import { loadPref, savePref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import { parseUserId } from "@lib/livekitSession";
+import { voiceStore } from "@stores/voice.store";
 
 const log = createLogger("audioElements");
 
@@ -64,6 +65,14 @@ export class AudioElements {
     publication: RemoteTrackPublication,
     participant: RemoteParticipant,
   ): void {
+    // Guard: do not attach any remote audio while locally deafened.
+    // applyRemoteAudioSubscriptionState() only covers participants present at
+    // the time of deafen — this guard catches participants who join afterward.
+    if (voiceStore.getState().localDeafened) {
+      publication.setSubscribed(false);
+      return;
+    }
+
     const userId = parseUserId(participant.identity);
     if (publication.source === Track.Source.ScreenShareAudio) {
       // Screenshare audio: manage via HTMLAudioElement volume (not participant.setVolume)
@@ -124,7 +133,10 @@ export class AudioElements {
         for (const el of detachedEls) audioEls.delete(el);
         if (audioEls.size === 0) this.screenshareAudioElements.delete(userId);
       }
-      log.debug("Screenshare audio track unsubscribed and detached", { userId, trackSid: track.sid });
+      log.debug("Screenshare audio track unsubscribed and detached", {
+        userId,
+        trackSid: track.sid,
+      });
     } else {
       for (const el of track.detach()) el.remove();
       if (track.sid !== undefined) this.remoteMicAudioElements.delete(track.sid);
@@ -166,7 +178,9 @@ export class AudioElements {
     }
   }
 
-  getUserVolume(userId: number): number { return getSavedUserVolume(userId); }
+  getUserVolume(userId: number): number {
+    return getSavedUserVolume(userId);
+  }
 
   setOutputVolume(volume: number): void {
     const clamped = Math.max(0, Math.min(200, volume));
@@ -208,14 +222,29 @@ export class AudioElements {
 
   // --- Cleanup ---
 
-  /** Remove all remote audio elements from the DOM and clear tracking maps. */
+  /** Remove all remote audio elements from the DOM and clear tracking maps.
+   *  Preserves screenshare mute state so reconnecting tracks inherit user intent. */
   cleanupAllAudioElements(): void {
-    for (const el of this.remoteMicAudioElements.values()) el.remove();
+    // BUG-107: Fully release audio elements — pause, clear srcObject, then remove.
+    for (const el of this.remoteMicAudioElements.values()) {
+      el.pause();
+      el.srcObject = null;
+      el.remove();
+    }
     this.remoteMicAudioElements.clear();
     for (const audioEls of this.screenshareAudioElements.values()) {
-      for (const el of audioEls) el.remove();
+      for (const el of audioEls) {
+        el.pause();
+        el.srcObject = null;
+        el.remove();
+      }
     }
     this.screenshareAudioElements.clear();
+  }
+
+  /** Full cleanup including screenshare mute state — used on intentional leave. */
+  cleanupAllAudioElementsFull(): void {
+    this.cleanupAllAudioElements();
     this.screenshareAudioMutedByUser.clear();
   }
 }

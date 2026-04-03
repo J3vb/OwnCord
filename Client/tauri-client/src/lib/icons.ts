@@ -232,20 +232,19 @@ export function createIcon(name: IconName, size = 24): SVGSVGElement {
   svg.setAttribute("data-icon", name);
   svg.classList.add("icon");
 
-  // Safe: path data comes entirely from the static ICON_PATHS constant above,
-  // never from user-provided input.
-  svg.innerHTML = ICON_PATHS[name];
+  // INVARIANT: ICON_PATHS values are static SVG path strings from Lucide.
+  // They must NEVER contain user data or dynamically-loaded content.
+  // This is the only safe use of innerHTML in the codebase — do not copy this pattern.
+  const pathData = ICON_PATHS[name];
+  if (pathData === undefined) return svg;
+  svg.innerHTML = pathData;
 
   return svg;
 }
 
 /** Create a signal-strength icon with per-bar coloring based on quality level.
  *  Bars are colored by the quality thresholds; unfilled bars use --bg-active. */
-export function createSignalIcon(
-  barsLit: number,
-  color: string,
-  size = 16,
-): SVGSVGElement {
+export function createSignalIcon(barsLit: number, color: string, size = 16): SVGSVGElement {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("width", String(size));
   svg.setAttribute("height", String(size));

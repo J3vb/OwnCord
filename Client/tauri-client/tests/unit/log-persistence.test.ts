@@ -64,12 +64,10 @@ function captureListener(): {
   getListener: () => ((entry: unknown) => void) | null;
 } {
   let listener: ((entry: unknown) => void) | null = null;
-  mockAddLogListener.mockImplementation(
-    (cb: (entry: unknown) => void) => {
-      listener = cb;
-      return () => {};
-    },
-  );
+  mockAddLogListener.mockImplementation((cb: (entry: unknown) => void) => {
+    listener = cb;
+    return () => {};
+  });
   return {
     getListener: () => listener,
   };
@@ -129,10 +127,7 @@ describe("log persistence", () => {
       captureListener();
       await initLogPersistence();
 
-      expect(mockMkdir).toHaveBeenCalledWith(
-        "/mock/logs/client-logs",
-        { recursive: true },
-      );
+      expect(mockMkdir).toHaveBeenCalledWith("/mock/logs/client-logs", { recursive: true });
     });
 
     it("does NOT create the log directory when it already exists", async () => {
@@ -380,8 +375,7 @@ describe("log persistence", () => {
   describe("clearPendingPersistedLogs", () => {
     it("clears the buffer so pending entries are discarded", async () => {
       const { getListener } = captureListener();
-      const { initLogPersistence, clearPendingPersistedLogs } =
-        await freshImport();
+      const { initLogPersistence, clearPendingPersistedLogs } = await freshImport();
       await initLogPersistence();
 
       getListener()!(makeEntry({ message: "will-be-cleared" }));
@@ -395,8 +389,7 @@ describe("log persistence", () => {
 
     it("clears a pending flush timer", async () => {
       const { getListener } = captureListener();
-      const { initLogPersistence, clearPendingPersistedLogs } =
-        await freshImport();
+      const { initLogPersistence, clearPendingPersistedLogs } = await freshImport();
       await initLogPersistence();
 
       getListener()!(makeEntry());
@@ -418,8 +411,7 @@ describe("log persistence", () => {
           }),
       );
 
-      const { initLogPersistence, clearPendingPersistedLogs } =
-        await freshImport();
+      const { initLogPersistence, clearPendingPersistedLogs } = await freshImport();
       await initLogPersistence();
 
       getListener()!(makeEntry());
@@ -487,12 +479,8 @@ describe("log persistence", () => {
 
       // Should have removed the oldest files (7 files, keep 5 => remove 2)
       expect(mockRemove).toHaveBeenCalledTimes(2);
-      expect(mockRemove).toHaveBeenCalledWith(
-        "/mock/logs/client-logs/2025-06-10.jsonl",
-      );
-      expect(mockRemove).toHaveBeenCalledWith(
-        "/mock/logs/client-logs/2025-06-11.jsonl",
-      );
+      expect(mockRemove).toHaveBeenCalledWith("/mock/logs/client-logs/2025-06-10.jsonl");
+      expect(mockRemove).toHaveBeenCalledWith("/mock/logs/client-logs/2025-06-11.jsonl");
     });
 
     it("does not rotate when file count is within MAX_LOG_FILES", async () => {
@@ -584,9 +572,7 @@ describe("log persistence", () => {
 
       // 6 jsonl files - keep 5 = remove 1
       expect(mockRemove).toHaveBeenCalledTimes(1);
-      expect(mockRemove).toHaveBeenCalledWith(
-        "/mock/logs/client-logs/2025-06-10.jsonl",
-      );
+      expect(mockRemove).toHaveBeenCalledWith("/mock/logs/client-logs/2025-06-10.jsonl");
     });
   });
 
@@ -602,8 +588,7 @@ describe("log persistence", () => {
 
     it("reads and concatenates all jsonl files in sorted order", async () => {
       captureListener();
-      const { initLogPersistence, readAllPersistedLogs } =
-        await freshImport();
+      const { initLogPersistence, readAllPersistedLogs } = await freshImport();
       await initLogPersistence();
 
       mockReadDir.mockResolvedValueOnce([
@@ -630,8 +615,7 @@ describe("log persistence", () => {
 
     it("filters out directories and non-jsonl entries", async () => {
       captureListener();
-      const { initLogPersistence, readAllPersistedLogs } =
-        await freshImport();
+      const { initLogPersistence, readAllPersistedLogs } = await freshImport();
       await initLogPersistence();
 
       mockReadDir.mockResolvedValueOnce([
@@ -650,13 +634,10 @@ describe("log persistence", () => {
 
     it("returns empty string when directory has no jsonl files", async () => {
       captureListener();
-      const { initLogPersistence, readAllPersistedLogs } =
-        await freshImport();
+      const { initLogPersistence, readAllPersistedLogs } = await freshImport();
       await initLogPersistence();
 
-      mockReadDir.mockResolvedValueOnce([
-        { name: "notes.txt", isDirectory: false },
-      ]);
+      mockReadDir.mockResolvedValueOnce([{ name: "notes.txt", isDirectory: false }]);
 
       const result = await readAllPersistedLogs();
       expect(result).toBe("");
@@ -665,8 +646,7 @@ describe("log persistence", () => {
 
     it("returns empty string on readDir failure", async () => {
       captureListener();
-      const { initLogPersistence, readAllPersistedLogs } =
-        await freshImport();
+      const { initLogPersistence, readAllPersistedLogs } = await freshImport();
       await initLogPersistence();
 
       mockReadDir.mockRejectedValueOnce(new Error("no access"));
@@ -677,13 +657,10 @@ describe("log persistence", () => {
 
     it("returns empty string on readTextFile failure", async () => {
       captureListener();
-      const { initLogPersistence, readAllPersistedLogs } =
-        await freshImport();
+      const { initLogPersistence, readAllPersistedLogs } = await freshImport();
       await initLogPersistence();
 
-      mockReadDir.mockResolvedValueOnce([
-        { name: "2025-06-15.jsonl", isDirectory: false },
-      ]);
+      mockReadDir.mockResolvedValueOnce([{ name: "2025-06-15.jsonl", isDirectory: false }]);
       mockReadTextFile.mockRejectedValueOnce(new Error("corrupt file"));
 
       const result = await readAllPersistedLogs();
@@ -735,8 +712,7 @@ describe("log persistence", () => {
   describe("activeFlush tracking", () => {
     it("clears activeFlush after successful flush", async () => {
       const { getListener } = captureListener();
-      const { initLogPersistence, clearPendingPersistedLogs } =
-        await freshImport();
+      const { initLogPersistence, clearPendingPersistedLogs } = await freshImport();
       await initLogPersistence();
 
       getListener()!(makeEntry());
@@ -751,8 +727,7 @@ describe("log persistence", () => {
     it("clears activeFlush after failed flush", async () => {
       mockWriteTextFile.mockRejectedValueOnce(new Error("write error"));
       const { getListener } = captureListener();
-      const { initLogPersistence, clearPendingPersistedLogs } =
-        await freshImport();
+      const { initLogPersistence, clearPendingPersistedLogs } = await freshImport();
       await initLogPersistence();
 
       getListener()!(makeEntry());
@@ -807,8 +782,7 @@ describe("log persistence", () => {
 
     it("handles entries with undefined name in readAllPersistedLogs", async () => {
       captureListener();
-      const { initLogPersistence, readAllPersistedLogs } =
-        await freshImport();
+      const { initLogPersistence, readAllPersistedLogs } = await freshImport();
       await initLogPersistence();
 
       mockReadDir.mockResolvedValueOnce([
@@ -849,9 +823,7 @@ describe("log persistence", () => {
       getListener()!(makeEntry());
       await vi.advanceTimersByTimeAsync(2000);
 
-      expect(mockWriteTextFile.mock.calls[0]![0]).toBe(
-        "/mock/logs/client-logs/2024-01-01.jsonl",
-      );
+      expect(mockWriteTextFile.mock.calls[0]![0]).toBe("/mock/logs/client-logs/2024-01-01.jsonl");
     });
 
     it("cleanup final flush catches and logs errors", async () => {

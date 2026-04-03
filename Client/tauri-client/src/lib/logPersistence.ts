@@ -5,14 +5,7 @@
 // Rotation: keeps the most recent MAX_LOG_FILES days of logs.
 
 import { appLogDir, join } from "@tauri-apps/api/path";
-import {
-  mkdir,
-  writeTextFile,
-  readDir,
-  remove,
-  exists,
-  readTextFile,
-} from "@tauri-apps/plugin-fs";
+import { mkdir, writeTextFile, readDir, remove, exists, readTextFile } from "@tauri-apps/plugin-fs";
 import { type LogEntry, addLogListener, createLogger } from "./logger";
 
 const log = createLogger("logPersistence");
@@ -95,19 +88,14 @@ async function rotateOldFiles(): Promise<void> {
   try {
     const entries = await readDir(logDir);
     const jsonlFiles = entries
-      .filter(
-        (e) =>
-          e.name?.endsWith(".jsonl") && !e.isDirectory,
-      )
+      .filter((e) => e.name?.endsWith(".jsonl") && !e.isDirectory)
       .map((e) => e.name)
-      .sort();
+      .toSorted((a, b) => a.localeCompare(b));
 
     if (jsonlFiles.length > MAX_LOG_FILES) {
-      const toRemove = jsonlFiles.slice(
-        0,
-        jsonlFiles.length - MAX_LOG_FILES,
-      );
+      const toRemove = jsonlFiles.slice(0, jsonlFiles.length - MAX_LOG_FILES);
       for (const file of toRemove) {
+        // eslint-disable-next-line no-await-in-loop -- sequential file deletion to avoid overwhelming the filesystem
         await remove(`${logDir}/${file}`);
       }
     }
@@ -193,15 +181,13 @@ export async function readAllPersistedLogs(): Promise<string> {
   try {
     const entries = await readDir(logDir);
     const jsonlFiles = entries
-      .filter(
-        (e) =>
-          e.name?.endsWith(".jsonl") && !e.isDirectory,
-      )
+      .filter((e) => e.name?.endsWith(".jsonl") && !e.isDirectory)
       .map((e) => e.name)
-      .sort();
+      .toSorted((a, b) => a.localeCompare(b));
 
     const parts: string[] = [];
     for (const file of jsonlFiles) {
+      // eslint-disable-next-line no-await-in-loop -- files must be read in sorted order for correct log concatenation
       const content = await readTextFile(`${logDir}/${file}`);
       parts.push(content);
     }

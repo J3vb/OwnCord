@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/updater"
 )
@@ -13,12 +14,13 @@ import (
 // NewAdminAPI returns a chi router with all /admin/api/* routes. All routes
 // are protected by adminAuthMiddleware which requires the ADMINISTRATOR bit,
 // except for the setup endpoints which are unauthenticated.
-func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer) http.Handler {
+func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string) http.Handler {
 	r := chi.NewRouter()
 
 	// Setup endpoints — unauthenticated, only functional when no users exist.
+	setupLimiter := auth.NewRateLimiter()
 	r.Get("/setup/status", handleSetupStatus(database))
-	r.Post("/setup", handleSetup(database))
+	r.Post("/setup", handleSetup(database, setupLimiter, allowedOrigins))
 
 	// SSE log stream — auth is via a single-use ticket from POST /logs/ticket.
 	// EventSource cannot send Authorization headers, so the client first
@@ -49,14 +51,18 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.Post("/backup", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			ownerOnlyMiddleware(database, handleBackup(database)).ServeHTTP(w, req)
 		}))
-		r.Get("/backups", handleListBackups())
+		r.Get("/backups", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			ownerOnlyMiddleware(database, handleListBackups()).ServeHTTP(w, req)
+		}))
 		r.Delete("/backups/{name}", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			ownerOnlyMiddleware(database, handleDeleteBackup(database)).ServeHTTP(w, req)
 		}))
 		r.Post("/backups/{name}/restore", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ownerOnlyMiddleware(database, handleRestoreBackup(database)).ServeHTTP(w, req)
+			ownerOnlyMiddleware(database, handleRestoreBackup(database, hub)).ServeHTTP(w, req)
 		}))
-		r.Get("/updates", handleCheckUpdate(u))
+		r.Get("/updates", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			ownerOnlyMiddleware(database, handleCheckUpdate(u)).ServeHTTP(w, req)
+		}))
 		r.Post("/updates/apply", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			ownerOnlyMiddleware(database, handleApplyUpdate(u, hub, version)).ServeHTTP(w, req)
 		}))

@@ -232,6 +232,99 @@ func TestHub_BroadcastToChannel_ZeroChannelSendsToAll(t *testing.T) {
 	assertReceived(t, s1, msg, "client")
 }
 
+// ─── BUG-122: Unfocused client must NOT receive channel-scoped broadcasts ────
+
+func TestHub_BroadcastToChannel_SkipsUnfocusedClient(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	chID := seedTestChannel(t, database, "secret")
+	u1 := seedTestUser(t, database, "focused")
+	u2 := seedTestUser(t, database, "unfocused")
+
+	s1 := make(chan []byte, 4)
+	s2 := make(chan []byte, 4)
+	c1 := ws.NewTestClientWithChannel(hub, u1, chID, s1) // focused on channel
+	c2 := ws.NewTestClient(hub, u2, s2)                  // channelID == 0 (unfocused)
+
+	hub.Register(c1)
+	hub.Register(c2)
+	time.Sleep(20 * time.Millisecond)
+
+	msg := []byte(`{"type":"chat_message","payload":{"content":"secret"}}`)
+	hub.BroadcastToChannel(chID, msg)
+	time.Sleep(20 * time.Millisecond)
+
+	assertReceived(t, s1, msg, "focused client")
+	assertNotReceived(t, s2, "unfocused client must NOT receive channel broadcast")
+}
+
+func TestHub_BroadcastToChannel_DeliversToVoiceClient(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	chID := seedTestChannel(t, database, "voice-text")
+	u1 := seedTestUser(t, database, "voiceuser")
+
+	s1 := make(chan []byte, 4)
+	c1 := ws.NewTestClient(hub, u1, s1) // channelID == 0
+	ws.SetClientVoiceChID(c1, chID)     // but in voice on this channel
+
+	hub.Register(c1)
+	time.Sleep(20 * time.Millisecond)
+
+	msg := []byte(`{"type":"chat_message","payload":{"content":"hello"}}`)
+	hub.BroadcastToChannel(chID, msg)
+	time.Sleep(20 * time.Millisecond)
+
+	assertReceived(t, s1, msg, "voice client should receive channel broadcast")
+}
+
+func TestHub_BroadcastToAll_StillDeliversToUnfocusedClient(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	u1 := seedTestUser(t, database, "globaluser")
+	s1 := make(chan []byte, 4)
+	c1 := ws.NewTestClient(hub, u1, s1) // channelID == 0 (unfocused)
+
+	hub.Register(c1)
+	time.Sleep(20 * time.Millisecond)
+
+	msg := []byte(`{"type":"presence","payload":{"status":"online"}}`)
+	hub.BroadcastToAll(msg)
+	time.Sleep(20 * time.Millisecond)
+
+	assertReceived(t, s1, msg, "unfocused client must still receive global broadcasts")
+}
+
+func TestHub_BroadcastToChannel_UnfocusedDoesNotReceiveAnyChannel(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	ch1 := seedTestChannel(t, database, "chan1")
+	ch2 := seedTestChannel(t, database, "chan2")
+	u1 := seedTestUser(t, database, "snooper")
+
+	s1 := make(chan []byte, 8)
+	c1 := ws.NewTestClient(hub, u1, s1) // unfocused
+
+	hub.Register(c1)
+	time.Sleep(20 * time.Millisecond)
+
+	msg1 := []byte(`{"type":"chat_message","payload":{"channel":"1"}}`)
+	msg2 := []byte(`{"type":"chat_message","payload":{"channel":"2"}}`)
+	hub.BroadcastToChannel(ch1, msg1)
+	hub.BroadcastToChannel(ch2, msg2)
+	time.Sleep(20 * time.Millisecond)
+
+	assertNotReceived(t, s1, "unfocused client must NOT receive ch1 broadcast")
+}
+
 // ─── SendToUser ───────────────────────────────────────────────────────────────
 
 func TestHub_SendToUser_ExistingClient(t *testing.T) {
@@ -354,7 +447,7 @@ func TestHub_ChatSend_RateLimit(t *testing.T) {
 
 	// Drain all messages, count errors.
 	errCount := 0
-	drainLoop:
+drainLoop:
 	for {
 		select {
 		case got := <-send:
@@ -504,6 +597,33 @@ func TestHub_GracefulStop_NoPanic(t *testing.T) {
 	hub.GracefulStop()
 }
 
+func TestHub_GracefulStop_Idempotent(t *testing.T) {
+	// BUG-087: GracefulStop must be safe to call concurrently/twice.
+	// Without sync.Once protection, double lkProcess.Stop() can panic.
+	hub, _ := newTestHub(t)
+	go hub.Run()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for range 2 {
+		go func() {
+			defer wg.Done()
+			hub.GracefulStop()
+		}()
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		// Success: no panic from concurrent GracefulStop.
+	case <-time.After(15 * time.Second):
+		t.Fatal("concurrent GracefulStop calls deadlocked")
+	}
+}
+
 // ─── CleanupVoiceForChannel ───────────────────────────────────────────────────
 
 func TestHub_CleanupVoiceForChannel_NoVoiceState_NoPanic(t *testing.T) {
@@ -517,6 +637,222 @@ func TestHub_CleanupVoiceForChannel_NoVoiceState_NoPanic(t *testing.T) {
 // before hub.Register is called. The hub's register case simply overwrites
 // the client map entry; voice cleanup for disconnects is handled by
 // handleVoiceLeave called from readPump/ICE monitor.
+
+// ─── sweepStaleClients ──────────────────────────────────────────────────────
+
+func TestHub_SweepStaleClients_RemovesInactiveClients(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	u1 := seedTestUser(t, database, "stale-alice")
+	u2 := seedTestUser(t, database, "fresh-bob")
+
+	s1 := make(chan []byte, 4)
+	s2 := make(chan []byte, 4)
+	c1 := ws.NewTestClient(hub, u1, s1)
+	c2 := ws.NewTestClient(hub, u2, s2)
+
+	hub.Register(c1)
+	hub.Register(c2)
+	time.Sleep(20 * time.Millisecond)
+
+	ws.SetClientLastActivityForTest(c1, time.Now().Add(-2*time.Minute))
+	ws.SetClientLastActivityForTest(c2, time.Now())
+
+	hub.SweepStaleClientsForTest()
+	time.Sleep(20 * time.Millisecond)
+
+	if hub.ClientCount() != 1 {
+		t.Errorf("ClientCount = %d after sweep, want 1", hub.ClientCount())
+	}
+	if hub.GetClient(u1) != nil {
+		t.Error("stale client should have been removed")
+	}
+	if hub.GetClient(u2) == nil {
+		t.Error("fresh client should still be present")
+	}
+}
+
+func TestHub_SweepStaleClients_NoClientsNoPanic(t *testing.T) {
+	hub, _ := newTestHub(t)
+	hub.SweepStaleClientsForTest()
+}
+
+func TestHub_SweepStaleClients_AllFresh(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	u1 := seedTestUser(t, database, "fresh-carol")
+	s1 := make(chan []byte, 4)
+	c1 := ws.NewTestClient(hub, u1, s1)
+	hub.Register(c1)
+	time.Sleep(20 * time.Millisecond)
+
+	ws.SetClientLastActivityForTest(c1, time.Now())
+	hub.SweepStaleClientsForTest()
+	time.Sleep(20 * time.Millisecond)
+
+	if hub.ClientCount() != 1 {
+		t.Errorf("ClientCount = %d after sweep of fresh clients, want 1", hub.ClientCount())
+	}
+}
+
+// ─── Session sweep (BUG-109) ──────────────────────────────────────────────
+
+// TestHub_SweepRevokedSessions_KicksRevokedClient verifies that the periodic
+// session sweep disconnects clients whose sessions have been deleted from the
+// database (e.g. after logout on another device).
+func TestHub_SweepRevokedSessions_KicksRevokedClient(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	// Create two users with sessions.
+	uid1, err := database.CreateUser("alice-revoke", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	uid2, err := database.CreateUser("bob-valid", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	u1, _ := database.GetUserByID(uid1)
+	u2, _ := database.GetUserByID(uid2)
+
+	token1 := "revoke-token-1"
+	token2 := "valid-token-2"
+	hash1 := auth.HashToken(token1)
+	hash2 := auth.HashToken(token2)
+
+	if _, err := database.CreateSession(uid1, hash1, "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession 1: %v", err)
+	}
+	if _, err := database.CreateSession(uid2, hash2, "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession 2: %v", err)
+	}
+
+	s1 := make(chan []byte, 4)
+	s2 := make(chan []byte, 4)
+	c1 := ws.NewTestClientWithTokenHash(hub, u1, hash1, 0, s1)
+	c2 := ws.NewTestClientWithTokenHash(hub, u2, hash2, 0, s2)
+
+	hub.Register(c1)
+	hub.Register(c2)
+	time.Sleep(20 * time.Millisecond)
+
+	// Delete alice's session (simulating logout from another device).
+	if err := database.DeleteSession(hash1); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+
+	// Run the session sweep.
+	hub.SweepRevokedSessionsForTest()
+	time.Sleep(20 * time.Millisecond)
+
+	// Alice should be kicked, Bob should remain.
+	if hub.GetClient(uid1) != nil {
+		t.Error("revoked client alice should have been kicked")
+	}
+	if hub.GetClient(uid2) == nil {
+		t.Error("valid client bob should still be connected")
+	}
+	if hub.ClientCount() != 1 {
+		t.Errorf("ClientCount = %d, want 1", hub.ClientCount())
+	}
+}
+
+// TestHub_SweepRevokedSessions_NoDBNoPanic verifies the sweep is a no-op
+// when the hub has no database (nil-safe).
+func TestHub_SweepRevokedSessions_NoDBNoPanic(t *testing.T) {
+	hub := ws.NewHubForTest()
+	hub.SweepRevokedSessionsForTest() // should not panic
+}
+
+// TestHub_SweepRevokedSessions_EmptyTokenHashSkipped verifies that clients
+// without a token hash (e.g. test clients) are not kicked by the sweep.
+func TestHub_SweepRevokedSessions_EmptyTokenHashSkipped(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	uid := seedTestUser(t, database, "no-hash-user")
+	s := make(chan []byte, 4)
+	c := ws.NewTestClient(hub, uid, s)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.SweepRevokedSessionsForTest()
+	time.Sleep(20 * time.Millisecond)
+
+	if hub.ClientCount() != 1 {
+		t.Errorf("ClientCount = %d, want 1 (client without token hash should survive)", hub.ClientCount())
+	}
+}
+
+// ─── LiveKitHealthCheck ─────────────────────────────────────────────────────
+
+func TestHub_LiveKitHealthCheck_NilReturnsError(t *testing.T) {
+	hub, _ := newTestHub(t)
+	ok, err := hub.LiveKitHealthCheck()
+	if ok {
+		t.Error("expected ok=false when LiveKit is nil")
+	}
+	if err == nil {
+		t.Error("expected non-nil error when LiveKit is nil")
+	}
+}
+
+// ─── SetLiveKitProcess ──────────────────────────────────────────────────────
+
+func TestHub_SetLiveKitProcess(t *testing.T) {
+	hub, _ := newTestHub(t)
+	hub.SetLiveKitProcess(nil)
+	go hub.Run()
+	hub.GracefulStop()
+}
+
+// ─── VoiceSessionCount ─────────────────────────────────────────────────────
+
+func TestHub_VoiceSessionCount(t *testing.T) {
+	tests := []struct {
+		name      string
+		voiceChs  []int64
+		wantCount int
+	}{
+		{"no clients", nil, 0},
+		{"all in voice", []int64{100, 200, 300}, 3},
+		{"none in voice", []int64{0, 0}, 0},
+		{"mixed", []int64{100, 0, 200, 0}, 2},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			hub, database := newTestHub(t)
+			go hub.Run()
+			defer hub.Stop()
+
+			for i, vch := range tc.voiceChs {
+				username := fmt.Sprintf("voice-%s-%d", tc.name, i)
+				uid := seedTestUser(t, database, username)
+				send := make(chan []byte, 4)
+				c := ws.NewTestClient(hub, uid, send)
+				if vch != 0 {
+					ws.SetClientVoiceChID(c, vch)
+				}
+				hub.Register(c)
+			}
+			time.Sleep(30 * time.Millisecond)
+
+			got := hub.VoiceSessionCount()
+			if got != tc.wantCount {
+				t.Errorf("VoiceSessionCount() = %d, want %d", got, tc.wantCount)
+			}
+		})
+	}
+}
 
 // hubTestSchema is the minimal schema needed for hub tests.
 var hubTestSchema = []byte(`

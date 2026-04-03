@@ -16,8 +16,14 @@ vi.mock("@lib/connectionStats", () => ({
     start: vi.fn(),
     stop: vi.fn(),
     getStats: vi.fn().mockReturnValue({
-      rtt: 0, quality: "excellent", outRate: 0, inRate: 0,
-      outPackets: 0, inPackets: 0, totalUp: 0, totalDown: 0,
+      rtt: 0,
+      quality: "excellent",
+      outRate: 0,
+      inRate: 0,
+      outPackets: 0,
+      inPackets: 0,
+      totalUp: 0,
+      totalDown: 0,
     }),
     onUpdate: vi.fn().mockReturnValue(() => {}),
     onQualityChanged: vi.fn().mockReturnValue(() => {}),
@@ -281,7 +287,9 @@ describe("VoiceWidget", () => {
     });
     widget.mount(container);
 
-    const screenshareBtn = container.querySelector('[aria-label="Screenshare"]') as HTMLButtonElement;
+    const screenshareBtn = container.querySelector(
+      '[aria-label="Screenshare"]',
+    ) as HTMLButtonElement;
     expect(screenshareBtn).not.toBeNull();
     expect(screenshareBtn.classList.contains("active-ctrl")).toBe(true);
     expect(screenshareBtn.getAttribute("aria-pressed")).toBe("true");

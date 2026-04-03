@@ -1,11 +1,4 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { fetchMock } = vi.hoisted(() => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -24,7 +17,12 @@ vi.mock("@lib/media-visibility", () => ({
   observeMedia: mockObserveMedia,
 }));
 
-import { clearEmbedCaches, renderGenericLinkPreview, parseOgTags, applyOgMeta } from "../../src/components/message-list/embeds";
+import {
+  clearEmbedCaches,
+  renderGenericLinkPreview,
+  parseOgTags,
+  applyOgMeta,
+} from "../../src/components/message-list/embeds";
 import type { OgMeta } from "../../src/components/message-list/embeds";
 import { setServerHost } from "../../src/components/message-list/attachments";
 
@@ -54,9 +52,12 @@ describe("renderGenericLinkPreview", () => {
   it("does not reuse OG metadata that resolves after the cache was cleared", async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let resolveFetch: ((value: any) => void) | null = null;
-    fetchMock.mockImplementationOnce((() => new Promise((resolve) => {
-      resolveFetch = resolve;
-    })) as any);
+    fetchMock.mockImplementationOnce(
+      (() =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        })) as any,
+    );
 
     const first = renderGenericLinkPreview("https://news.example.com/post");
     document.body.appendChild(first);
@@ -67,7 +68,9 @@ describe("renderGenericLinkPreview", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    fetchMock.mockResolvedValueOnce(mockHtmlResponse("<html><head><title>Fresh</title></head></html>"));
+    fetchMock.mockResolvedValueOnce(
+      mockHtmlResponse("<html><head><title>Fresh</title></head></html>"),
+    );
     const second = renderGenericLinkPreview("https://news.example.com/post");
     document.body.appendChild(second);
 
@@ -79,9 +82,12 @@ describe("renderGenericLinkPreview", () => {
   it("does not reuse an EMPTY_OG result that resolves after the cache was cleared", async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let resolveFetch: ((value: any) => void) | null = null;
-    fetchMock.mockImplementationOnce((() => new Promise((resolve) => {
-      resolveFetch = resolve;
-    })) as any);
+    fetchMock.mockImplementationOnce(
+      (() =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        })) as any,
+    );
 
     const first = renderGenericLinkPreview("https://news.example.com/empty");
     document.body.appendChild(first);
@@ -95,7 +101,9 @@ describe("renderGenericLinkPreview", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    fetchMock.mockResolvedValueOnce(mockHtmlResponse("<html><head><title>Recovered</title></head></html>"));
+    fetchMock.mockResolvedValueOnce(
+      mockHtmlResponse("<html><head><title>Recovered</title></head></html>"),
+    );
     const second = renderGenericLinkPreview("https://news.example.com/empty");
     document.body.appendChild(second);
 
@@ -110,12 +118,18 @@ describe("renderGenericLinkPreview", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let resolveSecond: ((value: any) => void) | null = null;
     fetchMock
-      .mockImplementationOnce((() => new Promise((resolve) => {
-        resolveFirst = resolve;
-      })) as any)
-      .mockImplementationOnce((() => new Promise((resolve) => {
-        resolveSecond = resolve;
-      })) as any);
+      .mockImplementationOnce(
+        (() =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          })) as any,
+      )
+      .mockImplementationOnce(
+        (() =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          })) as any,
+      );
 
     const first = renderGenericLinkPreview("https://news.example.com/race");
     document.body.appendChild(first);
@@ -144,7 +158,9 @@ describe("renderGenericLinkPreview", () => {
   });
 
   it("fetches OG metadata for public domains that begin with fd", async () => {
-    fetchMock.mockResolvedValue(mockHtmlResponse("<html><head><title>F-Droid</title></head></html>"));
+    fetchMock.mockResolvedValue(
+      mockHtmlResponse("<html><head><title>F-Droid</title></head></html>"),
+    );
 
     const card = renderGenericLinkPreview("https://fdroid.org/packages");
     document.body.appendChild(card);
@@ -213,7 +229,9 @@ describe("renderGenericLinkPreview", () => {
 
   it("allows previews for the configured OwnCord server even on private hosts", async () => {
     setServerHost("LOCALHOST:8080");
-    fetchMock.mockResolvedValue(mockHtmlResponse("<html><head><title>OwnCord Local</title></head></html>"));
+    fetchMock.mockResolvedValue(
+      mockHtmlResponse("<html><head><title>OwnCord Local</title></head></html>"),
+    );
 
     const card = renderGenericLinkPreview("https://localhost:8080/docs");
     document.body.appendChild(card);
@@ -298,7 +316,9 @@ describe("renderGenericLinkPreview", () => {
   it("renders from cache on second call (no second fetch)", async () => {
     clearEmbedCaches();
     fetchMock.mockResolvedValueOnce(
-      mockHtmlResponse('<html><head><meta property="og:title" content="Cached Title"></head></html>'),
+      mockHtmlResponse(
+        '<html><head><meta property="og:title" content="Cached Title"></head></html>',
+      ),
     );
 
     const card1 = renderGenericLinkPreview("https://cached.example.com/page");
@@ -333,7 +353,9 @@ describe("renderGenericLinkPreview", () => {
 
   it("allows 172.32.x.x (not private)", async () => {
     clearEmbedCaches();
-    fetchMock.mockResolvedValueOnce(mockHtmlResponse("<html><head><title>Public</title></head></html>"));
+    fetchMock.mockResolvedValueOnce(
+      mockHtmlResponse("<html><head><title>Public</title></head></html>"),
+    );
     const card = renderGenericLinkPreview("https://172.32.0.1/page");
     document.body.appendChild(card);
     await vi.waitFor(() => {
@@ -415,7 +437,9 @@ describe("renderGenericLinkPreview", () => {
 
   it("allows public IPv6 addresses", async () => {
     clearEmbedCaches();
-    fetchMock.mockResolvedValueOnce(mockHtmlResponse("<html><head><title>IPv6</title></head></html>"));
+    fetchMock.mockResolvedValueOnce(
+      mockHtmlResponse("<html><head><title>IPv6</title></head></html>"),
+    );
     const card = renderGenericLinkPreview("https://[2600::1]/page");
     document.body.appendChild(card);
     await vi.waitFor(() => {
@@ -495,7 +519,15 @@ describe("applyOgMeta", () => {
     const imageWrap = document.createElement("div");
 
     const meta: OgMeta = { title: "Page Title", description: null, image: null, siteName: null };
-    applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, "https://example.com/page", "example.com");
+    applyOgMeta(
+      meta,
+      titleEl,
+      descEl,
+      hostEl,
+      imageWrap,
+      "https://example.com/page",
+      "example.com",
+    );
 
     expect(titleEl.textContent).toBe("Page Title");
   });
@@ -507,7 +539,15 @@ describe("applyOgMeta", () => {
     const imageWrap = document.createElement("div");
 
     const meta: OgMeta = { title: null, description: null, image: null, siteName: null };
-    applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, "https://example.com/page", "example.com");
+    applyOgMeta(
+      meta,
+      titleEl,
+      descEl,
+      hostEl,
+      imageWrap,
+      "https://example.com/page",
+      "example.com",
+    );
 
     expect(titleEl.textContent).toBe("example.com");
   });
@@ -519,7 +559,15 @@ describe("applyOgMeta", () => {
     const imageWrap = document.createElement("div");
 
     const meta: OgMeta = { title: "Title", description: null, image: null, siteName: "My Site" };
-    applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, "https://example.com/page", "example.com");
+    applyOgMeta(
+      meta,
+      titleEl,
+      descEl,
+      hostEl,
+      imageWrap,
+      "https://example.com/page",
+      "example.com",
+    );
 
     expect(hostEl.textContent).toBe("My Site");
   });
@@ -532,7 +580,15 @@ describe("applyOgMeta", () => {
 
     const longDesc = "A".repeat(300);
     const meta: OgMeta = { title: "Title", description: longDesc, image: null, siteName: null };
-    applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, "https://example.com/page", "example.com");
+    applyOgMeta(
+      meta,
+      titleEl,
+      descEl,
+      hostEl,
+      imageWrap,
+      "https://example.com/page",
+      "example.com",
+    );
 
     expect(descEl.textContent!.length).toBe(200);
     expect(descEl.textContent!.endsWith("...")).toBe(true);
@@ -545,8 +601,21 @@ describe("applyOgMeta", () => {
     const hostEl = document.createElement("div");
     const imageWrap = document.createElement("div");
 
-    const meta: OgMeta = { title: "Title", description: "Short description", image: null, siteName: null };
-    applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, "https://example.com/page", "example.com");
+    const meta: OgMeta = {
+      title: "Title",
+      description: "Short description",
+      image: null,
+      siteName: null,
+    };
+    applyOgMeta(
+      meta,
+      titleEl,
+      descEl,
+      hostEl,
+      imageWrap,
+      "https://example.com/page",
+      "example.com",
+    );
 
     expect(descEl.textContent).toBe("Short description");
     expect(descEl.style.display).toBe("");
@@ -559,7 +628,15 @@ describe("applyOgMeta", () => {
     const imageWrap = document.createElement("div");
 
     const meta: OgMeta = { title: "Title", description: null, image: null, siteName: null };
-    applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, "https://example.com/page", "example.com");
+    applyOgMeta(
+      meta,
+      titleEl,
+      descEl,
+      hostEl,
+      imageWrap,
+      "https://example.com/page",
+      "example.com",
+    );
 
     expect(descEl.style.display).toBe("none");
   });
@@ -576,7 +653,15 @@ describe("applyOgMeta", () => {
       image: "https://example.com/image.jpg",
       siteName: null,
     };
-    applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, "https://example.com/page", "example.com");
+    applyOgMeta(
+      meta,
+      titleEl,
+      descEl,
+      hostEl,
+      imageWrap,
+      "https://example.com/page",
+      "example.com",
+    );
 
     const img = imageWrap.querySelector("img");
     expect(img).not.toBeNull();
@@ -596,7 +681,15 @@ describe("applyOgMeta", () => {
       image: "/images/og.png",
       siteName: null,
     };
-    applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, "https://example.com/page", "example.com");
+    applyOgMeta(
+      meta,
+      titleEl,
+      descEl,
+      hostEl,
+      imageWrap,
+      "https://example.com/page",
+      "example.com",
+    );
 
     const img = imageWrap.querySelector("img");
     expect(img).not.toBeNull();
@@ -615,7 +708,15 @@ describe("applyOgMeta", () => {
       image: "https://example.com/image.jpg",
       siteName: null,
     };
-    applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, "https://example.com/page", "example.com");
+    applyOgMeta(
+      meta,
+      titleEl,
+      descEl,
+      hostEl,
+      imageWrap,
+      "https://example.com/page",
+      "example.com",
+    );
 
     const img = imageWrap.querySelector("img")!;
     img.dispatchEvent(new Event("error"));
@@ -630,7 +731,15 @@ describe("applyOgMeta", () => {
     const imageWrap = document.createElement("div");
 
     const meta: OgMeta = { title: "Title", description: null, image: "", siteName: null };
-    applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, "https://example.com/page", "example.com");
+    applyOgMeta(
+      meta,
+      titleEl,
+      descEl,
+      hostEl,
+      imageWrap,
+      "https://example.com/page",
+      "example.com",
+    );
 
     expect(imageWrap.querySelector("img")).toBeNull();
   });
@@ -647,7 +756,15 @@ describe("applyOgMeta", () => {
       image: "https://192.168.1.1/image.png",
       siteName: null,
     };
-    applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, "https://example.com/page", "example.com");
+    applyOgMeta(
+      meta,
+      titleEl,
+      descEl,
+      hostEl,
+      imageWrap,
+      "https://example.com/page",
+      "example.com",
+    );
 
     expect(imageWrap.querySelector("img")).toBeNull();
   });
@@ -664,7 +781,15 @@ describe("applyOgMeta", () => {
       image: "https://example.com/animated.gif",
       siteName: null,
     };
-    applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, "https://example.com/page", "example.com");
+    applyOgMeta(
+      meta,
+      titleEl,
+      descEl,
+      hostEl,
+      imageWrap,
+      "https://example.com/page",
+      "example.com",
+    );
 
     const img = imageWrap.querySelector("img");
     expect(img).not.toBeNull();
@@ -683,7 +808,15 @@ describe("applyOgMeta", () => {
       image: "https://example.com/animated.gif",
       siteName: null,
     };
-    applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, "https://example.com/page", "example.com");
+    applyOgMeta(
+      meta,
+      titleEl,
+      descEl,
+      hostEl,
+      imageWrap,
+      "https://example.com/page",
+      "example.com",
+    );
 
     const img = imageWrap.querySelector("img")!;
     img.dispatchEvent(new Event("load"));
@@ -710,9 +843,12 @@ describe("renderGenericLinkPreview — cache stale during non-HTML response", ()
 
   it("discards non-HTML response result when cache was cleared mid-flight", async () => {
     let resolveFetch: ((value: unknown) => void) | null = null;
-    fetchMock.mockImplementationOnce(() => new Promise((resolve) => {
-      resolveFetch = resolve;
-    }));
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
 
     const card = renderGenericLinkPreview("https://stale-nonhtml.example.com/data");
     document.body.appendChild(card);
@@ -724,7 +860,9 @@ describe("renderGenericLinkPreview — cache stale during non-HTML response", ()
     // Resolve with non-HTML content type
     (resolveFetch as any)?.({
       ok: true,
-      headers: { get: (name: string) => name.toLowerCase() === "content-type" ? "application/json" : null },
+      headers: {
+        get: (name: string) => (name.toLowerCase() === "content-type" ? "application/json" : null),
+      },
       text: vi.fn().mockResolvedValue("{}"),
     });
 
@@ -733,7 +871,9 @@ describe("renderGenericLinkPreview — cache stale during non-HTML response", ()
 
     // Should have discarded the result (generation mismatch)
     // A new fetch for the same URL should still trigger a new fetch
-    fetchMock.mockResolvedValueOnce(mockHtmlResponse("<html><head><title>Fresh</title></head></html>"));
+    fetchMock.mockResolvedValueOnce(
+      mockHtmlResponse("<html><head><title>Fresh</title></head></html>"),
+    );
     const card2 = renderGenericLinkPreview("https://stale-nonhtml.example.com/data");
     document.body.appendChild(card2);
     await vi.waitFor(() => {
@@ -743,9 +883,12 @@ describe("renderGenericLinkPreview — cache stale during non-HTML response", ()
 
   it("discards fetch error result when cache was cleared mid-flight", async () => {
     let rejectFetch: ((err: Error) => void) | null = null;
-    fetchMock.mockImplementationOnce(() => new Promise((_resolve, reject) => {
-      rejectFetch = reject;
-    }));
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectFetch = reject;
+        }),
+    );
 
     const card = renderGenericLinkPreview("https://stale-error.example.com/fail");
     document.body.appendChild(card);
@@ -761,7 +904,9 @@ describe("renderGenericLinkPreview — cache stale during non-HTML response", ()
     await Promise.resolve();
 
     // A new fetch for the same URL should still trigger a new fetch
-    fetchMock.mockResolvedValueOnce(mockHtmlResponse("<html><head><title>Recovered</title></head></html>"));
+    fetchMock.mockResolvedValueOnce(
+      mockHtmlResponse("<html><head><title>Recovered</title></head></html>"),
+    );
     const card2 = renderGenericLinkPreview("https://stale-error.example.com/fail");
     document.body.appendChild(card2);
     await vi.waitFor(() => {

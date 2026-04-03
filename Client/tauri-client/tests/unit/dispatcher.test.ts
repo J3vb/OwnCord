@@ -13,12 +13,17 @@ import type { ServerMessage } from "../../src/lib/types";
 // Mock notifications and livekitSession to avoid side effects
 vi.mock("@lib/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
+  cleanupNotificationAudio: vi.fn(),
 }));
 vi.mock("@lib/livekitSession", () => ({
   handleVoiceToken: vi.fn(async () => {}),
   leaveVoice: vi.fn(),
   cleanupAll: vi.fn(),
+  isVoiceConnected: vi.fn(() => false),
 }));
+
+import { isVoiceConnected as _isVoiceConnected } from "../../src/lib/livekitSession";
+const mockIsVoiceConnected = vi.mocked(_isVoiceConnected);
 
 // Suppress console output
 vi.spyOn(console, "info").mockImplementation(() => {});
@@ -36,10 +41,7 @@ function createMockWs() {
     connect: vi.fn(),
     disconnect: vi.fn(),
     send: vi.fn(() => "test-id"),
-    on<T extends ServerMessage["type"]>(
-      type: T,
-      listener: WsListener<T>,
-    ): () => void {
+    on<T extends ServerMessage["type"]>(type: T, listener: WsListener<T>): () => void {
       if (!listeners.has(type)) {
         listeners.set(type, new Set());
       }
@@ -49,6 +51,7 @@ function createMockWs() {
       };
     },
     onStateChange: vi.fn(() => () => {}),
+    onCertFirstTrust: vi.fn(() => () => {}),
     onCertMismatch: vi.fn(() => () => {}),
     acceptCertFingerprint: vi.fn(async () => {}),
     getState: vi.fn(() => "disconnected" as const),
@@ -106,7 +109,7 @@ describe("WS Dispatcher", () => {
       localCamera: false,
       localScreenshare: false,
       joinedAt: null,
-    listenOnly: false,
+      listenOnly: false,
     }));
     dmStore.setState(() => ({ channels: [] }));
     uiStore.setState((prev) => ({ ...prev, transientError: null }));
@@ -144,12 +147,8 @@ describe("WS Dispatcher", () => {
         { id: 1, name: "general", type: "text", category: null, position: 0 },
         { id: 2, name: "voice", type: "voice", category: null, position: 1 },
       ],
-      members: [
-        { id: 1, username: "alex", avatar: null, role: "admin", status: "online" },
-      ],
-      voice_states: [
-        { channel_id: 2, user_id: 1, muted: false, deafened: false },
-      ],
+      members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
+      voice_states: [{ channel_id: 2, user_id: 1, muted: false, deafened: false }],
       roles: [],
     });
 
@@ -282,7 +281,13 @@ describe("WS Dispatcher", () => {
   it("wires member_ban to remove member from members store", () => {
     membersStore.setState((prev) => {
       const m = new Map(prev.members);
-      m.set(77, { id: 77, username: "banned-user", avatar: null, role: "member", status: "online" as const });
+      m.set(77, {
+        id: 77,
+        username: "banned-user",
+        avatar: null,
+        role: "member",
+        status: "online" as const,
+      });
       return { ...prev, members: m };
     });
 
@@ -293,7 +298,13 @@ describe("WS Dispatcher", () => {
   it("wires member_leave to members store", () => {
     membersStore.setState((prev) => {
       const m = new Map(prev.members);
-      m.set(99, { id: 99, username: "bye", avatar: null, role: "member", status: "online" as const });
+      m.set(99, {
+        id: 99,
+        username: "bye",
+        avatar: null,
+        role: "member",
+        status: "online" as const,
+      });
       return { ...prev, members: m };
     });
 
@@ -319,12 +330,10 @@ describe("WS Dispatcher", () => {
 
   it("wires ready with DM channels in payload", () => {
     mock.dispatch("ready", {
-      channels: [
-        { id: 1, name: "general", type: "text", category: null, position: 0 },
-      ],
+      channels: [{ id: 1, name: "general", type: "text", category: null, position: 0 }],
       members: [],
       voice_states: [],
-      roles: [{ id: 1, name: "admin", permissions: 0x7FFFFFFF }],
+      roles: [{ id: 1, name: "admin", permissions: 0x7fffffff }],
       dm_channels: [
         {
           channel_id: 100,
@@ -365,9 +374,7 @@ describe("WS Dispatcher", () => {
     }));
 
     mock.dispatch("ready", {
-      channels: [
-        { id: 1, name: "general", type: "text", category: null, position: 0 },
-      ],
+      channels: [{ id: 1, name: "general", type: "text", category: null, position: 0 }],
       members: [],
       voice_states: [],
       roles: [],
@@ -378,9 +385,7 @@ describe("WS Dispatcher", () => {
 
   it("ready with no text channels does not set active", () => {
     mock.dispatch("ready", {
-      channels: [
-        { id: 5, name: "voice-only", type: "voice", category: null, position: 0 },
-      ],
+      channels: [{ id: 5, name: "voice-only", type: "voice", category: null, position: 0 }],
       members: [],
       voice_states: [],
       roles: [],
@@ -560,7 +565,13 @@ describe("WS Dispatcher", () => {
   it("wires member_update to update role", () => {
     membersStore.setState((prev) => {
       const m = new Map(prev.members);
-      m.set(42, { id: 42, username: "alice", avatar: null, role: "member", status: "online" as const });
+      m.set(42, {
+        id: 42,
+        username: "alice",
+        avatar: null,
+        role: "member",
+        status: "online" as const,
+      });
       return { ...prev, members: m };
     });
 
@@ -1048,6 +1059,88 @@ describe("WS Dispatcher", () => {
         user_id: 99,
       });
     }).not.toThrow();
+  });
+
+  it("ready sends voice_leave when user appears in voice_states but LiveKit is disconnected", () => {
+    mockIsVoiceConnected.mockReturnValue(false);
+
+    // Set up auth so the current user ID is 42
+    authStore.setState(() => ({
+      token: "test-token",
+      user: { id: 42, username: "ghost", avatar: null, role: "member" },
+      serverName: "Test",
+      motd: "",
+      isAuthenticated: true,
+    }));
+
+    mock.dispatch("ready", {
+      channels: [{ id: 1, name: "general", type: "text", category: "", position: 0 }],
+      members: [],
+      voice_states: [{ user_id: 42, channel_id: 10, muted: false, deafened: false }],
+      roles: [],
+      dm_channels: [],
+    });
+
+    // The dispatcher should detect stale voice state and send voice_leave
+    expect(mock.ws.send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "voice_leave", payload: {} }),
+    );
+    // And clear the local voice channel
+    expect(voiceStore.getState().currentChannelId).toBeNull();
+  });
+
+  it("ready does NOT send voice_leave when LiveKit IS connected", () => {
+    mockIsVoiceConnected.mockReturnValue(true);
+
+    authStore.setState(() => ({
+      token: "test-token",
+      user: { id: 42, username: "active", avatar: null, role: "member" },
+      serverName: "Test",
+      motd: "",
+      isAuthenticated: true,
+    }));
+
+    mock.dispatch("ready", {
+      channels: [{ id: 1, name: "general", type: "text", category: "", position: 0 }],
+      members: [],
+      voice_states: [{ user_id: 42, channel_id: 10, muted: false, deafened: false }],
+      roles: [],
+      dm_channels: [],
+    });
+
+    // voice_leave should NOT be sent — the LiveKit room is active
+    const sendCalls = (mock.ws.send as ReturnType<typeof vi.fn>).mock.calls;
+    const voiceLeaveSent = sendCalls.some(
+      (args: unknown[]) => (args[0] as Record<string, unknown>)?.type === "voice_leave",
+    );
+    expect(voiceLeaveSent).toBe(false);
+  });
+
+  it("ready does NOT send voice_leave when user is NOT in voice_states", () => {
+    mockIsVoiceConnected.mockReturnValue(false);
+
+    authStore.setState(() => ({
+      token: "test-token",
+      user: { id: 42, username: "notinvoice", avatar: null, role: "member" },
+      serverName: "Test",
+      motd: "",
+      isAuthenticated: true,
+    }));
+
+    mock.dispatch("ready", {
+      channels: [{ id: 1, name: "general", type: "text", category: "", position: 0 }],
+      members: [],
+      voice_states: [{ user_id: 99, channel_id: 10, muted: false, deafened: false }],
+      roles: [],
+      dm_channels: [],
+    });
+
+    // voice_leave should NOT be sent — user 42 is not in voice_states
+    const sendCalls = (mock.ws.send as ReturnType<typeof vi.fn>).mock.calls;
+    const voiceLeaveSent = sendCalls.some(
+      (args: unknown[]) => (args[0] as Record<string, unknown>)?.type === "voice_leave",
+    );
+    expect(voiceLeaveSent).toBe(false);
   });
 
   it("cleanup removes all listeners", () => {

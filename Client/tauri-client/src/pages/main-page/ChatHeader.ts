@@ -18,18 +18,42 @@ export interface ChatHeaderRefs {
 export interface ChatHeaderOptions {
   readonly onTogglePins: () => void;
   readonly onSearchFocus?: () => void;
+  readonly onToggleDmProfile?: () => void;
 }
 
 // ---------------------------------------------------------------------------
 // Builder
 // ---------------------------------------------------------------------------
 
-export function buildChatHeader(
-  opts: ChatHeaderOptions,
-): { element: HTMLDivElement; refs: ChatHeaderRefs } {
+export function buildChatHeader(opts: ChatHeaderOptions): {
+  element: HTMLDivElement;
+  refs: ChatHeaderRefs;
+} {
   const header = createElement("div", { class: "chat-header", "data-testid": "chat-header" });
   const hash = createElement("span", { class: "ch-hash" }, "#");
-  const nameEl = createElement("span", { class: "ch-name", "data-testid": "chat-header-name" }, "general");
+  const nameEl = createElement(
+    "span",
+    { class: "ch-name", "data-testid": "chat-header-name" },
+    "general",
+  );
+
+  // Wrap hash+name in a clickable region for DM profile toggle
+  const nameGroup = createElement("div", {
+    class: "ch-name-group",
+    "data-testid": "ch-name-group",
+  });
+  nameGroup.style.display = "flex";
+  nameGroup.style.alignItems = "center";
+  nameGroup.style.gap = "0";
+  if (opts.onToggleDmProfile !== undefined) {
+    const toggle = opts.onToggleDmProfile;
+    nameGroup.style.cursor = "pointer";
+    nameGroup.addEventListener("click", () => {
+      toggle();
+    });
+  }
+  appendChildren(nameGroup, hash, nameEl);
+
   const divider = createElement("div", { class: "ch-divider" });
   const topicEl = createElement("span", { class: "ch-topic" }, "");
 
@@ -42,7 +66,9 @@ export function buildChatHeader(
     "data-testid": "pin-btn",
   });
   pinBtn.appendChild(createIcon("pin", 18));
-  pinBtn.addEventListener("click", () => { opts.onTogglePins(); });
+  pinBtn.addEventListener("click", () => {
+    opts.onTogglePins();
+  });
   const searchInput = createElement("input", {
     class: "search-input",
     type: "text",
@@ -53,12 +79,12 @@ export function buildChatHeader(
     const onFocus = opts.onSearchFocus;
     searchInput.addEventListener("focus", () => {
       onFocus();
-      (searchInput).blur();
+      searchInput.blur();
     });
   }
   appendChildren(tools, searchInput, pinBtn);
 
-  appendChildren(header, hash, nameEl, divider, topicEl, tools);
+  appendChildren(header, nameGroup, divider, topicEl, tools);
   return { element: header, refs: { hashEl: hash, nameEl, topicEl } };
 }
 

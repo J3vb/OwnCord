@@ -7,9 +7,15 @@ import { createLogger } from "./logger";
 
 const log = createLogger("ws");
 
+/** Monotonic generation counter — incremented on each connect() to invalidate
+ *  stale event listeners from a previous connection attempt. */
+let wsGeneration = 0;
+
 // Tauri IPC imports — resolved at runtime in Tauri context
 let tauriInvoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null = null;
-let tauriListen: ((event: string, handler: (e: { payload: unknown }) => void) => Promise<() => void>) | null = null;
+let tauriListen:
+  | ((event: string, handler: (e: { payload: unknown }) => void) => Promise<() => void>)
+  | null = null;
 
 // Dynamically load Tauri APIs (avoids import errors in test/browser env)
 async function ensureTauriApis(): Promise<void> {
@@ -53,6 +59,7 @@ export function parseStoredFingerprint(message?: string): string | undefined {
 }
 
 export type CertMismatchListener = (event: CertTofuEvent) => void;
+export type CertFirstTrustListener = (event: CertTofuEvent) => void;
 
 export interface WsClientConfig {
   readonly host: string;
@@ -96,6 +103,9 @@ export function createWsClient() {
 
   // TOFU cert mismatch listeners
   const certMismatchListeners = new Set<CertMismatchListener>();
+
+  // TOFU first-trust listeners (BUG-133)
+  const certFirstTrustListeners = new Set<CertFirstTrustListener>();
 
   function setState(newState: ConnectionState): void {
     if (state !== newState) {
@@ -193,7 +203,12 @@ export function createWsClient() {
     log.debug("WS ←", { type: msg.type, id: msg.id });
 
     // Deduplication during reconnection replay
-    if (replayDedup !== null && msg.type !== "auth_ok" && msg.type !== "auth_error" && msg.type !== "ready") {
+    if (
+      replayDedup !== null &&
+      msg.type !== "auth_ok" &&
+      msg.type !== "auth_error" &&
+      msg.type !== "ready"
+    ) {
       const dedupKey = msg.id ?? `${msg.type}:${seq}`;
       if (replayDedup.has(dedupKey)) {
         log.debug("Dedup: skipping duplicate message", { type: msg.type, key: dedupKey });
@@ -244,10 +259,7 @@ export function createWsClient() {
     }
     for (const listener of typeListeners) {
       try {
-        (listener)(
-          msg.payload,
-          msg.id,
-        );
+        listener(msg.payload, msg.id);
       } catch (err) {
         log.error(`Listener error for ${msg.type}`, err);
       }
@@ -257,14 +269,19 @@ export function createWsClient() {
   async function setupEventListeners(): Promise<void> {
     if (tauriListen === null) return;
 
+    // Capture generation so stale listeners from a previous connect() are no-ops.
+    const gen = wsGeneration;
+
     // Server messages
     const unsubMsg = await tauriListen("ws-message", (e) => {
+      if (gen !== wsGeneration) return;
       handleMessage(e.payload as string);
     });
     eventUnsubs.push(unsubMsg);
 
     // Connection state changes from Rust
     const unsubState = await tauriListen("ws-state", (e) => {
+      if (gen !== wsGeneration) return;
       const rustState = e.payload as string;
       log.debug("Rust WS state", { state: rustState });
 
@@ -301,16 +318,26 @@ export function createWsClient() {
 
     // Errors
     const unsubErr = await tauriListen("ws-error", (e) => {
+      if (gen !== wsGeneration) return;
       log.warn("WebSocket error (proxy)", { error: e.payload });
     });
     eventUnsubs.push(unsubErr);
 
     // TOFU certificate events
     const unsubCert = await tauriListen("cert-tofu", (e) => {
+      if (gen !== wsGeneration) return;
       const raw = e.payload as CertTofuEvent;
       log.info("TOFU cert event", { host: raw.host, status: raw.status });
 
-      if (raw.status === "mismatch") {
+      if (raw.status === "trusted_first_use") {
+        log.warn("TOFU: first-use certificate trust", {
+          host: raw.host,
+          fingerprint: raw.fingerprint,
+        });
+        for (const listener of certFirstTrustListeners) {
+          listener(raw);
+        }
+      } else if (raw.status === "mismatch") {
         const evt: CertTofuEvent = {
           ...raw,
           storedFingerprint: parseStoredFingerprint(raw.message),
@@ -337,7 +364,9 @@ export function createWsClient() {
         // was already invalidated after disconnect — safe to ignore.
         const result = unsub() as unknown;
         if (result instanceof Promise) {
-          result.catch(() => {});
+          result.catch((err) => {
+            log.warn("Failed to unsubscribe Tauri event listener", err);
+          });
         }
       } catch {
         // Sync errors also safe to ignore.
@@ -347,6 +376,7 @@ export function createWsClient() {
   }
 
   async function connect(cfg: WsClientConfig): Promise<void> {
+    wsGeneration++;
     config = cfg;
     intentionalClose = false;
     cancelReconnect();
@@ -439,10 +469,7 @@ export function createWsClient() {
       return send(msg);
     },
 
-    on<T extends ServerMessage["type"]>(
-      type: T,
-      listener: WsListener<T>,
-    ): () => void {
+    on<T extends ServerMessage["type"]>(type: T, listener: WsListener<T>): () => void {
       if (!listeners.has(type)) {
         listeners.set(type, new Set());
       }
@@ -456,6 +483,12 @@ export function createWsClient() {
     onStateChange(listener: (state: ConnectionState) => void): () => void {
       stateListeners.add(listener);
       return () => stateListeners.delete(listener);
+    },
+
+    /** Register a listener for TOFU first-trust events (BUG-133). */
+    onCertFirstTrust(listener: CertFirstTrustListener): () => void {
+      certFirstTrustListeners.add(listener);
+      return () => certFirstTrustListeners.delete(listener);
     },
 
     /** Register a listener for TOFU certificate mismatch events. */

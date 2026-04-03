@@ -5,7 +5,27 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 )
+
+// sanitizeFTSQuery strips FTS5 operator characters from user input to prevent
+// query injection. Only allows letters, digits, spaces, and hyphens.
+func sanitizeFTSQuery(q string) string {
+	var sb strings.Builder
+	sb.Grow(len(q))
+	for _, r := range q {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ' || r == '-' {
+			sb.WriteRune(r)
+		}
+	}
+	result := strings.TrimSpace(sb.String())
+	// Enforce a maximum query length to bound FTS processing.
+	// Use rune count to avoid splitting multi-byte characters.
+	if runes := []rune(result); len(runes) > 200 {
+		result = string(runes[:200])
+	}
+	return result
+}
 
 // CreateMessage inserts a new message and returns the assigned ID.
 // Content should already be sanitized before calling this function.
@@ -190,6 +210,10 @@ func (d *DB) SearchMessages(query string, channelID *int64, limit int) ([]Messag
 	if query == "" {
 		return []MessageSearchResult{}, nil
 	}
+	query = sanitizeFTSQuery(query)
+	if query == "" {
+		return []MessageSearchResult{}, nil
+	}
 	if limit < 1 {
 		return []MessageSearchResult{}, nil
 	}
@@ -239,6 +263,67 @@ func (d *DB) SearchMessages(query string, channelID *int64, limit int) ([]Messag
 	}
 	if rows.Err() != nil {
 		return nil, fmt.Errorf("SearchMessages rows: %w", rows.Err())
+	}
+	if results == nil {
+		results = []MessageSearchResult{}
+	}
+	return results, nil
+}
+
+// SearchMessagesInChannels performs a full-text search scoped to the given
+// channel IDs. This prevents information leakage by filtering at the DB level
+// rather than post-filtering in application code.
+func (d *DB) SearchMessagesInChannels(query string, channelIDs []int64, limit int) ([]MessageSearchResult, error) {
+	if query == "" || len(channelIDs) == 0 {
+		return []MessageSearchResult{}, nil
+	}
+	query = sanitizeFTSQuery(query)
+	if query == "" {
+		return []MessageSearchResult{}, nil
+	}
+	if limit < 1 {
+		return []MessageSearchResult{}, nil
+	}
+
+	// Build IN clause placeholders.
+	placeholders := make([]string, len(channelIDs))
+	args := make([]any, 0, len(channelIDs)+2)
+	args = append(args, query)
+	for i, id := range channelIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	args = append(args, limit)
+
+	rows, err := d.sqlDB.Query(
+		fmt.Sprintf(
+			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content, m.timestamp
+			 FROM messages_fts f
+			 JOIN messages m ON f.rowid = m.id
+			 JOIN channels c ON m.channel_id = c.id
+			 JOIN users u ON m.user_id = u.id
+			 WHERE messages_fts MATCH ? AND m.channel_id IN (%s) AND m.deleted = 0
+			 ORDER BY rank LIMIT ?`,
+			strings.Join(placeholders, ",")),
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("SearchMessagesInChannels: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var results []MessageSearchResult
+	for rows.Next() {
+		var r MessageSearchResult
+		if scanErr := rows.Scan(&r.MessageID, &r.ChannelID, &r.ChannelName,
+			&r.User.ID, &r.User.Username, &r.User.Avatar,
+			&r.Content, &r.Timestamp); scanErr != nil {
+			return nil, fmt.Errorf("SearchMessagesInChannels scan: %w", scanErr)
+		}
+		results = append(results, r)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("SearchMessagesInChannels rows: %w", rows.Err())
 	}
 	if results == nil {
 		results = []MessageSearchResult{}
@@ -299,7 +384,7 @@ func (d *DB) getReactionsBatch(msgIDs []int64, requestingUserID int64) (map[int6
 	placeholders := sb.String()
 
 	// Query: aggregate count + check if requesting user reacted.
-	query := fmt.Sprintf(
+	query := fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
 		`SELECT r.message_id, r.emoji, COUNT(*) as cnt,
 		        MAX(CASE WHEN r.user_id = ? THEN 1 ELSE 0 END) as me
 		 FROM reactions r

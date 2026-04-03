@@ -195,7 +195,9 @@ describe("MemberList", () => {
 
   it("skips role groups that have no members", () => {
     // Only add an owner — other groups should not render
-    setTestMembers([makeMember({ id: 1, username: "Alice", role: "owner", status: "online" as UserStatus })]);
+    setTestMembers([
+      makeMember({ id: 1, username: "Alice", role: "owner", status: "online" as UserStatus }),
+    ]);
     memberList.mount(container);
 
     const headers = container.querySelectorAll(".member-role-group");
@@ -314,7 +316,9 @@ describe("MemberList", () => {
     expect(container.querySelectorAll(".member-item").length).toBe(6);
 
     // Remove all but one member
-    setTestMembers([makeMember({ id: 99, username: "Solo", role: "member", status: "online" as UserStatus })]);
+    setTestMembers([
+      makeMember({ id: 99, username: "Solo", role: "member", status: "online" as UserStatus }),
+    ]);
     membersStore.flush();
 
     expect(container.querySelectorAll(".member-item").length).toBe(1);

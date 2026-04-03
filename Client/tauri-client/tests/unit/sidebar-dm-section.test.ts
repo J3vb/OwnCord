@@ -128,8 +128,18 @@ describe("SidebarDmSection", () => {
 
   describe("DM list items", () => {
     it("renders DM entries from store", () => {
-      addDmChannel(makeDm({ channelId: 100, recipient: { id: 10, username: "Alice", avatar: "", status: "online" } }));
-      addDmChannel(makeDm({ channelId: 101, recipient: { id: 11, username: "Bob", avatar: "", status: "idle" } }));
+      addDmChannel(
+        makeDm({
+          channelId: 100,
+          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+        }),
+      );
+      addDmChannel(
+        makeDm({
+          channelId: 101,
+          recipient: { id: 11, username: "Bob", avatar: "", status: "idle" },
+        }),
+      );
 
       const section = createSidebarDmSection(defaultOpts());
       container.appendChild(section.element);
@@ -142,10 +152,12 @@ describe("SidebarDmSection", () => {
 
     it("displays up to 3 DM entries (truncates if more)", () => {
       for (let i = 0; i < 5; i++) {
-        addDmChannel(makeDm({
-          channelId: 100 + i,
-          recipient: { id: 10 + i, username: `User${i}`, avatar: "", status: "online" },
-        }));
+        addDmChannel(
+          makeDm({
+            channelId: 100 + i,
+            recipient: { id: 10 + i, username: `User${i}`, avatar: "", status: "online" },
+          }),
+        );
       }
 
       const section = createSidebarDmSection(defaultOpts());
@@ -158,7 +170,12 @@ describe("SidebarDmSection", () => {
     });
 
     it("displays the recipient username in each entry", () => {
-      addDmChannel(makeDm({ channelId: 100, recipient: { id: 10, username: "Alice", avatar: "", status: "online" } }));
+      addDmChannel(
+        makeDm({
+          channelId: 100,
+          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+        }),
+      );
 
       const section = createSidebarDmSection(defaultOpts());
       container.appendChild(section.element);
@@ -219,7 +236,9 @@ describe("SidebarDmSection", () => {
 
   describe("status dot colors", () => {
     it("shows green dot for online status", () => {
-      addDmChannel(makeDm({ recipient: { id: 10, username: "Alice", avatar: "", status: "online" } }));
+      addDmChannel(
+        makeDm({ recipient: { id: 10, username: "Alice", avatar: "", status: "online" } }),
+      );
       const section = createSidebarDmSection(defaultOpts());
       container.appendChild(section.element);
 
@@ -231,7 +250,9 @@ describe("SidebarDmSection", () => {
     });
 
     it("shows yellow dot for idle status", () => {
-      addDmChannel(makeDm({ recipient: { id: 10, username: "Alice", avatar: "", status: "idle" } }));
+      addDmChannel(
+        makeDm({ recipient: { id: 10, username: "Alice", avatar: "", status: "idle" } }),
+      );
       const section = createSidebarDmSection(defaultOpts());
       container.appendChild(section.element);
 
@@ -255,7 +276,9 @@ describe("SidebarDmSection", () => {
     });
 
     it("shows text-micro dot for offline status", () => {
-      addDmChannel(makeDm({ recipient: { id: 10, username: "Alice", avatar: "", status: "offline" } }));
+      addDmChannel(
+        makeDm({ recipient: { id: 10, username: "Alice", avatar: "", status: "offline" } }),
+      );
       const section = createSidebarDmSection(defaultOpts());
       container.appendChild(section.element);
 
@@ -274,7 +297,13 @@ describe("SidebarDmSection", () => {
   describe("total unread badge", () => {
     it("shows total unread count in header badge when there are unreads", () => {
       addDmChannel(makeDm({ channelId: 100, unreadCount: 3 }));
-      addDmChannel(makeDm({ channelId: 101, recipient: { id: 11, username: "Bob", avatar: "", status: "online" }, unreadCount: 2 }));
+      addDmChannel(
+        makeDm({
+          channelId: 101,
+          recipient: { id: 11, username: "Bob", avatar: "", status: "online" },
+          unreadCount: 2,
+        }),
+      );
 
       const section = createSidebarDmSection(defaultOpts());
       container.appendChild(section.element);
@@ -306,7 +335,12 @@ describe("SidebarDmSection", () => {
   describe("View All button", () => {
     it("is hidden when 3 or fewer DMs exist", () => {
       addDmChannel(makeDm({ channelId: 100 }));
-      addDmChannel(makeDm({ channelId: 101, recipient: { id: 11, username: "Bob", avatar: "", status: "online" } }));
+      addDmChannel(
+        makeDm({
+          channelId: 101,
+          recipient: { id: 11, username: "Bob", avatar: "", status: "online" },
+        }),
+      );
 
       const section = createSidebarDmSection(defaultOpts());
       container.appendChild(section.element);
@@ -319,10 +353,12 @@ describe("SidebarDmSection", () => {
 
     it("is visible when more than 3 DMs exist and shows count", () => {
       for (let i = 0; i < 5; i++) {
-        addDmChannel(makeDm({
-          channelId: 100 + i,
-          recipient: { id: 10 + i, username: `User${i}`, avatar: "", status: "online" },
-        }));
+        addDmChannel(
+          makeDm({
+            channelId: 100 + i,
+            recipient: { id: 10 + i, username: `User${i}`, avatar: "", status: "online" },
+          }),
+        );
       }
 
       const section = createSidebarDmSection(defaultOpts());
@@ -337,10 +373,12 @@ describe("SidebarDmSection", () => {
 
     it("switches sidebar mode to dms when clicked", () => {
       for (let i = 0; i < 5; i++) {
-        addDmChannel(makeDm({
-          channelId: 100 + i,
-          recipient: { id: 10 + i, username: `User${i}`, avatar: "", status: "online" },
-        }));
+        addDmChannel(
+          makeDm({
+            channelId: 100 + i,
+            recipient: { id: 10 + i, username: `User${i}`, avatar: "", status: "online" },
+          }),
+        );
       }
 
       const section = createSidebarDmSection(defaultOpts());
@@ -409,10 +447,12 @@ describe("SidebarDmSection", () => {
 
     it("hides View All button when collapsed even if more than 3 DMs", () => {
       for (let i = 0; i < 5; i++) {
-        addDmChannel(makeDm({
-          channelId: 100 + i,
-          recipient: { id: 10 + i, username: `User${i}`, avatar: "", status: "online" },
-        }));
+        addDmChannel(
+          makeDm({
+            channelId: 100 + i,
+            recipient: { id: 10 + i, username: `User${i}`, avatar: "", status: "online" },
+          }),
+        );
       }
 
       const section = createSidebarDmSection(defaultOpts());

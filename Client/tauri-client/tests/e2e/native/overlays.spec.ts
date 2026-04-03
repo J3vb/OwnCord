@@ -148,7 +148,9 @@ test.describe("Pinned Messages", () => {
   test("pin button triggers pin action", async ({ nativePage }) => {
     // The pin button may be a standalone icon, not a data-testid element.
     // From production screenshots: it's the 📌 icon in the chat header.
-    const pinBtn = nativePage.locator("[data-testid='pin-btn'], .pin-btn, button[aria-label='Pins']").first();
+    const pinBtn = nativePage
+      .locator("[data-testid='pin-btn'], .pin-btn, button[aria-label='Pins']")
+      .first();
     const exists = await pinBtn.isVisible().catch(() => false);
     test.skip(!exists, "No pin button in chat header");
 
@@ -170,14 +172,19 @@ test.describe("Pinned Messages", () => {
   });
 
   test("pinned panel can be closed when available", async ({ nativePage }) => {
-    const pinBtn = nativePage.locator("[data-testid='pin-btn'], .pin-btn, button[aria-label='Pins']").first();
+    const pinBtn = nativePage
+      .locator("[data-testid='pin-btn'], .pin-btn, button[aria-label='Pins']")
+      .first();
     const exists = await pinBtn.isVisible().catch(() => false);
     test.skip(!exists, "No pin button in chat header");
 
     await pinBtn.click();
 
     const panel = nativePage.locator(".pinned-panel");
-    const panelVisible = await panel.waitFor({ state: "visible", timeout: 5_000 }).then(() => true).catch(() => false);
+    const panelVisible = await panel
+      .waitFor({ state: "visible", timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
     test.skip(!panelVisible, "Pinned panel did not open (server may not have pin data)");
 
     // Close via close button

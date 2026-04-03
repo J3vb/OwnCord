@@ -17,11 +17,11 @@ var blockedMagic = []struct {
 	name  string
 	magic []byte
 }{
-	{"PE executable", []byte("MZ")},             // Windows .exe / .dll
-	{"ELF binary", []byte("\x7fELF")},            // Linux binaries
-	{"Mach-O 64", []byte("\xcf\xfa\xed\xfe")},   // macOS 64-bit
-	{"Mach-O 32", []byte("\xce\xfa\xed\xfe")},   // macOS 32-bit
-	{"shell script", []byte("#!")},               // Shebang scripts (.sh, .py, etc.)
+	{"PE executable", []byte("MZ")},           // Windows .exe / .dll
+	{"ELF binary", []byte("\x7fELF")},         // Linux binaries
+	{"Mach-O 64", []byte("\xcf\xfa\xed\xfe")}, // macOS 64-bit
+	{"Mach-O 32", []byte("\xce\xfa\xed\xfe")}, // macOS 32-bit
+	{"shell script", []byte("#!")},            // Shebang scripts (.sh, .py, etc.)
 }
 
 // ValidateFileType checks the first few bytes of a file against known blocked
@@ -45,7 +45,7 @@ type Storage struct {
 // New creates a Storage instance that stores files in dir.
 // dir is created if it does not exist.
 func New(dir string, maxSizeMB int) (*Storage, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("creating storage dir %s: %w", dir, err)
 	}
 	return &Storage{dir: dir, maxSizeMB: maxSizeMB}, nil
@@ -99,32 +99,37 @@ func (s *Storage) resolvedPath(name string) (string, error) {
 // It reads the first 8 bytes to validate the file type (rejecting executables
 // and scripts) before writing the full content to disk.
 // The caller is responsible for generating a UUID filename.
-func (s *Storage) Save(uuid string, r io.Reader) error {
+func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 	if err := sanitizeFilename(uuid); err != nil {
-		return err
+		return 0, err
 	}
 	dst, err := s.resolvedPath(uuid)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// Read the first 8 bytes to check magic bytes without consuming the stream.
 	var header [8]byte
 	n, err := io.ReadFull(r, header[:])
 	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
-		return fmt.Errorf("reading file header: %w", err)
+		return 0, fmt.Errorf("reading file header: %w", err)
 	}
 	headerSlice := header[:n]
 
 	if err := ValidateFileType(headerSlice); err != nil {
-		return err
+		return 0, err
 	}
 
 	f, err := os.Create(dst)
 	if err != nil {
-		return fmt.Errorf("creating file %s: %w", dst, err)
+		return 0, fmt.Errorf("creating file %s: %w", dst, err)
 	}
-	defer f.Close() //nolint:errcheck
+	closed := false
+	defer func() {
+		if !closed {
+			_ = f.Close()
+		}
+	}()
 
 	// Reconstruct the full stream: header bytes we already read + remainder.
 	maxBytes := int64(s.maxSizeMB) * 1024 * 1024
@@ -132,21 +137,24 @@ func (s *Storage) Save(uuid string, r io.Reader) error {
 	limited := io.LimitReader(full, maxBytes)
 	written, err := io.Copy(f, limited)
 	if err != nil {
-		return fmt.Errorf("writing file: %w", err)
+		return 0, fmt.Errorf("writing file: %w", err)
 	}
 	// Probe for one more byte to detect if the file exceeds the limit.
 	if written == maxBytes {
 		var probe [1]byte
 		if n, _ := full.Read(probe[:]); n > 0 {
-			// File exceeds limit — remove the partial write and reject.
 			_ = f.Close()
+			closed = true
 			if removeErr := os.Remove(dst); removeErr != nil {
 				slog.Error("storage: failed to remove oversized file", "path", dst, "err", removeErr)
 			}
-			return fmt.Errorf("file exceeds maximum size of %d MB", s.maxSizeMB)
+			return 0, fmt.Errorf("file exceeds maximum size of %d MB", s.maxSizeMB)
 		}
 	}
-	return nil
+	if syncErr := f.Sync(); syncErr != nil {
+		return 0, fmt.Errorf("syncing file %s: %w", dst, syncErr)
+	}
+	return written, nil
 }
 
 // Delete removes the file named uuid from the storage dir.

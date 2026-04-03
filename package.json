@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "scripts": {
+    "changelog": "changelogen",
+    "release": "changelogen --release"
+  },
+  "devDependencies": {
+    "changelogen": "^0.6.2"
+  }
+}

@@ -1,0 +1,37 @@
+# go-gremlins mutation testing configuration
+# Run: gremlins unleash --config .gremlins.yaml
+
+unleash:
+  # Packages to mutate
+  packages:
+    - ./ws/...
+    - ./api/...
+    - ./auth/...
+    - ./db/...
+    - ./config/...
+    - ./storage/...
+    - ./updater/...
+
+  # Run tests with race detector
+  test_flags: "-race -count=1"
+
+  # Timeout per mutant test run
+  timeout: 60s
+
+  # Number of parallel workers
+  workers: 4
+
+  # Mutation operators to apply
+  mutant_types:
+    - CONDITIONALS_BOUNDARY      # < to <=, > to >=
+    - CONDITIONALS_NEGATION      # == to !=
+    - INCREMENT_DECREMENT        # ++ to --
+    - INVERT_NEGATIVES           # -x to x
+    - ARITHMETIC_BASE            # + to -, * to /
+    - INVERT_LOGICAL             # && to ||
+    - INVERT_LOOPCTRL            # break to continue
+    - REMOVE_SELF_ASSIGNMENTS    # x += 1 to x
+
+  # Thresholds for pass/fail
+  threshold:
+    efficacy: 60

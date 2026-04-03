@@ -20,9 +20,7 @@ export interface EditChannelModalOptions {
   readonly onClose: () => void;
 }
 
-export function createEditChannelModal(
-  options: EditChannelModalOptions,
-): MountableComponent {
+export function createEditChannelModal(options: EditChannelModalOptions): MountableComponent {
   const { channelName, channelType, onSave, onClose } = options;
   const ac = new AbortController();
   let overlay: HTMLDivElement | null = null;
@@ -120,10 +118,7 @@ export function createEditChannelModal(
           await onSave({ name });
         } catch (err) {
           errorEl.style.display = "block";
-          setText(
-            errorEl,
-            err instanceof Error ? err.message : "Failed to update channel",
-          );
+          setText(errorEl, err instanceof Error ? err.message : "Failed to update channel");
           saveBtn.removeAttribute("disabled");
           setText(saveBtn, "Save Changes");
         }

@@ -78,11 +78,7 @@ describe("toast global helper", () => {
       initToast(container);
 
       showToast("Server connected", "success");
-      expect(container.show).toHaveBeenCalledWith(
-        "Server connected",
-        "success",
-        undefined,
-      );
+      expect(container.show).toHaveBeenCalledWith("Server connected", "success", undefined);
     });
 
     it("defaults the type to 'info' when not specified", () => {

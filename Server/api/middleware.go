@@ -53,6 +53,10 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 
 			// Check expiry.
 			if auth.IsSessionExpired(sess.ExpiresAt) {
+				// Clean up expired session in background to prevent accumulation.
+				go func(h string) {
+					_ = database.DeleteSession(h)
+				}(hash)
 				writeJSON(w, http.StatusUnauthorized, errorResponse{
 					Error:   "UNAUTHORIZED",
 					Message: "session has expired",
@@ -207,15 +211,20 @@ func clientIPWithProxies(r *http.Request, trustedCIDRs []string) string {
 	}
 
 	// Prefer X-Real-IP when coming from a trusted proxy.
+	// BUG-112: Validate extracted IP to prevent spoofed rate-limit keys.
 	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-		return xri
+		if net.ParseIP(xri) != nil {
+			return xri
+		}
 	}
 
 	// Fall back to the leftmost (client) entry in X-Forwarded-For.
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		parts := strings.SplitN(xff, ",", 2)
 		if client := strings.TrimSpace(parts[0]); client != "" {
-			return client
+			if net.ParseIP(client) != nil {
+				return client
+			}
 		}
 	}
 
@@ -245,7 +254,11 @@ func isTrustedProxy(remoteIP string, cidrList []string) (bool, error) {
 // AdminIPRestrict returns middleware that blocks requests from IPs not in the
 // allowed CIDR list. Returns 403 Forbidden for disallowed IPs. If the CIDR
 // list is empty, all requests are allowed (no restriction).
-func AdminIPRestrict(allowedCIDRs []string) func(http.Handler) http.Handler {
+//
+// trustedProxyCIDRs specifies which connecting IPs are trusted reverse proxies.
+// When the connecting IP matches a trusted proxy, the real client IP is read
+// from X-Real-IP or X-Forwarded-For headers (BUG-116).
+func AdminIPRestrict(allowedCIDRs, trustedProxyCIDRs []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if len(allowedCIDRs) == 0 {
@@ -253,7 +266,7 @@ func AdminIPRestrict(allowedCIDRs []string) func(http.Handler) http.Handler {
 				return
 			}
 
-			ip := clientIP(r)
+			ip := clientIPWithProxies(r, trustedProxyCIDRs)
 			allowed, _ := isTrustedProxy(ip, allowedCIDRs)
 			if !allowed {
 				writeJSON(w, http.StatusForbidden, errorResponse{
@@ -292,7 +305,7 @@ func SecurityHeadersWithTLS(tlsMode string) func(http.Handler) http.Handler {
 			h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 			h.Set("Cache-Control", "no-store")
 			if tlsMode != "" {
-				h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+				h.Set("Strict-Transport-Security", fmt.Sprintf("max-age=%d; includeSubDomains", hstsMaxAgeSeconds))
 			}
 			next.ServeHTTP(w, r)
 		})
@@ -324,16 +337,20 @@ func MaxBodySize(maxBytes int64) func(http.Handler) http.Handler {
 	}
 }
 
-// MaxBodySizeUnless is like MaxBodySize but skips the limit for specific paths.
-// Exempted paths apply their own limit via route-scoped middleware.
-func MaxBodySizeUnless(maxBytes int64, exemptPaths ...string) func(http.Handler) http.Handler {
-	exempt := make(map[string]bool, len(exemptPaths))
-	for _, p := range exemptPaths {
-		exempt[p] = true
-	}
+// MaxBodySizeUnless is like MaxBodySize but skips the limit for paths that
+// match any of the given prefixes. Exempted paths apply their own limit via
+// route-scoped middleware.
+func MaxBodySizeUnless(maxBytes int64, exemptPrefixes ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !exempt[r.URL.Path] {
+			exempt := false
+			for _, prefix := range exemptPrefixes {
+				if strings.HasPrefix(r.URL.Path, prefix) {
+					exempt = true
+					break
+				}
+			}
+			if !exempt {
 				r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 			}
 			next.ServeHTTP(w, r)

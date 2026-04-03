@@ -1,17 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { buildAppearanceTab } from "@components/settings/AppearanceTab";
 
-const {
-  mockGetActiveThemeName,
-  mockLoadCustomTheme,
-  mockRestoreTheme,
-  mockApplyThemeByName,
-} = vi.hoisted(() => ({
-  mockGetActiveThemeName: vi.fn(() => "neon-glow"),
-  mockLoadCustomTheme: vi.fn((): { name: string; author: string; version: string; colors: Record<string, string> } | null => null),
-  mockRestoreTheme: vi.fn(),
-  mockApplyThemeByName: vi.fn(),
-}));
+const { mockGetActiveThemeName, mockLoadCustomTheme, mockRestoreTheme, mockApplyThemeByName } =
+  vi.hoisted(() => ({
+    mockGetActiveThemeName: vi.fn(() => "neon-glow"),
+    mockLoadCustomTheme: vi.fn(
+      (): {
+        name: string;
+        author: string;
+        version: string;
+        colors: Record<string, string>;
+      } | null => null,
+    ),
+    mockRestoreTheme: vi.fn(),
+    mockApplyThemeByName: vi.fn(),
+  }));
 
 vi.mock("@stores/ui.store", () => ({
   setTheme: vi.fn(),
@@ -109,8 +112,8 @@ describe("AppearanceTab — Accessibility", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 
-    const activeSwatch = container.querySelector('.accent-swatch.active') as HTMLElement;
-    const hexInput = container.querySelector('.accent-hex-row input') as HTMLInputElement;
+    const activeSwatch = container.querySelector(".accent-swatch.active") as HTMLElement;
+    const hexInput = container.querySelector(".accent-hex-row input") as HTMLInputElement;
 
     expect(activeSwatch).not.toBeNull();
     expect(activeSwatch.title).toBe("#00c8ff");
@@ -123,8 +126,8 @@ describe("AppearanceTab — Accessibility", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 
-    const activeSwatch = container.querySelector('.accent-swatch.active') as HTMLElement;
-    const hexInput = container.querySelector('.accent-hex-row input') as HTMLInputElement;
+    const activeSwatch = container.querySelector(".accent-swatch.active") as HTMLElement;
+    const hexInput = container.querySelector(".accent-hex-row input") as HTMLInputElement;
 
     expect(activeSwatch).not.toBeNull();
     expect(activeSwatch.title).toBe("#5865f2");
@@ -143,8 +146,8 @@ describe("AppearanceTab — Accessibility", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 
-    const activeSwatch = container.querySelector('.accent-swatch.active');
-    const hexInput = container.querySelector('.accent-hex-row input') as HTMLInputElement;
+    const activeSwatch = container.querySelector(".accent-swatch.active");
+    const hexInput = container.querySelector(".accent-hex-row input") as HTMLInputElement;
 
     expect(activeSwatch).toBeNull();
     expect(hexInput.value).toBe("123456");
@@ -157,11 +160,11 @@ describe("AppearanceTab — Accessibility", () => {
 
     const tiles = container.querySelectorAll(".theme-opt");
     const dark = tiles[0] as HTMLElement;
-    const hexInput = container.querySelector('.accent-hex-row input') as HTMLInputElement;
+    const hexInput = container.querySelector(".accent-hex-row input") as HTMLInputElement;
 
     dark.click();
 
-    const activeSwatch = container.querySelector('.accent-swatch.active') as HTMLElement;
+    const activeSwatch = container.querySelector(".accent-swatch.active") as HTMLElement;
     expect(activeSwatch.title).toBe("#5865f2");
     expect(hexInput.value).toBe("5865f2");
     expect(hexInput.placeholder).toBe("5865f2");

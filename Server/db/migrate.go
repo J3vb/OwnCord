@@ -18,6 +18,7 @@ package db
 // filename without executing the SQL, so subsequent runs treat them as done.
 
 import (
+	"database/sql"
 	"fmt"
 	"io/fs"
 	"sort"
@@ -46,8 +47,10 @@ func isExistingDatabase(d *DB) (bool, error) {
 		"SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
 	).Scan(&name)
 	if err != nil {
-		// sql.ErrNoRows means the table does not exist.
-		return false, nil
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("isExistingDatabase: %w", err)
 	}
 	return true, nil
 }
@@ -59,7 +62,10 @@ func schemaVersionsExists(d *DB) (bool, error) {
 		"SELECT name FROM sqlite_master WHERE type='table' AND name='schema_versions'",
 	).Scan(&name)
 	if err != nil {
-		return false, nil
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("schemaVersionsExists: %w", err)
 	}
 	return true, nil
 }
@@ -71,20 +77,12 @@ func isApplied(d *DB, filename string) (bool, error) {
 		"SELECT version FROM schema_versions WHERE version = ?", filename,
 	).Scan(&v)
 	if err != nil {
-		return false, nil
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("isApplied: %w", err)
 	}
 	return true, nil
-}
-
-// recordApplied inserts a migration filename into schema_versions.
-func recordApplied(d *DB, filename string) error {
-	_, err := d.sqlDB.Exec(
-		"INSERT INTO schema_versions (version) VALUES (?)", filename,
-	)
-	if err != nil {
-		return fmt.Errorf("recording migration %s: %w", filename, err)
-	}
-	return nil
 }
 
 // sqlFilenames returns all .sql entries from the FS sorted lexicographically.
@@ -111,10 +109,20 @@ func sqlFilenames(fsys fs.FS) ([]string, error) {
 // without executing them.  This is called once when upgrading a pre-tracking
 // database.
 func seedExistingDatabase(d *DB, filenames []string) error {
+	tx, err := d.sqlDB.Begin()
+	if err != nil {
+		return fmt.Errorf("begin seed tx: %w", err)
+	}
 	for _, name := range filenames {
-		if err := recordApplied(d, name); err != nil {
-			return fmt.Errorf("seeding %s: %w", name, err)
+		if _, execErr := tx.Exec(
+			"INSERT INTO schema_versions (version) VALUES (?)", name,
+		); execErr != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("seeding %s: %w", name, execErr)
 		}
+	}
+	if commitErr := tx.Commit(); commitErr != nil {
+		return fmt.Errorf("commit seed tx: %w", commitErr)
 	}
 	return nil
 }
@@ -168,36 +176,151 @@ func MigrateFS(database *DB, fsys fs.FS) error {
 			continue
 		}
 
-		tx, txErr := database.sqlDB.Begin()
-		if txErr != nil {
-			return fmt.Errorf("begin tx for %s: %w", name, txErr)
-		}
-
 		raw, readErr := fs.ReadFile(fsys, name)
 		if readErr != nil {
-			_ = tx.Rollback() // error ignored: already handling the triggering error
 			return fmt.Errorf("reading migration %s: %w", name, readErr)
 		}
 
-		if _, execErr := tx.Exec(string(raw)); execErr != nil {
-			_ = tx.Rollback() // error ignored: already handling the triggering error
-			return fmt.Errorf("executing migration %s: %w", name, execErr)
-		}
-
-		// Record the migration inside the same transaction so the migration
-		// and its tracking record are atomic. A crash between commit and
-		// record would otherwise cause re-application on next startup.
-		if _, execErr := tx.Exec(
-			"INSERT INTO schema_versions (version) VALUES (?)", name,
-		); execErr != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("recording migration %s: %w", name, execErr)
-		}
-
-		if commitErr := tx.Commit(); commitErr != nil {
-			return fmt.Errorf("commit migration %s: %w", name, commitErr)
+		if err := applyMigration(database, name, string(raw)); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+// applyMigration executes a single migration and records it. If the
+// migration contains multiple statements (e.g. several ALTER TABLE ADD
+// COLUMN), each is executed individually so that "duplicate column" errors
+// from a prior partial run can be skipped — the column already exists and
+// the intent is satisfied.
+func applyMigration(database *DB, name, rawSQL string) error {
+	stmts := splitStatements(rawSQL)
+
+	tx, txErr := database.sqlDB.Begin()
+	if txErr != nil {
+		return fmt.Errorf("begin tx for %s: %w", name, txErr)
+	}
+
+	for _, stmt := range stmts {
+		if _, execErr := tx.Exec(stmt); execErr != nil {
+			if isDuplicateColumn(execErr) {
+				continue // column already exists — skip
+			}
+			_ = tx.Rollback()
+			return fmt.Errorf("executing migration %s: %w", name, execErr)
+		}
+	}
+
+	// Record the migration inside the same transaction so the migration
+	// and its tracking record are atomic.
+	if _, execErr := tx.Exec(
+		"INSERT INTO schema_versions (version) VALUES (?)", name,
+	); execErr != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("recording migration %s: %w", name, execErr)
+	}
+
+	if commitErr := tx.Commit(); commitErr != nil {
+		return fmt.Errorf("commit migration %s: %w", name, commitErr)
+	}
+	return nil
+}
+
+// splitStatements splits raw SQL into individual statements on semicolons,
+// correctly handling BEGIN...END blocks used by CREATE TRIGGER definitions.
+// Empty/comment-only fragments are discarded.
+func splitStatements(raw string) []string {
+	out := make([]string, 0)
+	var buf strings.Builder
+	depth := 0
+
+	for _, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(line)
+
+		// Track BEGIN...END depth for trigger bodies.
+		upperTrimmed := strings.ToUpper(trimmed)
+		if depth > 0 && (upperTrimmed == "END;" || upperTrimmed == "END") {
+			depth--
+			buf.WriteString(line)
+			buf.WriteString("\n")
+			if depth == 0 {
+				// END; closes the trigger — flush the entire block as one statement.
+				s := strings.TrimSpace(buf.String())
+				// Strip trailing semicolons so the executor doesn't choke.
+				s = strings.TrimRight(s, ";")
+				s = strings.TrimSpace(s)
+				if s != "" && !isCommentOnly(s) {
+					out = append(out, s)
+				}
+				buf.Reset()
+			}
+			continue
+		}
+
+		// Detect BEGIN that opens a trigger body. The keyword appears at
+		// the end of a CREATE TRIGGER line (e.g. "... BEGIN") or on its
+		// own line inside a trigger definition.
+		if strings.HasSuffix(upperTrimmed, " BEGIN") || upperTrimmed == "BEGIN" {
+			depth++
+			buf.WriteString(line)
+			buf.WriteString("\n")
+			continue
+		}
+
+		if depth > 0 {
+			// Inside a BEGIN...END block — accumulate without splitting.
+			buf.WriteString(line)
+			buf.WriteString("\n")
+			continue
+		}
+
+		// Outside any block — split on semicolons within this line.
+		buf.WriteString(line)
+		buf.WriteString("\n")
+
+		// Check whether the accumulated buffer contains a semicolon to split on.
+		// We split the full buffer content, not just the current line, because a
+		// statement may span multiple lines before its terminating semicolon.
+		content := buf.String()
+		if strings.Contains(content, ";") {
+			parts := strings.Split(content, ";")
+			// All parts except the last are complete statements.
+			for _, p := range parts[:len(parts)-1] {
+				s := strings.TrimSpace(p)
+				if s == "" || isCommentOnly(s) {
+					continue
+				}
+				out = append(out, s)
+			}
+			// The last part is the remainder after the final semicolon.
+			buf.Reset()
+			buf.WriteString(parts[len(parts)-1])
+		}
+	}
+
+	// Flush any remaining content (statement without trailing semicolon).
+	s := strings.TrimSpace(buf.String())
+	if s != "" && !isCommentOnly(s) {
+		out = append(out, s)
+	}
+
+	return out
+}
+
+// isCommentOnly returns true if every line is a SQL comment or blank.
+func isCommentOnly(s string) bool {
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "--") {
+			return false
+		}
+	}
+	return true
+}
+
+// isDuplicateColumn reports whether a SQLite error indicates a duplicate
+// column name from an ALTER TABLE ADD COLUMN statement.
+func isDuplicateColumn(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "duplicate column name")
 }

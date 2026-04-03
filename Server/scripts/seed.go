@@ -140,30 +140,40 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to open database at %s: %v", *dbPath, err)
 	}
-	defer func() { _ = database.Close() }()
 
+	exitCode := run(database)
+	_ = database.Close()
+	os.Exit(exitCode)
+}
+
+func run(database *db.DB) int {
 	if err := db.Migrate(database); err != nil {
-		log.Fatalf("failed to run migrations: %v", err)
+		log.Printf("failed to run migrations: %v", err)
+		return 1
 	}
 
 	userIDs, err := createUsers(database)
 	if err != nil {
-		log.Fatalf("failed to create users: %v", err)
+		log.Printf("failed to create users: %v", err)
+		return 1
 	}
 
 	channelIDs, err := createChannels(database)
 	if err != nil {
-		log.Fatalf("failed to create channels: %v", err)
+		log.Printf("failed to create channels: %v", err)
+		return 1
 	}
 
 	msgCount, err := createMessages(database, channelIDs, userIDs)
 	if err != nil {
-		log.Fatalf("failed to create messages: %v", err)
+		log.Printf("failed to create messages: %v", err)
+		return 1
 	}
 
 	dmMsgCount, err := createDMConversation(database, userIDs)
 	if err != nil {
-		log.Fatalf("failed to create DM conversation: %v", err)
+		log.Printf("failed to create DM conversation: %v", err)
+		return 1
 	}
 
 	fmt.Println("--- Seed complete ---")
@@ -171,6 +181,7 @@ func main() {
 	fmt.Printf("  Channels: %d\n", len(channelIDs))
 	fmt.Printf("  Messages: %d (channel) + %d (DM) = %d total\n",
 		msgCount, dmMsgCount, msgCount+dmMsgCount)
+	return 0
 }
 
 // ─── User creation ──────────────────────────────────────────────────────────
@@ -234,8 +245,8 @@ func createChannels(database *db.DB) ([]int64, error) {
 		return nil, fmt.Errorf("listing channels: %w", err)
 	}
 	existingByName := make(map[string]int64, len(existing))
-	for _, ch := range existing {
-		existingByName[ch.Name] = ch.ID
+	for i := range existing {
+		existingByName[existing[i].Name] = existing[i].ID
 	}
 
 	for i, sc := range seedChannels {
@@ -353,7 +364,7 @@ func createDMConversation(database *db.DB, userIDs []int64) (int, error) {
 func init() {
 	// The default DB path is data/chatserver.db. Ensure the data directory
 	// exists so db.Open doesn't fail on a fresh checkout.
-	if err := os.MkdirAll("data", 0o755); err != nil {
+	if err := os.MkdirAll("data", 0o750); err != nil {
 		log.Printf("warning: could not create data directory: %v", err)
 	}
 }

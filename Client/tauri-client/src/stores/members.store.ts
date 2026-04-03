@@ -4,11 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
-import type {
-  ReadyMember,
-  MemberJoinPayload,
-  UserStatus,
-} from "@lib/types";
+import type { ReadyMember, MemberJoinPayload, UserStatus } from "@lib/types";
 
 export interface Member {
   readonly id: number;
@@ -93,6 +89,17 @@ export function updateMemberRole(userId: number, role: string): void {
     if (!existing) return prev;
     const next = new Map(prev.members);
     next.set(userId, { ...existing, role });
+    return { ...prev, members: next };
+  });
+}
+
+/** Update a member's profile (username, avatar) from a user_update event. */
+export function updateMemberProfile(userId: number, username: string, avatar: string | null): void {
+  membersStore.setState((prev) => {
+    const existing = prev.members.get(userId);
+    if (!existing) return prev;
+    const next = new Map(prev.members);
+    next.set(userId, { ...existing, username, avatar });
     return { ...prev, members: next };
   });
 }

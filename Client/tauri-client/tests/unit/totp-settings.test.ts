@@ -113,7 +113,9 @@ describe("TOTP Settings", () => {
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       enableBtn.click();
 
-      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
       expect(pwInput).not.toBeNull();
       // The enable button should be hidden
       expect(enableBtn.style.display).toBe("none");
@@ -133,8 +135,9 @@ describe("TOTP Settings", () => {
       enableBtn.click();
 
       // Leave password empty and click Submit
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn"))
-        .find((b) => b.textContent === "Submit") as HTMLElement;
+      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+        (b) => b.textContent === "Submit",
+      ) as HTMLElement;
       submitBtn.click();
 
       const errorEl = container.querySelector("[data-testid='totp-error']") as HTMLElement;
@@ -153,11 +156,14 @@ describe("TOTP Settings", () => {
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       enableBtn.click();
 
-      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
       pwInput.value = "mypassword123";
 
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn"))
-        .find((b) => b.textContent === "Submit") as HTMLElement;
+      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+        (b) => b.textContent === "Submit",
+      ) as HTMLElement;
       submitBtn.click();
 
       await vi.waitFor(() => {
@@ -176,11 +182,14 @@ describe("TOTP Settings", () => {
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       enableBtn.click();
 
-      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
       pwInput.value = "mypassword123";
 
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn"))
-        .find((b) => b.textContent === "Submit") as HTMLElement;
+      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+        (b) => b.textContent === "Submit",
+      ) as HTMLElement;
       submitBtn.click();
 
       await vi.waitFor(() => {
@@ -201,11 +210,14 @@ describe("TOTP Settings", () => {
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       enableBtn.click();
 
-      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
       pwInput.value = "mypassword123";
 
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn"))
-        .find((b) => b.textContent === "Submit") as HTMLElement;
+      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+        (b) => b.textContent === "Submit",
+      ) as HTMLElement;
       submitBtn.click();
 
       await vi.waitFor(() => {
@@ -215,9 +227,7 @@ describe("TOTP Settings", () => {
 
       // Look for the backup codes text
       const codeElements = container.querySelectorAll("code");
-      const backupCodeEl = Array.from(codeElements).find(
-        (el) => el.textContent?.includes("code1"),
-      );
+      const backupCodeEl = Array.from(codeElements).find((el) => el.textContent?.includes("code1"));
       expect(backupCodeEl).not.toBeUndefined();
       expect(backupCodeEl!.textContent).toContain("code1");
       expect(backupCodeEl!.textContent).toContain("code2");
@@ -235,15 +245,20 @@ describe("TOTP Settings", () => {
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       enableBtn.click();
 
-      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
       pwInput.value = "mypassword123";
 
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn"))
-        .find((b) => b.textContent === "Submit") as HTMLElement;
+      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+        (b) => b.textContent === "Submit",
+      ) as HTMLElement;
       submitBtn.click();
 
       await vi.waitFor(() => {
-        const codeInput = container.querySelector("[data-testid='totp-code-input']") as HTMLInputElement;
+        const codeInput = container.querySelector(
+          "[data-testid='totp-code-input']",
+        ) as HTMLInputElement;
         expect(codeInput).not.toBeNull();
         expect(codeInput.placeholder).toBe("6-digit code");
       });
@@ -266,11 +281,14 @@ describe("TOTP Settings", () => {
       enableBtn.click();
 
       // Step 2: Enter password and submit
-      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
       pwInput.value = "mypassword123";
 
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn"))
-        .find((b) => b.textContent === "Submit") as HTMLElement;
+      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+        (b) => b.textContent === "Submit",
+      ) as HTMLElement;
       submitBtn.click();
 
       // Wait for QR URI to appear
@@ -279,7 +297,9 @@ describe("TOTP Settings", () => {
       });
 
       // Step 3: Enter code and confirm
-      const codeInput = container.querySelector("[data-testid='totp-code-input']") as HTMLInputElement;
+      const codeInput = container.querySelector(
+        "[data-testid='totp-code-input']",
+      ) as HTMLInputElement;
       codeInput.value = "123456";
 
       const confirmBtn = container.querySelector("[data-testid='totp-confirm-btn']") as HTMLElement;
@@ -303,11 +323,14 @@ describe("TOTP Settings", () => {
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       enableBtn.click();
 
-      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
       pwInput.value = "wrongpassword";
 
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn"))
-        .find((b) => b.textContent === "Submit") as HTMLElement;
+      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+        (b) => b.textContent === "Submit",
+      ) as HTMLElement;
       submitBtn.click();
 
       await vi.waitFor(() => {
@@ -334,18 +357,23 @@ describe("TOTP Settings", () => {
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       enableBtn.click();
 
-      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
       pwInput.value = "mypassword123";
 
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn"))
-        .find((b) => b.textContent === "Submit") as HTMLElement;
+      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+        (b) => b.textContent === "Submit",
+      ) as HTMLElement;
       submitBtn.click();
 
       await vi.waitFor(() => {
         expect(container.querySelector("[data-testid='totp-qr-uri']")).not.toBeNull();
       });
 
-      const codeInput = container.querySelector("[data-testid='totp-code-input']") as HTMLInputElement;
+      const codeInput = container.querySelector(
+        "[data-testid='totp-code-input']",
+      ) as HTMLInputElement;
       codeInput.value = "000000";
 
       const confirmBtn = container.querySelector("[data-testid='totp-confirm-btn']") as HTMLElement;
@@ -359,7 +387,9 @@ describe("TOTP Settings", () => {
       });
 
       // Confirm button should be re-enabled
-      const confirmBtnAfter = container.querySelector("[data-testid='totp-confirm-btn']") as HTMLButtonElement;
+      const confirmBtnAfter = container.querySelector(
+        "[data-testid='totp-confirm-btn']",
+      ) as HTMLButtonElement;
       expect(confirmBtnAfter.disabled).toBe(false);
       expect(confirmBtnAfter.textContent).toBe("Verify & Activate");
 
@@ -381,18 +411,23 @@ describe("TOTP Settings", () => {
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       enableBtn.click();
 
-      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
       pwInput.value = "mypassword123";
 
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn"))
-        .find((b) => b.textContent === "Submit") as HTMLElement;
+      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+        (b) => b.textContent === "Submit",
+      ) as HTMLElement;
       submitBtn.click();
 
       await vi.waitFor(() => {
         expect(container.querySelector("[data-testid='totp-qr-uri']")).not.toBeNull();
       });
 
-      const codeInput = container.querySelector("[data-testid='totp-code-input']") as HTMLInputElement;
+      const codeInput = container.querySelector(
+        "[data-testid='totp-code-input']",
+      ) as HTMLInputElement;
       codeInput.value = "123456";
 
       const confirmBtn = container.querySelector("[data-testid='totp-confirm-btn']") as HTMLElement;
@@ -401,7 +436,9 @@ describe("TOTP Settings", () => {
       // After successful confirmation, onEnrolled() is called which re-renders.
       // Since updateUser sets mockTotpEnabled = true, the re-render should show the disable view.
       await vi.waitFor(() => {
-        const statusBadge = container.querySelector("[data-testid='totp-status-badge']") as HTMLElement;
+        const statusBadge = container.querySelector(
+          "[data-testid='totp-status-badge']",
+        ) as HTMLElement;
         expect(statusBadge.textContent).toBe("Enabled");
       });
 
@@ -448,7 +485,9 @@ describe("TOTP Settings", () => {
       expect(disableBtn.style.display).toBe("none");
 
       // Password input should appear
-      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
       expect(pwInput).not.toBeNull();
 
       overlay.destroy?.();
@@ -463,11 +502,14 @@ describe("TOTP Settings", () => {
       const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
       disableBtn.click();
 
-      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
       pwInput.value = "mypassword123";
 
-      const confirmBtn = Array.from(container.querySelectorAll(".ac-btn"))
-        .find((b) => b.textContent === "Confirm Disable") as HTMLElement;
+      const confirmBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+        (b) => b.textContent === "Confirm Disable",
+      ) as HTMLElement;
       confirmBtn.click();
 
       await vi.waitFor(() => {
@@ -488,11 +530,14 @@ describe("TOTP Settings", () => {
       const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
       disableBtn.click();
 
-      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
       pwInput.value = "wrongpassword";
 
-      const confirmBtn = Array.from(container.querySelectorAll(".ac-btn"))
-        .find((b) => b.textContent === "Confirm Disable") as HTMLElement;
+      const confirmBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+        (b) => b.textContent === "Confirm Disable",
+      ) as HTMLElement;
       confirmBtn.click();
 
       await vi.waitFor(() => {
@@ -518,18 +563,19 @@ describe("TOTP Settings", () => {
       const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
       disableBtn.click();
 
-      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
       pwInput.value = "mypassword123";
 
-      const confirmBtn = Array.from(container.querySelectorAll(".ac-btn"))
-        .find((b) => b.textContent === "Confirm Disable") as HTMLElement;
+      const confirmBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+        (b) => b.textContent === "Confirm Disable",
+      ) as HTMLElement;
       confirmBtn.click();
 
       await vi.waitFor(() => {
         const errorEl = container.querySelector("[data-testid='totp-error']") as HTMLElement;
-        expect(errorEl.textContent).toBe(
-          "2FA is required by this server and cannot be disabled",
-        );
+        expect(errorEl.textContent).toBe("2FA is required by this server and cannot be disabled");
       });
 
       overlay.destroy?.();
@@ -545,14 +591,17 @@ describe("TOTP Settings", () => {
       disableBtn.click();
 
       // Confirm area should be visible
-      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
       expect(pwInput).not.toBeNull();
 
       // Find the Cancel button that is a sibling of the "Confirm Disable" button
       // inside the TOTP section
       const totpSection = container.querySelector("[data-testid='totp-section']") as HTMLElement;
-      const cancelBtn = Array.from(totpSection.querySelectorAll(".ac-btn"))
-        .find((b) => b.textContent === "Cancel") as HTMLElement;
+      const cancelBtn = Array.from(totpSection.querySelectorAll(".ac-btn")).find(
+        (b) => b.textContent === "Cancel",
+      ) as HTMLElement;
       cancelBtn.click();
 
       // Disable button should reappear
@@ -577,17 +626,22 @@ describe("TOTP Settings", () => {
       const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
       disableBtn.click();
 
-      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
       pwInput.value = "mypassword123";
 
-      const confirmBtn = Array.from(container.querySelectorAll(".ac-btn"))
-        .find((b) => b.textContent === "Confirm Disable") as HTMLElement;
+      const confirmBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+        (b) => b.textContent === "Confirm Disable",
+      ) as HTMLElement;
       confirmBtn.click();
 
       // After successful disable, onDisabled() is called which re-renders.
       // Since updateUser sets mockTotpEnabled = false, re-render should show enrollment view.
       await vi.waitFor(() => {
-        const statusBadge = container.querySelector("[data-testid='totp-status-badge']") as HTMLElement;
+        const statusBadge = container.querySelector(
+          "[data-testid='totp-status-badge']",
+        ) as HTMLElement;
         expect(statusBadge.textContent).toBe("Disabled");
       });
 
@@ -619,17 +673,22 @@ describe("TOTP Settings", () => {
       // Navigate through enable flow
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       enableBtn.click();
-      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
       pwInput.value = "mypassword123";
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn"))
-        .find((b) => b.textContent === "Submit") as HTMLElement;
+      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+        (b) => b.textContent === "Submit",
+      ) as HTMLElement;
       submitBtn.click();
 
       await vi.waitFor(() => {
         expect(container.querySelector("[data-testid='totp-qr-uri']")).not.toBeNull();
       });
 
-      const codeInput = container.querySelector("[data-testid='totp-code-input']") as HTMLInputElement;
+      const codeInput = container.querySelector(
+        "[data-testid='totp-code-input']",
+      ) as HTMLInputElement;
       codeInput.value = "123456";
       (updateUser as ReturnType<typeof vi.fn>).mockClear();
 
@@ -658,12 +717,15 @@ describe("TOTP Settings", () => {
 
       const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
       disableBtn.click();
-      const pwInput = container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement;
+      const pwInput = container.querySelector(
+        "[data-testid='totp-password-input']",
+      ) as HTMLInputElement;
       pwInput.value = "mypassword123";
       (updateUser as ReturnType<typeof vi.fn>).mockClear();
 
-      const confirmBtn = Array.from(container.querySelectorAll(".ac-btn"))
-        .find((b) => b.textContent === "Confirm Disable") as HTMLElement;
+      const confirmBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+        (b) => b.textContent === "Confirm Disable",
+      ) as HTMLElement;
       confirmBtn.click();
 
       await vi.waitFor(() => {

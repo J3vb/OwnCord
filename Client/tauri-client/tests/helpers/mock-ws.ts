@@ -5,10 +5,7 @@
  * requiring Tauri IPC or a real WebSocket connection.
  */
 
-import type {
-  ServerMessage,
-  ClientMessage,
-} from "@lib/types";
+import type { ServerMessage, ClientMessage } from "@lib/types";
 import type { ConnectionState, WsListener, CertMismatchListener } from "@lib/ws";
 
 interface SentEnvelope {
@@ -59,10 +56,7 @@ export function createMockWsClient() {
       return id;
     },
 
-    on<T extends ServerMessage["type"]>(
-      type: T,
-      listener: WsListener<T>,
-    ): () => void {
+    on<T extends ServerMessage["type"]>(type: T, listener: WsListener<T>): () => void {
       if (!listeners.has(type)) {
         listeners.set(type, new Set());
       }
@@ -76,6 +70,10 @@ export function createMockWsClient() {
     onStateChange(listener: (s: ConnectionState) => void): () => void {
       stateListeners.add(listener);
       return () => stateListeners.delete(listener);
+    },
+
+    onCertFirstTrust(): () => void {
+      return () => {};
     },
 
     onCertMismatch(_listener: CertMismatchListener): () => void {

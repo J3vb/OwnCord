@@ -3,10 +3,12 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 )
 
@@ -72,51 +74,82 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	// If user is already in a different voice channel, leave it first.
 	if currentChID > 0 {
 		h.handleVoiceLeave(ctx, c)
+
+		// BUG-088: Verify old voice state is actually cleared before joining
+		// the new channel. If the DB delete failed (retry still running in
+		// background), the old row persists and JoinVoiceChannelIfCapacity's
+		// COUNT(*) may produce an incorrect result. Fail the switch so the
+		// user can retry cleanly.
+		vs, err := h.db.GetVoiceState(c.userID)
+		if err != nil {
+			slog.Warn("handleVoiceJoin: could not verify voice state cleared",
+				"user_id", c.userID, "err", err)
+			c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice channel switch failed — please try again"))
+			return
+		}
+		if vs != nil {
+			slog.Warn("handleVoiceJoin: stale voice state persists after leave, aborting switch",
+				"user_id", c.userID, "stale_channel", vs.ChannelID, "target_channel", channelID)
+			// Restore client voice state so the user knows they're still in the old channel.
+			c.setVoiceState(vs.ChannelID, vs.JoinedAt)
+			c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice channel switch failed — please try again"))
+			return
+		}
 	}
 
-	// Check channel capacity.
+	// Check channel capacity and persist to DB atomically.
 	maxUsers := ch.VoiceMaxUsers
 	if maxUsers > 0 {
-		existing, qErr := h.db.GetChannelVoiceStates(channelID)
-		if qErr != nil {
-			slog.Error("ws handleVoiceJoin GetChannelVoiceStates", "err", qErr, "channel_id", channelID)
-			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to check channel capacity"))
+		if err := h.db.JoinVoiceChannelIfCapacity(c.userID, channelID, maxUsers); err != nil {
+			if errors.Is(err, db.ErrChannelFull) {
+				c.sendMsg(buildErrorMsg(ErrCodeChannelFull, "voice channel is full"))
+				return
+			}
+			slog.Error("ws handleVoiceJoin JoinVoiceChannelIfCapacity", "err", err, "user_id", c.userID)
+			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to join voice channel"))
 			return
 		}
-		if len(existing) >= maxUsers {
-			c.sendMsg(buildErrorMsg(ErrCodeChannelFull, "voice channel is full"))
+	} else {
+		// No capacity limit — use standard join.
+		if err := h.db.JoinVoiceChannel(c.userID, channelID); err != nil {
+			slog.Error("ws handleVoiceJoin JoinVoiceChannel", "err", err, "user_id", c.userID)
+			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to join voice channel"))
 			return
 		}
 	}
 
-	// Persist to DB.
-	if err := h.db.JoinVoiceChannel(c.userID, channelID); err != nil {
-		slog.Error("ws handleVoiceJoin JoinVoiceChannel", "err", err, "user_id", c.userID)
+	// Load the persisted row immediately so later cleanup can target this exact
+	// join instance even if the user rejoins the same channel.
+	state, err := h.db.GetVoiceState(c.userID)
+	if err != nil || state == nil {
+		slog.Error("ws handleVoiceJoin GetVoiceState", "err", err, "user_id", c.userID)
+		h.rollbackVoiceJoin(c, channelID, false)
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to join voice channel"))
 		return
 	}
 
-	// Set voice channel on the client.
-	c.setVoiceChID(channelID)
-
 	// Generate LiveKit token if LiveKit client is available.
 	// Token generation failure is fatal — without a token the client cannot
 	// connect to the SFU, so we must roll back the DB join.
+	// NOTE: setVoiceState is deferred until after token send succeeds, so
+	// rollback does not broadcast a spurious voice_leave for an unannounced join.
 	if h.livekit != nil {
 		if c.user == nil {
 			slog.Error("handleVoiceJoin: nil user on client", "user_id", c.userID)
-			h.rollbackVoiceJoin(c, channelID)
+			h.rollbackVoiceJoin(c, channelID, false)
 			c.sendMsg(buildErrorMsg(ErrCodeInternal, "not authenticated"))
 			return
 		}
 		// Derive publish permissions from role — prevents SFU-level bypass
-		// when client connects directly via direct_url.
+		// when client connects directly via direct_url (BUG-128).
 		canPublish := h.hasChannelPerm(c, channelID, permissions.SpeakVoice)
 		canSubscribe := true
-		token, tokenErr := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, canPublish, canSubscribe)
+		canVideo := h.hasChannelPerm(c, channelID, permissions.UseVideo)
+		canScreenShare := h.hasChannelPerm(c, channelID, permissions.ShareScreen)
+		token, tokenErr := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, state.JoinedAt, canPublish, canSubscribe, canVideo, canScreenShare)
 		if tokenErr != nil {
 			slog.Error("ws handleVoiceJoin GenerateToken", "err", tokenErr, "user_id", c.userID)
-			h.rollbackVoiceJoin(c, channelID)
+			h.rollbackVoiceJoin(c, channelID, false)
 			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to generate voice token"))
 			return
 		}
@@ -126,15 +159,8 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		c.sendMsg(buildVoiceToken(channelID, token, "/livekit", h.livekit.URL()))
 	}
 
-	// Get and broadcast the joiner's state. Failure here means other users
-	// won't see the join (ghost state), so roll back to avoid inconsistency.
-	state, err := h.db.GetVoiceState(c.userID)
-	if err != nil || state == nil {
-		slog.Error("ws handleVoiceJoin GetVoiceState", "err", err, "user_id", c.userID)
-		h.rollbackVoiceJoin(c, channelID)
-		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to join voice channel"))
-		return
-	}
+	// Set voice channel on the client AFTER token is sent successfully.
+	c.setVoiceState(channelID, state.JoinedAt)
 
 	// Broadcast the joiner's state to all connected clients.
 	h.BroadcastToAll(buildVoiceState(*state))
@@ -185,7 +211,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 // handleVoiceTokenRefresh generates a fresh LiveKit token for a client
 // that is already in a voice channel. This lets clients request a new token
 // (e.g. before a manual reconnect) without leaving and rejoining voice.
-func (h *Hub) handleVoiceTokenRefresh(ctx context.Context, c *Client) {
+func (h *Hub) handleVoiceTokenRefresh(_ context.Context, c *Client) {
 	ratKey := fmt.Sprintf("voice_token_refresh:%d", c.userID)
 	if !h.limiter.Allow(ratKey, 1, 60*time.Second) {
 		c.sendMsg(buildRateLimitError("token refresh rate limited", 60))
@@ -211,7 +237,20 @@ func (h *Hub) handleVoiceTokenRefresh(ctx context.Context, c *Client) {
 
 	canPublish := h.hasChannelPerm(c, channelID, permissions.SpeakVoice)
 	canSubscribe := true
-	token, err := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, canPublish, canSubscribe)
+	canVideo := h.hasChannelPerm(c, channelID, permissions.UseVideo)
+	canScreenShare := h.hasChannelPerm(c, channelID, permissions.ShareScreen)
+	joinToken := c.getVoiceJoinToken()
+	if joinToken == "" {
+		state, stateErr := h.db.GetVoiceState(c.userID)
+		if stateErr != nil || state == nil {
+			slog.Error("ws handleVoiceTokenRefresh GetVoiceState", "err", stateErr, "user_id", c.userID)
+			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to refresh voice token"))
+			return
+		}
+		joinToken = state.JoinedAt
+		c.setVoiceState(channelID, joinToken)
+	}
+	token, err := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, joinToken, canPublish, canSubscribe, canVideo, canScreenShare)
 	if err != nil {
 		slog.Error("ws handleVoiceTokenRefresh GenerateToken", "err", err, "user_id", c.userID)
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to generate voice token"))
@@ -225,11 +264,13 @@ func (h *Hub) handleVoiceTokenRefresh(ctx context.Context, c *Client) {
 // rollbackVoiceJoin undoes a partially-completed voice join: clears the
 // client's voice channel ID, removes the DB voice state row, and broadcasts
 // voice_leave so other clients don't see a ghost participant.
-func (h *Hub) rollbackVoiceJoin(c *Client, channelID int64) {
+func (h *Hub) rollbackVoiceJoin(c *Client, channelID int64, broadcast bool) {
 	c.clearVoiceChID()
 	if err := h.db.LeaveVoiceChannel(c.userID); err != nil {
 		slog.Error("ws rollbackVoiceJoin LeaveVoiceChannel", "err", err,
 			"user_id", c.userID, "channel_id", channelID)
 	}
-	h.BroadcastToAll(buildVoiceLeave(channelID, c.userID))
+	if broadcast {
+		h.BroadcastToAll(buildVoiceLeave(channelID, c.userID))
+	}
 }

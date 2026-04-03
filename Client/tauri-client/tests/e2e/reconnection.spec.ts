@@ -65,7 +65,7 @@ test.describe("Reconnection — Banner Visibility", () => {
   test("reconnecting banner is hidden when connected", async ({ page }) => {
     const banner = page.locator(".reconnecting-banner");
     // The banner element exists but should NOT have the "visible" class
-    if (await banner.count() > 0) {
+    if ((await banner.count()) > 0) {
       await expect(banner).not.toHaveClass(/visible/);
     }
   });
@@ -83,7 +83,7 @@ test.describe("Reconnection — Banner Visibility", () => {
     await simulateReconnect(page);
 
     const banner = page.locator(".reconnecting-banner");
-    if (await banner.count() > 0) {
+    if ((await banner.count()) > 0) {
       // After successful reconnect, banner should be hidden
       await expect(banner).not.toHaveClass(/visible/);
     }

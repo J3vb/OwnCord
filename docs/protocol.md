@@ -804,7 +804,6 @@ All rate limits are enforced server-side using a token bucket rate limiter.
 | `voice_camera` | 2/sec | Requires USE_VIDEO |
 | `voice_screenshare` | 2/sec | Requires SHARE_SCREEN |
 | `voice_token_refresh` | 1/60sec | Must be in voice |
-| `soundboard_play` | N/A | Not yet implemented server-side |
 | `ping` | None | Heartbeat |
 
 ### Server -> Client (25+ types)

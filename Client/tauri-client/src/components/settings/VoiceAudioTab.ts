@@ -4,7 +4,14 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "./helpers";
-import { switchInputDevice, switchOutputDevice, setVoiceSensitivity, setInputVolume, setOutputVolume, reapplyAudioProcessing } from "@lib/livekitSession";
+import {
+  switchInputDevice,
+  switchOutputDevice,
+  setVoiceSensitivity,
+  setInputVolume,
+  setOutputVolume,
+  reapplyAudioProcessing,
+} from "@lib/livekitSession";
 
 export interface VoiceAudioTabHandle {
   build(): HTMLDivElement;
@@ -19,13 +26,19 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
   let invalidateCameraPreviewRequest: (() => void) | null = null;
 
   function cleanupMic(): void {
-    if (micAnimFrame !== null) { cancelAnimationFrame(micAnimFrame); micAnimFrame = null; }
+    if (micAnimFrame !== null) {
+      cancelAnimationFrame(micAnimFrame);
+      micAnimFrame = null;
+    }
     invalidateCameraPreviewRequest?.();
     if (micStream !== null) {
       for (const track of micStream.getTracks()) track.stop();
       micStream = null;
     }
-    if (micAudioCtx !== null) { void micAudioCtx.close(); micAudioCtx = null; }
+    if (micAudioCtx !== null) {
+      void micAudioCtx.close();
+      micAudioCtx = null;
+    }
     // Also stop camera preview
     if (cameraPreviewStream !== null) {
       for (const track of cameraPreviewStream.getTracks()) track.stop();
@@ -36,19 +49,24 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
   function build(): HTMLDivElement {
     // Clean up any previous mic/camera stream before rebuilding
     cleanupMic();
-    return buildVoiceAudioTabInner(signal, (stream, ctx, frame) => {
-      micStream = stream;
-      micAudioCtx = ctx;
-      micAnimFrame = frame;
-    }, (stream) => {
-      // Stop old camera tracks before registering new stream
-      if (cameraPreviewStream !== null && cameraPreviewStream !== stream) {
-        for (const track of cameraPreviewStream.getTracks()) track.stop();
-      }
-      cameraPreviewStream = stream;
-    }, (invalidate) => {
-      invalidateCameraPreviewRequest = invalidate;
-    });
+    return buildVoiceAudioTabInner(
+      signal,
+      (stream, ctx, frame) => {
+        micStream = stream;
+        micAudioCtx = ctx;
+        micAnimFrame = frame;
+      },
+      (stream) => {
+        // Stop old camera tracks before registering new stream
+        if (cameraPreviewStream !== null && cameraPreviewStream !== stream) {
+          for (const track of cameraPreviewStream.getTracks()) track.stop();
+        }
+        cameraPreviewStream = stream;
+      },
+      (invalidate) => {
+        invalidateCameraPreviewRequest = invalidate;
+      },
+    );
   }
 
   function cleanup(): void {
@@ -98,11 +116,15 @@ function buildVoiceAudioTabInner(
     value: String(savedInputVolume),
   });
   const inputVolumeLabel = createElement("span", { class: "slider-val" }, `${savedInputVolume}%`);
-  inputVolumeSlider.addEventListener("input", () => {
-    const val = Number(inputVolumeSlider.value);
-    setText(inputVolumeLabel, `${val}%`);
-    setInputVolume(val);
-  }, { signal });
+  inputVolumeSlider.addEventListener(
+    "input",
+    () => {
+      const val = Number(inputVolumeSlider.value);
+      setText(inputVolumeLabel, `${val}%`);
+      setInputVolume(val);
+    },
+    { signal },
+  );
   appendChildren(inputVolumeRow, inputVolumeSlider, inputVolumeLabel);
   section.appendChild(inputVolumeRow);
 
@@ -146,22 +168,32 @@ function buildVoiceAudioTabInner(
   }
 
   // Drag the threshold handle
-  meterThreshold.addEventListener("pointerdown", (e: PointerEvent) => {
-    e.preventDefault();
-    meterThreshold.setPointerCapture(e.pointerId);
-    const onMove = (ev: PointerEvent): void => { applySensitivity(sensitivityFromPointer(ev.clientX)); };
-    const onUp = (): void => {
-      meterThreshold.removeEventListener("pointermove", onMove);
-      meterThreshold.removeEventListener("pointerup", onUp);
-    };
-    meterThreshold.addEventListener("pointermove", onMove, { signal });
-    meterThreshold.addEventListener("pointerup", onUp, { signal });
-  }, { signal });
+  meterThreshold.addEventListener(
+    "pointerdown",
+    (e: PointerEvent) => {
+      e.preventDefault();
+      meterThreshold.setPointerCapture(e.pointerId);
+      const onMove = (ev: PointerEvent): void => {
+        applySensitivity(sensitivityFromPointer(ev.clientX));
+      };
+      const onUp = (): void => {
+        meterThreshold.removeEventListener("pointermove", onMove);
+        meterThreshold.removeEventListener("pointerup", onUp);
+      };
+      meterThreshold.addEventListener("pointermove", onMove, { signal });
+      meterThreshold.addEventListener("pointerup", onUp, { signal });
+    },
+    { signal },
+  );
 
   // Click on the meter bar to jump the threshold
-  meterBar.addEventListener("click", (e: MouseEvent) => {
-    applySensitivity(sensitivityFromPointer(e.clientX));
-  }, { signal });
+  meterBar.addEventListener(
+    "click",
+    (e: MouseEvent) => {
+      applySensitivity(sensitivityFromPointer(e.clientX));
+    },
+    { signal },
+  );
 
   // Output device selector
   const outputHeader = createElement("h3", {}, "Output Device");
@@ -188,19 +220,27 @@ function buildVoiceAudioTabInner(
     value: String(savedOutputVolume),
   });
   const outputVolumeLabel = createElement("span", { class: "slider-val" }, `${savedOutputVolume}%`);
-  outputVolumeSlider.addEventListener("input", () => {
-    const val = Number(outputVolumeSlider.value);
-    setText(outputVolumeLabel, `${val}%`);
-    setOutputVolume(val);
-  }, { signal });
+  outputVolumeSlider.addEventListener(
+    "input",
+    () => {
+      const val = Number(outputVolumeSlider.value);
+      setText(outputVolumeLabel, `${val}%`);
+      setOutputVolume(val);
+    },
+    { signal },
+  );
   appendChildren(outputVolumeRow, outputVolumeSlider, outputVolumeLabel);
   section.appendChild(outputVolumeRow);
 
   // Stream quality selector
   const qualityHeader = createElement("h3", {}, "Stream Quality");
-  const qualityDesc = createElement("p", {
-    style: "color:var(--text-muted);font-size:12px;margin:0 0 8px",
-  }, "Applies to camera and screenshare. Higher quality uses more bandwidth. Changes take effect on next voice join.");
+  const qualityDesc = createElement(
+    "p",
+    {
+      style: "color:var(--text-muted);font-size:12px;margin:0 0 8px",
+    },
+    "Applies to camera and screenshare. Higher quality uses more bandwidth. Changes take effect on next voice join.",
+  );
   const qualitySelect = createElement("select", {
     class: "form-input",
     style: "width:100%;margin-bottom:16px",
@@ -218,9 +258,13 @@ function buildVoiceAudioTabInner(
     qualitySelect.appendChild(opt);
   }
   qualitySelect.value = savedQuality;
-  qualitySelect.addEventListener("change", () => {
-    savePref("streamQuality", qualitySelect.value);
-  }, { signal });
+  qualitySelect.addEventListener(
+    "change",
+    () => {
+      savePref("streamQuality", qualitySelect.value);
+    },
+    { signal },
+  );
   section.appendChild(qualityHeader);
   section.appendChild(qualityDesc);
   section.appendChild(qualitySelect);
@@ -238,7 +282,8 @@ function buildVoiceAudioTabInner(
 
   // Camera preview
   const previewWrap = createElement("div", {
-    style: "margin-bottom:16px;border-radius:8px;overflow:hidden;background:#1e1f22;aspect-ratio:16/9;max-width:320px",
+    style:
+      "margin-bottom:16px;border-radius:8px;overflow:hidden;background:#1e1f22;aspect-ratio:16/9;max-width:320px",
   });
   const previewVideo = document.createElement("video");
   previewVideo.autoplay = true;
@@ -260,18 +305,27 @@ function buildVoiceAudioTabInner(
 
       for (const d of devices) {
         if (d.kind === "audioinput") {
-          const opt = createElement("option", { value: d.deviceId },
-            d.label || `Microphone (${d.deviceId.slice(0, 8)})`);
+          const opt = createElement(
+            "option",
+            { value: d.deviceId },
+            d.label || `Microphone (${d.deviceId.slice(0, 8)})`,
+          );
           if (d.deviceId === savedInput) opt.setAttribute("selected", "");
           inputSelect.appendChild(opt);
         } else if (d.kind === "audiooutput") {
-          const opt = createElement("option", { value: d.deviceId },
-            d.label || `Speaker (${d.deviceId.slice(0, 8)})`);
+          const opt = createElement(
+            "option",
+            { value: d.deviceId },
+            d.label || `Speaker (${d.deviceId.slice(0, 8)})`,
+          );
           if (d.deviceId === savedOutput) opt.setAttribute("selected", "");
           outputSelect.appendChild(opt);
         } else if (d.kind === "videoinput") {
-          const opt = createElement("option", { value: d.deviceId },
-            d.label || `Camera (${d.deviceId.slice(0, 8)})`);
+          const opt = createElement(
+            "option",
+            { value: d.deviceId },
+            d.label || `Camera (${d.deviceId.slice(0, 8)})`,
+          );
           if (d.deviceId === savedVideo) opt.setAttribute("selected", "");
           videoSelect.appendChild(opt);
         }
@@ -282,21 +336,32 @@ function buildVoiceAudioTabInner(
       if (savedOutput) outputSelect.value = savedOutput;
       if (savedVideo) videoSelect.value = savedVideo;
     } catch {
-      const errOpt = createElement("option", { value: "", disabled: "" },
-        "Could not enumerate devices");
+      const errOpt = createElement(
+        "option",
+        { value: "", disabled: "" },
+        "Could not enumerate devices",
+      );
       inputSelect.appendChild(errOpt);
     }
   })();
 
-  inputSelect.addEventListener("change", () => {
-    savePref("audioInputDevice", inputSelect.value);
-    void switchInputDevice(inputSelect.value);
-  }, { signal });
+  inputSelect.addEventListener(
+    "change",
+    () => {
+      savePref("audioInputDevice", inputSelect.value);
+      void switchInputDevice(inputSelect.value);
+    },
+    { signal },
+  );
 
-  outputSelect.addEventListener("change", () => {
-    savePref("audioOutputDevice", outputSelect.value);
-    void switchOutputDevice(outputSelect.value);
-  }, { signal });
+  outputSelect.addEventListener(
+    "change",
+    () => {
+      savePref("audioOutputDevice", outputSelect.value);
+      void switchOutputDevice(outputSelect.value);
+    },
+    { signal },
+  );
 
   // Race guard: prevent stale getUserMedia results from overwriting a newer request
   let cameraRequestId = 0;
@@ -348,10 +413,14 @@ function buildVoiceAudioTabInner(
     })();
   }
 
-  videoSelect.addEventListener("change", () => {
-    savePref("videoInputDevice", videoSelect.value);
-    startCameraPreview(videoSelect.value);
-  }, { signal });
+  videoSelect.addEventListener(
+    "change",
+    () => {
+      savePref("videoInputDevice", videoSelect.value);
+      startCameraPreview(videoSelect.value);
+    },
+    { signal },
+  );
 
   // Start initial camera preview only if a device has been explicitly selected
   const savedVideoDevice = loadPref<string>("videoInputDevice", "");
@@ -415,11 +484,36 @@ function buildVoiceAudioTabInner(
   })();
 
   // ── Audio processing toggles ──────────────────────────────────────
-  const audioToggles: ReadonlyArray<{ key: string; label: string; desc: string; fallback: boolean }> = [
-    { key: "echoCancellation", label: "Echo Cancellation", desc: "Reduce echo from speakers feeding back into microphone", fallback: true },
-    { key: "noiseSuppression", label: "Noise Suppression", desc: "Filter out background noise from your microphone", fallback: true },
-    { key: "autoGainControl", label: "Automatic Gain Control", desc: "Automatically adjust microphone volume", fallback: true },
-    { key: "enhancedNoiseSuppression", label: "Enhanced Noise Suppression", desc: "ML-powered noise removal (RNNoise) — filters keyboard, pets, and other non-voice sounds", fallback: false },
+  const audioToggles: ReadonlyArray<{
+    key: string;
+    label: string;
+    desc: string;
+    fallback: boolean;
+  }> = [
+    {
+      key: "echoCancellation",
+      label: "Echo Cancellation",
+      desc: "Reduce echo from speakers feeding back into microphone",
+      fallback: true,
+    },
+    {
+      key: "noiseSuppression",
+      label: "Noise Suppression",
+      desc: "Filter out background noise from your microphone",
+      fallback: true,
+    },
+    {
+      key: "autoGainControl",
+      label: "Automatic Gain Control",
+      desc: "Automatically adjust microphone volume",
+      fallback: true,
+    },
+    {
+      key: "enhancedNoiseSuppression",
+      label: "Enhanced Noise Suppression",
+      desc: "ML-powered noise removal (RNNoise) — filters keyboard, pets, and other non-voice sounds",
+      fallback: false,
+    },
   ];
 
   for (const item of audioToggles) {

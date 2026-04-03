@@ -21,7 +21,7 @@ Configuration is loaded in three layers (later layers override earlier ones):
 | `server.port` | int | `8443` | HTTP(S) listen port |
 | `server.name` | string | `"OwnCord Server"` | Server display name (shown in `/api/v1/info` and admin panel) |
 | `server.data_dir` | string | `"data"` | Directory for database, certs, uploads, backups |
-| `server.allowed_origins` | string[] | `["*"]` | WebSocket CORS allowed origins; restrict in production |
+| `server.allowed_origins` | string[] | `[]` | WebSocket CORS allowed origins; empty list DENIES all cross-origin (set to `["*"]` to allow any origin) |
 | `server.trusted_proxies` | string[] | `[]` | CIDRs of trusted reverse proxies (for X-Forwarded-For) |
 | `server.admin_allowed_cidrs` | string[] | private networks | CIDRs allowed to access `/admin` routes. Default: `127.0.0.0/8`, `::1/128`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7` |
 
@@ -99,7 +99,7 @@ server:
   port: 8443
   name: "OwnCord Server"
   data_dir: "data"
-  allowed_origins: ["*"]          # restrict in production
+  allowed_origins: []             # empty = deny all cross-origin; set to ["*"] to allow any
   trusted_proxies: []              # e.g. ["10.0.0.0/8"] if behind a reverse proxy
   admin_allowed_cidrs:
     - "127.0.0.0/8"

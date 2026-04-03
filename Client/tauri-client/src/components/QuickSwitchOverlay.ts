@@ -39,17 +39,24 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
     });
 
     // Close on backdrop click (not on modal content)
-    root.addEventListener("click", (e) => {
-      if (e.target === root) options.onClose();
-    }, { signal: ac.signal });
+    root.addEventListener(
+      "click",
+      (e) => {
+        if (e.target === root) options.onClose();
+      },
+      { signal: ac.signal },
+    );
 
     const modal = createElement("div", { class: "quick-switch-modal" });
 
     // Header
     const header = createElement("div", { class: "quick-switch-header" });
     const title = createElement("h2", {}, "Switch Server");
-    const subtitle = createElement("p", { class: "quick-switch-subtitle" },
-      "You\u2019ll disconnect from the current server.");
+    const subtitle = createElement(
+      "p",
+      { class: "quick-switch-subtitle" },
+      "You\u2019ll disconnect from the current server.",
+    );
     appendChildren(header, title, subtitle);
 
     // Server list
@@ -68,8 +75,11 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
 
       const info = createElement("div", { class: "quick-switch-info" });
       const nameEl = createElement("div", { class: "quick-switch-name" }, profile.name);
-      const hostEl = createElement("div", { class: "quick-switch-host" },
-        `${profile.host}${isCurrent ? " \u00B7 Connected" : ""}`);
+      const hostEl = createElement(
+        "div",
+        { class: "quick-switch-host" },
+        `${profile.host}${isCurrent ? " \u00B7 Connected" : ""}`,
+      );
       appendChildren(info, nameEl, hostEl);
 
       if (isCurrent) {
@@ -77,9 +87,13 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
         appendChildren(item, icon, info, dot);
       } else {
         appendChildren(item, icon, info);
-        item.addEventListener("click", () => {
-          options.onSwitch(profile.host, profile.name);
-        }, { signal: ac.signal });
+        item.addEventListener(
+          "click",
+          () => {
+            options.onSwitch(profile.host, profile.name);
+          },
+          { signal: ac.signal },
+        );
       }
 
       list.appendChild(item);
@@ -93,7 +107,11 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
     const addIcon = createElement("div", { class: "quick-switch-icon add" }, "+");
     const addInfo = createElement("div", { class: "quick-switch-info" });
     const addName = createElement("div", { class: "quick-switch-name" }, "Add new server");
-    const addHost = createElement("div", { class: "quick-switch-host" }, "Connect to another OwnCord server");
+    const addHost = createElement(
+      "div",
+      { class: "quick-switch-host" },
+      "Connect to another OwnCord server",
+    );
     appendChildren(addInfo, addName, addHost);
     appendChildren(addItem, addIcon, addInfo);
     addItem.addEventListener("click", () => options.onAddServer(), { signal: ac.signal });
@@ -107,9 +125,13 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
     container.appendChild(root);
 
     // Escape key closes overlay
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") options.onClose();
-    }, { signal: ac.signal });
+    document.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.key === "Escape") options.onClose();
+      },
+      { signal: ac.signal },
+    );
   }
 
   function destroy(): void {

@@ -6,12 +6,7 @@
  */
 
 import { test, expect } from "../native-fixture-persistent";
-import {
-  SKIP_SERVER,
-  hasCredentials,
-  ensureLoggedIn,
-  openSettings,
-} from "./helpers";
+import { SKIP_SERVER, hasCredentials, ensureLoggedIn, openSettings } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Helper: switch to a settings tab by name
@@ -56,9 +51,7 @@ test.describe("Theme Persistence (Native)", () => {
 
     // Find and click an inactive theme
     for (let i = 0; i < count; i++) {
-      const isActive = await themeOptions.nth(i).evaluate((el) =>
-        el.classList.contains("active"),
-      );
+      const isActive = await themeOptions.nth(i).evaluate((el) => el.classList.contains("active"));
       if (!isActive) {
         await themeOptions.nth(i).click();
         break;
@@ -76,7 +69,9 @@ test.describe("Theme Persistence (Native)", () => {
 
   test("accent color picker applies CSS variable", async ({ nativePage }) => {
     // Look for accent color input
-    const colorInput = nativePage.locator("input[type='color'], .accent-color-input, .accent-picker");
+    const colorInput = nativePage.locator(
+      "input[type='color'], .accent-color-input, .accent-picker",
+    );
 
     if (await colorInput.isVisible().catch(() => false)) {
       await colorInput.fill("#ff0066");
@@ -126,7 +121,9 @@ test.describe("Theme Persistence (Native)", () => {
   });
 
   test("compact mode toggle adds class to body", async ({ nativePage }) => {
-    const toggle = nativePage.locator(".setting-row", { hasText: "Compact Mode" }).locator(".toggle");
+    const toggle = nativePage
+      .locator(".setting-row", { hasText: "Compact Mode" })
+      .locator(".toggle");
     await expect(toggle).toBeVisible();
 
     const wasCompact = await nativePage.evaluate(() =>

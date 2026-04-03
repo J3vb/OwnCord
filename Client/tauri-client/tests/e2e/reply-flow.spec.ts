@@ -3,10 +3,7 @@
  * Covers: click reply → see reply bar → send reply → verify.
  */
 import { test, expect } from "@playwright/test";
-import {
-  mockTauriFullSessionWithMessagesAndEcho,
-  navigateToMainPage,
-} from "./helpers";
+import { mockTauriFullSessionWithMessagesAndEcho, navigateToMainPage } from "./helpers";
 
 test.describe("Reply Flow", () => {
   test.beforeEach(async ({ page }) => {

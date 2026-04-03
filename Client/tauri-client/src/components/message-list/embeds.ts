@@ -3,10 +3,7 @@
  * (title, description, image) for generic URLs as compact link cards.
  */
 
-import {
-  createElement,
-  setText,
-} from "@lib/dom";
+import { createElement, setText } from "@lib/dom";
 import { observeMedia } from "@lib/media-visibility";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { createLogger } from "@lib/logger";
@@ -52,7 +49,7 @@ export function parseOgTags(html: string): OgMeta {
     const escaped = escapeRegex(property);
     const regex = new RegExp(
       `<meta[^>]*(?:property|name)=["']${escaped}["'][^>]*content=["']([^"']*)["']` +
-      `|<meta[^>]*content=["']([^"']*)["'][^>]*(?:property|name)=["']${escaped}["']`,
+        `|<meta[^>]*content=["']([^"']*)["'][^>]*(?:property|name)=["']${escaped}["']`,
       "i",
     );
     const match = html.match(regex);
@@ -183,10 +180,16 @@ function fetchOgMeta(url: string): Promise<OgMeta> {
       const timer = setTimeout(() => controller.abort(), 5000);
       const fetchOpts: RequestInit = {
         signal: controller.signal,
-        headers: { "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)" },
+        headers: {
+          "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+        },
       };
       if (isTrustedServerUrl(url)) {
-        (fetchOpts as RequestInit & { danger?: { acceptInvalidCerts: boolean; acceptInvalidHostnames: boolean } }).danger = { acceptInvalidCerts: true, acceptInvalidHostnames: false };
+        (
+          fetchOpts as RequestInit & {
+            danger?: { acceptInvalidCerts: boolean; acceptInvalidHostnames: boolean };
+          }
+        ).danger = { acceptInvalidCerts: true, acceptInvalidHostnames: false };
       }
       const res = await tauriFetch(url, fetchOpts);
       clearTimeout(timer);
@@ -301,9 +304,8 @@ export function applyOgMeta(
     setText(hostEl, meta.siteName);
   }
   if (meta.description !== null) {
-    const desc = meta.description.length > 200
-      ? meta.description.slice(0, 197) + "..."
-      : meta.description;
+    const desc =
+      meta.description.length > 200 ? meta.description.slice(0, 197) + "..." : meta.description;
     setText(descEl, desc);
     descEl.style.display = "";
   } else {
@@ -316,7 +318,9 @@ export function applyOgMeta(
       try {
         const base = new URL(url);
         imgSrc = `${base.origin}${imgSrc}`;
-      } catch { /* keep as-is */ }
+      } catch {
+        /* keep as-is */
+      }
     }
     if (isSafeUrl(imgSrc) && !isBlockedForPreview(imgSrc)) {
       const isGif = imgSrc.toLowerCase().endsWith(".gif");
@@ -334,9 +338,13 @@ export function applyOgMeta(
         imageWrap.style.display = "none";
       });
       if (isGif) {
-        (img).addEventListener("load", () => {
-          observeMedia(img, imgSrc, imageWrap);
-        }, { once: true });
+        img.addEventListener(
+          "load",
+          () => {
+            observeMedia(img, imgSrc, imageWrap);
+          },
+          { once: true },
+        );
       }
       imageWrap.appendChild(img);
       imageWrap.style.display = "";

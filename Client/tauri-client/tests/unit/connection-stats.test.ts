@@ -203,7 +203,13 @@ describe("createConnectionStatsPoller", () => {
 
   it("classifies quality as fair for RTT 100-200ms", async () => {
     const room = createMockRoom([
-      { id: "cp1", type: "candidate-pair", currentRoundTripTime: 0.15, bytesSent: 0, bytesReceived: 0 },
+      {
+        id: "cp1",
+        type: "candidate-pair",
+        currentRoundTripTime: 0.15,
+        bytesSent: 0,
+        bytesReceived: 0,
+      },
     ]);
     const cb = vi.fn();
     poller = createConnectionStatsPoller(() => room as any);
@@ -217,7 +223,13 @@ describe("createConnectionStatsPoller", () => {
 
   it("classifies quality as poor for RTT 200-400ms", async () => {
     const room = createMockRoom([
-      { id: "cp1", type: "candidate-pair", currentRoundTripTime: 0.3, bytesSent: 0, bytesReceived: 0 },
+      {
+        id: "cp1",
+        type: "candidate-pair",
+        currentRoundTripTime: 0.3,
+        bytesSent: 0,
+        bytesReceived: 0,
+      },
     ]);
     const cb = vi.fn();
     poller = createConnectionStatsPoller(() => room as any);
@@ -231,7 +243,13 @@ describe("createConnectionStatsPoller", () => {
 
   it("classifies quality as bad for RTT >= 400ms", async () => {
     const room = createMockRoom([
-      { id: "cp1", type: "candidate-pair", currentRoundTripTime: 0.5, bytesSent: 0, bytesReceived: 0 },
+      {
+        id: "cp1",
+        type: "candidate-pair",
+        currentRoundTripTime: 0.5,
+        bytesSent: 0,
+        bytesReceived: 0,
+      },
     ]);
     const cb = vi.fn();
     poller = createConnectionStatsPoller(() => room as any);
@@ -245,7 +263,13 @@ describe("createConnectionStatsPoller", () => {
 
   it("extracts outbound-rtp and inbound-rtp packet counts", async () => {
     const room = createMockRoom([
-      { id: "cp1", type: "candidate-pair", currentRoundTripTime: 0.01, bytesSent: 100, bytesReceived: 200 },
+      {
+        id: "cp1",
+        type: "candidate-pair",
+        currentRoundTripTime: 0.01,
+        bytesSent: 100,
+        bytesReceived: 200,
+      },
       { id: "out1", type: "outbound-rtp", packetsSent: 500, bytesSent: 40000 },
       { id: "in1", type: "inbound-rtp", packetsReceived: 300, bytesReceived: 30000 },
     ]);
@@ -265,7 +289,13 @@ describe("createConnectionStatsPoller", () => {
     const room = createMockRoom([
       { id: "out1", type: "outbound-rtp", packetsSent: 100, bytesSent: 10000 },
       { id: "in1", type: "inbound-rtp", packetsReceived: 50, bytesReceived: 5000 },
-      { id: "cp1", type: "candidate-pair", currentRoundTripTime: 0.01, bytesSent: 0, bytesReceived: 0 },
+      {
+        id: "cp1",
+        type: "candidate-pair",
+        currentRoundTripTime: 0.01,
+        bytesSent: 0,
+        bytesReceived: 0,
+      },
     ]);
     const cb = vi.fn();
     poller = createConnectionStatsPoller(() => room as any);
@@ -307,7 +337,7 @@ describe("createConnectionStatsPoller", () => {
     };
 
     const qualityCb = vi.fn();
-    poller = createConnectionStatsPoller(() => roomActive ? room as any : null);
+    poller = createConnectionStatsPoller(() => (roomActive ? (room as any) : null));
     poller.onQualityChanged(qualityCb);
     poller.start();
 
@@ -330,7 +360,13 @@ describe("createConnectionStatsPoller", () => {
 
   it("unsubscribed onUpdate callback is not called", async () => {
     const room = createMockRoom([
-      { id: "cp1", type: "candidate-pair", currentRoundTripTime: 0.01, bytesSent: 0, bytesReceived: 0 },
+      {
+        id: "cp1",
+        type: "candidate-pair",
+        currentRoundTripTime: 0.01,
+        bytesSent: 0,
+        bytesReceived: 0,
+      },
     ]);
     const cb = vi.fn();
     poller = createConnectionStatsPoller(() => room as any);
@@ -468,8 +504,20 @@ describe("createConnectionStatsPoller", () => {
 
   it("ignores candidate-pair entries with non-numeric or zero RTT", async () => {
     const room = createMockRoom([
-      { id: "cp1", type: "candidate-pair", currentRoundTripTime: "bad", bytesSent: 0, bytesReceived: 0 },
-      { id: "cp2", type: "candidate-pair", currentRoundTripTime: 0, bytesSent: 0, bytesReceived: 0 },
+      {
+        id: "cp1",
+        type: "candidate-pair",
+        currentRoundTripTime: "bad",
+        bytesSent: 0,
+        bytesReceived: 0,
+      },
+      {
+        id: "cp2",
+        type: "candidate-pair",
+        currentRoundTripTime: 0,
+        bytesSent: 0,
+        bytesReceived: 0,
+      },
     ]);
     const cb = vi.fn();
     poller = createConnectionStatsPoller(() => room as any);
@@ -483,8 +531,20 @@ describe("createConnectionStatsPoller", () => {
 
   it("picks the lowest RTT when multiple candidate-pairs exist", async () => {
     const room = createMockRoom([
-      { id: "cp1", type: "candidate-pair", currentRoundTripTime: 0.3, bytesSent: 0, bytesReceived: 0 },
-      { id: "cp2", type: "candidate-pair", currentRoundTripTime: 0.05, bytesSent: 0, bytesReceived: 0 },
+      {
+        id: "cp1",
+        type: "candidate-pair",
+        currentRoundTripTime: 0.3,
+        bytesSent: 0,
+        bytesReceived: 0,
+      },
+      {
+        id: "cp2",
+        type: "candidate-pair",
+        currentRoundTripTime: 0.05,
+        bytesSent: 0,
+        bytesReceived: 0,
+      },
     ]);
     const cb = vi.fn();
     poller = createConnectionStatsPoller(() => room as any);
@@ -605,7 +665,13 @@ describe("createConnectionStatsPoller", () => {
 
   it("handles outbound-rtp without packetsSent", async () => {
     const room = createMockRoom([
-      { id: "cp1", type: "candidate-pair", currentRoundTripTime: 0.01, bytesSent: 0, bytesReceived: 0 },
+      {
+        id: "cp1",
+        type: "candidate-pair",
+        currentRoundTripTime: 0.01,
+        bytesSent: 0,
+        bytesReceived: 0,
+      },
       { id: "out1", type: "outbound-rtp", bytesSent: 100 },
     ]);
     const cb = vi.fn();
@@ -619,7 +685,13 @@ describe("createConnectionStatsPoller", () => {
 
   it("handles inbound-rtp without packetsReceived", async () => {
     const room = createMockRoom([
-      { id: "cp1", type: "candidate-pair", currentRoundTripTime: 0.01, bytesSent: 0, bytesReceived: 0 },
+      {
+        id: "cp1",
+        type: "candidate-pair",
+        currentRoundTripTime: 0.01,
+        bytesSent: 0,
+        bytesReceived: 0,
+      },
       { id: "in1", type: "inbound-rtp", bytesReceived: 100 },
     ]);
     const cb = vi.fn();

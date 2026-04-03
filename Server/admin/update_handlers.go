@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/owncord/server/updater"
+	"golang.org/x/mod/semver"
 )
 
 // handleCheckUpdate returns the current update status.
@@ -23,7 +24,8 @@ func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 		}
 		info, err := u.CheckForUpdate(r.Context())
 		if err != nil {
-			writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", "failed to check for updates: "+err.Error())
+			slog.Error("update check failed", "err", err)
+			writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", "failed to check for updates — see server logs")
 			return
 		}
 		writeJSON(w, http.StatusOK, info)
@@ -41,14 +43,19 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 		// Check for available update.
 		info, err := u.CheckForUpdate(r.Context())
 		if err != nil {
-			writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", err.Error())
+			slog.Error("update check failed during apply", "err", err)
+			writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", "failed to check for updates — see server logs")
 			return
 		}
 		if !info.UpdateAvailable {
+			if semver.Compare(info.Current, info.Latest) < 0 && !info.RequiredAssetsPresent {
+				writeErr(w, http.StatusBadGateway, "MISSING_ASSETS", "release is missing required assets")
+				return
+			}
 			writeErr(w, http.StatusConflict, "NO_UPDATE", "server is already up to date")
 			return
 		}
-		if info.DownloadURL == "" || info.ChecksumURL == "" {
+		if !info.RequiredAssetsPresent {
 			writeErr(w, http.StatusBadGateway, "MISSING_ASSETS", "release is missing required assets")
 			return
 		}
@@ -72,8 +79,9 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 		defer cancel()
 
-		if err := u.DownloadAndVerify(ctx, info.DownloadURL, info.ChecksumURL, newPath); err != nil {
-			writeErr(w, http.StatusBadGateway, "DOWNLOAD_FAILED", err.Error())
+		if err := u.DownloadAndVerify(ctx, info.Latest, info.DownloadURL, info.ChecksumURL, info.SignatureURL, info.ManifestURL, info.ManifestSignatureURL, newPath); err != nil {
+			slog.Error("update download/verify failed", "err", err)
+			writeErr(w, http.StatusBadGateway, "DOWNLOAD_FAILED", "download or verification failed — see server logs")
 			return
 		}
 
@@ -116,19 +124,24 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 				return
 			}
 
-			// Exit current process. os.Exit skips deferred cleanup intentionally —
-			// the process must die to release the file lock on its own binary
-			// before the new process can replace it on Windows. SQLite WAL mode
-			// protects DB integrity on unclean shutdown.
-			slog.Info("update: new process spawned, exiting current process")
-			os.Exit(0)
+			// Signal the process to shut down gracefully before exiting.
+			// We use SIGTERM on Unix to trigger the graceful shutdown handler
+			// in main.go. On Windows, os.Exit is unavoidable because the
+			// process must release its file lock on the binary.
+			slog.Info("update: new process spawned, shutting down current process")
+			if p, err := os.FindProcess(os.Getpid()); err == nil {
+				_ = p.Signal(syscall.SIGTERM)
+				// Give graceful shutdown a few seconds before force-killing.
+				time.Sleep(10 * time.Second)
+			}
+			os.Exit(0) // fallback if SIGTERM handler didn't exit
 		}()
 	})
 }
 
 // spawnDetached starts a new process that is not attached to the current one.
 func spawnDetached(exePath string, args []string) error {
-	cmd := exec.Command(exePath, args...)
+	cmd := exec.Command(exePath, args...) //nolint:gosec // G204: command path from trusted server config
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 

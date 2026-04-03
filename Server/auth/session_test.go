@@ -75,3 +75,61 @@ func TestHashToken_DifferentInputsDifferentHashes(t *testing.T) {
 		t.Errorf("HashToken() same hash for different inputs")
 	}
 }
+
+func TestGenerateToken_MultiDeviceUniqueness(t *testing.T) {
+	// Simulate multiple devices generating tokens simultaneously.
+	// All tokens must be unique (no collision across concurrent generation).
+	const devices = 50
+	tokens := make(chan string, devices)
+	errs := make(chan error, devices)
+
+	for range devices {
+		go func() {
+			tok, err := auth.GenerateToken()
+			if err != nil {
+				errs <- err
+				return
+			}
+			tokens <- tok
+		}()
+	}
+
+	seen := make(map[string]struct{}, devices)
+	for range devices {
+		select {
+		case err := <-errs:
+			t.Fatalf("GenerateToken() error in goroutine: %v", err)
+		case tok := <-tokens:
+			if _, dup := seen[tok]; dup {
+				t.Fatalf("GenerateToken() produced duplicate across concurrent calls")
+			}
+			seen[tok] = struct{}{}
+		}
+	}
+}
+
+func TestHashToken_ConsistentAfterRotation(t *testing.T) {
+	// After generating a new token (rotation), the old hash should NOT match
+	// the new token, and the new hash should match the new token.
+	oldToken, _ := auth.GenerateToken()
+	oldHash := auth.HashToken(oldToken)
+
+	newToken, _ := auth.GenerateToken()
+	newHash := auth.HashToken(newToken)
+
+	if oldHash == newHash {
+		t.Error("rotated token produced same hash as old token")
+	}
+	// Old token still hashes to old hash (deterministic).
+	if auth.HashToken(oldToken) != oldHash {
+		t.Error("HashToken is not deterministic for old token")
+	}
+}
+
+func TestHashToken_EmptyInput(t *testing.T) {
+	// Hashing an empty string should still produce a valid 64-char hex hash.
+	hash := auth.HashToken("")
+	if len(hash) != 64 {
+		t.Errorf("HashToken(\"\") len = %d, want 64", len(hash))
+	}
+}

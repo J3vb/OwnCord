@@ -88,10 +88,14 @@ export function createGifPicker(options: GifPickerOptions): {
       });
       item.appendChild(img);
 
-      item.addEventListener("click", () => {
-        options.onSelect(gif.fullUrl);
-        options.onClose();
-      }, { signal });
+      item.addEventListener(
+        "click",
+        () => {
+          options.onSelect(gif.fullUrl);
+          options.onClose();
+        },
+        { signal },
+      );
 
       grid.appendChild(item);
     }
@@ -109,9 +113,8 @@ export function createGifPicker(options: GifPickerOptions): {
     showLoading();
 
     try {
-      const gifs = query.length > 0
-        ? await searchGifs(query, GIF_LIMIT)
-        : await getTrendingGifs(GIF_LIMIT);
+      const gifs =
+        query.length > 0 ? await searchGifs(query, GIF_LIMIT) : await getTrendingGifs(GIF_LIMIT);
 
       // Only render if this is still the latest request
       if (requestId === currentRequestId) {
@@ -130,20 +133,28 @@ export function createGifPicker(options: GifPickerOptions): {
 
   // ── Event handlers ──
 
-  searchInput.addEventListener("input", () => {
-    if (debounceTimer !== null) {
-      clearTimeout(debounceTimer);
-    }
-    debounceTimer = setTimeout(() => {
-      void loadGifs(searchInput.value.trim());
-    }, DEBOUNCE_MS);
-  }, { signal });
+  searchInput.addEventListener(
+    "input",
+    () => {
+      if (debounceTimer !== null) {
+        clearTimeout(debounceTimer);
+      }
+      debounceTimer = setTimeout(() => {
+        void loadGifs(searchInput.value.trim());
+      }, DEBOUNCE_MS);
+    },
+    { signal },
+  );
 
-  root.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      options.onClose();
-    }
-  }, { signal });
+  root.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key === "Escape") {
+        options.onClose();
+      }
+    },
+    { signal },
+  );
 
   // Focus search on mount
   requestAnimationFrame(() => searchInput.focus());

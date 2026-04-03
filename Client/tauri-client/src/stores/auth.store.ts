@@ -7,6 +7,7 @@ import { createStore } from "@lib/store";
 import type { UserWithRole } from "@lib/types";
 import { resetVoiceStore } from "@stores/voice.store";
 import { leaveVoice } from "@lib/livekitSession";
+import { cleanupNotificationAudio } from "@lib/notifications";
 
 export interface AuthState {
   readonly token: string | null;
@@ -27,12 +28,7 @@ const INITIAL_STATE: AuthState = {
 export const authStore = createStore<AuthState>(INITIAL_STATE);
 
 /** Populate auth state after a successful auth_ok message. */
-export function setAuth(
-  token: string,
-  user: UserWithRole,
-  serverName: string,
-  motd: string,
-): void {
+export function setAuth(token: string, user: UserWithRole, serverName: string, motd: string): void {
   authStore.setState(() => ({
     token,
     user,
@@ -48,6 +44,7 @@ export function setAuth(
 export function clearAuth(): void {
   leaveVoice(false);
   resetVoiceStore();
+  cleanupNotificationAudio();
   authStore.setState(() => ({ ...INITIAL_STATE }));
 }
 

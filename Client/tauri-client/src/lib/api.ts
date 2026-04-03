@@ -27,6 +27,8 @@ import type {
 export interface ApiClientConfig {
   readonly host: string;
   readonly token?: string;
+  /** Accept self-signed TLS certificates (for local/dev OwnCord servers). */
+  readonly allowSelfSigned?: boolean;
 }
 
 /** API client error with parsed error body. */
@@ -47,10 +49,12 @@ export type OnUnauthorized = () => void;
 const log = createLogger("api");
 
 /** Create the REST API client. */
-export function createApiClient(
-  initialConfig: ApiClientConfig,
-  onUnauthorized?: OnUnauthorized,
-) {
+export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?: OnUnauthorized) {
+  // oxlint-disable-next-line consistent-function-scoping -- co-located with createApiClient for encapsulation
+  function isValidHost(host: string): boolean {
+    return /^[\w.-]+(:\d+)?$/.test(host) && host.length <= 253;
+  }
+
   let config = { ...initialConfig };
 
   function baseUrl(): string {
@@ -80,11 +84,15 @@ export function createApiClient(
     signal?: AbortSignal,
   ): Promise<T> {
     const url = `${urlBase}${path}`;
-    const init: RequestInit & { danger?: { acceptInvalidCerts: boolean; acceptInvalidHostnames: boolean } } = {
+    const init: RequestInit & {
+      danger?: { acceptInvalidCerts: boolean; acceptInvalidHostnames: boolean };
+    } = {
       method,
       headers: headers(),
       signal,
-      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
+      ...(config.allowSelfSigned === true
+        ? { danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } }
+        : {}),
     };
     if (body !== undefined) {
       init.body = JSON.stringify(body);
@@ -100,7 +108,9 @@ export function createApiClient(
       if (fetchErr instanceof Error) {
         throw fetchErr;
       }
-      throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr));
+      throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr), {
+        cause: fetchErr,
+      });
     }
 
     log.debug(`${label} ←`, { method, path, status: res.status });
@@ -113,7 +123,13 @@ export function createApiClient(
 
     if (!res.ok) {
       const err = await parseError(res);
-      log.warn(`${label} error`, { method, path, status: res.status, code: err.error, message: err.message });
+      log.warn(`${label} error`, {
+        method,
+        path,
+        status: res.status,
+        code: err.error,
+        message: err.message,
+      });
       throw new ApiClientError(res.status, err.error, err.message);
     }
 
@@ -125,14 +141,25 @@ export function createApiClient(
     return res.json() as Promise<T>;
   }
 
-  function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  function request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<T> {
     return doFetch<T>("API", baseUrl(), method, path, body, signal);
   }
 
-  function adminRequest<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  function adminRequest<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<T> {
     return doFetch<T>("Admin API", adminBaseUrl(), method, path, body, signal);
   }
 
+  // oxlint-disable-next-line consistent-function-scoping -- co-located with doFetch for encapsulation
   async function parseError(res: Response): Promise<ApiError> {
     try {
       const body = await res.json();
@@ -151,6 +178,10 @@ export function createApiClient(
   return {
     /** Update the client config (e.g., after login). */
     setConfig(newConfig: Partial<ApiClientConfig>): void {
+      if (newConfig.host !== undefined && !isValidHost(newConfig.host)) {
+        log.error("setConfig rejected invalid host", { host: newConfig.host });
+        throw new Error("Invalid host format");
+      }
       config = { ...config, ...newConfig };
     },
 
@@ -161,17 +192,8 @@ export function createApiClient(
 
     // ── Auth ──────────────────────────────────────────────
 
-    login(
-      username: string,
-      password: string,
-      signal?: AbortSignal,
-    ): Promise<AuthResponse> {
-      return request<AuthResponse>(
-        "POST",
-        "/auth/login",
-        { username, password },
-        signal,
-      );
+    login(username: string, password: string, signal?: AbortSignal): Promise<AuthResponse> {
+      return request<AuthResponse>("POST", "/auth/login", { username, password }, signal);
     },
 
     register(
@@ -199,26 +221,36 @@ export function createApiClient(
     ): Promise<AuthResponse> {
       // Don't mutate shared config — make direct fetch with the partial token
       const url = `${baseUrl()}/auth/verify-totp`;
-      const init: RequestInit & { danger?: { acceptInvalidCerts: boolean; acceptInvalidHostnames: boolean } } = {
+      const init: RequestInit & {
+        danger?: { acceptInvalidCerts: boolean; acceptInvalidHostnames: boolean };
+      } = {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${partialToken}`,
+          Authorization: `Bearer ${partialToken}`,
         },
         body: JSON.stringify({ code }),
         signal,
-        danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
+        ...(config.allowSelfSigned === true
+          ? { danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } }
+          : {}),
       };
 
       let res: Response;
       try {
         res = await fetch(url, init as RequestInit);
       } catch (fetchErr) {
-        log.error("API fetch failed", { method: "POST", path: "/auth/verify-totp", error: String(fetchErr) });
+        log.error("API fetch failed", {
+          method: "POST",
+          path: "/auth/verify-totp",
+          error: String(fetchErr),
+        });
         if (fetchErr instanceof Error) {
           throw fetchErr;
         }
-        throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr));
+        throw new Error(typeof fetchErr === "string" ? fetchErr : String(fetchErr), {
+          cause: fetchErr,
+        });
       }
 
       if (res.status === 401) {
@@ -236,12 +268,7 @@ export function createApiClient(
     },
 
     deleteAccount(password: string, signal?: AbortSignal): Promise<void> {
-      return request<void>(
-        "DELETE",
-        "/auth/account",
-        { password },
-        signal,
-      );
+      return request<void>("DELETE", "/auth/account", { password }, signal);
     },
 
     // ── Users ─────────────────────────────────────────────
@@ -270,7 +297,10 @@ export function createApiClient(
       );
     },
 
-    enableTotp(password: string, signal?: AbortSignal): Promise<{ qr_uri: string; backup_codes: string[] }> {
+    enableTotp(
+      password: string,
+      signal?: AbortSignal,
+    ): Promise<{ qr_uri: string; backup_codes: string[] }> {
       return request("POST", "/users/me/totp/enable", { password }, signal);
     },
 
@@ -283,21 +313,11 @@ export function createApiClient(
     },
 
     getSessions(signal?: AbortSignal): Promise<SessionResponse[]> {
-      return request<SessionResponse[]>(
-        "GET",
-        "/users/me/sessions",
-        undefined,
-        signal,
-      );
+      return request<SessionResponse[]>("GET", "/users/me/sessions", undefined, signal);
     },
 
     revokeSession(sessionId: number, signal?: AbortSignal): Promise<void> {
-      return request<void>(
-        "DELETE",
-        `/users/me/sessions/${sessionId}`,
-        undefined,
-        signal,
-      );
+      return request<void>("DELETE", `/users/me/sessions/${sessionId}`, undefined, signal);
     },
 
     // ── Channels ──────────────────────────────────────────
@@ -320,38 +340,15 @@ export function createApiClient(
     },
 
     getPins(channelId: number, signal?: AbortSignal): Promise<MessagesResponse> {
-      return request<MessagesResponse>(
-        "GET",
-        `/channels/${channelId}/pins`,
-        undefined,
-        signal,
-      );
+      return request<MessagesResponse>("GET", `/channels/${channelId}/pins`, undefined, signal);
     },
 
-    pinMessage(
-      channelId: number,
-      messageId: number,
-      signal?: AbortSignal,
-    ): Promise<void> {
-      return request<void>(
-        "POST",
-        `/channels/${channelId}/pins/${messageId}`,
-        undefined,
-        signal,
-      );
+    pinMessage(channelId: number, messageId: number, signal?: AbortSignal): Promise<void> {
+      return request<void>("POST", `/channels/${channelId}/pins/${messageId}`, undefined, signal);
     },
 
-    unpinMessage(
-      channelId: number,
-      messageId: number,
-      signal?: AbortSignal,
-    ): Promise<void> {
-      return request<void>(
-        "DELETE",
-        `/channels/${channelId}/pins/${messageId}`,
-        undefined,
-        signal,
-      );
+    unpinMessage(channelId: number, messageId: number, signal?: AbortSignal): Promise<void> {
+      return request<void>("DELETE", `/channels/${channelId}/pins/${messageId}`, undefined, signal);
     },
 
     // ── Search ────────────────────────────────────────────
@@ -364,20 +361,12 @@ export function createApiClient(
       const params = new URLSearchParams({ q: query });
       if (options?.channelId !== undefined) params.set("channel_id", String(options.channelId));
       if (options?.limit !== undefined) params.set("limit", String(options.limit));
-      return request<SearchResponse>(
-        "GET",
-        `/search?${params.toString()}`,
-        undefined,
-        signal,
-      );
+      return request<SearchResponse>("GET", `/search?${params.toString()}`, undefined, signal);
     },
 
     // ── File Uploads ──────────────────────────────────────
 
-    async uploadFile(
-      file: File,
-      signal?: AbortSignal,
-    ): Promise<UploadResponse> {
+    async uploadFile(file: File, signal?: AbortSignal): Promise<UploadResponse> {
       const formData = new FormData();
       formData.append("file", file);
 
@@ -393,7 +382,9 @@ export function createApiClient(
         headers: h,
         body: formData,
         signal,
-        danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
+        ...(config.allowSelfSigned === true
+          ? { danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } }
+          : {}),
       } as RequestInit);
 
       if (!res.ok) {
@@ -417,8 +408,8 @@ export function createApiClient(
       return request<InviteResponse>("POST", "/invites", data, signal);
     },
 
-    revokeInvite(inviteId: number, signal?: AbortSignal): Promise<void> {
-      return request<void>("DELETE", `/invites/${inviteId}`, undefined, signal);
+    revokeInvite(code: string, signal?: AbortSignal): Promise<void> {
+      return request<void>("DELETE", `/invites/${code}`, undefined, signal);
     },
 
     // ── Emoji ─────────────────────────────────────────────
@@ -449,16 +440,8 @@ export function createApiClient(
     },
 
     /** Create or get a DM channel with a user. */
-    createDm(
-      recipientId: number,
-      signal?: AbortSignal,
-    ): Promise<CreateDmResponse> {
-      return request<CreateDmResponse>(
-        "POST",
-        "/dms",
-        { recipient_id: recipientId },
-        signal,
-      );
+    createDm(recipientId: number, signal?: AbortSignal): Promise<CreateDmResponse> {
+      return request<CreateDmResponse>("POST", "/dms", { recipient_id: recipientId }, signal);
     },
 
     /** Close a DM (hide from sidebar). */
@@ -468,30 +451,22 @@ export function createApiClient(
 
     // ── Voice ─────────────────────────────────────────────
 
-    getVoiceCredentials(
-      signal?: AbortSignal,
-    ): Promise<VoiceCredentialsResponse> {
-      return request<VoiceCredentialsResponse>(
-        "GET",
-        "/voice/credentials",
-        undefined,
-        signal,
-      );
+    getVoiceCredentials(signal?: AbortSignal): Promise<VoiceCredentialsResponse> {
+      return request<VoiceCredentialsResponse>("GET", "/voice/credentials", undefined, signal);
     },
 
     // ── Health ────────────────────────────────────────────
 
-    async getHealth(
-      host?: string,
-      timeoutMs = 3000,
-    ): Promise<HealthResponse> {
+    async getHealth(host?: string, timeoutMs = 3000): Promise<HealthResponse> {
       const targetHost = host ?? config.host;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const res = await fetch(`https://${targetHost}/api/v1/health`, {
           signal: controller.signal,
-          danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false },
+          ...(config.allowSelfSigned === true
+            ? { danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } }
+            : {}),
         } as RequestInit);
         if (!res.ok) {
           throw new ApiClientError(res.status, "HEALTH_CHECK_FAILED", "Health check failed");
@@ -531,41 +506,37 @@ export function createApiClient(
       return adminRequest<ChannelResponse>("PATCH", `/channels/${id}`, data, signal);
     },
 
-    adminDeleteChannel(
-      id: number,
-      signal?: AbortSignal,
-    ): Promise<void> {
+    adminDeleteChannel(id: number, signal?: AbortSignal): Promise<void> {
       return adminRequest<void>("DELETE", `/channels/${id}`, undefined, signal);
     },
 
     // ── Admin: Members ──────────────────────────────────────
 
-    adminKickMember(
-      userId: number,
-      signal?: AbortSignal,
-    ): Promise<void> {
+    adminKickMember(userId: number, signal?: AbortSignal): Promise<void> {
       return adminRequest<void>("DELETE", `/users/${userId}/sessions`, undefined, signal);
     },
 
-    adminBanMember(
-      userId: number,
-      reason?: string,
-      signal?: AbortSignal,
-    ): Promise<void> {
-      return adminRequest<void>("PATCH", `/users/${userId}`, {
-        banned: true,
-        ban_reason: reason ?? "",
-      }, signal);
+    adminBanMember(userId: number, reason?: string, signal?: AbortSignal): Promise<void> {
+      return adminRequest<void>(
+        "PATCH",
+        `/users/${userId}`,
+        {
+          banned: true,
+          ban_reason: reason ?? "",
+        },
+        signal,
+      );
     },
 
-    adminChangeRole(
-      userId: number,
-      roleId: number,
-      signal?: AbortSignal,
-    ): Promise<void> {
-      return adminRequest<void>("PATCH", `/users/${userId}`, {
-        role_id: roleId,
-      }, signal);
+    adminChangeRole(userId: number, roleId: number, signal?: AbortSignal): Promise<void> {
+      return adminRequest<void>(
+        "PATCH",
+        `/users/${userId}`,
+        {
+          role_id: roleId,
+        },
+        signal,
+      );
     },
   };
 }

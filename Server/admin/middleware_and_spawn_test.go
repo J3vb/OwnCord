@@ -248,7 +248,7 @@ func TestOwnerOnlyMiddleware_OwnerPassesThrough(t *testing.T) {
 // role_id has been set to a nonexistent value returns 401.
 func TestAdminAuthMiddleware_RoleNotFound(t *testing.T) {
 	database := openWhiteboxTestDB(t)
-	handler := NewAdminAPI(database, "1.0.0", nil, nil, nil)
+	handler := NewAdminAPI(database, "1.0.0", nil, nil, nil, nil)
 
 	uid, err := database.CreateUser("noroleuser", "$2a$12$x", 1)
 	if err != nil {
@@ -401,7 +401,7 @@ func (m *mockHubWB) BroadcastChannelUpdate(ch *db.Channel)                  {}
 func (m *mockHubWB) BroadcastChannelDelete(channelID int64)                 {}
 func (m *mockHubWB) BroadcastMemberBan(userID int64)                        {}
 func (m *mockHubWB) BroadcastMemberUpdate(userID int64, roleName string)    {}
-func (m *mockHubWB) ClientCount() int                                        { return 0 }
+func (m *mockHubWB) ClientCount() int                                       { return 0 }
 
 // TestSpawnDetached_ValidExecutable verifies that spawnDetached can start a
 // real executable (the Go test binary itself) with a flag that causes immediate

@@ -30,9 +30,7 @@ export interface ReactionController {
 // Factory
 // ---------------------------------------------------------------------------
 
-export function createReactionController(
-  opts: ReactionControllerOptions,
-): ReactionController {
+export function createReactionController(opts: ReactionControllerOptions): ReactionController {
   const { ws, reactionsLimiter, getChannelId, showError } = opts;
 
   function sendReaction(msgId: number, emoji: string): void {
@@ -57,9 +55,7 @@ export function createReactionController(
   }
 
   function openPicker(msgId: number): void {
-    const reactBtn = document.querySelector(
-      `[data-testid="msg-react-${msgId}"]`,
-    );
+    const reactBtn = document.querySelector(`[data-testid="msg-react-${msgId}"]`);
     if (reactBtn === null) return;
 
     // Close any existing reaction picker (including proper cleanup)

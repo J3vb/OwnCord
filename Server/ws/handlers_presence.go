@@ -23,7 +23,7 @@ func registerPresenceHandlers(r *HandlerRegistry) {
 }
 
 // handleTyping processes a typing_start message.
-func (h *Hub) handleTyping(ctx context.Context, c *Client, payload json.RawMessage) {
+func (h *Hub) handleTyping(_ context.Context, c *Client, payload json.RawMessage) {
 	channelID, err := parseChannelID(payload)
 	if err != nil || channelID <= 0 {
 		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "channel_id must be positive integer"))
@@ -45,10 +45,8 @@ func (h *Hub) handleTyping(ctx context.Context, c *Client, payload json.RawMessa
 		if dmErr != nil || !ok {
 			return // silently drop — not a DM participant
 		}
-	} else {
-		if !h.hasChannelPerm(c, channelID, permissions.ReadMessages) {
-			return // silently drop — no read permission on this channel
-		}
+	} else if !h.hasChannelPerm(c, channelID, permissions.ReadMessages) {
+		return // silently drop — no read permission on this channel
 	}
 
 	var username string
@@ -65,7 +63,7 @@ func (h *Hub) handleTyping(ctx context.Context, c *Client, payload json.RawMessa
 }
 
 // handlePresence processes a presence_update message.
-func (h *Hub) handlePresence(ctx context.Context, c *Client, payload json.RawMessage) {
+func (h *Hub) handlePresence(_ context.Context, c *Client, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("presence:%d", c.userID)
 	if !h.limiter.Allow(ratKey, presenceRateLimit, presenceWindow) {
 		c.sendMsg(buildRateLimitError("too many presence updates", presenceWindow.Seconds()))
@@ -97,7 +95,7 @@ func (h *Hub) handlePresence(ctx context.Context, c *Client, payload json.RawMes
 // handleChannelFocus sets which channel the client is currently viewing,
 // so channel-scoped broadcasts (chat messages, typing) reach them.
 // Also updates read_states so unread counts decrease when the user views a channel.
-func (h *Hub) handleChannelFocus(ctx context.Context, c *Client, payload json.RawMessage) {
+func (h *Hub) handleChannelFocus(_ context.Context, c *Client, payload json.RawMessage) {
 	chID, err := parseChannelID(payload)
 	if err != nil || chID <= 0 {
 		slog.Debug("handleChannelFocus: invalid channel_id", "user_id", c.userID, "err", err)
@@ -116,10 +114,8 @@ func (h *Hub) handleChannelFocus(ctx context.Context, c *Client, payload json.Ra
 			c.sendMsg(buildErrorMsg(ErrCodeForbidden, "not a participant in this DM"))
 			return
 		}
-	} else {
-		if !h.requireChannelPerm(c, chID, permissions.ReadMessages, "READ_MESSAGES") {
-			return
-		}
+	} else if !h.requireChannelPerm(c, chID, permissions.ReadMessages, "READ_MESSAGES") {
+		return
 	}
 
 	c.mu.Lock()
