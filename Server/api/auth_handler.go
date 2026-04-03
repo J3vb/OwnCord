@@ -75,7 +75,7 @@ func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, t
 			Post("/register", handleRegister(database))
 
 		r.With(RateLimitMiddleware(loginLimiter, loginRateLimitPerMinute, time.Minute, trustedProxies)).
-			Post("/login", handleLogin(database, limiter, partialStore, trustedProxies, totpKey))
+			Post("/login", handleLogin(database, limiter, partialStore, trustedProxies))
 
 		r.With(RateLimitMiddleware(limiter, verifyTOTPRateLimitPerMinute, time.Minute, trustedProxies)).
 			Post("/verify-totp", handleVerifyTOTP(database, partialStore, limiter, usedTOTPCodes, totpKey))
@@ -251,7 +251,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 }
 
 // handleLogin processes POST /api/v1/auth/login.
-func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.PartialAuthStore, trustedProxies []string, totpKey []byte) http.HandlerFunc {
+func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.PartialAuthStore, trustedProxies []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req loginRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

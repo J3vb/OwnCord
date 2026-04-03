@@ -11,6 +11,7 @@
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
+import { isSafeUrl } from "./message-list/attachments";
 
 export interface DmConversation {
   readonly userId: number;
@@ -59,7 +60,7 @@ function renderDmItem(
   const avatar = createElement("div", { class: "dm-avatar" });
   avatar.style.background = avatarBg;
 
-  if (convo.avatar !== null) {
+  if (convo.avatar !== null && isSafeUrl(convo.avatar)) {
     const img = createElement("img", {
       src: convo.avatar,
       alt: convo.username,

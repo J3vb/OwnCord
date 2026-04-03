@@ -22,6 +22,9 @@ func TestAdminAPI_CheckUpdate_OK(t *testing.T) {
 				{"name": "chatserver.exe", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver.exe"},
 				{"name": "chatserver-linux-amd64.tar.gz", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver-linux-amd64.tar.gz"},
 				{"name": "checksums.sha256", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/checksums.sha256"},
+				{"name": "chatserver.exe.sig", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver.exe.sig"},
+				{"name": "server-update-manifest.json", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/server-update-manifest.json"},
+				{"name": "server-update-manifest.json.sig", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/server-update-manifest.json.sig"},
 			},
 		})
 	}))
@@ -46,6 +49,45 @@ func TestAdminAPI_CheckUpdate_OK(t *testing.T) {
 	}
 	if info.Latest != "v2.0.0" {
 		t.Errorf("latest = %q, want v2.0.0", info.Latest)
+	}
+	if !info.RequiredAssetsPresent {
+		t.Error("expected required_assets_present = true")
+	}
+}
+
+func TestAdminAPI_CheckUpdate_IncompleteReleaseNotInstallable(t *testing.T) {
+	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tag_name": "v2.0.0",
+			"body":     "Missing manifest",
+			"html_url": "https://github.com/J3vb/OwnCord/releases/tag/v2.0.0",
+			"assets": []map[string]any{
+				{"name": "chatserver.exe", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver.exe"},
+				{"name": "checksums.sha256", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/checksums.sha256"},
+			},
+		})
+	}))
+	defer mockGH.Close()
+
+	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	u.SetBaseURL(mockGH.URL)
+
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil)
+	token := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodGet, "/updates", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	var info updater.UpdateInfo
+	_ = json.Unmarshal(w.Body.Bytes(), &info)
+	if info.UpdateAvailable {
+		t.Error("expected update_available = false for incomplete release")
+	}
+	if info.RequiredAssetsPresent {
+		t.Error("expected required_assets_present = false for incomplete release")
 	}
 }
 
@@ -198,7 +240,7 @@ func TestAdminAPI_ApplyUpdate_CheckFails(t *testing.T) {
 }
 
 // TestAdminAPI_ApplyUpdate_MissingAssets verifies that 502 is returned when the
-// release has no download URL or checksum URL.
+// release has no download URL, checksum URL, or detached signature URL.
 func TestAdminAPI_ApplyUpdate_MissingAssets(t *testing.T) {
 	// Return a newer version but with no assets (empty download/checksum URLs).
 	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -272,6 +314,18 @@ func TestAdminAPI_ApplyUpdate_DownloadFails(t *testing.T) {
 				{
 					"name":                 "checksums.sha256",
 					"browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/checksums.sha256",
+				},
+				{
+					"name":                 "chatserver.exe.sig",
+					"browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver.exe.sig",
+				},
+				{
+					"name":                 "server-update-manifest.json",
+					"browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/server-update-manifest.json",
+				},
+				{
+					"name":                 "server-update-manifest.json.sig",
+					"browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/server-update-manifest.json.sig",
 				},
 			},
 		})

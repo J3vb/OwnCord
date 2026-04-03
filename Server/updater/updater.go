@@ -4,9 +4,12 @@ package updater
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	_ "embed"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -14,10 +17,13 @@ import (
 	"net/http"
 	neturl "net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
+
+	"aead.dev/minisign"
 
 	"github.com/owncord/server/syncutil"
 
@@ -25,25 +31,47 @@ import (
 )
 
 const (
-	defaultBaseURL = "https://api.github.com"
-	cacheTTL       = 1 * time.Hour
-	errorCacheTTL  = 5 * time.Minute
-	checksumAsset  = "checksums.sha256"
+	defaultBaseURL   = "https://api.github.com"
+	cacheTTL         = 1 * time.Hour
+	errorCacheTTL    = 5 * time.Minute
+	checksumAsset    = "checksums.sha256"
+	signatureAsset   = windowsServerBinary + ".sig"
+	manifestAsset    = "server-update-manifest.json"
+	manifestSigAsset = manifestAsset + ".sig"
 
 	windowsServerBinary = "chatserver.exe"
 	linuxServerArchive  = "chatserver-linux-amd64.tar.gz"
 )
 
+// serverUpdatePublicKeyText is the pinned public key for server update
+// signatures. Keep this file in sync with the SERVER_UPDATE_SIGNING_* CI
+// secrets when rotating the server updater keypair.
+//
+//go:embed server_update_public_key.txt
+var serverUpdatePublicKeyText string
+
+var defaultServerSignaturePublicKey = strings.TrimSpace(serverUpdatePublicKeyText)
+
 // UpdateInfo holds the result of a version check.
 type UpdateInfo struct {
-	Current         string  `json:"current"`
-	Latest          string  `json:"latest"`
-	UpdateAvailable bool    `json:"update_available"`
-	ReleaseURL      string  `json:"release_url"`
-	DownloadURL     string  `json:"download_url"`
-	ChecksumURL     string  `json:"checksum_url"`
-	ReleaseNotes    string  `json:"release_notes"`
-	Assets          []Asset `json:"assets,omitempty"`
+	Current               string  `json:"current"`
+	Latest                string  `json:"latest"`
+	UpdateAvailable       bool    `json:"update_available"`
+	RequiredAssetsPresent bool    `json:"required_assets_present"`
+	ReleaseURL            string  `json:"release_url"`
+	DownloadURL           string  `json:"download_url"`
+	ChecksumURL           string  `json:"checksum_url"`
+	SignatureURL          string  `json:"signature_url"`
+	ManifestURL           string  `json:"manifest_url"`
+	ManifestSignatureURL  string  `json:"manifest_signature_url"`
+	ReleaseNotes          string  `json:"release_notes"`
+	Assets                []Asset `json:"assets,omitempty"`
+}
+
+type releaseManifest struct {
+	Version string `json:"version"`
+	Asset   string `json:"asset"`
+	SHA256  string `json:"sha256"`
 }
 
 // Asset is a simplified release asset with name and download URL.
@@ -86,6 +114,7 @@ type Updater struct {
 	errCacheExpiry time.Time
 	mu             syncutil.Mutex
 	httpClient     *http.Client
+	signingKeyText string
 }
 
 // NewUpdater creates an Updater for the given repository.
@@ -96,6 +125,7 @@ func NewUpdater(currentVersion, githubToken, repoOwner, repoName string) *Update
 		repoOwner:      repoOwner,
 		repoName:       repoName,
 		httpClient:     &http.Client{Timeout: 30 * time.Second},
+		signingKeyText: defaultServerSignaturePublicKey,
 	}
 }
 
@@ -192,7 +222,7 @@ func (u *Updater) fetchLatestRelease(ctx context.Context) (UpdateInfo, error) {
 	// semver.Compare returns -1, 0, or +1. Update available when current < latest.
 	updateAvailable := semver.Compare(currentV, latestV) < 0
 
-	var downloadURL, checksumURL string
+	var downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL string
 	assets := make([]Asset, 0, len(release.Assets))
 	wantBinary := serverDownloadAssetName(runtime.GOOS)
 	for _, asset := range release.Assets {
@@ -200,23 +230,40 @@ func (u *Updater) fetchLatestRelease(ctx context.Context) (UpdateInfo, error) {
 			Name:        asset.Name,
 			DownloadURL: asset.BrowserDownloadURL,
 		})
-		if wantBinary != "" && strings.EqualFold(asset.Name, wantBinary) {
+		switch {
+		case wantBinary != "" && strings.EqualFold(asset.Name, wantBinary):
 			downloadURL = asset.BrowserDownloadURL
-		} else if strings.EqualFold(asset.Name, checksumAsset) {
+		case strings.EqualFold(asset.Name, checksumAsset):
 			checksumURL = asset.BrowserDownloadURL
+		case strings.EqualFold(asset.Name, signatureAsset):
+			signatureURL = asset.BrowserDownloadURL
+		case strings.EqualFold(asset.Name, manifestAsset):
+			manifestURL = asset.BrowserDownloadURL
+		case strings.EqualFold(asset.Name, manifestSigAsset):
+			manifestSignatureURL = asset.BrowserDownloadURL
 		}
 	}
+	requiredAssetsPresent := hasRequiredServerAssets(downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL)
+	updateAvailable = updateAvailable && requiredAssetsPresent
 
 	return UpdateInfo{
-		Current:         currentV,
-		Latest:          latestV,
-		UpdateAvailable: updateAvailable,
-		ReleaseURL:      release.HTMLURL,
-		DownloadURL:     downloadURL,
-		ChecksumURL:     checksumURL,
-		ReleaseNotes:    release.Body,
-		Assets:          assets,
+		Current:               currentV,
+		Latest:                latestV,
+		UpdateAvailable:       updateAvailable,
+		RequiredAssetsPresent: requiredAssetsPresent,
+		ReleaseURL:            release.HTMLURL,
+		DownloadURL:           downloadURL,
+		ChecksumURL:           checksumURL,
+		SignatureURL:          signatureURL,
+		ManifestURL:           manifestURL,
+		ManifestSignatureURL:  manifestSignatureURL,
+		ReleaseNotes:          release.Body,
+		Assets:                assets,
 	}, nil
+}
+
+func hasRequiredServerAssets(downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL string) bool {
+	return downloadURL != "" && checksumURL != "" && signatureURL != "" && manifestURL != "" && manifestSignatureURL != ""
 }
 
 // ValidateDownloadURL ensures the URL points to an expected GitHub release
@@ -230,36 +277,66 @@ func (u *Updater) ValidateDownloadURL(url string) error {
 }
 
 // DownloadAndVerify downloads the release artifact from downloadURL, fetches
-// the checksum file from checksumURL, and verifies the SHA256 hash matches.
-// On Windows the asset is a single executable; on Linux it is a tar.gz
-// archive containing a "chatserver" binary, which is extracted to destPath.
-// On checksum mismatch, partial files are removed.
-func (u *Updater) DownloadAndVerify(ctx context.Context, downloadURL, checksumURL, destPath string) error {
+// the checksum file, the detached binary signature, and a signed release
+// manifest, and verifies that the downloaded asset matches both the release
+// version and the pinned signing key. On Windows the asset is a single
+// executable; on Linux it is a tar.gz archive containing a "chatserver"
+// binary, which is extracted to destPath. On verification failure the
+// downloaded file is removed.
+func (u *Updater) DownloadAndVerify(ctx context.Context, latestVersion, downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL, destPath string) error {
 	if err := u.ValidateDownloadURL(downloadURL); err != nil {
 		return err
 	}
 	if err := u.ValidateDownloadURL(checksumURL); err != nil {
 		return fmt.Errorf("validating checksum URL: %w", err)
 	}
+	if err := u.ValidateDownloadURL(signatureURL); err != nil {
+		return fmt.Errorf("validating signature URL: %w", err)
+	}
+	if err := u.ValidateDownloadURL(manifestURL); err != nil {
+		return fmt.Errorf("validating manifest URL: %w", err)
+	}
+	if err := u.ValidateDownloadURL(manifestSignatureURL); err != nil {
+		return fmt.Errorf("validating manifest signature URL: %w", err)
+	}
 
 	checksumData, err := u.fetchBody(ctx, checksumURL)
 	if err != nil {
 		return fmt.Errorf("fetching checksums: %w", err)
 	}
-
-	goos := runtime.GOOS
-	names := checksumEntryNamesForGOOS(goos)
-	if len(names) == 0 {
-		return fmt.Errorf("server auto-update is not supported on %s", goos)
+	signatureData, err := u.fetchBody(ctx, signatureURL)
+	if err != nil {
+		return fmt.Errorf("fetching signature: %w", err)
 	}
-	expectedHash, err := u.parseChecksumFileAny(checksumData, names...)
+	manifestData, err := u.fetchBody(ctx, manifestURL)
+	if err != nil {
+		return fmt.Errorf("fetching release manifest: %w", err)
+	}
+	manifestSignatureData, err := u.fetchBody(ctx, manifestSignatureURL)
+	if err != nil {
+		return fmt.Errorf("fetching release manifest signature: %w", err)
+	}
+
+	assetFilename, err := assetFilenameFromURL(downloadURL)
+	if err != nil {
+		return fmt.Errorf("determining asset filename: %w", err)
+	}
+	manifest, err := u.VerifyReleaseManifest(manifestData, manifestSignatureData, latestVersion, assetFilename)
+	if err != nil {
+		return err
+	}
+	expectedHash, err := u.ParseChecksumFile(checksumData, assetFilename)
 	if err != nil {
 		return fmt.Errorf("parsing checksum file: %w", err)
 	}
+	if !strings.EqualFold(expectedHash, manifest.SHA256) {
+		return fmt.Errorf("release manifest checksum mismatch for %s", assetFilename)
+	}
 
+	goos := runtime.GOOS
 	switch goos {
 	case "windows":
-		return u.downloadWindowsBinaryAndVerify(ctx, downloadURL, destPath, expectedHash)
+		return u.downloadWindowsBinaryAndVerify(ctx, downloadURL, destPath, expectedHash, signatureData)
 	case "linux":
 		return u.downloadLinuxTarballAndVerify(ctx, downloadURL, destPath, expectedHash)
 	default:
@@ -267,11 +344,19 @@ func (u *Updater) DownloadAndVerify(ctx context.Context, downloadURL, checksumUR
 	}
 }
 
-func (u *Updater) downloadWindowsBinaryAndVerify(ctx context.Context, downloadURL, destPath, expectedHash string) error {
+func (u *Updater) downloadWindowsBinaryAndVerify(ctx context.Context, downloadURL, destPath, expectedHash string, signatureData []byte) error {
 	if err := u.downloadFile(ctx, downloadURL, destPath); err != nil {
 		return fmt.Errorf("downloading binary: %w", err)
 	}
+
+	if err := u.VerifySignature(destPath, signatureData); err != nil {
+		_ = os.Remove(destPath)
+		return err
+	}
+
+	// Verify hash.
 	if err := u.VerifyChecksum(destPath, expectedHash); err != nil {
+		// Remove the invalid file.
 		_ = os.Remove(destPath)
 		return err
 	}
@@ -402,6 +487,99 @@ func (u *Updater) parseChecksumFileAny(data []byte, names ...string) (string, er
 		}
 	}
 	return "", fmt.Errorf("no checksum line for any of: %s", strings.Join(names, ", "))
+}
+
+// VerifyReleaseManifest checks the detached signature on the release manifest
+// and ensures the manifest binds the downloaded asset to the expected version.
+func (u *Updater) VerifyReleaseManifest(manifestData, signatureText []byte, expectedVersion, expectedAsset string) (releaseManifest, error) {
+	if err := u.verifySignatureReader(bytes.NewReader(manifestData), signatureText, manifestAsset); err != nil {
+		return releaseManifest{}, fmt.Errorf("verifying release manifest signature: %w", err)
+	}
+
+	var manifest releaseManifest
+	if err := json.Unmarshal(manifestData, &manifest); err != nil {
+		return releaseManifest{}, fmt.Errorf("parsing release manifest: %w", err)
+	}
+	manifest.Version = ensureVPrefix(strings.TrimSpace(manifest.Version))
+	manifest.Asset = strings.TrimSpace(manifest.Asset)
+	manifest.SHA256 = strings.ToLower(strings.TrimSpace(manifest.SHA256))
+
+	if manifest.Version == "" || manifest.Asset == "" || manifest.SHA256 == "" {
+		return releaseManifest{}, fmt.Errorf("release manifest is missing required fields")
+	}
+	if manifest.Version != ensureVPrefix(expectedVersion) {
+		return releaseManifest{}, fmt.Errorf("release manifest version %q does not match release %q", manifest.Version, ensureVPrefix(expectedVersion))
+	}
+	if manifest.Asset != expectedAsset {
+		return releaseManifest{}, fmt.Errorf("release manifest asset %q does not match expected asset %q", manifest.Asset, expectedAsset)
+	}
+	if len(manifest.SHA256) != sha256.Size*2 {
+		return releaseManifest{}, fmt.Errorf("release manifest checksum for %s has invalid length", manifest.Asset)
+	}
+	if _, err := hex.DecodeString(manifest.SHA256); err != nil {
+		return releaseManifest{}, fmt.Errorf("release manifest checksum for %s is invalid: %w", manifest.Asset, err)
+	}
+
+	return manifest, nil
+}
+
+// VerifySignature checks whether the detached minisign signature matches the
+// file contents using the pinned server-update public key.
+func (u *Updater) VerifySignature(filePath string, signatureText []byte) error {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("opening file for signature verification: %w", err)
+	}
+	defer f.Close() //nolint:errcheck
+
+	return u.verifySignatureReader(f, signatureText, filepath.Base(filePath))
+}
+
+func (u *Updater) verifySignatureReader(reader io.Reader, signatureText []byte, subject string) error {
+	publicKey, err := u.serverSignaturePublicKey()
+	if err != nil {
+		return fmt.Errorf("loading update signing key: %w", err)
+	}
+
+	verifier := minisign.NewReader(reader)
+	if _, err := io.Copy(io.Discard, verifier); err != nil {
+		return fmt.Errorf("reading file for signature verification: %w", err)
+	}
+
+	normalizedSig := []byte(strings.TrimSpace(string(signatureText)))
+	var parsedSig minisign.Signature
+	if err := parsedSig.UnmarshalText(normalizedSig); err != nil {
+		return fmt.Errorf("invalid update signature format: %w", err)
+	}
+
+	if !verifier.Verify(publicKey, normalizedSig) {
+		return fmt.Errorf("signature verification failed for %s", subject)
+	}
+	return nil
+}
+
+func (u *Updater) serverSignaturePublicKey() (minisign.PublicKey, error) {
+	decoded, err := base64.StdEncoding.DecodeString(u.signingKeyText)
+	if err != nil {
+		return minisign.PublicKey{}, fmt.Errorf("decoding base64 public key: %w", err)
+	}
+	var publicKey minisign.PublicKey
+	if err := publicKey.UnmarshalText(decoded); err != nil {
+		return minisign.PublicKey{}, fmt.Errorf("parsing minisign public key: %w", err)
+	}
+	return publicKey, nil
+}
+
+func assetFilenameFromURL(rawURL string) (string, error) {
+	parsed, err := neturl.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	filename := path.Base(parsed.Path)
+	if filename == "." || filename == "/" || filename == "" {
+		return "", fmt.Errorf("missing asset filename in URL %q", rawURL)
+	}
+	return filename, nil
 }
 
 // VerifyChecksum computes the SHA256 hash of the file at filePath and

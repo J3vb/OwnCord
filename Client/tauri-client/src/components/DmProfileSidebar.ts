@@ -13,6 +13,7 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
+import { isSafeUrl } from "./message-list/attachments";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -114,7 +115,7 @@ export function createDmProfileSidebar(
     wrapper.style.position = "relative";
     wrapper.style.flexShrink = "0";
 
-    if (user.avatar !== null && user.avatar.length > 0) {
+    if (user.avatar !== null && user.avatar.length > 0 && isSafeUrl(user.avatar)) {
       wrapper.style.background = "transparent";
       const img = createElement("img", {
         src: user.avatar,

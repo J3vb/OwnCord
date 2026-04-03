@@ -121,6 +121,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: Client/tauri-client/package-lock.json
+
       - name: Download Windows client assets
         uses: actions/download-artifact@v4
         with:
@@ -139,9 +147,42 @@ jobs:
           name: server-linux
           path: linux
 
+      - name: Extract version from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
       - name: Generate SHA256 checksums
         run: |
           find windows linux -type f -exec sha256sum {} \; > checksums.sha256
+
+      - name: Generate server update manifest
+        shell: bash
+        run: |
+          SERVER_HASH=$(sha256sum windows/chatserver.exe | awk '{print $1}')
+          printf '{"version":"v%s","asset":"chatserver.exe","sha256":"%s"}' "$VERSION" "$SERVER_HASH" > windows/server-update-manifest.json
+
+      - name: Sign server update assets
+        working-directory: Client/tauri-client
+        shell: bash
+        env:
+          SERVER_UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.SERVER_UPDATE_SIGNING_PRIVATE_KEY }}
+          SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          KEY_PATH=$(mktemp)
+          printf '%s' "$SERVER_UPDATE_SIGNING_PRIVATE_KEY" > "$KEY_PATH"
+          trap 'rm -f "$KEY_PATH"' EXIT
+          npm ci
+          npx tauri signer sign -k "$KEY_PATH" -p "$SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD" ../../windows/chatserver.exe
+          npx tauri signer sign -k "$KEY_PATH" -p "$SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD" ../../windows/server-update-manifest.json
+
+      - name: Install root dependencies (changelogen)
+        run: npm ci
+
+      - name: Generate changelog
+        shell: bash
+        run: npx changelogen --output CHANGELOG.md
 
       - name: Create GitHub Release
         env:
@@ -150,5 +191,5 @@ jobs:
           mapfile -t assets < <(find windows linux -type f)
           assets+=(checksums.sha256)
           gh release create "${{ github.ref_name }}" \
-            --generate-notes \
+            --notes-file CHANGELOG.md \
             "${assets[@]}"

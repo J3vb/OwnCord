@@ -83,7 +83,7 @@ The Tauri desktop client implements the following security measures:
 
 ## Known Limitations
 
-- No code signing yet -- binaries are verified via SHA256 checksums only
+- Server auto-updates depend on a dedicated pinned minisign/Ed25519 server release key in [Server/updater/server_update_public_key.txt](Server/updater/server_update_public_key.txt) and a signed release manifest that binds the shipped binary hash to the release version; Windows Authenticode/SmartScreen code signing is still separate work
 - The Tenor API key is hardcoded (Google's public anonymous key) — consider build-time injection for production
 - CSP `connect-src` allows `https:` to any host (necessary for self-hosted server URLs not known at build time)
 

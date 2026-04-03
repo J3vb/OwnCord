@@ -80,9 +80,9 @@ func (h *Hub) NewLiveKitWebhookHandler(apiKey, apiSecret string) http.HandlerFun
 
 		switch event.Event {
 		case "participant_joined":
-			h.handleWebhookParticipantJoined(&event)
+			h.handleWebhookParticipantJoined(r.Context(), &event)
 		case "participant_left":
-			h.handleWebhookParticipantLeft(&event)
+			h.handleWebhookParticipantLeft(r.Context(), &event)
 		default:
 			slog.Debug("livekit webhook: unhandled event", "event", event.Event)
 		}
@@ -122,7 +122,7 @@ func parseRoomChannelID(roomName string) (int64, error) {
 	return strconv.ParseInt(roomName[8:], 10, 64)
 }
 
-func (h *Hub) handleWebhookParticipantJoined(event *livekit.WebhookEvent) {
+func (h *Hub) handleWebhookParticipantJoined(_ context.Context, event *livekit.WebhookEvent) {
 	p := event.GetParticipant()
 	room := event.GetRoom()
 	if p == nil || room == nil {
@@ -157,7 +157,7 @@ func (h *Hub) handleWebhookParticipantJoined(event *livekit.WebhookEvent) {
 			slog.Warn("livekit webhook: rogue participant_joined — no matching voice state, removing",
 				"user_id", userID, "channel_id", channelID)
 			if h.livekit != nil {
-				if rmErr := h.livekit.RemoveParticipant(channelID, userID, joinToken); rmErr != nil {
+				if rmErr := h.livekit.RemoveParticipant(channelID, userID, joinToken); rmErr != nil { //nolint:contextcheck // RemoveParticipant manages its own timeout context
 					slog.Error("livekit webhook: failed to remove rogue participant",
 						"error", rmErr, "user_id", userID, "channel_id", channelID)
 				}
@@ -170,7 +170,7 @@ func (h *Hub) handleWebhookParticipantJoined(event *livekit.WebhookEvent) {
 				"user_id", userID, "channel_id", channelID,
 				"expected_token", state.JoinedAt, "got_token", joinToken)
 			if h.livekit != nil {
-				if rmErr := h.livekit.RemoveParticipant(channelID, userID, joinToken); rmErr != nil {
+				if rmErr := h.livekit.RemoveParticipant(channelID, userID, joinToken); rmErr != nil { //nolint:contextcheck // RemoveParticipant manages its own timeout context
 					slog.Error("livekit webhook: failed to remove stale participant",
 						"error", rmErr, "user_id", userID, "channel_id", channelID)
 				}
@@ -180,7 +180,7 @@ func (h *Hub) handleWebhookParticipantJoined(event *livekit.WebhookEvent) {
 	}
 }
 
-func (h *Hub) handleWebhookParticipantLeft(event *livekit.WebhookEvent) {
+func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.WebhookEvent) {
 	p := event.GetParticipant()
 	room := event.GetRoom()
 	if p == nil || room == nil {
@@ -220,7 +220,7 @@ func (h *Hub) handleWebhookParticipantLeft(event *livekit.WebhookEvent) {
 				c.clearVoiceState()
 
 				if h.db != nil {
-					if err := leaveVoiceChannelWithRetry(context.Background(), h, userID, channelID, joinToken); err != nil {
+					if err := leaveVoiceChannelWithRetry(ctx, h, userID, channelID, joinToken); err != nil {
 						slog.Error("livekit webhook: LeaveVoiceChannel exhausted retries",
 							"error", err, "user_id", userID, "channel_id", channelID)
 					}

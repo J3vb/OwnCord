@@ -6,9 +6,11 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +20,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"aead.dev/minisign"
 )
 
 // ghRelease mirrors the GitHub release API response shape.
@@ -43,6 +47,9 @@ func newTestRelease(tag, body, htmlURL string, assetDownloadBase string) ghRelea
 			{Name: "chatserver.exe", BrowserDownloadURL: assetDownloadBase + "/chatserver.exe"},
 			{Name: "chatserver-linux-amd64.tar.gz", BrowserDownloadURL: assetDownloadBase + "/chatserver-linux-amd64.tar.gz"},
 			{Name: "checksums.sha256", BrowserDownloadURL: assetDownloadBase + "/checksums.sha256"},
+			{Name: "chatserver.exe.sig", BrowserDownloadURL: assetDownloadBase + "/chatserver.exe.sig"},
+			{Name: "server-update-manifest.json", BrowserDownloadURL: assetDownloadBase + "/server-update-manifest.json"},
+			{Name: "server-update-manifest.json.sig", BrowserDownloadURL: assetDownloadBase + "/server-update-manifest.json.sig"},
 		},
 	}
 }
@@ -68,6 +75,30 @@ func newTestUpdater(baseURL, currentVersion string) *Updater {
 	u := NewUpdater(currentVersion, "", "J3vb", "OwnCord")
 	u.baseURL = baseURL
 	return u
+}
+
+func newSignedTestUpdater(t *testing.T, baseURL, currentVersion string) (*Updater, minisign.PrivateKey) {
+	t.Helper()
+	publicKey, privateKey, err := minisign.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	publicKeyText, err := publicKey.MarshalText()
+	if err != nil {
+		t.Fatalf("MarshalText(public key): %v", err)
+	}
+	u := newTestUpdater(baseURL, currentVersion)
+	u.signingKeyText = base64.StdEncoding.EncodeToString(publicKeyText)
+	return u, privateKey
+}
+
+func signTestAsset(t *testing.T, privateKey minisign.PrivateKey, content []byte) []byte {
+	t.Helper()
+	reader := minisign.NewReader(bytes.NewReader(content))
+	if _, err := io.Copy(io.Discard, reader); err != nil {
+		t.Fatalf("signTestAsset io.Copy: %v", err)
+	}
+	return reader.SignWithComments(privateKey, "timestamp:1712016000\tfile:chatserver.exe", "untrusted comment: owncord test")
 }
 
 func TestCheckForUpdate_NewerVersionAvailable(t *testing.T) {
@@ -100,6 +131,44 @@ func TestCheckForUpdate_NewerVersionAvailable(t *testing.T) {
 		}
 	} else if info.DownloadURL != "" {
 		t.Error("expected empty DownloadURL on unsupported GOOS")
+	}
+	if info.SignatureURL == "" {
+		t.Error("expected non-empty SignatureURL")
+	}
+	if info.ManifestURL == "" {
+		t.Error("expected non-empty ManifestURL")
+	}
+	if info.ManifestSignatureURL == "" {
+		t.Error("expected non-empty ManifestSignatureURL")
+	}
+	if !info.RequiredAssetsPresent {
+		t.Error("expected RequiredAssetsPresent=true")
+	}
+}
+
+func TestCheckForUpdate_MissingRequiredAssetsSuppressesUpdate(t *testing.T) {
+	release := ghRelease{
+		TagName: "v1.2.0",
+		Body:    "Broken release",
+		HTMLURL: "https://github.com/J3vb/OwnCord/releases/tag/v1.2.0",
+		Assets: []ghAsset{
+			{Name: "chatserver.exe", BrowserDownloadURL: "https://github.com/J3vb/OwnCord/releases/download/v1.2.0/chatserver.exe"},
+			{Name: "checksums.sha256", BrowserDownloadURL: "https://github.com/J3vb/OwnCord/releases/download/v1.2.0/checksums.sha256"},
+		},
+	}
+	srv := newTestServer(t, release, http.StatusOK)
+	defer srv.Close()
+
+	u := newTestUpdater(srv.URL, "1.0.0")
+	info, err := u.CheckForUpdate(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if info.UpdateAvailable {
+		t.Fatal("expected UpdateAvailable=false for incomplete release")
+	}
+	if info.RequiredAssetsPresent {
+		t.Fatal("expected RequiredAssetsPresent=false for incomplete release")
 	}
 }
 
@@ -427,6 +496,46 @@ func TestExtractChatserverFromTarGz(t *testing.T) {
 	}
 }
 
+func TestAssetFilenameFromURL(t *testing.T) {
+	got, err := assetFilenameFromURL("https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe")
+	if err != nil {
+		t.Fatalf("assetFilenameFromURL: %v", err)
+	}
+	if got != "chatserver.exe" {
+		t.Errorf("assetFilenameFromURL = %q, want chatserver.exe", got)
+	}
+}
+
+func TestDefaultServerSignaturePublicKey_DiffersFromTauriUpdaterKey(t *testing.T) {
+	tauriConfigPath := filepath.Clean(filepath.Join("..", "..", "Client", "tauri-client", "src-tauri", "tauri.conf.json"))
+	raw, err := os.ReadFile(tauriConfigPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s): %v", tauriConfigPath, err)
+	}
+
+	var cfg struct {
+		Plugins struct {
+			Updater struct {
+				PubKey string `json:"pubkey"`
+			} `json:"updater"`
+		} `json:"plugins"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatalf("Unmarshal tauri.conf.json: %v", err)
+	}
+
+	if cfg.Plugins.Updater.PubKey == defaultServerSignaturePublicKey {
+		t.Fatalf("server updater signing key must differ from tauri.conf.json updater pubkey")
+	}
+}
+
+func TestDefaultServerSignaturePublicKey_Parseable(t *testing.T) {
+	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	if _, err := u.serverSignaturePublicKey(); err != nil {
+		t.Fatalf("serverSignaturePublicKey: %v", err)
+	}
+}
+
 // ─── SetBaseURL ──────────────────────────────────────────────────────────────
 
 func TestSetBaseURL(t *testing.T) {
@@ -554,6 +663,10 @@ func testDownloadAndVerifySuccessWindows(t *testing.T) {
 	content := []byte("real binary content for verification")
 	hash := sha256.Sum256(content)
 	checksumHex := hex.EncodeToString(hash[:])
+	u, privateKey := newSignedTestUpdater(t, "", "1.0.0")
+	signature := signTestAsset(t, privateKey, content)
+	manifest := []byte(`{"version":"v1.0.0","asset":"chatserver.exe","sha256":"` + checksumHex + `"}`)
+	manifestSignature := signTestAsset(t, privateKey, manifest)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/download/chatserver.exe", func(w http.ResponseWriter, r *http.Request) {
@@ -562,24 +675,35 @@ func testDownloadAndVerifySuccessWindows(t *testing.T) {
 	mux.HandleFunc("/download/checksums.sha256", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintf(w, "%s  chatserver.exe\n", checksumHex)
 	})
+	mux.HandleFunc("/download/chatserver.exe.sig", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(append(signature, []byte("\r\n")...))
+	})
+	mux.HandleFunc("/download/server-update-manifest.json", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(manifest)
+	})
+	mux.HandleFunc("/download/server-update-manifest.json.sig", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(manifestSignature)
+	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
 	tmpDir := t.TempDir()
-	dest := filepath.Join(tmpDir, "chatserver.exe")
+	dest := filepath.Join(tmpDir, "chatserver.exe.new")
 
-	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
 	u.baseURL = srv.URL
 
 	downloadURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe"
 	checksumURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/checksums.sha256"
+	signatureURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe.sig"
+	manifestURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json"
+	manifestSignatureURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json.sig"
 
 	// Override HTTP client to route GitHub URLs to our test server.
 	u.httpClient = &http.Client{
 		Transport: &rewriteTransport{srv.URL},
 	}
 
-	err := u.DownloadAndVerify(context.Background(), downloadURL, checksumURL, dest)
+	err := u.DownloadAndVerify(context.Background(), "v1.0.0", downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL, dest)
 	if err != nil {
 		t.Fatalf("DownloadAndVerify: %v", err)
 	}
@@ -595,6 +719,9 @@ func testDownloadAndVerifySuccessLinux(t *testing.T) {
 	tgz := mustBuildChatserverTarGz(t, inner)
 	hash := sha256.Sum256(tgz)
 	checksumHex := hex.EncodeToString(hash[:])
+	u, privateKey := newSignedTestUpdater(t, "", "1.0.0")
+	manifest := []byte(`{"version":"v1.0.0","asset":"chatserver-linux-amd64.tar.gz","sha256":"` + checksumHex + `"}`)
+	manifestSignature := signTestAsset(t, privateKey, manifest)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/download/chatserver-linux-amd64.tar.gz", func(w http.ResponseWriter, r *http.Request) {
@@ -603,23 +730,36 @@ func testDownloadAndVerifySuccessLinux(t *testing.T) {
 	mux.HandleFunc("/download/checksums.sha256", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintf(w, "%s  linux/chatserver-linux-amd64.tar.gz\n", checksumHex)
 	})
+	mux.HandleFunc("/download/chatserver-linux-amd64.tar.gz.sig", func(w http.ResponseWriter, r *http.Request) {
+		// Linux tar.gz does not have a detached binary sig; return empty to satisfy URL validation.
+		// The signing flow only applies the manifest; the binary sig slot is unused on Linux.
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/download/server-update-manifest.json", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(manifest)
+	})
+	mux.HandleFunc("/download/server-update-manifest.json.sig", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(manifestSignature)
+	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
 	tmpDir := t.TempDir()
 	dest := filepath.Join(tmpDir, "chatserver")
 
-	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
 	u.baseURL = srv.URL
 
 	downloadURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver-linux-amd64.tar.gz"
 	checksumURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/checksums.sha256"
+	signatureURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver-linux-amd64.tar.gz.sig"
+	manifestURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json"
+	manifestSignatureURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json.sig"
 
 	u.httpClient = &http.Client{
 		Transport: &rewriteTransport{srv.URL},
 	}
 
-	err := u.DownloadAndVerify(context.Background(), downloadURL, checksumURL, dest)
+	err := u.DownloadAndVerify(context.Background(), "v1.0.0", downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL, dest)
 	if err != nil {
 		t.Fatalf("DownloadAndVerify: %v", err)
 	}
@@ -661,7 +801,7 @@ func mustBuildChatserverTarGz(t *testing.T, inner []byte) []byte {
 
 func TestDownloadAndVerify_InvalidDownloadURL(t *testing.T) {
 	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
-	err := u.DownloadAndVerify(context.Background(), "https://evil.com/file", "https://evil.com/sum", "/tmp/out")
+	err := u.DownloadAndVerify(context.Background(), "v1.0.0", "https://evil.com/file", "https://evil.com/sum", "https://evil.com/file.sig", "https://evil.com/manifest.json", "https://evil.com/manifest.json.sig", "/tmp/out")
 	if err == nil {
 		t.Error("DownloadAndVerify should reject invalid download URL")
 	}
@@ -669,8 +809,8 @@ func TestDownloadAndVerify_InvalidDownloadURL(t *testing.T) {
 
 func TestDownloadAndVerify_InvalidChecksumURL(t *testing.T) {
 	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
-	downloadURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/" + serverDownloadAssetName(runtime.GOOS)
-	err := u.DownloadAndVerify(context.Background(), downloadURL, "https://evil.com/sum", "/tmp/out")
+	downloadURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe"
+	err := u.DownloadAndVerify(context.Background(), "v1.0.0", downloadURL, "https://evil.com/sum", "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe.sig", "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json", "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json.sig", "/tmp/out")
 	if err == nil {
 		t.Error("DownloadAndVerify should reject invalid checksum URL")
 	}
@@ -690,6 +830,12 @@ func TestDownloadAndVerify_ChecksumMismatch(t *testing.T) {
 func testDownloadAndVerifyChecksumMismatchWindows(t *testing.T) {
 	content := []byte("binary content")
 	wrongChecksum := "0000000000000000000000000000000000000000000000000000000000000000"
+	actualHash := sha256.Sum256(content)
+	actualChecksum := hex.EncodeToString(actualHash[:])
+	u, privateKey := newSignedTestUpdater(t, "", "1.0.0")
+	signature := signTestAsset(t, privateKey, content)
+	manifest := []byte(`{"version":"v1.0.0","asset":"chatserver.exe","sha256":"` + actualChecksum + `"}`)
+	manifestSignature := signTestAsset(t, privateKey, manifest)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/download/chatserver.exe", func(w http.ResponseWriter, r *http.Request) {
@@ -698,19 +844,30 @@ func testDownloadAndVerifyChecksumMismatchWindows(t *testing.T) {
 	mux.HandleFunc("/download/checksums.sha256", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintf(w, "%s  chatserver.exe\n", wrongChecksum)
 	})
+	mux.HandleFunc("/download/chatserver.exe.sig", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(signature)
+	})
+	mux.HandleFunc("/download/server-update-manifest.json", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(manifest)
+	})
+	mux.HandleFunc("/download/server-update-manifest.json.sig", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(manifestSignature)
+	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
 	tmpDir := t.TempDir()
 	dest := filepath.Join(tmpDir, "chatserver.exe")
 
-	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
 	u.httpClient = &http.Client{Transport: &rewriteTransport{srv.URL}}
 
 	downloadURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe"
 	checksumURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/checksums.sha256"
+	signatureURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe.sig"
+	manifestURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json"
+	manifestSignatureURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json.sig"
 
-	err := u.DownloadAndVerify(context.Background(), downloadURL, checksumURL, dest)
+	err := u.DownloadAndVerify(context.Background(), "v1.0.0", downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL, dest)
 	if err == nil {
 		t.Error("DownloadAndVerify should fail on checksum mismatch")
 	}
@@ -724,6 +881,11 @@ func testDownloadAndVerifyChecksumMismatchWindows(t *testing.T) {
 func testDownloadAndVerifyChecksumMismatchLinux(t *testing.T) {
 	tgz := mustBuildChatserverTarGz(t, []byte("x"))
 	wrongChecksum := "0000000000000000000000000000000000000000000000000000000000000000"
+	actualHash := sha256.Sum256(tgz)
+	actualChecksum := hex.EncodeToString(actualHash[:])
+	u, privateKey := newSignedTestUpdater(t, "", "1.0.0")
+	manifest := []byte(`{"version":"v1.0.0","asset":"chatserver-linux-amd64.tar.gz","sha256":"` + actualChecksum + `"}`)
+	manifestSignature := signTestAsset(t, privateKey, manifest)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/download/chatserver-linux-amd64.tar.gz", func(w http.ResponseWriter, r *http.Request) {
@@ -732,25 +894,228 @@ func testDownloadAndVerifyChecksumMismatchLinux(t *testing.T) {
 	mux.HandleFunc("/download/checksums.sha256", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintf(w, "%s  linux/chatserver-linux-amd64.tar.gz\n", wrongChecksum)
 	})
+	mux.HandleFunc("/download/chatserver-linux-amd64.tar.gz.sig", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/download/server-update-manifest.json", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(manifest)
+	})
+	mux.HandleFunc("/download/server-update-manifest.json.sig", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(manifestSignature)
+	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
 	tmpDir := t.TempDir()
 	dest := filepath.Join(tmpDir, "chatserver")
 
-	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
 	u.httpClient = &http.Client{Transport: &rewriteTransport{srv.URL}}
 
 	downloadURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver-linux-amd64.tar.gz"
 	checksumURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/checksums.sha256"
+	signatureURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver-linux-amd64.tar.gz.sig"
+	manifestURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json"
+	manifestSignatureURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json.sig"
 
-	err := u.DownloadAndVerify(context.Background(), downloadURL, checksumURL, dest)
+	err := u.DownloadAndVerify(context.Background(), "v1.0.0", downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL, dest)
 	if err == nil {
 		t.Error("DownloadAndVerify should fail on checksum mismatch")
 	}
 
 	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
 		t.Error("extracted file should not exist after checksum mismatch")
+	}
+}
+
+func TestDownloadAndVerify_MissingSignature(t *testing.T) {
+	content := []byte("real binary content for verification")
+	hash := sha256.Sum256(content)
+	checksumHex := hex.EncodeToString(hash[:])
+	u, privateKey := newSignedTestUpdater(t, "", "1.0.0")
+	manifest := []byte(`{"version":"v1.0.0","asset":"chatserver.exe","sha256":"` + checksumHex + `"}`)
+	manifestSignature := signTestAsset(t, privateKey, manifest)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/download/chatserver.exe", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(content)
+	})
+	mux.HandleFunc("/download/checksums.sha256", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, "%s  chatserver.exe\n", checksumHex)
+	})
+	mux.HandleFunc("/download/server-update-manifest.json", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(manifest)
+	})
+	mux.HandleFunc("/download/server-update-manifest.json.sig", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(manifestSignature)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	dest := filepath.Join(tmpDir, "chatserver.exe")
+
+	u.httpClient = &http.Client{Transport: &rewriteTransport{srv.URL}}
+
+	err := u.DownloadAndVerify(
+		context.Background(),
+		"v1.0.0",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/checksums.sha256",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe.sig",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json.sig",
+		dest,
+	)
+	if err == nil {
+		t.Fatal("DownloadAndVerify should fail when signature asset is missing")
+	}
+}
+
+func TestDownloadAndVerify_InvalidSignature(t *testing.T) {
+	content := []byte("real binary content for verification")
+	otherContent := []byte("tampered bytes")
+	hash := sha256.Sum256(content)
+	checksumHex := hex.EncodeToString(hash[:])
+	u, privateKey := newSignedTestUpdater(t, "", "1.0.0")
+	signature := signTestAsset(t, privateKey, otherContent)
+	manifest := []byte(`{"version":"v1.0.0","asset":"chatserver.exe","sha256":"` + checksumHex + `"}`)
+	manifestSignature := signTestAsset(t, privateKey, manifest)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/download/chatserver.exe", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(content)
+	})
+	mux.HandleFunc("/download/checksums.sha256", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, "%s  chatserver.exe\n", checksumHex)
+	})
+	mux.HandleFunc("/download/chatserver.exe.sig", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(signature)
+	})
+	mux.HandleFunc("/download/server-update-manifest.json", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(manifest)
+	})
+	mux.HandleFunc("/download/server-update-manifest.json.sig", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(manifestSignature)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	dest := filepath.Join(tmpDir, "chatserver.exe")
+
+	u.httpClient = &http.Client{Transport: &rewriteTransport{srv.URL}}
+	err := u.DownloadAndVerify(
+		context.Background(),
+		"v1.0.0",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/checksums.sha256",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe.sig",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json.sig",
+		dest,
+	)
+	if err == nil {
+		t.Fatal("DownloadAndVerify should fail on invalid signature")
+	}
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Error("file should be removed after signature verification failure")
+	}
+}
+
+func TestDownloadAndVerify_MalformedSignature(t *testing.T) {
+	content := []byte("real binary content for verification")
+	hash := sha256.Sum256(content)
+	checksumHex := hex.EncodeToString(hash[:])
+	u, privateKey := newSignedTestUpdater(t, "", "1.0.0")
+	manifest := []byte(`{"version":"v1.0.0","asset":"chatserver.exe","sha256":"` + checksumHex + `"}`)
+	manifestSignature := signTestAsset(t, privateKey, manifest)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/download/chatserver.exe", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(content)
+	})
+	mux.HandleFunc("/download/checksums.sha256", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, "%s  chatserver.exe\n", checksumHex)
+	})
+	mux.HandleFunc("/download/chatserver.exe.sig", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("not-a-valid-signature"))
+	})
+	mux.HandleFunc("/download/server-update-manifest.json", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(manifest)
+	})
+	mux.HandleFunc("/download/server-update-manifest.json.sig", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(manifestSignature)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	dest := filepath.Join(tmpDir, "chatserver.exe")
+
+	u.httpClient = &http.Client{Transport: &rewriteTransport{srv.URL}}
+	err := u.DownloadAndVerify(
+		context.Background(),
+		"v1.0.0",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/checksums.sha256",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe.sig",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json.sig",
+		dest,
+	)
+	if err == nil {
+		t.Fatal("DownloadAndVerify should fail on malformed signature")
+	}
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Error("file should be removed after malformed signature")
+	}
+}
+
+func TestDownloadAndVerify_ManifestVersionMismatch(t *testing.T) {
+	content := []byte("real binary content for verification")
+	hash := sha256.Sum256(content)
+	checksumHex := hex.EncodeToString(hash[:])
+	u, privateKey := newSignedTestUpdater(t, "", "1.0.0")
+	signature := signTestAsset(t, privateKey, content)
+	manifest := []byte(`{"version":"v0.9.0","asset":"chatserver.exe","sha256":"` + checksumHex + `"}`)
+	manifestSignature := signTestAsset(t, privateKey, manifest)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/download/chatserver.exe", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(content)
+	})
+	mux.HandleFunc("/download/checksums.sha256", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, "%s  chatserver.exe\n", checksumHex)
+	})
+	mux.HandleFunc("/download/chatserver.exe.sig", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(signature)
+	})
+	mux.HandleFunc("/download/server-update-manifest.json", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(manifest)
+	})
+	mux.HandleFunc("/download/server-update-manifest.json.sig", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(manifestSignature)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "chatserver.exe")
+	u.httpClient = &http.Client{Transport: &rewriteTransport{srv.URL}}
+	err := u.DownloadAndVerify(
+		context.Background(),
+		"v1.0.0",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/checksums.sha256",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe.sig",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json",
+		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json.sig",
+		dest,
+	)
+	if err == nil {
+		t.Fatal("DownloadAndVerify should fail on mismatched signed manifest version")
+	}
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Error("file should be removed after manifest verification failure")
 	}
 }
 

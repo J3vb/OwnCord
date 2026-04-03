@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/owncord/server/updater"
+	"golang.org/x/mod/semver"
 )
 
 // handleCheckUpdate returns the current update status.
@@ -31,7 +32,7 @@ func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 
 // handleApplyUpdate downloads and applies a server update.
 func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Handler {
-	//TODO: maybe disable this endpoint in future docker build type?
+	// TODO: maybe disable this endpoint in future docker build type?
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if u == nil {
 			writeErr(w, http.StatusServiceUnavailable, "UPDATE_UNAVAILABLE", "update checking is not configured")
@@ -46,10 +47,14 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 			return
 		}
 		if !info.UpdateAvailable {
+			if semver.Compare(info.Current, info.Latest) < 0 && !info.RequiredAssetsPresent {
+				writeErr(w, http.StatusBadGateway, "MISSING_ASSETS", "release is missing required assets")
+				return
+			}
 			writeErr(w, http.StatusConflict, "NO_UPDATE", "server is already up to date")
 			return
 		}
-		if info.DownloadURL == "" || info.ChecksumURL == "" {
+		if !info.RequiredAssetsPresent {
 			writeErr(w, http.StatusBadGateway, "MISSING_ASSETS", "release is missing required assets")
 			return
 		}
@@ -73,7 +78,7 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 		defer cancel()
 
-		if err := u.DownloadAndVerify(ctx, info.DownloadURL, info.ChecksumURL, newPath); err != nil {
+		if err := u.DownloadAndVerify(ctx, info.Latest, info.DownloadURL, info.ChecksumURL, info.SignatureURL, info.ManifestURL, info.ManifestSignatureURL, newPath); err != nil {
 			slog.Error("update download/verify failed", "err", err)
 			writeErr(w, http.StatusBadGateway, "DOWNLOAD_FAILED", "download or verification failed — see server logs")
 			return

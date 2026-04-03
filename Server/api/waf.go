@@ -128,5 +128,5 @@ func handleWAFInterruption(w http.ResponseWriter, it *types.Interruption) {
 	)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(it.Status)
-	fmt.Fprintf(w, `{"error":"request blocked by security rules"}`)
+	_, _ = fmt.Fprintf(w, `{"error":"request blocked by security rules"}`)
 }
