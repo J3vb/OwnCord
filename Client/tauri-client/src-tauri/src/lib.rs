@@ -1,6 +1,5 @@
 mod commands;
 mod credentials;
-mod hotkeys;
 mod livekit_proxy;
 mod ptt;
 mod tray;

@@ -146,7 +146,6 @@ pub fn get_cert_fingerprint(
 pub fn open_devtools(_window: tauri::WebviewWindow) {
     #[cfg(feature = "devtools")]
     {
-        use tauri::Manager;
         _window.open_devtools();
     }
 }

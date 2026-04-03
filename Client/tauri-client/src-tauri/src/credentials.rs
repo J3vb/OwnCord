@@ -79,7 +79,7 @@ pub fn save_credential(host: String, username: String, token: String, password: 
     }
     let blob = payload.to_string().into_bytes();
 
-    let mut cred = CREDENTIALW {
+    let cred = CREDENTIALW {
         Flags: CRED_FLAGS(0),
         Type: CRED_TYPE_GENERIC,
         TargetName: PWSTR(target.as_ptr() as *mut u16),
@@ -95,7 +95,7 @@ pub fn save_credential(host: String, username: String, token: String, password: 
     };
 
     unsafe {
-        CredWriteW(&mut cred, 0)
+        CredWriteW(&cred, 0)
             .map_err(|e| format!("CredWriteW failed: {e}"))?;
     }
 
