@@ -325,7 +325,11 @@ func (u *Updater) DownloadAndVerify(ctx context.Context, latestVersion, download
 	if err != nil {
 		return err
 	}
-	expectedHash, err := u.ParseChecksumFile(checksumData, assetFilename)
+	names := checksumEntryNamesForGOOS(runtime.GOOS)
+	if len(names) == 0 {
+		names = []string{assetFilename}
+	}
+	expectedHash, err := u.parseChecksumFileAny(checksumData, names...)
 	if err != nil {
 		return fmt.Errorf("parsing checksum file: %w", err)
 	}
