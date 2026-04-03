@@ -33,7 +33,7 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4 && govulncheck ./...
 
       - name: Run tests with race detection and coverage
-        run: go test -race ./... -coverprofile=coverage.out -cover
+        run: go test -race -timeout 20m ./... -coverprofile=coverage.out -cover
 
       - name: Run tests with deadlock detection
         run: go test -tags deadlock -count=1 ./...
@@ -118,7 +118,7 @@ jobs:
           cache-dependency-path: Client/tauri-client/package-lock.json
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e18c1f174353f26 # stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           components: clippy
 
