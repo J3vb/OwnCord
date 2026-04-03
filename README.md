@@ -8,6 +8,7 @@
 
 The gaming chat platform you actually own.
 
+
 > **Early Alpha / Work in Progress**
 > OwnCord is in active development and is not production-ready. Expect rough edges, rapid changes, and occasional breaking behavior.
 >
@@ -19,6 +20,8 @@ OwnCord is built with an AI-first development workflow.
 Most implementation is generated through autonomous AI tooling, with quality validated primarily through automated checks (CI, tests, linting) and real-world feedback during alpha.
 
 This approach enables fast iteration, but it also means behavior may change quickly between releases.
+
+
 
 OwnCord is a self-hosted chat stack with a Go server and a Tauri desktop client.
 It includes real-time messaging, voice/video via LiveKit, file sharing, and a web admin panel.
