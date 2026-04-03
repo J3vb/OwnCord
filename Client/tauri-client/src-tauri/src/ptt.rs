@@ -100,7 +100,7 @@ mod linux {
             // Control keys
             Keycode::Backspace => 0x08,
             Keycode::Tab => 0x09,
-            Keycode::Return => 0x0D,
+            Keycode::Enter => 0x0D,
             Keycode::Escape => 0x1B,
             Keycode::Space => 0x20,
             Keycode::PageUp => 0x21,
@@ -139,13 +139,11 @@ mod linux {
             Keycode::F12 => 0x7B,
             // Lock keys
             Keycode::CapsLock => 0x14,
-            Keycode::NumLock => 0x90,
-            Keycode::ScrollLock => 0x91,
             // Modifier keys (included so ptt_listen_for_key can skip them)
             Keycode::LShift | Keycode::RShift => 0x10,
             Keycode::LControl | Keycode::RControl => 0x11,
             Keycode::LAlt | Keycode::RAlt => 0x12,
-            Keycode::Meta => 0x5B,
+            Keycode::LMeta | Keycode::RMeta => 0x5B,
             _ => 0,
         }
     }
@@ -192,7 +190,7 @@ mod linux {
             0x5A => Some(Keycode::Z),
             0x08 => Some(Keycode::Backspace),
             0x09 => Some(Keycode::Tab),
-            0x0D => Some(Keycode::Return),
+            0x0D => Some(Keycode::Enter),
             0x1B => Some(Keycode::Escape),
             0x20 => Some(Keycode::Space),
             0x21 => Some(Keycode::PageUp),
@@ -228,8 +226,6 @@ mod linux {
             0x7A => Some(Keycode::F11),
             0x7B => Some(Keycode::F12),
             0x14 => Some(Keycode::CapsLock),
-            0x90 => Some(Keycode::NumLock),
-            0x91 => Some(Keycode::ScrollLock),
             _ => None,
         }
     }
@@ -401,7 +397,7 @@ mod tests {
             (Keycode::Key0, 0x30),
             (Keycode::Key9, 0x39),
             (Keycode::Space, 0x20),
-            (Keycode::Return, 0x0D),
+            (Keycode::Enter, 0x0D),
             (Keycode::F1, 0x70),
             (Keycode::F12, 0x7B),
         ];
