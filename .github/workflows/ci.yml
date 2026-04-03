@@ -144,7 +144,7 @@ jobs:
       - name: Security audit (Rust dependencies)
         working-directory: Client/tauri-client/src-tauri/
         run: |
-          cargo install cargo-audit@0.21.2 --quiet
+          cargo install cargo-audit@0.22.1 --quiet
           cargo audit
 
       - name: Build Tauri app
