@@ -25,14 +25,19 @@ import (
 
 	"aead.dev/minisign"
 
+	"github.com/owncord/server/config"
 	"github.com/owncord/server/syncutil"
 
 	"golang.org/x/mod/semver"
 )
 
 const (
-	defaultBaseURL   = "https://api.github.com"
-	cacheTTL         = 1 * time.Hour
+	defaultBaseURL = "https://api.github.com"
+	cacheTTL       = 1 * time.Hour
+
+	// maxFetchBytes caps the response body read for checksum/signature files.
+	// Prevents a malicious or corrupted release asset from exhausting memory.
+	maxFetchBytes    = config.MaxMessageBytes
 	errorCacheTTL    = 5 * time.Minute
 	checksumAsset    = "checksums.sha256"
 	signatureAsset   = windowsServerBinary + ".sig"
@@ -673,7 +678,7 @@ func (u *Updater) fetchBody(ctx context.Context, url string) ([]byte, error) {
 
 	// Cap reads at 1 MiB — checksum and signature files are tiny text;
 	// this prevents a malicious or corrupted release asset from exhausting memory.
-	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return io.ReadAll(io.LimitReader(resp.Body, maxFetchBytes))
 }
 
 // FindClientAssets scans the cached release assets for the Tauri NSIS

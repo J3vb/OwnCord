@@ -1,6 +1,7 @@
 package ws_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -796,7 +797,7 @@ func TestHub_SweepRevokedSessions_EmptyTokenHashSkipped(t *testing.T) {
 
 func TestHub_LiveKitHealthCheck_NilReturnsError(t *testing.T) {
 	hub, _ := newTestHub(t)
-	ok, err := hub.LiveKitHealthCheck()
+	ok, err := hub.LiveKitHealthCheck(context.Background())
 	if ok {
 		t.Error("expected ok=false when LiveKit is nil")
 	}

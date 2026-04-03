@@ -9,7 +9,7 @@ import (
 	"github.com/owncord/server/syncutil"
 )
 
-const sendBufSize = 256
+const sendBufSize = 256 // per-client outbound send-channel capacity
 
 // SessionCheckInterval is the number of messages processed between periodic
 // session-expiry checks in readPump. Exported so tests can trigger the check

@@ -1,89 +1,91 @@
 # Quick Start Guide
 
-Get OwnCord up and running in minutes.
+Get OwnCord running with the fewest possible steps.
+
+## Choose Your Setup Path
+
+| Goal | Best path |
+| ---- | --------- |
+| Fastest local/LAN setup | Prebuilt binaries |
+| Linux server with easiest operations | Docker |
+| Custom dev build | Build from source |
+
+## Platform Support (Current Releases)
+
+| Component | Windows x64 | Linux x64 | Linux ARM64 |
+| --------- | ----------- | --------- | ----------- |
+| Server binary | Yes | Yes | Not published yet |
+| Desktop client | Yes | Yes | Yes |
 
 ## Prerequisites
 
-| | Windows x64 | Linux x64 | Linux ARM64 |
-|-|:-----------:|:---------:|:-----------:|
-| Server | ✅ | ✅ | ✅ |
-| Client | ✅ | ✅ | ✅ |
+- Go 1.25+ (only if building server from source)
+- Node.js 20+ and Rust (only if building client from source)
+- Docker + Compose v2 (Docker path only)
+- LiveKit (optional, required for voice/video)
 
-- **Go 1.25+** (only if building the server from source)
-- **Node.js 20+** + **Rust / Cargo** (only if building the client from source)
-- **Docker + Compose v2** (alternative to building the server — Linux only)
-- **LiveKit Server** (optional, for voice/video) -- see [LiveKit Setup](livekit-setup.md)
+## Option A: Prebuilt binaries (recommended)
 
-## Step 1: Download
+1. Download from [GitHub Releases](https://github.com/J3vb/OwnCord/releases).
+2. Start the server:
+	 - Windows: `chatserver.exe`
+	 - Linux: `./chatserver`
+3. Open `https://localhost:8443/admin`.
+4. Create the Owner account.
+5. Create invite codes and share them.
 
-### Option A — Pre-built binaries (recommended)
-
-Download from [GitHub Releases](https://github.com/J3vb/OwnCord/releases):
-
-| Platform | Server | Client |
-|----------|--------|--------|
-| Windows x64 | `chatserver.exe` | `OwnCord_x.x.x_x64-setup.exe` |
-| Linux x64 | `chatserver-linux-amd64.tar.gz` | `OwnCord_x.x.x_x86_64.AppImage` or `_amd64.deb` |
-| Linux ARM64 | _(included in server tar)_ | `OwnCord_x.x.x_aarch64.AppImage` or `_arm64.deb` |
-
-### Option B — Docker (Linux server only)
+## Option B: Docker (Linux server)
 
 ```bash
 cd Server
-cp .env.example .env          # set LIVEKIT_API_KEY + LIVEKIT_API_SECRET
-cp livekit.yaml.example livekit.yaml  # set node_ip + matching keys
+cp .env.example .env
+cp livekit.yaml.example livekit.yaml
+# Edit both files before start
 docker compose up -d
 ```
 
-See [Deployment Guide — Docker](deployment.md#docker-linux) for full details.
+Then open `https://localhost:8443/admin` and create the Owner account.
 
-### Option C — Build from source
+Full Docker details: [Deployment Guide](deployment.md#docker-linux).
+
+## Option C: Build from source
 
 ```bash
 # Server (Windows)
-cd Server && go build -o chatserver.exe -ldflags "-s -w -X main.version=1.0.0" .
+cd Server
+go build -o chatserver.exe -ldflags "-s -w -X main.version=1.0.0" .
 
 # Server (Linux)
-cd Server && CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.0.0" .
+cd Server
+CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.0.0" .
 
 # Client
-cd Client/tauri-client && npm install && npm run tauri build
+cd Client/tauri-client
+npm install
+npm run tauri build
 ```
 
-## Step 2: Run the Server
+## What Happens on First Server Start
 
-**Windows/Linux binary:** Run `chatserver.exe` (Windows) or `./chatserver` (Linux). On first run:
+- `config.yaml` is created with defaults.
+- `data/` is created for DB, certs, uploads, and backups.
+- A self-signed TLS certificate is generated.
+- SQLite schema and migrations are applied.
 
-1. `config.yaml` is created in the working directory with default settings
-2. `data/` directory is created for the database, TLS certs, uploads, and backups
-3. A self-signed TLS certificate is generated automatically
-4. SQLite database is created and all migrations are applied
-5. All user statuses are reset to offline (clean slate)
+## Client Connection Notes
 
-The server starts on `https://0.0.0.0:8443`.
+- The default server address is `https://<server-ip>:8443`.
+- The desktop client uses TOFU certificate pinning:
+	- First connection prompts for trust.
+	- Future connections require the same cert fingerprint.
 
-See [Server Configuration](server-configuration.md) for the full config key reference and environment variable overrides.
+## If Remote Users Cannot Connect
 
-## Step 3: Admin Setup
-
-Open `https://localhost:8443/admin` in a browser. The first-run setup page will prompt you to create the Owner account (username + password). This user gets the Owner role with full server control.
-
-## Step 4: Create Invites
-
-In the admin panel, go to invite management and generate invite codes for your friends.
-
-## Step 5: Connect Clients
-
-Friends install OwnCord, enter your server address (IP or domain + port 8443), and redeem their invite code to register.
-
-The client uses TOFU (Trust On First Use) for self-signed certificates -- it will prompt to trust the server's certificate on first connection, then pin it for future sessions.
-
-## Networking
-
-If friends are outside your local network, see the [Port Forwarding Guide](port-forwarding.md) or use [Tailscale](tailscale.md) for zero-config networking.
+1. Use [Tailscale](tailscale.md) for the simplest remote setup.
+2. Or configure [Port Forwarding](port-forwarding.md).
 
 ## Next Steps
 
-- [Server Configuration](server-configuration.md) -- customize ports, TLS, uploads, voice
-- [Deployment Guide](deployment.md) -- production hardening, backups, monitoring, Windows service setup
-- [LiveKit Setup](livekit-setup.md) -- enable voice and video chat
+- [Server Configuration](server-configuration.md)
+- [Deployment Guide](deployment.md)
+- [LiveKit Setup](livekit-setup.md)

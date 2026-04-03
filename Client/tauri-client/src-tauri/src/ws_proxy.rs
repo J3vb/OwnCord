@@ -15,23 +15,25 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Runtime};
 use tauri_plugin_store::StoreExt;
 use tokio::sync::{mpsc, Mutex};
+use tokio::task::JoinSet;
 use tokio_tungstenite::tungstenite::Message;
 
 /// Maximum time to wait for the WebSocket handshake to complete.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Tauri store file for certificate fingerprints.
-const CERTS_STORE: &str = "certs.json";
+use crate::constants::CERTS_STORE;
 
 /// Sender half kept in Tauri state so `ws_send` can push messages.
+/// `tx` is wrapped in `Arc` so the monitoring task can clone a reference
+/// into its closure and clear the sender even after a worker task panic.
 pub struct WsState {
-    tx: Mutex<Option<mpsc::Sender<String>>>,
+    tx: Arc<Mutex<Option<mpsc::Sender<String>>>>,
 }
 
 impl WsState {
     pub fn new() -> Self {
         Self {
-            tx: Mutex::new(None),
+            tx: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -158,8 +160,16 @@ fn tofu_check<R: Runtime>(
     match stored {
         None => {
             // First use — store the fingerprint.
+            // Capture old value before mutating (None here, but consistent pattern).
+            let old_value = store.get(host);
             store.set(host, Value::String(fingerprint.to_string()));
             if let Err(e) = store.save() {
+                // Restore previous in-memory state: put back old value or delete
+                // if there was none, keeping in-memory consistent with on-disk.
+                match old_value {
+                    Some(v) => { let _ = store.set(host, v); }
+                    None    => { let _ = store.delete(host); }
+                }
                 return Err(format!("failed to persist cert fingerprint: {e}"));
             }
             Ok("trusted_first_use".to_string())
@@ -300,50 +310,72 @@ pub async fn ws_connect<R: Runtime>(
 
     let app_read = app.clone();
     let app_state = app.clone();
+    // Clone the Arc so the monitoring closure can clear tx on any exit path,
+    // including worker task panics, without needing tauri::State.
+    let tx_arc = Arc::clone(&state.tx);
 
-    // Task: forward server → JS
-    let mut read_task = tokio::spawn(async move {
-        while let Some(msg) = stream.next().await {
-            match msg {
-                Ok(Message::Text(text)) => {
-                    let _ = app_read.emit("ws-message", text.to_string());
-                }
-                Ok(Message::Close(frame)) => {
-                    debug!("[ws_proxy] server sent Close frame: {:?}", frame);
-                    break;
-                }
-                Err(e) => {
-                    warn!("[ws_proxy] read error: {}", e);
-                    let _ = app_read.emit("ws-error", format!("{e}"));
-                    break;
-                }
-                _ => {} // ignore binary/ping/pong
-            }
-        }
-    });
-
-    // Task: forward JS → server
-    let mut write_task = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            if sink.send(Message::Text(msg.into())).await.is_err() {
-                break;
-            }
-        }
-    });
-
-    // When either task ends, abort sibling and emit closed
+    // Single outer task owns a JoinSet containing read and write workers.
+    // join_next() blocks until the first worker finishes (normally or via panic),
+    // then abort_all() + drain guarantees both workers and their sockets are
+    // cleaned up before the closed event is emitted.
     tokio::spawn(async move {
-        tokio::select! {
-            _ = &mut read_task => {
-                debug!("[ws_proxy] read task ended, aborting write task");
-                write_task.abort();
+        let mut set = JoinSet::new();
+
+        // Task: forward server → JS
+        set.spawn(async move {
+            while let Some(msg) = stream.next().await {
+                match msg {
+                    Ok(Message::Text(text)) => {
+                        let _ = app_read.emit("ws-message", text.to_string());
+                    }
+                    Ok(Message::Close(frame)) => {
+                        debug!("[ws_proxy] server sent Close frame: {:?}", frame);
+                        break;
+                    }
+                    Err(e) => {
+                        warn!("[ws_proxy] read error: {}", e);
+                        let _ = app_read.emit("ws-error", format!("{e}"));
+                        break;
+                    }
+                    _ => {} // ignore binary/ping/pong
+                }
             }
-            _ = &mut write_task => {
-                debug!("[ws_proxy] write task ended, aborting read task");
-                read_task.abort();
+        });
+
+        // Task: forward JS → server
+        set.spawn(async move {
+            while let Some(msg) = rx.recv().await {
+                if sink.send(Message::Text(msg.into())).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        // Block until the first worker finishes (normal exit or panic).
+        let first = set.join_next().await;
+
+        // Cancel the sibling and drain it so sockets close cleanly before
+        // emitting state. abort_all() is a no-op if only one task remains.
+        set.abort_all();
+        while set.join_next().await.is_some() {}
+
+        match first {
+            Some(Err(ref e)) if e.is_panic() => {
+                error!("[ws_proxy] worker task panicked: {:?}", e);
+            }
+            _ => {
+                info!("[ws_proxy] connection closed");
             }
         }
-        info!("[ws_proxy] connection closed");
+
+        // Clear the sender so ws_send returns "not connected". This runs on
+        // every exit path — normal close, graceful disconnect, and panic.
+        {
+            let mut tx_lock = tx_arc.lock().await;
+            *tx_lock = None;
+        }
+
+        // Always emit closed, even after a panic.
         emit_ws_state(&app_state, "closed");
     });
 
@@ -358,7 +390,16 @@ pub async fn ws_send(
 ) -> Result<(), String> {
     let tx_lock = state.tx.lock().await;
     if let Some(tx) = tx_lock.as_ref() {
-        tx.try_send(message).map_err(|e| format!("ws send failed: {e}"))
+        match tx.try_send(message) {
+            Ok(()) => Ok(()),
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                warn!("[ws_proxy] ws_send: outbound channel full, message dropped");
+                Err("ws_send: channel full, message dropped".into())
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                Err("ws_send: channel closed".into())
+            }
+        }
     } else {
         Err("WebSocket not connected".into())
     }
@@ -401,10 +442,20 @@ pub fn accept_cert_fingerprint<R: Runtime>(
         .store(CERTS_STORE)
         .map_err(|e| format!("failed to open certs store: {e}"))?;
 
+    // Capture old value before mutating so we can restore it if save fails.
+    let old_value = store.get(&host);
     store.set(&host, Value::String(fingerprint));
-    store
-        .save()
-        .map_err(|e| format!("failed to persist cert fingerprint: {e}"))?;
+    if let Err(e) = store.save() {
+        // Restore previous in-memory state: put back old fingerprint if one
+        // existed, or delete if there was none. Without this, the new
+        // fingerprint would be trusted in-process even though it was never
+        // persisted to certs.json.
+        match old_value {
+            Some(v) => { let _ = store.set(&host, v); }
+            None    => { let _ = store.delete(&host); }
+        }
+        return Err(format!("failed to persist cert fingerprint: {e}"));
+    }
     Ok(())
 }
 

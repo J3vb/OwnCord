@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -786,7 +787,7 @@ func TestSecurityHeadersWithTLS_NoHSTSWithoutTLS(t *testing.T) {
 // ─── handleLiveKitHealth tests ──────────────────────────────────────────────
 
 func TestLiveKitHealth_Healthy(t *testing.T) {
-	h := api.HandleLiveKitHealthForTest(func() (bool, error) {
+	h := api.HandleLiveKitHealthForTest(func(_ context.Context) (bool, error) {
 		return true, nil
 	})
 
@@ -809,7 +810,7 @@ func TestLiveKitHealth_Healthy(t *testing.T) {
 }
 
 func TestLiveKitHealth_Unhealthy(t *testing.T) {
-	h := api.HandleLiveKitHealthForTest(func() (bool, error) {
+	h := api.HandleLiveKitHealthForTest(func(_ context.Context) (bool, error) {
 		return false, fmt.Errorf("connection refused")
 	})
 
@@ -835,7 +836,7 @@ func TestLiveKitHealth_Unhealthy(t *testing.T) {
 }
 
 func TestLiveKitHealth_UnhealthyNoError(t *testing.T) {
-	h := api.HandleLiveKitHealthForTest(func() (bool, error) {
+	h := api.HandleLiveKitHealthForTest(func(_ context.Context) (bool, error) {
 		return false, nil
 	})
 

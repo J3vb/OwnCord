@@ -330,6 +330,11 @@ func getOutboundIP() string {
 		return "localhost"
 	}
 	defer conn.Close() //nolint:errcheck
-	addr := conn.LocalAddr().(*net.UDPAddr)
+	addr, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok {
+		slog.Warn("getOutboundIP: unexpected LocalAddr type, falling back to localhost",
+			"type", fmt.Sprintf("%T", conn.LocalAddr()))
+		return "localhost"
+	}
 	return addr.IP.String()
 }

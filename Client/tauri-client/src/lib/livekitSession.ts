@@ -70,42 +70,118 @@ type PendingVoiceJoin = {
   readonly directUrl?: string;
 };
 
-/** Read pendingJoin from an instance — bypasses TS control-flow narrowing
- *  that incorrectly assumes the field is still null after an async interleave. */
-function getPendingJoin(session: LiveKitSession): PendingVoiceJoin | null {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TS narrowing workaround
-  return (session as any).pendingJoin as PendingVoiceJoin | null;
-}
+// --- State machine ---
+
+/** Discriminated-union session state. All connection-lifecycle fields live here.
+ *  The "connecting" variant also carries the BUG-142 monotonic generation counter
+ *  (joinGeneration) so superseded-join detection is co-located with the state. */
+type SessionState =
+  | { readonly type: "idle" }
+  | {
+      readonly type: "connecting";
+      readonly pendingJoin: PendingVoiceJoin | null;
+      readonly joinGeneration: number;
+    }
+  | {
+      readonly type: "connected";
+      readonly room: Room;
+      readonly channelId: number;
+      readonly latestToken: string;
+      readonly lastUrl: string;
+      readonly lastDirectUrl: string | undefined;
+    }
+  | {
+      readonly type: "reconnecting";
+      readonly channelId: number;
+      readonly latestToken: string;
+      readonly lastUrl: string;
+      readonly lastDirectUrl: string | undefined;
+      readonly ac: AbortController;
+    };
 
 // --- LiveKitSession class ---
 
 export class LiveKitSession {
-  private room: Room | null = null;
+  /** Single source of truth for all connection-lifecycle state. */
+  private _state: SessionState = { type: "idle" };
+
+  // --- Non-connection fields (configuration / callbacks / infrastructure) ---
   private ws: WsClient | null = null;
   private onErrorCallback: ((message: string) => void) | null = null;
-  private currentChannelId: number | null = null;
   private serverHost: string | null = null;
   private onRemoteVideoCallback: RemoteVideoCallback | null = null;
   private onRemoteVideoRemovedCallback: RemoteVideoRemovedCallback | null = null;
   private tokenRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Latest token received from server (used for reconnection after token refresh). */
-  private latestToken: string | null = null;
-  /** Guard: true while handleVoiceToken is connecting — prevents concurrent joins. */
-  private connecting = false;
-  /** Latest join request received while a connection attempt is already running. */
-  private pendingJoin: PendingVoiceJoin | null = null;
-  /** Last known LiveKit URL and directUrl for auto-reconnect on unexpected disconnect. */
-  private lastUrl: string | null = null;
-  private lastDirectUrl: string | undefined = undefined;
+  /** BUG-146: Guard timer — fires if the server never responds to voice_token_refresh. */
+  private tokenRefreshTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   /** Max auto-reconnect attempts before giving up and showing error. */
   private static readonly MAX_RECONNECT_ATTEMPTS = 2;
   private static readonly RECONNECT_DELAY_MS = 3000;
-  /** Aborted by leaveVoice() to cancel a pending auto-reconnect loop. */
-  private reconnectAc: AbortController | null = null;
   /** Master output volume multiplier (0-2.0). Per-user volumes are scaled by this. */
   private outputVolumeMultiplier = loadPref<number>("outputVolume", 100) / 100;
   /** Cached port for the local LiveKit TLS proxy (Rust-side, for self-signed cert support). */
   private liveKitProxyPort: number | null = null;
+
+  // --- State transition (single writer) ---
+
+  private setState(next: SessionState): void {
+    const prev = this._state.type;
+    this._state = next;
+    log.debug("Session state transition", { from: prev, to: next.type });
+  }
+
+  // --- Typed state accessors (replace scattered field reads) ---
+
+  /** Room from state, or null when idle/connecting/reconnecting. */
+  private get _room(): Room | null {
+    return this._state.type === "connected" ? this._state.room : null;
+  }
+
+  /** Channel ID from state, or null when idle/connecting. */
+  private get _currentChannelId(): number | null {
+    return this._state.type === "connected" || this._state.type === "reconnecting"
+      ? this._state.channelId
+      : null;
+  }
+
+  /** Latest token from state, or null when idle/connecting. */
+  private get _latestToken(): string | null {
+    return this._state.type === "connected" || this._state.type === "reconnecting"
+      ? this._state.latestToken
+      : null;
+  }
+
+  /** Last URL from state, or null when idle/connecting. */
+  private get _lastUrl(): string | null {
+    return this._state.type === "connected" || this._state.type === "reconnecting"
+      ? this._state.lastUrl
+      : null;
+  }
+
+  /** Last direct URL from state. */
+  private get _lastDirectUrl(): string | undefined {
+    return this._state.type === "connected" || this._state.type === "reconnecting"
+      ? this._state.lastDirectUrl
+      : undefined;
+  }
+
+  /** True while a connect attempt is running. */
+  private get _connecting(): boolean {
+    return this._state.type === "connecting";
+  }
+
+  /** The abort controller for an in-flight reconnect, or null. */
+  private get _reconnectAc(): AbortController | null {
+    return this._state.type === "reconnecting" ? this._state.ac : null;
+  }
+
+  /** Helper to check state is "connected" for a specific channelId, reading
+   *  through a method call so TS control-flow narrowing cannot cache the result.
+   *  Used in connectAndSetup() checkpoints after setState() transitions. */
+  private isStateConnected(channelId: number): boolean {
+    const s: SessionState = this._state;
+    return s.type === "connected" && s.channelId === channelId;
+  }
 
   // --- Extracted modules (facade pattern) ---
   private _audioPipeline = new AudioPipeline();
@@ -120,7 +196,7 @@ export class LiveKitSession {
   /** Lazily built deps for the extracted video track functions. */
   private get _videoTrackDeps(): VideoTrackDeps {
     return {
-      getRoom: () => this.room,
+      getRoom: () => this._room,
       getWs: () => this.ws,
       onError: (msg) => {
         this.onErrorCallback?.(msg);
@@ -134,29 +210,60 @@ export class LiveKitSession {
 
   constructor() {
     this._eventHandlers = createRoomEventHandlers({
-      getRoom: () => this.room,
+      getRoom: () => this._room,
       setRoom: (r) => {
-        this.room = r;
+        // Called by handleDisconnected immediately before setReconnectAc.
+        // Capture the reconnect fields from the current "connected" state
+        // while we still have them, then clear the room (transition to idle).
+        // setReconnectAc will pick up _pendingReconnectFields to form the
+        // "reconnecting" state atomically.
+        if (r === null && this._state.type === "connected") {
+          this._pendingReconnectFields = {
+            channelId: this._state.channelId,
+            latestToken: this._state.latestToken,
+            lastUrl: this._state.lastUrl,
+            lastDirectUrl: this._state.lastDirectUrl,
+          };
+          this.setState({ type: "idle" });
+        }
       },
-      getCurrentChannelId: () => this.currentChannelId,
+      getCurrentChannelId: () => this._currentChannelId,
       getAudioElements: () => this._audioElements,
       getOnRemoteVideoCallback: () => this.onRemoteVideoCallback,
       getOnRemoteVideoRemovedCallback: () => this.onRemoteVideoRemovedCallback,
       getOnErrorCallback: () => this.onErrorCallback,
-      isConnecting: () => this.connecting,
-      getLatestToken: () => this.latestToken,
-      getLastUrl: () => this.lastUrl,
-      getLastDirectUrl: () => this.lastDirectUrl,
+      isConnecting: () => this._connecting,
+      getLatestToken: () => this._latestToken,
+      getLastUrl: () => this._lastUrl,
+      getLastDirectUrl: () => this._lastDirectUrl,
       setReconnectAc: (ac) => {
-        this.reconnectAc = ac;
+        if (ac !== null && this._pendingReconnectFields !== null) {
+          // Transition from idle → reconnecting atomically using the fields
+          // captured in setRoom() above.
+          const { channelId, latestToken, lastUrl, lastDirectUrl } = this._pendingReconnectFields;
+          this._pendingReconnectFields = null;
+          this.setState({
+            type: "reconnecting",
+            channelId,
+            latestToken,
+            lastUrl,
+            lastDirectUrl,
+            ac,
+          });
+        }
+        // ac === null: reconnect succeeded — connectAndSetup already set "connected".
+        // No transition needed; just discard stale pending fields if any.
+        if (ac === null) {
+          this._pendingReconnectFields = null;
+        }
       },
       syncModuleRooms: () => this.syncModuleRooms(),
       teardownForReconnect: () => {
         this._audioPipeline.teardownAudioPipeline();
         this.clearTokenRefreshTimer();
         // BUG-098: Stop leaked camera/screen tracks before room is nulled.
-        stopManualCameraTrack(this._cameraState, this.room);
-        stopManualScreenTracks(this._screenState, this.room);
+        stopManualCameraTrack(this._cameraState, this._room);
+        stopManualScreenTracks(this._screenState, this._room);
         setLocalCamera(false);
         setLocalScreenshare(false);
       },
@@ -166,6 +273,15 @@ export class LiveKitSession {
         this.attemptAutoReconnect(token, url, channelId, directUrl, signal),
     });
   }
+
+  /** Temporary holding field: populated by setRoom(null) in handleDisconnected's
+   *  callback sequence so setReconnectAc can form the "reconnecting" state atomically. */
+  private _pendingReconnectFields: {
+    channelId: number;
+    latestToken: string;
+    lastUrl: string;
+    lastDirectUrl: string | undefined;
+  } | null = null;
 
   // --- Room factory ---
 
@@ -212,10 +328,11 @@ export class LiveKitSession {
 
   /** Update all extracted modules with the current room reference. */
   private syncModuleRooms(): void {
-    this._audioPipeline.setRoom(this.room);
-    this._audioElements.setRoom(this.room);
-    this._deviceManager.setRoom(this.room);
-    this._deviceManager.setAudioPipeline(this.room !== null ? this._audioPipeline : null);
+    const room = this._room;
+    this._audioPipeline.setRoom(room);
+    this._audioElements.setRoom(room);
+    this._deviceManager.setRoom(room);
+    this._deviceManager.setAudioPipeline(room !== null ? this._audioPipeline : null);
     this._deviceManager.setOnError(this.onErrorCallback);
     this._deviceManager.setOnToast(this.onErrorCallback);
   }
@@ -238,20 +355,39 @@ export class LiveKitSession {
       // eslint-disable-next-line no-await-in-loop -- intentional sequential polling with backoff delay
       await new Promise((r) => setTimeout(r, LiveKitSession.RECONNECT_DELAY_MS));
       // If user manually left or joined a different channel during the delay, abort.
-      if (signal.aborted || this.currentChannelId !== channelId) {
+      if (signal.aborted || this._currentChannelId !== channelId) {
         log.info("Auto-reconnect aborted — user left or channel changed");
         return;
       }
       try {
-        this.room = this.createRoom();
-        this.syncModuleRooms();
+        const newRoom = this.createRoom();
+        // Set state to reconnecting with the fresh room-less attempt info;
+        // the actual room appears in "connected" state after connect succeeds.
+        if (this._state.type === "reconnecting") {
+          this.setState({ ...this._state, ac: this._state.ac });
+        }
+        this._audioPipeline.setRoom(newRoom);
+        this._audioElements.setRoom(newRoom);
+        this._deviceManager.setRoom(newRoom);
+        this._deviceManager.setAudioPipeline(this._audioPipeline);
         // eslint-disable-next-line no-await-in-loop -- sequential reconnect: resolve URL then connect
         const resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
         // eslint-disable-next-line no-await-in-loop -- sequential reconnect: must connect before restoring state
-        await this.room.connect(resolvedUrl, token);
+        await newRoom.connect(resolvedUrl, token);
         log.info("Auto-reconnect succeeded", { attempt, channelId, url: resolvedUrl });
-        logIceConnectionInfo(this.room);
-        this.room
+        // Transition to "connected" — this is the single atomic write.
+        this.setState({
+          type: "connected",
+          room: newRoom,
+          channelId,
+          latestToken: token,
+          lastUrl: url,
+          lastDirectUrl: directUrl,
+        });
+        this._deviceManager.setOnError(this.onErrorCallback);
+        this._deviceManager.setOnToast(this.onErrorCallback);
+        logIceConnectionInfo(newRoom);
+        newRoom
           .startAudio()
           .catch((err) => log.debug("Failed to start audio after reconnect", err));
         // eslint-disable-next-line no-await-in-loop -- sequential reconnect: must restore voice state after connect
@@ -260,7 +396,7 @@ export class LiveKitSession {
         const savedInput = loadPref<string>("audioInputDevice", "");
         if (savedInput) {
           try {
-            await this.room.switchActiveDevice("audioinput", savedInput);
+            await newRoom.switchActiveDevice("audioinput", savedInput);
           } catch (err) {
             log.warn("Reconnect: saved input device unavailable, using default", err);
           }
@@ -268,7 +404,7 @@ export class LiveKitSession {
         const savedOutput = loadPref<string>("audioOutputDevice", "");
         if (savedOutput) {
           try {
-            await this.room.switchActiveDevice("audiooutput", savedOutput);
+            await newRoom.switchActiveDevice("audiooutput", savedOutput);
           } catch (err) {
             log.warn("Reconnect: saved output device unavailable, using default", err);
           }
@@ -276,24 +412,38 @@ export class LiveKitSession {
         this._audioPipeline.setupAudioPipeline();
         this.reapplyMuteGain();
         this.startTokenRefreshTimer();
-        // Clear the abort controller after all post-connect work is done so
-        // leaveVoice() can still abort during restoreLocalVoiceState above.
-        this.reconnectAc = null;
+        // Signal the setReconnectAc callback that the reconnect is done.
+        // ac === null clears the pending state in the callback.
+        this._pendingReconnectFields = null;
         // Request a fresh token since the stored one may be close to expiry.
         this.requestTokenRefresh();
         return;
       } catch (err) {
         log.warn("Auto-reconnect failed", { attempt, url, error: err });
-        if (this.room !== null) {
-          this.room.removeAllListeners();
-          this.room
+        const failedRoom = this._room;
+        if (failedRoom !== null) {
+          failedRoom.removeAllListeners();
+          failedRoom
             .disconnect()
             .catch((disconnectErr) =>
               log.warn("Failed to disconnect room after reconnect failure", disconnectErr),
             );
-          this.room = null;
-          this.syncModuleRooms();
         }
+        // Return to idle so the next attempt starts fresh.
+        if (this._state.type === "reconnecting") {
+          this.setState({
+            type: "reconnecting",
+            channelId: this._state.channelId,
+            latestToken: this._state.latestToken,
+            lastUrl: this._state.lastUrl,
+            lastDirectUrl: this._state.lastDirectUrl,
+            ac: this._state.ac,
+          });
+        }
+        this._audioPipeline.setRoom(null);
+        this._audioElements.setRoom(null);
+        this._deviceManager.setRoom(null);
+        this._deviceManager.setAudioPipeline(null);
       }
     }
     // All attempts exhausted — give up and clean up.
@@ -384,10 +534,17 @@ export class LiveKitSession {
       clearTimeout(this.tokenRefreshTimer);
       this.tokenRefreshTimer = null;
     }
+    // BUG-146: Also cancel any in-flight refresh response timeout so it does
+    // not fire after the session is torn down (leaveVoice / cleanupAll both
+    // call this method, so one clearing point covers all cleanup paths).
+    if (this.tokenRefreshTimeoutTimer !== null) {
+      clearTimeout(this.tokenRefreshTimeoutTimer);
+      this.tokenRefreshTimeoutTimer = null;
+    }
   }
 
   private requestTokenRefresh(): void {
-    if (this.ws === null || this.room === null) {
+    if (this.ws === null || this._room === null) {
       log.debug("Skipping token refresh — no active session");
       return;
     }
@@ -396,9 +553,35 @@ export class LiveKitSession {
     // NOTE: startTokenRefreshTimer is called from handleVoiceTokenRefresh
     // (the server response handler), not here, to avoid scheduling two
     // competing timers per cycle.
+
+    // BUG-146: Arm a 60-second response deadline. If the server never replies,
+    // the token stalls silently. On timeout we log a warning and reschedule the
+    // next refresh attempt rather than disconnecting — the current live session
+    // is unaffected (LiveKit keeps active connections alive beyond token expiry);
+    // the risk is only that a network blip during the stale window would fail to
+    // reconnect. Reconnecting for a refresh timeout is intentionally NOT done here
+    // because the WS connection itself may be degraded; a forced disconnect would
+    // make the UX worse than leaving the existing (still-valid) token in place.
+    if (this.tokenRefreshTimeoutTimer !== null) {
+      clearTimeout(this.tokenRefreshTimeoutTimer);
+    }
+    this.tokenRefreshTimeoutTimer = setTimeout(() => {
+      this.tokenRefreshTimeoutTimer = null;
+      log.warn(
+        "Voice token refresh timed out — server did not respond within 60 s. " +
+          "Rescheduling refresh; existing token remains in use.",
+      );
+      // Re-arm the next scheduled refresh so the client keeps trying.
+      this.startTokenRefreshTimer();
+    }, 60_000);
   }
 
   handleVoiceTokenRefresh(token?: string): void {
+    // BUG-146: Cancel the response-deadline timer — the server replied in time.
+    if (this.tokenRefreshTimeoutTimer !== null) {
+      clearTimeout(this.tokenRefreshTimeoutTimer);
+      this.tokenRefreshTimeoutTimer = null;
+    }
     // KNOWN LIMITATION: The livekit-client SDK does not expose a method to
     // rotate the token on an active connection. We store the fresh token so
     // that reconnection (auto-reconnect or manual rejoin) uses it, but the
@@ -409,8 +592,10 @@ export class LiveKitSession {
     //   - The 23h refresh timer ensures a fresh token is always ready
     //     *before* the original expires, so reconnects within the window work.
     // See also: Server/ws/livekit.go tokenTTL constant.
-    if (token) {
-      this.latestToken = token;
+    if (token && this._state.type === "connected") {
+      this.setState({ ...this._state, latestToken: token });
+    } else if (token && this._state.type === "reconnecting") {
+      this.setState({ ...this._state, latestToken: token });
     }
     this.startTokenRefreshTimer();
     log.info("Voice token refreshed, timer restarted");
@@ -419,7 +604,8 @@ export class LiveKitSession {
   // --- Volume helpers ---
 
   private async restoreLocalVoiceState(mode: "join" | "reconnect"): Promise<void> {
-    if (this.room === null) return;
+    const room = this._room;
+    if (room === null) return;
 
     const state = voiceStore.getState();
     const muted = state.localMuted || state.localDeafened;
@@ -427,7 +613,7 @@ export class LiveKitSession {
     const shouldEnableMicrophone = !muted;
 
     try {
-      await this.room.localParticipant.setMicrophoneEnabled(shouldEnableMicrophone);
+      await room.localParticipant.setMicrophoneEnabled(shouldEnableMicrophone);
       if (shouldEnableMicrophone) {
         log.info(
           mode === "join"
@@ -496,29 +682,74 @@ export class LiveKitSession {
   }
 
   /** Shared connect-with-retry + post-connect setup used by both the primary
-   *  handleVoiceToken path and the pending-join drain loop. Returns true if
-   *  the room ended up connected and set up, false otherwise. */
+   *  handleVoiceToken path and the pending-join drain loop.
+   *  Returns true if the room ended up connected and set up,
+   *  false on error, or "superseded" if a newer join generation invalidated
+   *  this attempt (caller should re-read pendingJoin immediately). */
   private async connectAndSetup(
     token: string,
     url: string,
     channelId: number,
     directUrl?: string,
-  ): Promise<boolean> {
-    if (this.room !== null) this.leaveVoice(false);
-    this.connecting = true;
+  ): Promise<boolean | "superseded"> {
+    if (this._room !== null) this.leaveVoice(false);
+    // Increment the generation counter and embed it into the "connecting" state.
+    // Any newer call to connectAndSetup() will produce a larger generation,
+    // making myGeneration !== currentGeneration at each checkpoint.
+    const prevState = this._state;
+    const prevGeneration = prevState.type === "connecting" ? prevState.joinGeneration : 0;
+    const myGeneration = prevGeneration + 1;
+    this.setState({ type: "connecting", pendingJoin: null, joinGeneration: myGeneration });
     let resolvedUrl = "";
+    // Track the room being built in this attempt so we can disconnect it on
+    // supersession without touching the shared state (which may already have
+    // been claimed by a newer attempt).
+    let localRoom: Room | null = null;
     try {
-      this.room = this.createRoom();
-      this.syncModuleRooms();
+      localRoom = this.createRoom();
+      this._audioPipeline.setRoom(localRoom);
+      this._audioElements.setRoom(localRoom);
+      this._deviceManager.setRoom(localRoom);
+      this._deviceManager.setAudioPipeline(this._audioPipeline);
+      this._deviceManager.setOnError(this.onErrorCallback);
+      this._deviceManager.setOnToast(this.onErrorCallback);
       resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
+
+      // Checkpoint 1: after URL resolution (may be slow for TLS proxy init).
+      if (this._state.type !== "connecting" || this._state.joinGeneration !== myGeneration) {
+        log.info("connectAndSetup: superseded after URL resolution — aborting", {
+          channelId,
+          myGeneration,
+          currentGeneration: this._state.type === "connecting" ? this._state.joinGeneration : "n/a",
+        });
+        return "superseded";
+      }
+
       const MAX_RETRIES = 3;
       const RETRY_DELAY_MS = 2000;
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
           // eslint-disable-next-line no-await-in-loop -- sequential retry: must attempt connect before checking result
-          await this.room.connect(resolvedUrl, token);
-          // Check if a newer join was queued during the async connect.
-          const queuedJoin = getPendingJoin(this);
+          await localRoom.connect(resolvedUrl, token);
+
+          // Checkpoint 2: after room.connect() — the primary race window.
+          if (this._state.type !== "connecting" || this._state.joinGeneration !== myGeneration) {
+            log.info("connectAndSetup: superseded after room.connect() — aborting", {
+              channelId,
+              myGeneration,
+              currentGeneration:
+                this._state.type === "connecting" ? this._state.joinGeneration : "n/a",
+            });
+            localRoom.removeAllListeners();
+            localRoom
+              .disconnect()
+              .catch((err) => log.debug("Failed to disconnect superseded room", err));
+            return "superseded";
+          }
+
+          // Belt-and-suspenders: also keep existing pending-join token check
+          // for logging clarity when a newer request arrived via pendingJoin.
+          const queuedJoin = this._state.type === "connecting" ? this._state.pendingJoin : null;
           if (
             queuedJoin !== null &&
             (queuedJoin.token !== token ||
@@ -530,15 +761,15 @@ export class LiveKitSession {
               channelId,
               queuedChannelId: queuedJoin.channelId,
             });
-            if (this.room !== null) {
-              const room = this.room;
-              this.room = null;
-              this.syncModuleRooms();
-              room.removeAllListeners();
-              room
-                .disconnect()
-                .catch((err) => log.debug("Failed to disconnect room during cleanup", err));
-            }
+            localRoom.removeAllListeners();
+            localRoom
+              .disconnect()
+              .catch((err) => log.debug("Failed to disconnect room during cleanup", err));
+            localRoom = null;
+            this._audioPipeline.setRoom(null);
+            this._audioElements.setRoom(null);
+            this._deviceManager.setRoom(null);
+            this._deviceManager.setAudioPipeline(null);
             break;
           }
           break;
@@ -552,46 +783,96 @@ export class LiveKitSession {
             });
             // eslint-disable-next-line no-await-in-loop -- intentional backoff delay between retry attempts
             await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
-            if (this.room === null) throw connectErr;
-            this.room.removeAllListeners();
-            this.room = this.createRoom();
-            this.syncModuleRooms();
+            // Generation check inside retry loop: a superseding join may arrive
+            // during the backoff delay.
+            if (this._state.type !== "connecting" || this._state.joinGeneration !== myGeneration) {
+              log.info("connectAndSetup: superseded during retry backoff — aborting", {
+                channelId,
+                attempt,
+              });
+              return "superseded";
+            }
+            if (localRoom === null) throw connectErr;
+            localRoom.removeAllListeners();
+            localRoom = this.createRoom();
+            this._audioPipeline.setRoom(localRoom);
+            this._audioElements.setRoom(localRoom);
+            this._deviceManager.setRoom(localRoom);
+            this._deviceManager.setAudioPipeline(this._audioPipeline);
           } else {
             throw connectErr;
           }
         }
       }
       // If the room was discarded (stale join superseded by pending), skip setup.
-      if (this.room !== null) {
+      if (localRoom !== null) {
         log.info("Connected to LiveKit room", { channelId, url: resolvedUrl });
-        logIceConnectionInfo(this.room);
-        this.currentChannelId = channelId;
-        this.latestToken = token;
-        this.lastUrl = url;
-        this.lastDirectUrl = directUrl;
+        logIceConnectionInfo(localRoom);
+        // Atomic transition to "connected" — all connection fields set together.
+        this.setState({
+          type: "connected",
+          room: localRoom,
+          channelId,
+          latestToken: token,
+          lastUrl: url,
+          lastDirectUrl: directUrl,
+        });
         // Optimistic startAudio — may succeed if the join was triggered by a
         // recent user gesture. If not, the AudioPlaybackStatusChanged handler
         // will register a click-to-unlock fallback.
-        this.room.startAudio().catch(() => {
+        localRoom.startAudio().catch(() => {
           log.debug("Optimistic startAudio failed — waiting for user gesture");
         });
         await this.restoreLocalVoiceState("join");
+
+        // Checkpoint 3: after restoreLocalVoiceState (mic acquisition can be slow).
+        // Cast to SessionState to escape TS control-flow narrowing that incorrectly
+        // assumes _state is still "connecting" (it was set to "connected" above, but
+        // TS cannot see through the setState() opaque method call).
+        if (!this.isStateConnected(channelId)) {
+          log.info("connectAndSetup: superseded after restoreLocalVoiceState — aborting", {
+            channelId,
+          });
+          this.leaveVoice(false);
+          return "superseded";
+        }
+
         const savedInput = loadPref<string>("audioInputDevice", "");
         if (savedInput) {
           try {
-            await this.room.switchActiveDevice("audioinput", savedInput);
+            await localRoom.switchActiveDevice("audioinput", savedInput);
           } catch (err) {
             log.warn("Saved input device unavailable, using default", err);
           }
         }
+
+        // Checkpoint 4: after audioinput switchActiveDevice.
+        if (!this.isStateConnected(channelId)) {
+          log.info("connectAndSetup: superseded after audioinput switch — aborting", {
+            channelId,
+          });
+          this.leaveVoice(false);
+          return "superseded";
+        }
+
         const savedOutput = loadPref<string>("audioOutputDevice", "");
         if (savedOutput) {
           try {
-            await this.room.switchActiveDevice("audiooutput", savedOutput);
+            await localRoom.switchActiveDevice("audiooutput", savedOutput);
           } catch (err) {
             log.warn("Saved output device unavailable, using default", err);
           }
         }
+
+        // Checkpoint 5: after audiooutput switchActiveDevice.
+        if (!this.isStateConnected(channelId)) {
+          log.info("connectAndSetup: superseded after audiooutput switch — aborting", {
+            channelId,
+          });
+          this.leaveVoice(false);
+          return "superseded";
+        }
+
         this._audioPipeline.setupAudioPipeline();
         this.reapplyMuteGain();
         this.startTokenRefreshTimer();
@@ -601,13 +882,18 @@ export class LiveKitSession {
       return false;
     } catch (err) {
       log.error("Failed to connect to LiveKit", { url: resolvedUrl, error: err });
-      if (this.room !== null) {
+      if (localRoom !== null) {
         this.onErrorCallback?.("Failed to join voice — connection error");
       }
       this.leaveVoice(false);
       return false;
     } finally {
-      this.connecting = false;
+      // Only clear "connecting" back to "idle" if we are still in the connecting
+      // state for this generation — never overwrite a "connected" state that was
+      // set by the success path above (guards against risk #4 in the analysis).
+      if (this._state.type === "connecting" && this._state.joinGeneration === myGeneration) {
+        this.setState({ type: "idle" });
+      }
     }
   }
 
@@ -617,25 +903,32 @@ export class LiveKitSession {
     channelId: number,
     directUrl?: string,
   ): Promise<void> {
-    if (
-      this.room !== null &&
-      this.currentChannelId === channelId &&
-      this.room.state === "connected"
-    ) {
+    const s = this._state;
+    if (s.type === "connected" && s.channelId === channelId && s.room.state === "connected") {
       this.handleVoiceTokenRefresh(token);
       return;
     }
     // Prevent concurrent connect attempts (rapid channel switching).
-    if (this.connecting) {
-      this.pendingJoin = { token, url, channelId, directUrl };
+    if (this._connecting) {
+      // Update the pendingJoin on the existing "connecting" state immutably.
+      if (this._state.type === "connecting") {
+        this.setState({
+          ...this._state,
+          pendingJoin: { token, url, channelId, directUrl },
+        });
+      }
       log.warn("handleVoiceToken: already connecting, queued latest join request", { channelId });
       return;
     }
     await this.connectAndSetup(token, url, channelId, directUrl);
     // Drain pending joins iteratively to avoid unbounded recursion when
     // rapid channel switches queue multiple requests.
-    let pendingJoin = this.pendingJoin;
-    this.pendingJoin = null;
+    // A "superseded" result means connectAndSetup() already aborted early;
+    // we still drain pendingJoin so the latest request always wins.
+    let pendingJoin = this._state.type === "connecting" ? this._state.pendingJoin : null;
+    if (this._state.type === "connecting") {
+      this.setState({ ...this._state, pendingJoin: null });
+    }
     while (pendingJoin !== null) {
       const {
         token: pToken,
@@ -643,26 +936,32 @@ export class LiveKitSession {
         channelId: pChannelId,
         directUrl: pDirectUrl,
       } = pendingJoin;
+      const cur = this._state;
       if (
-        this.room !== null &&
-        this.currentChannelId === pChannelId &&
-        this.room.state === "connected"
+        cur.type === "connected" &&
+        cur.channelId === pChannelId &&
+        cur.room.state === "connected"
       ) {
         this.handleVoiceTokenRefresh(pToken);
       } else {
         // eslint-disable-next-line no-await-in-loop -- sequential drain of pending joins to avoid unbounded recursion
         await this.connectAndSetup(pToken, pUrl, pChannelId, pDirectUrl);
+        // If this attempt was itself superseded (another join arrived during the
+        // await), the loop will naturally pick it up via the updated pendingJoin.
       }
-      pendingJoin = this.pendingJoin;
-      this.pendingJoin = null;
+      pendingJoin = this._state.type === "connecting" ? this._state.pendingJoin : null;
+      if (this._state.type === "connecting") {
+        this.setState({ ...this._state, pendingJoin: null });
+      }
     }
   }
 
   /** Retry microphone permission after being in listen-only mode. */
   async retryMicPermission(): Promise<void> {
-    if (this.room === null) return;
+    const room = this._room;
+    if (room === null) return;
     try {
-      await this.room.localParticipant.setMicrophoneEnabled(true);
+      await room.localParticipant.setMicrophoneEnabled(true);
       setListenOnly(false);
       // BUG-103: Honor deafened state — keep mic muted if user is deafened.
       const { localDeafened } = voiceStore.getState();
@@ -685,18 +984,18 @@ export class LiveKitSession {
   }
 
   leaveVoice(sendWs = true): void {
-    // Cancel any pending auto-reconnect loop first
-    if (this.reconnectAc !== null) {
-      this.reconnectAc.abort();
-      this.reconnectAc = null;
+    // Cancel any pending auto-reconnect loop first.
+    const ac = this._reconnectAc;
+    if (ac !== null) {
+      ac.abort();
     }
+    this._pendingReconnectFields = null;
     this.clearTokenRefreshTimer();
     this._audioPipeline.teardownAudioPipeline();
     this._eventHandlers.removeAutoplayUnlock();
-    this.pendingJoin = null;
     // Clean up manually published tracks.
-    stopManualCameraTrack(this._cameraState, this.room);
-    stopManualScreenTracks(this._screenState, this.room);
+    stopManualCameraTrack(this._cameraState, this._room);
+    stopManualScreenTracks(this._screenState, this._room);
     if (sendWs && this.ws !== null) {
       this.ws.send({ type: "voice_leave", payload: {} });
     }
@@ -704,17 +1003,16 @@ export class LiveKitSession {
     // TrackUnsubscribed, but may be missed during rapid reconnection).
     // Full cleanup: also clears screenshare mute state on intentional leave.
     this._audioElements.cleanupAllAudioElementsFull();
-    if (this.room !== null) {
-      const r = this.room;
-      this.room = null;
-      this.syncModuleRooms();
-      r.removeAllListeners();
-      r.disconnect().catch((err) => log.warn("room.disconnect() error (non-fatal)", err));
+    const room = this._room;
+    if (room !== null) {
+      room.removeAllListeners();
+      room.disconnect().catch((err) => log.warn("room.disconnect() error (non-fatal)", err));
     }
-    this.currentChannelId = null;
-    this.latestToken = null;
-    this.lastUrl = null;
-    this.lastDirectUrl = undefined;
+    // Transition to idle — atomically clears room, channelId, tokens, reconnectAc,
+    // pendingJoin, and the joinGeneration (idle has none). Any in-flight
+    // connectAndSetup() will detect the state type change at its next checkpoint.
+    this.setState({ type: "idle" });
+    this.syncModuleRooms();
     setLocalCamera(false);
     setLocalScreenshare(false);
     log.info("Left voice session");
@@ -722,6 +1020,8 @@ export class LiveKitSession {
 
   cleanupAll(): void {
     this.leaveVoice(false);
+    // leaveVoice() already transitions state to "idle".
+    // Clear non-connection fields (config / callbacks / infrastructure).
     this.onErrorCallback = null;
     this.onRemoteVideoCallback = null;
     this.onRemoteVideoRemovedCallback = null;
@@ -749,16 +1049,17 @@ export class LiveKitSession {
    *  the audio pipeline. Re-publish and rebuild when unmuting. This guarantees
    *  the SFU has no audio track to forward to other participants. */
   private async applyMicMuteState(muted: boolean): Promise<void> {
-    if (this.room === null) return;
+    const room = this._room;
+    if (room === null) return;
     if (muted) {
       // Tear down pipeline first so it doesn't hold refs to the track
       this._audioPipeline.teardownAudioPipeline();
       // Fully disable the mic — this unpublishes the track from the SFU
-      await this.room.localParticipant.setMicrophoneEnabled(false);
+      await room.localParticipant.setMicrophoneEnabled(false);
       log.debug("Mic fully unpublished (muted)");
     } else {
       // Re-enable mic — this re-publishes the track to the SFU
-      await this.room.localParticipant.setMicrophoneEnabled(true);
+      await room.localParticipant.setMicrophoneEnabled(true);
       // Rebuild the audio pipeline on the fresh track
       this._audioPipeline.setupAudioPipeline();
       log.debug("Mic re-published (unmuted)");
@@ -840,26 +1141,26 @@ export class LiveKitSession {
   }
 
   getLocalCameraStream(): MediaStream | null {
-    return doGetLocalCameraStream(this.room);
+    return doGetLocalCameraStream(this._room);
   }
 
   getLocalScreenshareStream(): MediaStream | null {
-    return doGetLocalScreenshareStream(this.room);
+    return doGetLocalScreenshareStream(this._room);
   }
 
   /** Get a remote participant's video MediaStream by userId and track type. Returns null if not available. */
   getRemoteVideoStream(userId: number, type: "camera" | "screenshare"): MediaStream | null {
-    return doGetRemoteVideoStream(this.room, userId, type);
+    return doGetRemoteVideoStream(this._room, userId, type);
   }
 
   getRoom(): Room | null {
-    return this.room;
+    return this._room;
   }
 
   getSessionDebugInfo(): Record<string, unknown> {
     return buildSessionDebugInfo({
-      room: this.room,
-      currentChannelId: this.currentChannelId,
+      room: this._room,
+      currentChannelId: this._currentChannelId,
       outputVolumeMultiplier: this.outputVolumeMultiplier,
       audioPipeline: this._audioPipeline,
       audioElements: this._audioElements,

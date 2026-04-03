@@ -2,6 +2,7 @@
 package ws
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"runtime"
@@ -39,8 +40,9 @@ type Hub struct {
 	registry     *HandlerRegistry
 	permChecker  *permissions.Checker
 
-	seq       uint64           // atomic monotonic sequence counter
-	replayBuf *EventRingBuffer // recent broadcast events for reconnection replay
+	seq            uint64           // atomic monotonic sequence counter
+	replayBuf      *EventRingBuffer // recent broadcast events for reconnection replay
+	broadcastDrops atomic.Uint64    // counts messages dropped due to full broadcast channel
 
 	// Settings cache — avoids per-connection DB queries for server_name/motd.
 	settingsMu         syncutil.RWMutex
@@ -63,7 +65,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
 		clients:      make(map[int64]*Client),
 		db:           database,
 		limiter:      limiter,
-		broadcast:    make(chan broadcastMsg, 256),
+		broadcast:    make(chan broadcastMsg, 1024),
 		register:     make(chan *Client, 32),
 		unregister:   make(chan *Client, 32),
 		stop:         make(chan struct{}),
@@ -122,11 +124,11 @@ func (h *Hub) SetLiveKit(lk *LiveKitClient) {
 // It tries the SDK client first (ListRooms), and falls back to an HTTP probe
 // if a managed process is configured. Returns false with a reason if LiveKit
 // is not configured or unreachable.
-func (h *Hub) LiveKitHealthCheck() (bool, error) {
+func (h *Hub) LiveKitHealthCheck(ctx context.Context) (bool, error) {
 	if h.livekit == nil {
 		return false, fmt.Errorf("not configured")
 	}
-	return h.livekit.HealthCheck()
+	return h.livekit.HealthCheck(ctx)
 }
 
 // SetLiveKitProcess sets the LiveKit process manager on the hub.
@@ -353,6 +355,7 @@ func (h *Hub) BroadcastToChannel(channelID int64, msg []byte) {
 	select {
 	case h.broadcast <- broadcastMsg{channelID: channelID, msg: msg}:
 	default:
+		h.broadcastDrops.Add(1)
 		slog.Warn("hub: broadcast channel full, dropping message",
 			"channel_id", channelID, "msg_len", len(msg))
 	}
@@ -364,6 +367,7 @@ func (h *Hub) BroadcastToAll(msg []byte) {
 	select {
 	case h.broadcast <- broadcastMsg{channelID: 0, msg: msg}:
 	default:
+		h.broadcastDrops.Add(1)
 		slog.Warn("hub: broadcast channel full, dropping global message",
 			"msg_len", len(msg))
 	}
@@ -440,6 +444,12 @@ func (h *Hub) ClientCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.clients)
+}
+
+// BroadcastDropCount returns the cumulative number of messages dropped due to a
+// full broadcast channel. Safe to call from any goroutine.
+func (h *Hub) BroadcastDropCount() uint64 {
+	return h.broadcastDrops.Load()
 }
 
 // VoiceSessionCount returns the number of clients currently in a voice channel.

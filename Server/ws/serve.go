@@ -12,6 +12,7 @@ import (
 	"nhooyr.io/websocket"
 
 	"github.com/owncord/server/auth"
+	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 )
@@ -20,6 +21,10 @@ const (
 	authDeadline     = 10 * time.Second
 	writeTimeout     = 10 * time.Second
 	settingsCacheTTL = 30 * time.Second
+
+	// wsReadLimitBytes is the maximum size of a single inbound WebSocket
+	// message. Must match the client-side upload cap.
+	wsReadLimitBytes = config.MaxMessageBytes
 )
 
 // ServeWS upgrades an HTTP connection to WebSocket, performs in-band auth,
@@ -37,7 +42,7 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 			slog.Warn("ws upgrade failed", "err", err)
 			return
 		}
-		conn.SetReadLimit(1 << 20) // 1 MB — match client-side limit
+		conn.SetReadLimit(wsReadLimitBytes) // match client-side upload cap
 
 		c, lastSeq, err := hub.upgradeAndAuth(conn, database, r)
 		if err != nil {

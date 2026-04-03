@@ -6,8 +6,10 @@ Production deployment guide for OwnCord server on Windows and Linux.
 
 - **Windows 10+** (x64) or **Linux** (x64)
 - **Go 1.25+** (only if building from source)
-- **LiveKit Server** binary (for voice/video) -- see [LiveKit Setup](livekit-setup.md)
-- Ports available: `8443` (default), `7880` (LiveKit), `80` (if using ACME/Let's Encrypt)
+- **LiveKit Server** binary (only if enabling voice/video) -- see [LiveKit Setup](livekit-setup.md)
+- Required port: `8443` (OwnCord HTTPS/WebSocket)
+- Additional ports for voice/video: `7880/TCP`, `7881/TCP`, `50000-60000/UDP`
+- Additional port for ACME TLS: `80/TCP`
 
 ## Building from Source
 
