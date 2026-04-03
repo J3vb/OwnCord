@@ -27,39 +27,44 @@ server on Windows or Linux and keep everything under your control
 
 ## Quick Start
 
-1. Download the server binary and the OwnCord installer from
-   [GitHub Releases](https://github.com/J3vb/OwnCord/releases):
-   - **Windows**: `chatserver.exe`
-   - **Linux**: `chatserver-linux-amd64.tar.gz` (extract to get `chatserver`)
-2. Run `chatserver.exe` / `./chatserver` — generates `config.yaml` and a `data/`
-   directory (database, TLS certs, uploads, backups) on first run
+**Option A — Binary (Windows / Linux)**
+
+1. Download from [GitHub Releases](https://github.com/J3vb/OwnCord/releases):
+   - **Windows**: `chatserver.exe` + `OwnCord_x.x.x_x64-setup.exe`
+   - **Linux x64**: `chatserver-linux-amd64.tar.gz` + `OwnCord_x.x.x_x86_64.AppImage` (or `_amd64.deb`)
+   - **Linux ARM64**: `chatserver-linux-amd64.tar.gz` + `OwnCord_x.x.x_aarch64.AppImage` (or `_arm64.deb`)
+2. Run `chatserver.exe` / `./chatserver` — generates `config.yaml` and `data/` on first run
 3. Open `https://localhost:8443/admin` to create the Owner account
-4. Generate an invite code in the admin panel and share it
-5. Friends install the client, enter your server address
-   (`ip:8443`), and register with the invite code
-> Note: You should locate your active IPv4 via `ipconfig` for Win or `ip a` for Linux, since OwnCord server runs on `0.0.0.0`.
->
-> Example: 192.168.1.2:8443
+4. Generate invite codes and share them with friends
 
-The client uses TOFU (Trust On First Use) for self-signed
-certificates — it prompts to trust the server on first
-connection, then pins it for future sessions.
+**Option B — Docker (Linux)**
 
+```bash
+cd Server
+cp .env.example .env && cp livekit.yaml.example livekit.yaml
+# Edit both files (set API keys + your public IP in livekit.yaml)
+docker compose up -d
+```
+
+See [Deployment Guide](docs/deployment.md) for full Docker setup.
+
+> **Finding your IP:** `ipconfig` (Windows) or `ip a` (Linux). The server binds to `0.0.0.0:8443` — share your LAN IP (e.g. `192.168.1.2:8443`) with friends.
+
+The client uses TOFU (Trust On First Use) for self-signed certificates — it prompts to trust the server on first connection, then pins it for future sessions.
 
 ### Voice & Video Setup (Optional)
 
-Voice and video require [LiveKit Server](https://github.com/livekit/livekit/releases):
+**Binary deployment** — set in `config.yaml` and restart:
+```yaml
+voice:
+  livekit_api_key: "my-unique-key"
+  livekit_api_secret: "my-secret-min-32-characters-long!!"
+  livekit_binary: "C:/path/to/livekit-server.exe"  # Windows
+  # livekit_binary: "/usr/local/bin/livekit-server"  # Linux
+```
+OwnCord auto-starts LiveKit as a companion process.
 
-1. Download `livekit-server` from the LiveKit releases page
-2. Edit `config.yaml` and set:
-   ```yaml
-   voice:
-     livekit_api_key: "devkey"           # any string
-     livekit_api_secret: "secret-min-32-characters-long!!"  # min 32 chars
-     livekit_binary: "C:/path/to/livekit-server.exe"
-   ```
-3. Restart `chatserver.exe` — it auto-starts LiveKit as a
-   companion process
+**Docker deployment** — LiveKit runs as a separate container, configured via `.env` and `livekit.yaml`. See [LiveKit Setup](docs/livekit-setup.md#docker).
 
 
 ## Features
@@ -74,7 +79,7 @@ Voice and video require [LiveKit Server](https://github.com/livekit/livekit/rele
 - Pinned messages per channel
 - Rich link previews with Open Graph metadata
 - YouTube embed support with cached titles
-- GIF picker powered by Tenor with inline rendering
+- GIF picker powered by Klipy with inline rendering and Klipy watermark
 - Inline image previews with lightbox viewer
 
 ### Voice & Video
@@ -146,11 +151,11 @@ Voice and video require [LiveKit Server](https://github.com/livekit/livekit/rele
 
 ### Desktop Client
 
-- Native Windows app built with Tauri v2
+- Native desktop app built with Tauri v2 — Windows x64, Linux x64, Linux ARM64
 - System tray integration
 - Desktop notifications with taskbar flash and sound
 - In-app auto-update with progress notification
-- Credential storage via Windows Credential Manager
+- Credential storage via system keychain (Windows Credential Manager / Linux Secret Service / macOS Keychain)
 - Auto-login with saved credentials (one-click connect)
 - Custom emoji picker
 - Compact mode for information-dense layouts
@@ -236,9 +241,8 @@ OwnCord/
 ### Prerequisites
 
 - Go 1.25+
-- Node.js 20+
-- Rust (stable)
-- Windows 10/11 (client) or Linux x64 (server)
+- Node.js 20+ and Rust (stable) — client only
+- Windows x64, Linux x64, or Linux ARM64
 
 ### Server
 
@@ -262,8 +266,9 @@ npm install
 npm run tauri build
 ```
 
-The installer is output to
-`Client/tauri-client/src-tauri/target/release/bundle/nsis/`.
+Output location:
+- **Windows**: `src-tauri/target/release/bundle/nsis/` (NSIS installer)
+- **Linux**: `src-tauri/target/release/bundle/appimage/` and `bundle/deb/`
 
 ### Running Tests
 
@@ -365,8 +370,8 @@ See [Contributing Guide](docs/contributing.md) for details.
 | Server | Go, chi router, LiveKit server SDK |
 | Database | SQLite (pure Go, embedded) |
 | Client | Tauri v2 (Rust + TypeScript) |
-| Voice/Video | LiveKit SFU (companion process) |
-| Build | NSIS installer, GitHub Actions CI |
+| Voice/Video | LiveKit SFU (companion process or Docker) |
+| Build | NSIS (Windows), AppImage + deb (Linux), GitHub Actions CI |
 
 ## License
 
