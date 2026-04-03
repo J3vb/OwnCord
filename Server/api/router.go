@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -190,7 +191,8 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		Get("/api/v1/metrics", handleMetrics(
 			func() int { return hub.ClientCount() },
 			func() int { return hub.VoiceSessionCount() },
-			func() (bool, error) { return hub.LiveKitHealthCheck() },
+			func() uint64 { return hub.BroadcastDropCount() },
+			func(ctx context.Context) (bool, error) { return hub.LiveKitHealthCheck(ctx) },
 		))
 
 	// Admin panel: static files + REST API (Phase 6).
@@ -266,7 +268,7 @@ type livekitHealthResponse struct {
 
 func handleLiveKitHealth(hub *ws.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ok, err := hub.LiveKitHealthCheck() //nolint:contextcheck // TODO: propagate context through this call path
+		ok, err := hub.LiveKitHealthCheck(r.Context())
 		if ok {
 			writeJSON(w, http.StatusOK, livekitHealthResponse{
 				Status:           "ok",

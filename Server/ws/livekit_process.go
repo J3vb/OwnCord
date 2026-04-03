@@ -245,10 +245,10 @@ func (p *LiveKitProcess) IsRunning() bool {
 
 // HealthCheck probes the LiveKit HTTP endpoint to verify it is accepting
 // connections. Returns true if the server responds (any status code).
-func (p *LiveKitProcess) HealthCheck() (bool, error) {
+func (p *LiveKitProcess) HealthCheck(ctx context.Context) (bool, error) {
 	httpURL := wsToHTTP(p.cfg.LiveKitURL)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, httpURL, nil)

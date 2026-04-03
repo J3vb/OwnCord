@@ -9,13 +9,21 @@
 //! This ensures the stored integer is consistent on both Windows and Linux.
 
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Runtime};
 
 /// Virtual key code for the PTT key. 0 = disabled.
 static PTT_VKEY: AtomicI32 = AtomicI32::new(0);
-/// Whether the polling loop is running.
+/// Whether the polling loop is running (intent flag, kept for backwards compat).
 static PTT_RUNNING: AtomicBool = AtomicBool::new(false);
+/// Shutdown signal sent into the polling thread. Separate from PTT_RUNNING so
+/// that "stop the loop now" and "should a loop be running" are distinct.
+static PTT_SHUTDOWN: AtomicBool = AtomicBool::new(false);
+/// Handle to the polling thread. `Some` means a thread is alive; `None` means
+/// no thread exists. This Mutex is the authoritative critical section that
+/// prevents duplicate thread spawns.
+static PTT_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
 
 // ---------------------------------------------------------------------------
 // Platform-specific key detection
@@ -23,9 +31,15 @@ static PTT_RUNNING: AtomicBool = AtomicBool::new(false);
 
 #[cfg(windows)]
 fn is_key_down(vk: i32) -> bool {
+    // VK codes 1-254 are valid; 0 and 255 are reserved/undefined
+    if !(1..=254).contains(&vk) {
+        return false;
+    }
+    // SAFETY: GetAsyncKeyState is safe to call with valid VK codes 1-254
     let state =
         unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(vk) };
-    (state as u16 & 0x8000) != 0
+    // High-order bit set (negative when interpreted as i16) = key is down
+    (state as i16) < 0
 }
 
 #[cfg(target_os = "linux")]
@@ -241,33 +255,88 @@ mod linux {
 // ---------------------------------------------------------------------------
 
 /// Start the PTT polling loop. Emits `ptt-state` (bool) events.
+///
+/// Uses `PTT_THREAD`'s Mutex as the critical section to prevent duplicate
+/// thread spawns. The `PTT_SHUTDOWN` flag is passed into the thread loop so
+/// it can be stopped cleanly from `ptt_stop` or `ptt_stop_internal`.
 #[tauri::command]
 pub fn ptt_start<R: Runtime>(app: AppHandle<R>) {
-    if PTT_RUNNING.swap(true, Ordering::SeqCst) {
-        return; // already running
+    let mut guard = PTT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.is_some() {
+        return; // thread already alive — Mutex is the authoritative check
     }
 
-    std::thread::spawn(move || {
-        let mut was_pressed = false;
+    // Reset the shutdown flag before spawning so the loop doesn't exit
+    // immediately if a previous ptt_stop set it.
+    PTT_SHUTDOWN.store(false, Ordering::SeqCst);
+    PTT_RUNNING.store(true, Ordering::SeqCst);
 
-        while PTT_RUNNING.load(Ordering::SeqCst) {
-            let vk = PTT_VKEY.load(Ordering::SeqCst);
-            if vk != 0 {
-                let pressed = is_key_down(vk);
-                if pressed != was_pressed {
-                    was_pressed = pressed;
-                    let _ = app.emit("ptt-state", pressed);
+    let handle = std::thread::spawn(move || {
+        // Wrap the entire loop body in catch_unwind so that panics from
+        // is_key_down (unsafe FFI) or app.emit do not leave PTT_RUNNING
+        // stuck at true with no way to recover.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut was_pressed = false;
+
+            while !PTT_SHUTDOWN.load(Ordering::SeqCst) {
+                let vk = PTT_VKEY.load(Ordering::SeqCst);
+                if vk != 0 {
+                    let pressed = is_key_down(vk);
+                    if pressed != was_pressed {
+                        was_pressed = pressed;
+                        let _ = app.emit("ptt-state", pressed);
+                    }
                 }
+                std::thread::sleep(Duration::from_millis(20));
             }
-            std::thread::sleep(Duration::from_millis(20));
+        }));
+
+        // Clear the thread handle slot so ptt_start can spawn a replacement.
+        // Use unwrap_or_else to handle a poisoned Mutex defensively, matching
+        // the pattern used in ptt_stop_internal.
+        let mut g = PTT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
+        *g = None;
+        PTT_RUNNING.store(false, Ordering::SeqCst);
+
+        if result.is_err() {
+            log::error!("PTT polling thread panicked — PTT is no longer active");
+            // Notify the frontend so it can surface a warning and offer retry.
+            let _ = app.emit("ptt-error", "PTT thread panicked");
         }
     });
+
+    *guard = Some(handle);
 }
 
-/// Stop the PTT polling loop.
+/// Stop the PTT polling loop (IPC-callable command).
 #[tauri::command]
 pub fn ptt_stop() {
+    ptt_stop_internal();
+}
+
+/// Stop the PTT polling thread and block until it has fully exited.
+///
+/// This is the internal, non-IPC version called from the Tauri lifecycle
+/// handler (`RunEvent::Exit`) to guarantee the thread is gone before the
+/// process tears down, preventing the `AppHandle` from being used against
+/// a half-torn-down runtime.
+pub fn ptt_stop_internal() {
+    // Signal the thread to exit.
+    PTT_SHUTDOWN.store(true, Ordering::SeqCst);
     PTT_RUNNING.store(false, Ordering::SeqCst);
+
+    // Take the handle out of the Mutex so we can join it outside the lock,
+    // avoiding a potential deadlock if the thread itself tries to lock
+    // PTT_THREAD on exit.
+    let handle = {
+        let mut guard = PTT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
+        guard.take()
+    };
+
+    if let Some(h) = handle {
+        // Best-effort join — ignore if the thread already exited or panicked.
+        let _ = h.join();
+    }
 }
 
 /// Set the PTT virtual key code. Pass 0 to disable.

@@ -1,6 +1,7 @@
 package ws_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -720,7 +721,7 @@ func TestHealthCheck_Success(t *testing.T) {
 
 	proc := ws.NewLiveKitProcess(cfg, tlsCfg, t.TempDir())
 
-	ok, err := proc.HealthCheck()
+	ok, err := proc.HealthCheck(context.Background())
 	if err != nil {
 		t.Fatalf("HealthCheck: %v", err)
 	}
@@ -741,7 +742,7 @@ func TestHealthCheck_ServerDown(t *testing.T) {
 
 	proc := ws.NewLiveKitProcess(cfg, tlsCfg, t.TempDir())
 
-	ok, err := proc.HealthCheck()
+	ok, err := proc.HealthCheck(context.Background())
 	if err == nil {
 		t.Fatal("expected error for unreachable server, got nil")
 	}
@@ -767,7 +768,7 @@ func TestHealthCheck_NonOKStatus(t *testing.T) {
 	tlsCfg := &config.TLSConfig{}
 	proc := ws.NewLiveKitProcess(cfg, tlsCfg, t.TempDir())
 
-	ok, err := proc.HealthCheck()
+	ok, err := proc.HealthCheck(context.Background())
 	if err != nil {
 		t.Fatalf("HealthCheck: %v", err)
 	}

@@ -1,23 +1,33 @@
-# Tailscale Guide (Zero-Config Alternative)
+# Tailscale Guide (Zero-Config Remote Access)
 
-Use Tailscale for secure, zero-config networking without port forwarding.
+Use Tailscale when you want remote access without port forwarding.
 
-## What is Tailscale
+## Why Tailscale
 
-Tailscale is a mesh VPN that creates encrypted tunnels between your devices using WireGuard. No port forwarding, no dynamic DNS, and it works behind CGNAT. Free for personal use.
+Tailscale creates an encrypted private network between your devices using WireGuard.
+It works behind CGNAT and strict home routers, so setup is usually faster than manual forwarding.
 
 ## Setup
 
-1. **Install Tailscale** on the server machine and each client machine: https://tailscale.com/download
-2. **Sign in** with the same Tailscale account (or share the machine using Tailscale's sharing feature)
-3. **Find the server's Tailscale IP** -- shown in the Tailscale app, typically `100.x.y.z`
-4. **Disable TLS in config** -- set `tls.mode` to `"off"` in `config.yaml` since Tailscale already encrypts all traffic with WireGuard
-5. **Connect clients** using the Tailscale IP: `100.x.y.z:8443`
+1. Install Tailscale on the server machine and client machines: https://tailscale.com/download
+2. Sign in and confirm all devices are in the same tailnet (or shared access is granted).
+3. Get the server Tailscale IP (usually `100.x.y.z`) from the Tailscale app.
+4. Keep OwnCord on port `8443`.
+5. Connect clients to `https://<tailscale-ip>:8443`.
+
+## TLS Recommendation
+
+- Recommended: keep `tls.mode: self_signed` (default).
+- Optional advanced setup: set `tls.mode: off` only if every client is strictly inside trusted Tailscale access and you accept plaintext inside the tailnet.
+
+## Voice/Video with Tailscale
+
+- Tailscale handles device-to-device reachability, but LiveKit still needs correct runtime config.
+- Follow [livekit-setup.md](livekit-setup.md) for LiveKit key/secret and port behavior.
 
 ## Benefits
 
-- No port forwarding needed
-- Works behind CGNAT and strict firewalls
-- Encrypted by default (WireGuard)
-- Stable IPs that don't change
-- Easy to add/remove friends via the Tailscale admin console
+- No router port forwarding.
+- Works behind CGNAT.
+- Stable private IPs.
+- Encrypted transport by default.
