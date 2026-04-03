@@ -762,5 +762,13 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error 
 		}
 	}
 
+	// Explicitly close and check the error so a disk-full flush failure is
+	// not silently swallowed, which would leave a corrupt file on disk.
+	if err := f.Close(); err != nil {
+		closed = true
+		_ = os.Remove(destPath)
+		return fmt.Errorf("closing downloaded file: %w", err)
+	}
+	closed = true
 	return nil
 }
