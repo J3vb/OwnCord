@@ -299,7 +299,7 @@ func (u *Updater) downloadLinuxTarballAndVerify(ctx context.Context, downloadURL
 		_ = os.Remove(destPath)
 		return fmt.Errorf("extracting archive: %w", err)
 	}
-	if err := os.Chmod(destPath, 0o755); err != nil {
+	if err := os.Chmod(destPath, 0o755); err != nil { //nolint:gosec // G302: binary must be world-executable to run
 		return fmt.Errorf("chmod binary: %w", err)
 	}
 	return nil
