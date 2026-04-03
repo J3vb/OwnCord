@@ -528,8 +528,8 @@ describe("GifPicker", () => {
   describe("stale request cancellation", () => {
     it("does not render results from a superseded request", async () => {
       // First search resolves late, second resolves immediately
-      let resolveFirst!: (v: readonly TenorGif[]) => void;
-      const firstPromise = new Promise<readonly TenorGif[]>((res) => {
+      let resolveFirst!: (v: readonly GifResult[]) => void;
+      const firstPromise = new Promise<readonly GifResult[]>((res) => {
         resolveFirst = res;
       });
 
