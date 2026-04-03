@@ -3,8 +3,10 @@
 
 // Tenor API key — defaults to Google's public anonymous test key from
 // https://developers.google.com/tenor/guides/quickstart
+// This key is intentionally public (Google's demo key, not a secret).
 // Override via VITE_TENOR_API_KEY at build time for production use.
 const TENOR_API_KEY =
+  // codeql[js/hardcoded-credentials] -- Google's public anonymous demo key, not a secret
   import.meta.env.VITE_TENOR_API_KEY ?? "AIzaSyAyimkuYQYF_FXVALexPuGQctUWRURdCYQ";
 const TENOR_BASE = "https://tenor.googleapis.com/v2";
 const DEFAULT_LIMIT = 20;
