@@ -38,6 +38,10 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 ring = "0.17"
 log = "0.4"
 env_logger = "0.11"
+keyring = "3"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.58", features = ["Win32_Security_Credentials", "Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse"] }
+windows = { version = "0.58", features = ["Win32_UI_Input_KeyboardAndMouse"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+device_query = "2"

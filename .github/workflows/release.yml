@@ -6,7 +6,7 @@ on:
       - "v*"
 
 jobs:
-  release-client:
+  release-client-windows:
     name: Build Tauri (Windows)
     runs-on: windows-latest
     permissions:
@@ -57,6 +57,77 @@ jobs:
         with:
           name: windows-release-assets
           path: release-staging/
+
+  release-client-linux:
+    name: Build Tauri (Linux)
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: Client/tauri-client/package-lock.json
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            libsecret-1-dev \
+            libasound2-dev \
+            libssl-dev \
+            patchelf \
+            librsvg2-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: Client/tauri-client/src-tauri
+
+      - name: Install npm dependencies
+        working-directory: Client/tauri-client
+        run: npm ci
+
+      - name: Build Tauri app (AppImage + deb)
+        working-directory: Client/tauri-client
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          VITE_KLIPY_API_KEY: ${{ secrets.VITE_KLIPY_API_KEY }}
+        run: npm run tauri build -- --bundles appimage,deb
+
+      - name: Stage Linux release assets
+        shell: bash
+        run: |
+          mkdir -p linux-staging
+          BUNDLE_DIR="Client/tauri-client/src-tauri/target/release/bundle"
+          # AppImage
+          APPIMAGE=$(find "$BUNDLE_DIR/appimage" -name "*.AppImage" ! -name "*.sig" | head -1)
+          if [ -n "$APPIMAGE" ] && [ -f "$APPIMAGE" ]; then cp "$APPIMAGE" linux-staging/; fi
+          APPIMAGE_SIG=$(find "$BUNDLE_DIR/appimage" -name "*.AppImage.sig" | head -1)
+          if [ -n "$APPIMAGE_SIG" ] && [ -f "$APPIMAGE_SIG" ]; then cp "$APPIMAGE_SIG" linux-staging/; fi
+          APPIMAGE_TAR=$(find "$BUNDLE_DIR/appimage" -name "*.AppImage.tar.gz" ! -name "*.sig" | head -1)
+          if [ -n "$APPIMAGE_TAR" ] && [ -f "$APPIMAGE_TAR" ]; then cp "$APPIMAGE_TAR" linux-staging/; fi
+          APPIMAGE_TAR_SIG=$(find "$BUNDLE_DIR/appimage" -name "*.AppImage.tar.gz.sig" | head -1)
+          if [ -n "$APPIMAGE_TAR_SIG" ] && [ -f "$APPIMAGE_TAR_SIG" ]; then cp "$APPIMAGE_TAR_SIG" linux-staging/; fi
+          # .deb
+          DEB=$(find "$BUNDLE_DIR/deb" -name "*.deb" | head -1)
+          if [ -n "$DEB" ] && [ -f "$DEB" ]; then cp "$DEB" linux-staging/; fi
+
+      - name: Upload Linux release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release-assets
+          path: linux-staging/
 
   release-server:
     name: Build server (${{ matrix.os }})
@@ -115,9 +186,133 @@ jobs:
           name: ${{ matrix.artifact }}
           path: chatserver-linux-amd64.tar.gz
 
+  release-client-linux-arm64:
+    name: Build Tauri (Linux ARM64)
+    runs-on: ubuntu-22.04-arm
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: Client/tauri-client/package-lock.json
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            libsecret-1-dev \
+            libasound2-dev \
+            libssl-dev \
+            patchelf \
+            librsvg2-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: Client/tauri-client/src-tauri
+
+      - name: Install npm dependencies
+        working-directory: Client/tauri-client
+        run: npm ci
+
+      - name: Build Tauri app (AppImage + deb)
+        working-directory: Client/tauri-client
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          VITE_KLIPY_API_KEY: ${{ secrets.VITE_KLIPY_API_KEY }}
+        run: npm run tauri build -- --bundles appimage,deb
+
+      - name: Stage Linux ARM64 release assets
+        shell: bash
+        run: |
+          mkdir -p linux-arm64-staging
+          BUNDLE_DIR="Client/tauri-client/src-tauri/target/release/bundle"
+          # AppImage (ensure arch is in filename)
+          for f in "$BUNDLE_DIR"/appimage/*.AppImage; do
+            [ -f "$f" ] || continue
+            [[ "$f" == *.sig ]] && continue
+            dest="linux-arm64-staging/$(basename "$f")"
+            # Append _aarch64 if bundler omits arch from filename
+            [[ "$(basename "$f")" == *aarch64* ]] || dest="${dest%.AppImage}_aarch64.AppImage"
+            cp "$f" "$dest"
+          done
+          for f in "$BUNDLE_DIR"/appimage/*.AppImage.tar.gz; do
+            [ -f "$f" ] && cp "$f" linux-arm64-staging/
+          done
+          for f in "$BUNDLE_DIR"/appimage/*.sig; do
+            [ -f "$f" ] && cp "$f" linux-arm64-staging/
+          done
+          # .deb
+          for f in "$BUNDLE_DIR"/deb/*.deb; do
+            [ -f "$f" ] && cp "$f" linux-arm64-staging/
+          done
+
+      - name: Upload Linux ARM64 release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64-release-assets
+          path: linux-arm64-staging/
+
+  release-server-docker:
+    name: Build & Push Server Docker Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/owncord-server
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: Server/
+          push: true
+          build-args: VERSION=${{ env.VERSION }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   publish:
     name: Publish GitHub Release
-    needs: [release-client, release-server]
+    needs: [release-client-windows, release-client-linux, release-client-linux-arm64, release-server, release-server-docker]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -136,13 +331,25 @@ jobs:
           name: windows-release-assets
           path: windows
 
+      - name: Download Linux x86_64 client assets
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-release-assets
+          path: linux
+
+      - name: Download Linux ARM64 client assets
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-arm64-release-assets
+          path: linux
+
       - name: Download Windows server binary
         uses: actions/download-artifact@v4
         with:
           name: server-windows
           path: windows
 
-      - name: Download Linux archive
+      - name: Download Linux server archive
         uses: actions/download-artifact@v4
         with:
           name: server-linux

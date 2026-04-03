@@ -31,13 +31,32 @@
     "active": true,
     "createUpdaterArtifacts": "v1Compatible",
     "targets": [
-      "nsis"
+      "nsis",
+      "appimage",
+      "deb"
     ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
+      "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libayatana-appindicator3-1",
+          "libsecret-1-0"
+        ]
+      },
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    },
+    "category": "Network",
+    "shortDescription": "Self-hosted chat platform",
+    "longDescription": "OwnCord is a self-hosted voice and text chat platform with end-to-end encryption and full media support.",
     "windows": {
       "nsis": {
         "displayLanguageSelector": false,
