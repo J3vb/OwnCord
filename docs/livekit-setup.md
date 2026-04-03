@@ -2,11 +2,62 @@
 
 LiveKit is an open-source SFU (Selective Forwarding Unit) that handles real-time voice and video. OwnCord uses it instead of rolling its own WebRTC stack -- LiveKit handles all the hard parts (DTLS, ICE, codec negotiation, simulcast) while OwnCord manages permissions, state, and room lifecycle.
 
+There are two ways to run LiveKit alongside OwnCord:
+
+| Method | Best for | LiveKit managed by |
+|--------|----------|--------------------|
+| **Docker Compose** | Linux servers | Docker (separate container) |
+| **Companion process** | Windows / bare-metal Linux | OwnCord (auto-start) |
+
 ---
 
-## 1. Get the LiveKit Binary
+## Docker <a name="docker"></a>
 
-Download `livekit-server` for Windows from one of:
+When running OwnCord via `docker compose`, LiveKit runs as a separate container on the same internal network. OwnCord reaches it at `ws://livekit:7880` via Docker's internal DNS — no port forwarding needed between containers.
+
+### Setup
+
+1. **Edit `.env`** (in `Server/`) — set `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET`:
+
+   ```
+   LIVEKIT_API_KEY=my-unique-key
+   LIVEKIT_API_SECRET=my-secret-at-least-32-characters-long
+   ```
+
+2. **Edit `livekit.yaml`** (copy from `livekit.yaml.example`) — use the same key/secret and set your public IP:
+
+   ```yaml
+   port: 7880
+   rtc:
+     tcp_port: 7881
+     port_range_start: 50000
+     port_range_end: 60000
+     node_ip: "YOUR_SERVER_PUBLIC_IP"   # required for remote clients
+   keys:
+     my-unique-key: my-secret-at-least-32-characters-long
+   logging:
+     level: info
+   ```
+
+3. **Leave `voice.livekit_binary` unset** in your `config.yaml`. The `voice.livekit_url` should be `ws://livekit:7880` (Docker DNS).
+
+4. **Open firewall ports** on your host:
+
+   | Port | Protocol | Purpose |
+   |------|----------|---------|
+   | `7880` | TCP | LiveKit signaling |
+   | `7881` | TCP | TCP fallback for WebRTC |
+   | `50000-60000` | UDP | WebRTC media |
+
+> **`node_ip` is required** for remote clients. Without it, LiveKit advertises internal Docker IP addresses as ICE candidates, which are unreachable from the internet. If your cloud VM has a metadata service (AWS, GCP, DigitalOcean) you can use `use_external_ip: true` instead.
+
+---
+
+## Companion Process (Windows / bare-metal Linux)
+
+### 1. Get the LiveKit Binary
+
+Download `livekit-server` for your platform from one of:
 
 - **GitHub releases**: <https://github.com/livekit/livekit/releases>
   - Grab the `livekit-server_*_windows_amd64.zip` asset

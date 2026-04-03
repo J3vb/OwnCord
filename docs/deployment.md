@@ -31,6 +31,75 @@ Alternatively, download a pre-built binary from GitHub Releases:
 - **Windows**: `chatserver.exe`
 - **Linux**: `chatserver-linux-amd64.tar.gz` (extract to get `chatserver`)
 
+## Docker (Linux)
+
+The easiest way to run OwnCord on Linux. Includes the chat server and LiveKit voice/video as separate containers on a shared internal network.
+
+### Prerequisites
+
+- Docker Engine 24+ and Docker Compose v2
+- Ports available: `8443` (chat), `7880-7881` TCP, `50000-60000` UDP (LiveKit media)
+
+### Quick Start
+
+```bash
+cd Server
+
+# 1. Create your secrets file
+cp .env.example .env
+# Edit .env — set LIVEKIT_API_KEY and LIVEKIT_API_SECRET (secret must be 32+ chars)
+
+# 2. Create your LiveKit config
+cp livekit.yaml.example livekit.yaml
+# Edit livekit.yaml — set node_ip to your server's public IP, and paste the same key/secret
+
+# 3. Create a minimal config.yaml for OwnCord (server name, TLS, etc.)
+# Leave voice.livekit_url and voice.livekit_binary unset — compose injects these via env vars
+
+# 4. Start
+docker compose up -d
+```
+
+On first start OwnCord creates its database and writes defaults into `/app/data`. Navigate to `https://<your-ip>:8443/admin` to create the Owner account.
+
+### config.yaml for Docker
+
+You do **not** need to set `voice.livekit_api_key`, `voice.livekit_api_secret`, or `voice.livekit_binary` in your `config.yaml` when using Docker — these are injected via environment variables from `.env`. Set everything else as normal:
+
+```yaml
+server:
+  name: "My OwnCord"
+  port: 8443
+
+voice:
+  livekit_url: "ws://livekit:7880"   # Docker service DNS — do not change
+  quality: "medium"
+
+tls:
+  mode: "self_signed"   # or "acme" / "manual" for production
+```
+
+### Data Persistence
+
+The `owncord-data` Docker volume maps to `/app/data` inside the container. This holds the SQLite database, TLS certs, uploads, and backups. It persists across container restarts and upgrades.
+
+To back up, use the admin backup endpoint as normal — backups land in `/app/data/backups/` which is part of the named volume.
+
+### Upgrading
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+The named volume is preserved — no data loss.
+
+### LiveKit in Docker
+
+LiveKit runs as its own container (`livekit/livekit-server:v1`) and is **not** managed by OwnCord's companion-process system. Leave `voice.livekit_binary` unset. See [LiveKit Setup — Docker](livekit-setup.md#docker) for details.
+
+---
+
 ## First Run Behavior
 
 When `chatserver.exe` starts for the first time:
