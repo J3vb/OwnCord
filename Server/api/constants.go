@@ -65,6 +65,10 @@ const (
 	// per IP per minute.
 	profilePasswordRateLimitPerMinute = 5
 
+	// profileUpdateRateLimitPerMinute is the maximum profile update attempts
+	// per user per minute.
+	profileUpdateRateLimitPerMinute = 10
+
 	// loginUserFailureThreshold is the number of failed login attempts for a
 	// specific username (regardless of source IP) before the account is locked.
 	loginUserFailureThreshold = 9
@@ -131,4 +135,7 @@ const (
 	// maxUploadFilenameLength is the maximum length of an upload filename
 	// (filesystem-safe limit).
 	maxUploadFilenameLength = 255
+
+	// maxAvatarURLLen is the maximum length of a user avatar URL.
+	maxAvatarURLLen = 512
 )

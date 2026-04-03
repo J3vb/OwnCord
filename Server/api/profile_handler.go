@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -57,7 +58,8 @@ func MountProfileRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter
 	r.Route("/api/v1/users/me", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
 
-		r.Patch("/", handleUpdateProfile(database, broadcaster))
+		r.With(RateLimitMiddleware(limiter, profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
+			Patch("/", handleUpdateProfile(database, broadcaster))
 
 		r.With(RateLimitMiddleware(limiter, profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
 			Put("/password", handleChangePassword(database, limiter))
@@ -65,6 +67,24 @@ func MountProfileRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter
 		r.Get("/sessions", handleListSessions(database))
 		r.Delete("/sessions/{id}", handleRevokeSession(database))
 	})
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+// validateAvatarURL checks that avatar is either empty or a valid https:// URL
+// no longer than maxAvatarURLLen characters.
+func validateAvatarURL(avatar string) error {
+	if avatar == "" {
+		return nil
+	}
+	if len(avatar) > maxAvatarURLLen {
+		return fmt.Errorf("avatar URL too long (max %d characters)", maxAvatarURLLen)
+	}
+	parsed, err := url.Parse(avatar)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return fmt.Errorf("avatar URL must use https://")
+	}
+	return nil
 }
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
@@ -108,9 +128,16 @@ func handleUpdateProfile(database *db.DB, broadcaster ProfileBroadcaster) http.H
 			return
 		}
 
-		// Sanitize avatar if provided.
+		// Sanitize and validate avatar if provided.
 		if req.Avatar != nil {
 			trimmed := strings.TrimSpace(sanitizer.Sanitize(*req.Avatar))
+			if err := validateAvatarURL(trimmed); err != nil {
+				writeJSON(w, http.StatusBadRequest, errorResponse{
+					Error:   "INVALID_INPUT",
+					Message: err.Error(),
+				})
+				return
+			}
 			req.Avatar = &trimmed
 		}
 

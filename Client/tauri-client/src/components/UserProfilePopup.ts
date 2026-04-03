@@ -13,6 +13,7 @@ import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
+import { isSafeUrl } from "./message-list/attachments";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -137,7 +138,7 @@ export function createUserProfilePopup(
       wrapper.style.background = "#4e5058";
       const text = createElement("span", {}, "?");
       wrapper.appendChild(text);
-    } else if (user.avatar !== null && user.avatar.length > 0) {
+    } else if (user.avatar !== null && user.avatar.length > 0 && isSafeUrl(user.avatar)) {
       const img = createElement("img", {
         src: user.avatar,
         alt: user.username,
