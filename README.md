@@ -362,3 +362,7 @@ See [Contributing Guide](docs/contributing.md) for details.
 ## License
 
 AGPL-3.0
+
+---
+
+*Built with [Claude Code](https://claude.ai/code) and [GitHub Copilot](https://github.com/features/copilot).*
