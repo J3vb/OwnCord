@@ -16,6 +16,7 @@ import (
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/updater"
 )
 
 // openWhiteboxTestDB opens an in-memory SQLite database for whitebox tests.
@@ -419,7 +420,7 @@ func TestSpawnDetached_ValidExecutable(t *testing.T) {
 		t.Fatalf("abs path of test binary: %v", err)
 	}
 
-	err = spawnDetached(selfExe, []string{"-test.run=^$"})
+	err = updater.SpawnDetached(selfExe, []string{"-test.run=^$"})
 	if err != nil {
 		t.Errorf("spawnDetached returned error: %v", err)
 	}
@@ -428,7 +429,7 @@ func TestSpawnDetached_ValidExecutable(t *testing.T) {
 // TestSpawnDetached_InvalidExecutable verifies that spawnDetached returns an
 // error when the executable path does not exist.
 func TestSpawnDetached_InvalidExecutable(t *testing.T) {
-	err := spawnDetached("/nonexistent/path/to/binary", nil)
+	err := updater.SpawnDetached("/nonexistent/path/to/binary", nil)
 	if err == nil {
 		t.Error("expected error when executable does not exist, got nil")
 	}
@@ -448,7 +449,7 @@ func TestSpawnDetached_SetsWindowsFlags(t *testing.T) {
 	}
 
 	// Just verify it doesn't panic when setting the Windows creation flag.
-	err = spawnDetached(selfExe, []string{"-test.run=^$"})
+	err = updater.SpawnDetached(selfExe, []string{"-test.run=^$"})
 	if err != nil {
 		t.Errorf("spawnDetached on Windows returned error: %v", err)
 	}
