@@ -1,25 +1,35 @@
 # Deployment Guide
 
-Production deployment guide for OwnCord server on Windows.
+Production deployment guide for OwnCord server on Windows and Linux.
 
 ## Prerequisites
 
-- **Windows 10+** (x64)
+- **Windows 10+** (x64) or **Linux** (x64)
 - **Go 1.25+** (only if building from source)
 - **LiveKit Server** binary (for voice/video) -- see [LiveKit Setup](livekit-setup.md)
 - Ports available: `8443` (default), `7880` (LiveKit), `80` (if using ACME/Let's Encrypt)
 
 ## Building from Source
 
+**Windows:**
 ```bash
 cd Server
 go build -o chatserver.exe -ldflags "-s -w -X main.version=1.0.0" .
 ```
 
+**Linux:**
+```bash
+cd Server
+CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.0.0" .
+```
+
 - `-s -w` strips debug info (smaller binary)
 - `-X main.version=...` embeds the version string
+- `CGO_ENABLED=0` produces a fully static binary on Linux
 
-Alternatively, download a pre-built `chatserver.exe` from GitHub Releases.
+Alternatively, download a pre-built binary from GitHub Releases:
+- **Windows**: `chatserver.exe`
+- **Linux**: `chatserver-linux-amd64.tar.gz` (extract to get `chatserver`)
 
 ## First Run Behavior
 

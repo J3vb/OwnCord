@@ -6,7 +6,8 @@ How to set up the development environment and contribute to OwnCord.
 
 ### Prerequisites
 
-- **Windows 10+** (x64)
+- **Windows 10+** (x64) — required for the Tauri client
+- **Linux x64** — supported for server-only development
 - **Go 1.25+** (server)
 - **Node.js 20+** (client)
 - **Rust / Cargo** (Tauri client)
@@ -17,7 +18,8 @@ How to set up the development environment and contribute to OwnCord.
 
 | Command | Description |
 |---------|-------------|
-| `go build -o chatserver.exe -ldflags "-s -w" .` | Build server binary |
+| `go build -o chatserver.exe -ldflags "-s -w" .` | Build server binary (Windows) |
+| `CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w" .` | Build server binary (Linux) |
 | `go test ./...` | Run all server tests |
 | `go test ./... -cover` | Run server tests with coverage |
 | `go test -race ./...` | Run server tests with race detection |

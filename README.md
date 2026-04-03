@@ -11,10 +11,10 @@
 > **Early Alpha — Building in the Open**
 > OwnCord is under active development and is not production-ready. Do not use it for sensitive communications. Security hardening is in progress. Contributions and [security reports](https://github.com/J3vb/OwnCord/issues) are welcome.
 
-A self-hosted Windows chat platform with real-time messaging,
+A self-hosted chat platform with real-time messaging,
 voice/video, file sharing, and a web admin panel. Run your own
-server and keep everything under your control — zero cloud
-dependencies, works fully on LAN.
+server on Windows or Linux and keep everything under your control
+— zero cloud dependencies, works fully on LAN.
 
 <p align="center">
   <img src=".github/images/Client.png" alt="OwnCord Client" width="700">
@@ -27,9 +27,11 @@ dependencies, works fully on LAN.
 
 ## Quick Start
 
-1. Download `chatserver.exe` and the OwnCord installer from
-   [GitHub Releases](https://github.com/J3vb/OwnCord/releases)
-2. Run `chatserver.exe` — generates `config.yaml` and a `data/`
+1. Download the server binary and the OwnCord installer from
+   [GitHub Releases](https://github.com/J3vb/OwnCord/releases):
+   - **Windows**: `chatserver.exe`
+   - **Linux**: `chatserver-linux-amd64.tar.gz` (extract to get `chatserver`)
+2. Run `chatserver.exe` / `./chatserver` — generates `config.yaml` and a `data/`
    directory (database, TLS certs, uploads, backups) on first run
 3. Open `https://localhost:8443/admin` to create the Owner account
 4. Generate an invite code in the admin panel and share it
@@ -236,13 +238,20 @@ OwnCord/
 - Go 1.25+
 - Node.js 20+
 - Rust (stable)
-- Windows 10/11
+- Windows 10/11 (client) or Linux x64 (server)
 
 ### Server
 
+**Windows:**
 ```bash
 cd Server
 go build -o chatserver.exe -ldflags "-s -w -X main.version=1.0.0" .
+```
+
+**Linux:**
+```bash
+cd Server
+CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.0.0" .
 ```
 
 ### Client
