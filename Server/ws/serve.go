@@ -232,7 +232,7 @@ func (h *Hub) handleFreshConnect(
 			// different identity and won't be removed. Use a hub-stop-aware
 			// context to avoid goroutine leaks on shutdown.
 			staleChID, staleUserID, staleJoinToken := vs.ChannelID, c.userID, vs.JoinedAt
-			go func() {
+			go func() { //nolint:contextcheck // goroutine intentionally detaches from request context; lifecycle managed via h.stop
 				select {
 				case <-h.stop:
 					return

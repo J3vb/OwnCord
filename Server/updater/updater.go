@@ -224,15 +224,16 @@ func (u *Updater) fetchLatestRelease(ctx context.Context) (UpdateInfo, error) {
 			Name:        asset.Name,
 			DownloadURL: asset.BrowserDownloadURL,
 		})
-		if strings.EqualFold(asset.Name, binaryAsset) {
+		switch {
+		case strings.EqualFold(asset.Name, binaryAsset):
 			downloadURL = asset.BrowserDownloadURL
-		} else if strings.EqualFold(asset.Name, checksumAsset) {
+		case strings.EqualFold(asset.Name, checksumAsset):
 			checksumURL = asset.BrowserDownloadURL
-		} else if strings.EqualFold(asset.Name, signatureAsset) {
+		case strings.EqualFold(asset.Name, signatureAsset):
 			signatureURL = asset.BrowserDownloadURL
-		} else if strings.EqualFold(asset.Name, manifestAsset) {
+		case strings.EqualFold(asset.Name, manifestAsset):
 			manifestURL = asset.BrowserDownloadURL
-		} else if strings.EqualFold(asset.Name, manifestSigAsset) {
+		case strings.EqualFold(asset.Name, manifestSigAsset):
 			manifestSignatureURL = asset.BrowserDownloadURL
 		}
 	}

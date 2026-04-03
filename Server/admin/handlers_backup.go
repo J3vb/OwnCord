@@ -124,12 +124,12 @@ func handleDeleteBackup(database *db.DB) http.Handler {
 			return
 		}
 
-		if _, err := os.Stat(target); os.IsNotExist(err) {
+		if _, err := os.Stat(target); os.IsNotExist(err) { //nolint:gosec // G703: path sanitized by HasPrefix check above
 			writeErr(w, http.StatusNotFound, "NOT_FOUND", "backup not found")
 			return
 		}
 
-		if err := os.Remove(target); err != nil {
+		if err := os.Remove(target); err != nil { //nolint:gosec // G703: path sanitized by HasPrefix check above
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete backup")
 			return
 		}
@@ -156,7 +156,7 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 			return
 		}
 
-		if _, err := os.Stat(target); os.IsNotExist(err) {
+		if _, err := os.Stat(target); os.IsNotExist(err) { //nolint:gosec // G703: path sanitized by HasPrefix check above
 			writeErr(w, http.StatusNotFound, "NOT_FOUND", "backup not found")
 			return
 		}

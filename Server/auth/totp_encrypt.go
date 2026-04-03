@@ -110,8 +110,8 @@ func DecryptTOTPSecret(key []byte, ciphertext string) (string, error) {
 
 	data, err := hex.DecodeString(ciphertext)
 	if err != nil {
-		// Not valid hex -- treat as unencrypted plaintext.
-		return ciphertext, nil
+		// Not valid hex -- treat as unencrypted plaintext (backwards compat).
+		return ciphertext, nil //nolint:nilerr
 	}
 
 	block, err := aes.NewCipher(key)
@@ -135,7 +135,7 @@ func DecryptTOTPSecret(key []byte, ciphertext string) (string, error) {
 	if err != nil {
 		// Decryption failed -- likely an unencrypted legacy secret.
 		// Return as-is for backwards compatibility.
-		return ciphertext, nil
+		return ciphertext, nil //nolint:nilerr
 	}
 
 	return string(plaintext), nil

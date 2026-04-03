@@ -206,5 +206,5 @@ func (h *Hub) HandleWebhookParticipantLeftForTest(userID int64, channelID int64,
 			Name: roomName,
 		},
 	}
-	h.handleWebhookParticipantLeft(event)
+	h.handleWebhookParticipantLeft(context.Background(), event)
 }

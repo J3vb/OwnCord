@@ -262,14 +262,12 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 						})
 						return
 					}
-				} else {
-					if !hasChannelPermREST(database, role, *aa.ChannelID, permissions.ReadMessages) {
-						writeJSON(w, http.StatusForbidden, errorResponse{
-							Error:   "FORBIDDEN",
-							Message: "you do not have access to this file",
-						})
-						return
-					}
+				} else if !hasChannelPermREST(database, role, *aa.ChannelID, permissions.ReadMessages) {
+					writeJSON(w, http.StatusForbidden, errorResponse{
+						Error:   "FORBIDDEN",
+						Message: "you do not have access to this file",
+					})
+					return
 				}
 			}
 		}
