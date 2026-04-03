@@ -10,6 +10,7 @@ const mockSetUserVolume = vi.fn();
 vi.mock("@lib/livekitSession", () => ({
   muteScreenshareAudio: (...args: unknown[]) => mockMuteScreenshareAudio(...args),
   setUserVolume: (...args: unknown[]) => mockSetUserVolume(...args),
+  setScreenshareAudioVolume: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------

@@ -18,6 +18,7 @@ vi.mock("@stores/voice.store", () => ({
 vi.mock("@lib/livekitSession", () => ({
   getLocalCameraStream: mockGetLocalCameraStream,
   getLocalScreenshareStream: mockGetLocalScreenshareStream,
+  setScreenshareAudioVolume: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
