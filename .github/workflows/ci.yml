@@ -137,6 +137,23 @@ jobs:
         working-directory: Client/tauri-client/
         run: cargo tauri-typegen generate
 
+      - name: Fix generated TypeScript bindings (tauri-typegen 0.5.0 workaround)
+        working-directory: Client/tauri-client/
+        # tauri-typegen 0.5.0 cannot map serde_json::Value to a TS type — patch post-generation.
+        # Duplicate events are avoided at source by using one emit() call site per event name.
+        run: |
+          node -e "
+          const fs = require('fs');
+          const tp = fs.readFileSync('src/generated/types.ts', 'utf8');
+          if (!tp.includes('export type Value')) {
+            fs.writeFileSync('src/generated/types.ts', tp.replace(
+              'export interface CredentialData',
+              'export type Value = unknown;\n\nexport interface CredentialData'
+            ));
+          }
+          console.log('Generated bindings patched.');
+          "
+
       - name: Clippy lint (Rust)
         working-directory: Client/tauri-client/src-tauri/
         run: cargo clippy -- -D warnings
