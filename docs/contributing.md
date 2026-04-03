@@ -6,11 +6,16 @@ How to set up the development environment and contribute to OwnCord.
 
 ### Prerequisites
 
-- **Windows 10+** (x64) — required for the Tauri client
-- **Linux x64** — supported for server-only development
+| Platform | Server | Client |
+|----------|--------|--------|
+| Windows 10+ x64 | ✅ | ✅ |
+| Linux x64 | ✅ | ✅ |
+| Linux ARM64 | ✅ | ✅ (CI only) |
+
 - **Go 1.25+** (server)
 - **Node.js 20+** (client)
-- **Rust / Cargo** (Tauri client)
+- **Rust / Cargo** (Tauri client — not needed for server-only work)
+- **Docker + Compose v2** (optional — alternative to building the server locally)
 
 ### Available Commands
 
@@ -26,12 +31,19 @@ How to set up the development environment and contribute to OwnCord.
 
 #### Client (Tauri v2)
 
+**Build & dev**
+
 | Command | Description |
 |---------|-------------|
 | `npm run dev` | Start Vite dev server with hot reload |
 | `npm run build` | TypeScript check + Vite production build |
 | `npm run tauri dev` | Launch Tauri app in dev mode |
-| `npm run tauri build` | Build release installer |
+| `npm run tauri build` | Build release installer (NSIS on Windows, AppImage+deb on Linux) |
+
+**Tests**
+
+| Command | Description |
+|---------|-------------|
 | `npm test` | Run all tests (vitest) |
 | `npm run test:unit` | Unit tests only |
 | `npm run test:integration` | Integration tests only |
@@ -41,10 +53,22 @@ How to set up the development environment and contribute to OwnCord.
 | `npm run test:e2e:ui` | Playwright UI mode |
 | `npm run test:watch` | Vitest watch mode |
 | `npm run test:coverage` | Coverage report |
+| `npm run test:mutate` | Stryker mutation testing |
+| `npm run test:mutate:dry` | Stryker dry-run (no mutations applied) |
+| `npm run test:browser` | Vitest browser-mode tests |
+
+**Type checking, linting & formatting**
+
+| Command | Description |
+|---------|-------------|
 | `npm run typecheck` | Full typecheck (all sources) |
 | `npm run typecheck:build` | Typecheck build config only |
-| `npm run lint` | ESLint check (src/) |
+| `npm run lint` | oxlint + ESLint check (src/) |
 | `npm run lint:fix` | ESLint auto-fix |
+| `npm run lint:ox` | oxlint only (fast correctness checks) |
+| `npm run format` | Prettier format (src/ + tests/) |
+| `npm run format:check` | Prettier check only (no writes) |
+| `npm run knip` | Dead code and unused export detection |
 
 ## Active Branches
 
