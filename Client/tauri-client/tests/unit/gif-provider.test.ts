@@ -139,9 +139,7 @@ describe("searchGifs", () => {
     });
 
     it("maps multiple results in order", async () => {
-      mockFetch.mockResolvedValue(
-        okResponse([gifResult("a"), gifResult("b"), gifResult("c")]),
-      );
+      mockFetch.mockResolvedValue(okResponse([gifResult("a"), gifResult("b"), gifResult("c")]));
       const gifs = await searchGifs("cats");
       expect(gifs.map((g) => g.id)).toEqual(["a", "b", "c"]);
     });
