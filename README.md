@@ -48,9 +48,9 @@ It includes real-time messaging, voice/video via LiveKit, file sharing, and a we
 
 | Component | Windows x64 | Linux x64 | Linux ARM64 |
 | --------- | ----------- | --------- | ----------- |
-| Server binary | Yes | Yes | Not published yet |
-| Desktop client | Yes | Yes | Yes |
-| Docker server | N/A | Yes | N/A |
+| Server binary | Yes | Not published yet | N/A |
+| Desktop client | Yes | Not published yet | Not published yet |
+| Docker server | N/A | Not published yet | N/A |
 
 ## Start Here
 
