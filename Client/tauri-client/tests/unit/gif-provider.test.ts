@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { searchGifs, getTrendingGifs } from "../../src/lib/tenor";
+import { searchGifs, getTrendingGifs } from "../../src/lib/gifProvider";
 
 // ---------------------------------------------------------------------------
-// Fetch mock — global fetch used by tenor.ts (no plugin wrapper)
+// Fetch mock — global fetch used by gifProvider.ts (no plugin wrapper)
 // ---------------------------------------------------------------------------
 
 const mockFetch = vi.fn();
@@ -20,7 +20,7 @@ afterEach(() => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function tenorResult(
+function gifResult(
   id: string,
   overrides: {
     tinygif?: string | null;
@@ -29,8 +29,8 @@ function tenorResult(
   } = {},
 ) {
   const {
-    tinygif = `https://media.tenor.com/${id}_tiny.gif`,
-    gif = `https://media.tenor.com/${id}.gif`,
+    tinygif = `https://media.klipy.com/${id}_tiny.gif`,
+    gif = `https://media.klipy.com/${id}.gif`,
     title = `Title ${id}`,
   } = overrides;
 
@@ -75,10 +75,10 @@ function capturedUrl(): string {
 
 describe("searchGifs", () => {
   describe("URL construction", () => {
-    it("calls the Tenor search endpoint", async () => {
+    it("calls the Klipy search endpoint", async () => {
       mockFetch.mockResolvedValue(okResponse([]));
       await searchGifs("cats");
-      expect(capturedUrl()).toMatch(/^https:\/\/tenor\.googleapis\.com\/v2\/search/);
+      expect(capturedUrl()).toMatch(/^https:\/\/api\.klipy\.com\/v2\/search/);
     });
 
     it("includes the query param q", async () => {
@@ -90,7 +90,7 @@ describe("searchGifs", () => {
     it("includes the API key param", async () => {
       mockFetch.mockResolvedValue(okResponse([]));
       await searchGifs("dogs");
-      expect(capturedParams().get("key")).toBeTruthy();
+      expect(capturedParams().has("key")).toBe(true);
     });
 
     it("includes media_filter param", async () => {
@@ -127,20 +127,20 @@ describe("searchGifs", () => {
     });
 
     it("maps id, title, url (tinygif), and fullUrl (gif) correctly", async () => {
-      mockFetch.mockResolvedValue(okResponse([tenorResult("abc123")]));
+      mockFetch.mockResolvedValue(okResponse([gifResult("abc123")]));
       const gifs = await searchGifs("cats");
       expect(gifs).toHaveLength(1);
       expect(gifs[0]).toEqual({
         id: "abc123",
         title: "Title abc123",
-        url: "https://media.tenor.com/abc123_tiny.gif",
-        fullUrl: "https://media.tenor.com/abc123.gif",
+        url: "https://media.klipy.com/abc123_tiny.gif",
+        fullUrl: "https://media.klipy.com/abc123.gif",
       });
     });
 
     it("maps multiple results in order", async () => {
       mockFetch.mockResolvedValue(
-        okResponse([tenorResult("a"), tenorResult("b"), tenorResult("c")]),
+        okResponse([gifResult("a"), gifResult("b"), gifResult("c")]),
       );
       const gifs = await searchGifs("cats");
       expect(gifs.map((g) => g.id)).toEqual(["a", "b", "c"]);
@@ -148,7 +148,7 @@ describe("searchGifs", () => {
 
     it("filters out results with no tinygif format", async () => {
       mockFetch.mockResolvedValue(
-        okResponse([tenorResult("keep"), tenorResult("drop", { tinygif: null })]),
+        okResponse([gifResult("keep"), gifResult("drop", { tinygif: null })]),
       );
       const gifs = await searchGifs("cats");
       expect(gifs).toHaveLength(1);
@@ -157,7 +157,7 @@ describe("searchGifs", () => {
 
     it("filters out results with no gif format", async () => {
       mockFetch.mockResolvedValue(
-        okResponse([tenorResult("keep"), tenorResult("drop", { gif: null })]),
+        okResponse([gifResult("keep"), gifResult("drop", { gif: null })]),
       );
       const gifs = await searchGifs("cats");
       expect(gifs).toHaveLength(1);
@@ -166,7 +166,7 @@ describe("searchGifs", () => {
 
     it("filters out results missing both formats", async () => {
       mockFetch.mockResolvedValue(
-        okResponse([tenorResult("drop", { tinygif: null, gif: null }), tenorResult("keep")]),
+        okResponse([gifResult("drop", { tinygif: null, gif: null }), gifResult("keep")]),
       );
       const gifs = await searchGifs("cats");
       expect(gifs).toHaveLength(1);
@@ -175,10 +175,28 @@ describe("searchGifs", () => {
 
     it("returns an empty array when all results lack required formats", async () => {
       mockFetch.mockResolvedValue(
-        okResponse([tenorResult("x", { tinygif: null }), tenorResult("y", { gif: null })]),
+        okResponse([gifResult("x", { tinygif: null }), gifResult("y", { gif: null })]),
       );
       const gifs = await searchGifs("cats");
       expect(gifs).toEqual([]);
+    });
+
+    it("filters out results with non-Klipy CDN URLs", async () => {
+      mockFetch.mockResolvedValue(
+        okResponse([
+          gifResult("drop", {
+            tinygif: "https://media.tenor.com/drop_tiny.gif",
+            gif: "https://media.tenor.com/drop.gif",
+          }),
+          gifResult("keep", {
+            tinygif: "https://static.klipy.com/keep_tiny.gif",
+            gif: "https://static.klipy.com/keep.gif",
+          }),
+        ]),
+      );
+      const gifs = await searchGifs("cats");
+      expect(gifs).toHaveLength(1);
+      expect(gifs[0]?.id).toBe("keep");
     });
   });
 
@@ -211,10 +229,10 @@ describe("searchGifs", () => {
 
 describe("getTrendingGifs", () => {
   describe("URL construction", () => {
-    it("calls the Tenor featured endpoint", async () => {
+    it("calls the Klipy featured endpoint", async () => {
       mockFetch.mockResolvedValue(okResponse([]));
       await getTrendingGifs();
-      expect(capturedUrl()).toMatch(/^https:\/\/tenor\.googleapis\.com\/v2\/featured/);
+      expect(capturedUrl()).toMatch(/^https:\/\/api\.klipy\.com\/v2\/featured/);
     });
 
     it("does not include a q param", async () => {
@@ -226,7 +244,7 @@ describe("getTrendingGifs", () => {
     it("includes the API key param", async () => {
       mockFetch.mockResolvedValue(okResponse([]));
       await getTrendingGifs();
-      expect(capturedParams().get("key")).toBeTruthy();
+      expect(capturedParams().has("key")).toBe(true);
     });
 
     it("includes media_filter param", async () => {
@@ -256,19 +274,19 @@ describe("getTrendingGifs", () => {
     });
 
     it("maps fields correctly", async () => {
-      mockFetch.mockResolvedValue(okResponse([tenorResult("trend1")]));
+      mockFetch.mockResolvedValue(okResponse([gifResult("trend1")]));
       const gifs = await getTrendingGifs();
       expect(gifs[0]).toEqual({
         id: "trend1",
         title: "Title trend1",
-        url: "https://media.tenor.com/trend1_tiny.gif",
-        fullUrl: "https://media.tenor.com/trend1.gif",
+        url: "https://media.klipy.com/trend1_tiny.gif",
+        fullUrl: "https://media.klipy.com/trend1.gif",
       });
     });
 
     it("filters out results with missing tinygif", async () => {
       mockFetch.mockResolvedValue(
-        okResponse([tenorResult("keep"), tenorResult("drop", { tinygif: null })]),
+        okResponse([gifResult("keep"), gifResult("drop", { tinygif: null })]),
       );
       const gifs = await getTrendingGifs();
       expect(gifs.map((g) => g.id)).toEqual(["keep"]);
@@ -276,7 +294,7 @@ describe("getTrendingGifs", () => {
 
     it("filters out results with missing gif", async () => {
       mockFetch.mockResolvedValue(
-        okResponse([tenorResult("keep"), tenorResult("drop", { gif: null })]),
+        okResponse([gifResult("keep"), gifResult("drop", { gif: null })]),
       );
       const gifs = await getTrendingGifs();
       expect(gifs.map((g) => g.id)).toEqual(["keep"]);

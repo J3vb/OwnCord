@@ -1,36 +1,36 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createGifPicker } from "@components/GifPicker";
 import type { GifPickerOptions } from "@components/GifPicker";
-import type { TenorGif } from "@lib/tenor";
+import type { GifResult } from "@lib/gifProvider";
 
 // ---------------------------------------------------------------------------
 // Module mock — must be hoisted before imports in vitest
 // ---------------------------------------------------------------------------
 
-vi.mock("@lib/tenor", () => ({
+vi.mock("@lib/gifProvider", () => ({
   searchGifs: vi.fn(),
   getTrendingGifs: vi.fn(),
 }));
 
 // Import the mocks so tests can control their return values
-import { searchGifs, getTrendingGifs } from "@lib/tenor";
+import { searchGifs, getTrendingGifs } from "@lib/gifProvider";
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function makeGif(id: string): TenorGif {
+function makeGif(id: string): GifResult {
   return {
     id,
     title: `GIF ${id}`,
-    url: `https://media.tenor.com/preview/${id}.gif`,
-    fullUrl: `https://media.tenor.com/full/${id}.gif`,
+    url: `https://media.klipy.com/preview/${id}.gif`,
+    fullUrl: `https://media.klipy.com/full/${id}.gif`,
   };
 }
 
-const TRENDING_GIFS: readonly TenorGif[] = [makeGif("t1"), makeGif("t2"), makeGif("t3")];
+const TRENDING_GIFS: readonly GifResult[] = [makeGif("t1"), makeGif("t2"), makeGif("t3")];
 
-const SEARCH_GIFS: readonly TenorGif[] = [makeGif("s1"), makeGif("s2")];
+const SEARCH_GIFS: readonly GifResult[] = [makeGif("s1"), makeGif("s2")];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -90,7 +90,7 @@ describe("GifPicker", () => {
       const { picker } = makePicker();
       const attribution = picker.element.querySelector(".gp-attribution");
       expect(attribution).not.toBeNull();
-      expect(attribution!.textContent).toBe("Powered by Tenor");
+      expect(attribution!.textContent).toBe("Powered by Klipy");
       picker.destroy();
     });
   });
@@ -103,7 +103,7 @@ describe("GifPicker", () => {
       const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
       expect(input).not.toBeNull();
       expect(input.tagName).toBe("INPUT");
-      expect(input.placeholder).toBe("Search Tenor");
+      expect(input.placeholder).toBe("Search Klipy");
       picker.destroy();
     });
 
@@ -265,11 +265,11 @@ describe("GifPicker", () => {
     });
 
     it("img alt falls back to 'GIF' when title is empty", async () => {
-      const gifNoTitle: TenorGif = {
+      const gifNoTitle: GifResult = {
         id: "no-title",
         title: "",
-        url: "https://media.tenor.com/preview/no-title.gif",
-        fullUrl: "https://media.tenor.com/full/no-title.gif",
+        url: "https://media.klipy.com/preview/no-title.gif",
+        fullUrl: "https://media.klipy.com/full/no-title.gif",
       };
       vi.mocked(getTrendingGifs).mockResolvedValue([gifNoTitle]);
 
