@@ -24,9 +24,11 @@ if (typeof crypto === "undefined" || !crypto.subtle) {
 }
 
 const ECDH_CURVE = "P-256";
+// UTF-8 bytes of "owncord-voice-e2ee-v1"
 const HKDF_SALT = new Uint8Array([
   111, 119, 110, 99, 111, 114, 100, 45, 118, 111, 105, 99, 101, 45, 101, 50, 101, 101, 45, 118, 49,
 ]);
+// UTF-8 bytes of "room-key-wrap"
 const HKDF_INFO = new Uint8Array([114, 111, 111, 109, 45, 107, 101, 121, 45, 119, 114, 97, 112]);
 const ROOM_KEY_BYTES = 32; // 256-bit AES key for LiveKit SFrame
 

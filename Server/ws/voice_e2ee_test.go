@@ -387,16 +387,6 @@ func TestE2EE_GetPubKey_ReturnsKeyAfterAnnounce(t *testing.T) {
 	}
 }
 
-// ─── I-7: login rate limit ──────────────────────────────────────────────────
-
-func TestLoginRateLimit_Is5(t *testing.T) {
-	// I-7: loginRateLimitPerMinute should be 5, not 60.
-	// We can't directly access the constant from ws_test, but we test the
-	// behavior via the API package test. This test is a placeholder that
-	// verifies the constant value via the api package's exported test helper.
-	// (See constants_test.go for the actual value assertion.)
-}
-
 // ─── is_key_holder in voice_token payload ────────────────────────────────────
 
 func TestE2EE_VoiceToken_IncludesIsKeyHolder(t *testing.T) {
