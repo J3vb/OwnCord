@@ -54,7 +54,7 @@ describe("e2eeCrypto", () => {
 
       // Decode, flip the first byte, re-encode
       const bytes = Uint8Array.from(atob(encryptedKey), (c) => c.charCodeAt(0));
-      bytes[0] ^= 0xff;
+      bytes[0] = bytes[0]! ^ 0xff;
       const tampered = btoa(String.fromCharCode(...bytes));
 
       await expect(unwrapRoomKey(bob.privateKey, alice.publicKey, tampered, iv)).rejects.toThrow();
