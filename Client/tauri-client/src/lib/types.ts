@@ -280,6 +280,7 @@ export interface VoiceTokenPayload {
   readonly token: string;
   readonly url: string;
   readonly direct_url?: string;
+  readonly is_key_holder?: boolean;
 }
 
 // ── Voice E2EE (client-side ECDH key exchange) ─────────────────────────────
