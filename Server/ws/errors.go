@@ -16,4 +16,6 @@ const (
 	ErrCodeUnknownType   = "UNKNOWN_TYPE"
 	ErrCodeSlowMode      = "SLOW_MODE"
 	ErrCodeConflict      = "CONFLICT"
+	ErrCodeBadPayload    = "BAD_PAYLOAD"
+	ErrCodeNotKeyHolder  = "NOT_KEY_HOLDER"
 )

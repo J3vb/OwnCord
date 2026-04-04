@@ -122,10 +122,11 @@ type voiceConfigPayload struct {
 }
 
 type voiceTokenPayload struct {
-	ChannelID int64  `json:"channel_id"`
-	Token     string `json:"token"`
-	URL       string `json:"url"`
-	DirectURL string `json:"direct_url"`
+	ChannelID   int64  `json:"channel_id"`
+	Token       string `json:"token"`
+	URL         string `json:"url"`
+	DirectURL   string `json:"direct_url"`
+	IsKeyHolder bool   `json:"is_key_holder"`
 }
 
 // ── Voice E2EE (client-side ECDH key exchange) ─────────────────────────────
@@ -411,14 +412,15 @@ func buildVoiceConfig(channelID int64, quality string, bitrate int, maxUsers int
 // buildVoiceToken constructs a voice_token message with a LiveKit token and URL.
 // url is the proxy path ("/livekit") for remote clients; direct_url is the raw
 // LiveKit URL (e.g. "ws://localhost:7880") for localhost clients.
-func buildVoiceToken(channelID int64, token string, proxyPath string, directURL string) []byte { //nolint:unparam // kept configurable for proxy path flexibility
+func buildVoiceToken(channelID int64, token string, proxyPath string, directURL string, isKeyHolder bool) []byte { //nolint:unparam // kept configurable for proxy path flexibility
 	return buildJSON(wsMsg{
 		Type: MsgTypeVoiceToken,
 		Payload: voiceTokenPayload{
-			ChannelID: channelID,
-			Token:     token,
-			URL:       proxyPath,
-			DirectURL: directURL,
+			ChannelID:   channelID,
+			Token:       token,
+			URL:         proxyPath,
+			DirectURL:   directURL,
+			IsKeyHolder: isKeyHolder,
 		},
 	})
 }

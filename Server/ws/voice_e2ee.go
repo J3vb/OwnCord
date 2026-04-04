@@ -7,6 +7,66 @@ import (
 	"log/slog"
 )
 
+// decodeBase64Loose accepts both standard (padded) and raw (unpadded) base64.
+// ECDH public keys exported from WebCrypto use raw base64 (no '=' padding);
+// we accept both to avoid breaking existing clients.
+func decodeBase64Loose(s string) ([]byte, error) {
+	if b, err := base64.StdEncoding.DecodeString(s); err == nil {
+		return b, nil
+	}
+	return base64.RawStdEncoding.DecodeString(s)
+}
+
+// updateKeyHolder scans connected clients to find the one with the lowest
+// userID currently in channelID, and records them as the key holder.
+// If no clients remain in the channel the entry is deleted.
+// Must NOT be called while h.mu is held (it acquires h.mu.RLock internally).
+func (h *Hub) updateKeyHolder(channelID int64) {
+	h.mu.RLock()
+	var minUserID int64
+	found := false
+	for uid, c := range h.clients {
+		if c.getVoiceChID() == channelID {
+			if !found || uid < minUserID {
+				minUserID = uid
+				found = true
+			}
+		}
+	}
+	h.mu.RUnlock()
+
+	h.keyHolderMu.Lock()
+	if found {
+		h.voiceKeyHolders[channelID] = minUserID
+	} else {
+		delete(h.voiceKeyHolders, channelID)
+	}
+	h.keyHolderMu.Unlock()
+}
+
+// isVoiceKeyHolder reports whether userID is the current key holder for channelID.
+func (h *Hub) isVoiceKeyHolder(channelID, userID int64) bool {
+	h.keyHolderMu.RLock()
+	kh, ok := h.voiceKeyHolders[channelID]
+	h.keyHolderMu.RUnlock()
+	return ok && kh == userID
+}
+
+// computeIsKeyHolder determines whether userID will become the key holder when
+// joining channelID. Returns true if no connected client in that channel has a
+// lower userID. This is used before calling setVoiceState so the result can be
+// included in the voice_token message sent to the joiner.
+func (h *Hub) computeIsKeyHolder(channelID, userID int64) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for uid, c := range h.clients {
+		if c.getVoiceChID() == channelID && uid < userID {
+			return false
+		}
+	}
+	return true
+}
+
 // handleVoiceE2EEAnnounce processes a client's ECDH public key announcement.
 // The server stores the key on the Client struct and relays it to all other
 // participants in the same voice channel. The server never sees or generates
@@ -33,7 +93,7 @@ func (h *Hub) handleVoiceE2EEAnnounce(_ context.Context, c *Client, payload json
 		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "public_key too large"))
 		return
 	}
-	if _, err := base64.StdEncoding.DecodeString(p.PublicKey); err != nil {
+	if _, err := decodeBase64Loose(p.PublicKey); err != nil {
 		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "public_key is not valid base64"))
 		return
 	}
@@ -73,12 +133,19 @@ func (h *Hub) handleVoiceE2EEOffer(_ context.Context, c *Client, payload json.Ra
 		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "encrypted_key or iv too large"))
 		return
 	}
-	if _, err := base64.StdEncoding.DecodeString(p.EncryptedKey); err != nil {
+	if _, err := decodeBase64Loose(p.EncryptedKey); err != nil {
 		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "encrypted_key is not valid base64"))
 		return
 	}
-	if _, err := base64.StdEncoding.DecodeString(p.IV); err != nil {
+	if _, err := decodeBase64Loose(p.IV); err != nil {
 		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "iv is not valid base64"))
+		return
+	}
+
+	// I-1: Only the designated key holder may distribute the room key. This
+	// prevents any other participant from performing a key substitution attack.
+	if !h.isVoiceKeyHolder(voiceChID, c.userID) {
+		c.sendMsg(buildErrorMsg(ErrCodeNotKeyHolder, "only the key holder may send key offers"))
 		return
 	}
 
@@ -124,12 +191,21 @@ func (h *Hub) sendToVoiceChannelExcept(channelID int64, excludeUserID int64, msg
 }
 
 // getClientE2EEPubKey returns the stored ECDH public key for a connected user.
+// I-6 fix: Copy the public key value while h.mu.RLock is still held so the
+// client cannot be garbage collected between the lookup and the key read.
 func (h *Hub) getClientE2EEPubKey(userID int64) string {
 	h.mu.RLock()
 	c, ok := h.clients[userID]
-	h.mu.RUnlock()
 	if !ok {
+		h.mu.RUnlock()
 		return ""
 	}
-	return c.getE2EEPubKey()
+	key := c.getE2EEPubKey()
+	h.mu.RUnlock()
+	return key
+}
+
+// GetClientE2EEPubKeyForTest is an exported wrapper for tests.
+func (h *Hub) GetClientE2EEPubKeyForTest(userID int64) string {
+	return h.getClientE2EEPubKey(userID)
 }

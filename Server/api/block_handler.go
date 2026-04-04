@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -13,8 +12,8 @@ import (
 // handleBlockUser blocks a user (prevents DM creation and messaging).
 func handleBlockUser(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user := getUserFromContext(r)
-		if user == nil {
+		user, ok := r.Context().Value(UserKey).(*db.User)
+		if !ok || user == nil {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
 				Error:   "UNAUTHORIZED",
 				Message: "not authenticated",
@@ -75,8 +74,8 @@ func handleBlockUser(database *db.DB) http.HandlerFunc {
 // handleUnblockUser removes a block on a user.
 func handleUnblockUser(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user := getUserFromContext(r)
-		if user == nil {
+		user, ok := r.Context().Value(UserKey).(*db.User)
+		if !ok || user == nil {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
 				Error:   "UNAUTHORIZED",
 				Message: "not authenticated",
@@ -111,8 +110,8 @@ func handleUnblockUser(database *db.DB) http.HandlerFunc {
 // handleListBlocks returns all users blocked by the authenticated user.
 func handleListBlocks(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user := getUserFromContext(r)
-		if user == nil {
+		user, ok := r.Context().Value(UserKey).(*db.User)
+		if !ok || user == nil {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
 				Error:   "UNAUTHORIZED",
 				Message: "not authenticated",
