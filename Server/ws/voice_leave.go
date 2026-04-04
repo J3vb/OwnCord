@@ -34,6 +34,12 @@ func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
 
 	h.BroadcastToAll(buildVoiceLeave(oldChID, c.userID))
 
+	// Clear E2EE key when the voice channel is now empty so the next session
+	// gets a fresh key (forward secrecy per voice session).
+	if remaining, err := h.db.GetChannelVoiceStates(oldChID); err == nil && len(remaining) == 0 {
+		h.e2eeKeys.ClearChannel(oldChID)
+	}
+
 	// Remove from LiveKit (best-effort).
 	if h.livekit != nil {
 		if err := h.livekit.RemoveParticipant(oldChID, c.userID, oldJoinToken); err != nil { //nolint:contextcheck // TODO: propagate context through this call path

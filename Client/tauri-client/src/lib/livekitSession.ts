@@ -1,5 +1,5 @@
 // LiveKit Session — lifecycle orchestrator for voice chat via LiveKit
-import { Room, RoomEvent } from "livekit-client";
+import { Room, RoomEvent, ExternalE2EEKeyProvider } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import {
   voiceStore,
@@ -68,6 +68,7 @@ type PendingVoiceJoin = {
   readonly url: string;
   readonly channelId: number;
   readonly directUrl?: string;
+  readonly e2eeKey?: string;
 };
 
 // --- State machine ---
@@ -89,6 +90,7 @@ type SessionState =
       readonly latestToken: string;
       readonly lastUrl: string;
       readonly lastDirectUrl: string | undefined;
+      readonly e2eeKey: string | undefined;
     }
   | {
       readonly type: "reconnecting";
@@ -96,6 +98,7 @@ type SessionState =
       readonly latestToken: string;
       readonly lastUrl: string;
       readonly lastDirectUrl: string | undefined;
+      readonly e2eeKey: string | undefined;
       readonly ac: AbortController;
     };
 
@@ -121,6 +124,11 @@ export class LiveKitSession {
   private outputVolumeMultiplier = loadPref<number>("outputVolume", 100) / 100;
   /** Cached port for the local LiveKit TLS proxy (Rust-side, for self-signed cert support). */
   private liveKitProxyPort: number | null = null;
+
+  /** E2EE key provider — shared across Room instances. The server distributes
+   *  a per-channel symmetric key via the voice_token message; we feed it into
+   *  this provider before connecting. LiveKit's SFrame worker handles the rest. */
+  private _e2eeKeyProvider = new ExternalE2EEKeyProvider();
 
   // --- State transition (single writer) ---
 
@@ -162,6 +170,13 @@ export class LiveKitSession {
   private get _lastDirectUrl(): string | undefined {
     return this._state.type === "connected" || this._state.type === "reconnecting"
       ? this._state.lastDirectUrl
+      : undefined;
+  }
+
+  /** E2EE key from state. */
+  private get _e2eeKey(): string | undefined {
+    return this._state.type === "connected" || this._state.type === "reconnecting"
+      ? this._state.e2eeKey
       : undefined;
   }
 
@@ -223,6 +238,7 @@ export class LiveKitSession {
             latestToken: this._state.latestToken,
             lastUrl: this._state.lastUrl,
             lastDirectUrl: this._state.lastDirectUrl,
+            e2eeKey: this._state.e2eeKey,
           };
           this.setState({ type: "idle" });
         }
@@ -240,7 +256,7 @@ export class LiveKitSession {
         if (ac !== null && this._pendingReconnectFields !== null) {
           // Transition from idle → reconnecting atomically using the fields
           // captured in setRoom() above.
-          const { channelId, latestToken, lastUrl, lastDirectUrl } = this._pendingReconnectFields;
+          const { channelId, latestToken, lastUrl, lastDirectUrl, e2eeKey } = this._pendingReconnectFields;
           this._pendingReconnectFields = null;
           this.setState({
             type: "reconnecting",
@@ -248,6 +264,7 @@ export class LiveKitSession {
             latestToken,
             lastUrl,
             lastDirectUrl,
+            e2eeKey,
             ac,
           });
         }
@@ -281,6 +298,7 @@ export class LiveKitSession {
     latestToken: string;
     lastUrl: string;
     lastDirectUrl: string | undefined;
+    e2eeKey: string | undefined;
   } | null = null;
 
   // --- Room factory ---
@@ -308,6 +326,12 @@ export class LiveKitSession {
           maxBitrate: SCREENSHARE_PUBLISH_BITRATES[quality],
           maxFramerate: quality === "low" ? 5 : quality === "medium" ? 15 : 30,
         },
+      },
+      // End-to-end encryption: SFrame-based E2EE using a server-distributed
+      // per-channel symmetric key. The SFU only sees encrypted frames.
+      e2ee: {
+        keyProvider: this._e2eeKeyProvider,
+        worker: new Worker(new URL("livekit-client/e2ee-worker", import.meta.url)),
       },
     });
     newRoom.on(RoomEvent.TrackSubscribed, this._eventHandlers.handleTrackSubscribed);
@@ -398,6 +422,13 @@ export class LiveKitSession {
           return;
         }
 
+        // Re-apply E2EE key from the reconnecting state before connecting.
+        const reconnectE2eeKey = this._e2eeKey;
+        if (reconnectE2eeKey) {
+          // eslint-disable-next-line no-await-in-loop -- must set key before connect
+          await this._e2eeKeyProvider.setKey(reconnectE2eeKey);
+        }
+
         // eslint-disable-next-line no-await-in-loop -- sequential reconnect: must connect before restoring state
         await newRoom.connect(resolvedUrl, token);
 
@@ -416,6 +447,7 @@ export class LiveKitSession {
           latestToken: token,
           lastUrl: url,
           lastDirectUrl: directUrl,
+          e2eeKey: this._e2eeKey,
         });
         this._deviceManager.setOnError(this.onErrorCallback);
         this._deviceManager.setOnToast(this.onErrorCallback);
@@ -470,6 +502,7 @@ export class LiveKitSession {
             latestToken: this._state.latestToken,
             lastUrl: this._state.lastUrl,
             lastDirectUrl: this._state.lastDirectUrl,
+            e2eeKey: this._state.e2eeKey,
             ac: this._state.ac,
           });
         }
@@ -724,6 +757,7 @@ export class LiveKitSession {
     url: string,
     channelId: number,
     directUrl?: string,
+    e2eeKey?: string,
   ): Promise<boolean | "superseded"> {
     if (this._room !== null) this.leaveVoice(false);
     // Increment the generation counter and embed it into the "connecting" state.
@@ -760,6 +794,13 @@ export class LiveKitSession {
 
       const MAX_RETRIES = 3;
       const RETRY_DELAY_MS = 2000;
+      // Set the E2EE key before connecting so SFrame encryption is active
+      // from the first published frame.
+      if (e2eeKey) {
+        await this._e2eeKeyProvider.setKey(e2eeKey);
+        log.info("E2EE key set for voice channel", { channelId });
+      }
+
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
           // eslint-disable-next-line no-await-in-loop -- sequential retry: must attempt connect before checking result
@@ -849,6 +890,7 @@ export class LiveKitSession {
           latestToken: token,
           lastUrl: url,
           lastDirectUrl: directUrl,
+          e2eeKey,
         });
         // Optimistic startAudio — may succeed if the join was triggered by a
         // recent user gesture. If not, the AudioPlaybackStatusChanged handler
@@ -935,6 +977,7 @@ export class LiveKitSession {
     url: string,
     channelId: number,
     directUrl?: string,
+    e2eeKey?: string,
   ): Promise<void> {
     const s = this._state;
     if (s.type === "connected" && s.channelId === channelId && s.room.state === "connected") {
@@ -947,13 +990,13 @@ export class LiveKitSession {
       if (this._state.type === "connecting") {
         this.setState({
           ...this._state,
-          pendingJoin: { token, url, channelId, directUrl },
+          pendingJoin: { token, url, channelId, directUrl, e2eeKey },
         });
       }
       log.warn("handleVoiceToken: already connecting, queued latest join request", { channelId });
       return;
     }
-    await this.connectAndSetup(token, url, channelId, directUrl);
+    await this.connectAndSetup(token, url, channelId, directUrl, e2eeKey);
     // Drain pending joins iteratively to avoid unbounded recursion when
     // rapid channel switches queue multiple requests.
     // A "superseded" result means connectAndSetup() already aborted early;
@@ -968,6 +1011,7 @@ export class LiveKitSession {
         url: pUrl,
         channelId: pChannelId,
         directUrl: pDirectUrl,
+        e2eeKey: pE2eeKey,
       } = pendingJoin;
       const cur = this._state;
       if (
@@ -978,7 +1022,7 @@ export class LiveKitSession {
         this.handleVoiceTokenRefresh(pToken);
       } else {
         // eslint-disable-next-line no-await-in-loop -- sequential drain of pending joins to avoid unbounded recursion
-        await this.connectAndSetup(pToken, pUrl, pChannelId, pDirectUrl);
+        await this.connectAndSetup(pToken, pUrl, pChannelId, pDirectUrl, pE2eeKey);
         // If this attempt was itself superseded (another join arrived during the
         // await), the loop will naturally pick it up via the updated pendingJoin.
       }

@@ -126,6 +126,7 @@ type voiceTokenPayload struct {
 	Token     string `json:"token"`
 	URL       string `json:"url"`
 	DirectURL string `json:"direct_url"`
+	E2EEKey   string `json:"e2ee_key,omitempty"`
 }
 
 type voiceLeavePayload struct {
@@ -384,7 +385,7 @@ func buildVoiceConfig(channelID int64, quality string, bitrate int, maxUsers int
 // buildVoiceToken constructs a voice_token message with a LiveKit token and URL.
 // url is the proxy path ("/livekit") for remote clients; direct_url is the raw
 // LiveKit URL (e.g. "ws://localhost:7880") for localhost clients.
-func buildVoiceToken(channelID int64, token string, proxyPath string, directURL string) []byte { //nolint:unparam // kept configurable for proxy path flexibility
+func buildVoiceToken(channelID int64, token string, proxyPath string, directURL string, e2eeKey string) []byte { //nolint:unparam // kept configurable for proxy path flexibility
 	return buildJSON(wsMsg{
 		Type: MsgTypeVoiceToken,
 		Payload: voiceTokenPayload{
@@ -392,6 +393,7 @@ func buildVoiceToken(channelID int64, token string, proxyPath string, directURL 
 			Token:     token,
 			URL:       proxyPath,
 			DirectURL: directURL,
+			E2EEKey:   e2eeKey,
 		},
 	})
 }

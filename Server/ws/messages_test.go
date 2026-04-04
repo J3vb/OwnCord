@@ -541,7 +541,7 @@ func TestBuildTypingMsg_ValidJSON(t *testing.T) {
 // ─── buildVoiceToken ──────────────────────────────────────────────────────────
 
 func TestBuildVoiceToken_Type(t *testing.T) {
-	msg := buildVoiceToken(99, "jwt-token", "/livekit", "ws://localhost:7880")
+	msg := buildVoiceToken(99, "jwt-token", "/livekit", "ws://localhost:7880", "dGVzdC1rZXk=")
 	var env struct {
 		Type string `json:"type"`
 	}
@@ -554,13 +554,14 @@ func TestBuildVoiceToken_Type(t *testing.T) {
 }
 
 func TestBuildVoiceToken_Payload(t *testing.T) {
-	msg := buildVoiceToken(99, "jwt-token", "/livekit", "ws://localhost:7880")
+	msg := buildVoiceToken(99, "jwt-token", "/livekit", "ws://localhost:7880", "dGVzdC1rZXk=")
 	var env struct {
 		Payload struct {
 			ChannelID int64  `json:"channel_id"`
 			Token     string `json:"token"`
 			URL       string `json:"url"`
 			DirectURL string `json:"direct_url"`
+			E2EEKey   string `json:"e2ee_key"`
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal(msg, &env); err != nil {
@@ -578,10 +579,13 @@ func TestBuildVoiceToken_Payload(t *testing.T) {
 	if env.Payload.DirectURL != "ws://localhost:7880" {
 		t.Errorf("payload.direct_url = %q, want ws://localhost:7880", env.Payload.DirectURL)
 	}
+	if env.Payload.E2EEKey != "dGVzdC1rZXk=" {
+		t.Errorf("payload.e2ee_key = %q, want dGVzdC1rZXk=", env.Payload.E2EEKey)
+	}
 }
 
 func TestBuildVoiceToken_ValidJSON(t *testing.T) {
-	if !json.Valid(buildVoiceToken(1, "t", "/livekit", "ws://a")) {
+	if !json.Valid(buildVoiceToken(1, "t", "/livekit", "ws://a", "")) {
 		t.Error("buildVoiceToken output is not valid JSON")
 	}
 }
