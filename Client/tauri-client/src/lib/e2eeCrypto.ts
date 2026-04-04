@@ -24,8 +24,10 @@ if (typeof crypto === "undefined" || !crypto.subtle) {
 }
 
 const ECDH_CURVE = "P-256";
-const HKDF_SALT = new TextEncoder().encode("owncord-voice-e2ee-v1");
-const HKDF_INFO = new TextEncoder().encode("room-key-wrap");
+const HKDF_SALT = new Uint8Array([
+  111, 119, 110, 99, 111, 114, 100, 45, 118, 111, 105, 99, 101, 45, 101, 50, 101, 101, 45, 118, 49,
+]);
+const HKDF_INFO = new Uint8Array([114, 111, 111, 109, 45, 107, 101, 121, 45, 119, 114, 97, 112]);
 const ROOM_KEY_BYTES = 32; // 256-bit AES key for LiveKit SFrame
 
 // ── Key pair generation ─────────────────────────────────────────────────────
@@ -63,7 +65,8 @@ export async function computeKeyFingerprint(publicKey: CryptoKey): Promise<strin
     .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
     .join("");
   // Format as 8 groups of 4 hex chars: "AB12 CD34 EF56 ..."
-  return hex.match(/.{1,4}/g)!.slice(0, 8).join(" ");
+  const groups = hex.match(/.{1,4}/g) ?? [];
+  return groups.slice(0, 8).join(" ");
 }
 
 // ── Room key generation ─────────────────────────────────────────────────────
@@ -95,11 +98,7 @@ export async function wrapRoomKey(
   const wrapKey = await deriveWrappingKey(myPrivateKey, peerPublicKey);
   const iv = crypto.getRandomValues(new Uint8Array(12)); // 96-bit GCM nonce
 
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    wrapKey,
-    roomKey,
-  );
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, wrapKey, roomKey);
 
   return {
     encryptedKey: uint8ToBase64(new Uint8Array(ciphertext)),
@@ -122,11 +121,7 @@ export async function unwrapRoomKey(
   const iv = base64ToUint8(ivBase64);
   const ciphertext = base64ToUint8(encryptedKeyBase64);
 
-  const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv },
-    wrapKey,
-    ciphertext,
-  );
+  const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, wrapKey, ciphertext);
 
   return new Uint8Array(plaintext);
 }
@@ -148,9 +143,7 @@ async function deriveWrappingKey(
   );
 
   // Step 2: Import shared secret as HKDF key material
-  const hkdfKey = await crypto.subtle.importKey("raw", sharedBits, "HKDF", false, [
-    "deriveKey",
-  ]);
+  const hkdfKey = await crypto.subtle.importKey("raw", sharedBits, "HKDF", false, ["deriveKey"]);
 
   // Step 3: HKDF → AES-GCM key
   return crypto.subtle.deriveKey(
@@ -170,11 +163,7 @@ async function deriveWrappingKey(
 // ── Base64 utilities ────────────────────────────────────────────────────────
 
 function uint8ToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
+  return btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join(""));
 }
 
 function base64ToUint8(base64: string): Uint8Array {
