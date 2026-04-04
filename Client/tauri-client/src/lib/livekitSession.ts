@@ -788,6 +788,7 @@ export class LiveKitSession {
     url: string,
     channelId: number,
     directUrl?: string,
+    isKeyHolder?: boolean,
   ): Promise<boolean | "superseded"> {
     if (this._room !== null) this.leaveVoice(false);
     // Increment the generation counter and embed it into the "connecting" state.
@@ -841,18 +842,8 @@ export class LiveKitSession {
         log.info("E2EE: drained queued announce", { userId: qId });
       }
 
-      // Determine key holder by lowest user ID in the channel (deterministic,
-      // avoids race when two users join simultaneously — both would otherwise
-      // see zero peers and elect themselves key holder).
-      const myId = authStore.getState().user?.id ?? 0;
-      const channelVoiceUsers = voiceStore.getState().voiceUsers.get(channelId);
-      let lowestInChannel = myId;
-      if (channelVoiceUsers) {
-        for (const uid of channelVoiceUsers.keys()) {
-          if (uid < lowestInChannel) lowestInChannel = uid;
-        }
-      }
-      this._isKeyHolder = myId !== 0 && lowestInChannel === myId;
+      // Use server-authoritative is_key_holder from voice_token payload.
+      this._isKeyHolder = isKeyHolder ?? false;
 
       if (this._isKeyHolder) {
         // We're the first participant — generate the room key.
@@ -893,16 +884,16 @@ export class LiveKitSession {
             await Promise.race([roomKeyPromise, makeTimeout(5_000)]);
             keyReceived = true;
           } catch {
-            log.warn("E2EE: key exchange timed out after retry, proceeding without E2EE", {
-              channelId,
-            });
-            this.onErrorCallback?.("End-to-end encryption unavailable — key exchange timed out");
+            log.error("E2EE: key exchange timed out after retry — disconnecting", { channelId });
+            this._roomKeyResolver = null;
+            this._roomKeyRejector = null;
+            if (timeoutId !== null) clearTimeout(timeoutId);
+            this.onErrorCallback?.("e2ee_timeout");
+            this.leaveVoice(false);
+            return false;
           }
         } finally {
           if (timeoutId !== null) clearTimeout(timeoutId);
-        }
-        if (!keyReceived) {
-          log.error("E2EE: failed to receive room key", { channelId });
         }
         this._roomKeyResolver = null;
         this._roomKeyRejector = null;
@@ -1072,6 +1063,11 @@ export class LiveKitSession {
     } catch (err) {
       log.error("Failed to connect to LiveKit", { url: resolvedUrl, error: err });
       if (localRoom !== null) {
+        try {
+          localRoom.disconnect();
+        } catch {
+          /* ignore */
+        }
         this.onErrorCallback?.("Failed to join voice — connection error");
       }
       this.leaveVoice(false);
@@ -1091,6 +1087,7 @@ export class LiveKitSession {
     url: string,
     channelId: number,
     directUrl?: string,
+    isKeyHolder?: boolean,
   ): Promise<void> {
     const s = this._state;
     if (s.type === "connected" && s.channelId === channelId && s.room.state === "connected") {
@@ -1109,7 +1106,7 @@ export class LiveKitSession {
       log.warn("handleVoiceToken: already connecting, queued latest join request", { channelId });
       return;
     }
-    await this.connectAndSetup(token, url, channelId, directUrl);
+    await this.connectAndSetup(token, url, channelId, directUrl, isKeyHolder);
     // Drain pending joins iteratively to avoid unbounded recursion when
     // rapid channel switches queue multiple requests.
     // A "superseded" result means connectAndSetup() already aborted early;
@@ -1190,11 +1187,7 @@ export class LiveKitSession {
       const keypair = this._ecdhKeyPair;
       const currentRoomKey = this._roomKey;
       if (this._isKeyHolder && currentRoomKey && keypair) {
-        const { encryptedKey, iv } = await wrapRoomKey(
-          keypair.privateKey,
-          peerKey,
-          currentRoomKey,
-        );
+        const { encryptedKey, iv } = await wrapRoomKey(keypair.privateKey, peerKey, currentRoomKey);
         this.ws?.send({
           type: "voice_e2ee_offer",
           payload: { target_user_id: userId, encrypted_key: encryptedKey, iv },
