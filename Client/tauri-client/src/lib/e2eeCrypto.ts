@@ -16,6 +16,13 @@
 
 import { log } from "@lib/logger";
 
+// ── WebCrypto availability check ───────────────────────────────────────────
+if (typeof crypto === "undefined" || !crypto.subtle) {
+  throw new Error(
+    "E2EE requires WebCrypto (crypto.subtle). Ensure the app is served over HTTPS or a secure context.",
+  );
+}
+
 const ECDH_CURVE = "P-256";
 const HKDF_SALT = new TextEncoder().encode("owncord-voice-e2ee-v1");
 const HKDF_INFO = new TextEncoder().encode("room-key-wrap");
@@ -40,6 +47,23 @@ export async function exportPublicKey(key: CryptoKey): Promise<string> {
 export async function importPublicKey(base64: string): Promise<CryptoKey> {
   const raw = base64ToUint8(base64);
   return crypto.subtle.importKey("raw", raw, { name: "ECDH", namedCurve: ECDH_CURVE }, true, []);
+}
+
+// ── Key fingerprint (for out-of-band verification) ─────────────────────────
+
+/**
+ * Compute a human-readable fingerprint of a public key for out-of-band
+ * verification (safety numbers). Returns a hex string of the SHA-256 hash
+ * of the raw key bytes, formatted as "AB12 CD34 …" groups.
+ */
+export async function computeKeyFingerprint(publicKey: CryptoKey): Promise<string> {
+  const raw = await crypto.subtle.exportKey("raw", publicKey);
+  const hash = await crypto.subtle.digest("SHA-256", raw);
+  const hex = Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+    .join("");
+  // Format as 8 groups of 4 hex chars: "AB12 CD34 EF56 ..."
+  return hex.match(/.{1,4}/g)!.slice(0, 8).join(" ");
 }
 
 // ── Room key generation ─────────────────────────────────────────────────────
@@ -154,7 +178,12 @@ function uint8ToBase64(bytes: Uint8Array): string {
 }
 
 function base64ToUint8(base64: string): Uint8Array {
-  const binary = atob(base64);
+  let binary: string;
+  try {
+    binary = atob(base64);
+  } catch {
+    throw new Error("E2EE: invalid base64 input");
+  }
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
     bytes[i] = binary.charCodeAt(i);
