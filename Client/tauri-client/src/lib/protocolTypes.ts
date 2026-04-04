@@ -39,6 +39,8 @@ export const ServerMessageType = {
   PONG: "pong",
   DM_CHANNEL_OPEN: "dm_channel_open",
   DM_CHANNEL_CLOSE: "dm_channel_close",
+  VOICE_E2EE_ANNOUNCE: "voice_e2ee_announce",
+  VOICE_E2EE_OFFER: "voice_e2ee_offer",
 } as const;
 
 export type ServerMessageTypeValue = (typeof ServerMessageType)[keyof typeof ServerMessageType];
@@ -66,6 +68,8 @@ export const ClientMessageType = {
   PING: "ping",
   // Extension (not in protocol-schema.json but used in practice)
   VOICE_TOKEN_REFRESH: "voice_token_refresh",
+  VOICE_E2EE_ANNOUNCE: "voice_e2ee_announce",
+  VOICE_E2EE_OFFER: "voice_e2ee_offer",
 } as const;
 
 export type ClientMessageTypeValue = (typeof ClientMessageType)[keyof typeof ClientMessageType];

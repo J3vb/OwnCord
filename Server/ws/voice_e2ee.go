@@ -62,6 +62,12 @@ func (h *Hub) handleVoiceE2EEOffer(_ context.Context, c *Client, payload json.Ra
 		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "target_user_id, encrypted_key, and iv are required"))
 		return
 	}
+	// Size limits: AES-256-GCM encrypted 32-byte key ≈ 64 base64 chars + 16-byte
+	// auth tag. 1024 chars is generous. IV is 12 bytes = 16 base64 chars.
+	if len(p.EncryptedKey) > 1024 || len(p.IV) > 128 {
+		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "encrypted_key or iv too large"))
+		return
+	}
 
 	// Verify the target is in the same voice channel.
 	h.mu.RLock()
