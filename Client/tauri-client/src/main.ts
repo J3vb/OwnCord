@@ -85,7 +85,10 @@ if (!appEl) {
 
 // Create core services
 const router = createRouter("connect");
-const api = createApiClient({ host: "", allowSelfSigned: true }, () => {
+// H-3: Default to strict TLS verification. Self-signed cert support is handled
+// by the Rust-side TOFU WS proxy and the CertMismatchModal, not by disabling
+// TLS validation in the HTTP client.
+const api = createApiClient({ host: "", allowSelfSigned: false }, () => {
   log.warn("Session expired (401), clearing auth");
   clearAuth();
 });

@@ -184,13 +184,10 @@ function fetchOgMeta(url: string): Promise<OgMeta> {
           "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
         },
       };
-      if (isTrustedServerUrl(url)) {
-        (
-          fetchOpts as RequestInit & {
-            danger?: { acceptInvalidCerts: boolean; acceptInvalidHostnames: boolean };
-          }
-        ).danger = { acceptInvalidCerts: true, acceptInvalidHostnames: false };
-      }
+      // M-8: Removed acceptInvalidCerts for OG fetches. Even for trusted server
+      // URLs, TLS validation should not be bypassed as it enables MITM attacks.
+      // Self-signed servers are handled by the Rust TLS proxy for WebSocket;
+      // OG preview fetches should respect standard certificate validation.
       const res = await tauriFetch(url, fetchOpts);
       clearTimeout(timer);
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -69,6 +70,16 @@ func handleCreateInvite(database *db.DB) http.HandlerFunc {
 		}
 
 		var expiresAt *time.Time
+		// H-4: Cap invite expiration to 30 days (720 hours) to prevent
+		// effectively permanent invites that survive admin revocation policies.
+		const maxExpiresInHours = 720
+		if req.ExpiresInHours > maxExpiresInHours {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error:   "BAD_REQUEST",
+				Message: fmt.Sprintf("expires_in_hours cannot exceed %d (30 days)", maxExpiresInHours),
+			})
+			return
+		}
 		if req.ExpiresInHours > 0 {
 			t := time.Now().Add(time.Duration(req.ExpiresInHours) * time.Hour)
 			expiresAt = &t
