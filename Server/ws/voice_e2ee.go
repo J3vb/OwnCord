@@ -7,9 +7,11 @@ import (
 	"log/slog"
 )
 
-// decodeBase64Loose accepts both standard (padded) and raw (unpadded) base64.
-// ECDH public keys exported from WebCrypto use raw base64 (no '=' padding);
-// we accept both to avoid breaking existing clients.
+// decodeBase64Loose accepts both padded (StdEncoding) and unpadded (RawStdEncoding)
+// standard-alphabet base64. ECDH public keys exported from WebCrypto omit '='
+// padding; we accept both forms to avoid breaking existing clients.
+// Note: URL-safe base64 (alphabet '-_') is not accepted; clients must use the
+// standard alphabet ('+/').
 func decodeBase64Loose(s string) ([]byte, error) {
 	if b, err := base64.StdEncoding.DecodeString(s); err == nil {
 		return b, nil
@@ -20,8 +22,14 @@ func decodeBase64Loose(s string) ([]byte, error) {
 // updateKeyHolder scans connected clients to find the one with the lowest
 // userID currently in channelID, and records them as the key holder.
 // If no clients remain in the channel the entry is deleted.
-// Must NOT be called while h.mu is held (it acquires h.mu.RLock internally).
+// Must NOT be called while h.mu or h.keyHolderMu is held.
+// Lock order: keyHolderMu (write) → h.mu (read). Holding keyHolderMu for
+// the entire scan+write prevents two concurrent calls from racing and
+// overwriting each other with a stale result.
 func (h *Hub) updateKeyHolder(channelID int64) {
+	h.keyHolderMu.Lock()
+	defer h.keyHolderMu.Unlock()
+
 	h.mu.RLock()
 	var minUserID int64
 	found := false
@@ -35,13 +43,11 @@ func (h *Hub) updateKeyHolder(channelID int64) {
 	}
 	h.mu.RUnlock()
 
-	h.keyHolderMu.Lock()
 	if found {
 		h.voiceKeyHolders[channelID] = minUserID
 	} else {
 		delete(h.voiceKeyHolders, channelID)
 	}
-	h.keyHolderMu.Unlock()
 }
 
 // isVoiceKeyHolder reports whether userID is the current key holder for channelID.
@@ -149,9 +155,11 @@ func (h *Hub) handleVoiceE2EEOffer(_ context.Context, c *Client, payload json.Ra
 		return
 	}
 
-	// Verify the target is in the same voice channel — lookup and channel
-	// check must be atomic (under the same lock hold) to prevent TOCTOU races
-	// where the target leaves between lookup and the channel comparison.
+	// Verify the target is in the same voice channel, then relay — all under
+	// one h.mu.RLock hold so the check and send are atomic. A concurrent
+	// voice_leave cannot remove the target from h.clients between the lookup
+	// and the channel comparison, nor between the comparison and the send.
+	msg := buildVoiceE2EEOffer(c.userID, p.EncryptedKey, p.IV)
 	h.mu.RLock()
 	target, ok := h.clients[p.TargetUserID]
 	if !ok {
@@ -159,16 +167,13 @@ func (h *Hub) handleVoiceE2EEOffer(_ context.Context, c *Client, payload json.Ra
 		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "target user not connected"))
 		return
 	}
-	targetChID := target.getVoiceChID()
-	h.mu.RUnlock()
-	if targetChID != voiceChID {
+	if target.getVoiceChID() != voiceChID {
+		h.mu.RUnlock()
 		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "target user not in your voice channel"))
 		return
 	}
-
-	// Relay the encrypted key offer to the target.
-	msg := buildVoiceE2EEOffer(c.userID, p.EncryptedKey, p.IV)
 	target.sendMsg(msg)
+	h.mu.RUnlock()
 
 	slog.Debug("voice e2ee: offer relayed",
 		"from_user_id", c.userID, "to_user_id", p.TargetUserID, "channel_id", voiceChID)

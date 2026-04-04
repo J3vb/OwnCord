@@ -868,10 +868,8 @@ export class LiveKitSession {
           new Promise<void>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error("E2EE key exchange timeout")), ms);
           });
-        let keyReceived = false;
         try {
           await Promise.race([roomKeyPromise, makeTimeout(10_000)]);
-          keyReceived = true;
         } catch {
           // First attempt timed out — re-announce and retry once.
           if (timeoutId !== null) clearTimeout(timeoutId);
@@ -882,7 +880,6 @@ export class LiveKitSession {
           });
           try {
             await Promise.race([roomKeyPromise, makeTimeout(5_000)]);
-            keyReceived = true;
           } catch {
             log.error("E2EE: key exchange timed out after retry — disconnecting", { channelId });
             this._roomKeyResolver = null;
