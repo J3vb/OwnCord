@@ -13,7 +13,7 @@ tauri-build = { version = "2", features = [] }
 tauri-typegen = "0.5"
 
 [features]
-default = ["devtools"]
+default = []
 devtools = ["tauri/devtools"]
 
 [dependencies]

@@ -41,6 +41,7 @@ type Hub struct {
 	permChecker  *permissions.Checker
 
 	seq            uint64           // atomic monotonic sequence counter
+	seqMu          syncutil.Mutex   // serializes seq assignment + replay insertion + delivery order
 	replayBuf      *EventRingBuffer // recent broadcast events for reconnection replay
 	broadcastDrops atomic.Uint64    // counts messages dropped due to full broadcast channel
 
@@ -439,6 +440,24 @@ func (h *Hub) SendToUser(userID int64, msg []byte) bool {
 	return c.trySendMsg(msg)
 }
 
+// sendSequencedToUsers stamps msg with a monotonic seq, stores it in the replay
+// buffer under channelID, and fanouts the wrapped payload to the provided users.
+func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
+	h.seqMu.Lock()
+	defer h.seqMu.Unlock()
+
+	seq := h.nextSeq()
+	wrapped := wrapWithSeq(msg, seq)
+
+	// Store DM event for reconnect replay; filtering is channel-based and uses
+	// allowed channel IDs computed at auth time (including open DMs).
+	h.replayBuf.Push(seq, channelID, wrapped)
+
+	for _, userID := range userIDs {
+		h.SendToUser(userID, wrapped)
+	}
+}
+
 // ClientCount returns the number of currently registered clients (test helper).
 func (h *Hub) ClientCount() int {
 	h.mu.RLock()
@@ -623,6 +642,9 @@ func (h *Hub) sweepStaleVoiceStates() {
 // deliverBroadcast stamps bm.msg with a monotonic sequence number, stores it
 // in the replay buffer, and sends it to the appropriate clients.
 func (h *Hub) deliverBroadcast(bm broadcastMsg) {
+	h.seqMu.Lock()
+	defer h.seqMu.Unlock()
+
 	seq := h.nextSeq()
 	msg := wrapWithSeq(bm.msg, seq)
 

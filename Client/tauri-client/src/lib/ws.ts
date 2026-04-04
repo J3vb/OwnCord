@@ -157,7 +157,13 @@ export function createWsClient() {
     setState("reconnecting");
     reconnectTimer = setTimeout(() => {
       reconnectAttempt++;
-      void connect(config!);
+      const nextConfig = config;
+      if (!nextConfig) {
+        log.warn("Reconnect aborted: missing config");
+        setState("disconnected");
+        return;
+      }
+      void connect(nextConfig);
     }, delay);
   }
 
@@ -463,6 +469,7 @@ export function createWsClient() {
     cleanupEventListeners();
     void disconnectProxy();
     setState("disconnected");
+    config = null;
     // Reset lastSeq — disconnect() is only called for intentional close
     // (logout). Automatic reconnects go through scheduleReconnect() which
     // preserves lastSeq for server-side event replay.

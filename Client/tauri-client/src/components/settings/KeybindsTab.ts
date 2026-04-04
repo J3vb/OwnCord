@@ -40,7 +40,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     () => {
       if (capturing) return;
       capturing = true;
-      pttValue.textContent = "Press any key...";
+      pttValue.textContent = "Press a supported key...";
       pttValue.style.borderColor = "var(--accent)";
       pttValue.style.color = "var(--accent)";
 
@@ -93,7 +93,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     {
       style: "font-size: 11px; color: var(--text-micro); margin: 4px 0 16px 0; line-height: 1.4;",
     },
-    "PTT works globally and does not hijack the key \u2014 you can still type and use other apps normally. Mouse buttons (Mouse 4/5) also work.",
+    "PTT works globally and does not hijack the key. Capture supports function keys, navigation keys, and Mouse 4/5.",
   );
   section.appendChild(pttHint);
 

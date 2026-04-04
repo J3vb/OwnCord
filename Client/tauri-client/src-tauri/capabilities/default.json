@@ -28,7 +28,6 @@
     "notification:allow-notify",
     "notification:allow-request-permission",
     "notification:allow-is-permission-granted",
-    "http:default",
     {
       "identifier": "http:allow-fetch",
       "allow": [
