@@ -280,6 +280,8 @@ export interface VoiceTokenPayload {
   readonly token: string;
   readonly url: string;
   readonly direct_url?: string;
+  /** Base64-encoded 256-bit symmetric key for LiveKit SFrame E2EE. */
+  readonly e2ee_key?: string;
 }
 
 export interface MemberJoinPayload {

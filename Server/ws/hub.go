@@ -50,6 +50,12 @@ type Hub struct {
 	settingsName       string
 	settingsMotd       string
 	settingsLastUpdate time.Time
+
+	// E2EE key store — per-channel symmetric keys for voice encryption.
+	// Keys are ephemeral: generated when the first user joins a voice channel,
+	// cleared when the channel empties. All participants in the same channel
+	// receive the same key via the voice_token message (over the encrypted WS).
+	e2eeKeys *VoiceE2EEKeys
 }
 
 // NewHub creates a Hub ready to be started with Run.
@@ -75,6 +81,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
 		permChecker:  permissions.NewChecker(database),
 		settingsName: "OwnCord Server",
 		settingsMotd: "Welcome!",
+		e2eeKeys:    NewVoiceE2EEKeys(),
 	}
 	h.refreshSettingsLocked()
 	return h
@@ -281,6 +288,9 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 	for _, vs := range states {
 		h.BroadcastToAll(buildVoiceLeave(channelID, vs.UserID))
 	}
+
+	// Clear E2EE key — channel is now empty.
+	h.e2eeKeys.ClearChannel(channelID)
 }
 
 // IsUserConnected returns true if a client with the given userID is already
