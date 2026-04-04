@@ -234,9 +234,15 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 		if !isAdmin {
 			if aa.ChannelID == nil {
 				// Unlinked attachment — only the uploader may access.
-				// Legacy rows (NULL uploader_id) are allowed through with a warning.
+				// M-2: Legacy rows (NULL uploader_id) are now denied rather than
+				// served to any authenticated user.
 				if aa.UploaderID == nil {
-					slog.Warn("legacy attachment served without uploader_id", "id", fileID)
+					slog.Warn("legacy attachment access denied (NULL uploader_id)", "id", fileID)
+					writeJSON(w, http.StatusForbidden, errorResponse{
+						Error:   "FORBIDDEN",
+						Message: "you do not have access to this file",
+					})
+					return
 				} else if user == nil || *aa.UploaderID != user.ID {
 					writeJSON(w, http.StatusForbidden, errorResponse{
 						Error:   "FORBIDDEN",

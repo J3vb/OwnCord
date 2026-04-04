@@ -2,11 +2,12 @@ package db
 
 import "fmt"
 
-// ListInvites returns all invites ordered by creation time descending.
+// ListInvites returns invites ordered by creation time descending.
+// M-12: Limited to 200 rows to prevent unbounded result sets.
 func (d *DB) ListInvites() ([]*Invite, error) {
 	rows, err := d.sqlDB.Query(
 		`SELECT id, code, created_by, max_uses, use_count, expires_at, revoked, created_at
-		 FROM invites ORDER BY created_at DESC`,
+		 FROM invites ORDER BY created_at DESC LIMIT 200`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("ListInvites: %w", err)

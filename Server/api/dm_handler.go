@@ -26,6 +26,14 @@ func MountDMRoutes(r chi.Router, database *db.DB, broadcaster DMBroadcaster) {
 		r.Get("/", handleListDMs(database))
 		r.Delete("/{channelId}", handleCloseDM(database, broadcaster))
 	})
+
+	// User blocking routes — prevent DM creation and messaging.
+	r.Route("/api/v1/blocks", func(r chi.Router) {
+		r.Use(AuthMiddleware(database))
+		r.Get("/", handleListBlocks(database))
+		r.Put("/{userId}", handleBlockUser(database))
+		r.Delete("/{userId}", handleUnblockUser(database))
+	})
 }
 
 // createDMRequest is the JSON body for POST /api/v1/dms.
@@ -97,6 +105,25 @@ func handleCreateDM(database *db.DB) http.HandlerFunc {
 			writeJSON(w, http.StatusNotFound, errorResponse{
 				Error:   "NOT_FOUND",
 				Message: "recipient not found",
+			})
+			return
+		}
+
+		// Check if either user has blocked the other.
+		blocked, blockErr := database.IsEitherBlocked(user.ID, req.RecipientID)
+		if blockErr != nil {
+			slog.Error("handleCreateDM IsEitherBlocked", "err", blockErr,
+				"user_id", user.ID, "recipient_id", req.RecipientID)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{
+				Error:   "INTERNAL_ERROR",
+				Message: "failed to check block status",
+			})
+			return
+		}
+		if blocked {
+			writeJSON(w, http.StatusForbidden, errorResponse{
+				Error:   "BLOCKED",
+				Message: "cannot create DM with this user",
 			})
 			return
 		}
