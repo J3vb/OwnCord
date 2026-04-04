@@ -924,8 +924,12 @@ export class LiveKitSession {
       // Only clear "connecting" back to "idle" if we are still in the connecting
       // state for this generation — never overwrite a "connected" state that was
       // set by the success path above (guards against risk #4 in the analysis).
+      // If a pendingJoin was queued while this attempt ran, leave the state as
+      // "connecting" so handleVoiceToken's drain loop can read and consume it.
       if (this._state.type === "connecting" && this._state.joinGeneration === myGeneration) {
-        this.setState({ type: "idle" });
+        if (this._state.pendingJoin === null) {
+          this.setState({ type: "idle" });
+        }
       }
     }
   }

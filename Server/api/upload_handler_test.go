@@ -11,6 +11,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -149,6 +151,15 @@ func newUploadTestStorage(t *testing.T) *storage.Storage {
 func buildUploadRouter(database *db.DB, store *storage.Storage, allowedOrigins []string) http.Handler {
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
+	api.MountUploadRoutes(r, database, store, limiter, allowedOrigins)
+	return r
+}
+
+func buildUploadRouterWithLimiter(database *db.DB, store *storage.Storage, limiter *auth.RateLimiter, allowedOrigins []string) http.Handler {
+	r := chi.NewRouter()
+	if limiter == nil {
+		limiter = auth.NewRateLimiter()
+	}
 	api.MountUploadRoutes(r, database, store, limiter, allowedOrigins)
 	return r
 }
@@ -459,6 +470,139 @@ func TestUpload_BlockedFileType_ELF(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestUpload_RateLimitedAfterBurst(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	limiter := auth.NewRateLimiter()
+	router := buildUploadRouterWithLimiter(database, store, limiter, nil)
+	token := uploadCreateToken(t, database, "burstuser", 1)
+	otherToken := uploadCreateToken(t, database, "otherburstuser", 1)
+	content := []byte("upload payload with enough bytes for content type detection")
+
+	for range 10 {
+		rr := doUpload(t, router, token, "file", "burst.txt", content)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("pre-limit upload status = %d, want 201; body: %s", rr.Code, rr.Body.String())
+		}
+	}
+
+	rr := doUpload(t, router, token, "file", "burst.txt", content)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("rate-limited upload status = %d, want 429; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode rate-limit response: %v", err)
+	}
+	if resp["error"] != "RATE_LIMITED" {
+		t.Errorf("error = %v, want RATE_LIMITED", resp["error"])
+	}
+
+	rr = doUpload(t, router, otherToken, "file", "burst.txt", content)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("other user upload status = %d, want 201; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestUpload_OversizedFileRejected(t *testing.T) {
+	database := newUploadTestDB(t)
+	dir := t.TempDir()
+	store, err := storage.New(dir, 1)
+	if err != nil {
+		t.Fatalf("storage.New: %v", err)
+	}
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "largeupload", 1)
+	content := bytes.Repeat([]byte("a"), (1<<20)+1)
+
+	rr := doUpload(t, router, token, "file", "too-large.txt", content)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("oversized upload status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode oversized response: %v", err)
+	}
+	message, _ := resp["message"].(string)
+	if !strings.Contains(message, "file exceeds maximum size") {
+		t.Fatalf("message = %q, want size rejection", message)
+	}
+	if resp["error"] != "BAD_REQUEST" {
+		t.Errorf("error = %v, want BAD_REQUEST", resp["error"])
+	}
+}
+
+func TestUpload_DBCreateAttachmentFailureDeletesStoredFile(t *testing.T) {
+	database := newUploadTestDB(t)
+	dir := t.TempDir()
+	store, err := storage.New(dir, 10)
+	if err != nil {
+		t.Fatalf("storage.New: %v", err)
+	}
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "dbfailupload", 1)
+
+	if _, err := database.Exec(`DROP TABLE attachments`); err != nil {
+		t.Fatalf("drop attachments table: %v", err)
+	}
+
+	content := []byte("content that will save to disk before attachment insert fails")
+	rr := doUpload(t, router, token, "file", "cleanup.txt", content)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("upload status = %d, want 500; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode db failure response: %v", err)
+	}
+	if resp["error"] != "INTERNAL_ERROR" {
+		t.Errorf("error = %v, want INTERNAL_ERROR", resp["error"])
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected stored file cleanup on DB failure, found %d entries", len(entries))
+	}
+}
+
+func TestUpload_SanitizesReservedFilenameToUnnamed(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "sanitizeupload", 1)
+	content := []byte("content for reserved filename sanitization")
+
+	rr := doUpload(t, router, token, "file", ".", content)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["filename"] != "unnamed" {
+		t.Fatalf("filename = %v, want unnamed", resp["filename"])
+	}
+
+	att, err := database.GetAttachmentByID(resp["id"].(string))
+	if err != nil {
+		t.Fatalf("GetAttachmentByID: %v", err)
+	}
+	if att == nil {
+		t.Fatal("expected attachment record in DB, got nil")
+	}
+	if att.Filename != "unnamed" {
+		t.Fatalf("DB filename = %q, want unnamed", att.Filename)
 	}
 }
 
