@@ -68,7 +68,6 @@ type PendingVoiceJoin = {
   readonly url: string;
   readonly channelId: number;
   readonly directUrl?: string;
-  readonly e2eeKey?: string;
 };
 
 // --- State machine ---
@@ -90,7 +89,6 @@ type SessionState =
       readonly latestToken: string;
       readonly lastUrl: string;
       readonly lastDirectUrl: string | undefined;
-      readonly e2eeKey: string | undefined;
     }
   | {
       readonly type: "reconnecting";
@@ -98,7 +96,6 @@ type SessionState =
       readonly latestToken: string;
       readonly lastUrl: string;
       readonly lastDirectUrl: string | undefined;
-      readonly e2eeKey: string | undefined;
       readonly ac: AbortController;
     };
 
@@ -125,10 +122,22 @@ export class LiveKitSession {
   /** Cached port for the local LiveKit TLS proxy (Rust-side, for self-signed cert support). */
   private liveKitProxyPort: number | null = null;
 
-  /** E2EE key provider — shared across Room instances. The server distributes
-   *  a per-channel symmetric key via the voice_token message; we feed it into
-   *  this provider before connecting. LiveKit's SFrame worker handles the rest. */
+  /** E2EE key provider — shared across Room instances. The room key is generated
+   *  and exchanged client-side via ECDH; the server never sees it. */
   private _e2eeKeyProvider = new ExternalE2EEKeyProvider();
+
+  // ── Client-side E2EE state (ECDH key exchange) ───────────────────────────
+  /** Ephemeral ECDH P-256 keypair for the current voice session. */
+  private _ecdhKeyPair: CryptoKeyPair | null = null;
+  /** The 256-bit symmetric room key (plaintext). Only held by the key holder
+   *  initially; other participants receive it via ECDH-wrapped offers. */
+  private _roomKey: Uint8Array | null = null;
+  /** Peer ECDH public keys indexed by userId. */
+  private _peerPublicKeys: Map<number, CryptoKey> = new Map();
+  /** True if this client is the key holder (longest-present participant). */
+  private _isKeyHolder = false;
+  /** Resolver for non-key-holders waiting to receive the room key via offer. */
+  private _roomKeyResolver: (() => void) | null = null;
 
   // --- State transition (single writer) ---
 
@@ -170,13 +179,6 @@ export class LiveKitSession {
   private get _lastDirectUrl(): string | undefined {
     return this._state.type === "connected" || this._state.type === "reconnecting"
       ? this._state.lastDirectUrl
-      : undefined;
-  }
-
-  /** E2EE key from state. */
-  private get _e2eeKey(): string | undefined {
-    return this._state.type === "connected" || this._state.type === "reconnecting"
-      ? this._state.e2eeKey
       : undefined;
   }
 
@@ -238,7 +240,6 @@ export class LiveKitSession {
             latestToken: this._state.latestToken,
             lastUrl: this._state.lastUrl,
             lastDirectUrl: this._state.lastDirectUrl,
-            e2eeKey: this._state.e2eeKey,
           };
           this.setState({ type: "idle" });
         }
@@ -256,7 +257,7 @@ export class LiveKitSession {
         if (ac !== null && this._pendingReconnectFields !== null) {
           // Transition from idle → reconnecting atomically using the fields
           // captured in setRoom() above.
-          const { channelId, latestToken, lastUrl, lastDirectUrl, e2eeKey } = this._pendingReconnectFields;
+          const { channelId, latestToken, lastUrl, lastDirectUrl } = this._pendingReconnectFields;
           this._pendingReconnectFields = null;
           this.setState({
             type: "reconnecting",
@@ -264,7 +265,6 @@ export class LiveKitSession {
             latestToken,
             lastUrl,
             lastDirectUrl,
-            e2eeKey,
             ac,
           });
         }
@@ -298,7 +298,6 @@ export class LiveKitSession {
     latestToken: string;
     lastUrl: string;
     lastDirectUrl: string | undefined;
-    e2eeKey: string | undefined;
   } | null = null;
 
   // --- Room factory ---
@@ -422,11 +421,12 @@ export class LiveKitSession {
           return;
         }
 
-        // Re-apply E2EE key from the reconnecting state before connecting.
-        const reconnectE2eeKey = this._e2eeKey;
-        if (reconnectE2eeKey) {
+        // E2EE keys are exchanged client-side via ECDH. On reconnect, the
+        // room key is still in _roomKey from the previous session. Re-apply it.
+        if (this._roomKey) {
+          const { roomKeyToBase64 } = await import("@lib/e2eeCrypto");
           // eslint-disable-next-line no-await-in-loop -- must set key before connect
-          await this._e2eeKeyProvider.setKey(reconnectE2eeKey);
+          await this._e2eeKeyProvider.setKey(roomKeyToBase64(this._roomKey));
         }
 
         // eslint-disable-next-line no-await-in-loop -- sequential reconnect: must connect before restoring state
@@ -447,7 +447,6 @@ export class LiveKitSession {
           latestToken: token,
           lastUrl: url,
           lastDirectUrl: directUrl,
-          e2eeKey: this._e2eeKey,
         });
         this._deviceManager.setOnError(this.onErrorCallback);
         this._deviceManager.setOnToast(this.onErrorCallback);
@@ -502,7 +501,6 @@ export class LiveKitSession {
             latestToken: this._state.latestToken,
             lastUrl: this._state.lastUrl,
             lastDirectUrl: this._state.lastDirectUrl,
-            e2eeKey: this._state.e2eeKey,
             ac: this._state.ac,
           });
         }
@@ -757,7 +755,6 @@ export class LiveKitSession {
     url: string,
     channelId: number,
     directUrl?: string,
-    e2eeKey?: string,
   ): Promise<boolean | "superseded"> {
     if (this._room !== null) this.leaveVoice(false);
     // Increment the generation counter and embed it into the "connecting" state.
@@ -794,12 +791,53 @@ export class LiveKitSession {
 
       const MAX_RETRIES = 3;
       const RETRY_DELAY_MS = 2000;
-      // Set the E2EE key before connecting so SFrame encryption is active
-      // from the first published frame.
-      if (e2eeKey) {
-        await this._e2eeKeyProvider.setKey(e2eeKey);
-        log.info("E2EE key set for voice channel", { channelId });
+
+      // ── Client-side E2EE key exchange (ECDH) ──────────────────────────
+      // Generate a fresh ECDH keypair for this session.
+      const { generateECDHKeyPair, exportPublicKey, generateRoomKey, roomKeyToBase64 } =
+        await import("@lib/e2eeCrypto");
+      this._ecdhKeyPair = await generateECDHKeyPair();
+      this._peerPublicKeys.clear();
+      const myPubKeyBase64 = await exportPublicKey(this._ecdhKeyPair.publicKey);
+
+      // Determine if we are the key holder (first in channel = no existing
+      // voice_e2ee_announce messages received before this point).
+      // The server sends existing participants' public keys during voice_join
+      // sync — if we received none, we're first.
+      const existingPeerCount = this._peerPublicKeys.size;
+      this._isKeyHolder = existingPeerCount === 0;
+
+      if (this._isKeyHolder) {
+        // We're the first participant — generate the room key.
+        this._roomKey = generateRoomKey();
+        await this._e2eeKeyProvider.setKey(roomKeyToBase64(this._roomKey));
+        log.info("E2EE: key holder — generated room key", { channelId });
+      } else {
+        // Wait for the key holder to send us the room key via voice_e2ee_offer.
+        // This promise resolves when handleE2EEOffer() sets _roomKey.
+        log.info("E2EE: waiting for room key from key holder", { channelId });
+        const roomKeyPromise = new Promise<void>((resolve) => {
+          this._roomKeyResolver = resolve;
+        });
+        // Don't block forever — timeout after 10 seconds.
+        const timeout = new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error("E2EE key exchange timeout")), 10_000),
+        );
+        try {
+          await Promise.race([roomKeyPromise, timeout]);
+        } catch {
+          log.warn("E2EE: key exchange timed out, proceeding without E2EE", { channelId });
+        }
+        this._roomKeyResolver = null;
       }
+
+      // Announce our public key so existing participants (and the key holder)
+      // can see us. This must happen AFTER we set up the roomKeyResolver so
+      // we don't miss an immediate offer response.
+      this.ws?.send({
+        type: "voice_e2ee_announce",
+        payload: { public_key: myPubKeyBase64 },
+      });
 
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
@@ -890,7 +928,6 @@ export class LiveKitSession {
           latestToken: token,
           lastUrl: url,
           lastDirectUrl: directUrl,
-          e2eeKey,
         });
         // Optimistic startAudio — may succeed if the join was triggered by a
         // recent user gesture. If not, the AudioPlaybackStatusChanged handler
@@ -977,7 +1014,6 @@ export class LiveKitSession {
     url: string,
     channelId: number,
     directUrl?: string,
-    e2eeKey?: string,
   ): Promise<void> {
     const s = this._state;
     if (s.type === "connected" && s.channelId === channelId && s.room.state === "connected") {
@@ -990,13 +1026,13 @@ export class LiveKitSession {
       if (this._state.type === "connecting") {
         this.setState({
           ...this._state,
-          pendingJoin: { token, url, channelId, directUrl, e2eeKey },
+          pendingJoin: { token, url, channelId, directUrl },
         });
       }
       log.warn("handleVoiceToken: already connecting, queued latest join request", { channelId });
       return;
     }
-    await this.connectAndSetup(token, url, channelId, directUrl, e2eeKey);
+    await this.connectAndSetup(token, url, channelId, directUrl);
     // Drain pending joins iteratively to avoid unbounded recursion when
     // rapid channel switches queue multiple requests.
     // A "superseded" result means connectAndSetup() already aborted early;
@@ -1011,7 +1047,6 @@ export class LiveKitSession {
         url: pUrl,
         channelId: pChannelId,
         directUrl: pDirectUrl,
-        e2eeKey: pE2eeKey,
       } = pendingJoin;
       const cur = this._state;
       if (
@@ -1022,7 +1057,7 @@ export class LiveKitSession {
         this.handleVoiceTokenRefresh(pToken);
       } else {
         // eslint-disable-next-line no-await-in-loop -- sequential drain of pending joins to avoid unbounded recursion
-        await this.connectAndSetup(pToken, pUrl, pChannelId, pDirectUrl, pE2eeKey);
+        await this.connectAndSetup(pToken, pUrl, pChannelId, pDirectUrl);
         // If this attempt was itself superseded (another join arrived during the
         // await), the loop will naturally pick it up via the updated pendingJoin.
       }
@@ -1030,6 +1065,152 @@ export class LiveKitSession {
       if (this._state.type === "connecting") {
         this.setState({ ...this._state, pendingJoin: null });
       }
+    }
+  }
+
+  // ── Client-side E2EE handlers (ECDH key exchange) ───────────────────────
+
+  /**
+   * Handle a voice_e2ee_announce from the server — another participant has
+   * announced their ECDH public key. If we are the key holder, wrap and send
+   * the room key to them.
+   */
+  async handleE2EEAnnounce(userId: number, publicKeyBase64: string): Promise<void> {
+    try {
+      const { importPublicKey, wrapRoomKey } = await import("@lib/e2eeCrypto");
+      const peerKey = await importPublicKey(publicKeyBase64);
+      this._peerPublicKeys.set(userId, peerKey);
+      log.info("E2EE: received peer public key", { userId });
+
+      // If we're the key holder and have a room key, wrap it for the new peer.
+      if (this._isKeyHolder && this._roomKey && this._ecdhKeyPair) {
+        const { encryptedKey, iv } = await wrapRoomKey(
+          this._ecdhKeyPair.privateKey,
+          peerKey,
+          this._roomKey,
+        );
+        this.ws?.send({
+          type: "voice_e2ee_offer",
+          payload: { target_user_id: userId, encrypted_key: encryptedKey, iv },
+        });
+        log.info("E2EE: sent room key offer to peer", { userId });
+      }
+    } catch (err) {
+      log.error("E2EE: failed to handle announce", err);
+    }
+  }
+
+  /**
+   * Handle a voice_e2ee_offer from the server — the key holder has sent us
+   * the encrypted room key. Unwrap it and apply to the E2EE key provider.
+   */
+  async handleE2EEOffer(
+    fromUserId: number,
+    encryptedKeyBase64: string,
+    ivBase64: string,
+  ): Promise<void> {
+    try {
+      const { unwrapRoomKey, roomKeyToBase64 } = await import("@lib/e2eeCrypto");
+      const peerKey = this._peerPublicKeys.get(fromUserId);
+      if (!peerKey) {
+        log.warn("E2EE: received offer from unknown peer", { fromUserId });
+        return;
+      }
+      if (!this._ecdhKeyPair) {
+        log.warn("E2EE: received offer but no ECDH keypair");
+        return;
+      }
+
+      this._roomKey = await unwrapRoomKey(
+        this._ecdhKeyPair.privateKey,
+        peerKey,
+        encryptedKeyBase64,
+        ivBase64,
+      );
+      await this._e2eeKeyProvider.setKey(roomKeyToBase64(this._roomKey));
+      log.info("E2EE: room key received and applied", { fromUserId });
+
+      // Resolve the pending connect promise if we were waiting for the key.
+      if (this._roomKeyResolver) {
+        this._roomKeyResolver();
+        this._roomKeyResolver = null;
+      }
+    } catch (err) {
+      log.error("E2EE: failed to handle offer", err);
+    }
+  }
+
+  /**
+   * Handle a participant leaving the voice channel. If we become the new key
+   * holder, rotate the room key and distribute to remaining peers.
+   */
+  async handleParticipantLeft(userId: number): Promise<void> {
+    this._peerPublicKeys.delete(userId);
+
+    // Determine if we should become the new key holder.
+    // Key holder is the longest-present participant — determined by voice state
+    // list order. The first user in the voiceUsers map for our channel is the holder.
+    const channelId = this._currentChannelId;
+    if (!channelId) return;
+
+    const state = voiceStore.getState();
+    const channelUsers = state.voiceUsers.get(channelId);
+    if (!channelUsers || channelUsers.size === 0) return;
+
+    // The first user in the map is the longest-present (server sends in join order).
+    const firstUserId = channelUsers.keys().next().value;
+    // Get our own user ID from the ws client.
+    // If we're the first user remaining, we're the new key holder.
+    const wasKeyHolder = this._isKeyHolder;
+    // We need to know our own user ID — derive from the room's local participant.
+    const myUserId = this._room?.localParticipant?.identity
+      ? parseInt(this._room.localParticipant.identity, 10)
+      : null;
+
+    if (myUserId !== null && firstUserId === myUserId && !wasKeyHolder) {
+      this._isKeyHolder = true;
+      log.info("E2EE: became key holder after participant left", { userId, channelId });
+
+      // Rotate the room key — generate a new one and distribute to all remaining peers.
+      try {
+        const { generateRoomKey, roomKeyToBase64, wrapRoomKey } =
+          await import("@lib/e2eeCrypto");
+        this._roomKey = generateRoomKey();
+        await this._e2eeKeyProvider.setKey(roomKeyToBase64(this._roomKey));
+        log.info("E2EE: rotated room key", { channelId });
+
+        // Wrap and send the new key to all remaining peers.
+        if (this._ecdhKeyPair) {
+          for (const [peerId, peerKey] of this._peerPublicKeys) {
+            const { encryptedKey, iv } = await wrapRoomKey(
+              this._ecdhKeyPair.privateKey,
+              peerKey,
+              this._roomKey,
+            );
+            this.ws?.send({
+              type: "voice_e2ee_offer",
+              payload: { target_user_id: peerId, encrypted_key: encryptedKey, iv },
+            });
+          }
+          log.info("E2EE: distributed rotated key to peers", {
+            peerCount: this._peerPublicKeys.size,
+          });
+        }
+      } catch (err) {
+        log.error("E2EE: failed to rotate room key", err);
+      }
+    }
+  }
+
+  /** Clear all E2EE state (called on voice leave). */
+  private clearE2EEState(): void {
+    this._ecdhKeyPair = null;
+    this._roomKey = null;
+    this._peerPublicKeys.clear();
+    this._isKeyHolder = false;
+    if (this._roomKeyResolver) {
+      this._roomKeyResolver();
+      this._roomKeyResolver = null;
     }
   }
 
@@ -1085,6 +1266,8 @@ export class LiveKitSession {
       room.removeAllListeners();
       room.disconnect().catch((err) => log.warn("room.disconnect() error (non-fatal)", err));
     }
+    // Clear client-side E2EE state (ECDH keypair, room key, peer keys).
+    this.clearE2EEState();
     // Transition to idle — atomically clears room, channelId, tokens, reconnectAc,
     // pendingJoin, and the joinGeneration (idle has none). Any in-flight
     // connectAndSetup() will detect the state type change at its next checkpoint.
@@ -1265,6 +1448,9 @@ export const setOnRemoteVideo = session.setOnRemoteVideo.bind(session);
 export const setOnRemoteVideoRemoved = session.setOnRemoteVideoRemoved.bind(session);
 export const clearOnRemoteVideo = session.clearOnRemoteVideo.bind(session);
 export const handleVoiceToken = session.handleVoiceToken.bind(session);
+export const handleE2EEAnnounce = session.handleE2EEAnnounce.bind(session);
+export const handleE2EEOffer = session.handleE2EEOffer.bind(session);
+export const handleParticipantLeft = session.handleParticipantLeft.bind(session);
 export const leaveVoice = session.leaveVoice.bind(session);
 export const retryMicPermission = session.retryMicPermission.bind(session);
 export const cleanupAll = session.cleanupAll.bind(session);
