@@ -60,6 +60,8 @@ func TestHandlerRegistry_AllExpectedTypesRegistered(t *testing.T) {
 		"voice_deafen",
 		"voice_camera",
 		"voice_screenshare",
+		"voice_e2ee_announce",
+		"voice_e2ee_offer",
 		"ping",
 	}
 

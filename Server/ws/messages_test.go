@@ -541,7 +541,7 @@ func TestBuildTypingMsg_ValidJSON(t *testing.T) {
 // ─── buildVoiceToken ──────────────────────────────────────────────────────────
 
 func TestBuildVoiceToken_Type(t *testing.T) {
-	msg := buildVoiceToken(99, "jwt-token", "/livekit", "ws://localhost:7880")
+	msg := buildVoiceToken(99, "jwt-token", "/livekit", "ws://localhost:7880", false)
 	var env struct {
 		Type string `json:"type"`
 	}
@@ -554,7 +554,7 @@ func TestBuildVoiceToken_Type(t *testing.T) {
 }
 
 func TestBuildVoiceToken_Payload(t *testing.T) {
-	msg := buildVoiceToken(99, "jwt-token", "/livekit", "ws://localhost:7880")
+	msg := buildVoiceToken(99, "jwt-token", "/livekit", "ws://localhost:7880", false)
 	var env struct {
 		Payload struct {
 			ChannelID int64  `json:"channel_id"`
@@ -583,7 +583,7 @@ func TestBuildVoiceToken_Payload(t *testing.T) {
 func TestBuildVoiceToken_NoE2EEKey(t *testing.T) {
 	// E2EE keys are now exchanged client-side via ECDH; voice_token must not
 	// contain an e2ee_key field.
-	msg := buildVoiceToken(1, "t", "/livekit", "ws://a")
+	msg := buildVoiceToken(1, "t", "/livekit", "ws://a", false)
 	var body map[string]any
 	if err := json.Unmarshal(msg, &body); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -595,7 +595,7 @@ func TestBuildVoiceToken_NoE2EEKey(t *testing.T) {
 }
 
 func TestBuildVoiceToken_ValidJSON(t *testing.T) {
-	if !json.Valid(buildVoiceToken(1, "t", "/livekit", "ws://a")) {
+	if !json.Valid(buildVoiceToken(1, "t", "/livekit", "ws://a", false)) {
 		t.Error("buildVoiceToken output is not valid JSON")
 	}
 }

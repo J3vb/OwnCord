@@ -51,6 +51,11 @@ type Hub struct {
 	settingsMotd       string
 	settingsLastUpdate time.Time
 
+	// voiceKeyHolders maps channelID → userID of the current key holder.
+	// The key holder is the connected participant with the lowest userID in the channel.
+	// Protected by keyHolderMu.
+	keyHolderMu     sync.RWMutex
+	voiceKeyHolders map[int64]int64
 }
 
 // NewHub creates a Hub ready to be started with Run.
@@ -64,18 +69,19 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
 	registerPingHandler(reg)
 
 	h := &Hub{
-		clients:      make(map[int64]*Client),
-		db:           database,
-		limiter:      limiter,
-		broadcast:    make(chan broadcastMsg, 1024),
-		register:     make(chan *Client, 32),
-		unregister:   make(chan *Client, 32),
-		stop:         make(chan struct{}),
-		replayBuf:    NewEventRingBuffer(1000),
-		registry:     reg,
-		permChecker:  permissions.NewChecker(database),
-		settingsName: "OwnCord Server",
-		settingsMotd: "Welcome!",
+		clients:         make(map[int64]*Client),
+		db:              database,
+		limiter:         limiter,
+		broadcast:       make(chan broadcastMsg, 1024),
+		register:        make(chan *Client, 32),
+		unregister:      make(chan *Client, 32),
+		stop:            make(chan struct{}),
+		replayBuf:       NewEventRingBuffer(1000),
+		registry:        reg,
+		permChecker:     permissions.NewChecker(database),
+		settingsName:    "OwnCord Server",
+		settingsMotd:    "Welcome!",
+		voiceKeyHolders: make(map[int64]int64),
 	}
 	h.refreshSettingsLocked()
 	return h
@@ -282,7 +288,6 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 	for _, vs := range states {
 		h.BroadcastToAll(buildVoiceLeave(channelID, vs.UserID))
 	}
-
 }
 
 // IsUserConnected returns true if a client with the given userID is already

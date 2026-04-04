@@ -109,6 +109,14 @@ CREATE TABLE IF NOT EXISTS read_states (
     mention_count   INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, channel_id)
 );
+
+CREATE TABLE IF NOT EXISTS user_blocks (
+    blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (blocker_id, blocked_id),
+    CHECK (blocker_id != blocked_id)
+);
 `)
 
 // ─── helpers ────────────────────────────────────────────────────────────────

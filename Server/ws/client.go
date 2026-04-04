@@ -129,6 +129,16 @@ func SetClientVoiceStateForTest(c *Client, channelID int64, joinToken string) {
 	c.voiceJoinToken = joinToken
 }
 
+// SetClientE2EEPubKeyForTest sets the E2EE public key on a client. For test use only.
+func SetClientE2EEPubKeyForTest(c *Client, key string) {
+	c.setE2EEPubKey(key)
+}
+
+// GetClientE2EEPubKeyForTest returns the E2EE public key from a client. For test use only.
+func GetClientE2EEPubKeyForTest(c *Client) string {
+	return c.getE2EEPubKey()
+}
+
 // NewTestClientWithTokenHash creates a test client that carries a session token
 // hash. Use this when tests need to exercise the periodic session-expiry check.
 func NewTestClientWithTokenHash(hub *Hub, user *db.User, tokenHash string, channelID int64, send chan []byte) *Client {
