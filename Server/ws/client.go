@@ -27,6 +27,7 @@ type Client struct {
 	channelID      int64     // currently viewed channel for channel-scoped broadcasts
 	voiceChID      int64     // voice channel the user is in (0 = not in voice); guarded by voiceMu
 	voiceJoinToken string    // opaque join-instance token for the current voice session; guarded by voiceMu
+	e2eePubKey     string    // ECDH P-256 public key (base64) for voice E2EE; guarded by voiceMu
 	roleName       string    // cached role name for chat_message broadcasts
 	tokenHash      string    // SHA-256 hex of the session token; used for periodic revalidation
 	lastSeq        uint64    // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
@@ -213,7 +214,22 @@ func (c *Client) clearVoiceState() (int64, string) {
 	oldJoinToken := c.voiceJoinToken
 	c.voiceChID = 0
 	c.voiceJoinToken = ""
+	c.e2eePubKey = ""
 	return oldChID, oldJoinToken
+}
+
+// setE2EEPubKey stores the ECDH public key for voice E2EE key exchange.
+func (c *Client) setE2EEPubKey(key string) {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	c.e2eePubKey = key
+}
+
+// getE2EEPubKey returns the stored ECDH public key.
+func (c *Client) getE2EEPubKey() string {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	return c.e2eePubKey
 }
 
 // sendMsg queues a message to this client's send buffer without blocking.

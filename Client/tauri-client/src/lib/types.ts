@@ -280,8 +280,21 @@ export interface VoiceTokenPayload {
   readonly token: string;
   readonly url: string;
   readonly direct_url?: string;
-  /** Base64-encoded 256-bit symmetric key for LiveKit SFrame E2EE. */
-  readonly e2ee_key?: string;
+}
+
+// ── Voice E2EE (client-side ECDH key exchange) ─────────────────────────────
+
+/** Server→Client relay of another participant's ECDH public key. */
+export interface VoiceE2EEAnnouncePayload {
+  readonly user_id: number;
+  readonly public_key: string;
+}
+
+/** Server→Client relay of an encrypted room key from the key holder. */
+export interface VoiceE2EEOfferPayload {
+  readonly from_user_id: number;
+  readonly encrypted_key: string;
+  readonly iv: string;
 }
 
 export interface MemberJoinPayload {
@@ -445,6 +458,8 @@ export type ServerMessage =
   | (WsEnvelope<VoiceConfigPayload> & { readonly type: "voice_config" })
   | (WsEnvelope<VoiceSpeakersPayload> & { readonly type: "voice_speakers" })
   | (WsEnvelope<VoiceTokenPayload> & { readonly type: "voice_token" })
+  | (WsEnvelope<VoiceE2EEAnnouncePayload> & { readonly type: "voice_e2ee_announce" })
+  | (WsEnvelope<VoiceE2EEOfferPayload> & { readonly type: "voice_e2ee_offer" })
   | (WsEnvelope<MemberJoinPayload> & { readonly type: "member_join" })
   | (WsEnvelope<MemberLeavePayload> & { readonly type: "member_leave" })
   | (WsEnvelope<MemberUpdatePayload> & { readonly type: "member_update" })
@@ -475,7 +490,11 @@ export type ClientMessage =
   | (WsEnvelope<VoiceDeafenPayload> & { readonly type: "voice_deafen" })
   | (WsEnvelope<VoiceCameraPayload> & { readonly type: "voice_camera" })
   | (WsEnvelope<VoiceScreensharePayload> & { readonly type: "voice_screenshare" })
-  | (WsEnvelope<Record<string, never>> & { readonly type: "voice_token_refresh" });
+  | (WsEnvelope<Record<string, never>> & { readonly type: "voice_token_refresh" })
+  | (WsEnvelope<{ public_key: string }> & { readonly type: "voice_e2ee_announce" })
+  | (WsEnvelope<{ target_user_id: number; encrypted_key: string; iv: string }> & {
+      readonly type: "voice_e2ee_offer";
+    });
 
 // -----------------------------------------------------------------------------
 // REST API Response Types
