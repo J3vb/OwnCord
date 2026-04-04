@@ -14,6 +14,7 @@ import {
   getUserRole,
   roleColorVar,
   GROUP_THRESHOLD_MS,
+  setServerHost,
 } from "../../src/components/message-list/renderers";
 import type { Message } from "../../src/stores/messages.store";
 import { membersStore } from "../../src/stores/members.store";
@@ -63,11 +64,15 @@ describe("renderers", () => {
 
   beforeEach(() => {
     resetStores();
+    // jsdom sets window.location.origin to "null", which breaks new URL(relativeUrl, origin).
+    // Set a server host so resolveServerUrl converts relative paths to absolute URLs before isSafeUrl parses them.
+    setServerHost("localhost:8080");
     container = document.createElement("div");
     document.body.appendChild(container);
   });
 
   afterEach(() => {
+    setServerHost("");
     container.remove();
   });
 

@@ -74,6 +74,17 @@ func postJSONWithToken(t *testing.T, router http.Handler, path, token string, bo
 	return rr
 }
 
+func postJSONFromIP(t *testing.T, router http.Handler, path string, body any, ip string) *httptest.ResponseRecorder {
+	t.Helper()
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = ip + ":9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	return rr
+}
+
 // getWithToken performs a GET with an Authorization header.
 func getWithToken(t *testing.T, router http.Handler, path, token string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -344,6 +355,97 @@ func TestLogin_LockoutUsesTrustedForwardedIP(t *testing.T) {
 	}
 }
 
+func TestLogin_UsernameLockoutAcrossDifferentIPs(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	_, _ = database.CreateUser("lockoutuser", hash, 4)
+
+	for i := 0; i < 10; i++ {
+		rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
+			"username": "lockoutuser",
+			"password": "wrongpassword",
+		}, fmt.Sprintf("198.51.100.%d", i+1))
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d status = %d, want 401; body = %s", i+1, rr.Code, rr.Body.String())
+		}
+	}
+
+	rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
+		"username": "lockoutuser",
+		"password": "wrongpassword",
+	}, "198.51.100.250")
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("username lockout status = %d, want 429; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestLogin_UsernameLockoutBlocksCorrectPasswordFromFreshIP(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	_, _ = database.CreateUser("lockoutcorrect", hash, 4)
+
+	for i := 0; i < 10; i++ {
+		rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
+			"username": "lockoutcorrect",
+			"password": "wrongpassword",
+		}, fmt.Sprintf("203.0.113.%d", i+1))
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("setup attempt %d status = %d, want 401; body = %s", i+1, rr.Code, rr.Body.String())
+		}
+	}
+
+	rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
+		"username": "lockoutcorrect",
+		"password": "correctPass1",
+	}, "203.0.113.250")
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("locked correct-password status = %d, want 429; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestLogin_SuccessResetsUsernameFailureCounter(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	_, _ = database.CreateUser("resetuser", hash, 4)
+
+	for i := 0; i < 8; i++ {
+		rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
+			"username": "resetuser",
+			"password": "wrongpassword",
+		}, fmt.Sprintf("192.0.2.%d", i+1))
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("setup attempt %d status = %d, want 401; body = %s", i+1, rr.Code, rr.Body.String())
+		}
+	}
+
+	rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
+		"username": "resetuser",
+		"password": "correctPass1",
+	}, "192.0.2.200")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("success status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+
+	for i := 0; i < 3; i++ {
+		rr = postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
+			"username": "resetuser",
+			"password": "wrongpassword",
+		}, fmt.Sprintf("192.0.2.%d", 201+i))
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("post-reset attempt %d status = %d, want 401; body = %s", i+1, rr.Code, rr.Body.String())
+		}
+	}
+}
+
 func TestLogin_GenericErrorOnBadCredentials(t *testing.T) {
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
@@ -393,6 +495,44 @@ func TestLogin_RequiresTOTPChallenge(t *testing.T) {
 	}
 	if token := resp["token"]; token != nil && token != "" {
 		t.Fatalf("expected no full session token before TOTP verification, got %v", token)
+	}
+}
+
+func TestLogin_UsernameLockoutBlocksTOTPChallenge(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	userID, _ := database.CreateUser("totplocked", hash, 4)
+	if _, err := database.Exec(`UPDATE users SET totp_secret = ? WHERE id = ?`, "JBSWY3DPEHPK3PXP", userID); err != nil {
+		t.Fatalf("set totp secret: %v", err)
+	}
+
+	for i := 0; i < 10; i++ {
+		rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
+			"username": "totplocked",
+			"password": "wrongpassword",
+		}, fmt.Sprintf("198.18.0.%d", i+1))
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("setup attempt %d status = %d, want 401; body = %s", i+1, rr.Code, rr.Body.String())
+		}
+	}
+
+	rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
+		"username": "totplocked",
+		"password": "correctPass1",
+	}, "198.18.0.250")
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("locked TOTP login status = %d, want 429; body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["partial_token"] != nil {
+		t.Fatalf("partial_token = %v, want nil when username is locked out", resp["partial_token"])
 	}
 }
 
