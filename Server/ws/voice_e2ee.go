@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"log/slog"
 )
@@ -30,6 +31,10 @@ func (h *Hub) handleVoiceE2EEAnnounce(_ context.Context, c *Client, payload json
 	// or ~44 chars (compressed). Allow up to 256 chars to be safe.
 	if len(p.PublicKey) > 256 {
 		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "public_key too large"))
+		return
+	}
+	if _, err := base64.StdEncoding.DecodeString(p.PublicKey); err != nil {
+		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "public_key is not valid base64"))
 		return
 	}
 
@@ -68,16 +73,28 @@ func (h *Hub) handleVoiceE2EEOffer(_ context.Context, c *Client, payload json.Ra
 		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "encrypted_key or iv too large"))
 		return
 	}
+	if _, err := base64.StdEncoding.DecodeString(p.EncryptedKey); err != nil {
+		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "encrypted_key is not valid base64"))
+		return
+	}
+	if _, err := base64.StdEncoding.DecodeString(p.IV); err != nil {
+		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "iv is not valid base64"))
+		return
+	}
 
-	// Verify the target is in the same voice channel.
+	// Verify the target is in the same voice channel — lookup and channel
+	// check must be atomic (under the same lock hold) to prevent TOCTOU races
+	// where the target leaves between lookup and the channel comparison.
 	h.mu.RLock()
 	target, ok := h.clients[p.TargetUserID]
-	h.mu.RUnlock()
 	if !ok {
+		h.mu.RUnlock()
 		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "target user not connected"))
 		return
 	}
-	if target.getVoiceChID() != voiceChID {
+	targetChID := target.getVoiceChID()
+	h.mu.RUnlock()
+	if targetChID != voiceChID {
 		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "target user not in your voice channel"))
 		return
 	}
