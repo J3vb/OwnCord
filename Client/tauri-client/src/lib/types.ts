@@ -497,7 +497,8 @@ export interface RegisterResponse {
 /** GET /api/health response. */
 export interface HealthResponse {
   readonly status: string;
-  readonly version: string;
+  /** Version is omitted from unauthenticated endpoints to prevent fingerprinting. */
+  readonly version?: string;
   readonly uptime: number;
   readonly online_users: number;
 }
