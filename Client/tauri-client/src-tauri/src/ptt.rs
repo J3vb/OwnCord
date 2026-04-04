@@ -25,6 +25,41 @@ static PTT_SHUTDOWN: AtomicBool = AtomicBool::new(false);
 /// prevents duplicate thread spawns.
 static PTT_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
 
+/// Returns true if a VK code is allowed for global capture in ptt_listen_for_key.
+///
+/// Security hardening (BUG-136): only non-text keys are capturable to reduce
+/// misuse potential if the renderer is compromised.
+fn is_allowed_ptt_capture_vk(vk: i32) -> bool {
+    // Explicitly reject modifier keys.
+    if matches!(vk, 0x10 | 0x11 | 0x12 | 0x5B | 0x5C) {
+        return false;
+    }
+
+    // Function keys F1-F24.
+    if (0x70..=0x87).contains(&vk) {
+        return true;
+    }
+
+    // Non-text navigation/control keys.
+    matches!(
+        vk,
+        0x1B | // Escape
+        0x20 | // Space
+        0x21 | // Page Up
+        0x22 | // Page Down
+        0x23 | // End
+        0x24 | // Home
+        0x25 | // Left
+        0x26 | // Up
+        0x27 | // Right
+        0x28 | // Down
+        0x2D | // Insert
+        0x2E | // Delete
+        0x05 | // Mouse X1
+        0x06   // Mouse X2
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Platform-specific key detection
 // ---------------------------------------------------------------------------
@@ -371,7 +406,7 @@ pub async fn ptt_listen_for_key() -> i32 {
             while std::time::Instant::now() < deadline {
                 for key in device_state.get_keys() {
                     let vk = linux::keycode_to_vk(&key);
-                    if vk == 0 || linux::is_modifier_vk(vk) {
+                    if vk == 0 || linux::is_modifier_vk(vk) || !is_allowed_ptt_capture_vk(vk) {
                         continue;
                     }
                     // Wait for key release (with its own timeout)
@@ -395,8 +430,8 @@ pub async fn ptt_listen_for_key() -> i32 {
 
             while std::time::Instant::now() < deadline {
                 for vk in 1..=254i32 {
-                    // Skip modifier keys
-                    if matches!(vk, 0x10 | 0x11 | 0x12 | 0x5B | 0x5C) {
+                    // Skip keys that are not explicitly allowed for capture.
+                    if !is_allowed_ptt_capture_vk(vk) {
                         continue;
                     }
                     if is_key_down(vk) {
@@ -444,6 +479,28 @@ mod tests {
         assert!(ptt_set_key(-1).is_err());
         assert!(ptt_set_key(255).is_err());
         assert!(ptt_set_key(300).is_err());
+    }
+
+    #[test]
+    fn allowed_capture_vk_accepts_safe_non_text_keys() {
+        assert!(is_allowed_ptt_capture_vk(0x70)); // F1
+        assert!(is_allowed_ptt_capture_vk(0x7B)); // F12
+        assert!(is_allowed_ptt_capture_vk(0x25)); // Left arrow
+        assert!(is_allowed_ptt_capture_vk(0x2E)); // Delete
+        assert!(is_allowed_ptt_capture_vk(0x05)); // Mouse X1
+        assert!(is_allowed_ptt_capture_vk(0x06)); // Mouse X2
+    }
+
+    #[test]
+    fn allowed_capture_vk_rejects_text_and_modifier_keys() {
+        assert!(!is_allowed_ptt_capture_vk(0x41)); // A
+        assert!(!is_allowed_ptt_capture_vk(0x31)); // 1
+        assert!(!is_allowed_ptt_capture_vk(0x0D)); // Enter
+        assert!(!is_allowed_ptt_capture_vk(0x08)); // Backspace
+        assert!(!is_allowed_ptt_capture_vk(0x10)); // Shift
+        assert!(!is_allowed_ptt_capture_vk(0x11)); // Ctrl
+        assert!(!is_allowed_ptt_capture_vk(0x12)); // Alt
+        assert!(!is_allowed_ptt_capture_vk(0x5B)); // Meta
     }
 
     #[test]

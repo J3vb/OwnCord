@@ -1789,6 +1789,37 @@ describe("LiveKitSession", () => {
 
       expect(leaveVoiceChannel).toHaveBeenCalled();
     });
+
+    it("cleans up reconnect room when signal aborts after connect resolves (BUG-070)", async () => {
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 5,
+        latestToken: "token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+      session.setServerHost("localhost:7880");
+      const ac = new AbortController();
+
+      mockRoom.connect.mockImplementationOnce(async () => {
+        ac.abort();
+      });
+
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "token",
+        "/livekit",
+        5,
+        "ws://localhost:7880",
+        ac.signal,
+      );
+
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      expect(mockRoom.disconnect).toHaveBeenCalled();
+      expect((session as any)._state.type).not.toBe("connected");
+    });
   });
 
   describe("token refresh timer", () => {

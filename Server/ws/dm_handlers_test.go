@@ -176,6 +176,45 @@ func TestDM_ChatSend_ParticipantSuccess(t *testing.T) {
 	}
 }
 
+func TestDM_ChatSend_SequencedAndReplayBuffered(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	alice := seedOwnerUser(t, database, "dm-seq-alice")
+	bob := seedMemberUser(t, database, "dm-seq-bob")
+	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
+
+	sendAlice := make(chan []byte, 128)
+	sendBob := make(chan []byte, 128)
+	cAlice := ws.NewTestClientWithUser(hub, alice, dmChID, sendAlice)
+	cBob := ws.NewTestClientWithUser(hub, bob, dmChID, sendBob)
+	hub.Register(cAlice)
+	hub.Register(cBob)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(cAlice, dmChatSendMsg(dmChID, "m1"))
+	hub.HandleMessageForTest(cAlice, dmChatSendMsg(dmChID, "m2"))
+	hub.HandleMessageForTest(cAlice, dmChatSendMsg(dmChID, "m3"))
+	time.Sleep(120 * time.Millisecond)
+
+	bobMsgs := dmDrainAll(sendBob)
+	chat := dmFindMsgType(bobMsgs, "chat_message")
+	if chat == nil {
+		t.Fatal("Bob did not receive any DM chat_message")
+	}
+	if _, ok := chat["seq"]; !ok {
+		t.Fatal("DM chat_message is missing seq")
+	}
+
+	oldest := hub.ReplayBuffer().OldestSeq()
+	if oldest == 0 {
+		t.Fatal("replay buffer did not record DM events (oldest seq is 0)")
+	}
+
+	replayed := hub.ReplayBuffer().EventsSinceFiltered(oldest+1, map[int64]bool{dmChID: true})
+	if len(replayed) == 0 {
+		t.Fatal("expected DM replay events after oldest+1, got none")
+	}
+}
+
 func TestDM_ChatSend_NonParticipantForbidden(t *testing.T) {
 	hub, database := newHandlerHub(t)
 	alice := seedOwnerUser(t, database, "dm-forbid-alice")

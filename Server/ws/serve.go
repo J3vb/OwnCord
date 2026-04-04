@@ -287,6 +287,9 @@ func (h *Hub) handleFreshConnect(
 		slog.Error("buildReady failed", "user_id", c.userID, "err", readyErr)
 		_ = conn.Write(ctx, websocket.MessageText,
 			buildErrorMsg(ErrCodeInternal, "failed to build ready payload"))
+		h.unregisterNow(c)
+		_ = conn.Close(websocket.StatusInternalError, "failed to build ready payload")
+		return readyErr
 	}
 
 	if updateErr := database.UpdateUserStatus(c.userID, "online"); updateErr != nil {

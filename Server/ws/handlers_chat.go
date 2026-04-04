@@ -210,10 +210,6 @@ func (h *Hub) broadcastChatMessage(c *Client, channelID int64, isDM bool, broadc
 	}
 
 	for _, pid := range participantIDs {
-		h.SendToUser(pid, broadcast)
-	}
-
-	for _, pid := range participantIDs {
 		if pid == c.userID {
 			continue
 		}
@@ -226,6 +222,8 @@ func (h *Hub) broadcastChatMessage(c *Client, channelID int64, isDM bool, broadc
 			h.SendToUser(pid, buildDMChannelOpen(channelID, c.user))
 		}
 	}
+
+	h.sendSequencedToUsers(channelID, participantIDs, broadcast)
 }
 
 // handleChatEdit processes a chat_edit message.

@@ -361,6 +361,18 @@ export class LiveKitSession {
       }
       try {
         const newRoom = this.createRoom();
+        const cleanupAbortedReconnect = async (): Promise<void> => {
+          newRoom.removeAllListeners();
+          try {
+            await newRoom.disconnect();
+          } catch (disconnectErr) {
+            log.warn("Failed to disconnect room after reconnect abort", disconnectErr);
+          }
+          this._audioPipeline.setRoom(null);
+          this._audioElements.setRoom(null);
+          this._deviceManager.setRoom(null);
+          this._deviceManager.setAudioPipeline(null);
+        };
         // Set state to reconnecting with the fresh room-less attempt info;
         // the actual room appears in "connected" state after connect succeeds.
         if (this._state.type === "reconnecting") {
@@ -370,10 +382,31 @@ export class LiveKitSession {
         this._audioElements.setRoom(newRoom);
         this._deviceManager.setRoom(newRoom);
         this._deviceManager.setAudioPipeline(this._audioPipeline);
+
+        if (signal.aborted || this._currentChannelId !== channelId) {
+          log.info("Auto-reconnect aborted after room creation");
+          await cleanupAbortedReconnect();
+          return;
+        }
+
         // eslint-disable-next-line no-await-in-loop -- sequential reconnect: resolve URL then connect
         const resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
+
+        if (signal.aborted || this._currentChannelId !== channelId) {
+          log.info("Auto-reconnect aborted before room connect");
+          await cleanupAbortedReconnect();
+          return;
+        }
+
         // eslint-disable-next-line no-await-in-loop -- sequential reconnect: must connect before restoring state
         await newRoom.connect(resolvedUrl, token);
+
+        if (signal.aborted || this._currentChannelId !== channelId) {
+          log.info("Auto-reconnect aborted after room connect");
+          await cleanupAbortedReconnect();
+          return;
+        }
+
         log.info("Auto-reconnect succeeded", { attempt, channelId, url: resolvedUrl });
         // Transition to "connected" — this is the single atomic write.
         this.setState({

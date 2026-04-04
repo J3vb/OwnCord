@@ -39,7 +39,7 @@ document.addEventListener("contextmenu", (e) => {
   e.preventDefault();
 });
 
-// F12 or Ctrl+Shift+I opens WebView2 DevTools.
+// F12 or Ctrl+Shift+I opens WebView2 DevTools in development builds only.
 // F5 and Ctrl+R are blocked to prevent accidental page reloads which cause
 // ghost voice state (user appears in channel with no LiveKit connection).
 document.addEventListener("keydown", (e) => {
@@ -47,7 +47,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     return;
   }
-  if (e.key === "F12" || (e.ctrlKey && e.shiftKey && e.key === "I")) {
+  if (import.meta.env.DEV && (e.key === "F12" || (e.ctrlKey && e.shiftKey && e.key === "I"))) {
     e.preventDefault();
     void import("@tauri-apps/api/core").then(({ invoke }) => {
       void invoke("open_devtools");
