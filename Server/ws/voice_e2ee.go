@@ -27,9 +27,9 @@ func (h *Hub) handleVoiceE2EEAnnounce(_ context.Context, c *Client, payload json
 		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "public_key is required"))
 		return
 	}
-	// Sanity check: base64-encoded P-256 public key is ~88 chars (uncompressed)
-	// or ~44 chars (compressed). Allow up to 256 chars to be safe.
-	if len(p.PublicKey) > 256 {
+	// P-256 uncompressed public key = 65 bytes → 88 base64 chars.
+	// Allow up to 128 chars for padding tolerance.
+	if len(p.PublicKey) > 128 {
 		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "public_key too large"))
 		return
 	}

@@ -156,6 +156,10 @@ export class LiveKitSession {
   private _e2eeEpoch = 0;
   /** Announces that arrived before our ECDH keypair was ready. Drained after keypair init. */
   private _pendingAnnounces: Array<{ userId: number; publicKeyBase64: string }> = [];
+  /** Periodic key rotation timer — fires every KEY_ROTATION_INTERVAL_MS when key holder. */
+  private _keyRotationTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Interval between periodic key rotations (5 minutes). */
+  private static readonly KEY_ROTATION_INTERVAL_MS = 5 * 60 * 1000;
 
   // --- State transition (single writer) ---
 
@@ -856,6 +860,7 @@ export class LiveKitSession {
         this._roomKey = generateRoomKey();
         await this._e2eeKeyProvider.setKey(roomKeyToBase64(this._roomKey));
         log.info("E2EE: key holder — generated room key", { channelId });
+        this.startKeyRotationTimer();
       } else {
         // Wait for the key holder to send us the room key via voice_e2ee_offer.
         // This promise resolves when handleE2EEOffer() sets _roomKey.
@@ -864,18 +869,40 @@ export class LiveKitSession {
           this._roomKeyResolver = resolve;
           this._roomKeyRejector = reject;
         });
-        // Don't block forever — timeout after 10 seconds.
+        // Wait up to 10s for the key holder to send an offer. If the first
+        // attempt times out, re-announce our public key (the offer may have been
+        // lost if the key holder disconnected mid-send) and wait 5s more.
         let timeoutId: ReturnType<typeof setTimeout> | null = null;
-        const timeout = new Promise<void>((_, reject) => {
-          timeoutId = setTimeout(() => reject(new Error("E2EE key exchange timeout")), 10_000);
-        });
+        const makeTimeout = (ms: number) =>
+          new Promise<void>((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error("E2EE key exchange timeout")), ms);
+          });
+        let keyReceived = false;
         try {
-          await Promise.race([roomKeyPromise, timeout]);
+          await Promise.race([roomKeyPromise, makeTimeout(10_000)]);
+          keyReceived = true;
         } catch {
-          log.warn("E2EE: key exchange timed out, proceeding without E2EE", { channelId });
-          this.onErrorCallback?.("End-to-end encryption unavailable — key exchange timed out");
+          // First attempt timed out — re-announce and retry once.
+          if (timeoutId !== null) clearTimeout(timeoutId);
+          log.warn("E2EE: first key exchange attempt timed out, re-announcing", { channelId });
+          this.ws?.send({
+            type: "voice_e2ee_announce",
+            payload: { public_key: myPubKeyBase64 },
+          });
+          try {
+            await Promise.race([roomKeyPromise, makeTimeout(5_000)]);
+            keyReceived = true;
+          } catch {
+            log.warn("E2EE: key exchange timed out after retry, proceeding without E2EE", {
+              channelId,
+            });
+            this.onErrorCallback?.("End-to-end encryption unavailable — key exchange timed out");
+          }
         } finally {
           if (timeoutId !== null) clearTimeout(timeoutId);
+        }
+        if (!keyReceived) {
+          log.error("E2EE: failed to receive room key", { channelId });
         }
         this._roomKeyResolver = null;
         this._roomKeyRejector = null;
@@ -1133,21 +1160,29 @@ export class LiveKitSession {
       return;
     }
     try {
-      // Deduplicate: if we already have a key for this user with the same base64,
-      // skip the import. If the key changed, log a warning (could be a reconnect
-      // or a protocol violation).
+      // Deduplicate: if the key is identical, skip the import but still
+      // re-send the room key offer (the peer may be re-requesting after a
+      // missed offer or reconnect).
       const existingKey = this._peerPublicKeys.get(userId);
-      const peerKey = await importPublicKey(publicKeyBase64);
+      let peerKey: CryptoKey;
+      let isDuplicate = false;
       if (existingKey) {
         const existingB64 = await exportPublicKey(existingKey);
         if (existingB64 === publicKeyBase64) {
-          log.debug("E2EE: duplicate announce from same key, ignoring", { userId });
-          return;
+          peerKey = existingKey;
+          isDuplicate = true;
+          log.debug("E2EE: duplicate announce — will re-send offer if key holder", { userId });
+        } else {
+          peerKey = await importPublicKey(publicKeyBase64);
+          log.warn("E2EE: peer public key changed (reconnect?)", { userId });
         }
-        log.warn("E2EE: peer public key changed (reconnect or key rotation?)", { userId });
+      } else {
+        peerKey = await importPublicKey(publicKeyBase64);
       }
-      this._peerPublicKeys.set(userId, peerKey);
-      log.info("E2EE: received peer public key", { userId });
+      if (!isDuplicate) {
+        this._peerPublicKeys.set(userId, peerKey);
+        log.info("E2EE: received peer public key", { userId });
+      }
 
       // If we're the key holder and have a room key, wrap it for the new peer.
       // Capture keypair + roomKey before async work to avoid null dereference if
@@ -1321,8 +1356,71 @@ export class LiveKitSession {
         log.error("E2EE: failed to rotate room key", err);
       } finally {
         this._rotatingKey = false;
+        this.startKeyRotationTimer();
       }
     }
+  }
+
+  // ── Periodic key rotation ──────────────────────────────────────────────────
+
+  /** Start the periodic key rotation timer (only meaningful for key holders). */
+  private startKeyRotationTimer(): void {
+    this.clearKeyRotationTimer();
+    if (!this._isKeyHolder) return;
+    this._keyRotationTimer = setTimeout(() => {
+      this._keyRotationTimer = null;
+      this.rotateKeyPeriodically();
+    }, LiveKitSession.KEY_ROTATION_INTERVAL_MS);
+    log.debug("E2EE: key rotation timer started", {
+      intervalMs: LiveKitSession.KEY_ROTATION_INTERVAL_MS,
+    });
+  }
+
+  private clearKeyRotationTimer(): void {
+    if (this._keyRotationTimer !== null) {
+      clearTimeout(this._keyRotationTimer);
+      this._keyRotationTimer = null;
+    }
+  }
+
+  /** Rotate the room key on a timer tick (forward secrecy improvement). */
+  private async rotateKeyPeriodically(): Promise<void> {
+    if (!this._isKeyHolder || this._rotatingKey) return;
+    const channelId = this._currentChannelId;
+    if (!channelId) return;
+
+    this._rotatingKey = true;
+    try {
+      this._e2eeEpoch++;
+      this._roomKey = generateRoomKey();
+      await this._e2eeKeyProvider.setKey(roomKeyToBase64(this._roomKey));
+      log.info("E2EE: periodic key rotation", { channelId, epoch: this._e2eeEpoch });
+
+      const keypair = this._ecdhKeyPair;
+      if (keypair && this._roomKey) {
+        for (const [peerId, peerKey] of this._peerPublicKeys) {
+          const { encryptedKey, iv } = await wrapRoomKey(
+            keypair.privateKey,
+            peerKey,
+            this._roomKey,
+          );
+          this.ws?.send({
+            type: "voice_e2ee_offer",
+            payload: { target_user_id: peerId, encrypted_key: encryptedKey, iv },
+          });
+        }
+        log.info("E2EE: distributed periodically rotated key", {
+          peerCount: this._peerPublicKeys.size,
+        });
+      }
+    } catch (err) {
+      log.error("E2EE: periodic key rotation failed", err);
+    } finally {
+      this._rotatingKey = false;
+    }
+
+    // Re-arm the timer for the next rotation.
+    this.startKeyRotationTimer();
   }
 
   /** Clear all E2EE state (called on voice leave). */
@@ -1334,6 +1432,7 @@ export class LiveKitSession {
     this._rotatingKey = false;
     this._e2eeEpoch = 0;
     this._pendingAnnounces.length = 0;
+    this.clearKeyRotationTimer();
     // Reject (not resolve) so waiting connectAndSetup sees a failure, not a
     // silent success with no room key.
     if (this._roomKeyRejector) {
