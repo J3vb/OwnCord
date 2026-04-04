@@ -389,13 +389,13 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   // ── Voice E2EE (client-side ECDH key exchange) ────────
 
   unsubs.push(
-    ws.on("voice_e2ee_announce" as S, (payload: { user_id: number; public_key: string }) => {
+    ws.on(S.VOICE_E2EE_ANNOUNCE, (payload) => {
       void handleE2EEAnnounce(payload.user_id, payload.public_key);
     }),
   );
 
   unsubs.push(
-    ws.on("voice_e2ee_offer" as S, (payload: { from_user_id: number; encrypted_key: string; iv: string }) => {
+    ws.on(S.VOICE_E2EE_OFFER, (payload) => {
       void handleE2EEOffer(payload.from_user_id, payload.encrypted_key, payload.iv);
     }),
   );
