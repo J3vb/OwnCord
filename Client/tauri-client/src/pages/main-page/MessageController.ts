@@ -67,15 +67,10 @@ export interface MessageController {
   loadOlderMessages(channelId: number, signal: AbortSignal): Promise<void>;
 }
 
-export function createMessageController(
-  opts: MessageControllerOptions,
-): MessageController {
+export function createMessageController(opts: MessageControllerOptions): MessageController {
   const { api, showError } = opts;
 
-  async function loadMessages(
-    channelId: number,
-    signal: AbortSignal,
-  ): Promise<void> {
+  async function loadMessages(channelId: number, signal: AbortSignal): Promise<void> {
     if (isChannelLoaded(channelId)) {
       log.debug("Messages already loaded", { channelId });
       return;
@@ -101,10 +96,7 @@ export function createMessageController(
     }
   }
 
-  async function loadOlderMessages(
-    channelId: number,
-    signal: AbortSignal,
-  ): Promise<void> {
+  async function loadOlderMessages(channelId: number, signal: AbortSignal): Promise<void> {
     const messages = getChannelMessages(channelId);
     if (messages.length === 0) return;
     const oldest = messages[0]!;

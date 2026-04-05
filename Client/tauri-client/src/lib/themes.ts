@@ -43,6 +43,7 @@ export function listThemeNames(): readonly string[] {
  */
 export function applyThemeByName(name: string): void {
   // Remove all existing theme- classes
+  // oxlint-disable-next-line no-useless-spread -- snapshot needed: classList mutates during iteration
   for (const cls of [...document.body.classList]) {
     if (cls.startsWith("theme-")) {
       document.body.classList.remove(cls);
@@ -100,11 +101,7 @@ export function getActiveThemeName(): string {
     const legacyRaw = localStorage.getItem(STORAGE_KEY_LEGACY);
     if (legacyRaw !== null) {
       const legacyName: unknown = JSON.parse(legacyRaw);
-      if (
-        typeof legacyName === "string" &&
-        legacyName.length > 0 &&
-        isKnownThemeName(legacyName)
-      ) {
+      if (typeof legacyName === "string" && legacyName.length > 0 && isKnownThemeName(legacyName)) {
         localStorage.setItem(STORAGE_KEY_ACTIVE, legacyName);
         return legacyName;
       }
@@ -118,10 +115,7 @@ export function getActiveThemeName(): string {
 
 /** Persists a custom theme to localStorage. */
 export function saveCustomTheme(theme: OwnCordTheme): void {
-  localStorage.setItem(
-    STORAGE_KEY_CUSTOM_PREFIX + theme.name,
-    JSON.stringify(theme),
-  );
+  localStorage.setItem(STORAGE_KEY_CUSTOM_PREFIX + theme.name, JSON.stringify(theme));
 }
 
 /** Loads a custom theme by name, or null if not found / parse error / invalid shape. */
@@ -131,7 +125,8 @@ export function loadCustomTheme(name: string): OwnCordTheme | null {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (
-      typeof parsed !== "object" || parsed === null ||
+      typeof parsed !== "object" ||
+      parsed === null ||
       typeof (parsed as Record<string, unknown>).name !== "string" ||
       typeof (parsed as Record<string, unknown>).colors !== "object"
     ) {

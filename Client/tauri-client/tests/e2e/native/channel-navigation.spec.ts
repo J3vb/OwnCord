@@ -8,7 +8,7 @@
  */
 
 import { test, expect } from "../native-fixture-persistent";
-import { SKIP_SERVER, hasCredentials, ensureLoggedIn } from "./helpers";
+import { SKIP_SERVER, hasCredentials, ensureLoggedIn, countTextChannels } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
@@ -51,12 +51,12 @@ test.describe("Channel Switching", () => {
     test.skip(!hasCredentials(), "Skipped: OWNCORD_TEST_USER/OWNCORD_TEST_PASS not set");
     await ensureLoggedIn(nativePage);
 
-    // Single channel count check for all switching tests
-    const textCount = await nativePage
-      .locator(".channel-item")
-      .filter({ has: nativePage.locator(".ch-icon", { hasText: "#" }) })
-      .count();
-    test.skip(textCount < 2, "Need at least 2 text channels to test switching");
+    // Conditional skip: need at least 2 text channels for switching tests
+    const textCount = await countTextChannels(nativePage);
+    test.skip(
+      textCount < 2,
+      `Need at least 2 text channels to test switching (found ${textCount})`,
+    );
   });
 
   test("clicking a text channel makes it active", async ({ nativePage }) => {

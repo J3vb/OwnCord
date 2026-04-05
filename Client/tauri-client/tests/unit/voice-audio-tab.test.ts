@@ -24,24 +24,27 @@ describe("VoiceAudioTab camera preview", () => {
     document.body.innerHTML = "";
     localStorage.setItem("owncord:settings:videoInputDevice", '"camera-1"');
 
-    vi.stubGlobal("AudioContext", class {
-      createAnalyser() {
-        return {
-          fftSize: 0,
-          smoothingTimeConstant: 0,
-          frequencyBinCount: 32,
-          getByteFrequencyData: vi.fn(),
-        };
-      }
+    vi.stubGlobal(
+      "AudioContext",
+      class {
+        createAnalyser() {
+          return {
+            fftSize: 0,
+            smoothingTimeConstant: 0,
+            frequencyBinCount: 32,
+            getByteFrequencyData: vi.fn(),
+          };
+        }
 
-      createMediaStreamSource() {
-        return { connect: vi.fn() };
-      }
+        createMediaStreamSource() {
+          return { connect: vi.fn() };
+        }
 
-      close() {
-        return Promise.resolve();
-      }
-    });
+        close() {
+          return Promise.resolve();
+        }
+      },
+    );
   });
 
   it("does not restore a stale camera stream after the tab is aborted", async () => {
@@ -56,9 +59,9 @@ describe("VoiceAudioTab camera preview", () => {
 
     vi.stubGlobal("navigator", {
       mediaDevices: {
-        enumerateDevices: vi.fn().mockResolvedValue([
-          { kind: "videoinput", deviceId: "camera-1", label: "Camera 1" },
-        ]),
+        enumerateDevices: vi
+          .fn()
+          .mockResolvedValue([{ kind: "videoinput", deviceId: "camera-1", label: "Camera 1" }]),
         getUserMedia: vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
           if (constraints.video && constraints.audio === false) {
             return new Promise<MediaStream>((resolve) => {
@@ -97,9 +100,9 @@ describe("VoiceAudioTab camera preview", () => {
 
     vi.stubGlobal("navigator", {
       mediaDevices: {
-        enumerateDevices: vi.fn().mockResolvedValue([
-          { kind: "videoinput", deviceId: "camera-1", label: "Camera 1" },
-        ]),
+        enumerateDevices: vi
+          .fn()
+          .mockResolvedValue([{ kind: "videoinput", deviceId: "camera-1", label: "Camera 1" }]),
         getUserMedia: vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
           if (constraints.video && constraints.audio === false) {
             return new Promise<MediaStream>((resolve) => {
@@ -132,7 +135,9 @@ describe("VoiceAudioTab camera preview", () => {
 // ---------------------------------------------------------------------------
 
 describe("VoiceAudioTab UI structure", () => {
-  function stubNavigator(devices: Array<{ kind: string; deviceId: string; label: string }> = []): void {
+  function stubNavigator(
+    devices: Array<{ kind: string; deviceId: string; label: string }> = [],
+  ): void {
     const audioStream = {
       getTracks: () => [{ stop: vi.fn() }],
     } as unknown as MediaStream;
@@ -149,16 +154,25 @@ describe("VoiceAudioTab UI structure", () => {
     vi.clearAllMocks();
     localStorage.clear();
     document.body.innerHTML = "";
-    vi.stubGlobal("AudioContext", class {
-      createAnalyser() {
-        return {
-          fftSize: 0, smoothingTimeConstant: 0, frequencyBinCount: 32,
-          getByteFrequencyData: vi.fn(),
-        };
-      }
-      createMediaStreamSource() { return { connect: vi.fn() }; }
-      close() { return Promise.resolve(); }
-    });
+    vi.stubGlobal(
+      "AudioContext",
+      class {
+        createAnalyser() {
+          return {
+            fftSize: 0,
+            smoothingTimeConstant: 0,
+            frequencyBinCount: 32,
+            getByteFrequencyData: vi.fn(),
+          };
+        }
+        createMediaStreamSource() {
+          return { connect: vi.fn() };
+        }
+        close() {
+          return Promise.resolve();
+        }
+      },
+    );
   });
 
   afterEach(() => {
@@ -287,9 +301,7 @@ describe("VoiceAudioTab UI structure", () => {
   });
 
   it("input device change calls switchInputDevice and saves pref", async () => {
-    stubNavigator([
-      { kind: "audioinput", deviceId: "mic-1", label: "Mic 1" },
-    ]);
+    stubNavigator([{ kind: "audioinput", deviceId: "mic-1", label: "Mic 1" }]);
     const ac = new AbortController();
     const tab = createVoiceAudioTab(ac.signal);
     const el = tab.build();
@@ -309,9 +321,7 @@ describe("VoiceAudioTab UI structure", () => {
   });
 
   it("output device change calls switchOutputDevice and saves pref", async () => {
-    stubNavigator([
-      { kind: "audiooutput", deviceId: "spk-1", label: "Speaker 1" },
-    ]);
+    stubNavigator([{ kind: "audiooutput", deviceId: "spk-1", label: "Speaker 1" }]);
     const ac = new AbortController();
     const tab = createVoiceAudioTab(ac.signal);
     const el = tab.build();
@@ -393,8 +403,8 @@ describe("VoiceAudioTab UI structure", () => {
       const inputSelect = el.querySelectorAll("select")[0]!;
       const options = inputSelect.querySelectorAll("option");
       // Should have default + error option
-      const texts = Array.from(options).map(o => o.textContent);
-      expect(texts.some(t => t?.includes("Could not enumerate"))).toBe(true);
+      const texts = Array.from(options).map((o) => o.textContent);
+      expect(texts.some((t) => t?.includes("Could not enumerate"))).toBe(true);
     });
 
     ac.abort();
@@ -425,9 +435,9 @@ describe("VoiceAudioTab UI structure", () => {
 
     vi.stubGlobal("navigator", {
       mediaDevices: {
-        enumerateDevices: vi.fn().mockResolvedValue([
-          { kind: "videoinput", deviceId: "cam-1", label: "Camera 1" },
-        ]),
+        enumerateDevices: vi
+          .fn()
+          .mockResolvedValue([{ kind: "videoinput", deviceId: "cam-1", label: "Camera 1" }]),
         getUserMedia: vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
           if (constraints.video && constraints.audio === false) {
             return Promise.resolve(cameraStream);
@@ -459,9 +469,9 @@ describe("VoiceAudioTab UI structure", () => {
 
     vi.stubGlobal("navigator", {
       mediaDevices: {
-        enumerateDevices: vi.fn().mockResolvedValue([
-          { kind: "videoinput", deviceId: "cam-1", label: "Camera 1" },
-        ]),
+        enumerateDevices: vi
+          .fn()
+          .mockResolvedValue([{ kind: "videoinput", deviceId: "cam-1", label: "Camera 1" }]),
         getUserMedia: vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
           if (constraints.video && constraints.audio === false) {
             return Promise.resolve(cameraStream);
@@ -502,9 +512,9 @@ describe("VoiceAudioTab UI structure", () => {
 
     vi.stubGlobal("navigator", {
       mediaDevices: {
-        enumerateDevices: vi.fn().mockResolvedValue([
-          { kind: "videoinput", deviceId: "cam-1", label: "Camera 1" },
-        ]),
+        enumerateDevices: vi
+          .fn()
+          .mockResolvedValue([{ kind: "videoinput", deviceId: "cam-1", label: "Camera 1" }]),
         getUserMedia: vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
           if (constraints.video && constraints.audio === false) {
             return Promise.reject(new Error("Camera access denied"));
@@ -575,7 +585,7 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     // Should not throw — mic meter stays empty
-    await new Promise(r => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
     ac.abort();
   });
 
@@ -601,9 +611,7 @@ describe("VoiceAudioTab UI structure", () => {
   });
 
   it("uses device ID fallback label for devices without labels", async () => {
-    stubNavigator([
-      { kind: "audioinput", deviceId: "abcdef12", label: "" },
-    ]);
+    stubNavigator([{ kind: "audioinput", deviceId: "abcdef12", label: "" }]);
     const ac = new AbortController();
     const tab = createVoiceAudioTab(ac.signal);
     const el = tab.build();

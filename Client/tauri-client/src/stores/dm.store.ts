@@ -63,7 +63,13 @@ export function updateDmLastMessage(
     const rest = prev.channels.filter((c) => c.channelId !== channelId);
     return {
       channels: [
-        { ...updated, lastMessageId: messageId, lastMessage: content, lastMessageAt: timestamp, unreadCount: updated.unreadCount + 1 },
+        {
+          ...updated,
+          lastMessageId: messageId,
+          lastMessage: content,
+          lastMessageAt: timestamp,
+          unreadCount: updated.unreadCount + 1,
+        },
         ...rest,
       ],
     };
@@ -95,8 +101,6 @@ export function updateDmLastMessagePreview(
 /** Clear unread count for a DM channel. */
 export function clearDmUnread(channelId: number): void {
   dmStore.setState((prev) => ({
-    channels: prev.channels.map((c) =>
-      c.channelId === channelId ? { ...c, unreadCount: 0 } : c,
-    ),
+    channels: prev.channels.map((c) => (c.channelId === channelId ? { ...c, unreadCount: 0 } : c)),
   }));
 }

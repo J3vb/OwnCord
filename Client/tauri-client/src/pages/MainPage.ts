@@ -32,10 +32,7 @@ import {
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
-import {
-  createMessageController,
-  createPendingDeleteManager,
-} from "./main-page/MessageController";
+import { createMessageController, createPendingDeleteManager } from "./main-page/MessageController";
 import type { MessageController } from "./main-page/MessageController";
 import { createReactionController } from "./main-page/ReactionController";
 import type { ReactionController } from "./main-page/ReactionController";
@@ -44,6 +41,8 @@ import type { VideoModeController } from "./main-page/VideoModeController";
 import { createChannelController } from "./main-page/ChannelController";
 import type { ChannelController } from "./main-page/ChannelController";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
+import { createDmProfileSidebar } from "@components/DmProfileSidebar";
+import type { DmProfileSidebarComponent } from "@components/DmProfileSidebar";
 import { createSidebarArea } from "./main-page/SidebarArea";
 import { createChatArea } from "./main-page/ChatArea";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
@@ -103,6 +102,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // Toast container for user-facing error feedback
   let toast: ToastContainer | null = null;
 
+  // DM profile sidebar (right panel, toggled via DM header click)
+  let dmProfileSidebar: DmProfileSidebarComponent | null = null;
+  let dmProfileSlot: HTMLDivElement | null = null;
+
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
@@ -112,12 +115,68 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   }
 
   /** Resolve display name for a channel — for DMs, use recipient username from DM store. */
-  function resolveChannelName(channelId: number, channelName: string, channelType?: string): string {
+  function resolveChannelName(
+    channelId: number,
+    channelName: string,
+    channelType?: string,
+  ): string {
     if (channelType === "dm" && (!channelName || channelName === "")) {
       const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
       if (dm !== undefined) return dm.recipient.username;
     }
     return channelName;
+  }
+
+  /** Toggle the DM profile sidebar open/closed for the current DM partner. */
+  function toggleDmProfile(): void {
+    if (dmProfileSlot === null) return;
+
+    // If already open, close it
+    if (dmProfileSidebar !== null) {
+      dmProfileSidebar.destroy?.();
+      dmProfileSidebar = null;
+      return;
+    }
+
+    // Only open in DM mode
+    const active = getActiveChannel();
+    if (active === null || active.type !== "dm") return;
+
+    const dmChannel = dmStore.getState().channels.find((c) => c.channelId === active.id);
+    if (dmChannel === undefined) return;
+
+    const recipient = dmChannel.recipient;
+    const status =
+      recipient.status === "online" ||
+      recipient.status === "idle" ||
+      recipient.status === "dnd" ||
+      recipient.status === "offline"
+        ? recipient.status
+        : ("offline" as const);
+
+    dmProfileSidebar = createDmProfileSidebar({
+      user: {
+        id: recipient.id,
+        username: recipient.username,
+        avatar: recipient.avatar || null,
+        status,
+        about: null,
+        joinDate: null,
+      },
+      onClose: () => {
+        dmProfileSidebar?.destroy?.();
+        dmProfileSidebar = null;
+      },
+    });
+    dmProfileSidebar.mount(dmProfileSlot);
+  }
+
+  /** Close the DM profile sidebar if open. */
+  function closeDmProfile(): void {
+    if (dmProfileSidebar !== null) {
+      dmProfileSidebar.destroy?.();
+      dmProfileSidebar = null;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -188,7 +247,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       getRoot: () => root,
       getToast: () => toast,
       getChannelCtrl: () => channelCtrl,
+      onToggleDmProfile: () => {
+        toggleDmProfile();
+      },
     });
+    dmProfileSlot = chatAreaResult.dmProfileSlot;
     children.push(...chatAreaResult.children);
     unsubscribers.push(...chatAreaResult.unsubscribers);
     videoGrid = chatAreaResult.videoGrid;
@@ -204,6 +267,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       app,
       sidebar.sidebarWrapper,
       chatAreaResult.chatArea,
+      chatAreaResult.dmProfileSlot,
     );
     root.appendChild(app);
 
@@ -337,7 +401,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       const user = channelUsers?.get(userId);
       const tileId = isScreenshare ? userId + SCREENSHARE_TILE_ID_OFFSET : userId;
       const username = isScreenshare
-        ? (user?.username ? `${user.username} (Screen)` : `User ${userId} (Screen)`)
+        ? user?.username
+          ? `${user.username} (Screen)`
+          : `User ${userId} (Screen)`
         : (user?.username ?? `User ${userId}`);
       videoGrid.addStream(tileId, username, stream, {
         isSelf: false,
@@ -355,28 +421,30 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     // Subscribe to voice store for camera/screenshare state changes only (not speaking ticks)
     let prevVideoSignature = "";
-    unsubscribers.push(voiceStore.subscribe((state) => {
-      try {
-        // Build a lightweight signature of video-relevant state (camera + screenshare)
-        let sig = (state.localCamera ? "c" : "") + (state.localScreenshare ? "s" : "");
-        const channelId = state.currentChannelId;
-        if (channelId !== null) {
-          const users = state.voiceUsers.get(channelId);
-          if (users) {
-            for (const [uid, u] of users) {
-              if (u.camera) sig += `:c${uid}`;
-              if (u.screenshare) sig += `:s${uid}`;
+    unsubscribers.push(
+      voiceStore.subscribe((state) => {
+        try {
+          // Build a lightweight signature of video-relevant state (camera + screenshare)
+          let sig = (state.localCamera ? "c" : "") + (state.localScreenshare ? "s" : "");
+          const channelId = state.currentChannelId;
+          if (channelId !== null) {
+            const users = state.voiceUsers.get(channelId);
+            if (users) {
+              for (const [uid, u] of users) {
+                if (u.camera) sig += `:c${uid}`;
+                if (u.screenshare) sig += `:s${uid}`;
+              }
             }
           }
+          if (sig !== prevVideoSignature) {
+            prevVideoSignature = sig;
+            videoModeCtrl?.checkVideoMode();
+          }
+        } catch (err) {
+          log.error("Voice store subscription error", err);
         }
-        if (sig !== prevVideoSignature) {
-          prevVideoSignature = sig;
-          videoModeCtrl?.checkVideoMode();
-        }
-      } catch (err) {
-        log.error("Voice store subscription error", err);
-      }
-    }));
+      }),
+    );
 
     // Auto-update notifier — checks server for newer client version
     if (apiConfig.host) {
@@ -398,7 +466,18 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             if (active.type === "text") {
               videoModeCtrl?.showChat();
             }
-            channelCtrl?.mountChannel(active.id, resolveChannelName(active.id, active.name, active.type), active.type);
+            // Close DM profile sidebar when switching channels
+            if (active.type !== "dm") {
+              closeDmProfile();
+            } else {
+              // Also close when switching to a different DM
+              closeDmProfile();
+            }
+            channelCtrl?.mountChannel(
+              active.id,
+              resolveChannelName(active.id, active.name, active.type),
+              active.type,
+            );
           }
         } catch (err) {
           log.error("Channel mount failed", err);
@@ -409,7 +488,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     const active = getActiveChannel();
     if (active !== null) {
-      channelCtrl?.mountChannel(active.id, resolveChannelName(active.id, active.name, active.type), active.type);
+      channelCtrl?.mountChannel(
+        active.id,
+        resolveChannelName(active.id, active.name, active.type),
+        active.type,
+      );
     }
   }
 
@@ -430,6 +513,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       videoModeCtrl = null;
 
       videoGrid = null;
+
+      closeDmProfile();
+      dmProfileSlot = null;
 
       for (const child of children) {
         try {

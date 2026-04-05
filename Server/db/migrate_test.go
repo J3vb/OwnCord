@@ -45,9 +45,9 @@ func (failReadDirFS) Open(name string) (fs.File, error) {
 
 type badDirFile struct{}
 
-func (badDirFile) Read([]byte) (int, error)        { return 0, fmt.Errorf("not a file") }
-func (badDirFile) Close() error                    { return nil }
-func (badDirFile) Stat() (fs.FileInfo, error)      { return fakeDirInfo{}, nil }
+func (badDirFile) Read([]byte) (int, error)   { return 0, fmt.Errorf("not a file") }
+func (badDirFile) Close() error               { return nil }
+func (badDirFile) Stat() (fs.FileInfo, error) { return fakeDirInfo{}, nil }
 func (badDirFile) ReadDir(int) ([]fs.DirEntry, error) {
 	return nil, fmt.Errorf("readdir always fails")
 }
@@ -136,7 +136,7 @@ func TestMigrate_AllMigrationsRecorded(t *testing.T) {
 
 	fsys := simpleFS(
 		"001_alpha.sql", "CREATE TABLE IF NOT EXISTS alpha (id INTEGER PRIMARY KEY);",
-		"002_beta.sql",  "CREATE TABLE IF NOT EXISTS beta  (id INTEGER PRIMARY KEY);",
+		"002_beta.sql", "CREATE TABLE IF NOT EXISTS beta  (id INTEGER PRIMARY KEY);",
 		"003_gamma.sql", "CREATE TABLE IF NOT EXISTS gamma (id INTEGER PRIMARY KEY);",
 	)
 
@@ -457,7 +457,7 @@ func TestMigrate_PartialRunRecordsOnlyApplied(t *testing.T) {
 
 	fsys := simpleFS(
 		"001_good.sql", "CREATE TABLE IF NOT EXISTS partial_good (id INTEGER PRIMARY KEY);",
-		"002_bad.sql",  "THIS IS DEFINITELY NOT SQL;",
+		"002_bad.sql", "THIS IS DEFINITELY NOT SQL;",
 	)
 
 	_ = db.MigrateFS(database, fsys) // we expect an error; ignore it here
@@ -476,9 +476,9 @@ func TestMigrate_NonSQLFilesSkipped(t *testing.T) {
 	database := openMemory(t)
 
 	fsys := fstest.MapFS{
-		"README.md":   {Data: []byte("not sql")},
-		"001_ok.sql":  {Data: []byte("CREATE TABLE IF NOT EXISTS ns_test (id INTEGER PRIMARY KEY);")},
-		"002_ok.go":   {Data: []byte("package migrations")},
+		"README.md":  {Data: []byte("not sql")},
+		"001_ok.sql": {Data: []byte("CREATE TABLE IF NOT EXISTS ns_test (id INTEGER PRIMARY KEY);")},
+		"002_ok.go":  {Data: []byte("package migrations")},
 	}
 
 	if err := db.MigrateFS(database, fsys); err != nil {

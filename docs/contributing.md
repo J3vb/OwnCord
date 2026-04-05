@@ -7,7 +7,7 @@ How to set up the development environment and contribute to OwnCord.
 ### Prerequisites
 
 - **Windows 10+** (x64)
-- **Go 1.22+** (server)
+- **Go 1.25+** (server)
 - **Node.js 20+** (client)
 - **Rust / Cargo** (Tauri client)
 
@@ -40,6 +40,7 @@ How to set up the development environment and contribute to OwnCord.
 | `npm run test:watch` | Vitest watch mode |
 | `npm run test:coverage` | Coverage report |
 | `npm run typecheck` | Full typecheck (all sources) |
+| `npm run typecheck:build` | Typecheck build config only |
 | `npm run lint` | ESLint check (src/) |
 | `npm run lint:fix` | ESLint auto-fix |
 

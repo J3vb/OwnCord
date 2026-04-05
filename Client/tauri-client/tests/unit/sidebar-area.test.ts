@@ -272,7 +272,9 @@ function defaultOpts(): SidebarAreaOptions {
       }),
       closeDm: vi.fn().mockResolvedValue(undefined),
       getInvites: vi.fn().mockResolvedValue([]),
-      createInvite: vi.fn().mockResolvedValue({ code: "abc", expires_at: "", max_uses: 0, use_count: 0 }),
+      createInvite: vi
+        .fn()
+        .mockResolvedValue({ code: "abc", expires_at: "", max_uses: 0, use_count: 0 }),
       revokeInvite: vi.fn().mockResolvedValue(undefined),
       adminCreateChannel: vi.fn().mockResolvedValue(undefined),
       adminUpdateChannel: vi.fn().mockResolvedValue(undefined),
@@ -381,9 +383,18 @@ describe("SidebarArea", () => {
       membersStore.setState((prev) => ({
         ...prev,
         members: new Map([
-          [1, { id: 1, username: "User1", avatar: null, role: "member", status: "online" as const }],
-          [2, { id: 2, username: "User2", avatar: null, role: "member", status: "offline" as const }],
-          [3, { id: 3, username: "User3", avatar: null, role: "member", status: "online" as const }],
+          [
+            1,
+            { id: 1, username: "User1", avatar: null, role: "member", status: "online" as const },
+          ],
+          [
+            2,
+            { id: 2, username: "User2", avatar: null, role: "member", status: "offline" as const },
+          ],
+          [
+            3,
+            { id: 3, username: "User3", avatar: null, role: "member", status: "online" as const },
+          ],
         ]),
       }));
 
@@ -428,9 +439,18 @@ describe("SidebarArea", () => {
       membersStore.setState((prev) => ({
         ...prev,
         members: new Map([
-          [1, { id: 1, username: "User1", avatar: null, role: "member", status: "online" as const }],
-          [2, { id: 2, username: "User2", avatar: null, role: "member", status: "online" as const }],
-          [3, { id: 3, username: "User3", avatar: null, role: "member", status: "online" as const }],
+          [
+            1,
+            { id: 1, username: "User1", avatar: null, role: "member", status: "online" as const },
+          ],
+          [
+            2,
+            { id: 2, username: "User2", avatar: null, role: "member", status: "online" as const },
+          ],
+          [
+            3,
+            { id: 3, username: "User3", avatar: null, role: "member", status: "online" as const },
+          ],
         ]),
       }));
       membersStore.flush();
@@ -498,10 +518,12 @@ describe("SidebarArea", () => {
 
     it("renders DM list with up to 3 entries", () => {
       for (let i = 0; i < 5; i++) {
-        addDmChannel(makeDm({
-          channelId: 100 + i,
-          recipient: { id: 10 + i, username: `User${i}`, avatar: "", status: "online" },
-        }));
+        addDmChannel(
+          makeDm({
+            channelId: 100 + i,
+            recipient: { id: 10 + i, username: `User${i}`, avatar: "", status: "online" },
+          }),
+        );
       }
 
       const result = createSidebarArea(defaultOpts());
@@ -515,10 +537,12 @@ describe("SidebarArea", () => {
 
     it("shows View All button when more than 3 DMs exist", () => {
       for (let i = 0; i < 5; i++) {
-        addDmChannel(makeDm({
-          channelId: 100 + i,
-          recipient: { id: 10 + i, username: `User${i}`, avatar: "", status: "online" },
-        }));
+        addDmChannel(
+          makeDm({
+            channelId: 100 + i,
+            recipient: { id: 10 + i, username: `User${i}`, avatar: "", status: "online" },
+          }),
+        );
       }
 
       const result = createSidebarArea(defaultOpts());
@@ -545,10 +569,12 @@ describe("SidebarArea", () => {
 
     it("View All button switches to DMs mode", () => {
       for (let i = 0; i < 5; i++) {
-        addDmChannel(makeDm({
-          channelId: 100 + i,
-          recipient: { id: 10 + i, username: `User${i}`, avatar: "", status: "online" },
-        }));
+        addDmChannel(
+          makeDm({
+            channelId: 100 + i,
+            recipient: { id: 10 + i, username: `User${i}`, avatar: "", status: "online" },
+          }),
+        );
       }
 
       const result = createSidebarArea(defaultOpts());
@@ -577,11 +603,13 @@ describe("SidebarArea", () => {
 
     it("shows total unread badge in DM header", () => {
       addDmChannel(makeDm({ channelId: 100, unreadCount: 3 }));
-      addDmChannel(makeDm({
-        channelId: 101,
-        recipient: { id: 11, username: "Bob", avatar: "", status: "online" },
-        unreadCount: 2,
-      }));
+      addDmChannel(
+        makeDm({
+          channelId: 101,
+          recipient: { id: 11, username: "Bob", avatar: "", status: "online" },
+          unreadCount: 2,
+        }),
+      );
 
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
@@ -641,25 +669,33 @@ describe("SidebarArea", () => {
     });
 
     it("status dots use correct colors for different statuses", () => {
-      addDmChannel(makeDm({
-        channelId: 100,
-        recipient: { id: 10, username: "Alice", avatar: "", status: "idle" },
-      }));
-      addDmChannel(makeDm({
-        channelId: 101,
-        recipient: { id: 11, username: "Bob", avatar: "", status: "dnd" },
-      }));
-      addDmChannel(makeDm({
-        channelId: 102,
-        recipient: { id: 12, username: "Charlie", avatar: "", status: "offline" },
-      }));
+      addDmChannel(
+        makeDm({
+          channelId: 100,
+          recipient: { id: 10, username: "Alice", avatar: "", status: "idle" },
+        }),
+      );
+      addDmChannel(
+        makeDm({
+          channelId: 101,
+          recipient: { id: 11, username: "Bob", avatar: "", status: "dnd" },
+        }),
+      );
+      addDmChannel(
+        makeDm({
+          channelId: 102,
+          recipient: { id: 12, username: "Charlie", avatar: "", status: "offline" },
+        }),
+      );
 
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const entries = container.querySelectorAll("[data-testid='dm-entry']");
       // Entries are rendered from store (last added first)
-      const dots = Array.from(entries).map((e) => (e.querySelector("span") as HTMLElement).style.background);
+      const dots = Array.from(entries).map(
+        (e) => (e.querySelector("span") as HTMLElement).style.background,
+      );
 
       expect(dots).toContain("var(--yellow)");
       expect(dots).toContain("var(--red)");
@@ -836,8 +872,14 @@ describe("SidebarArea", () => {
       membersStore.setState((prev) => ({
         ...prev,
         members: new Map([
-          [1, { id: 1, username: "testuser", avatar: null, role: "admin", status: "online" as const }],
-          [2, { id: 2, username: "Alice", avatar: null, role: "member", status: "online" as const }],
+          [
+            1,
+            { id: 1, username: "testuser", avatar: null, role: "admin", status: "online" as const },
+          ],
+          [
+            2,
+            { id: 2, username: "Alice", avatar: null, role: "member", status: "online" as const },
+          ],
           [3, { id: 3, username: "Bob", avatar: null, role: "member", status: "idle" as const }],
         ]),
       }));
@@ -902,8 +944,14 @@ describe("SidebarArea", () => {
       membersStore.setState((prev) => ({
         ...prev,
         members: new Map([
-          [1, { id: 1, username: "testuser", avatar: null, role: "admin", status: "online" as const }],
-          [2, { id: 2, username: "Alice", avatar: null, role: "member", status: "online" as const }],
+          [
+            1,
+            { id: 1, username: "testuser", avatar: null, role: "admin", status: "online" as const },
+          ],
+          [
+            2,
+            { id: 2, username: "Alice", avatar: null, role: "member", status: "online" as const },
+          ],
         ]),
       }));
 
@@ -930,7 +978,10 @@ describe("SidebarArea", () => {
       membersStore.setState((prev) => ({
         ...prev,
         members: new Map([
-          [1, { id: 1, username: "testuser", avatar: null, role: "admin", status: "online" as const }],
+          [
+            1,
+            { id: 1, username: "testuser", avatar: null, role: "admin", status: "online" as const },
+          ],
           [2, { id: 2, username: "Alice", avatar: null, role: "member", status: "idle" as const }],
         ]),
       }));
@@ -973,8 +1024,13 @@ describe("SidebarArea", () => {
       channelsStore.setState((prev) => {
         const next = new Map(prev.channels);
         next.set(1, {
-          id: 1, name: "general", type: "text",
-          category: null, position: 0, unreadCount: 0, lastMessageId: null,
+          id: 1,
+          name: "general",
+          type: "text",
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          lastMessageId: null,
         });
         return { ...prev, channels: next, activeChannelId: 1 };
       });
@@ -996,8 +1052,13 @@ describe("SidebarArea", () => {
       channelsStore.setState((prev) => {
         const next = new Map(prev.channels);
         next.set(50, {
-          id: 50, name: "DmCh", type: "dm",
-          category: null, position: 0, unreadCount: 0, lastMessageId: null,
+          id: 50,
+          name: "DmCh",
+          type: "dm",
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          lastMessageId: null,
         });
         return { ...prev, channels: next, activeChannelId: 50 };
       });
@@ -1059,7 +1120,9 @@ describe("SidebarArea", () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
-      const memberSection = container.querySelector("[data-testid='sidebar-members']") as HTMLElement;
+      const memberSection = container.querySelector(
+        "[data-testid='sidebar-members']",
+      ) as HTMLElement;
       expect(memberSection.style.height).toBe("200px");
 
       cleanup(result);
@@ -1106,7 +1169,9 @@ describe("SidebarArea", () => {
       const memberHeader = container.querySelector(".sidebar-members-header") as HTMLElement;
       memberHeader.click();
 
-      const memberSection = container.querySelector("[data-testid='sidebar-members']") as HTMLElement;
+      const memberSection = container.querySelector(
+        "[data-testid='sidebar-members']",
+      ) as HTMLElement;
       expect(memberSection.style.height).toBe("auto");
 
       cleanup(result);
@@ -1162,7 +1227,9 @@ describe("SidebarArea", () => {
       memberHeader.click(); // Collapse
       memberHeader.click(); // Expand
 
-      const memberSection = container.querySelector("[data-testid='sidebar-members']") as HTMLElement;
+      const memberSection = container.querySelector(
+        "[data-testid='sidebar-members']",
+      ) as HTMLElement;
       expect(memberSection.style.height).toBe("300px");
 
       cleanup(result);
@@ -1194,8 +1261,13 @@ describe("SidebarArea", () => {
       channelsStore.setState((prev) => {
         const next = new Map(prev.channels);
         next.set(1, {
-          id: 1, name: "general", type: "text",
-          category: null, position: 0, unreadCount: 0, lastMessageId: null,
+          id: 1,
+          name: "general",
+          type: "text",
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          lastMessageId: null,
         });
         return { ...prev, channels: next, activeChannelId: 1 };
       });
@@ -1225,12 +1297,22 @@ describe("SidebarArea", () => {
       channelsStore.setState((prev) => {
         const next = new Map(prev.channels);
         next.set(1, {
-          id: 1, name: "general", type: "text",
-          category: null, position: 0, unreadCount: 0, lastMessageId: null,
+          id: 1,
+          name: "general",
+          type: "text",
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          lastMessageId: null,
         });
         next.set(2, {
-          id: 2, name: "voice", type: "voice",
-          category: null, position: 0, unreadCount: 0, lastMessageId: null,
+          id: 2,
+          name: "voice",
+          type: "voice",
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          lastMessageId: null,
         });
         return { ...prev, channels: next };
       });
@@ -1251,7 +1333,10 @@ describe("SidebarArea", () => {
     });
 
     it("onCloseDm removes DM and calls closeDm API", () => {
-      const dm = makeDm({ channelId: 100, recipient: { id: 10, username: "Alice", avatar: "", status: "online" } });
+      const dm = makeDm({
+        channelId: 100,
+        recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+      });
       addDmChannel(dm);
 
       uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
@@ -1271,14 +1356,24 @@ describe("SidebarArea", () => {
     });
 
     it("onCloseDm goes back to channels when last DM is closed", () => {
-      addDmChannel(makeDm({ channelId: 100, recipient: { id: 10, username: "Alice", avatar: "", status: "online" } }));
+      addDmChannel(
+        makeDm({
+          channelId: 100,
+          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+        }),
+      );
 
       uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
       channelsStore.setState((prev) => {
         const next = new Map(prev.channels);
         next.set(1, {
-          id: 1, name: "general", type: "text",
-          category: null, position: 0, unreadCount: 0, lastMessageId: null,
+          id: 1,
+          name: "general",
+          type: "text",
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          lastMessageId: null,
         });
         return { ...prev, channels: next, activeChannelId: 100 };
       });
@@ -1296,7 +1391,12 @@ describe("SidebarArea", () => {
     });
 
     it("onSelectConversation selects a DM in DMs mode", () => {
-      addDmChannel(makeDm({ channelId: 100, recipient: { id: 10, username: "Alice", avatar: "", status: "online" } }));
+      addDmChannel(
+        makeDm({
+          channelId: 100,
+          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+        }),
+      );
 
       uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
 
@@ -1670,8 +1770,13 @@ describe("SidebarArea", () => {
       channelsStore.setState((prev) => {
         const next = new Map(prev.channels);
         next.set(100, {
-          id: 100, name: "ExistingName", type: "dm",
-          category: null, position: 0, unreadCount: 0, lastMessageId: null,
+          id: 100,
+          name: "ExistingName",
+          type: "dm",
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          lastMessageId: null,
         });
         return { ...prev, channels: next };
       });
@@ -1955,8 +2060,14 @@ describe("SidebarArea", () => {
       membersStore.setState((prev) => ({
         ...prev,
         members: new Map([
-          [1, { id: 1, username: "testuser", avatar: null, role: "admin", status: "online" as const }],
-          [2, { id: 2, username: "Alice", avatar: null, role: "member", status: "online" as const }],
+          [
+            1,
+            { id: 1, username: "testuser", avatar: null, role: "admin", status: "online" as const },
+          ],
+          [
+            2,
+            { id: 2, username: "Alice", avatar: null, role: "member", status: "online" as const },
+          ],
         ]),
       }));
 

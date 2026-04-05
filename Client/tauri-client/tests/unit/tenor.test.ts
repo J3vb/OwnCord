@@ -28,7 +28,11 @@ function tenorResult(
     title?: string;
   } = {},
 ) {
-  const { tinygif = `https://media.tenor.com/${id}_tiny.gif`, gif = `https://media.tenor.com/${id}.gif`, title = `Title ${id}` } = overrides;
+  const {
+    tinygif = `https://media.tenor.com/${id}_tiny.gif`,
+    gif = `https://media.tenor.com/${id}.gif`,
+    title = `Title ${id}`,
+  } = overrides;
 
   const media_formats: Record<string, { url: string }> = {};
   if (tinygif !== null) media_formats["tinygif"] = { url: tinygif };
@@ -74,9 +78,7 @@ describe("searchGifs", () => {
     it("calls the Tenor search endpoint", async () => {
       mockFetch.mockResolvedValue(okResponse([]));
       await searchGifs("cats");
-      expect(capturedUrl()).toMatch(
-        /^https:\/\/tenor\.googleapis\.com\/v2\/search/,
-      );
+      expect(capturedUrl()).toMatch(/^https:\/\/tenor\.googleapis\.com\/v2\/search/);
     });
 
     it("includes the query param q", async () => {
@@ -125,9 +127,7 @@ describe("searchGifs", () => {
     });
 
     it("maps id, title, url (tinygif), and fullUrl (gif) correctly", async () => {
-      mockFetch.mockResolvedValue(
-        okResponse([tenorResult("abc123")]),
-      );
+      mockFetch.mockResolvedValue(okResponse([tenorResult("abc123")]));
       const gifs = await searchGifs("cats");
       expect(gifs).toHaveLength(1);
       expect(gifs[0]).toEqual({
@@ -148,10 +148,7 @@ describe("searchGifs", () => {
 
     it("filters out results with no tinygif format", async () => {
       mockFetch.mockResolvedValue(
-        okResponse([
-          tenorResult("keep"),
-          tenorResult("drop", { tinygif: null }),
-        ]),
+        okResponse([tenorResult("keep"), tenorResult("drop", { tinygif: null })]),
       );
       const gifs = await searchGifs("cats");
       expect(gifs).toHaveLength(1);
@@ -160,10 +157,7 @@ describe("searchGifs", () => {
 
     it("filters out results with no gif format", async () => {
       mockFetch.mockResolvedValue(
-        okResponse([
-          tenorResult("keep"),
-          tenorResult("drop", { gif: null }),
-        ]),
+        okResponse([tenorResult("keep"), tenorResult("drop", { gif: null })]),
       );
       const gifs = await searchGifs("cats");
       expect(gifs).toHaveLength(1);
@@ -172,10 +166,7 @@ describe("searchGifs", () => {
 
     it("filters out results missing both formats", async () => {
       mockFetch.mockResolvedValue(
-        okResponse([
-          tenorResult("drop", { tinygif: null, gif: null }),
-          tenorResult("keep"),
-        ]),
+        okResponse([tenorResult("drop", { tinygif: null, gif: null }), tenorResult("keep")]),
       );
       const gifs = await searchGifs("cats");
       expect(gifs).toHaveLength(1);
@@ -184,10 +175,7 @@ describe("searchGifs", () => {
 
     it("returns an empty array when all results lack required formats", async () => {
       mockFetch.mockResolvedValue(
-        okResponse([
-          tenorResult("x", { tinygif: null }),
-          tenorResult("y", { gif: null }),
-        ]),
+        okResponse([tenorResult("x", { tinygif: null }), tenorResult("y", { gif: null })]),
       );
       const gifs = await searchGifs("cats");
       expect(gifs).toEqual([]);
@@ -226,9 +214,7 @@ describe("getTrendingGifs", () => {
     it("calls the Tenor featured endpoint", async () => {
       mockFetch.mockResolvedValue(okResponse([]));
       await getTrendingGifs();
-      expect(capturedUrl()).toMatch(
-        /^https:\/\/tenor\.googleapis\.com\/v2\/featured/,
-      );
+      expect(capturedUrl()).toMatch(/^https:\/\/tenor\.googleapis\.com\/v2\/featured/);
     });
 
     it("does not include a q param", async () => {
@@ -282,10 +268,7 @@ describe("getTrendingGifs", () => {
 
     it("filters out results with missing tinygif", async () => {
       mockFetch.mockResolvedValue(
-        okResponse([
-          tenorResult("keep"),
-          tenorResult("drop", { tinygif: null }),
-        ]),
+        okResponse([tenorResult("keep"), tenorResult("drop", { tinygif: null })]),
       );
       const gifs = await getTrendingGifs();
       expect(gifs.map((g) => g.id)).toEqual(["keep"]);
@@ -293,10 +276,7 @@ describe("getTrendingGifs", () => {
 
     it("filters out results with missing gif", async () => {
       mockFetch.mockResolvedValue(
-        okResponse([
-          tenorResult("keep"),
-          tenorResult("drop", { gif: null }),
-        ]),
+        okResponse([tenorResult("keep"), tenorResult("drop", { gif: null })]),
       );
       const gifs = await getTrendingGifs();
       expect(gifs.map((g) => g.id)).toEqual(["keep"]);

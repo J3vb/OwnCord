@@ -38,9 +38,7 @@ function makeCallbacks(overrides: Partial<ConnectPageCallbacks> = {}): ConnectPa
   };
 }
 
-const testProfiles: SimpleProfile[] = [
-  { name: "Test Server", host: "localhost:8443" },
-];
+const testProfiles: SimpleProfile[] = [{ name: "Test Server", host: "localhost:8443" }];
 
 describe("ConnectPage", () => {
   let container: HTMLDivElement;
@@ -228,7 +226,9 @@ describe("ConnectPage", () => {
 
   it("disables form inputs during loading state", async () => {
     let resolveLogin: () => void;
-    const loginPromise = new Promise<void>((resolve) => { resolveLogin = resolve; });
+    const loginPromise = new Promise<void>((resolve) => {
+      resolveLogin = resolve;
+    });
     const onLogin = vi.fn().mockReturnValue(loginPromise);
 
     const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
@@ -269,7 +269,11 @@ describe("ConnectPage", () => {
   // --- selectServer / auto-login flow ---
 
   it("selectServer sets host and loads credentials asynchronously", async () => {
-    mockLoadCredential.mockResolvedValue({ username: "saveduser", token: "tok", password: "savedpass" });
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      password: "savedpass",
+    });
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
 
@@ -284,8 +288,9 @@ describe("ConnectPage", () => {
       expect(usernameInput.value).toBe("saveduser");
     });
 
+    // Password is no longer returned from credential store over IPC (security hardening)
     const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    expect(passwordInput.value).toBe("savedpass");
+    expect(passwordInput.value).toBe("");
 
     page.destroy?.();
   });
@@ -627,7 +632,12 @@ describe("ConnectPage", () => {
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 
     await vi.waitFor(() => {
-      expect(onRegister).toHaveBeenCalledWith("localhost:8443", "newuser", "password123", "INVITE-CODE");
+      expect(onRegister).toHaveBeenCalledWith(
+        "localhost:8443",
+        "newuser",
+        "password123",
+        "INVITE-CODE",
+      );
     });
 
     page.destroy?.();
@@ -782,7 +792,9 @@ describe("ConnectPage", () => {
 
   it("ignores submit while already loading", async () => {
     let resolveLogin: () => void;
-    const loginPromise = new Promise<void>((resolve) => { resolveLogin = resolve; });
+    const loginPromise = new Promise<void>((resolve) => {
+      resolveLogin = resolve;
+    });
     const onLogin = vi.fn().mockReturnValue(loginPromise);
 
     const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
@@ -799,7 +811,9 @@ describe("ConnectPage", () => {
     const form = container.querySelector(".connect-form") as HTMLFormElement;
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 
-    await vi.waitFor(() => { expect(onLogin).toHaveBeenCalledTimes(1); });
+    await vi.waitFor(() => {
+      expect(onLogin).toHaveBeenCalledTimes(1);
+    });
 
     // Submit again while loading
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -945,7 +959,9 @@ describe("ConnectPage", () => {
 
   it("shows correct button text during loading states", async () => {
     let resolveLogin: () => void;
-    const loginPromise = new Promise<void>((resolve) => { resolveLogin = resolve; });
+    const loginPromise = new Promise<void>((resolve) => {
+      resolveLogin = resolve;
+    });
     const onLogin = vi.fn().mockReturnValue(loginPromise);
 
     const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
@@ -973,7 +989,9 @@ describe("ConnectPage", () => {
 
   it("shows registering text in register mode during loading", async () => {
     let resolveRegister: () => void;
-    const registerPromise = new Promise<void>((resolve) => { resolveRegister = resolve; });
+    const registerPromise = new Promise<void>((resolve) => {
+      resolveRegister = resolve;
+    });
     const onRegister = vi.fn().mockReturnValue(registerPromise);
 
     const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);

@@ -28,10 +28,6 @@ export function teardownToast(): void {
  * Show a toast notification globally. No-ops silently if the toast
  * container has not been initialized yet.
  */
-export function showToast(
-  message: string,
-  type: ToastType = "info",
-  durationMs?: number,
-): void {
+export function showToast(message: string, type: ToastType = "info", durationMs?: number): void {
   instance?.show(message, type, durationMs);
 }

@@ -34,12 +34,12 @@ type GitHubConfig struct {
 
 // VoiceConfig holds LiveKit server connection and voice quality settings.
 type VoiceConfig struct {
-	LiveKitAPIKey    string `koanf:"livekit_api_key"`    // LiveKit API key
-	LiveKitAPISecret string `koanf:"livekit_api_secret"` // LiveKit API secret
-	LiveKitURL       string `koanf:"livekit_url"`        // LiveKit server WebSocket URL (e.g. ws://localhost:7880)
-	LiveKitBinaryPath string `koanf:"livekit_binary"`    // path to livekit-server binary; empty = don't auto-start
-	NodeIP           string `koanf:"node_ip"`            // public IP for WebRTC ICE candidates; empty = auto-detect
-	Quality          string `koanf:"quality"`            // low | medium | high
+	LiveKitAPIKey     string `koanf:"livekit_api_key"`    // LiveKit API key
+	LiveKitAPISecret  string `koanf:"livekit_api_secret"` // LiveKit API secret
+	LiveKitURL        string `koanf:"livekit_url"`        // LiveKit server WebSocket URL (e.g. ws://localhost:7880)
+	LiveKitBinaryPath string `koanf:"livekit_binary"`     // path to livekit-server binary; empty = don't auto-start
+	NodeIP            string `koanf:"node_ip"`            // public IP for WebRTC ICE candidates; empty = auto-detect
+	Quality           string `koanf:"quality"`            // low | medium | high
 }
 
 // ServerConfig holds HTTP server settings.
@@ -50,6 +50,8 @@ type ServerConfig struct {
 	AllowedOrigins    []string `koanf:"allowed_origins"`
 	TrustedProxies    []string `koanf:"trusted_proxies"`
 	AdminAllowedCIDRs []string `koanf:"admin_allowed_cidrs"`
+	WAFEnabled        bool     `koanf:"waf_enabled"`        // Enable Coraza WAF (default: false)
+	WAFParanoiaLevel  int      `koanf:"waf_paranoia_level"` // OWASP CRS paranoia level 1-4 (default: 2)
 }
 
 // DatabaseConfig holds database settings.
@@ -79,15 +81,15 @@ func defaults() Config {
 			Port:           8443,
 			Name:           "OwnCord Server",
 			DataDir:        "data",
-			AllowedOrigins: []string{"*"},
+			AllowedOrigins: []string{},
 			TrustedProxies: []string{},
 			AdminAllowedCIDRs: []string{
-				"127.0.0.0/8",     // localhost IPv4
-				"::1/128",         // localhost IPv6
-				"10.0.0.0/8",      // private class A
-				"172.16.0.0/12",   // private class B
-				"192.168.0.0/16",  // private class C
-				"fc00::/7",        // IPv6 unique local
+				"127.0.0.0/8",    // localhost IPv4
+				"::1/128",        // localhost IPv6
+				"10.0.0.0/8",     // private class A
+				"172.16.0.0/12",  // private class B
+				"192.168.0.0/16", // private class C
+				"fc00::/7",       // IPv6 unique local
 			},
 		},
 		Database: DatabaseConfig{
@@ -117,7 +119,7 @@ server:
   port: 8443
   name: "OwnCord Server"
   data_dir: "data"
-  # allowed_origins: ["*"]   # restrict WebSocket origins, e.g. ["https://example.com"]
+  # allowed_origins: []       # empty = deny cross-origin; set to ["*"] for dev or specific origins for prod
   # trusted_proxies: []       # CIDRs of trusted reverse proxies, e.g. ["10.0.0.0/8"]
   # admin_allowed_cidrs:      # CIDRs allowed to access /admin (default: private networks only)
   #   - "127.0.0.0/8"
@@ -208,7 +210,9 @@ func Load(cfgPath string) (*Config, error) {
 
 	// Apply voice defaults for zero-value fields (koanf loses defaults when
 	// the YAML section is present but fields are commented out / omitted).
-	applyVoiceDefaults(&cfg.Voice)
+	if err := applyVoiceDefaults(&cfg.Voice); err != nil {
+		return nil, fmt.Errorf("applying voice defaults: %w", err)
+	}
 
 	// Warn if using default dev credentials — these are public and insecure.
 	// Clear credentials so downstream consumers (e.g. NewLiveKitClient) see
@@ -227,7 +231,7 @@ func Load(cfgPath string) (*Config, error) {
 // production — NewLiveKitClient rejects them.
 const (
 	DefaultLiveKitAPIKey    = "devkey"
-	DefaultLiveKitAPISecret = "owncord-dev-secret-key-min-32chars"
+	DefaultLiveKitAPISecret = "owncord-dev-secret-key-min-32chars" //nolint:gosec // G101: false positive — config key name, not a credential
 )
 
 // IsDefaultVoiceCredentials returns true when the voice config still uses
@@ -238,12 +242,12 @@ func IsDefaultVoiceCredentials(v *VoiceConfig) bool {
 }
 
 // generateRandomKey returns a crypto-random hex string of the given byte length.
-func generateRandomKey(byteLen int) string {
+func generateRandomKey(byteLen int) (string, error) {
 	b := make([]byte, byteLen)
 	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand failed: " + err.Error())
+		return "", fmt.Errorf("crypto/rand: %w", err)
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
 }
 
 // applyVoiceDefaults fills in zero-value voice fields with sensible defaults.
@@ -251,13 +255,21 @@ func generateRandomKey(byteLen int) string {
 // overwrites struct defaults with Go zero values.
 // When API key/secret are empty, unique random credentials are generated
 // so voice works out of the box without shipping known-public defaults.
-func applyVoiceDefaults(v *VoiceConfig) {
+func applyVoiceDefaults(v *VoiceConfig) error {
 	if v.LiveKitAPIKey == "" {
-		v.LiveKitAPIKey = "key-" + generateRandomKey(8)
+		key, err := generateRandomKey(8)
+		if err != nil {
+			return fmt.Errorf("generating LiveKit API key: %w", err)
+		}
+		v.LiveKitAPIKey = "key-" + key
 		slog.Warn("generated random LiveKit API key — voice tokens will break on restart; set voice.livekit_api_key in config.yaml for stable operation")
 	}
 	if v.LiveKitAPISecret == "" {
-		v.LiveKitAPISecret = generateRandomKey(32) // 64 hex chars, well above 32-char minimum
+		secret, err := generateRandomKey(32)
+		if err != nil {
+			return fmt.Errorf("generating LiveKit API secret: %w", err)
+		}
+		v.LiveKitAPISecret = secret
 		slog.Warn("generated random LiveKit API secret — set voice.livekit_api_secret in config.yaml for stable operation")
 	}
 	if v.LiveKitURL == "" {
@@ -266,6 +278,7 @@ func applyVoiceDefaults(v *VoiceConfig) {
 	if v.Quality == "" {
 		v.Quality = "medium"
 	}
+	return nil
 }
 
 // validateYAML checks that raw bytes are valid YAML.

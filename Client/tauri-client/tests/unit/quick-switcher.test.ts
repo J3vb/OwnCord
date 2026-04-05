@@ -196,7 +196,9 @@ describe("QuickSwitcher", () => {
 
   it("Ctrl+K closes the switcher when it is open", () => {
     switcher.mount(container);
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
+    );
     expect(onClose).toHaveBeenCalledOnce();
   });
 

@@ -34,7 +34,12 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	r.Use(middleware.Recoverer)
 	r.Use(requestLogger) // structured request/response logging
 	r.Use(SecurityHeadersWithTLS(cfg.TLS.Mode))
-	r.Use(MaxBodySizeUnless(1<<20, "/api/v1/uploads")) // 1 MiB default; upload route exempt
+	r.Use(MaxBodySizeUnless(defaultMaxBodySize, "/api/v1/uploads")) // upload route exempt
+
+	// Coraza WAF — opt-in via config.
+	if cfg.Server.WAFEnabled {
+		r.Use(NewWAFMiddleware(cfg.Server.WAFParanoiaLevel))
+	}
 
 	// Health check — unauthenticated, no versioning prefix.
 	// The online user count callback is set after hub creation below.
@@ -46,13 +51,14 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		return 0
 	}))
 
-	// Shared rate limiter for auth endpoints.
-	limiter := auth.NewRateLimiter()
+	// Shared rate limiter for auth endpoints. Lockouts are persisted to the
+	// database so they survive server restarts (M2 security hardening).
+	limiter := auth.NewPersistentRateLimiter(database)
 
 	// Start background cleanup of stale rate-limiter entries to prevent
 	// unbounded memory growth. The goroutine exits when stopCh is closed.
 	limiterStopCh := make(chan struct{})
-	go limiter.StartCleanup(5*time.Minute, 15*time.Minute, limiterStopCh)
+	go limiter.StartCleanup(rateLimiterCleanupInterval, rateLimiterCleanupMaxWindow, limiterStopCh)
 
 	// Versioned API routes.
 	r.Route("/api/v1", func(r chi.Router) {
@@ -65,8 +71,20 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		r.Get("/info", handleInfo(cfg, ver))
 	})
 
+	// Load (or auto-generate) the AES-256 key for TOTP secret encryption (M1).
+	totpKey, totpKeyErr := auth.LoadOrGenerateTOTPKey(cfg.Server.DataDir)
+	if totpKeyErr != nil {
+		slog.Error("failed to load TOTP encryption key", "error", totpKeyErr)
+		// Fall through — handlers will still work but cannot encrypt/decrypt.
+		// This should not happen in practice since LoadOrGenerateTOTPKey
+		// auto-generates a key when none exists.
+	}
+
 	// Auth routes: register, login, logout, me.
-	MountAuthRoutes(r, database, limiter, cfg.Server.TrustedProxies)
+	MountAuthRoutes(r, database, limiter, cfg.Server.TrustedProxies, totpKey)
+
+	// Profile routes are mounted after hub creation (below) so the hub can
+	// broadcast user_update events for real-time profile changes.
 
 	// Invite management routes (require MANAGE_INVITES permission).
 	MountInviteRoutes(r, database)
@@ -78,11 +96,17 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// be passed as a DMBroadcaster for real-time close events.
 
 	// File upload and serving routes.
+	// L12: verify config upload size fits within the HTTP body limit.
+	if int64(cfg.Upload.MaxSizeMB)<<20 > uploadMaxBodySize {
+		slog.Warn("upload.max_size_mb exceeds HTTP body limit, capping",
+			"configured_mb", cfg.Upload.MaxSizeMB,
+			"http_limit_bytes", uploadMaxBodySize)
+	}
 	store, storeErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
 	if storeErr != nil {
 		slog.Error("failed to create file storage", "error", storeErr)
 	} else {
-		MountUploadRoutes(r, database, store, cfg.Server.AllowedOrigins)
+		MountUploadRoutes(r, database, store, limiter, cfg.Server.AllowedOrigins)
 	}
 
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
@@ -122,12 +146,12 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// LiveKit webhook endpoint (no auth middleware — uses LiveKit JWT verification).
 	if lkErr == nil {
-		r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs)).
+		r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies)).
 			Post("/api/v1/livekit/webhook",
 				ws.MountWebhookRoute(hub, cfg.Voice.LiveKitAPIKey, cfg.Voice.LiveKitAPISecret))
 
 		// LiveKit health check — admin-IP-restricted.
-		r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs)).
+		r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies)).
 			Get("/api/v1/livekit/health", handleLiveKitHealth(hub))
 
 		// Reverse proxy LiveKit signaling through OwnCord's HTTPS server.
@@ -139,23 +163,30 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		// is handled by the LiveKit JWT (access_token query param) which the
 		// LiveKit server validates. Users can only obtain a valid JWT through
 		// the authenticated voice_join WS flow. Rate limiting prevents abuse.
-		r.With(rateLimitMiddlewareWithPrefix(limiter, "livekit_proxy:", 30, time.Minute, cfg.Server.TrustedProxies)).
+		r.With(rateLimitMiddlewareWithPrefix(limiter, "livekit_proxy:", livekitProxyRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)).
 			Handle("/livekit/*", http.StripPrefix("/livekit", NewLiveKitProxy(cfg.Voice.LiveKitURL, cfg.Server.AllowedOrigins)))
 	}
+
+	// Profile routes: update profile, change password, session management.
+	// Mounted after hub creation so the hub can broadcast user_update events.
+	MountProfileRoutes(r, database, limiter, cfg.Server.TrustedProxies, hub)
 
 	// DM (direct message) REST routes — mounted after hub creation so the
 	// hub can send real-time dm_channel_close events to WebSocket clients.
 	MountDMRoutes(r, database, hub)
 
 	// Connectivity diagnostics — any authenticated user can check.
-	r.With(AuthMiddleware(database)).Get("/api/v1/diagnostics/connectivity",
-		handleDiagnosticsConnectivity(cfg, ver, hub))
+	// BUG-121: Rate limit 5 req/min as documented.
+	r.With(AuthMiddleware(database),
+		RateLimitMiddleware(limiter, 5, time.Minute, cfg.Server.TrustedProxies)).
+		Get("/api/v1/diagnostics/connectivity",
+			handleDiagnosticsConnectivity(cfg, ver, hub))
 
 	go hub.Run()
 	r.Get("/api/v1/ws", ws.ServeWS(hub, database, cfg.Server.AllowedOrigins))
 
 	// Metrics endpoint — admin-IP-restricted, returns runtime stats as JSON.
-	r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs)).
+	r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies)).
 		Get("/api/v1/metrics", handleMetrics(
 			func() int { return hub.ClientCount() },
 			func() int { return hub.VoiceSessionCount() },
@@ -165,9 +196,9 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Admin panel: static files + REST API (Phase 6).
 	// Restrict /admin to configured CIDRs (default: private networks only).
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, "J3vb", "OwnCord")
-	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf)
+	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins)
 	r.Group(func(r chi.Router) {
-		r.Use(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs))
+		r.Use(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
 		r.Mount("/admin", adminHandler)
 	})
 
@@ -235,7 +266,7 @@ type livekitHealthResponse struct {
 
 func handleLiveKitHealth(hub *ws.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ok, err := hub.LiveKitHealthCheck()
+		ok, err := hub.LiveKitHealthCheck() //nolint:contextcheck // TODO: propagate context through this call path
 		if ok {
 			writeJSON(w, http.StatusOK, livekitHealthResponse{
 				Status:           "ok",
@@ -308,5 +339,7 @@ func requestLogger(next http.Handler) http.Handler {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("writeJSON: failed to encode response", "error", err)
+	}
 }

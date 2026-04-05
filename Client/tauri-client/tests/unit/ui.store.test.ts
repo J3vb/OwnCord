@@ -312,28 +312,19 @@ describe("ui store", () => {
     });
 
     it("resets to empty set for invalid JSON", () => {
-      localStorage.setItem(
-        "owncord:collapsed:test-server:443",
-        "not-json",
-      );
+      localStorage.setItem("owncord:collapsed:test-server:443", "not-json");
       loadCollapsedCategories("test-server:443");
       expect(uiStore.getState().collapsedCategories.size).toBe(0);
     });
 
     it("resets to empty set for non-array data", () => {
-      localStorage.setItem(
-        "owncord:collapsed:test-server:443",
-        JSON.stringify({ foo: "bar" }),
-      );
+      localStorage.setItem("owncord:collapsed:test-server:443", JSON.stringify({ foo: "bar" }));
       loadCollapsedCategories("test-server:443");
       expect(uiStore.getState().collapsedCategories.size).toBe(0);
     });
 
     it("resets to empty set for array with non-string elements", () => {
-      localStorage.setItem(
-        "owncord:collapsed:test-server:443",
-        JSON.stringify([1, 2, 3]),
-      );
+      localStorage.setItem("owncord:collapsed:test-server:443", JSON.stringify([1, 2, 3]));
       loadCollapsedCategories("test-server:443");
       expect(uiStore.getState().collapsedCategories.size).toBe(0);
     });

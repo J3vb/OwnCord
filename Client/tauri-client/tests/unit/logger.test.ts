@@ -61,11 +61,7 @@ describe("logger", () => {
     const log = createLogger("test");
     log.info("with data", { key: "value" });
 
-    expect(infoSpy).toHaveBeenCalledWith(
-      expect.any(String),
-      "with data",
-      { key: "value" },
-    );
+    expect(infoSpy).toHaveBeenCalledWith(expect.any(String), "with data", { key: "value" });
   });
 
   it("notifies listeners", () => {
@@ -111,9 +107,7 @@ describe("logger", () => {
 
     expect(listener).toHaveBeenCalledTimes(1);
     const entry = listener.mock.calls[0]?.[0];
-    expect(entry.data).toEqual(
-      expect.objectContaining({ error: "something broke" }),
-    );
+    expect(entry.data).toEqual(expect.objectContaining({ error: "something broke" }));
     expect(entry.data).toHaveProperty("stack");
 
     unsub();
@@ -129,9 +123,7 @@ describe("logger", () => {
     log.warn("context", { reason: err, count: 3 });
 
     const entry = listener.mock.calls[0]?.[0];
-    expect(entry.data.reason).toEqual(
-      expect.objectContaining({ error: "inner error" }),
-    );
+    expect(entry.data.reason).toEqual(expect.objectContaining({ error: "inner error" }));
     expect(entry.data.count).toBe(3);
 
     unsub();
@@ -168,10 +160,6 @@ describe("logger", () => {
     log.info("no data");
 
     // The third argument should be "" (empty string fallback)
-    expect(infoSpy).toHaveBeenCalledWith(
-      expect.any(String),
-      "no data",
-      "",
-    );
+    expect(infoSpy).toHaveBeenCalledWith(expect.any(String), "no data", "");
   });
 });

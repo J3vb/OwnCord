@@ -134,10 +134,11 @@ export function setMessages(
   messages: readonly MessageResponse[],
   hasMore: boolean,
 ): void {
-  const converted = messages.map(messageResponseToMessage).reverse();
-  const trimmed = converted.length > MAX_MESSAGES_PER_CHANNEL
-    ? converted.slice(converted.length - MAX_MESSAGES_PER_CHANNEL)
-    : converted;
+  const converted = messages.map(messageResponseToMessage).toReversed();
+  const trimmed =
+    converted.length > MAX_MESSAGES_PER_CHANNEL
+      ? converted.slice(converted.length - MAX_MESSAGES_PER_CHANNEL)
+      : converted;
   messagesStore.setState((prev) => {
     const updatedMessages = new Map(prev.messagesByChannel);
     updatedMessages.set(channelId, trimmed);
@@ -164,7 +165,7 @@ export function prependMessages(
   messages: readonly MessageResponse[],
   hasMore: boolean,
 ): void {
-  const converted = messages.map(messageResponseToMessage).reverse();
+  const converted = messages.map(messageResponseToMessage).toReversed();
   messagesStore.setState((prev) => {
     const existing = prev.messagesByChannel.get(channelId) ?? [];
     let combined = [...converted, ...existing];
@@ -223,11 +224,7 @@ export function deleteMessage(payload: ChatDeletedPayload): void {
 }
 
 /** Toggle the pinned state of a message (optimistic update after API call). */
-export function setMessagePinned(
-  channelId: number,
-  messageId: number,
-  pinned: boolean,
-): void {
+export function setMessagePinned(channelId: number, messageId: number, pinned: boolean): void {
   messagesStore.setState((prev) => {
     const channelMessages = prev.messagesByChannel.get(channelId);
     if (!channelMessages) return prev;
@@ -243,10 +240,7 @@ export function setMessagePinned(
 }
 
 /** Track a pending outbound message send. */
-export function addPendingSend(
-  correlationId: string,
-  channelId: number,
-): void {
+export function addPendingSend(correlationId: string, channelId: number): void {
   messagesStore.setState((prev) => {
     const updated = new Map(prev.pendingSends);
     updated.set(correlationId, channelId);
@@ -255,11 +249,7 @@ export function addPendingSend(
 }
 
 /** Confirm a pending send — remove from pending map. */
-export function confirmSend(
-  correlationId: string,
-  _messageId: number,
-  _timestamp: string,
-): void {
+export function confirmSend(correlationId: string, _messageId: number, _timestamp: string): void {
   messagesStore.setState((prev) => {
     const updated = new Map(prev.pendingSends);
     updated.delete(correlationId);
@@ -289,10 +279,7 @@ export function clearChannelMessages(channelId: number): void {
 }
 
 /** Update reactions on a message from a reaction_update WS event. */
-export function updateReaction(
-  payload: ReactionUpdatePayload,
-  currentUserId: number,
-): void {
+export function updateReaction(payload: ReactionUpdatePayload, currentUserId: number): void {
   messagesStore.setState((prev) => {
     const channelMessages = prev.messagesByChannel.get(payload.channel_id);
     if (!channelMessages) return prev;
@@ -307,9 +294,7 @@ export function updateReaction(
         const found = existing.find((r) => r.emoji === payload.emoji);
         if (found !== undefined) {
           const updatedReactions = existing.map((r) =>
-            r.emoji === payload.emoji
-              ? { ...r, count: r.count + 1, me: r.me || isMe }
-              : r,
+            r.emoji === payload.emoji ? { ...r, count: r.count + 1, me: r.me || isMe } : r,
           );
           return { ...msg, reactions: updatedReactions };
         }
@@ -322,9 +307,7 @@ export function updateReaction(
       // action === "remove"
       const updatedReactions = existing
         .map((r) =>
-          r.emoji === payload.emoji
-            ? { ...r, count: r.count - 1, me: isMe ? false : r.me }
-            : r,
+          r.emoji === payload.emoji ? { ...r, count: r.count - 1, me: isMe ? false : r.me } : r,
         )
         .filter((r) => r.count > 0);
       return { ...msg, reactions: updatedReactions };
@@ -342,9 +325,7 @@ export function updateReaction(
 
 /** Get messages for a channel, or empty array if none loaded. */
 export function getChannelMessages(channelId: number): readonly Message[] {
-  return messagesStore.select(
-    (s) => s.messagesByChannel.get(channelId) ?? [],
-  );
+  return messagesStore.select((s) => s.messagesByChannel.get(channelId) ?? []);
 }
 
 /** Check whether initial messages have been loaded for a channel. */

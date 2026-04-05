@@ -24,9 +24,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 /** Create a MessageResponse with sensible defaults. */
-export function makeMessage(
-  overrides?: Partial<MessageResponse>,
-): MessageResponse {
+export function makeMessage(overrides?: Partial<MessageResponse>): MessageResponse {
   return {
     id: 1,
     channel_id: 1,
@@ -44,9 +42,7 @@ export function makeMessage(
 }
 
 /** Create a MemberResponse with sensible defaults. */
-export function makeMember(
-  overrides?: Partial<MemberResponse>,
-): MemberResponse {
+export function makeMember(overrides?: Partial<MemberResponse>): MemberResponse {
   return {
     id: 1,
     username: "testuser",
@@ -58,9 +54,7 @@ export function makeMember(
 }
 
 /** Create a ReadyChannel with sensible defaults. */
-export function makeChannel(
-  overrides?: Partial<ReadyChannel>,
-): ReadyChannel {
+export function makeChannel(overrides?: Partial<ReadyChannel>): ReadyChannel {
   return {
     id: 1,
     name: "general",
@@ -74,9 +68,7 @@ export function makeChannel(
 }
 
 /** Create a ReactionSummary with sensible defaults. */
-export function makeReaction(
-  overrides?: Partial<ReactionSummary>,
-): ReactionSummary {
+export function makeReaction(overrides?: Partial<ReactionSummary>): ReactionSummary {
   return {
     emoji: "👍",
     count: 1,
@@ -86,9 +78,7 @@ export function makeReaction(
 }
 
 /** Create a VoiceStatePayload with sensible defaults. */
-export function makeVoiceState(
-  overrides?: Partial<VoiceStatePayload>,
-): VoiceStatePayload {
+export function makeVoiceState(overrides?: Partial<VoiceStatePayload>): VoiceStatePayload {
   return {
     channel_id: 3,
     user_id: 1,
@@ -107,9 +97,7 @@ export function makeVoiceState(
 // ---------------------------------------------------------------------------
 
 /** Create a MessageUser with sensible defaults. */
-export function makeMessageUser(
-  overrides?: Partial<MessageUser>,
-): MessageUser {
+export function makeMessageUser(overrides?: Partial<MessageUser>): MessageUser {
   return {
     id: 1,
     username: "testuser",
@@ -119,9 +107,7 @@ export function makeMessageUser(
 }
 
 /** Create an Attachment with sensible defaults. */
-export function makeAttachment(
-  overrides?: Partial<Attachment>,
-): Attachment {
+export function makeAttachment(overrides?: Partial<Attachment>): Attachment {
   return {
     id: "att-1",
     filename: "image.png",
@@ -149,9 +135,7 @@ export function makeChatMessagePayload(
 }
 
 /** Create a ReadyMember with sensible defaults. */
-export function makeReadyMember(
-  overrides?: Partial<ReadyMember>,
-): ReadyMember {
+export function makeReadyMember(overrides?: Partial<ReadyMember>): ReadyMember {
   return {
     id: 1,
     username: "testuser",
@@ -163,9 +147,7 @@ export function makeReadyMember(
 }
 
 /** Create a ReadyVoiceState with sensible defaults. */
-export function makeReadyVoiceState(
-  overrides?: Partial<ReadyVoiceState>,
-): ReadyVoiceState {
+export function makeReadyVoiceState(overrides?: Partial<ReadyVoiceState>): ReadyVoiceState {
   return {
     channel_id: 3,
     user_id: 1,
@@ -176,9 +158,7 @@ export function makeReadyVoiceState(
 }
 
 /** Create a ReadyRole with sensible defaults. */
-export function makeReadyRole(
-  overrides?: Partial<ReadyRole>,
-): ReadyRole {
+export function makeReadyRole(overrides?: Partial<ReadyRole>): ReadyRole {
   return {
     id: 1,
     name: "Member",
@@ -193,25 +173,41 @@ export function makeReadyRole(
 // ---------------------------------------------------------------------------
 
 /** Create a full ReadyPayload fixture for integration tests. */
-export function makeReadyPayload(
-  overrides?: Partial<ReadyPayload>,
-): ReadyPayload {
+export function makeReadyPayload(overrides?: Partial<ReadyPayload>): ReadyPayload {
   return {
     channels: [
-      makeChannel({ id: 1, name: "general", type: "text", position: 0, unread_count: 3, last_message_id: 100 }),
-      makeChannel({ id: 2, name: "random", type: "text", position: 1, unread_count: 0, last_message_id: 50 }),
-      makeChannel({ id: 3, name: "Voice Chat", type: "voice", category: "Voice Channels", position: 0 }),
+      makeChannel({
+        id: 1,
+        name: "general",
+        type: "text",
+        position: 0,
+        unread_count: 3,
+        last_message_id: 100,
+      }),
+      makeChannel({
+        id: 2,
+        name: "random",
+        type: "text",
+        position: 1,
+        unread_count: 0,
+        last_message_id: 50,
+      }),
+      makeChannel({
+        id: 3,
+        name: "Voice Chat",
+        type: "voice",
+        category: "Voice Channels",
+        position: 0,
+      }),
     ],
     members: [
       makeReadyMember({ id: 1, username: "admin", role: "admin", status: "online" }),
       makeReadyMember({ id: 2, username: "user1", role: "member", status: "online" }),
     ],
-    voice_states: [
-      makeReadyVoiceState({ user_id: 1, channel_id: 3 }),
-    ],
+    voice_states: [makeReadyVoiceState({ user_id: 1, channel_id: 3 })],
     roles: [
-      makeReadyRole({ id: 1, name: "Owner", color: "#e74c3c", permissions: 0x7FFFFFFF }),
-      makeReadyRole({ id: 2, name: "Admin", color: "#f1c40f", permissions: 0x3FFFFFFF }),
+      makeReadyRole({ id: 1, name: "Owner", color: "#e74c3c", permissions: 0x7fffffff }),
+      makeReadyRole({ id: 2, name: "Admin", color: "#f1c40f", permissions: 0x3fffffff }),
       makeReadyRole({ id: 3, name: "Member", color: null, permissions: 0x3 }),
     ],
     ...overrides,

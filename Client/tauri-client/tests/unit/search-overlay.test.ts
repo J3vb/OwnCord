@@ -220,10 +220,7 @@ describe("createSearchOverlay", () => {
 
   describe("keyboard navigation", () => {
     it("ArrowDown moves active index", async () => {
-      const results = [
-        makeResult({ message_id: 1 }),
-        makeResult({ message_id: 2 }),
-      ];
+      const results = [makeResult({ message_id: 1 }), makeResult({ message_id: 2 })];
       const onSearch = vi.fn().mockResolvedValue(results);
       const opts = makeOptions({ onSearch });
       const overlay = createSearchOverlay(opts);
@@ -235,12 +232,20 @@ describe("createSearchOverlay", () => {
       await vi.advanceTimersByTimeAsync(300);
 
       // First item should be active
-      expect(container.querySelector("[data-testid='search-result-0']")!.classList.contains("search-result-item--active")).toBe(true);
+      expect(
+        container
+          .querySelector("[data-testid='search-result-0']")!
+          .classList.contains("search-result-item--active"),
+      ).toBe(true);
 
       // Arrow down
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
 
-      expect(container.querySelector("[data-testid='search-result-1']")!.classList.contains("search-result-item--active")).toBe(true);
+      expect(
+        container
+          .querySelector("[data-testid='search-result-1']")!
+          .classList.contains("search-result-item--active"),
+      ).toBe(true);
 
       overlay.destroy?.();
     });
@@ -354,20 +359,25 @@ describe("createSearchOverlay", () => {
       await vi.advanceTimersByTimeAsync(300);
 
       // First item is active
-      expect(container.querySelector("[data-testid='search-result-0']")!.classList.contains("search-result-item--active")).toBe(true);
+      expect(
+        container
+          .querySelector("[data-testid='search-result-0']")!
+          .classList.contains("search-result-item--active"),
+      ).toBe(true);
 
       // Arrow up should wrap to last
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
-      expect(container.querySelector("[data-testid='search-result-2']")!.classList.contains("search-result-item--active")).toBe(true);
+      expect(
+        container
+          .querySelector("[data-testid='search-result-2']")!
+          .classList.contains("search-result-item--active"),
+      ).toBe(true);
 
       overlay.destroy?.();
     });
 
     it("ArrowDown wraps from last to first", async () => {
-      const results = [
-        makeResult({ message_id: 1 }),
-        makeResult({ message_id: 2 }),
-      ];
+      const results = [makeResult({ message_id: 1 }), makeResult({ message_id: 2 })];
       const onSearch = vi.fn().mockResolvedValue(results);
       const opts = makeOptions({ onSearch });
       const overlay = createSearchOverlay(opts);
@@ -380,11 +390,19 @@ describe("createSearchOverlay", () => {
 
       // Move to last
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-      expect(container.querySelector("[data-testid='search-result-1']")!.classList.contains("search-result-item--active")).toBe(true);
+      expect(
+        container
+          .querySelector("[data-testid='search-result-1']")!
+          .classList.contains("search-result-item--active"),
+      ).toBe(true);
 
       // One more should wrap to first
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-      expect(container.querySelector("[data-testid='search-result-0']")!.classList.contains("search-result-item--active")).toBe(true);
+      expect(
+        container
+          .querySelector("[data-testid='search-result-0']")!
+          .classList.contains("search-result-item--active"),
+      ).toBe(true);
 
       overlay.destroy?.();
     });
@@ -393,10 +411,12 @@ describe("createSearchOverlay", () => {
   it("aborts previous search when a new search starts", async () => {
     let abortedSignal: AbortSignal | undefined;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const onSearch = vi.fn().mockImplementation((_q: string, _ch: number | undefined, signal: AbortSignal) => {
-      abortedSignal = signal;
-      return new Promise(() => {}); // Never resolves — stalled search
-    });
+    const onSearch = vi
+      .fn()
+      .mockImplementation((_q: string, _ch: number | undefined, signal: AbortSignal) => {
+        abortedSignal = signal;
+        return new Promise(() => {}); // Never resolves — stalled search
+      });
     const opts = makeOptions({ onSearch });
     const overlay = createSearchOverlay(opts);
     overlay.mount(container);
@@ -411,7 +431,9 @@ describe("createSearchOverlay", () => {
     const firstSignal = abortedSignal;
 
     // Second search — should abort the first
+    // Advance past the MIN_SEARCH_INTERVAL_MS (500ms) rate limit before triggering debounce
     onSearch.mockImplementation(() => Promise.resolve([]));
+    await vi.advanceTimersByTimeAsync(200); // now 500ms since first search fired
     input.value = "second";
     input.dispatchEvent(new Event("input"));
     await vi.advanceTimersByTimeAsync(300);
@@ -425,8 +447,11 @@ describe("createSearchOverlay", () => {
   it("shows 'Searching...' status during search", async () => {
     let resolveSearch: ((results: SearchResultItem[]) => void) | undefined;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const onSearch = vi.fn().mockImplementation(() =>
-      new Promise<SearchResultItem[]>((resolve) => { resolveSearch = resolve; }),
+    const onSearch = vi.fn().mockImplementation(
+      () =>
+        new Promise<SearchResultItem[]>((resolve) => {
+          resolveSearch = resolve;
+        }),
     );
     const opts = makeOptions({ onSearch });
     const overlay = createSearchOverlay(opts);

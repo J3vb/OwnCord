@@ -28,16 +28,9 @@ function makeGif(id: string): TenorGif {
   };
 }
 
-const TRENDING_GIFS: readonly TenorGif[] = [
-  makeGif("t1"),
-  makeGif("t2"),
-  makeGif("t3"),
-];
+const TRENDING_GIFS: readonly TenorGif[] = [makeGif("t1"), makeGif("t2"), makeGif("t3")];
 
-const SEARCH_GIFS: readonly TenorGif[] = [
-  makeGif("s1"),
-  makeGif("s2"),
-];
+const SEARCH_GIFS: readonly TenorGif[] = [makeGif("s1"), makeGif("s2")];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -377,9 +370,7 @@ describe("GifPicker", () => {
       const { picker } = makePicker({ onClose });
       container.appendChild(picker.element);
 
-      picker.element.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-      );
+      picker.element.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 
       expect(onClose).toHaveBeenCalledOnce();
       picker.destroy();
@@ -390,12 +381,8 @@ describe("GifPicker", () => {
       const { picker } = makePicker({ onClose });
       container.appendChild(picker.element);
 
-      picker.element.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-      );
-      picker.element.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
-      );
+      picker.element.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      picker.element.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
 
       expect(onClose).not.toHaveBeenCalled();
       picker.destroy();
@@ -549,8 +536,8 @@ describe("GifPicker", () => {
       vi.mocked(getTrendingGifs).mockResolvedValue(TRENDING_GIFS);
 
       vi.mocked(searchGifs)
-        .mockReturnValueOnce(firstPromise)     // "ca" — resolves late
-        .mockResolvedValueOnce(SEARCH_GIFS);   // "cats" — resolves immediately
+        .mockReturnValueOnce(firstPromise) // "ca" — resolves late
+        .mockResolvedValueOnce(SEARCH_GIFS); // "cats" — resolves immediately
 
       const { picker } = makePicker();
       container.appendChild(picker.element);
@@ -631,9 +618,7 @@ describe("GifPicker", () => {
 
       picker.destroy();
 
-      picker.element.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-      );
+      picker.element.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 
       expect(onClose).not.toHaveBeenCalled();
     });

@@ -17,7 +17,15 @@ const {
   mockClearAttachmentCaches: vi.fn(),
   mockClearEmbedCaches: vi.fn(),
   mockClearMediaCaches: vi.fn(),
-  deleteDbState: { mode: "success" as "success" | "blocked-then-success" | "blocked-stuck" | "error" | "blocked-double" | "success-then-blocked" },
+  deleteDbState: {
+    mode: "success" as
+      | "success"
+      | "blocked-then-success"
+      | "blocked-stuck"
+      | "error"
+      | "blocked-double"
+      | "success-then-blocked",
+  },
 }));
 
 // Mock Tauri APIs
@@ -152,9 +160,7 @@ describe("AdvancedTab — Clear All Cache", () => {
     const section = buildAdvancedTab(ac.signal);
     container.appendChild(section);
     const buttons = container.querySelectorAll("button.ac-btn");
-    const btn = Array.from(buttons).find(
-      (b) => b.textContent === label,
-    ) as HTMLButtonElement;
+    const btn = Array.from(buttons).find((b) => b.textContent === label) as HTMLButtonElement;
     expect(btn).toBeDefined();
     return btn;
   }
@@ -166,7 +172,10 @@ describe("AdvancedTab — Clear All Cache", () => {
   }
 
   it("preserves owncord:profiles after Clear All Cache", async () => {
-    localStorage.setItem("owncord:profiles", JSON.stringify([{ name: "Local", host: "localhost" }]));
+    localStorage.setItem(
+      "owncord:profiles",
+      JSON.stringify([{ name: "Local", host: "localhost" }]),
+    );
     localStorage.setItem("owncord:settings:fontSize", "16");
     sessionStorage.setItem("some-session-key", "value");
 
@@ -204,7 +213,10 @@ describe("AdvancedTab — Clear All Cache", () => {
 
   it("preserves active and custom theme keys after Clear All Cache", async () => {
     localStorage.setItem("owncord:theme:active", "custom-sunrise");
-    localStorage.setItem("owncord:theme:custom:custom-sunrise", JSON.stringify({ name: "custom-sunrise" }));
+    localStorage.setItem(
+      "owncord:theme:custom:custom-sunrise",
+      JSON.stringify({ name: "custom-sunrise" }),
+    );
     localStorage.setItem("owncord:settings:accentColor", '"#00c8ff"');
 
     const btn = getClearAllBtn();
@@ -470,7 +482,9 @@ describe("AdvancedTab — Toggles & Structure", () => {
     const section = buildAdvancedTab(ac.signal);
     container.appendChild(section);
 
-    const labels = Array.from(container.querySelectorAll(".setting-label")).map((l) => l.textContent);
+    const labels = Array.from(container.querySelectorAll(".setting-label")).map(
+      (l) => l.textContent,
+    );
     expect(labels).toContain("Clear Image Cache");
     expect(labels).toContain("Clear Log Files");
     expect(labels).toContain("Clear All Cache & Restart");

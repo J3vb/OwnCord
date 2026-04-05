@@ -1,9 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  mockTauriFullSession,
-  navigateToMainPage,
-  emitWsMessage,
-} from "./helpers";
+import { mockTauriFullSession, navigateToMainPage, emitWsMessage } from "./helpers";
 
 test.describe("Typing Indicator — WebSocket", () => {
   test.beforeEach(async ({ page }) => {
@@ -18,7 +14,7 @@ test.describe("Typing Indicator — WebSocket", () => {
 
     // Initially empty
     const typingBar = page.locator(".typing-bar");
-    if (await typingBar.count() > 0) {
+    if ((await typingBar.count()) > 0) {
       await expect(typingBar).toBeEmpty();
     }
 

@@ -7,7 +7,6 @@ import {
   createPresenceLimiter,
   createReactionLimiter,
   createVoiceLimiter,
-  createSoundboardLimiter,
   createChatLimiter,
   createVideoCameraLimiter,
 } from "@lib/rate-limiter";
@@ -34,9 +33,7 @@ describe("RateLimiter", () => {
   });
 
   it("throws when windowMs < 1", () => {
-    expect(() => new RateLimiter({ maxTokens: 1, windowMs: 0 })).toThrow(
-      "windowMs must be >= 1",
-    );
+    expect(() => new RateLimiter({ maxTokens: 1, windowMs: 0 })).toThrow("windowMs must be >= 1");
   });
 
   // -- tryConsume -----------------------------------------------------------
@@ -258,15 +255,6 @@ describe("Pre-configured limiters", () => {
     expect(limiter.tryConsume()).toBe(true);
     expect(limiter.tryConsume()).toBe(false);
   });
-
-  it("createSoundboardLimiter: 1 per 3s", () => {
-    const limiter = createSoundboardLimiter();
-    expect(limiter.tryConsume()).toBe(true);
-    expect(limiter.tryConsume()).toBe(false);
-
-    vi.advanceTimersByTime(3_001);
-    expect(limiter.tryConsume()).toBe(true);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -283,7 +271,6 @@ describe("createRateLimiterSet", () => {
       "reactions",
       "voice",
       "voiceVideo",
-      "soundboard",
     ] as const;
 
     for (const key of expectedKeys) {

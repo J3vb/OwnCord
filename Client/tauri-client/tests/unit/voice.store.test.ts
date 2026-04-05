@@ -17,11 +17,7 @@ import {
   setVoiceConfig,
   getChannelVoiceUsers,
 } from "../../src/stores/voice.store";
-import type {
-  ReadyVoiceState,
-  VoiceStatePayload,
-  VoiceLeavePayload,
-} from "../../src/lib/types";
+import type { ReadyVoiceState, VoiceStatePayload, VoiceLeavePayload } from "../../src/lib/types";
 import { authStore } from "../../src/stores/auth.store";
 
 function resetStore(): void {
@@ -503,7 +499,11 @@ describe("voice store", () => {
       expect(ch10?.has(2)).toBe(true);
 
       authStore.setState(() => ({
-        token: null, user: null, serverName: null, motd: null, isAuthenticated: false,
+        token: null,
+        user: null,
+        serverName: null,
+        motd: null,
+        isAuthenticated: false,
       }));
     });
 
@@ -523,7 +523,11 @@ describe("voice store", () => {
       expect(voiceStore.getState().voiceUsers.has(20)).toBe(false);
 
       authStore.setState(() => ({
-        token: null, user: null, serverName: null, motd: null, isAuthenticated: false,
+        token: null,
+        user: null,
+        serverName: null,
+        motd: null,
+        isAuthenticated: false,
       }));
     });
   });
@@ -544,7 +548,11 @@ describe("voice store", () => {
       expect(voiceStore.getState().currentChannelId).toBe(10);
 
       authStore.setState(() => ({
-        token: null, user: null, serverName: null, motd: null, isAuthenticated: false,
+        token: null,
+        user: null,
+        serverName: null,
+        motd: null,
+        isAuthenticated: false,
       }));
     });
 
@@ -564,7 +572,11 @@ describe("voice store", () => {
       expect(voiceStore.getState().currentChannelId).toBe(42);
 
       authStore.setState(() => ({
-        token: null, user: null, serverName: null, motd: null, isAuthenticated: false,
+        token: null,
+        user: null,
+        serverName: null,
+        motd: null,
+        isAuthenticated: false,
       }));
     });
   });

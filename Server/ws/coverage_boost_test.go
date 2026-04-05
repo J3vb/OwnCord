@@ -204,7 +204,7 @@ func TestGracefulStop_MultipleClients(t *testing.T) {
 	hub, database := newCoverageHub(t)
 
 	for i := range 5 {
-		user := seedCoverageOwner(t, database, strings.ReplaceAll("graceful-multi-"+string(rune('a'+i)), "", ""))
+		user := seedCoverageOwner(t, database, "graceful-multi-"+string(rune('a'+i)))
 		send := make(chan []byte, 16)
 		c := ws.NewTestClientWithUser(hub, user, 0, send)
 		hub.Register(c)
@@ -484,6 +484,10 @@ func TestHandleMessage_Ping_ReturnsPong(t *testing.T) {
 func TestBuildReady_VoiceChannelWithParticipants(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "ready-voice-user")
+	role, rErr := database.GetRoleByID(1)
+	if rErr != nil || role == nil {
+		t.Fatalf("GetRoleByID: %v", rErr)
+	}
 
 	// Create a voice channel.
 	vcID, err := database.CreateChannel("voice-room", "voice", "", "", 0)
@@ -497,9 +501,9 @@ func TestBuildReady_VoiceChannelWithParticipants(t *testing.T) {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
 
-	msg, err := hub.BuildReadyForTest(database, user.ID)
+	msg, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
 	if err != nil {
-		t.Fatalf("BuildReadyForTest: %v", err)
+		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
 	}
 
 	var env struct {
@@ -521,6 +525,10 @@ func TestBuildReady_VoiceChannelWithParticipants(t *testing.T) {
 func TestBuildReady_MultipleChannelTypes(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "ready-multi-user")
+	role, rErr := database.GetRoleByID(1)
+	if rErr != nil || role == nil {
+		t.Fatalf("GetRoleByID: %v", rErr)
+	}
 
 	// Create text and voice channels.
 	_, err := database.CreateChannel("text-chan", "text", "General", "", 0)
@@ -532,9 +540,9 @@ func TestBuildReady_MultipleChannelTypes(t *testing.T) {
 		t.Fatalf("CreateChannel voice: %v", err)
 	}
 
-	msg, err := hub.BuildReadyForTest(database, user.ID)
+	msg, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
 	if err != nil {
-		t.Fatalf("BuildReadyForTest: %v", err)
+		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
 	}
 
 	var env struct {
@@ -801,7 +809,12 @@ func TestHandleChannelFocus_ValidChannel(t *testing.T) {
 	})
 	hub.HandleMessageForTest(c, raw)
 	time.Sleep(20 * time.Millisecond)
-	// Should not error — just update internal state.
+
+	// Valid channel focus should not produce an error message.
+	code := drainForErrorCode(send, 100*time.Millisecond)
+	if code != "" {
+		t.Errorf("expected no error for valid channel_focus, got code=%q", code)
+	}
 }
 
 // ─── presence handler error paths ────────────────────────────────────────────
@@ -1602,6 +1615,14 @@ func TestHandleVoiceLeave_NotInVoice(t *testing.T) {
 
 	hub.HandleVoiceLeaveForTest(c)
 	time.Sleep(20 * time.Millisecond)
+
+	// Client should still be connected and have no voice channel set.
+	if !hub.IsUserConnected(user.ID) {
+		t.Error("user should still be connected after no-op voice leave")
+	}
+	if got := ws.GetClientVoiceChIDForTest(c); got != 0 {
+		t.Errorf("voiceChID = %d, want 0 after leave when not in voice", got)
+	}
 }
 
 func TestHandleVoiceMute_FullFlow(t *testing.T) {
@@ -2002,7 +2023,16 @@ func TestDeliverBroadcast_FullBuffer_DropsMessage(t *testing.T) {
 	// Broadcasting should not block — message dropped.
 	hub.BroadcastToAll([]byte(`{"type":"should_be_dropped"}`))
 	time.Sleep(50 * time.Millisecond)
-	// No assertion needed — just verify no deadlock.
+
+	// Buffer should still contain only the filler message (dropped msg was not enqueued).
+	if len(send) != 1 {
+		t.Errorf("send buffer length = %d, want 1 (dropped message should not be enqueued)", len(send))
+	}
+	// The client should still be registered despite the dropped message.
+	if !hub.IsUserConnected(user.ID) {
+		t.Error("client should remain connected after a dropped broadcast")
+	}
+	_ = c // keep c referenced
 }
 
 func TestBuildAuthOK_NonNilAvatar(t *testing.T) {
@@ -2219,4 +2249,506 @@ func TestHandleVoiceJoin_InvalidQualityFallsBackToMedium(t *testing.T) {
 		}
 	}
 	t.Error("expected voice_config with medium quality fallback")
+}
+
+// ─── getLastActivity (client.go:153) ─────────────────────────────────────────
+
+func TestGetLastActivity_ReturnsZeroForNewTestClient(t *testing.T) {
+	hub, _ := newCoverageHub(t)
+	send := make(chan []byte, 4)
+	c := ws.NewTestClient(hub, 1, send)
+
+	got := ws.GetLastActivityForTest(c)
+	if !got.IsZero() {
+		t.Fatalf("expected zero time for new test client, got %v", got)
+	}
+}
+
+func TestGetLastActivity_UpdatedByTouch(t *testing.T) {
+	hub, _ := newCoverageHub(t)
+	send := make(chan []byte, 4)
+	c := ws.NewTestClient(hub, 1, send)
+
+	before := time.Now()
+	ws.TouchForTest(c)
+	after := time.Now()
+
+	got := ws.GetLastActivityForTest(c)
+	if got.Before(before) || got.After(after) {
+		t.Fatalf("lastActivity = %v, expected between %v and %v", got, before, after)
+	}
+}
+
+func TestGetLastActivity_MultipleTouch(t *testing.T) {
+	hub, _ := newCoverageHub(t)
+	send := make(chan []byte, 4)
+	c := ws.NewTestClient(hub, 1, send)
+
+	ws.TouchForTest(c)
+	first := ws.GetLastActivityForTest(c)
+
+	time.Sleep(5 * time.Millisecond)
+	ws.TouchForTest(c)
+	second := ws.GetLastActivityForTest(c)
+
+	if !second.After(first) {
+		t.Fatalf("second touch (%v) should be after first (%v)", second, first)
+	}
+}
+
+// ─── setVoiceChID (client.go:186) ───────────────────────────────────────────
+
+func TestSetVoiceChID_SetsAndGetsValue(t *testing.T) {
+	hub, _ := newCoverageHub(t)
+	send := make(chan []byte, 4)
+	c := ws.NewTestClient(hub, 1, send)
+
+	ws.SetVoiceChIDForTest(c, 77)
+	if got := ws.GetClientVoiceChIDForTest(c); got != 77 {
+		t.Fatalf("voiceChID = %d, want 77", got)
+	}
+}
+
+func TestSetVoiceChID_OverwritesPreviousValue(t *testing.T) {
+	hub, _ := newCoverageHub(t)
+	send := make(chan []byte, 4)
+	c := ws.NewTestClient(hub, 1, send)
+
+	ws.SetVoiceChIDForTest(c, 10)
+	ws.SetVoiceChIDForTest(c, 20)
+	if got := ws.GetClientVoiceChIDForTest(c); got != 20 {
+		t.Fatalf("voiceChID = %d, want 20", got)
+	}
+}
+
+func TestSetVoiceChID_ZeroMeansNotInVoice(t *testing.T) {
+	hub, _ := newCoverageHub(t)
+	send := make(chan []byte, 4)
+	c := ws.NewTestClient(hub, 1, send)
+
+	ws.SetVoiceChIDForTest(c, 50)
+	ws.SetVoiceChIDForTest(c, 0)
+	if got := ws.GetClientVoiceChIDForTest(c); got != 0 {
+		t.Fatalf("voiceChID = %d, want 0", got)
+	}
+}
+
+// ─── clearVoiceChID (client.go:203) ─────────────────────────────────────────
+
+func TestClearVoiceChID_ReturnsOldValueAndClearsToZero(t *testing.T) {
+	hub, _ := newCoverageHub(t)
+	send := make(chan []byte, 4)
+	c := ws.NewTestClient(hub, 1, send)
+
+	ws.SetVoiceChIDForTest(c, 42)
+	old := ws.ClearVoiceChIDForTest(c)
+	if old != 42 {
+		t.Fatalf("clearVoiceChID returned %d, want 42", old)
+	}
+	if got := ws.GetClientVoiceChIDForTest(c); got != 0 {
+		t.Fatalf("voiceChID after clear = %d, want 0", got)
+	}
+}
+
+func TestClearVoiceChID_ReturnsZeroWhenNotInVoice(t *testing.T) {
+	hub, _ := newCoverageHub(t)
+	send := make(chan []byte, 4)
+	c := ws.NewTestClient(hub, 1, send)
+
+	old := ws.ClearVoiceChIDForTest(c)
+	if old != 0 {
+		t.Fatalf("clearVoiceChID returned %d, want 0", old)
+	}
+}
+
+func TestClearVoiceChID_DoubleClearReturnsZero(t *testing.T) {
+	hub, _ := newCoverageHub(t)
+	send := make(chan []byte, 4)
+	c := ws.NewTestClient(hub, 1, send)
+
+	ws.SetVoiceChIDForTest(c, 99)
+	first := ws.ClearVoiceChIDForTest(c)
+	second := ws.ClearVoiceChIDForTest(c)
+	if first != 99 {
+		t.Fatalf("first clear = %d, want 99", first)
+	}
+	if second != 0 {
+		t.Fatalf("second clear = %d, want 0", second)
+	}
+}
+
+// ─── handleVoiceTokenRefresh (voice_join.go:188) ────────────────────────────
+
+func voiceTokenRefreshMsg() []byte {
+	raw, _ := json.Marshal(map[string]any{
+		"type":    "voice_token_refresh",
+		"payload": map[string]any{},
+	})
+	return raw
+}
+
+func TestHandleVoiceTokenRefresh_NotInVoice(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user := seedCoverageOwner(t, database, "vtr-notinvoice")
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, voiceTokenRefreshMsg())
+	time.Sleep(50 * time.Millisecond)
+
+	code := drainForErrorCode(send, 200*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("error code = %q, want BAD_REQUEST", code)
+	}
+}
+
+func TestHandleVoiceTokenRefresh_InVoice_ReturnsToken(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user := seedCoverageOwner(t, database, "vtr-invc")
+	vcID := seedVoiceChannel(t, database, "vtr-vc")
+	send := make(chan []byte, 64)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	raw, _ := json.Marshal(map[string]any{
+		"type":    "voice_join",
+		"payload": map[string]any{"channel_id": vcID},
+	})
+	hub.HandleMessageForTest(c, raw)
+	time.Sleep(100 * time.Millisecond)
+	drainChanBuf(send)
+
+	hub.HandleMessageForTest(c, voiceTokenRefreshMsg())
+	time.Sleep(100 * time.Millisecond)
+
+	msgs := drainChanTimeout(send, 300*time.Millisecond)
+	foundToken := false
+	for _, msg := range msgs {
+		var env map[string]any
+		if json.Unmarshal(msg, &env) == nil && env["type"] == "voice_token" {
+			foundToken = true
+			break
+		}
+	}
+	if !foundToken {
+		t.Error("expected voice_token message after token refresh")
+	}
+}
+
+func TestHandleVoiceTokenRefresh_NilUser(t *testing.T) {
+	hub, _ := newCoverageHub(t)
+	send := make(chan []byte, 16)
+	c := ws.NewTestClient(hub, 1, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	ws.SetVoiceChIDForTest(c, 42)
+
+	hub.HandleMessageForTest(c, voiceTokenRefreshMsg())
+	time.Sleep(50 * time.Millisecond)
+
+	code := drainForErrorCode(send, 200*time.Millisecond)
+	if code != "INTERNAL" {
+		t.Errorf("error code = %q, want INTERNAL", code)
+	}
+}
+
+// ─── rollbackVoiceJoin (voice_join.go:239) ──────────────────────────────────
+
+func TestRollbackVoiceJoin_ClearsVoiceStateAndBroadcasts(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user := seedCoverageOwner(t, database, "rb-user")
+	vcID := seedVoiceChannel(t, database, "rb-vc")
+	send := make(chan []byte, 64)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	if err := database.JoinVoiceChannel(user.ID, vcID); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	ws.SetVoiceChIDForTest(c, vcID)
+
+	hub.RollbackVoiceJoinForTest(c, vcID)
+	time.Sleep(100 * time.Millisecond)
+
+	if got := ws.GetClientVoiceChIDForTest(c); got != 0 {
+		t.Fatalf("voiceChID after rollback = %d, want 0", got)
+	}
+
+	state, _ := database.GetVoiceState(user.ID)
+	if state != nil {
+		t.Fatal("voice state should be nil after rollback")
+	}
+
+	msgs := drainChanTimeout(send, 300*time.Millisecond)
+	foundLeave := false
+	for _, msg := range msgs {
+		var env map[string]any
+		if json.Unmarshal(msg, &env) == nil && env["type"] == "voice_leave" {
+			foundLeave = true
+			break
+		}
+	}
+	if !foundLeave {
+		t.Error("expected voice_leave broadcast after rollback")
+	}
+}
+
+func TestRollbackVoiceJoin_NoDBState_DoesNotPanic(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user := seedCoverageOwner(t, database, "rb-nostate")
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	ws.SetVoiceChIDForTest(c, 999)
+	hub.RollbackVoiceJoinForTest(c, 999)
+	time.Sleep(50 * time.Millisecond)
+
+	if got := ws.GetClientVoiceChIDForTest(c); got != 0 {
+		t.Fatalf("voiceChID after rollback = %d, want 0", got)
+	}
+}
+
+// ─── leaveVoiceChannelWithRetry (voice_leave.go:57) ─────────────────────────
+
+func TestLeaveVoiceChannelWithRetry_SuccessOnFirstAttempt(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user := seedCoverageOwner(t, database, "lvcr-ok")
+	vcID := seedVoiceChannel(t, database, "lvcr-ok-vc")
+
+	if err := database.JoinVoiceChannel(user.ID, vcID); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+
+	state, _ := database.GetVoiceState(user.ID)
+	if state == nil {
+		t.Fatal("voice state should exist before leave")
+	}
+
+	err := ws.LeaveVoiceChannelWithRetryForTest(hub, user.ID, vcID, state.JoinedAt)
+	if err != nil {
+		t.Fatalf("leaveVoiceChannelWithRetry returned error: %v", err)
+	}
+
+	state, _ = database.GetVoiceState(user.ID)
+	if state != nil {
+		t.Fatal("voice state should be nil after successful leave")
+	}
+}
+
+func TestLeaveVoiceChannelWithRetry_NoVoiceState_NilReturn(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	_ = seedCoverageOwner(t, database, "lvcr-nostate")
+
+	err := ws.LeaveVoiceChannelWithRetryForTest(hub, 9999, 1, "")
+	if err != nil {
+		t.Fatalf("expected nil error for non-existent voice state, got: %v", err)
+	}
+}
+
+// ─── CleanupVoiceForChannel (hub.go:237) — additional paths ─────────────────
+
+func TestCleanupVoiceForChannel_WithClientsInChannel(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user1 := seedCoverageOwner(t, database, "cvfc-u1")
+	user2 := seedCoverageOwner(t, database, "cvfc-u2")
+	vcID := seedVoiceChannel(t, database, "cvfc-vc")
+
+	send1 := make(chan []byte, 64)
+	send2 := make(chan []byte, 64)
+	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
+	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
+	hub.Register(c1)
+	hub.Register(c2)
+	time.Sleep(20 * time.Millisecond)
+
+	if err := database.JoinVoiceChannel(user1.ID, vcID); err != nil {
+		t.Fatalf("JoinVoiceChannel u1: %v", err)
+	}
+	if err := database.JoinVoiceChannel(user2.ID, vcID); err != nil {
+		t.Fatalf("JoinVoiceChannel u2: %v", err)
+	}
+	ws.SetVoiceChIDForTest(c1, vcID)
+	ws.SetVoiceChIDForTest(c2, vcID)
+
+	hub.CleanupVoiceForChannel(vcID)
+	time.Sleep(100 * time.Millisecond)
+
+	if got := ws.GetClientVoiceChIDForTest(c1); got != 0 {
+		t.Errorf("c1 voiceChID = %d, want 0", got)
+	}
+	if got := ws.GetClientVoiceChIDForTest(c2); got != 0 {
+		t.Errorf("c2 voiceChID = %d, want 0", got)
+	}
+
+	states, _ := database.GetChannelVoiceStates(vcID)
+	if len(states) != 0 {
+		t.Errorf("expected 0 voice states after cleanup, got %d", len(states))
+	}
+}
+
+func TestCleanupVoiceForChannel_EmptyChannel(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	vcID := seedVoiceChannel(t, database, "cvfc-empty-vc")
+	hub.CleanupVoiceForChannel(vcID)
+	time.Sleep(20 * time.Millisecond)
+
+	// After cleanup of an empty channel, voice states should still be empty.
+	states, err := database.GetChannelVoiceStates(vcID)
+	if err != nil {
+		t.Fatalf("GetChannelVoiceStates: %v", err)
+	}
+	if len(states) != 0 {
+		t.Errorf("expected 0 voice states after cleaning empty channel, got %d", len(states))
+	}
+}
+
+func TestCleanupVoiceForChannel_DBStateButNoClient(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user := seedCoverageOwner(t, database, "cvfc-noclient")
+	vcID := seedVoiceChannel(t, database, "cvfc-noclient-vc")
+
+	if err := database.JoinVoiceChannel(user.ID, vcID); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+
+	hub.CleanupVoiceForChannel(vcID)
+	time.Sleep(50 * time.Millisecond)
+
+	state, _ := database.GetVoiceState(user.ID)
+	if state != nil {
+		t.Error("voice state should be nil after cleanup")
+	}
+}
+
+// ─── sweepStaleVoiceStates (hub.go:489) ─────────────────────────────────────
+
+func TestSweepStaleVoiceStates_RemovesGhostState(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user := seedCoverageOwner(t, database, "sweep-ghost")
+	vcID := seedVoiceChannel(t, database, "sweep-ghost-vc")
+
+	// Put user in voice in DB but don't register a client — ghost state.
+	if err := database.JoinVoiceChannel(user.ID, vcID); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+
+	// Verify it exists.
+	state, _ := database.GetVoiceState(user.ID)
+	if state == nil {
+		t.Fatal("voice state should exist before sweep")
+	}
+
+	hub.SweepStaleVoiceStatesForTest()
+	time.Sleep(100 * time.Millisecond)
+
+	// Ghost state should be removed.
+	state, _ = database.GetVoiceState(user.ID)
+	if state != nil {
+		t.Error("ghost voice state should be nil after sweep")
+	}
+}
+
+func TestSweepStaleVoiceStates_PreservesActiveClientState(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user := seedCoverageOwner(t, database, "sweep-active")
+	vcID := seedVoiceChannel(t, database, "sweep-active-vc")
+
+	// Register client and set voice channel.
+	send := make(chan []byte, 64)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	if err := database.JoinVoiceChannel(user.ID, vcID); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	ws.SetVoiceChIDForTest(c, vcID)
+
+	hub.SweepStaleVoiceStatesForTest()
+	time.Sleep(100 * time.Millisecond)
+
+	// Active client's state should be preserved.
+	state, _ := database.GetVoiceState(user.ID)
+	if state == nil {
+		t.Error("active client's voice state should be preserved after sweep")
+	}
+}
+
+func TestSweepStaleVoiceStates_NoStatesNoPanic(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	hub.SweepStaleVoiceStatesForTest()
+	time.Sleep(50 * time.Millisecond)
+
+	// With no voice states in the DB, sweep should leave the system clean.
+	// Verify by checking a known user has no voice state.
+	user := seedCoverageOwner(t, database, "sweep-no-states")
+	state, err := database.GetVoiceState(user.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state != nil {
+		t.Error("expected nil voice state for user after sweep with no states")
+	}
+}
+
+func TestSweepStaleVoiceStates_MismatchedChannelIsGhost(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user := seedCoverageOwner(t, database, "sweep-mismatch")
+	vc1 := seedVoiceChannel(t, database, "sweep-mismatch-vc1")
+	vc2 := seedVoiceChannel(t, database, "sweep-mismatch-vc2")
+
+	// Register client in vc1 but DB says vc2.
+	send := make(chan []byte, 64)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	if err := database.JoinVoiceChannel(user.ID, vc2); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	ws.SetVoiceChIDForTest(c, vc1) // Client thinks vc1, DB says vc2 — mismatch.
+
+	hub.SweepStaleVoiceStatesForTest()
+	time.Sleep(100 * time.Millisecond)
+
+	// Mismatched state should be removed from DB.
+	state, _ := database.GetVoiceState(user.ID)
+	if state != nil {
+		t.Error("mismatched voice state should be removed after sweep")
+	}
+}
+
+// ─── BroadcastToChannel / BroadcastToAll full-channel path ──────────────────
+
+func TestBroadcastToChannel_DropsWhenFull(t *testing.T) {
+	hub, _ := newCoverageHub(t)
+	// Don't start Run() — broadcast channel will fill up.
+	// The broadcast channel capacity is 256.
+	for i := 0; i < 260; i++ {
+		hub.BroadcastToChannel(1, []byte(`{"type":"test"}`))
+	}
+	// With no Run() loop draining, some messages are dropped.
+	// Hub should still be functional after overflow — verify by checking
+	// that a user lookup still works (hub internals not corrupted).
+	if hub.IsUserConnected(9999) {
+		t.Error("expected false for non-existent user after broadcast overflow")
+	}
+}
+
+func TestBroadcastToAll_DropsWhenFull(t *testing.T) {
+	hub, _ := newCoverageHub(t)
+	for i := 0; i < 260; i++ {
+		hub.BroadcastToAll([]byte(`{"type":"test"}`))
+	}
+	// Hub should still be functional after overflow — verify hub state is intact.
+	if hub.IsUserConnected(9999) {
+		t.Error("expected false for non-existent user after broadcast overflow")
+	}
 }

@@ -35,9 +35,9 @@ type createDMRequest struct {
 
 // createDMResponse is the JSON response for POST /api/v1/dms.
 type createDMResponse struct {
-	ChannelID int64   `json:"channel_id"`
+	ChannelID int64     `json:"channel_id"`
 	Recipient db.DMUser `json:"recipient"`
-	Created   bool    `json:"created"`
+	Created   bool      `json:"created"`
 }
 
 // listDMsResponse is the JSON response for GET /api/v1/dms.
@@ -88,7 +88,7 @@ func handleCreateDM(database *db.DB) http.HandlerFunc {
 		if err != nil {
 			slog.Error("handleCreateDM GetUserByID", "err", err, "recipient_id", req.RecipientID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to look up recipient",
 			})
 			return
@@ -102,12 +102,12 @@ func handleCreateDM(database *db.DB) http.HandlerFunc {
 		}
 
 		// Get or create the DM channel.
-		ch, created, err := database.GetOrCreateDMChannel(user.ID, req.RecipientID)
+		ch, created, err := database.GetOrCreateDMChannel(user.ID, req.RecipientID) //nolint:contextcheck // TODO: propagate context through this call path
 		if err != nil {
 			slog.Error("handleCreateDM GetOrCreateDMChannel", "err", err,
 				"user_id", user.ID, "recipient_id", req.RecipientID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to create DM channel",
 			})
 			return
@@ -154,7 +154,7 @@ func handleListDMs(database *db.DB) http.HandlerFunc {
 		if err != nil {
 			slog.Error("handleListDMs GetUserDMChannels", "err", err, "user_id", user.ID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to list DM channels",
 			})
 			return
@@ -187,15 +187,15 @@ func handleCloseDM(database *db.DB, broadcaster DMBroadcaster) http.HandlerFunc 
 			slog.Error("handleCloseDM IsDMParticipant", "err", err,
 				"user_id", user.ID, "channel_id", channelID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to verify DM participation",
 			})
 			return
 		}
 		if !isParticipant {
-			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error:   "FORBIDDEN",
-				Message: "you are not a participant in this DM",
+			writeJSON(w, http.StatusNotFound, errorResponse{
+				Error:   "NOT_FOUND",
+				Message: "channel not found",
 			})
 			return
 		}
@@ -204,7 +204,7 @@ func handleCloseDM(database *db.DB, broadcaster DMBroadcaster) http.HandlerFunc 
 			slog.Error("handleCloseDM CloseDM", "err", err,
 				"user_id", user.ID, "channel_id", channelID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to close DM",
 			})
 			return

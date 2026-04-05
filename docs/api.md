@@ -248,6 +248,36 @@ Invalidate the current session token.
 
 ---
 
+### DELETE /api/v1/auth/account
+
+Permanently delete the authenticated user's account. Requires password confirmation.
+
+**Auth:** Required (Bearer token)
+**Rate limit:** 5 requests/minute per IP. After 3 failed password attempts, the endpoint locks out for 15 minutes per user.
+
+#### Request
+
+```json
+{
+  "password": "MyStr0ng!Pass"
+}
+```
+
+#### Response 204 No Content
+
+Account deleted successfully. All sessions, messages (soft-deleted), and associated data are cleaned up.
+
+#### Errors
+
+| Status | Code | Cause |
+| ------ | ---- | ----- |
+| 400 | `INVALID_INPUT` | Missing or incorrect password |
+| 403 | `FORBIDDEN` | Cannot delete the last admin account |
+| 429 | `RATE_LIMITED` | Locked out after 3 failed password attempts (15 min cooldown) |
+| 500 | `SERVER_ERROR` | Database error during deletion |
+
+---
+
 ### POST /api/v1/users/me/totp/enable
 
 Start TOTP enrollment for the authenticated user. The secret is not persisted until `/api/v1/users/me/totp/confirm` succeeds.

@@ -197,9 +197,7 @@ describe("createMemberPickerModal", () => {
 
   it("shows empty list when only the current user exists", () => {
     setCurrentUser(1);
-    setStoreMembers([
-      makeMember({ id: 1, username: "Me" }),
-    ]);
+    setStoreMembers([makeMember({ id: 1, username: "Me" })]);
 
     const component = createMemberPickerModal({
       onSelect: vi.fn(),
@@ -233,9 +231,7 @@ describe("createMemberPickerModal", () => {
 
   it("renders avatar with uppercased first letter of username", () => {
     setCurrentUser(1);
-    setStoreMembers([
-      makeMember({ id: 2, username: "alice" }),
-    ]);
+    setStoreMembers([makeMember({ id: 2, username: "alice" })]);
 
     const component = createMemberPickerModal({
       onSelect: vi.fn(),
@@ -252,9 +248,7 @@ describe("createMemberPickerModal", () => {
 
   it("renders username text in the item", () => {
     setCurrentUser(1);
-    setStoreMembers([
-      makeMember({ id: 2, username: "Bob" }),
-    ]);
+    setStoreMembers([makeMember({ id: 2, username: "Bob" })]);
 
     const component = createMemberPickerModal({
       onSelect: vi.fn(),
@@ -272,9 +266,7 @@ describe("createMemberPickerModal", () => {
 
   it("renders member status text", () => {
     setCurrentUser(1);
-    setStoreMembers([
-      makeMember({ id: 2, username: "Alice", status: "online" }),
-    ]);
+    setStoreMembers([makeMember({ id: 2, username: "Alice", status: "online" })]);
 
     const component = createMemberPickerModal({
       onSelect: vi.fn(),
@@ -290,9 +282,7 @@ describe("createMemberPickerModal", () => {
 
   it("renders offline status for offline members", () => {
     setCurrentUser(1);
-    setStoreMembers([
-      makeMember({ id: 2, username: "Alice", status: "offline" }),
-    ]);
+    setStoreMembers([makeMember({ id: 2, username: "Alice", status: "offline" })]);
 
     const component = createMemberPickerModal({
       onSelect: vi.fn(),
@@ -308,9 +298,7 @@ describe("createMemberPickerModal", () => {
 
   it("applies green color for online status", () => {
     setCurrentUser(1);
-    setStoreMembers([
-      makeMember({ id: 2, username: "Alice", status: "online" }),
-    ]);
+    setStoreMembers([makeMember({ id: 2, username: "Alice", status: "online" })]);
 
     const component = createMemberPickerModal({
       onSelect: vi.fn(),
@@ -329,9 +317,7 @@ describe("createMemberPickerModal", () => {
 
   it("applies micro text color for non-online status", () => {
     setCurrentUser(1);
-    setStoreMembers([
-      makeMember({ id: 2, username: "Alice", status: "idle" }),
-    ]);
+    setStoreMembers([makeMember({ id: 2, username: "Alice", status: "idle" })]);
 
     const component = createMemberPickerModal({
       onSelect: vi.fn(),
@@ -351,9 +337,7 @@ describe("createMemberPickerModal", () => {
 
   it("calls onSelect with the member's user ID when a member item is clicked", () => {
     setCurrentUser(1);
-    setStoreMembers([
-      makeMember({ id: 42, username: "Alice" }),
-    ]);
+    setStoreMembers([makeMember({ id: 42, username: "Alice" })]);
 
     const onSelect = vi.fn();
     const component = createMemberPickerModal({
@@ -373,9 +357,7 @@ describe("createMemberPickerModal", () => {
 
   it("closes the modal when a member is selected", () => {
     setCurrentUser(1);
-    setStoreMembers([
-      makeMember({ id: 2, username: "Alice" }),
-    ]);
+    setStoreMembers([makeMember({ id: 2, username: "Alice" })]);
 
     const component = createMemberPickerModal({
       onSelect: vi.fn(),
@@ -604,9 +586,7 @@ describe("createMemberPickerModal", () => {
 
   it("each member item has the channel-item class", () => {
     setCurrentUser(1);
-    setStoreMembers([
-      makeMember({ id: 2, username: "Alice" }),
-    ]);
+    setStoreMembers([makeMember({ id: 2, username: "Alice" })]);
 
     const component = createMemberPickerModal({
       onSelect: vi.fn(),
@@ -622,9 +602,7 @@ describe("createMemberPickerModal", () => {
 
   it("each member item has cursor pointer style", () => {
     setCurrentUser(1);
-    setStoreMembers([
-      makeMember({ id: 2, username: "Alice" }),
-    ]);
+    setStoreMembers([makeMember({ id: 2, username: "Alice" })]);
 
     const component = createMemberPickerModal({
       onSelect: vi.fn(),

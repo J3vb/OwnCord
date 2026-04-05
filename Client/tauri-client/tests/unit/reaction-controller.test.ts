@@ -4,12 +4,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // Mocks
 // ---------------------------------------------------------------------------
 
-const { mockGetChannelMessages, createMockEmojiPickerElement, mockEmojiPickerDestroy } =
-  vi.hoisted(() => ({
-    mockGetChannelMessages: vi.fn((): Array<{ id: number; reactions: Array<{ emoji: string; me: boolean }> }> => []),
+const { mockGetChannelMessages, createMockEmojiPickerElement, mockEmojiPickerDestroy } = vi.hoisted(
+  () => ({
+    mockGetChannelMessages: vi.fn(
+      (): Array<{ id: number; reactions: Array<{ emoji: string; me: boolean }> }> => [],
+    ),
     createMockEmojiPickerElement: () => document.createElement("div"),
     mockEmojiPickerDestroy: vi.fn(),
-  }));
+  }),
+);
 
 vi.mock("@lib/dom", () => ({
   createElement: vi.fn((tag: string, attrs?: Record<string, string>) => {
@@ -93,9 +96,7 @@ describe("createReactionController", () => {
 
   describe("direct emoji toggle", () => {
     it("sends reaction_add for a new emoji", () => {
-      mockGetChannelMessages.mockReturnValue([
-        { id: 1, reactions: [] },
-      ]);
+      mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: [] }]);
       const opts = makeOpts();
       const ctrl = createReactionController(opts);
 
@@ -108,9 +109,7 @@ describe("createReactionController", () => {
     });
 
     it("sends reaction_remove when user already reacted", () => {
-      mockGetChannelMessages.mockReturnValue([
-        { id: 1, reactions: [{ emoji: "👍", me: true }] },
-      ]);
+      mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: [{ emoji: "👍", me: true }] }]);
       const opts = makeOpts();
       const ctrl = createReactionController(opts);
 
@@ -129,9 +128,7 @@ describe("createReactionController", () => {
       ctrl.handleReaction(1, "👍");
 
       expect(opts.ws.send).not.toHaveBeenCalled();
-      expect(opts.showError).toHaveBeenCalledWith(
-        "Slow down! Please wait before reacting again.",
-      );
+      expect(opts.showError).toHaveBeenCalledWith("Slow down! Please wait before reacting again.");
     });
   });
 
@@ -149,8 +146,15 @@ describe("createReactionController", () => {
       const btn = document.createElement("button");
       btn.setAttribute("data-testid", "msg-react-1");
       btn.getBoundingClientRect = vi.fn(() => ({
-        left: 500, right: 530, top: 100, bottom: 130,
-        width: 30, height: 30, x: 500, y: 100, toJSON: () => {},
+        left: 500,
+        right: 530,
+        top: 100,
+        bottom: 130,
+        width: 30,
+        height: 30,
+        x: 500,
+        y: 100,
+        toJSON: () => {},
       }));
       document.body.appendChild(btn);
 
@@ -166,8 +170,15 @@ describe("createReactionController", () => {
       const btn = document.createElement("button");
       btn.setAttribute("data-testid", "msg-react-1");
       btn.getBoundingClientRect = vi.fn(() => ({
-        left: 500, right: 530, top: 100, bottom: 130,
-        width: 30, height: 30, x: 500, y: 100, toJSON: () => {},
+        left: 500,
+        right: 530,
+        top: 100,
+        bottom: 130,
+        width: 30,
+        height: 30,
+        x: 500,
+        y: 100,
+        toJSON: () => {},
       }));
       document.body.appendChild(btn);
 
@@ -183,14 +194,19 @@ describe("createReactionController", () => {
     });
 
     it("sends reaction when emoji is selected from picker", () => {
-      mockGetChannelMessages.mockReturnValue([
-        { id: 1, reactions: [] },
-      ]);
+      mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: [] }]);
       const btn = document.createElement("button");
       btn.setAttribute("data-testid", "msg-react-1");
       btn.getBoundingClientRect = vi.fn(() => ({
-        left: 500, right: 530, top: 100, bottom: 130,
-        width: 30, height: 30, x: 500, y: 100, toJSON: () => {},
+        left: 500,
+        right: 530,
+        top: 100,
+        bottom: 130,
+        width: 30,
+        height: 30,
+        x: 500,
+        y: 100,
+        toJSON: () => {},
       }));
       document.body.appendChild(btn);
 
@@ -211,14 +227,19 @@ describe("createReactionController", () => {
     });
 
     it("calls pickerDestroy when emoji is selected", () => {
-      mockGetChannelMessages.mockReturnValue([
-        { id: 1, reactions: [] },
-      ]);
+      mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: [] }]);
       const btn = document.createElement("button");
       btn.setAttribute("data-testid", "msg-react-1");
       btn.getBoundingClientRect = vi.fn(() => ({
-        left: 500, right: 530, top: 100, bottom: 130,
-        width: 30, height: 30, x: 500, y: 100, toJSON: () => {},
+        left: 500,
+        right: 530,
+        top: 100,
+        bottom: 130,
+        width: 30,
+        height: 30,
+        x: 500,
+        y: 100,
+        toJSON: () => {},
       }));
       document.body.appendChild(btn);
 
@@ -235,8 +256,15 @@ describe("createReactionController", () => {
       const btn = document.createElement("button");
       btn.setAttribute("data-testid", "msg-react-1");
       btn.getBoundingClientRect = vi.fn(() => ({
-        left: 500, right: 530, top: 100, bottom: 130,
-        width: 30, height: 30, x: 500, y: 100, toJSON: () => {},
+        left: 500,
+        right: 530,
+        top: 100,
+        bottom: 130,
+        width: 30,
+        height: 30,
+        x: 500,
+        y: 100,
+        toJSON: () => {},
       }));
       document.body.appendChild(btn);
 
@@ -254,8 +282,15 @@ describe("createReactionController", () => {
       const btn = document.createElement("button");
       btn.setAttribute("data-testid", "msg-react-1");
       btn.getBoundingClientRect = vi.fn(() => ({
-        left: 500, right: 530, top: 100, bottom: 130,
-        width: 30, height: 30, x: 500, y: 100, toJSON: () => {},
+        left: 500,
+        right: 530,
+        top: 100,
+        bottom: 130,
+        width: 30,
+        height: 30,
+        x: 500,
+        y: 100,
+        toJSON: () => {},
       }));
       document.body.appendChild(btn);
 
@@ -275,8 +310,15 @@ describe("createReactionController", () => {
       const btn = document.createElement("button");
       btn.setAttribute("data-testid", "msg-react-1");
       btn.getBoundingClientRect = vi.fn(() => ({
-        left: 500, right: 530, top: 100, bottom: 130,
-        width: 30, height: 30, x: 500, y: 100, toJSON: () => {},
+        left: 500,
+        right: 530,
+        top: 100,
+        bottom: 130,
+        width: 30,
+        height: 30,
+        x: 500,
+        y: 100,
+        toJSON: () => {},
       }));
       document.body.appendChild(btn);
 

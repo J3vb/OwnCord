@@ -9,7 +9,7 @@ import (
 // GenerateToken returns a cryptographically random 256-bit token encoded as a
 // 64-character lowercase hex string.
 func GenerateToken() (string, error) {
-	raw := make([]byte, 32) // 256 bits
+	raw := make([]byte, sessionTokenBytes) // 256 bits
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
 	}

@@ -12,10 +12,30 @@ import { applyThemeByName } from "@lib/themes";
 export const STORAGE_PREFIX = "owncord:settings:";
 
 export const THEMES = {
-  dark: { "--bg-primary": "#313338", "--bg-secondary": "#2b2d31", "--bg-tertiary": "#1e1f22", "--text-normal": "#dbdee1" },
-  "neon-glow": { "--bg-primary": "#1a1b1e", "--bg-secondary": "#111214", "--bg-tertiary": "#0d0e10", "--text-normal": "#dbdee1" },
-  midnight: { "--bg-primary": "#1a1a2e", "--bg-secondary": "#16213e", "--bg-tertiary": "#0f3460", "--text-normal": "#e0e0e0" },
-  light: { "--bg-primary": "#ffffff", "--bg-secondary": "#f2f3f5", "--bg-tertiary": "#e3e5e8", "--text-normal": "#313338" },
+  dark: {
+    "--bg-primary": "#313338",
+    "--bg-secondary": "#2b2d31",
+    "--bg-tertiary": "#1e1f22",
+    "--text-normal": "#dbdee1",
+  },
+  "neon-glow": {
+    "--bg-primary": "#1a1b1e",
+    "--bg-secondary": "#111214",
+    "--bg-tertiary": "#0d0e10",
+    "--text-normal": "#dbdee1",
+  },
+  midnight: {
+    "--bg-primary": "#1a1a2e",
+    "--bg-secondary": "#16213e",
+    "--bg-tertiary": "#0f3460",
+    "--text-normal": "#e0e0e0",
+  },
+  light: {
+    "--bg-primary": "#ffffff",
+    "--bg-secondary": "#f2f3f5",
+    "--bg-tertiary": "#e3e5e8",
+    "--text-normal": "#313338",
+  },
 } as const;
 
 export type ThemeName = keyof typeof THEMES;
@@ -72,12 +92,16 @@ export function createToggle(
   }
 
   toggle.addEventListener("click", doToggle, { signal: opts.signal });
-  toggle.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      doToggle();
-    }
-  }, { signal: opts.signal });
+  toggle.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        doToggle();
+      }
+    },
+    { signal: opts.signal },
+  );
 
   return toggle;
 }

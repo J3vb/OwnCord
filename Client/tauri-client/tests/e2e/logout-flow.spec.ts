@@ -12,15 +12,11 @@ test.describe("Logout Flow", () => {
     await navigateToMainPage(page);
   });
 
-  test("clicking Log Out in settings returns to connect page", async ({
-    page,
-  }) => {
+  test("clicking Log Out in settings returns to connect page", async ({ page }) => {
     // Open settings
     const settingsBtn = page.locator("button[aria-label='Settings']");
     await settingsBtn.click();
-    await expect(
-      page.locator(".settings-overlay.open"),
-    ).toBeVisible({ timeout: 3000 });
+    await expect(page.locator(".settings-overlay.open")).toBeVisible({ timeout: 3000 });
 
     // Click Log Out button
     const logoutBtn = page.locator(".settings-nav-item.danger", {
@@ -37,9 +33,7 @@ test.describe("Logout Flow", () => {
     // Open settings and log out
     const settingsBtn = page.locator("button[aria-label='Settings']");
     await settingsBtn.click();
-    await expect(
-      page.locator(".settings-overlay.open"),
-    ).toBeVisible({ timeout: 3000 });
+    await expect(page.locator(".settings-overlay.open")).toBeVisible({ timeout: 3000 });
 
     const logoutBtn = page.locator(".settings-nav-item.danger", {
       hasText: "Log Out",

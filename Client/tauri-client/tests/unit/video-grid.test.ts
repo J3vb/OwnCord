@@ -10,6 +10,7 @@ const mockSetUserVolume = vi.fn();
 vi.mock("@lib/livekitSession", () => ({
   muteScreenshareAudio: (...args: unknown[]) => mockMuteScreenshareAudio(...args),
   setUserVolume: (...args: unknown[]) => mockSetUserVolume(...args),
+  setScreenshareAudioVolume: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -25,7 +26,40 @@ import {
 
 /** Minimal MediaStream stub for testing. */
 function fakeStream(): MediaStream {
-  return { getTracks: () => [] } as unknown as MediaStream;
+  return { getTracks: () => [], getVideoTracks: () => [] } as unknown as MediaStream;
+}
+
+/**
+ * MediaStream stub with a controllable video track.
+ * Allows testing track lifecycle (ended/mute events).
+ */
+function fakeStreamWithTrack(): {
+  stream: MediaStream;
+  track: { listeners: Record<string, Array<() => void>>; dispatchEvent(type: string): void };
+} {
+  const listeners: Record<string, Array<() => void>> = {};
+  const track = {
+    listeners,
+    id: `track-${Math.random()}`,
+    addEventListener(type: string, fn: () => void) {
+      (listeners[type] ??= []).push(fn);
+    },
+    removeEventListener(type: string, fn: () => void) {
+      const arr = listeners[type];
+      if (arr) {
+        const idx = arr.indexOf(fn);
+        if (idx >= 0) arr.splice(idx, 1);
+      }
+    },
+    dispatchEvent(type: string) {
+      for (const fn of listeners[type] ?? []) fn();
+    },
+  };
+  const stream = {
+    getTracks: () => [track],
+    getVideoTracks: () => [track],
+  } as unknown as MediaStream;
+  return { stream, track };
 }
 
 // ---------------------------------------------------------------------------
@@ -53,9 +87,15 @@ describe("VideoGrid", () => {
     vi.clearAllMocks();
     // ResizeObserver is not available in JSDOM
     globalThis.ResizeObserver ??= class {
-      observe(): void { /* noop */ }
-      unobserve(): void { /* noop */ }
-      disconnect(): void { /* noop */ }
+      observe(): void {
+        /* noop */
+      }
+      unobserve(): void {
+        /* noop */
+      }
+      disconnect(): void {
+        /* noop */
+      }
     } as unknown as typeof ResizeObserver;
 
     container = document.createElement("div");
@@ -192,6 +232,118 @@ describe("VideoGrid", () => {
 
     expect(container.querySelector(".video-grid")).toBeNull();
     expect(grid.hasStreams()).toBe(false);
+  });
+
+  // -----------------------------------------------------------------------
+  // Autoplay / .play() tests (Bug fix: black window in WebView2)
+  // -----------------------------------------------------------------------
+
+  describe("video autoplay", () => {
+    it("addStream calls .play() on the video element", () => {
+      const playMock = vi.fn().mockResolvedValue(undefined);
+      const origCreate = document.createElement.bind(document);
+      vi.spyOn(document, "createElement").mockImplementation(
+        (tag: string, opts?: ElementCreationOptions) => {
+          const el = origCreate(tag, opts);
+          if (tag === "video") {
+            (el as HTMLVideoElement).play = playMock;
+          }
+          return el;
+        },
+      );
+
+      grid.addStream(1, "Alice", fakeStream());
+
+      expect(playMock).toHaveBeenCalledTimes(1);
+
+      vi.restoreAllMocks();
+    });
+
+    it("addStream calls .play() when replacing srcObject on existing tile", () => {
+      const playMock = vi.fn().mockResolvedValue(undefined);
+      const origCreate = document.createElement.bind(document);
+      vi.spyOn(document, "createElement").mockImplementation(
+        (tag: string, opts?: ElementCreationOptions) => {
+          const el = origCreate(tag, opts);
+          if (tag === "video") {
+            (el as HTMLVideoElement).play = playMock;
+          }
+          return el;
+        },
+      );
+
+      const { stream: s1 } = fakeStreamWithTrack();
+      const { stream: s2 } = fakeStreamWithTrack();
+
+      grid.addStream(1, "Alice", s1);
+      playMock.mockClear();
+
+      // Different tracks → srcObject replaced → should call play again
+      grid.addStream(1, "Alice", s2);
+      expect(playMock).toHaveBeenCalledTimes(1);
+
+      vi.restoreAllMocks();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Track lifecycle tests (Bug fix: stale black tiles)
+  // -----------------------------------------------------------------------
+
+  describe("track lifecycle", () => {
+    it("removes tile when video track fires 'ended' event", () => {
+      const { stream, track } = fakeStreamWithTrack();
+      grid.addStream(1, "Alice", stream);
+      expect(grid.hasStreams()).toBe(true);
+
+      track.dispatchEvent("ended");
+      expect(grid.hasStreams()).toBe(false);
+    });
+
+    it("hides tile when video track fires 'mute' event (does not remove)", () => {
+      const { stream, track } = fakeStreamWithTrack();
+      grid.addStream(1, "Alice", stream);
+      expect(grid.hasStreams()).toBe(true);
+
+      track.dispatchEvent("mute");
+      // Tile should still exist but have track-muted class
+      expect(grid.hasStreams()).toBe(true);
+      const cell = container.querySelector(".video-cell") as HTMLElement;
+      expect(cell.classList.contains("track-muted")).toBe(true);
+    });
+
+    it("restores tile when video track fires 'unmute' after mute", () => {
+      const { stream, track } = fakeStreamWithTrack();
+      grid.addStream(1, "Alice", stream);
+
+      track.dispatchEvent("mute");
+      const cell = container.querySelector(".video-cell") as HTMLElement;
+      expect(cell.classList.contains("track-muted")).toBe(true);
+
+      track.dispatchEvent("unmute");
+      expect(cell.classList.contains("track-muted")).toBe(false);
+    });
+
+    it("cleans up track listeners when tile is removed via removeStream", () => {
+      const { stream, track } = fakeStreamWithTrack();
+      grid.addStream(1, "Alice", stream);
+      grid.removeStream(1);
+
+      // Dispatching ended after removal should not throw or cause issues
+      expect(() => track.dispatchEvent("ended")).not.toThrow();
+      expect(grid.hasStreams()).toBe(false);
+    });
+
+    it("cleans up track listeners on destroy", () => {
+      const { stream, track } = fakeStreamWithTrack();
+      grid.addStream(1, "Alice", stream);
+      grid.destroy!();
+
+      // Verify listeners were removed
+      expect(track.listeners["ended"]?.length ?? 0).toBe(0);
+      expect(track.listeners["mute"]?.length ?? 0).toBe(0);
+      expect(track.listeners["unmute"]?.length ?? 0).toBe(0);
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -359,6 +511,60 @@ describe("VideoGrid", () => {
   });
 
   // -----------------------------------------------------------------------
+  // Stream type attribute tests (Spec 3 — video scaling)
+  // -----------------------------------------------------------------------
+
+  describe("data-stream-type attribute", () => {
+    it("sets data-stream-type='screenshare' when isScreenshare is true", () => {
+      const config = makeTileConfig({ isScreenshare: true });
+      grid.addStream(1, "Alice (Screen)", fakeStream(), config);
+
+      const cell = container.querySelector(".video-cell") as HTMLElement;
+      expect(cell.dataset.streamType).toBe("screenshare");
+    });
+
+    it("sets data-stream-type='camera' when isScreenshare is false", () => {
+      const config = makeTileConfig({ isScreenshare: false });
+      grid.addStream(1, "Alice", fakeStream(), config);
+
+      const cell = container.querySelector(".video-cell") as HTMLElement;
+      expect(cell.dataset.streamType).toBe("camera");
+    });
+
+    it("defaults data-stream-type='camera' when no config is provided", () => {
+      grid.addStream(1, "Alice", fakeStream());
+
+      const cell = container.querySelector(".video-cell") as HTMLElement;
+      expect(cell.dataset.streamType).toBe("camera");
+    });
+
+    it("preserves data-stream-type when stream is updated in-place", () => {
+      const config = makeTileConfig({ isScreenshare: true });
+      grid.addStream(1, "Alice (Screen)", fakeStream(), config);
+
+      // Update stream (same userId)
+      grid.addStream(1, "Alice (Screen) v2", fakeStream(), config);
+
+      const cell = container.querySelector(".video-cell") as HTMLElement;
+      expect(cell.dataset.streamType).toBe("screenshare");
+    });
+
+    it("syncs data-stream-type when stream type changes on in-place update", () => {
+      const cameraConfig = makeTileConfig({ isScreenshare: false });
+      grid.addStream(1, "Alice", fakeStream(), cameraConfig);
+
+      const cell = container.querySelector(".video-cell") as HTMLElement;
+      expect(cell.dataset.streamType).toBe("camera");
+
+      // Re-add same userId as screenshare
+      const screenConfig = makeTileConfig({ isScreenshare: true });
+      grid.addStream(1, "Alice (Screen)", fakeStream(), screenConfig);
+
+      expect(cell.dataset.streamType).toBe("screenshare");
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Focus mode tests (Spec 2)
   // -----------------------------------------------------------------------
 
@@ -506,6 +712,32 @@ describe("VideoGrid", () => {
       const stripArea = container.querySelector(".video-focus-strip");
       expect(stripArea).not.toBeNull();
       expect(stripArea!.querySelectorAll(".video-cell").length).toBe(2);
+    });
+
+    it("focused cell retains data-stream-type attribute in focus layout", () => {
+      const config = makeTileConfig({ isScreenshare: true });
+      grid.addStream(1, "Alice (Screen)", fakeStream(), config);
+      grid.addStream(2, "Bob", fakeStream());
+
+      grid.setFocusedTile(1);
+
+      const mainArea = container.querySelector(".video-focus-main");
+      const focusedCell = mainArea!.querySelector(".video-cell") as HTMLElement;
+      expect(focusedCell.dataset.streamType).toBe("screenshare");
+    });
+
+    it("thumbnail cells retain data-stream-type attribute in strip", () => {
+      const cameraConfig = makeTileConfig({ isScreenshare: false });
+      grid.addStream(1, "Alice", fakeStream(), cameraConfig);
+
+      const screenConfig = makeTileConfig({ isScreenshare: true });
+      grid.addStream(2, "Bob (Screen)", fakeStream(), screenConfig);
+
+      grid.setFocusedTile(2);
+
+      const stripArea = container.querySelector(".video-focus-strip");
+      const thumbCell = stripArea!.querySelector(".video-cell") as HTMLElement;
+      expect(thumbCell.dataset.streamType).toBe("camera");
     });
 
     it("removing non-focused tile preserves current focus", () => {

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -12,15 +13,6 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 )
-
-// setupLimiter restricts setup attempts to prevent brute-force attacks
-// against the initial owner account creation endpoint.
-var setupLimiter = auth.NewRateLimiter()
-
-// ResetSetupLimiter resets the setup rate limiter. Exported for tests only.
-func ResetSetupLimiter() {
-	setupLimiter = auth.NewRateLimiter()
-}
 
 // setupSanitizer strips all HTML from user input during setup.
 var setupSanitizer = bluemonday.StrictPolicy()
@@ -61,8 +53,18 @@ func handleSetupStatus(database *db.DB) http.HandlerFunc {
 
 // handleSetup creates the first owner account. It only works when no users
 // exist in the database, preventing abuse after initial setup.
-func handleSetup(database *db.DB) http.HandlerFunc {
+func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// CSRF protection: reject cross-origin requests (BUG-097).
+		// If Origin is present and doesn't match allowed origins, deny.
+		// No Origin header = same-origin or non-browser client (allow).
+		if origin := r.Header.Get("Origin"); origin != "" {
+			if !isSetupOriginAllowed(origin, allowedOrigins) {
+				writeErr(w, http.StatusForbidden, "FORBIDDEN", "cross-origin setup request blocked")
+				return
+			}
+		}
+
 		// Rate limit: 5 attempts per minute per IP.
 		// Strip the port so that different source ports from the same IP
 		// are correctly grouped under a single rate-limit bucket.
@@ -71,19 +73,8 @@ func handleSetup(database *db.DB) http.HandlerFunc {
 			host = r.RemoteAddr
 		}
 		setupKey := "setup:" + host
-		if !setupLimiter.Allow(setupKey, 5, time.Minute) {
+		if !limiter.Allow(setupKey, 5, time.Minute) {
 			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many setup attempts, try again later")
-			return
-		}
-
-		// Gate: only allow when no users exist.
-		count, err := database.UserCount()
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check user count")
-			return
-		}
-		if count > 0 {
-			writeErr(w, http.StatusForbidden, "FORBIDDEN", "setup has already been completed")
 			return
 		}
 
@@ -117,8 +108,13 @@ func handleSetup(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		// Create the owner account (role_id=1 is Owner).
-		uid, err := database.CreateUser(req.Username, hash, ownerRoleID)
+		// Atomically check no users exist and create the owner (BUG-119).
+		// This closes the TOCTOU race between UserCount() and CreateUser().
+		uid, err := database.CreateOwnerIfEmpty(req.Username, hash, ownerRoleID)
+		if errors.Is(err, db.ErrConflict) {
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", "setup has already been completed")
+			return
+		}
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create user")
 			return
@@ -132,6 +128,10 @@ func handleSetup(database *db.DB) http.HandlerFunc {
 		}
 
 		device := r.Header.Get("User-Agent")
+		const maxDeviceLen = 512
+		if len(device) > maxDeviceLen {
+			device = device[:maxDeviceLen]
+		}
 		if _, err := database.CreateSession(uid, auth.HashToken(token), device, host); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create session")
 			return
@@ -159,4 +159,16 @@ func handleSetup(database *db.DB) http.HandlerFunc {
 			InviteCode: inviteCode,
 		})
 	}
+}
+
+// isSetupOriginAllowed checks if the given origin is permitted by the
+// configured allowed_origins list. Wildcard "*" allows any origin.
+// An empty list denies all cross-origin requests (safe default).
+func isSetupOriginAllowed(origin string, allowed []string) bool {
+	for _, a := range allowed {
+		if a == "*" || strings.EqualFold(a, origin) {
+			return true
+		}
+	}
+	return false
 }

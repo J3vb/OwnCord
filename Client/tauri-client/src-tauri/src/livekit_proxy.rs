@@ -68,20 +68,20 @@ impl LiveKitProxyState {
 // ---------------------------------------------------------------------------
 
 /// Tauri store file for certificate fingerprints (shared with ws_proxy).
-const CERTS_STORE: &str = "certs.json";
+pub(crate) const CERTS_STORE: &str = "certs.json";
 
 /// Verifies the server certificate against a known SHA-256 fingerprint.
 /// Reuses the fingerprint stored by ws_proxy's TOFU handshake for the same
 /// host, so LiveKit connections are pinned to the same certificate the user
 /// already trusted during WebSocket setup.
 #[derive(Debug)]
-struct PinnedVerifier {
+pub(crate) struct PinnedVerifier {
     /// Expected SHA-256 colon-hex fingerprint (e.g. "aa:bb:cc:...").
     expected_fingerprint: String,
 }
 
 impl PinnedVerifier {
-    fn new(expected_fingerprint: String) -> Self {
+    pub(crate) fn new(expected_fingerprint: String) -> Self {
         Self { expected_fingerprint }
     }
 }
@@ -155,12 +155,12 @@ impl rustls::client::danger::ServerCertVerifier for PinnedVerifier {
 /// Produce the cert store key matching ws_proxy's format.
 /// ws_proxy extracts the host from "wss://host/path" which omits port 443.
 /// We normalise by stripping the default ":443" suffix so the keys match.
-fn cert_store_key(remote_host: &str) -> String {
+pub(crate) fn cert_store_key(remote_host: &str) -> String {
     remote_host.strip_suffix(":443").unwrap_or(remote_host).to_string()
 }
 
 /// Load the stored certificate fingerprint for a host from the Tauri cert store.
-fn load_stored_fingerprint<R: Runtime>(
+pub(crate) fn load_stored_fingerprint<R: Runtime>(
     app: &tauri::AppHandle<R>,
     host: &str,
 ) -> Result<Option<String>, String> {
@@ -189,6 +189,16 @@ pub async fn start_livekit_proxy<R: Runtime>(
     state: tauri::State<'_, LiveKitProxyState>,
     remote_host: String,
 ) -> Result<u16, String> {
+    // Reject remote_host values containing CRLF or null bytes to prevent
+    // HTTP header injection in the proxy's header rewriting logic.
+    if remote_host.contains('\r') || remote_host.contains('\n') || remote_host.contains('\0') {
+        return Err("remote_host contains invalid characters".into());
+    }
+    // Basic hostname format: alphanumeric, dots, hyphens, colons (port), brackets (IPv6)
+    if !remote_host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']')) {
+        return Err("remote_host contains unexpected characters".into());
+    }
+
     let mut inner = state.inner.lock().await;
 
     info!("[livekit_proxy] start requested for {}", remote_host);

@@ -57,9 +57,14 @@ pub fn ptt_stop() {
 }
 
 /// Set the PTT virtual key code. Pass 0 to disable.
+/// Valid range: 0 (disabled) or 1–254 (Windows virtual key codes).
 #[tauri::command]
-pub fn ptt_set_key(vk_code: i32) {
+pub fn ptt_set_key(vk_code: i32) -> Result<(), String> {
+    if vk_code != 0 && !(1..=254).contains(&vk_code) {
+        return Err(format!("invalid virtual key code: {vk_code} (must be 0 or 1-254)"));
+    }
     PTT_VKEY.store(vk_code, Ordering::SeqCst);
+    Ok(())
 }
 
 /// Get the current PTT virtual key code.
@@ -71,27 +76,32 @@ pub fn ptt_get_key() -> i32 {
 /// Wait for the user to press any non-modifier key and return its VK code.
 /// Used by the keybind capture UI. Times out after 10 seconds and returns 0
 /// to avoid blocking a thread indefinitely if the user navigates away.
+/// Runs on a dedicated thread to avoid blocking the Tauri async thread pool.
 #[tauri::command]
-pub fn ptt_listen_for_key() -> i32 {
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+pub async fn ptt_listen_for_key() -> i32 {
+    tokio::task::spawn_blocking(|| {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
 
-    while std::time::Instant::now() < deadline {
-        for vk in 1..=254i32 {
-            // Skip modifier keys
-            if matches!(vk, 0x10 | 0x11 | 0x12 | 0x5B | 0x5C) {
-                continue;
-            }
-            if is_key_down(vk) {
-                // Wait for release (with its own timeout)
-                let release_deadline = std::time::Instant::now() + Duration::from_secs(5);
-                while is_key_down(vk) && std::time::Instant::now() < release_deadline {
-                    std::thread::sleep(Duration::from_millis(20));
+        while std::time::Instant::now() < deadline {
+            for vk in 1..=254i32 {
+                // Skip modifier keys
+                if matches!(vk, 0x10 | 0x11 | 0x12 | 0x5B | 0x5C) {
+                    continue;
                 }
-                return vk;
+                if is_key_down(vk) {
+                    // Wait for release (with its own timeout)
+                    let release_deadline = std::time::Instant::now() + Duration::from_secs(5);
+                    while is_key_down(vk) && std::time::Instant::now() < release_deadline {
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                    return vk;
+                }
             }
+            std::thread::sleep(Duration::from_millis(20));
         }
-        std::thread::sleep(Duration::from_millis(20));
-    }
 
-    0 // timed out — no key pressed
+        0 // timed out — no key pressed
+    })
+    .await
+    .unwrap_or(0)
 }

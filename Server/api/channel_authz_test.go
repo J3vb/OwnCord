@@ -191,3 +191,59 @@ func TestSearch_AdminSeesAllResults(t *testing.T) {
 		t.Errorf("admin should see all 2 results, got %d", len(results))
 	}
 }
+
+// ─── DM exclusion from channel list (BUG-093) ─────────────────────────────
+
+func TestChannelList_ExcludesDMChannels_Member(t *testing.T) {
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "dm-excl-member", 4)
+
+	// Create a normal text channel and a DM channel.
+	database.CreateChannel("general", "text", "", "", 0)
+	database.Exec(`INSERT INTO channels (name, type, position) VALUES ('dm-1', 'dm', 0)`)
+
+	rr := chGet(t, router, "/api/v1/channels", token)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var channels []map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&channels); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, ch := range channels {
+		if ch["type"] == "dm" {
+			t.Errorf("DM channel should not appear in channel list, got: %v", ch["name"])
+		}
+	}
+	if len(channels) != 1 {
+		t.Errorf("expected 1 channel (text only), got %d", len(channels))
+	}
+}
+
+func TestChannelList_ExcludesDMChannels_Admin(t *testing.T) {
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "dm-excl-admin", 1) // Owner
+
+	database.CreateChannel("general", "text", "", "", 0)
+	database.CreateChannel("voice", "voice", "", "", 1)
+	database.Exec(`INSERT INTO channels (name, type, position) VALUES ('dm-1', 'dm', 0)`)
+
+	rr := chGet(t, router, "/api/v1/channels", token)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var channels []map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&channels)
+	for _, ch := range channels {
+		if ch["type"] == "dm" {
+			t.Errorf("DM channel should not appear even for admin, got: %v", ch["name"])
+		}
+	}
+	if len(channels) != 2 {
+		t.Errorf("expected 2 channels (text+voice), got %d", len(channels))
+	}
+}

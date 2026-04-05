@@ -42,9 +42,7 @@ test.describe("Theme Persistence", () => {
     // Find a theme option that is NOT currently active
     let targetIndex = -1;
     for (let i = 0; i < count; i++) {
-      const isActive = await themeOptions.nth(i).evaluate((el) =>
-        el.classList.contains("active"),
-      );
+      const isActive = await themeOptions.nth(i).evaluate((el) => el.classList.contains("active"));
       if (!isActive) {
         targetIndex = i;
         break;
@@ -72,9 +70,7 @@ test.describe("Theme Persistence", () => {
     await themeOptions.nth(1).click();
 
     // Check localStorage for theme persistence
-    const storedTheme = await page.evaluate(() =>
-      localStorage.getItem("owncord:theme:active"),
-    );
+    const storedTheme = await page.evaluate(() => localStorage.getItem("owncord:theme:active"));
     expect(storedTheme).not.toBeNull();
     expect(storedTheme!.length).toBeGreaterThan(0);
   });
@@ -85,9 +81,7 @@ test.describe("Theme Persistence", () => {
     await themeOptions.first().click();
 
     // Read what was stored
-    const storedTheme = await page.evaluate(() =>
-      localStorage.getItem("owncord:theme:active"),
-    );
+    const storedTheme = await page.evaluate(() => localStorage.getItem("owncord:theme:active"));
 
     // Verify the body has the corresponding class
     if (storedTheme !== null) {
@@ -144,16 +138,12 @@ test.describe("Accent Color Override", () => {
 
       // Wait for the value to be stored
       await expect(async () => {
-        const val = await page.evaluate(() =>
-          localStorage.getItem("owncord:pref:accentColor"),
-        );
+        const val = await page.evaluate(() => localStorage.getItem("owncord:pref:accentColor"));
         expect(val).not.toBeNull();
       }).toPass({ timeout: 3_000 });
 
       // Read the stored value
-      const stored = await page.evaluate(() =>
-        localStorage.getItem("owncord:pref:accentColor"),
-      );
+      const stored = await page.evaluate(() => localStorage.getItem("owncord:pref:accentColor"));
 
       // Navigate away from Appearance tab and back
       await switchSettingsTab(page, "Account");

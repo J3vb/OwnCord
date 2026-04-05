@@ -142,7 +142,7 @@ describe("CSS injection prevention", () => {
   });
 
   it("should reject property name not starting with --", () => {
-    applyCustomWithColors({ "background": "#ff0000" });
+    applyCustomWithColors({ background: "#ff0000" });
     // "background" does not start with "--", so it must not be set
     expect(document.body.style.getPropertyValue("background")).toBe("");
   });

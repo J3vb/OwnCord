@@ -1,0 +1,6 @@
+dist/
+src-tauri/
+node_modules/
+public/
+coverage/
+*.html

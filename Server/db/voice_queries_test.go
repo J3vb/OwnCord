@@ -685,3 +685,81 @@ func TestVoice_GetChannelVoiceStates_IncludesCameraAndScreenshare(t *testing.T) 
 		t.Error("Screenshare should be false in GetChannelVoiceStates")
 	}
 }
+
+func TestVoice_JoinVoiceChannel_SameChannel_RefreshesJoinToken(t *testing.T) {
+	database := newVoiceTestDB(t)
+	userID := seedVoiceUser(t, database, "same-channel-token")
+	chanID := seedVoiceChannel(t, database, "voice-same-token")
+
+	if err := database.JoinVoiceChannel(userID, chanID); err != nil {
+		t.Fatalf("first JoinVoiceChannel: %v", err)
+	}
+	first, err := database.GetVoiceState(userID)
+	if err != nil {
+		t.Fatalf("GetVoiceState(first): %v", err)
+	}
+	if first == nil || first.JoinedAt == "" {
+		t.Fatal("first join token missing")
+	}
+
+	if err := database.JoinVoiceChannel(userID, chanID); err != nil {
+		t.Fatalf("second JoinVoiceChannel: %v", err)
+	}
+	second, err := database.GetVoiceState(userID)
+	if err != nil {
+		t.Fatalf("GetVoiceState(second): %v", err)
+	}
+	if second == nil || second.JoinedAt == "" {
+		t.Fatal("second join token missing")
+	}
+	if second.JoinedAt == first.JoinedAt {
+		t.Fatalf("same-channel rejoin reused join token %q", second.JoinedAt)
+	}
+}
+
+func TestVoice_LeaveVoiceChannelIfMatch_DoesNotDeleteSameChannelRejoin(t *testing.T) {
+	database := newVoiceTestDB(t)
+	userID := seedVoiceUser(t, database, "stale-delete")
+	chanID := seedVoiceChannel(t, database, "voice-stale-delete")
+
+	if err := database.JoinVoiceChannel(userID, chanID); err != nil {
+		t.Fatalf("first JoinVoiceChannel: %v", err)
+	}
+	first, err := database.GetVoiceState(userID)
+	if err != nil {
+		t.Fatalf("GetVoiceState(first): %v", err)
+	}
+	if first == nil {
+		t.Fatal("GetVoiceState(first) returned nil")
+	}
+
+	if err := database.JoinVoiceChannel(userID, chanID); err != nil {
+		t.Fatalf("second JoinVoiceChannel: %v", err)
+	}
+	second, err := database.GetVoiceState(userID)
+	if err != nil {
+		t.Fatalf("GetVoiceState(second): %v", err)
+	}
+	if second == nil {
+		t.Fatal("GetVoiceState(second) returned nil")
+	}
+
+	deleted, err := database.LeaveVoiceChannelIfMatch(userID, chanID, first.JoinedAt)
+	if err != nil {
+		t.Fatalf("LeaveVoiceChannelIfMatch: %v", err)
+	}
+	if deleted {
+		t.Fatal("stale join token deleted the replacement same-channel row")
+	}
+
+	current, err := database.GetVoiceState(userID)
+	if err != nil {
+		t.Fatalf("GetVoiceState(current): %v", err)
+	}
+	if current == nil {
+		t.Fatal("replacement voice state was removed")
+	}
+	if current.JoinedAt != second.JoinedAt {
+		t.Fatalf("replacement join token = %q, want %q", current.JoinedAt, second.JoinedAt)
+	}
+}

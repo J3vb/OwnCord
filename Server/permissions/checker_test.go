@@ -14,9 +14,11 @@ type mockDB struct {
 	dmErr          error
 }
 
-type chanRoleKey struct{ channelID, roleID int64 }
-type chanPerm struct{ allow, deny int64 }
-type dmKey struct{ userID, channelID int64 }
+type (
+	chanRoleKey struct{ channelID, roleID int64 }
+	chanPerm    struct{ allow, deny int64 }
+	dmKey       struct{ userID, channelID int64 }
+)
 
 func newMockDB() *mockDB {
 	return &mockDB{
@@ -258,6 +260,46 @@ func TestRequireChannelAccess(t *testing.T) {
 			channelID:   100,
 			dmOK:        true,
 			wantErr:     nil,
+		},
+		{
+			name:        "admin bypasses regular channel check",
+			userID:      1,
+			rolePerms:   Administrator,
+			roleID:      1,
+			channelType: "text",
+			channelID:   10,
+			perm:        ManageChannels | ManageRoles, // multi-bit
+			wantErr:     nil,
+		},
+		{
+			name:        "admin does NOT bypass DM participant check",
+			userID:      1,
+			rolePerms:   Administrator,
+			roleID:      1,
+			channelType: "dm",
+			channelID:   100,
+			dmOK:        false,
+			wantErr:     ErrNotDMParticipant,
+		},
+		{
+			name:        "voice channel uses role perms",
+			userID:      1,
+			rolePerms:   ReadMessages | ConnectVoice | SpeakVoice,
+			roleID:      4,
+			channelType: "voice",
+			channelID:   20,
+			perm:        ConnectVoice,
+			wantErr:     nil,
+		},
+		{
+			name:        "voice channel denied without perm",
+			userID:      1,
+			rolePerms:   ReadMessages | SendMessages,
+			roleID:      4,
+			channelType: "voice",
+			channelID:   20,
+			perm:        ConnectVoice,
+			wantErr:     ErrPermissionDenied,
 		},
 	}
 

@@ -4,15 +4,32 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync/atomic"
+	"time"
 )
+
+// ErrChannelFull is returned when a voice channel is at capacity.
+var ErrChannelFull = errors.New("voice channel is full")
+
+var voiceJoinSeq uint64
+
+func newVoiceJoinToken() string {
+	seq := atomic.AddUint64(&voiceJoinSeq, 1)
+	return fmt.Sprintf("%s-%020d", time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z"), seq)
+}
 
 // JoinVoiceChannel inserts or replaces the user's voice state for the given
 // channel. If the user is already in a different channel, the old row is
 // replaced. Muted, deafened, and speaking are reset to false on join.
+//
+// joined_at doubles as an opaque join-instance token so stale cleanup can
+// target one specific voice session even if the user later rejoins the same
+// channel.
 func (d *DB) JoinVoiceChannel(userID, channelID int64) error {
+	joinToken := newVoiceJoinToken()
 	_, err := d.sqlDB.Exec(
-		`INSERT INTO voice_states (user_id, channel_id, muted, deafened, speaking, camera, screenshare)
-		 VALUES (?, ?, 0, 0, 0, 0, 0)
+		`INSERT INTO voice_states (user_id, channel_id, muted, deafened, speaking, camera, screenshare, joined_at)
+		 VALUES (?, ?, 0, 0, 0, 0, 0, ?)
 		 ON CONFLICT(user_id) DO UPDATE SET
 		     channel_id  = excluded.channel_id,
 		     muted       = 0,
@@ -20,11 +37,41 @@ func (d *DB) JoinVoiceChannel(userID, channelID int64) error {
 		     speaking    = 0,
 		     camera      = 0,
 		     screenshare = 0,
-		     joined_at   = datetime('now')`,
-		userID, channelID,
+		     joined_at   = excluded.joined_at`,
+		userID, channelID, joinToken,
 	)
 	if err != nil {
 		return fmt.Errorf("JoinVoiceChannel: %w", err)
+	}
+	return nil
+}
+
+// JoinVoiceChannelIfCapacity atomically inserts a voice state only if the
+// channel has fewer than maxUsers participants. Returns ErrChannelFull when
+// the channel is at capacity. This prevents the TOCTOU race where two
+// concurrent joins both observe capacity and both succeed.
+func (d *DB) JoinVoiceChannelIfCapacity(userID, channelID int64, maxUsers int) error {
+	joinToken := newVoiceJoinToken()
+	res, err := d.sqlDB.Exec(
+		`INSERT INTO voice_states (user_id, channel_id, muted, deafened, speaking, camera, screenshare, joined_at)
+		 SELECT ?, ?, 0, 0, 0, 0, 0, ?
+		 WHERE (SELECT COUNT(*) FROM voice_states WHERE channel_id = ?) < ?
+		 ON CONFLICT(user_id) DO UPDATE SET
+		     channel_id  = excluded.channel_id,
+		     muted       = 0,
+		     deafened    = 0,
+		     speaking    = 0,
+		     camera      = 0,
+		     screenshare = 0,
+		     joined_at   = excluded.joined_at`,
+		userID, channelID, joinToken, channelID, maxUsers,
+	)
+	if err != nil {
+		return fmt.Errorf("JoinVoiceChannelIfCapacity: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrChannelFull
 	}
 	return nil
 }
@@ -39,13 +86,28 @@ func (d *DB) LeaveVoiceChannel(userID int64) error {
 	return nil
 }
 
+// LeaveVoiceChannelIfMatch removes the user's voice state only if the row
+// still points at expectedChannelID and matches the expected join token.
+// Returns true if a row was deleted.
+func (d *DB) LeaveVoiceChannelIfMatch(userID, expectedChannelID int64, expectedJoinedAt string) (bool, error) {
+	result, err := d.sqlDB.Exec(
+		`DELETE FROM voice_states WHERE user_id = ? AND channel_id = ? AND joined_at = ?`,
+		userID, expectedChannelID, expectedJoinedAt,
+	)
+	if err != nil {
+		return false, fmt.Errorf("LeaveVoiceChannelIfMatch: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	return n > 0, nil
+}
+
 // GetVoiceState returns the current voice state for the given user,
 // or nil if the user is not in any voice channel.
 func (d *DB) GetVoiceState(userID int64) (*VoiceState, error) {
 	row := d.sqlDB.QueryRow(
 		`SELECT vs.user_id, vs.channel_id, u.username,
 		        vs.muted, vs.deafened, vs.speaking,
-		        vs.camera, vs.screenshare
+		        vs.camera, vs.screenshare, vs.joined_at
 		 FROM voice_states vs
 		 JOIN users u ON u.id = vs.user_id
 		 WHERE vs.user_id = ?`,
@@ -60,7 +122,7 @@ func (d *DB) GetChannelVoiceStates(channelID int64) ([]VoiceState, error) {
 	rows, err := d.sqlDB.Query(
 		`SELECT vs.user_id, vs.channel_id, u.username,
 		        vs.muted, vs.deafened, vs.speaking,
-		        vs.camera, vs.screenshare
+		        vs.camera, vs.screenshare, vs.joined_at
 		 FROM voice_states vs
 		 JOIN users u ON u.id = vs.user_id
 		 WHERE vs.channel_id = ?
@@ -95,7 +157,7 @@ func (d *DB) GetAllVoiceStates() ([]VoiceState, error) {
 	rows, err := d.sqlDB.Query(
 		`SELECT vs.user_id, vs.channel_id, u.username,
 		        vs.muted, vs.deafened, vs.speaking,
-		        vs.camera, vs.screenshare
+		        vs.camera, vs.screenshare, vs.joined_at
 		 FROM voice_states vs
 		 JOIN users u ON u.id = vs.user_id
 		 ORDER BY vs.channel_id, vs.joined_at ASC`,
@@ -197,6 +259,26 @@ func (d *DB) UpdateVoiceCamera(userID int64, camera bool) error {
 	return nil
 }
 
+// EnableCameraIfUnderLimit atomically enables a user's camera only if the
+// channel has not yet reached maxVideo active cameras. Returns true if the
+// camera was enabled, false if the limit was already reached.
+func (d *DB) EnableCameraIfUnderLimit(userID, channelID int64, maxVideo int) (bool, error) {
+	res, err := d.sqlDB.Exec(
+		`UPDATE voice_states SET camera = 1
+		 WHERE user_id = ? AND channel_id = ?
+		   AND (SELECT COUNT(*) FROM voice_states WHERE channel_id = ? AND camera = 1) < ?`,
+		userID, channelID, channelID, maxVideo,
+	)
+	if err != nil {
+		return false, fmt.Errorf("EnableCameraIfUnderLimit: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("EnableCameraIfUnderLimit RowsAffected: %w", err)
+	}
+	return rows > 0, nil
+}
+
 // UpdateVoiceScreenshare sets the screenshare field for the given user's voice state.
 func (d *DB) UpdateVoiceScreenshare(userID int64, screenshare bool) error {
 	_, err := d.sqlDB.Exec(
@@ -233,7 +315,7 @@ func scanVoiceState(row *sql.Row) (*VoiceState, error) {
 	err := row.Scan(
 		&vs.UserID, &vs.ChannelID, &vs.Username,
 		&muted, &deafened, &speaking,
-		&camera, &screenshare,
+		&camera, &screenshare, &vs.JoinedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -256,7 +338,7 @@ func scanVoiceStateRow(rows *sql.Rows) (VoiceState, error) {
 	err := rows.Scan(
 		&vs.UserID, &vs.ChannelID, &vs.Username,
 		&muted, &deafened, &speaking,
-		&camera, &screenshare,
+		&camera, &screenshare, &vs.JoinedAt,
 	)
 	if err != nil {
 		return vs, fmt.Errorf("scanVoiceStateRow: %w", err)

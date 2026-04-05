@@ -3,15 +3,17 @@ package auth
 import (
 	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha1"
+	"crypto/sha1" //nolint:gosec // G505: SHA1 required by TOTP/HOTP RFC 6238/4226
+	"crypto/subtle"
 	"encoding/base32"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/owncord/server/syncutil"
 )
 
 const (
@@ -30,13 +32,13 @@ type PartialAuthChallenge struct {
 }
 
 type PartialAuthStore struct {
-	mu      sync.Mutex
+	mu      syncutil.Mutex
 	entries map[string]PartialAuthChallenge
 	ttl     time.Duration
 }
 
 type PendingTOTPStore struct {
-	mu      sync.Mutex
+	mu      syncutil.Mutex
 	entries map[int64]pendingTOTPEnrollment
 	ttl     time.Duration
 }
@@ -83,6 +85,10 @@ func (s *PartialAuthStore) Lookup(token string) (PartialAuthChallenge, bool) {
 	defer s.mu.Unlock()
 	s.cleanupExpiredLocked()
 	entry, ok := s.entries[token]
+	if ok && time.Now().After(entry.ExpiresAt) {
+		delete(s.entries, token)
+		return PartialAuthChallenge{}, false
+	}
 	return entry, ok
 }
 
@@ -92,6 +98,10 @@ func (s *PartialAuthStore) Consume(token string) (PartialAuthChallenge, bool) {
 	s.cleanupExpiredLocked()
 	entry, ok := s.entries[token]
 	if !ok {
+		return PartialAuthChallenge{}, false
+	}
+	if time.Now().After(entry.ExpiresAt) {
+		delete(s.entries, token)
 		return PartialAuthChallenge{}, false
 	}
 	delete(s.entries, token)
@@ -160,8 +170,57 @@ func (s *PendingTOTPStore) cleanupExpiredLocked() {
 	}
 }
 
+// UsedTOTPCodeStore tracks recently verified TOTP codes to prevent replay
+// attacks within the ±1 period validity window (~90 seconds).
+type UsedTOTPCodeStore struct {
+	mu      syncutil.Mutex
+	entries map[string]time.Time // key: "userID:code" → expiry
+}
+
+func NewUsedTOTPCodeStore() *UsedTOTPCodeStore {
+	return &UsedTOTPCodeStore{
+		entries: make(map[string]time.Time),
+	}
+}
+
+// MarkUsed records a TOTP code as used for the given user. Returns false if
+// the code was already used (replay detected).
+func (s *UsedTOTPCodeStore) MarkUsed(userID int64, code string) bool {
+	key := fmt.Sprintf("%d:%s", userID, code)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cleanupExpiredLocked()
+	if _, exists := s.entries[key]; exists {
+		return false // replay detected
+	}
+	// Codes are valid for at most 90 seconds (current period ± 1).
+	s.entries[key] = time.Now().Add(usedTOTPCodeTTL)
+	return true
+}
+
+func (s *UsedTOTPCodeStore) cleanupExpiredLocked() {
+	now := time.Now()
+	for key, expiry := range s.entries {
+		if now.After(expiry) {
+			delete(s.entries, key)
+		}
+	}
+}
+
+// VerifyTOTPCodeOnce verifies a TOTP code and marks it as used to prevent
+// replay attacks. Returns false if the code is invalid or was already used.
+func VerifyTOTPCodeOnce(secret, code string, at time.Time, userID int64, usedStore *UsedTOTPCodeStore) bool {
+	if !VerifyTOTPCode(secret, code, at) {
+		return false
+	}
+	if usedStore == nil {
+		return true
+	}
+	return usedStore.MarkUsed(userID, code)
+}
+
 func GenerateTOTPSecret() (string, error) {
-	bytes := make([]byte, 20)
+	bytes := make([]byte, totpSecretBytes)
 	if _, err := rand.Read(bytes); err != nil {
 		return "", fmt.Errorf("GenerateTOTPSecret: %w", err)
 	}
@@ -186,7 +245,7 @@ func GenerateTOTPCode(secret string, at time.Time) (string, error) {
 		return "", fmt.Errorf("GenerateTOTPCode: %w", err)
 	}
 
-	counter := uint64(at.UTC().Unix() / int64(totpPeriod.Seconds()))
+	counter := uint64(at.UTC().Unix() / int64(totpPeriod.Seconds())) //nolint:gosec // G115: TOTP counter is always positive
 	buf := make([]byte, 8)
 	binary.BigEndian.PutUint64(buf, counter)
 
@@ -204,7 +263,7 @@ func VerifyTOTPCode(secret, code string, at time.Time) bool {
 	}
 	for _, offset := range []int{-1, 0, 1} {
 		candidate, err := GenerateTOTPCode(secret, at.Add(time.Duration(offset)*totpPeriod))
-		if err == nil && candidate == code {
+		if err == nil && subtle.ConstantTimeCompare([]byte(candidate), []byte(code)) == 1 {
 			return true
 		}
 	}
@@ -212,7 +271,7 @@ func VerifyTOTPCode(secret, code string, at time.Time) bool {
 }
 
 func generateOpaqueToken() (string, error) {
-	bytes := make([]byte, 32)
+	bytes := make([]byte, opaqueTokenBytes)
 	if _, err := rand.Read(bytes); err != nil {
 		return "", fmt.Errorf("generateOpaqueToken: %w", err)
 	}

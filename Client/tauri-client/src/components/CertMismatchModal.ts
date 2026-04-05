@@ -18,9 +18,7 @@ export interface CertMismatchModalOptions {
   readonly onReject: () => void;
 }
 
-export function createCertMismatchModal(
-  options: CertMismatchModalOptions,
-): MountableComponent {
+export function createCertMismatchModal(options: CertMismatchModalOptions): MountableComponent {
   const { host, storedFingerprint, newFingerprint, onAccept, onReject } = options;
   let overlay: HTMLDivElement | null = null;
   const ac = new AbortController();
@@ -52,8 +50,8 @@ export function createCertMismatchModal(
     setText(
       desc,
       "The server's TLS certificate fingerprint has changed. " +
-      "This could mean the server regenerated its certificate, " +
-      "or it could indicate a security issue.",
+        "This could mean the server regenerated its certificate, " +
+        "or it could indicate a security issue.",
     );
 
     const details = createElement("div", { class: "cert-details" });
@@ -110,11 +108,7 @@ export function createCertMismatchModal(
   return { mount, destroy };
 }
 
-function buildRow(
-  label: string,
-  value: string,
-  isFingerprint: boolean,
-): HTMLDivElement {
+function buildRow(label: string, value: string, isFingerprint: boolean): HTMLDivElement {
   const row = createElement("div", { class: "cert-row" });
   const labelEl = createElement("span", { class: "cert-label" });
   setText(labelEl, label);

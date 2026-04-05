@@ -127,9 +127,9 @@ test.describe("Message List — Real-time", () => {
     }
 
     for (let i = 0; i < 3; i++) {
-      await expect(
-        page.locator(".msg-text", { hasText: `Rapid message ${i}` })
-      ).toBeVisible({ timeout: 5_000 });
+      await expect(page.locator(".msg-text", { hasText: `Rapid message ${i}` })).toBeVisible({
+        timeout: 5_000,
+      });
     }
   });
 });

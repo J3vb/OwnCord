@@ -16,17 +16,13 @@ function getDefaultAccent(themeName: string): string {
 
   const customTheme = loadCustomTheme(themeName);
   const accent = customTheme?.colors["--accent"];
-  return typeof accent === "string" && /^#[\da-fA-F]{3,8}$/.test(accent)
-    ? accent
-    : FALLBACK_ACCENT;
+  return typeof accent === "string" && /^#[\da-fA-F]{3,8}$/.test(accent) ? accent : FALLBACK_ACCENT;
 }
 
 export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
   const activeThemeName = getActiveThemeName();
-  const currentTheme = activeThemeName in THEMES
-    ? activeThemeName as ThemeName
-    : null;
+  const currentTheme = activeThemeName in THEMES ? (activeThemeName as ThemeName) : null;
   const currentFontSize = loadPref<number>("fontSize", 16);
   const currentCompact = loadPref<boolean>("compactMode", false);
   let hasStoredAccent = localStorage.getItem("owncord:settings:accentColor") !== null;
@@ -37,13 +33,17 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   const themeRow = createElement("div", { class: "theme-options", role: "radiogroup" });
   for (const name of Object.keys(THEMES) as ThemeName[]) {
     const isActive = name === currentTheme;
-    const btn = createElement("button", {
-      class: `theme-opt ${name}${isActive ? " active" : ""}`,
-      role: "radio",
-      tabindex: "0",
-      "aria-checked": isActive ? "true" : "false",
-      "aria-label": name.charAt(0).toUpperCase() + name.slice(1),
-    }, name.charAt(0).toUpperCase() + name.slice(1));
+    const btn = createElement(
+      "button",
+      {
+        class: `theme-opt ${name}${isActive ? " active" : ""}`,
+        role: "radio",
+        tabindex: "0",
+        "aria-checked": isActive ? "true" : "false",
+        "aria-label": name.charAt(0).toUpperCase() + name.slice(1),
+      },
+      name.charAt(0).toUpperCase() + name.slice(1),
+    );
 
     const activateTheme = (): void => {
       applyTheme(name);
@@ -60,12 +60,16 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     };
 
     btn.addEventListener("click", activateTheme, { signal });
-    btn.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        activateTheme();
-      }
-    }, { signal });
+    btn.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          activateTheme();
+        }
+      },
+      { signal },
+    );
 
     themeRow.appendChild(btn);
   }
@@ -82,12 +86,16 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     value: String(currentFontSize),
   });
   const fontLabel = createElement("span", { class: "slider-val" }, `${currentFontSize}px`);
-  fontSlider.addEventListener("input", () => {
-    const size = Number(fontSlider.value);
-    setText(fontLabel, `${size}px`);
-    document.documentElement.style.setProperty("--font-size", `${size}px`);
-    savePref("fontSize", size);
-  }, { signal });
+  fontSlider.addEventListener(
+    "input",
+    () => {
+      const size = Number(fontSlider.value);
+      setText(fontLabel, `${size}px`);
+      document.documentElement.style.setProperty("--font-size", `${size}px`);
+      savePref("fontSize", size);
+    },
+    { signal },
+  );
   appendChildren(fontRow, fontSlider, fontLabel);
   appendChildren(section, fontHeader, fontRow);
 
@@ -120,6 +128,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
 
   const currentAccent = loadPref<string>("accentColor", defaultAccent);
 
+  // oxlint-disable-next-line consistent-function-scoping -- co-located with saveAccent for readability
   function applyAccent(color: string): void {
     // Set on both documentElement and body so the accent wins over
     // theme class specificity (body.theme-neon-glow sets --accent)
@@ -177,25 +186,33 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     };
 
     swatch.addEventListener("click", activateSwatch, { signal });
-    swatch.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        activateSwatch();
-      }
-    }, { signal });
+    swatch.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          activateSwatch();
+        }
+      },
+      { signal },
+    );
 
     swatchesRow.appendChild(swatch);
   }
 
-  hexInput.addEventListener("input", () => {
-    const raw = hexInput.value.replace(/[^0-9a-fA-F]/g, "").slice(0, 6);
-    hexInput.value = raw;
-    if (raw.length === 6) {
-      const color = `#${raw}`;
-      saveAccent(color);
-      syncDisplayedAccent(color);
-    }
-  }, { signal });
+  hexInput.addEventListener(
+    "input",
+    () => {
+      const raw = hexInput.value.replace(/[^0-9a-fA-F]/g, "").slice(0, 6);
+      hexInput.value = raw;
+      if (raw.length === 6) {
+        const color = `#${raw}`;
+        saveAccent(color);
+        syncDisplayedAccent(color);
+      }
+    },
+    { signal },
+  );
 
   appendChildren(hexInputRow, hexPrefix, hexInput);
   appendChildren(section, accentHeader, swatchesRow, hexInputRow);

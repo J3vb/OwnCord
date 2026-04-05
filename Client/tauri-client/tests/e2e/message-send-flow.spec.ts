@@ -3,10 +3,7 @@
  * Covers: type message → send → see it appear in message list.
  */
 import { test, expect } from "@playwright/test";
-import {
-  mockTauriFullSessionWithEcho,
-  navigateToMainPage,
-} from "./helpers";
+import { mockTauriFullSessionWithEcho, navigateToMainPage } from "./helpers";
 
 test.describe("Message Send Flow", () => {
   test.beforeEach(async ({ page }) => {
@@ -46,9 +43,9 @@ test.describe("Message Send Flow", () => {
     await textarea.press("Enter");
 
     // Wait for the echo message to appear (confirms send happened)
-    await expect(
-      page.locator(".message .msg-text", { hasText: "Clear after send" }),
-    ).toBeVisible({ timeout: 5000 });
+    await expect(page.locator(".message .msg-text", { hasText: "Clear after send" })).toBeVisible({
+      timeout: 5000,
+    });
 
     // Textarea should be empty
     await expect(textarea).toHaveValue("");

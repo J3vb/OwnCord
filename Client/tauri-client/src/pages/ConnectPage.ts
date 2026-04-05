@@ -22,12 +22,7 @@ import type { SimpleProfile } from "./connect-page/ServerPanel";
 /** Callbacks for external wiring (API integration added later). */
 export interface ConnectPageCallbacks {
   onLogin(host: string, username: string, password: string): Promise<void>;
-  onRegister(
-    host: string,
-    username: string,
-    password: string,
-    inviteCode: string,
-  ): Promise<void>;
+  onRegister(host: string, username: string, password: string, inviteCode: string): Promise<void>;
   onTotpSubmit(code: string): Promise<void>;
   onAddProfile?(name: string, host: string): void;
   onDeleteProfile?(profileId: string): void;
@@ -184,7 +179,11 @@ export function createConnectPage(
     branding.appendChild(logoSvg);
 
     const brandName = createElement("div", { class: "brand-name" }, "OwnCord");
-    const brandTag = createElement("div", { class: "brand-tagline" }, "Self-hosted chat \u2014 Your server, your rules");
+    const brandTag = createElement(
+      "div",
+      { class: "brand-tagline" },
+      "Self-hosted chat \u2014 Your server, your rules",
+    );
     appendChildren(branding, brandName, brandTag);
 
     serverPanel.element.insertBefore(branding, serverPanel.element.firstChild);
@@ -277,7 +276,8 @@ export function createConnectPage(
         try {
           const cred = await loadCredential(host);
           if (cred && loginForm.getHost() === host) {
-            loginForm.setCredentials(cred.username, cred.password);
+            // Password is no longer returned from credential store over IPC
+            loginForm.setCredentials(cred.username);
           }
         } catch {
           // Credential loading is best-effort; user can type manually

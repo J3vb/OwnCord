@@ -126,7 +126,7 @@ describe("FileUpload", () => {
     const onUpload = vi.fn(async () => {});
     const upload = makeUpload({ onUpload, maxSizeMb: 5 });
 
-    const bigFile = new File(["x"], "huge.bin", { type: "application/octet-stream" });
+    const bigFile = new File(["x"], "huge.pdf", { type: "application/pdf" });
     Object.defineProperty(bigFile, "size", { value: 6 * 1024 * 1024 }); // 6 MB > 5 MB limit
 
     const input = container.querySelector(".file-upload__input") as HTMLInputElement;
@@ -156,7 +156,7 @@ describe("FileUpload", () => {
     const onUpload = vi.fn(async () => {});
     const upload = makeUpload({ onUpload });
 
-    const bigFile = new File(["x"], "huge.bin", { type: "application/octet-stream" });
+    const bigFile = new File(["x"], "huge.pdf", { type: "application/pdf" });
     Object.defineProperty(bigFile, "size", { value: 11 * 1024 * 1024 }); // 11 MB > 10 MB default
 
     const input = container.querySelector(".file-upload__input") as HTMLInputElement;
@@ -288,9 +288,12 @@ describe("FileUpload", () => {
 
   it("cancel button aborts in-flight upload and resets preview", async () => {
     let resolveUpload: (() => void) | undefined;
-    const onUpload = vi.fn<any>(() => new Promise<void>((resolve) => {
-      resolveUpload = resolve;
-    }));
+    const onUpload = vi.fn<any>(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveUpload = resolve;
+        }),
+    );
     const upload = makeUpload({ onUpload });
 
     const file = new File(["data"], "test.txt", { type: "text/plain" });
@@ -327,7 +330,9 @@ describe("FileUpload", () => {
     const root = container.querySelector(".file-upload") as HTMLDivElement;
     const file = new File(["dropped"], "dropped.pdf", { type: "application/pdf" });
 
-    const dropEvent = new Event("drop", { bubbles: true }) as Event & { dataTransfer?: { files: File[] } };
+    const dropEvent = new Event("drop", { bubbles: true }) as Event & {
+      dataTransfer?: { files: File[] };
+    };
     Object.defineProperty(dropEvent, "dataTransfer", {
       value: { files: [file] },
     });
@@ -404,9 +409,12 @@ describe("FileUpload", () => {
 
   it("destroy aborts in-flight upload", async () => {
     let resolveUpload: (() => void) | undefined;
-    const onUpload = vi.fn<any>(() => new Promise<void>((resolve) => {
-      resolveUpload = resolve;
-    }));
+    const onUpload = vi.fn<any>(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveUpload = resolve;
+        }),
+    );
     const upload = makeUpload({ onUpload });
 
     const file = new File(["data"], "test.txt", { type: "text/plain" });
@@ -448,7 +456,7 @@ describe("FileUpload", () => {
     const onUpload = vi.fn(async () => {});
     const upload = makeUpload({ onUpload, maxSizeMb: 20 });
 
-    const file = new File(["x"], "big.bin", { type: "application/octet-stream" });
+    const file = new File(["x"], "big.pdf", { type: "application/pdf" });
     Object.defineProperty(file, "size", { value: 5 * 1024 * 1024 }); // 5 MB
 
     const input = container.querySelector(".file-upload__input") as HTMLInputElement;

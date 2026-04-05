@@ -5,7 +5,11 @@
 
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { muteScreenshareAudio, setUserVolume } from "@lib/livekitSession";
+import {
+  muteScreenshareAudio,
+  setScreenshareAudioVolume,
+  setUserVolume,
+} from "@lib/livekitSession";
 import type { MountableComponent } from "@lib/safe-render";
 
 export interface TileConfig {
@@ -26,9 +30,13 @@ export interface VideoGridComponent extends MountableComponent {
 }
 
 /** Create a fresh volume icon element. */
-function volumeIcon(): SVGSVGElement { return createIcon("volume-2", 16); }
+function volumeIcon(): SVGSVGElement {
+  return createIcon("volume-2", 16);
+}
 /** Create a fresh volume-x (muted) icon element. */
-function volumeXIcon(): SVGSVGElement { return createIcon("volume-x", 16); }
+function volumeXIcon(): SVGSVGElement {
+  return createIcon("volume-x", 16);
+}
 /** Replace a button's icon child with a new one. */
 function setButtonIcon(btn: HTMLButtonElement, icon: SVGSVGElement): void {
   while (btn.firstChild) btn.removeChild(btn.firstChild);
@@ -93,7 +101,10 @@ export function computeGridLayout(
 
 export function createVideoGrid(): VideoGridComponent {
   let root: HTMLDivElement | null = null;
-  const cells = new Map<number, { el: HTMLDivElement; config?: TileConfig }>();
+  const cells = new Map<
+    number,
+    { el: HTMLDivElement; config?: TileConfig; trackCleanup?: () => void }
+  >();
   let focusedTileId: number | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let resizeRafId = 0;
@@ -110,6 +121,44 @@ export function createVideoGrid(): VideoGridComponent {
     for (const entry of cells.values()) {
       entry.el.style.width = `${layout.tileW}px`;
       entry.el.style.height = `${layout.tileH}px`;
+    }
+  }
+
+  /** Attach ended/mute/unmute listeners on the first video track to handle stale tiles. */
+  function attachTrackLifecycle(userId: number, stream: MediaStream): void {
+    // Clean up previous listeners for this tile
+    const prev = cells.get(userId);
+    if (prev?.trackCleanup) {
+      prev.trackCleanup();
+      prev.trackCleanup = undefined;
+    }
+
+    const track = stream.getVideoTracks()[0];
+    if (track === undefined) return;
+
+    const onTrackEnded = (): void => {
+      removeStream(userId);
+    };
+    const onTrackMute = (): void => {
+      // Temporarily hide video — track may unmute after network recovery
+      const cell = cells.get(userId);
+      if (cell !== undefined) cell.el.classList.add("track-muted");
+    };
+    const onTrackUnmute = (): void => {
+      const cell = cells.get(userId);
+      if (cell !== undefined) cell.el.classList.remove("track-muted");
+    };
+    track.addEventListener("ended", onTrackEnded);
+    track.addEventListener("mute", onTrackMute);
+    track.addEventListener("unmute", onTrackUnmute);
+
+    const entry = cells.get(userId);
+    if (entry !== undefined) {
+      entry.trackCleanup = () => {
+        track.removeEventListener("ended", onTrackEnded);
+        track.removeEventListener("mute", onTrackMute);
+        track.removeEventListener("unmute", onTrackUnmute);
+      };
     }
   }
 
@@ -191,7 +240,12 @@ export function createVideoGrid(): VideoGridComponent {
     applyGridSizes();
   }
 
-  function addStream(userId: number, username: string, stream: MediaStream, config?: TileConfig): void {
+  function addStream(
+    userId: number,
+    username: string,
+    stream: MediaStream,
+    config?: TileConfig,
+  ): void {
     if (root === null) return;
 
     // If a cell already exists for this user, update it in place
@@ -207,6 +261,8 @@ export function createVideoGrid(): VideoGridComponent {
           oldTracks.every((t, i) => t.id === newTracks[i]?.id);
         if (!tracksMatch) {
           video.srcObject = stream;
+          video.play()?.catch(() => {});
+          attachTrackLifecycle(userId, stream);
         }
       }
       // Update username label in case it changed
@@ -214,6 +270,8 @@ export function createVideoGrid(): VideoGridComponent {
       if (label !== null) {
         label.textContent = username;
       }
+      // Sync stream type attribute in case it changed
+      existing.el.dataset.streamType = config?.isScreenshare ? "screenshare" : "camera";
       return;
     }
 
@@ -223,12 +281,15 @@ export function createVideoGrid(): VideoGridComponent {
     });
     video.muted = true;
     video.srcObject = stream;
+    video.play()?.catch(() => {});
 
     const label = createElement("div", { class: "video-username" }, username);
 
+    const streamType = config?.isScreenshare ? "screenshare" : "camera";
     const cell = createElement("div", {
       class: "video-cell",
       "data-user-id": String(userId),
+      "data-stream-type": streamType,
     });
     appendChildren(cell, video, label);
 
@@ -263,7 +324,9 @@ export function createVideoGrid(): VideoGridComponent {
         const wasMuted = muted;
         muted = currentVolume === 0;
         if (config.isScreenshare) {
+          // BUG-102: Set actual volume, not just mute toggle.
           muteScreenshareAudio(config.audioUserId, muted);
+          setScreenshareAudioVolume(config.audioUserId, currentVolume / 200);
         } else {
           setUserVolume(config.audioUserId, currentVolume);
         }
@@ -310,6 +373,7 @@ export function createVideoGrid(): VideoGridComponent {
     }
 
     cells.set(userId, { el: cell, config });
+    attachTrackLifecycle(userId, stream);
     root.appendChild(cell);
     if (focusedTileId !== null) {
       rebuildFocusLayout();
@@ -321,6 +385,11 @@ export function createVideoGrid(): VideoGridComponent {
   function removeStream(userId: number): void {
     const entry = cells.get(userId);
     if (entry === undefined) return;
+
+    if (entry.trackCleanup) {
+      entry.trackCleanup();
+      entry.trackCleanup = undefined;
+    }
 
     const video = entry.el.querySelector("video");
     if (video !== null) video.srcObject = null;
@@ -354,7 +423,9 @@ export function createVideoGrid(): VideoGridComponent {
     container.appendChild(root);
 
     // Observe container size changes to recalculate tile layout
-    resizeObserver = new ResizeObserver(() => { scheduleResize(); });
+    resizeObserver = new ResizeObserver(() => {
+      scheduleResize();
+    });
     resizeObserver.observe(root);
   }
 
@@ -368,6 +439,10 @@ export function createVideoGrid(): VideoGridComponent {
     }
 
     for (const [, entry] of cells) {
+      if (entry.trackCleanup) {
+        entry.trackCleanup();
+        entry.trackCleanup = undefined;
+      }
       const video = entry.el.querySelector("video");
       if (video !== null) video.srcObject = null;
     }
@@ -380,5 +455,13 @@ export function createVideoGrid(): VideoGridComponent {
     }
   }
 
-  return { mount, destroy, addStream, removeStream, hasStreams, setFocusedTile, getFocusedTileId: getFocusedTileIdFn };
+  return {
+    mount,
+    destroy,
+    addStream,
+    removeStream,
+    hasStreams,
+    setFocusedTile,
+    getFocusedTileId: getFocusedTileIdFn,
+  };
 }

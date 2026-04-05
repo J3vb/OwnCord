@@ -179,6 +179,16 @@ fn tofu_check<R: Runtime>(
     }
 }
 
+/// Single call site for ws-state events — keeps tauri-typegen from generating duplicates.
+fn emit_ws_state<R: Runtime>(app: &AppHandle<R>, state: &str) {
+    let _ = app.emit("ws-state", state);
+}
+
+/// Single call site for cert-tofu events — keeps tauri-typegen from generating duplicates.
+fn emit_cert_tofu<R: Runtime>(app: &AppHandle<R>, payload: serde_json::Value) {
+    let _ = app.emit("cert-tofu", payload);
+}
+
 /// Connect to a WSS server. Spawns a background task that:
 /// - Emits `ws-message` events for incoming server messages
 /// - Emits `ws-state` events for connection state changes
@@ -207,7 +217,7 @@ pub async fn ws_connect<R: Runtime>(
         return Err("Only wss:// connections are permitted".into());
     }
 
-    let _ = app.emit("ws-state", "connecting");
+    emit_ws_state(&app, "connecting");
 
     // Create TOFU verifier that captures the cert fingerprint during handshake.
     let (verifier, captured_fp) = TofuVerifier::new();
@@ -255,27 +265,21 @@ pub async fn ws_connect<R: Runtime>(
     match tofu_check(&app, &host, &fingerprint) {
         Ok(status) => {
             info!("[ws_proxy] TOFU check passed for {}: {}", host, status);
-            let _ = app.emit(
-                "cert-tofu",
-                serde_json::json!({
-                    "host": host,
-                    "fingerprint": fingerprint,
-                    "status": status,
-                }),
-            );
+            emit_cert_tofu(&app, serde_json::json!({
+                "host": host,
+                "fingerprint": fingerprint,
+                "status": status,
+            }));
         }
         Err(mismatch_msg) => {
             warn!("[ws_proxy] TOFU check FAILED for {} — certificate fingerprint mismatch", host);
             debug!("[ws_proxy] TOFU detail: {}", mismatch_msg);
-            let _ = app.emit(
-                "cert-tofu",
-                serde_json::json!({
-                    "host": host,
-                    "fingerprint": fingerprint,
-                    "status": "mismatch",
-                    "message": mismatch_msg,
-                }),
-            );
+            emit_cert_tofu(&app, serde_json::json!({
+                "host": host,
+                "fingerprint": fingerprint,
+                "status": "mismatch",
+                "message": mismatch_msg,
+            }));
             // Reject the connection — do not proceed.
             return Err(mismatch_msg);
         }
@@ -283,7 +287,7 @@ pub async fn ws_connect<R: Runtime>(
     // ── End TOFU check ───────────────────────────────────────────────────
 
     info!("[ws_proxy] connected to {}", host);
-    let _ = app.emit("ws-state", "open");
+    emit_ws_state(&app, "open");
 
     let (mut sink, mut stream) = ws_stream.split();
 
@@ -340,7 +344,7 @@ pub async fn ws_connect<R: Runtime>(
             }
         }
         info!("[ws_proxy] connection closed");
-        let _ = app_state.emit("ws-state", "closed");
+        emit_ws_state(&app_state, "closed");
     });
 
     Ok(())

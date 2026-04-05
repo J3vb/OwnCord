@@ -22,7 +22,14 @@ const {
   mockMessageInputDestroy: vi.fn(),
   mockTypingMount: vi.fn(),
   mockTypingDestroy: vi.fn(),
-  mockGetChannelMessages: vi.fn((): Array<{ id: number; content?: string; user?: { id: number; username: string }; deleted?: boolean }> => []),
+  mockGetChannelMessages: vi.fn(
+    (): Array<{
+      id: number;
+      content?: string;
+      user?: { id: number; username: string };
+      deleted?: boolean;
+    }> => [],
+  ),
   mockSetReplyTo: vi.fn(),
   mockStartEdit: vi.fn(),
   mockScrollToMessage: vi.fn(() => true),
@@ -30,14 +37,21 @@ const {
 
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({
-    debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
   }),
 }));
 
 vi.mock("@lib/dom", () => ({
   createElement: vi.fn((tag: string) => document.createElement(tag)),
-  clearChildren: vi.fn((el: HTMLElement) => { el.innerHTML = ""; }),
-  setText: vi.fn((el: HTMLElement, text: string) => { el.textContent = text; }),
+  clearChildren: vi.fn((el: HTMLElement) => {
+    el.innerHTML = "";
+  }),
+  setText: vi.fn((el: HTMLElement, text: string) => {
+    el.textContent = text;
+  }),
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- captured from mock factory, typed at call sites
@@ -93,7 +107,16 @@ vi.mock("../../src/pages/main-page/ChatHeader", () => ({
 }));
 
 const { mockDmStoreGetState, mockMembersStoreGetState } = vi.hoisted(() => ({
-  mockDmStoreGetState: vi.fn(() => ({ channels: [] as Array<{ channelId: number; recipient: { id: number; username: string; avatar: string; status: string }; lastMessageId: number | null; lastMessage: string; lastMessageAt: string; unreadCount: number }> })),
+  mockDmStoreGetState: vi.fn(() => ({
+    channels: [] as Array<{
+      channelId: number;
+      recipient: { id: number; username: string; avatar: string; status: string };
+      lastMessageId: number | null;
+      lastMessage: string;
+      lastMessageAt: string;
+      unreadCount: number;
+    }>,
+  })),
   mockMembersStoreGetState: vi.fn(() => ({ members: new Map() })),
 }));
 
@@ -126,11 +149,22 @@ function makeSlots(): ChannelControllerOptions["slots"] {
 
 function makeOpts(overrides: Partial<ChannelControllerOptions> = {}): ChannelControllerOptions {
   return {
-    ws: { send: vi.fn(), getState: vi.fn(() => "connected") } as unknown as ChannelControllerOptions["ws"],
-    api: { uploadFile: vi.fn().mockResolvedValue({ id: 1, url: "/f/1", filename: "f.txt" }) } as unknown as ChannelControllerOptions["api"],
-    msgCtrl: { loadMessages: vi.fn(), loadOlderMessages: vi.fn() } as unknown as ChannelControllerOptions["msgCtrl"],
+    ws: {
+      send: vi.fn(),
+      getState: vi.fn(() => "connected"),
+    } as unknown as ChannelControllerOptions["ws"],
+    api: {
+      uploadFile: vi.fn().mockResolvedValue({ id: 1, url: "/f/1", filename: "f.txt" }),
+    } as unknown as ChannelControllerOptions["api"],
+    msgCtrl: {
+      loadMessages: vi.fn(),
+      loadOlderMessages: vi.fn(),
+    } as unknown as ChannelControllerOptions["msgCtrl"],
     pendingDeleteManager: { tryDelete: vi.fn(() => "pending" as const), cleanup: vi.fn() },
-    reactionCtrl: { handleReaction: vi.fn(), destroy: vi.fn() } as unknown as ChannelControllerOptions["reactionCtrl"],
+    reactionCtrl: {
+      handleReaction: vi.fn(),
+      destroy: vi.fn(),
+    } as unknown as ChannelControllerOptions["reactionCtrl"],
     typingLimiter: { tryConsume: vi.fn(() => true) },
     showToast: vi.fn(),
     getCurrentUserId: () => 1,
@@ -242,7 +276,9 @@ describe("createChannelController", () => {
   describe("MessageList callbacks", () => {
     it("onDeleteClick sends delete on confirmed", () => {
       const opts = makeOpts();
-      (opts.pendingDeleteManager.tryDelete as ReturnType<typeof vi.fn>).mockReturnValue("confirmed");
+      (opts.pendingDeleteManager.tryDelete as ReturnType<typeof vi.fn>).mockReturnValue(
+        "confirmed",
+      );
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
@@ -372,11 +408,15 @@ describe("createChannelController", () => {
 
     it("onUploadFile shows toast on failure", async () => {
       const opts = makeOpts();
-      (opts.api as unknown as { uploadFile: ReturnType<typeof vi.fn> }).uploadFile.mockRejectedValue(new Error("upload failed"));
+      (
+        opts.api as unknown as { uploadFile: ReturnType<typeof vi.fn> }
+      ).uploadFile.mockRejectedValue(new Error("upload failed"));
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      await expect(capturedMessageInputOpts!.onUploadFile(new File(["x"], "test.txt"))).rejects.toThrow("upload failed");
+      await expect(
+        capturedMessageInputOpts!.onUploadFile(new File(["x"], "test.txt")),
+      ).rejects.toThrow("upload failed");
       expect(opts.showToast).toHaveBeenCalledWith("File upload failed", "error");
     });
   });
@@ -442,7 +482,9 @@ describe("createChannelController", () => {
 
     it("onPinClick pins a message and shows toast", async () => {
       const opts = makeOpts();
-      (opts.api as unknown as { pinMessage: ReturnType<typeof vi.fn> }).pinMessage = vi.fn().mockResolvedValue(undefined);
+      (opts.api as unknown as { pinMessage: ReturnType<typeof vi.fn> }).pinMessage = vi
+        .fn()
+        .mockResolvedValue(undefined);
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
@@ -456,7 +498,9 @@ describe("createChannelController", () => {
 
     it("onPinClick unpins a message and shows toast", async () => {
       const opts = makeOpts();
-      (opts.api as unknown as { unpinMessage: ReturnType<typeof vi.fn> }).unpinMessage = vi.fn().mockResolvedValue(undefined);
+      (opts.api as unknown as { unpinMessage: ReturnType<typeof vi.fn> }).unpinMessage = vi
+        .fn()
+        .mockResolvedValue(undefined);
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
@@ -470,7 +514,9 @@ describe("createChannelController", () => {
 
     it("onPinClick shows error toast on failure", async () => {
       const opts = makeOpts();
-      (opts.api as unknown as { pinMessage: ReturnType<typeof vi.fn> }).pinMessage = vi.fn().mockRejectedValue(new Error("network error"));
+      (opts.api as unknown as { pinMessage: ReturnType<typeof vi.fn> }).pinMessage = vi
+        .fn()
+        .mockRejectedValue(new Error("network error"));
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 

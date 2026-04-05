@@ -80,11 +80,7 @@ describe("createMessageController", () => {
       await ctrl.loadMessages(42, signal);
 
       expect(api.getMessages).toHaveBeenCalledWith(42, { limit: 50 }, signal);
-      expect(mockSetMessages).toHaveBeenCalledWith(
-        42,
-        [{ id: 1, content: "hi" }],
-        false,
-      );
+      expect(mockSetMessages).toHaveBeenCalledWith(42, [{ id: 1, content: "hi" }], false);
     });
 
     it("skips fetch when channel is already loaded", async () => {
@@ -155,16 +151,8 @@ describe("createMessageController", () => {
 
       await ctrl.loadOlderMessages(42, signal);
 
-      expect(api.getMessages).toHaveBeenCalledWith(
-        42,
-        { before: 10, limit: 50 },
-        signal,
-      );
-      expect(mockPrependMessages).toHaveBeenCalledWith(
-        42,
-        [{ id: 5, content: "older" }],
-        true,
-      );
+      expect(api.getMessages).toHaveBeenCalledWith(42, { before: 10, limit: 50 }, signal);
+      expect(mockPrependMessages).toHaveBeenCalledWith(42, [{ id: 5, content: "older" }], true);
     });
 
     it("does nothing when channel has no messages", async () => {

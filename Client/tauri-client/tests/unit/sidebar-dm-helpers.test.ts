@@ -216,7 +216,9 @@ describe("SidebarDmHelpers", () => {
 
     it("sets activeDmUserId in UI store", () => {
       const deps = makeDeps();
-      const dm = makeDmChannel({ recipient: { id: 10, username: "Alice", avatar: "", status: "online" } });
+      const dm = makeDmChannel({
+        recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+      });
       selectDmConversation(dm, deps);
 
       expect(uiStore.getState().activeDmUserId).toBe(10);
@@ -278,7 +280,9 @@ describe("SidebarDmHelpers", () => {
       // Add a member with a known status
       membersStore.setState((prev) => ({
         ...prev,
-        members: new Map([[20, { id: 20, username: "Bob", avatar: null, role: "member", status: "idle" as const }]]),
+        members: new Map([
+          [20, { id: 20, username: "Bob", avatar: null, role: "member", status: "idle" as const }],
+        ]),
       }));
 
       const mockApi = {
@@ -365,13 +369,15 @@ describe("SidebarDmHelpers", () => {
     });
 
     it("maps DM channels to DmConversation objects", () => {
-      addDmChannel(makeDmChannel({
-        channelId: 100,
-        recipient: { id: 10, username: "Alice", avatar: "alice.png", status: "online" },
-        lastMessage: "Hello!",
-        lastMessageAt: "2025-01-01T00:00:00Z",
-        unreadCount: 3,
-      }));
+      addDmChannel(
+        makeDmChannel({
+          channelId: 100,
+          recipient: { id: 10, username: "Alice", avatar: "alice.png", status: "online" },
+          lastMessage: "Hello!",
+          lastMessageAt: "2025-01-01T00:00:00Z",
+          unreadCount: 3,
+        }),
+      );
 
       const result = buildDmConversations(null);
       expect(result).toHaveLength(1);
@@ -388,74 +394,95 @@ describe("SidebarDmHelpers", () => {
     });
 
     it("marks conversation as active when userId matches activeDmUserId", () => {
-      addDmChannel(makeDmChannel({
-        channelId: 100,
-        recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
-      }));
+      addDmChannel(
+        makeDmChannel({
+          channelId: 100,
+          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+        }),
+      );
 
       const result = buildDmConversations(10);
       expect(result[0]!.active).toBe(true);
     });
 
     it("does not mark conversation as active when userId does not match", () => {
-      addDmChannel(makeDmChannel({
-        channelId: 100,
-        recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
-      }));
+      addDmChannel(
+        makeDmChannel({
+          channelId: 100,
+          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+        }),
+      );
 
       const result = buildDmConversations(999);
       expect(result[0]!.active).toBe(false);
     });
 
     it("uses 'No messages yet' when lastMessage is empty", () => {
-      addDmChannel(makeDmChannel({
-        channelId: 100,
-        lastMessage: "",
-      }));
+      addDmChannel(
+        makeDmChannel({
+          channelId: 100,
+          lastMessage: "",
+        }),
+      );
 
       const result = buildDmConversations(null);
       expect(result[0]!.lastMessage).toBe("No messages yet");
     });
 
     it("sets unread to false when unreadCount is 0", () => {
-      addDmChannel(makeDmChannel({
-        channelId: 100,
-        unreadCount: 0,
-      }));
+      addDmChannel(
+        makeDmChannel({
+          channelId: 100,
+          unreadCount: 0,
+        }),
+      );
 
       const result = buildDmConversations(null);
       expect(result[0]!.unread).toBe(false);
     });
 
     it("uses avatar null when avatar is empty string", () => {
-      addDmChannel(makeDmChannel({
-        channelId: 100,
-        recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
-      }));
+      addDmChannel(
+        makeDmChannel({
+          channelId: 100,
+          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+        }),
+      );
 
       const result = buildDmConversations(null);
       expect(result[0]!.avatar).toBeNull();
     });
 
     it("defaults status to 'offline' when status is undefined", () => {
-      addDmChannel(makeDmChannel({
-        channelId: 100,
-        recipient: { id: 10, username: "Alice", avatar: "", status: undefined as unknown as string },
-      }));
+      addDmChannel(
+        makeDmChannel({
+          channelId: 100,
+          recipient: {
+            id: 10,
+            username: "Alice",
+            avatar: "",
+            status: undefined as unknown as string,
+          },
+        }),
+      );
 
       const result = buildDmConversations(null);
       expect(result[0]!.status).toBe("offline");
     });
 
     it("handles multiple DM channels", () => {
-      addDmChannel(makeDmChannel({
-        channelId: 100,
-        recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
-      }));
-      addDmChannel(makeDmChannel({
-        channelId: 101,
-        recipient: { id: 11, username: "Bob", avatar: "", status: "idle" },
-      }));
+      addDmChannel(
+        makeDmChannel({
+          channelId: 100,
+          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+        }),
+      );
+      addDmChannel(
+        makeDmChannel({
+          channelId: 101,
+          recipient: { id: 11, username: "Bob", avatar: "", status: "idle" },
+        }),
+      );
 
       const result = buildDmConversations(11);
       expect(result).toHaveLength(2);

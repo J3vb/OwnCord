@@ -4,10 +4,7 @@
  * VoiceWidget shows connected users when in a voice channel.
  */
 import { test, expect } from "@playwright/test";
-import {
-  mockTauriFullSessionWithVoice,
-  navigateToMainPage,
-} from "./helpers";
+import { mockTauriFullSessionWithVoice, navigateToMainPage } from "./helpers";
 
 test.describe("Voice Channel Items", () => {
   test.beforeEach(async ({ page }) => {

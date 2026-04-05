@@ -16,10 +16,7 @@ export interface MountableComponent {
  * Safely mount a component, catching any errors during rendering.
  * On failure, displays a fallback UI instead of crashing the app.
  */
-export function safeMount(
-  component: MountableComponent,
-  container: Element,
-): void {
+export function safeMount(component: MountableComponent, container: Element): void {
   try {
     component.mount(container);
   } catch (err) {
@@ -67,7 +64,7 @@ export function installGlobalErrorHandlers(): void {
   window.addEventListener("unhandledrejection", (event) => {
     const reason =
       event.reason instanceof Error
-        ? event.reason.stack ?? event.reason.message
+        ? (event.reason.stack ?? event.reason.message)
         : String(event.reason);
 
     // Tauri plugin-http GC cleanup: when a consumed Response body is finalized,

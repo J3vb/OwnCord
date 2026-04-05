@@ -19,7 +19,7 @@ test.describe("Typing Indicator", () => {
 
   test("typing bar is empty by default", async ({ page }) => {
     const typingBar = page.locator(".typing-bar");
-    if (await typingBar.count() > 0) {
+    if ((await typingBar.count()) > 0) {
       // When empty, typing bar should have no visible dots text
       const text = await typingBar.textContent();
       expect(text?.trim()).toBe("");

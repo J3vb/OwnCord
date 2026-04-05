@@ -63,9 +63,7 @@ export interface ChannelController {
 // Factory
 // ---------------------------------------------------------------------------
 
-export function createChannelController(
-  opts: ChannelControllerOptions,
-): ChannelController {
+export function createChannelController(opts: ChannelControllerOptions): ChannelController {
   const {
     ws,
     api,
@@ -174,13 +172,15 @@ export function createChannelController(
         const action = currentlyPinned
           ? api.unpinMessage(chId, msgId)
           : api.pinMessage(chId, msgId);
-        action.then(() => {
-          setMessagePinned(chId, msgId, !currentlyPinned);
-          showToast(currentlyPinned ? "Message unpinned" : "Message pinned", "success");
-        }).catch((err) => {
-          log.error("Pin/unpin failed", { error: String(err) });
-          showToast("Failed to pin/unpin message", "error");
-        });
+        action
+          .then(() => {
+            setMessagePinned(chId, msgId, !currentlyPinned);
+            showToast(currentlyPinned ? "Message unpinned" : "Message pinned", "success");
+          })
+          .catch((err) => {
+            log.error("Pin/unpin failed", { error: String(err) });
+            showToast("Failed to pin/unpin message", "error");
+          });
       },
     });
     messageList.mount(slots.messagesSlot);
@@ -251,18 +251,22 @@ export function createChannelController(
     messageInput.mount(slots.inputSlot);
 
     // Arrow-up edit: listen for edit-last-message bubbling from MessageInput
-    slots.inputSlot.addEventListener("edit-last-message", () => {
-      const msgs = getChannelMessages(channelId);
-      const myId = getCurrentUserId();
-      // Find the last message sent by the current user (array is chronological)
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        const m = msgs[i]!;
-        if (m.user.id === myId && !m.deleted) {
-          messageInput?.startEdit(m.id, m.content);
-          break;
+    slots.inputSlot.addEventListener(
+      "edit-last-message",
+      () => {
+        const msgs = getChannelMessages(channelId);
+        const myId = getCurrentUserId();
+        // Find the last message sent by the current user (array is chronological)
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          const m = msgs[i]!;
+          if (m.user.id === myId && !m.deleted) {
+            messageInput?.startEdit(m.id, m.content);
+            break;
+          }
         }
-      }
-    }, { signal });
+      },
+      { signal },
+    );
 
     // Update header
     if (chatHeaderRefs !== null && channelType === "dm") {

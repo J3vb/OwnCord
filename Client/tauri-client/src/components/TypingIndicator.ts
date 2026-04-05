@@ -25,9 +25,7 @@ function formatTypingText(users: readonly Member[]): string {
   return "Several people are typing...";
 }
 
-export function createTypingIndicator(
-  options: TypingIndicatorOptions,
-): MountableComponent {
+export function createTypingIndicator(options: TypingIndicatorOptions): MountableComponent {
   const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
 
@@ -65,7 +63,9 @@ export function createTypingIndicator(
     disposable.onStoreChange(
       membersStore,
       (s) => s.typingUsers,
-      () => { updateFromState(); },
+      () => {
+        updateFromState();
+      },
     );
 
     container.appendChild(root);

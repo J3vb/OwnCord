@@ -11,23 +11,31 @@ const MOCK_REGISTER_RESPONSE = {
 };
 
 async function mockRegisterSuccess(page: import("@playwright/test").Page): Promise<void> {
-  await page.addInitScript(buildTauriMockScript({
-    httpRoutes: [
-      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      { pattern: "/api/v1/auth/register", status: 200, body: MOCK_REGISTER_RESPONSE },
-    ],
-    simulateWsFlow: true,
-  }));
+  await page.addInitScript(
+    buildTauriMockScript({
+      httpRoutes: [
+        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        { pattern: "/api/v1/auth/register", status: 200, body: MOCK_REGISTER_RESPONSE },
+      ],
+      simulateWsFlow: true,
+    }),
+  );
 }
 
 async function mockRegisterConflict(page: import("@playwright/test").Page): Promise<void> {
-  await page.addInitScript(buildTauriMockScript({
-    httpRoutes: [
-      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      { pattern: "/api/v1/auth/register", status: 409, body: { error: "USERNAME_TAKEN", message: "Username already exists" } },
-    ],
-    simulateWsFlow: false,
-  }));
+  await page.addInitScript(
+    buildTauriMockScript({
+      httpRoutes: [
+        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        {
+          pattern: "/api/v1/auth/register",
+          status: 409,
+          body: { error: "USERNAME_TAKEN", message: "Username already exists" },
+        },
+      ],
+      simulateWsFlow: false,
+    }),
+  );
 }
 
 async function switchToRegisterMode(page: import("@playwright/test").Page): Promise<void> {

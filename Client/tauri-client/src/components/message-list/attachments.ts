@@ -3,10 +3,7 @@
  * Also owns the server host state and URL resolution used by other modules.
  */
 
-import {
-  createElement,
-  appendChildren,
-} from "@lib/dom";
+import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@components/settings/helpers";
@@ -77,10 +74,22 @@ export function clearAttachmentCaches(): void {
 }
 
 /** Safe MIME types allowed in data: URIs — blocks script injection via crafted Content-Type. */
+// Note: image/svg+xml is intentionally excluded — SVGs can execute JS if
+// loaded in <object>, <embed>, or <iframe> contexts. Only raster formats
+// are considered safe for data: URI rendering via <img>.
 const SAFE_MIME_TYPES = new Set([
-  "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml",
-  "image/avif", "image/bmp", "video/mp4", "video/webm", "audio/mpeg",
-  "audio/ogg", "audio/wav", "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+  "image/bmp",
+  "video/mp4",
+  "video/webm",
+  "audio/mpeg",
+  "audio/ogg",
+  "audio/wav",
+  "application/pdf",
 ]);
 
 /** Sanitize a Content-Type header value for use in a data: URI. */
@@ -124,7 +133,9 @@ export function openCacheDb(): Promise<IDBDatabase | null> {
           db.createObjectStore(IDB_STORE);
         }
       };
+      // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
       req.onsuccess = () => resolve(req.result);
+      // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
       req.onerror = () => resolve(null);
     } catch {
       resolve(null);
@@ -134,8 +145,11 @@ export function openCacheDb(): Promise<IDBDatabase | null> {
 
 function closeDbAfterTransaction(tx: IDBTransaction, db: IDBDatabase): void {
   const close = (): void => db.close();
+  // oxlint-disable-next-line prefer-add-event-listener -- IDBTransaction does not support addEventListener
   tx.oncomplete = close;
+  // oxlint-disable-next-line prefer-add-event-listener -- IDBTransaction does not support addEventListener
   tx.onabort = close;
+  // oxlint-disable-next-line prefer-add-event-listener -- IDBTransaction does not support addEventListener
   tx.onerror = close;
 }
 
@@ -149,7 +163,9 @@ async function idbGet(url: string): Promise<string | null> {
       closeDbAfterTransaction(tx, db);
       const store = tx.objectStore(IDB_STORE);
       const req = store.get(url);
+      // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
       req.onsuccess = () => resolve(typeof req.result === "string" ? req.result : null);
+      // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
       req.onerror = () => resolve(null);
     } catch {
       db.close();
@@ -218,7 +234,7 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
     try {
       const useInsecure = isServerUrl(url);
       const fetchOpts: RequestInit = useInsecure
-        ? { danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } } as RequestInit
+        ? ({ danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } } as RequestInit)
         : {};
       const res = await tauriFetch(url, fetchOpts);
       if (!res.ok) return null;
@@ -267,7 +283,8 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
 
     // Reserve space using server-provided dimensions to prevent layout shift.
     if (att.width != null && att.height != null && att.width > 0 && att.height > 0) {
-      const maxW = 400, maxH = 350;
+      const maxW = 400,
+        maxH = 350;
       const scale = Math.min(1, maxW / att.width, maxH / att.height);
       const w = Math.round(att.width * scale);
       const h = Math.round(att.height * scale);
@@ -307,10 +324,14 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
         alt: att.filename,
       });
       attachLightbox(img);
-      img.addEventListener("load", () => {
-        clearReservation();
-        if (isGif) observeMedia(img, cached, wrap, !loadPref("animateGifs", true));
-      }, { once: true });
+      img.addEventListener(
+        "load",
+        () => {
+          clearReservation();
+          if (isGif) observeMedia(img, cached, wrap, !loadPref("animateGifs", true));
+        },
+        { once: true },
+      );
       wrap.appendChild(img);
     } else {
       // Show loading placeholder, then replace with image
@@ -324,10 +345,14 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
             alt: att.filename,
           });
           attachLightbox(img);
-          img.addEventListener("load", () => {
-            clearReservation();
-            if (isGif) observeMedia(img, dataUrl, wrap, !loadPref("animateGifs", true));
-          }, { once: true });
+          img.addEventListener(
+            "load",
+            () => {
+              clearReservation();
+              if (isGif) observeMedia(img, dataUrl, wrap, !loadPref("animateGifs", true));
+            },
+            { once: true },
+          );
           placeholder.replaceWith(img);
         } else {
           placeholder.classList.remove("loading");
@@ -374,14 +399,19 @@ async function downloadFile(url: string, filename: string): Promise<void> {
     // Fetch file data — only accept invalid certs for the OwnCord server
     const useInsecure = isServerUrl(url);
     const fetchOpts: RequestInit = useInsecure
-      ? { danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } } as RequestInit
+      ? ({ danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } } as RequestInit)
       : {};
     const res = await tauriFetch(url, fetchOpts);
-    if (!res.ok) return;
+    if (!res.ok) {
+      log.error("Download failed", { filename, status: res.status });
+      alert(`Download failed: server returned ${res.status}`);
+      return;
+    }
 
     const buffer = await res.arrayBuffer();
     await writeFile(filePath, new Uint8Array(buffer));
   } catch (err) {
     log.error("Download failed", { filename, error: String(err) });
+    alert(`Download failed for ${filename} — check logs for details`);
   }
 }

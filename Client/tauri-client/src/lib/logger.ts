@@ -36,9 +36,7 @@ function serializeData(data: unknown): unknown {
   if (typeof data === "object" && data !== null) {
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
-      result[key] = value instanceof Error
-        ? { error: value.message, stack: value.stack }
-        : value;
+      result[key] = value instanceof Error ? { error: value.message, stack: value.stack } : value;
     }
     return result;
   }

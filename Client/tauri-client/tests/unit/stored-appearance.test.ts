@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const {
-  mockGetActiveThemeName,
-  mockRestoreTheme,
-  mockApplyThemeByName,
-} = vi.hoisted(() => ({
+const { mockGetActiveThemeName, mockRestoreTheme, mockApplyThemeByName } = vi.hoisted(() => ({
   mockGetActiveThemeName: vi.fn(() => "neon-glow"),
   mockRestoreTheme: vi.fn(),
   mockApplyThemeByName: vi.fn(),

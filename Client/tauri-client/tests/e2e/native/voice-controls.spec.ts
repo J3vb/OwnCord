@@ -8,7 +8,7 @@
  */
 
 import { test, expect } from "../native-fixture-persistent";
-import { SKIP_SERVER, hasCredentials, ensureLoggedIn } from "./helpers";
+import { SKIP_SERVER, hasCredentials, ensureLoggedIn, countVoiceChannels } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
@@ -18,10 +18,8 @@ test.describe("Voice Channel UI", () => {
     test.skip(!hasCredentials(), "Skipped: OWNCORD_TEST_USER/OWNCORD_TEST_PASS not set");
     await ensureLoggedIn(nativePage);
 
-    // Single voice-channel availability check for all tests in this describe
-    const voiceCount = await nativePage
-      .locator(".channel-item .ch-icon", { hasText: "🔊" })
-      .count();
+    // Conditional skip: need at least 1 voice channel
+    const voiceCount = await countVoiceChannels(nativePage);
     test.skip(voiceCount === 0, "No voice channels on this server");
   });
 

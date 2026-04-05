@@ -122,7 +122,9 @@ function makeMockApi(overrides: Record<string, unknown> = {}) {
       ],
     }),
     unpinMessage: vi.fn().mockResolvedValue(undefined),
-    search: vi.fn().mockResolvedValue({ results: [{ channel_id: 1, message_id: 10, content: "hello" }] }),
+    search: vi
+      .fn()
+      .mockResolvedValue({ results: [{ channel_id: 1, message_id: 10, content: "hello" }] }),
     ...overrides,
   };
 }
@@ -155,7 +157,6 @@ describe("createInviteManagerController", () => {
     const controller = createInviteManagerController({
       api: api as never,
       getRoot: () => root,
-
     });
 
     await controller.open();
@@ -173,7 +174,6 @@ describe("createInviteManagerController", () => {
     const controller = createInviteManagerController({
       api: api as never,
       getRoot: () => root,
-
     });
 
     await controller.open();
@@ -197,7 +197,6 @@ describe("createInviteManagerController", () => {
     const controller = createInviteManagerController({
       api: api as never,
       getRoot: () => root,
-
     });
 
     await controller.open();
@@ -219,7 +218,6 @@ describe("createInviteManagerController", () => {
     const controller = createInviteManagerController({
       api: api as never,
       getRoot: () => root,
-
     });
 
     await controller.open();
@@ -365,10 +363,7 @@ describe("createPinnedPanelController", () => {
     opts.onJumpToMessage(999);
 
     expect(mockScrollToMessage).toHaveBeenCalledWith(999);
-    expect(mockShowToast).toHaveBeenCalledWith(
-      expect.stringContaining("not in"),
-      "info",
-    );
+    expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining("not in"), "info");
     // Panel should NOT close when message not found
     expect(mockPinnedMessagesDestroy).not.toHaveBeenCalled();
   });
@@ -961,12 +956,8 @@ describe("createInviteManagerController (additional)", () => {
     expect(mockShowToast).toHaveBeenCalledWith("Something went wrong", "error");
   });
 
-  it("onRevokeInvite succeeds when invite code is not found in re-fetch", async () => {
-    const api = makeMockApi({
-      getInvites: vi.fn()
-        .mockResolvedValueOnce([makeInviteResponse()]) // initial load
-        .mockResolvedValueOnce([]), // re-fetch returns empty
-    });
+  it("onRevokeInvite passes invite code directly to API", async () => {
+    const api = makeMockApi();
 
     const controller = createInviteManagerController({
       api: api as never,
@@ -979,9 +970,8 @@ describe("createInviteManagerController (additional)", () => {
       onRevokeInvite: (code: string) => Promise<void>;
     };
 
-    // Should not throw and should not call revokeInvite since no match
-    await expect(opts.onRevokeInvite("nonexistent")).resolves.toBeUndefined();
-    expect(api.revokeInvite).not.toHaveBeenCalled();
+    await expect(opts.onRevokeInvite("abc123xyz")).resolves.toBeUndefined();
+    expect(api.revokeInvite).toHaveBeenCalledWith("abc123xyz");
   });
 });
 
@@ -1076,7 +1066,11 @@ describe("createSearchOverlayController", () => {
     controller.open();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
-      onSearch: (query: string, chId: number | undefined, signal?: AbortSignal) => Promise<unknown[]>;
+      onSearch: (
+        query: string,
+        chId: number | undefined,
+        signal?: AbortSignal,
+      ) => Promise<unknown[]>;
     };
 
     const results = await opts.onSearch("hello", 5);
@@ -1099,7 +1093,11 @@ describe("createSearchOverlayController", () => {
     controller.open();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
-      onSearch: (query: string, chId: number | undefined, signal?: AbortSignal) => Promise<unknown[]>;
+      onSearch: (
+        query: string,
+        chId: number | undefined,
+        signal?: AbortSignal,
+      ) => Promise<unknown[]>;
     };
 
     await expect(opts.onSearch("test", 5)).rejects.toThrow("Aborted");
@@ -1121,7 +1119,11 @@ describe("createSearchOverlayController", () => {
     controller.open();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
-      onSearch: (query: string, chId: number | undefined, signal?: AbortSignal) => Promise<unknown[]>;
+      onSearch: (
+        query: string,
+        chId: number | undefined,
+        signal?: AbortSignal,
+      ) => Promise<unknown[]>;
     };
 
     await expect(opts.onSearch("test", 5)).rejects.toThrow("network failure");
@@ -1148,7 +1150,10 @@ describe("createSearchOverlayController", () => {
 
     // Mock requestAnimationFrame to execute immediately
     const origRaf = globalThis.requestAnimationFrame;
-    globalThis.requestAnimationFrame = (cb: FrameRequestCallback) => { cb(0); return 0; };
+    globalThis.requestAnimationFrame = (cb: FrameRequestCallback) => {
+      cb(0);
+      return 0;
+    };
 
     opts.onSelectResult({ channel_id: 3, message_id: 42 });
 
@@ -1176,7 +1181,10 @@ describe("createSearchOverlayController", () => {
     };
 
     const origRaf = globalThis.requestAnimationFrame;
-    globalThis.requestAnimationFrame = (cb: FrameRequestCallback) => { cb(0); return 0; };
+    globalThis.requestAnimationFrame = (cb: FrameRequestCallback) => {
+      cb(0);
+      return 0;
+    };
 
     opts.onSelectResult({ channel_id: 3, message_id: 999 });
 
