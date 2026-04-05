@@ -43,6 +43,15 @@ type HubBroadcaster interface {
 	ClientCount() int
 }
 
+// ─── PermissionInvalidator ───────────────────────────────────────────────────
+
+// PermissionInvalidator allows admin handlers to invalidate the permission
+// cache when roles or permissions change. Satisfied by *service.PermissionService.
+type PermissionInvalidator interface {
+	InvalidateUser(userID int64)
+	InvalidateAll()
+}
+
 // ─── adminUserResponse ──────────────────────────────────────────────────────
 
 // adminUserResponse is the safe public shape returned by user-listing and

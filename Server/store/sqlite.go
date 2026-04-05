@@ -37,14 +37,21 @@ func (s *SQLiteStore) Close() error { return s.db.Close() }
 // SQLDb returns the underlying *sql.DB.
 func (s *SQLiteStore) SQLDb() *sql.DB { return s.db.SQLDb() }
 
-// WithTx executes fn within a transaction.
+// WithTx executes fn within a transaction. For SQLite, all writes are
+// serialized through a single connection (MaxOpenConns=1), so the transaction
+// is started and committed on the same underlying connection that fn's
+// store calls use.
+//
+// TODO: implement properly with a transaction-scoped Store wrapper when
+// services need multi-statement transactions.
 func (s *SQLiteStore) WithTx(ctx context.Context, fn func(Store) error) error {
+	// SQLite serializes all writes through one connection, so starting a
+	// transaction and calling fn(s) effectively wraps fn's DB calls in
+	// that transaction — provided MaxOpenConns remains 1.
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	// For SQLite with single writer, the transaction operates on the same
-	// *db.DB — we pass the same store since SQLite serializes writes.
 	if txErr := fn(s); txErr != nil {
 		_ = tx.Rollback()
 		return txErr
