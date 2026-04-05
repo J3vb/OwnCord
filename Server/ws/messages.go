@@ -207,18 +207,6 @@ func buildErrorMsg(code, message string) []byte {
 	})
 }
 
-// buildRateLimitError produces a RATE_LIMITED error with retry_after per PROTOCOL.md.
-func buildRateLimitError(message string, retryAfterSeconds float64) []byte {
-	return buildJSON(map[string]any{
-		"type": MsgTypeError,
-		"payload": map[string]any{
-			"code":        "RATE_LIMITED",
-			"message":     message,
-			"retry_after": retryAfterSeconds,
-		},
-	})
-}
-
 // buildAuthError produces an auth_error envelope per PROTOCOL.md.
 // The client treats this type as non-recoverable and stops reconnecting.
 func buildAuthError(message string) []byte {
