@@ -50,7 +50,13 @@ import {
 } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import type { DmChannelPayload } from "./types";
-import { handleVoiceToken, isVoiceConnected } from "@lib/livekitSession";
+import {
+  handleVoiceToken,
+  handleE2EEAnnounce,
+  handleE2EEOffer,
+  handleParticipantLeft,
+  isVoiceConnected,
+} from "@lib/livekitSession";
 import { notifyIncomingMessage } from "./notifications";
 import { createLogger } from "./logger";
 import { ServerMessageType as S } from "./protocolTypes";
@@ -352,6 +358,8 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   unsubs.push(
     ws.on(S.VOICE_LEAVE, (payload) => {
       removeVoiceUser(payload);
+      // Notify E2EE state machine so key holder can rotate the room key.
+      void handleParticipantLeft(payload.user_id);
       // Clear local voice state if the current user was removed (kick/disconnect)
       const currentUserId = authStore.getState().user?.id ?? 0;
       if (payload.user_id === currentUserId) {
@@ -374,7 +382,27 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
 
   unsubs.push(
     ws.on(S.VOICE_TOKEN, (payload) => {
-      void handleVoiceToken(payload.token, payload.url, payload.channel_id, payload.direct_url);
+      void handleVoiceToken(
+        payload.token,
+        payload.url,
+        payload.channel_id,
+        payload.direct_url,
+        payload.is_key_holder,
+      );
+    }),
+  );
+
+  // ── Voice E2EE (client-side ECDH key exchange) ────────
+
+  unsubs.push(
+    ws.on(S.VOICE_E2EE_ANNOUNCE, (payload) => {
+      void handleE2EEAnnounce(payload.user_id, payload.public_key);
+    }),
+  );
+
+  unsubs.push(
+    ws.on(S.VOICE_E2EE_OFFER, (payload) => {
+      void handleE2EEOffer(payload.from_user_id, payload.encrypted_key, payload.iv);
     }),
   );
 

@@ -16,7 +16,7 @@ const (
 	registerRateLimitPerMinute = 3
 
 	// loginRateLimitPerMinute is the maximum login attempts per IP per minute.
-	loginRateLimitPerMinute = 60
+	loginRateLimitPerMinute = 5
 
 	// verifyTOTPRateLimitPerMinute is the maximum TOTP verification attempts per IP per minute.
 	verifyTOTPRateLimitPerMinute = 10

@@ -31,4 +31,10 @@ func registerVoiceHandlers(r *HandlerRegistry) {
 	r.Register(MsgTypeVoiceScreenshare, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
 		h.handleVoiceScreenshare(ctx, c, payload)
 	})
+	r.Register(MsgTypeVoiceE2EEAnnounce, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
+		h.handleVoiceE2EEAnnounce(ctx, c, payload)
+	})
+	r.Register(MsgTypeVoiceE2EEOffer, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
+		h.handleVoiceE2EEOffer(ctx, c, payload)
+	})
 }
