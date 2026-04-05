@@ -16,6 +16,7 @@ import (
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/service"
 	"github.com/owncord/server/storage"
 	"github.com/owncord/server/updater"
 	"github.com/owncord/server/ws"
@@ -111,8 +112,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		MountUploadRoutes(r, database, store, limiter, cfg.Server.AllowedOrigins)
 	}
 
+	// Service layer — centralizes business logic for REST and WS handlers.
+	svc := service.New(database, limiter)
+
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, svc)
 	getOnlineUsers = func() int { return hub.ClientCount() }
 
 	// Create LiveKit client if voice config is present; voice is disabled on failure.
