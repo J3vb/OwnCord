@@ -62,11 +62,7 @@ type Hub struct {
 // It also initializes the settings cache from the database.
 func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
 	reg := NewHandlerRegistry()
-	registerChatHandlers(reg)
-	registerPresenceHandlers(reg)
-	registerReactionHandlers(reg)
-	registerVoiceHandlers(reg)
-	registerPingHandler(reg)
+	registerVoiceHandlersV1(reg)
 
 	h := &Hub{
 		clients:         make(map[int64]*Client),
@@ -83,6 +79,33 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
 		settingsMotd:    "Welcome!",
 		voiceKeyHolders: make(map[int64]int64),
 	}
+
+	// V2 handler registrations (need Hub fields for deps).
+	registerPingHandler(reg, PingDeps{Limiter: h.limiter})
+	registerChatHandlers(reg, ChatDeps{
+		DB:          h.db,
+		Limiter:     h.limiter,
+		Permissions: h.permChecker,
+	})
+	registerPresenceHandlers(reg, PresenceDeps{
+		DB:          h.db,
+		Limiter:     h.limiter,
+		Permissions: h.permChecker,
+	})
+	registerReactionHandlers(reg, ReactionDeps{
+		DB:          h.db,
+		Limiter:     h.limiter,
+		Permissions: h.permChecker,
+	})
+	registerVoiceControlsV2(reg, VoiceDeps{
+		DB:          h.db,
+		Limiter:     h.limiter,
+		Permissions: h.permChecker,
+		LiveKit:     h.livekit,
+		TokenGen:    h, // Hub delegates to h.livekit at call time (set via SetLiveKit)
+		KeyHolder:   h,
+	})
+
 	h.refreshSettingsLocked()
 	return h
 }
@@ -126,6 +149,24 @@ func (h *Hub) refreshSettingsLocked() {
 // SetLiveKit sets the LiveKit client on the hub. Must be called before Run.
 func (h *Hub) SetLiveKit(lk *LiveKitClient) {
 	h.livekit = lk
+}
+
+// GenerateToken delegates to the LiveKit client. Returns an error if LiveKit
+// is not configured. Satisfies VoiceTokenGenerator so the Hub can be passed
+// as a dep at registration time (before SetLiveKit is called).
+func (h *Hub) GenerateToken(userID int64, username string, channelID int64, voiceJoinToken string, canPublish, canSubscribe, canVideo, canScreenShare bool) (string, error) {
+	if h.livekit == nil {
+		return "", fmt.Errorf("voice not configured")
+	}
+	return h.livekit.GenerateToken(userID, username, channelID, voiceJoinToken, canPublish, canSubscribe, canVideo, canScreenShare)
+}
+
+// URL delegates to the LiveKit client. Returns empty string if not configured.
+func (h *Hub) URL() string {
+	if h.livekit == nil {
+		return ""
+	}
+	return h.livekit.URL()
 }
 
 // LiveKitHealthCheck probes the LiveKit server for connectivity.

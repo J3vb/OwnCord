@@ -93,22 +93,100 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	c.invalidCount = 0
 	c.mu.Unlock()
 
+	// Cap client-controlled fields before logging to prevent log injection
+	// and unbounded log entries.
+	msgType := env.Type
+	if len(msgType) > 64 {
+		msgType = msgType[:64]
+	}
+	reqID := env.ID
+	if len(reqID) > 64 {
+		reqID = reqID[:64]
+	}
+
 	// Request-scoped logger with correlation context.
 	reqLog := slog.With(
 		"user_id", c.userID,
-		"msg_type", env.Type,
-		"req_id", env.ID,
+		"msg_type", msgType,
+		"req_id", reqID,
 	)
 
 	reqLog.Debug("ws ← client message")
 
+	// ── V2 dispatch (strangler fig) ──────────────────────────────────────
+	// Only attempt V2 parsing+dispatch if a V2 handler is registered for
+	// this type. This prevents the stricter V2 parser from rejecting
+	// payloads that V1 handlers handle leniently.
+	if h.registry.hasV2(env.Type) {
+		if ctor, ok := getCommandConstructor(env.Type); ok {
+			cmd, parseErr := ctor(c.userID, env.ID, env.Payload)
+			if parseErr != nil {
+				reqLog.Warn("ws command parse error", "err", parseErr)
+				c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "invalid payload"))
+				return
+			}
+
+			var username string
+			var avatar *string
+			if c.user != nil {
+				username = c.user.Username
+				avatar = c.user.Avatar
+			}
+			voiceChID, voiceJoinTok := c.getVoiceState()
+			info := ClientInfo{
+				UserID:         c.userID,
+				Username:       username,
+				Avatar:         avatar,
+				RoleName:       c.roleName,
+				ReqID:          env.ID,
+				VoiceChannelID: voiceChID,
+				VoiceJoinToken: voiceJoinTok,
+			}
+
+			result, dispatched := h.registry.DispatchV2(c.ctx, cmd, info)
+			if !dispatched {
+				reqLog.Error("ws V2 handler registered but DispatchV2 returned false", "type", env.Type)
+				c.sendMsg(buildErrorMsg(ErrCodeInternal, "internal error"))
+				return
+			}
+			if result.Error != nil {
+				if ce, ok := result.Error.(ClientError); ok {
+					c.sendMsg(buildErrorMsg(ce.Code, ce.Message))
+				} else {
+					reqLog.Error("ws handler internal error", "err", result.Error)
+					c.sendMsg(buildErrorMsg(ErrCodeInternal, "internal error"))
+				}
+				return
+			}
+			// Apply client state mutations.
+			if result.SetChannelID != nil {
+				c.mu.Lock()
+				c.channelID = *result.SetChannelID
+				c.mu.Unlock()
+			}
+			if result.SetE2EEPubKey != nil {
+				c.setE2EEPubKey(*result.SetE2EEPubKey)
+			}
+			if result.SetVoiceJoinToken != nil {
+				chID := c.getVoiceChID()
+				if chID != 0 {
+					c.setVoiceState(chID, *result.SetVoiceJoinToken)
+				}
+			}
+			if result.Reply != nil {
+				c.sendMsg(result.Reply)
+			}
+			if len(result.Events) > 0 {
+				h.EmitEvents(result.Events)
+			}
+			return
+		}
+	}
+	// ── End V2 dispatch ──────────────────────────────────────────────────
+
 	if !h.registry.Dispatch(c.ctx, env.Type, h, c, env.ID, env.Payload) {
 		reqLog.Warn("ws handleMessage unknown type")
-		truncType := env.Type
-		if len(truncType) > 64 {
-			truncType = truncType[:64]
-		}
-		c.sendMsg(buildErrorMsg(ErrCodeUnknownType, fmt.Sprintf("unknown message type: %s", truncType)))
+		c.sendMsg(buildErrorMsg(ErrCodeUnknownType, fmt.Sprintf("unknown message type: %s", msgType)))
 	}
 }
 

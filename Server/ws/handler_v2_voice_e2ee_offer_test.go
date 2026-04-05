@@ -1,0 +1,205 @@
+package ws
+
+import (
+	"context"
+	"encoding/base64"
+	"strings"
+	"testing"
+)
+
+var (
+	validEncKey = base64.StdEncoding.EncodeToString(make([]byte, 48))
+	validIV     = base64.StdEncoding.EncodeToString(make([]byte, 12))
+)
+
+func offerDeps(isHolder bool) VoiceDeps {
+	return VoiceDeps{
+		KeyHolder: &mockKeyHolder{isHolder: isHolder},
+	}
+}
+
+func TestVoiceE2EEOfferV2_HappyPath(t *testing.T) {
+	deps := offerDeps(true)
+	cmd := VoiceE2EEOfferCmd{
+		userID:       1,
+		targetUserID: 2,
+		encryptedKey: validEncKey,
+		iv:           validIV,
+	}
+	info := ClientInfo{UserID: 1, VoiceChannelID: 100}
+
+	result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps)
+
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if len(result.Events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(result.Events))
+	}
+
+	// Should be a VoiceChannelGuardedEvent targeting user 2.
+	evt, ok := result.Events[0].(VoiceChannelGuardedEvent)
+	if !ok {
+		t.Fatalf("expected VoiceChannelGuardedEvent, got %T", result.Events[0])
+	}
+	if evt.TargetUserID() != 2 {
+		t.Errorf("expected target user 2, got %d", evt.TargetUserID())
+	}
+	if evt.VoiceChannelID() != 100 {
+		t.Errorf("expected voice channel 100, got %d", evt.VoiceChannelID())
+	}
+}
+
+func TestVoiceE2EEOfferV2_NotInVoiceChannel(t *testing.T) {
+	deps := offerDeps(true)
+	cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: validEncKey, iv: validIV}
+	info := ClientInfo{UserID: 1, VoiceChannelID: 0}
+
+	result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps)
+
+	if result.Error == nil {
+		t.Fatal("expected error for not in voice channel")
+	}
+	ce, ok := result.Error.(ClientError)
+	if !ok {
+		t.Fatalf("expected ClientError, got %T", result.Error)
+	}
+	if ce.Code != ErrCodeVoiceError {
+		t.Errorf("expected code %q, got %q", ErrCodeVoiceError, ce.Code)
+	}
+}
+
+func TestVoiceE2EEOfferV2_EmptyFields(t *testing.T) {
+	deps := offerDeps(true)
+	tests := []struct {
+		name string
+		cmd  VoiceE2EEOfferCmd
+	}{
+		{"empty target", VoiceE2EEOfferCmd{userID: 1, targetUserID: 0, encryptedKey: validEncKey, iv: validIV}},
+		{"empty key", VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: "", iv: validIV}},
+		{"empty iv", VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: validEncKey, iv: ""}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := ClientInfo{UserID: 1, VoiceChannelID: 100}
+			result := handleVoiceE2EEOfferV2(context.Background(), tt.cmd, info, deps)
+			if result.Error == nil {
+				t.Fatal("expected error for empty field")
+			}
+			ce, ok := result.Error.(ClientError)
+			if !ok {
+				t.Fatalf("expected ClientError, got %T", result.Error)
+			}
+			if ce.Code != ErrCodeBadPayload {
+				t.Errorf("expected code %q, got %q", ErrCodeBadPayload, ce.Code)
+			}
+		})
+	}
+}
+
+func TestVoiceE2EEOfferV2_OversizedFields(t *testing.T) {
+	deps := offerDeps(true)
+	tests := []struct {
+		name string
+		cmd  VoiceE2EEOfferCmd
+	}{
+		{"key too large", VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: strings.Repeat("A", 1025), iv: validIV}},
+		{"iv too large", VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: validEncKey, iv: strings.Repeat("A", 129)}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := ClientInfo{UserID: 1, VoiceChannelID: 100}
+			result := handleVoiceE2EEOfferV2(context.Background(), tt.cmd, info, deps)
+			if result.Error == nil {
+				t.Fatal("expected error for oversized field")
+			}
+			ce, ok := result.Error.(ClientError)
+			if !ok {
+				t.Fatalf("expected ClientError, got %T", result.Error)
+			}
+			if ce.Code != ErrCodeBadPayload {
+				t.Errorf("expected code %q, got %q", ErrCodeBadPayload, ce.Code)
+			}
+		})
+	}
+}
+
+func TestVoiceE2EEOfferV2_InvalidBase64(t *testing.T) {
+	deps := offerDeps(true)
+	tests := []struct {
+		name string
+		cmd  VoiceE2EEOfferCmd
+	}{
+		{"bad key", VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: "not-base64!!!", iv: validIV}},
+		{"bad iv", VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: validEncKey, iv: "not-base64!!!"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := ClientInfo{UserID: 1, VoiceChannelID: 100}
+			result := handleVoiceE2EEOfferV2(context.Background(), tt.cmd, info, deps)
+			if result.Error == nil {
+				t.Fatal("expected error for invalid base64")
+			}
+			ce, ok := result.Error.(ClientError)
+			if !ok {
+				t.Fatalf("expected ClientError, got %T", result.Error)
+			}
+			if ce.Code != ErrCodeBadPayload {
+				t.Errorf("expected code %q, got %q", ErrCodeBadPayload, ce.Code)
+			}
+		})
+	}
+}
+
+func TestVoiceE2EEOfferV2_NotKeyHolder(t *testing.T) {
+	deps := offerDeps(false)
+	cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: validEncKey, iv: validIV}
+	info := ClientInfo{UserID: 1, VoiceChannelID: 100}
+
+	result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps)
+
+	if result.Error == nil {
+		t.Fatal("expected error for non-key-holder")
+	}
+	ce, ok := result.Error.(ClientError)
+	if !ok {
+		t.Fatalf("expected ClientError, got %T", result.Error)
+	}
+	if ce.Code != ErrCodeNotKeyHolder {
+		t.Errorf("expected code %q, got %q", ErrCodeNotKeyHolder, ce.Code)
+	}
+}
+
+func TestVoiceE2EEOfferV2_NilKeyHolder_ReturnsInternal(t *testing.T) {
+	deps := VoiceDeps{KeyHolder: nil}
+	cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: validEncKey, iv: validIV}
+	info := ClientInfo{UserID: 1, VoiceChannelID: 100}
+
+	result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps)
+
+	if result.Error == nil {
+		t.Fatal("expected error for nil KeyHolder")
+	}
+	ce, ok := result.Error.(ClientError)
+	if !ok {
+		t.Fatalf("expected ClientError, got %T", result.Error)
+	}
+	if ce.Code != ErrCodeInternal {
+		t.Errorf("expected code %q, got %q", ErrCodeInternal, ce.Code)
+	}
+}
+
+func TestVoiceE2EEOfferV2_NoReply(t *testing.T) {
+	deps := offerDeps(true)
+	cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: validEncKey, iv: validIV}
+	info := ClientInfo{UserID: 1, VoiceChannelID: 100}
+
+	result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps)
+
+	if result.Reply != nil {
+		t.Errorf("expected no reply, got %s", result.Reply)
+	}
+}

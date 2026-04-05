@@ -58,6 +58,10 @@ vi.mock("livekit-client", () => ({
     h1080fps30: { resolution: { width: 1920, height: 1080 } },
   },
   DisconnectReason: { CLIENT_INITIATED: 0 },
+  ExternalE2EEKeyProvider: vi.fn(() => ({
+    setKey: vi.fn(),
+    getKeys: vi.fn().mockReturnValue([]),
+  })),
   createLocalVideoTrack: vi.fn(async () => ({
     kind: "video",
     mediaStreamTrack: new MediaStreamTrack(),
@@ -117,6 +121,24 @@ vi.mock("@lib/logger", () => ({
 vi.mock("@lib/noise-suppression", () => ({
   createRNNoiseProcessor: vi.fn(),
 }));
+
+const mockKeyPair = vi.hoisted(() => ({
+  publicKey: { type: "public" } as unknown as CryptoKey,
+  privateKey: { type: "private" } as unknown as CryptoKey,
+}));
+
+vi.mock("@lib/e2eeCrypto", () => ({
+  generateECDHKeyPair: vi.fn(async () => mockKeyPair),
+  exportPublicKey: vi.fn(async () => "mock-pub-key-base64"),
+  importPublicKey: vi.fn(async () => ({ type: "public" }) as unknown as CryptoKey),
+  generateRoomKey: vi.fn(() => new Uint8Array(32)),
+  roomKeyToBase64: vi.fn(() => "mock-room-key-base64"),
+  wrapRoomKey: vi.fn(async () => ({ encryptedKey: "enc", iv: "iv" })),
+  unwrapRoomKey: vi.fn(async () => new Uint8Array(32)),
+}));
+
+// Stub Worker for E2EE web worker (not available in Node/vitest)
+globalThis.Worker = vi.fn() as unknown as typeof Worker;
 
 // Now import
 import { parseUserId, LiveKitSession, getRoomForStats } from "../../src/lib/livekitSession";
@@ -501,7 +523,7 @@ describe("LiveKitSession", () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
 
-      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
 
       expect(mockRoom.connect).toHaveBeenCalledWith("ws://localhost:7880", "test-token");
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
@@ -511,7 +533,7 @@ describe("LiveKitSession", () => {
       session.setServerHost("example.com:443");
       session.setWsClient({ send: vi.fn() } as any);
 
-      await session.handleVoiceToken("test-token", "/livekit", 1);
+      await session.handleVoiceToken("test-token", "/livekit", 1, undefined, true);
 
       expect(mockInvoke).toHaveBeenCalledWith("start_livekit_proxy", {
         remoteHost: "example.com:443",
@@ -528,7 +550,7 @@ describe("LiveKitSession", () => {
       const domErr = new DOMException("Permission denied", "NotAllowedError");
       mockRoom.localParticipant.setMicrophoneEnabled.mockRejectedValueOnce(domErr);
 
-      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
 
       expect(errorCb).toHaveBeenCalledWith(
         "Microphone permission denied — joined in listen-only mode",
@@ -544,7 +566,7 @@ describe("LiveKitSession", () => {
       const domErr = new DOMException("No device", "NotFoundError");
       mockRoom.localParticipant.setMicrophoneEnabled.mockRejectedValueOnce(domErr);
 
-      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
 
       expect(errorCb).toHaveBeenCalledWith("No microphone found — joined in listen-only mode");
     });
@@ -557,7 +579,7 @@ describe("LiveKitSession", () => {
 
       mockRoom.localParticipant.setMicrophoneEnabled.mockRejectedValueOnce(new Error("unknown"));
 
-      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
 
       expect(errorCb).toHaveBeenCalledWith("Microphone unavailable — joined in listen-only mode");
     });
@@ -577,6 +599,7 @@ describe("LiveKitSession", () => {
         "/livekit",
         1,
         "ws://localhost:7880",
+        true,
       );
 
       // Advance through all retry delays (3 retries x 2000ms each)
@@ -603,10 +626,18 @@ describe("LiveKitSession", () => {
         "/livekit-one",
         1,
         "ws://localhost:7881",
+        true,
       );
-      await Promise.resolve();
+      // Flush microtasks so E2EE async steps resolve before connect
+      await vi.advanceTimersByTimeAsync(0);
 
-      await session.handleVoiceToken("second-token", "/livekit-two", 2, "ws://localhost:7882");
+      await session.handleVoiceToken(
+        "second-token",
+        "/livekit-two",
+        2,
+        "ws://localhost:7882",
+        true,
+      );
       expect(mockRoom.connect).toHaveBeenCalledTimes(1);
 
       firstConnect.resolve(undefined);
@@ -711,7 +742,7 @@ describe("LiveKitSession", () => {
       });
 
       // Connect to create the room and register handlers
-      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
       expect(disconnectedHandler).toBeDefined();
 
       // Inject fake manual tracks as if camera/screen were enabled
@@ -760,6 +791,7 @@ describe("LiveKitSession", () => {
         "/livekit",
         1,
         "ws://localhost:7880",
+        true,
       );
       await Promise.resolve(); // Let handleVoiceToken reach room.connect()
 
@@ -1004,7 +1036,7 @@ describe("LiveKitSession", () => {
       // Set up a room via handleVoiceToken
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
-      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
 
       expect((session as any)._state.type).toBe("connected");
       const room = (session as any)._state.room;
@@ -1018,7 +1050,7 @@ describe("LiveKitSession", () => {
     it("sets currentChannelId to null after leave", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
-      await session.handleVoiceToken("tok", "/lk", 5, "ws://localhost:7880");
+      await session.handleVoiceToken("tok", "/lk", 5, "ws://localhost:7880", true);
 
       expect((session as any)._state.channelId).toBe(5);
 
@@ -1030,7 +1062,7 @@ describe("LiveKitSession", () => {
     it("sets latestToken to null after leave", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
-      await session.handleVoiceToken("my-token", "/lk", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("my-token", "/lk", 1, "ws://localhost:7880", true);
 
       expect((session as any)._state.latestToken).toBe("my-token");
 
@@ -1042,7 +1074,7 @@ describe("LiveKitSession", () => {
     it("sets lastUrl to null and lastDirectUrl to undefined after leave", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
-      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
 
       session.leaveVoice(false);
 
@@ -1098,7 +1130,7 @@ describe("LiveKitSession", () => {
     beforeEach(async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
-      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
       vi.clearAllMocks();
     });
 
@@ -1126,7 +1158,7 @@ describe("LiveKitSession", () => {
     beforeEach(async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
-      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
       vi.clearAllMocks();
     });
 
@@ -1179,7 +1211,7 @@ describe("LiveKitSession", () => {
     it("enables mic and exits listen-only on success", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
-      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
       vi.clearAllMocks();
 
       await session.retryMicPermission();
@@ -1192,7 +1224,7 @@ describe("LiveKitSession", () => {
     it("applies noise suppressor when enhancedNoiseSuppression pref is true", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
-      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
       vi.clearAllMocks();
 
       mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
@@ -1216,7 +1248,7 @@ describe("LiveKitSession", () => {
       session.setWsClient({ send: vi.fn() } as any);
       const errorCb = vi.fn();
       session.setOnError(errorCb);
-      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
       vi.clearAllMocks();
 
       mockRoom.localParticipant.setMicrophoneEnabled.mockRejectedValueOnce(
@@ -1235,7 +1267,7 @@ describe("LiveKitSession", () => {
     it("sets up audio pipeline on success", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
-      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
       vi.clearAllMocks();
 
       const setupSpy = vi.spyOn((session as any)._audioPipeline, "setupAudioPipeline");
@@ -1267,7 +1299,7 @@ describe("LiveKitSession", () => {
         .spyOn((session as any)._audioPipeline, "applyNoiseSuppressor")
         .mockResolvedValue(undefined);
 
-      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
 
       expect(noiseSpy).toHaveBeenCalled();
       noiseSpy.mockRestore();
@@ -1280,7 +1312,7 @@ describe("LiveKitSession", () => {
       mockVoiceState.localMuted = false;
       mockVoiceState.localDeafened = false;
 
-      await session.handleVoiceToken("tok", "/lk", 7, "ws://localhost:7880");
+      await session.handleVoiceToken("tok", "/lk", 7, "ws://localhost:7880", true);
       vi.clearAllMocks();
 
       // Session is already in "connected" state with channelId=7 after handleVoiceToken
@@ -1310,7 +1342,7 @@ describe("LiveKitSession", () => {
       session.setOnError(errorCb);
       mockRoom.localParticipant.setMicrophoneEnabled.mockRejectedValueOnce(new Error("some error"));
 
-      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
 
       expect(errorCb).toHaveBeenCalledWith("Microphone unavailable — joined in listen-only mode");
     });
@@ -1321,7 +1353,7 @@ describe("LiveKitSession", () => {
 
       const subSpy = vi.spyOn((session as any)._audioElements, "applyRemoteAudioSubscriptionState");
 
-      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
 
       // Should be called with the deafened state
       expect(subSpy).toHaveBeenCalledWith(true);
@@ -1332,7 +1364,7 @@ describe("LiveKitSession", () => {
       mockVoiceState.localMuted = true;
       mockVoiceState.localDeafened = false;
 
-      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
 
       // setMicrophoneEnabled(false) should have been called (shouldEnableMicrophone = false when muted)
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false);
@@ -1342,7 +1374,7 @@ describe("LiveKitSession", () => {
       mockVoiceState.localMuted = false;
       mockVoiceState.localDeafened = false;
 
-      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
 
       expect(setListenOnly).toHaveBeenCalledWith(false);
     });
@@ -1350,7 +1382,7 @@ describe("LiveKitSession", () => {
     it("sets listenOnly(true) when mic fails", async () => {
       mockRoom.localParticipant.setMicrophoneEnabled.mockRejectedValueOnce(new Error("fail"));
 
-      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
 
       expect(setListenOnly).toHaveBeenCalledWith(true);
     });
@@ -1556,6 +1588,7 @@ describe("LiveKitSession", () => {
         "/livekit",
         1,
         "ws://localhost:7880",
+        true,
       );
 
       await vi.advanceTimersByTimeAsync(2100);
@@ -1578,6 +1611,7 @@ describe("LiveKitSession", () => {
         "/livekit",
         1,
         "ws://localhost:7880",
+        true,
       );
 
       for (let i = 0; i < 3; i++) {
@@ -1602,6 +1636,7 @@ describe("LiveKitSession", () => {
         "/livekit",
         1,
         "ws://localhost:7880",
+        true,
       );
 
       // Inject a pendingJoin into the current "connecting" state
@@ -1638,6 +1673,7 @@ describe("LiveKitSession", () => {
         "/livekit",
         1,
         "ws://localhost:7880",
+        true,
       );
 
       expect(result).toBe(true);
@@ -1648,11 +1684,11 @@ describe("LiveKitSession", () => {
       session.setWsClient({ send: vi.fn() } as any);
 
       mockRoom.connect.mockResolvedValue(undefined);
-      await (session as any).connectAndSetup("token-1", "/livekit", 1, "ws://localhost:7880");
+      await (session as any).connectAndSetup("token-1", "/livekit", 1, "ws://localhost:7880", true);
       expect((session as any)._state.type).toBe("connected");
 
       const leaveSpy = vi.spyOn(session, "leaveVoice");
-      await (session as any).connectAndSetup("token-2", "/livekit", 2, "ws://localhost:7880");
+      await (session as any).connectAndSetup("token-2", "/livekit", 2, "ws://localhost:7880", true);
 
       expect(leaveSpy).toHaveBeenCalledWith(false);
       leaveSpy.mockRestore();
@@ -1665,12 +1701,12 @@ describe("LiveKitSession", () => {
       session.setWsClient({ send: vi.fn() } as any);
 
       mockRoom.connect.mockResolvedValue(undefined);
-      await session.handleVoiceToken("token-1", "/livekit", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("token-1", "/livekit", 1, "ws://localhost:7880", true);
 
       mockRoom.state = "connected";
       const refreshSpy = vi.spyOn(session, "handleVoiceTokenRefresh");
 
-      await session.handleVoiceToken("token-2", "/livekit", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("token-2", "/livekit", 1, "ws://localhost:7880", true);
 
       expect(refreshSpy).toHaveBeenCalledWith("token-2");
       expect(mockRoom.connect).toHaveBeenCalledTimes(1);
@@ -1686,11 +1722,18 @@ describe("LiveKitSession", () => {
         .mockImplementationOnce(() => firstConnect.promise)
         .mockResolvedValue(undefined);
 
-      const firstJoin = session.handleVoiceToken("token-1", "/livekit-1", 1, "ws://localhost:7881");
-      await Promise.resolve();
+      const firstJoin = session.handleVoiceToken(
+        "token-1",
+        "/livekit-1",
+        1,
+        "ws://localhost:7881",
+        true,
+      );
+      // Flush microtasks so E2EE async steps resolve before connect
+      await vi.advanceTimersByTimeAsync(0);
 
-      await session.handleVoiceToken("token-2", "/livekit-2", 2, "ws://localhost:7882");
-      await session.handleVoiceToken("token-3", "/livekit-3", 3, "ws://localhost:7883");
+      await session.handleVoiceToken("token-2", "/livekit-2", 2, "ws://localhost:7882", true);
+      await session.handleVoiceToken("token-3", "/livekit-3", 3, "ws://localhost:7883", true);
 
       const s = (session as any)._state;
       expect(s.type).toBe("connecting");
@@ -1890,7 +1933,7 @@ describe("LiveKitSession", () => {
       session.setServerHost("localhost:7880");
 
       mockRoom.connect.mockResolvedValue(undefined);
-      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
 
       mockWs.send.mockClear();
 
@@ -1932,7 +1975,7 @@ describe("LiveKitSession", () => {
       session.setServerHost("localhost:7880");
 
       mockRoom.connect.mockResolvedValue(undefined);
-      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880");
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
 
       mockWs.send.mockClear();
       (session as any).clearTokenRefreshTimer();
