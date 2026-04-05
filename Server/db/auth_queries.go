@@ -222,9 +222,26 @@ func (d *DB) UnbanUser(id int64) error {
 
 // ─── Session Operations ───────────────────────────────────────────────────────
 
+// maxSessionsPerUser is the maximum number of concurrent sessions allowed per
+// user. When exceeded, the oldest session is evicted. This prevents unbounded
+// session accumulation from credential stuffing or token theft (H-6).
+const maxSessionsPerUser = 25
+
 // CreateSession inserts a new session and returns the session ID.
 // tokenHash must already be hashed (never store plaintext tokens).
+// H-6: Enforces a per-user session cap by evicting the oldest session when
+// the limit is reached.
 func (d *DB) CreateSession(userID int64, tokenHash, device, ip string) (int64, error) {
+	// Evict oldest sessions if at or above the cap.
+	_, _ = d.sqlDB.Exec(
+		`DELETE FROM sessions WHERE id IN (
+			SELECT id FROM sessions WHERE user_id = ?
+			ORDER BY created_at DESC
+			LIMIT -1 OFFSET ?
+		)`,
+		userID, maxSessionsPerUser-1,
+	)
+
 	expiresAt := time.Now().Add(sessionTTL).UTC().Format("2006-01-02T15:04:05Z")
 	res, err := d.sqlDB.Exec(
 		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at)
@@ -451,14 +468,16 @@ type MemberSummary struct {
 	Role     string  `json:"role"`
 }
 
-// ListMembers returns all non-banned users as lightweight summaries.
+// ListMembers returns non-banned users as lightweight summaries.
+// M-12: Limited to 1000 rows to prevent unbounded result sets on large servers.
 func (d *DB) ListMembers() ([]MemberSummary, error) {
 	rows, err := d.sqlDB.Query(
 		`SELECT u.id, u.username, u.avatar, u.status, LOWER(r.name)
 		 FROM users u
 		 JOIN roles r ON u.role_id = r.id
 		 WHERE u.banned = 0
-		 ORDER BY u.username ASC`,
+		 ORDER BY u.username ASC
+		 LIMIT 1000`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("ListMembers: %w", err)
