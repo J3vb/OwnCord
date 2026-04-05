@@ -233,12 +233,20 @@ func (h *Hub) requireChannelPerm(c *Client, channelID int64, perm int64, permLab
 // that should survive reconnection replay.
 func (h *Hub) broadcastExclude(channelID, excludeUserID int64, msg []byte) {
 	if channelID == 0 {
-		// Global broadcast excluding one user — use the global topic.
 		h.pubsub.Publish(TopicGlobal, msg, excludeUserID)
 		return
 	}
-	// Channel-scoped broadcast excluding one user.
 	h.pubsub.Publish(ChannelTopic(channelID), msg, excludeUserID)
+}
+
+// broadcastExcludeLow is like broadcastExclude but at low priority.
+// Used for typing indicators — dropped on overflow instead of disconnecting.
+func (h *Hub) broadcastExcludeLow(channelID, excludeUserID int64, msg []byte) {
+	if channelID == 0 {
+		h.pubsub.PublishLow(TopicGlobal, msg, excludeUserID)
+		return
+	}
+	h.pubsub.PublishLow(ChannelTopic(channelID), msg, excludeUserID)
 }
 
 // broadcastToDMParticipants sends a message to all participants of a DM channel

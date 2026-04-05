@@ -13,8 +13,10 @@ func newTestPubSub() *PubSub {
 
 func makeTestClient(userID int64) *Client {
 	return &Client{
-		userID: userID,
-		send:   make(chan []byte, 16),
+		userID:   userID,
+		send:     make(chan []byte, 16),
+		sendHigh: make(chan []byte, 16),
+		sendLow:  make(chan []byte, 16),
 	}
 }
 
@@ -165,25 +167,47 @@ func TestPubSub_PublishGlobal(t *testing.T) {
 	assertChanMsg(t, c2.send, msg)
 }
 
-func TestPubSub_PublishLowPriority(t *testing.T) {
+func TestPubSub_PublishLow(t *testing.T) {
 	ps := newTestPubSub()
 	c1 := makeTestClient(1)
-	c2 := &Client{userID: 2, send: make(chan []byte, 1)} // tiny buffer
+	// c2 has a tiny low-priority buffer that we pre-fill.
+	c2 := &Client{userID: 2, send: make(chan []byte, 16), sendHigh: make(chan []byte, 4), sendLow: make(chan []byte, 1)}
 
 	ps.Subscribe(c1, "channel:1")
 	ps.Subscribe(c2, "channel:1")
 
-	// Fill c2's buffer so it drops low-priority messages.
-	c2.send <- []byte(`filler`)
+	// Fill c2's low-priority buffer so it drops.
+	c2.sendLow <- []byte(`filler`)
 
 	msg := []byte(`{"type":"typing"}`)
-	delivered := ps.PublishLowPriority("channel:1", msg, 0)
+	delivered := ps.PublishLow("channel:1", msg, 0)
 
-	// c1 should receive, c2 should be dropped (buffer full).
-	if delivered != 1 {
-		t.Fatalf("delivered = %d, want 1 (c2 buffer full)", delivered)
+	// Both get counted (sendLowMsg counts the attempt), but c2's message was dropped.
+	if delivered != 2 {
+		t.Fatalf("delivered = %d, want 2", delivered)
 	}
-	assertChanMsg(t, c1.send, msg)
+	assertChanMsg(t, c1.sendLow, msg)
+	// c2's sendLow only has the filler, not the typing msg.
+	assertChanMsg(t, c2.sendLow, []byte(`filler`))
+	assertChanEmpty(t, c2.sendLow)
+}
+
+func TestPubSub_PublishHigh(t *testing.T) {
+	ps := newTestPubSub()
+	c1 := makeTestClient(1)
+	c2 := makeTestClient(2)
+
+	ps.Subscribe(c1, UserTopic(1))
+	ps.Subscribe(c2, UserTopic(1))
+
+	msg := []byte(`{"type":"dm"}`)
+	delivered := ps.PublishHigh(UserTopic(1), msg, 0)
+
+	if delivered != 2 {
+		t.Fatalf("delivered = %d, want 2", delivered)
+	}
+	assertChanMsg(t, c1.sendHigh, msg)
+	assertChanMsg(t, c2.sendHigh, msg)
 }
 
 // ─── TopicsForClient ─────────────────────────────────────────────────────────
