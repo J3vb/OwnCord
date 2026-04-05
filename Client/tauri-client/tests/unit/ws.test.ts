@@ -2913,3 +2913,193 @@ describe("send edge cases", () => {
     expect(client.getState()).toBe("connected");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Listener registry mechanics (no Tauri connection needed)
+// ---------------------------------------------------------------------------
+
+describe("listener registry mechanics (on/off/dispatch)", () => {
+  let client: ReturnType<typeof createWsClient>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue(undefined);
+    mockListen.mockClear();
+    eventHandlers.clear();
+    client = createWsClient();
+  });
+
+  afterEach(() => {
+    client.disconnect();
+    vi.useRealTimers();
+  });
+
+  it("on() registers a listener and returns an unsubscribe function", () => {
+    const listener = vi.fn();
+    const unsub = client.on("chat_message", listener);
+    expect(typeof unsub).toBe("function");
+  });
+
+  it("off via returned unsubscribe removes a specific listener", async () => {
+    // Connect so we can dispatch messages through the proxy
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    const calls: string[] = [];
+    const listenerA = () => calls.push("A");
+    const listenerB = () => calls.push("B");
+
+    client.on("chat_message", listenerA);
+    const unsubB = client.on("chat_message", listenerB);
+
+    // Remove only B
+    unsubB();
+
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "chat_message",
+        payload: {
+          id: 1,
+          channel_id: 1,
+          user: { id: 1, username: "a", avatar: null },
+          content: "test",
+          reply_to: null,
+          attachments: [],
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
+
+    expect(calls).toEqual(["A"]);
+  });
+
+  it("multiple listeners on the same event type all get called", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    const calls: string[] = [];
+    client.on("chat_message", () => calls.push("first"));
+    client.on("chat_message", () => calls.push("second"));
+    client.on("chat_message", () => calls.push("third"));
+
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "chat_message",
+        payload: {
+          id: 1,
+          channel_id: 1,
+          user: { id: 1, username: "a", avatar: null },
+          content: "test",
+          reply_to: null,
+          attachments: [],
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
+
+    expect(calls).toEqual(["first", "second", "third"]);
+  });
+
+  it("listener removal mid-dispatch does not crash", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    const calls: string[] = [];
+    let unsubSelf: (() => void) | null = null;
+
+    // This listener unsubscribes itself when called
+    unsubSelf = client.on("chat_message", () => {
+      calls.push("self-removing");
+      unsubSelf!();
+    });
+
+    // Second listener should still be called
+    client.on("chat_message", () => calls.push("survivor"));
+
+    const msgJson = JSON.stringify({
+      type: "chat_message",
+      payload: {
+        id: 1,
+        channel_id: 1,
+        user: { id: 1, username: "a", avatar: null },
+        content: "test",
+        reply_to: null,
+        attachments: [],
+        timestamp: "2026-01-01T00:00:00Z",
+      },
+    });
+
+    // First dispatch — self-removing listener fires then removes itself
+    emitTauriEvent("ws-message", msgJson);
+    expect(calls).toContain("self-removing");
+    expect(calls).toContain("survivor");
+
+    // Second dispatch — only survivor should fire
+    calls.length = 0;
+    emitTauriEvent("ws-message", msgJson);
+    expect(calls).toEqual(["survivor"]);
+  });
+
+  it("unknown event type dispatch does not throw", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    // Dispatch a completely unknown event type — should not crash
+    expect(() => {
+      emitTauriEvent(
+        "ws-message",
+        JSON.stringify({
+          type: "totally_unknown_event",
+          payload: { foo: "bar" },
+        }),
+      );
+    }).not.toThrow();
+  });
+
+  it("error boundary: throwing listener does not prevent next listener from running", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    const received: string[] = [];
+
+    client.on("chat_message", () => {
+      throw new Error("first listener explodes");
+    });
+    client.on("chat_message", (payload) => {
+      received.push((payload as { content: string }).content);
+    });
+    client.on("chat_message", () => {
+      throw new Error("third listener also explodes");
+    });
+    client.on("chat_message", (payload) => {
+      received.push("fourth:" + (payload as { content: string }).content);
+    });
+
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "chat_message",
+        payload: {
+          id: 1,
+          channel_id: 1,
+          user: { id: 1, username: "a", avatar: null },
+          content: "hello",
+          reply_to: null,
+          attachments: [],
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
+
+    // Both non-throwing listeners should have received the message
+    expect(received).toEqual(["hello", "fourth:hello"]);
+  });
+});
