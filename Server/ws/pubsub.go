@@ -152,10 +152,40 @@ func (ps *PubSub) Publish(topic Topic, msg []byte, excludeUserID int64) int {
 	return len(clients)
 }
 
+// PublishLowPriority sends msg to subscribers of topic using trySendMsg, which
+// silently drops the message if a client's buffer is full instead of
+// disconnecting them. Use this for ephemeral events like typing indicators
+// and presence updates that can be safely lost.
+func (ps *PubSub) PublishLowPriority(topic Topic, msg []byte, excludeUserID int64) int {
+	ps.mu.RLock()
+	subs := ps.topics[topic]
+	clients := make([]*Client, 0, len(subs))
+	for uid, c := range subs {
+		if uid != excludeUserID {
+			clients = append(clients, c)
+		}
+	}
+	ps.mu.RUnlock()
+
+	delivered := 0
+	for _, c := range clients {
+		if c.trySendMsg(msg) {
+			delivered++
+		}
+	}
+	return delivered
+}
+
 // PublishGlobal sends msg to every client subscribed to the "global" topic.
 // This is equivalent to Publish(TopicGlobal, msg, 0) but makes intent explicit.
 func (ps *PubSub) PublishGlobal(msg []byte) int {
 	return ps.Publish(TopicGlobal, msg, 0)
+}
+
+// PublishGlobalLowPriority sends msg to all global subscribers using
+// trySendMsg (drop instead of disconnect on full buffer).
+func (ps *PubSub) PublishGlobalLowPriority(msg []byte) int {
+	return ps.PublishLowPriority(TopicGlobal, msg, 0)
 }
 
 // SubscriberCount returns the number of subscribers for a topic.
