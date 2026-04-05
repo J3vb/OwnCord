@@ -1061,7 +1061,7 @@ export class LiveKitSession {
       log.error("Failed to connect to LiveKit", { url: resolvedUrl, error: err });
       if (localRoom !== null) {
         try {
-          localRoom.disconnect();
+          void localRoom.disconnect();
         } catch {
           /* ignore */
         }
@@ -1363,7 +1363,7 @@ export class LiveKitSession {
     if (!this._isKeyHolder) return;
     this._keyRotationTimer = setTimeout(() => {
       this._keyRotationTimer = null;
-      this.rotateKeyPeriodically();
+      void this.rotateKeyPeriodically();
     }, LiveKitSession.KEY_ROTATION_INTERVAL_MS);
     log.debug("E2EE: key rotation timer started", {
       intervalMs: LiveKitSession.KEY_ROTATION_INTERVAL_MS,
