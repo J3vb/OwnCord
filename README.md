@@ -1,18 +1,26 @@
 ![stability-experimental](https://img.shields.io/badge/stability-experimental-orange.svg?style=for-the-badge)
 
-
 ![Go](https://img.shields.io/badge/go-%2300ADD8.svg?style=for-the-badge&logo=go&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/typescript-%23007ACC.svg?style=for-the-badge&logo=typescript&logoColor=white)
 ![NPM](https://img.shields.io/badge/NPM-%23CB3837.svg?style=for-the-badge&logo=npm&logoColor=white)
+
 # OwnCord
 
-*The gaming chat platform you actually own.*
+The gaming chat platform you actually own.
+
+
+> **Early Alpha / Work in Progress**
+> OwnCord is in active development and is not production-ready. Expect rough edges, rapid changes, and occasional breaking behavior.
+>
+> Do not use it for sensitive communications yet.
 
 ## Development Model
-OwnCord follows an AI-assisted, iteration-focused development workflow. 
-A significant portion of the implementation is generated with AI tooling, with quality validated through automated checks (CI, tests, linting) and real-world usage during alpha.
 
-This approach enables rapid iteration and experimentation, but it also means behavior and internal structure may evolve quickly between releases.
+OwnCord is built with an AI-first development workflow.
+Most implementation is generated through autonomous AI tooling, with quality validated primarily through automated checks (CI, tests, linting) and real-world feedback during alpha.
+
+This approach enables fast iteration, but it also means behavior may change quickly between releases.
+
 
 
 OwnCord is a self-hosted chat stack with a Go server and a Tauri desktop client.
