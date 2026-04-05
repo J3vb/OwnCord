@@ -84,6 +84,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		// auto-generates a key when none exists.
 	}
 
+	// Service layer — centralizes business logic for REST and WS handlers.
+	st := dbstore.NewSQLiteStore(database)
+	svc := service.New(st, limiter)
+
 	// Auth routes: register, login, logout, me.
 	MountAuthRoutes(r, database, limiter, cfg.Server.TrustedProxies, totpKey)
 
@@ -112,10 +116,6 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	} else {
 		MountUploadRoutes(r, database, store, limiter, cfg.Server.AllowedOrigins)
 	}
-
-	// Service layer — centralizes business logic for REST and WS handlers.
-	st := dbstore.NewSQLiteStore(database)
-	svc := service.New(st, limiter)
 
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
 	hub := ws.NewHub(database, limiter, svc)
@@ -206,7 +206,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Admin panel: static files + REST API (Phase 6).
 	// Restrict /admin to configured CIDRs (default: private networks only).
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, "J3vb", "OwnCord")
-	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins)
+	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions)
 	r.Group(func(r chi.Router) {
 		r.Use(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
 		r.Mount("/admin", adminHandler)

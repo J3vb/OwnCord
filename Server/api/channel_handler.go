@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/service"
 )
 
@@ -63,6 +64,24 @@ func MountChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, li
 		AuthMiddleware(database),
 		searchRateLimitMiddleware(limiter, searchRateLimitPerMinute, time.Minute, trustedProxies),
 	).Get("/api/v1/search", handleSearch(svc))
+}
+
+// hasChannelPermREST checks whether the role has the given permission on the channel,
+// accounting for Administrator bypass and channel overrides.
+// Used by non-migrated handlers (e.g., upload_handler.go).
+func hasChannelPermREST(database *db.DB, role *db.Role, channelID, perm int64) bool {
+	if role == nil {
+		return false
+	}
+	if permissions.HasAdmin(role.Permissions) {
+		return true
+	}
+	allow, deny, err := database.GetChannelPermissions(channelID, role.ID)
+	if err != nil {
+		return false
+	}
+	effective := permissions.EffectivePerms(role.Permissions, allow, deny)
+	return effective&perm == perm
 }
 
 // handleListChannels returns all channels the authenticated user can see.

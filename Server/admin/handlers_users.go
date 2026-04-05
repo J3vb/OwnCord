@@ -51,7 +51,7 @@ type patchUserRequest struct {
 	BanReason *string `json:"ban_reason"`
 }
 
-func handlePatchUser(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
+func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
 		if err != nil {
@@ -103,6 +103,9 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 				return
 			}
 			slog.Info("role changed", "actor_id", actor, "target_user", user.Username, "new_role_id", *req.RoleID)
+			if permInvalidator != nil {
+				permInvalidator.InvalidateUser(id)
+			}
 		}
 
 		banReason := ""
