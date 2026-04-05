@@ -1,0 +1,1960 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OwnCord Project Map</title>
+<style>
+  :root {
+    --bg: #0d0f14;
+    --surface: #151820;
+    --surface2: #1c2030;
+    --border: #2a2e3e;
+    --text: #e0e0e0;
+    --text-dim: #8890a0;
+    --cyan: #00c8ff;
+    --purple: #7b2fff;
+    --green: #00d26a;
+    --yellow: #ffc107;
+    --red: #ff4757;
+    --orange: #ff8c42;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* Header */
+  .header {
+    background: linear-gradient(135deg, rgba(0,200,255,0.06), rgba(123,47,255,0.06));
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 50;
+    backdrop-filter: blur(12px);
+  }
+  .header h1 {
+    font-size: 16px; font-weight: 600;
+    background: linear-gradient(135deg, var(--cyan), var(--purple));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .header .actions { display: flex; gap: 8px; align-items: center; }
+  .timestamp { font-size: 11px; color: var(--text-dim); }
+  .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); display: inline-block; margin-right: 4px; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* Buttons */
+  button, select { background: var(--surface2); color: var(--text); border: 1px solid var(--border); padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; transition: all 0.15s; }
+  button:hover, select:hover { border-color: var(--cyan); color: var(--cyan); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Main layout */
+  .main { max-width: 1200px; margin: 0 auto; padding: 0 24px 60px; }
+
+  /* Section headers */
+  .section { margin-top: 32px; }
+  .section-header {
+    display: flex; align-items: baseline; gap: 12px;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--cyan); }
+  .section-subtitle { font-size: 12px; color: var(--text-dim); }
+
+  /* Grid & cards */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+  .card h3 { font-size: 12px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; }
+  .card.wide { grid-column: 1 / -1; }
+  .card.accent-top { border-top: 2px solid var(--cyan); }
+  .card.accent-green { border-top: 2px solid var(--green); }
+
+  /* Session banner */
+  .session-banner {
+    background: linear-gradient(135deg, rgba(0,210,106,0.08), rgba(0,200,255,0.05));
+    border: 1px solid rgba(0,210,106,0.25);
+    border-radius: 10px;
+    padding: 16px 20px;
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+    margin-bottom: 14px;
+  }
+  .session-banner.inactive { background: var(--surface); border-color: var(--border); }
+  .session-status { display: flex; align-items: center; gap: 12px; }
+  .session-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+  .session-dot.off { background: var(--text-dim); animation: none; }
+  .session-label { font-weight: 600; font-size: 14px; }
+  .session-timer { font-size: 13px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  .session-stats { display: flex; gap: 20px; font-size: 13px; }
+  .session-stats .num { font-weight: 700; color: var(--cyan); }
+
+  /* Plan items */
+  .plan-item { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(42,46,62,0.4); }
+  .plan-item:last-child { border-bottom: none; }
+  .plan-rank {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: rgba(0,200,255,0.1); border: 1px solid rgba(0,200,255,0.3);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; color: var(--cyan); flex-shrink: 0;
+  }
+  .plan-body { flex: 1; }
+  .plan-title { font-weight: 600; font-size: 13px; }
+  .plan-rationale { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+  .plan-size { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px; margin-left: 8px; }
+  .plan-size.small { background: rgba(0,210,106,0.15); color: var(--green); }
+  .plan-size.medium { background: rgba(255,193,7,0.15); color: var(--yellow); }
+  .plan-size.large { background: rgba(255,140,66,0.15); color: var(--orange); }
+
+  /* Suggestion cards */
+  .suggestion-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; transition: border-color 0.15s; }
+  .suggestion-card:hover { border-color: rgba(0,200,255,0.3); }
+  .suggestion-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .suggestion-module { font-weight: 600; font-size: 14px; }
+  .suggestion-score { font-size: 11px; color: var(--text-dim); }
+  .suggestion-rationale { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+  .suggestion-breakdown { display: flex; gap: 12px; font-size: 11px; }
+  .suggestion-breakdown .label { color: var(--text-dim); }
+  .suggestion-breakdown .val { font-weight: 600; }
+  .suggestion-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .suggestion-actions button { font-size: 10px; padding: 3px 8px; }
+
+  /* Prompt generator */
+  .prompt-gen { margin-top: 10px; }
+  .prompt-gen-toggle {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; color: var(--cyan); cursor: pointer;
+    background: none; border: none; padding: 0;
+    transition: color 0.15s;
+  }
+  .prompt-gen-toggle:hover { color: #fff; }
+  .prompt-gen-toggle .arrow { font-size: 8px; transition: transform 0.2s; display: inline-block; }
+  .prompt-gen-toggle .arrow.open { transform: rotate(90deg); }
+  .prompt-gen-body {
+    display: none; margin-top: 8px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px; position: relative;
+  }
+  .prompt-gen-body.visible { display: block; }
+  .prompt-gen-text {
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 11px; line-height: 1.5; color: var(--text);
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 200px; overflow-y: auto;
+    user-select: all;
+  }
+  .prompt-gen-copy {
+    position: absolute; top: 6px; right: 6px;
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text-dim); font-size: 10px; padding: 3px 8px; cursor: pointer;
+    display: flex; align-items: center; gap: 4px;
+    transition: all 0.15s;
+  }
+  .prompt-gen-copy:hover { border-color: var(--cyan); color: var(--cyan); }
+  .prompt-gen-copy.copied { border-color: var(--green); color: var(--green); }
+
+  /* Strategy pills */
+  .strategy-pills { display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
+  .strategy-pill { padding: 4px 10px; border-radius: 12px; font-size: 11px; cursor: pointer; background: var(--surface2); border: 1px solid var(--border); color: var(--text-dim); }
+  .strategy-pill.active { border-color: var(--cyan); background: rgba(0,200,255,0.1); color: var(--cyan); }
+
+  /* Task pills */
+  .task-pill { display: inline-block; padding: 2px 8px; margin: 2px 3px 2px 0; border-radius: 3px; font-size: 11px; background: var(--surface2); border: 1px solid var(--border); }
+  .task-pill.bug { border-color: rgba(255,71,87,0.4); color: var(--red); }
+  .task-pill.code-review { border-color: rgba(255,193,7,0.4); color: var(--yellow); }
+  .task-pill.high { border-color: rgba(255,140,66,0.4); color: var(--orange); }
+  .task-pill.deferred { border-color: rgba(0,200,255,0.3); color: var(--cyan); }
+  .task-pill.roadmap { border-color: rgba(123,47,255,0.3); color: var(--purple); }
+
+  /* Collapsible sections */
+  .collapsible { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
+  .collapsible-header { padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; transition: background 0.15s; }
+  .collapsible-header:hover { background: rgba(0,200,255,0.03); }
+  .collapsible-title { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .collapsible-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: var(--surface2); }
+  .collapsible-arrow { font-size: 10px; color: var(--text-dim); transition: transform 0.2s; flex-shrink: 0; }
+  .collapsible.open .collapsible-arrow { transform: rotate(180deg); }
+  .collapsible-body { padding: 0 18px 16px; display: none; }
+  .collapsible.open .collapsible-body { display: block; }
+
+  /* Coverage bars */
+  .cov-row { display: flex; align-items: center; margin-bottom: 6px; gap: 6px; }
+  .cov-row .name { width: 100px; font-size: 12px; font-family: 'Cascadia Code', monospace; color: var(--text-dim); flex-shrink: 0; }
+  .cov-bar { flex: 1; height: 16px; background: var(--surface2); border-radius: 3px; overflow: hidden; position: relative; }
+  .cov-fill { height: 100%; border-radius: 3px; }
+  .cov-row .pct { width: 48px; text-align: right; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+  .target-line { position: absolute; left: 80%; top: 0; bottom: 0; width: 1px; background: var(--text-dim); opacity: 0.3; }
+
+  /* Mini chart */
+  .mini-chart { display: flex; align-items: flex-end; gap: 1px; height: 30px; }
+  .mini-bar { width: 6px; border-radius: 1px 1px 0 0; background: var(--cyan); opacity: 0.7; min-height: 1px; }
+
+  /* Badges */
+  .badge { display: inline-block; padding: 2px 7px; border-radius: 3px; font-size: 10px; font-weight: 600; }
+  .badge.go { background: rgba(0,173,238,0.15); color: #00adef; }
+  .badge.typescript { background: rgba(49,120,198,0.15); color: #3178c6; }
+  .badge.rust { background: rgba(222,165,132,0.15); color: #dea584; }
+
+  /* Agent badges */
+  .agent-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 3px 8px; border-radius: 4px; background: rgba(0,200,255,0.08); border: 1px solid rgba(0,200,255,0.2); color: var(--cyan); }
+  .agent-badge.done { background: rgba(0,210,106,0.1); border-color: rgba(0,210,106,0.25); color: var(--green); }
+  .agent-badge.failed { background: rgba(255,71,87,0.1); border-color: rgba(255,71,87,0.25); color: var(--red); }
+
+  /* Debt markers */
+  .debt-type { font-weight: 600; font-size: 10px; padding: 1px 5px; border-radius: 2px; }
+  .debt-type.TODO { background: rgba(0,200,255,0.15); color: var(--cyan); }
+  .debt-type.FIXME { background: rgba(255,193,7,0.15); color: var(--yellow); }
+  .debt-type.HACK { background: rgba(255,71,87,0.15); color: var(--red); }
+
+  /* Loading state */
+  .loading { display: flex; align-items: center; justify-content: center; min-height: 200px; color: var(--text-dim); font-size: 13px; }
+  .loading::after { content: ''; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--cyan); border-radius: 50%; margin-left: 8px; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Button spinner for loading states */
+  .btn-loading { pointer-events: none; opacity: 0.8; }
+  .btn-loading::after { content: ''; display: inline-block; width: 10px; height: 10px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; margin-left: 6px; animation: spin 0.6s linear infinite; vertical-align: middle; }
+
+  /* Activity feed */
+  .feed { max-height: 260px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  .feed::-webkit-scrollbar { width: 4px; }
+  .feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .feed-item { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(42,46,62,0.3); font-size: 12px; animation: feedIn 0.3s ease; }
+  .feed-item:last-child { border-bottom: none; }
+  @keyframes feedIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+  .feed-time { font-size: 10px; color: var(--text-dim); white-space: nowrap; min-width: 52px; font-variant-numeric: tabular-nums; }
+  .feed-icon { width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; flex-shrink: 0; }
+  .feed-icon.session { background: rgba(0,210,106,0.15); color: var(--green); }
+  .feed-icon.file { background: rgba(0,200,255,0.15); color: var(--cyan); }
+  .feed-icon.agent { background: rgba(123,47,255,0.15); color: var(--purple); }
+  .feed-icon.error { background: rgba(255,71,87,0.15); color: var(--red); }
+  .feed-icon.info { background: rgba(255,193,7,0.15); color: var(--yellow); }
+  .feed-msg { flex: 1; color: var(--text-dim); }
+
+  /* Job queue panel */
+  .queue-panel { display: flex; flex-direction: column; gap: 8px; }
+  .queue-job {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px; transition: border-color 0.15s;
+  }
+  .queue-job.running { border-color: rgba(0,200,255,0.4); }
+  .queue-job.completed { border-color: rgba(0,210,106,0.3); }
+  .queue-job.failed, .queue-job.dead { border-color: rgba(255,71,87,0.3); }
+  .queue-job-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .queue-job-title { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+  .queue-job-meta { font-size: 11px; color: var(--text-dim); display: flex; gap: 12px; }
+
+  /* Terminal output */
+  .terminal {
+    background: #0a0c10; border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px; margin-top: 8px;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 11px; line-height: 1.5; color: #a0b0c0;
+    max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
+    scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+  }
+  .terminal::-webkit-scrollbar { width: 4px; }
+  .terminal::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .terminal .cursor { display: inline-block; width: 6px; height: 12px; background: var(--cyan); animation: blink 1s step-end infinite; vertical-align: text-bottom; margin-left: 2px; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .terminal-empty { color: var(--text-dim); font-style: italic; }
+
+  /* Status dot inline */
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+  .status-dot.queued { background: var(--yellow); }
+  .status-dot.running { background: var(--cyan); animation: pulse 1.5s infinite; }
+  .status-dot.completed { background: var(--green); }
+  .status-dot.failed, .status-dot.dead { background: var(--red); }
+  .status-dot.cancelled { background: var(--text-dim); }
+  .status-dot.review { background: var(--purple); animation: pulse 1.5s infinite; }
+  .status-dot.merged { background: var(--green); }
+  .status-dot.provisioning { background: var(--yellow); animation: pulse 1s infinite; }
+
+  /* ===== Mission Control ===== */
+
+  /* Fleet status bar */
+  .fleet-bar {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+    background: linear-gradient(135deg, rgba(123,47,255,0.06), rgba(0,200,255,0.06));
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 18px; margin-bottom: 14px;
+  }
+  .fleet-bar-stats { display: flex; gap: 16px; font-size: 13px; }
+  .fleet-bar-stats .stat { display: flex; align-items: center; gap: 6px; }
+  .fleet-bar-stats .stat .num { font-weight: 700; }
+  .fleet-bar-stats .stat .num.active { color: var(--cyan); }
+  .fleet-bar-stats .stat .num.queued { color: var(--yellow); }
+  .fleet-bar-stats .stat .num.review { color: var(--purple); }
+  .fleet-bar-controls { display: flex; gap: 8px; align-items: center; }
+  .fleet-bar-controls label { font-size: 11px; color: var(--text-dim); }
+  .fleet-bar-controls input[type="range"] {
+    width: 80px; accent-color: var(--cyan); cursor: pointer;
+    background: transparent; height: 4px;
+  }
+  .fleet-bar-controls .max-label { font-size: 12px; font-weight: 700; color: var(--cyan); min-width: 16px; text-align: center; }
+
+  /* Quick launch bar */
+  .quick-launch {
+    display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px;
+  }
+  .quick-launch-btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 20px;
+    padding: 5px 14px; font-size: 12px; color: var(--text); cursor: pointer;
+    transition: all 0.15s;
+  }
+  .quick-launch-btn:hover { border-color: var(--cyan); color: var(--cyan); background: rgba(0,200,255,0.06); }
+  .quick-launch-btn .ql-icon { font-size: 10px; opacity: 0.6; }
+  .quick-launch-btn .ql-score { font-size: 10px; color: var(--text-dim); margin-left: 2px; }
+
+  /* Agent grid — 2x2 responsive */
+  .agent-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 12px;
+  }
+  .agent-panel {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden; transition: border-color 0.2s;
+  }
+  .agent-panel.status-running { border-color: rgba(0,200,255,0.35); }
+  .agent-panel.status-review { border-color: rgba(123,47,255,0.35); }
+  .agent-panel.status-provisioning { border-color: rgba(255,193,7,0.3); }
+  .agent-panel.status-queued { border-color: rgba(255,193,7,0.2); }
+
+  .agent-panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    background: rgba(0,0,0,0.15);
+  }
+  .agent-panel-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
+  .agent-panel-actions { display: flex; gap: 5px; }
+  .agent-panel-actions button { font-size: 10px; padding: 3px 10px; }
+
+  .agent-panel-body { display: grid; grid-template-columns: 1fr 1fr; min-height: 240px; }
+  .agent-panel-body.single-col { grid-template-columns: 1fr; }
+
+  .agent-panel-terminal {
+    border-right: 1px solid var(--border);
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  .agent-panel-terminal .terminal { border: none; border-radius: 0; margin: 0; max-height: 320px; flex: 1; }
+
+  .agent-panel-files {
+    padding: 10px 12px; max-height: 320px; overflow-y: auto;
+    scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+  }
+  .agent-panel-files::-webkit-scrollbar { width: 4px; }
+  .agent-panel-files::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* Merge button states */
+  .merge-btn { background: rgba(0,210,106,0.12); border-color: var(--green); color: var(--green); }
+  .merge-btn:hover { background: rgba(0,210,106,0.2); }
+  .merge-btn:disabled { opacity: 0.4; cursor: not-allowed; border-color: var(--border); color: var(--text-dim); background: var(--surface2); }
+  .merge-btn.merging { pointer-events: none; opacity: 0.8; }
+  .merge-btn.merging::after { content: ''; display: inline-block; width: 10px; height: 10px; border: 2px solid var(--green); border-top-color: transparent; border-radius: 50%; margin-left: 6px; animation: spin 0.6s linear infinite; vertical-align: middle; }
+
+  /* Empty grid placeholder */
+  .agent-grid-empty {
+    grid-column: 1 / -1; text-align: center; padding: 40px 20px;
+    color: var(--text-dim); font-size: 13px;
+  }
+  .agent-grid-empty .hint { font-size: 12px; margin-top: 8px; color: var(--text-dim); opacity: 0.7; }
+
+  /* Split panel for expanded jobs */
+  .job-split { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin-top: 8px; background: var(--border); border-radius: 6px; overflow: hidden; }
+  .job-split > div { background: #0a0c10; }
+  .job-terminal-col { padding: 0; }
+  .job-terminal-col .terminal { border: none; border-radius: 0; margin: 0; max-height: 400px; }
+  .job-files-col { padding: 10px 12px; max-height: 400px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  .job-files-col::-webkit-scrollbar { width: 4px; }
+  .job-files-col::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .files-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .files-header-title { font-size: 12px; font-weight: 600; color: var(--text-dim); }
+  .diff-freshness { font-size: 10px; color: var(--text-dim); font-style: italic; }
+
+  .file-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 4px; cursor: pointer; font-size: 12px; transition: background 0.1s; }
+  .file-row:hover { background: rgba(0,200,255,0.05); }
+  .file-row.active { border-left: 2px solid var(--cyan); animation: pulse 2s infinite; }
+  .file-status { font-size: 11px; font-weight: 700; width: 16px; text-align: center; flex-shrink: 0; }
+  .file-status.M { color: var(--yellow); }
+  .file-status.A { color: var(--green); }
+  .file-status.D { color: var(--red); }
+  .file-path { flex: 1; font-family: 'Cascadia Code', monospace; font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-stats { font-size: 10px; white-space: nowrap; flex-shrink: 0; }
+  .file-stats .add { color: var(--green); }
+  .file-stats .del { color: var(--red); }
+  .file-expand-icon { font-size: 9px; color: var(--text-dim); transition: transform 0.15s; flex-shrink: 0; width: 10px; }
+  .file-expand-icon.open { transform: rotate(90deg); }
+
+  .file-diff { display: none; margin: 2px 0 6px; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; max-height: 300px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  .file-diff::-webkit-scrollbar { width: 4px; }
+  .file-diff::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .file-diff.open { display: block; }
+  .diff-line { font-family: 'Cascadia Code', monospace; font-size: 11px; line-height: 1.6; padding: 0 8px; white-space: pre-wrap; word-break: break-all; }
+  .diff-line.hunk { color: var(--cyan); background: rgba(0,200,255,0.06); font-weight: 600; }
+  .diff-line.add { color: #a0e8a0; background: rgba(0,210,106,0.08); }
+  .diff-line.del { color: #e8a0a0; background: rgba(255,71,87,0.08); }
+  .diff-line.ctx { color: var(--text-dim); }
+  .diff-truncated { font-size: 11px; color: var(--text-dim); text-align: center; padding: 6px; font-style: italic; cursor: pointer; }
+  .diff-truncated:hover { color: var(--cyan); }
+
+  /* Ring (task completion) */
+  .ring-container { text-align: center; }
+  .ring { width: 70px; height: 70px; margin: 0 auto 4px; }
+  .ring svg { transform: rotate(-90deg); }
+  .ring-label { font-size: 11px; color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<!-- ===== HEADER ===== -->
+<div class="header">
+  <h1>OwnCord Project Map</h1>
+  <div class="actions">
+    <span class="timestamp"><span class="live-dot" id="liveDot" style="display:none"></span><span id="timestamp"></span></span>
+    <button onclick="refresh(true)" id="refreshBtn">Refresh</button>
+    <button onclick="refresh(false)" id="fullRefreshBtn">Full refresh</button>
+  </div>
+</div>
+
+<div class="main loading" id="app">
+  <div class="loading">Loading project data...</div>
+</div>
+
+<!-- Result overlay for viewing agent job results -->
+<div id="resultOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:100;align-items:center;justify-content:center" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:80%;max-width:800px;max-height:80vh;overflow:auto;padding:24px">
+    <div style="display:flex;justify-content:space-between;margin-bottom:12px"><h2 style="font-size:16px;color:var(--cyan)">Agent Result</h2><button onclick="document.getElementById('resultOverlay').style.display='none'" style="font-size:11px">Close</button></div>
+    <pre id="resultContent" style="font-size:12px;line-height:1.5;white-space:pre-wrap;color:var(--text-dim)"></pre>
+  </div>
+</div>
+
+<!-- New Job overlay -->
+<div id="newJobOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:100;align-items:center;justify-content:center" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:90%;max-width:420px;padding:24px">
+    <h2 style="font-size:16px;color:var(--cyan);margin-bottom:16px">Create Agent Job</h2>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div><label style="font-size:11px;color:var(--text-dim)">Type</label><br>
+        <select id="jobType" style="width:100%;margin-top:4px"><option>research</option><option>write-tests</option><option>code-review</option><option>security-audit</option><option>fix-debt</option><option>custom</option></select></div>
+      <div><label style="font-size:11px;color:var(--text-dim)">Target Module</label><br>
+        <input id="jobTarget" style="width:100%;margin-top:4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);padding:5px 8px;border-radius:6px;font-size:12px" placeholder="e.g. auth, ws, lib"></div>
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button onclick="submitNewJob()" style="background:rgba(0,200,255,0.1);border-color:var(--cyan);color:var(--cyan)">Create</button>
+        <button onclick="document.getElementById('newJobOverlay').style.display='none'">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let data = null;
+let sessionTimer = null;
+
+// Auth token
+const _authToken = new URLSearchParams(window.location.search).get('token') || '';
+function authHeaders(extra) {
+  const h = Object.assign({}, extra);
+  if (_authToken) h['Authorization'] = 'Bearer ' + _authToken;
+  return h;
+}
+
+// HTML escape
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ===== Prompt Generator =====
+function buildPrompt(sg) {
+  const lines = [];
+  lines.push(`I want to work on the "${sg.module}" module in this project.`);
+  lines.push('');
+  lines.push('## Context');
+  lines.push(`Priority score: ${sg.score} (Coverage: ${sg.breakdown.coverage}, Bugs: ${sg.breakdown.bugs}, Momentum: ${sg.breakdown.momentum}, Debt: ${sg.breakdown.debt})`);
+  lines.push('');
+
+  if (sg.signals && sg.signals.length > 0) {
+    lines.push('## Key signals');
+    for (const s of sg.signals) {
+      lines.push(`- **${s.signal}**: ${s.value}`);
+    }
+    lines.push('');
+  }
+
+  lines.push('## What I need');
+  const needs = [];
+  if (sg.breakdown.bugs > 0) needs.push('fix open bugs');
+  if (sg.breakdown.coverage > 0) needs.push('improve test coverage toward 80%');
+  if (sg.breakdown.debt > 0) needs.push('address tech debt (TODOs, large files, long functions)');
+  if (sg.breakdown.momentum > 0) needs.push('advance open tasks and reduce staleness');
+  if (needs.length === 0) needs.push('general improvements');
+  lines.push(needs.map(n => `- ${n.charAt(0).toUpperCase() + n.slice(1)}`).join('\n'));
+  lines.push('');
+  lines.push('Please start by reading the relevant source files, understanding the current state, and then propose a plan before making changes.');
+
+  return lines.join('\n');
+}
+
+// ===== Activity Feed =====
+const MAX_FEED_ITEMS = 50;
+const activityFeed = [];
+
+function feedAdd(icon, msg) {
+  const now = new Date();
+  const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  activityFeed.unshift({ time, icon, msg });
+  if (activityFeed.length > MAX_FEED_ITEMS) activityFeed.length = MAX_FEED_ITEMS;
+  renderFeedUI();
+}
+
+function renderFeedUI() {
+  const el = document.getElementById('activityFeed');
+  if (!el) return;
+  if (activityFeed.length === 0) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--text-dim);font-style:italic;padding:8px 0">No activity yet. Start a session or queue an agent job.</div>';
+    return;
+  }
+  el.innerHTML = '';
+  for (const f of activityFeed) {
+    const item = document.createElement('div');
+    item.className = 'feed-item';
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'feed-time';
+    timeSpan.textContent = f.time;
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'feed-icon ' + f.icon;
+    iconSpan.innerHTML = '&#x25CF;';
+    const msgSpan = document.createElement('span');
+    msgSpan.className = 'feed-msg';
+    msgSpan.textContent = f.msg;
+    item.appendChild(timeSpan);
+    item.appendChild(iconSpan);
+    item.appendChild(msgSpan);
+    el.appendChild(item);
+  }
+}
+
+// ===== Live job output tracking =====
+const jobOutputBuffers = new Map(); // jobId -> accumulated output string
+
+function appendJobOutput(jobId, chunk) {
+  const prev = jobOutputBuffers.get(jobId) || '';
+  jobOutputBuffers.set(jobId, prev + chunk);
+  // Update terminal UI if visible (both legacy and Mission Control panels)
+  let foundTerminal = false;
+  for (const prefix of ['terminal-', 'mc-terminal-']) {
+    const termEl = document.getElementById(prefix + jobId);
+    if (termEl) {
+      foundTerminal = true;
+      termEl.textContent = jobOutputBuffers.get(jobId);
+      termEl.scrollTop = termEl.scrollHeight;
+      const cursor = termEl.querySelector('.cursor');
+      if (!cursor) {
+        const c = document.createElement('span');
+        c.className = 'cursor';
+        termEl.appendChild(c);
+      }
+    }
+  }
+  // If no terminal exists yet (grid still shows queued state), trigger a one-time refresh
+  if (!foundTerminal && !appendJobOutput._refreshPending) {
+    appendJobOutput._refreshPending = true;
+    setTimeout(() => { appendJobOutput._refreshPending = false; refresh(true); }, 300);
+  }
+  // Also log to feed (debounced — only every 2s)
+  if (!appendJobOutput._feedTimer) {
+    appendJobOutput._feedTimer = setTimeout(() => {
+      appendJobOutput._feedTimer = null;
+      const lines = (jobOutputBuffers.get(jobId) || '').split('\n').filter(Boolean);
+      if (lines.length > 0) {
+        const lastLine = lines[lines.length - 1].slice(0, 100);
+        feedAdd('agent', `[${jobId.slice(0,12)}] ${lastLine}`);
+      }
+    }, 2000);
+  }
+}
+
+// Fetch full output for a job (for expanding completed/running jobs)
+async function fetchJobOutput(jobId, status) {
+  // For running jobs, try live endpoint first
+  if (status === 'running') {
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/output`, { headers: authHeaders() });
+      const d = await res.json();
+      if (d.output) {
+        jobOutputBuffers.set(jobId, d.output);
+        return d.output;
+      }
+    } catch { /* fall through */ }
+  }
+  // For completed jobs, try result endpoint
+  if (status === 'completed' || status === 'dead') {
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/result`, { headers: authHeaders() });
+      const d = await res.json();
+      if (d.content) return d.content;
+    } catch { /* fall through */ }
+  }
+  // Return whatever we have buffered
+  return jobOutputBuffers.get(jobId) || '';
+}
+
+// Track which job terminals are expanded
+const expandedJobs = new Set();
+// ===== Live diff tracking =====
+const jobDiffData = new Map();
+const jobActivityFiles = new Map();
+const expandedDiffFiles = new Map();
+
+function toggleJobExpand(jobId, status) {
+  if (expandedJobs.has(jobId)) {
+    expandedJobs.delete(jobId);
+    const termEl = document.getElementById('terminal-wrap-' + jobId);
+    if (termEl) termEl.style.display = 'none';
+  } else {
+    expandedJobs.add(jobId);
+    const termEl = document.getElementById('terminal-wrap-' + jobId);
+    if (termEl) {
+      termEl.style.display = 'block';
+      // Fetch output if not already loaded
+      const inner = document.getElementById('terminal-' + jobId);
+      if (inner && !inner.textContent.trim()) {
+        inner.innerHTML = '<span class="terminal-empty">Loading output...</span>';
+        fetchJobOutput(jobId, status).then(output => {
+          if (inner) {
+            inner.textContent = output || '(no output yet)';
+            inner.scrollTop = inner.scrollHeight;
+            if (status === 'running') {
+              const c = document.createElement('span');
+              c.className = 'cursor';
+              inner.appendChild(c);
+            }
+          }
+        });
+      }
+      // Fetch diff data
+      if (!jobDiffData.has(jobId)) {
+        fetchJobDiff(jobId);
+      }
+    }
+  }
+}
+
+// ===== SSE for live updates =====
+let evtSource;
+function connectSSE() {
+  evtSource = new EventSource('/api/events');
+  evtSource.onmessage = (e) => {
+    let event;
+    try { event = JSON.parse(e.data); } catch { return; }
+    if (event.type === 'file-change') {
+      document.getElementById('liveDot').style.display = 'inline-block';
+      feedAdd('file', `File changed: ${event.filename || 'unknown'}`);
+      setTimeout(() => refresh(true), 500);
+    }
+    if (event.type === 'connected') {
+      document.getElementById('liveDot').style.display = 'inline-block';
+      feedAdd('info', 'Connected to live updates');
+    }
+    if (event.type === 'session-started') {
+      feedAdd('session', 'Session started \u2014 tracking changes from current HEAD');
+      refresh(true);
+    }
+    if (event.type === 'session-ended') {
+      const details = [];
+      if (event.filesChanged) details.push(`${event.filesChanged} files`);
+      if (event.duration) details.push(String(event.duration));
+      feedAdd('session', `Session ended${details.length ? ' \u2014 ' + details.join(', ') : ''}`);
+      refresh(true);
+    }
+    if (event.type === 'job-output') {
+      // Live output chunk from a running agent
+      appendJobOutput(event.jobId, event.chunk);
+    }
+    if (event.type === 'job-diff') {
+      jobDiffData.set(event.jobId, {
+        files: event.files || [],
+        diffs: event.diffs || {},
+        freshness: event.freshness,
+      });
+      updateFileListUI(event.jobId);
+    }
+    if (event.type === 'job-activity') {
+      if (!jobActivityFiles.has(event.jobId)) jobActivityFiles.set(event.jobId, new Set());
+      const active = jobActivityFiles.get(event.jobId);
+      active.add(event.file);
+      if (active.size > 5) {
+        const arr = [...active];
+        active.clear();
+        for (const f of arr.slice(-5)) active.add(f);
+      }
+      updateFileActivityUI(event.jobId);
+    }
+    if (event.type === 'merge-lock') {
+      mergeLocked = event.locked;
+      mergingJobId = event.locked ? event.jobId : null;
+      document.querySelectorAll('.merge-btn').forEach(b => {
+        b.disabled = event.locked;
+        if (!event.locked) b.classList.remove('merging');
+      });
+      if (event.locked) feedAdd('agent', `Merge lock acquired for ${event.jobId?.slice(0,8)}`);
+    }
+    if (event.type === 'fleet-update') {
+      fleetStatus.active = event.active ?? fleetStatus.active;
+      fleetStatus.maxConcurrent = event.max ?? fleetStatus.maxConcurrent;
+      updateFleetBarUI();
+      feedAdd('info', `Fleet: ${event.active}/${event.max} agents active`);
+      // Rebuild grid — jobs may have changed status (queued → running)
+      refresh(true);
+    }
+    if (event.type === 'job-update') {
+      // Supports both formats: {job: {id, type, target, status}} and {jobId, status}
+      const j = event.job || event;
+      const id = j.id || j.jobId || event.jobId;
+      const status = j.status || event.status;
+      if (id && status) {
+        const label = (j.type && j.target) ? `${j.type} on ${j.target}` : id.slice(0, 8);
+        feedAdd('agent', `Agent ${label} \u2192 ${status}`);
+        // Clean up client-side buffers for terminal states
+        if (['completed', 'merged', 'dead', 'cancelled'].includes(status)) {
+          jobOutputBuffers.delete(id);
+          jobActivityFiles.delete(id);
+        }
+        fetchFleetStatus();
+      }
+      refresh(true);
+    }
+  };
+  evtSource.onerror = () => {
+    document.getElementById('liveDot').style.display = 'none';
+    feedAdd('error', 'Lost connection to server — retrying...');
+  };
+}
+connectSSE();
+
+function updateFileListUI(jobId) {
+  const diffData = jobDiffData.get(jobId);
+  if (!diffData) return;
+  // Update both legacy and Mission Control file lists
+  for (const prefix of ['filelist-', 'mc-filelist-']) {
+    const el = document.getElementById(prefix + jobId);
+    if (el) el.innerHTML = renderFileListInner(jobId, diffData);
+  }
+}
+
+function updateFileActivityUI(jobId) {
+  const active = jobActivityFiles.get(jobId);
+  if (!active) return;
+  document.querySelectorAll(`.file-row[data-job="${jobId}"]`).forEach(row => {
+    const path = row.dataset.path;
+    row.classList.toggle('active', active.has(path));
+  });
+}
+
+function toggleDiffFile(jobId, filePath) {
+  if (!expandedDiffFiles.has(jobId)) expandedDiffFiles.set(jobId, new Set());
+  const set = expandedDiffFiles.get(jobId);
+  const safeId = CSS.escape(filePath);
+  const diffEl = document.getElementById('filediff-' + jobId + '-' + safeId);
+  const iconEl = document.getElementById('fileicon-' + jobId + '-' + safeId);
+  if (set.has(filePath)) {
+    set.delete(filePath);
+    if (diffEl) diffEl.classList.remove('open');
+    if (iconEl) iconEl.classList.remove('open');
+  } else {
+    set.add(filePath);
+    if (diffEl) diffEl.classList.add('open');
+    if (iconEl) iconEl.classList.add('open');
+  }
+}
+
+async function fetchJobDiff(jobId) {
+  try {
+    const res = await fetch(`/api/jobs/${jobId}/diff`, { headers: authHeaders() });
+    const d = await res.json();
+    if (d.files) {
+      jobDiffData.set(jobId, { files: d.files, diffs: d.diffs || {}, freshness: d.freshness });
+      updateFileListUI(jobId);
+    }
+  } catch { /* silent */ }
+}
+
+async function refresh(quick = true) {
+  const btn = quick ? document.getElementById('refreshBtn') : document.getElementById('fullRefreshBtn');
+  btn.disabled = true; btn.textContent = 'Loading...';
+  try {
+    const url = quick ? '/api/data?refresh' : '/api/data?refresh&full=1';
+    const res = await fetch(url, { headers: authHeaders() });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    data = await res.json();
+    render();
+  } catch (e) {
+    document.getElementById('app').innerHTML = `<div class="loading" style="color:var(--red)">Error: ${esc(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = quick ? 'Refresh' : 'Full refresh';
+  }
+}
+
+// Delegated event listeners for dynamic buttons
+document.addEventListener('click', e => {
+  const workedBtn = e.target.closest('.worked-on-btn');
+  if (workedBtn) { workedOn(workedBtn.dataset.module); return; }
+  const strategyPill = e.target.closest('.strategy-pill[data-strategy]');
+  if (strategyPill) { changeStrategy(strategyPill.dataset.strategy); return; }
+  const queueBtn = e.target.closest('.queue-job-btn');
+  if (queueBtn) { createJobApi(queueBtn.dataset.type, queueBtn.dataset.target); return; }
+  // Prompt generator toggle
+  const promptToggle = e.target.closest('.prompt-gen-toggle');
+  if (promptToggle) {
+    const mod = promptToggle.dataset.module;
+    const body = document.getElementById('prompt-body-' + mod);
+    const arrow = promptToggle.querySelector('.arrow');
+    if (body) { body.classList.toggle('visible'); }
+    if (arrow) { arrow.classList.toggle('open'); }
+    return;
+  }
+  // Prompt generator copy
+  const promptCopy = e.target.closest('.prompt-gen-copy');
+  if (promptCopy) {
+    const mod = promptCopy.dataset.module;
+    const body = document.getElementById('prompt-body-' + mod);
+    const textEl = body?.querySelector('.prompt-gen-text');
+    if (textEl) {
+      navigator.clipboard.writeText(textEl.textContent).then(() => {
+        promptCopy.classList.add('copied');
+        promptCopy.innerHTML = '&#10003; Copied!';
+        setTimeout(() => { promptCopy.classList.remove('copied'); promptCopy.innerHTML = '&#128203; Copy'; }, 2000);
+      });
+    }
+    return;
+  }
+  const viewBtn = e.target.closest('.view-result-btn');
+  if (viewBtn) { viewJobResult(viewBtn.dataset.id); return; }
+  const cancelBtn = e.target.closest('.cancel-job-btn');
+  if (cancelBtn) { cancelJobApi(cancelBtn.dataset.id); return; }
+  // Toggle job expand (show/hide output)
+  const toggleJobBtn = e.target.closest('.toggle-job-btn');
+  if (toggleJobBtn) { toggleJobExpand(toggleJobBtn.dataset.jobId, toggleJobBtn.dataset.jobStatus); return; }
+  // Toggle diff file expand
+  const fileRow = e.target.closest('.file-row[data-job][data-path]');
+  if (fileRow) { toggleDiffFile(fileRow.dataset.job, fileRow.dataset.path); return; }
+  // Collapsible toggle
+  const colHeader = e.target.closest('.collapsible-header');
+  if (colHeader) { colHeader.closest('.collapsible').classList.toggle('open'); return; }
+});
+
+// ===== API Functions =====
+
+async function startSessionApi() {
+  const btn = document.getElementById('sessionStartBtn');
+  if (btn) { btn.classList.add('btn-loading'); btn.disabled = true; btn.textContent = 'Starting'; }
+  feedAdd('session', 'Starting session...');
+  try {
+    const res = await fetch('/api/session/start', { method: 'POST', headers: authHeaders() });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const result = await res.json();
+    if (result.error) {
+      feedAdd('error', `Session start failed: ${result.error}`);
+      alert(result.error);
+    } else {
+      feedAdd('session', `Session started \u2014 baseline SHA: ${result.baselineSha?.slice(0,8) || ''}`);
+    }
+    refresh(true);
+  } catch(e) {
+    feedAdd('error', `Session start failed: ${e.message}`);
+    alert('Failed: '+e.message);
+  } finally {
+    if (btn) { btn.classList.remove('btn-loading'); btn.disabled = false; btn.textContent = 'Start Session'; }
+  }
+}
+async function endSessionApi() {
+  const btn = document.getElementById('sessionEndBtn');
+  if (btn) { btn.classList.add('btn-loading'); btn.disabled = true; btn.textContent = 'Ending'; }
+  feedAdd('session', 'Ending session...');
+  try {
+    const res = await fetch('/api/session/end', { method: 'POST', headers: authHeaders() });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const result = await res.json();
+    if (result.error) {
+      feedAdd('error', `Session end failed: ${result.error}`);
+      alert(result.error); return;
+    }
+    feedAdd('session', `Session ended \u2014 ${result.filesChanged||0} files, ${result.duration||''}`);
+    if (result.tasksUpdated?.length) feedAdd('info', `Tasks moved to done: ${result.tasksUpdated.join(', ')}`);
+    refresh(true);
+  } catch(e) {
+    feedAdd('error', `Session end failed: ${e.message}`);
+    alert('Failed: '+e.message);
+  } finally {
+    if (btn) { btn.classList.remove('btn-loading'); btn.disabled = false; btn.textContent = 'End Session'; }
+  }
+}
+
+async function createJobApi(type, target, customPrompt) {
+  const body = { type, target };
+  if (customPrompt) body.customPrompt = customPrompt;
+  feedAdd('agent', `Queueing ${type} job on ${target}...`);
+  try {
+    const res = await fetch('/api/jobs', { method: 'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const d = await res.json();
+    if (d.error) {
+      feedAdd('error', `Job creation failed: ${d.error}`);
+      alert(d.error); return;
+    }
+    feedAdd('agent', `${type} job on ${target} queued (id: ${d.id?.slice(0,8) || ''})`);
+    refresh(true);
+  } catch(e) {
+    feedAdd('error', `Job creation failed: ${e.message}`);
+    alert('Failed: '+e.message);
+  }
+}
+async function cancelJobApi(id) {
+  feedAdd('agent', `Cancelling job ${id.slice(0,8)}...`);
+  try { const res = await fetch(`/api/jobs/${id}`, { method: 'DELETE', headers: authHeaders() }); if (!res.ok) throw new Error(`Server error: ${res.status}`); feedAdd('agent', `Job ${id.slice(0,8)} cancelled`); refresh(true); } catch(e) { feedAdd('error', `Cancel failed: ${e.message}`); alert('Failed: '+e.message); }
+}
+async function viewJobResult(id) {
+  try {
+    const res = await fetch(`/api/jobs/${id}/result`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const d = await res.json();
+    if (d.content) {
+      document.getElementById('resultOverlay').style.display = 'flex';
+      document.getElementById('resultContent').textContent = d.content;
+    } else { alert('No result available'); }
+  } catch(e) { alert('Failed: '+e.message); }
+}
+async function processQueueApi() {
+  try { const res = await fetch('/api/jobs/process', { method: 'POST', headers: authHeaders() }); if (!res.ok) throw new Error(`Server error: ${res.status}`); refresh(true); } catch(e) { alert('Failed: '+e.message); }
+}
+
+// ===== Fleet state =====
+let mergeLocked = false;
+let mergingJobId = null;
+let fleetStatus = { active: 0, queued: 0, review: 0, maxConcurrent: 4 };
+
+async function fetchFleetStatus() {
+  try {
+    const res = await fetch('/api/fleet/status', { headers: authHeaders() });
+    if (res.ok) {
+      fleetStatus = await res.json();
+      updateFleetBarUI();
+    }
+  } catch { /* silent */ }
+}
+
+function updateFleetBarUI() {
+  const el = document.getElementById('fleetBarStats');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="stat"><span class="num active">${fleetStatus.active}</span>/<span>${fleetStatus.maxConcurrent}</span> active</div>
+    <div class="stat"><span class="num queued">${fleetStatus.queued}</span> queued</div>
+    <div class="stat"><span class="num review">${fleetStatus.review}</span> for review</div>`;
+  const slider = document.getElementById('fleetMaxSlider');
+  if (slider && slider !== document.activeElement) {
+    slider.value = fleetStatus.maxConcurrent;
+    const label = document.getElementById('fleetMaxLabel');
+    if (label) label.textContent = fleetStatus.maxConcurrent;
+  }
+}
+
+async function setFleetMax(val) {
+  const label = document.getElementById('fleetMaxLabel');
+  if (label) label.textContent = val;
+  try {
+    await fetch('/api/fleet/config', {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ maxConcurrent: parseInt(val) }),
+    });
+    fleetStatus.maxConcurrent = parseInt(val);
+  } catch { /* silent */ }
+}
+
+async function mergeJobApi(jobId) {
+  if (mergeLocked) return;
+  feedAdd('agent', `Merging job ${jobId.slice(0,8)}...`);
+  // Update all merge buttons to disabled
+  document.querySelectorAll('.merge-btn').forEach(b => { b.disabled = true; });
+  const btn = document.getElementById('merge-btn-' + jobId);
+  if (btn) { btn.classList.add('merging'); btn.textContent = 'Merging'; }
+
+  try {
+    const res = await fetch(`/api/jobs/${jobId}/merge`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({}),
+    });
+    const d = await res.json();
+    if (res.status === 423) {
+      feedAdd('error', 'Another merge is already in progress');
+      alert('Another merge is already in progress');
+    } else if (res.status === 409) {
+      feedAdd('error', `Merge conflict: ${(d.conflicts||[]).join(', ')}`);
+      alert(`Merge conflict in: ${(d.conflicts||[]).join(', ')}\nResolve manually in your editor.`);
+    } else if (res.status === 400) {
+      feedAdd('error', d.error || 'Working tree dirty');
+      alert(d.error || 'Working tree has uncommitted changes');
+    } else if (res.status === 410) {
+      feedAdd('error', 'Branch gone — worktree was already cleaned up');
+      alert('Branch no longer exists. Use Dismiss to clear this job.');
+    } else if (res.ok) {
+      feedAdd('agent', `Merged! ${d.filesChanged} files changed (${d.commitSha?.slice(0,8)})`);
+    } else {
+      feedAdd('error', d.error || 'Merge failed');
+      alert(d.error || 'Merge failed');
+    }
+    refresh(true);
+  } catch (e) {
+    feedAdd('error', `Merge failed: ${e.message}`);
+    alert('Merge failed: ' + e.message);
+  } finally {
+    document.querySelectorAll('.merge-btn').forEach(b => { b.disabled = mergeLocked; b.classList.remove('merging'); });
+    if (btn) btn.textContent = 'Merge \u2192 dev';
+  }
+}
+
+async function retryJobApi(jobId) {
+  feedAdd('agent', `Retrying job ${jobId.slice(0,8)}...`);
+  try {
+    // Cancel old, re-create
+    const jobsRes = await fetch('/api/jobs', { headers: authHeaders() });
+    const jobsData = await jobsRes.json();
+    const job = jobsData.jobs?.find(j => j.id === jobId);
+    if (!job) { alert('Job not found'); return; }
+    await createJobApi(job.type, job.target, job.customPrompt);
+  } catch (e) { alert('Retry failed: ' + e.message); }
+}
+
+async function dismissJobApi(jobId) {
+  feedAdd('agent', `Dismissing job ${jobId.slice(0,8)}...`);
+  try {
+    const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE', headers: authHeaders() });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    feedAdd('agent', `Job ${jobId.slice(0,8)} dismissed`);
+    jobOutputBuffers.delete(jobId);
+    jobDiffData.delete(jobId);
+    jobActivityFiles.delete(jobId);
+    refresh(true);
+  } catch (e) { alert('Dismiss failed: ' + e.message); }
+}
+async function workedOn(mod) {
+  try {
+    const res = await fetch('/api/worked-on', { method: 'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify({module: mod}) });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    refresh(true);
+  } catch(e) { console.error('worked-on failed:', e.message); }
+}
+async function changeStrategy(s) {
+  try {
+    const res = await fetch('/api/strategy', { method: 'POST', headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify({strategy: s}) });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    refresh(true);
+  } catch(e) { console.error('strategy failed:', e.message); }
+}
+function showNewJobForm() { document.getElementById('newJobOverlay').style.display = 'flex'; }
+function submitNewJob() {
+  const type = document.getElementById('jobType').value;
+  const target = document.getElementById('jobTarget').value;
+  if (!target) { alert('Please enter a target module'); return; }
+  document.getElementById('newJobOverlay').style.display = 'none';
+  createJobApi(type, target);
+}
+
+// ===== Helpers =====
+
+function covColor(p) { if (p==null) return 'var(--red)'; if (p>=80) return 'var(--green)'; if (p>=60) return 'var(--yellow)'; return 'var(--red)'; }
+function covText(p) { return p==null ? '---' : p.toFixed(1)+'%'; }
+function covBar(name, pct) {
+  const w = pct!=null ? Math.min(100,pct) : 0;
+  return `<div class="cov-row"><span class="name">${esc(name)}/</span><div class="cov-bar"><div class="cov-fill" style="width:${w}%;background:${covColor(pct)}"></div><div class="target-line"></div></div><span class="pct" style="color:${covColor(pct)}">${covText(pct)}</span></div>`;
+}
+function ring(done, open) {
+  const t=done+open, p=t>0?(done/t)*100:0, r=30, c=2*Math.PI*r, o=c-(p/100)*c;
+  return `<div class="ring-container"><div class="ring"><svg width="70" height="70" viewBox="0 0 70 70"><circle cx="35" cy="35" r="${r}" fill="none" stroke="var(--surface2)" stroke-width="6"/><circle cx="35" cy="35" r="${r}" fill="none" stroke="url(#grad)" stroke-width="6" stroke-dasharray="${c}" stroke-dashoffset="${o}" stroke-linecap="round"/><defs><linearGradient id="grad"><stop offset="0%" stop-color="var(--cyan)"/><stop offset="100%" stop-color="var(--purple)"/></linearGradient></defs><text x="35" y="35" text-anchor="middle" dominant-baseline="central" fill="var(--text)" font-size="13" font-weight="700">${p.toFixed(0)}%</text></svg></div><div class="ring-label">${esc(String(done))} done / ${esc(String(open))} open</div></div>`;
+}
+function pillClass(ph) { if (ph==='bug') return 'bug'; if (ph==='code-review') return 'code-review'; if (ph==='high') return 'high'; if (ph.startsWith('roadmap')) return 'roadmap'; if (ph==='deferred') return 'deferred'; return ''; }
+function phaseLabel(p) { return {'bug':'Bugs','high':'High Priority','code-review':'Code Review','medium':'Medium','deferred':'Deferred','roadmap-r1':'R1: Community','roadmap-r2':'R2: Gaming','roadmap-r3':'R3: Voice','roadmap-r4':'R4: LAN Party','roadmap-r5':'R5: Platform','roadmap-r6':'R6: Future'}[p]||p; }
+
+function sizeColor(size) { return {small:'var(--green)',medium:'var(--yellow)',large:'var(--orange)'}[size]||'var(--text-dim)'; }
+
+function agentStatusBadge(status) {
+  const colors = {queued:'var(--yellow)',provisioning:'var(--yellow)',running:'var(--cyan)',review:'var(--purple)',completed:'var(--green)',merged:'var(--green)',failed:'var(--orange)',dead:'var(--red)',cancelled:'var(--text-dim)'};
+  const cls = (status === 'completed' || status === 'merged') ? 'done' : (status === 'failed' || status === 'dead') ? 'failed' : '';
+  return `<span class="agent-badge ${cls}" style="${!cls ? 'color:'+( colors[status]||'var(--text-dim)')+';border-color:'+(colors[status]||'var(--border)') : ''}">${esc(status)}</span>`;
+}
+
+// ===== Main render =====
+
+function render() {
+  if (!data) return;
+  const el = document.getElementById('app');
+  el.className = 'main';
+  document.getElementById('timestamp').textContent = `Updated ${new Date(data.timestamp).toLocaleTimeString()}`;
+
+  let h = '';
+  h += renderNow();
+  h += renderMissionControl();
+  h += renderWhatToWorkOn();
+  h += renderHealth();
+  el.innerHTML = h;
+
+  // Load session status async (needs DOM present)
+  loadSessionBanner();
+  loadAgentHealth();
+  // Load fleet status for Mission Control
+  fetchFleetStatus();
+  // Restore feed content after DOM rebuild
+  renderFeedUI();
+  // Load output for any expanded running/completed jobs
+  loadExpandedJobOutputs();
+  // Load output for Mission Control panels
+  loadMissionControlOutputs();
+}
+
+// ===== SECTION 1: NOW =====
+
+function renderNow() {
+  let h = `<div class="section">
+    <div class="section-header">
+      <span class="section-title">Now</span>
+      <span class="section-subtitle">Your current session and what to focus on today</span>
+    </div>`;
+
+  // Session banner (populated async)
+  h += `<div id="sessionBanner"><div class="session-banner inactive">
+    <div class="session-status"><div class="session-dot off"></div><span class="session-label" style="color:var(--text-dim)">Loading...</span></div>
+  </div></div>`;
+
+  h += '<div class="grid">';
+
+  // Briefing card
+  const br = data.briefing;
+  if (br) {
+    h += `<div class="card accent-top"><h3>Briefing</h3>
+      <div style="font-size:14px;line-height:1.5;margin-bottom:8px">${esc(br.greeting)}</div>`;
+    if (br.agentResults?.length) {
+      h += `<div style="display:flex;gap:6px;flex-wrap:wrap">`;
+      for (const r of br.agentResults.slice(0,4)) {
+        h += `<span class="agent-badge done">${esc(r.type)} on ${esc(r.target)}</span>`;
+      }
+      h += `</div>`;
+    }
+    if (br.autoQueueSuggestions?.length) {
+      h += `<div style="margin-top:10px;font-size:11px;color:var(--text-dim)"><strong>Suggested jobs:</strong></div>`;
+      for (const s of br.autoQueueSuggestions.slice(0,3)) {
+        h += `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:11px"><span>${esc(s.type)} on ${esc(s.target)}</span><button class="queue-job-btn" data-type="${esc(s.type)}" data-target="${esc(s.target)}" style="font-size:10px;padding:2px 6px">Queue</button></div>`;
+      }
+    }
+    h += `</div>`;
+  }
+
+  // Today's Plan card (populated async alongside session)
+  h += `<div class="card accent-green" id="planCard"><h3>Today's Plan</h3><div id="planContent" style="font-size:12px;color:var(--text-dim)">Loading...</div></div>`;
+
+  // In Progress + Open Work
+  const sd = data.sessionData;
+  const b = data.backlog;
+
+  if (sd?.inProgress?.length) {
+    h += `<div class="card"><h3>In Progress</h3>`;
+    for (const t of sd.inProgress) {
+      h += `<div style="padding:4px 0;font-size:13px"><span style="color:var(--yellow);font-weight:600">${esc(t.id)}</span> ${esc(t.description)}</div>`;
+    }
+    h += `</div>`;
+  }
+
+  if (b) {
+    h += `<div class="card"><h3>Open Work (${b.openCount||0})</h3>`;
+    if (b.openCount > 0) {
+      // Task completion ring
+      h += `<div style="float:right;margin-left:12px">${ring(b.doneCount, b.openCount)}</div>`;
+      for (const [ph, tasks] of Object.entries(b.byPhase||{})) {
+        h += `<div style="margin-bottom:6px"><span style="font-size:11px;color:var(--text-dim)">${phaseLabel(ph)}</span> `;
+        for (const t of tasks) h += `<span class="task-pill ${pillClass(ph)}" title="${esc(t.description)}">${esc(t.id)}</span>`;
+        h += `</div>`;
+      }
+    } else {
+      h += `<div style="font-size:12px;color:var(--text-dim)">No open tasks</div>`;
+    }
+    h += `</div>`;
+  }
+
+  // Activity Feed card
+  h += `<div class="card wide accent-top" style="border-top-color:var(--purple)"><h3>Activity Feed</h3>
+    <div class="feed" id="activityFeed"><div style="font-size:12px;color:var(--text-dim);font-style:italic;padding:8px 0">No activity yet. Start a session or queue an agent job.</div></div>
+  </div>`;
+
+  h += '</div></div>';
+  return h;
+}
+
+function loadSessionBanner() {
+  (async () => {
+    try {
+      const [statusRes, planRes] = await Promise.all([
+        fetch('/api/session/status'),
+        fetch('/api/session/plan'),
+      ]);
+      const status = await statusRes.json();
+      const plan = await planRes.json();
+
+      // Session banner
+      const bannerEl = document.getElementById('sessionBanner');
+      if (bannerEl) {
+        if (status.active) {
+          const elapsed = status.startedAt ? Math.floor((Date.now() - new Date(status.startedAt).getTime()) / 1000) : 0;
+          const mm = Math.floor(elapsed / 60), ss = elapsed % 60;
+          bannerEl.innerHTML = `<div class="session-banner">
+            <div class="session-status">
+              <div class="session-dot"></div>
+              <span class="session-label">Session Active</span>
+              <span class="session-timer" id="sessionTimerDisplay">${mm}m ${ss}s</span>
+            </div>
+            <div class="session-stats">
+              <div><span class="num">${status.filesChanged?.length||0}</span> files changed</div>
+              <div><span class="num">${status.commits?.length||0}</span> commits</div>
+              <div><span class="num">${status.modulesTouched?.length||0}</span> modules</div>
+            </div>
+            <button id="sessionEndBtn" onclick="endSessionApi()" style="background:rgba(255,71,87,0.15);border-color:var(--red);color:var(--red)">End Session</button>
+          </div>`;
+          // Live timer
+          if (sessionTimer) clearInterval(sessionTimer);
+          const startTime = new Date(status.startedAt).getTime();
+          sessionTimer = setInterval(() => {
+            const el = document.getElementById('sessionTimerDisplay');
+            if (!el) { clearInterval(sessionTimer); return; }
+            const s = Math.floor((Date.now() - startTime) / 1000);
+            el.textContent = `${Math.floor(s/60)}m ${s%60}s`;
+          }, 1000);
+        } else {
+          bannerEl.innerHTML = `<div class="session-banner inactive">
+            <div class="session-status">
+              <div class="session-dot off"></div>
+              <span class="session-label" style="color:var(--text-dim)">No Active Session</span>
+            </div>
+            <button id="sessionStartBtn" onclick="startSessionApi()" style="background:rgba(0,210,106,0.15);border-color:var(--green);color:var(--green)">Start Session</button>
+          </div>`;
+        }
+      }
+
+      // Plan content
+      const planEl = document.getElementById('planContent');
+      if (planEl) {
+        if (plan.tasks?.length) {
+          let ph = '';
+          for (const t of plan.tasks) {
+            ph += `<div class="plan-item">
+              <div class="plan-rank">${esc(String(t.priority))}</div>
+              <div class="plan-body">
+                <div><span class="plan-title">${esc(t.title)}</span> <span class="plan-size ${esc(t.estimatedFocus)}">${esc(t.estimatedFocus)}</span></div>
+                <div class="plan-rationale">${esc(t.rationale)}</div>
+              </div>
+            </div>`;
+          }
+          planEl.innerHTML = ph;
+        } else {
+          planEl.innerHTML = `<div style="color:var(--text-dim);font-style:italic">No suggestions yet. Try a full refresh.</div>`;
+        }
+      }
+    } catch(e) {
+      const bannerEl = document.getElementById('sessionBanner');
+      if (bannerEl) bannerEl.innerHTML = `<div class="session-banner inactive"><div style="color:var(--red);font-size:12px">Error: ${esc(e.message)}</div></div>`;
+    }
+  })();
+}
+
+// ===== SECTION: MISSION CONTROL =====
+
+function renderMissionControl() {
+  const jobs = data.agentJobs;
+  const allJobs = jobs?.jobs || [];
+
+  // Active jobs: running, provisioning, review, queued (show in grid)
+  const gridStatuses = new Set(['running', 'provisioning', 'review', 'queued']);
+  const gridJobs = allJobs
+    .filter(j => gridStatuses.has(j.status))
+    .sort((a, b) => {
+      const order = { running: 0, provisioning: 1, review: 2, queued: 3 };
+      const so = (order[a.status] ?? 9) - (order[b.status] ?? 9);
+      if (so !== 0) return so;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+
+  // Suggestions for quick launch
+  const suggestions = data.suggestions?.suggestions || [];
+  const quickLaunchItems = suggestions.slice(0, 6);
+
+  let h = `<div class="section">
+    <div class="section-header">
+      <span class="section-title">Mission Control</span>
+      <span class="section-subtitle">Parallel agent fleet — launch, monitor, and merge</span>
+    </div>`;
+
+  // Fleet status bar
+  h += `<div class="fleet-bar">
+    <div class="fleet-bar-stats" id="fleetBarStats">
+      <div class="stat"><span class="num active">${fleetStatus.active}</span>/<span>${fleetStatus.maxConcurrent}</span> active</div>
+      <div class="stat"><span class="num queued">${fleetStatus.queued}</span> queued</div>
+      <div class="stat"><span class="num review">${fleetStatus.review}</span> for review</div>
+    </div>
+    <div class="fleet-bar-controls">
+      <label>Max agents:</label>
+      <span class="max-label" id="fleetMaxLabel">${fleetStatus.maxConcurrent}</span>
+      <input type="range" id="fleetMaxSlider" min="1" max="8" value="${fleetStatus.maxConcurrent}" oninput="setFleetMax(this.value)">
+      <button onclick="showNewJobForm()" style="margin-left:8px">+ New Job</button>
+      <button onclick="processQueueApi()">Process Queue</button>
+    </div>
+  </div>`;
+
+  // Quick launch bar
+  if (quickLaunchItems.length > 0) {
+    h += `<div class="quick-launch">`;
+    for (const sg of quickLaunchItems) {
+      const types = [];
+      if (sg.breakdown.coverage > 0) types.push('write-tests');
+      if (sg.breakdown.bugs > 0) types.push('fix-debt');
+      if (sg.breakdown.debt > 0) types.push('code-review');
+      const bestType = types[0] || 'code-review';
+      h += `<button class="quick-launch-btn queue-job-btn" data-type="${esc(bestType)}" data-target="${esc(sg.module)}">
+        <span class="ql-icon">\u25B6</span>
+        ${esc(bestType)} <strong>${esc(sg.module)}</strong>
+        <span class="ql-score">${esc(String(sg.score))}</span>
+      </button>`;
+    }
+    h += `</div>`;
+  }
+
+  // Agent grid
+  h += `<div class="agent-grid">`;
+
+  if (gridJobs.length === 0) {
+    h += `<div class="agent-grid-empty">
+      <div>No active agents</div>
+      <div class="hint">Use the quick launch buttons above or click "+ New Job" to start an agent</div>
+    </div>`;
+  }
+
+  for (const j of gridJobs.slice(0, 8)) {
+    const isRunning = j.status === 'running' || j.status === 'provisioning';
+    const isReview = j.status === 'review';
+    const isQueued = j.status === 'queued';
+    const bufferedOutput = jobOutputBuffers.get(j.id) || '';
+    const elapsed = j.startedAt
+      ? Math.round((Date.now() - new Date(j.startedAt).getTime()) / 1000)
+      : 0;
+    const elapsedStr = elapsed > 0 ? `${Math.floor(elapsed/60)}m ${elapsed%60}s` : '';
+
+    // Panel actions
+    let actions = '';
+    if (isReview) {
+      actions += `<button class="merge-btn" id="merge-btn-${esc(j.id)}" onclick="mergeJobApi('${esc(j.id)}')" ${mergeLocked ? 'disabled' : ''}>Merge \u2192 dev</button>`;
+      actions += ` <button class="toggle-job-btn" data-job-id="${esc(j.id)}" data-job-status="review" style="font-size:10px;padding:3px 8px">Diff</button>`;
+      actions += ` <button onclick="dismissJobApi('${esc(j.id)}')" style="font-size:10px;padding:3px 8px;color:var(--text-dim);border-color:var(--border)">Dismiss</button>`;
+    }
+    if (isRunning) {
+      actions += `<button class="cancel-job-btn" data-id="${esc(j.id)}" style="color:var(--red);border-color:rgba(255,71,87,0.3)">Cancel</button>`;
+    }
+    if (isQueued) {
+      actions += `<button class="cancel-job-btn" data-id="${esc(j.id)}" style="color:var(--red);border-color:rgba(255,71,87,0.3)">Remove</button>`;
+    }
+
+    h += `<div class="agent-panel status-${esc(j.status)}">
+      <div class="agent-panel-header">
+        <div class="agent-panel-title">
+          <span class="status-dot ${esc(j.status)}"></span>
+          <span>${esc(j.type)}</span>
+          <span style="color:var(--cyan)">${esc(j.target)}</span>
+          ${agentStatusBadge(j.status)}
+          ${elapsedStr ? `<span style="font-size:10px;color:var(--text-dim);font-weight:400">${elapsedStr}</span>` : ''}
+        </div>
+        <div class="agent-panel-actions">${actions}</div>
+      </div>`;
+
+    if (isQueued) {
+      // Queued: simple waiting state
+      h += `<div class="agent-panel-body single-col" style="min-height:60px;display:flex;align-items:center;justify-content:center">
+        <div style="text-align:center;color:var(--text-dim);font-size:12px">
+          <div style="font-size:20px;margin-bottom:6px">\u23F3</div>
+          Waiting in queue\u2026
+        </div>
+      </div>`;
+    } else {
+      // Running/Review: split terminal + files
+      h += `<div class="agent-panel-body">
+        <div class="agent-panel-terminal">
+          <div class="terminal" id="mc-terminal-${esc(j.id)}">${
+            bufferedOutput ? esc(bufferedOutput) : '<span class="terminal-empty">Connecting\u2026</span>'
+          }${isRunning ? '<span class="cursor"></span>' : ''}</div>
+        </div>
+        <div class="agent-panel-files" id="mc-filelist-${esc(j.id)}">
+          ${renderFileListInner(j.id, jobDiffData.get(j.id) || { files: [], diffs: {}, freshness: null })}
+        </div>
+      </div>`;
+    }
+
+    h += `</div>`;
+  }
+
+  h += `</div></div>`;
+  return h;
+}
+
+function loadMissionControlOutputs() {
+  const jobs = data.agentJobs?.jobs || [];
+  const gridStatuses = new Set(['running', 'provisioning', 'review']);
+  const activeJobs = jobs.filter(j => gridStatuses.has(j.status));
+
+  for (const job of activeJobs) {
+    const termEl = document.getElementById('mc-terminal-' + job.id);
+    if (!termEl) continue;
+
+    const buffered = jobOutputBuffers.get(job.id);
+    if (buffered) {
+      termEl.textContent = buffered;
+      termEl.scrollTop = termEl.scrollHeight;
+      if (job.status === 'running') {
+        const c = document.createElement('span');
+        c.className = 'cursor';
+        termEl.appendChild(c);
+      }
+    } else if (job.status === 'running' || job.status === 'review') {
+      termEl.innerHTML = '<span class="terminal-empty">Loading output\u2026</span>';
+      fetchJobOutput(job.id, job.status).then(output => {
+        const el = document.getElementById('mc-terminal-' + job.id);
+        if (el) {
+          el.textContent = output || '(no output yet)';
+          el.scrollTop = el.scrollHeight;
+          if (job.status === 'running') {
+            const c = document.createElement('span');
+            c.className = 'cursor';
+            el.appendChild(c);
+          }
+        }
+      });
+    }
+
+    // Load diff data for file list
+    if (!jobDiffData.has(job.id)) {
+      fetchJobDiff(job.id);
+    } else {
+      updateMCFileListUI(job.id);
+    }
+  }
+}
+
+function updateMCFileListUI(jobId) {
+  const el = document.getElementById('mc-filelist-' + jobId);
+  if (!el) return;
+  const diffData = jobDiffData.get(jobId);
+  if (!diffData) return;
+  el.innerHTML = renderFileListInner(jobId, diffData);
+}
+
+// ===== SECTION 2: WHAT TO WORK ON =====
+
+function renderWhatToWorkOn() {
+  const s = data.suggestions;
+
+  let h = `<div class="section">
+    <div class="section-header">
+      <span class="section-title">What to Work On</span>
+      <span class="section-subtitle">AI-ranked suggestions based on coverage, bugs, debt, and momentum</span>
+    </div>`;
+
+  if (s) {
+    // Strategy pills
+    h += `<div class="strategy-pills">`;
+    for (const st of ['balanced','bugs-first','coverage-first','momentum-first','debt-first']) {
+      h += `<div class="strategy-pill ${s.strategy===st?'active':''}" data-strategy="${esc(st)}">${st.replace(/-/g,' ')}</div>`;
+    }
+    h += `</div>`;
+    if (s.recentlyWorked?.length) {
+      h += `<div style="font-size:11px;color:var(--text-dim);margin-bottom:12px">Recently worked on: ${esc(s.recentlyWorked.join(', '))} (cooled down)</div>`;
+    }
+
+    // Suggestion cards
+    h += '<div class="grid">';
+    for (const sg of s.suggestions || []) {
+      h += `<div class="card"><div class="suggestion-card">
+        <div class="suggestion-header">
+          <span class="suggestion-module">#${esc(String(sg.rank))} ${esc(sg.module)}</span>
+          <span class="suggestion-score">score: ${esc(String(sg.score))}</span>
+        </div>
+        <div class="suggestion-rationale">${esc(sg.rationale)}</div>
+        <div class="suggestion-breakdown">
+          <div><span class="label">Coverage:</span> <span class="val" style="color:var(--cyan)">${esc(String(sg.breakdown.coverage))}</span></div>
+          <div><span class="label">Bugs:</span> <span class="val" style="color:var(--red)">${esc(String(sg.breakdown.bugs))}</span></div>
+          <div><span class="label">Momentum:</span> <span class="val" style="color:var(--yellow)">${esc(String(sg.breakdown.momentum))}</span></div>
+          <div><span class="label">Debt:</span> <span class="val" style="color:var(--orange)">${esc(String(sg.breakdown.debt))}</span></div>
+        </div>
+        <div class="suggestion-actions">
+          <button class="worked-on-btn" data-module="${esc(sg.module)}" style="border-color:var(--green);color:var(--green)">I worked on this</button>
+          <button class="queue-job-btn" data-type="write-tests" data-target="${esc(sg.module)}">write-tests</button>
+          <button class="queue-job-btn" data-type="code-review" data-target="${esc(sg.module)}">code-review</button>
+        </div>
+        <div class="prompt-gen" data-module="${esc(sg.module)}">
+          <button class="prompt-gen-toggle" data-module="${esc(sg.module)}">
+            <span class="arrow">&#9654;</span> AI Prompt
+          </button>
+          <div class="prompt-gen-body" id="prompt-body-${esc(sg.module)}">
+            <button class="prompt-gen-copy" data-module="${esc(sg.module)}" title="Copy to clipboard">&#128203; Copy</button>
+            <div class="prompt-gen-text">${esc(buildPrompt(sg))}</div>
+          </div>
+        </div>
+      </div></div>`;
+    }
+    h += '</div>';
+  } else {
+    h += `<div class="card"><div style="font-size:12px;color:var(--text-dim)">No suggestion data available. Try a full refresh.</div></div>`;
+  }
+
+  h += '</div>';
+  return h;
+}
+
+function renderFileListInner(jobId, diffData) {
+  const activeFiles = jobActivityFiles.get(jobId) || new Set();
+  const expanded = expandedDiffFiles.get(jobId) || new Set();
+  const ago = diffData.freshness ? timeSince(diffData.freshness) : '';
+
+  let h = `<div class="files-header">
+    <span class="files-header-title">Files Changed (${diffData.files.length})</span>
+    <span class="diff-freshness">${ago ? '\u21BB ' + ago : ''}</span>
+  </div>`;
+
+  if (diffData.files.length === 0) {
+    h += '<div style="font-size:11px;color:var(--text-dim);font-style:italic;padding:8px 0">No file changes detected yet</div>';
+    return h;
+  }
+
+  for (const f of diffData.files) {
+    const isActive = activeFiles.has(f.path);
+    const isExpanded = expanded.has(f.path);
+    const safeId = CSS.escape(f.path);
+
+    h += `<div class="file-row ${isActive ? 'active' : ''}" data-job="${esc(jobId)}" data-path="${esc(f.path)}">
+      <span class="file-expand-icon ${isExpanded ? 'open' : ''}" id="fileicon-${esc(jobId)}-${safeId}">\u25B6</span>
+      <span class="file-status ${esc(f.status)}">${esc(f.status)}</span>
+      <span class="file-path" title="${esc(f.path)}">${esc(f.path)}</span>
+      <span class="file-stats">${f.additions ? '<span class="add">+' + f.additions + '</span>' : ''}${f.deletions ? ' <span class="del">-' + f.deletions + '</span>' : ''}</span>
+    </div>`;
+
+    const diffContent = diffData.diffs[f.path] || '';
+    h += `<div class="file-diff ${isExpanded ? 'open' : ''}" id="filediff-${esc(jobId)}-${safeId}">`;
+    h += renderDiffLines(diffContent);
+    h += `</div>`;
+  }
+
+  return h;
+}
+
+function renderDiffLines(diffText) {
+  if (!diffText) return '<div class="diff-line ctx">(no diff content)</div>';
+
+  const lines = diffText.split('\n');
+  let h = '';
+  let count = 0;
+  const MAX_LINES = 500;
+
+  for (const line of lines) {
+    if (count >= MAX_LINES) {
+      h += `<div class="diff-truncated">${lines.length - count} more lines</div>`;
+      break;
+    }
+    if (line.startsWith('@@')) {
+      h += `<div class="diff-line hunk">${esc(line)}</div>`;
+    } else if (line.startsWith('+')) {
+      h += `<div class="diff-line add">${esc(line)}</div>`;
+    } else if (line.startsWith('-')) {
+      h += `<div class="diff-line del">${esc(line)}</div>`;
+    } else if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) {
+      continue;
+    } else {
+      h += `<div class="diff-line ctx">${esc(line)}</div>`;
+    }
+    count++;
+  }
+
+  return h;
+}
+
+function timeSince(isoString) {
+  const seconds = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return seconds + 's ago';
+  const minutes = Math.floor(seconds / 60);
+  return minutes + 'm ago';
+}
+
+// ===== SECTION 3: HEALTH =====
+
+function renderHealth() {
+  let h = `<div class="section">
+    <div class="section-header">
+      <span class="section-title">Health</span>
+      <span class="section-subtitle">Project metrics — click any card to expand</span>
+    </div>`;
+
+  h += renderCoverageCollapsible();
+  h += renderActivityCollapsible();
+  h += renderDebtCollapsible();
+  h += renderDepsCollapsible();
+  h += renderHistoryCollapsible();
+  h += renderAgentJobsCollapsible();
+
+  h += '</div>';
+  return h;
+}
+
+function renderCoverageCollapsible() {
+  const { modules: m, goCoverage: gc, vitestCoverage: v } = data;
+  const tsAreas = v?.areas||{};
+  const totalTs = tsAreas._total;
+  const goTotal = gc?.summary?.overallPercentage;
+
+  const tsBadge = totalTs ? `<span class="collapsible-badge" style="color:${covColor(totalTs.statements)}">TS: ${covText(totalTs.statements)}</span>` : '';
+  const goBadge = goTotal != null ? `<span class="collapsible-badge" style="color:${covColor(goTotal)}">Go: ${covText(goTotal)}</span>` : '';
+
+  let body = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">';
+
+  // Go coverage
+  body += '<div><div style="font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:8px">Server (Go)</div>';
+  if (m?.go) { for (const pkg of m.go) body += covBar(pkg.name, gc?.packages?.[pkg.name]?.percentage ?? null); }
+  body += '</div>';
+
+  // TS coverage
+  body += '<div><div style="font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:8px">Client (TypeScript)</div>';
+  if (totalTs) body += covBar('Overall', totalTs.statements);
+  if (m?.typescript) { for (const dir of m.typescript.filter(d=>d.type==='typescript')) body += covBar(dir.name, tsAreas[dir.name]?.statements ?? null); }
+  if (v?.testCount) body += `<div style="margin-top:6px;font-size:11px;color:var(--text-dim)">${v.testCount} total tests</div>`;
+  body += '</div></div>';
+
+  // Rust
+  if (m?.summary?.rustSourceFiles > 0) {
+    body += `<div style="margin-top:12px;font-size:12px;color:var(--text-dim)">Rust/Tauri: ${m.summary.rustSourceFiles} source files, ${m.summary.rustTestFiles} test files (${m.rust?.[0]?.sourceLines||0} lines)</div>`;
+  }
+
+  return collapsible('Coverage', `${tsBadge} ${goBadge}`, body, true);
+}
+
+function renderActivityCollapsible() {
+  const g = data.gitData;
+  if (!g) return collapsible('Activity', '<span class="collapsible-badge">no data</span>', '<div style="font-size:12px;color:var(--text-dim)">No git data. Try a full refresh.</div>');
+
+  const badges = `<span class="collapsible-badge" style="color:var(--cyan)">${g.totalCommits30d||0} commits (30d)</span>
+    <span class="collapsible-badge" style="color:var(--green)">trend: ${g.velocity?.trend||'stable'}</span>`;
+
+  let body = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">';
+
+  // Velocity
+  if (g.velocity?.daily) {
+    const max = Math.max(...g.velocity.daily.map(d=>d.count),1);
+    body += `<div><div style="font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:8px">Velocity (30d)</div>
+      <div class="mini-chart">${g.velocity.daily.map(d=>`<div class="mini-bar" style="height:${Math.max(1,(d.count/max)*30)}px" title="${d.date}: ${d.count}"></div>`).join('')}</div>
+      <div style="margin-top:6px;font-size:12px;color:var(--text-dim)">Weekly avg: ${g.velocity.weeklyAvg?.toFixed(1)||'?'} commits/day</div>
+    </div>`;
+  }
+
+  // Staleness
+  if (g.staleness) {
+    const stale = Object.entries(g.staleness).sort((a,b)=>b[1].daysSinceLastCommit-a[1].daysSinceLastCommit);
+    body += `<div><div style="font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:8px">Module Staleness</div>`;
+    for (const [mod, d] of stale) {
+      const days = d.daysSinceLastCommit;
+      const color = days>14 ? 'var(--red)' : days>7 ? 'var(--yellow)' : 'var(--green)';
+      body += `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px"><span>${esc(mod)}</span><span style="color:${color}">${days}d ago</span></div>`;
+    }
+    body += '</div>';
+  }
+  body += '</div>';
+
+  // Recent commits
+  if (g.recentCommits?.length) {
+    body += `<div style="margin-top:14px"><div style="font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:6px">Recent Commits</div>`;
+    for (const c of g.recentCommits.slice(0,8)) {
+      body += `<div style="display:flex;gap:8px;padding:3px 0;font-size:11px;border-bottom:1px solid rgba(42,46,62,0.3)">
+        <span style="white-space:nowrap;color:var(--text-dim)">${esc(c.date?.slice(0,10))}</span>
+        <span class="badge go">${esc(c.type||'other')}</span>
+        <span style="color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.message?.slice(0,80))}</span>
+      </div>`;
+    }
+    body += '</div>';
+  }
+
+  return collapsible('Activity', badges, body);
+}
+
+function renderDebtCollapsible() {
+  const d = data.debtData;
+  if (!d) return collapsible('Tech Debt', '<span class="collapsible-badge">no data</span>', '<div style="font-size:12px;color:var(--text-dim)">No debt data. Try a full refresh.</div>');
+
+  const badges = `<span class="collapsible-badge" style="color:var(--yellow)">${d.summary?.totalMarkers||0} markers</span>
+    <span class="collapsible-badge" style="color:var(--orange)">${d.summary?.totalLargeFiles||0} large files</span>`;
+
+  let body = '';
+
+  // Markers
+  if (d.markers?.length) {
+    for (const m of d.markers.slice(0,12)) {
+      body += `<div style="margin-bottom:8px"><span class="debt-type ${esc(m.type)}">${esc(m.type)}</span> <span style="font-family:monospace;font-size:11px;color:var(--cyan)">${esc(m.file)}:${m.line}</span> <span style="font-size:12px;color:var(--text-dim)">${esc(m.text?.slice(0,100))}</span></div>`;
+    }
+    if (d.markers.length > 12) body += `<div style="font-size:11px;color:var(--text-dim)">...and ${d.markers.length-12} more</div>`;
+  }
+
+  // Large files
+  if (d.largeFiles?.length) {
+    body += `<div style="margin-top:12px;font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:6px">Oversized Files</div>`;
+    for (const f of d.largeFiles.slice(0,8)) {
+      const color = f.severity==='critical' ? 'var(--red)' : 'var(--yellow)';
+      body += `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px"><span style="font-family:monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px">${esc(f.file)}</span><span style="color:${color}">${f.lines} lines</span></div>`;
+    }
+  }
+
+  return collapsible('Tech Debt', badges, body);
+}
+
+function renderDepsCollapsible() {
+  const ig = data.importGraph;
+  if (!ig) return collapsible('Dependencies', '<span class="collapsible-badge">no data</span>', '<div style="font-size:12px;color:var(--text-dim)">No dependency data. Try a full refresh.</div>');
+
+  const cycleCount = ig.cycles?.length || 0;
+  const badges = `<span class="collapsible-badge" style="color:${cycleCount>0?'var(--red)':'var(--green)'}">${cycleCount} cycle${cycleCount!==1?'s':''}</span>
+    <span class="collapsible-badge">${ig.nodes?.length||0} modules</span>`;
+
+  let body = '';
+
+  // Cycles
+  if (cycleCount > 0) {
+    body += `<div style="margin-bottom:10px">`;
+    for (const cycle of ig.cycles) {
+      body += `<div style="padding:3px 0;font-size:12px;color:var(--red)">${cycle.map(esc).join(' &rarr; ')} &rarr; ${esc(cycle[0])}</div>`;
+    }
+    body += `</div>`;
+  }
+
+  // Most coupled
+  if (ig.mostCoupled?.length) {
+    body += `<div style="font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:6px">Most Coupled</div>`;
+    for (const m of ig.mostCoupled) {
+      body += `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;border-bottom:1px solid rgba(42,46,62,0.3)"><span><strong>${esc(m.name)}</strong></span><span style="color:var(--cyan)">coupling: ${esc(String(m.coupling))} (in:${esc(String(m.fanIn))} out:${esc(String(m.fanOut))})</span></div>`;
+    }
+  }
+
+  return collapsible('Dependencies', badges, body);
+}
+
+function renderHistoryCollapsible() {
+  const s = data.sessionData;
+  if (!s) return collapsible('History', '<span class="collapsible-badge">no data</span>', '<div style="font-size:12px;color:var(--text-dim)">No session data. Try a full refresh.</div>');
+
+  const badges = `<span class="collapsible-badge" style="color:var(--cyan)">${s.streaks?.current||0}-day streak</span>
+    <span class="collapsible-badge">${s.streaks?.totalSessions||0} sessions</span>`;
+
+  let body = '';
+
+  // Last session
+  if (s.lastSession) {
+    body += `<div style="margin-bottom:12px;padding:8px 12px;background:var(--surface2);border-radius:6px">
+      <div style="font-size:12px;font-weight:600;margin-bottom:4px">Last: ${esc(s.lastSession.date||'')}</div>
+      <div style="font-size:12px;color:var(--text-dim)">${esc(s.lastSession.summary)||'No summary'}</div>
+      <div style="font-size:11px;color:var(--green);margin-top:2px">${s.lastSession.tasksCompleted||0} tasks completed</div>
+    </div>`;
+  }
+
+  // Timeline
+  if (s.sessions?.length) {
+    for (const sess of [...s.sessions].reverse().slice(0,10)) {
+      body += `<div style="padding:5px 0;font-size:12px;border-bottom:1px solid rgba(42,46,62,0.3)">
+        <span style="color:var(--cyan);font-weight:600">${esc(sess.date)}</span>
+        <span style="color:var(--text-dim);margin-left:8px">${esc(sess.summary)||'No summary'}</span>
+        <span style="color:var(--green);margin-left:8px">${sess.tasksCompleted||0} tasks</span>
+      </div>`;
+    }
+  }
+
+  // Recently done
+  if (s.recentlyDone?.length) {
+    body += `<div style="margin-top:10px;font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:4px">Recently Completed</div>`;
+    for (const t of s.recentlyDone.slice(0,6)) {
+      body += `<div style="padding:3px 0;font-size:12px"><span style="color:var(--green)">${esc(t.id)}</span> ${esc(t.description)} <span style="color:var(--text-dim);font-size:10px">${esc(t.date)}</span></div>`;
+    }
+  }
+
+  return collapsible('History', badges, body);
+}
+
+function renderAgentJobsCollapsible() {
+  const jobs = data.agentJobs;
+  const allJobs = jobs?.jobs || [];
+  const stats = { queued: 0, provisioning: 0, running: 0, review: 0, completed: 0, merged: 0, failed: 0, dead: 0 };
+  for (const j of allJobs) { if (stats[j.status] !== undefined) stats[j.status]++; }
+
+  const badges = [];
+  if (stats.running+stats.provisioning) badges.push(`<span class="collapsible-badge" style="color:var(--cyan)">${stats.running+stats.provisioning} running</span>`);
+  if (stats.queued) badges.push(`<span class="collapsible-badge" style="color:var(--yellow)">${stats.queued} queued</span>`);
+  if (stats.review) badges.push(`<span class="collapsible-badge" style="color:var(--purple)">${stats.review} review</span>`);
+  if (stats.completed+stats.merged) badges.push(`<span class="collapsible-badge" style="color:var(--green)">${stats.completed+stats.merged} done</span>`);
+  if (stats.failed+stats.dead) badges.push(`<span class="collapsible-badge" style="color:var(--red)">${stats.failed+stats.dead} failed</span>`);
+  if (!badges.length) badges.push(`<span class="collapsible-badge">no jobs</span>`);
+
+  let body = '';
+
+  // Health + controls bar
+  body += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div id="agentHealthInline" style="font-size:12px;color:var(--text-dim)">Checking CLI...</div>
+    <div style="display:flex;gap:6px">
+      <button onclick="showNewJobForm()">New Job</button>
+      <button onclick="processQueueApi()">Process Queue</button>
+    </div>
+  </div>`;
+
+  if (allJobs.length === 0) {
+    body += `<div style="font-size:12px;color:var(--text-dim);padding:12px 0">No agent jobs yet. Click "New Job" to queue one, or use the action buttons on suggestions above.</div>`;
+    // Open by default if has running jobs
+    return collapsible('Agent Jobs', badges.join(' '), body, stats.running > 0);
+  }
+
+  // Sort: running first, then queued, then rest by date desc
+  const statusOrder = { running: 0, provisioning: 1, review: 2, queued: 3, completed: 4, merged: 5, failed: 6, dead: 7, cancelled: 8 };
+  const sorted = [...allJobs].sort((a, b) => {
+    const so = (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9);
+    if (so !== 0) return so;
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  });
+
+  body += '<div class="queue-panel">';
+  for (const j of sorted.slice(0, 20)) {
+    const isExpanded = expandedJobs.has(j.id);
+    const dur = j.startedAt && j.completedAt
+      ? Math.round((new Date(j.completedAt)-new Date(j.startedAt))/1000)+'s'
+      : j.startedAt
+        ? Math.round((Date.now()-new Date(j.startedAt).getTime())/1000)+'s (running)'
+        : '';
+    const errorText = j.error ? `<div style="font-size:11px;color:var(--red);margin-top:4px">${esc(j.error)}</div>` : '';
+
+    let actions = '';
+    if (['completed', 'running', 'review'].includes(j.status)) {
+      actions += `<button class="toggle-job-btn" data-job-id="${esc(j.id)}" data-job-status="${esc(j.status)}" style="font-size:10px;padding:3px 8px">${isExpanded ? 'Hide Output' : 'Show Output'}</button>`;
+    }
+    if (j.status === 'review') {
+      actions += ` <button class="merge-btn" onclick="mergeJobApi('${esc(j.id)}')" ${mergeLocked ? 'disabled' : ''} style="font-size:10px;padding:3px 8px">Merge</button>`;
+    }
+    if (j.status === 'queued' || j.status === 'running') {
+      actions += ` <button class="cancel-job-btn" data-id="${esc(j.id)}" style="font-size:10px;padding:3px 8px;color:var(--red);border-color:rgba(255,71,87,0.3)">Cancel</button>`;
+    }
+    if (j.status === 'completed' || j.status === 'review') {
+      actions += ` <button class="view-result-btn" data-id="${esc(j.id)}" style="font-size:10px;padding:3px 8px">Full Result</button>`;
+    }
+    if (j.status === 'failed' || j.status === 'dead') {
+      actions += ` <button onclick="retryJobApi('${esc(j.id)}')" style="font-size:10px;padding:3px 8px;color:var(--yellow);border-color:rgba(255,193,7,0.3)">Retry</button>`;
+    }
+
+    // Get buffered output for running jobs
+    const bufferedOutput = jobOutputBuffers.get(j.id) || '';
+
+    body += `<div class="queue-job ${esc(j.status)}">
+      <div class="queue-job-header">
+        <div class="queue-job-title">
+          <span class="status-dot ${esc(j.status)}"></span>
+          <span>${esc(j.type)}</span>
+          <span style="color:var(--cyan)">${esc(j.target)}</span>
+          <span style="font-size:10px;color:var(--text-dim);font-weight:400">${esc(j.status)}</span>
+        </div>
+        <div style="display:flex;gap:4px">${actions}</div>
+      </div>
+      <div class="queue-job-meta">
+        <span>Created ${esc(j.createdAt?.slice(11,19) || '')}</span>
+        ${dur ? `<span>Duration: ${dur}</span>` : ''}
+        ${j.retryCount > 0 ? `<span style="color:var(--orange)">Retry ${j.retryCount}/${j.maxRetries||2}</span>` : ''}
+      </div>
+      ${errorText}
+      <div id="terminal-wrap-${esc(j.id)}" style="display:${isExpanded ? 'block' : 'none'}">
+        <div class="job-split">
+          <div class="job-terminal-col">
+            <div class="terminal" id="terminal-${esc(j.id)}">${
+              isExpanded && bufferedOutput ? esc(bufferedOutput) : (isExpanded ? '<span class="terminal-empty">Loading...</span>' : '')
+            }${j.status === 'running' ? '<span class="cursor"></span>' : ''}</div>
+          </div>
+          <div class="job-files-col" id="filelist-${esc(j.id)}">
+            ${isExpanded ? renderFileListInner(j.id, jobDiffData.get(j.id) || { files: [], diffs: {}, freshness: null }) : ''}
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+  body += '</div>';
+
+  if (allJobs.length > 20) {
+    body += `<div style="font-size:11px;color:var(--text-dim);margin-top:8px">...and ${allJobs.length - 20} older jobs</div>`;
+  }
+
+  // Auto-open if has running jobs
+  return collapsible('Agent Jobs', badges.join(' '), body, stats.running > 0);
+}
+
+function loadAgentHealth() {
+  (async () => {
+    try {
+      const res = await fetch('/api/agent/health');
+      const health = await res.json();
+      const el = document.getElementById('agentHealthInline');
+      if (el) el.innerHTML = health.available
+        ? `<span style="color:var(--green)">Claude CLI available</span> <span style="color:var(--text-dim)">(${esc(health.version)})</span>`
+        : `<span style="color:var(--red)">Claude CLI not available</span> <span style="color:var(--text-dim)">${esc(health.error||'')}</span>`;
+    } catch {}
+  })();
+}
+
+function loadExpandedJobOutputs() {
+  // For any expanded jobs, fetch their output after DOM is rebuilt
+  for (const jobId of expandedJobs) {
+    const termEl = document.getElementById('terminal-' + jobId);
+    if (!termEl) continue;
+    const buffered = jobOutputBuffers.get(jobId);
+    if (buffered) {
+      termEl.textContent = buffered;
+      termEl.scrollTop = termEl.scrollHeight;
+    } else {
+      // Need to fetch — find the job to know its status
+      const job = data.agentJobs?.jobs?.find(j => j.id === jobId);
+      if (job) {
+        termEl.innerHTML = '<span class="terminal-empty">Loading output...</span>';
+        fetchJobOutput(jobId, job.status).then(output => {
+          const el = document.getElementById('terminal-' + jobId);
+          if (el) {
+            el.textContent = output || '(no output yet)';
+            el.scrollTop = el.scrollHeight;
+            if (job.status === 'running') {
+              const c = document.createElement('span');
+              c.className = 'cursor';
+              el.appendChild(c);
+            }
+          }
+        });
+      }
+    }
+    // Restore diff data
+    if (!jobDiffData.has(jobId)) {
+      fetchJobDiff(jobId);
+    } else {
+      updateFileListUI(jobId);
+    }
+  }
+}
+
+// ===== Collapsible helper =====
+
+function collapsible(title, badgesHtml, bodyHtml, openByDefault) {
+  return `<div class="collapsible${openByDefault?' open':''}">
+    <div class="collapsible-header">
+      <div class="collapsible-title">${esc(title)} ${badgesHtml}</div>
+      <span class="collapsible-arrow">&#9660;</span>
+    </div>
+    <div class="collapsible-body">${bodyHtml}</div>
+  </div>`;
+}
+
+// Initial load
+refresh(true);
+</script>
+</body>
+</html>
