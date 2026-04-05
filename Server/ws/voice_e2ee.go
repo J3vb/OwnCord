@@ -5,16 +5,18 @@ import (
 	"encoding/base64"
 )
 
-// decodeBase64Loose accepts both padded (StdEncoding) and unpadded (RawStdEncoding)
-// standard-alphabet base64. ECDH public keys exported from WebCrypto omit '='
-// padding; we accept both forms to avoid breaking existing clients.
+// validateBase64Loose checks that s is valid padded (StdEncoding) or unpadded
+// (RawStdEncoding) standard-alphabet base64. ECDH public keys exported from
+// WebCrypto omit '=' padding; we accept both forms to avoid breaking existing
+// clients.
 // Note: URL-safe base64 (alphabet '-_') is not accepted; clients must use the
 // standard alphabet ('+/').
-func decodeBase64Loose(s string) ([]byte, error) {
-	if b, err := base64.StdEncoding.DecodeString(s); err == nil {
-		return b, nil
+func validateBase64Loose(s string) error {
+	if _, err := base64.StdEncoding.DecodeString(s); err == nil {
+		return nil
 	}
-	return base64.RawStdEncoding.DecodeString(s)
+	_, err := base64.RawStdEncoding.DecodeString(s)
+	return err
 }
 
 // updateKeyHolder scans connected clients to find the one with the lowest
@@ -96,7 +98,7 @@ func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, 
 	if len(pubKey) > 128 {
 		return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "public_key too large"}}
 	}
-	if _, err := decodeBase64Loose(pubKey); err != nil {
+	if err := validateBase64Loose(pubKey); err != nil {
 		return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "public_key is not valid base64"}}
 	}
 
@@ -143,10 +145,10 @@ func handleVoiceE2EEOfferV2(_ context.Context, cmd Command, info ClientInfo, dep
 	if len(encKey) > 1024 || len(iv) > 128 {
 		return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "encrypted_key or iv too large"}}
 	}
-	if _, err := decodeBase64Loose(encKey); err != nil {
+	if err := validateBase64Loose(encKey); err != nil {
 		return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "encrypted_key is not valid base64"}}
 	}
-	if _, err := decodeBase64Loose(iv); err != nil {
+	if err := validateBase64Loose(iv); err != nil {
 		return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "iv is not valid base64"}}
 	}
 
