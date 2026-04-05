@@ -46,7 +46,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Health check — unauthenticated, no versioning prefix.
 	// The online user count callback is set after hub creation below.
 	var getOnlineUsers func() int
-	r.Get("/health", handleHealth(ver, func() int {
+	r.Get("/health", handleHealth(func() int {
 		if getOnlineUsers != nil {
 			return getOnlineUsers()
 		}
@@ -64,13 +64,13 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// Versioned API routes.
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Get("/health", handleHealth(ver, func() int {
+		r.Get("/health", handleHealth(func() int {
 			if getOnlineUsers != nil {
 				return getOnlineUsers()
 			}
 			return 0
 		}))
-		r.Get("/info", handleInfo(cfg, ver))
+		r.Get("/info", handleInfo(cfg))
 	})
 
 	// Load (or auto-generate) the AES-256 key for TOTP secret encryption (M1).
@@ -239,7 +239,7 @@ type infoResponse struct {
 	Name string `json:"name"`
 }
 
-func handleHealth(ver string, getOnlineUsers func() int) http.HandlerFunc {
+func handleHealth(getOnlineUsers func() int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// C-2: Version removed from unauthenticated health endpoint to prevent
 		// server fingerprinting. Version is available on the authenticated
@@ -252,7 +252,7 @@ func handleHealth(ver string, getOnlineUsers func() int) http.HandlerFunc {
 	}
 }
 
-func handleInfo(cfg *config.Config, ver string) http.HandlerFunc {
+func handleInfo(cfg *config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// C-2: Version removed from unauthenticated info endpoint.
 		writeJSON(w, http.StatusOK, infoResponse{
