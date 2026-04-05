@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"runtime"
 	"time"
@@ -16,13 +17,15 @@ type ServerMetrics struct {
 	NumGC          uint32  `json:"num_gc"`
 	ConnectedUsers int     `json:"connected_users"`
 	VoiceSessions  int     `json:"voice_sessions"`
+	BroadcastDrops uint64  `json:"broadcast_drops"`
 	LiveKitHealthy *bool   `json:"livekit_healthy,omitempty"`
 }
 
 // handleMetrics returns an HTTP handler that reports runtime server metrics.
 // getConnectedUsers is a callback to retrieve the current WebSocket client count.
+// getBroadcastDrops is a callback to retrieve the cumulative broadcast drop counter.
 // livekitHealthCheck is optional — if non-nil, it probes the LiveKit companion process.
-func handleMetrics(getConnectedUsers func() int, getVoiceSessions func() int, livekitHealthCheck func() (bool, error)) http.HandlerFunc {
+func handleMetrics(getConnectedUsers func() int, getVoiceSessions func() int, getBroadcastDrops func() uint64, livekitHealthCheck func(context.Context) (bool, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
@@ -37,10 +40,11 @@ func handleMetrics(getConnectedUsers func() int, getVoiceSessions func() int, li
 			NumGC:          m.NumGC,
 			ConnectedUsers: getConnectedUsers(),
 			VoiceSessions:  getVoiceSessions(),
+			BroadcastDrops: getBroadcastDrops(),
 		}
 
 		if livekitHealthCheck != nil {
-			healthy, _ := livekitHealthCheck()
+			healthy, _ := livekitHealthCheck(r.Context())
 			metrics.LiveKitHealthy = &healthy
 		}
 

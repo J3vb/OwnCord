@@ -20,6 +20,7 @@ func TestAdminAPI_CheckUpdate_OK(t *testing.T) {
 			"html_url": "https://github.com/J3vb/OwnCord/releases/tag/v2.0.0",
 			"assets": []map[string]any{
 				{"name": "chatserver.exe", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver.exe"},
+				{"name": "chatserver-linux-amd64.tar.gz", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver-linux-amd64.tar.gz"},
 				{"name": "checksums.sha256", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/checksums.sha256"},
 				{"name": "chatserver.exe.sig", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver.exe.sig"},
 				{"name": "server-update-manifest.json", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/server-update-manifest.json"},
@@ -305,6 +306,10 @@ func TestAdminAPI_ApplyUpdate_DownloadFails(t *testing.T) {
 				{
 					"name":                 "chatserver.exe",
 					"browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver.exe",
+				},
+				{
+					"name":                 "chatserver-linux-amd64.tar.gz",
+					"browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver-linux-amd64.tar.gz",
 				},
 				{
 					"name":                 "checksums.sha256",

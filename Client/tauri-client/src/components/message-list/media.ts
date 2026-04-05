@@ -5,6 +5,7 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import klipyWatermark from "../../assets/KLIPY Light with logo.svg";
 import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@components/settings/helpers";
@@ -32,6 +33,16 @@ function cacheImageHeight(url: string, h: number): void {
     if (firstKey !== undefined) imageHeightCache.delete(firstKey);
   }
   imageHeightCache.set(url, h);
+}
+
+/** Check if a URL originates from the Klipy CDN. */
+function isKlipyUrl(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return hostname === "klipy.com" || hostname.endsWith(".klipy.com");
+  } catch {
+    return false;
+  }
 }
 
 /** Check if a URL points to an animated GIF. */
@@ -289,6 +300,17 @@ export function renderInlineImage(url: string): HTMLDivElement {
   });
 
   wrap.appendChild(img);
+
+  if (isKlipyUrl(url)) {
+    const watermark = createElement("img", {
+      class: "klipy-watermark",
+      src: klipyWatermark,
+      alt: "",
+      "aria-hidden": "true",
+    });
+    wrap.appendChild(watermark);
+  }
+
   return wrap;
 }
 

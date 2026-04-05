@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/storage"
 	"github.com/owncord/server/updater"
 	"github.com/owncord/server/ws"
@@ -175,9 +177,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// hub can send real-time dm_channel_close events to WebSocket clients.
 	MountDMRoutes(r, database, hub)
 
-	// Connectivity diagnostics — any authenticated user can check.
-	// BUG-121: Rate limit 5 req/min as documented.
+	// H-8: Connectivity diagnostics restricted to admin users only.
+	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.
 	r.With(AuthMiddleware(database),
+		RequirePermission(permissions.Administrator),
 		RateLimitMiddleware(limiter, 5, time.Minute, cfg.Server.TrustedProxies)).
 		Get("/api/v1/diagnostics/connectivity",
 			handleDiagnosticsConnectivity(cfg, ver, hub))
@@ -190,7 +193,8 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		Get("/api/v1/metrics", handleMetrics(
 			func() int { return hub.ClientCount() },
 			func() int { return hub.VoiceSessionCount() },
-			func() (bool, error) { return hub.LiveKitHealthCheck() },
+			func() uint64 { return hub.BroadcastDropCount() },
+			func(ctx context.Context) (bool, error) { return hub.LiveKitHealthCheck(ctx) },
 		))
 
 	// Admin panel: static files + REST API (Phase 6).
@@ -226,22 +230,22 @@ var serverStartTime = time.Now()
 // healthResponse is the JSON shape returned by GET /health.
 type healthResponse struct {
 	Status      string `json:"status"`
-	Version     string `json:"version"`
 	Uptime      int64  `json:"uptime"`
 	OnlineUsers int    `json:"online_users"`
 }
 
 // infoResponse is the JSON shape returned by GET /api/v1/info.
 type infoResponse struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
+	Name string `json:"name"`
 }
 
 func handleHealth(ver string, getOnlineUsers func() int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// C-2: Version removed from unauthenticated health endpoint to prevent
+		// server fingerprinting. Version is available on the authenticated
+		// diagnostics endpoint instead.
 		writeJSON(w, http.StatusOK, healthResponse{
 			Status:      "ok",
-			Version:     ver,
 			Uptime:      int64(time.Since(serverStartTime).Seconds()),
 			OnlineUsers: getOnlineUsers(),
 		})
@@ -250,9 +254,9 @@ func handleHealth(ver string, getOnlineUsers func() int) http.HandlerFunc {
 
 func handleInfo(cfg *config.Config, ver string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// C-2: Version removed from unauthenticated info endpoint.
 		writeJSON(w, http.StatusOK, infoResponse{
-			Name:    cfg.Server.Name,
-			Version: ver,
+			Name: cfg.Server.Name,
 		})
 	}
 }
@@ -266,7 +270,7 @@ type livekitHealthResponse struct {
 
 func handleLiveKitHealth(hub *ws.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ok, err := hub.LiveKitHealthCheck() //nolint:contextcheck // TODO: propagate context through this call path
+		ok, err := hub.LiveKitHealthCheck(r.Context())
 		if ok {
 			writeJSON(w, http.StatusOK, livekitHealthResponse{
 				Status:           "ok",

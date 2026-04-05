@@ -210,8 +210,8 @@ func (c *LiveKitClient) CountVideoTracks(channelID int64) (int, error) {
 
 // HealthCheck verifies connectivity to the LiveKit server by listing rooms.
 // Returns true if the server responds successfully.
-func (c *LiveKitClient) HealthCheck() (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+func (c *LiveKitClient) HealthCheck(ctx context.Context) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
 	_, err := c.roomSvc.ListRooms(ctx, &livekit.ListRoomsRequest{})

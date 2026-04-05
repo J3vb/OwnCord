@@ -5,6 +5,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -322,7 +323,7 @@ func TestRevokeSession_NegativeID(t *testing.T) {
 // ─── handleLiveKitHealth via exported test helper ───────────────────────────
 
 func TestLiveKitHealth_OK(t *testing.T) {
-	handler := api.HandleLiveKitHealthForTest(func() (bool, error) {
+	handler := api.HandleLiveKitHealthForTest(func(_ context.Context) (bool, error) {
 		return true, nil
 	})
 
@@ -345,7 +346,7 @@ func TestLiveKitHealth_OK(t *testing.T) {
 }
 
 func TestLiveKitHealth_Degraded_WithError(t *testing.T) {
-	handler := api.HandleLiveKitHealthForTest(func() (bool, error) {
+	handler := api.HandleLiveKitHealthForTest(func(_ context.Context) (bool, error) {
 		return false, errors.New("connection refused")
 	})
 
@@ -368,7 +369,7 @@ func TestLiveKitHealth_Degraded_WithError(t *testing.T) {
 }
 
 func TestLiveKitHealth_Degraded_NilError(t *testing.T) {
-	handler := api.HandleLiveKitHealthForTest(func() (bool, error) {
+	handler := api.HandleLiveKitHealthForTest(func(_ context.Context) (bool, error) {
 		return false, nil
 	})
 
@@ -637,7 +638,7 @@ func TestSetPinned_Unauthorized(t *testing.T) {
 // writeJSON is at 75% — testing the success path covers the rest.
 
 func TestWriteJSON_BasicSuccess(t *testing.T) {
-	handler := api.HandleLiveKitHealthForTest(func() (bool, error) {
+	handler := api.HandleLiveKitHealthForTest(func(_ context.Context) (bool, error) {
 		return true, nil
 	})
 

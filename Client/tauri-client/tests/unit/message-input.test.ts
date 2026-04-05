@@ -746,9 +746,9 @@ describe("MessageInput", () => {
     gifBtn.click();
 
     expect(lastGifPickerOptions).not.toBeNull();
-    lastGifPickerOptions!.onSelect("https://tenor.com/example.gif");
+    lastGifPickerOptions!.onSelect("https://media.klipy.com/example.gif");
 
-    expect(opts.onSend).toHaveBeenCalledWith("https://tenor.com/example.gif", null, []);
+    expect(opts.onSend).toHaveBeenCalledWith("https://media.klipy.com/example.gif", null, []);
 
     comp.destroy?.();
   });

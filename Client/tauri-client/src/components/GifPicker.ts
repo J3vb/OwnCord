@@ -1,9 +1,9 @@
-// GifPicker — searchable GIF selector powered by Tenor API.
+// GifPicker — searchable GIF selector powered by Klipy API.
 // Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
 
 import { createElement, setText, clearChildren } from "@lib/dom";
-import { searchGifs, getTrendingGifs } from "@lib/tenor";
-import type { TenorGif } from "@lib/tenor";
+import { searchGifs, getTrendingGifs } from "@lib/gifProvider";
+import type { GifResult } from "@lib/gifProvider";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,13 +43,13 @@ export function createGifPicker(options: GifPickerOptions): {
   const searchInput = createElement("input", {
     class: "gp-search",
     type: "text",
-    placeholder: "Search Tenor",
+    placeholder: "Search Klipy",
   });
   header.appendChild(searchInput);
 
   // Attribution
   const attribution = createElement("div", { class: "gp-attribution" });
-  setText(attribution, "Powered by Tenor");
+  setText(attribution, "Powered by Klipy");
   header.appendChild(attribution);
 
   root.appendChild(header);
@@ -68,7 +68,7 @@ export function createGifPicker(options: GifPickerOptions): {
 
   // ── Rendering ──
 
-  function renderGifs(gifs: readonly TenorGif[]): void {
+  function renderGifs(gifs: readonly GifResult[]): void {
     clearChildren(gridArea);
 
     if (gifs.length === 0) {

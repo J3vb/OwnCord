@@ -1,5 +1,5 @@
 // LiveKit Session — lifecycle orchestrator for voice chat via LiveKit
-import { Room, RoomEvent } from "livekit-client";
+import { Room, RoomEvent, ExternalE2EEKeyProvider } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import {
   voiceStore,
@@ -10,11 +10,21 @@ import {
   leaveVoiceChannel,
   setListenOnly,
 } from "@stores/voice.store";
+import { authStore } from "@stores/auth.store";
 import { loadPref } from "@components/settings/helpers";
 import { createLogger } from "@lib/logger";
 import { invoke } from "@tauri-apps/api/core";
 import { AudioPipeline } from "@lib/audioPipeline";
 import { AudioElements } from "@lib/audioElements";
+import {
+  generateECDHKeyPair,
+  exportPublicKey,
+  importPublicKey,
+  generateRoomKey,
+  roomKeyToBase64,
+  wrapRoomKey,
+  unwrapRoomKey,
+} from "@lib/e2eeCrypto";
 import { DeviceManager } from "@lib/deviceManager";
 import {
   type VideoTrackDeps,
@@ -70,42 +80,147 @@ type PendingVoiceJoin = {
   readonly directUrl?: string;
 };
 
-/** Read pendingJoin from an instance — bypasses TS control-flow narrowing
- *  that incorrectly assumes the field is still null after an async interleave. */
-function getPendingJoin(session: LiveKitSession): PendingVoiceJoin | null {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TS narrowing workaround
-  return (session as any).pendingJoin as PendingVoiceJoin | null;
-}
+// --- State machine ---
+
+/** Discriminated-union session state. All connection-lifecycle fields live here.
+ *  The "connecting" variant also carries the BUG-142 monotonic generation counter
+ *  (joinGeneration) so superseded-join detection is co-located with the state. */
+type SessionState =
+  | { readonly type: "idle" }
+  | {
+      readonly type: "connecting";
+      readonly pendingJoin: PendingVoiceJoin | null;
+      readonly joinGeneration: number;
+    }
+  | {
+      readonly type: "connected";
+      readonly room: Room;
+      readonly channelId: number;
+      readonly latestToken: string;
+      readonly lastUrl: string;
+      readonly lastDirectUrl: string | undefined;
+    }
+  | {
+      readonly type: "reconnecting";
+      readonly channelId: number;
+      readonly latestToken: string;
+      readonly lastUrl: string;
+      readonly lastDirectUrl: string | undefined;
+      readonly ac: AbortController;
+    };
 
 // --- LiveKitSession class ---
 
 export class LiveKitSession {
-  private room: Room | null = null;
+  /** Single source of truth for all connection-lifecycle state. */
+  private _state: SessionState = { type: "idle" };
+
+  // --- Non-connection fields (configuration / callbacks / infrastructure) ---
   private ws: WsClient | null = null;
   private onErrorCallback: ((message: string) => void) | null = null;
-  private currentChannelId: number | null = null;
   private serverHost: string | null = null;
   private onRemoteVideoCallback: RemoteVideoCallback | null = null;
   private onRemoteVideoRemovedCallback: RemoteVideoRemovedCallback | null = null;
   private tokenRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Latest token received from server (used for reconnection after token refresh). */
-  private latestToken: string | null = null;
-  /** Guard: true while handleVoiceToken is connecting — prevents concurrent joins. */
-  private connecting = false;
-  /** Latest join request received while a connection attempt is already running. */
-  private pendingJoin: PendingVoiceJoin | null = null;
-  /** Last known LiveKit URL and directUrl for auto-reconnect on unexpected disconnect. */
-  private lastUrl: string | null = null;
-  private lastDirectUrl: string | undefined = undefined;
+  /** BUG-146: Guard timer — fires if the server never responds to voice_token_refresh. */
+  private tokenRefreshTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   /** Max auto-reconnect attempts before giving up and showing error. */
   private static readonly MAX_RECONNECT_ATTEMPTS = 2;
   private static readonly RECONNECT_DELAY_MS = 3000;
-  /** Aborted by leaveVoice() to cancel a pending auto-reconnect loop. */
-  private reconnectAc: AbortController | null = null;
   /** Master output volume multiplier (0-2.0). Per-user volumes are scaled by this. */
   private outputVolumeMultiplier = loadPref<number>("outputVolume", 100) / 100;
   /** Cached port for the local LiveKit TLS proxy (Rust-side, for self-signed cert support). */
   private liveKitProxyPort: number | null = null;
+
+  /** E2EE key provider — shared across Room instances. The room key is generated
+   *  and exchanged client-side via ECDH; the server never sees it. */
+  private _e2eeKeyProvider = new ExternalE2EEKeyProvider();
+
+  // ── Client-side E2EE state (ECDH key exchange) ───────────────────────────
+  /** Ephemeral ECDH P-256 keypair for the current voice session. */
+  private _ecdhKeyPair: CryptoKeyPair | null = null;
+  /** The 256-bit symmetric room key (plaintext). Only held by the key holder
+   *  initially; other participants receive it via ECDH-wrapped offers. */
+  private _roomKey: Uint8Array | null = null;
+  /** Peer ECDH public keys indexed by userId. */
+  private _peerPublicKeys: Map<number, CryptoKey> = new Map();
+  /** True if this client is the key holder (longest-present participant). */
+  private _isKeyHolder = false;
+  /** Resolver/rejector for non-key-holders waiting to receive the room key via offer. */
+  private _roomKeyResolver: (() => void) | null = null;
+  private _roomKeyRejector: ((err: Error) => void) | null = null;
+  /** Guard: true while a key rotation is in progress (prevents concurrent rotations). */
+  private _rotatingKey = false;
+  /** Monotonic counter incremented on every key rotation. handleE2EEOffer captures the
+   *  epoch before async work and discards the result if epoch changed (stale offer). */
+  private _e2eeEpoch = 0;
+  /** Announces that arrived before our ECDH keypair was ready. Drained after keypair init. */
+  private _pendingAnnounces: Array<{ userId: number; publicKeyBase64: string }> = [];
+  /** Periodic key rotation timer — fires every KEY_ROTATION_INTERVAL_MS when key holder. */
+  private _keyRotationTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Interval between periodic key rotations (5 minutes). */
+  private static readonly KEY_ROTATION_INTERVAL_MS = 5 * 60 * 1000;
+
+  // --- State transition (single writer) ---
+
+  private setState(next: SessionState): void {
+    const prev = this._state.type;
+    this._state = next;
+    log.debug("Session state transition", { from: prev, to: next.type });
+  }
+
+  // --- Typed state accessors (replace scattered field reads) ---
+
+  /** Room from state, or null when idle/connecting/reconnecting. */
+  private get _room(): Room | null {
+    return this._state.type === "connected" ? this._state.room : null;
+  }
+
+  /** Channel ID from state, or null when idle/connecting. */
+  private get _currentChannelId(): number | null {
+    return this._state.type === "connected" || this._state.type === "reconnecting"
+      ? this._state.channelId
+      : null;
+  }
+
+  /** Latest token from state, or null when idle/connecting. */
+  private get _latestToken(): string | null {
+    return this._state.type === "connected" || this._state.type === "reconnecting"
+      ? this._state.latestToken
+      : null;
+  }
+
+  /** Last URL from state, or null when idle/connecting. */
+  private get _lastUrl(): string | null {
+    return this._state.type === "connected" || this._state.type === "reconnecting"
+      ? this._state.lastUrl
+      : null;
+  }
+
+  /** Last direct URL from state. */
+  private get _lastDirectUrl(): string | undefined {
+    return this._state.type === "connected" || this._state.type === "reconnecting"
+      ? this._state.lastDirectUrl
+      : undefined;
+  }
+
+  /** True while a connect attempt is running. */
+  private get _connecting(): boolean {
+    return this._state.type === "connecting";
+  }
+
+  /** The abort controller for an in-flight reconnect, or null. */
+  private get _reconnectAc(): AbortController | null {
+    return this._state.type === "reconnecting" ? this._state.ac : null;
+  }
+
+  /** Helper to check state is "connected" for a specific channelId, reading
+   *  through a method call so TS control-flow narrowing cannot cache the result.
+   *  Used in connectAndSetup() checkpoints after setState() transitions. */
+  private isStateConnected(channelId: number): boolean {
+    const s: SessionState = this._state;
+    return s.type === "connected" && s.channelId === channelId;
+  }
 
   // --- Extracted modules (facade pattern) ---
   private _audioPipeline = new AudioPipeline();
@@ -120,7 +235,7 @@ export class LiveKitSession {
   /** Lazily built deps for the extracted video track functions. */
   private get _videoTrackDeps(): VideoTrackDeps {
     return {
-      getRoom: () => this.room,
+      getRoom: () => this._room,
       getWs: () => this.ws,
       onError: (msg) => {
         this.onErrorCallback?.(msg);
@@ -134,29 +249,60 @@ export class LiveKitSession {
 
   constructor() {
     this._eventHandlers = createRoomEventHandlers({
-      getRoom: () => this.room,
+      getRoom: () => this._room,
       setRoom: (r) => {
-        this.room = r;
+        // Called by handleDisconnected immediately before setReconnectAc.
+        // Capture the reconnect fields from the current "connected" state
+        // while we still have them, then clear the room (transition to idle).
+        // setReconnectAc will pick up _pendingReconnectFields to form the
+        // "reconnecting" state atomically.
+        if (r === null && this._state.type === "connected") {
+          this._pendingReconnectFields = {
+            channelId: this._state.channelId,
+            latestToken: this._state.latestToken,
+            lastUrl: this._state.lastUrl,
+            lastDirectUrl: this._state.lastDirectUrl,
+          };
+          this.setState({ type: "idle" });
+        }
       },
-      getCurrentChannelId: () => this.currentChannelId,
+      getCurrentChannelId: () => this._currentChannelId,
       getAudioElements: () => this._audioElements,
       getOnRemoteVideoCallback: () => this.onRemoteVideoCallback,
       getOnRemoteVideoRemovedCallback: () => this.onRemoteVideoRemovedCallback,
       getOnErrorCallback: () => this.onErrorCallback,
-      isConnecting: () => this.connecting,
-      getLatestToken: () => this.latestToken,
-      getLastUrl: () => this.lastUrl,
-      getLastDirectUrl: () => this.lastDirectUrl,
+      isConnecting: () => this._connecting,
+      getLatestToken: () => this._latestToken,
+      getLastUrl: () => this._lastUrl,
+      getLastDirectUrl: () => this._lastDirectUrl,
       setReconnectAc: (ac) => {
-        this.reconnectAc = ac;
+        if (ac !== null && this._pendingReconnectFields !== null) {
+          // Transition from idle → reconnecting atomically using the fields
+          // captured in setRoom() above.
+          const { channelId, latestToken, lastUrl, lastDirectUrl } = this._pendingReconnectFields;
+          this._pendingReconnectFields = null;
+          this.setState({
+            type: "reconnecting",
+            channelId,
+            latestToken,
+            lastUrl,
+            lastDirectUrl,
+            ac,
+          });
+        }
+        // ac === null: reconnect succeeded — connectAndSetup already set "connected".
+        // No transition needed; just discard stale pending fields if any.
+        if (ac === null) {
+          this._pendingReconnectFields = null;
+        }
       },
       syncModuleRooms: () => this.syncModuleRooms(),
       teardownForReconnect: () => {
         this._audioPipeline.teardownAudioPipeline();
         this.clearTokenRefreshTimer();
         // BUG-098: Stop leaked camera/screen tracks before room is nulled.
-        stopManualCameraTrack(this._cameraState, this.room);
-        stopManualScreenTracks(this._screenState, this.room);
+        stopManualCameraTrack(this._cameraState, this._room);
+        stopManualScreenTracks(this._screenState, this._room);
         setLocalCamera(false);
         setLocalScreenshare(false);
       },
@@ -166,6 +312,15 @@ export class LiveKitSession {
         this.attemptAutoReconnect(token, url, channelId, directUrl, signal),
     });
   }
+
+  /** Temporary holding field: populated by setRoom(null) in handleDisconnected's
+   *  callback sequence so setReconnectAc can form the "reconnecting" state atomically. */
+  private _pendingReconnectFields: {
+    channelId: number;
+    latestToken: string;
+    lastUrl: string;
+    lastDirectUrl: string | undefined;
+  } | null = null;
 
   // --- Room factory ---
 
@@ -193,6 +348,12 @@ export class LiveKitSession {
           maxFramerate: quality === "low" ? 5 : quality === "medium" ? 15 : 30,
         },
       },
+      // End-to-end encryption: SFrame-based E2EE using a server-distributed
+      // per-channel symmetric key. The SFU only sees encrypted frames.
+      e2ee: {
+        keyProvider: this._e2eeKeyProvider,
+        worker: new Worker(new URL("livekit-client/e2ee-worker", import.meta.url)),
+      },
     });
     newRoom.on(RoomEvent.TrackSubscribed, this._eventHandlers.handleTrackSubscribed);
     newRoom.on(RoomEvent.TrackUnsubscribed, this._eventHandlers.handleTrackUnsubscribed);
@@ -212,10 +373,11 @@ export class LiveKitSession {
 
   /** Update all extracted modules with the current room reference. */
   private syncModuleRooms(): void {
-    this._audioPipeline.setRoom(this.room);
-    this._audioElements.setRoom(this.room);
-    this._deviceManager.setRoom(this.room);
-    this._deviceManager.setAudioPipeline(this.room !== null ? this._audioPipeline : null);
+    const room = this._room;
+    this._audioPipeline.setRoom(room);
+    this._audioElements.setRoom(room);
+    this._deviceManager.setRoom(room);
+    this._deviceManager.setAudioPipeline(room !== null ? this._audioPipeline : null);
     this._deviceManager.setOnError(this.onErrorCallback);
     this._deviceManager.setOnToast(this.onErrorCallback);
   }
@@ -238,20 +400,91 @@ export class LiveKitSession {
       // eslint-disable-next-line no-await-in-loop -- intentional sequential polling with backoff delay
       await new Promise((r) => setTimeout(r, LiveKitSession.RECONNECT_DELAY_MS));
       // If user manually left or joined a different channel during the delay, abort.
-      if (signal.aborted || this.currentChannelId !== channelId) {
+      if (signal.aborted || this._currentChannelId !== channelId) {
         log.info("Auto-reconnect aborted — user left or channel changed");
         return;
       }
       try {
-        this.room = this.createRoom();
-        this.syncModuleRooms();
+        const newRoom = this.createRoom();
+        const cleanupAbortedReconnect = async (): Promise<void> => {
+          newRoom.removeAllListeners();
+          try {
+            await newRoom.disconnect();
+          } catch (disconnectErr) {
+            log.warn("Failed to disconnect room after reconnect abort", disconnectErr);
+          }
+          this._audioPipeline.setRoom(null);
+          this._audioElements.setRoom(null);
+          this._deviceManager.setRoom(null);
+          this._deviceManager.setAudioPipeline(null);
+        };
+        // Set state to reconnecting with the fresh room-less attempt info;
+        // the actual room appears in "connected" state after connect succeeds.
+        if (this._state.type === "reconnecting") {
+          this.setState({ ...this._state, ac: this._state.ac });
+        }
+        this._audioPipeline.setRoom(newRoom);
+        this._audioElements.setRoom(newRoom);
+        this._deviceManager.setRoom(newRoom);
+        this._deviceManager.setAudioPipeline(this._audioPipeline);
+
+        if (signal.aborted || this._currentChannelId !== channelId) {
+          log.info("Auto-reconnect aborted after room creation");
+          await cleanupAbortedReconnect();
+          return;
+        }
+
         // eslint-disable-next-line no-await-in-loop -- sequential reconnect: resolve URL then connect
         const resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
+
+        if (signal.aborted || this._currentChannelId !== channelId) {
+          log.info("Auto-reconnect aborted before room connect");
+          await cleanupAbortedReconnect();
+          return;
+        }
+
+        // E2EE: Regenerate ECDH keypair for the new session (forward secrecy)
+        // and re-announce so other participants can re-wrap the room key for us.
+        // If we still have the room key from before disconnect, re-apply it now
+        // so audio works immediately; the key holder will send a fresh offer if
+        // the key was rotated during our absence.
+        // eslint-disable-next-line no-await-in-loop -- must set up E2EE before connect
+        this._ecdhKeyPair = await generateECDHKeyPair();
+        this._peerPublicKeys.clear();
+        if (this._roomKey) {
+          // eslint-disable-next-line no-await-in-loop -- must set key before connect
+          await this._e2eeKeyProvider.setKey(roomKeyToBase64(this._roomKey));
+        }
+        // eslint-disable-next-line no-await-in-loop -- must export before connect
+        const reconnectPubKey = await exportPublicKey(this._ecdhKeyPair.publicKey);
+        this.ws?.send({
+          type: "voice_e2ee_announce",
+          payload: { public_key: reconnectPubKey },
+        });
+
         // eslint-disable-next-line no-await-in-loop -- sequential reconnect: must connect before restoring state
-        await this.room.connect(resolvedUrl, token);
+        await newRoom.connect(resolvedUrl, token);
+
+        if (signal.aborted || this._currentChannelId !== channelId) {
+          log.info("Auto-reconnect aborted after room connect");
+          await cleanupAbortedReconnect();
+          return;
+        }
+
         log.info("Auto-reconnect succeeded", { attempt, channelId, url: resolvedUrl });
-        logIceConnectionInfo(this.room);
-        this.room
+        // Transition to "connected" — this is the single atomic write.
+        this.setState({
+          type: "connected",
+          room: newRoom,
+          channelId,
+          latestToken: token,
+          lastUrl: url,
+          lastDirectUrl: directUrl,
+        });
+        this._deviceManager.setOnError(this.onErrorCallback);
+        this._deviceManager.setOnToast(this.onErrorCallback);
+        logIceConnectionInfo(newRoom);
+        newRoom
           .startAudio()
           .catch((err) => log.debug("Failed to start audio after reconnect", err));
         // eslint-disable-next-line no-await-in-loop -- sequential reconnect: must restore voice state after connect
@@ -260,7 +493,7 @@ export class LiveKitSession {
         const savedInput = loadPref<string>("audioInputDevice", "");
         if (savedInput) {
           try {
-            await this.room.switchActiveDevice("audioinput", savedInput);
+            await newRoom.switchActiveDevice("audioinput", savedInput);
           } catch (err) {
             log.warn("Reconnect: saved input device unavailable, using default", err);
           }
@@ -268,7 +501,7 @@ export class LiveKitSession {
         const savedOutput = loadPref<string>("audioOutputDevice", "");
         if (savedOutput) {
           try {
-            await this.room.switchActiveDevice("audiooutput", savedOutput);
+            await newRoom.switchActiveDevice("audiooutput", savedOutput);
           } catch (err) {
             log.warn("Reconnect: saved output device unavailable, using default", err);
           }
@@ -276,24 +509,38 @@ export class LiveKitSession {
         this._audioPipeline.setupAudioPipeline();
         this.reapplyMuteGain();
         this.startTokenRefreshTimer();
-        // Clear the abort controller after all post-connect work is done so
-        // leaveVoice() can still abort during restoreLocalVoiceState above.
-        this.reconnectAc = null;
+        // Signal the setReconnectAc callback that the reconnect is done.
+        // ac === null clears the pending state in the callback.
+        this._pendingReconnectFields = null;
         // Request a fresh token since the stored one may be close to expiry.
         this.requestTokenRefresh();
         return;
       } catch (err) {
         log.warn("Auto-reconnect failed", { attempt, url, error: err });
-        if (this.room !== null) {
-          this.room.removeAllListeners();
-          this.room
+        const failedRoom = this._room;
+        if (failedRoom !== null) {
+          failedRoom.removeAllListeners();
+          failedRoom
             .disconnect()
             .catch((disconnectErr) =>
               log.warn("Failed to disconnect room after reconnect failure", disconnectErr),
             );
-          this.room = null;
-          this.syncModuleRooms();
         }
+        // Return to idle so the next attempt starts fresh.
+        if (this._state.type === "reconnecting") {
+          this.setState({
+            type: "reconnecting",
+            channelId: this._state.channelId,
+            latestToken: this._state.latestToken,
+            lastUrl: this._state.lastUrl,
+            lastDirectUrl: this._state.lastDirectUrl,
+            ac: this._state.ac,
+          });
+        }
+        this._audioPipeline.setRoom(null);
+        this._audioElements.setRoom(null);
+        this._deviceManager.setRoom(null);
+        this._deviceManager.setAudioPipeline(null);
       }
     }
     // All attempts exhausted — give up and clean up.
@@ -384,10 +631,17 @@ export class LiveKitSession {
       clearTimeout(this.tokenRefreshTimer);
       this.tokenRefreshTimer = null;
     }
+    // BUG-146: Also cancel any in-flight refresh response timeout so it does
+    // not fire after the session is torn down (leaveVoice / cleanupAll both
+    // call this method, so one clearing point covers all cleanup paths).
+    if (this.tokenRefreshTimeoutTimer !== null) {
+      clearTimeout(this.tokenRefreshTimeoutTimer);
+      this.tokenRefreshTimeoutTimer = null;
+    }
   }
 
   private requestTokenRefresh(): void {
-    if (this.ws === null || this.room === null) {
+    if (this.ws === null || this._room === null) {
       log.debug("Skipping token refresh — no active session");
       return;
     }
@@ -396,9 +650,35 @@ export class LiveKitSession {
     // NOTE: startTokenRefreshTimer is called from handleVoiceTokenRefresh
     // (the server response handler), not here, to avoid scheduling two
     // competing timers per cycle.
+
+    // BUG-146: Arm a 60-second response deadline. If the server never replies,
+    // the token stalls silently. On timeout we log a warning and reschedule the
+    // next refresh attempt rather than disconnecting — the current live session
+    // is unaffected (LiveKit keeps active connections alive beyond token expiry);
+    // the risk is only that a network blip during the stale window would fail to
+    // reconnect. Reconnecting for a refresh timeout is intentionally NOT done here
+    // because the WS connection itself may be degraded; a forced disconnect would
+    // make the UX worse than leaving the existing (still-valid) token in place.
+    if (this.tokenRefreshTimeoutTimer !== null) {
+      clearTimeout(this.tokenRefreshTimeoutTimer);
+    }
+    this.tokenRefreshTimeoutTimer = setTimeout(() => {
+      this.tokenRefreshTimeoutTimer = null;
+      log.warn(
+        "Voice token refresh timed out — server did not respond within 60 s. " +
+          "Rescheduling refresh; existing token remains in use.",
+      );
+      // Re-arm the next scheduled refresh so the client keeps trying.
+      this.startTokenRefreshTimer();
+    }, 60_000);
   }
 
   handleVoiceTokenRefresh(token?: string): void {
+    // BUG-146: Cancel the response-deadline timer — the server replied in time.
+    if (this.tokenRefreshTimeoutTimer !== null) {
+      clearTimeout(this.tokenRefreshTimeoutTimer);
+      this.tokenRefreshTimeoutTimer = null;
+    }
     // KNOWN LIMITATION: The livekit-client SDK does not expose a method to
     // rotate the token on an active connection. We store the fresh token so
     // that reconnection (auto-reconnect or manual rejoin) uses it, but the
@@ -409,8 +689,10 @@ export class LiveKitSession {
     //   - The 23h refresh timer ensures a fresh token is always ready
     //     *before* the original expires, so reconnects within the window work.
     // See also: Server/ws/livekit.go tokenTTL constant.
-    if (token) {
-      this.latestToken = token;
+    if (token && this._state.type === "connected") {
+      this.setState({ ...this._state, latestToken: token });
+    } else if (token && this._state.type === "reconnecting") {
+      this.setState({ ...this._state, latestToken: token });
     }
     this.startTokenRefreshTimer();
     log.info("Voice token refreshed, timer restarted");
@@ -419,7 +701,8 @@ export class LiveKitSession {
   // --- Volume helpers ---
 
   private async restoreLocalVoiceState(mode: "join" | "reconnect"): Promise<void> {
-    if (this.room === null) return;
+    const room = this._room;
+    if (room === null) return;
 
     const state = voiceStore.getState();
     const muted = state.localMuted || state.localDeafened;
@@ -427,7 +710,7 @@ export class LiveKitSession {
     const shouldEnableMicrophone = !muted;
 
     try {
-      await this.room.localParticipant.setMicrophoneEnabled(shouldEnableMicrophone);
+      await room.localParticipant.setMicrophoneEnabled(shouldEnableMicrophone);
       if (shouldEnableMicrophone) {
         log.info(
           mode === "join"
@@ -496,29 +779,154 @@ export class LiveKitSession {
   }
 
   /** Shared connect-with-retry + post-connect setup used by both the primary
-   *  handleVoiceToken path and the pending-join drain loop. Returns true if
-   *  the room ended up connected and set up, false otherwise. */
+   *  handleVoiceToken path and the pending-join drain loop.
+   *  Returns true if the room ended up connected and set up,
+   *  false on error, or "superseded" if a newer join generation invalidated
+   *  this attempt (caller should re-read pendingJoin immediately). */
   private async connectAndSetup(
     token: string,
     url: string,
     channelId: number,
     directUrl?: string,
-  ): Promise<boolean> {
-    if (this.room !== null) this.leaveVoice(false);
-    this.connecting = true;
+    isKeyHolder?: boolean,
+  ): Promise<boolean | "superseded"> {
+    if (this._room !== null) this.leaveVoice(false);
+    // Increment the generation counter and embed it into the "connecting" state.
+    // Any newer call to connectAndSetup() will produce a larger generation,
+    // making myGeneration !== currentGeneration at each checkpoint.
+    const prevState = this._state;
+    const prevGeneration = prevState.type === "connecting" ? prevState.joinGeneration : 0;
+    const myGeneration = prevGeneration + 1;
+    this.setState({ type: "connecting", pendingJoin: null, joinGeneration: myGeneration });
     let resolvedUrl = "";
+    // Track the room being built in this attempt so we can disconnect it on
+    // supersession without touching the shared state (which may already have
+    // been claimed by a newer attempt).
+    let localRoom: Room | null = null;
     try {
-      this.room = this.createRoom();
-      this.syncModuleRooms();
+      localRoom = this.createRoom();
+      this._audioPipeline.setRoom(localRoom);
+      this._audioElements.setRoom(localRoom);
+      this._deviceManager.setRoom(localRoom);
+      this._deviceManager.setAudioPipeline(this._audioPipeline);
+      this._deviceManager.setOnError(this.onErrorCallback);
+      this._deviceManager.setOnToast(this.onErrorCallback);
       resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
+
+      // Checkpoint 1: after URL resolution (may be slow for TLS proxy init).
+      if (this._state.type !== "connecting" || this._state.joinGeneration !== myGeneration) {
+        log.info("connectAndSetup: superseded after URL resolution — aborting", {
+          channelId,
+          myGeneration,
+          currentGeneration: this._state.type === "connecting" ? this._state.joinGeneration : "n/a",
+        });
+        return "superseded";
+      }
+
       const MAX_RETRIES = 3;
       const RETRY_DELAY_MS = 2000;
+
+      // ── Client-side E2EE key exchange (ECDH) ──────────────────────────
+      // Generate a fresh ECDH keypair for this session.
+      this._ecdhKeyPair = await generateECDHKeyPair();
+      this._peerPublicKeys.clear();
+      const myPubKeyBase64 = await exportPublicKey(this._ecdhKeyPair.publicKey);
+
+      // Drain any announces that arrived before our keypair was ready.
+      // These are from existing participants whose public keys the server
+      // relayed during voice_join sync.
+      const queued = this._pendingAnnounces.splice(0);
+      for (const { userId: qId, publicKeyBase64: qKey } of queued) {
+        const peerKey = await importPublicKey(qKey);
+        this._peerPublicKeys.set(qId, peerKey);
+        log.info("E2EE: drained queued announce", { userId: qId });
+      }
+
+      // Use server-authoritative is_key_holder from voice_token payload.
+      this._isKeyHolder = isKeyHolder ?? false;
+
+      if (this._isKeyHolder) {
+        // We're the first participant — generate the room key.
+        this._e2eeEpoch++;
+        this._roomKey = generateRoomKey();
+        await this._e2eeKeyProvider.setKey(roomKeyToBase64(this._roomKey));
+        log.info("E2EE: key holder — generated room key", { channelId });
+        this.startKeyRotationTimer();
+      } else {
+        // Wait for the key holder to send us the room key via voice_e2ee_offer.
+        // This promise resolves when handleE2EEOffer() sets _roomKey.
+        log.info("E2EE: waiting for room key from key holder", { channelId });
+        const roomKeyPromise = new Promise<void>((resolve, reject) => {
+          this._roomKeyResolver = resolve;
+          this._roomKeyRejector = reject;
+        });
+        // Wait up to 10s for the key holder to send an offer. If the first
+        // attempt times out, re-announce our public key (the offer may have been
+        // lost if the key holder disconnected mid-send) and wait 5s more.
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        const makeTimeout = (ms: number) =>
+          new Promise<void>((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error("E2EE key exchange timeout")), ms);
+          });
+        try {
+          await Promise.race([roomKeyPromise, makeTimeout(10_000)]);
+        } catch {
+          // First attempt timed out — re-announce and retry once.
+          if (timeoutId !== null) clearTimeout(timeoutId);
+          log.warn("E2EE: first key exchange attempt timed out, re-announcing", { channelId });
+          this.ws?.send({
+            type: "voice_e2ee_announce",
+            payload: { public_key: myPubKeyBase64 },
+          });
+          try {
+            await Promise.race([roomKeyPromise, makeTimeout(5_000)]);
+          } catch {
+            log.error("E2EE: key exchange timed out after retry — disconnecting", { channelId });
+            this._roomKeyResolver = null;
+            this._roomKeyRejector = null;
+            if (timeoutId !== null) clearTimeout(timeoutId);
+            this.onErrorCallback?.("e2ee_timeout");
+            this.leaveVoice(false);
+            return false;
+          }
+        } finally {
+          if (timeoutId !== null) clearTimeout(timeoutId);
+        }
+        this._roomKeyResolver = null;
+        this._roomKeyRejector = null;
+      }
+
+      // Announce our public key so existing participants (and the key holder)
+      // can see us. This must happen AFTER we set up the roomKeyResolver so
+      // we don't miss an immediate offer response.
+      this.ws?.send({
+        type: "voice_e2ee_announce",
+        payload: { public_key: myPubKeyBase64 },
+      });
+
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
           // eslint-disable-next-line no-await-in-loop -- sequential retry: must attempt connect before checking result
-          await this.room.connect(resolvedUrl, token);
-          // Check if a newer join was queued during the async connect.
-          const queuedJoin = getPendingJoin(this);
+          await localRoom.connect(resolvedUrl, token);
+
+          // Checkpoint 2: after room.connect() — the primary race window.
+          if (this._state.type !== "connecting" || this._state.joinGeneration !== myGeneration) {
+            log.info("connectAndSetup: superseded after room.connect() — aborting", {
+              channelId,
+              myGeneration,
+              currentGeneration:
+                this._state.type === "connecting" ? this._state.joinGeneration : "n/a",
+            });
+            localRoom.removeAllListeners();
+            localRoom
+              .disconnect()
+              .catch((err) => log.debug("Failed to disconnect superseded room", err));
+            return "superseded";
+          }
+
+          // Belt-and-suspenders: also keep existing pending-join token check
+          // for logging clarity when a newer request arrived via pendingJoin.
+          const queuedJoin = this._state.type === "connecting" ? this._state.pendingJoin : null;
           if (
             queuedJoin !== null &&
             (queuedJoin.token !== token ||
@@ -530,15 +938,15 @@ export class LiveKitSession {
               channelId,
               queuedChannelId: queuedJoin.channelId,
             });
-            if (this.room !== null) {
-              const room = this.room;
-              this.room = null;
-              this.syncModuleRooms();
-              room.removeAllListeners();
-              room
-                .disconnect()
-                .catch((err) => log.debug("Failed to disconnect room during cleanup", err));
-            }
+            localRoom.removeAllListeners();
+            localRoom
+              .disconnect()
+              .catch((err) => log.debug("Failed to disconnect room during cleanup", err));
+            localRoom = null;
+            this._audioPipeline.setRoom(null);
+            this._audioElements.setRoom(null);
+            this._deviceManager.setRoom(null);
+            this._deviceManager.setAudioPipeline(null);
             break;
           }
           break;
@@ -552,46 +960,96 @@ export class LiveKitSession {
             });
             // eslint-disable-next-line no-await-in-loop -- intentional backoff delay between retry attempts
             await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
-            if (this.room === null) throw connectErr;
-            this.room.removeAllListeners();
-            this.room = this.createRoom();
-            this.syncModuleRooms();
+            // Generation check inside retry loop: a superseding join may arrive
+            // during the backoff delay.
+            if (this._state.type !== "connecting" || this._state.joinGeneration !== myGeneration) {
+              log.info("connectAndSetup: superseded during retry backoff — aborting", {
+                channelId,
+                attempt,
+              });
+              return "superseded";
+            }
+            if (localRoom === null) throw connectErr;
+            localRoom.removeAllListeners();
+            localRoom = this.createRoom();
+            this._audioPipeline.setRoom(localRoom);
+            this._audioElements.setRoom(localRoom);
+            this._deviceManager.setRoom(localRoom);
+            this._deviceManager.setAudioPipeline(this._audioPipeline);
           } else {
             throw connectErr;
           }
         }
       }
       // If the room was discarded (stale join superseded by pending), skip setup.
-      if (this.room !== null) {
+      if (localRoom !== null) {
         log.info("Connected to LiveKit room", { channelId, url: resolvedUrl });
-        logIceConnectionInfo(this.room);
-        this.currentChannelId = channelId;
-        this.latestToken = token;
-        this.lastUrl = url;
-        this.lastDirectUrl = directUrl;
+        logIceConnectionInfo(localRoom);
+        // Atomic transition to "connected" — all connection fields set together.
+        this.setState({
+          type: "connected",
+          room: localRoom,
+          channelId,
+          latestToken: token,
+          lastUrl: url,
+          lastDirectUrl: directUrl,
+        });
         // Optimistic startAudio — may succeed if the join was triggered by a
         // recent user gesture. If not, the AudioPlaybackStatusChanged handler
         // will register a click-to-unlock fallback.
-        this.room.startAudio().catch(() => {
+        localRoom.startAudio().catch(() => {
           log.debug("Optimistic startAudio failed — waiting for user gesture");
         });
         await this.restoreLocalVoiceState("join");
+
+        // Checkpoint 3: after restoreLocalVoiceState (mic acquisition can be slow).
+        // Cast to SessionState to escape TS control-flow narrowing that incorrectly
+        // assumes _state is still "connecting" (it was set to "connected" above, but
+        // TS cannot see through the setState() opaque method call).
+        if (!this.isStateConnected(channelId)) {
+          log.info("connectAndSetup: superseded after restoreLocalVoiceState — aborting", {
+            channelId,
+          });
+          this.leaveVoice(false);
+          return "superseded";
+        }
+
         const savedInput = loadPref<string>("audioInputDevice", "");
         if (savedInput) {
           try {
-            await this.room.switchActiveDevice("audioinput", savedInput);
+            await localRoom.switchActiveDevice("audioinput", savedInput);
           } catch (err) {
             log.warn("Saved input device unavailable, using default", err);
           }
         }
+
+        // Checkpoint 4: after audioinput switchActiveDevice.
+        if (!this.isStateConnected(channelId)) {
+          log.info("connectAndSetup: superseded after audioinput switch — aborting", {
+            channelId,
+          });
+          this.leaveVoice(false);
+          return "superseded";
+        }
+
         const savedOutput = loadPref<string>("audioOutputDevice", "");
         if (savedOutput) {
           try {
-            await this.room.switchActiveDevice("audiooutput", savedOutput);
+            await localRoom.switchActiveDevice("audiooutput", savedOutput);
           } catch (err) {
             log.warn("Saved output device unavailable, using default", err);
           }
         }
+
+        // Checkpoint 5: after audiooutput switchActiveDevice.
+        if (!this.isStateConnected(channelId)) {
+          log.info("connectAndSetup: superseded after audiooutput switch — aborting", {
+            channelId,
+          });
+          this.leaveVoice(false);
+          return "superseded";
+        }
+
         this._audioPipeline.setupAudioPipeline();
         this.reapplyMuteGain();
         this.startTokenRefreshTimer();
@@ -601,13 +1059,27 @@ export class LiveKitSession {
       return false;
     } catch (err) {
       log.error("Failed to connect to LiveKit", { url: resolvedUrl, error: err });
-      if (this.room !== null) {
+      if (localRoom !== null) {
+        try {
+          localRoom.disconnect();
+        } catch {
+          /* ignore */
+        }
         this.onErrorCallback?.("Failed to join voice — connection error");
       }
       this.leaveVoice(false);
       return false;
     } finally {
-      this.connecting = false;
+      // Only clear "connecting" back to "idle" if we are still in the connecting
+      // state for this generation — never overwrite a "connected" state that was
+      // set by the success path above (guards against risk #4 in the analysis).
+      // If a pendingJoin was queued while this attempt ran, leave the state as
+      // "connecting" so handleVoiceToken's drain loop can read and consume it.
+      if (this._state.type === "connecting" && this._state.joinGeneration === myGeneration) {
+        if (this._state.pendingJoin === null) {
+          this.setState({ type: "idle" });
+        }
+      }
     }
   }
 
@@ -616,26 +1088,34 @@ export class LiveKitSession {
     url: string,
     channelId: number,
     directUrl?: string,
+    isKeyHolder?: boolean,
   ): Promise<void> {
-    if (
-      this.room !== null &&
-      this.currentChannelId === channelId &&
-      this.room.state === "connected"
-    ) {
+    const s = this._state;
+    if (s.type === "connected" && s.channelId === channelId && s.room.state === "connected") {
       this.handleVoiceTokenRefresh(token);
       return;
     }
     // Prevent concurrent connect attempts (rapid channel switching).
-    if (this.connecting) {
-      this.pendingJoin = { token, url, channelId, directUrl };
+    if (this._connecting) {
+      // Update the pendingJoin on the existing "connecting" state immutably.
+      if (this._state.type === "connecting") {
+        this.setState({
+          ...this._state,
+          pendingJoin: { token, url, channelId, directUrl },
+        });
+      }
       log.warn("handleVoiceToken: already connecting, queued latest join request", { channelId });
       return;
     }
-    await this.connectAndSetup(token, url, channelId, directUrl);
+    await this.connectAndSetup(token, url, channelId, directUrl, isKeyHolder);
     // Drain pending joins iteratively to avoid unbounded recursion when
     // rapid channel switches queue multiple requests.
-    let pendingJoin = this.pendingJoin;
-    this.pendingJoin = null;
+    // A "superseded" result means connectAndSetup() already aborted early;
+    // we still drain pendingJoin so the latest request always wins.
+    let pendingJoin = this._state.type === "connecting" ? this._state.pendingJoin : null;
+    if (this._state.type === "connecting") {
+      this.setState({ ...this._state, pendingJoin: null });
+    }
     while (pendingJoin !== null) {
       const {
         token: pToken,
@@ -643,26 +1123,325 @@ export class LiveKitSession {
         channelId: pChannelId,
         directUrl: pDirectUrl,
       } = pendingJoin;
+      const cur = this._state;
       if (
-        this.room !== null &&
-        this.currentChannelId === pChannelId &&
-        this.room.state === "connected"
+        cur.type === "connected" &&
+        cur.channelId === pChannelId &&
+        cur.room.state === "connected"
       ) {
         this.handleVoiceTokenRefresh(pToken);
       } else {
         // eslint-disable-next-line no-await-in-loop -- sequential drain of pending joins to avoid unbounded recursion
         await this.connectAndSetup(pToken, pUrl, pChannelId, pDirectUrl);
+        // If this attempt was itself superseded (another join arrived during the
+        // await), the loop will naturally pick it up via the updated pendingJoin.
       }
-      pendingJoin = this.pendingJoin;
-      this.pendingJoin = null;
+      pendingJoin = this._state.type === "connecting" ? this._state.pendingJoin : null;
+      if (this._state.type === "connecting") {
+        this.setState({ ...this._state, pendingJoin: null });
+      }
     }
+  }
+
+  // ── Client-side E2EE handlers (ECDH key exchange) ───────────────────────
+
+  /**
+   * Handle a voice_e2ee_announce from the server — another participant has
+   * announced their ECDH public key. If we are the key holder, wrap and send
+   * the room key to them.
+   */
+  async handleE2EEAnnounce(userId: number, publicKeyBase64: string): Promise<void> {
+    // Queue if our keypair isn't ready yet (announce arrived during connectAndSetup).
+    if (!this._ecdhKeyPair) {
+      this._pendingAnnounces.push({ userId, publicKeyBase64 });
+      log.info("E2EE: queued announce (keypair not ready)", { userId });
+      return;
+    }
+    try {
+      // Deduplicate: if the key is identical, skip the import but still
+      // re-send the room key offer (the peer may be re-requesting after a
+      // missed offer or reconnect).
+      const existingKey = this._peerPublicKeys.get(userId);
+      let peerKey: CryptoKey;
+      let isDuplicate = false;
+      if (existingKey) {
+        const existingB64 = await exportPublicKey(existingKey);
+        if (existingB64 === publicKeyBase64) {
+          peerKey = existingKey;
+          isDuplicate = true;
+          log.debug("E2EE: duplicate announce — will re-send offer if key holder", { userId });
+        } else {
+          peerKey = await importPublicKey(publicKeyBase64);
+          log.warn("E2EE: peer public key changed (reconnect?)", { userId });
+        }
+      } else {
+        peerKey = await importPublicKey(publicKeyBase64);
+      }
+      if (!isDuplicate) {
+        this._peerPublicKeys.set(userId, peerKey);
+        log.info("E2EE: received peer public key", { userId });
+      }
+
+      // If we're the key holder and have a room key, wrap it for the new peer.
+      // Capture keypair + roomKey before async work to avoid null dereference if
+      // clearE2EEState() runs concurrently.
+      const keypair = this._ecdhKeyPair;
+      const currentRoomKey = this._roomKey;
+      if (this._isKeyHolder && currentRoomKey && keypair) {
+        const { encryptedKey, iv } = await wrapRoomKey(keypair.privateKey, peerKey, currentRoomKey);
+        this.ws?.send({
+          type: "voice_e2ee_offer",
+          payload: { target_user_id: userId, encrypted_key: encryptedKey, iv },
+        });
+        log.info("E2EE: sent room key offer to peer", { userId });
+      }
+    } catch (err) {
+      log.error("E2EE: failed to handle announce", err);
+    }
+  }
+
+  /**
+   * Handle a voice_e2ee_offer from the server — the key holder has sent us
+   * the encrypted room key. Unwrap it and apply to the E2EE key provider.
+   */
+  async handleE2EEOffer(
+    fromUserId: number,
+    encryptedKeyBase64: string,
+    ivBase64: string,
+  ): Promise<void> {
+    try {
+      const peerKey = this._peerPublicKeys.get(fromUserId);
+      if (!peerKey) {
+        log.warn("E2EE: received offer from unknown peer", { fromUserId });
+        return;
+      }
+      const keypair = this._ecdhKeyPair;
+      if (!keypair) {
+        log.warn("E2EE: received offer but no ECDH keypair");
+        return;
+      }
+
+      // Capture epoch before async work — if a key rotation occurs during
+      // unwrap, the epoch will have advanced and we discard this stale result.
+      const epochBefore = this._e2eeEpoch;
+
+      const unwrapped = await unwrapRoomKey(
+        keypair.privateKey,
+        peerKey,
+        encryptedKeyBase64,
+        ivBase64,
+      );
+
+      if (this._e2eeEpoch !== epochBefore) {
+        log.info("E2EE: discarding stale offer (epoch changed during unwrap)", {
+          fromUserId,
+          epochBefore,
+          epochNow: this._e2eeEpoch,
+        });
+        return;
+      }
+
+      this._roomKey = unwrapped;
+      await this._e2eeKeyProvider.setKey(roomKeyToBase64(this._roomKey));
+      log.info("E2EE: room key received and applied", { fromUserId });
+
+      // Resolve the pending connect promise if we were waiting for the key.
+      if (this._roomKeyResolver) {
+        this._roomKeyResolver();
+        this._roomKeyResolver = null;
+        this._roomKeyRejector = null;
+      }
+    } catch (err) {
+      log.error("E2EE: failed to handle offer", err);
+      // Propagate decryption failure so the waiting connectAndSetup unblocks.
+      if (this._roomKeyRejector) {
+        this._roomKeyRejector(err instanceof Error ? err : new Error(String(err)));
+        this._roomKeyResolver = null;
+        this._roomKeyRejector = null;
+      }
+    }
+  }
+
+  /**
+   * Handle a participant leaving the voice channel. If we become the new key
+   * holder, rotate the room key and distribute to remaining peers.
+   *
+   * Key holder election: the participant with the lowest user ID among remaining
+   * participants is elected. This is deterministic and does not depend on Map
+   * insertion order (which is not guaranteed to match server join order).
+   */
+  async handleParticipantLeft(userId: number): Promise<void> {
+    this._peerPublicKeys.delete(userId);
+
+    const channelId = this._currentChannelId;
+    if (!channelId) return;
+
+    const state = voiceStore.getState();
+    const channelUsers = state.voiceUsers.get(channelId);
+    if (!channelUsers || channelUsers.size === 0) return;
+
+    // Elect key holder: lowest user_id among remaining participants.
+    let lowestUserId = Infinity;
+    for (const uid of channelUsers.keys()) {
+      if (uid < lowestUserId) lowestUserId = uid;
+    }
+
+    const wasKeyHolder = this._isKeyHolder;
+    const myUserId = authStore.getState().user?.id ?? 0;
+
+    if (myUserId !== 0 && lowestUserId === myUserId && !wasKeyHolder) {
+      // Prevent concurrent rotations (e.g. two participants leave in rapid succession).
+      if (this._rotatingKey) {
+        log.warn("E2EE: key rotation already in progress, skipping", { userId, channelId });
+        return;
+      }
+      this._rotatingKey = true;
+      this._isKeyHolder = true;
+      log.info("E2EE: became key holder after participant left", { userId, channelId });
+
+      // Rotate the room key — generate a new one and distribute to all remaining peers.
+      try {
+        this._e2eeEpoch++;
+        this._roomKey = generateRoomKey();
+        await this._e2eeKeyProvider.setKey(roomKeyToBase64(this._roomKey));
+        log.info("E2EE: rotated room key", { channelId, epoch: this._e2eeEpoch });
+
+        // Snapshot peers before async loop — new peers that arrive during
+        // wrapping are handled by the post-rotation check below.
+        const keypair = this._ecdhKeyPair;
+        const peersSnapshot = new Map(this._peerPublicKeys);
+
+        if (keypair) {
+          for (const [peerId, peerKey] of peersSnapshot) {
+            const { encryptedKey, iv } = await wrapRoomKey(
+              keypair.privateKey,
+              peerKey,
+              this._roomKey,
+            );
+            this.ws?.send({
+              type: "voice_e2ee_offer",
+              payload: { target_user_id: peerId, encrypted_key: encryptedKey, iv },
+            });
+          }
+          log.info("E2EE: distributed rotated key to peers", {
+            peerCount: peersSnapshot.size,
+          });
+
+          // H3: Check for peers that arrived during the rotation loop and
+          // send them the new key too.
+          if (keypair === this._ecdhKeyPair && this._roomKey) {
+            for (const [peerId, peerKey] of this._peerPublicKeys) {
+              if (!peersSnapshot.has(peerId)) {
+                const { encryptedKey, iv } = await wrapRoomKey(
+                  keypair.privateKey,
+                  peerKey,
+                  this._roomKey,
+                );
+                this.ws?.send({
+                  type: "voice_e2ee_offer",
+                  payload: { target_user_id: peerId, encrypted_key: encryptedKey, iv },
+                });
+                log.info("E2EE: sent rotated key to late-arriving peer", { peerId });
+              }
+            }
+          }
+        }
+      } catch (err) {
+        log.error("E2EE: failed to rotate room key", err);
+      } finally {
+        this._rotatingKey = false;
+        this.startKeyRotationTimer();
+      }
+    }
+  }
+
+  // ── Periodic key rotation ──────────────────────────────────────────────────
+
+  /** Start the periodic key rotation timer (only meaningful for key holders). */
+  private startKeyRotationTimer(): void {
+    this.clearKeyRotationTimer();
+    if (!this._isKeyHolder) return;
+    this._keyRotationTimer = setTimeout(() => {
+      this._keyRotationTimer = null;
+      this.rotateKeyPeriodically();
+    }, LiveKitSession.KEY_ROTATION_INTERVAL_MS);
+    log.debug("E2EE: key rotation timer started", {
+      intervalMs: LiveKitSession.KEY_ROTATION_INTERVAL_MS,
+    });
+  }
+
+  private clearKeyRotationTimer(): void {
+    if (this._keyRotationTimer !== null) {
+      clearTimeout(this._keyRotationTimer);
+      this._keyRotationTimer = null;
+    }
+  }
+
+  /** Rotate the room key on a timer tick (forward secrecy improvement). */
+  private async rotateKeyPeriodically(): Promise<void> {
+    if (!this._isKeyHolder || this._rotatingKey) return;
+    const channelId = this._currentChannelId;
+    if (!channelId) return;
+
+    this._rotatingKey = true;
+    try {
+      this._e2eeEpoch++;
+      this._roomKey = generateRoomKey();
+      await this._e2eeKeyProvider.setKey(roomKeyToBase64(this._roomKey));
+      log.info("E2EE: periodic key rotation", { channelId, epoch: this._e2eeEpoch });
+
+      const keypair = this._ecdhKeyPair;
+      if (keypair && this._roomKey) {
+        for (const [peerId, peerKey] of this._peerPublicKeys) {
+          const { encryptedKey, iv } = await wrapRoomKey(
+            keypair.privateKey,
+            peerKey,
+            this._roomKey,
+          );
+          this.ws?.send({
+            type: "voice_e2ee_offer",
+            payload: { target_user_id: peerId, encrypted_key: encryptedKey, iv },
+          });
+        }
+        log.info("E2EE: distributed periodically rotated key", {
+          peerCount: this._peerPublicKeys.size,
+        });
+      }
+    } catch (err) {
+      log.error("E2EE: periodic key rotation failed", err);
+    } finally {
+      this._rotatingKey = false;
+    }
+
+    // Re-arm the timer for the next rotation.
+    this.startKeyRotationTimer();
+  }
+
+  /** Clear all E2EE state (called on voice leave). */
+  private clearE2EEState(): void {
+    this._ecdhKeyPair = null;
+    this._roomKey = null;
+    this._peerPublicKeys.clear();
+    this._isKeyHolder = false;
+    this._rotatingKey = false;
+    this._e2eeEpoch = 0;
+    this._pendingAnnounces.length = 0;
+    this.clearKeyRotationTimer();
+    // Reject (not resolve) so waiting connectAndSetup sees a failure, not a
+    // silent success with no room key.
+    if (this._roomKeyRejector) {
+      this._roomKeyRejector(new Error("Voice session ended"));
+    }
+    this._roomKeyResolver = null;
+    this._roomKeyRejector = null;
   }
 
   /** Retry microphone permission after being in listen-only mode. */
   async retryMicPermission(): Promise<void> {
-    if (this.room === null) return;
+    const room = this._room;
+    if (room === null) return;
     try {
-      await this.room.localParticipant.setMicrophoneEnabled(true);
+      await room.localParticipant.setMicrophoneEnabled(true);
       setListenOnly(false);
       // BUG-103: Honor deafened state — keep mic muted if user is deafened.
       const { localDeafened } = voiceStore.getState();
@@ -685,18 +1464,18 @@ export class LiveKitSession {
   }
 
   leaveVoice(sendWs = true): void {
-    // Cancel any pending auto-reconnect loop first
-    if (this.reconnectAc !== null) {
-      this.reconnectAc.abort();
-      this.reconnectAc = null;
+    // Cancel any pending auto-reconnect loop first.
+    const ac = this._reconnectAc;
+    if (ac !== null) {
+      ac.abort();
     }
+    this._pendingReconnectFields = null;
     this.clearTokenRefreshTimer();
     this._audioPipeline.teardownAudioPipeline();
     this._eventHandlers.removeAutoplayUnlock();
-    this.pendingJoin = null;
     // Clean up manually published tracks.
-    stopManualCameraTrack(this._cameraState, this.room);
-    stopManualScreenTracks(this._screenState, this.room);
+    stopManualCameraTrack(this._cameraState, this._room);
+    stopManualScreenTracks(this._screenState, this._room);
     if (sendWs && this.ws !== null) {
       this.ws.send({ type: "voice_leave", payload: {} });
     }
@@ -704,17 +1483,18 @@ export class LiveKitSession {
     // TrackUnsubscribed, but may be missed during rapid reconnection).
     // Full cleanup: also clears screenshare mute state on intentional leave.
     this._audioElements.cleanupAllAudioElementsFull();
-    if (this.room !== null) {
-      const r = this.room;
-      this.room = null;
-      this.syncModuleRooms();
-      r.removeAllListeners();
-      r.disconnect().catch((err) => log.warn("room.disconnect() error (non-fatal)", err));
+    const room = this._room;
+    if (room !== null) {
+      room.removeAllListeners();
+      room.disconnect().catch((err) => log.warn("room.disconnect() error (non-fatal)", err));
     }
-    this.currentChannelId = null;
-    this.latestToken = null;
-    this.lastUrl = null;
-    this.lastDirectUrl = undefined;
+    // Clear client-side E2EE state (ECDH keypair, room key, peer keys).
+    this.clearE2EEState();
+    // Transition to idle — atomically clears room, channelId, tokens, reconnectAc,
+    // pendingJoin, and the joinGeneration (idle has none). Any in-flight
+    // connectAndSetup() will detect the state type change at its next checkpoint.
+    this.setState({ type: "idle" });
+    this.syncModuleRooms();
     setLocalCamera(false);
     setLocalScreenshare(false);
     log.info("Left voice session");
@@ -722,6 +1502,8 @@ export class LiveKitSession {
 
   cleanupAll(): void {
     this.leaveVoice(false);
+    // leaveVoice() already transitions state to "idle".
+    // Clear non-connection fields (config / callbacks / infrastructure).
     this.onErrorCallback = null;
     this.onRemoteVideoCallback = null;
     this.onRemoteVideoRemovedCallback = null;
@@ -749,16 +1531,17 @@ export class LiveKitSession {
    *  the audio pipeline. Re-publish and rebuild when unmuting. This guarantees
    *  the SFU has no audio track to forward to other participants. */
   private async applyMicMuteState(muted: boolean): Promise<void> {
-    if (this.room === null) return;
+    const room = this._room;
+    if (room === null) return;
     if (muted) {
       // Tear down pipeline first so it doesn't hold refs to the track
       this._audioPipeline.teardownAudioPipeline();
       // Fully disable the mic — this unpublishes the track from the SFU
-      await this.room.localParticipant.setMicrophoneEnabled(false);
+      await room.localParticipant.setMicrophoneEnabled(false);
       log.debug("Mic fully unpublished (muted)");
     } else {
       // Re-enable mic — this re-publishes the track to the SFU
-      await this.room.localParticipant.setMicrophoneEnabled(true);
+      await room.localParticipant.setMicrophoneEnabled(true);
       // Rebuild the audio pipeline on the fresh track
       this._audioPipeline.setupAudioPipeline();
       log.debug("Mic re-published (unmuted)");
@@ -840,26 +1623,26 @@ export class LiveKitSession {
   }
 
   getLocalCameraStream(): MediaStream | null {
-    return doGetLocalCameraStream(this.room);
+    return doGetLocalCameraStream(this._room);
   }
 
   getLocalScreenshareStream(): MediaStream | null {
-    return doGetLocalScreenshareStream(this.room);
+    return doGetLocalScreenshareStream(this._room);
   }
 
   /** Get a remote participant's video MediaStream by userId and track type. Returns null if not available. */
   getRemoteVideoStream(userId: number, type: "camera" | "screenshare"): MediaStream | null {
-    return doGetRemoteVideoStream(this.room, userId, type);
+    return doGetRemoteVideoStream(this._room, userId, type);
   }
 
   getRoom(): Room | null {
-    return this.room;
+    return this._room;
   }
 
   getSessionDebugInfo(): Record<string, unknown> {
     return buildSessionDebugInfo({
-      room: this.room,
-      currentChannelId: this.currentChannelId,
+      room: this._room,
+      currentChannelId: this._currentChannelId,
       outputVolumeMultiplier: this.outputVolumeMultiplier,
       audioPipeline: this._audioPipeline,
       audioElements: this._audioElements,
@@ -887,6 +1670,9 @@ export const setOnRemoteVideo = session.setOnRemoteVideo.bind(session);
 export const setOnRemoteVideoRemoved = session.setOnRemoteVideoRemoved.bind(session);
 export const clearOnRemoteVideo = session.clearOnRemoteVideo.bind(session);
 export const handleVoiceToken = session.handleVoiceToken.bind(session);
+export const handleE2EEAnnounce = session.handleE2EEAnnounce.bind(session);
+export const handleE2EEOffer = session.handleE2EEOffer.bind(session);
+export const handleParticipantLeft = session.handleParticipantLeft.bind(session);
 export const leaveVoice = session.leaveVoice.bind(session);
 export const retryMicPermission = session.retryMicPermission.bind(session);
 export const cleanupAll = session.cleanupAll.bind(session);

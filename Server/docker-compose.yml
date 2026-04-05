@@ -1,0 +1,54 @@
+# OwnCord server stack — chat server + LiveKit voice/video
+#
+# Quick start:
+#   1. cp .env.example .env  && edit .env (set secrets + public IP)
+#   2. cp livekit.yaml.example livekit.yaml  && edit livekit.yaml (same keys)
+#   3. docker compose up -d
+#
+# LiveKit runs as a separate container on the same internal network.
+# The OwnCord server reaches it at ws://livekit:7880 (Docker DNS).
+# Browser clients reach LiveKit directly via the ports published below,
+# so your firewall must allow TCP 7880-7881 and UDP 50000-60000.
+
+services:
+
+  owncord:
+    image: ghcr.io/j3vb/owncord-server:latest
+    restart: unless-stopped
+    ports:
+      - "8443:8443"
+    environment:
+      # Secrets injected from .env — never hardcode these
+      OWNCORD_VOICE_LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      OWNCORD_VOICE_LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+    volumes:
+      # Mount your config.yaml for non-secret settings (server name, TLS, etc.)
+      # See the example config at: https://github.com/J3vb/OwnCord#configuration
+      - ./config.yaml:/app/config.yaml:ro
+      # Persistent data (SQLite DB + uploaded files)
+      - owncord-data:/app/data
+    depends_on:
+      - livekit
+    networks:
+      - owncord-net
+
+  livekit:
+    image: livekit/livekit-server:v1
+    restart: unless-stopped
+    # LiveKit config file — copy livekit.yaml.example → livekit.yaml and fill in
+    command: --config /etc/livekit/livekit.yaml
+    ports:
+      - "7880:7880"            # WebSocket API (OwnCord server + browser signalling)
+      - "7881:7881"            # TCP fallback for WebRTC (clients behind strict NAT)
+      - "50000-60000:50000-60000/udp"  # WebRTC UDP media streams
+    volumes:
+      - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
+    networks:
+      - owncord-net
+
+networks:
+  owncord-net:
+    driver: bridge
+
+volumes:
+  owncord-data:

@@ -541,7 +541,7 @@ func TestBuildTypingMsg_ValidJSON(t *testing.T) {
 // ─── buildVoiceToken ──────────────────────────────────────────────────────────
 
 func TestBuildVoiceToken_Type(t *testing.T) {
-	msg := buildVoiceToken(99, "jwt-token", "/livekit", "ws://localhost:7880")
+	msg := buildVoiceToken(99, "jwt-token", "/livekit", "ws://localhost:7880", false)
 	var env struct {
 		Type string `json:"type"`
 	}
@@ -554,7 +554,7 @@ func TestBuildVoiceToken_Type(t *testing.T) {
 }
 
 func TestBuildVoiceToken_Payload(t *testing.T) {
-	msg := buildVoiceToken(99, "jwt-token", "/livekit", "ws://localhost:7880")
+	msg := buildVoiceToken(99, "jwt-token", "/livekit", "ws://localhost:7880", false)
 	var env struct {
 		Payload struct {
 			ChannelID int64  `json:"channel_id"`
@@ -580,8 +580,82 @@ func TestBuildVoiceToken_Payload(t *testing.T) {
 	}
 }
 
+func TestBuildVoiceToken_NoE2EEKey(t *testing.T) {
+	// E2EE keys are now exchanged client-side via ECDH; voice_token must not
+	// contain an e2ee_key field.
+	msg := buildVoiceToken(1, "t", "/livekit", "ws://a", false)
+	var body map[string]any
+	if err := json.Unmarshal(msg, &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	payload, _ := body["payload"].(map[string]any)
+	if _, exists := payload["e2ee_key"]; exists {
+		t.Error("voice_token payload must not contain e2ee_key (keys are exchanged client-side)")
+	}
+}
+
 func TestBuildVoiceToken_ValidJSON(t *testing.T) {
-	if !json.Valid(buildVoiceToken(1, "t", "/livekit", "ws://a")) {
+	if !json.Valid(buildVoiceToken(1, "t", "/livekit", "ws://a", false)) {
 		t.Error("buildVoiceToken output is not valid JSON")
+	}
+}
+
+// ─── buildVoiceE2EEAnnounce ─────────────────────────────────────────────────
+
+func TestBuildVoiceE2EEAnnounce_ValidJSON(t *testing.T) {
+	msg := buildVoiceE2EEAnnounce(42, "dGVzdC1wdWJrZXk=")
+	if !json.Valid(msg) {
+		t.Error("buildVoiceE2EEAnnounce output is not valid JSON")
+	}
+	var env struct {
+		Type    string `json:"type"`
+		Payload struct {
+			UserID    int64  `json:"user_id"`
+			PublicKey string `json:"public_key"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Type != "voice_e2ee_announce" {
+		t.Errorf("type = %q, want voice_e2ee_announce", env.Type)
+	}
+	if env.Payload.UserID != 42 {
+		t.Errorf("user_id = %d, want 42", env.Payload.UserID)
+	}
+	if env.Payload.PublicKey != "dGVzdC1wdWJrZXk=" {
+		t.Errorf("public_key = %q, want dGVzdC1wdWJrZXk=", env.Payload.PublicKey)
+	}
+}
+
+// ─── buildVoiceE2EEOffer ────────────────────────────────────────────────────
+
+func TestBuildVoiceE2EEOffer_ValidJSON(t *testing.T) {
+	msg := buildVoiceE2EEOffer(42, "encrypted-blob", "random-iv")
+	if !json.Valid(msg) {
+		t.Error("buildVoiceE2EEOffer output is not valid JSON")
+	}
+	var env struct {
+		Type    string `json:"type"`
+		Payload struct {
+			FromUserID   int64  `json:"from_user_id"`
+			EncryptedKey string `json:"encrypted_key"`
+			IV           string `json:"iv"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Type != "voice_e2ee_offer" {
+		t.Errorf("type = %q, want voice_e2ee_offer", env.Type)
+	}
+	if env.Payload.FromUserID != 42 {
+		t.Errorf("from_user_id = %d, want 42", env.Payload.FromUserID)
+	}
+	if env.Payload.EncryptedKey != "encrypted-blob" {
+		t.Errorf("encrypted_key = %q, want encrypted-blob", env.Payload.EncryptedKey)
+	}
+	if env.Payload.IV != "random-iv" {
+		t.Errorf("iv = %q, want random-iv", env.Payload.IV)
 	}
 }

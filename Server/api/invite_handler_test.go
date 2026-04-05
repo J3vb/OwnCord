@@ -101,6 +101,95 @@ func TestCreateInvite_Unlimited(t *testing.T) {
 	}
 }
 
+func TestCreateInvite_EmptyBody(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildInviteRouter(database, limiter)
+	token := loginAndGetToken(t, router, database, "emptyinvitebody", 2)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/invites", http.NoBody)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("CreateInvite empty body status = %d, want 201; body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["max_uses"] != nil {
+		t.Errorf("max_uses = %v, want nil", resp["max_uses"])
+	}
+	if resp["expires_at"] != nil {
+		t.Errorf("expires_at = %v, want nil", resp["expires_at"])
+	}
+	if resp["code"] == nil || resp["code"] == "" {
+		t.Fatal("expected invite code in response")
+	}
+}
+
+func TestCreateInvite_CreateInviteFailure(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildInviteRouter(database, limiter)
+	token := loginAndGetToken(t, router, database, "invitecreatefail", 2)
+
+	if _, err := database.Exec(`DROP TABLE invites`); err != nil {
+		t.Fatalf("drop invites table: %v", err)
+	}
+
+	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{})
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("CreateInvite create failure status = %d, want 500; body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["message"] != "failed to create invite" {
+		t.Errorf("message = %v, want failed to create invite", resp["message"])
+	}
+}
+
+func TestCreateInvite_GetInviteFailure(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildInviteRouter(database, limiter)
+	token := loginAndGetToken(t, router, database, "invitegetfail", 2)
+
+	if _, err := database.Exec(`
+		CREATE TRIGGER delete_invite_after_insert
+		AFTER INSERT ON invites
+		BEGIN
+			DELETE FROM invites WHERE code = NEW.code;
+		END;
+	`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{})
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("CreateInvite get failure status = %d, want 500; body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["message"] != "failed to retrieve invite" {
+		t.Errorf("message = %v, want failed to retrieve invite", resp["message"])
+	}
+	if _, err := database.Exec(`DROP TRIGGER delete_invite_after_insert`); err != nil {
+		t.Fatalf("drop trigger: %v", err)
+	}
+}
+
 // ─── GET /api/v1/invites ──────────────────────────────────────────────────────
 
 func TestListInvites_Success(t *testing.T) {
@@ -143,6 +232,31 @@ func TestListInvites_Unauthorized(t *testing.T) {
 
 	if rr.Code != http.StatusUnauthorized {
 		t.Errorf("ListInvites no auth status = %d, want 401", rr.Code)
+	}
+}
+
+func TestListInvites_EmptyArray(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildInviteRouter(database, limiter)
+	token := loginAndGetToken(t, router, database, "emptyinvitelist", 2)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/invites", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("ListInvites empty status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp []any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp) != 0 {
+		t.Fatalf("ListInvites empty returned %d items, want 0", len(resp))
 	}
 }
 
@@ -227,6 +341,51 @@ func TestRevokeInvite_MemberForbidden(t *testing.T) {
 
 	if rr2.Code != http.StatusForbidden {
 		t.Errorf("RevokeInvite member status = %d, want 403", rr2.Code)
+	}
+}
+
+func TestRevokeInvite_RevokeFailure(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildInviteRouter(database, limiter)
+	token := loginAndGetToken(t, router, database, "revokefailure", 2)
+
+	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("setup create invite: status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var created map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	code := created["code"].(string)
+
+	if _, err := database.Exec(`
+		CREATE TRIGGER block_revoke_invite
+		BEFORE UPDATE OF revoked ON invites
+		BEGIN
+			SELECT RAISE(FAIL, 'revoke blocked');
+		END;
+	`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/invites/"+code, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr2 := httptest.NewRecorder()
+	router.ServeHTTP(rr2, req)
+
+	if rr2.Code != http.StatusInternalServerError {
+		t.Fatalf("RevokeInvite failure status = %d, want 500; body = %s", rr2.Code, rr2.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rr2.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode revoke failure response: %v", err)
+	}
+	if resp["message"] != "failed to revoke invite" {
+		t.Errorf("message = %v, want failed to revoke invite", resp["message"])
 	}
 }
 

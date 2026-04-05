@@ -106,8 +106,13 @@ export function createStore<T>(initialState: T): Store<T> {
 
   /** Re-entrancy guard: true while a subscriber notification is running. */
   let updating = false;
-  /** Updaters queued by re-entrant setState calls during notification. */
-  const pendingUpdates: Array<(prev: T) => T> = [];
+  /**
+   * Coalesced updater for re-entrant setState calls made during notification.
+   * Instead of an unbounded array, re-entrant calls are composed into a single
+   * function chain so queue depth never exceeds 1, regardless of burst size.
+   * Ordering is preserved: each updater sees the output of the previous one.
+   */
+  let pendingUpdater: ((prev: T) => T) | null = null;
 
   function getState(): T {
     return state;
@@ -115,8 +120,12 @@ export function createStore<T>(initialState: T): Store<T> {
 
   function setState(updater: (prev: T) => T): void {
     if (updating) {
-      // Re-entrant call from within a subscriber — queue for later.
-      pendingUpdates.push(updater);
+      // Re-entrant call from within a subscriber — coalesce into a single
+      // pending updater by composing with any already-queued function.
+      // This keeps queue depth at O(1) regardless of burst size while
+      // preserving update ordering (each updater sees previous output).
+      const existing = pendingUpdater;
+      pendingUpdater = existing === null ? updater : (prev: T) => updater(existing(prev));
       return;
     }
     state = updater(state);
@@ -129,9 +138,12 @@ export function createStore<T>(initialState: T): Store<T> {
           for (const listener of listeners) {
             listener(state);
           }
-          // Drain any updates queued by re-entrant setState during notification.
-          while (pendingUpdates.length > 0) {
-            const queued = pendingUpdates.shift()!;
+          // Drain any update coalesced by re-entrant setState during notification.
+          // Loop to handle further re-entrant calls that may occur within listeners
+          // invoked during the drain itself.
+          while (pendingUpdater !== null) {
+            const queued = pendingUpdater;
+            pendingUpdater = null;
             state = queued(state);
             for (const listener of listeners) {
               listener(state);

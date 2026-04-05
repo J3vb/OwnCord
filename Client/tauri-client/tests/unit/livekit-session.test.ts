@@ -635,7 +635,14 @@ describe("LiveKitSession", () => {
     it("preserves local mute state on reconnect", async () => {
       mockVoiceState.localMuted = true;
       mockVoiceState.localDeafened = false;
-      (session as any).currentChannelId = 7;
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 7,
+        latestToken: "reconnect-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
 
       const ac = new AbortController();
       const reconnectPromise = (session as any).attemptAutoReconnect(
@@ -655,7 +662,14 @@ describe("LiveKitSession", () => {
     it("re-applies deafened remote subscriptions on reconnect", async () => {
       mockVoiceState.localMuted = true;
       mockVoiceState.localDeafened = true;
-      (session as any).currentChannelId = 9;
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 9,
+        latestToken: "reconnect-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
 
       const setSubscribed = vi.fn();
       mockRoom.remoteParticipants = new Map([
@@ -754,8 +768,8 @@ describe("LiveKitSession", () => {
       expect(disconnectedHandler).toBeDefined();
       disconnectedHandler!(7);
 
-      // The room should NOT have been nulled — retry loop is still in control
-      expect((session as any).room).not.toBeNull();
+      // The session should NOT have been reset to idle — retry loop is still in control
+      expect((session as any)._state.type).not.toBe("idle");
 
       // Resolve connect to let the flow complete normally
       connectDeferred.resolve(undefined);
@@ -928,12 +942,19 @@ describe("LiveKitSession", () => {
     it("aborts reconnectAc when reconnect is in progress", () => {
       const ac = new AbortController();
       const abortSpy = vi.spyOn(ac, "abort");
-      (session as any).reconnectAc = ac;
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 1,
+        latestToken: "t",
+        lastUrl: "/lk",
+        lastDirectUrl: undefined,
+        ac,
+      };
 
       session.leaveVoice(false);
 
       expect(abortSpy).toHaveBeenCalled();
-      expect((session as any).reconnectAc).toBeNull();
+      expect((session as any)._state.type).toBe("idle");
     });
 
     it("clears the token refresh timer so it does not fire after leave", () => {
@@ -959,15 +980,15 @@ describe("LiveKitSession", () => {
     });
 
     it("nulls pendingJoin", () => {
-      (session as any).pendingJoin = {
-        token: "t",
-        url: "/lk",
-        channelId: 1,
+      (session as any)._state = {
+        type: "connecting",
+        pendingJoin: { token: "t", url: "/lk", channelId: 1 },
+        joinGeneration: 1,
       };
 
       session.leaveVoice(false);
 
-      expect((session as any).pendingJoin).toBeNull();
+      expect((session as any)._state.type).toBe("idle");
     });
 
     it("calls cleanupAllAudioElementsFull on _audioElements", () => {
@@ -985,8 +1006,8 @@ describe("LiveKitSession", () => {
       session.setWsClient({ send: vi.fn() } as any);
       await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880");
 
-      const room = (session as any).room;
-      expect(room).not.toBeNull();
+      expect((session as any)._state.type).toBe("connected");
+      const room = (session as any)._state.room;
 
       session.leaveVoice(false);
 
@@ -999,11 +1020,11 @@ describe("LiveKitSession", () => {
       session.setWsClient({ send: vi.fn() } as any);
       await session.handleVoiceToken("tok", "/lk", 5, "ws://localhost:7880");
 
-      expect((session as any).currentChannelId).toBe(5);
+      expect((session as any)._state.channelId).toBe(5);
 
       session.leaveVoice(false);
 
-      expect((session as any).currentChannelId).toBeNull();
+      expect((session as any)._state.type).toBe("idle");
     });
 
     it("sets latestToken to null after leave", async () => {
@@ -1011,11 +1032,11 @@ describe("LiveKitSession", () => {
       session.setWsClient({ send: vi.fn() } as any);
       await session.handleVoiceToken("my-token", "/lk", 1, "ws://localhost:7880");
 
-      expect((session as any).latestToken).toBe("my-token");
+      expect((session as any)._state.latestToken).toBe("my-token");
 
       session.leaveVoice(false);
 
-      expect((session as any).latestToken).toBeNull();
+      expect((session as any)._state.type).toBe("idle");
     });
 
     it("sets lastUrl to null and lastDirectUrl to undefined after leave", async () => {
@@ -1025,8 +1046,7 @@ describe("LiveKitSession", () => {
 
       session.leaveVoice(false);
 
-      expect((session as any).lastUrl).toBeNull();
-      expect((session as any).lastDirectUrl).toBeUndefined();
+      expect((session as any)._state.type).toBe("idle");
     });
   });
 
@@ -1263,8 +1283,7 @@ describe("LiveKitSession", () => {
       await session.handleVoiceToken("tok", "/lk", 7, "ws://localhost:7880");
       vi.clearAllMocks();
 
-      // Set up for reconnect
-      (session as any).currentChannelId = 7;
+      // Session is already in "connected" state with channelId=7 after handleVoiceToken
       mockRoom.localParticipant.setMicrophoneEnabled.mockRejectedValueOnce(new Error("mic gone"));
 
       const ac = new AbortController();
@@ -1585,11 +1604,16 @@ describe("LiveKitSession", () => {
         "ws://localhost:7880",
       );
 
-      (session as any).pendingJoin = {
-        token: "token-2",
-        url: "/livekit-2",
-        channelId: 2,
-        directUrl: "ws://localhost:7882",
+      // Inject a pendingJoin into the current "connecting" state
+      const currentState = (session as any)._state;
+      (session as any)._state = {
+        ...currentState,
+        pendingJoin: {
+          token: "token-2",
+          url: "/livekit-2",
+          channelId: 2,
+          directUrl: "ws://localhost:7882",
+        },
       };
 
       connectDeferred.resolve(undefined);
@@ -1625,7 +1649,7 @@ describe("LiveKitSession", () => {
 
       mockRoom.connect.mockResolvedValue(undefined);
       await (session as any).connectAndSetup("token-1", "/livekit", 1, "ws://localhost:7880");
-      expect((session as any).room).not.toBeNull();
+      expect((session as any)._state.type).toBe("connected");
 
       const leaveSpy = vi.spyOn(session, "leaveVoice");
       await (session as any).connectAndSetup("token-2", "/livekit", 2, "ws://localhost:7880");
@@ -1668,8 +1692,10 @@ describe("LiveKitSession", () => {
       await session.handleVoiceToken("token-2", "/livekit-2", 2, "ws://localhost:7882");
       await session.handleVoiceToken("token-3", "/livekit-3", 3, "ws://localhost:7883");
 
-      expect((session as any).pendingJoin.token).toBe("token-3");
-      expect((session as any).pendingJoin.channelId).toBe(3);
+      const s = (session as any)._state;
+      expect(s.type).toBe("connecting");
+      expect(s.pendingJoin.token).toBe("token-3");
+      expect(s.pendingJoin.channelId).toBe(3);
 
       firstConnect.resolve(undefined);
       await firstJoin;
@@ -1681,7 +1707,14 @@ describe("LiveKitSession", () => {
 
   describe("attemptAutoReconnect (lifecycle)", () => {
     it("returns without reconnecting when signal is aborted during delay", async () => {
-      (session as any).currentChannelId = 5;
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 5,
+        latestToken: "token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
       const ac = new AbortController();
 
       const reconnectPromise = (session as any).attemptAutoReconnect(
@@ -1700,7 +1733,14 @@ describe("LiveKitSession", () => {
     });
 
     it("aborts when currentChannelId changes during delay", async () => {
-      (session as any).currentChannelId = 5;
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 5,
+        latestToken: "token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
       const ac = new AbortController();
 
       const reconnectPromise = (session as any).attemptAutoReconnect(
@@ -1711,7 +1751,7 @@ describe("LiveKitSession", () => {
         ac.signal,
       );
 
-      (session as any).currentChannelId = 99;
+      (session as any)._state = { type: "idle" };
       await vi.advanceTimersByTimeAsync(3100);
       await reconnectPromise;
 
@@ -1719,7 +1759,14 @@ describe("LiveKitSession", () => {
     });
 
     it("succeeds on second attempt after first fails", async () => {
-      (session as any).currentChannelId = 5;
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 5,
+        latestToken: "token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
       session.setServerHost("localhost:7880");
       const ac = new AbortController();
 
@@ -1743,7 +1790,14 @@ describe("LiveKitSession", () => {
     });
 
     it("calls leaveVoice, leaveVoiceChannel, and error callback after all attempts fail", async () => {
-      (session as any).currentChannelId = 5;
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 5,
+        latestToken: "token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
       session.setServerHost("localhost:7880");
       const errorCb = vi.fn();
       session.setOnError(errorCb);
@@ -1768,7 +1822,14 @@ describe("LiveKitSession", () => {
     });
 
     it("catches room disconnect failure during cleanup without throwing", async () => {
-      (session as any).currentChannelId = 5;
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 5,
+        latestToken: "token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
       session.setServerHost("localhost:7880");
       const ac = new AbortController();
 
@@ -1788,6 +1849,37 @@ describe("LiveKitSession", () => {
       await reconnectPromise;
 
       expect(leaveVoiceChannel).toHaveBeenCalled();
+    });
+
+    it("cleans up reconnect room when signal aborts after connect resolves (BUG-070)", async () => {
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 5,
+        latestToken: "token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+      session.setServerHost("localhost:7880");
+      const ac = new AbortController();
+
+      mockRoom.connect.mockImplementationOnce(async () => {
+        ac.abort();
+      });
+
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "token",
+        "/livekit",
+        5,
+        "ws://localhost:7880",
+        ac.signal,
+      );
+
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      expect(mockRoom.disconnect).toHaveBeenCalled();
+      expect((session as any)._state.type).not.toBe("connected");
     });
   });
 
@@ -1811,7 +1903,7 @@ describe("LiveKitSession", () => {
     });
 
     it("requestTokenRefresh skips silently when ws is null", () => {
-      (session as any).room = mockRoom;
+      // ws is null (not set) — requestTokenRefresh should skip without throwing
       expect(() => (session as any).requestTokenRefresh()).not.toThrow();
     });
 
@@ -1821,8 +1913,16 @@ describe("LiveKitSession", () => {
     });
 
     it("handleVoiceTokenRefresh stores valid token and restarts timer", () => {
+      (session as any)._state = {
+        type: "connected",
+        room: mockRoom,
+        channelId: 1,
+        latestToken: "old-token",
+        lastUrl: "/lk",
+        lastDirectUrl: undefined,
+      };
       session.handleVoiceTokenRefresh("fresh-token");
-      expect((session as any).latestToken).toBe("fresh-token");
+      expect((session as any)._state.latestToken).toBe("fresh-token");
       expect((session as any).tokenRefreshTimer).not.toBeNull();
     });
 

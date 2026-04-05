@@ -113,6 +113,20 @@ func (h *Hub) checkChatSendPermission(c *Client, channelID int64, isDM bool) boo
 			c.sendMsg(buildErrorMsg(ErrCodeForbidden, "you are not a participant in this DM"))
 			return false
 		}
+		// Check if either DM participant has blocked the other.
+		recipient, recErr := h.db.GetDMRecipient(channelID, c.userID)
+		if recErr == nil && recipient != nil {
+			blocked, blkErr := h.db.IsEitherBlocked(c.userID, recipient.ID)
+			if blkErr != nil {
+				slog.Error("ws checkChatSendPermission IsEitherBlocked", "err", blkErr)
+				c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to check block status"))
+				return false
+			}
+			if blocked {
+				c.sendMsg(buildErrorMsg(ErrCodeForbidden, "cannot send messages — user is blocked"))
+				return false
+			}
+		}
 		return true
 	}
 	return h.requireChannelPerm(c, channelID, permissions.ReadMessages|permissions.SendMessages, "SEND_MESSAGES")
@@ -210,10 +224,6 @@ func (h *Hub) broadcastChatMessage(c *Client, channelID int64, isDM bool, broadc
 	}
 
 	for _, pid := range participantIDs {
-		h.SendToUser(pid, broadcast)
-	}
-
-	for _, pid := range participantIDs {
 		if pid == c.userID {
 			continue
 		}
@@ -226,6 +236,8 @@ func (h *Hub) broadcastChatMessage(c *Client, channelID int64, isDM bool, broadc
 			h.SendToUser(pid, buildDMChannelOpen(channelID, c.user))
 		}
 	}
+
+	h.sendSequencedToUsers(channelID, participantIDs, broadcast)
 }
 
 // handleChatEdit processes a chat_edit message.

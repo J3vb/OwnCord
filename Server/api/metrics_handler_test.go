@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -17,7 +18,8 @@ func buildMetricsRouter(allowedCIDRs []string) http.Handler {
 		Get("/api/v1/metrics", api.HandleMetricsForTest(
 			func() int { return 5 },
 			func() int { return 2 },
-			func() (bool, error) { return true, nil },
+			func() uint64 { return 0 },
+			func(_ context.Context) (bool, error) { return true, nil },
 		))
 	return r
 }
@@ -42,7 +44,7 @@ func TestHandleMetrics_ReturnsExpectedFields(t *testing.T) {
 	requiredFields := []string{
 		"uptime", "uptime_seconds", "goroutines",
 		"heap_alloc_mb", "heap_sys_mb", "num_gc",
-		"connected_users", "voice_sessions", "livekit_healthy",
+		"connected_users", "voice_sessions", "broadcast_drops", "livekit_healthy",
 	}
 	for _, f := range requiredFields {
 		if _, ok := resp[f]; !ok {
@@ -93,6 +95,7 @@ func TestHandleMetrics_WithoutLiveKitHealthCheck(t *testing.T) {
 	r.Get("/api/v1/metrics", api.HandleMetricsForTest(
 		func() int { return 0 },
 		func() int { return 0 },
+		func() uint64 { return 0 },
 		nil, // no livekit
 	))
 
