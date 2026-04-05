@@ -157,18 +157,15 @@ func (h *Hub) broadcastExclude(channelID, excludeUserID int64, msg []byte) {
 }
 
 // broadcastToDMParticipants sends a message to all participants of a DM channel
-// using SendToUser for each participant. This bypasses the channel-subscription
-// model used by BroadcastToChannel, which is correct for DMs since users may
-// not be "focused" on the DM channel.
+// while preserving DM semantics (delivery is by participant, not channel focus).
+// Unlike broadcastToDMParticipantsExclude, this path is sequenced and replayable.
 func (h *Hub) broadcastToDMParticipants(channelID int64, msg []byte) {
 	participantIDs, err := h.db.GetDMParticipantIDs(channelID)
 	if err != nil {
 		slog.Error("broadcastToDMParticipants GetDMParticipantIDs", "err", err, "channel_id", channelID)
 		return
 	}
-	for _, pid := range participantIDs {
-		h.SendToUser(pid, msg)
-	}
+	h.sendSequencedToUsers(channelID, participantIDs, msg)
 }
 
 // broadcastToDMParticipantsExclude sends a message to all participants of a DM

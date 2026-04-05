@@ -233,6 +233,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function measureRendered(): void {
     if (contentContainer === null || renderedStart < 0) return;
     const children = contentContainer.children;
+
+    // Pass 1 — pure reads: collect all heights without touching any styles.
+    // Batching all getComputedStyle / offsetHeight reads before any writes
+    // allows the browser to satisfy them with a single layout calculation
+    // instead of forcing a synchronous reflow on every iteration.
+    interface Measurement {
+      readonly key: string;
+      readonly idx: number;
+      readonly h: number;
+    }
+    const measurements: Measurement[] = [];
     for (let i = 0; i < children.length; i++) {
       const globalIdx = renderedStart + i;
       if (globalIdx < 0 || (tree !== null && globalIdx >= tree.size)) continue;
@@ -240,11 +251,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       const style = getComputedStyle(el);
       const h = el.offsetHeight + parseFloat(style.marginTop) + parseFloat(style.marginBottom);
       if (h > 0) {
-        const key = itemKey(globalIdx);
-        heightCache.set(key, h);
-        if (tree !== null) {
-          tree.set(globalIdx, h);
-        }
+        measurements.push({ key: itemKey(globalIdx), idx: globalIdx, h });
+      }
+    }
+
+    // Pass 2 — pure writes: apply all cached heights to heightCache and the
+    // Fenwick tree. No DOM reads here, so no additional reflow is triggered.
+    for (const { key, idx, h } of measurements) {
+      heightCache.set(key, h);
+      if (tree !== null) {
+        tree.set(idx, h);
       }
     }
   }
@@ -453,6 +469,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
   let scrollRafId = 0;
   let resizeRafId = 0;
+  let resizeObserver: ResizeObserver | null = null;
   // resizeDirty tracking removed — resize observer batches via RAF directly
   function handleScroll(): void {
     if (root === null) return;
@@ -515,7 +532,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     // Watch for height changes in rendered items (images loading, embeds expanding).
     // Batched via RAF with anchor-based scroll preservation.
-    const resizeObserver = new ResizeObserver(() => {
+    resizeObserver = new ResizeObserver(() => {
       if (root === null || contentContainer === null) return;
       if (resizeRafId !== 0) return;
 
@@ -544,7 +561,6 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       });
     });
     resizeObserver.observe(contentContainer);
-    ac.signal.addEventListener("abort", () => resizeObserver.disconnect());
 
     parentContainer.appendChild(root);
 
@@ -579,6 +595,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   }
 
   function destroy(): void {
+    if (resizeObserver !== null) {
+      resizeObserver.disconnect();
+      resizeObserver = null;
+    }
     ac.abort();
     if (scrollRafId !== 0) {
       cancelAnimationFrame(scrollRafId);

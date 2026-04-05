@@ -36,6 +36,7 @@ use tauri_plugin_store::StoreExt;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
+use tokio::time::{timeout, Duration};
 
 /// Tauri-managed state for the LiveKit TLS proxy.
 pub struct LiveKitProxyState {
@@ -67,8 +68,7 @@ impl LiveKitProxyState {
 // TLS certificate verifier — pinned fingerprint check
 // ---------------------------------------------------------------------------
 
-/// Tauri store file for certificate fingerprints (shared with ws_proxy).
-pub(crate) const CERTS_STORE: &str = "certs.json";
+use crate::constants::CERTS_STORE;
 
 /// Verifies the server certificate against a known SHA-256 fingerprint.
 /// Reuses the fingerprint stored by ws_proxy's TOFU handshake for the same
@@ -326,22 +326,39 @@ async fn handle_connection(
     pinned_fingerprint: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // ── 1. Read HTTP request headers (up to \r\n\r\n) ────────────────────
+    // Guarded by a 10-second timeout so a slow or stalled client cannot
+    // hold the Tokio task open indefinitely (BUG-151).
     let mut buf = Vec::with_capacity(4096);
-    let mut trailer = [0u8; 4];
-    loop {
-        let mut byte = [0u8; 1];
-        local.read_exact(&mut byte).await?;
-        buf.push(byte[0]);
-        trailer[0] = trailer[1];
-        trailer[1] = trailer[2];
-        trailer[2] = trailer[3];
-        trailer[3] = byte[0];
-        if trailer == *b"\r\n\r\n" {
-            break;
+    timeout(Duration::from_secs(10), async {
+        let mut trailer = [0u8; 4];
+        loop {
+            let mut byte = [0u8; 1];
+            local.read_exact(&mut byte).await?;
+            buf.push(byte[0]);
+            trailer[0] = trailer[1];
+            trailer[1] = trailer[2];
+            trailer[2] = trailer[3];
+            trailer[3] = byte[0];
+            if trailer == *b"\r\n\r\n" {
+                break;
+            }
+            if buf.len() > 16_384 {
+                return Err(Box::<dyn std::error::Error + Send + Sync>::from(
+                    "HTTP request headers too large",
+                ));
+            }
         }
-        if buf.len() > 16_384 {
-            return Err("HTTP request headers too large".into());
-        }
+        Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+    })
+    .await
+    .map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from(
+        "upstream header read timed out",
+    ))??;
+
+    // Reject CRLF in remote_host before header insertion (defense-in-depth;
+    // primary validation is in start_livekit_proxy).
+    if remote_host.contains('\r') || remote_host.contains('\n') {
+        return Err("remote_host contains CRLF — header injection rejected".into());
     }
 
     // ── 2. Rewrite Host and Origin headers ───────────────────────────────

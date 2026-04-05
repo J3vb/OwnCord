@@ -1,0 +1,24 @@
+# LiveKit server configuration for OwnCord
+# Copy this file to livekit.yaml and fill in your values.
+# The api_key and api_secret here MUST match the values in your .env file.
+
+port: 7880
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 60000
+
+  # Your server's public IP address — required so browser WebRTC clients can
+  # reach LiveKit directly for media. Leave blank only if running entirely on
+  # localhost (development). On cloud VMs with a metadata service (AWS, GCP,
+  # DigitalOcean) you can set use_external_ip: true instead.
+  node_ip: "YOUR_SERVER_PUBLIC_IP"
+  # use_external_ip: true   # uncomment on cloud VMs instead of node_ip
+
+keys:
+  # Must match LIVEKIT_API_KEY / LIVEKIT_API_SECRET in your .env file
+  YOUR_API_KEY: YOUR_API_SECRET
+
+logging:
+  level: info

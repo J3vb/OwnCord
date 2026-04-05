@@ -23,6 +23,8 @@ const (
 	MsgTypeVoiceScreenshare  = "voice_screenshare"
 	MsgTypePing              = "ping"
 	MsgTypeVoiceTokenRefresh = "voice_token_refresh" //nolint:gosec // G101: false positive — message type constant, not a credential
+	MsgTypeVoiceE2EEAnnounce = "voice_e2ee_announce"
+	MsgTypeVoiceE2EEOffer    = "voice_e2ee_offer"
 )
 
 // Server → Client message types (sent in broadcasts/responses).
@@ -53,6 +55,8 @@ const (
 	MsgTypeServerRestart  = "server_restart"
 	MsgTypeError          = "error"
 	MsgTypePong           = "pong"
-	MsgTypeDMChannelOpen  = "dm_channel_open"
-	MsgTypeDMChannelClose = "dm_channel_close"
+	MsgTypeDMChannelOpen         = "dm_channel_open"
+	MsgTypeDMChannelClose        = "dm_channel_close"
+	MsgTypeVoiceE2EEAnnounceBC   = "voice_e2ee_announce" // broadcast (same string as client msg)
+	MsgTypeVoiceE2EEOfferRelay   = "voice_e2ee_offer"    // relay (same string as client msg)
 )

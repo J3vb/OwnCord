@@ -156,11 +156,19 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		// Send both proxy path and direct URL. The client uses direct_url
 		// when on localhost (avoids self-signed TLS issues with WebView
 		// fetch) and falls back to the /livekit proxy for remote clients.
-		c.sendMsg(buildVoiceToken(channelID, token, "/livekit", h.livekit.URL()))
+		// NOTE: E2EE keys are no longer server-generated. Clients exchange
+		// keys via ECDH (voice_e2ee_announce / voice_e2ee_offer messages).
+		// C-2: Include is_key_holder so the client knows whether to initiate
+		// key distribution after connecting to the SFU.
+		isKeyHolder := h.computeIsKeyHolder(channelID, c.userID)
+		c.sendMsg(buildVoiceToken(channelID, token, "/livekit", h.livekit.URL(), isKeyHolder))
 	}
 
 	// Set voice channel on the client AFTER token is sent successfully.
 	c.setVoiceState(channelID, state.JoinedAt)
+
+	// Update key holder map now that this client's voice state is set.
+	h.updateKeyHolder(channelID)
 
 	// Broadcast the joiner's state to all connected clients.
 	h.BroadcastToAll(buildVoiceState(*state))
@@ -176,6 +184,11 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 			continue
 		}
 		c.sendMsg(buildVoiceState(vs))
+		// Send existing participant's ECDH public key so the joiner can
+		// participate in the client-side E2EE key exchange.
+		if pubKey := h.getClientE2EEPubKey(vs.UserID); pubKey != "" {
+			c.sendMsg(buildVoiceE2EEAnnounce(vs.UserID, pubKey))
+		}
 	}
 
 	// Send voice_config to the joiner.
@@ -257,7 +270,9 @@ func (h *Hub) handleVoiceTokenRefresh(_ context.Context, c *Client) {
 		return
 	}
 
-	c.sendMsg(buildVoiceToken(channelID, token, "/livekit", h.livekit.URL()))
+	// E2EE keys are exchanged client-side via ECDH; token refresh only
+	// provides a new LiveKit access token.
+	c.sendMsg(buildVoiceToken(channelID, token, "/livekit", h.livekit.URL(), h.isVoiceKeyHolder(channelID, c.userID)))
 	slog.Info("voice token refreshed", "user_id", c.userID, "channel_id", channelID)
 }
 

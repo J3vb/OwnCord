@@ -34,6 +34,13 @@ func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
 
 	h.BroadcastToAll(buildVoiceLeave(oldChID, c.userID))
 
+	// Re-elect key holder now that this user has left the channel.
+	h.updateKeyHolder(oldChID)
+
+	// E2EE keys are now managed client-side via ECDH key exchange.
+	// When a participant leaves, remaining clients rotate the room key
+	// automatically — the server has no key material to clear.
+
 	// Remove from LiveKit (best-effort).
 	if h.livekit != nil {
 		if err := h.livekit.RemoveParticipant(oldChID, c.userID, oldJoinToken); err != nil { //nolint:contextcheck // TODO: propagate context through this call path

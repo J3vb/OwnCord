@@ -1,8 +1,7 @@
 use serde_json::Value;
 use tauri_plugin_store::StoreExt;
 
-const SETTINGS_STORE: &str = "settings.json";
-const CERTS_STORE: &str = "certs.json";
+use crate::constants::{CERTS_STORE, SETTINGS_STORE};
 
 /// Maximum length for a settings key to prevent denial-of-service.
 const MAX_SETTINGS_KEY_LEN: usize = 128;
@@ -107,10 +106,19 @@ pub fn store_cert_fingerprint(
         .store(CERTS_STORE)
         .map_err(|e| format!("failed to open certs store: {e}"))?;
 
+    // Capture old value before mutating so we can restore it if save fails.
+    let old_value = store.get(&host);
     store.set(&host, Value::String(fingerprint));
-    store
-        .save()
-        .map_err(|e| format!("failed to persist cert fingerprint: {e}"))?;
+    if let Err(e) = store.save() {
+        // Restore previous in-memory state: put back old fingerprint if one
+        // existed, or delete if there was none. Without this, a failed save
+        // during cert rotation would silently lose the previously trusted cert.
+        match old_value {
+            Some(v) => { let _ = store.set(&host, v); }
+            None    => { let _ = store.delete(&host); }
+        }
+        return Err(format!("failed to persist cert fingerprint: {e}"));
+    }
     Ok(())
 }
 

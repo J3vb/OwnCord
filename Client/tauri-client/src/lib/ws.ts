@@ -157,7 +157,13 @@ export function createWsClient() {
     setState("reconnecting");
     reconnectTimer = setTimeout(() => {
       reconnectAttempt++;
-      void connect(config!);
+      const nextConfig = config;
+      if (!nextConfig) {
+        log.warn("Reconnect aborted: missing config");
+        setState("disconnected");
+        return;
+      }
+      void connect(nextConfig);
     }, delay);
   }
 
@@ -215,10 +221,12 @@ export function createWsClient() {
         return;
       }
       replayDedup.add(dedupKey);
-      // Evict oldest entries if set is too large
       if (replayDedup.size > MAX_DEDUP_SIZE) {
-        const first = replayDedup.values().next().value;
-        if (first !== undefined) replayDedup.delete(first);
+        const targetSize = Math.floor(MAX_DEDUP_SIZE * 0.8);
+        for (const key of replayDedup) {
+          if (replayDedup.size <= targetSize) break;
+          replayDedup.delete(key);
+        }
       }
     }
 
@@ -419,8 +427,17 @@ export function createWsClient() {
       log.warn("Cannot send, WebSocket not open");
       return;
     }
-    tauriInvoke("ws_send", { message: json }).catch((err) => {
-      log.error("ws_send failed", err);
+    tauriInvoke("ws_send", { message: json }).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("channel full")) {
+        // Outbound channel is saturated — log a prominent warning so callers
+        // can detect backpressure rather than silently losing messages.
+        log.warn("ws_send: outbound channel full, message dropped (backpressure)", {
+          messagePreview: json.slice(0, 120),
+        });
+      } else {
+        log.error("ws_send failed", err);
+      }
     });
   }
 
@@ -452,6 +469,7 @@ export function createWsClient() {
     cleanupEventListeners();
     void disconnectProxy();
     setState("disconnected");
+    config = null;
     // Reset lastSeq — disconnect() is only called for intentional close
     // (logout). Automatic reconnects go through scheduleReconnect() which
     // preserves lastSeq for server-side event replay.

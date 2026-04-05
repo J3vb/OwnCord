@@ -104,13 +104,17 @@ func EncryptTOTPSecret(key []byte, plaintext string) (string, error) {
 // continue to work.
 func DecryptTOTPSecret(key []byte, ciphertext string) (string, error) {
 	// Backwards compatibility: if it doesn't look encrypted, return as-is.
+	// M-4: Log a warning so operators can detect unencrypted TOTP secrets
+	// and migrate them (e.g. after key rotation or initial setup).
 	if len(ciphertext) < minEncryptedHexLen {
+		slog.Warn("TOTP secret returned as plaintext (too short for encrypted format) — consider encrypting legacy secrets")
 		return ciphertext, nil
 	}
 
 	data, err := hex.DecodeString(ciphertext)
 	if err != nil {
 		// Not valid hex -- treat as unencrypted plaintext (backwards compat).
+		slog.Warn("TOTP secret returned as plaintext (not valid hex) — consider encrypting legacy secrets")
 		return ciphertext, nil //nolint:nilerr
 	}
 
@@ -127,14 +131,17 @@ func DecryptTOTPSecret(key []byte, ciphertext string) (string, error) {
 	nonceSize := gcm.NonceSize()
 	if len(data) < nonceSize+gcm.Overhead() {
 		// Too short to be valid encrypted data -- return as plaintext.
+		slog.Warn("TOTP secret returned as plaintext (data too short for nonce+tag)")
 		return ciphertext, nil
 	}
 
 	nonce, sealed := data[:nonceSize], data[nonceSize:]
 	plaintext, err := gcm.Open(nil, nonce, sealed, nil)
 	if err != nil {
-		// Decryption failed -- likely an unencrypted legacy secret.
+		// Decryption failed -- likely an unencrypted legacy secret or wrong key.
 		// Return as-is for backwards compatibility.
+		slog.Warn("TOTP secret decryption failed — returning as plaintext (check TOTP_ENCRYPTION_KEY)",
+			"error", err)
 		return ciphertext, nil //nolint:nilerr
 	}
 

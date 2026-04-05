@@ -122,10 +122,38 @@ type voiceConfigPayload struct {
 }
 
 type voiceTokenPayload struct {
-	ChannelID int64  `json:"channel_id"`
-	Token     string `json:"token"`
-	URL       string `json:"url"`
-	DirectURL string `json:"direct_url"`
+	ChannelID   int64  `json:"channel_id"`
+	Token       string `json:"token"`
+	URL         string `json:"url"`
+	DirectURL   string `json:"direct_url"`
+	IsKeyHolder bool   `json:"is_key_holder"`
+}
+
+// ── Voice E2EE (client-side ECDH key exchange) ─────────────────────────────
+
+// voiceE2EEAnnounceIn is the client→server payload for voice_e2ee_announce.
+type voiceE2EEAnnounceIn struct {
+	PublicKey string `json:"public_key"`
+}
+
+// voiceE2EEAnnounceBroadcast is the server→client relay with user_id added.
+type voiceE2EEAnnounceBroadcast struct {
+	UserID    int64  `json:"user_id"`
+	PublicKey string `json:"public_key"`
+}
+
+// voiceE2EEOfferIn is the client→server payload for voice_e2ee_offer.
+type voiceE2EEOfferIn struct {
+	TargetUserID int64  `json:"target_user_id"`
+	EncryptedKey string `json:"encrypted_key"`
+	IV           string `json:"iv"`
+}
+
+// voiceE2EEOfferRelay is the server→client relay with from_user_id.
+type voiceE2EEOfferRelay struct {
+	FromUserID   int64  `json:"from_user_id"`
+	EncryptedKey string `json:"encrypted_key"`
+	IV           string `json:"iv"`
 }
 
 type voiceLeavePayload struct {
@@ -384,14 +412,38 @@ func buildVoiceConfig(channelID int64, quality string, bitrate int, maxUsers int
 // buildVoiceToken constructs a voice_token message with a LiveKit token and URL.
 // url is the proxy path ("/livekit") for remote clients; direct_url is the raw
 // LiveKit URL (e.g. "ws://localhost:7880") for localhost clients.
-func buildVoiceToken(channelID int64, token string, proxyPath string, directURL string) []byte { //nolint:unparam // kept configurable for proxy path flexibility
+func buildVoiceToken(channelID int64, token string, proxyPath string, directURL string, isKeyHolder bool) []byte { //nolint:unparam // kept configurable for proxy path flexibility
 	return buildJSON(wsMsg{
 		Type: MsgTypeVoiceToken,
 		Payload: voiceTokenPayload{
-			ChannelID: channelID,
-			Token:     token,
-			URL:       proxyPath,
-			DirectURL: directURL,
+			ChannelID:   channelID,
+			Token:       token,
+			URL:         proxyPath,
+			DirectURL:   directURL,
+			IsKeyHolder: isKeyHolder,
+		},
+	})
+}
+
+// buildVoiceE2EEAnnounce constructs a voice_e2ee_announce server→client relay.
+func buildVoiceE2EEAnnounce(userID int64, publicKey string) []byte {
+	return buildJSON(wsMsg{
+		Type: MsgTypeVoiceE2EEAnnounceBC,
+		Payload: voiceE2EEAnnounceBroadcast{
+			UserID:    userID,
+			PublicKey: publicKey,
+		},
+	})
+}
+
+// buildVoiceE2EEOffer constructs a voice_e2ee_offer server→client relay.
+func buildVoiceE2EEOffer(fromUserID int64, encryptedKey, iv string) []byte {
+	return buildJSON(wsMsg{
+		Type: MsgTypeVoiceE2EEOfferRelay,
+		Payload: voiceE2EEOfferRelay{
+			FromUserID:   fromUserID,
+			EncryptedKey: encryptedKey,
+			IV:           iv,
 		},
 	})
 }

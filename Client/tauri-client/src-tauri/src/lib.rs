@@ -1,4 +1,5 @@
 mod commands;
+mod constants;
 mod credentials;
 mod livekit_proxy;
 mod ptt;
@@ -8,7 +9,7 @@ mod ws_proxy;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    match tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
@@ -56,6 +57,29 @@ pub fn run() {
             tray::create_tray(app.handle())?;
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+    {
+        Ok(app) => {
+            app.run(|_app, event| {
+                if let tauri::RunEvent::Exit = event {
+                    // Stop the PTT polling thread before the process tears down.
+                    // This ensures the AppHandle held inside the thread is released
+                    // cleanly and the thread does not call app.emit on a dead runtime.
+                    ptt::ptt_stop_internal();
+                }
+            });
+        }
+        Err(e) => {
+            eprintln!("Fatal startup error: {e}");
+            #[cfg(not(target_os = "linux"))]
+            rfd::MessageDialog::new()
+                .set_title("OwnCord failed to start")
+                .set_description(&format!(
+                    "The application encountered a startup error and cannot continue.\n\n{e}"
+                ))
+                .set_level(rfd::MessageLevel::Error)
+                .show();
+            std::process::exit(1);
+        }
+    }
 }

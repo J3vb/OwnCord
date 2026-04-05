@@ -1779,6 +1779,36 @@ describe("scheduleReconnect guard clauses", () => {
     const reconnects = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
     expect(reconnects).toHaveLength(0);
   });
+
+  it("reconnect timer callback bails out safely when config is cleared", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
+
+    // Unexpected close schedules reconnect.
+    emitTauriEvent("ws-state", "closed");
+
+    // Simulate config being cleared before timer callback executes.
+    client.disconnect();
+    mockInvoke.mockClear();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    const reconnects = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    expect(reconnects).toHaveLength(0);
+    expect(client.getState()).toBe("disconnected");
+  });
 });
 
 describe("cert-tofu non-mismatch statuses", () => {

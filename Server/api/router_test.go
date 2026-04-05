@@ -87,7 +87,7 @@ func TestHealthEndpointStatusOK(t *testing.T) {
 	}
 }
 
-func TestHealthEndpointHasVersion(t *testing.T) {
+func TestHealthEndpointOmitsVersion(t *testing.T) {
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -100,8 +100,9 @@ func TestHealthEndpointHasVersion(t *testing.T) {
 		t.Fatalf("JSON decode error: %v", err)
 	}
 
-	if body["version"] == nil || body["version"] == "" {
-		t.Error("health response missing 'version' field")
+	// C-2: Version must NOT be exposed on unauthenticated endpoints.
+	if _, exists := body["version"]; exists {
+		t.Error("health response must not contain 'version' field (prevents fingerprinting)")
 	}
 }
 
@@ -136,7 +137,7 @@ func TestAPIV1InfoReturnsServerName(t *testing.T) {
 	}
 }
 
-func TestAPIV1InfoReturnsVersion(t *testing.T) {
+func TestAPIV1InfoOmitsVersion(t *testing.T) {
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
@@ -149,8 +150,9 @@ func TestAPIV1InfoReturnsVersion(t *testing.T) {
 		t.Fatalf("JSON decode error: %v", err)
 	}
 
-	if body["version"] == nil {
-		t.Error("info response missing 'version' field")
+	// C-2: Version must NOT be exposed to prevent fingerprinting.
+	if _, exists := body["version"]; exists {
+		t.Error("info response must not contain 'version' field (prevents fingerprinting)")
 	}
 }
 

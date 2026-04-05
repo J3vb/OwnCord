@@ -1,0 +1,21 @@
+# Compiled binaries
+*.exe
+chatserver
+owncord-server.exe
+
+# Data & uploads (user-provided at runtime via volume)
+data/
+
+# Coverage and test output
+*.out
+*.prof
+
+# Local config (users provide their own via volume mount or env)
+config.yaml
+
+# Scripts (not needed in image)
+scripts/
+
+# Git metadata
+.git
+.gitignore

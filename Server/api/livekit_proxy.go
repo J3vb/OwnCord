@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -179,20 +180,32 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL, all
 	<-errc
 }
 
+// wsProxyMaxMessageSize is the maximum WebSocket message size the LiveKit
+// proxy will forward. Messages exceeding this are dropped to prevent OOM.
+// 256 KB is generous for LiveKit signaling (typically < 10 KB).
+const wsProxyMaxMessageSize = 256 * 1024
+
 // copyWS reads messages from src and writes them to dst until an error or
-// context cancellation.
+// context cancellation. H-5: Messages exceeding wsProxyMaxMessageSize are
+// rejected to prevent memory exhaustion via oversized frames.
 func copyWS(ctx context.Context, dst, src *websocket.Conn) error {
 	for {
 		msgType, reader, err := src.Reader(ctx)
 		if err != nil {
 			return err
 		}
+		// Wrap reader with a size limit to prevent OOM from oversized messages.
+		limited := io.LimitReader(reader, wsProxyMaxMessageSize+1)
 		writer, err := dst.Writer(ctx, msgType)
 		if err != nil {
 			return err
 		}
-		if _, copyErr := io.Copy(writer, reader); copyErr != nil {
+		n, copyErr := io.Copy(writer, limited)
+		if copyErr != nil {
 			return copyErr
+		}
+		if n > wsProxyMaxMessageSize {
+			return fmt.Errorf("livekit proxy: message exceeds %d byte limit", wsProxyMaxMessageSize)
 		}
 		if closeErr := writer.Close(); closeErr != nil {
 			return closeErr

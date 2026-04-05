@@ -642,7 +642,7 @@
 
 /* Image attachment */
 .msg-image {
-  margin-top: 4px; max-width: 550px; border-radius: var(--radius-md);
+  position: relative; margin-top: 4px; max-width: 550px; border-radius: var(--radius-md);
   overflow: hidden; cursor: pointer; contain: layout style;
 }
 .msg-image img {
@@ -1106,10 +1106,15 @@
   gap: 6px;
 }
 .gp-item {
-  cursor: pointer; border-radius: var(--radius-sm);
+  position: relative; cursor: pointer; border-radius: var(--radius-sm);
   overflow: hidden; transition: transform .1s;
 }
 .gp-item:hover { transform: scale(1.03); }
+.klipy-watermark {
+  position: absolute; bottom: 6px; left: 6px;
+  height: 18px; width: auto; pointer-events: none;
+  opacity: 0.9;
+}
 .gp-img {
   width: 100%; display: block; object-fit: cover;
   border-radius: var(--radius-sm);

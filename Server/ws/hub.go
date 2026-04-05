@@ -2,6 +2,7 @@
 package ws
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"runtime"
@@ -39,14 +40,22 @@ type Hub struct {
 	registry     *HandlerRegistry
 	permChecker  *permissions.Checker
 
-	seq       uint64           // atomic monotonic sequence counter
-	replayBuf *EventRingBuffer // recent broadcast events for reconnection replay
+	seq            uint64           // atomic monotonic sequence counter
+	seqMu          syncutil.Mutex   // serializes seq assignment + replay insertion + delivery order
+	replayBuf      *EventRingBuffer // recent broadcast events for reconnection replay
+	broadcastDrops atomic.Uint64    // counts messages dropped due to full broadcast channel
 
 	// Settings cache — avoids per-connection DB queries for server_name/motd.
 	settingsMu         syncutil.RWMutex
 	settingsName       string
 	settingsMotd       string
 	settingsLastUpdate time.Time
+
+	// voiceKeyHolders maps channelID → userID of the current key holder.
+	// The key holder is the connected participant with the lowest userID in the channel.
+	// Protected by keyHolderMu.
+	keyHolderMu     sync.RWMutex
+	voiceKeyHolders map[int64]int64
 }
 
 // NewHub creates a Hub ready to be started with Run.
@@ -60,18 +69,19 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
 	registerPingHandler(reg)
 
 	h := &Hub{
-		clients:      make(map[int64]*Client),
-		db:           database,
-		limiter:      limiter,
-		broadcast:    make(chan broadcastMsg, 256),
-		register:     make(chan *Client, 32),
-		unregister:   make(chan *Client, 32),
-		stop:         make(chan struct{}),
-		replayBuf:    NewEventRingBuffer(1000),
-		registry:     reg,
-		permChecker:  permissions.NewChecker(database),
-		settingsName: "OwnCord Server",
-		settingsMotd: "Welcome!",
+		clients:         make(map[int64]*Client),
+		db:              database,
+		limiter:         limiter,
+		broadcast:       make(chan broadcastMsg, 1024),
+		register:        make(chan *Client, 32),
+		unregister:      make(chan *Client, 32),
+		stop:            make(chan struct{}),
+		replayBuf:       NewEventRingBuffer(1000),
+		registry:        reg,
+		permChecker:     permissions.NewChecker(database),
+		settingsName:    "OwnCord Server",
+		settingsMotd:    "Welcome!",
+		voiceKeyHolders: make(map[int64]int64),
 	}
 	h.refreshSettingsLocked()
 	return h
@@ -122,11 +132,11 @@ func (h *Hub) SetLiveKit(lk *LiveKitClient) {
 // It tries the SDK client first (ListRooms), and falls back to an HTTP probe
 // if a managed process is configured. Returns false with a reason if LiveKit
 // is not configured or unreachable.
-func (h *Hub) LiveKitHealthCheck() (bool, error) {
+func (h *Hub) LiveKitHealthCheck(ctx context.Context) (bool, error) {
 	if h.livekit == nil {
 		return false, fmt.Errorf("not configured")
 	}
-	return h.livekit.HealthCheck()
+	return h.livekit.HealthCheck(ctx)
 }
 
 // SetLiveKitProcess sets the LiveKit process manager on the hub.
@@ -353,6 +363,7 @@ func (h *Hub) BroadcastToChannel(channelID int64, msg []byte) {
 	select {
 	case h.broadcast <- broadcastMsg{channelID: channelID, msg: msg}:
 	default:
+		h.broadcastDrops.Add(1)
 		slog.Warn("hub: broadcast channel full, dropping message",
 			"channel_id", channelID, "msg_len", len(msg))
 	}
@@ -364,6 +375,7 @@ func (h *Hub) BroadcastToAll(msg []byte) {
 	select {
 	case h.broadcast <- broadcastMsg{channelID: 0, msg: msg}:
 	default:
+		h.broadcastDrops.Add(1)
 		slog.Warn("hub: broadcast channel full, dropping global message",
 			"msg_len", len(msg))
 	}
@@ -435,11 +447,35 @@ func (h *Hub) SendToUser(userID int64, msg []byte) bool {
 	return c.trySendMsg(msg)
 }
 
+// sendSequencedToUsers stamps msg with a monotonic seq, stores it in the replay
+// buffer under channelID, and fanouts the wrapped payload to the provided users.
+func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
+	h.seqMu.Lock()
+	defer h.seqMu.Unlock()
+
+	seq := h.nextSeq()
+	wrapped := wrapWithSeq(msg, seq)
+
+	// Store DM event for reconnect replay; filtering is channel-based and uses
+	// allowed channel IDs computed at auth time (including open DMs).
+	h.replayBuf.Push(seq, channelID, wrapped)
+
+	for _, userID := range userIDs {
+		h.SendToUser(userID, wrapped)
+	}
+}
+
 // ClientCount returns the number of currently registered clients (test helper).
 func (h *Hub) ClientCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.clients)
+}
+
+// BroadcastDropCount returns the cumulative number of messages dropped due to a
+// full broadcast channel. Safe to call from any goroutine.
+func (h *Hub) BroadcastDropCount() uint64 {
+	return h.broadcastDrops.Load()
 }
 
 // VoiceSessionCount returns the number of clients currently in a voice channel.
@@ -613,6 +649,9 @@ func (h *Hub) sweepStaleVoiceStates() {
 // deliverBroadcast stamps bm.msg with a monotonic sequence number, stores it
 // in the replay buffer, and sends it to the appropriate clients.
 func (h *Hub) deliverBroadcast(bm broadcastMsg) {
+	h.seqMu.Lock()
+	defer h.seqMu.Unlock()
+
 	seq := h.nextSeq()
 	msg := wrapWithSeq(bm.msg, seq)
 

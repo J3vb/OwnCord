@@ -1,6 +1,10 @@
 package api
 
-import "time"
+import (
+	"time"
+
+	"github.com/owncord/server/config"
+)
 
 // ─── Rate limits ────────────────────────────────────────────────────────────
 //
@@ -12,7 +16,7 @@ const (
 	registerRateLimitPerMinute = 3
 
 	// loginRateLimitPerMinute is the maximum login attempts per IP per minute.
-	loginRateLimitPerMinute = 60
+	loginRateLimitPerMinute = 5
 
 	// verifyTOTPRateLimitPerMinute is the maximum TOTP verification attempts per IP per minute.
 	verifyTOTPRateLimitPerMinute = 10
@@ -123,7 +127,7 @@ const (
 
 const (
 	// defaultMaxBodySize is the default request body size limit (1 MiB).
-	defaultMaxBodySize = 1 << 20
+	defaultMaxBodySize = config.MaxMessageBytes
 
 	// uploadMaxBodySize is the request body size limit for file uploads (100 MiB).
 	uploadMaxBodySize = 100 << 20
