@@ -91,20 +91,12 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 	registerPingHandler(reg, PingDeps{Limiter: h.limiter})
 
 	chatDeps := ChatDeps{
-		DB:          h.db,
-		Limiter:     h.limiter,
-		Permissions: h.permChecker,
+		Limiter: h.limiter,
 	}
 	presenceDeps := PresenceDeps{
-		DB:          h.db,
-		Limiter:     h.limiter,
-		Permissions: h.permChecker,
+		Limiter: h.limiter,
 	}
-	reactionDeps := ReactionDeps{
-		DB:          h.db,
-		Limiter:     h.limiter,
-		Permissions: h.permChecker,
-	}
+	reactionDeps := ReactionDeps{}
 	if svc != nil {
 		chatDeps.MessageSvc = svc.Messages
 		presenceDeps.ChannelSvc = svc.Channels

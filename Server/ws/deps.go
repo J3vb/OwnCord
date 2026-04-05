@@ -31,26 +31,19 @@ type PingDeps struct {
 
 // ChatDeps holds dependencies for chat handlers.
 type ChatDeps struct {
-	DB          *db.DB
-	Limiter     *auth.RateLimiter
-	Permissions *permissions.Checker
-	MessageSvc  *service.MessageService
+	Limiter    *auth.RateLimiter
+	MessageSvc *service.MessageService
 }
 
 // PresenceDeps holds dependencies for presence, typing, and channel focus handlers.
 type PresenceDeps struct {
-	DB          *db.DB
-	Limiter     *auth.RateLimiter
-	Permissions *permissions.Checker
-	ChannelSvc  *service.ChannelService
+	Limiter    *auth.RateLimiter
+	ChannelSvc *service.ChannelService
 }
 
 // ReactionDeps holds dependencies for reaction handlers.
 type ReactionDeps struct {
-	DB          *db.DB
-	Limiter     *auth.RateLimiter
-	Permissions *permissions.Checker
-	MessageSvc  *service.MessageService
+	MessageSvc *service.MessageService
 }
 
 // VoiceTokenGenerator generates LiveKit access tokens. Abstracted so V2
