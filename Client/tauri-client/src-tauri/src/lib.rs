@@ -1,6 +1,5 @@
 mod commands;
 mod credentials;
-mod hotkeys;
 mod livekit_proxy;
 mod ptt;
 mod tray;
@@ -42,6 +41,7 @@ pub fn run() {
             ptt::ptt_listen_for_key,
             livekit_proxy::start_livekit_proxy,
             livekit_proxy::stop_livekit_proxy,
+            #[cfg(feature = "devtools")]
             commands::open_devtools,
         ])
         .setup(|app| {

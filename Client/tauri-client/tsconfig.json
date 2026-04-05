@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "ES2021",
+    "target": "ES2023",
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
@@ -12,7 +12,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "lib": [
-      "ES2021",
+      "ES2023",
       "DOM",
       "DOM.Iterable"
     ],

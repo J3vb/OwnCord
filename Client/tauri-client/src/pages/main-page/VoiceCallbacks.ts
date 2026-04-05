@@ -5,11 +5,7 @@
 
 import { createLogger } from "@lib/logger";
 import type { WsClient } from "@lib/ws";
-import {
-  voiceStore,
-  joinVoiceChannel,
-  leaveVoiceChannel,
-} from "@stores/voice.store";
+import { voiceStore, joinVoiceChannel, leaveVoiceChannel } from "@stores/voice.store";
 import {
   leaveVoice as voiceSessionLeave,
   setMuted as voiceSessionSetMuted,

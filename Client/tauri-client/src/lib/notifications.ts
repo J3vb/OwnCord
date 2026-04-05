@@ -52,10 +52,16 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   }
 
   const channelName = getChannelName(payload.channel_id);
-  const title = `${payload.user.username} in #${channelName}`;
-  const body = payload.content.length > 100
-    ? payload.content.slice(0, 100) + "..."
-    : payload.content;
+
+  // oxlint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
+  function sanitizeNotif(s: string, maxLen: number): string {
+    // eslint-disable-next-line no-control-regex -- intentional: strip control chars from user-provided strings
+    const cleaned = s.replace(/[\x00-\x1F\x7F]/g, "");
+    return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + "..." : cleaned;
+  }
+
+  const title = sanitizeNotif(`${payload.user.username} in #${channelName}`, 80);
+  const body = sanitizeNotif(payload.content, 100);
 
   // Desktop notification
   if (loadPref<boolean>("desktopNotifications", true)) {
@@ -93,11 +99,11 @@ function fireDesktopNotification(title: string, body: string): void {
       // Fallback to Web Notification API (dev mode / non-Tauri)
       try {
         if (Notification.permission === "granted") {
-          new Notification(title, { body });
+          void new Notification(title, { body });
         } else if (Notification.permission !== "denied") {
           const result = await Notification.requestPermission();
           if (result === "granted") {
-            new Notification(title, { body });
+            void new Notification(title, { body });
           }
         }
       } catch {
@@ -122,6 +128,16 @@ function flashTaskbar(): void {
 
 // Simple notification sound using Web Audio API
 let notifAudioCtx: AudioContext | null = null;
+
+/** Close and release the notification AudioContext. Call on logout/cleanup. */
+export function cleanupNotificationAudio(): void {
+  if (notifAudioCtx !== null) {
+    notifAudioCtx.close().catch((err) => {
+      log.warn("Failed to close notification AudioContext", err);
+    });
+    notifAudioCtx = null;
+  }
+}
 
 /** Play a brief notification chime. */
 function playNotificationSound(): void {

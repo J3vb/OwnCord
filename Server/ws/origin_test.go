@@ -38,20 +38,19 @@ func TestOriginAcceptOptions_ExplicitOrigins(t *testing.T) {
 	}
 }
 
-// TestOriginAcceptOptions_EmptyList falls back to wildcard (InsecureSkipVerify)
-// so that an empty configuration doesn't silently reject all connections.
+// TestOriginAcceptOptions_EmptyList denies cross-origin by default (secure).
 func TestOriginAcceptOptions_EmptyList(t *testing.T) {
 	opts := ws.OriginAcceptOptions([]string{})
-	if !opts.InsecureSkipVerify {
-		t.Error("OriginAcceptOptions([]) should fall back to InsecureSkipVerify=true")
+	if opts.InsecureSkipVerify {
+		t.Error("OriginAcceptOptions([]) should deny cross-origin (InsecureSkipVerify=false)")
 	}
 }
 
-// TestOriginAcceptOptions_NilList same as empty.
+// TestOriginAcceptOptions_NilList same as empty — deny by default.
 func TestOriginAcceptOptions_NilList(t *testing.T) {
 	opts := ws.OriginAcceptOptions(nil)
-	if !opts.InsecureSkipVerify {
-		t.Error("OriginAcceptOptions(nil) should fall back to InsecureSkipVerify=true")
+	if opts.InsecureSkipVerify {
+		t.Error("OriginAcceptOptions(nil) should deny cross-origin (InsecureSkipVerify=false)")
 	}
 }
 

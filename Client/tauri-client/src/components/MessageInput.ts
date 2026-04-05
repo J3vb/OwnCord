@@ -12,7 +12,11 @@ import { createGifPicker } from "@components/GifPicker";
 export interface MessageInputOptions {
   readonly channelId: number;
   readonly channelName: string;
-  readonly onSend: (content: string, replyTo: number | null, attachments: readonly string[]) => void;
+  readonly onSend: (
+    content: string,
+    replyTo: number | null,
+    attachments: readonly string[],
+  ) => void;
   readonly onUploadFile?: (file: File) => Promise<{ id: string; url: string; filename: string }>;
   readonly onTyping: () => void;
   readonly onEditMessage: (messageId: number, content: string) => void;
@@ -40,14 +44,14 @@ const ALLOWED_TYPES = [
   "application/json",
 ];
 
-export function createMessageInput(
-  options: MessageInputOptions,
-): MessageInputComponent {
+export function createMessageInput(options: MessageInputOptions): MessageInputComponent {
   const ac = new AbortController();
   const signal = ac.signal;
   let root: HTMLDivElement | null = null;
-  let state = { replyTo: null as { messageId: number; username: string } | null,
-    editing: null as { messageId: number } | null };
+  let state = {
+    replyTo: null as { messageId: number; username: string } | null,
+    editing: null as { messageId: number } | null,
+  };
   let lastTypingTime = 0;
   let lastSendTime = 0;
 
@@ -58,7 +62,8 @@ export function createMessageInput(
   let attachmentPreviewBar: HTMLDivElement | null = null;
 
   /** Pending attachment IDs to send with the next message. */
-  const pendingAttachments: { id: string; filename: string; readonly previewEl: HTMLDivElement }[] = [];
+  const pendingAttachments: { id: string; filename: string; readonly previewEl: HTMLDivElement }[] =
+    [];
   /** Count of file uploads currently in flight. */
   let pendingUploadCount = 0;
   /** References to picker close functions, set by mount() for destroy() to call. */
@@ -72,9 +77,15 @@ export function createMessageInput(
     replyBar.classList.add("visible");
   }
 
-  function hideReplyBar(): void { replyBar?.classList.remove("visible"); }
-  function showEditBar(): void { editBar?.classList.add("visible"); }
-  function hideEditBar(): void { editBar?.classList.remove("visible"); }
+  function hideReplyBar(): void {
+    replyBar?.classList.remove("visible");
+  }
+  function showEditBar(): void {
+    editBar?.classList.add("visible");
+  }
+  function hideEditBar(): void {
+    editBar?.classList.remove("visible");
+  }
 
   function autoResize(): void {
     if (textarea === null) return;
@@ -102,11 +113,18 @@ export function createMessageInput(
 
   function showUploadError(message: string): void {
     if (attachmentPreviewBar === null) return;
-    const errEl = createElement("div", {
-      class: "attachment-upload-error",
-    }, message);
+    const errEl = createElement(
+      "div",
+      {
+        class: "attachment-upload-error",
+      },
+      message,
+    );
     attachmentPreviewBar.appendChild(errEl);
-    const t = setTimeout(() => { activeTimers.delete(t); errEl.remove(); }, 4000);
+    const t = setTimeout(() => {
+      activeTimers.delete(t);
+      errEl.remove();
+    }, 4000);
     activeTimers.add(t);
   }
 
@@ -165,11 +183,12 @@ export function createMessageInput(
   }
 
   /** Read a File as a data: URL (more reliable than createObjectURL in WebView2). */
+  // oxlint-disable-next-line consistent-function-scoping -- co-located with handlePasteFile for readability
   function readFileAsDataUrl(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(new Error("Failed to read file"));
+      reader.addEventListener("load", () => resolve(reader.result as string));
+      reader.addEventListener("error", () => reject(new Error("Failed to read file")));
       reader.readAsDataURL(file);
     });
   }
@@ -183,9 +202,9 @@ export function createMessageInput(
       return;
     }
 
-    // Validate file type (allow empty type for files without MIME info)
-    if (file.type !== "" && !ALLOWED_TYPES.some((t) => file.type.startsWith(t))) {
-      showUploadError(`Unsupported file type: ${file.type}`);
+    // Validate file type — reject files with unknown/empty MIME type
+    if (file.type === "" || !ALLOWED_TYPES.some((t) => file.type.startsWith(t))) {
+      showUploadError(`${file.name} is not a supported file type`);
       return;
     }
 
@@ -203,13 +222,17 @@ export function createMessageInput(
         alt: file.name,
       });
       item.appendChild(img);
-      readFileAsDataUrl(file).then((dataUrl) => {
-        img.src = dataUrl;
-      }).catch(() => {
-        // Fallback: show filename
-        const nameEl = createElement("span", { class: "attachment-preview-name" }, file.name);
-        img.replaceWith(nameEl);
-      });
+      readFileAsDataUrl(file)
+        .then((dataUrl) => {
+          if (signal.aborted) return;
+          img.src = dataUrl;
+        })
+        .catch(() => {
+          if (signal.aborted) return;
+          // Fallback: show filename
+          const nameEl = createElement("span", { class: "attachment-preview-name" }, file.name);
+          img.replaceWith(nameEl);
+        });
     } else {
       const icon = createElement("div", { class: "attachment-preview-file" });
       icon.appendChild(createIcon("file-text", 16));
@@ -227,10 +250,14 @@ export function createMessageInput(
       "data-testid": "attachment-remove",
     });
     removeBtn.appendChild(createIcon("x", 14));
-    removeBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      removePreviewItem(tempId);
-    }, { signal });
+    removeBtn.addEventListener(
+      "click",
+      (e) => {
+        e.stopPropagation();
+        removePreviewItem(tempId);
+      },
+      { signal },
+    );
     item.appendChild(removeBtn);
 
     attachmentPreviewBar.appendChild(item);
@@ -240,11 +267,14 @@ export function createMessageInput(
     pendingUploadCount++;
     try {
       const result = await options.onUploadFile(file);
-      // Replace temp ID with real server ID
-      const att = pendingAttachments.find((a) => a.id === tempId);
-      if (att !== undefined) {
-        att.id = result.id;
-        att.filename = result.filename;
+      // Replace temp ID with real server ID (immutable update)
+      const attIdx = pendingAttachments.findIndex((a) => a.id === tempId);
+      if (attIdx !== -1) {
+        pendingAttachments[attIdx] = {
+          ...pendingAttachments[attIdx]!,
+          id: result.id,
+          filename: result.filename,
+        };
         item.classList.remove("uploading");
         spinner.remove();
       }
@@ -284,7 +314,10 @@ export function createMessageInput(
   function cancelEdit(): void {
     state = { ...state, editing: null };
     hideEditBar();
-    if (textarea !== null) { textarea.value = ""; autoResize(); }
+    if (textarea !== null) {
+      textarea.value = "";
+      autoResize();
+    }
   }
 
   function mount(container: Element): void {
@@ -313,8 +346,11 @@ export function createMessageInput(
     attachmentPreviewBar = createElement("div", { class: "attachment-preview-bar" });
 
     const inputBox = createElement("div", { class: "message-input-box" });
-    const attachBtn = createElement("button",
-      { class: "input-btn attach-btn", "aria-label": "Attach file" }, "+");
+    const attachBtn = createElement(
+      "button",
+      { class: "input-btn attach-btn", "aria-label": "Attach file" },
+      "+",
+    );
 
     // File picker via attach button
     if (options.onUploadFile !== undefined) {
@@ -323,13 +359,17 @@ export function createMessageInput(
         style: "display: none;",
         accept: "image/*,video/*,audio/*,.pdf,.txt,.zip,.rar,.7z",
       });
-      fileInput.addEventListener("change", () => {
-        const file = fileInput.files?.[0];
-        if (file != null) {
-          void handlePasteFile(file);
-        }
-        fileInput.value = "";
-      }, { signal });
+      fileInput.addEventListener(
+        "change",
+        () => {
+          const file = fileInput.files?.[0];
+          if (file != null) {
+            void handlePasteFile(file);
+          }
+          fileInput.value = "";
+        },
+        { signal },
+      );
       attachBtn.addEventListener("click", () => fileInput.click(), { signal });
       root?.appendChild(fileInput);
     } else {
@@ -337,42 +377,73 @@ export function createMessageInput(
       attachBtn.title = "File uploads not available";
     }
     textarea = createElement("textarea", {
-      class: "msg-textarea", placeholder: `Message #${options.channelName}`, rows: "1",
+      class: "msg-textarea",
+      placeholder: `Message #${options.channelName}`,
+      rows: "1",
       "data-testid": "msg-textarea",
     });
-    const emojiBtn = createElement("button",
-      { class: "input-btn emoji-btn", "aria-label": "Emoji" });
+    const emojiBtn = createElement("button", {
+      class: "input-btn emoji-btn",
+      "aria-label": "Emoji",
+    });
     emojiBtn.appendChild(createIcon("smile", 20));
-    const gifBtn = createElement("button",
-      { class: "input-btn gif-btn", "aria-label": "GIF" }, "GIF");
-    const sendBtn = createElement("button",
-      { class: "input-btn send-btn", "aria-label": "Send message", "data-testid": "send-btn" });
+    const gifBtn = createElement(
+      "button",
+      { class: "input-btn gif-btn", "aria-label": "GIF" },
+      "GIF",
+    );
+    const sendBtn = createElement("button", {
+      class: "input-btn send-btn",
+      "aria-label": "Send message",
+      "data-testid": "send-btn",
+    });
     sendBtn.appendChild(createIcon("send", 20));
 
-    textarea.addEventListener("input", () => { autoResize(); maybeEmitTyping(); }, { signal });
-    textarea.addEventListener("keydown", (e: KeyboardEvent) => {
-      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
-      if (e.key === "Escape") {
-        if (state.editing !== null) { cancelEdit(); }
-        else if (state.replyTo !== null) { clearReply(); }
-      }
-      if (e.key === "ArrowUp" && textarea !== null && textarea.value.length === 0) {
-        root?.dispatchEvent(new CustomEvent("edit-last-message", { bubbles: true }));
-      }
-    }, { signal });
+    textarea.addEventListener(
+      "input",
+      () => {
+        autoResize();
+        maybeEmitTyping();
+      },
+      { signal },
+    );
+    textarea.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          handleSend();
+        }
+        if (e.key === "Escape") {
+          if (state.editing !== null) {
+            cancelEdit();
+          } else if (state.replyTo !== null) {
+            clearReply();
+          }
+        }
+        if (e.key === "ArrowUp" && textarea !== null && textarea.value.length === 0) {
+          root?.dispatchEvent(new CustomEvent("edit-last-message", { bubbles: true }));
+        }
+      },
+      { signal },
+    );
 
     // Clipboard paste: detect images/files
-    textarea.addEventListener("paste", (e: ClipboardEvent) => {
-      const items = e.clipboardData?.items;
-      if (items === undefined) return;
-      for (const item of items) {
-        if (item.kind !== "file") continue;
-        const file = item.getAsFile();
-        if (file === null) continue;
-        e.preventDefault();
-        void handlePasteFile(file);
-      }
-    }, { signal });
+    textarea.addEventListener(
+      "paste",
+      (e: ClipboardEvent) => {
+        const items = e.clipboardData?.items;
+        if (items === undefined) return;
+        for (const item of items) {
+          if (item.kind !== "file") continue;
+          const file = item.getAsFile();
+          if (file === null) continue;
+          e.preventDefault();
+          void handlePasteFile(file);
+        }
+      },
+      { signal },
+    );
 
     sendBtn.addEventListener("click", handleSend, { signal });
 
@@ -393,7 +464,11 @@ export function createMessageInput(
       if (emojiPicker === null) return;
       const target = e.target as Node;
       // Close if click is outside both the picker and the emoji button
-      if (!emojiPicker.element.contains(target) && target !== emojiBtn && !emojiBtn.contains(target)) {
+      if (
+        !emojiPicker.element.contains(target) &&
+        target !== emojiBtn &&
+        !emojiBtn.contains(target)
+      ) {
         closeEmojiPicker();
       }
     }
@@ -428,7 +503,9 @@ export function createMessageInput(
       // Defer so this click doesn't immediately close it
       const t1 = setTimeout(() => {
         activeTimers.delete(t1);
-        document.addEventListener("mousedown", handleClickOutside);
+        if (!signal.aborted) {
+          document.addEventListener("mousedown", handleClickOutside);
+        }
       }, 0);
       activeTimers.add(t1);
     }
@@ -477,7 +554,9 @@ export function createMessageInput(
       root?.appendChild(gifPicker.element);
       const t2 = setTimeout(() => {
         activeTimers.delete(t2);
-        document.addEventListener("mousedown", handleGifClickOutside);
+        if (!signal.aborted) {
+          document.addEventListener("mousedown", handleGifClickOutside);
+        }
       }, 0);
       activeTimers.add(t2);
     }
@@ -485,7 +564,10 @@ export function createMessageInput(
     gifBtn.addEventListener("click", toggleGifPicker, { signal });
 
     // Store picker cleanup for destroy()
-    cleanupPickers = () => { closeEmojiPicker(); closeGifPicker(); };
+    cleanupPickers = () => {
+      closeEmojiPicker();
+      closeGifPicker();
+    };
 
     appendChildren(inputBox, attachBtn, textarea, emojiBtn, gifBtn, sendBtn);
     appendChildren(root, replyBar, editBar, attachmentPreviewBar, inputBox);

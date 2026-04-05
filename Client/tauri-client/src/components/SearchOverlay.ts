@@ -13,7 +13,11 @@ import type { SearchResultItem } from "@lib/types";
 // ---------------------------------------------------------------------------
 
 export interface SearchOverlayOptions {
-  readonly onSearch: (query: string, channelId?: number, signal?: AbortSignal) => Promise<readonly SearchResultItem[]>;
+  readonly onSearch: (
+    query: string,
+    channelId?: number,
+    signal?: AbortSignal,
+  ) => Promise<readonly SearchResultItem[]>;
   readonly onSelectResult: (result: SearchResultItem) => void;
   readonly onClose: () => void;
   readonly currentChannelId?: number;
@@ -25,6 +29,8 @@ export interface SearchOverlayOptions {
 
 const DEBOUNCE_MS = 300;
 const MIN_QUERY_LEN = 2;
+/** Minimum interval between actual search API calls (rate limiting). */
+const MIN_SEARCH_INTERVAL_MS = 500;
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -42,12 +48,17 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   let results: readonly SearchResultItem[] = [];
   let debounceTimer: number | null = null;
   let searchAbort: AbortController | null = null;
+  let lastSearchTime = 0;
 
+  // oxlint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
   function formatTimestamp(ts: string): string {
     try {
       const d = new Date(ts);
-      return d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
-        + " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+      return (
+        d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
+        " " +
+        d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+      );
     } catch {
       return ts;
     }
@@ -62,9 +73,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       const isActive = i === activeIndex;
 
       const item = createElement("div", {
-        class: isActive
-          ? "search-result-item search-result-item--active"
-          : "search-result-item",
+        class: isActive ? "search-result-item search-result-item--active" : "search-result-item",
         role: "option",
         "aria-selected": isActive ? "true" : "false",
         "data-testid": `search-result-${i}`,
@@ -84,10 +93,14 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
 
       appendChildren(item, header, content);
 
-      item.addEventListener("click", () => {
-        options.onSelectResult(r);
-        options.onClose();
-      }, { signal });
+      item.addEventListener(
+        "click",
+        () => {
+          options.onSelectResult(r);
+          options.onClose();
+        },
+        { signal },
+      );
 
       resultsDiv.appendChild(item);
     }
@@ -99,6 +112,10 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   }
 
   function doSearch(): void {
+    const now = Date.now();
+    if (now - lastSearchTime < MIN_SEARCH_INTERVAL_MS) return;
+    lastSearchTime = now;
+
     const query = input.value.trim();
     if (query.length < MIN_QUERY_LEN) {
       results = [];
@@ -115,7 +132,8 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
 
     setStatus("Searching...");
 
-    options.onSearch(query, options.currentChannelId, searchAbort.signal)
+    options
+      .onSearch(query, options.currentChannelId, searchAbort.signal)
       .then((items) => {
         results = items;
         activeIndex = 0;

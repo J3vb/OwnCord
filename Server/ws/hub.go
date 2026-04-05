@@ -12,6 +12,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/syncutil"
 )
 
 // broadcastMsg is an internal message queued for delivery.
@@ -23,25 +24,26 @@ type broadcastMsg struct {
 // Hub manages all active WebSocket clients and routes messages between them.
 // All exported methods are safe to call from multiple goroutines.
 type Hub struct {
-	clients     map[int64]*Client
-	mu          sync.RWMutex
-	db          *db.DB
-	limiter     *auth.RateLimiter
-	broadcast   chan broadcastMsg
-	register    chan *Client
-	unregister  chan *Client
-	stop        chan struct{}
-	stopOnce    sync.Once
-	livekit     *LiveKitClient
-	lkProcess   *LiveKitProcess
-	registry    *HandlerRegistry
-	permChecker *permissions.Checker
+	clients      map[int64]*Client
+	mu           syncutil.RWMutex
+	db           *db.DB
+	limiter      *auth.RateLimiter
+	broadcast    chan broadcastMsg
+	register     chan *Client
+	unregister   chan *Client
+	stop         chan struct{}
+	stopOnce     sync.Once
+	gracefulOnce sync.Once
+	livekit      *LiveKitClient
+	lkProcess    *LiveKitProcess
+	registry     *HandlerRegistry
+	permChecker  *permissions.Checker
 
 	seq       uint64           // atomic monotonic sequence counter
 	replayBuf *EventRingBuffer // recent broadcast events for reconnection replay
 
 	// Settings cache — avoids per-connection DB queries for server_name/motd.
-	settingsMu         sync.RWMutex
+	settingsMu         syncutil.RWMutex
 	settingsName       string
 	settingsMotd       string
 	settingsLastUpdate time.Time
@@ -146,6 +148,10 @@ func (h *Hub) Run() {
 		func() {
 			staleTicker := time.NewTicker(30 * time.Second)
 			defer staleTicker.Stop()
+			sessionSweepTicker := time.NewTicker(30 * time.Second)
+			defer sessionSweepTicker.Stop()
+			voiceSweepTicker := time.NewTicker(60 * time.Second)
+			defer voiceSweepTicker.Stop()
 
 			defer func() {
 				if r := recover(); r != nil {
@@ -165,6 +171,7 @@ func (h *Hub) Run() {
 
 					if panicCount >= 3 {
 						slog.Error("hub: too many panics in 60s, stopping")
+						h.Stop()
 						return
 					}
 				}
@@ -182,6 +189,10 @@ func (h *Hub) Run() {
 					h.deliverBroadcast(bm)
 				case <-staleTicker.C:
 					h.sweepStaleClients()
+				case <-sessionSweepTicker.C:
+					h.sweepRevokedSessions()
+				case <-voiceSweepTicker.C:
+					h.sweepStaleVoiceStates()
 				}
 			}
 		}()
@@ -205,27 +216,30 @@ func (h *Hub) Stop() {
 }
 
 // GracefulStop stops the LiveKit process (if managed) and then stops the hub.
+// Safe to call multiple times concurrently.
 func (h *Hub) GracefulStop() {
-	// Broadcast restart notice to all connected clients.
-	h.BroadcastServerRestart("shutdown", 5)
+	h.gracefulOnce.Do(func() {
+		// Broadcast restart notice to all connected clients.
+		h.BroadcastServerRestart("shutdown", 5)
 
-	// Stop LiveKit process.
-	if h.lkProcess != nil {
-		h.lkProcess.Stop()
-	}
+		// Stop LiveKit process.
+		if h.lkProcess != nil {
+			h.lkProcess.Stop()
+		}
 
-	// Give clients 5 seconds to disconnect gracefully.
-	time.Sleep(5 * time.Second)
+		// Give clients 5 seconds to disconnect gracefully.
+		time.Sleep(5 * time.Second)
 
-	// Close all remaining client connections.
-	h.mu.Lock()
-	for _, c := range h.clients {
-		c.closeSend()
-	}
-	h.mu.Unlock()
+		// Close all remaining client connections.
+		h.mu.Lock()
+		for _, c := range h.clients {
+			c.closeSend()
+		}
+		h.mu.Unlock()
 
-	// Stop the hub dispatch loop.
-	h.stopOnce.Do(func() { close(h.stop) })
+		// Stop the hub dispatch loop.
+		h.stopOnce.Do(func() { close(h.stop) })
+	})
 }
 
 // CleanupVoiceForChannel removes all voice participants from the given channel.
@@ -256,7 +270,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 
 		// Remove from LiveKit (best-effort).
 		if h.livekit != nil {
-			_ = h.livekit.RemoveParticipant(channelID, vs.UserID)
+			_ = h.livekit.RemoveParticipant(channelID, vs.UserID, vs.JoinedAt)
 		}
 	}
 
@@ -296,14 +310,23 @@ func (h *Hub) Unregister(c *Client) {
 func (h *Hub) registerNow(c *Client) {
 	h.mu.Lock()
 	if old, exists := h.clients[c.userID]; exists {
-		oldVoiceChID := old.clearVoiceChID()
-		if c.getVoiceChID() == 0 {
-			c.setVoiceChID(oldVoiceChID)
+		oldVoiceChID, oldVoiceJoinToken := old.clearVoiceState()
+		if c.lastSeq > 0 {
+			// Network reconnect — preserve voice state so the user stays
+			// in voice during brief WS drops.
+			if c.getVoiceChID() == 0 {
+				c.setVoiceState(oldVoiceChID, oldVoiceJoinToken)
+			}
 		}
+		// Fresh connections (lastSeq == 0): do NOT transfer voice state.
+		// Stale voice cleanup (DB + broadcast + LiveKit) is owned entirely
+		// by the handshake path in serve.go, which runs before registerNow.
+		// registerNow only handles in-memory client replacement.
+
 		// Kick the stale connection atomically before registering
 		// the new one — prevents TOCTOU races on duplicate login.
 		slog.Warn("hub: kicking stale connection for re-registering user",
-			"user_id", c.userID)
+			"user_id", c.userID, "last_seq", c.lastSeq)
 		old.closeSend()
 	}
 	h.clients[c.userID] = c
@@ -311,13 +334,16 @@ func (h *Hub) registerNow(c *Client) {
 	h.mu.Unlock()
 }
 
-func (h *Hub) unregisterNow(c *Client) {
+func (h *Hub) unregisterNow(c *Client) bool {
 	h.mu.Lock()
-	if current, ok := h.clients[c.userID]; ok && current == c {
+	defer h.mu.Unlock()
+	current, exists := h.clients[c.userID]
+	if exists && current == c {
 		delete(h.clients, c.userID)
 		slog.Info("hub: client unregistered", "user_id", c.userID, "total_clients", len(h.clients))
+		return false // not replaced
 	}
-	h.mu.Unlock()
+	return true // different client registered = was replaced
 }
 
 // BroadcastToChannel enqueues msg for delivery to all clients subscribed to
@@ -365,9 +391,31 @@ func (h *Hub) BroadcastChannelDelete(channelID int64) {
 	h.BroadcastToAll(buildChannelDelete(channelID))
 }
 
-// BroadcastMemberBan sends a member_ban message to all connected clients.
+// BroadcastMemberBan sends a member_ban message to all connected clients
+// and immediately disconnects the banned user's WebSocket connection (BUG-113).
 func (h *Hub) BroadcastMemberBan(userID int64) {
 	h.BroadcastToAll(buildMemberBan(userID))
+	h.DisconnectUser(userID)
+}
+
+// DisconnectUser forcibly disconnects the client identified by userID.
+// No-op if the user is not currently connected.
+func (h *Hub) DisconnectUser(userID int64) {
+	h.mu.RLock()
+	c, ok := h.clients[userID]
+	h.mu.RUnlock()
+	if !ok {
+		return
+	}
+	slog.Info("hub: disconnecting user", "user_id", userID)
+	c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
+	h.kickClient(c)
+}
+
+// BroadcastUserUpdate sends a user_update message to all connected clients
+// when a user changes their profile (username, avatar).
+func (h *Hub) BroadcastUserUpdate(userID int64, username string, avatar *string) {
+	h.BroadcastToAll(buildUserUpdate(userID, username, avatar))
 }
 
 // BroadcastMemberUpdate sends a member_update message to all connected clients.
@@ -469,6 +517,99 @@ func (h *Hub) sweepStaleClients() {
 	}
 }
 
+// sweepRevokedSessions iterates all connected clients and kicks any whose
+// session has been deleted, expired, or whose user has been banned. This
+// provides time-based session enforcement for idle WebSocket connections
+// that never trigger the message-count-based check (BUG-109).
+func (h *Hub) sweepRevokedSessions() {
+	if h.db == nil {
+		return
+	}
+
+	h.mu.RLock()
+	snapshot := make([]*Client, 0, len(h.clients))
+	for _, c := range h.clients {
+		if c.tokenHash != "" {
+			snapshot = append(snapshot, c)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, c := range snapshot {
+		result, err := h.db.GetSessionWithBanStatus(c.tokenHash)
+		if err != nil || result == nil || auth.IsSessionExpired(result.ExpiresAt) {
+			slog.Info("session sweep: revoked/expired session, disconnecting",
+				"user_id", c.userID)
+			h.kickClient(c)
+			continue
+		}
+		tempUser := &db.User{Banned: result.Banned, BanExpires: result.BanExpires}
+		if auth.IsEffectivelyBanned(tempUser) {
+			slog.Info("session sweep: banned user, disconnecting",
+				"user_id", c.userID)
+			c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
+			h.kickClient(c)
+		}
+	}
+}
+
+// sweepStaleVoiceStates queries all voice_states rows and removes any that
+// don't match a connected client's voiceChID. This catches ghost users that
+// slip through the primary cleanup paths (registerNow, readPump defer,
+// LiveKit webhook).
+func (h *Hub) sweepStaleVoiceStates() {
+	if h.db == nil {
+		return
+	}
+	allStates, err := h.db.GetAllVoiceStates()
+	if err != nil {
+		slog.Warn("sweepStaleVoiceStates: GetAllVoiceStates failed", "err", err)
+		return
+	}
+	if len(allStates) == 0 {
+		return
+	}
+
+	h.mu.RLock()
+	var stale []struct {
+		userID    int64
+		channelID int64
+		joinedAt  string
+	}
+	for _, vs := range allStates {
+		c, ok := h.clients[vs.UserID]
+		if !ok || c.getVoiceChID() != vs.ChannelID {
+			stale = append(stale, struct {
+				userID    int64
+				channelID int64
+				joinedAt  string
+			}{vs.UserID, vs.ChannelID, vs.JoinedAt})
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, s := range stale {
+		// Channel-conditional delete: only removes the row if it still points
+		// at the channel we snapshotted. If the user rejoined or moved between
+		// the snapshot and now, the delete is a no-op and we skip the broadcast.
+		deleted, err := h.db.LeaveVoiceChannelIfMatch(s.userID, s.channelID, s.joinedAt)
+		if err != nil {
+			slog.Error("sweepStaleVoiceStates: LeaveVoiceChannelIfMatch failed",
+				"err", err, "user_id", s.userID, "channel_id", s.channelID)
+			continue
+		}
+		if !deleted {
+			continue
+		}
+		slog.Warn("sweepStaleVoiceStates: removed ghost voice state",
+			"user_id", s.userID, "channel_id", s.channelID)
+		h.BroadcastToAll(buildVoiceLeave(s.channelID, s.userID))
+		if h.livekit != nil {
+			_ = h.livekit.RemoveParticipant(s.channelID, s.userID, s.joinedAt)
+		}
+	}
+}
+
 // deliverBroadcast stamps bm.msg with a monotonic sequence number, stores it
 // in the replay buffer, and sends it to the appropriate clients.
 func (h *Hub) deliverBroadcast(bm broadcastMsg) {
@@ -476,7 +617,7 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	msg := wrapWithSeq(bm.msg, seq)
 
 	// Store in replay buffer for reconnection recovery.
-	h.replayBuf.Push(seq, msg)
+	h.replayBuf.Push(seq, bm.channelID, msg)
 
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -484,7 +625,12 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	delivered := 0
 	skipped := 0
 	for _, c := range h.clients {
-		// channelID == 0 → broadcast to everyone.
+		// channelID == 0 → global broadcast, deliver to everyone.
+		// Otherwise, only deliver to clients viewing this channel
+		// (via channel_focus) or in voice on this channel.
+		// Clients that haven't focused any channel (channelID == 0)
+		// are intentionally excluded from channel-scoped broadcasts
+		// to prevent information leakage (BUG-122).
 		if bm.channelID != 0 && c.getChannelID() != bm.channelID && c.getVoiceChID() != bm.channelID {
 			skipped++
 			continue

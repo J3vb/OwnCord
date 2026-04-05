@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -19,14 +20,16 @@ type errorResponse struct {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("writeJSON: failed to encode response", "error", err)
+	}
 }
 
 func writeErr(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, errorResponse{Error: code, Message: msg})
 }
 
-func pathInt64(r *http.Request, param string) (int64, error) {
+func pathInt64(r *http.Request, param string) (int64, error) { //nolint:unparam // kept generic for future URL params
 	raw := chi.URLParam(r, param)
 	return strconv.ParseInt(raw, 10, 64)
 }

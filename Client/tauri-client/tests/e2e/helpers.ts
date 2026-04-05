@@ -160,7 +160,13 @@ export const MOCK_MESSAGES_RICH = {
       timestamp: "2026-03-15T10:03:00Z",
       edited_at: null,
       attachments: [
-        { id: "1", filename: "screenshot.png", size: 102400, mime: "image/png", url: "/uploads/screenshot.png" },
+        {
+          id: "1",
+          filename: "screenshot.png",
+          size: 102400,
+          mime: "image/png",
+          url: "/uploads/screenshot.png",
+        },
       ],
       reactions: [],
       reply_to: null,
@@ -175,7 +181,13 @@ export const MOCK_MESSAGES_RICH = {
       timestamp: "2026-03-15T10:03:30Z",
       edited_at: null,
       attachments: [
-        { id: "2", filename: "report.pdf", size: 512000, mime: "application/pdf", url: "/uploads/report.pdf" },
+        {
+          id: "2",
+          filename: "report.pdf",
+          size: 512000,
+          mime: "application/pdf",
+          url: "/uploads/report.pdf",
+        },
       ],
       reactions: [],
       reply_to: null,
@@ -557,13 +569,19 @@ export function buildTauriMockScript(opts: {
 
         // ---- WS commands ----
         if (cmd === "ws_connect") {
-          ${opts.simulateWsFlow ? `
+          ${
+            opts.simulateWsFlow
+              ? `
           setTimeout(() => __tauriEmitEvent("ws-state", "open"), 100);
-          ` : ""}
+          `
+              : ""
+          }
           return;
         }
         if (cmd === "ws_send") {
-          ${opts.simulateWsFlow ? `
+          ${
+            opts.simulateWsFlow
+              ? `
           try {
             var parsed = JSON.parse(args?.message || "{}");
             if (parsed.type === "auth") {
@@ -582,7 +600,9 @@ export function buildTauriMockScript(opts: {
               }
             }
           } catch (e) {}
-          ` : ""}
+          `
+              : ""
+          }
           return;
         }
         if (cmd === "ws_disconnect") return;
@@ -618,136 +638,164 @@ export function buildTauriMockScript(opts: {
 // ---------------------------------------------------------------------------
 
 export async function mockTauriConnect(page: Page): Promise<void> {
-  await page.addInitScript(buildTauriMockScript({
-    httpRoutes: [
-      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-    ],
-    simulateWsFlow: false,
-  }));
+  await page.addInitScript(
+    buildTauriMockScript({
+      httpRoutes: [
+        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+      ],
+      simulateWsFlow: false,
+    }),
+  );
 }
 
 export async function mockTauriConnectWith2FA(page: Page): Promise<void> {
-  await page.addInitScript(buildTauriMockScript({
-    httpRoutes: [
-      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_2FA_RESPONSE },
-    ],
-    simulateWsFlow: false,
-  }));
+  await page.addInitScript(
+    buildTauriMockScript({
+      httpRoutes: [
+        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_2FA_RESPONSE },
+      ],
+      simulateWsFlow: false,
+    }),
+  );
 }
 
 export async function mockTauriFullSession(page: Page): Promise<void> {
-  await page.addInitScript(buildTauriMockScript({
-    httpRoutes: [
-      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-      { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-      { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
-    ],
-    simulateWsFlow: true,
-  }));
+  await page.addInitScript(
+    buildTauriMockScript({
+      httpRoutes: [
+        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+        { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
+      ],
+      simulateWsFlow: true,
+    }),
+  );
 }
 
 export async function mockTauriFullSessionWithMessages(page: Page): Promise<void> {
-  await page.addInitScript(buildTauriMockScript({
-    httpRoutes: [
-      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-      { pattern: "/messages", status: 200, body: MOCK_MESSAGES_RICH },
-      { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
-      { pattern: "/api/v1/invites", status: 200, body: MOCK_INVITES },
-    ],
-    simulateWsFlow: true,
-    readyOverrides: {
-      channels: MOCK_CHANNELS_WITH_CATEGORIES,
-      members: MOCK_MEMBERS_MULTI_ROLE,
-    },
-  }));
+  await page.addInitScript(
+    buildTauriMockScript({
+      httpRoutes: [
+        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+        { pattern: "/messages", status: 200, body: MOCK_MESSAGES_RICH },
+        { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
+        { pattern: "/api/v1/invites", status: 200, body: MOCK_INVITES },
+      ],
+      simulateWsFlow: true,
+      readyOverrides: {
+        channels: MOCK_CHANNELS_WITH_CATEGORIES,
+        members: MOCK_MEMBERS_MULTI_ROLE,
+      },
+    }),
+  );
 }
 
 export async function mockTauriFullSessionWithVoice(page: Page): Promise<void> {
-  await page.addInitScript(buildTauriMockScript({
-    httpRoutes: [
-      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-      { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-    ],
-    simulateWsFlow: true,
-    wsHandlers: voiceWsHandlers(),
-    readyOverrides: {
-      channels: MOCK_CHANNELS_WITH_CATEGORIES,
-      members: MOCK_MEMBERS_MULTI_ROLE,
-      voice_states: MOCK_VOICE_STATE,
-    },
-  }));
+  await page.addInitScript(
+    buildTauriMockScript({
+      httpRoutes: [
+        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+      ],
+      simulateWsFlow: true,
+      wsHandlers: voiceWsHandlers(),
+      readyOverrides: {
+        channels: MOCK_CHANNELS_WITH_CATEGORIES,
+        members: MOCK_MEMBERS_MULTI_ROLE,
+        voice_states: MOCK_VOICE_STATE,
+      },
+    }),
+  );
 }
 
 export async function mockTauriFullSessionWithVoiceFailure(page: Page): Promise<void> {
-  await page.addInitScript(buildTauriMockScript({
-    httpRoutes: [
-      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-      { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-    ],
-    simulateWsFlow: true,
-    wsHandlers: [voiceJoinFailureHandler()],
-    readyOverrides: {
-      channels: MOCK_CHANNELS_WITH_CATEGORIES,
-      members: MOCK_MEMBERS_MULTI_ROLE,
-      voice_states: MOCK_VOICE_STATE,
-    },
-  }));
+  await page.addInitScript(
+    buildTauriMockScript({
+      httpRoutes: [
+        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+      ],
+      simulateWsFlow: true,
+      wsHandlers: [voiceJoinFailureHandler()],
+      readyOverrides: {
+        channels: MOCK_CHANNELS_WITH_CATEGORIES,
+        members: MOCK_MEMBERS_MULTI_ROLE,
+        voice_states: MOCK_VOICE_STATE,
+      },
+    }),
+  );
 }
 
 export async function mockTauriFullSessionWithEcho(page: Page): Promise<void> {
-  await page.addInitScript(buildTauriMockScript({
-    httpRoutes: [
-      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-      { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-    ],
-    simulateWsFlow: true,
-    echoChatSend: true,
-  }));
+  await page.addInitScript(
+    buildTauriMockScript({
+      httpRoutes: [
+        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+      ],
+      simulateWsFlow: true,
+      echoChatSend: true,
+    }),
+  );
 }
 
 export async function mockTauriFullSessionWithMessagesAndEcho(page: Page): Promise<void> {
-  await page.addInitScript(buildTauriMockScript({
-    httpRoutes: [
-      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-      { pattern: "/messages", status: 200, body: MOCK_MESSAGES_RICH },
-      { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
-      { pattern: "/api/v1/invites", status: 200, body: MOCK_INVITES },
-    ],
-    simulateWsFlow: true,
-    echoChatSend: true,
-    readyOverrides: {
-      channels: MOCK_CHANNELS_WITH_CATEGORIES,
-      members: MOCK_MEMBERS_MULTI_ROLE,
-    },
-  }));
+  await page.addInitScript(
+    buildTauriMockScript({
+      httpRoutes: [
+        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+        { pattern: "/messages", status: 200, body: MOCK_MESSAGES_RICH },
+        { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
+        { pattern: "/api/v1/invites", status: 200, body: MOCK_INVITES },
+      ],
+      simulateWsFlow: true,
+      echoChatSend: true,
+      readyOverrides: {
+        channels: MOCK_CHANNELS_WITH_CATEGORIES,
+        members: MOCK_MEMBERS_MULTI_ROLE,
+      },
+    }),
+  );
 }
 
 export async function mockTauriFullSessionWithFailingMessages(page: Page): Promise<void> {
-  await page.addInitScript(buildTauriMockScript({
-    httpRoutes: [
-      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-      { pattern: "/messages", status: 500, body: { error: "INTERNAL_ERROR", message: "Failed to load messages" } },
-    ],
-    simulateWsFlow: true,
-  }));
+  await page.addInitScript(
+    buildTauriMockScript({
+      httpRoutes: [
+        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+        {
+          pattern: "/messages",
+          status: 500,
+          body: { error: "INTERNAL_ERROR", message: "Failed to load messages" },
+        },
+      ],
+      simulateWsFlow: true,
+    }),
+  );
 }
 
 export async function mockTauriLoginError(page: Page): Promise<void> {
-  await page.addInitScript(buildTauriMockScript({
-    httpRoutes: [
-      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      { pattern: "/api/v1/auth/login", status: 401, body: { error: "INVALID_CREDENTIALS", message: "Invalid username or password" } },
-    ],
-    simulateWsFlow: false,
-  }));
+  await page.addInitScript(
+    buildTauriMockScript({
+      httpRoutes: [
+        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        {
+          pattern: "/api/v1/auth/login",
+          status: 401,
+          body: { error: "INVALID_CREDENTIALS", message: "Invalid username or password" },
+        },
+      ],
+      simulateWsFlow: false,
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -794,15 +842,14 @@ export async function switchSettingsTab(page: Page, tabName: string): Promise<vo
  * Emit a WebSocket event from the mock server to the client.
  * Must be called after the page has loaded and WS listeners are registered.
  */
-export async function emitWsEvent(
-  page: Page,
-  eventName: string,
-  payload: unknown,
-): Promise<void> {
+export async function emitWsEvent(page: Page, eventName: string, payload: unknown): Promise<void> {
   await page.evaluate(
     ({ event, data }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__tauriEmitEvent(event, typeof data === "string" ? data : JSON.stringify(data));
+      (window as any).__tauriEmitEvent(
+        event,
+        typeof data === "string" ? data : JSON.stringify(data),
+      );
     },
     { event: eventName, data: payload },
   );

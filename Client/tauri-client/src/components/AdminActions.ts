@@ -60,53 +60,73 @@ function withConfirmation(
   let confirming = false;
   const originalLabel = item.textContent ?? "";
 
-  item.addEventListener("click", (e) => {
-    e.stopPropagation();
-    if (confirming) {
-      confirming = false;
-      setText(item, originalLabel);
-      onConfirm();
-    } else {
-      confirming = true;
-      setText(item, confirmLabel);
-    }
-  }, { signal });
+  item.addEventListener(
+    "click",
+    (e) => {
+      e.stopPropagation();
+      if (confirming) {
+        confirming = false;
+        setText(item, originalLabel);
+        onConfirm();
+      } else {
+        confirming = true;
+        setText(item, confirmLabel);
+      }
+    },
+    { signal },
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Member Context Menu
 // ---------------------------------------------------------------------------
 
-export function createMemberContextMenu(
-  options: MemberContextMenuOptions,
-): ContextMenuResult {
+export function createMemberContextMenu(options: MemberContextMenuOptions): ContextMenuResult {
   const ac = new AbortController();
   const menu = createElement("div", { class: "context-menu" });
 
   // Role submenu trigger
-  const roleItem = createElement("div", {
-    class: "context-menu__item",
-  }, "Change Role");
+  const roleItem = createElement(
+    "div",
+    {
+      class: "context-menu__item",
+    },
+    "Change Role",
+  );
 
   const roleSub = createElement("div", { class: "context-menu__submenu" });
   for (const role of options.availableRoles) {
-    const cls = role === options.currentRole
-      ? "context-menu__item context-menu__item--active"
-      : "context-menu__item";
-    const roleOption = createMenuItem(role, cls, () => {
-      if (role !== options.currentRole) {
-        void options.onChangeRole(role);
-      }
-    }, ac.signal);
+    const cls =
+      role === options.currentRole
+        ? "context-menu__item context-menu__item--active"
+        : "context-menu__item";
+    const roleOption = createMenuItem(
+      role,
+      cls,
+      () => {
+        if (role !== options.currentRole) {
+          void options.onChangeRole(role);
+        }
+      },
+      ac.signal,
+    );
     roleSub.appendChild(roleOption);
   }
 
-  roleItem.addEventListener("mouseenter", () => {
-    roleSub.style.display = "";
-  }, { signal: ac.signal });
-  roleItem.addEventListener("mouseleave", () => {
-    roleSub.style.display = "none";
-  }, { signal: ac.signal });
+  roleItem.addEventListener(
+    "mouseenter",
+    () => {
+      roleSub.style.display = "";
+    },
+    { signal: ac.signal },
+  );
+  roleItem.addEventListener(
+    "mouseleave",
+    () => {
+      roleSub.style.display = "none";
+    },
+    { signal: ac.signal },
+  );
 
   roleSub.style.display = "none";
   appendChildren(roleItem, roleSub);
@@ -115,21 +135,39 @@ export function createMemberContextMenu(
   menu.appendChild(createSeparator());
 
   // Kick with confirmation
-  const kickItem = createElement("div", {
-    class: "context-menu__item context-menu__item--danger",
-  }, "Kick");
-  withConfirmation(kickItem, "Are you sure?", () => {
-    void options.onKick();
-  }, ac.signal);
+  const kickItem = createElement(
+    "div",
+    {
+      class: "context-menu__item context-menu__item--danger",
+    },
+    "Kick",
+  );
+  withConfirmation(
+    kickItem,
+    "Are you sure?",
+    () => {
+      void options.onKick();
+    },
+    ac.signal,
+  );
   menu.appendChild(kickItem);
 
   // Ban with confirmation
-  const banItem = createElement("div", {
-    class: "context-menu__item context-menu__item--danger",
-  }, "Ban");
-  withConfirmation(banItem, "Are you sure?", () => {
-    void options.onBan();
-  }, ac.signal);
+  const banItem = createElement(
+    "div",
+    {
+      class: "context-menu__item context-menu__item--danger",
+    },
+    "Ban",
+  );
+  withConfirmation(
+    banItem,
+    "Are you sure?",
+    () => {
+      void options.onBan();
+    },
+    ac.signal,
+  );
   menu.appendChild(banItem);
 
   function destroy(): void {
@@ -144,9 +182,7 @@ export function createMemberContextMenu(
 // Channel Context Menu
 // ---------------------------------------------------------------------------
 
-export function createChannelContextMenu(
-  options: ChannelContextMenuOptions,
-): ContextMenuResult {
+export function createChannelContextMenu(options: ChannelContextMenuOptions): ContextMenuResult {
   const ac = new AbortController();
   const menu = createElement("div", { class: "context-menu" });
 
@@ -171,12 +207,21 @@ export function createChannelContextMenu(
   menu.appendChild(createSeparator());
 
   // Delete Channel with confirmation
-  const deleteItem = createElement("div", {
-    class: "context-menu__item context-menu__item--danger",
-  }, "Delete Channel");
-  withConfirmation(deleteItem, "Are you sure?", () => {
-    void options.onDelete();
-  }, ac.signal);
+  const deleteItem = createElement(
+    "div",
+    {
+      class: "context-menu__item context-menu__item--danger",
+    },
+    "Delete Channel",
+  );
+  withConfirmation(
+    deleteItem,
+    "Are you sure?",
+    () => {
+      void options.onDelete();
+    },
+    ac.signal,
+  );
   menu.appendChild(deleteItem);
 
   function destroy(): void {

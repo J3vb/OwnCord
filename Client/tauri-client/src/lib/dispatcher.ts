@@ -27,6 +27,7 @@ import {
   addMember,
   removeMember,
   updateMemberRole,
+  updateMemberProfile,
   updatePresence,
   setTyping,
 } from "@stores/members.store";
@@ -49,7 +50,7 @@ import {
 } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import type { DmChannelPayload } from "./types";
-import { handleVoiceToken } from "@lib/livekitSession";
+import { handleVoiceToken, isVoiceConnected } from "@lib/livekitSession";
 import { notifyIncomingMessage } from "./notifications";
 import { createLogger } from "./logger";
 import { ServerMessageType as S } from "./protocolTypes";
@@ -87,12 +88,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
 
   unsubs.push(
     ws.on(S.AUTH_OK, (payload) => {
-      setAuth(
-        authStore.getState().token ?? "",
-        payload.user,
-        payload.server_name,
-        payload.motd,
-      );
+      setAuth(authStore.getState().token ?? "", payload.user, payload.server_name, payload.motd);
     }),
   );
 
@@ -112,6 +108,19 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
       setRoles(payload.roles ?? []);
       setMembers(payload.members);
       setVoiceStates(payload.voice_states);
+
+      // Defense-in-depth: if the ready payload shows us in a voice channel
+      // but we have no LiveKit room connection (e.g. after F5 reload),
+      // send voice_leave to clean up the stale state. The server should
+      // have already cleaned this up, but this handles edge cases.
+      const currentUserId = authStore.getState().user?.id ?? 0;
+      const inVoicePerReady =
+        currentUserId !== 0 && payload.voice_states.some((vs) => vs.user_id === currentUserId);
+      if (inVoicePerReady && !isVoiceConnected()) {
+        log.warn("Stale voice state detected in ready payload — sending voice_leave");
+        ws.send({ type: "voice_leave", payload: {} });
+        leaveVoiceChannel();
+      }
 
       // Auto-select the first text channel if none is active
       const currentActive = channelsStore.select((s) => s.activeChannelId);
@@ -163,9 +172,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
         user: payload.user.username,
       });
       addMessage(payload);
-      const activeId = channelsStore.select(
-        (s) => s.activeChannelId,
-      );
+      const activeId = channelsStore.select((s) => s.activeChannelId);
 
       // Check if this is a DM channel and whether the message is from self.
       const dmChannels = dmStore.getState().channels;
@@ -196,12 +203,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
             payload.timestamp,
           );
         } else {
-          updateDmLastMessage(
-            payload.channel_id,
-            payload.id,
-            payload.content,
-            payload.timestamp,
-          );
+          updateDmLastMessage(payload.channel_id, payload.id, payload.content, payload.timestamp);
         }
       }
 
@@ -278,7 +280,7 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
         const remaining = channelsStore.select((s) => s.channels);
         const sorted = [...remaining.values()]
           .filter((ch) => ch.type === "text")
-          .sort((a, b) => a.position - b.position);
+          .toSorted((a, b) => a.position - b.position);
         const firstTextId = sorted.length > 0 ? sorted[0]!.id : null;
         setActiveChannel(firstTextId);
         log.info("Active channel deleted, redirected", { deletedId: payload.id });
@@ -313,6 +315,24 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
     ws.on(S.MEMBER_UPDATE, (payload) => {
       log.info("Member role updated", { userId: payload.user_id, role: payload.role });
       updateMemberRole(payload.user_id, payload.role);
+    }),
+  );
+
+  unsubs.push(
+    ws.on(S.USER_UPDATE, (payload) => {
+      log.info("User profile updated", { userId: payload.user_id, username: payload.username });
+      updateMemberProfile(payload.user_id, payload.username, payload.avatar);
+
+      // Update auth store if the current user changed their own profile.
+      const currentUser = authStore.getState().user;
+      if (currentUser && payload.user_id === currentUser.id) {
+        setAuth(
+          authStore.getState().token ?? "",
+          { ...currentUser, username: payload.username, avatar: payload.avatar },
+          authStore.getState().serverName ?? "",
+          authStore.getState().motd ?? "",
+        );
+      }
     }),
   );
 

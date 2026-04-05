@@ -19,6 +19,9 @@ const log = createLogger("audioPipeline");
 export class AudioPipeline {
   private room: Room | null = null;
 
+  /** Monotonic counter incremented on teardown — used to discard stale async results. */
+  private _pipelineGeneration = 0;
+
   // Pipeline nodes
   private audioPipelineCtx: AudioContext | null = null;
   private audioPipelineGain: GainNode | null = null;
@@ -121,12 +124,22 @@ export class AudioPipeline {
       this.audioPipelineAnalyser = analyser;
       this.audioPipelineDest = dest;
 
-      // Replace the WebRTC sender's track with the pipeline output
+      // Replace the WebRTC sender's track with the pipeline output.
+      // BUG-106: Guard with generation counter to discard stale replaceTrack
+      // if teardown races ahead of this setup.
       const adjustedTrack = dest.stream.getAudioTracks()[0];
+      const gen = this._pipelineGeneration;
       if (adjustedTrack !== undefined && micPub.track.sender) {
-        void micPub.track.sender.replaceTrack(adjustedTrack).catch((err) => {
-          log.warn("Failed to replace sender track with pipeline output", err);
-        });
+        void micPub.track.sender
+          .replaceTrack(adjustedTrack)
+          .then(() => {
+            if (this._pipelineGeneration !== gen) {
+              log.debug("replaceTrack (setup) completed after generation change — stale");
+            }
+          })
+          .catch((err) => {
+            log.warn("Failed to replace sender track with pipeline output", err);
+          });
       }
 
       log.info("Audio pipeline created", { inputGain: this.currentInputGain });
@@ -140,21 +153,44 @@ export class AudioPipeline {
 
   /** Tear down the audio pipeline and restore the original sender track. */
   teardownAudioPipeline(): void {
+    this._pipelineGeneration++;
     this.stopVadPolling();
 
-    // Restore original mic track on the WebRTC sender
+    // Restore original mic track on the WebRTC sender.
+    // BUG-106: Guard with generation counter so a stale teardown replaceTrack
+    // cannot overwrite a subsequent setup's pipeline track.
+    const gen = this._pipelineGeneration;
     if (this.room !== null) {
       const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
       if (micPub?.track?.sender !== undefined) {
         const originalTrack = micPub.track.mediaStreamTrack;
-        void micPub.track.sender.replaceTrack(originalTrack).catch((err) => log.debug("Failed to replace track during teardown", err));
+        void micPub.track.sender
+          .replaceTrack(originalTrack)
+          .then(() => {
+            if (this._pipelineGeneration !== gen) {
+              log.debug("replaceTrack (teardown) completed after generation change — stale");
+            }
+          })
+          .catch((err) => log.debug("Failed to replace track during teardown", err));
       }
     }
 
-    if (this.audioPipelineGain !== null) { this.audioPipelineGain.disconnect(); this.audioPipelineGain = null; }
-    if (this.audioPipelineAnalyser !== null) { this.audioPipelineAnalyser.disconnect(); this.audioPipelineAnalyser = null; }
-    if (this.audioPipelineDest !== null) { this.audioPipelineDest.disconnect(); this.audioPipelineDest = null; }
-    if (this.audioPipelineCtx !== null) { void this.audioPipelineCtx.close(); this.audioPipelineCtx = null; }
+    if (this.audioPipelineGain !== null) {
+      this.audioPipelineGain.disconnect();
+      this.audioPipelineGain = null;
+    }
+    if (this.audioPipelineAnalyser !== null) {
+      this.audioPipelineAnalyser.disconnect();
+      this.audioPipelineAnalyser = null;
+    }
+    if (this.audioPipelineDest !== null) {
+      this.audioPipelineDest.disconnect();
+      this.audioPipelineDest = null;
+    }
+    if (this.audioPipelineCtx !== null) {
+      void this.audioPipelineCtx.close();
+      this.audioPipelineCtx = null;
+    }
     this.vadGated = false;
   }
 
@@ -163,7 +199,11 @@ export class AudioPipeline {
   updatePipelineGain(): void {
     if (this.audioPipelineGain === null || this.audioPipelineCtx === null) return;
     const effectiveGain = this.vadGated ? 0 : this.currentInputGain;
-    this.audioPipelineGain.gain.setTargetAtTime(effectiveGain, this.audioPipelineCtx.currentTime, 0.015);
+    this.audioPipelineGain.gain.setTargetAtTime(
+      effectiveGain,
+      this.audioPipelineCtx.currentTime,
+      0.015,
+    );
   }
 
   // --- Volume/sensitivity ---
@@ -188,7 +228,10 @@ export class AudioPipeline {
     this.stopVadPolling();
     if (clamped >= 100) {
       // Ensure ungated
-      if (this.vadGated) { this.vadGated = false; this.updatePipelineGain(); }
+      if (this.vadGated) {
+        this.vadGated = false;
+        this.updatePipelineGain();
+      }
     } else {
       this.startVadPolling();
     }
@@ -207,9 +250,13 @@ export class AudioPipeline {
   private _vadUsingWorklet = false;
 
   /** Latest RMS value from VAD (for UI indicator bar). */
-  get lastVadRms(): number { return this._lastVadRms; }
+  get lastVadRms(): number {
+    return this._lastVadRms;
+  }
   /** Whether VAD is using AudioWorklet (true) or setTimeout fallback (false). */
-  get vadUsingWorklet(): boolean { return this._vadUsingWorklet; }
+  get vadUsingWorklet(): boolean {
+    return this._vadUsingWorklet;
+  }
 
   /** Start VAD — tries AudioWorklet first, falls back to setTimeout polling. */
   startVadPolling(): void {
@@ -219,16 +266,22 @@ export class AudioPipeline {
     const sensitivity = loadPref<number>("voiceSensitivity", 50);
     if (sensitivity >= 100) return;
 
-    const threshold = ((100 - sensitivity) / 100) * 0.10;
+    const threshold = ((100 - sensitivity) / 100) * 0.1;
 
     // Try AudioWorklet first
-    this.audioPipelineCtx.audioWorklet.addModule("/vad-worklet.js").then(() => {
-      if (this.audioPipelineCtx === null) return; // Torn down while loading
-      this.startVadWorklet(threshold);
-    }).catch((err) => {
-      log.warn("AudioWorklet unavailable, falling back to setTimeout VAD", err);
-      this.startVadFallback(threshold);
-    });
+    const gen = this._pipelineGeneration;
+    this.audioPipelineCtx.audioWorklet
+      .addModule("/vad-worklet.js")
+      .then(() => {
+        if (gen !== this._pipelineGeneration) return; // Torn down while loading
+        if (this.audioPipelineCtx === null) return;
+        this.startVadWorklet(threshold);
+      })
+      .catch((err) => {
+        if (gen !== this._pipelineGeneration) return;
+        log.warn("AudioWorklet unavailable, falling back to setTimeout VAD", err);
+        this.startVadFallback(threshold);
+      });
   }
 
   /** Start VAD via AudioWorklet (preferred — runs on audio thread). */
@@ -245,8 +298,10 @@ export class AudioPipeline {
       }
       // Don't connect workletNode output to anything — it's analysis-only
 
+      // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
       workletNode.port.postMessage({ type: "config", threshold });
 
+      // oxlint-disable-next-line prefer-add-event-listener -- MessagePort does not support addEventListener
       workletNode.port.onmessage = (event: MessageEvent) => {
         if (event.data.type === "gate") {
           const gated = event.data.gated as boolean;
@@ -341,6 +396,7 @@ export class AudioPipeline {
     }
     // Stop AudioWorklet
     if (this.vadWorkletNode !== null) {
+      // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
       this.vadWorkletNode.port.postMessage({ type: "stop" });
       this.vadWorkletNode.disconnect();
       this.vadWorkletNode = null;

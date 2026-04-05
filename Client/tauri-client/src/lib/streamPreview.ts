@@ -12,6 +12,7 @@
 import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { getRemoteVideoStream } from "@lib/livekitSession";
+import { voiceStore } from "@stores/voice.store";
 
 /** Internal state tracked per voice-user-item row for cleanup. */
 interface PreviewState {
@@ -118,15 +119,24 @@ function showPreview(
     }
     previewDiv.appendChild(video);
   } else {
-    previewDiv.appendChild(createPlaceholder(onClickJoin));
+    const isInChannel = voiceStore.getState().currentChannelId !== null;
+    if (isInChannel) {
+      previewDiv.appendChild(createUnavailablePlaceholder(onClickWatch));
+    } else {
+      previewDiv.appendChild(createPlaceholder(onClickJoin));
+    }
   }
 
   // Screen reader announcement
-  const announcement = createElement("span", {
-    role: "status",
-    "aria-live": "polite",
-    class: "sr-only",
-  }, `Showing stream preview for ${username}`);
+  const announcement = createElement(
+    "span",
+    {
+      role: "status",
+      "aria-live": "polite",
+      class: "sr-only",
+    },
+    `Showing stream preview for ${username}`,
+  );
   previewDiv.appendChild(announcement);
 
   // Close when mouse leaves the preview div (but not if moving back to row)
@@ -165,6 +175,26 @@ function createPlaceholder(onClickJoin?: () => void): HTMLElement {
   return placeholder;
 }
 
+function createUnavailablePlaceholder(onClickWatch?: () => void): HTMLElement {
+  const placeholder = createElement("div", {
+    class: "vu-preview-placeholder",
+    role: "button",
+    "aria-label": "Stream unavailable",
+  });
+  const icon = createIcon("monitor-off", 14);
+  icon.style.color = "var(--text-faint)";
+  placeholder.appendChild(icon);
+  const text = createElement("span", {}, "Stream unavailable");
+  placeholder.appendChild(text);
+  if (onClickWatch !== undefined) {
+    placeholder.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onClickWatch();
+    });
+  }
+  return placeholder;
+}
+
 function hidePreview(row: HTMLElement): void {
   const state = previewTimers.get(row);
   if (state !== undefined) {
@@ -177,7 +207,8 @@ function hidePreview(row: HTMLElement): void {
 
   // Preview is a sibling after the row
   const next = row.nextElementSibling;
-  const previewDiv = (next !== null && next.classList.contains("vu-preview")) ? next as HTMLElement : null;
+  const previewDiv =
+    next !== null && next.classList.contains("vu-preview") ? (next as HTMLElement) : null;
   if (previewDiv === null) {
     previewTimers.delete(row);
     return;
@@ -236,7 +267,11 @@ export function attachStreamPreview(
       state.animation = window.setTimeout(() => {
         // Check if mouse is now over the preview sibling
         const preview = row.nextElementSibling;
-        if (preview !== null && preview.classList.contains("vu-preview") && preview.matches(":hover")) {
+        if (
+          preview !== null &&
+          preview.classList.contains("vu-preview") &&
+          preview.matches(":hover")
+        ) {
           return; // Mouse moved to preview — keep it open
         }
         hidePreview(row);
@@ -266,18 +301,19 @@ export function attachStreamPreview(
  * any open previews when the user scrolls. WebView2 doesn't always
  * fire mouseleave on scroll.
  */
-export function attachScrollCollapse(
-  container: HTMLElement,
-  signal: AbortSignal,
-): void {
-  container.addEventListener("scroll", () => {
-    const openPreviews = container.querySelectorAll<HTMLElement>(".vu-preview");
-    for (const preview of openPreviews) {
-      // Preview is a sibling after the row — get the preceding voice-user-item
-      const row = preview.previousElementSibling;
-      if (row !== null && row.classList.contains("voice-user-item")) {
-        hidePreview(row as HTMLElement);
+export function attachScrollCollapse(container: HTMLElement, signal: AbortSignal): void {
+  container.addEventListener(
+    "scroll",
+    () => {
+      const openPreviews = container.querySelectorAll<HTMLElement>(".vu-preview");
+      for (const preview of openPreviews) {
+        // Preview is a sibling after the row — get the preceding voice-user-item
+        const row = preview.previousElementSibling;
+        if (row !== null && row.classList.contains("voice-user-item")) {
+          hidePreview(row as HTMLElement);
+        }
       }
-    }
-  }, { signal, passive: true });
+    },
+    { signal, passive: true },
+  );
 }

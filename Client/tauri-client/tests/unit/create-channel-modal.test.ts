@@ -42,17 +42,11 @@ describe("allowedTypesForCategory", () => {
   });
 
   it("returns text and announcement for text categories", () => {
-    expect(allowedTypesForCategory("Text Channels")).toEqual([
-      "text",
-      "announcement",
-    ]);
+    expect(allowedTypesForCategory("Text Channels")).toEqual(["text", "announcement"]);
   });
 
   it("returns text and announcement for 'Chat'", () => {
-    expect(allowedTypesForCategory("Chat")).toEqual([
-      "text",
-      "announcement",
-    ]);
+    expect(allowedTypesForCategory("Chat")).toEqual(["text", "announcement"]);
   });
 });
 
@@ -94,7 +88,9 @@ describe("CreateChannelModal", () => {
 
   it("shows only text and announcement types for text categories", () => {
     const { modal } = makeModal("Text Channels");
-    const select = container.querySelector("[data-testid='channel-type-select']") as HTMLSelectElement;
+    const select = container.querySelector(
+      "[data-testid='channel-type-select']",
+    ) as HTMLSelectElement;
     const options = Array.from(select.options).map((o) => o.value);
     expect(options).toEqual(["text", "announcement"]);
     expect(options).not.toContain("voice");
@@ -103,7 +99,9 @@ describe("CreateChannelModal", () => {
 
   it("shows only voice type for voice categories", () => {
     const { modal } = makeModal("Voice Channels");
-    const select = container.querySelector("[data-testid='channel-type-select']") as HTMLSelectElement;
+    const select = container.querySelector(
+      "[data-testid='channel-type-select']",
+    ) as HTMLSelectElement;
     const options = Array.from(select.options).map((o) => o.value);
     expect(options).toEqual(["voice"]);
     expect(options).not.toContain("text");
@@ -121,7 +119,9 @@ describe("CreateChannelModal", () => {
     const onCreate = vi.fn(async () => {});
     const { modal } = makeModal("Text Channels", { onCreate });
 
-    const submitBtn = container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement;
+    const submitBtn = container.querySelector(
+      "[data-testid='channel-create-submit']",
+    ) as HTMLButtonElement;
     submitBtn.click();
 
     const error = container.querySelector("[data-testid='channel-create-error']");
@@ -134,10 +134,14 @@ describe("CreateChannelModal", () => {
     const onCreate = vi.fn(async () => {});
     const { modal } = makeModal("Text Channels", { onCreate });
 
-    const nameInput = container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement;
+    const nameInput = container.querySelector(
+      "[data-testid='channel-name-input']",
+    ) as HTMLInputElement;
     nameInput.value = "test-channel";
 
-    const submitBtn = container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement;
+    const submitBtn = container.querySelector(
+      "[data-testid='channel-create-submit']",
+    ) as HTMLButtonElement;
     submitBtn.click();
 
     // Wait for async handler
@@ -174,10 +178,14 @@ describe("CreateChannelModal", () => {
     const onCreate = vi.fn().mockRejectedValue(new Error("Name already exists"));
     const { modal } = makeModal("Text Channels", { onCreate });
 
-    const nameInput = container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement;
+    const nameInput = container.querySelector(
+      "[data-testid='channel-name-input']",
+    ) as HTMLInputElement;
     nameInput.value = "duplicate";
 
-    const submitBtn = container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement;
+    const submitBtn = container.querySelector(
+      "[data-testid='channel-create-submit']",
+    ) as HTMLButtonElement;
     submitBtn.click();
 
     await vi.waitFor(() => {
@@ -196,10 +204,14 @@ describe("CreateChannelModal", () => {
     const onCreate = vi.fn().mockRejectedValue("string error");
     const { modal } = makeModal("Text Channels", { onCreate });
 
-    const nameInput = container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement;
+    const nameInput = container.querySelector(
+      "[data-testid='channel-name-input']",
+    ) as HTMLInputElement;
     nameInput.value = "test";
 
-    const submitBtn = container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement;
+    const submitBtn = container.querySelector(
+      "[data-testid='channel-create-submit']",
+    ) as HTMLButtonElement;
     submitBtn.click();
 
     await vi.waitFor(() => {
@@ -212,13 +224,22 @@ describe("CreateChannelModal", () => {
 
   it("disables submit button and shows 'Creating...' while creating", async () => {
     let resolveCreate: (() => void) | undefined;
-    const onCreate = vi.fn<any>(() => new Promise<void>((resolve) => { resolveCreate = resolve; }));
+    const onCreate = vi.fn<any>(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
     const { modal } = makeModal("Text Channels", { onCreate });
 
-    const nameInput = container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement;
+    const nameInput = container.querySelector(
+      "[data-testid='channel-name-input']",
+    ) as HTMLInputElement;
     nameInput.value = "new-channel";
 
-    const submitBtn = container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement;
+    const submitBtn = container.querySelector(
+      "[data-testid='channel-create-submit']",
+    ) as HTMLButtonElement;
     submitBtn.click();
 
     expect(submitBtn.hasAttribute("disabled")).toBe(true);
@@ -243,7 +264,9 @@ describe("CreateChannelModal", () => {
     const onClose = vi.fn();
     const { modal } = makeModal("Text Channels", { onClose });
 
-    const overlay = container.querySelector("[data-testid='create-channel-modal']") as HTMLDivElement;
+    const overlay = container.querySelector(
+      "[data-testid='create-channel-modal']",
+    ) as HTMLDivElement;
     // Simulate clicking the overlay backdrop directly
     overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
@@ -252,19 +275,26 @@ describe("CreateChannelModal", () => {
   });
 
   it("clears previous error when submitting valid data after error", async () => {
-    const onCreate = vi.fn()
+    const onCreate = vi
+      .fn()
       .mockRejectedValueOnce(new Error("First error"))
       .mockResolvedValueOnce(undefined);
     const { modal } = makeModal("Text Channels", { onCreate });
 
-    const nameInput = container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement;
+    const nameInput = container.querySelector(
+      "[data-testid='channel-name-input']",
+    ) as HTMLInputElement;
     nameInput.value = "test";
 
-    const submitBtn = container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement;
+    const submitBtn = container.querySelector(
+      "[data-testid='channel-create-submit']",
+    ) as HTMLButtonElement;
     submitBtn.click();
 
     await vi.waitFor(() => {
-      expect(container.querySelector("[data-testid='channel-create-error']")?.textContent).toBe("First error");
+      expect(container.querySelector("[data-testid='channel-create-error']")?.textContent).toBe(
+        "First error",
+      );
     });
 
     // Try again with a valid name

@@ -11,7 +11,8 @@ import { SERVER_URL, TEST_USER, TEST_PASS, SKIP_SERVER, hasCredentials } from ".
 test.describe("Authentication Flow", () => {
   test.beforeEach(async ({ nativePage }) => {
     test.skip(SKIP_SERVER, "Skipped: OWNCORD_SKIP_SERVER_TESTS is set");
-    await nativePage.waitForLoadState("networkidle");
+    // Wait for the connect form to be fully rendered
+    await expect(nativePage.locator("#host")).toBeVisible({ timeout: 15_000 });
   });
 
   test("connect page renders all form fields", async ({ nativePage }) => {
@@ -97,25 +98,23 @@ test.describe("Authentication Flow", () => {
   });
 
   test("saved server profile shows in sidebar", async ({ nativePage }) => {
-    // If a server has been connected before, it should appear in the sidebar
+    // If a server has been connected before, it should appear in the sidebar.
+    // On first-time launch there may be no saved profiles — conditionally verify.
     const serverItem = nativePage.locator(".server-item").first();
-    const hasSavedServer = await serverItem.isVisible().catch(() => false);
+    const hasSavedServer = await serverItem.isVisible({ timeout: 3_000 }).catch(() => false);
+    test.skip(!hasSavedServer, "No saved server profiles (first-time launch)");
 
-    if (hasSavedServer) {
-      // Verify server item has name and host info
-      await expect(serverItem.locator(".srv-name")).toBeVisible();
-      // srv-meta may contain multiple spans (host + username), just check the container
-      await expect(serverItem.locator(".srv-meta")).toBeVisible();
-    }
-    // If no saved server, that's fine — first-time launch
+    // Verify server item has name and host info
+    await expect(serverItem.locator(".srv-name")).toBeVisible();
+    // srv-meta may contain multiple spans (host + username), just check the container
+    await expect(serverItem.locator(".srv-meta")).toBeVisible();
   });
 
   test("clicking saved server auto-fills host field", async ({ nativePage }) => {
-    // Wait for sidebar to fully populate before checking visibility
-    await nativePage.waitForLoadState("networkidle");
+    // Wait for the connect form to be ready, then check for saved server profiles
     const serverItem = nativePage.locator(".server-item").first();
     const hasSavedServer = await serverItem.isVisible({ timeout: 5_000 }).catch(() => false);
-    test.skip(!hasSavedServer, "No saved server profiles");
+    test.skip(!hasSavedServer, "No saved server profiles (first-time launch)");
 
     // Click the server item to auto-fill
     await serverItem.click();

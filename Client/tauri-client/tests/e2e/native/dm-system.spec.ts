@@ -6,12 +6,7 @@
  */
 
 import { test, expect } from "../native-fixture-persistent";
-import {
-  SKIP_SERVER,
-  hasCredentials,
-  ensureLoggedIn,
-  waitForMessages,
-} from "./helpers";
+import { SKIP_SERVER, hasCredentials, ensureLoggedIn, waitForMessages } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 

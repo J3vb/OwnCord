@@ -13,11 +13,14 @@ import (
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 )
 
-const authDeadline = 10 * time.Second
-const writeTimeout = 10 * time.Second
-const settingsCacheTTL = 30 * time.Second
+const (
+	authDeadline     = 10 * time.Second
+	writeTimeout     = 10 * time.Second
+	settingsCacheTTL = 30 * time.Second
+)
 
 // ServeWS upgrades an HTTP connection to WebSocket, performs in-band auth,
 // then drives the client's read/write loops.
@@ -36,26 +39,10 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 		}
 		conn.SetReadLimit(1 << 20) // 1 MB — match client-side limit
 
-		user, tokenHash, lastSeq, err := authenticateConn(conn, database)
+		c, lastSeq, err := hub.upgradeAndAuth(conn, database, r)
 		if err != nil {
-			slog.Warn("ws auth failed", "err", err, "remote", r.RemoteAddr)
-			_ = conn.Close(websocket.StatusPolicyViolation, "authentication failed")
 			return
 		}
-
-		c := newClient(hub, conn, user, tokenHash, r.Context())
-		c.remoteAddr = r.RemoteAddr
-
-		// Look up role name for protocol-compliant payloads and cache on client.
-		roleName := "member"
-		if role, roleErr := database.GetRoleByID(user.RoleID); roleErr == nil && role != nil {
-			roleName = strings.ToLower(role.Name)
-		}
-		c.roleName = roleName
-
-		slog.Info("websocket connected", "username", user.Username, "user_id", user.ID, "remote", r.RemoteAddr)
-		_ = database.LogAudit(user.ID, "ws_connect", "user", user.ID,
-			"WebSocket connected from "+r.RemoteAddr)
 
 		ctx := r.Context()
 		startPumps := func() {
@@ -70,73 +57,242 @@ func ServeWS(hub *Hub, database *db.DB, allowedOrigins []string) http.HandlerFun
 		// try to replay missed events from the ring buffer instead of
 		// sending a full ready payload.
 		if lastSeq > 0 {
-			events := hub.ReplayBuffer().EventsSince(lastSeq)
-			if events != nil {
-				// Replay succeeded — send auth_ok then missed events.
-				slog.Info("ws sending auth_ok (reconnect)", "user_id", user.ID, "username", user.Username, "role", roleName)
-				if err := conn.Write(ctx, websocket.MessageText, hub.buildAuthOK(user, roleName)); err != nil {
-					slog.Warn("ws: failed to send auth_ok (reconnect)", "user_id", user.ID, "err", err)
-					_ = conn.Close(websocket.StatusInternalError, "handshake failed")
-					return
-				}
-				for _, evt := range events {
-					if err := conn.Write(ctx, websocket.MessageText, evt); err != nil {
-						slog.Warn("ws: failed to send replay event", "user_id", user.ID, "err", err)
-						_ = conn.Close(websocket.StatusInternalError, "handshake failed")
-						return
-					}
-				}
-				slog.Info("ws replay completed", "user_id", user.ID, "events_replayed", len(events), "from_seq", lastSeq)
-				hub.registerNow(c)
-
-				// Update presence but skip member_join — user was already known.
-				if updateErr := database.UpdateUserStatus(user.ID, "online"); updateErr != nil {
-					slog.Warn("ws UpdateUserStatus", "err", updateErr)
-				}
-				hub.BroadcastToAll(buildPresenceMsg(user.ID, "online"))
-
-				// Start pumps.
+			if hub.handleReconnect(ctx, conn, c, database, lastSeq) {
 				startPumps()
 				return
 			}
 			// Replay failed (seq too old) — fall through to full ready payload.
-			slog.Info("ws replay failed (seq too old), sending full ready", "user_id", user.ID, "last_seq", lastSeq)
+			slog.Info("ws replay failed (seq too old), sending full ready", "user_id", c.userID, "last_seq", lastSeq)
 		}
 
-		// Fresh connection or replay fallback: full auth_ok + ready flow.
-		slog.Info("ws sending auth_ok", "user_id", user.ID, "username", user.Username, "role", roleName)
-		if err := conn.Write(ctx, websocket.MessageText, hub.buildAuthOK(user, roleName)); err != nil {
-			slog.Warn("ws: failed to send auth_ok", "user_id", user.ID, "err", err)
-			_ = conn.Close(websocket.StatusInternalError, "handshake failed")
+		if err := hub.handleFreshConnect(ctx, conn, c, database); err != nil {
 			return
 		}
-		if ready, readyErr := hub.buildReady(database, user.ID); readyErr == nil {
-			slog.Info("ws sending ready payload", "user_id", user.ID, "payload_bytes", len(ready))
-			if err := conn.Write(ctx, websocket.MessageText, ready); err != nil {
-				slog.Warn("ws: failed to send ready payload", "user_id", user.ID, "err", err)
-				_ = conn.Close(websocket.StatusInternalError, "handshake failed")
-				return
-			}
-		} else {
-			slog.Error("buildReady failed", "user_id", user.ID, "err", readyErr)
-			_ = conn.Write(ctx, websocket.MessageText,
-				buildErrorMsg(ErrCodeInternal, "failed to build ready payload"))
-		}
-		hub.registerNow(c)
-
-		if updateErr := database.UpdateUserStatus(user.ID, "online"); updateErr != nil {
-			slog.Warn("ws UpdateUserStatus", "err", updateErr)
-		}
-
-		slog.Info("ws broadcasting member_join and presence", "user_id", user.ID, "username", user.Username)
-		hub.BroadcastToAll(buildMemberJoin(user, roleName))
-		hub.BroadcastToAll(buildPresenceMsg(user.ID, "online"))
 
 		// writePump runs in background; readPump blocks.
 		// When readPump returns (disconnect), close the send channel first
 		// so writePump drains any remaining messages, then cancel its context.
 		startPumps()
 	}
+}
+
+func (h *Hub) upgradeAndAuth(
+	conn *websocket.Conn, database *db.DB, r *http.Request,
+) (*Client, uint64, error) {
+	user, tokenHash, lastSeq, err := authenticateConn(r.Context(), conn, database)
+	if err != nil {
+		slog.Warn("ws auth failed", "err", err, "remote", r.RemoteAddr)
+		_ = conn.Close(websocket.StatusPolicyViolation, "authentication failed")
+		return nil, 0, err
+	}
+
+	c := newClient(h, conn, user, tokenHash, lastSeq, r.Context())
+	c.remoteAddr = r.RemoteAddr
+
+	// Look up role name for protocol-compliant payloads and cache on client.
+	roleName := "member"
+	if role, roleErr := database.GetRoleByID(user.RoleID); roleErr == nil && role != nil {
+		roleName = strings.ToLower(role.Name)
+	}
+	c.roleName = roleName
+
+	slog.Info("websocket connected", "username", user.Username, "user_id", user.ID, "remote", r.RemoteAddr)
+	_ = database.LogAudit(user.ID, "ws_connect", "user", user.ID,
+		"WebSocket connected from "+r.RemoteAddr)
+
+	return c, lastSeq, nil
+}
+
+func (h *Hub) handleReconnect(
+	ctx context.Context, conn *websocket.Conn, c *Client, database *db.DB, lastSeq uint64,
+) bool {
+	// Compute the set of channel IDs the reconnecting user can access so that
+	// channel-scoped replay events are filtered by current permissions (M3).
+	allowedChannelIDs, err := h.computeAllowedChannels(database, c.user)
+	if err != nil {
+		slog.Warn("ws handleReconnect: computeAllowedChannels failed, falling back to full ready",
+			"user_id", c.userID, "err", err)
+		return false
+	}
+
+	events := h.ReplayBuffer().EventsSinceFiltered(lastSeq, allowedChannelIDs)
+	if events == nil {
+		return false
+	}
+
+	// Register BEFORE writing replay data so broadcasts that arrive during
+	// the write window are queued in the client's send buffer instead of
+	// being lost (BUG-123). writePump hasn't started yet, so queued messages
+	// will be drained once the pumps begin.
+	h.registerNow(c)
+
+	// Replay succeeded — send auth_ok then missed events.
+	slog.Info("ws sending auth_ok (reconnect)", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
+	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(c.user, c.roleName)); err != nil {
+		slog.Warn("ws: failed to send auth_ok (reconnect)", "user_id", c.userID, "err", err)
+		h.unregisterNow(c)
+		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
+		return true
+	}
+	for _, evt := range events {
+		if err := conn.Write(ctx, websocket.MessageText, evt); err != nil {
+			slog.Warn("ws: failed to send replay event", "user_id", c.userID, "err", err)
+			h.unregisterNow(c)
+			_ = conn.Close(websocket.StatusInternalError, "handshake failed")
+			return true
+		}
+	}
+	slog.Info("ws replay completed", "user_id", c.userID, "events_replayed", len(events), "from_seq", lastSeq)
+
+	// Update presence but skip member_join — user was already known.
+	if updateErr := database.UpdateUserStatus(c.userID, "online"); updateErr != nil {
+		slog.Warn("ws UpdateUserStatus", "err", updateErr)
+	}
+	h.BroadcastToAll(buildPresenceMsg(c.userID, "online"))
+
+	return true
+}
+
+// computeAllowedChannels returns the set of channel IDs a user may access,
+// including both server channels (filtered by ReadMessages permission) and
+// the user's open DM channels. This mirrors the buildReady logic so that
+// replay-buffer filtering matches the ready payload's visible channels.
+func (h *Hub) computeAllowedChannels(database *db.DB, user *db.User) (map[int64]bool, error) {
+	channels, err := database.ListChannels()
+	if err != nil {
+		return nil, fmt.Errorf("computeAllowedChannels ListChannels: %w", err)
+	}
+
+	role, err := database.GetRoleByID(user.RoleID)
+	if err != nil {
+		return nil, fmt.Errorf("computeAllowedChannels GetRoleByID: %w", err)
+	}
+
+	allowed := make(map[int64]bool)
+
+	// Nil role = zero access (fail closed, same as buildReady).
+	if role != nil {
+		if permissions.HasAdmin(role.Permissions) {
+			// Admin bypasses all channel permission checks.
+			for i := range channels {
+				if channels[i].Type != "dm" {
+					allowed[channels[i].ID] = true
+				}
+			}
+		} else {
+			overrides, oErr := database.GetAllChannelPermissionsForRole(role.ID)
+			if oErr != nil {
+				return nil, fmt.Errorf("computeAllowedChannels GetAllChannelPermissionsForRole: %w", oErr)
+			}
+			for i := range channels {
+				if channels[i].Type == "dm" {
+					continue
+				}
+				o := overrides[channels[i].ID]
+				effective := permissions.EffectivePerms(role.Permissions, o.Allow, o.Deny)
+				if effective&permissions.ReadMessages == permissions.ReadMessages {
+					allowed[channels[i].ID] = true
+				}
+			}
+		}
+	}
+
+	// Include the user's open DM channels.
+	dmChannels, dmErr := database.GetUserDMChannels(user.ID)
+	if dmErr != nil {
+		slog.Warn("computeAllowedChannels GetUserDMChannels", "err", dmErr)
+		// Non-fatal: DM events will simply be filtered out.
+	} else {
+		for i := range dmChannels {
+			allowed[dmChannels[i].ChannelID] = true
+		}
+	}
+
+	return allowed, nil
+}
+
+func (h *Hub) handleFreshConnect(
+	ctx context.Context, conn *websocket.Conn, c *Client, database *db.DB,
+) error {
+	// Clean stale voice state BEFORE building ready and registering.
+	// When a user F5-reloads while in voice, the DB row from the previous
+	// session must be removed so the ready payload doesn't include it and
+	// other clients see a voice_leave broadcast.
+	if vs, err := database.GetVoiceState(c.userID); err == nil && vs != nil {
+		slog.Info("ws fresh connect: cleaning stale voice state",
+			"user_id", c.userID, "channel_id", vs.ChannelID)
+		if _, delErr := database.LeaveVoiceChannelIfMatch(c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
+			slog.Warn("ws fresh connect: LeaveVoiceChannelIfMatch failed", "err", delErr)
+		}
+		h.BroadcastToAll(buildVoiceLeave(vs.ChannelID, c.userID))
+		if h.livekit != nil {
+			// BUG-089: Capture stale join token so the goroutine only removes
+			// the exact stale participant. The identity includes joinedAt, so
+			// even if the user rejoins voice quickly, the new session has a
+			// different identity and won't be removed. Use a hub-stop-aware
+			// context to avoid goroutine leaks on shutdown.
+			staleChID, staleUserID, staleJoinToken := vs.ChannelID, c.userID, vs.JoinedAt
+			go func() { //nolint:contextcheck // goroutine intentionally detaches from request context; lifecycle managed via h.stop
+				select {
+				case <-h.stop:
+					return
+				default:
+				}
+				if err := h.livekit.RemoveParticipant(staleChID, staleUserID, staleJoinToken); err != nil {
+					slog.Warn("ws fresh connect: RemoveParticipant failed (may already be gone)",
+						"err", err, "user_id", staleUserID, "channel_id", staleChID)
+				}
+			}()
+		}
+	}
+
+	// Look up role for permission-filtered ready payload.
+	// Fail closed: if the role lookup fails, disconnect rather than serving
+	// a permissive ready payload with nil role (BUG-094).
+	userRole, roleErr := database.GetRoleByID(c.user.RoleID)
+	if roleErr != nil || userRole == nil {
+		slog.Error("ws: role lookup failed, disconnecting", "user_id", c.userID, "role_id", c.user.RoleID, "err", roleErr)
+		_ = conn.Close(websocket.StatusInternalError, "role lookup failed")
+		return fmt.Errorf("role lookup failed for user %d: %w", c.userID, roleErr)
+	}
+
+	// Register BEFORE writing auth_ok + ready so broadcasts that arrive during
+	// the write window are queued in the client's send buffer instead of
+	// being lost (BUG-123). writePump hasn't started yet, so queued messages
+	// will be drained once the pumps begin.
+	h.registerNow(c)
+
+	// Fresh connection or replay fallback: full auth_ok + ready flow.
+	slog.Info("ws sending auth_ok", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
+	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(c.user, c.roleName)); err != nil {
+		slog.Warn("ws: failed to send auth_ok", "user_id", c.userID, "err", err)
+		h.unregisterNow(c)
+		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
+		return err
+	}
+	if ready, readyErr := h.buildReady(database, c.userID, userRole); readyErr == nil {
+		slog.Info("ws sending ready payload", "user_id", c.userID, "payload_bytes", len(ready))
+		if err := conn.Write(ctx, websocket.MessageText, ready); err != nil {
+			slog.Warn("ws: failed to send ready payload", "user_id", c.userID, "err", err)
+			h.unregisterNow(c)
+			_ = conn.Close(websocket.StatusInternalError, "handshake failed")
+			return err
+		}
+	} else {
+		slog.Error("buildReady failed", "user_id", c.userID, "err", readyErr)
+		_ = conn.Write(ctx, websocket.MessageText,
+			buildErrorMsg(ErrCodeInternal, "failed to build ready payload"))
+	}
+
+	if updateErr := database.UpdateUserStatus(c.userID, "online"); updateErr != nil {
+		slog.Warn("ws UpdateUserStatus", "err", updateErr)
+	}
+
+	slog.Info("ws broadcasting member_join and presence", "user_id", c.userID, "username", c.user.Username)
+	h.BroadcastToAll(buildMemberJoin(c.user, c.roleName))
+	h.BroadcastToAll(buildPresenceMsg(c.userID, "online"))
+
+	return nil
 }
 
 // writePump drains the client's send channel and writes to the WebSocket.
@@ -165,11 +321,13 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 	var lastReadErr error
 	defer func() {
-		hub.unregisterNow(c)
+		// Snapshot voice state BEFORE unregister to avoid TOCTOU with replacement connections.
+		voiceChID := c.getVoiceChID()
+		replaced := hub.unregisterNow(c)
 		if c.user != nil {
-			replaced := hub.IsUserConnected(c.userID)
-			voiceChID := c.getVoiceChID()
-			if !replaced {
+			// Always clean up voice state — LeaveVoiceChannelIfMatch uses a
+			// join_token guard so it won't remove a replacement client's session.
+			if voiceChID != 0 {
 				hub.handleVoiceLeave(ctx, c)
 			}
 			c.mu.Lock()
@@ -220,8 +378,8 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 // authenticateConn reads the first WebSocket message and validates the session
 // token. Returns the authenticated user and the token hash (for later
 // periodic session revalidation).
-func authenticateConn(conn *websocket.Conn, database *db.DB) (*db.User, string, uint64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), authDeadline)
+func authenticateConn(parent context.Context, conn *websocket.Conn, database *db.DB) (*db.User, string, uint64, error) {
+	ctx, cancel := context.WithTimeout(parent, authDeadline)
 	defer cancel()
 
 	_, raw, err := conn.Read(ctx)
@@ -302,7 +460,7 @@ func (h *Hub) buildAuthOK(user *db.User, roleName string) []byte {
 // buildReady constructs the ready server→client message.
 // Per PROTOCOL.md, channels include unread_count and last_message_id per user,
 // and only protocol-specified fields (no slow_mode, archived, voice_* extras).
-func (h *Hub) buildReady(database *db.DB, userID int64) ([]byte, error) {
+func (h *Hub) buildReady(database *db.DB, userID int64, role *db.Role) ([]byte, error) {
 	channels, err := database.ListChannels()
 	if err != nil {
 		return nil, fmt.Errorf("buildReady ListChannels: %w", err)
@@ -318,6 +476,39 @@ func (h *Hub) buildReady(database *db.DB, userID int64) ([]byte, error) {
 		members = []db.MemberSummary{}
 	}
 
+	// Filter channels by READ_MESSAGES permission (mirrors REST handleListChannels).
+	overrides := map[int64]db.ChannelOverride{}
+	if role != nil && !permissions.HasAdmin(role.Permissions) {
+		var oErr error
+		overrides, oErr = database.GetAllChannelPermissionsForRole(role.ID)
+		if oErr != nil {
+			return nil, fmt.Errorf("buildReady GetAllChannelPermissionsForRole: %w", oErr)
+		}
+	}
+	var visibleChannels []db.Channel
+	for i := range channels {
+		// DM channels are excluded — they are delivered via dm_channels field.
+		if channels[i].Type == "dm" {
+			continue
+		}
+		// Nil role = zero access (fail closed). Admin role bypasses all checks.
+		if role == nil {
+			continue
+		}
+		if permissions.HasAdmin(role.Permissions) {
+			visibleChannels = append(visibleChannels, channels[i])
+			continue
+		}
+		o := overrides[channels[i].ID]
+		effective := permissions.EffectivePerms(role.Permissions, o.Allow, o.Deny)
+		if effective&permissions.ReadMessages == permissions.ReadMessages {
+			visibleChannels = append(visibleChannels, channels[i])
+		}
+	}
+	if visibleChannels == nil {
+		visibleChannels = []db.Channel{}
+	}
+
 	// Per-user unread counts.
 	unreadMap, err := database.GetChannelUnreadCounts(userID)
 	if err != nil {
@@ -326,17 +517,17 @@ func (h *Hub) buildReady(database *db.DB, userID int64) ([]byte, error) {
 	}
 
 	// Build protocol-compliant channel objects (strip extra fields).
-	channelPayloads := make([]map[string]any, 0, len(channels))
-	for _, ch := range channels {
+	channelPayloads := make([]map[string]any, 0, len(visibleChannels))
+	for i := range visibleChannels {
 		entry := map[string]any{
-			"id":       ch.ID,
-			"name":     ch.Name,
-			"type":     ch.Type,
-			"category": ch.Category,
-			"position": ch.Position,
+			"id":       visibleChannels[i].ID,
+			"name":     visibleChannels[i].Name,
+			"type":     visibleChannels[i].Type,
+			"category": visibleChannels[i].Category,
+			"position": visibleChannels[i].Position,
 		}
-		if ch.Type == "text" {
-			if u, ok := unreadMap[ch.ID]; ok {
+		if visibleChannels[i].Type == "text" {
+			if u, ok := unreadMap[visibleChannels[i].ID]; ok {
 				entry["unread_count"] = u.UnreadCount
 				entry["last_message_id"] = u.LastMessageID
 			} else {
@@ -347,12 +538,22 @@ func (h *Hub) buildReady(database *db.DB, userID int64) ([]byte, error) {
 		channelPayloads = append(channelPayloads, entry)
 	}
 
-	// Collect all active voice states across every voice channel.
-	voiceStates, err := collectAllVoiceStates(database, channels)
+	// Collect voice states, filtered to only visible channels (BUG-095).
+	allVoiceStates, err := collectAllVoiceStates(database, channels)
 	if err != nil {
 		// Non-fatal: send empty list rather than failing the whole ready payload.
 		slog.Warn("buildReady collectAllVoiceStates", "err", err)
-		voiceStates = []db.VoiceState{}
+		allVoiceStates = []db.VoiceState{}
+	}
+	visibleSet := make(map[int64]struct{}, len(visibleChannels))
+	for i := range visibleChannels {
+		visibleSet[visibleChannels[i].ID] = struct{}{}
+	}
+	voiceStates := make([]db.VoiceState, 0, len(allVoiceStates))
+	for i := range allVoiceStates {
+		if _, ok := visibleSet[allVoiceStates[i].ChannelID]; ok {
+			voiceStates = append(voiceStates, allVoiceStates[i])
+		}
 	}
 
 	// Load open DM channels for this user.

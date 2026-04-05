@@ -1,5 +1,9 @@
 import { test, expect } from "@playwright/test";
-import { mockTauriFullSession, mockTauriFullSessionWithMessages, navigateToMainPage } from "./helpers";
+import {
+  mockTauriFullSession,
+  mockTauriFullSessionWithMessages,
+  navigateToMainPage,
+} from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Tests: Channel Sidebar

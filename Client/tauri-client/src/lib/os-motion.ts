@@ -19,7 +19,11 @@ export function syncOsMotionListener(enabled: boolean): void {
     const raw = localStorage.getItem("owncord:settings:reducedMotion");
     let manual = false;
     if (raw !== null) {
-      try { manual = JSON.parse(raw) === true; } catch { /* corrupted — default false */ }
+      try {
+        manual = JSON.parse(raw) === true;
+      } catch {
+        /* corrupted — default false */
+      }
     }
     document.documentElement.classList.toggle("reduced-motion", manual);
     return;
@@ -28,7 +32,11 @@ export function syncOsMotionListener(enabled: boolean): void {
   ac = new AbortController();
   const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
   document.documentElement.classList.toggle("reduced-motion", mq.matches);
-  mq.addEventListener("change", (e: MediaQueryListEvent) => {
-    document.documentElement.classList.toggle("reduced-motion", e.matches);
-  }, { signal: ac.signal });
+  mq.addEventListener(
+    "change",
+    (e: MediaQueryListEvent) => {
+      document.documentElement.classList.toggle("reduced-motion", e.matches);
+    },
+    { signal: ac.signal },
+  );
 }

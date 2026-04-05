@@ -290,6 +290,157 @@ voice:
 	}
 }
 
+func TestLoadEnvOverridesPrecedenceOverYAML(t *testing.T) {
+	// Env vars should override values set in the YAML file.
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	yaml := `
+server:
+  port: 9000
+  name: "YAML Server"
+`
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
+		t.Fatalf("failed to write yaml: %v", err)
+	}
+
+	t.Setenv("OWNCORD_SERVER_PORT", "5555")
+	t.Setenv("OWNCORD_SERVER_NAME", "Env Wins")
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+
+	if cfg.Server.Port != 5555 {
+		t.Errorf("Server.Port = %d, want 5555 (env should override YAML)", cfg.Server.Port)
+	}
+	if cfg.Server.Name != "Env Wins" {
+		t.Errorf("Server.Name = %q, want 'Env Wins' (env should override YAML)", cfg.Server.Name)
+	}
+}
+
+func TestLoadUnreadableConfigFile(t *testing.T) {
+	// A config file that exists but can't be read should return an error.
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	// Create a directory where a file is expected — os.ReadFile will fail.
+	if err := os.Mkdir(cfgPath, 0o755); err != nil {
+		t.Fatalf("failed to create directory: %v", err)
+	}
+
+	_, err := config.Load(cfgPath)
+	if err == nil {
+		t.Error("Load() should error when config path is a directory")
+	}
+}
+
+func TestLoadVoiceDefaultCredentialsCleared(t *testing.T) {
+	// When YAML sets the well-known default dev credentials, Load should clear them.
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	yaml := `
+voice:
+  livekit_api_key: "devkey"
+  livekit_api_secret: "owncord-dev-secret-key-min-32chars"
+`
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
+		t.Fatalf("failed to write yaml: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+
+	if cfg.Voice.LiveKitAPIKey != "" {
+		t.Errorf("Voice.LiveKitAPIKey = %q, want empty (dev creds should be cleared)", cfg.Voice.LiveKitAPIKey)
+	}
+	if cfg.Voice.LiveKitAPISecret != "" {
+		t.Errorf("Voice.LiveKitAPISecret = %q, want empty (dev creds should be cleared)", cfg.Voice.LiveKitAPISecret)
+	}
+}
+
+func TestLoadVoiceEmptySectionGetsDefaults(t *testing.T) {
+	// An empty voice section in YAML should still get defaults applied.
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	yaml := "voice:\n"
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
+		t.Fatalf("failed to write yaml: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+
+	if cfg.Voice.LiveKitURL != "ws://localhost:7880" {
+		t.Errorf("Voice.LiveKitURL = %q, want default 'ws://localhost:7880'", cfg.Voice.LiveKitURL)
+	}
+	if cfg.Voice.Quality != "medium" {
+		t.Errorf("Voice.Quality = %q, want default 'medium'", cfg.Voice.Quality)
+	}
+	// Key and secret should be auto-generated (non-empty).
+	if cfg.Voice.LiveKitAPIKey == "" {
+		t.Error("Voice.LiveKitAPIKey should be auto-generated, got empty")
+	}
+	if cfg.Voice.LiveKitAPISecret == "" {
+		t.Error("Voice.LiveKitAPISecret should be auto-generated, got empty")
+	}
+}
+
+func TestIsDefaultVoiceCredentials(t *testing.T) {
+	cases := []struct {
+		name   string
+		key    string
+		secret string
+		want   bool
+	}{
+		{"both default", config.DefaultLiveKitAPIKey, config.DefaultLiveKitAPISecret, true},
+		{"only key default", config.DefaultLiveKitAPIKey, "custom-secret-long-enough-32chars", true},
+		{"only secret default", "custom-key", config.DefaultLiveKitAPISecret, true},
+		{"neither default", "custom-key", "custom-secret-long-enough-32chars", false},
+		{"both empty", "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := &config.VoiceConfig{
+				LiveKitAPIKey:    tc.key,
+				LiveKitAPISecret: tc.secret,
+			}
+			got := config.IsDefaultVoiceCredentials(v)
+			if got != tc.want {
+				t.Errorf("IsDefaultVoiceCredentials() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadGitHubToken(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	yaml := `
+github:
+  token: "ghp_test123"
+`
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
+		t.Fatalf("failed to write yaml: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.GitHub.Token != "ghp_test123" {
+		t.Errorf("GitHub.Token = %q, want 'ghp_test123'", cfg.GitHub.Token)
+	}
+}
+
 func TestLoadUploadBoundaryValues(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")

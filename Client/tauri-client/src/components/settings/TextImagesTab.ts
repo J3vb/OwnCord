@@ -44,7 +44,9 @@ export function buildTextImagesTab(signal: AbortSignal): HTMLDivElement {
     const isOn = loadPref<boolean>(item.key, item.fallback);
     const toggle = createToggle(isOn, {
       signal,
-      onChange: (nowOn) => { savePref(item.key, nowOn); },
+      onChange: (nowOn) => {
+        savePref(item.key, nowOn);
+      },
     });
     appendChildren(row, info, toggle);
     section.appendChild(row);

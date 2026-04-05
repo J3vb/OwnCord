@@ -2,9 +2,12 @@ use serde::Serialize;
 use std::ptr;
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::ERROR_NOT_FOUND;
+// CRED_PERSIST_ENTERPRISE scopes credentials per-user (roams with domain
+// profile). Previously CRED_PERSIST_LOCAL_MACHINE was used, which exposes
+// credentials to all users on shared machines.
 use windows::Win32::Security::Credentials::{
     CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_FLAGS,
-    CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+    CRED_PERSIST_ENTERPRISE, CRED_TYPE_GENERIC,
 };
 
 /// Data returned from `load_credential`.
@@ -12,7 +15,9 @@ use windows::Win32::Security::Credentials::{
 pub struct CredentialData {
     pub username: String,
     pub token: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    // Password is stored in the credential blob for re-authentication but
+    // is never serialized back to the frontend over IPC to limit exposure.
+    #[serde(skip)]
     pub password: Option<String>,
 }
 
@@ -74,7 +79,7 @@ pub fn save_credential(host: String, username: String, token: String, password: 
     }
     let blob = payload.to_string().into_bytes();
 
-    let mut cred = CREDENTIALW {
+    let cred = CREDENTIALW {
         Flags: CRED_FLAGS(0),
         Type: CRED_TYPE_GENERIC,
         TargetName: PWSTR(target.as_ptr() as *mut u16),
@@ -82,7 +87,7 @@ pub fn save_credential(host: String, username: String, token: String, password: 
         LastWritten: Default::default(),
         CredentialBlobSize: blob.len() as u32,
         CredentialBlob: blob.as_ptr() as *mut u8,
-        Persist: CRED_PERSIST_LOCAL_MACHINE,
+        Persist: CRED_PERSIST_ENTERPRISE,
         AttributeCount: 0,
         Attributes: ptr::null_mut(),
         TargetAlias: PWSTR::null(),
@@ -90,7 +95,7 @@ pub fn save_credential(host: String, username: String, token: String, password: 
     };
 
     unsafe {
-        CredWriteW(&mut cred, 0)
+        CredWriteW(&cred, 0)
             .map_err(|e| format!("CredWriteW failed: {e}"))?;
     }
 

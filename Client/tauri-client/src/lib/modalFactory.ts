@@ -68,9 +68,7 @@ export function createModal(
   const overlay = createElement("div", overlayBaseAttrs);
 
   // Build modal container
-  const modalClass = className !== undefined
-    ? `modal ${className}`
-    : "modal";
+  const modalClass = className !== undefined ? `modal ${className}` : "modal";
   const modal = createElement("div", { class: modalClass });
   modal.appendChild(content);
   overlay.appendChild(modal);
@@ -115,16 +113,20 @@ export function createModal(
 
   // If an external signal is provided, clean up when it aborts
   if (signal !== undefined) {
-    signal.addEventListener("abort", () => {
-      if (!closed) {
-        closed = true;
-        overlay.remove();
-        onClose?.();
-        if (!ac.signal.aborted) {
-          ac.abort();
+    signal.addEventListener(
+      "abort",
+      () => {
+        if (!closed) {
+          closed = true;
+          overlay.remove();
+          onClose?.();
+          if (!ac.signal.aborted) {
+            ac.abort();
+          }
         }
-      }
-    }, { signal: ac.signal });
+      },
+      { signal: ac.signal },
+    );
   }
 
   container.appendChild(overlay);

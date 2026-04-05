@@ -10,12 +10,12 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/syncutil"
 )
 
 // ─── Ticket Store for SSE Log Stream ────────────────────────────────────────
@@ -28,7 +28,7 @@ type ticketEntry struct {
 
 // ticketStore manages short-lived, single-use tickets for SSE authentication.
 type ticketStore struct {
-	mu      sync.Mutex
+	mu      syncutil.Mutex
 	tickets map[string]ticketEntry
 }
 
@@ -110,7 +110,7 @@ type LogEntry struct {
 // RingBuffer is a bounded, thread-safe circular buffer of log entries
 // with fan-out to SSE subscriber channels.
 type RingBuffer struct {
-	mu          sync.Mutex
+	mu          syncutil.Mutex
 	entries     []LogEntry
 	capacity    int
 	subscribers map[*chan LogEntry]struct{}
@@ -132,7 +132,11 @@ func (rb *RingBuffer) Write(entry LogEntry) {
 	defer rb.mu.Unlock()
 
 	if len(rb.entries) >= rb.capacity {
-		rb.entries = rb.entries[1:]
+		// Copy to a new slice to release the backing array's first slot,
+		// preventing unbounded growth from repeated re-slicing.
+		fresh := make([]LogEntry, rb.capacity-1, rb.capacity)
+		copy(fresh, rb.entries[1:])
+		rb.entries = fresh
 	}
 	rb.entries = append(rb.entries, entry)
 
@@ -198,8 +202,8 @@ func NewMultiHandler(stdout slog.Handler, buf *RingBuffer, minLevel slog.Leveler
 	}
 }
 
-func (h *multiHandler) Enabled(_ context.Context, level slog.Level) bool {
-	return h.stdout.Enabled(context.Background(), level) || h.ring.Enabled(level)
+func (h *multiHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.stdout.Enabled(ctx, level) || h.ring.Enabled(level)
 }
 
 func (h *multiHandler) Handle(ctx context.Context, r slog.Record) error {

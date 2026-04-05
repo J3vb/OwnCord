@@ -77,7 +77,7 @@ test.describe("Channel Switch — Messages", () => {
 
     // The message should NOT be visible in current view
     await expect(
-      page.locator(".msg-text", { hasText: "Message on other channel" })
+      page.locator(".msg-text", { hasText: "Message on other channel" }),
     ).not.toBeVisible();
   });
 

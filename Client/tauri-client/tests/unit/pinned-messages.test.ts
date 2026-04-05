@@ -3,9 +3,27 @@ import { createPinnedMessages } from "@components/PinnedMessages";
 import type { PinnedMessage, PinnedMessagesOptions } from "@components/PinnedMessages";
 
 const samplePins: PinnedMessage[] = [
-  { id: 1, content: "Hello world", author: "Alice", timestamp: "2024-01-01T12:00:00Z", avatarColor: "#5865f2" },
-  { id: 2, content: "Important notice", author: "Bob", timestamp: "2024-01-02T14:30:00Z", avatarColor: "#e74c3c" },
-  { id: 3, content: "Reminder", author: "Charlie", timestamp: "2024-01-03T09:00:00Z", avatarColor: "#2ecc71" },
+  {
+    id: 1,
+    content: "Hello world",
+    author: "Alice",
+    timestamp: "2024-01-01T12:00:00Z",
+    avatarColor: "#5865f2",
+  },
+  {
+    id: 2,
+    content: "Important notice",
+    author: "Bob",
+    timestamp: "2024-01-02T14:30:00Z",
+    avatarColor: "#e74c3c",
+  },
+  {
+    id: 3,
+    content: "Reminder",
+    author: "Charlie",
+    timestamp: "2024-01-03T09:00:00Z",
+    avatarColor: "#2ecc71",
+  },
 ];
 
 describe("PinnedMessages", () => {

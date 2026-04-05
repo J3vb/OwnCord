@@ -32,10 +32,7 @@ export interface DmHelperDeps {
  * Switch the UI to a specific DM conversation. Saves the current non-DM
  * channel so it can be restored when the user navigates back.
  */
-export function selectDmConversation(
-  dmChannel: DmChannel,
-  deps: DmHelperDeps,
-): void {
+export function selectDmConversation(dmChannel: DmChannel, deps: DmHelperDeps): void {
   // Save current channel so we can restore it when user clicks "Back"
   // Only save if the current channel is a real text/voice channel, not another DM
   const currentActive = channelsStore.getState().activeChannelId;
@@ -88,10 +85,7 @@ export function addDmToChannelsStore(dmChannel: DmChannel): void {
 // ---------------------------------------------------------------------------
 
 /** Create a DM with a user via the API and switch to it. */
-export async function handleCreateDm(
-  recipientId: number,
-  deps: DmHelperDeps,
-): Promise<void> {
+export async function handleCreateDm(recipientId: number, deps: DmHelperDeps): Promise<void> {
   try {
     const result = await deps.api.createDm(recipientId);
     const member = membersStore.getState().members.get(recipientId);

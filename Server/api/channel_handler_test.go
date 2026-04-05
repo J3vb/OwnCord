@@ -152,6 +152,20 @@ CREATE TABLE IF NOT EXISTS settings (
 INSERT OR IGNORE INTO settings (key, value) VALUES
     ('server_name', 'OwnCord Server'),
     ('motd', 'Welcome!');
+
+CREATE TABLE IF NOT EXISTS dm_participants (
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    PRIMARY KEY (channel_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_dm_participants_user ON dm_participants(user_id);
+
+CREATE TABLE IF NOT EXISTS dm_open_state (
+    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    opened_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, channel_id)
+);
 `)
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -507,9 +521,11 @@ func TestSearch_InvalidFTSQuery(t *testing.T) {
 	chID, _ := database.CreateChannel("fts", "text", "", "", 0)
 	_, _ = database.CreateMessage(chID, user.ID, "search seed", nil)
 
+	// FTS5 operator characters are now stripped by sanitizeFTSQuery, so a
+	// bare quote becomes an empty query which returns 200 with no results.
 	rr := chGet(t, router, "/api/v1/search?q=%22", token)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -644,5 +660,262 @@ func TestChannelMessages_InvalidLimit(t *testing.T) {
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages?limit=abc", chID), token)
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("invalid limit status = %d, want 400", rr.Code)
+	}
+}
+
+// ─── GET /api/v1/channels/{id}/pins ─────────────────────────────────────────
+
+// newPinTestDB creates a DB with dm_participants table needed for pin tests.
+func newPinTestDB(t *testing.T) *db.DB {
+	t.Helper()
+	database := newChannelTestDB(t)
+	// Add DM tables required by pin handlers for DM authorization.
+	_, err := database.Exec(`
+		CREATE TABLE IF NOT EXISTS dm_participants (
+			channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+			user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+			PRIMARY KEY (channel_id, user_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_dm_participants_user ON dm_participants(user_id);
+		CREATE TABLE IF NOT EXISTS dm_open_state (
+			user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+			channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+			opened_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+			PRIMARY KEY (user_id, channel_id)
+		);
+	`)
+	if err != nil {
+		t.Fatalf("create dm_participants: %v", err)
+	}
+	return database
+}
+
+func TestGetPins_Unauthenticated(t *testing.T) {
+	router := buildChannelRouter(newPinTestDB(t))
+	rr := chGet(t, router, "/api/v1/channels/1/pins", "")
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rr.Code)
+	}
+}
+
+func TestGetPins_ChannelNotFound(t *testing.T) {
+	database := newPinTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "pinuser1", 1)
+
+	rr := chGet(t, router, "/api/v1/channels/9999/pins", token)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestGetPins_EmptyPins(t *testing.T) {
+	database := newPinTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "pinuser2", 1)
+	chID, _ := database.CreateChannel("general", "text", "", "", 0)
+
+	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/pins", chID), token)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Messages []any `json:"messages"`
+		HasMore  bool  `json:"has_more"`
+	}
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	if len(resp.Messages) != 0 {
+		t.Errorf("expected 0 pinned messages, got %d", len(resp.Messages))
+	}
+	if resp.HasMore {
+		t.Error("has_more should be false for empty pins")
+	}
+}
+
+func TestGetPins_ReturnsPinnedMessages(t *testing.T) {
+	database := newPinTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "pinuser3", 1)
+	user, _ := database.GetUserByUsername("pinuser3")
+	chID, _ := database.CreateChannel("general", "text", "", "", 0)
+
+	msgID, _ := database.CreateMessage(chID, user.ID, "pinned message", nil)
+	_ = database.SetMessagePinned(msgID, true)
+	// Also create an unpinned message — should not appear.
+	_, _ = database.CreateMessage(chID, user.ID, "not pinned", nil)
+
+	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/pins", chID), token)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Messages []any `json:"messages"`
+	}
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	if len(resp.Messages) != 1 {
+		t.Errorf("expected 1 pinned message, got %d", len(resp.Messages))
+	}
+}
+
+func TestGetPins_DMChannel_NonParticipantForbidden(t *testing.T) {
+	database := newPinTestDB(t)
+	router := buildChannelRouter(database)
+
+	// Create two users for the DM and a third who should be denied.
+	chTestCreateToken(t, database, "dmuser1", 4)
+	chTestCreateToken(t, database, "dmuser2", 4)
+	outsiderToken := chTestCreateToken(t, database, "outsider", 4)
+
+	user1, _ := database.GetUserByUsername("dmuser1")
+	user2, _ := database.GetUserByUsername("dmuser2")
+
+	// Create a DM channel manually.
+	dmCh, _, _ := database.GetOrCreateDMChannel(user1.ID, user2.ID)
+
+	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/pins", dmCh.ID), outsiderToken)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestGetPins_MemberNoReadPermission(t *testing.T) {
+	database := newPinTestDB(t)
+	router := buildChannelRouter(database)
+	// Role 4 = Member with permissions 1635 (0x663).
+	// Deny READ_MESSAGES on a specific channel via override.
+	token := chTestCreateToken(t, database, "nopermuser", 4)
+	chID, _ := database.CreateChannel("restricted", "text", "", "", 0)
+
+	// Deny all permissions for role 4 on this channel.
+	_, _ = database.Exec(
+		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, 4, 0, 2147483647)`,
+		chID,
+	)
+
+	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/pins", chID), token)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// ─── POST/DELETE /api/v1/channels/{id}/pins/{messageId} ─────────────────────
+
+func chPost(t *testing.T, router http.Handler, path, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	return rr
+}
+
+func chDelete(t *testing.T, router http.Handler, path, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodDelete, path, nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	return rr
+}
+
+func TestSetPinned_PinSuccessfully(t *testing.T) {
+	database := newPinTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "pinner1", 1)
+	user, _ := database.GetUserByUsername("pinner1")
+	chID, _ := database.CreateChannel("general", "text", "", "", 0)
+	msgID, _ := database.CreateMessage(chID, user.ID, "pin me", nil)
+
+	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("pin status = %d, want 204; body: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify the message is actually pinned.
+	msg, _ := database.GetMessage(msgID)
+	if !msg.Pinned {
+		t.Error("message should be pinned after POST")
+	}
+}
+
+func TestSetPinned_UnpinSuccessfully(t *testing.T) {
+	database := newPinTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "unpinner1", 1)
+	user, _ := database.GetUserByUsername("unpinner1")
+	chID, _ := database.CreateChannel("general", "text", "", "", 0)
+	msgID, _ := database.CreateMessage(chID, user.ID, "unpin me", nil)
+	_ = database.SetMessagePinned(msgID, true)
+
+	rr := chDelete(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("unpin status = %d, want 204; body: %s", rr.Code, rr.Body.String())
+	}
+
+	msg, _ := database.GetMessage(msgID)
+	if msg.Pinned {
+		t.Error("message should not be pinned after DELETE")
+	}
+}
+
+func TestSetPinned_MessageNotFound(t *testing.T) {
+	database := newPinTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "pinner2", 1)
+	chID, _ := database.CreateChannel("general", "text", "", "", 0)
+
+	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/9999", chID), token)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSetPinned_ChannelNotFound(t *testing.T) {
+	database := newPinTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "pinner3", 1)
+
+	rr := chPost(t, router, "/api/v1/channels/9999/pins/1", token)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSetPinned_NoPermission(t *testing.T) {
+	database := newPinTestDB(t)
+	router := buildChannelRouter(database)
+	// Member role (4) has permissions 1635 — does not include MANAGE_MESSAGES (0x2000).
+	token := chTestCreateToken(t, database, "noperm", 4)
+	user, _ := database.GetUserByUsername("noperm")
+	chID, _ := database.CreateChannel("general", "text", "", "", 0)
+	msgID, _ := database.CreateMessage(chID, user.ID, "try to pin", nil)
+
+	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSetPinned_Idempotent(t *testing.T) {
+	database := newPinTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "pinner4", 1)
+	user, _ := database.GetUserByUsername("pinner4")
+	chID, _ := database.CreateChannel("general", "text", "", "", 0)
+	msgID, _ := database.CreateMessage(chID, user.ID, "already pinned", nil)
+	_ = database.SetMessagePinned(msgID, true)
+
+	// Pinning again should still succeed (idempotent).
+	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("idempotent pin status = %d, want 204; body: %s", rr.Code, rr.Body.String())
 	}
 }

@@ -7,12 +7,14 @@ import { buildTauriMockScript } from "./helpers";
 
 test.describe("Connect Page — Settings Overlay", () => {
   test.beforeEach(async ({ page }) => {
-    await page.addInitScript(buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      ],
-      simulateWsFlow: false,
-    }));
+    await page.addInitScript(
+      buildTauriMockScript({
+        httpRoutes: [
+          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        ],
+        simulateWsFlow: false,
+      }),
+    );
     await page.goto("/");
   });
 

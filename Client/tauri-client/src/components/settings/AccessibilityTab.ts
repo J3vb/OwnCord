@@ -44,7 +44,9 @@ const TOGGLES: ReadonlyArray<ToggleItem> = [
     label: "Sync with OS",
     desc: "Automatically enable reduced motion based on your OS accessibility settings",
     fallback: false,
-    sideEffect: (nowOn) => { syncOsMotionListener(nowOn); },
+    sideEffect: (nowOn) => {
+      syncOsMotionListener(nowOn);
+    },
   },
   {
     key: "largeFont",

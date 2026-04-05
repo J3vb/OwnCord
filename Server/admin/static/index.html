@@ -388,21 +388,38 @@ function renderNav(){
 }
 
 function navigateTo(id){
-  if(state.section==='logs'&&id!=='logs'){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}}
-  state.section=id;renderNav();renderContent();
+  try{
+    if(state.section==='logs'&&id!=='logs'){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}}
+    state.section=id;renderNav();renderContent();
+  }catch(err){
+    console.error('[Admin] Tab navigation failed for "'+id+'":', err);
+    var c=document.getElementById('content');
+    if(c)c.innerHTML='<div class="page-title">Error</div><p style="color:var(--red)">Failed to navigate to '+esc(id)+': '+esc(err&&err.message||String(err))+'</p><button class="btn btn-accent" onclick="navigateTo(\'dashboard\')">Back to Dashboard</button>';
+  }
 }
 
 function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}state.token='';localStorage.removeItem('admin_token');showOverlay('loginOverlay')}
 
 /* ═══ Content Router ═══ */
 function renderContent(){
-  const c=document.getElementById('content');c.scrollTop=0;
+  const c=document.getElementById('content');if(!c)return;c.scrollTop=0;
   const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,audit:renderAudit,logs:renderLogs,settings:renderSettings,backups:renderBackups,updates:renderUpdates};
   c.innerHTML='<div class="page-title">Loading...</div>';
-  const fn=r[state.section]||renderDashboard;
-  const result=fn();
-  if(result instanceof Promise)result.then(html=>{c.innerHTML=html}).catch(e=>{c.innerHTML='<div class="page-title">Error</div><p style="color:var(--red)">'+esc(e.message)+'</p>'});
-  else c.innerHTML=result;
+  const fn=r[state.section];
+  if(typeof fn!=='function'){console.error('[Admin] No render function for section: '+state.section);c.innerHTML='<div class="page-title">Error</div><p style="color:var(--red)">Unknown section: '+esc(state.section)+'</p><button class="btn btn-accent" onclick="navigateTo(\'dashboard\')">Back to Dashboard</button>';return}
+  try{
+    const result=fn();
+    if(result instanceof Promise){
+      const renderSection=state.section;
+      result.then(function(html){if(state.section===renderSection)c.innerHTML=html}).catch(function(e){
+        console.error('[Admin] Render error in "'+renderSection+'":', e);
+        if(state.section===renderSection)c.innerHTML='<div class="page-title">Error</div><p style="color:var(--red)">'+esc(e&&e.message||String(e))+'</p><button class="btn btn-accent" onclick="renderContent()">Retry</button>';
+      });
+    }else{c.innerHTML=result}
+  }catch(e){
+    console.error('[Admin] Sync render error in "'+state.section+'":', e);
+    c.innerHTML='<div class="page-title">Error</div><p style="color:var(--red)">'+esc(e&&e.message||String(e))+'</p><button class="btn btn-accent" onclick="renderContent()">Retry</button>';
+  }
 }
 
 /* ═══ Dashboard ═══ */

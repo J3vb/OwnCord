@@ -24,12 +24,11 @@ const log = createLogger("overlays");
 
 export function mapInviteResponse(r: InviteResponse): InviteItem {
   const extra = r as unknown as Record<string, unknown>;
-  const createdBy = typeof extra["created_by"] === "object"
-    && extra["created_by"] !== null
-    ? (extra["created_by"] as { username?: string }).username ?? "unknown"
-    : "unknown";
-  const uses = r.use_count
-    ?? (typeof extra["uses"] === "number" ? (extra["uses"]) : 0);
+  const createdBy =
+    typeof extra["created_by"] === "object" && extra["created_by"] !== null
+      ? ((extra["created_by"] as { username?: string }).username ?? "unknown")
+      : "unknown";
+  const uses = r.use_count ?? (typeof extra["uses"] === "number" ? extra["uses"] : 0);
   return {
     code: r.code,
     createdBy,
@@ -135,7 +134,6 @@ export interface InviteManagerController {
 export function createInviteManagerController(opts: {
   readonly api: ApiClient;
   readonly getRoot: () => HTMLDivElement | null;
-
 }): InviteManagerController {
   let instance: MountableComponent | null = null;
 
@@ -160,11 +158,7 @@ export function createInviteManagerController(opts: {
         },
         onRevokeInvite: async (code: string) => {
           try {
-            const raw2 = await opts.api.getInvites();
-            const match = raw2.find((i) => i.code === code);
-            if (match !== undefined) {
-              await opts.api.revokeInvite(match.id);
-            }
+            await opts.api.revokeInvite(code);
           } catch (err) {
             log.error("Invite revoke failed", { code, error: String(err) });
             throw err;
@@ -243,12 +237,15 @@ export function createPinnedPanelController(opts: {
           }
         },
         onUnpin: (msgId: number) => {
-          void opts.api.unpinMessage(channelId, msgId).then(() => {
-            close();
-          }).catch((err: unknown) => {
-            log.error("Failed to unpin message", { msgId, error: String(err) });
-            showToast("Failed to unpin message", "error");
-          });
+          void opts.api
+            .unpinMessage(channelId, msgId)
+            .then(() => {
+              close();
+            })
+            .catch((err: unknown) => {
+              log.error("Failed to unpin message", { msgId, error: String(err) });
+              showToast("Failed to unpin message", "error");
+            });
         },
         onClose: close,
       });

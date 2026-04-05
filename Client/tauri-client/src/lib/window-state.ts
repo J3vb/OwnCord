@@ -22,7 +22,10 @@ const invokePromise: Promise<
   ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null
 > = import("@tauri-apps/api/core")
   .then((m) => m.invoke)
-  .catch(() => null);
+  .catch((err) => {
+    log.warn("Tauri core API not available for window state", err);
+    return null;
+  });
 
 /**
  * Save the current window state to the Tauri settings store.
@@ -99,7 +102,12 @@ export async function initWindowState(): Promise<() => void> {
         await win.setPosition(pos);
         await win.setSize(size);
       }
-      log.info("Restored window state", { x: saved.x, y: saved.y, width: saved.width, height: saved.height });
+      log.info("Restored window state", {
+        x: saved.x,
+        y: saved.y,
+        width: saved.width,
+        height: saved.height,
+      });
     } catch (err) {
       log.warn("Failed to restore window state", { error: String(err) });
     }

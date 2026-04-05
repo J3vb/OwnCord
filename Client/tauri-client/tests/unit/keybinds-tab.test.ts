@@ -81,7 +81,9 @@ describe("KeybindsTab", () => {
   it("shows 'Press any key...' when capture button is clicked", () => {
     const el = buildKeybindsTab(new AbortController().signal);
     mockCaptureKeyPress.mockReturnValue(new Promise(() => {})); // never resolves
-    const pttBtn = el.querySelectorAll(".keybind-row")[0]!.querySelector(".kbd") as HTMLButtonElement;
+    const pttBtn = el
+      .querySelectorAll(".keybind-row")[0]!
+      .querySelector(".kbd") as HTMLButtonElement;
 
     pttBtn.click();
 
@@ -94,7 +96,9 @@ describe("KeybindsTab", () => {
     const el = buildKeybindsTab(new AbortController().signal);
     mockCaptureKeyPress.mockResolvedValue(0x05); // Mouse 5
     mockVkName.mockReturnValue("Mouse 5");
-    const pttBtn = el.querySelectorAll(".keybind-row")[0]!.querySelector(".kbd") as HTMLButtonElement;
+    const pttBtn = el
+      .querySelectorAll(".keybind-row")[0]!
+      .querySelector(".kbd") as HTMLButtonElement;
 
     pttBtn.click();
 
@@ -109,7 +113,9 @@ describe("KeybindsTab", () => {
   it("restores previous value when captureKeyPress times out (returns 0)", async () => {
     const el = buildKeybindsTab(new AbortController().signal);
     mockCaptureKeyPress.mockResolvedValue(0);
-    const pttBtn = el.querySelectorAll(".keybind-row")[0]!.querySelector(".kbd") as HTMLButtonElement;
+    const pttBtn = el
+      .querySelectorAll(".keybind-row")[0]!
+      .querySelector(".kbd") as HTMLButtonElement;
 
     pttBtn.click();
 
@@ -122,7 +128,9 @@ describe("KeybindsTab", () => {
   it("restores previous value on captureKeyPress failure (fallback path)", async () => {
     const el = buildKeybindsTab(new AbortController().signal);
     mockCaptureKeyPress.mockRejectedValue(new Error("No Tauri"));
-    const pttBtn = el.querySelectorAll(".keybind-row")[0]!.querySelector(".kbd") as HTMLButtonElement;
+    const pttBtn = el
+      .querySelectorAll(".keybind-row")[0]!
+      .querySelector(".kbd") as HTMLButtonElement;
 
     pttBtn.click();
 
@@ -136,7 +144,9 @@ describe("KeybindsTab", () => {
   it("ignores click when already capturing", () => {
     const el = buildKeybindsTab(new AbortController().signal);
     mockCaptureKeyPress.mockReturnValue(new Promise(() => {})); // never resolves
-    const pttBtn = el.querySelectorAll(".keybind-row")[0]!.querySelector(".kbd") as HTMLButtonElement;
+    const pttBtn = el
+      .querySelectorAll(".keybind-row")[0]!
+      .querySelector(".kbd") as HTMLButtonElement;
 
     pttBtn.click();
     expect(pttBtn.textContent).toBe("Press any key...");
@@ -247,7 +257,9 @@ describe("KeybindsTab", () => {
     mockCaptureKeyPress.mockResolvedValue(0);
 
     const el = buildKeybindsTab(new AbortController().signal);
-    const pttBtn = el.querySelectorAll(".keybind-row")[0]!.querySelector(".kbd") as HTMLButtonElement;
+    const pttBtn = el
+      .querySelectorAll(".keybind-row")[0]!
+      .querySelector(".kbd") as HTMLButtonElement;
 
     expect(pttBtn.textContent).toBe("F2");
 
@@ -266,7 +278,9 @@ describe("KeybindsTab", () => {
     mockCaptureKeyPress.mockRejectedValue(new Error("No Tauri"));
 
     const el = buildKeybindsTab(new AbortController().signal);
-    const pttBtn = el.querySelectorAll(".keybind-row")[0]!.querySelector(".kbd") as HTMLButtonElement;
+    const pttBtn = el
+      .querySelectorAll(".keybind-row")[0]!
+      .querySelector(".kbd") as HTMLButtonElement;
 
     expect(pttBtn.textContent).toBe("F2");
 

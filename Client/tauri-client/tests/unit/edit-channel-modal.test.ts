@@ -36,7 +36,9 @@ describe("EditChannelModal", () => {
 
   it("pre-fills the name input with current channel name", () => {
     const { modal } = makeModal();
-    const input = container.querySelector("[data-testid='edit-channel-name-input']") as HTMLInputElement;
+    const input = container.querySelector(
+      "[data-testid='edit-channel-name-input']",
+    ) as HTMLInputElement;
     expect(input.value).toBe("general");
     modal.destroy?.();
   });
@@ -51,10 +53,14 @@ describe("EditChannelModal", () => {
   it("shows error when saving with empty name", () => {
     const onSave = vi.fn(async () => {});
     const { modal } = makeModal({ onSave });
-    const input = container.querySelector("[data-testid='edit-channel-name-input']") as HTMLInputElement;
+    const input = container.querySelector(
+      "[data-testid='edit-channel-name-input']",
+    ) as HTMLInputElement;
     input.value = "";
 
-    const saveBtn = container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement;
+    const saveBtn = container.querySelector(
+      "[data-testid='edit-channel-submit']",
+    ) as HTMLButtonElement;
     saveBtn.click();
 
     const error = container.querySelector("[data-testid='edit-channel-error']");
@@ -66,10 +72,14 @@ describe("EditChannelModal", () => {
   it("calls onSave with updated name", async () => {
     const onSave = vi.fn(async () => {});
     const { modal } = makeModal({ onSave });
-    const input = container.querySelector("[data-testid='edit-channel-name-input']") as HTMLInputElement;
+    const input = container.querySelector(
+      "[data-testid='edit-channel-name-input']",
+    ) as HTMLInputElement;
     input.value = "renamed-channel";
 
-    const saveBtn = container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement;
+    const saveBtn = container.querySelector(
+      "[data-testid='edit-channel-submit']",
+    ) as HTMLButtonElement;
     saveBtn.click();
 
     await vi.waitFor(() => {
@@ -98,10 +108,14 @@ describe("EditChannelModal", () => {
     const onSave = vi.fn().mockRejectedValue(new Error("Server error"));
     const { modal } = makeModal({ onSave });
 
-    const input = container.querySelector("[data-testid='edit-channel-name-input']") as HTMLInputElement;
+    const input = container.querySelector(
+      "[data-testid='edit-channel-name-input']",
+    ) as HTMLInputElement;
     input.value = "new-name";
 
-    const saveBtn = container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement;
+    const saveBtn = container.querySelector(
+      "[data-testid='edit-channel-submit']",
+    ) as HTMLButtonElement;
     saveBtn.click();
 
     await vi.waitFor(() => {
@@ -120,10 +134,14 @@ describe("EditChannelModal", () => {
     const onSave = vi.fn().mockRejectedValue("unknown");
     const { modal } = makeModal({ onSave });
 
-    const input = container.querySelector("[data-testid='edit-channel-name-input']") as HTMLInputElement;
+    const input = container.querySelector(
+      "[data-testid='edit-channel-name-input']",
+    ) as HTMLInputElement;
     input.value = "new-name";
 
-    const saveBtn = container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement;
+    const saveBtn = container.querySelector(
+      "[data-testid='edit-channel-submit']",
+    ) as HTMLButtonElement;
     saveBtn.click();
 
     await vi.waitFor(() => {
@@ -136,13 +154,22 @@ describe("EditChannelModal", () => {
 
   it("disables save button and shows 'Saving...' during save", async () => {
     let resolveSave: (() => void) | undefined;
-    const onSave = vi.fn<any>(() => new Promise<void>((resolve) => { resolveSave = resolve; }));
+    const onSave = vi.fn<any>(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
     const { modal } = makeModal({ onSave });
 
-    const input = container.querySelector("[data-testid='edit-channel-name-input']") as HTMLInputElement;
+    const input = container.querySelector(
+      "[data-testid='edit-channel-name-input']",
+    ) as HTMLInputElement;
     input.value = "renamed";
 
-    const saveBtn = container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement;
+    const saveBtn = container.querySelector(
+      "[data-testid='edit-channel-submit']",
+    ) as HTMLButtonElement;
     saveBtn.click();
 
     expect(saveBtn.hasAttribute("disabled")).toBe(true);
@@ -178,10 +205,14 @@ describe("EditChannelModal", () => {
     const onSave = vi.fn(async () => {});
     const { modal } = makeModal({ onSave });
 
-    const input = container.querySelector("[data-testid='edit-channel-name-input']") as HTMLInputElement;
+    const input = container.querySelector(
+      "[data-testid='edit-channel-name-input']",
+    ) as HTMLInputElement;
     input.value = "   "; // whitespace only
 
-    const saveBtn = container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement;
+    const saveBtn = container.querySelector(
+      "[data-testid='edit-channel-submit']",
+    ) as HTMLButtonElement;
     saveBtn.click();
 
     expect(input.classList.contains("error")).toBe(true);

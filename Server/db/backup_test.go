@@ -127,7 +127,7 @@ func TestBackupToSafe_RejectsNullByte(t *testing.T) {
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	malicious := filepath.Join(backupDir, "evil\x00.db")
+	malicious := filepath.Join(backupDir, "evil\x00.db") //nolint:gocritic // intentional null byte for security test
 	err := database.BackupToSafe(malicious, backupDir)
 	if err == nil {
 		t.Error("BackupToSafe() with null byte in path should return error, got nil")

@@ -19,7 +19,6 @@ func TestPermissionBitValues(t *testing.T) {
 		{"ReadMessages", permissions.ReadMessages, 0x0002},
 		{"AttachFiles", permissions.AttachFiles, 0x0020},
 		{"AddReactions", permissions.AddReactions, 0x0040},
-		{"UseSoundboard", permissions.UseSoundboard, 0x0100},
 		{"ConnectVoice", permissions.ConnectVoice, 0x0200},
 		{"SpeakVoice", permissions.SpeakVoice, 0x0400},
 		{"UseVideo", permissions.UseVideo, 0x0800},
@@ -116,7 +115,7 @@ func TestHasPerm_AllBitsSet(t *testing.T) {
 	allPerms := int64(0x7FFFFFFF)
 	perms := []int64{
 		permissions.SendMessages, permissions.ReadMessages, permissions.AttachFiles,
-		permissions.AddReactions, permissions.UseSoundboard, permissions.ConnectVoice,
+		permissions.AddReactions, permissions.ConnectVoice,
 		permissions.SpeakVoice, permissions.UseVideo, permissions.ShareScreen,
 		permissions.ManageMessages, permissions.ManageChannels, permissions.KickMembers,
 		permissions.BanMembers, permissions.MuteMembers, permissions.ManageRoles,
@@ -252,5 +251,140 @@ func TestEffectivePerms_DenyAllGrantNone(t *testing.T) {
 	got := permissions.EffectivePerms(base, 0, deny)
 	if got != 0 {
 		t.Errorf("EffectivePerms deny all: got 0x%X, want 0", got)
+	}
+}
+
+// ─── HasPerm — combined multi-bit checks ────────────────────────────────────
+
+func TestHasPerm_RequiresAllBitsPresent(t *testing.T) {
+	// Require both SendMessages AND ManageMessages; user only has SendMessages.
+	rolePerms := permissions.SendMessages | permissions.ReadMessages
+	combined := permissions.SendMessages | permissions.ManageMessages
+
+	if permissions.HasPerm(rolePerms, combined) {
+		t.Error("should fail when only some of the required bits are present")
+	}
+}
+
+func TestHasPerm_CombinedBitsAllPresent(t *testing.T) {
+	rolePerms := permissions.SendMessages | permissions.ReadMessages | permissions.ManageMessages
+	combined := permissions.SendMessages | permissions.ManageMessages
+
+	if !permissions.HasPerm(rolePerms, combined) {
+		t.Error("should succeed when all required combined bits are present")
+	}
+}
+
+// ─── EffectivePerms — channel override edge cases ───────────────────────────
+
+func TestEffectivePerms_DenyAllThenAllowOne(t *testing.T) {
+	base := permissions.SendMessages | permissions.ReadMessages | permissions.ConnectVoice
+	deny := int64(0x7FFFFFFF)         // deny everything
+	allow := permissions.ReadMessages // re-allow just ReadMessages
+
+	eff := permissions.EffectivePerms(base, allow, deny)
+	if eff != permissions.ReadMessages {
+		t.Errorf("deny-all + allow-one: got 0x%X, want 0x%X", eff, permissions.ReadMessages)
+	}
+}
+
+func TestEffectivePerms_MultipleDenyMultipleAllow(t *testing.T) {
+	base := permissions.SendMessages | permissions.ReadMessages | permissions.AttachFiles | permissions.ConnectVoice
+	deny := permissions.SendMessages | permissions.ConnectVoice
+	allow := permissions.ManageChannels | permissions.ManageMessages
+
+	eff := permissions.EffectivePerms(base, allow, deny)
+
+	// Should keep: ReadMessages, AttachFiles (not denied)
+	// Should lose: SendMessages, ConnectVoice (denied)
+	// Should gain: ManageChannels, ManageMessages (allowed)
+	want := permissions.ReadMessages | permissions.AttachFiles | permissions.ManageChannels | permissions.ManageMessages
+	if eff != want {
+		t.Errorf("multi deny+allow: got 0x%X, want 0x%X", eff, want)
+	}
+}
+
+// ─── Role hierarchy simulation ──────────────────────────────────────────────
+
+func TestRoleHierarchy_OwnerHasMorePermsThanAdmin(t *testing.T) {
+	ownerPerms := int64(0x7FFFFFFF) // Owner default
+	adminPerms := int64(0x3FFFFFFF) // Admin default (no Administrator bit)
+
+	if !permissions.HasAdmin(ownerPerms) {
+		t.Error("owner should be admin")
+	}
+	if permissions.HasAdmin(adminPerms) {
+		t.Error("admin role should NOT have Administrator bit")
+	}
+
+	// Owner can ManageServer via admin bypass.
+	// Admin can ManageServer via direct bit.
+	if !permissions.HasPerm(adminPerms, permissions.ManageServer) {
+		t.Error("admin should have ManageServer bit directly")
+	}
+}
+
+func TestRoleHierarchy_MemberLacksModPerms(t *testing.T) {
+	memberPerms := int64(1635) // Default member permissions from schema
+
+	modPerms := []int64{
+		permissions.ManageMessages,
+		permissions.ManageChannels,
+		permissions.KickMembers,
+		permissions.BanMembers,
+		permissions.ManageRoles,
+		permissions.ManageServer,
+		permissions.Administrator,
+	}
+
+	for _, p := range modPerms {
+		if permissions.HasPerm(memberPerms, p) {
+			t.Errorf("member (0x%X) should not have permission 0x%X", memberPerms, p)
+		}
+	}
+}
+
+func TestRoleHierarchy_MemberHasBasicPerms(t *testing.T) {
+	memberPerms := int64(1635) //nolint:gocritic // documenting the bitmask composition, not commented-out code
+
+	basicPerms := []struct {
+		name string
+		perm int64
+	}{
+		{"SendMessages", permissions.SendMessages},
+		{"ReadMessages", permissions.ReadMessages},
+	}
+
+	for _, tc := range basicPerms {
+		t.Run(tc.name, func(t *testing.T) {
+			if !permissions.HasPerm(memberPerms, tc.perm) {
+				t.Errorf("member should have %s", tc.name)
+			}
+		})
+	}
+}
+
+// ─── Permission bits are unique powers of 2 ─────────────────────────────────
+
+func TestPermissionBits_AreDistinctPowersOfTwo(t *testing.T) {
+	bits := []int64{
+		permissions.SendMessages, permissions.ReadMessages, permissions.AttachFiles,
+		permissions.AddReactions, permissions.ConnectVoice,
+		permissions.SpeakVoice, permissions.UseVideo, permissions.ShareScreen,
+		permissions.ManageMessages, permissions.ManageChannels, permissions.KickMembers,
+		permissions.BanMembers, permissions.MuteMembers, permissions.ManageRoles,
+		permissions.ManageServer, permissions.ManageInvites, permissions.ViewAuditLog,
+		permissions.Administrator,
+	}
+
+	seen := make(map[int64]bool)
+	for _, b := range bits {
+		if b&(b-1) != 0 {
+			t.Errorf("permission 0x%X is not a power of 2", b)
+		}
+		if seen[b] {
+			t.Errorf("duplicate permission bit: 0x%X", b)
+		}
+		seen[b] = true
 	}
 }

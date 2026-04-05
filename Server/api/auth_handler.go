@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -40,19 +39,6 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
-type verifyTotpRequest struct {
-	Code string `json:"code"`
-}
-
-type passwordConfirmationRequest struct {
-	Password string `json:"password"`
-}
-
-type totpConfirmationRequest struct {
-	Password string `json:"password"`
-	Code     string `json:"code"`
-}
-
 // userResponse is the user shape included in auth responses.
 type userResponse struct {
 	ID          int64  `json:"id"`
@@ -72,30 +58,27 @@ type authSuccessResponse struct {
 	User         *userResponse `json:"user,omitempty"`
 }
 
-type totpEnableResponse struct {
-	QRURI       string   `json:"qr_uri"`
-	BackupCodes []string `json:"backup_codes"`
-}
-
 // MountAuthRoutes registers all auth endpoints on the given router.
 // Rate limiters are applied per-endpoint as specified. trustedProxies is the
 // list of CIDRs whose X-Forwarded-For / X-Real-IP headers are honoured for
-// rate-limiting IP resolution.
-func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, trustedProxies []string) {
+// rate-limiting IP resolution. totpKey is the AES-256 key used to encrypt
+// TOTP secrets at rest (M1 security hardening).
+func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, trustedProxies []string, totpKey []byte) {
 	registerLimiter := limiter
 	loginLimiter := limiter
-	partialStore := auth.NewPartialAuthStore(10 * time.Minute)
-	pendingTOTPStore := auth.NewPendingTOTPStore(10 * time.Minute)
+	partialStore := auth.NewPartialAuthStore(partialAuthStoreTTL)
+	pendingTOTPStore := auth.NewPendingTOTPStore(pendingTOTPStoreTTL)
+	usedTOTPCodes := auth.NewUsedTOTPCodeStore()
 
 	r.Route("/api/v1/auth", func(r chi.Router) {
-		r.With(RateLimitMiddleware(registerLimiter, 3, time.Minute, trustedProxies)).
+		r.With(RateLimitMiddleware(registerLimiter, registerRateLimitPerMinute, time.Minute, trustedProxies)).
 			Post("/register", handleRegister(database))
 
-		r.With(RateLimitMiddleware(loginLimiter, 60, time.Minute, trustedProxies)).
+		r.With(RateLimitMiddleware(loginLimiter, loginRateLimitPerMinute, time.Minute, trustedProxies)).
 			Post("/login", handleLogin(database, limiter, partialStore, trustedProxies))
 
-		r.With(RateLimitMiddleware(limiter, 10, time.Minute, trustedProxies)).
-			Post("/verify-totp", handleVerifyTOTP(database, partialStore))
+		r.With(RateLimitMiddleware(limiter, verifyTOTPRateLimitPerMinute, time.Minute, trustedProxies)).
+			Post("/verify-totp", handleVerifyTOTP(database, partialStore, limiter, usedTOTPCodes, totpKey))
 
 		r.With(AuthMiddleware(database)).
 			Post("/logout", handleLogout(database))
@@ -104,21 +87,21 @@ func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, t
 			Get("/me", handleMe())
 
 		r.With(AuthMiddleware(database),
-			RateLimitMiddleware(limiter, 5, time.Minute, trustedProxies)).
+			RateLimitMiddleware(limiter, sensitiveEndpointRateLimitPerMinute, time.Minute, trustedProxies)).
 			Delete("/account", handleDeleteAccount(database, limiter))
 	})
 
 	r.With(AuthMiddleware(database),
-		RateLimitMiddleware(limiter, 5, time.Minute, trustedProxies)).
-		Post("/api/v1/users/me/totp/enable", handleEnableTOTP(pendingTOTPStore))
+		RateLimitMiddleware(limiter, sensitiveEndpointRateLimitPerMinute, time.Minute, trustedProxies)).
+		Post("/api/v1/users/me/totp/enable", handleEnableTOTP(pendingTOTPStore, limiter))
 
 	r.With(AuthMiddleware(database),
-		RateLimitMiddleware(limiter, 5, time.Minute, trustedProxies)).
-		Post("/api/v1/users/me/totp/confirm", handleConfirmTOTP(database, pendingTOTPStore))
+		RateLimitMiddleware(limiter, sensitiveEndpointRateLimitPerMinute, time.Minute, trustedProxies)).
+		Post("/api/v1/users/me/totp/confirm", handleConfirmTOTP(database, pendingTOTPStore, usedTOTPCodes, limiter, totpKey))
 
 	r.With(AuthMiddleware(database),
-		RateLimitMiddleware(limiter, 5, time.Minute, trustedProxies)).
-		Delete("/api/v1/users/me/totp", handleDisableTOTP(database, pendingTOTPStore))
+		RateLimitMiddleware(limiter, sensitiveEndpointRateLimitPerMinute, time.Minute, trustedProxies)).
+		Delete("/api/v1/users/me/totp", handleDisableTOTP(database, pendingTOTPStore, limiter))
 }
 
 // handleRegister processes POST /api/v1/auth/register.
@@ -127,7 +110,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 		registrationOpen, err := isRegistrationOpen(database)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to load registration policy",
 			})
 			return
@@ -143,7 +126,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 		require2FA, err := isRequire2FAEnabled(database)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to load registration policy",
 			})
 			return
@@ -199,7 +182,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 		hash, err := auth.HashPassword(req.Password)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to process registration",
 			})
 			return
@@ -211,14 +194,15 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 		if err != nil {
 			// UNIQUE constraint violation → duplicate username → 400.
 			// Any other DB error → 500.
-			if db.IsUniqueConstraintError(err) {
+			switch {
+			case db.IsUniqueConstraintError(err):
 				writeJSON(w, http.StatusBadRequest, genericAuthError)
-			} else if errors.Is(err, db.ErrNotFound) {
+			case errors.Is(err, db.ErrNotFound):
 				writeJSON(w, http.StatusBadRequest, genericAuthError)
-			} else {
+			default:
 				slog.Error("CreateUserWithInvite failed", "err", err, "username", req.Username)
 				writeJSON(w, http.StatusInternalServerError, errorResponse{
-					Error:   "SERVER_ERROR",
+					Error:   "INTERNAL_ERROR",
 					Message: "registration failed — please try again",
 				})
 			}
@@ -234,16 +218,16 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 		token, err := auth.GenerateToken()
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to create session",
 			})
 			return
 		}
 
-		device := r.Header.Get("User-Agent")
+		device := truncateDevice(r.Header.Get("User-Agent"))
 		if _, err := database.CreateSession(uid, auth.HashToken(token), device, ip); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to create session",
 			})
 			return
@@ -253,7 +237,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 		if err != nil || user == nil {
 			slog.Error("failed to fetch user after registration", "user_id", uid, "error", err)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "registration succeeded but user fetch failed",
 			})
 			return
@@ -292,9 +276,19 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 
 		ip := clientIPWithProxies(r, trustedProxies)
 
-		// Check lockout first.
+		// Check per-IP lockout first.
 		lockKey := "login_lock:" + ip
 		if limiter.IsLockedOut(lockKey) {
+			writeJSON(w, http.StatusTooManyRequests, errorResponse{
+				Error:   "RATE_LIMITED",
+				Message: "account temporarily locked due to too many failed attempts",
+			})
+			return
+		}
+
+		// BUG-110: Also check per-username lockout to prevent distributed brute force.
+		userLockKey := "login_user_lock:" + req.Username
+		if limiter.IsLockedOut(userLockKey) {
 			writeJSON(w, http.StatusTooManyRequests, errorResponse{
 				Error:   "RATE_LIMITED",
 				Message: "account temporarily locked due to too many failed attempts",
@@ -315,17 +309,22 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 			// non-nil error here is a genuine DB failure.
 			slog.Error("login: GetUserByUsername failed", "err", err, "ip", ip)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "login temporarily unavailable",
 			})
 			return
 		}
 
 		failKey := "login_fail:" + ip
+		userFailKey := "login_user_fail:" + req.Username
 		if user == nil || !auth.CheckPassword(user.PasswordHash, req.Password) {
-			// Track failures; lockout on the 10th failure.
-			if !limiter.Allow(failKey, 9, 15*time.Minute) {
-				limiter.Lockout(lockKey, 15*time.Minute)
+			// Track failures per-IP; lockout on threshold.
+			if !limiter.Allow(failKey, loginFailureThreshold, loginFailureWindow) {
+				limiter.Lockout(lockKey, loginLockoutDuration)
+			}
+			// BUG-110: Track failures per-username; lockout on threshold.
+			if !limiter.Allow(userFailKey, loginUserFailureThreshold, loginUserFailureWindow) {
+				limiter.Lockout(userLockKey, loginUserLockoutDuration)
 			}
 			slog.Info("login failed", "ip", ip, "username_len", len(req.Username))
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
@@ -335,8 +334,9 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 			return
 		}
 
-		// Reset failure counter on success.
+		// Reset failure counters on success.
 		limiter.Reset(failKey)
+		limiter.Reset(userFailKey)
 
 		if auth.IsEffectivelyBanned(user) {
 			slog.Warn("banned user login attempt", "username", user.Username, "user_id", user.ID, "ip", ip)
@@ -352,16 +352,16 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 		require2FA, err := isRequire2FAEnabled(database)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to load authentication policy",
 			})
 			return
 		}
 		if user.TOTPSecret != nil {
-			partialToken, err := partialStore.Issue(user.ID, r.Header.Get("User-Agent"), ip)
+			partialToken, err := partialStore.Issue(user.ID, truncateDevice(r.Header.Get("User-Agent")), ip)
 			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, errorResponse{
-					Error:   "SERVER_ERROR",
+					Error:   "INTERNAL_ERROR",
 					Message: "failed to start two-factor challenge",
 				})
 				return
@@ -381,10 +381,10 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 		}
 
 		// Issue session.
-		token, err := issueSession(database, user.ID, r.Header.Get("User-Agent"), ip)
+		token, err := issueSession(database, user.ID, truncateDevice(r.Header.Get("User-Agent")), ip)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to create session",
 			})
 			return
@@ -405,233 +405,6 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 	}
 }
 
-func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		partialToken, ok := auth.ExtractBearerToken(r)
-		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "missing or invalid authorization header",
-			})
-			return
-		}
-
-		challenge, ok := partialStore.Lookup(partialToken)
-		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "invalid or expired two-factor challenge",
-			})
-			return
-		}
-
-		var req verifyTotpRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "malformed request body",
-			})
-			return
-		}
-
-		user, err := database.GetUserByID(challenge.UserID)
-		if err != nil || user == nil || user.TOTPSecret == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "invalid or expired two-factor challenge",
-			})
-			return
-		}
-
-		if !auth.VerifyTOTPCode(*user.TOTPSecret, strings.TrimSpace(req.Code), time.Now().UTC()) {
-			partialStore.RegisterFailure(partialToken, 5)
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "invalid two-factor code",
-			})
-			return
-		}
-
-		if _, ok := partialStore.Consume(partialToken); !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "invalid or expired two-factor challenge",
-			})
-			return
-		}
-
-		token, err := issueSession(database, user.ID, challenge.Device, challenge.IP)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
-				Message: "failed to create session",
-			})
-			return
-		}
-
-		writeJSON(w, http.StatusOK, authSuccessResponse{
-			Token:       token,
-			Requires2FA: false,
-			User:        toUserResponse(user),
-		})
-	}
-}
-
-func handleEnableTOTP(pendingStore *auth.PendingTOTPStore) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "not authenticated",
-			})
-			return
-		}
-
-		var req passwordConfirmationRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "malformed request body",
-			})
-			return
-		}
-		if err := requirePasswordConfirmation(user, req.Password); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: err.Error(),
-			})
-			return
-		}
-
-		secret, err := auth.GenerateTOTPSecret()
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
-				Message: "failed to generate two-factor secret",
-			})
-			return
-		}
-
-		pendingStore.Put(user.ID, secret)
-		writeJSON(w, http.StatusOK, totpEnableResponse{
-			QRURI:       auth.BuildTOTPURI(user.Username, secret, "OwnCord"),
-			BackupCodes: []string{},
-		})
-	}
-}
-
-func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "not authenticated",
-			})
-			return
-		}
-
-		var req totpConfirmationRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "malformed request body",
-			})
-			return
-		}
-		if err := requirePasswordConfirmation(user, req.Password); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: err.Error(),
-			})
-			return
-		}
-
-		secret, ok := pendingStore.Lookup(user.ID)
-		if !ok {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: "no pending two-factor enrollment found",
-			})
-			return
-		}
-
-		if !auth.VerifyTOTPCode(secret, strings.TrimSpace(req.Code), time.Now().UTC()) {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "invalid two-factor code",
-			})
-			return
-		}
-
-		if err := database.UpdateUserTOTPSecret(user.ID, &secret); err != nil {
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
-				Message: "failed to enable two-factor authentication",
-			})
-			return
-		}
-		pendingStore.Delete(user.ID)
-		w.WriteHeader(http.StatusNoContent)
-	}
-}
-
-func handleDisableTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserKey).(*db.User)
-		if !ok || user == nil {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "not authenticated",
-			})
-			return
-		}
-
-		var req passwordConfirmationRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "malformed request body",
-			})
-			return
-		}
-		if err := requirePasswordConfirmation(user, req.Password); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: err.Error(),
-			})
-			return
-		}
-
-		require2FA, err := isRequire2FAEnabled(database)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
-				Message: "failed to load authentication policy",
-			})
-			return
-		}
-		if require2FA {
-			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error:   "FORBIDDEN",
-				Message: "two-factor authentication is required for this server",
-			})
-			return
-		}
-
-		pendingStore.Delete(user.ID)
-		if err := database.UpdateUserTOTPSecret(user.ID, nil); err != nil {
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
-				Message: "failed to disable two-factor authentication",
-			})
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}
-}
-
 // handleLogout processes POST /api/v1/auth/logout.
 func handleLogout(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -646,7 +419,7 @@ func handleLogout(database *db.DB) http.HandlerFunc {
 
 		if err := database.DeleteSession(sess.TokenHash); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to logout",
 			})
 			return
@@ -723,8 +496,8 @@ func handleDeleteAccount(database *db.DB, limiter *auth.RateLimiter) http.Handle
 		// Verify the supplied password matches the stored hash.
 		failKey := fmt.Sprintf("delete_fail:%d", user.ID)
 		if !auth.CheckPassword(user.PasswordHash, req.Password) {
-			if !limiter.Allow(failKey, 3, 15*time.Minute) {
-				limiter.Lockout(lockKey, 15*time.Minute)
+			if !limiter.Allow(failKey, deleteAccountFailureThreshold, deleteAccountFailureWindow) {
+				limiter.Lockout(lockKey, deleteAccountLockoutDuration)
 			}
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error:   "INVALID_INPUT",
@@ -744,7 +517,7 @@ func handleDeleteAccount(database *db.DB, limiter *auth.RateLimiter) http.Handle
 			}
 			slog.Error("DeleteAccount failed", "err", err, "user_id", user.ID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "SERVER_ERROR",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to delete account",
 			})
 			return
@@ -777,6 +550,16 @@ func toUserResponse(u *db.User) *userResponse {
 	return resp
 }
 
+// truncateDevice truncates the User-Agent to prevent oversized session records.
+const maxDeviceLen = 512
+
+func truncateDevice(ua string) string {
+	if len(ua) > maxDeviceLen {
+		return ua[:maxDeviceLen]
+	}
+	return ua
+}
+
 func issueSession(database *db.DB, userID int64, device, ip string) (string, error) {
 	token, err := auth.GenerateToken()
 	if err != nil {
@@ -793,7 +576,7 @@ func isRequire2FAEnabled(database *db.DB) (bool, error) {
 }
 
 func isRegistrationOpen(database *db.DB) (bool, error) {
-	return getBooleanSetting(database, "registration_open", false)
+	return getBooleanSetting(database, "registration_open", true)
 }
 
 func getBooleanSetting(database *db.DB, key string, defaultValue bool) (bool, error) {

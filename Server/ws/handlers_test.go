@@ -1264,6 +1264,33 @@ func TestChatDelete_RateLimit_ReturnsError(t *testing.T) {
 	}
 }
 
+// ─── BUG-126: Deleted messages must not be editable ─────────────────────────
+
+func TestChatEdit_DeletedMessage_ReturnsForbidden(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "edit-del-owner")
+	chID := seedTestChannel(t, database, "edit-del-chan")
+	msgID := seedMessage(t, database, chID, user.ID, "to be deleted")
+
+	// Soft-delete the message.
+	if err := database.DeleteMessage(msgID, user.ID, false); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, chatEditMsg(msgID, "ghost edit"))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "FORBIDDEN" {
+		t.Errorf("expected FORBIDDEN for editing deleted message, got %q", code)
+	}
+}
+
 // ─── handleReaction ───────────────────────────────────────────────────────────
 
 // TestReaction_AddReaction_BroadcastsReactionUpdate verifies that adding a
@@ -1481,6 +1508,33 @@ func TestReaction_InvalidMessageID_ReturnsBadRequest(t *testing.T) {
 	code := receiveErrorCode(send, 300*time.Millisecond)
 	if code != "BAD_REQUEST" {
 		t.Errorf("expected BAD_REQUEST for message_id=0, got %q", code)
+	}
+}
+
+// ─── BUG-126: Deleted messages must not be reactable ─────────────────────────
+
+func TestReaction_DeletedMessage_ReturnsBadRequest(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "react-del-owner")
+	chID := seedTestChannel(t, database, "react-del-chan")
+	msgID := seedMessage(t, database, chID, user.ID, "to be deleted")
+
+	// Soft-delete the message.
+	if err := database.DeleteMessage(msgID, user.ID, false); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c, reactionMsg("reaction_add", msgID, "👍"))
+	time.Sleep(50 * time.Millisecond)
+
+	code := receiveErrorCode(send, 300*time.Millisecond)
+	if code != "BAD_REQUEST" {
+		t.Errorf("expected BAD_REQUEST for reacting to deleted message, got %q", code)
 	}
 }
 

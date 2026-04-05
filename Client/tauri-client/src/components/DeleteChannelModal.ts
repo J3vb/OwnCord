@@ -14,9 +14,7 @@ export interface DeleteChannelModalOptions {
   readonly onClose: () => void;
 }
 
-export function createDeleteChannelModal(
-  options: DeleteChannelModalOptions,
-): MountableComponent {
+export function createDeleteChannelModal(options: DeleteChannelModalOptions): MountableComponent {
   const { channelName, onConfirm, onClose } = options;
   const ac = new AbortController();
   let overlay: HTMLDivElement | null = null;
@@ -88,10 +86,7 @@ export function createDeleteChannelModal(
           await onConfirm();
         } catch (err) {
           errorEl.style.display = "block";
-          setText(
-            errorEl,
-            err instanceof Error ? err.message : "Failed to delete channel",
-          );
+          setText(errorEl, err instanceof Error ? err.message : "Failed to delete channel");
           deleteBtn.removeAttribute("disabled");
           setText(deleteBtn, "Delete Channel");
         }

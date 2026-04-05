@@ -41,7 +41,9 @@ export interface SidebarMemberSectionResult {
 // Factory
 // ---------------------------------------------------------------------------
 
-export function createSidebarMemberSection(opts: SidebarMemberSectionOptions): SidebarMemberSectionResult {
+export function createSidebarMemberSection(
+  opts: SidebarMemberSectionOptions,
+): SidebarMemberSectionResult {
   const { api, getToast } = opts;
   const unsubs: Array<() => void> = [];
 
@@ -74,28 +76,42 @@ export function createSidebarMemberSection(opts: SidebarMemberSectionOptions): S
   let startY = 0;
   let startHeight = 0;
 
-  resizeHandle.addEventListener("mousedown", (e: MouseEvent) => {
-    isDragging = true;
-    startY = e.clientY;
-    startHeight = memberListContainer.offsetHeight;
-    e.preventDefault();
-  }, { signal: resizeAbort.signal });
+  resizeHandle.addEventListener(
+    "mousedown",
+    (e: MouseEvent) => {
+      isDragging = true;
+      startY = e.clientY;
+      startHeight = memberListContainer.offsetHeight;
+      e.preventDefault();
+    },
+    { signal: resizeAbort.signal },
+  );
 
-  document.addEventListener("mousemove", (e: MouseEvent) => {
-    if (!isDragging) return;
-    const delta = startY - e.clientY;
-    const maxH = window.innerHeight * 0.65;
-    const newHeight = Math.max(80, Math.min(startHeight + delta, maxH));
-    memberListContainer.style.height = `${newHeight}px`;
-  }, { signal: resizeAbort.signal });
+  document.addEventListener(
+    "mousemove",
+    (e: MouseEvent) => {
+      if (!isDragging) return;
+      const delta = startY - e.clientY;
+      const maxH = window.innerHeight * 0.65;
+      const newHeight = Math.max(80, Math.min(startHeight + delta, maxH));
+      memberListContainer.style.height = `${newHeight}px`;
+    },
+    { signal: resizeAbort.signal },
+  );
 
-  document.addEventListener("mouseup", () => {
-    if (!isDragging) return;
-    isDragging = false;
-    localStorage.setItem(LS_KEY_HEIGHT, String(memberListContainer.offsetHeight));
-  }, { signal: resizeAbort.signal });
+  document.addEventListener(
+    "mouseup",
+    () => {
+      if (!isDragging) return;
+      isDragging = false;
+      localStorage.setItem(LS_KEY_HEIGHT, String(memberListContainer.offsetHeight));
+    },
+    { signal: resizeAbort.signal },
+  );
 
-  unsubs.push(() => { resizeAbort.abort(); });
+  unsubs.push(() => {
+    resizeAbort.abort();
+  });
 
   // --- Collapse state ---
   const savedCollapsed = localStorage.getItem(LS_KEY_COLLAPSED);

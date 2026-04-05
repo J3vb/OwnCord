@@ -14,11 +14,7 @@ export interface CreateChannelModalOptions {
   /** The category this channel will be created under. */
   readonly category: string;
   /** Called when the user submits the form. */
-  readonly onCreate: (data: {
-    name: string;
-    type: ChannelType;
-    category: string;
-  }) => Promise<void>;
+  readonly onCreate: (data: { name: string; type: ChannelType; category: string }) => Promise<void>;
   /** Called when the modal is closed without creating. */
   readonly onClose: () => void;
 }
@@ -29,18 +25,14 @@ export function isVoiceCategory(category: string): boolean {
 }
 
 /** Returns the allowed channel types for a given category. */
-export function allowedTypesForCategory(
-  category: string,
-): readonly ChannelType[] {
+export function allowedTypesForCategory(category: string): readonly ChannelType[] {
   if (isVoiceCategory(category)) {
     return ["voice"] as const;
   }
   return ["text", "announcement"] as const;
 }
 
-export function createCreateChannelModal(
-  options: CreateChannelModalOptions,
-): MountableComponent {
+export function createCreateChannelModal(options: CreateChannelModalOptions): MountableComponent {
   const { category, onCreate, onClose } = options;
   const ac = new AbortController();
   let overlay: HTMLDivElement | null = null;
@@ -72,11 +64,7 @@ export function createCreateChannelModal(
 
     // Category (read-only display)
     const categoryGroup = createElement("div", { class: "form-group" });
-    const categoryLabel = createElement(
-      "label",
-      { class: "form-label" },
-      "Category",
-    );
+    const categoryLabel = createElement("label", { class: "form-label" }, "Category");
     const categoryDisplay = createElement("div", {
       class: "form-input",
       style: "opacity: 0.7; cursor: default;",
@@ -104,11 +92,7 @@ export function createCreateChannelModal(
     });
 
     for (const t of allowedTypes) {
-      const opt = createElement(
-        "option",
-        { value: t },
-        t.charAt(0).toUpperCase() + t.slice(1),
-      );
+      const opt = createElement("option", { value: t }, t.charAt(0).toUpperCase() + t.slice(1));
       typeSelect.appendChild(opt);
     }
     appendChildren(typeGroup, typeLabel, typeSelect);
@@ -166,10 +150,7 @@ export function createCreateChannelModal(
           });
         } catch (err) {
           errorEl.style.display = "block";
-          setText(
-            errorEl,
-            err instanceof Error ? err.message : "Failed to create channel",
-          );
+          setText(errorEl, err instanceof Error ? err.message : "Failed to create channel");
           createBtn.removeAttribute("disabled");
           setText(createBtn, "Create Channel");
         }

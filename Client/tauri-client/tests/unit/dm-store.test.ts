@@ -65,10 +65,7 @@ describe("dmStore", () => {
     });
 
     it("updates an existing channel without creating a duplicate", () => {
-      setDmChannels([
-        makeDm({ channelId: 1, lastMessage: "old" }),
-        makeDm({ channelId: 2 }),
-      ]);
+      setDmChannels([makeDm({ channelId: 1, lastMessage: "old" }), makeDm({ channelId: 2 })]);
       addDmChannel(makeDm({ channelId: 1, lastMessage: "new" }));
       const channels = dmStore.getState().channels;
       expect(channels).toHaveLength(2);
@@ -78,11 +75,7 @@ describe("dmStore", () => {
     });
 
     it("moves an updated existing channel to the front", () => {
-      setDmChannels([
-        makeDm({ channelId: 1 }),
-        makeDm({ channelId: 2 }),
-        makeDm({ channelId: 3 }),
-      ]);
+      setDmChannels([makeDm({ channelId: 1 }), makeDm({ channelId: 2 }), makeDm({ channelId: 3 })]);
       addDmChannel(makeDm({ channelId: 3, lastMessage: "bumped" }));
       const channels = dmStore.getState().channels;
       expect(channels[0]!.channelId).toBe(3);
@@ -168,11 +161,7 @@ describe("dmStore", () => {
     });
 
     it("moves the updated channel to the front of the list", () => {
-      setDmChannels([
-        makeDm({ channelId: 1 }),
-        makeDm({ channelId: 2 }),
-        makeDm({ channelId: 3 }),
-      ]);
+      setDmChannels([makeDm({ channelId: 1 }), makeDm({ channelId: 2 }), makeDm({ channelId: 3 })]);
       updateDmLastMessagePreview(3, 50, "latest", "2026-03-28T14:00:00Z");
       const channels = dmStore.getState().channels;
       expect(channels[0]!.channelId).toBe(3);
@@ -213,11 +202,7 @@ describe("dmStore", () => {
 
   describe("updateDmLastMessage — reordering", () => {
     it("moves the updated channel to the front of the list", () => {
-      setDmChannels([
-        makeDm({ channelId: 1 }),
-        makeDm({ channelId: 2 }),
-        makeDm({ channelId: 3 }),
-      ]);
+      setDmChannels([makeDm({ channelId: 1 }), makeDm({ channelId: 2 }), makeDm({ channelId: 3 })]);
       updateDmLastMessage(3, 50, "new", "2026-03-28T14:00:00Z");
       const channels = dmStore.getState().channels;
       expect(channels[0]!.channelId).toBe(3);

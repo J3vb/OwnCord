@@ -38,10 +38,7 @@ describe("createModal", () => {
 
   it("applies overlay attributes", () => {
     const content = document.createElement("div");
-    const inst = createModal(
-      { content, overlayAttrs: { "data-testid": "my-modal" } },
-      container,
-    );
+    const inst = createModal({ content, overlayAttrs: { "data-testid": "my-modal" } }, container);
 
     expect(inst.overlay.getAttribute("data-testid")).toBe("my-modal");
   });
@@ -104,10 +101,7 @@ describe("createModal", () => {
   it("closeOnBackdrop=false prevents backdrop close", () => {
     const onClose = vi.fn();
     const content = document.createElement("div");
-    const inst = createModal(
-      { content, onClose, closeOnBackdrop: false },
-      container,
-    );
+    const inst = createModal({ content, onClose, closeOnBackdrop: false }, container);
 
     inst.overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
@@ -118,10 +112,7 @@ describe("createModal", () => {
   it("closeOnEscape=false prevents Escape close", () => {
     const onClose = vi.fn();
     const content = document.createElement("div");
-    createModal(
-      { content, onClose, closeOnEscape: false },
-      container,
-    );
+    createModal({ content, onClose, closeOnEscape: false }, container);
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
 
@@ -131,10 +122,7 @@ describe("createModal", () => {
   it("cleans up when external signal is aborted", () => {
     const externalAc = new AbortController();
     const content = document.createElement("div");
-    const inst = createModal(
-      { content, signal: externalAc.signal },
-      container,
-    );
+    const inst = createModal({ content, signal: externalAc.signal }, container);
 
     expect(container.contains(inst.overlay)).toBe(true);
 

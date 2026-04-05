@@ -61,7 +61,7 @@ func MountChannelRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter
 	})
 	r.With(
 		AuthMiddleware(database),
-		searchRateLimitMiddleware(limiter, 30, time.Minute, trustedProxies),
+		searchRateLimitMiddleware(limiter, searchRateLimitPerMinute, time.Minute, trustedProxies),
 	).Get("/api/v1/search", handleSearch(database))
 }
 
@@ -105,7 +105,7 @@ func handleListChannels(database *db.DB) http.HandlerFunc {
 		if err != nil {
 			slog.Error("handleListChannels ListChannels", "err", err)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to list channels",
 			})
 			return
@@ -119,7 +119,7 @@ func handleListChannels(database *db.DB) http.HandlerFunc {
 			if oErr != nil {
 				slog.Error("handleListChannels GetAllChannelPermissionsForRole", "err", oErr)
 				writeJSON(w, http.StatusInternalServerError, errorResponse{
-					Error:   "INTERNAL",
+					Error:   "INTERNAL_ERROR",
 					Message: "failed to fetch channel permissions",
 				})
 				return
@@ -127,10 +127,14 @@ func handleListChannels(database *db.DB) http.HandlerFunc {
 		}
 
 		// Filter channels by READ_MESSAGES permission.
+		// DM channels are excluded — they are delivered via the separate DM endpoints.
 		var visible []db.Channel
-		for _, ch := range channels {
-			if hasChannelPermBatch(role, overrides, ch.ID, permissions.ReadMessages) {
-				visible = append(visible, ch)
+		for i := range channels {
+			if channels[i].Type == "dm" {
+				continue
+			}
+			if hasChannelPermBatch(role, overrides, channels[i].ID, permissions.ReadMessages) {
+				visible = append(visible, channels[i])
 			}
 		}
 		if visible == nil {
@@ -153,7 +157,7 @@ func handleGetMessages(database *db.DB) http.HandlerFunc {
 		if err != nil {
 			slog.Error("handleGetMessages GetChannel", "err", err, "channel_id", channelID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to look up channel",
 			})
 			return
@@ -178,9 +182,9 @@ func handleGetMessages(database *db.DB) http.HandlerFunc {
 			}
 			ok, dmErr := database.IsDMParticipant(user.ID, channelID)
 			if dmErr != nil || !ok {
-				writeJSON(w, http.StatusForbidden, errorResponse{
-					Error:   "FORBIDDEN",
-					Message: "not a participant in this DM",
+				writeJSON(w, http.StatusNotFound, errorResponse{
+					Error:   "NOT_FOUND",
+					Message: "channel not found",
 				})
 				return
 			}
@@ -236,7 +240,7 @@ func handleGetMessages(database *db.DB) http.HandlerFunc {
 		if err != nil {
 			slog.Error("handleGetMessages GetMessagesForAPI", "err", err, "channel_id", channelID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to fetch messages",
 			})
 			return
@@ -280,6 +284,41 @@ func handleSearch(database *db.DB) http.HandlerFunc {
 				return
 			}
 			channelID = &v
+
+			// Pre-check: verify the user can read this channel before running
+			// the FTS query, preventing timing-oracle information leakage.
+			ch, chErr := database.GetChannel(v)
+			if chErr != nil || ch == nil {
+				writeJSON(w, http.StatusNotFound, errorResponse{
+					Error:   "NOT_FOUND",
+					Message: "channel not found",
+				})
+				return
+			}
+			if ch.Type == "dm" {
+				user, _ := r.Context().Value(UserKey).(*db.User)
+				if user == nil {
+					writeJSON(w, http.StatusForbidden, errorResponse{
+						Error: "FORBIDDEN", Message: "no permission to search this channel",
+					})
+					return
+				}
+				ok, dmErr := database.IsDMParticipant(user.ID, v)
+				if dmErr != nil || !ok {
+					writeJSON(w, http.StatusForbidden, errorResponse{
+						Error: "FORBIDDEN", Message: "no permission to search this channel",
+					})
+					return
+				}
+			} else {
+				role, _ := r.Context().Value(RoleKey).(*db.Role)
+				if !hasChannelPermREST(database, role, v, permissions.ReadMessages) {
+					writeJSON(w, http.StatusForbidden, errorResponse{
+						Error: "FORBIDDEN", Message: "no permission to search this channel",
+					})
+					return
+				}
+			}
 		}
 
 		limit := defaultMessageLimit
@@ -298,90 +337,111 @@ func handleSearch(database *db.DB) http.HandlerFunc {
 			limit = v
 		}
 
-		results, err := database.SearchMessages(q, channelID, limit)
-		if err != nil {
-			if isInvalidSearchQueryError(err) {
-				writeJSON(w, http.StatusBadRequest, errorResponse{
-					Error:   "BAD_REQUEST",
-					Message: "invalid search query",
-				})
-				return
-			}
-			slog.Error("handleSearch SearchMessages", "err", err, "query", q)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
-				Message: "search failed",
-			})
-			return
-		}
+		var results []db.MessageSearchResult
 
-		// Batch-fetch overrides and post-filter results by READ_MESSAGES.
-		role, _ := r.Context().Value(RoleKey).(*db.Role)
-		user, _ := r.Context().Value(UserKey).(*db.User)
-		overrides := map[int64]db.ChannelOverride{}
-		if role != nil && !permissions.HasAdmin(role.Permissions) {
-			var oErr error
-			overrides, oErr = database.GetAllChannelPermissionsForRole(role.ID)
-			if oErr != nil {
-				slog.Error("handleSearch GetAllChannelPermissionsForRole", "err", oErr)
+		if channelID != nil {
+			// Single-channel search: permission already checked above.
+			var err error
+			results, err = database.SearchMessages(q, channelID, limit)
+			if err != nil {
+				if isInvalidSearchQueryError(err) {
+					writeJSON(w, http.StatusBadRequest, errorResponse{
+						Error:   "BAD_REQUEST",
+						Message: "invalid search query",
+					})
+					return
+				}
+				slog.Error("handleSearch SearchMessages", "err", err, "query", q)
 				writeJSON(w, http.StatusInternalServerError, errorResponse{
-					Error:   "INTERNAL",
+					Error:   "INTERNAL_ERROR",
 					Message: "search failed",
 				})
 				return
 			}
-		}
+		} else {
+			// Global search: pre-compute the set of accessible channel IDs
+			// so the DB query never touches restricted content.
+			role, _ := r.Context().Value(RoleKey).(*db.Role)
+			user, _ := r.Context().Value(UserKey).(*db.User)
 
-		// Batch-fetch channel types in a single query to avoid N+1 lookups.
-		uniqueIDs := make(map[int64]struct{}, len(results))
-		for _, res := range results {
-			uniqueIDs[res.ChannelID] = struct{}{}
-		}
-		channelIDs := make([]int64, 0, len(uniqueIDs))
-		for id := range uniqueIDs {
-			channelIDs = append(channelIDs, id)
-		}
-		channelTypeCache, ctErr := database.GetChannelTypes(channelIDs)
-		if ctErr != nil {
-			slog.Error("handleSearch GetChannelTypes", "err", ctErr)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
-				Message: "search failed",
-			})
-			return
-		}
-
-		var filtered []db.MessageSearchResult
-		for _, res := range results {
-			chType, ok := channelTypeCache[res.ChannelID]
-			if !ok {
-				// Fail closed if we cannot determine the channel type.
-				continue
+			// 1. Guild channels the user can read.
+			allChannels, chErr := database.ListChannels()
+			if chErr != nil {
+				slog.Error("handleSearch ListChannels", "err", chErr)
+				writeJSON(w, http.StatusInternalServerError, errorResponse{
+					Error:   "INTERNAL_ERROR",
+					Message: "search failed",
+				})
+				return
 			}
-			if chType == "dm" {
-				// DM channels require participant-based auth.
-				if user == nil {
-					continue
+
+			overrides := map[int64]db.ChannelOverride{}
+			if role != nil && !permissions.HasAdmin(role.Permissions) {
+				var oErr error
+				overrides, oErr = database.GetAllChannelPermissionsForRole(role.ID)
+				if oErr != nil {
+					slog.Error("handleSearch GetAllChannelPermissionsForRole", "err", oErr)
+					writeJSON(w, http.StatusInternalServerError, errorResponse{
+						Error:   "INTERNAL_ERROR",
+						Message: "search failed",
+					})
+					return
 				}
-				ok, dmErr := database.IsDMParticipant(user.ID, res.ChannelID)
-				if dmErr != nil || !ok {
-					continue
+			}
+
+			var accessibleIDs []int64
+			for i := range allChannels {
+				if allChannels[i].Type == "dm" {
+					continue // DM channels handled separately below.
 				}
+				if hasChannelPermBatch(role, overrides, allChannels[i].ID, permissions.ReadMessages) {
+					accessibleIDs = append(accessibleIDs, allChannels[i].ID)
+				}
+			}
+
+			// 2. DM channels the user participates in.
+			if user != nil {
+				dmChannels, dmErr := database.GetUserDMChannels(user.ID)
+				if dmErr != nil {
+					slog.Error("handleSearch GetUserDMChannels", "err", dmErr)
+					writeJSON(w, http.StatusInternalServerError, errorResponse{
+						Error:   "INTERNAL_ERROR",
+						Message: "search failed",
+					})
+					return
+				}
+				for _, dm := range dmChannels {
+					accessibleIDs = append(accessibleIDs, dm.ChannelID)
+				}
+			}
+
+			if len(accessibleIDs) == 0 {
+				results = []db.MessageSearchResult{}
 			} else {
-				if !hasChannelPermBatch(role, overrides, res.ChannelID, permissions.ReadMessages) {
-					continue
+				var err error
+				results, err = database.SearchMessagesInChannels(q, accessibleIDs, limit)
+				if err != nil {
+					if isInvalidSearchQueryError(err) {
+						writeJSON(w, http.StatusBadRequest, errorResponse{
+							Error:   "BAD_REQUEST",
+							Message: "invalid search query",
+						})
+						return
+					}
+					slog.Error("handleSearch SearchMessagesInChannels", "err", err, "query", q)
+					writeJSON(w, http.StatusInternalServerError, errorResponse{
+						Error:   "INTERNAL_ERROR",
+						Message: "search failed",
+					})
+					return
 				}
 			}
-			filtered = append(filtered, res)
-		}
-		if filtered == nil {
-			filtered = []db.MessageSearchResult{}
 		}
 
 		type response struct {
 			Results []db.MessageSearchResult `json:"results"`
 		}
-		writeJSON(w, http.StatusOK, response{Results: filtered})
+		writeJSON(w, http.StatusOK, response{Results: results})
 	}
 }
 
@@ -397,7 +457,7 @@ func handleGetPins(database *db.DB) http.HandlerFunc {
 		if err != nil {
 			slog.Error("handleGetPins GetChannel", "err", err, "channel_id", channelID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to look up channel",
 			})
 			return
@@ -422,9 +482,9 @@ func handleGetPins(database *db.DB) http.HandlerFunc {
 			}
 			ok, dmErr := database.IsDMParticipant(user.ID, channelID)
 			if dmErr != nil || !ok {
-				writeJSON(w, http.StatusForbidden, errorResponse{
-					Error:   "FORBIDDEN",
-					Message: "not a participant in this DM",
+				writeJSON(w, http.StatusNotFound, errorResponse{
+					Error:   "NOT_FOUND",
+					Message: "channel not found",
 				})
 				return
 			}
@@ -450,7 +510,7 @@ func handleGetPins(database *db.DB) http.HandlerFunc {
 		if err != nil {
 			slog.Error("handleGetPins GetPinnedMessages", "err", err, "channel_id", channelID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to fetch pinned messages",
 			})
 			return
@@ -486,7 +546,7 @@ func handleSetPinned(database *db.DB, pinned bool) http.HandlerFunc {
 		if chErr != nil {
 			slog.Error("handleSetPinned GetChannel", "err", chErr, "channel_id", channelID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to look up channel",
 			})
 			return
@@ -511,9 +571,9 @@ func handleSetPinned(database *db.DB, pinned bool) http.HandlerFunc {
 			}
 			ok, dmErr := database.IsDMParticipant(user.ID, channelID)
 			if dmErr != nil || !ok {
-				writeJSON(w, http.StatusForbidden, errorResponse{
-					Error:   "FORBIDDEN",
-					Message: "not a participant in this DM",
+				writeJSON(w, http.StatusNotFound, errorResponse{
+					Error:   "NOT_FOUND",
+					Message: "channel not found",
 				})
 				return
 			}
@@ -534,7 +594,7 @@ func handleSetPinned(database *db.DB, pinned bool) http.HandlerFunc {
 		if err != nil {
 			slog.Error("handleSetPinned GetMessage", "err", err, "action", action, "message_id", messageID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to look up message",
 			})
 			return
@@ -550,7 +610,7 @@ func handleSetPinned(database *db.DB, pinned bool) http.HandlerFunc {
 		if err := database.SetMessagePinned(messageID, pinned); err != nil {
 			slog.Error("handleSetPinned SetMessagePinned", "err", err, "action", action, "message_id", messageID)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL",
+				Error:   "INTERNAL_ERROR",
 				Message: "failed to " + action + " message",
 			})
 			return

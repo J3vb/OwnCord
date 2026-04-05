@@ -95,9 +95,9 @@ async function navigateToMainPageWithDms(page: import("@playwright/test").Page):
   await waitForWsReady(page);
   // Wait for the DM section to render in the unified sidebar
   // In channels mode: DM section = .sidebar-dm-section, DM entries = [data-testid="dm-entry"]
-  await expect(
-    page.locator(".sidebar-dm-section, [data-testid='dm-entry']").first(),
-  ).toBeVisible({ timeout: 5_000 });
+  await expect(page.locator(".sidebar-dm-section, [data-testid='dm-entry']").first()).toBeVisible({
+    timeout: 5_000,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -245,9 +245,7 @@ test.describe("DM System — WS Events", () => {
     });
 
     // The unread count should increment. In channels mode, DM entries use .dm-unread-badge
-    await expect(
-      page.locator(".dm-unread-badge").first(),
-    ).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator(".dm-unread-badge").first()).toBeVisible({ timeout: 5_000 });
   });
 });
 

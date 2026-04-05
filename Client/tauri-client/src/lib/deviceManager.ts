@@ -78,7 +78,7 @@ export class DeviceManager {
       const savedInput = loadPref<string>("audioInputDevice", "");
 
       // Check if the saved input device was removed
-      if (savedInput !== "" && !devices.some(d => d.deviceId === savedInput)) {
+      if (savedInput !== "" && !devices.some((d) => d.deviceId === savedInput)) {
         log.warn("Saved audio input device removed — falling back to default", { savedInput });
         // Reset to default
         savePref("audioInputDevice", "");
@@ -102,7 +102,7 @@ export class DeviceManager {
       // Check output device
       const outputDevices = await Room.getLocalDevices("audiooutput");
       const savedOutput = loadPref<string>("audioOutputDevice", "");
-      if (savedOutput !== "" && !outputDevices.some(d => d.deviceId === savedOutput)) {
+      if (savedOutput !== "" && !outputDevices.some((d) => d.deviceId === savedOutput)) {
         log.warn("Saved audio output device removed — falling back to default", { savedOutput });
         savePref("audioOutputDevice", "");
         this.onToast?.("Audio output device disconnected — switched to default");

@@ -181,10 +181,7 @@ describe("messages store", () => {
   describe("setMessages", () => {
     it("sets messages for a channel", () => {
       // API returns newest-first; store reverses to oldest-first for display.
-      const responses = [
-        makeMessageResponse({ id: 11 }),
-        makeMessageResponse({ id: 10 }),
-      ];
+      const responses = [makeMessageResponse({ id: 11 }), makeMessageResponse({ id: 10 })];
       setMessages(1, responses, false);
 
       const msgs = getChannelMessages(1);
@@ -234,11 +231,7 @@ describe("messages store", () => {
     it("prepends older messages before existing ones", () => {
       // API returns newest-first; store reverses to oldest-first.
       setMessages(1, [makeMessageResponse({ id: 20 })], true);
-      prependMessages(
-        1,
-        [makeMessageResponse({ id: 15 }), makeMessageResponse({ id: 10 })],
-        false,
-      );
+      prependMessages(1, [makeMessageResponse({ id: 15 }), makeMessageResponse({ id: 10 })], false);
 
       const msgs = getChannelMessages(1);
       expect(msgs).toHaveLength(3);
@@ -565,13 +558,16 @@ describe("messages store", () => {
     it("marks reaction as 'me' when current user reacts", () => {
       addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
 
-      updateReaction({
-        message_id: 100,
-        channel_id: 1,
-        emoji: "❤️",
-        user_id: 1,
-        action: "add",
-      }, 1);
+      updateReaction(
+        {
+          message_id: 100,
+          channel_id: 1,
+          emoji: "❤️",
+          user_id: 1,
+          action: "add",
+        },
+        1,
+      );
 
       const msg = getChannelMessages(1)[0]!;
       expect(msg.reactions[0]).toEqual({ emoji: "❤️", count: 1, me: true });
@@ -580,21 +576,27 @@ describe("messages store", () => {
     it("increments count on existing reaction", () => {
       addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
 
-      updateReaction({
-        message_id: 100,
-        channel_id: 1,
-        emoji: "👍",
-        user_id: 2,
-        action: "add",
-      }, 1);
+      updateReaction(
+        {
+          message_id: 100,
+          channel_id: 1,
+          emoji: "👍",
+          user_id: 2,
+          action: "add",
+        },
+        1,
+      );
 
-      updateReaction({
-        message_id: 100,
-        channel_id: 1,
-        emoji: "👍",
-        user_id: 3,
-        action: "add",
-      }, 1);
+      updateReaction(
+        {
+          message_id: 100,
+          channel_id: 1,
+          emoji: "👍",
+          user_id: 3,
+          action: "add",
+        },
+        1,
+      );
 
       const msg = getChannelMessages(1)[0]!;
       expect(msg.reactions).toHaveLength(1);
@@ -604,21 +606,27 @@ describe("messages store", () => {
     it("sets me=true when incrementing existing reaction by current user", () => {
       addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
 
-      updateReaction({
-        message_id: 100,
-        channel_id: 1,
-        emoji: "👍",
-        user_id: 2,
-        action: "add",
-      }, 1);
+      updateReaction(
+        {
+          message_id: 100,
+          channel_id: 1,
+          emoji: "👍",
+          user_id: 2,
+          action: "add",
+        },
+        1,
+      );
 
-      updateReaction({
-        message_id: 100,
-        channel_id: 1,
-        emoji: "👍",
-        user_id: 1,
-        action: "add",
-      }, 1);
+      updateReaction(
+        {
+          message_id: 100,
+          channel_id: 1,
+          emoji: "👍",
+          user_id: 1,
+          action: "add",
+        },
+        1,
+      );
 
       const msg = getChannelMessages(1)[0]!;
       expect(msg.reactions[0]!.me).toBe(true);
@@ -632,7 +640,10 @@ describe("messages store", () => {
       updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 3, action: "add" }, 1);
 
       // Remove one
-      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 3, action: "remove" }, 1);
+      updateReaction(
+        { message_id: 100, channel_id: 1, emoji: "👍", user_id: 3, action: "remove" },
+        1,
+      );
 
       const msg = getChannelMessages(1)[0]!;
       expect(msg.reactions).toHaveLength(1);
@@ -643,7 +654,10 @@ describe("messages store", () => {
       addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
 
       updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "add" }, 1);
-      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "remove" }, 1);
+      updateReaction(
+        { message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "remove" },
+        1,
+      );
 
       const msg = getChannelMessages(1)[0]!;
       expect(msg.reactions).toHaveLength(0);
@@ -656,7 +670,10 @@ describe("messages store", () => {
       updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "add" }, 1);
       expect(getChannelMessages(1)[0]!.reactions[0]!.me).toBe(true);
 
-      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 1, action: "remove" }, 1);
+      updateReaction(
+        { message_id: 100, channel_id: 1, emoji: "👍", user_id: 1, action: "remove" },
+        1,
+      );
 
       const msg = getChannelMessages(1)[0]!;
       expect(msg.reactions[0]!.me).toBe(false);
@@ -665,7 +682,10 @@ describe("messages store", () => {
 
     it("is a no-op if the channel does not exist", () => {
       const before = messagesStore.getState();
-      updateReaction({ message_id: 999, channel_id: 99, emoji: "👍", user_id: 1, action: "add" }, 1);
+      updateReaction(
+        { message_id: 999, channel_id: 99, emoji: "👍", user_id: 1, action: "add" },
+        1,
+      );
       const after = messagesStore.getState();
       expect(before).toBe(after);
     });
@@ -686,7 +706,10 @@ describe("messages store", () => {
 
       updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 1, action: "add" }, 1);
       updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "add" }, 1);
-      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "remove" }, 1);
+      updateReaction(
+        { message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "remove" },
+        1,
+      );
 
       const msg = getChannelMessages(1)[0]!;
       expect(msg.reactions[0]!.me).toBe(true);
@@ -719,7 +742,10 @@ describe("messages store", () => {
       updateReaction({ message_id: 100, channel_id: 1, emoji: "❤️", user_id: 3, action: "add" }, 1);
 
       // Remove 👍 — ❤️ should remain unchanged
-      updateReaction({ message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "remove" }, 1);
+      updateReaction(
+        { message_id: 100, channel_id: 1, emoji: "👍", user_id: 2, action: "remove" },
+        1,
+      );
 
       const msg = getChannelMessages(1)[0]!;
       expect(msg.reactions).toHaveLength(1);

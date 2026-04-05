@@ -29,7 +29,9 @@ describe("ChatHeader", () => {
     container.appendChild(element);
 
     expect(refs.nameEl.textContent).toBe("general");
-    expect(container.querySelector('[data-testid="chat-header-name"]')?.textContent).toBe("general");
+    expect(container.querySelector('[data-testid="chat-header-name"]')?.textContent).toBe(
+      "general",
+    );
   });
 
   it("displays hash prefix", () => {
@@ -73,7 +75,9 @@ describe("ChatHeader", () => {
 
     // Update name via ref
     refs.nameEl.textContent = "announcements";
-    expect(container.querySelector('[data-testid="chat-header-name"]')?.textContent).toBe("announcements");
+    expect(container.querySelector('[data-testid="chat-header-name"]')?.textContent).toBe(
+      "announcements",
+    );
 
     // Update topic via ref
     refs.topicEl.textContent = "Important news";

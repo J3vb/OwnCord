@@ -38,9 +38,12 @@ describe("media cache clearing", () => {
 
   it("replaces a stale loading title with a fallback when the cache is cleared mid-fetch", async () => {
     let resolveFetch: ((value: ReturnType<typeof oembedResponse>) => void) | undefined;
-    fetchMock.mockImplementationOnce(() => new Promise((resolve) => {
-      resolveFetch = resolve;
-    }));
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
 
     const element = renderYouTubeEmbed("abc123", "https://www.youtube.com/watch?v=abc123");
     document.body.appendChild(element);

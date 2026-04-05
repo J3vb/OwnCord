@@ -85,6 +85,37 @@ jobs:
           }
           $lines -join "`n" | Out-File -FilePath checksums.sha256 -Encoding utf8 -NoNewline
 
+          $manifest = @{
+            version = "v$env:VERSION"
+            asset = "chatserver.exe"
+            sha256 = $serverHash
+          } | ConvertTo-Json -Compress
+          $manifest | Out-File -FilePath Server/server-update-manifest.json -Encoding utf8 -NoNewline
+
+      - name: Sign server update assets
+        working-directory: Client/tauri-client
+        shell: pwsh
+        env:
+          SERVER_UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.SERVER_UPDATE_SIGNING_PRIVATE_KEY }}
+          SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $keyPath = Join-Path $env:RUNNER_TEMP 'owncord-server-update.key'
+          [System.IO.File]::WriteAllText($keyPath, $env:SERVER_UPDATE_SIGNING_PRIVATE_KEY)
+          try {
+            npx tauri signer sign -k $keyPath -p "$env:SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD" ../../Server/chatserver.exe
+            npx tauri signer sign -k $keyPath -p "$env:SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD" ../../Server/server-update-manifest.json
+          }
+          finally {
+            Remove-Item $keyPath -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Install root dependencies (changelogen)
+        run: npm ci
+
+      - name: Generate changelog
+        shell: bash
+        run: npx changelogen --output CHANGELOG.md
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -92,6 +123,9 @@ jobs:
         run: |
           ASSETS=(
             Server/chatserver.exe
+            Server/chatserver.exe.sig
+            Server/server-update-manifest.json
+            Server/server-update-manifest.json.sig
             "${{ steps.artifacts.outputs.installer_path }}"
             checksums.sha256
           )
@@ -103,5 +137,5 @@ jobs:
             ASSETS+=("${{ steps.artifacts.outputs.nsis_sig }}")
           fi
           gh release create ${{ github.ref_name }} \
-            --generate-notes \
+            --notes-file CHANGELOG.md \
             "${ASSETS[@]}"

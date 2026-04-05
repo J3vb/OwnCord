@@ -30,6 +30,17 @@ vi.mock("livekit-client", () => ({
   },
 }));
 
+const mockVoiceStoreState = {
+  localDeafened: false,
+  currentChannelId: null as number | null,
+};
+
+vi.mock("@stores/voice.store", () => ({
+  voiceStore: {
+    getState: () => mockVoiceStoreState,
+  },
+}));
+
 vi.mock("@lib/livekitSession", () => ({
   parseUserId: (identity: string) => {
     const match = identity.match(/^user-(\d+)$/);
@@ -58,6 +69,8 @@ describe("AudioElements", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockVoiceStoreState.localDeafened = false;
+    mockVoiceStoreState.currentChannelId = null;
     elements = new AudioElements();
   });
 
@@ -487,6 +500,49 @@ describe("AudioElements", () => {
     });
   });
 
+  describe("deafen guard — handleTrackSubscribedAudio", () => {
+    it("does not attach mic audio when locally deafened", () => {
+      mockVoiceStoreState.localDeafened = true;
+
+      const { track, audioEl } = createMockTrack("audio", "track-deaf-1");
+      const publication = { source: "microphone", setSubscribed: vi.fn() };
+      const participant = { identity: "user-42", setVolume: vi.fn() };
+
+      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+
+      // Should NOT attach any audio element
+      expect(track.attach).not.toHaveBeenCalled();
+      // Should unsubscribe the publication
+      expect(publication.setSubscribed).toHaveBeenCalledWith(false);
+    });
+
+    it("does not attach screenshare audio when locally deafened", () => {
+      mockVoiceStoreState.localDeafened = true;
+
+      const { track, audioEl } = createMockTrack("audio", "track-deaf-ss");
+      const publication = { source: "screenShareAudio", setSubscribed: vi.fn() };
+      const participant = { identity: "user-42", setVolume: vi.fn() };
+
+      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+
+      expect(track.attach).not.toHaveBeenCalled();
+      expect(publication.setSubscribed).toHaveBeenCalledWith(false);
+    });
+
+    it("attaches mic audio normally when not deafened", () => {
+      mockVoiceStoreState.localDeafened = false;
+
+      const { track } = createMockTrack("audio", "track-ok-1");
+      const publication = { source: "microphone", setSubscribed: vi.fn() };
+      const participant = { identity: "user-42", setVolume: vi.fn() };
+
+      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+
+      expect(track.attach).toHaveBeenCalled();
+      expect(publication.setSubscribed).not.toHaveBeenCalled();
+    });
+  });
+
   describe("cleanupAllAudioElements", () => {
     it("does not throw when empty", () => {
       expect(() => elements.cleanupAllAudioElements()).not.toThrow();
@@ -507,9 +563,15 @@ describe("AudioElements", () => {
       expect(removeSs).toHaveBeenCalled();
     });
 
-    it("clears muted-by-user state", () => {
+    it("preserves muted-by-user state for reconnecting tracks", () => {
       elements.muteScreenshareAudio(42, true);
       elements.cleanupAllAudioElements();
+      expect(elements.getScreenshareAudioMuted(42)).toBe(true);
+    });
+
+    it("clears muted-by-user state with full cleanup", () => {
+      elements.muteScreenshareAudio(42, true);
+      elements.cleanupAllAudioElementsFull();
       expect(elements.getScreenshareAudioMuted(42)).toBe(false);
     });
   });

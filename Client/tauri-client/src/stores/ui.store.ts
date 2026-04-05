@@ -92,9 +92,7 @@ export function setTheme(theme: "dark" | "neon-glow" | "midnight" | "light"): vo
 }
 
 /** Set the WebSocket connection status. */
-export function setConnectionStatus(
-  status: "connected" | "reconnecting" | "disconnected",
-): void {
+export function setConnectionStatus(status: "connected" | "reconnecting" | "disconnected"): void {
   uiStore.setState((prev) => ({
     ...prev,
     connectionStatus: status,
@@ -152,10 +150,7 @@ export function loadCollapsedCategories(serverHost: string): void {
 function saveCollapsedCategories(categories: ReadonlySet<string>): void {
   if (currentServerHost === null) return;
   try {
-    localStorage.setItem(
-      COLLAPSED_KEY_PREFIX + currentServerHost,
-      JSON.stringify([...categories]),
-    );
+    localStorage.setItem(COLLAPSED_KEY_PREFIX + currentServerHost, JSON.stringify([...categories]));
   } catch {
     // localStorage may be unavailable or full — silently ignore
   }

@@ -3,31 +3,39 @@
  * Covers: valid code submits, invalid code shows error, cancel returns to login.
  */
 import { test, expect } from "@playwright/test";
-import {
-  buildTauriMockScript,
-  MOCK_LOGIN_2FA_RESPONSE,
-  MOCK_TOKEN,
-} from "./helpers";
+import { buildTauriMockScript, MOCK_LOGIN_2FA_RESPONSE, MOCK_TOKEN } from "./helpers";
 
 async function mockTotpSuccess(page: import("@playwright/test").Page): Promise<void> {
-  await page.addInitScript(buildTauriMockScript({
-    httpRoutes: [
-      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_2FA_RESPONSE },
-      { pattern: "/api/v1/auth/verify-totp", status: 200, body: { token: MOCK_TOKEN, requires_2fa: false } },
-    ],
-    simulateWsFlow: true,
-  }));
+  await page.addInitScript(
+    buildTauriMockScript({
+      httpRoutes: [
+        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_2FA_RESPONSE },
+        {
+          pattern: "/api/v1/auth/verify-totp",
+          status: 200,
+          body: { token: MOCK_TOKEN, requires_2fa: false },
+        },
+      ],
+      simulateWsFlow: true,
+    }),
+  );
 }
 
 async function mockTotpFailure(page: import("@playwright/test").Page): Promise<void> {
-  await page.addInitScript(buildTauriMockScript({
-    httpRoutes: [
-      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_2FA_RESPONSE },
-      { pattern: "/api/v1/auth/verify-totp", status: 401, body: { error: "INVALID_CODE", message: "Invalid verification code" } },
-    ],
-  }));
+  await page.addInitScript(
+    buildTauriMockScript({
+      httpRoutes: [
+        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_2FA_RESPONSE },
+        {
+          pattern: "/api/v1/auth/verify-totp",
+          status: 401,
+          body: { error: "INVALID_CODE", message: "Invalid verification code" },
+        },
+      ],
+    }),
+  );
 }
 
 async function loginToTotp(page: import("@playwright/test").Page): Promise<void> {

@@ -60,7 +60,7 @@ func (d *DB) GetServerStats() (*ServerStats, error) {
 // limit=0 returns no rows.
 func (d *DB) ListAllUsers(limit, offset int) ([]UserWithRole, error) {
 	rows, err := d.sqlDB.Query(
-		`SELECT u.id, u.username, u.password, u.avatar, u.role_id, u.totp_secret,
+		`SELECT u.id, u.username, u.avatar, u.role_id,
 		        u.status, u.created_at, u.last_seen, u.banned, u.ban_reason, u.ban_expires,
 		        COALESCE(r.name, '') AS role_name
 		 FROM users u
@@ -79,8 +79,8 @@ func (d *DB) ListAllUsers(limit, offset int) ([]UserWithRole, error) {
 		var uwr UserWithRole
 		var banned int
 		err := rows.Scan(
-			&uwr.ID, &uwr.Username, &uwr.PasswordHash, &uwr.Avatar, &uwr.RoleID,
-			&uwr.TOTPSecret, &uwr.Status, &uwr.CreatedAt, &uwr.LastSeen,
+			&uwr.ID, &uwr.Username, &uwr.Avatar, &uwr.RoleID,
+			&uwr.Status, &uwr.CreatedAt, &uwr.LastSeen,
 			&banned, &uwr.BanReason, &uwr.BanExpires,
 			&uwr.RoleName,
 		)
@@ -348,7 +348,7 @@ func (d *DB) BackupToSafe(path, safeRoot string) error {
 	// Defence-in-depth: only allow safe characters (alphanumeric, path separators,
 	// hyphen, underscore, dot, space, colon, tilde). This is a strict allowlist —
 	// anything else is rejected to prevent SQL injection via the interpolated path.
-	for _, ch := range clean {
+	for _, ch := range absClean {
 		switch {
 		case ch >= 'a' && ch <= 'z',
 			ch >= 'A' && ch <= 'Z',
@@ -362,11 +362,11 @@ func (d *DB) BackupToSafe(path, safeRoot string) error {
 
 	// Reject SQL comment sequences that could break the VACUUM INTO statement,
 	// even though individual hyphens are allowed for filenames.
-	if strings.Contains(clean, "--") {
+	if strings.Contains(absClean, "--") {
 		return fmt.Errorf("BackupToSafe: path contains forbidden sequence %q", "--")
 	}
 
-	_, err = d.sqlDB.Exec(fmt.Sprintf("VACUUM INTO '%s'", clean))
+	_, err = d.sqlDB.Exec(fmt.Sprintf("VACUUM INTO '%s'", absClean))
 	if err != nil {
 		return fmt.Errorf("BackupToSafe: %w", err)
 	}

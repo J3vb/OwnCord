@@ -10,7 +10,6 @@ const (
 	ReadMessages   = int64(0x0002)     // bit 1
 	AttachFiles    = int64(0x0020)     // bit 5
 	AddReactions   = int64(0x0040)     // bit 6
-	UseSoundboard  = int64(0x0100)     // bit 8
 	ConnectVoice   = int64(0x0200)     // bit 9
 	SpeakVoice     = int64(0x0400)     // bit 10
 	UseVideo       = int64(0x0800)     // bit 11
@@ -40,6 +39,13 @@ const (
 // position below this value cannot modify the owner role or perform privileged
 // operations reserved for the owner.
 const OwnerRolePosition = 100
+
+// IsOwnerRole reports whether the given role ID is the built-in owner role.
+// Use this as an explicit guard in role-modification handlers to prevent
+// non-owners from escalating to owner privileges.
+func IsOwnerRole(roleID int64) bool {
+	return roleID == OwnerRoleID
+}
 
 // ─── Permission helper functions ─────────────────────────────────────────────
 

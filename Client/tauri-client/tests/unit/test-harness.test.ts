@@ -40,8 +40,7 @@ describe("createTestHarness", () => {
 
   it("queryAll() returns all matching elements within the container", () => {
     harness = createTestHarness();
-    harness.container.innerHTML =
-      '<span class="item">a</span><span class="item">b</span>';
+    harness.container.innerHTML = '<span class="item">a</span><span class="item">b</span>';
 
     const els = harness.queryAll(".item");
     expect(els.length).toBe(2);
@@ -53,7 +52,9 @@ describe("createTestHarness", () => {
 
     const btn = document.createElement("button");
     btn.className = "click-me";
-    btn.addEventListener("click", () => { clicked = true; });
+    btn.addEventListener("click", () => {
+      clicked = true;
+    });
     harness.container.appendChild(btn);
 
     harness.click(".click-me");

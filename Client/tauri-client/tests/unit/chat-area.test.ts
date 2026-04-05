@@ -26,7 +26,10 @@ vi.mock("@lib/icons", () => ({
 
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({
-    debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
   }),
 }));
 
@@ -65,7 +68,10 @@ vi.mock("@components/VideoGrid", () => ({
 
 import { createChatArea } from "../../src/pages/main-page/ChatArea";
 import type { ChatAreaOptions } from "../../src/pages/main-page/ChatArea";
-import { createPinnedPanelController, createSearchOverlayController } from "../../src/pages/main-page/OverlayManagers";
+import {
+  createPinnedPanelController,
+  createSearchOverlayController,
+} from "../../src/pages/main-page/OverlayManagers";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -73,7 +79,11 @@ import { createPinnedPanelController, createSearchOverlayController } from "../.
 
 function makeOptions(overrides: Partial<ChatAreaOptions> = {}): ChatAreaOptions {
   return {
-    api: { getPins: vi.fn(), search: vi.fn(), unpinMessage: vi.fn() } as unknown as ChatAreaOptions["api"],
+    api: {
+      getPins: vi.fn(),
+      search: vi.fn(),
+      unpinMessage: vi.fn(),
+    } as unknown as ChatAreaOptions["api"],
     getRoot: () => document.createElement("div"),
     getToast: () => null,
     getChannelCtrl: () => null,
@@ -306,7 +316,9 @@ describe("createChatArea", () => {
   it("focusing search input opens the search overlay controller", () => {
     const result = createChatArea(makeOptions());
 
-    const searchInput = result.chatArea.querySelector("[data-testid='search-input']") as HTMLInputElement;
+    const searchInput = result.chatArea.querySelector(
+      "[data-testid='search-input']",
+    ) as HTMLInputElement;
     expect(searchInput).not.toBeNull();
     searchInput.dispatchEvent(new Event("focus"));
     expect(mockSearchOpen).toHaveBeenCalledTimes(1);

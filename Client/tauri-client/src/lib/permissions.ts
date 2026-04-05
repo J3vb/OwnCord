@@ -1,7 +1,7 @@
-import { Permission } from './types';
+import { Permission } from "./types";
 
 /** Bitmask with every permission bit set. */
-const ALL_PERMISSIONS = 0x7FFFFFFF;
+const ALL_PERMISSIONS = 0x7fffffff;
 
 /**
  * Returns true if `userPerms` includes the given permission bit.

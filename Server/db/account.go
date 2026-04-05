@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // DeleteAccount anonymises and disables a user account within a single
@@ -29,25 +30,66 @@ func (d *DB) DeleteAccount(ctx context.Context, userID int64) error {
 	defer tx.Rollback() //nolint:errcheck
 
 	// ── Guard: last admin/owner check ────────────────────────────────────
-	// Owner (role_id=1) and Admin (role_id=2) are both "admin-class" roles.
-	var userRoleID int64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT role_id FROM users WHERE id = ?`, userID,
-	).Scan(&userRoleID); err != nil {
-		return fmt.Errorf("DeleteAccount fetch role: %w", err)
+	// Dynamically resolve admin-class role IDs from the roles table.
+	adminRows, err := tx.QueryContext(ctx,
+		`SELECT id FROM roles WHERE name IN ('Owner', 'Admin')`,
+	)
+	if err != nil {
+		return fmt.Errorf("DeleteAccount fetch admin roles: %w", err)
+	}
+	var adminRoleIDs []int64
+	for adminRows.Next() {
+		var rid int64
+		if scanErr := adminRows.Scan(&rid); scanErr != nil {
+			adminRows.Close() //nolint:errcheck
+			return fmt.Errorf("DeleteAccount scan admin role: %w", scanErr)
+		}
+		adminRoleIDs = append(adminRoleIDs, rid)
+	}
+	adminRows.Close() //nolint:errcheck
+	if adminRows.Err() != nil {
+		return fmt.Errorf("DeleteAccount admin roles rows: %w", adminRows.Err())
 	}
 
-	const roleOwner, roleAdmin int64 = 1, 2
-	if userRoleID == roleOwner || userRoleID == roleAdmin {
-		var adminCount int
+	if len(adminRoleIDs) == 0 {
+		// No admin-class roles defined; skip the guard.
+	} else {
+		var userRoleID int64
 		if err := tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM users WHERE role_id IN (?, ?) AND id != ? AND banned = 0`,
-			roleOwner, roleAdmin, userID,
-		).Scan(&adminCount); err != nil {
-			return fmt.Errorf("DeleteAccount count admins: %w", err)
+			`SELECT role_id FROM users WHERE id = ?`, userID,
+		).Scan(&userRoleID); err != nil {
+			return fmt.Errorf("DeleteAccount fetch role: %w", err)
 		}
-		if adminCount == 0 {
-			return ErrLastAdmin
+
+		isAdminClass := false
+		for _, rid := range adminRoleIDs {
+			if userRoleID == rid {
+				isAdminClass = true
+				break
+			}
+		}
+
+		if isAdminClass {
+			// Build IN clause dynamically for the admin role IDs.
+			placeholders := make([]string, len(adminRoleIDs))
+			args := make([]any, 0, len(adminRoleIDs)+1)
+			for i, rid := range adminRoleIDs {
+				placeholders[i] = "?"
+				args = append(args, rid)
+			}
+			args = append(args, userID)
+
+			var adminCount int
+			if err := tx.QueryRowContext(ctx,
+				fmt.Sprintf(`SELECT COUNT(*) FROM users WHERE role_id IN (%s) AND id != ? AND banned = 0`,
+					strings.Join(placeholders, ",")),
+				args...,
+			).Scan(&adminCount); err != nil {
+				return fmt.Errorf("DeleteAccount count admins: %w", err)
+			}
+			if adminCount == 0 {
+				return ErrLastAdmin
+			}
 		}
 	}
 

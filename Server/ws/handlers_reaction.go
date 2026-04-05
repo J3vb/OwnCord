@@ -20,7 +20,7 @@ func registerReactionHandlers(r *HandlerRegistry) {
 }
 
 // handleReaction processes reaction_add and reaction_remove messages.
-func (h *Hub) handleReaction(ctx context.Context, c *Client, add bool, payload json.RawMessage) {
+func (h *Hub) handleReaction(_ context.Context, c *Client, add bool, payload json.RawMessage) {
 	ratKey := fmt.Sprintf("reaction:%d", c.userID)
 	if !h.limiter.Allow(ratKey, reactionRateLimit, reactionWindow) {
 		c.sendMsg(buildRateLimitError("too many reactions", reactionWindow.Seconds()))
@@ -55,11 +55,22 @@ func (h *Hub) handleReaction(ctx context.Context, c *Client, add bool, payload j
 			return
 		}
 	}
+	// Sanitize HTML to prevent stored XSS via emoji field.
+	if sanitized := sanitizer.Sanitize(p.Emoji); sanitized != p.Emoji {
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "emoji contains invalid characters"))
+		return
+	}
 
 	msg, err := h.db.GetMessage(msgID)
 	if err != nil || msg == nil {
 		// Normalize: return same error whether message doesn't exist or is in
 		// a channel the user can't see (prevents IDOR information leak).
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "reaction failed"))
+		return
+	}
+
+	// BUG-126: Reject reactions on soft-deleted messages.
+	if msg.Deleted {
 		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "reaction failed"))
 		return
 	}
@@ -74,10 +85,8 @@ func (h *Hub) handleReaction(ctx context.Context, c *Client, add bool, payload j
 			c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "reaction failed"))
 			return
 		}
-	} else {
-		if !h.requireChannelPerm(c, msg.ChannelID, permissions.AddReactions, "ADD_REACTIONS") {
-			return
-		}
+	} else if !h.requireChannelPerm(c, msg.ChannelID, permissions.AddReactions, "ADD_REACTIONS") {
+		return
 	}
 
 	action := "add"

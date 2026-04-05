@@ -122,19 +122,19 @@ func TestExtractBearerToken_TokenPreservesValue(t *testing.T) {
 
 func TestExtractBearerToken_MultipleSpaces(t *testing.T) {
 	// SplitN with n=2 means "Bearer  tok" splits into ["Bearer", " tok"].
-	// The second part " tok" is non-empty, so the function must return " tok", true.
+	// The implementation trims whitespace, so " mytoken" becomes "mytoken".
 	r, _ := http.NewRequest(http.MethodGet, "/", nil)
 	r.Header.Set("Authorization", "Bearer  mytoken")
 
 	token, ok := auth.ExtractBearerToken(r)
 
-	// The contract: returns whatever follows the single separating space.
-	// " mytoken" is non-empty, so ok should be true.
+	// The implementation applies TrimSpace to the extracted token,
+	// so the leading space from the double-space header is stripped.
 	if !ok {
 		t.Fatal("ExtractBearerToken() ok = false for double-space header, want true")
 	}
-	if token != " mytoken" {
-		t.Errorf("ExtractBearerToken() token = %q, want %q", token, " mytoken")
+	if token != "mytoken" {
+		t.Errorf("ExtractBearerToken() token = %q, want %q", token, "mytoken")
 	}
 }
 
@@ -307,5 +307,90 @@ func TestIsEffectivelyBanned_NilUser(t *testing.T) {
 	}()
 	if auth.IsEffectivelyBanned(nil) {
 		t.Error("IsEffectivelyBanned(nil) = true, want false")
+	}
+}
+
+// ─── ValidateUsername ────────────────────────────────────────────────────────
+
+func TestValidateUsername_ValidNames(t *testing.T) {
+	cases := []string{
+		"ab",                               // minimum length (2 runes)
+		"alice",                            // normal ASCII
+		"user_name",                        // with underscore
+		"日本語ユーザー",                          // CJK (multi-byte runes)
+		"abcdefghijklmnopqrstuvwxyz123456", // exactly 32 chars
+	}
+	for _, name := range cases {
+		if err := auth.ValidateUsername(name); err != nil {
+			t.Errorf("ValidateUsername(%q) = %v, want nil", name, err)
+		}
+	}
+}
+
+func TestValidateUsername_TooShort(t *testing.T) {
+	cases := []string{
+		"",  // empty
+		"a", // single char
+	}
+	for _, name := range cases {
+		if err := auth.ValidateUsername(name); err == nil {
+			t.Errorf("ValidateUsername(%q) = nil, want error for too short", name)
+		}
+	}
+}
+
+func TestValidateUsername_TooLong(t *testing.T) {
+	// 33 runes exceeds the 32-rune limit.
+	long := "abcdefghijklmnopqrstuvwxyz1234567"
+	if err := auth.ValidateUsername(long); err == nil {
+		t.Errorf("ValidateUsername(%q) = nil, want error for too long", long)
+	}
+}
+
+func TestValidateUsername_ControlCharactersRejected(t *testing.T) {
+	cases := []string{
+		"user\x00name", // null byte
+		"user\nname",   // newline
+		"user\tname",   // tab
+		"abc\x07def",   // bell
+	}
+	for _, name := range cases {
+		if err := auth.ValidateUsername(name); err == nil {
+			t.Errorf("ValidateUsername(%q) = nil, want error for control char", name)
+		}
+	}
+}
+
+func TestValidateUsername_InvisibleCharactersRejected(t *testing.T) {
+	// Zero-width joiner (U+200D) is in unicode.Cf category.
+	name := "user\u200Dname"
+	if err := auth.ValidateUsername(name); err == nil {
+		t.Errorf("ValidateUsername(%q) = nil, want error for invisible character", name)
+	}
+
+	// Zero-width space (U+200B).
+	name2 := "user\u200Bname"
+	if err := auth.ValidateUsername(name2); err == nil {
+		t.Errorf("ValidateUsername(%q) = nil, want error for zero-width space", name2)
+	}
+}
+
+func TestValidateUsername_WhitespaceTrimmed(t *testing.T) {
+	// Leading/trailing whitespace is trimmed, so "  a  " becomes "a" (1 rune = too short).
+	if err := auth.ValidateUsername("  a  "); err == nil {
+		t.Error("ValidateUsername(\"  a  \") = nil, want error (trimmed to 1 rune)")
+	}
+
+	// After trimming, "  ab  " becomes "ab" (2 runes = valid).
+	if err := auth.ValidateUsername("  ab  "); err != nil {
+		t.Errorf("ValidateUsername(\"  ab  \") = %v, want nil (trimmed to 2 runes)", err)
+	}
+}
+
+func TestValidateUsername_UnicodeLength(t *testing.T) {
+	// Each emoji is 1 rune but multiple bytes. 2 emoji should be valid (min length).
+	twoEmoji := "😀😀"
+	if err := auth.ValidateUsername(twoEmoji); err != nil {
+		t.Errorf("ValidateUsername(%q) = %v, want nil for 2-rune emoji name", twoEmoji, err)
 	}
 }

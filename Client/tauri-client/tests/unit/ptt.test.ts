@@ -37,7 +37,9 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 vi.mock("@components/settings/helpers", () => ({
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
-  savePref: (key: string, value: unknown) => { testPrefs.set(key, value); },
+  savePref: (key: string, value: unknown) => {
+    testPrefs.set(key, value);
+  },
 }));
 
 vi.mock("@stores/voice.store", () => ({
@@ -116,15 +118,15 @@ describe("vkName", () => {
     });
 
     it("returns 'F12' for 0x7B", () => {
-      expect(vkName(0x7B)).toBe("F12");
+      expect(vkName(0x7b)).toBe("F12");
     });
 
     it("returns 'Enter' for 0x0D", () => {
-      expect(vkName(0x0D)).toBe("Enter");
+      expect(vkName(0x0d)).toBe("Enter");
     });
 
     it("returns 'Escape' for 0x1B", () => {
-      expect(vkName(0x1B)).toBe("Escape");
+      expect(vkName(0x1b)).toBe("Escape");
     });
 
     it("returns 'Backspace' for 0x08", () => {
@@ -136,11 +138,11 @@ describe("vkName", () => {
     });
 
     it("returns 'Delete' for 0x2E", () => {
-      expect(vkName(0x2E)).toBe("Delete");
+      expect(vkName(0x2e)).toBe("Delete");
     });
 
     it("returns 'Insert' for 0x2D", () => {
-      expect(vkName(0x2D)).toBe("Insert");
+      expect(vkName(0x2d)).toBe("Insert");
     });
 
     it("returns 'Arrow Left' for 0x25", () => {
@@ -196,11 +198,11 @@ describe("vkName", () => {
     });
 
     it("returns 'Z' for 0x5A", () => {
-      expect(vkName(0x5A)).toBe("Z");
+      expect(vkName(0x5a)).toBe("Z");
     });
 
     it("returns 'M' for 0x4D", () => {
-      expect(vkName(0x4D)).toBe("M");
+      expect(vkName(0x4d)).toBe("M");
     });
   });
 
@@ -221,11 +223,11 @@ describe("vkName", () => {
   describe("unknown keys — hex fallback", () => {
     it("returns hex string for an unrecognised VK code", () => {
       // 0xFF is not in the map and not in any named range
-      expect(vkName(0xFF)).toBe("Key 0xFF");
+      expect(vkName(0xff)).toBe("Key 0xFF");
     });
 
     it("returns uppercase hex for 0xAB", () => {
-      expect(vkName(0xAB)).toBe("Key 0xAB");
+      expect(vkName(0xab)).toBe("Key 0xAB");
     });
 
     it("returns 'Key 0x0' for vk code 0", () => {

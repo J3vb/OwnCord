@@ -19,28 +19,35 @@ jobs:
       run:
         working-directory: Server/
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
           go-version: "1.25"
+          cache-dependency-path: Server/go.sum
 
       - name: Build server
         run: go build -o chatserver.exe -ldflags "-s -w" .
 
-      - name: Run tests with coverage
-        run: go test ./... -coverprofile=coverage.out -cover
+      - name: Go vulnerability check
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4 && govulncheck ./...
+
+      - name: Run tests with race detection and coverage
+        run: go test -race -timeout 20m ./... -coverprofile=coverage.out -cover
+
+      - name: Run tests with deadlock detection
+        run: go test -tags deadlock -count=1 ./...
 
       - name: Upload Go coverage
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: go-coverage
           path: Server/coverage.out
           retention-days: 7
 
       - name: Lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
         with:
           version: v2.11.3
           working-directory: Server/
@@ -52,9 +59,9 @@ jobs:
       run:
         working-directory: Client/tauri-client/
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
           cache: npm
@@ -63,15 +70,30 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Security audit (npm)
+        run: npm audit --audit-level=high
+
+      - name: Oxlint (fast correctness checks)
+        run: npx oxlint src/
+
       - name: TypeScript check
         run: npx tsc --noEmit
+
+      - name: ESLint (type-aware rules)
+        run: npx eslint src/
+
+      - name: Prettier format check
+        run: npx prettier --check "src/**/*.ts" "tests/**/*.ts"
+
+      - name: Knip (unused code & deps)
+        run: npx knip || true
 
       - name: Run unit tests with coverage
         run: npx vitest run --coverage --reporter=default
 
       - name: Upload client coverage
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: client-coverage
           path: Client/tauri-client/coverage/
@@ -87,24 +109,60 @@ jobs:
       run:
         working-directory: Client/tauri-client/
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: Client/tauri-client/package-lock.json
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: clippy
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
         with:
           workspaces: Client/tauri-client/src-tauri
 
       - name: Install npm dependencies
         run: npm ci
+
+      - name: Install tauri-typegen
+        run: cargo install tauri-typegen@0.5.0 --quiet
+
+      - name: Generate TypeScript IPC bindings
+        working-directory: Client/tauri-client/
+        run: cargo tauri-typegen generate
+
+      - name: Fix generated TypeScript bindings (tauri-typegen 0.5.0 workaround)
+        working-directory: Client/tauri-client/
+        # tauri-typegen 0.5.0 cannot map serde_json::Value to a TS type — patch post-generation.
+        # Duplicate events are avoided at source by using one emit() call site per event name.
+        run: |
+          node -e "
+          const fs = require('fs');
+          const tp = fs.readFileSync('src/generated/types.ts', 'utf8');
+          if (!tp.includes('export type Value')) {
+            fs.writeFileSync('src/generated/types.ts', tp.replace(
+              'export interface CredentialData',
+              'export type Value = unknown;\n\nexport interface CredentialData'
+            ));
+          }
+          console.log('Generated bindings patched.');
+          "
+
+      - name: Clippy lint (Rust)
+        working-directory: Client/tauri-client/src-tauri/
+        run: cargo clippy -- -D warnings
+
+      - name: Security audit (Rust dependencies)
+        working-directory: Client/tauri-client/src-tauri/
+        run: |
+          cargo install cargo-audit@0.22.1 --quiet
+          cargo audit
 
       - name: Build Tauri app
         env:

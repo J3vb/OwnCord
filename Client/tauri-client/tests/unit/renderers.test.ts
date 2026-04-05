@@ -272,11 +272,21 @@ describe("renderers", () => {
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
       container.appendChild(el);
 
-      expect(container.querySelector("[data-testid='msg-react-1']")?.getAttribute("aria-label")).toBe("React");
-      expect(container.querySelector("[data-testid='msg-reply-1']")?.getAttribute("aria-label")).toBe("Reply");
-      expect(container.querySelector("[data-testid='msg-pin-1']")?.getAttribute("aria-label")).toBe("Pin");
-      expect(container.querySelector("[data-testid='msg-edit-1']")?.getAttribute("aria-label")).toBe("Edit");
-      expect(container.querySelector("[data-testid='msg-delete-1']")?.getAttribute("aria-label")).toBe("Delete");
+      expect(
+        container.querySelector("[data-testid='msg-react-1']")?.getAttribute("aria-label"),
+      ).toBe("React");
+      expect(
+        container.querySelector("[data-testid='msg-reply-1']")?.getAttribute("aria-label"),
+      ).toBe("Reply");
+      expect(container.querySelector("[data-testid='msg-pin-1']")?.getAttribute("aria-label")).toBe(
+        "Pin",
+      );
+      expect(
+        container.querySelector("[data-testid='msg-edit-1']")?.getAttribute("aria-label"),
+      ).toBe("Edit");
+      expect(
+        container.querySelector("[data-testid='msg-delete-1']")?.getAttribute("aria-label"),
+      ).toBe("Delete");
 
       ac.abort();
     });
@@ -287,7 +297,9 @@ describe("renderers", () => {
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
       container.appendChild(el);
 
-      expect(container.querySelector("[data-testid='msg-pin-1']")?.getAttribute("aria-label")).toBe("Unpin");
+      expect(container.querySelector("[data-testid='msg-pin-1']")?.getAttribute("aria-label")).toBe(
+        "Unpin",
+      );
 
       ac.abort();
     });
@@ -324,7 +336,13 @@ describe("renderers", () => {
     it("renders attachments for image types", () => {
       const msg = makeMessage({
         attachments: [
-          { id: "1", filename: "photo.png", size: 1024, mime: "image/png", url: "/uploads/photo.png" },
+          {
+            id: "1",
+            filename: "photo.png",
+            size: 1024,
+            mime: "image/png",
+            url: "/uploads/photo.png",
+          },
         ],
       });
       const ac = new AbortController();
@@ -339,7 +357,13 @@ describe("renderers", () => {
     it("renders attachments for file types", () => {
       const msg = makeMessage({
         attachments: [
-          { id: "1", filename: "doc.pdf", size: 2048, mime: "application/pdf", url: "/uploads/doc.pdf" },
+          {
+            id: "1",
+            filename: "doc.pdf",
+            size: 2048,
+            mime: "application/pdf",
+            url: "/uploads/doc.pdf",
+          },
         ],
       });
       const ac = new AbortController();
@@ -401,11 +425,7 @@ describe("renderers", () => {
     });
 
     it("returns a valid HH:MM string for every supported timestamp format", () => {
-      const formats = [
-        "2026-03-19T08:30:00Z",
-        "2026-03-19 08:30:00",
-        "2026-03-19T08:30:00+00:00",
-      ];
+      const formats = ["2026-03-19T08:30:00Z", "2026-03-19 08:30:00", "2026-03-19T08:30:00+00:00"];
       for (const ts of formats) {
         expect(formatTime(ts)).toMatch(/^\d{2}:\d{2}$/);
       }
@@ -695,9 +715,11 @@ describe("renderers", () => {
       // loadPref reads from localStorage with the "owncord:settings:" prefix
       localStorage.setItem("owncord:settings:developerMode", "true");
       // Dispatch pref-change to invalidate the cached developerModeEnabled value
-      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
-        detail: { key: "developerMode" },
-      }));
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", {
+          detail: { key: "developerMode" },
+        }),
+      );
 
       const msg = makeMessage();
       const ac = new AbortController();
@@ -710,17 +732,21 @@ describe("renderers", () => {
 
       // Clean up: restore developer mode to false
       localStorage.setItem("owncord:settings:developerMode", "false");
-      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
-        detail: { key: "developerMode" },
-      }));
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", {
+          detail: { key: "developerMode" },
+        }),
+      );
       ac.abort();
     });
 
     it("Copy ID button calls clipboard.writeText on click", () => {
       localStorage.setItem("owncord:settings:developerMode", "true");
-      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
-        detail: { key: "developerMode" },
-      }));
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", {
+          detail: { key: "developerMode" },
+        }),
+      );
 
       const writeTextMock = vi.fn().mockResolvedValue(undefined);
       Object.assign(navigator, { clipboard: { writeText: writeTextMock } });
@@ -738,17 +764,21 @@ describe("renderers", () => {
 
       // Clean up
       localStorage.setItem("owncord:settings:developerMode", "false");
-      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
-        detail: { key: "developerMode" },
-      }));
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", {
+          detail: { key: "developerMode" },
+        }),
+      );
       ac.abort();
     });
 
     it("Copy ID button handles clipboard failure gracefully", () => {
       localStorage.setItem("owncord:settings:developerMode", "true");
-      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
-        detail: { key: "developerMode" },
-      }));
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", {
+          detail: { key: "developerMode" },
+        }),
+      );
 
       Object.assign(navigator, {
         clipboard: { writeText: vi.fn().mockRejectedValue(new Error("clipboard unavailable")) },
@@ -765,17 +795,21 @@ describe("renderers", () => {
 
       // Clean up
       localStorage.setItem("owncord:settings:developerMode", "false");
-      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
-        detail: { key: "developerMode" },
-      }));
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", {
+          detail: { key: "developerMode" },
+        }),
+      );
       ac.abort();
     });
 
     it("does not render Copy ID button when developerMode is disabled", () => {
       localStorage.setItem("owncord:settings:developerMode", "false");
-      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
-        detail: { key: "developerMode" },
-      }));
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", {
+          detail: { key: "developerMode" },
+        }),
+      );
 
       const msg = makeMessage();
       const ac = new AbortController();
@@ -988,7 +1022,9 @@ describe("renderers", () => {
     it("returns role for known member", () => {
       membersStore.setState((prev) => ({
         ...prev,
-        members: new Map([[42, { id: 42, username: "admin", avatar: null, role: "admin", status: "online" }]]),
+        members: new Map([
+          [42, { id: 42, username: "admin", avatar: null, role: "admin", status: "online" }],
+        ]),
       }));
       expect(getUserRole(42)).toBe("admin");
     });
@@ -998,9 +1034,11 @@ describe("renderers", () => {
     afterEach(() => {
       // Restore roleColors to default (true)
       localStorage.setItem("owncord:settings:roleColors", "true");
-      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
-        detail: { key: "roleColors" },
-      }));
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", {
+          detail: { key: "roleColors" },
+        }),
+      );
     });
 
     it("returns owner color for 'owner' role", () => {
@@ -1025,9 +1063,11 @@ describe("renderers", () => {
 
     it("returns member color for all roles when roleColors is disabled", () => {
       localStorage.setItem("owncord:settings:roleColors", "false");
-      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
-        detail: { key: "roleColors" },
-      }));
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", {
+          detail: { key: "roleColors" },
+        }),
+      );
 
       expect(roleColorVar("owner")).toBe("var(--role-member)");
       expect(roleColorVar("admin")).toBe("var(--role-member)");
@@ -1037,15 +1077,19 @@ describe("renderers", () => {
 
     it("re-enables role colors when pref changes back to true", () => {
       localStorage.setItem("owncord:settings:roleColors", "false");
-      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
-        detail: { key: "roleColors" },
-      }));
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", {
+          detail: { key: "roleColors" },
+        }),
+      );
       expect(roleColorVar("owner")).toBe("var(--role-member)");
 
       localStorage.setItem("owncord:settings:roleColors", "true");
-      window.dispatchEvent(new CustomEvent("owncord:pref-change", {
-        detail: { key: "roleColors" },
-      }));
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", {
+          detail: { key: "roleColors" },
+        }),
+      );
       expect(roleColorVar("owner")).toBe("var(--role-owner)");
     });
   });
@@ -1201,7 +1245,6 @@ describe("renderers", () => {
       expect(container.textContent).toContain("before");
       expect(container.textContent).toContain("after");
     });
-
   });
 
   // ---------------------------------------------------------------------------

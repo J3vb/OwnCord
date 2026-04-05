@@ -35,21 +35,31 @@ const ROLE_GROUPS: readonly {
 /** Status priority for sorting: lower = higher priority (shown first). */
 function statusPriority(status: UserStatus): number {
   switch (status) {
-    case "online": return 0;
-    case "idle": return 1;
-    case "dnd": return 2;
-    case "offline": return 3;
-    default: return 99;
+    case "online":
+      return 0;
+    case "idle":
+      return 1;
+    case "dnd":
+      return 2;
+    case "offline":
+      return 3;
+    default:
+      return 99;
   }
 }
 
 function statusColor(status: UserStatus): string {
   switch (status) {
-    case "online": return "var(--green)";
-    case "idle": return "var(--yellow)";
-    case "dnd": return "var(--red)";
-    case "offline": return "var(--text-micro)";
-    default: return "#747f8d";
+    case "online":
+      return "var(--green)";
+    case "idle":
+      return "var(--yellow)";
+    case "dnd":
+      return "var(--red)";
+    case "offline":
+      return "var(--text-micro)";
+    default:
+      return "#747f8d";
   }
 }
 
@@ -95,53 +105,54 @@ function createMemberItem(
   });
   avatar.appendChild(statusDot);
 
-  const name = createElement(
-    "span",
-    { class: "mi-name", style: `color: ${colorVar}` },
-  );
+  const name = createElement("span", { class: "mi-name", style: `color: ${colorVar}` });
   setText(name, member.username);
 
   appendChildren(item, avatar, name);
 
   // Context menu for admin actions
-  item.addEventListener("contextmenu", (e) => {
-    e.preventDefault();
+  item.addEventListener(
+    "contextmenu",
+    (e) => {
+      e.preventDefault();
 
-    // Don't show context menu for yourself
-    const currentUserId = authStore.getState().user?.id ?? 0;
-    if (member.id === currentUserId) return;
+      // Don't show context menu for yourself
+      const currentUserId = authStore.getState().user?.id ?? 0;
+      if (member.id === currentUserId) return;
 
-    // Only admins and owners can use admin actions
-    const role = opts.currentUserRole.toLowerCase();
-    if (role !== "owner" && role !== "admin") return;
+      // Only admins and owners can use admin actions
+      const role = opts.currentUserRole.toLowerCase();
+      if (role !== "owner" && role !== "admin") return;
 
-    closeActiveMenu();
-    document.removeEventListener("mousedown", handleOutsideClick);
+      closeActiveMenu();
+      document.removeEventListener("mousedown", handleOutsideClick);
 
-    const availableRoles = ["admin", "moderator", "member"];
+      const availableRoles = ["admin", "moderator", "member"];
 
-    activeMenu = createMemberContextMenu({
-      userId: member.id,
-      username: member.username,
-      currentRole: member.role.toLowerCase(),
-      availableRoles,
-      onKick: () => opts.onKick(member.id, member.username),
-      onBan: () => opts.onBan(member.id, member.username),
-      onChangeRole: (newRole: string) => opts.onChangeRole(member.id, member.username, newRole),
-    });
+      activeMenu = createMemberContextMenu({
+        userId: member.id,
+        username: member.username,
+        currentRole: member.role.toLowerCase(),
+        availableRoles,
+        onKick: () => opts.onKick(member.id, member.username),
+        onBan: () => opts.onBan(member.id, member.username),
+        onChangeRole: (newRole: string) => opts.onChangeRole(member.id, member.username, newRole),
+      });
 
-    // Position at mouse
-    activeMenu.element.style.position = "fixed";
-    activeMenu.element.style.left = `${e.clientX}px`;
-    activeMenu.element.style.top = `${e.clientY}px`;
-    activeMenu.element.style.zIndex = "1000";
-    document.body.appendChild(activeMenu.element);
+      // Position at mouse
+      activeMenu.element.style.position = "fixed";
+      activeMenu.element.style.left = `${e.clientX}px`;
+      activeMenu.element.style.top = `${e.clientY}px`;
+      activeMenu.element.style.zIndex = "1000";
+      document.body.appendChild(activeMenu.element);
 
-    // Close on outside click (deferred so this click doesn't close it)
-    setTimeout(() => {
-      document.addEventListener("mousedown", handleOutsideClick);
-    }, 0);
-  }, { signal });
+      // Close on outside click (deferred so this click doesn't close it)
+      setTimeout(() => {
+        document.addEventListener("mousedown", handleOutsideClick);
+      }, 0);
+    },
+    { signal },
+  );
 
   return item;
 }
@@ -163,7 +174,7 @@ function renderList(root: HTMLDivElement, opts: MemberListOptions, signal: Abort
   for (const group of ROLE_GROUPS) {
     const groupMembers = allMembers
       .filter((m) => m.role.toLowerCase() === group.role)
-      .sort((a, b) => statusPriority(a.status) - statusPriority(b.status));
+      .toSorted((a, b) => statusPriority(a.status) - statusPriority(b.status));
 
     if (groupMembers.length === 0) continue;
 

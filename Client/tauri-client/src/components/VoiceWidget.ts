@@ -111,7 +111,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     pingLabel.style.color = color;
 
     // Update expanded stats pane fields if they exist
-    if (outRateEl) setText(outRateEl, `${formatRate(stats.outRate)} (${formatBitrate(stats.outRate)})`);
+    if (outRateEl)
+      setText(outRateEl, `${formatRate(stats.outRate)} (${formatBitrate(stats.outRate)})`);
     if (outPacketsEl) setText(outPacketsEl, String(stats.outPackets));
     if (rttEl) {
       setText(rttEl, stats.rtt > 0 ? `${stats.rtt.toFixed(1)} ms` : "—");
@@ -194,11 +195,30 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     deafenBtn?.classList.toggle("active-ctrl", voice.localDeafened);
     cameraBtn?.classList.toggle("active-ctrl", voice.localCamera);
 
-    if (muteBtn) { swapIcon(muteBtn, voice.localMuted ? "mic-off" : "mic"); muteBtn.setAttribute("aria-pressed", String(voice.localMuted)); }
-    if (deafenBtn) { swapIcon(deafenBtn, voice.localDeafened ? "headphones-off" : "headphones"); deafenBtn.setAttribute("aria-pressed", String(voice.localDeafened)); }
-    if (cameraBtn) { swapIcon(cameraBtn, voice.localCamera ? "camera-off" : "camera"); cameraBtn.setAttribute("aria-pressed", String(voice.localCamera)); }
+    if (muteBtn) {
+      swapIcon(muteBtn, voice.localMuted ? "mic-off" : "mic");
+      muteBtn.setAttribute("aria-pressed", String(voice.localMuted));
+    }
+    if (deafenBtn) {
+      swapIcon(deafenBtn, voice.localDeafened ? "headphones-off" : "headphones");
+      deafenBtn.setAttribute("aria-pressed", String(voice.localDeafened));
+    }
+    if (cameraBtn) {
+      swapIcon(cameraBtn, voice.localCamera ? "camera-off" : "camera");
+      cameraBtn.setAttribute("aria-pressed", String(voice.localCamera));
+    }
     shareBtn?.classList.toggle("active-ctrl", voice.localScreenshare);
-    if (shareBtn) { swapIcon(shareBtn, voice.localScreenshare ? "monitor-off" : "monitor"); shareBtn.setAttribute("aria-pressed", String(voice.localScreenshare)); }
+    shareBtn?.classList.toggle("sharing-active", voice.localScreenshare);
+    if (shareBtn) {
+      swapIcon(shareBtn, voice.localScreenshare ? "monitor-off" : "monitor");
+      shareBtn.setAttribute("aria-pressed", String(voice.localScreenshare));
+      // Update button label to show "Sharing" when active
+      const labelSpan = shareBtn.querySelector(".vw-share-label");
+      if (labelSpan !== null) {
+        labelSpan.textContent = voice.localScreenshare ? "Sharing" : "";
+        (labelSpan as HTMLElement).style.display = voice.localScreenshare ? "inline" : "none";
+      }
+    }
 
     // Show/hide "Grant Microphone" button based on listen-only state
     if (grantMicBtn) {
@@ -235,9 +255,13 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     pingLabel = createElement("span", { class: "vw-ping" }, "—");
     pingLabel.style.color = QUALITY_COLORS.excellent;
     signalWrap.appendChild(pingLabel);
-    signalWrap.addEventListener("click", () => {
-      statsPane?.classList.toggle("visible");
-    }, { signal: ac.signal });
+    signalWrap.addEventListener(
+      "click",
+      () => {
+        statsPane?.classList.toggle("visible");
+      },
+      { signal: ac.signal },
+    );
 
     appendChildren(header, connLabel, timerEl, channelNameEl, signalWrap);
 
@@ -254,7 +278,11 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     rttEl = createElement("span", {}, "—");
     rttEl.style.fontWeight = "600";
     const outBody = createElement("div", { class: "vw-stats-row" });
-    for (const [label, el] of [["Rate: ", outRateEl], ["Packets: ", outPacketsEl], ["RTT: ", rttEl]] as const) {
+    for (const [label, el] of [
+      ["Rate: ", outRateEl],
+      ["Packets: ", outPacketsEl],
+      ["RTT: ", rttEl],
+    ] as const) {
       outBody.appendChild(document.createTextNode(label));
       outBody.appendChild(el);
       outBody.appendChild(createElement("br", {}));
@@ -267,7 +295,10 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     inRateEl = createElement("span", {}, "0 B/s");
     inPacketsEl = createElement("span", {}, "0");
     const inBody = createElement("div", { class: "vw-stats-row" });
-    for (const [label, el] of [["Rate: ", inRateEl], ["Packets: ", inPacketsEl]] as const) {
+    for (const [label, el] of [
+      ["Rate: ", inRateEl],
+      ["Packets: ", inPacketsEl],
+    ] as const) {
       inBody.appendChild(document.createTextNode(label));
       inBody.appendChild(el);
       inBody.appendChild(createElement("br", {}));
@@ -298,57 +329,80 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     muteBtn = createControlButton("Mute", "mic", options.onMuteToggle);
     deafenBtn = createControlButton("Deafen", "headphones", options.onDeafenToggle);
     cameraBtn = createControlButton("Camera", "camera", options.onCameraToggle);
-    shareBtn = createControlButton("Screenshare", "monitor", options.onScreenshareToggle);
+    shareBtn = createControlButton(
+      "Screenshare",
+      "monitor",
+      options.onScreenshareToggle,
+      "vw-share-btn",
+    );
+    const shareLabelSpan = createElement("span", { class: "vw-share-label" });
+    shareLabelSpan.style.display = "none";
+    shareBtn.appendChild(shareLabelSpan);
     const disconnectBtn = createControlButton(
-      "Disconnect", "phone", options.onDisconnect, "disconnect",
+      "Disconnect",
+      "phone",
+      options.onDisconnect,
+      "disconnect",
     );
     appendChildren(controls, muteBtn, deafenBtn, cameraBtn, shareBtn, disconnectBtn);
 
     // "Grant Microphone" button for listen-only mode
-    grantMicBtn = createElement("button", {
-      class: "vw-grant-mic",
-      "aria-label": "Grant microphone permission",
-    }, "Grant Microphone");
+    grantMicBtn = createElement(
+      "button",
+      {
+        class: "vw-grant-mic",
+        "aria-label": "Grant microphone permission",
+      },
+      "Grant Microphone",
+    );
     grantMicBtn.style.display = "none";
-    grantMicBtn.addEventListener("click", () => {
-      if (grantMicBtn) {
-        grantMicBtn.disabled = true;
-        setText(grantMicBtn, "Requesting...");
-      }
-      void retryMicPermission().finally(() => {
+    grantMicBtn.addEventListener(
+      "click",
+      () => {
         if (grantMicBtn) {
-          grantMicBtn.disabled = false;
-          setText(grantMicBtn, "Grant Microphone");
+          grantMicBtn.disabled = true;
+          setText(grantMicBtn, "Requesting...");
         }
-      });
-    }, { signal: ac.signal });
+        void retryMicPermission().finally(() => {
+          if (grantMicBtn) {
+            grantMicBtn.disabled = false;
+            setText(grantMicBtn, "Grant Microphone");
+          }
+        });
+      },
+      { signal: ac.signal },
+    );
 
     appendChildren(root, header, statsPane, grantMicBtn, controls);
 
     render();
 
-    unsubs.push(voiceStore.subscribeSelector(
-      (s) => ({
-        channelId: s.currentChannelId,
-        muted: s.localMuted,
-        deafened: s.localDeafened,
-        camera: s.localCamera,
-        screenshare: s.localScreenshare,
-        listenOnly: s.listenOnly,
-      }),
-      () => render(),
-      (a, b) =>
-        a.channelId === b.channelId &&
-        a.muted === b.muted &&
-        a.deafened === b.deafened &&
-        a.camera === b.camera &&
-        a.screenshare === b.screenshare &&
-        a.listenOnly === b.listenOnly,
-    ));
-    unsubs.push(channelsStore.subscribeSelector(
-      (s) => s.channels,
-      () => render(),
-    ));
+    unsubs.push(
+      voiceStore.subscribeSelector(
+        (s) => ({
+          channelId: s.currentChannelId,
+          muted: s.localMuted,
+          deafened: s.localDeafened,
+          camera: s.localCamera,
+          screenshare: s.localScreenshare,
+          listenOnly: s.listenOnly,
+        }),
+        () => render(),
+        (a, b) =>
+          a.channelId === b.channelId &&
+          a.muted === b.muted &&
+          a.deafened === b.deafened &&
+          a.camera === b.camera &&
+          a.screenshare === b.screenshare &&
+          a.listenOnly === b.listenOnly,
+      ),
+    );
+    unsubs.push(
+      channelsStore.subscribeSelector(
+        (s) => s.channels,
+        () => render(),
+      ),
+    );
 
     container.appendChild(root);
   }

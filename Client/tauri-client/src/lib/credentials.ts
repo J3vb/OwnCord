@@ -10,7 +10,8 @@ const log = createLogger("credentials");
 export interface SavedCredential {
   readonly username: string;
   readonly token: string;
-  readonly password?: string;
+  // Note: password is no longer returned from the Rust backend over IPC
+  // to limit credential exposure in the JS heap.
 }
 
 /** Dynamically import Tauri invoke to avoid errors in test/browser. */
@@ -53,9 +54,7 @@ export async function saveCredential(
  * Load a credential from Windows Credential Manager.
  * Returns null if not found or Tauri unavailable.
  */
-export async function loadCredential(
-  host: string,
-): Promise<SavedCredential | null> {
+export async function loadCredential(host: string): Promise<SavedCredential | null> {
   const invoke = await getInvoke();
   if (!invoke) {
     return null;
@@ -68,7 +67,6 @@ export async function loadCredential(
         return {
           username: cred.username,
           token: cred.token,
-          ...(typeof cred.password === "string" ? { password: cred.password } : {}),
         };
       }
     }

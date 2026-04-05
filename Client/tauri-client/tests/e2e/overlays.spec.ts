@@ -1,5 +1,9 @@
 import { test, expect } from "@playwright/test";
-import { mockTauriFullSession, mockTauriFullSessionWithMessages, navigateToMainPage } from "./helpers";
+import {
+  mockTauriFullSession,
+  mockTauriFullSessionWithMessages,
+  navigateToMainPage,
+} from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Tests: Quick Switcher (Ctrl+K)
@@ -67,10 +71,9 @@ test.describe("Quick Switcher", () => {
     const initialCount = await page.locator(".quick-switcher__item").count();
 
     await input.fill("general");
-    await expect.poll(
-      async () => page.locator(".quick-switcher__item").count(),
-      { timeout: 2000 },
-    ).toBeGreaterThan(0);
+    await expect
+      .poll(async () => page.locator(".quick-switcher__item").count(), { timeout: 2000 })
+      .toBeGreaterThan(0);
 
     const filteredCount = await page.locator(".quick-switcher__item").count();
     expect(filteredCount).toBeLessThanOrEqual(initialCount);
@@ -162,10 +165,9 @@ test.describe("Emoji Picker", () => {
 
     // Search for a specific emoji character that exists in the grid
     await search.fill("\uD83D\uDE00");
-    await expect.poll(
-      async () => page.locator(".ep-emoji").count(),
-      { timeout: 2000 },
-    ).toBeGreaterThan(0);
+    await expect
+      .poll(async () => page.locator(".ep-emoji").count(), { timeout: 2000 })
+      .toBeGreaterThan(0);
 
     const countAfter = await allEmojis.count();
     // After filtering, should have fewer results

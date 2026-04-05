@@ -34,10 +34,8 @@ function nextUuid(): string {
 function createMockBackend(): PersistenceBackend & {
   saved: Array<{ schemaVersion: number; profiles: readonly ServerProfile[] }>;
 } {
-  let stored: { schemaVersion: number; profiles: readonly ServerProfile[] } | null =
-    null;
-  const saved: Array<{ schemaVersion: number; profiles: readonly ServerProfile[] }> =
-    [];
+  let stored: { schemaVersion: number; profiles: readonly ServerProfile[] } | null = null;
+  const saved: Array<{ schemaVersion: number; profiles: readonly ServerProfile[] }> = [];
 
   return {
     saved,
@@ -55,9 +53,7 @@ function createMockBackend(): PersistenceBackend & {
 // Mock fetch
 // ---------------------------------------------------------------------------
 
-function createMockFetch(
-  handler: (url: string, init?: RequestInit) => Promise<Response>,
-): FetchFn {
+function createMockFetch(handler: (url: string, init?: RequestInit) => Promise<Response>): FetchFn {
   return handler as unknown as FetchFn;
 }
 
@@ -236,9 +232,7 @@ describe("ProfileManager", () => {
 
   describe("health checks", () => {
     it("returns online status for a healthy server", async () => {
-      const fetchFn = createMockFetch(async () =>
-        jsonResponse({ version: "1.2.3" }),
-      );
+      const fetchFn = createMockFetch(async () => jsonResponse({ version: "1.2.3" }));
       const m = mgr(fetchFn);
       const profile = m.addProfile(sampleData);
 
@@ -296,9 +290,7 @@ describe("ProfileManager", () => {
     });
 
     it("returns offline for non-OK response", async () => {
-      const fetchFn = createMockFetch(async () =>
-        jsonResponse({ error: "bad" }, 500),
-      );
+      const fetchFn = createMockFetch(async () => jsonResponse({ error: "bad" }, 500));
       const m = mgr(fetchFn);
       const profile = m.addProfile(sampleData);
 
@@ -359,9 +351,7 @@ describe("ProfileManager", () => {
       expect(results.get(p2.id)?.status).toBe("online");
       expect(pingedHosts).toHaveLength(2);
       expect(pingedHosts).toContain("https://localhost:8443/api/v1/health");
-      expect(pingedHosts).toContain(
-        "https://prod.example.com:443/api/v1/health",
-      );
+      expect(pingedHosts).toContain("https://prod.example.com:443/api/v1/health");
     });
 
     it("checkAllHealth returns empty map when no profiles", async () => {
@@ -382,10 +372,7 @@ describe("ProfileManager", () => {
       const exported = m1.exportProfiles();
 
       const backend2 = createMockBackend();
-      const m2 = createProfileManager(
-        backend2,
-        mockFetch as unknown as FetchFn,
-      );
+      const m2 = createProfileManager(backend2, mockFetch as unknown as FetchFn);
       const result = m2.importProfiles(exported);
 
       expect(result.imported).toBe(2);
@@ -446,8 +433,26 @@ describe("ProfileManager", () => {
     it("rejects import entries with invalid shape", () => {
       const m = mgr();
       const badEntries = [
-        { id: "x", name: "", host: "a", username: "b", color: "#000", autoConnect: false, rememberPassword: false, lastConnected: null },
-        { id: "y", name: "Valid", host: "valid.com:443", username: "u", color: "#fff", autoConnect: false, rememberPassword: false, lastConnected: null },
+        {
+          id: "x",
+          name: "",
+          host: "a",
+          username: "b",
+          color: "#000",
+          autoConnect: false,
+          rememberPassword: false,
+          lastConnected: null,
+        },
+        {
+          id: "y",
+          name: "Valid",
+          host: "valid.com:443",
+          username: "u",
+          color: "#fff",
+          autoConnect: false,
+          rememberPassword: false,
+          lastConnected: null,
+        },
       ];
       const result = m.importProfiles(JSON.stringify(badEntries));
       expect(result.imported).toBe(1);
@@ -492,10 +497,7 @@ describe("ProfileManager", () => {
       const exported = m1.exportProfiles();
 
       const backend2 = createMockBackend();
-      const m2 = createProfileManager(
-        backend2,
-        mockFetch as unknown as FetchFn,
-      );
+      const m2 = createProfileManager(backend2, mockFetch as unknown as FetchFn);
       m2.importProfiles(exported);
 
       const imported = m2.getAll();
@@ -644,9 +646,7 @@ describe("ProfileManager", () => {
     });
 
     it("returns null onlineUsers when field is missing", async () => {
-      const fetchFn = createMockFetch(async () =>
-        jsonResponse({ version: "1.2.3" }),
-      );
+      const fetchFn = createMockFetch(async () => jsonResponse({ version: "1.2.3" }));
       const m = mgr(fetchFn);
       const profile = m.addProfile(sampleData);
 
@@ -656,9 +656,7 @@ describe("ProfileManager", () => {
     });
 
     it("returns null version when field is not a string", async () => {
-      const fetchFn = createMockFetch(async () =>
-        jsonResponse({ version: 123 }),
-      );
+      const fetchFn = createMockFetch(async () => jsonResponse({ version: 123 }));
       const m = mgr(fetchFn);
       const profile = m.addProfile(sampleData);
 
@@ -698,9 +696,7 @@ describe("ProfileManager", () => {
     });
 
     it("healthStatuses updates are visible via store", async () => {
-      const fetchFn = createMockFetch(async () =>
-        jsonResponse({ version: "3.0.0" }),
-      );
+      const fetchFn = createMockFetch(async () => jsonResponse({ version: "3.0.0" }));
       const m = mgr(fetchFn);
       const profile = m.addProfile(sampleData);
 

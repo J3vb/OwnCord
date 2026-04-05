@@ -11,11 +11,14 @@ import type { VoiceUser } from "@stores/voice.store";
 import { membersStore } from "@stores/members.store";
 import { setUserVolume, getUserVolume } from "@lib/livekitSession";
 import { authStore } from "@stores/auth.store";
+import { attachStreamPreview, attachScrollCollapse } from "@lib/streamPreview";
+import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 
 export interface VoiceChannelOptions {
   channelId: number;
   channelName: string;
   onJoin(): void;
+  onClickWatch?(tileId: number): void;
 }
 
 export interface VoiceChannelResult {
@@ -53,6 +56,9 @@ export function createVoiceChannel(options: VoiceChannelOptions): VoiceChannelRe
 
   appendChildren(root, channelItem, usersContainer);
 
+  // BUG-104: Attach scroll collapse once (not per-update) to avoid listener accumulation.
+  attachScrollCollapse(usersContainer, ac.signal);
+
   // Click to join
   channelItem.addEventListener("click", options.onJoin, { signal: ac.signal });
 
@@ -77,10 +83,14 @@ export function createVoiceChannel(options: VoiceChannelOptions): VoiceChannelRe
     const menu = createElement("div", { class: "context-menu" });
 
     // Header
-    const header = createElement("div", {
-      class: "context-menu-item",
-      style: "font-weight:600;cursor:default;pointer-events:none",
-    }, username);
+    const header = createElement(
+      "div",
+      {
+        class: "context-menu-item",
+        style: "font-weight:600;cursor:default;pointer-events:none",
+      },
+      username,
+    );
     menu.appendChild(header);
 
     const sep = createElement("div", { class: "context-menu-sep" });
@@ -88,10 +98,14 @@ export function createVoiceChannel(options: VoiceChannelOptions): VoiceChannelRe
 
     // Volume label
     const currentVol = getUserVolume(userId);
-    const volLabel = createElement("div", {
-      class: "context-menu-item",
-      style: "font-size:12px;color:var(--text-muted);cursor:default;pointer-events:none",
-    }, `User Volume: ${currentVol}%`);
+    const volLabel = createElement(
+      "div",
+      {
+        class: "context-menu-item",
+        style: "font-size:12px;color:var(--text-muted);cursor:default;pointer-events:none",
+      },
+      `User Volume: ${currentVol}%`,
+    );
     menu.appendChild(volLabel);
 
     // Volume slider (0-200%, like Discord)
@@ -106,10 +120,14 @@ export function createVoiceChannel(options: VoiceChannelOptions): VoiceChannelRe
       value: String(currentVol),
       style: "flex:1",
     });
-    const valLabel = createElement("span", {
-      class: "slider-val",
-      style: "min-width:40px;text-align:right;font-size:12px;color:var(--text-muted)",
-    }, `${currentVol}%`);
+    const valLabel = createElement(
+      "span",
+      {
+        class: "slider-val",
+        style: "min-width:40px;text-align:right;font-size:12px;color:var(--text-muted)",
+      },
+      `${currentVol}%`,
+    );
 
     slider.addEventListener("input", () => {
       const val = Number(slider.value);
@@ -142,18 +160,20 @@ export function createVoiceChannel(options: VoiceChannelOptions): VoiceChannelRe
     const dismissSignal = menuDismissAc.signal;
     setTimeout(() => {
       if (dismissSignal.aborted) return;
-      document.addEventListener("mousedown", (e: MouseEvent) => {
-        if (!menu.contains(e.target as Node)) {
-          closeContextMenu();
-        }
-      }, { signal: dismissSignal });
+      document.addEventListener(
+        "mousedown",
+        (e: MouseEvent) => {
+          if (!menu.contains(e.target as Node)) {
+            closeContextMenu();
+          }
+        },
+        { signal: dismissSignal },
+      );
     }, 0);
   }
 
   function createUserRow(user: VoiceUser, username: string): HTMLDivElement {
-    const classes = user.speaking
-      ? "voice-user-item speaking"
-      : "voice-user-item";
+    const classes = user.speaking ? "voice-user-item speaking" : "voice-user-item";
     const row = createElement("div", { class: classes });
 
     const initial = username.length > 0 ? username.charAt(0).toUpperCase() : "?";
@@ -180,11 +200,15 @@ export function createVoiceChannel(options: VoiceChannelOptions): VoiceChannelRe
     // Right-click for per-user volume (skip for own user)
     const currentUser = authStore.getState().user;
     if (currentUser === null || currentUser.id !== user.userId) {
-      row.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        showVolumeMenu(user.userId, username, e.clientX, e.clientY);
-      }, { signal: ac.signal });
+      row.addEventListener(
+        "contextmenu",
+        (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          showVolumeMenu(user.userId, username, e.clientX, e.clientY);
+        },
+        { signal: ac.signal },
+      );
     }
 
     return row;
@@ -215,6 +239,31 @@ export function createVoiceChannel(options: VoiceChannelOptions): VoiceChannelRe
       const username = (member as { username?: string } | undefined)?.username ?? "Unknown";
       const row = createUserRow(user, username);
       usersContainer.appendChild(row);
+
+      // Attach stream preview for remote users with active video
+      const currentUser = authStore.getState().user;
+      if (
+        (currentUser === null || currentUser.id !== user.userId) &&
+        (user.camera || user.screenshare)
+      ) {
+        const tileId = user.screenshare ? user.userId + SCREENSHARE_TILE_ID_OFFSET : user.userId;
+        attachStreamPreview(
+          row,
+          user.userId,
+          username,
+          user.screenshare,
+          user.camera,
+          ac.signal,
+          () => {
+            // Only join if not already in this channel
+            if (voiceStore.getState().currentChannelId !== options.channelId) {
+              options.onJoin();
+            }
+            if (options.onClickWatch !== undefined) options.onClickWatch(tileId);
+          },
+          options.onClickWatch !== undefined ? () => options.onClickWatch!(tileId) : undefined,
+        );
+      }
     }
 
     // Mark channel-item active if there are users
@@ -227,8 +276,18 @@ export function createVoiceChannel(options: VoiceChannelOptions): VoiceChannelRe
 
   // Initial render and subscribe
   update();
-  unsubs.push(voiceStore.subscribeSelector((s) => s.voiceUsers, () => update()));
-  unsubs.push(membersStore.subscribeSelector((s) => s.members, () => update()));
+  unsubs.push(
+    voiceStore.subscribeSelector(
+      (s) => s.voiceUsers,
+      () => update(),
+    ),
+  );
+  unsubs.push(
+    membersStore.subscribeSelector(
+      (s) => s.members,
+      () => update(),
+    ),
+  );
 
   function destroy(): void {
     closeContextMenu();

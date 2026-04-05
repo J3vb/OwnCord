@@ -16,11 +16,7 @@ vi.mock("@lib/streamPreview", () => ({
 }));
 
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
-import {
-  channelsStore,
-  setChannels,
-  setActiveChannel,
-} from "../../src/stores/channels.store";
+import { channelsStore, setChannels, setActiveChannel } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore, toggleCategory } from "../../src/stores/ui.store";
 import { voiceStore, updateVoiceState } from "../../src/stores/voice.store";
@@ -148,9 +144,7 @@ describe("ChannelSidebar", () => {
     const items = container.querySelectorAll(".channel-item");
     expect(items.length).toBe(4);
 
-    const names = Array.from(
-      container.querySelectorAll(".ch-name"),
-    ).map((el) => el.textContent);
+    const names = Array.from(container.querySelectorAll(".ch-name")).map((el) => el.textContent);
     expect(names).toContain("general");
     expect(names).toContain("random");
     expect(names).toContain("voice-lobby");
@@ -179,9 +173,7 @@ describe("ChannelSidebar", () => {
     const ch1Before = channelsStore.getState().channels.get(1);
     expect(ch1Before?.unreadCount).toBe(2);
 
-    const firstItem = container.querySelector(
-      '[data-channel-id="1"]',
-    ) as HTMLElement;
+    const firstItem = container.querySelector('[data-channel-id="1"]') as HTMLElement;
     expect(firstItem).not.toBeNull();
     firstItem.click();
 
@@ -195,9 +187,7 @@ describe("ChannelSidebar", () => {
     sidebar.mount(container);
 
     // Text Channels category should have 2 channels visible
-    const textChannelsBefore = container.querySelectorAll(
-      '.channel-item',
-    );
+    const textChannelsBefore = container.querySelectorAll(".channel-item");
     expect(textChannelsBefore.length).toBe(4);
 
     // Click the "Text Channels" category header to collapse
@@ -251,9 +241,7 @@ describe("ChannelSidebar", () => {
     setActiveChannel(2);
     sidebar.mount(container);
 
-    const activeItem = container.querySelector(
-      '[data-channel-id="2"]',
-    );
+    const activeItem = container.querySelector('[data-channel-id="2"]');
     expect(activeItem?.classList.contains("active")).toBe(true);
   });
 
@@ -261,9 +249,7 @@ describe("ChannelSidebar", () => {
     setChannels(testChannels);
     sidebar.mount(container);
 
-    const voiceItem = container.querySelector(
-      '[data-channel-id="3"]',
-    );
+    const voiceItem = container.querySelector('[data-channel-id="3"]');
     const icon = voiceItem?.querySelector(".ch-icon");
     expect(icon).not.toBeNull();
   });
@@ -272,9 +258,7 @@ describe("ChannelSidebar", () => {
     setChannels(testChannels);
     sidebar.mount(container);
 
-    const voiceItem = container.querySelector(
-      '[data-channel-id="3"]',
-    ) as HTMLElement;
+    const voiceItem = container.querySelector('[data-channel-id="3"]') as HTMLElement;
     voiceItem.click();
 
     // Should NOT set active channel
@@ -287,9 +271,7 @@ describe("ChannelSidebar", () => {
     setChannels(testChannels);
     sidebar.mount(container);
 
-    const textItem = container.querySelector(
-      '[data-channel-id="1"]',
-    ) as HTMLElement;
+    const textItem = container.querySelector('[data-channel-id="1"]') as HTMLElement;
     textItem.click();
 
     expect(channelsStore.getState().activeChannelId).toBe(1);
@@ -301,9 +283,7 @@ describe("ChannelSidebar", () => {
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
     sidebar.mount(container);
 
-    const voiceItem = container.querySelector(
-      '[data-channel-id="3"]',
-    ) as HTMLElement;
+    const voiceItem = container.querySelector('[data-channel-id="3"]') as HTMLElement;
     voiceItem.click();
 
     expect(onVoiceLeave).toHaveBeenCalled();
@@ -315,7 +295,12 @@ describe("ChannelSidebar", () => {
     // Add a member so username resolves
     membersStore.setState((prev) => ({
       ...prev,
-      members: new Map([[10, { id: 10, username: "Alice", avatar: null, role: "member", status: "online" as const }]]),
+      members: new Map([
+        [
+          10,
+          { id: 10, username: "Alice", avatar: null, role: "member", status: "online" as const },
+        ],
+      ]),
     }));
     updateVoiceState({
       channel_id: 3,
@@ -344,9 +329,7 @@ describe("ChannelSidebar", () => {
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
     sidebar.mount(container);
 
-    const voiceItem = container.querySelector(
-      '[data-channel-id="3"]',
-    );
+    const voiceItem = container.querySelector('[data-channel-id="3"]');
     expect(voiceItem?.classList.contains("active")).toBe(true);
   });
 
@@ -640,11 +623,13 @@ describe("ChannelSidebar", () => {
     expect(channelEl).not.toBeNull();
 
     // Dispatch right-click
-    channelEl.dispatchEvent(new MouseEvent("contextmenu", {
-      bubbles: true,
-      clientX: 100,
-      clientY: 200,
-    }));
+    channelEl.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        clientX: 100,
+        clientY: 200,
+      }),
+    );
 
     const ctxMenu = document.querySelector('[data-testid="channel-context-menu"]');
     expect(ctxMenu).not.toBeNull();
@@ -672,11 +657,13 @@ describe("ChannelSidebar", () => {
     sidebar.mount(container);
 
     const channelEl = container.querySelector('[data-channel-id="1"]') as HTMLElement;
-    channelEl.dispatchEvent(new MouseEvent("contextmenu", {
-      bubbles: true,
-      clientX: 100,
-      clientY: 200,
-    }));
+    channelEl.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        clientX: 100,
+        clientY: 200,
+      }),
+    );
 
     const editItem = document.querySelector('[data-testid="ctx-edit-channel"]') as HTMLElement;
     editItem.click();
@@ -701,11 +688,13 @@ describe("ChannelSidebar", () => {
     sidebar.mount(container);
 
     const channelEl = container.querySelector('[data-channel-id="1"]') as HTMLElement;
-    channelEl.dispatchEvent(new MouseEvent("contextmenu", {
-      bubbles: true,
-      clientX: 100,
-      clientY: 200,
-    }));
+    channelEl.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        clientX: 100,
+        clientY: 200,
+      }),
+    );
 
     const deleteItem = document.querySelector('[data-testid="ctx-delete-channel"]') as HTMLElement;
     deleteItem.click();
@@ -735,11 +724,13 @@ describe("ChannelSidebar", () => {
     sidebar.mount(container);
 
     const channelEl = container.querySelector('[data-channel-id="1"]') as HTMLElement;
-    channelEl.dispatchEvent(new MouseEvent("contextmenu", {
-      bubbles: true,
-      clientX: 100,
-      clientY: 200,
-    }));
+    channelEl.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        clientX: 100,
+        clientY: 200,
+      }),
+    );
 
     // No context menu should appear for non-admin
     const ctxMenu = document.querySelector('[data-testid="channel-context-menu"]');
@@ -779,7 +770,9 @@ describe("ChannelSidebar", () => {
     setChannels(testChannels);
     sidebar.mount(container);
 
-    const addBtn = container.querySelector('[data-testid="create-channel-text-channels"]') as HTMLElement;
+    const addBtn = container.querySelector(
+      '[data-testid="create-channel-text-channels"]',
+    ) as HTMLElement;
     addBtn.click();
 
     expect(onCreateChannel).toHaveBeenCalledWith("Text Channels");
@@ -801,7 +794,9 @@ describe("ChannelSidebar", () => {
     // All 4 channels visible before click
     expect(container.querySelectorAll(".channel-item").length).toBe(4);
 
-    const addBtn = container.querySelector('[data-testid="create-channel-text-channels"]') as HTMLElement;
+    const addBtn = container.querySelector(
+      '[data-testid="create-channel-text-channels"]',
+    ) as HTMLElement;
     addBtn.click();
 
     // Category should NOT have collapsed (stopPropagation in the handler)
@@ -857,11 +852,13 @@ describe("ChannelSidebar", () => {
     sidebar.mount(container);
 
     const voiceRow = container.querySelector(".voice-user-item") as HTMLElement;
-    voiceRow.dispatchEvent(new MouseEvent("contextmenu", {
-      bubbles: true,
-      clientX: 150,
-      clientY: 250,
-    }));
+    voiceRow.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        clientX: 150,
+        clientY: 250,
+      }),
+    );
 
     const volMenu = document.querySelector(".user-vol-menu");
     expect(volMenu).not.toBeNull();
@@ -1011,9 +1008,7 @@ describe("ChannelSidebar", () => {
     const userItems = container.querySelectorAll(".voice-user-item");
     expect(userItems.length).toBe(2);
 
-    const names = Array.from(userItems).map(
-      (el) => el.querySelector(".vu-name")?.textContent,
-    );
+    const names = Array.from(userItems).map((el) => el.querySelector(".vu-name")?.textContent);
     expect(names).toContain("UserA");
     expect(names).toContain("UserB");
   });
@@ -1052,7 +1047,23 @@ describe("ChannelSidebar", () => {
     voiceStore.setState(() => ({
       currentChannelId: 3,
       voiceUsers: new Map([
-        [3, new Map([[99, { userId: 99, username: "Streamer", speaking: false, muted: false, deafened: false, camera: false, screenshare: true }]])],
+        [
+          3,
+          new Map([
+            [
+              99,
+              {
+                userId: 99,
+                username: "Streamer",
+                speaking: false,
+                muted: false,
+                deafened: false,
+                camera: false,
+                screenshare: true,
+              },
+            ],
+          ]),
+        ],
       ]),
       voiceConfigs: new Map(),
       localMuted: false,
@@ -1080,7 +1091,23 @@ describe("ChannelSidebar", () => {
     voiceStore.setState(() => ({
       currentChannelId: 3,
       voiceUsers: new Map([
-        [3, new Map([[99, { userId: 99, username: "Cammer", speaking: false, muted: false, deafened: false, camera: true, screenshare: false }]])],
+        [
+          3,
+          new Map([
+            [
+              99,
+              {
+                userId: 99,
+                username: "Cammer",
+                speaking: false,
+                muted: false,
+                deafened: false,
+                camera: true,
+                screenshare: false,
+              },
+            ],
+          ]),
+        ],
       ]),
       voiceConfigs: new Map(),
       localMuted: false,
@@ -1114,7 +1141,23 @@ describe("ChannelSidebar", () => {
     voiceStore.setState(() => ({
       currentChannelId: 3,
       voiceUsers: new Map([
-        [3, new Map([[42, { userId: 42, username: "Me", speaking: false, muted: false, deafened: false, camera: true, screenshare: false }]])],
+        [
+          3,
+          new Map([
+            [
+              42,
+              {
+                userId: 42,
+                username: "Me",
+                speaking: false,
+                muted: false,
+                deafened: false,
+                camera: true,
+                screenshare: false,
+              },
+            ],
+          ]),
+        ],
       ]),
       voiceConfigs: new Map(),
       localMuted: false,
@@ -1139,7 +1182,23 @@ describe("ChannelSidebar", () => {
     voiceStore.setState(() => ({
       currentChannelId: 3,
       voiceUsers: new Map([
-        [3, new Map([[1, { userId: 1, username: "User", speaking: false, muted: false, deafened: false, camera: false, screenshare: true }]])],
+        [
+          3,
+          new Map([
+            [
+              1,
+              {
+                userId: 1,
+                username: "User",
+                speaking: false,
+                muted: false,
+                deafened: false,
+                camera: false,
+                screenshare: true,
+              },
+            ],
+          ]),
+        ],
       ]),
       voiceConfigs: new Map(),
       localMuted: false,
@@ -1164,7 +1223,23 @@ describe("ChannelSidebar", () => {
     voiceStore.setState(() => ({
       currentChannelId: 3,
       voiceUsers: new Map([
-        [3, new Map([[99, { userId: 99, username: "User", speaking: false, muted: false, deafened: false, camera: true, screenshare: false }]])],
+        [
+          3,
+          new Map([
+            [
+              99,
+              {
+                userId: 99,
+                username: "User",
+                speaking: false,
+                muted: false,
+                deafened: false,
+                camera: true,
+                screenshare: false,
+              },
+            ],
+          ]),
+        ],
       ]),
       voiceConfigs: new Map(),
       localMuted: false,

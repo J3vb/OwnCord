@@ -72,7 +72,10 @@
       "identifier": "fs:allow-write-file",
       "allow": [
         {
-          "path": "**"
+          "path": "$APPDATA/**"
+        },
+        {
+          "path": "$APPLOG/**"
         }
       ]
     },

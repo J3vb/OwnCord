@@ -21,9 +21,9 @@ type tauriPlatformResponse struct {
 
 // tauriUpdateResponse is the JSON shape the Tauri updater plugin expects.
 type tauriUpdateResponse struct {
-	Version   string                          `json:"version"`
-	Notes     string                          `json:"notes,omitempty"`
-	PubDate   string                          `json:"pub_date,omitempty"`
+	Version   string                           `json:"version"`
+	Notes     string                           `json:"notes,omitempty"`
+	PubDate   string                           `json:"pub_date,omitempty"`
 	Platforms map[string]tauriPlatformResponse `json:"platforms"`
 }
 

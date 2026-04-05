@@ -6,7 +6,7 @@ const {
   mockClearLogBuffer,
   mockAddLogListener,
   mockSetLogLevel,
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
 } = vi.hoisted(() => ({
   mockGetLogBuffer: vi.fn<any>(),
   mockClearLogBuffer: vi.fn<any>(),
@@ -325,7 +325,9 @@ describe("LogsTab", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockAddLogListener.mockImplementation(((cb: any) => {
       logCallback = cb;
-      return () => { logCallback = undefined; };
+      return () => {
+        logCallback = undefined;
+      };
     }) as any);
 
     const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
@@ -345,7 +347,9 @@ describe("LogsTab", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockAddLogListener.mockImplementation(((cb: any) => {
       logCallback = cb;
-      return () => { logCallback = undefined; };
+      return () => {
+        logCallback = undefined;
+      };
     }) as any);
 
     const handle = createLogsTab(() => "Account" as TabName, controller.signal);
