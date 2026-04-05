@@ -20,6 +20,8 @@ type Services struct {
 	DMs         *DMService
 	Invites     *InviteService
 	Blocks      *BlockService
+	Moderation  *ModerationService
+	Voice       *VoiceService
 }
 
 // New creates all domain services wired together.
@@ -34,5 +36,7 @@ func New(st store.Store, limiter *auth.RateLimiter) *Services {
 		DMs:         NewDMService(st),
 		Invites:     NewInviteService(st),
 		Blocks:      NewBlockService(st),
+		Moderation:  NewModerationService(st),
+		Voice:       NewVoiceService(st, permSvc),
 	}
 }
