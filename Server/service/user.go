@@ -22,7 +22,10 @@ func NewUserService(st store.Store) *UserService {
 // Returns the updated user for response building.
 func (s *UserService) UpdateProfile(userID int64, username string, avatar *string) (*db.User, error) {
 	if err := s.st.UpdateUserProfile(userID, username, avatar); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInternal, err)
+		if db.IsUniqueConstraintError(err) {
+			return nil, fmt.Errorf("%w: username is already taken", ErrConflict)
+		}
+		return nil, fmt.Errorf("%w: failed to update profile", ErrInternal)
 	}
 	user, err := s.st.GetUserByID(userID)
 	if err != nil {

@@ -114,7 +114,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	if storeErr != nil {
 		slog.Error("failed to create file storage", "error", storeErr)
 	} else {
-		MountUploadRoutes(r, database, store, limiter, cfg.Server.AllowedOrigins)
+		MountUploadRoutes(r, database, store, limiter, cfg.Server.AllowedOrigins, svc.Permissions)
 	}
 
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
@@ -177,7 +177,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// Profile routes: update profile, change password, session management.
 	// Mounted after hub creation so the hub can broadcast user_update events.
-	MountProfileRoutes(r, database, limiter, cfg.Server.TrustedProxies, hub)
+	MountProfileRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
 
 	// DM (direct message) REST routes — mounted after hub creation so the
 	// hub can send real-time dm_channel_close events to WebSocket clients.
