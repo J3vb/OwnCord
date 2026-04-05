@@ -94,7 +94,13 @@ func (p *LiveKitProcess) SetProcessStoppedForTest() {
 func NewHubForTest() *Hub {
 	return &Hub{
 		clients: make(map[int64]*Client),
+		pubsub:  NewPubSub(),
 	}
+}
+
+// PubSubForTest exposes the hub's PubSub for external tests.
+func (h *Hub) PubSubForTest() *PubSub {
+	return h.pubsub
 }
 
 // BuildAuthOKForTest exposes Hub.buildAuthOK for external tests.

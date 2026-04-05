@@ -160,9 +160,20 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 			}
 			// Apply client state mutations.
 			if result.SetChannelID != nil {
+				oldChID := c.getChannelID()
 				c.mu.Lock()
 				c.channelID = *result.SetChannelID
 				c.mu.Unlock()
+				// Update pub/sub channel topic subscriptions.
+				newChID := *result.SetChannelID
+				if oldChID != newChID {
+					if oldChID > 0 {
+						c.hub.pubsub.Unsubscribe(c, ChannelTopic(oldChID))
+					}
+					if newChID > 0 {
+						c.hub.pubsub.Subscribe(c, ChannelTopic(newChID))
+					}
+				}
 			}
 			if result.SetE2EEPubKey != nil {
 				c.setE2EEPubKey(*result.SetE2EEPubKey)
