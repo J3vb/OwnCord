@@ -232,17 +232,13 @@ func (h *Hub) requireChannelPerm(c *Client, channelID int64, perm int64, permLab
 // This is correct for typing indicators but would be incorrect for messages
 // that should survive reconnection replay.
 func (h *Hub) broadcastExclude(channelID, excludeUserID int64, msg []byte) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	for uid, c := range h.clients {
-		if uid == excludeUserID {
-			continue
-		}
-		if channelID != 0 && c.getChannelID() != channelID {
-			continue
-		}
-		c.sendMsg(msg)
+	if channelID == 0 {
+		// Global broadcast excluding one user — use the global topic.
+		h.pubsub.Publish(TopicGlobal, msg, excludeUserID)
+		return
 	}
+	// Channel-scoped broadcast excluding one user.
+	h.pubsub.Publish(ChannelTopic(channelID), msg, excludeUserID)
 }
 
 // broadcastToDMParticipants sends a message to all participants of a DM channel

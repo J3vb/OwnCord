@@ -6,8 +6,8 @@ package service
 
 import (
 	"github.com/owncord/server/auth"
-	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/store"
 )
 
 // Services bundles all domain services for dependency injection.
@@ -16,15 +16,23 @@ type Services struct {
 	Messages    *MessageService
 	Channels    *ChannelService
 	Permissions *PermissionService
+	Users       *UserService
+	DMs         *DMService
+	Invites     *InviteService
+	Blocks      *BlockService
 }
 
 // New creates all domain services wired together.
-func New(database *db.DB, limiter *auth.RateLimiter) *Services {
-	permChecker := permissions.NewChecker(database)
-	permSvc := NewPermissionService(database, permChecker)
+func New(st store.Store, limiter *auth.RateLimiter) *Services {
+	permChecker := permissions.NewChecker(st)
+	permSvc := NewPermissionService(st, permChecker)
 	return &Services{
-		Messages:    NewMessageService(database, permSvc, limiter),
-		Channels:    NewChannelService(database, permSvc),
+		Messages:    NewMessageService(st, permSvc, limiter),
+		Channels:    NewChannelService(st, permSvc),
 		Permissions: permSvc,
+		Users:       NewUserService(st),
+		DMs:         NewDMService(st),
+		Invites:     NewInviteService(st),
+		Blocks:      NewBlockService(st),
 	}
 }

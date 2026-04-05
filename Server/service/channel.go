@@ -7,19 +7,20 @@ import (
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/store"
 )
 
 // ChannelService handles channel-related business logic including
 // listing, permission-filtered access, typing, presence, and read state.
 type ChannelService struct {
-	db    *db.DB
+	st    store.Store
 	perms *PermissionService
 }
 
 // NewChannelService creates a ChannelService.
-func NewChannelService(database *db.DB, perms *PermissionService) *ChannelService {
+func NewChannelService(st store.Store, perms *PermissionService) *ChannelService {
 	return &ChannelService{
-		db:    database,
+		st:    st,
 		perms: perms,
 	}
 }
@@ -27,7 +28,7 @@ func NewChannelService(database *db.DB, perms *PermissionService) *ChannelServic
 // ListVisibleChannels returns channels the user has ReadMessages permission for.
 // DM channels are excluded (they are accessed via DMService).
 func (s *ChannelService) ListVisibleChannels(userID int64) ([]db.Channel, error) {
-	all, err := s.db.ListChannels()
+	all, err := s.st.ListChannels()
 	if err != nil {
 		slog.Error("ChannelService.ListVisibleChannels", "err", err)
 		return nil, fmt.Errorf("%w: failed to list channels", ErrInternal)
@@ -51,7 +52,7 @@ func (s *ChannelService) ListVisibleChannels(userID int64) ([]db.Channel, error)
 		return visible, nil
 	}
 
-	overrides, err := s.db.GetAllChannelPermissionsForRole(role.ID)
+	overrides, err := s.st.GetAllChannelPermissionsForRole(role.ID)
 	if err != nil {
 		overrides = make(map[int64]db.ChannelOverride)
 	}
@@ -90,13 +91,13 @@ func (s *ChannelService) HandleTyping(userID, channelID int64, limiter interface
 		return nil, nil
 	}
 
-	ch, err := s.db.GetChannel(channelID)
+	ch, err := s.st.GetChannel(channelID)
 	if err != nil || ch == nil {
 		return nil, nil // silent drop
 	}
 
 	if ch.Type == "dm" {
-		ok, err := s.db.IsDMParticipant(userID, channelID)
+		ok, err := s.st.IsDMParticipant(userID, channelID)
 		if err != nil || !ok {
 			return nil, nil // silent drop
 		}
@@ -110,7 +111,7 @@ func (s *ChannelService) HandleTyping(userID, channelID int64, limiter interface
 // GetDMParticipantIDs returns the participant IDs for a DM channel.
 // Convenience method for handlers building DM events.
 func (s *ChannelService) GetDMParticipantIDs(channelID int64) ([]int64, error) {
-	return s.db.GetDMParticipantIDs(channelID)
+	return s.st.GetDMParticipantIDs(channelID)
 }
 
 // HandlePresenceUpdate validates and persists a presence status change.
@@ -130,7 +131,7 @@ func (s *ChannelService) HandlePresenceUpdate(userID int64, status string, limit
 		return fmt.Errorf("%w: invalid status", ErrBadRequest)
 	}
 
-	if err := s.db.UpdateUserStatus(userID, status); err != nil {
+	if err := s.st.UpdateUserStatus(userID, status); err != nil {
 		slog.Error("ChannelService.HandlePresenceUpdate", "err", err, "user_id", userID)
 		return fmt.Errorf("%w: failed to update status", ErrInternal)
 	}
@@ -145,13 +146,13 @@ func (s *ChannelService) HandleChannelFocus(userID, channelID int64) (*db.Channe
 		return nil, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
 	}
 
-	ch, err := s.db.GetChannel(channelID)
+	ch, err := s.st.GetChannel(channelID)
 	if err != nil || ch == nil {
 		return nil, fmt.Errorf("%w: channel not found", ErrForbidden)
 	}
 
 	if ch.Type == "dm" {
-		ok, err := s.db.IsDMParticipant(userID, channelID)
+		ok, err := s.st.IsDMParticipant(userID, channelID)
 		if err != nil || !ok {
 			return nil, fmt.Errorf("%w: access denied", ErrForbidden)
 		}
@@ -162,9 +163,9 @@ func (s *ChannelService) HandleChannelFocus(userID, channelID int64) (*db.Channe
 	}
 
 	// Mark channel as read.
-	latestID, err := s.db.GetLatestMessageID(channelID)
+	latestID, err := s.st.GetLatestMessageID(channelID)
 	if err == nil && latestID > 0 {
-		_ = s.db.UpdateReadState(userID, channelID, latestID)
+		_ = s.st.UpdateReadState(userID, channelID, latestID)
 	}
 
 	slog.Debug("channel_focus", "user_id", userID, "channel_id", channelID)

@@ -11,6 +11,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/store"
 )
 
 // sanitizer is the shared HTML sanitization policy (strips all tags).
@@ -97,15 +98,15 @@ type ReactionResult struct {
 // MessageService handles message-related business logic including
 // send, edit, delete, reactions, pins, and search.
 type MessageService struct {
-	db      *db.DB
+	st      store.Store
 	perms   *PermissionService
 	limiter *auth.RateLimiter
 }
 
 // NewMessageService creates a MessageService.
-func NewMessageService(database *db.DB, perms *PermissionService, limiter *auth.RateLimiter) *MessageService {
+func NewMessageService(st store.Store, perms *PermissionService, limiter *auth.RateLimiter) *MessageService {
 	return &MessageService{
-		db:      database,
+		st:      st,
 		perms:   perms,
 		limiter: limiter,
 	}
@@ -124,7 +125,7 @@ func (s *MessageService) SendMessage(p SendMessageParams) (*SendMessageResult, e
 		return nil, fmt.Errorf("%w: channel_id must be a positive integer", ErrBadRequest)
 	}
 
-	ch, err := s.db.GetChannel(p.ChannelID)
+	ch, err := s.st.GetChannel(p.ChannelID)
 	if err != nil || ch == nil {
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
@@ -158,7 +159,7 @@ func (s *MessageService) SendMessage(p SendMessageParams) (*SendMessageResult, e
 	}
 
 	// Persist message.
-	msgID, err := s.db.CreateMessage(p.ChannelID, p.UserID, content, p.ReplyTo)
+	msgID, err := s.st.CreateMessage(p.ChannelID, p.UserID, content, p.ReplyTo)
 	if err != nil {
 		slog.Error("MessageService.SendMessage CreateMessage", "err", err)
 		return nil, fmt.Errorf("%w: failed to save message", ErrInternal)
@@ -167,17 +168,17 @@ func (s *MessageService) SendMessage(p SendMessageParams) (*SendMessageResult, e
 	// Link attachments.
 	var attachments []db.AttachmentInfo
 	if len(p.AttachmentIDs) > 0 {
-		linked, linkErr := s.db.LinkAttachmentsToMessage(msgID, p.AttachmentIDs)
+		linked, linkErr := s.st.LinkAttachmentsToMessage(msgID, p.AttachmentIDs)
 		if linkErr != nil {
 			slog.Error("MessageService.SendMessage LinkAttachments", "err", linkErr, "msg_id", msgID)
 			// Cleanup: soft-delete the message.
-			if delErr := s.db.DeleteMessage(msgID, p.UserID, true); delErr != nil {
+			if delErr := s.st.DeleteMessage(msgID, p.UserID, true); delErr != nil {
 				slog.Error("MessageService.SendMessage DeleteMessage (cleanup)", "err", delErr, "msg_id", msgID)
 			}
 			return nil, fmt.Errorf("%w: failed to send message with attachments", ErrInternal)
 		}
 		if linked > 0 {
-			attMap, attErr := s.db.GetAttachmentsByMessageIDs([]int64{msgID})
+			attMap, attErr := s.st.GetAttachmentsByMessageIDs([]int64{msgID})
 			if attErr != nil {
 				slog.Error("MessageService.SendMessage GetAttachments", "err", attErr)
 			} else {
@@ -187,7 +188,7 @@ func (s *MessageService) SendMessage(p SendMessageParams) (*SendMessageResult, e
 	}
 
 	// Fetch message for timestamp.
-	msg, err := s.db.GetMessage(msgID)
+	msg, err := s.st.GetMessage(msgID)
 	if err != nil || msg == nil {
 		slog.Error("MessageService.SendMessage GetMessage after create", "err", err)
 		return nil, fmt.Errorf("%w: failed to retrieve message", ErrInternal)
@@ -204,21 +205,21 @@ func (s *MessageService) SendMessage(p SendMessageParams) (*SendMessageResult, e
 
 	// DM path: open DM for recipients.
 	if isDM {
-		participantIDs, pErr := s.db.GetDMParticipantIDs(p.ChannelID)
+		participantIDs, pErr := s.st.GetDMParticipantIDs(p.ChannelID)
 		if pErr != nil {
 			slog.Error("MessageService.SendMessage GetDMParticipantIDs", "err", pErr, "channel_id", p.ChannelID)
 			return result, nil // Message saved, skip DM side effects.
 		}
 		result.ParticipantIDs = participantIDs
 
-		sender, _ := s.db.GetUserByID(p.UserID)
+		sender, _ := s.st.GetUserByID(p.UserID)
 		result.SenderUser = sender
 
 		for _, pid := range participantIDs {
 			if pid == p.UserID {
 				continue
 			}
-			if openErr := s.db.OpenDM(pid, p.ChannelID); openErr != nil {
+			if openErr := s.st.OpenDM(pid, p.ChannelID); openErr != nil {
 				slog.Error("MessageService.SendMessage OpenDM", "err", openErr, "recipient_id", pid, "channel_id", p.ChannelID)
 				continue
 			}
@@ -248,7 +249,7 @@ func (s *MessageService) EditMessage(userID, msgID int64, rawContent string) (*E
 	}
 
 	// Fetch message.
-	msg, err := s.db.GetMessage(msgID)
+	msg, err := s.st.GetMessage(msgID)
 	if err != nil || msg == nil {
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 	}
@@ -257,11 +258,11 @@ func (s *MessageService) EditMessage(userID, msgID int64, rawContent string) (*E
 	}
 
 	// Channel type for DM-aware permissions.
-	ch, chErr := s.db.GetChannel(msg.ChannelID)
+	ch, chErr := s.st.GetChannel(msg.ChannelID)
 	isDM := chErr == nil && ch != nil && ch.Type == "dm"
 
 	if isDM {
-		ok, dmErr := s.db.IsDMParticipant(userID, msg.ChannelID)
+		ok, dmErr := s.st.IsDMParticipant(userID, msg.ChannelID)
 		if dmErr != nil || !ok {
 			return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 		}
@@ -270,12 +271,12 @@ func (s *MessageService) EditMessage(userID, msgID int64, rawContent string) (*E
 	}
 
 	// EditMessage checks ownership internally.
-	if err := s.db.EditMessage(msgID, userID, content); err != nil {
+	if err := s.st.EditMessage(msgID, userID, content); err != nil {
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 	}
 
 	// Re-fetch for updated edited_at timestamp.
-	msg, err = s.db.GetMessage(msgID)
+	msg, err = s.st.GetMessage(msgID)
 	if err != nil || msg == nil {
 		slog.Error("MessageService.EditMessage GetMessage after edit", "err", err, "msg_id", msgID)
 		return nil, fmt.Errorf("%w: edit saved but broadcast failed", ErrInternal)
@@ -295,7 +296,7 @@ func (s *MessageService) EditMessage(userID, msgID int64, rawContent string) (*E
 	}
 
 	if isDM {
-		participantIDs, pErr := s.db.GetDMParticipantIDs(msg.ChannelID)
+		participantIDs, pErr := s.st.GetDMParticipantIDs(msg.ChannelID)
 		if pErr != nil {
 			slog.Error("MessageService.EditMessage GetDMParticipantIDs", "err", pErr, "channel_id", msg.ChannelID)
 		} else {
@@ -319,16 +320,16 @@ func (s *MessageService) DeleteMessage(userID, msgID int64) (*DeleteMessageResul
 		return nil, fmt.Errorf("%w: message_id must be positive integer", ErrBadRequest)
 	}
 
-	msg, err := s.db.GetMessage(msgID)
+	msg, err := s.st.GetMessage(msgID)
 	if err != nil || msg == nil {
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
 
-	ch, chErr := s.db.GetChannel(msg.ChannelID)
+	ch, chErr := s.st.GetChannel(msg.ChannelID)
 	isDM := chErr == nil && ch != nil && ch.Type == "dm"
 
 	if isDM {
-		ok, dmErr := s.db.IsDMParticipant(userID, msg.ChannelID)
+		ok, dmErr := s.st.IsDMParticipant(userID, msg.ChannelID)
 		if dmErr != nil || !ok {
 			return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 		}
@@ -342,12 +343,12 @@ func (s *MessageService) DeleteMessage(userID, msgID int64) (*DeleteMessageResul
 	}
 
 	isMod := !isDM && s.perms.HasChannelPerm(userID, msg.ChannelID, permissions.ManageMessages)
-	if err := s.db.DeleteMessage(msgID, userID, isMod); err != nil {
+	if err := s.st.DeleteMessage(msgID, userID, isMod); err != nil {
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
 
 	slog.Debug("message deleted", "user_id", userID, "msg_id", msgID, "channel_id", msg.ChannelID, "is_mod", isMod)
-	_ = s.db.LogAudit(userID, "message_delete", "message", msgID,
+	_ = s.st.LogAudit(userID, "message_delete", "message", msgID,
 		fmt.Sprintf("channel %d, mod_action=%v", msg.ChannelID, isMod))
 
 	result := &DeleteMessageResult{
@@ -358,7 +359,7 @@ func (s *MessageService) DeleteMessage(userID, msgID int64) (*DeleteMessageResul
 	}
 
 	if isDM {
-		participantIDs, pErr := s.db.GetDMParticipantIDs(msg.ChannelID)
+		participantIDs, pErr := s.st.GetDMParticipantIDs(msg.ChannelID)
 		if pErr != nil {
 			slog.Error("MessageService.DeleteMessage GetDMParticipantIDs", "err", pErr, "channel_id", msg.ChannelID)
 		} else {
@@ -403,7 +404,7 @@ func (s *MessageService) handleReaction(userID, msgID int64, emoji string, add b
 		return nil, fmt.Errorf("%w: emoji contains unsafe content", ErrBadRequest)
 	}
 
-	msg, err := s.db.GetMessage(msgID)
+	msg, err := s.st.GetMessage(msgID)
 	if err != nil || msg == nil {
 		return nil, fmt.Errorf("%w: message not found", ErrForbidden)
 	}
@@ -411,11 +412,11 @@ func (s *MessageService) handleReaction(userID, msgID int64, emoji string, add b
 		return nil, fmt.Errorf("%w: cannot react to deleted message", ErrDeletedMessage)
 	}
 
-	ch, chErr := s.db.GetChannel(msg.ChannelID)
+	ch, chErr := s.st.GetChannel(msg.ChannelID)
 	isDM := chErr == nil && ch != nil && ch.Type == "dm"
 
 	if isDM {
-		ok, dmErr := s.db.IsDMParticipant(userID, msg.ChannelID)
+		ok, dmErr := s.st.IsDMParticipant(userID, msg.ChannelID)
 		if dmErr != nil || !ok {
 			return nil, fmt.Errorf("%w: not a DM participant", ErrForbidden)
 		}
@@ -427,13 +428,13 @@ func (s *MessageService) handleReaction(userID, msgID int64, emoji string, add b
 
 	action := "add"
 	if add {
-		if err := s.db.AddReaction(msgID, userID, emoji); err != nil {
+		if err := s.st.AddReaction(msgID, userID, emoji); err != nil {
 			slog.Warn("MessageService.AddReaction", "err", err, "msg_id", msgID, "user_id", userID)
 			return nil, fmt.Errorf("%w: reaction already exists", ErrConflict)
 		}
 	} else {
 		action = "remove"
-		if err := s.db.RemoveReaction(msgID, userID, emoji); err != nil {
+		if err := s.st.RemoveReaction(msgID, userID, emoji); err != nil {
 			slog.Warn("MessageService.RemoveReaction", "err", err, "msg_id", msgID, "user_id", userID)
 			return nil, fmt.Errorf("%w: reaction not found", ErrBadRequest)
 		}
@@ -449,7 +450,7 @@ func (s *MessageService) handleReaction(userID, msgID int64, emoji string, add b
 	}
 
 	if isDM {
-		participantIDs, pErr := s.db.GetDMParticipantIDs(msg.ChannelID)
+		participantIDs, pErr := s.st.GetDMParticipantIDs(msg.ChannelID)
 		if pErr != nil {
 			slog.Error("MessageService.handleReaction GetDMParticipantIDs", "err", pErr, "channel_id", msg.ChannelID)
 		} else {
@@ -466,14 +467,14 @@ func (s *MessageService) GetMessages(userID, channelID, before int64, limit int)
 		return nil, false, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
 	}
 
-	ch, err := s.db.GetChannel(channelID)
+	ch, err := s.st.GetChannel(channelID)
 	if err != nil || ch == nil {
 		return nil, false, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
 
 	// Permission check.
 	if ch.Type == "dm" {
-		ok, err := s.db.IsDMParticipant(userID, channelID)
+		ok, err := s.st.IsDMParticipant(userID, channelID)
 		if err != nil || !ok {
 			return nil, false, fmt.Errorf("%w: access denied", ErrForbidden)
 		}
@@ -491,7 +492,7 @@ func (s *MessageService) GetMessages(userID, channelID, before int64, limit int)
 	}
 
 	// Fetch one extra to detect has_more.
-	msgs, err := s.db.GetMessagesForAPI(channelID, before, limit+1, userID)
+	msgs, err := s.st.GetMessagesForAPI(channelID, before, limit+1, userID)
 	if err != nil {
 		slog.Error("MessageService.GetMessages", "err", err, "channel_id", channelID)
 		return nil, false, fmt.Errorf("%w: failed to fetch messages", ErrInternal)
@@ -519,19 +520,19 @@ func (s *MessageService) SearchMessages(userID int64, query string, channelID *i
 
 	// Single-channel search.
 	if channelID != nil && *channelID > 0 {
-		ch, err := s.db.GetChannel(*channelID)
+		ch, err := s.st.GetChannel(*channelID)
 		if err != nil || ch == nil {
 			return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 		}
 		if ch.Type == "dm" {
-			ok, err := s.db.IsDMParticipant(userID, *channelID)
+			ok, err := s.st.IsDMParticipant(userID, *channelID)
 			if err != nil || !ok {
 				return nil, fmt.Errorf("%w: access denied", ErrForbidden)
 			}
 		} else if !s.perms.HasChannelPerm(userID, *channelID, permissions.ReadMessages) {
 			return nil, fmt.Errorf("%w: access denied", ErrForbidden)
 		}
-		results, err := s.db.SearchMessages(query, channelID, limit)
+		results, err := s.st.SearchMessages(query, channelID, limit)
 		if err != nil {
 			return nil, fmt.Errorf("%w: search failed", ErrInternal)
 		}
@@ -547,7 +548,7 @@ func (s *MessageService) SearchMessages(userID int64, query string, channelID *i
 		return nil, nil
 	}
 
-	results, err := s.db.SearchMessagesInChannels(query, accessibleIDs, limit)
+	results, err := s.st.SearchMessagesInChannels(query, accessibleIDs, limit)
 	if err != nil {
 		return nil, fmt.Errorf("%w: search failed", ErrInternal)
 	}
@@ -559,19 +560,19 @@ func (s *MessageService) GetPinnedMessages(userID, channelID int64) ([]db.Messag
 	if channelID <= 0 {
 		return nil, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
 	}
-	ch, err := s.db.GetChannel(channelID)
+	ch, err := s.st.GetChannel(channelID)
 	if err != nil || ch == nil {
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
 	if ch.Type == "dm" {
-		ok, err := s.db.IsDMParticipant(userID, channelID)
+		ok, err := s.st.IsDMParticipant(userID, channelID)
 		if err != nil || !ok {
 			return nil, fmt.Errorf("%w: access denied", ErrForbidden)
 		}
 	} else if !s.perms.HasChannelPerm(userID, channelID, permissions.ReadMessages) {
 		return nil, fmt.Errorf("%w: access denied", ErrForbidden)
 	}
-	msgs, err := s.db.GetPinnedMessages(channelID, userID)
+	msgs, err := s.st.GetPinnedMessages(channelID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to fetch pinned messages", ErrInternal)
 	}
@@ -583,12 +584,12 @@ func (s *MessageService) SetMessagePinned(userID, channelID, msgID int64, pinned
 	if channelID <= 0 || msgID <= 0 {
 		return fmt.Errorf("%w: invalid IDs", ErrBadRequest)
 	}
-	ch, err := s.db.GetChannel(channelID)
+	ch, err := s.st.GetChannel(channelID)
 	if err != nil || ch == nil {
 		return fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
 	if ch.Type == "dm" {
-		ok, err := s.db.IsDMParticipant(userID, channelID)
+		ok, err := s.st.IsDMParticipant(userID, channelID)
 		if err != nil || !ok {
 			return fmt.Errorf("%w: access denied", ErrForbidden)
 		}
@@ -596,16 +597,16 @@ func (s *MessageService) SetMessagePinned(userID, channelID, msgID int64, pinned
 		return fmt.Errorf("%w: missing MANAGE_MESSAGES permission", ErrForbidden)
 	}
 	// Verify message belongs to this channel.
-	msg, err := s.db.GetMessage(msgID)
+	msg, err := s.st.GetMessage(msgID)
 	if err != nil || msg == nil || msg.ChannelID != channelID {
 		return fmt.Errorf("%w: message not found in this channel", ErrNotFound)
 	}
-	return s.db.SetMessagePinned(msgID, pinned)
+	return s.st.SetMessagePinned(msgID, pinned)
 }
 
 // GetAccessibleChannelIDs returns all channel IDs the user can read.
 func (s *MessageService) GetAccessibleChannelIDs(userID int64) ([]int64, error) {
-	channels, err := s.db.ListChannels()
+	channels, err := s.st.ListChannels()
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to list channels", ErrInternal)
 	}
@@ -618,7 +619,7 @@ func (s *MessageService) GetAccessibleChannelIDs(userID int64) ([]int64, error) 
 	isAdmin := permissions.HasAdmin(role.Permissions)
 	var overrides map[int64]db.ChannelOverride
 	if !isAdmin {
-		overrides, _ = s.db.GetAllChannelPermissionsForRole(role.ID)
+		overrides, _ = s.st.GetAllChannelPermissionsForRole(role.ID)
 		if overrides == nil {
 			overrides = make(map[int64]db.ChannelOverride)
 		}
@@ -641,7 +642,7 @@ func (s *MessageService) GetAccessibleChannelIDs(userID int64) ([]int64, error) 
 	}
 
 	// Also include DM channels the user participates in.
-	dmChannels, err := s.db.GetUserDMChannels(userID)
+	dmChannels, err := s.st.GetUserDMChannels(userID)
 	if err == nil {
 		for _, dmc := range dmChannels {
 			ids = append(ids, dmc.ChannelID)
@@ -654,16 +655,16 @@ func (s *MessageService) GetAccessibleChannelIDs(userID int64) ([]int64, error) 
 // checkSendPermission validates send permission for DM and non-DM channels.
 func (s *MessageService) checkSendPermission(userID, channelID int64, isDM bool) error {
 	if isDM {
-		ok, err := s.db.IsDMParticipant(userID, channelID)
+		ok, err := s.st.IsDMParticipant(userID, channelID)
 		if err != nil {
 			return fmt.Errorf("%w: failed to check DM participation", ErrInternal)
 		}
 		if !ok {
 			return fmt.Errorf("%w: not a participant in this DM", ErrForbidden)
 		}
-		recipient, err := s.db.GetDMRecipient(channelID, userID)
+		recipient, err := s.st.GetDMRecipient(channelID, userID)
 		if err == nil && recipient != nil {
-			blocked, blkErr := s.db.IsEitherBlocked(userID, recipient.ID)
+			blocked, blkErr := s.st.IsEitherBlocked(userID, recipient.ID)
 			if blkErr != nil {
 				return fmt.Errorf("%w: failed to check block status", ErrInternal)
 			}
