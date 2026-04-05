@@ -31,6 +31,7 @@ func newEmitTestHub() *Hub {
 		register:        make(chan *Client, 16),
 		unregister:      make(chan *Client, 16),
 		stop:            make(chan struct{}),
+		pubsub:          NewPubSub(),
 		replayBuf:       NewEventRingBuffer(100),
 		voiceKeyHolders: make(map[int64]int64),
 	}
@@ -42,6 +43,12 @@ func registerEmitTestClient(h *Hub, userID, channelID int64) chan []byte {
 	send := make(chan []byte, 64)
 	c := NewTestClientWithChannel(h, userID, channelID, send)
 	h.clients[userID] = c
+	// Subscribe to pub/sub topics so deliverBroadcast can reach this client.
+	h.pubsub.Subscribe(c, TopicGlobal)
+	h.pubsub.Subscribe(c, UserTopic(userID))
+	if channelID > 0 {
+		h.pubsub.Subscribe(c, ChannelTopic(channelID))
+	}
 	return send
 }
 
@@ -51,6 +58,15 @@ func registerEmitTestVoiceClient(h *Hub, userID, channelID, voiceChID int64) cha
 	c := NewTestClientWithChannel(h, userID, channelID, send)
 	SetClientVoiceChID(c, voiceChID)
 	h.clients[userID] = c
+	// Subscribe to pub/sub topics so deliverBroadcast can reach this client.
+	h.pubsub.Subscribe(c, TopicGlobal)
+	h.pubsub.Subscribe(c, UserTopic(userID))
+	if channelID > 0 {
+		h.pubsub.Subscribe(c, ChannelTopic(channelID))
+	}
+	if voiceChID > 0 {
+		h.pubsub.Subscribe(c, ChannelTopic(voiceChID))
+	}
 	return send
 }
 

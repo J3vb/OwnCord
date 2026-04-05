@@ -6,6 +6,7 @@ import (
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/store"
 )
 
 // cachedPerms holds a snapshot of a user's role and channel overrides.
@@ -24,7 +25,7 @@ const permCacheTTL = 30 * time.Second
 // at scale. The cache is populated lazily on first access and invalidated
 // on role or channel override changes.
 type PermissionService struct {
-	db      *db.DB
+	st      store.Store
 	checker *permissions.Checker
 
 	mu    sync.RWMutex
@@ -32,9 +33,9 @@ type PermissionService struct {
 }
 
 // NewPermissionService creates a PermissionService backed by the given DB.
-func NewPermissionService(database *db.DB, checker *permissions.Checker) *PermissionService {
+func NewPermissionService(st store.Store, checker *permissions.Checker) *PermissionService {
 	return &PermissionService{
-		db:      database,
+		st:      st,
 		checker: checker,
 		cache:   make(map[int64]*cachedPerms),
 	}
@@ -60,7 +61,7 @@ func (s *PermissionService) HasChannelPerm(userID, channelID, perm int64) bool {
 // For regular channels it uses cached role-based permission checks.
 func (s *PermissionService) RequireChannelAccess(userID int64, channelType string, channelID, perm int64) error {
 	if channelType == "dm" {
-		ok, err := s.db.IsDMParticipant(userID, channelID)
+		ok, err := s.st.IsDMParticipant(userID, channelID)
 		if err != nil {
 			return err
 		}
@@ -80,9 +81,9 @@ func (s *PermissionService) GetRoleForUser(userID int64) (*db.Role, error) {
 	cp := s.getOrPopulate(userID)
 	if cp == nil {
 		// Cache miss, fall back to direct DB query.
-		return s.db.GetRoleForUser(userID)
+		return s.st.GetRoleForUser(userID)
 	}
-	return s.db.GetRoleByID(cp.roleID)
+	return s.st.GetRoleByID(cp.roleID)
 }
 
 // InvalidateUser removes cached permissions for a specific user.
@@ -127,11 +128,11 @@ func (s *PermissionService) getOrPopulate(userID int64) *cachedPerms {
 	s.mu.RUnlock()
 
 	// Populate.
-	role, err := s.db.GetRoleForUser(userID)
+	role, err := s.st.GetRoleForUser(userID)
 	if err != nil || role == nil {
 		return nil
 	}
-	overrides, err := s.db.GetAllChannelPermissionsForRole(role.ID)
+	overrides, err := s.st.GetAllChannelPermissionsForRole(role.ID)
 	if err != nil {
 		// Fall back to uncached if override fetch fails.
 		overrides = make(map[int64]db.ChannelOverride)

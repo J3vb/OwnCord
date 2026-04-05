@@ -18,6 +18,7 @@ import (
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/service"
 	"github.com/owncord/server/storage"
+	dbstore "github.com/owncord/server/store"
 	"github.com/owncord/server/updater"
 	"github.com/owncord/server/ws"
 )
@@ -90,10 +91,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// broadcast user_update events for real-time profile changes.
 
 	// Invite management routes (require MANAGE_INVITES permission).
-	MountInviteRoutes(r, database)
+	MountInviteRoutes(r, database, svc)
 
 	// Channel and message REST routes.
-	MountChannelRoutes(r, database, limiter, cfg.Server.TrustedProxies)
+	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies)
 
 	// DM REST routes are mounted after hub creation (below) so the hub can
 	// be passed as a DMBroadcaster for real-time close events.
@@ -113,7 +114,8 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	}
 
 	// Service layer — centralizes business logic for REST and WS handlers.
-	svc := service.New(database, limiter)
+	st := dbstore.NewSQLiteStore(database)
+	svc := service.New(st, limiter)
 
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
 	hub := ws.NewHub(database, limiter, svc)
@@ -179,7 +181,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// DM (direct message) REST routes — mounted after hub creation so the
 	// hub can send real-time dm_channel_close events to WebSocket clients.
-	MountDMRoutes(r, database, hub)
+	MountDMRoutes(r, database, svc, hub)
 
 	// H-8: Connectivity diagnostics restricted to admin users only.
 	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.
