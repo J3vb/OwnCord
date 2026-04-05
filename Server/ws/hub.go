@@ -512,6 +512,26 @@ func (h *Hub) SendToUser(userID int64, msg []byte) bool {
 	return c.trySendMsg(msg)
 }
 
+// SendToUserHigh sends a high-priority message to a specific user.
+func (h *Hub) SendToUserHigh(userID int64, msg []byte) bool {
+	h.mu.RLock()
+	c, ok := h.clients[userID]
+	h.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	c.sendHighMsg(msg)
+	return true
+}
+
+// BroadcastToAllLow enqueues a low-priority global broadcast.
+// Low-priority messages are silently dropped if a client's buffer is full.
+func (h *Hub) BroadcastToAllLow(msg []byte) {
+	// Low-priority global broadcasts bypass the sequenced broadcast channel
+	// and go directly through pub/sub — they don't need replay or seq numbering.
+	h.pubsub.PublishGlobalLow(msg)
+}
+
 // sendSequencedToUsers stamps msg with a monotonic seq, stores it in the replay
 // buffer under channelID, and fanouts the wrapped payload to the provided users.
 func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
@@ -527,6 +547,20 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 
 	for _, userID := range userIDs {
 		h.SendToUser(userID, wrapped)
+	}
+}
+
+// sendSequencedToUsersHigh is like sendSequencedToUsers but uses high-priority delivery.
+func (h *Hub) sendSequencedToUsersHigh(channelID int64, userIDs []int64, msg []byte) {
+	h.seqMu.Lock()
+	defer h.seqMu.Unlock()
+
+	seq := h.nextSeq()
+	wrapped := wrapWithSeq(msg, seq)
+	h.replayBuf.Push(seq, channelID, wrapped)
+
+	for _, userID := range userIDs {
+		h.SendToUserHigh(userID, wrapped)
 	}
 }
 
