@@ -170,6 +170,9 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	// Set voice channel on the client AFTER token is sent successfully.
 	c.setVoiceState(channelID, state.JoinedAt)
 
+	// Subscribe to voice topic for voice-scoped events.
+	h.pubsub.Subscribe(c, VoiceTopic(channelID))
+
 	// Update key holder map now that this client's voice state is set.
 	h.updateKeyHolder(channelID)
 

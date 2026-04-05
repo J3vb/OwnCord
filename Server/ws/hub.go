@@ -41,7 +41,8 @@ type Hub struct {
 	registry     *HandlerRegistry
 	permChecker  *permissions.Checker
 
-	pubsub *PubSub // topic-based pub/sub for O(subscribers) broadcast
+	pubsub      *PubSub           // topic-based pub/sub for O(subscribers) broadcast
+	topicLimiter *TopicRateLimiter // per-topic throughput caps
 
 	seq            uint64           // atomic monotonic sequence counter
 	seqMu          syncutil.Mutex   // serializes seq assignment + replay insertion + delivery order
@@ -77,6 +78,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 		unregister:      make(chan *Client, 32),
 		stop:            make(chan struct{}),
 		pubsub:          NewPubSub(),
+		topicLimiter:    NewTopicRateLimiter(topicRateLimitPerSecond, time.Second),
 		replayBuf:       NewEventRingBuffer(1000),
 		registry:        reg,
 		permChecker:     permissions.NewChecker(database),
@@ -633,6 +635,11 @@ func wrapWithSeq(msg []byte, seq uint64) []byte {
 // a ping every 30s, so 90s (3x) gives plenty of margin.
 const staleClientTimeout = 90 * time.Second
 
+// topicRateLimitPerSecond is the default maximum messages per second for any
+// single channel topic. Prevents a busy channel from saturating the broadcast
+// loop and starving other channels.
+const topicRateLimitPerSecond = 100
+
 // sweepStaleClients iterates over all connected clients and kicks any that
 // have not sent a message within staleClientTimeout.
 func (h *Hub) sweepStaleClients() {
@@ -764,6 +771,11 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	} else {
 		// Channel-scoped broadcast — deliver to subscribers of the channel topic.
 		topic := ChannelTopic(bm.channelID)
+		if !h.topicLimiter.Allow(topic) {
+			slog.Warn("hub: topic rate limit exceeded, dropping message",
+				"channel_id", bm.channelID, "seq", seq)
+			return
+		}
 		delivered := h.pubsub.Publish(topic, msg, 0)
 		slog.Debug("hub: channel broadcast",
 			"channel_id", bm.channelID, "delivered", delivered, "seq", seq)
