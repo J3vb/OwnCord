@@ -165,6 +165,27 @@ func TestPubSub_PublishGlobal(t *testing.T) {
 	assertChanMsg(t, c2.send, msg)
 }
 
+func TestPubSub_PublishLowPriority(t *testing.T) {
+	ps := newTestPubSub()
+	c1 := makeTestClient(1)
+	c2 := &Client{userID: 2, send: make(chan []byte, 1)} // tiny buffer
+
+	ps.Subscribe(c1, "channel:1")
+	ps.Subscribe(c2, "channel:1")
+
+	// Fill c2's buffer so it drops low-priority messages.
+	c2.send <- []byte(`filler`)
+
+	msg := []byte(`{"type":"typing"}`)
+	delivered := ps.PublishLowPriority("channel:1", msg, 0)
+
+	// c1 should receive, c2 should be dropped (buffer full).
+	if delivered != 1 {
+		t.Fatalf("delivered = %d, want 1 (c2 buffer full)", delivered)
+	}
+	assertChanMsg(t, c1.send, msg)
+}
+
 // ─── TopicsForClient ─────────────────────────────────────────────────────────
 
 func TestPubSub_TopicsForClient(t *testing.T) {
