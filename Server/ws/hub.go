@@ -41,6 +41,8 @@ type Hub struct {
 	registry     *HandlerRegistry
 	permChecker  *permissions.Checker
 
+	pubsub *PubSub // topic-based pub/sub for O(subscribers) broadcast
+
 	seq            uint64           // atomic monotonic sequence counter
 	seqMu          syncutil.Mutex   // serializes seq assignment + replay insertion + delivery order
 	replayBuf      *EventRingBuffer // recent broadcast events for reconnection replay
@@ -74,6 +76,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 		register:        make(chan *Client, 32),
 		unregister:      make(chan *Client, 32),
 		stop:            make(chan struct{}),
+		pubsub:          NewPubSub(),
 		replayBuf:       NewEventRingBuffer(1000),
 		registry:        reg,
 		permChecker:     permissions.NewChecker(database),
@@ -386,6 +389,9 @@ func (h *Hub) registerNow(c *Client) {
 		// by the handshake path in serve.go, which runs before registerNow.
 		// registerNow only handles in-memory client replacement.
 
+		// Remove the old client from all pub/sub topics before replacing.
+		h.pubsub.UnsubscribeAll(old)
+
 		// Kick the stale connection atomically before registering
 		// the new one — prevents TOCTOU races on duplicate login.
 		slog.Warn("hub: kicking stale connection for re-registering user",
@@ -395,17 +401,23 @@ func (h *Hub) registerNow(c *Client) {
 	h.clients[c.userID] = c
 	slog.Info("hub: client registered", "user_id", c.userID, "total_clients", len(h.clients))
 	h.mu.Unlock()
+
+	// Subscribe the new client to default pub/sub topics.
+	h.pubsub.Subscribe(c, TopicGlobal)
+	h.pubsub.Subscribe(c, UserTopic(c.userID))
 }
 
 func (h *Hub) unregisterNow(c *Client) bool {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	current, exists := h.clients[c.userID]
 	if exists && current == c {
 		delete(h.clients, c.userID)
 		slog.Info("hub: client unregistered", "user_id", c.userID, "total_clients", len(h.clients))
+		h.mu.Unlock()
+		h.pubsub.UnsubscribeAll(c)
 		return false // not replaced
 	}
+	h.mu.Unlock()
 	return true // different client registered = was replaced
 }
 
@@ -553,6 +565,7 @@ func (h *Hub) kickClient(c *Client) {
 		delete(h.clients, c.userID)
 	}
 	h.mu.Unlock()
+	h.pubsub.UnsubscribeAll(c)
 	c.closeSend()
 }
 
@@ -700,7 +713,7 @@ func (h *Hub) sweepStaleVoiceStates() {
 }
 
 // deliverBroadcast stamps bm.msg with a monotonic sequence number, stores it
-// in the replay buffer, and sends it to the appropriate clients.
+// in the replay buffer, and sends it to the appropriate clients via pub/sub.
 func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	h.seqMu.Lock()
 	defer h.seqMu.Unlock()
@@ -711,27 +724,14 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	// Store in replay buffer for reconnection recovery.
 	h.replayBuf.Push(seq, bm.channelID, msg)
 
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	delivered := 0
-	skipped := 0
-	for _, c := range h.clients {
-		// channelID == 0 → global broadcast, deliver to everyone.
-		// Otherwise, only deliver to clients viewing this channel
-		// (via channel_focus) or in voice on this channel.
-		// Clients that haven't focused any channel (channelID == 0)
-		// are intentionally excluded from channel-scoped broadcasts
-		// to prevent information leakage (BUG-122).
-		if bm.channelID != 0 && c.getChannelID() != bm.channelID && c.getVoiceChID() != bm.channelID {
-			skipped++
-			continue
-		}
-		c.sendMsg(msg)
-		delivered++
-	}
-	if bm.channelID != 0 {
+	if bm.channelID == 0 {
+		// Global broadcast — deliver to every connected client.
+		h.pubsub.PublishGlobal(msg)
+	} else {
+		// Channel-scoped broadcast — deliver to subscribers of the channel topic.
+		topic := ChannelTopic(bm.channelID)
+		delivered := h.pubsub.Publish(topic, msg, 0)
 		slog.Debug("hub: channel broadcast",
-			"channel_id", bm.channelID, "delivered", delivered, "skipped", skipped, "seq", seq)
+			"channel_id", bm.channelID, "delivered", delivered, "seq", seq)
 	}
 }
