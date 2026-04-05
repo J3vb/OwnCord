@@ -97,6 +97,69 @@ func TestListRoles_OrderedByPositionDesc(t *testing.T) {
 	}
 }
 
+// ─── GetUserWithRole tests ────────────────────────────────────────────────────
+
+func TestGetUserWithRole_Found(t *testing.T) {
+	database := newTestDB(t)
+	uid, err := database.CreateUser("joinuser", "hash", 4) // Member role
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	user, role, err := database.GetUserWithRole(uid)
+	if err != nil {
+		t.Fatalf("GetUserWithRole: %v", err)
+	}
+	if user == nil || role == nil {
+		t.Fatal("GetUserWithRole returned nil user or role")
+	}
+	if user.ID != uid {
+		t.Errorf("user.ID = %d, want %d", user.ID, uid)
+	}
+	if user.Username != "joinuser" {
+		t.Errorf("user.Username = %q, want %q", user.Username, "joinuser")
+	}
+	if role.ID != 4 {
+		t.Errorf("role.ID = %d, want 4 (Member)", role.ID)
+	}
+	if role.Name != "Member" {
+		t.Errorf("role.Name = %q, want %q", role.Name, "Member")
+	}
+	if role.Permissions == 0 {
+		t.Error("role.Permissions = 0, want non-zero for Member")
+	}
+}
+
+func TestGetUserWithRole_NotFound(t *testing.T) {
+	database := newTestDB(t)
+
+	user, role, err := database.GetUserWithRole(9999)
+	if err != nil {
+		t.Fatalf("GetUserWithRole(not found): %v", err)
+	}
+	if user != nil || role != nil {
+		t.Error("GetUserWithRole returned non-nil for missing user")
+	}
+}
+
+func TestGetUserWithRole_BoolConversions(t *testing.T) {
+	database := newTestDB(t)
+	uid, _ := database.CreateUser("booluser", "hash", 4) // Member: is_default=1
+
+	user, role, err := database.GetUserWithRole(uid)
+	if err != nil {
+		t.Fatalf("GetUserWithRole: %v", err)
+	}
+	// Fresh user should not be banned.
+	if user.Banned {
+		t.Error("user.Banned = true, want false for new user")
+	}
+	// Member role has is_default=1.
+	if !role.IsDefault {
+		t.Error("role.IsDefault = false, want true for Member")
+	}
+}
+
 // ─── ListInvites tests ────────────────────────────────────────────────────────
 
 func TestListInvites_Empty(t *testing.T) {

@@ -1907,7 +1907,7 @@ func TestChannelFocus_ValidFocus_UpdatesChannelID(t *testing.T) {
 
 // TestChannelFocus_InvalidChannelID_NoResponse verifies that a channel_focus
 // with channel_id=0 is silently ignored (no crash, no error message).
-func TestChannelFocus_InvalidChannelID_NoResponse(t *testing.T) {
+func TestChannelFocus_InvalidChannelID_ReturnsBadRequest(t *testing.T) {
 	hub, database := newHandlerHub(t)
 	user := seedOwnerUser(t, database, "focus-invalid1")
 
@@ -1923,16 +1923,20 @@ func TestChannelFocus_InvalidChannelID_NoResponse(t *testing.T) {
 	hub.HandleMessageForTest(c, raw)
 	time.Sleep(50 * time.Millisecond)
 
-	// No error or other message should be sent for invalid channel_id.
+	// Constructor rejects channel_id <= 0 with BAD_REQUEST.
 	msgs := drainChan(send)
+	found := false
 	for _, m := range msgs {
 		var env map[string]any
 		if err := json.Unmarshal(m, &env); err != nil {
 			continue
 		}
 		if env["type"] == "error" {
-			t.Errorf("expected silent ignore for channel_id=0, but got error: %s", m)
+			found = true
 		}
+	}
+	if !found {
+		t.Error("expected BAD_REQUEST error for channel_id=0, got nothing")
 	}
 }
 
