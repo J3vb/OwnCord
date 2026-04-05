@@ -78,6 +78,7 @@ type PendingVoiceJoin = {
   readonly url: string;
   readonly channelId: number;
   readonly directUrl?: string;
+  readonly isKeyHolder?: boolean;
 };
 
 // --- State machine ---
@@ -1061,7 +1062,7 @@ export class LiveKitSession {
       log.error("Failed to connect to LiveKit", { url: resolvedUrl, error: err });
       if (localRoom !== null) {
         try {
-          localRoom.disconnect();
+          void localRoom.disconnect();
         } catch {
           /* ignore */
         }
@@ -1101,7 +1102,7 @@ export class LiveKitSession {
       if (this._state.type === "connecting") {
         this.setState({
           ...this._state,
-          pendingJoin: { token, url, channelId, directUrl },
+          pendingJoin: { token, url, channelId, directUrl, isKeyHolder },
         });
       }
       log.warn("handleVoiceToken: already connecting, queued latest join request", { channelId });
@@ -1122,6 +1123,7 @@ export class LiveKitSession {
         url: pUrl,
         channelId: pChannelId,
         directUrl: pDirectUrl,
+        isKeyHolder: pIsKeyHolder,
       } = pendingJoin;
       const cur = this._state;
       if (
@@ -1132,7 +1134,7 @@ export class LiveKitSession {
         this.handleVoiceTokenRefresh(pToken);
       } else {
         // eslint-disable-next-line no-await-in-loop -- sequential drain of pending joins to avoid unbounded recursion
-        await this.connectAndSetup(pToken, pUrl, pChannelId, pDirectUrl);
+        await this.connectAndSetup(pToken, pUrl, pChannelId, pDirectUrl, pIsKeyHolder);
         // If this attempt was itself superseded (another join arrived during the
         // await), the loop will naturally pick it up via the updated pendingJoin.
       }
@@ -1363,7 +1365,7 @@ export class LiveKitSession {
     if (!this._isKeyHolder) return;
     this._keyRotationTimer = setTimeout(() => {
       this._keyRotationTimer = null;
-      this.rotateKeyPeriodically();
+      void this.rotateKeyPeriodically();
     }, LiveKitSession.KEY_ROTATION_INTERVAL_MS);
     log.debug("E2EE: key rotation timer started", {
       intervalMs: LiveKitSession.KEY_ROTATION_INTERVAL_MS,

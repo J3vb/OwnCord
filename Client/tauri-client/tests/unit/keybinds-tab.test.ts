@@ -78,7 +78,7 @@ describe("KeybindsTab", () => {
 
   // --- PTT key capture flow ---
 
-  it("shows 'Press any key...' when capture button is clicked", () => {
+  it("shows 'Press a supported key...' when capture button is clicked", () => {
     const el = buildKeybindsTab(new AbortController().signal);
     mockCaptureKeyPress.mockReturnValue(new Promise(() => {})); // never resolves
     const pttBtn = el
@@ -87,7 +87,7 @@ describe("KeybindsTab", () => {
 
     pttBtn.click();
 
-    expect(pttBtn.textContent).toBe("Press any key...");
+    expect(pttBtn.textContent).toBe("Press a supported key...");
     expect(pttBtn.style.borderColor).toBe("var(--accent)");
     expect(pttBtn.style.color).toBe("var(--accent)");
   });
@@ -149,7 +149,7 @@ describe("KeybindsTab", () => {
       .querySelector(".kbd") as HTMLButtonElement;
 
     pttBtn.click();
-    expect(pttBtn.textContent).toBe("Press any key...");
+    expect(pttBtn.textContent).toBe("Press a supported key...");
 
     // Second click should be ignored
     pttBtn.click();
@@ -264,7 +264,7 @@ describe("KeybindsTab", () => {
     expect(pttBtn.textContent).toBe("F2");
 
     pttBtn.click();
-    expect(pttBtn.textContent).toBe("Press any key...");
+    expect(pttBtn.textContent).toBe("Press a supported key...");
 
     await vi.waitFor(() => {
       expect(pttBtn.textContent).toBe("F2");

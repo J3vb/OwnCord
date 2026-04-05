@@ -3,8 +3,6 @@ package ws
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
-	"log/slog"
 )
 
 // decodeBase64Loose accepts both padded (StdEncoding) and unpadded (RawStdEncoding)
@@ -50,8 +48,13 @@ func (h *Hub) updateKeyHolder(channelID int64) {
 	}
 }
 
-// isVoiceKeyHolder reports whether userID is the current key holder for channelID.
-func (h *Hub) isVoiceKeyHolder(channelID, userID int64) bool {
+// IsVoiceKeyHolder reports whether userID is the current key holder for channelID.
+// Satisfies the KeyHolderChecker interface.
+//
+// NOTE: When called from a V2 handler (via deps), there is a TOCTOU window
+// between this check and the subsequent event delivery in EmitEvents. See the
+// comment on handleVoiceE2EEOfferV2 for details.
+func (h *Hub) IsVoiceKeyHolder(channelID, userID int64) bool {
 	h.keyHolderMu.RLock()
 	kh, ok := h.voiceKeyHolders[channelID]
 	h.keyHolderMu.RUnlock()
@@ -73,110 +76,113 @@ func (h *Hub) computeIsKeyHolder(channelID, userID int64) bool {
 	return true
 }
 
-// handleVoiceE2EEAnnounce processes a client's ECDH public key announcement.
-// The server stores the key on the Client struct and relays it to all other
-// participants in the same voice channel. The server never sees or generates
-// the room encryption key — only opaque public keys pass through.
-func (h *Hub) handleVoiceE2EEAnnounce(_ context.Context, c *Client, payload json.RawMessage) {
-	voiceChID := c.getVoiceChID()
+// handleVoiceE2EEAnnounceV2 is the V2 (pure) handler for voice_e2ee_announce.
+// It validates the public key and returns a SetE2EEPubKey mutation plus a
+// VoiceE2EEAnnounceEvent for relay to other voice channel participants.
+func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+	_ = deps.(VoiceDeps)
+	announceCmd := cmd.(VoiceE2EEAnnounceCmd)
+	userID := info.UserID
+	voiceChID := info.VoiceChannelID
+
 	if voiceChID == 0 {
-		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "not in a voice channel"))
-		return
+		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
 	}
 
-	var p voiceE2EEAnnounceIn
-	if err := json.Unmarshal(payload, &p); err != nil {
-		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "invalid voice_e2ee_announce payload"))
-		return
+	pubKey := announceCmd.PublicKey()
+	if pubKey == "" {
+		return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "public_key is required"}}
 	}
-	if p.PublicKey == "" {
-		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "public_key is required"))
-		return
+	if len(pubKey) > 128 {
+		return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "public_key too large"}}
 	}
-	// P-256 uncompressed public key = 65 bytes → 88 base64 chars.
-	// Allow up to 128 chars for padding tolerance.
-	if len(p.PublicKey) > 128 {
-		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "public_key too large"))
-		return
-	}
-	if _, err := decodeBase64Loose(p.PublicKey); err != nil {
-		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "public_key is not valid base64"))
-		return
+	if _, err := decodeBase64Loose(pubKey); err != nil {
+		return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "public_key is not valid base64"}}
 	}
 
-	// Store the public key on the client for later retrieval by new joiners.
-	c.setE2EEPubKey(p.PublicKey)
-
-	// Relay to all other clients in the same voice channel.
-	msg := buildVoiceE2EEAnnounce(c.userID, p.PublicKey)
-	h.sendToVoiceChannelExcept(voiceChID, c.userID, msg)
-
-	slog.Debug("voice e2ee: announce relayed", "user_id", c.userID, "channel_id", voiceChID)
+	msg := buildVoiceE2EEAnnounce(userID, pubKey)
+	return Result{
+		SetE2EEPubKey: &pubKey,
+		Events: []Event{VoiceE2EEAnnounceEvent{
+			voiceChannelID: voiceChID,
+			excludeUserID:  userID,
+			payload:        msg,
+		}},
+	}
 }
 
-// handleVoiceE2EEOffer relays an encrypted room key from one participant to
-// another. The payload is opaque to the server — it contains an AES-GCM
-// encrypted room key that only the target can decrypt via ECDH.
-func (h *Hub) handleVoiceE2EEOffer(_ context.Context, c *Client, payload json.RawMessage) {
-	voiceChID := c.getVoiceChID()
+// handleVoiceE2EEOfferV2 is the V2 (pure) handler for voice_e2ee_offer.
+// It validates the payload and key holder status, then returns a
+// VoiceE2EEOfferGuardedEvent for atomic check-and-send delivery.
+//
+// KNOWN RACE: There is a window between the IsVoiceKeyHolder check below
+// and the sendToUserIfInVoiceChannel delivery in EmitEvents where the key
+// holder map can change (e.g. the real key holder leaves voice). This is
+// accepted because VoiceChannelGuardedEvent uses atomic check-and-send
+// under h.mu.RLock, guaranteeing the target is still in the voice channel
+// at delivery time. The worst case is a stale "not key holder" rejection
+// that the client retries.
+// TODO: consider re-checking key-holder status inside sendToUserIfInVoiceChannel
+// under the same h.mu.RLock to close the TOCTOU window completely.
+func handleVoiceE2EEOfferV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+	d := deps.(VoiceDeps)
+	offerCmd := cmd.(VoiceE2EEOfferCmd)
+	voiceChID := info.VoiceChannelID
+
 	if voiceChID == 0 {
-		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "not in a voice channel"))
-		return
+		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
 	}
 
-	var p voiceE2EEOfferIn
-	if err := json.Unmarshal(payload, &p); err != nil {
-		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "invalid voice_e2ee_offer payload"))
-		return
+	targetUserID := offerCmd.TargetUserID()
+	encKey := offerCmd.EncryptedKey()
+	iv := offerCmd.IV()
+
+	if targetUserID <= 0 || encKey == "" || iv == "" {
+		return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "target_user_id, encrypted_key, and iv are required"}}
 	}
-	if p.TargetUserID <= 0 || p.EncryptedKey == "" || p.IV == "" {
-		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "target_user_id, encrypted_key, and iv are required"))
-		return
+	if len(encKey) > 1024 || len(iv) > 128 {
+		return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "encrypted_key or iv too large"}}
 	}
-	// Size limits: AES-256-GCM encrypted 32-byte key ≈ 64 base64 chars + 16-byte
-	// auth tag. 1024 chars is generous. IV is 12 bytes = 16 base64 chars.
-	if len(p.EncryptedKey) > 1024 || len(p.IV) > 128 {
-		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "encrypted_key or iv too large"))
-		return
+	if _, err := decodeBase64Loose(encKey); err != nil {
+		return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "encrypted_key is not valid base64"}}
 	}
-	if _, err := decodeBase64Loose(p.EncryptedKey); err != nil {
-		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "encrypted_key is not valid base64"))
-		return
-	}
-	if _, err := decodeBase64Loose(p.IV); err != nil {
-		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "iv is not valid base64"))
-		return
+	if _, err := decodeBase64Loose(iv); err != nil {
+		return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "iv is not valid base64"}}
 	}
 
-	// I-1: Only the designated key holder may distribute the room key. This
-	// prevents any other participant from performing a key substitution attack.
-	if !h.isVoiceKeyHolder(voiceChID, c.userID) {
-		c.sendMsg(buildErrorMsg(ErrCodeNotKeyHolder, "only the key holder may send key offers"))
-		return
+	if d.KeyHolder == nil {
+		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "key holder checker not configured"}}
+	}
+	if !d.KeyHolder.IsVoiceKeyHolder(voiceChID, info.UserID) {
+		return Result{Error: ClientError{Code: ErrCodeNotKeyHolder, Message: "only the key holder may send key offers"}}
 	}
 
-	// Verify the target is in the same voice channel, then relay — all under
-	// one h.mu.RLock hold so the check and send are atomic. A concurrent
-	// voice_leave cannot remove the target from h.clients between the lookup
-	// and the channel comparison, nor between the comparison and the send.
-	msg := buildVoiceE2EEOffer(c.userID, p.EncryptedKey, p.IV)
+	msg := buildVoiceE2EEOffer(info.UserID, encKey, iv)
+	return Result{
+		Events: []Event{VoiceE2EEOfferGuardedEvent{
+			voiceChannelID: voiceChID,
+			targetUserID:   targetUserID,
+			payload:        msg,
+		}},
+	}
+}
+
+// sendToUserIfInVoiceChannel atomically verifies that targetUserID is in the
+// given voice channel and sends the message — all under a single h.mu.RLock.
+// This prevents TOCTOU races where the target leaves voice between the check
+// and the send. Used by VoiceChannelGuardedEvent (voice_e2ee_offer).
+func (h *Hub) sendToUserIfInVoiceChannel(voiceChannelID, targetUserID int64, msg []byte) {
 	h.mu.RLock()
-	target, ok := h.clients[p.TargetUserID]
+	defer h.mu.RUnlock()
+
+	target, ok := h.clients[targetUserID]
 	if !ok {
-		h.mu.RUnlock()
-		c.sendMsg(buildErrorMsg(ErrCodeBadPayload, "target user not connected"))
-		return
+		return // target not connected — silently drop
 	}
-	if target.getVoiceChID() != voiceChID {
-		h.mu.RUnlock()
-		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "target user not in your voice channel"))
-		return
+	if target.getVoiceChID() != voiceChannelID {
+		return // target not in expected voice channel — silently drop
 	}
 	target.sendMsg(msg)
-	h.mu.RUnlock()
-
-	slog.Debug("voice e2ee: offer relayed",
-		"from_user_id", c.userID, "to_user_id", p.TargetUserID, "channel_id", voiceChID)
 }
 
 // sendToVoiceChannelExcept sends a message to all clients in the given voice
