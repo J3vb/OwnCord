@@ -13,6 +13,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/service"
 	"github.com/owncord/server/syncutil"
 )
 
@@ -60,7 +61,8 @@ type Hub struct {
 
 // NewHub creates a Hub ready to be started with Run.
 // It also initializes the settings cache from the database.
-func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
+// If svc is non-nil, V2 handlers receive service references for business logic delegation.
+func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *Hub {
 	reg := NewHandlerRegistry()
 	registerVoiceHandlersV1(reg)
 
@@ -82,21 +84,31 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
 
 	// V2 handler registrations (need Hub fields for deps).
 	registerPingHandler(reg, PingDeps{Limiter: h.limiter})
-	registerChatHandlers(reg, ChatDeps{
+
+	chatDeps := ChatDeps{
 		DB:          h.db,
 		Limiter:     h.limiter,
 		Permissions: h.permChecker,
-	})
-	registerPresenceHandlers(reg, PresenceDeps{
+	}
+	presenceDeps := PresenceDeps{
 		DB:          h.db,
 		Limiter:     h.limiter,
 		Permissions: h.permChecker,
-	})
-	registerReactionHandlers(reg, ReactionDeps{
+	}
+	reactionDeps := ReactionDeps{
 		DB:          h.db,
 		Limiter:     h.limiter,
 		Permissions: h.permChecker,
-	})
+	}
+	if svc != nil {
+		chatDeps.MessageSvc = svc.Messages
+		presenceDeps.ChannelSvc = svc.Channels
+		reactionDeps.MessageSvc = svc.Messages
+	}
+
+	registerChatHandlers(reg, chatDeps)
+	registerPresenceHandlers(reg, presenceDeps)
+	registerReactionHandlers(reg, reactionDeps)
 	registerVoiceControlsV2(reg, VoiceDeps{
 		DB:          h.db,
 		Limiter:     h.limiter,
