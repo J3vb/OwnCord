@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"bytes"
 	"testing"
 )
 
@@ -46,7 +47,7 @@ func TestResultWithError(t *testing.T) {
 func TestResultWithReply(t *testing.T) {
 	reply := []byte(`{"type":"chat_send_ok","id":"req-1"}`)
 	r := Result{Reply: reply}
-	if string(r.Reply) != string(reply) {
+	if !bytes.Equal(r.Reply, reply) {
 		t.Errorf("Reply = %q, want %q", r.Reply, reply)
 	}
 }

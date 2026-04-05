@@ -144,7 +144,7 @@ func TestGetUserWithRole_NotFound(t *testing.T) {
 
 func TestGetUserWithRole_BoolConversions(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("booluser", "hash", 4) // Member: is_default=1
+	uid, _ := database.CreateUser("booluser", "hash", 4)
 
 	user, role, err := database.GetUserWithRole(uid)
 	if err != nil {
