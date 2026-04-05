@@ -11,7 +11,7 @@ import {
 } from "@lib/e2eeCrypto";
 
 vi.mock("@lib/logger", () => ({
-  log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
 describe("e2eeCrypto", () => {

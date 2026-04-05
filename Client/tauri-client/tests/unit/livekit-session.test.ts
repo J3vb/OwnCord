@@ -58,6 +58,10 @@ vi.mock("livekit-client", () => ({
     h1080fps30: { resolution: { width: 1920, height: 1080 } },
   },
   DisconnectReason: { CLIENT_INITIATED: 0 },
+  ExternalE2EEKeyProvider: vi.fn(() => ({
+    setKey: vi.fn(),
+    getKeys: vi.fn().mockReturnValue([]),
+  })),
   createLocalVideoTrack: vi.fn(async () => ({
     kind: "video",
     mediaStreamTrack: new MediaStreamTrack(),
