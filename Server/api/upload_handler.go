@@ -20,6 +20,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/service"
 	"github.com/owncord/server/storage"
 )
 
@@ -75,14 +76,14 @@ func isUnsafeInlineMIME(mimeType string) bool {
 
 // MountUploadRoutes registers upload and file-serving endpoints.
 // allowedOrigins controls the Access-Control-Allow-Origin header on served files.
-func MountUploadRoutes(r chi.Router, database *db.DB, store *storage.Storage, limiter *auth.RateLimiter, allowedOrigins []string) {
+func MountUploadRoutes(r chi.Router, database *db.DB, store *storage.Storage, limiter *auth.RateLimiter, allowedOrigins []string, permSvc *service.PermissionService) {
 	// Upload requires authentication and a higher body size limit (100 MB).
 	r.With(
 		AuthMiddleware(database),
 		MaxBodySize(uploadMaxBodySize),
 	).Post("/api/v1/uploads", handleUpload(database, store, limiter))
 	// File serving requires authentication for channel-level access control.
-	r.With(AuthMiddleware(database)).Get("/api/v1/files/{id}", handleServeFile(database, store, allowedOrigins))
+	r.With(AuthMiddleware(database)).Get("/api/v1/files/{id}", handleServeFile(database, store, allowedOrigins, permSvc))
 }
 
 func handleUpload(database *db.DB, store *storage.Storage, limiter *auth.RateLimiter) http.HandlerFunc {
@@ -202,7 +203,7 @@ func handleUpload(database *db.DB, store *storage.Storage, limiter *auth.RateLim
 	}
 }
 
-func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []string) http.HandlerFunc {
+func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []string, permSvc *service.PermissionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fileID := chi.URLParam(r, "id")
 		if fileID == "" {
@@ -268,7 +269,7 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 						})
 						return
 					}
-				} else if !hasChannelPermREST(database, role, *aa.ChannelID, permissions.ReadMessages) {
+				} else if user == nil || !permSvc.HasChannelPerm(user.ID, *aa.ChannelID, permissions.ReadMessages) {
 					writeJSON(w, http.StatusForbidden, errorResponse{
 						Error:   "FORBIDDEN",
 						Message: "you do not have access to this file",
