@@ -23,12 +23,12 @@ The session-resident plan that was actually executed lives in
 - [x] `cd Server && go test ./store/... ./ws/... ./plugin/... ./telemetry/...`
       — all pass; full suite `go test ./...` green.
 - [x] `cd Server && go vet ./...` — clean.
-- [ ] `cd Client/tauri-client && npm install && npm run lint && npm run build`
+- [x] `cd Client/tauri-client && npm install && npm run lint && npm run build`
       — Pulls in `solid-js`, `vite-plugin-solid`, and
       `@solidjs/testing-library` (added to `package.json`); confirms the
       Solid pipeline compiles inside the existing Vite + TS setup.
-- [ ] `cd Client/tauri-client && npm run test` — runs the new
-      `Badge.test.tsx` smoke test.
+- [x] `cd Client/tauri-client && npm run test` — runs the new
+      `Badge.test.tsx` smoke test. All 111 test files / 3186 tests pass.
 
 ---
 
@@ -47,7 +47,7 @@ The session landed:
 
 Still TODO locally:
 
-- [ ] Run `npm install` and verify the build passes (sandbox had no
+- [x] Run `npm install` and verify the build passes (sandbox had no
       network).
 - [ ] Migrate the remaining leaf components in
       `src/components/` one PR at a time, following the recipe in
