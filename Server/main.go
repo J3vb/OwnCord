@@ -149,17 +149,56 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 		}
 	}()
 
-	// ── 5. Build HTTP router ───────────────────────────────────────────────
-	router, hub, routerCleanup := api.NewRouter(cfg, database, version, logBuf)
+	// ── 5. Construct shared store wrapper ──────────────────────────────────
+	// Used by both the event persistence layer and the plugin runtime. Once
+	// the Phase A "store everywhere" refactor lands, NewRouter will accept
+	// store.Store directly and this wrapper goes away.
+	storeWrapper := store.NewSQLiteStore(database)
+
+	// ── 5a. Construct plugin runtime BEFORE the router so the router can
+	// wire the live registry into the plugin admin handler. ────────────────
+	var pluginRegistry *plugin.Registry
+	if cfg.Plugins.Enabled {
+		registry, plugErr := plugin.NewRegistry(plugin.Config{
+			Directory:     cfg.Plugins.Directory,
+			MaxMemoryMB:   cfg.Plugins.MaxMemoryMB,
+			CPUBudgetMs:   cfg.Plugins.CPUBudgetMs,
+			HTTPAllowlist: cfg.Plugins.HTTPAllowlist,
+			Store:         storeWrapper,
+		})
+		if plugErr != nil {
+			log.Warn("plugin runtime init failed; continuing without plugins", "error", plugErr)
+		} else {
+			pluginRegistry = registry
+			if err := registry.LoadAll(context.Background()); err != nil {
+				log.Warn("plugin loader: failed to scan directory", "error", err)
+			}
+			defer func() {
+				closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = registry.Close(closeCtx)
+			}()
+		}
+	}
+
+	// ── 5b. Build HTTP router ──────────────────────────────────────────────
+	router, hub, routerCleanup := api.NewRouter(cfg, database, version, logBuf, pluginRegistry)
 	defer routerCleanup()
 
-	// ── 5b. Wire event persistence (Phase B Step 7) ────────────────────────
-	// Construct a Store wrapper for the cold-tier event log + plugin KV. The
-	// store-everywhere refactor (Phase A pending TODO) will eventually thread
-	// this through NewRouter directly; for now we attach it after the fact so
-	// the router signature stays unchanged.
-	storeWrapper := store.NewSQLiteStore(database)
+	// ── 5c. Wire event persistence (Phase B Step 7) ────────────────────────
 	if cfg.EventPersistence.Enabled && hub != nil {
+		// Seed the hub's in-memory seq counter from the persisted MAX(seq)
+		// so wrapped-payload seqs stay monotonic across restarts. Without
+		// this, the events table accumulates rows whose payload seqs reset
+		// to 1 after every restart, breaking the reconnect "events since
+		// last_seq" contract.
+		if maxSeq, seedErr := storeWrapper.GetMaxEventSeq(context.Background()); seedErr != nil {
+			log.Warn("event persistence: failed to read MAX(events.seq); starting hub seq from 0", "error", seedErr)
+		} else if maxSeq > 0 {
+			hub.SeedSeq(uint64(maxSeq))
+			log.Info("event persistence: seeded hub seq from persisted events", "seq", maxSeq)
+		}
+
 		persister := ws.NewEventPersister(
 			storeWrapper,
 			4096,
@@ -180,29 +219,6 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 			defer stopCancel()
 			persister.Stop(stopCtx)
 		}()
-	}
-
-	// ── 5c. Wire plugin runtime (Phase C Step 9) ───────────────────────────
-	if cfg.Plugins.Enabled {
-		registry, plugErr := plugin.NewRegistry(plugin.Config{
-			Directory:     cfg.Plugins.Directory,
-			MaxMemoryMB:   cfg.Plugins.MaxMemoryMB,
-			CPUBudgetMs:   cfg.Plugins.CPUBudgetMs,
-			HTTPAllowlist: cfg.Plugins.HTTPAllowlist,
-			Store:         storeWrapper,
-		})
-		if plugErr != nil {
-			log.Warn("plugin runtime init failed; continuing without plugins", "error", plugErr)
-		} else {
-			if err := registry.LoadAll(context.Background()); err != nil {
-				log.Warn("plugin loader: failed to scan directory", "error", err)
-			}
-			defer func() {
-				closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				_ = registry.Close(closeCtx)
-			}()
-		}
 	}
 
 	// ── 6. Start server ────────────────────────────────────────────────────

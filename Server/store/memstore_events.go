@@ -15,7 +15,9 @@ import (
 // memEventStore is an in-memory EventStore + PluginStore implementation
 // embedded into MemStore via the field below.
 type memEventStore struct {
-	mu       sync.Mutex
+	mu sync.Mutex
+	// nextSeq tracks the high-water mark of caller-supplied event seqs so
+	// GetMaxEventSeq is O(1). PersistEvent updates it after each insert.
 	nextSeq  atomic.Int64
 	events   []db.PersistedEvent
 	plugins  map[int64]*db.PluginRow
@@ -39,11 +41,10 @@ func (m *MemStore) ensureEvents() *memEventStore {
 	return m.eventStore
 }
 
-func (m *MemStore) PersistEvent(_ context.Context, eventType string, channelID int64, payload []byte) (int64, error) {
+func (m *MemStore) PersistEvent(_ context.Context, seq int64, eventType string, channelID int64, payload []byte) error {
 	es := m.ensureEvents()
 	es.mu.Lock()
 	defer es.mu.Unlock()
-	seq := es.nextSeq.Add(1)
 	cp := make([]byte, len(payload))
 	copy(cp, payload)
 	es.events = append(es.events, db.PersistedEvent{
@@ -53,7 +54,11 @@ func (m *MemStore) PersistEvent(_ context.Context, eventType string, channelID i
 		Payload:   cp,
 		CreatedAt: time.Now().UTC(),
 	})
-	return seq, nil
+	// Track the high water mark so GetMaxEventSeq is O(1).
+	if seq > es.nextSeq.Load() {
+		es.nextSeq.Store(seq)
+	}
+	return nil
 }
 
 func (m *MemStore) GetEventsSince(_ context.Context, afterSeq int64, limit int) ([]db.PersistedEvent, error) {
@@ -93,6 +98,11 @@ func (m *MemStore) GetEventsSinceForChannels(_ context.Context, afterSeq int64, 
 		}
 	}
 	return out, nil
+}
+
+func (m *MemStore) GetMaxEventSeq(_ context.Context) (int64, error) {
+	es := m.ensureEvents()
+	return es.nextSeq.Load(), nil
 }
 
 func (m *MemStore) PruneEventsOlderThan(_ context.Context, cutoff time.Time) (int64, error) {

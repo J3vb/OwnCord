@@ -86,14 +86,37 @@ class PluginBridge {
     );
   }
 
+  /**
+   * Look up the pluginId of an iframe by its contentWindow. Returns null if
+   * the source is not one of our managed plugin frames. This is the key
+   * defense against postMessage spoofing: we never trust the pluginId field
+   * inside the message body, only the e.source pointer.
+   */
+  private pluginIdForSource(source: MessageEventSource | null): number | null {
+    if (!source) return null;
+    for (const [pid, frame] of this.frames) {
+      if (frame.contentWindow === source) return pid;
+    }
+    return null;
+  }
+
   private onMessage = (e: MessageEvent): void => {
     const data = e.data;
     if (!data || typeof data !== "object") return;
     if ((data as { source?: unknown }).source === HOST_ORIGIN_PREFIX) return; // own echo
-    const env = data as { pluginId?: unknown; type?: unknown; payload?: unknown };
-    if (typeof env.pluginId !== "number" || typeof env.type !== "string") return;
+    // SECURITY: validate the message originated from one of our managed
+    // plugin iframes by matching e.source against frame.contentWindow.
+    // Without this check, any arbitrary frame (including a malicious parent
+    // frame in an embedding scenario, or any same-origin script that
+    // obtained a window reference) could spoof messages from any plugin by
+    // claiming an arbitrary pluginId in the body. The pluginId from the
+    // message body is intentionally ignored — we use the trusted lookup.
+    const trustedPluginId = this.pluginIdForSource(e.source);
+    if (trustedPluginId === null) return;
+    const env = data as { type?: unknown; payload?: unknown };
+    if (typeof env.type !== "string") return;
     const envelope: PluginMessageEnvelope = {
-      pluginId: env.pluginId,
+      pluginId: trustedPluginId,
       type: env.type,
       payload: env.payload,
     };

@@ -24,19 +24,28 @@ package plugin
 import (
 	"encoding/json"
 	"fmt"
+	"path"
+	"regexp"
 	"strings"
 )
+
+// pluginNameRegexp restricts plugin names to a tight ASCII charset so the
+// name can flow safely into URL paths (/api/v1/plugins/<name>/...), filesystem
+// paths, and log lines without escaping concerns. Mirrors the npm package
+// name rules: lowercase, digits, dash and underscore, 1-64 chars, must start
+// with a letter or digit.
+var pluginNameRegexp = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 // Manifest is the parsed plugin metadata declared in plugin.json (or
 // plugin.toml in the wazero-tagged build). The on-disk schema is intentionally
 // flat so the default JSON parser handles it without a TOML dependency.
 type Manifest struct {
-	Name        string   `json:"name"`
-	Version     string   `json:"version"`
-	Author      string   `json:"author"`
-	Description string   `json:"description"`
-	Entrypoint  string   `json:"entrypoint"` // relative .wasm path
-	Permissions []string `json:"permissions"`
+	Name        string    `json:"name"`
+	Version     string    `json:"version"`
+	Author      string    `json:"author"`
+	Description string    `json:"description"`
+	Entrypoint  string    `json:"entrypoint"` // relative .wasm path
+	Permissions []string  `json:"permissions"`
 	Resources   Resources `json:"resources"`
 	UI          UISpec    `json:"ui"`
 }
@@ -98,14 +107,23 @@ func (m *Manifest) Validate() error {
 	if strings.TrimSpace(m.Name) == "" {
 		return fmt.Errorf("plugin manifest: name is required")
 	}
+	if !pluginNameRegexp.MatchString(m.Name) {
+		return fmt.Errorf("plugin manifest: name %q must match %s", m.Name, pluginNameRegexp.String())
+	}
 	if strings.TrimSpace(m.Version) == "" {
 		return fmt.Errorf("plugin manifest: version is required")
+	}
+	if len(m.Version) > 64 {
+		return fmt.Errorf("plugin manifest: version too long (max 64)")
 	}
 	if strings.TrimSpace(m.Entrypoint) == "" {
 		return fmt.Errorf("plugin manifest: entrypoint is required")
 	}
 	if !strings.HasSuffix(m.Entrypoint, ".wasm") {
 		return fmt.Errorf("plugin manifest: entrypoint %q must end in .wasm", m.Entrypoint)
+	}
+	if err := validateRelativePath(m.Entrypoint); err != nil {
+		return fmt.Errorf("plugin manifest: entrypoint: %w", err)
 	}
 	for _, p := range m.Permissions {
 		if !validCapabilities[Capability(p)] {
@@ -114,6 +132,47 @@ func (m *Manifest) Validate() error {
 	}
 	if m.Resources.MaxMemoryMB < 0 || m.Resources.CPUBudgetMs < 0 {
 		return fmt.Errorf("plugin manifest: resources must be non-negative")
+	}
+	for i, t := range m.UI.Tabs {
+		if strings.TrimSpace(t.ID) == "" {
+			return fmt.Errorf("plugin manifest: ui.tabs[%d].id is required", i)
+		}
+		if strings.TrimSpace(t.Asset) == "" {
+			return fmt.Errorf("plugin manifest: ui.tabs[%d].asset is required", i)
+		}
+		if err := validateRelativePath(t.Asset); err != nil {
+			return fmt.Errorf("plugin manifest: ui.tabs[%d].asset: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// validateRelativePath rejects absolute paths, paths containing "..", paths
+// with NUL bytes, backslashes (Windows separators), and paths that the path
+// package's Clean would alter (which catches "./foo", "foo//bar", trailing
+// slashes, etc.). Asset and entrypoint paths must be plain forward-slash
+// relative segments under the plugin directory.
+func validateRelativePath(p string) error {
+	if p == "" {
+		return fmt.Errorf("path is empty")
+	}
+	if strings.ContainsRune(p, 0) {
+		return fmt.Errorf("path contains NUL byte")
+	}
+	if strings.ContainsRune(p, '\\') {
+		return fmt.Errorf("path contains backslash; use forward slashes only")
+	}
+	if strings.HasPrefix(p, "/") {
+		return fmt.Errorf("path %q must be relative", p)
+	}
+	cleaned := path.Clean(p)
+	if cleaned != p {
+		return fmt.Errorf("path %q is not in canonical form (clean: %q)", p, cleaned)
+	}
+	for _, seg := range strings.Split(cleaned, "/") {
+		if seg == ".." {
+			return fmt.Errorf("path %q contains parent traversal", p)
+		}
 	}
 	return nil
 }

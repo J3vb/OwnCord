@@ -576,8 +576,8 @@ func (s *PostgresStore) GetAllSettings() (map[string]string, error) {
 
 // ── EventStore (stubs — Phase B Step 7) ─────────────────────────────────────
 
-func (s *PostgresStore) PersistEvent(ctx context.Context, eventType string, channelID int64, payload []byte) (int64, error) {
-	return 0, ErrPostgresNotImplemented
+func (s *PostgresStore) PersistEvent(ctx context.Context, seq int64, eventType string, channelID int64, payload []byte) error {
+	return ErrPostgresNotImplemented
 }
 
 func (s *PostgresStore) GetEventsSince(ctx context.Context, afterSeq int64, limit int) ([]db.PersistedEvent, error) {
@@ -589,6 +589,10 @@ func (s *PostgresStore) GetEventsSinceForChannels(ctx context.Context, afterSeq 
 }
 
 func (s *PostgresStore) PruneEventsOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
+	return 0, ErrPostgresNotImplemented
+}
+
+func (s *PostgresStore) GetMaxEventSeq(ctx context.Context) (int64, error) {
 	return 0, ErrPostgresNotImplemented
 }
 

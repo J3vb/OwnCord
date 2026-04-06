@@ -1,5 +1,9 @@
--- name: PersistEvent :execresult
-INSERT INTO events (event_type, channel_id, payload) VALUES (?, ?, ?);
+-- name: PersistEvent :exec
+-- seq is supplied by the hub so the row seq matches the wrapped-payload seq.
+INSERT INTO events (seq, event_type, channel_id, payload) VALUES (?, ?, ?, ?);
+
+-- name: GetMaxEventSeq :one
+SELECT COALESCE(MAX(seq), 0) FROM events;
 
 -- name: GetEventsSince :many
 SELECT seq, event_type, channel_id, payload, created_at

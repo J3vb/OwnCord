@@ -32,7 +32,7 @@ func setupRouter(t *testing.T) http.Handler {
 		},
 	}
 
-	handler, _, cleanup := api.NewRouter(cfg, database, "test", nil)
+	handler, _, cleanup := api.NewRouter(cfg, database, "test", nil, nil)
 	t.Cleanup(cleanup)
 	return handler
 }

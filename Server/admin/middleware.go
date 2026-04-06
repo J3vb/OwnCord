@@ -11,6 +11,13 @@ import (
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
+// RequireAdminAuth is the exported form of adminAuthMiddleware. External
+// packages (e.g. api/router.go for the plugin admin handler) reuse it so the
+// session/permission gate stays in one place.
+func RequireAdminAuth(database *db.DB) func(http.Handler) http.Handler {
+	return adminAuthMiddleware(database)
+}
+
 // adminAuthMiddleware validates the Bearer token and requires ADMINISTRATOR.
 // On success it stores the *db.User and *db.Session in the request context so
 // downstream handlers can retrieve them without re-querying the database.

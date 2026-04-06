@@ -22,7 +22,7 @@ func TestEventPersisterFlushesBatch(t *testing.T) {
 	t.Cleanup(func() { p.Stop(ctx) })
 
 	for i := 0; i < 10; i++ {
-		p.Enqueue("broadcast", 0, []byte(`{"type":"x"}`))
+		p.Enqueue(int64(i+1), "broadcast", 0, []byte(`{"type":"x"}`))
 	}
 
 	// Wait for at least one flush tick.
@@ -62,8 +62,12 @@ func TestEventPersisterDropsOnFullQueue(t *testing.T) {
 	p := NewEventPersister(mem, 2, 1024, time.Hour)
 	// NB: Start is intentionally NOT called so the queue stays full.
 	for i := 0; i < 50; i++ {
-		p.Enqueue("broadcast", 0, []byte(`{}`))
+		p.Enqueue(int64(i+1), "broadcast", 0, []byte(`{}`))
 	}
+	// Stop without Start — must not deadlock.
+	stopCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	p.Stop(stopCtx)
 	_, dropped, _, _ := p.Stats()
 	if dropped == 0 {
 		t.Fatal("expected drops with full queue and no consumer")
@@ -76,7 +80,7 @@ func TestEventPersisterStopDrains(t *testing.T) {
 	p.Start(context.Background())
 
 	for i := 0; i < 5; i++ {
-		p.Enqueue("broadcast", 0, []byte(`{}`))
+		p.Enqueue(int64(i+1), "broadcast", 0, []byte(`{}`))
 	}
 
 	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
