@@ -205,14 +205,10 @@ Still TODO locally:
       `NewPluginAdminHandler` — landed in Pass 2. The router now accepts
       a `*plugin.Registry` parameter and the handler is also wrapped in
       `admin.RequireAdminAuth` (Pass 2 closed the auth bypass too).
-- [ ] Add a precompiled trivial `.wasm` blob under
-      `Server/plugin/examples/hello/hello.wasm` so the example plugin can
-      actually be loaded by an integration test once wazero is wired.
-      Build it locally with TinyGo:
-  ```sh
-  cd Server/plugin/examples/hello
-  tinygo build -o hello.wasm -target wasi ./main.go
-  ```
+- [x] Add precompiled `Server/plugin/examples/hello/hello.wasm` (925 KiB).
+      Built with TinyGo 0.40.1 + Go 1.25.3 + Binaryen wasm-opt 129.
+      Source in main.go; exports: allocate, deallocate, list_commands,
+      command_dispatch, on_event.
 - [x] Implement plugin marketplace install path
       (`POST /api/v1/admin/plugins/install` with multipart zip) — landed
       in Pass 4. `Registry.InstallFromZip` does zip-slip validation, no
