@@ -25,9 +25,22 @@ How to set up the development environment and contribute to OwnCord.
 |---------|-------------|
 | `go build -o chatserver.exe -ldflags "-s -w" .` | Build server binary (Windows) |
 | `CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w" .` | Build server binary (Linux) |
+| `go build -tags otel .` | Build with OpenTelemetry SDK (requires `go get` first — see Phase B) |
+| `go build -tags wazero .` | Build with Wazero plugin runtime (requires `go get` first — see Phase C) |
+| `go build -tags postgres .` | Build with PostgreSQL backend (requires pgx in go.mod) |
 | `go test ./...` | Run all server tests |
 | `go test ./... -cover` | Run server tests with coverage |
 | `go test -race ./...` | Run server tests with race detection |
+
+**Make targets** (run from `Server/`):
+
+| Command | Description |
+|---------|-------------|
+| `make sqlc-install` | Install the pinned sqlc version into `$GOBIN` |
+| `make sqlc-generate` | Regenerate type-safe Go for both SQLite (`db/dbgen/`) and PostgreSQL (`db/pgdbgen/`) engines |
+| `make sqlc-verify` | Fail if committed `dbgen` / `pgdbgen` output is stale (used by CI) |
+| `make otel-up` | Start Jaeger (traces) + Prometheus (metrics) via Docker for local OTel development |
+| `make otel-down` | Stop and remove the OTel dev containers |
 
 #### Client (Tauri v2)
 
