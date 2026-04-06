@@ -131,22 +131,15 @@ The session landed:
 
 Still TODO locally:
 
-- [ ] Add the OTel modules to `go.mod`:
-  ```sh
-  cd Server
-  go get go.opentelemetry.io/otel@latest \
-         go.opentelemetry.io/otel/sdk@latest \
-         go.opentelemetry.io/otel/exporters/prometheus@latest \
-         go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@latest \
-         go.opentelemetry.io/contrib/instrumentation/github.com/go-chi/chi/v5/otelchi@latest
-  go mod tidy
-  ```
-- [ ] Replace the placeholder body of `telemetry/telemetry_otel.go`'s
-      `Init` with the real tracer + meter provider construction and the
-      `otelchi.Middleware` wiring (see the inline TODO comment with the
-      call graph).
-- [ ] Build with `-tags otel` once the SDK is in `go.mod` and add a CI
-      job that exercises the tagged build.
+- [x] Add the OTel modules to `go.mod`:
+      otel v1.43.0, sdk v1.43.0, exporters/prometheus v0.65.0,
+      exporters/otlp/otlptrace/otlptracegrpc v1.43.0,
+      otelhttp v0.67.0 (used instead of unavailable otelchi).
+- [x] Replace the placeholder body of `telemetry/telemetry_otel.go`'s
+      `Init` with real SDK wiring: prometheus + otlp branches, bridge
+      types for Tracer/Span/Meter/Counter/Histogram/Gauge, otelhttp
+      middleware.
+- [x] Build with `-tags otel` — passes. Full 5-tag matrix green.
 - [x] Add spans to the remaining service-layer entry points
       (`DMService`, `VoiceService`, `InviteService`, `ModerationService`,
       `BlockService`, `UserService`) — landed in Pass 3, one entrypoint
@@ -191,15 +184,11 @@ The session landed:
 
 Still TODO locally:
 
-- [ ] Add wazero to `go.mod`:
-  ```sh
-  cd Server
-  go get github.com/tetratelabs/wazero@latest
-  go mod tidy
-  ```
-- [ ] Replace the placeholder body in `Server/plugin/sandbox_wazero.go`
-      with real wazero runtime construction. The file contains an inline
-      TODO with the exact API call graph.
+- [x] Add wazero to `go.mod`: v1.11.0 landed.
+- [x] Replace the placeholder body in `Server/plugin/sandbox_wazero.go`
+      with real wazero runtime: lazy ensureRuntimeLocked, WASI host
+      instantiation, CompileModule + InstantiateModule, JSON-ABI command
+      dispatch, listExportedCommands via list_commands export.
 - [ ] Replace JSON-only manifest parsing with TOML support behind the
       `wazero` build tag (the design doc names `plugin.toml`). Add
       `github.com/BurntSushi/toml` and a `parseTOML` shim that falls back
