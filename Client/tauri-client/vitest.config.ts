@@ -1,7 +1,14 @@
 import { defineConfig } from "vitest/config";
 import { resolve } from "path";
+import solidPlugin from "vite-plugin-solid";
 
 export default defineConfig({
+  plugins: [
+    // Transform Solid JSX/TSX for component tests under src/components/solid/.
+    solidPlugin({
+      include: ["src/components/solid/**/*.{ts,tsx,js,jsx}"],
+    }),
+  ],
   resolve: {
     alias: {
       "@lib": resolve(__dirname, "src/lib"),
@@ -13,7 +20,11 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
-    include: ["tests/**/*.test.ts"],
+    include: [
+      "tests/**/*.test.ts",
+      // Solid component tests live next to the source they test.
+      "src/components/solid/**/*.test.tsx",
+    ],
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],

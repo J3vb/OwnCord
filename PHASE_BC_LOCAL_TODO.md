@@ -58,9 +58,9 @@ Still TODO locally:
       in containers with native Solid components and delete the old
       vanilla DOM utilities (`createComponent`, factory shells) referenced
       from `src/components/`.
-- [ ] Add a Vitest config preset under `vitest.config.ts` that pulls in
-      `@solidjs/testing-library` automatically (currently the test imports
-      it directly).
+- [x] Add Vitest config preset: vite-plugin-solid added to vitest.config.ts,
+      include expanded to pick up src/components/solid/**/*.test.tsx.
+      Badge.test.tsx now runs automatically (112 files, 3188 tests pass).
 
 ---
 
@@ -189,10 +189,10 @@ Still TODO locally:
       with real wazero runtime: lazy ensureRuntimeLocked, WASI host
       instantiation, CompileModule + InstantiateModule, JSON-ABI command
       dispatch, listExportedCommands via list_commands export.
-- [ ] Replace JSON-only manifest parsing with TOML support behind the
-      `wazero` build tag (the design doc names `plugin.toml`). Add
-      `github.com/BurntSushi/toml` and a `parseTOML` shim that falls back
-      to the existing `ParseManifest` if no `plugin.toml` is found.
+- [x] Replace JSON-only manifest parsing with TOML support behind the
+      `wazero` build tag. Added BurntSushi/toml v1.6.0, manifest_toml.go
+      (wazero) + manifest_nottoml.go (!wazero), loader.go prefers plugin.toml
+      then falls back to plugin.json.
 - [x] Wire `Server/plugin/host_events.go` into the WS pub/sub hub.
       Landed: `EventSink.SetBroadcaster`/`Emit` added; hub gains
       `SetPluginEventSink`; `deliverBroadcast` calls `sink.Dispatch`
