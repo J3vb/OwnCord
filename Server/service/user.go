@@ -1,11 +1,14 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/store"
+	"github.com/owncord/server/telemetry"
 )
 
 // UserService handles user profile and session operations.
@@ -21,6 +24,16 @@ func NewUserService(st store.Store) *UserService {
 // UpdateProfile updates a user's username and/or avatar.
 // Returns the updated user for response building.
 func (s *UserService) UpdateProfile(userID int64, username string, avatar *string) (*db.User, error) {
+	ctx, span := telemetry.GlobalTracer("service/user").Start(context.Background(), "UserService.UpdateProfile",
+		telemetry.Int64("user_id", userID),
+	)
+	start := time.Now()
+	defer func() {
+		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationMs, start,
+			telemetry.String("method", "UpdateProfile"))
+		span.End()
+	}()
+
 	if err := s.st.UpdateUserProfile(userID, username, avatar); err != nil {
 		if db.IsUniqueConstraintError(err) {
 			return nil, fmt.Errorf("%w: username is already taken", ErrConflict)

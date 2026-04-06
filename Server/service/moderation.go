@@ -1,11 +1,13 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/owncord/server/store"
+	"github.com/owncord/server/telemetry"
 )
 
 // ModerationService handles user ban/unban operations.
@@ -21,6 +23,17 @@ func NewModerationService(st store.Store) *ModerationService {
 // BanUser bans a target user. Validates the target exists and
 // prevents self-banning.
 func (s *ModerationService) BanUser(actorID, targetID int64, reason string, expires *time.Time) error {
+	ctx, span := telemetry.GlobalTracer("service/moderation").Start(context.Background(), "ModerationService.BanUser",
+		telemetry.Int64("actor_id", actorID),
+		telemetry.Int64("target_id", targetID),
+	)
+	start := time.Now()
+	defer func() {
+		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationMs, start,
+			telemetry.String("method", "BanUser"))
+		span.End()
+	}()
+
 	if targetID <= 0 {
 		return fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
 	}

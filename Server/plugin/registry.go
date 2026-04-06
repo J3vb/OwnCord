@@ -34,10 +34,10 @@ type Registry struct {
 	cfg Config
 
 	mu       sync.RWMutex
-	plugins  map[int64]*Instance     // by plugin row id
-	byName   map[string]*Instance    // by manifest name
-	commands map[string]*Instance    // command name → owning plugin
-	uiTabs   []UITabBinding          // declared by `ui` capability plugins
+	plugins  map[int64]*Instance  // by plugin row id
+	byName   map[string]*Instance // by manifest name
+	commands map[string]*Instance // command name → owning plugin
+	uiTabs   []UITabBinding       // declared by `ui` capability plugins
 
 	// runtimePlatform is set by the wazero-tagged build's NewRegistry to a
 	// concrete *wazero.Runtime. The default build leaves it nil and falls
@@ -163,7 +163,14 @@ func (r *Registry) activateAll(ctx context.Context) error {
 		}
 		if err := r.activate(ctx, inst); err != nil {
 			slog.Warn("plugin: activation failed", "name", row.Name, "err", err)
+			continue
 		}
+		// Sync the in-memory enabled flag with the DB row so callers that
+		// read inst.Enabled (e.g. /api/v1/admin/plugins listings, future
+		// host-side capability checks) see the activated state.
+		r.mu.Lock()
+		inst.Enabled = true
+		r.mu.Unlock()
 	}
 	return nil
 }

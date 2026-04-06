@@ -2,6 +2,7 @@
 package ws
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -663,11 +664,45 @@ func (h *Hub) persistEvent(seq uint64, channelID int64, payload []byte) {
 	if h.eventPersister == nil {
 		return
 	}
-	eventType := "broadcast"
-	if channelID != 0 {
-		eventType = "channel_broadcast"
+	eventType := extractEventType(payload)
+	if eventType == "" {
+		eventType = "broadcast"
+		if channelID != 0 {
+			eventType = "channel_broadcast"
+		}
 	}
 	h.eventPersister.Enqueue(int64(seq), eventType, channelID, payload)
+}
+
+// extractEventType scans a wrapped JSON envelope for the value of the "type"
+// field and returns it. Returns "" on any parse failure so the caller can
+// substitute a generic label. The scan is intentionally not a full JSON
+// decode — it only looks for the literal `"type":"<value>"` token, which
+// matches every wire-format envelope produced by this server. This avoids the
+// allocation cost of `encoding/json` on the broadcast hot path.
+func extractEventType(payload []byte) string {
+	const needle = `"type":"`
+	idx := bytes.Index(payload, []byte(needle))
+	if idx < 0 {
+		return ""
+	}
+	start := idx + len(needle)
+	end := bytes.IndexByte(payload[start:], '"')
+	if end < 0 {
+		return ""
+	}
+	t := payload[start : start+end]
+	// Reject any value with control chars or escapes — we want a clean
+	// label, not arbitrary user-controlled metadata. Length-cap defensively.
+	if len(t) == 0 || len(t) > 64 {
+		return ""
+	}
+	for _, b := range t {
+		if b < 0x20 || b == '\\' {
+			return ""
+		}
+	}
+	return string(t)
 }
 
 // wrapWithSeq injects a "seq" field into a JSON message without re-serializing.

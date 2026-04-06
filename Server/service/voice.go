@@ -1,13 +1,16 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/store"
+	"github.com/owncord/server/telemetry"
 )
 
 // VoiceService handles voice state business logic.
@@ -25,6 +28,17 @@ func NewVoiceService(st store.Store, perm *PermissionService) *VoiceService {
 // joins the user to the voice channel respecting capacity limits.
 // Returns the channel on success so callers can access voice config fields.
 func (s *VoiceService) JoinChannel(userID, channelID int64) (*db.Channel, error) {
+	ctx, span := telemetry.GlobalTracer("service/voice").Start(context.Background(), "VoiceService.JoinChannel",
+		telemetry.Int64("user_id", userID),
+		telemetry.Int64("channel_id", channelID),
+	)
+	start := time.Now()
+	defer func() {
+		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationMs, start,
+			telemetry.String("method", "JoinChannel"))
+		span.End()
+	}()
+
 	if channelID <= 0 {
 		return nil, fmt.Errorf("%w: channel_id must be a positive integer", ErrBadRequest)
 	}

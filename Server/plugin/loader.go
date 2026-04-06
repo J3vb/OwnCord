@@ -61,9 +61,21 @@ func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 		if parseErr != nil {
 			return nil, fmt.Errorf("plugin %q: %w", e.Name(), parseErr)
 		}
+		// Reject any symlinks anywhere in the plugin directory tree. The asset
+		// handler enforces that resolved paths stay rooted at pluginDir, but
+		// http.ServeFile / os.Open follow symlinks transparently — a malicious
+		// plugin .zip containing `assets/index.html -> /etc/passwd` would
+		// otherwise serve host files. Stat (not Lstat) is used for the
+		// entrypoint because we want to refuse it being a symlink even if
+		// the target is valid.
+		if err := rejectSymlinksUnder(pluginDir); err != nil {
+			return nil, fmt.Errorf("plugin %q: %w", e.Name(), err)
+		}
 		wasmPath := filepath.Join(pluginDir, manifest.Entrypoint)
-		if _, statErr := os.Stat(wasmPath); statErr != nil {
+		if info, statErr := os.Lstat(wasmPath); statErr != nil {
 			return nil, fmt.Errorf("plugin %q: missing entrypoint %s: %w", e.Name(), manifest.Entrypoint, statErr)
+		} else if info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("plugin %q: entrypoint %s is a symlink", e.Name(), manifest.Entrypoint)
 		}
 		found = append(found, foundPlugin{
 			Manifest: manifest,
@@ -72,6 +84,21 @@ func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 		})
 	}
 	return found, nil
+}
+
+// rejectSymlinksUnder walks root and returns an error if any entry is a
+// symlink. Defends against malicious plugin packages that ship symlinks to
+// host filesystem paths.
+func rejectSymlinksUnder(root string) error {
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink not allowed: %s", path)
+		}
+		return nil
+	})
 }
 
 // serialize returns a canonical JSON encoding of the manifest, used as the
