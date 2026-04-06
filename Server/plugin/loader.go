@@ -49,17 +49,27 @@ func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 			continue
 		}
 		pluginDir := filepath.Join(dir, e.Name())
-		manifestPath := filepath.Join(pluginDir, "plugin.json")
-		raw, rdErr := os.ReadFile(manifestPath)
-		if rdErr != nil {
-			if os.IsNotExist(rdErr) {
-				continue
-			}
-			return nil, fmt.Errorf("plugin %q: read plugin.json: %w", e.Name(), rdErr)
+
+		// Prefer plugin.toml (wazero build) over plugin.json.
+		manifest, ok, tomlErr := tryLoadPluginTOML(pluginDir)
+		if tomlErr != nil {
+			return nil, fmt.Errorf("plugin %q: %w", e.Name(), tomlErr)
 		}
-		manifest, parseErr := ParseManifest(raw)
-		if parseErr != nil {
-			return nil, fmt.Errorf("plugin %q: %w", e.Name(), parseErr)
+		if !ok {
+			// Fall back to plugin.json.
+			manifestPath := filepath.Join(pluginDir, "plugin.json")
+			raw, rdErr := os.ReadFile(manifestPath)
+			if rdErr != nil {
+				if os.IsNotExist(rdErr) {
+					continue
+				}
+				return nil, fmt.Errorf("plugin %q: read plugin.json: %w", e.Name(), rdErr)
+			}
+			var parseErr error
+			manifest, parseErr = ParseManifest(raw)
+			if parseErr != nil {
+				return nil, fmt.Errorf("plugin %q: %w", e.Name(), parseErr)
+			}
 		}
 		// Reject any symlinks anywhere in the plugin directory tree. The asset
 		// handler enforces that resolved paths stay rooted at pluginDir, but
