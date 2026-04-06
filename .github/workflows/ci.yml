@@ -40,6 +40,21 @@ jobs:
       - name: Build server
         run: go build -o ${{ matrix.binary }} -ldflags "-s -w" .
 
+      # Phase B + C build-tag matrix. Each tag variant must compile so the
+      # tag boundaries don't drift. The OTel and wazero tags are gated
+      # behind `continue-on-error: true` until the upstream modules land in
+      # go.mod (tracked in PHASE_BC_LOCAL_TODO.md). Once the modules are
+      # added, drop continue-on-error so a missing tag combo fails CI.
+      - name: Build with -tags otel (Phase B Step 8)
+        continue-on-error: true
+        run: go build -tags otel ./...
+      - name: Build with -tags wazero (Phase C Step 9)
+        continue-on-error: true
+        run: go build -tags wazero ./...
+      - name: Build with -tags otel,wazero (full community-hub build)
+        continue-on-error: true
+        run: go build -tags otel,wazero ./...
+
       - name: Go vulnerability check
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4 && govulncheck ./...
 

@@ -107,9 +107,9 @@ Still TODO locally:
       the DB tier returns the missing events. The session test
       (`event_persister_test.go`) covers the persister in isolation but
       not the buffer→DB handoff inside `handleReconnect`.
-- [ ] Add a `replay_source` field to the auth_ok payload so the client
-      can log the tier. The hub already records the tier in metrics; the
-      client surface change is a separate UX call.
+- [x] Add a `replay_source` field to the auth_ok payload — landed in
+      Pass 4. `buildAuthOK` takes the tier as a parameter, "none" on
+      fresh connect, "buffer" or "db" on resume.
 - [x] Document the new `event_persistence` block in `defaultYAML` inside
       `Server/config/config.go` — landed in Pass 3.
 
@@ -230,9 +230,11 @@ Still TODO locally:
   cd Server/plugin/examples/hello
   tinygo build -o hello.wasm -target wasi ./main.go
   ```
-- [ ] Implement plugin marketplace install path
-      (`POST /api/v1/admin/plugins/install` with multipart zip). The
-      handler is scaffolded but the install endpoint is currently absent.
+- [x] Implement plugin marketplace install path
+      (`POST /api/v1/admin/plugins/install` with multipart zip) — landed
+      in Pass 4. `Registry.InstallFromZip` does zip-slip validation, no
+      symlinks, 16 MiB compressed cap, 64 MiB uncompressed cap, then
+      atomic rename into the plugin directory.
 - [ ] Replace plugin postgres stubs in `Server/store/postgres.go` with
       real `pgdbgen`-backed implementations once `make sqlc-generate`
       runs (same blocker as Phase B Step 7).
