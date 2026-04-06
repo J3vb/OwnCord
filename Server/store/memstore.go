@@ -39,6 +39,12 @@ type MemStore struct {
 	blocks map[int64]map[int64]bool
 	// userID -> channelID -> lastReadMessageID
 	readStates map[int64]map[int64]int64
+
+	// Phase B Step 7 / Phase C Step 9 — events + plugin KV. Lazily initialised
+	// via ensureEvents() so existing tests that constructed a bare MemStore
+	// without these fields keep working.
+	eventsOnce sync.Once
+	eventStore *memEventStore
 }
 
 // NewMemStore creates an empty MemStore ready for use.

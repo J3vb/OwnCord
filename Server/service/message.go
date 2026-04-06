@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/store"
+	"github.com/owncord/server/telemetry"
 )
 
 // sanitizer is the shared HTML sanitization policy (strips all tags).
@@ -115,6 +117,19 @@ func NewMessageService(st store.Store, perms *PermissionService, limiter *auth.R
 // SendMessage validates, persists, and prepares broadcast data for a new message.
 // Callers are responsible for emitting the appropriate events.
 func (s *MessageService) SendMessage(p SendMessageParams) (*SendMessageResult, error) {
+	// Phase B Step 8 — wrap the public service entrypoint in a tracing span
+	// and a duration histogram. Both are no-ops in the default build.
+	ctx, span := telemetry.GlobalTracer("service/message").Start(context.Background(), "MessageService.SendMessage",
+		telemetry.Int64("user_id", p.UserID),
+		telemetry.Int64("channel_id", p.ChannelID),
+	)
+	start := time.Now()
+	defer func() {
+		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationMs, start,
+			telemetry.String("method", "SendMessage"))
+		span.End()
+	}()
+
 	// Rate limit.
 	ratKey := fmt.Sprintf("chat:%d", p.UserID)
 	if s.limiter != nil && !s.limiter.Allow(ratKey, 10, time.Second) {

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/store"
+	"github.com/owncord/server/telemetry"
 )
 
 // ChannelService handles channel-related business logic including
@@ -28,6 +30,17 @@ func NewChannelService(st store.Store, perms *PermissionService) *ChannelService
 // ListVisibleChannels returns channels the user has ReadMessages permission for.
 // DM channels are excluded (they are accessed via DMService).
 func (s *ChannelService) ListVisibleChannels(userID int64) ([]db.Channel, error) {
+	// Phase B Step 8 — span the public service entrypoint.
+	ctx, span := telemetry.GlobalTracer("service/channel").Start(context.Background(),
+		"ChannelService.ListVisibleChannels",
+		telemetry.Int64("user_id", userID),
+	)
+	start := time.Now()
+	defer func() {
+		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationMs, start,
+			telemetry.String("method", "ListVisibleChannels"))
+		span.End()
+	}()
 	all, err := s.st.ListChannels()
 	if err != nil {
 		slog.Error("ChannelService.ListVisibleChannels", "err", err)

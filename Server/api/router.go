@@ -19,6 +19,7 @@ import (
 	"github.com/owncord/server/service"
 	"github.com/owncord/server/storage"
 	dbstore "github.com/owncord/server/store"
+	"github.com/owncord/server/telemetry"
 	"github.com/owncord/server/updater"
 	"github.com/owncord/server/ws"
 )
@@ -37,6 +38,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// handled explicitly in clientIPWithProxies using the trusted_proxies config.
 	r.Use(middleware.Recoverer)
 	r.Use(requestLogger) // structured request/response logging
+	// Phase B Step 8 — OpenTelemetry HTTP tracing. No-op when telemetry is
+	// disabled or the otel build tag is not set, so this is safe to mount
+	// unconditionally.
+	r.Use(telemetry.HTTPMiddleware())
 	r.Use(SecurityHeadersWithTLS(cfg.TLS.Mode))
 	r.Use(MaxBodySizeUnless(defaultMaxBodySize, "/api/v1/uploads")) // upload route exempt
 
@@ -203,6 +208,15 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 			func(ctx context.Context) (bool, error) { return hub.LiveKitHealthCheck(ctx) },
 		))
 
+	// Phase B Step 8 — OpenTelemetry Prometheus exporter. Mounted alongside
+	// the legacy JSON endpoint when a Prometheus exporter is wired (otel
+	// build, exporter == "prometheus"). Returns 404 in the default no-op build
+	// because telemetry.PrometheusHandler() returns nil.
+	if promH := telemetry.PrometheusHandler(); promH != nil {
+		r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies)).
+			Mount("/metrics", promH)
+	}
+
 	// Admin panel: static files + REST API (Phase 6).
 	// Restrict /admin to configured CIDRs (default: private networks only).
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, "J3vb", "OwnCord")
@@ -210,6 +224,12 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	r.Group(func(r chi.Router) {
 		r.Use(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
 		r.Mount("/admin", adminHandler)
+
+		// Phase C Step 9 — plugin admin REST surface. Mounted alongside the
+		// admin panel so it inherits the same network ACL. Plugin runtime is
+		// owned by main.go; the handler accepts a nil registry and reports
+		// 503 on lifecycle calls when plugin support is disabled.
+		r.Mount("/api/v1/admin/plugins", NewPluginAdminHandler(nil, st))
 	})
 
 	// Client auto-update endpoint (unauthenticated).

@@ -302,3 +302,35 @@ CREATE TABLE IF NOT EXISTS user_blocks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_blocks_blocked ON user_blocks(blocked_id, blocker_id);
+
+-- ── events (Phase B Step 7: event persistence) ──────────────────────────────
+-- Cold-storage replay buffer for WebSocket reconnections that fall outside the
+-- in-memory ring window. Pruned by a background goroutine after the configured
+-- retention window (default 24h).
+CREATE TABLE IF NOT EXISTS events (
+    seq        BIGSERIAL   PRIMARY KEY,
+    event_type TEXT        NOT NULL,
+    payload    BYTEA       NOT NULL,
+    channel_id BIGINT      NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_channel_seq ON events(channel_id, seq);
+CREATE INDEX IF NOT EXISTS idx_events_created_at  ON events(created_at);
+
+-- ── plugins (Phase C Step 9: Wazero plugin runtime) ─────────────────────────
+CREATE TABLE IF NOT EXISTS plugins (
+    id            BIGSERIAL   PRIMARY KEY,
+    name          TEXT        NOT NULL UNIQUE,
+    version       TEXT        NOT NULL,
+    enabled       BOOLEAN     NOT NULL DEFAULT FALSE,
+    manifest_json TEXT        NOT NULL,
+    installed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS plugin_kv (
+    plugin_id BIGINT NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+    key       TEXT   NOT NULL,
+    value     BYTEA  NOT NULL,
+    PRIMARY KEY (plugin_id, key)
+);

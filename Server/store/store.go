@@ -26,6 +26,8 @@ type Store interface {
 	AttachmentStore
 	AdminStore
 	SettingsStore
+	EventStore
+	PluginStore
 
 	// Close releases the underlying database connection.
 	Close() error
@@ -193,4 +195,45 @@ type SettingsStore interface {
 	GetSetting(key string) (string, error)
 	SetSetting(key, value string) error
 	GetAllSettings() (map[string]string, error)
+}
+
+// EventStore persists broadcast events for cold-replay during reconnection
+// when the in-memory ring buffer no longer covers the client's last_seq.
+//
+// Phase B Step 7 — Event Persistence Layer.
+type EventStore interface {
+	// PersistEvent appends an event to the persistent log and returns the
+	// auto-assigned seq. channelID == 0 means the event was a global broadcast.
+	PersistEvent(ctx context.Context, eventType string, channelID int64, payload []byte) (int64, error)
+
+	// GetEventsSince returns up to limit events with seq > afterSeq, ordered
+	// by seq ascending. Used as a fallback after the ring buffer misses.
+	GetEventsSince(ctx context.Context, afterSeq int64, limit int) ([]db.PersistedEvent, error)
+
+	// GetEventsSinceForChannels returns up to limit events with seq > afterSeq
+	// whose channel_id is in channelIDs OR is 0 (global broadcasts), ordered by
+	// seq ascending. Mirrors EventRingBuffer.EventsSinceFiltered.
+	GetEventsSinceForChannels(ctx context.Context, afterSeq int64, channelIDs []int64, limit int) ([]db.PersistedEvent, error)
+
+	// PruneEventsOlderThan deletes events with created_at < cutoff. Returns the
+	// number of deleted rows. Called periodically by the pruner goroutine.
+	PruneEventsOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
+}
+
+// PluginStore manages installed plugins and per-plugin KV namespaces.
+//
+// Phase C Step 9 — Wazero Plugin Runtime.
+type PluginStore interface {
+	InstallPlugin(ctx context.Context, name, version, manifestJSON string) (int64, error)
+	EnablePlugin(ctx context.Context, id int64) error
+	DisablePlugin(ctx context.Context, id int64) error
+	UninstallPlugin(ctx context.Context, id int64) error
+	GetPlugin(ctx context.Context, id int64) (*db.PluginRow, error)
+	GetPluginByName(ctx context.Context, name string) (*db.PluginRow, error)
+	ListPlugins(ctx context.Context) ([]db.PluginRow, error)
+
+	PluginKVGet(ctx context.Context, pluginID int64, key string) ([]byte, error)
+	PluginKVSet(ctx context.Context, pluginID int64, key string, value []byte) error
+	PluginKVDelete(ctx context.Context, pluginID int64, key string) error
+	PluginKVScan(ctx context.Context, pluginID int64, prefix string, limit int) (map[string][]byte, error)
 }

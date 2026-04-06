@@ -23,7 +23,11 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/plugin"
 	"github.com/owncord/server/storage"
+	"github.com/owncord/server/store"
+	"github.com/owncord/server/telemetry"
+	"github.com/owncord/server/ws"
 )
 
 // version is overridden at build time via -ldflags "-X main.version=1.0.0".
@@ -132,9 +136,74 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 		log.Info("cleared stale voice states")
 	}
 
+	// ── 4b. Telemetry (Phase B Step 8) ─────────────────────────────────────
+	telemetryShutdown, telErr := telemetry.Init(context.Background(), cfg.Telemetry)
+	if telErr != nil {
+		log.Warn("telemetry init failed; continuing without OpenTelemetry", "error", telErr)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := telemetryShutdown(shutdownCtx); err != nil {
+			log.Warn("telemetry shutdown returned error", "error", err)
+		}
+	}()
+
 	// ── 5. Build HTTP router ───────────────────────────────────────────────
 	router, hub, routerCleanup := api.NewRouter(cfg, database, version, logBuf)
 	defer routerCleanup()
+
+	// ── 5b. Wire event persistence (Phase B Step 7) ────────────────────────
+	// Construct a Store wrapper for the cold-tier event log + plugin KV. The
+	// store-everywhere refactor (Phase A pending TODO) will eventually thread
+	// this through NewRouter directly; for now we attach it after the fact so
+	// the router signature stays unchanged.
+	storeWrapper := store.NewSQLiteStore(database)
+	if cfg.EventPersistence.Enabled && hub != nil {
+		persister := ws.NewEventPersister(
+			storeWrapper,
+			4096,
+			cfg.EventPersistence.BatchSize,
+			time.Duration(cfg.EventPersistence.BatchFlushMs)*time.Millisecond,
+		)
+		persister.Start(context.Background())
+		hub.SetEventPersister(persister)
+		hub.SetEventStore(storeWrapper)
+
+		retention := time.Duration(cfg.EventPersistence.RetentionHours) * time.Hour
+		prunerInterval := time.Duration(cfg.EventPersistence.PrunerIntervalMinutes) * time.Minute
+		prunerCtx, prunerCancel := context.WithCancel(context.Background())
+		ws.StartEventPruner(prunerCtx, storeWrapper, retention, prunerInterval)
+		defer func() {
+			prunerCancel()
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer stopCancel()
+			persister.Stop(stopCtx)
+		}()
+	}
+
+	// ── 5c. Wire plugin runtime (Phase C Step 9) ───────────────────────────
+	if cfg.Plugins.Enabled {
+		registry, plugErr := plugin.NewRegistry(plugin.Config{
+			Directory:     cfg.Plugins.Directory,
+			MaxMemoryMB:   cfg.Plugins.MaxMemoryMB,
+			CPUBudgetMs:   cfg.Plugins.CPUBudgetMs,
+			HTTPAllowlist: cfg.Plugins.HTTPAllowlist,
+			Store:         storeWrapper,
+		})
+		if plugErr != nil {
+			log.Warn("plugin runtime init failed; continuing without plugins", "error", plugErr)
+		} else {
+			if err := registry.LoadAll(context.Background()); err != nil {
+				log.Warn("plugin loader: failed to scan directory", "error", err)
+			}
+			defer func() {
+				closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = registry.Close(closeCtx)
+			}()
+		}
+	}
 
 	// ── 6. Start server ────────────────────────────────────────────────────
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
