@@ -131,22 +131,27 @@ The session landed:
 
 Still TODO locally:
 
-- [ ] Add the OTel modules to `go.mod`:
-  ```sh
-  cd Server
-  go get go.opentelemetry.io/otel@latest \
-         go.opentelemetry.io/otel/sdk@latest \
-         go.opentelemetry.io/otel/exporters/prometheus@latest \
-         go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@latest \
-         go.opentelemetry.io/contrib/instrumentation/github.com/go-chi/chi/v5/otelchi@latest
-  go mod tidy
-  ```
-- [ ] Replace the placeholder body of `telemetry/telemetry_otel.go`'s
-      `Init` with the real tracer + meter provider construction and the
-      `otelchi.Middleware` wiring (see the inline TODO comment with the
-      call graph).
-- [ ] Build with `-tags otel` once the SDK is in `go.mod` and add a CI
-      job that exercises the tagged build.
+- [x] Add the OTel modules to `go.mod` — landed on
+      `claude/review-phase-completion-PBExk`. go.mod now carries
+      `go.opentelemetry.io/otel/sdk`, `.../exporters/prometheus`,
+      `.../exporters/otlp/otlptrace/otlptracegrpc`, and
+      `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp`.
+      (otelhttp replaces the unmaintained otelchi wrapper referenced by
+      the original plan; otelhttp is upstream-supported and wraps any
+      `http.Handler` including a Chi router.)
+- [x] Replace the placeholder body of `telemetry/telemetry_otel.go`'s
+      `Init` with the real tracer + meter provider construction. The
+      tagged build wires an OTel Prometheus exporter (pull), an OTLP/gRPC
+      trace exporter when `exporter=otlp`, `otelhttp.NewHandler` as the
+      HTTP middleware, and a real provider that re-binds `AppMetrics`
+      instruments via `resetAppMetricsForInit`. Tests in
+      `Server/telemetry/telemetry_otel_test.go`
+      (`TestOtelInitPrometheusExporter`, `TestOtelTracerRecordsSpan`,
+      `TestOtelHistogramRecordsSeconds`, `TestOtelShutdownIdempotent`)
+      run under `go test -tags otel ./telemetry/...`.
+- [ ] Add a CI job that exercises `go build -tags otel ./...` and
+      `go test -tags otel ./telemetry/...`. Both pass locally against
+      Go 1.25.1.
 - [x] Add spans to the remaining service-layer entry points
       (`DMService`, `VoiceService`, `InviteService`, `ModerationService`,
       `BlockService`, `UserService`) — landed in Pass 3, one entrypoint
@@ -191,15 +196,23 @@ The session landed:
 
 Still TODO locally:
 
-- [ ] Add wazero to `go.mod`:
-  ```sh
-  cd Server
-  go get github.com/tetratelabs/wazero@latest
-  go mod tidy
-  ```
-- [ ] Replace the placeholder body in `Server/plugin/sandbox_wazero.go`
-      with real wazero runtime construction. The file contains an inline
-      TODO with the exact API call graph.
+- [x] Add wazero to `go.mod` — landed on
+      `claude/review-phase-completion-PBExk`. `go.mod` now requires
+      `github.com/tetratelabs/wazero v1.11.0`.
+- [x] Replace the placeholder body in `Server/plugin/sandbox_wazero.go`
+      with real wazero runtime construction. The tagged build now owns a
+      shared `wazero.Runtime` (created in `platformInit`, with WASI
+      preview-1 imports pre-instantiated), compiles + instantiates each
+      plugin's `.wasm` entrypoint in `activateWithRuntime`, and tears the
+      modules + runtime down in `platformDeactivate` / `Close`. Tests in
+      `Server/plugin/sandbox_wazero_test.go`
+      (`TestWazeroRegistryCreatesRuntime`,
+      `TestWazeroActivateCompilesModule`,
+      `TestWazeroDispatchCommandMissingExport`,
+      `TestWazeroCloseTearsDownRuntime`,
+      `TestWazeroInvalidWASMFailsActivation`) run under
+      `go test -tags wazero ./plugin/...` using a 41-byte embedded WASM
+      fixture — no external WASM asset required.
 - [ ] Replace JSON-only manifest parsing with TOML support behind the
       `wazero` build tag (the design doc names `plugin.toml`). Add
       `github.com/BurntSushi/toml` and a `parseTOML` shim that falls back

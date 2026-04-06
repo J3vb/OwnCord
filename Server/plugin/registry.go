@@ -48,10 +48,12 @@ type Registry struct {
 	// Subscribe; the WS hub calls sink.Dispatch on each broadcast.
 	sink *EventSink
 
-	// runtimePlatform is set by the wazero-tagged build's NewRegistry to a
-	// concrete *wazero.Runtime. The default build leaves it nil and falls
-	// back to manifest-only behaviour.
+	// runtimePlatform is populated by platformInit in the wazero-tagged build
+	// with a concrete *wazero.Runtime. The default build leaves it nil and
+	// falls back to manifest-only behaviour. platformClose tears the runtime
+	// down; both fields are set by platformInit atomically.
 	runtimePlatform any
+	platformClose   func(context.Context) error
 }
 
 // Instance is a single loaded plugin.
@@ -81,20 +83,32 @@ func NewRegistry(cfg Config) (*Registry, error) {
 	if cfg.Store == nil {
 		return nil, fmt.Errorf("plugin: NewRegistry requires a non-nil PluginStore")
 	}
-	return &Registry{
+	r := &Registry{
 		cfg:      cfg,
 		plugins:  make(map[int64]*Instance),
 		byName:   make(map[string]*Instance),
 		commands: make(map[string]*Instance),
 		sink:     NewEventSink(),
-	}, nil
+	}
+	// platformInit is supplied by sandbox_default.go (no-op) or
+	// sandbox_wazero.go (real Wazero runtime). Either way it owns the
+	// runtimePlatform + platformClose pair on the Registry.
+	platform, closeFn, err := platformInit(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("plugin: platform init: %w", err)
+	}
+	r.runtimePlatform = platform
+	r.platformClose = closeFn
+	return r, nil
 }
 
 // Close shuts the registry down. In the wazero-tagged build it tears the
 // runtime down and frees module memory.
 func (r *Registry) Close(ctx context.Context) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	for _, inst := range r.plugins {
+		r.platformDeactivate(inst)
+	}
 	for id := range r.plugins {
 		delete(r.plugins, id)
 	}
@@ -105,6 +119,13 @@ func (r *Registry) Close(ctx context.Context) error {
 		delete(r.commands, c)
 	}
 	r.uiTabs = nil
+	closeFn := r.platformClose
+	r.platformClose = nil
+	r.runtimePlatform = nil
+	r.mu.Unlock()
+	if closeFn != nil {
+		return closeFn(ctx)
+	}
 	return nil
 }
 
@@ -378,12 +399,21 @@ func (r *Registry) activateAll(ctx context.Context) error {
 
 // activate compiles and starts a single plugin module. Default build returns
 // ErrRuntimeUnavailable; the wazero-tagged build replaces this with the real
-// implementation via the runtimePlatform field.
+// implementation via activateWithRuntime.
+//
+// The runtimePlatform read is guarded by r.mu so a concurrent Close() that
+// nil-s the field cannot be observed mid-activation. The captured platform
+// value is then passed into activateWithRuntime as a parameter so the actual
+// compile uses the snapshot rather than re-reading r.runtimePlatform — this
+// closes the race window between the nil check and the wazero call.
 func (r *Registry) activate(ctx context.Context, inst *Instance) error {
-	if r.runtimePlatform == nil {
+	r.mu.RLock()
+	platform := r.runtimePlatform
+	r.mu.RUnlock()
+	if platform == nil {
 		return ErrRuntimeUnavailable
 	}
-	return r.activateWithRuntime(ctx, inst)
+	return r.activateWithRuntime(ctx, platform, inst)
 }
 
 // EnablePlugin marks a plugin enabled in the store, then attempts to load it.
@@ -407,7 +437,9 @@ func (r *Registry) EnablePlugin(ctx context.Context, id int64) error {
 	return nil
 }
 
-// DisablePlugin marks a plugin disabled and tears its module down.
+// DisablePlugin marks a plugin disabled and tears its module down. The
+// wazero-tagged build frees the compiled module via platformDeactivate so
+// re-enabling recompiles from disk; the default build is a no-op.
 func (r *Registry) DisablePlugin(ctx context.Context, id int64) error {
 	if err := r.cfg.Store.DisablePlugin(ctx, id); err != nil {
 		return err
@@ -422,6 +454,10 @@ func (r *Registry) DisablePlugin(ctx context.Context, id int64) error {
 				delete(r.commands, cmd)
 			}
 		}
+		// Free the wazero module so memory is returned to the runtime
+		// immediately rather than waiting for registry Close. Safe to call
+		// on an instance that was never activated.
+		r.platformDeactivate(inst)
 	}
 	return nil
 }
