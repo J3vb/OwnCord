@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	aead.dev/minisign v0.3.0
+	github.com/BurntSushi/toml v1.6.0
 	github.com/corazawaf/coraza/v3 v3.6.0
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/uuid v1.6.0
@@ -40,7 +41,6 @@ require (
 	buf.build/go/protovalidate v1.1.2 // indirect
 	buf.build/go/protoyaml v0.6.0 // indirect
 	cel.dev/expr v0.25.1 // indirect
-	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/benbjohnson/clock v1.3.5 // indirect
