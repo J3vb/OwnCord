@@ -110,9 +110,8 @@ Still TODO locally:
 - [ ] Add a `replay_source` field to the auth_ok payload so the client
       can log the tier. The hub already records the tier in metrics; the
       client surface change is a separate UX call.
-- [ ] Document the new `event_persistence` block in `defaultYAML` inside
-      `Server/config/config.go` (the struct and defaults landed; the
-      sample config comments did not).
+- [x] Document the new `event_persistence` block in `defaultYAML` inside
+      `Server/config/config.go` — landed in Pass 3.
 
 ---
 
@@ -155,12 +154,12 @@ Still TODO locally:
       call graph).
 - [ ] Build with `-tags otel` once the SDK is in `go.mod` and add a CI
       job that exercises the tagged build.
-- [ ] Add spans to the remaining service-layer entry points
+- [x] Add spans to the remaining service-layer entry points
       (`DMService`, `VoiceService`, `InviteService`, `ModerationService`,
-      `BlockService`, `UserService`). The pattern is identical to the
-      three already done in this branch.
-- [ ] Document the new `telemetry` block in `defaultYAML` inside
-      `Server/config/config.go`.
+      `BlockService`, `UserService`) — landed in Pass 3, one entrypoint
+      per service. Add additional spans on demand.
+- [x] Document the new `telemetry` block in `defaultYAML` inside
+      `Server/config/config.go` — landed in Pass 3.
 - [ ] Add a `make otel-up` target that spins up Jaeger via
       docker-compose for local tracing development.
 
@@ -219,10 +218,10 @@ Still TODO locally:
       WS layer.** Either add one (small surface) or fold plugin commands
       into the REST layer first. The plugin Registry already exposes
       `DispatchCommand` so the hookup is one call site.
-- [ ] Pass the live `*plugin.Registry` from `Server/main.go` into
-      `NewPluginAdminHandler` (the router currently constructs the
-      handler with a nil registry so list works but enable/disable returns
-      503).
+- [x] Pass the live `*plugin.Registry` from `Server/main.go` into
+      `NewPluginAdminHandler` — landed in Pass 2. The router now accepts
+      a `*plugin.Registry` parameter and the handler is also wrapped in
+      `admin.RequireAdminAuth` (Pass 2 closed the auth bypass too).
 - [ ] Add a precompiled trivial `.wasm` blob under
       `Server/plugin/examples/hello/hello.wasm` so the example plugin can
       actually be loaded by an integration test once wazero is wired.

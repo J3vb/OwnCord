@@ -26,6 +26,7 @@ type AppMetrics struct {
 	WSReconnectTierTotal  Counter
 	WSEventsPersisted     Counter
 	WSEventsDropped       Counter
+	WSEventsPersistErrors Counter
 	DBQueryDurationSec    Histogram
 	VoiceActiveSessions   Gauge
 	VoiceParticipants     Gauge
@@ -54,6 +55,7 @@ func NewAppMetrics() *AppMetrics {
 			WSReconnectTierTotal:  ws.Counter("ws_reconnect_tier_total", "Reconnection replay tier hits, attribute tier=buffer|db|full"),
 			WSEventsPersisted:     ws.Counter("ws_events_persisted_total", "Events written to the cold-tier event log"),
 			WSEventsDropped:       ws.Counter("ws_events_dropped_total", "Events dropped because the persister queue was full"),
+			WSEventsPersistErrors: ws.Counter("ws_events_persist_errors_total", "PersistEvent calls that returned an error from the underlying store"),
 			DBQueryDurationSec:    db.Histogram("db_query_duration_seconds", "Per-query wall time", "s"),
 			VoiceActiveSessions:   voice.Gauge("voice_active_sessions", "Active LiveKit rooms"),
 			VoiceParticipants:     voice.Gauge("voice_participants", "Connected LiveKit participants across all rooms"),

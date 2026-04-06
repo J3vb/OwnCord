@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/owncord/server/store"
+	"github.com/owncord/server/telemetry"
 )
 
 // pendingEvent is a single event waiting to be flushed to the EventStore.
@@ -84,15 +85,18 @@ func (p *EventPersister) Start(ctx context.Context) {
 // seq is the hub-assigned monotonic sequence for this event — it must be the
 // same value embedded in the wrapped payload so reconnect replay returns rows
 // whose row-seq matches the payload-seq the client tracks.
+//
+// CONTRACT: payload must not be mutated by the caller after Enqueue returns.
+// All current call sites pass a fresh slice from wrapWithSeq, so no defensive
+// copy is taken here. This matters because Enqueue is invoked under the hub's
+// seqMu lock and any per-call allocation directly serializes broadcast
+// throughput.
 func (p *EventPersister) Enqueue(seq int64, eventType string, channelID int64, payload []byte) {
 	if p == nil {
 		return
 	}
-	// Defensive copy: callers may reuse buffers.
-	cp := make([]byte, len(payload))
-	copy(cp, payload)
 	select {
-	case p.queue <- pendingEvent{seq: seq, eventType: eventType, channelID: channelID, payload: cp}:
+	case p.queue <- pendingEvent{seq: seq, eventType: eventType, channelID: channelID, payload: payload}:
 	default:
 		p.dropped.Add(1)
 	}
@@ -127,6 +131,9 @@ func (p *EventPersister) run(ctx context.Context) {
 	tick := time.NewTicker(p.flushEvy)
 	defer tick.Stop()
 
+	// Cache the AppMetrics bundle once instead of looking it up per event.
+	metrics := telemetry.NewAppMetrics()
+
 	batch := make([]pendingEvent, 0, p.batchSize)
 	flush := func() {
 		if len(batch) == 0 {
@@ -136,11 +143,13 @@ func (p *EventPersister) run(ctx context.Context) {
 		for _, evt := range batch {
 			if err := p.store.PersistEvent(ctx, evt.seq, evt.eventType, evt.channelID, evt.payload); err != nil {
 				p.errors.Add(1)
+				metrics.WSEventsPersistErrors.Add(ctx, 1)
 				slog.Warn("event persister: PersistEvent failed",
 					"seq", evt.seq, "event_type", evt.eventType, "channel_id", evt.channelID, "err", err)
 				continue
 			}
 			p.persisted.Add(1)
+			metrics.WSEventsPersisted.Add(ctx, 1)
 		}
 		batch = batch[:0]
 	}

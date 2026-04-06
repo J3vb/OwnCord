@@ -1,11 +1,13 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"time"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/store"
+	"github.com/owncord/server/telemetry"
 )
 
 // InviteService handles invite management.
@@ -26,6 +28,16 @@ func MaxInviteExpiryHours() int { return maxInviteExpiryHoursVal }
 
 // CreateInvite creates a new invite code with optional max uses and expiry.
 func (s *InviteService) CreateInvite(createdBy int64, maxUses int, expiresInHours int) (*db.Invite, error) {
+	ctx, span := telemetry.GlobalTracer("service/invite").Start(context.Background(), "InviteService.CreateInvite",
+		telemetry.Int64("created_by", createdBy),
+	)
+	start := time.Now()
+	defer func() {
+		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationMs, start,
+			telemetry.String("method", "CreateInvite"))
+		span.End()
+	}()
+
 	// Cap expiry.
 	if expiresInHours > maxInviteExpiryHoursVal {
 		expiresInHours = maxInviteExpiryHoursVal

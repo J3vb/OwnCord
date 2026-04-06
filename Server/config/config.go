@@ -255,6 +255,35 @@ voice:
 
 # github:
 #   token: ""  # optional: GitHub API token for higher rate limits (5000 req/hr vs 60)
+
+# Phase B Step 7 — cold-tier event log used by the WebSocket reconnect path.
+# When the in-memory ring buffer can't cover a client's last_seq the server
+# falls back to these rows before forcing a full re-sync. Rows older than
+# retention_hours are pruned by a background goroutine.
+# event_persistence:
+#   enabled: true             # set false to disable cold-tier replay entirely
+#   retention_hours: 24       # how long to keep persisted broadcast events
+#   batch_size: 50            # flush after this many events buffered
+#   batch_flush_ms: 100       # OR after this many milliseconds, whichever first
+#   pruner_interval_minutes: 60  # how often the retention pruner runs
+
+# Phase B Step 8 — OpenTelemetry exporter. The default build ships a no-op
+# provider; building with -tags otel enables the real SDK.
+# telemetry:
+#   enabled: false            # master switch
+#   exporter: "none"          # none | prometheus | otlp
+#   otlp_endpoint: ""         # required when exporter == "otlp" (host:port of collector)
+#   service_name: "owncord-server"
+
+# Phase C Step 9 — Wazero plugin runtime. Disabled by default so existing
+# operators are unaffected. Plugins live in subdirectories of the configured
+# directory; see Server/plugin/examples/hello for the manifest format.
+# plugins:
+#   enabled: false
+#   directory: "data/plugins"
+#   max_memory_mb: 64         # per-plugin memory cap
+#   cpu_budget_ms: 100        # per-invocation CPU budget
+#   http_allowlist: []        # hostnames plugins may reach via the http capability
 `
 
 // Load reads configuration from the given YAML file path, merging with

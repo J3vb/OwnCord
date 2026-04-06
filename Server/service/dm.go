@@ -1,11 +1,14 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/store"
+	"github.com/owncord/server/telemetry"
 )
 
 // DMService handles direct message channel operations.
@@ -28,6 +31,17 @@ type CreateDMResult struct {
 // CreateDM creates or retrieves a DM channel between two users.
 // Validates that neither user has blocked the other.
 func (s *DMService) CreateDM(userID, recipientID int64) (*CreateDMResult, error) {
+	ctx, span := telemetry.GlobalTracer("service/dm").Start(context.Background(), "DMService.CreateDM",
+		telemetry.Int64("user_id", userID),
+		telemetry.Int64("recipient_id", recipientID),
+	)
+	start := time.Now()
+	defer func() {
+		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationMs, start,
+			telemetry.String("method", "CreateDM"))
+		span.End()
+	}()
+
 	if recipientID <= 0 {
 		return nil, fmt.Errorf("%w: recipient_id must be positive", ErrBadRequest)
 	}

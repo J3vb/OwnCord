@@ -193,8 +193,14 @@ func rejectPrivateAddrs(ctx context.Context, host string) error {
 	return nil
 }
 
+// cgnRange covers RFC6598 carrier-grade NAT (100.64.0.0/10). net.IP.IsPrivate
+// does NOT include this range, but it is non-routable on the public internet
+// and may reach internal services on carrier networks.
+var cgnRange = &net.IPNet{IP: net.IPv4(100, 64, 0, 0).To4(), Mask: net.CIDRMask(10, 32)}
+
 // ipAllowed reports nil if ip is a public, routable address. Loopback,
-// link-local, multicast, unspecified, and RFC1918 ranges are rejected.
+// link-local, multicast, unspecified, RFC1918, RFC4193, and RFC6598 (CGN)
+// ranges are rejected.
 func ipAllowed(ip net.IP) error {
 	if ip == nil {
 		return fmt.Errorf("nil ip")
@@ -213,6 +219,9 @@ func ipAllowed(ip net.IP) error {
 	}
 	if ip.IsMulticast() {
 		return fmt.Errorf("multicast address %s", ip)
+	}
+	if v4 := ip.To4(); v4 != nil && cgnRange.Contains(v4) {
+		return fmt.Errorf("carrier-grade NAT address %s", ip)
 	}
 	// Reject IPv4-mapped IPv6 forms of the same.
 	if v4 := ip.To4(); v4 != nil && (v4.IsLoopback() || v4.IsPrivate() || v4.IsLinkLocalUnicast()) {

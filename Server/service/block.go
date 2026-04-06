@@ -1,10 +1,13 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/owncord/server/store"
+	"github.com/owncord/server/telemetry"
 )
 
 // BlockService handles user block/unblock operations.
@@ -20,6 +23,17 @@ func NewBlockService(st store.Store) *BlockService {
 // BlockUser blocks a target user. Validates the target exists and
 // prevents self-blocking.
 func (s *BlockService) BlockUser(blockerID, targetID int64) error {
+	ctx, span := telemetry.GlobalTracer("service/block").Start(context.Background(), "BlockService.BlockUser",
+		telemetry.Int64("blocker_id", blockerID),
+		telemetry.Int64("target_id", targetID),
+	)
+	start := time.Now()
+	defer func() {
+		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationMs, start,
+			telemetry.String("method", "BlockUser"))
+		span.End()
+	}()
+
 	if targetID <= 0 {
 		return fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
 	}
