@@ -14,6 +14,7 @@ import (
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/service"
+	"github.com/owncord/server/store"
 	"github.com/owncord/server/syncutil"
 )
 
@@ -48,6 +49,15 @@ type Hub struct {
 	seqMu          syncutil.Mutex   // serializes seq assignment + replay insertion + delivery order
 	replayBuf      *EventRingBuffer // recent broadcast events for reconnection replay
 	broadcastDrops atomic.Uint64    // counts messages dropped due to full broadcast channel
+
+	// Phase B Step 7 — event persistence. nil = ring buffer only.
+	eventPersister *EventPersister
+	eventStore     store.EventStore // read path for cold-tier replay
+
+	// Phase B Step 7 — reconnection tier metrics. Incremented per resume.
+	reconnectTierBuf  atomic.Uint64
+	reconnectTierDB   atomic.Uint64
+	reconnectTierFull atomic.Uint64
 
 	// Settings cache — avoids per-connection DB queries for server_name/motd.
 	settingsMu         syncutil.RWMutex
@@ -538,6 +548,7 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 	// Store DM event for reconnect replay; filtering is channel-based and uses
 	// allowed channel IDs computed at auth time (including open DMs).
 	h.replayBuf.Push(seq, channelID, wrapped)
+	h.persistEvent(channelID, wrapped)
 
 	for _, userID := range userIDs {
 		h.SendToUser(userID, wrapped)
@@ -552,6 +563,7 @@ func (h *Hub) sendSequencedToUsersHigh(channelID int64, userIDs []int64, msg []b
 	seq := h.nextSeq()
 	wrapped := wrapWithSeq(msg, seq)
 	h.replayBuf.Push(seq, channelID, wrapped)
+	h.persistEvent(channelID, wrapped)
 
 	for _, userID := range userIDs {
 		h.SendToUserHigh(userID, wrapped)
@@ -605,6 +617,38 @@ func (h *Hub) nextSeq() uint64 {
 // ReplayBuffer returns the hub's event ring buffer for reconnection replay.
 func (h *Hub) ReplayBuffer() *EventRingBuffer {
 	return h.replayBuf
+}
+
+// SetEventPersister attaches a persister so subsequent broadcasts are also
+// written to the persistent EventStore. Pass nil to disable.
+func (h *Hub) SetEventPersister(p *EventPersister) {
+	h.eventPersister = p
+}
+
+// SetEventStore attaches a read-side EventStore used by the cold-tier
+// reconnect replay path. Typically the same store backing SetEventPersister.
+func (h *Hub) SetEventStore(s store.EventStore) {
+	h.eventStore = s
+}
+
+// ReconnectTierStats returns the per-tier resume hit counters in the order
+// (buffer, db, full). Phase B Step 7 metrics surface; OpenTelemetry meters
+// (Step 8) read from the same atomics.
+func (h *Hub) ReconnectTierStats() (buffer, db, full uint64) {
+	return h.reconnectTierBuf.Load(), h.reconnectTierDB.Load(), h.reconnectTierFull.Load()
+}
+
+// persistEvent enqueues a broadcast event for cold-storage persistence. Safe
+// to call with a nil persister; never blocks the broadcast hot path.
+func (h *Hub) persistEvent(channelID int64, payload []byte) {
+	if h.eventPersister == nil {
+		return
+	}
+	eventType := "broadcast"
+	if channelID != 0 {
+		eventType = "channel_broadcast"
+	}
+	h.eventPersister.Enqueue(eventType, channelID, payload)
 }
 
 // wrapWithSeq injects a "seq" field into a JSON message without re-serializing.
@@ -756,6 +800,7 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 
 	// Store in replay buffer for reconnection recovery.
 	h.replayBuf.Push(seq, bm.channelID, msg)
+	h.persistEvent(bm.channelID, msg)
 
 	if bm.channelID == 0 {
 		// Global broadcast — deliver to every connected client.

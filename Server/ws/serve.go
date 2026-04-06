@@ -15,6 +15,7 @@ import (
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/telemetry"
 )
 
 const (
@@ -121,9 +122,41 @@ func (h *Hub) handleReconnect(
 	}
 
 	events := h.ReplayBuffer().EventsSinceFiltered(lastSeq, allowedChannelIDs)
+	replaySource := "buffer"
 	if events == nil {
-		return false
+		// Phase B Step 7 — try cold-tier replay from the EventStore before
+		// giving up and forcing a full ready re-sync.
+		if h.eventStore != nil {
+			channelIDs := make([]int64, 0, len(allowedChannelIDs))
+			for cid := range allowedChannelIDs {
+				channelIDs = append(channelIDs, cid)
+			}
+			const maxColdReplay = 5000
+			persisted, dbErr := h.eventStore.GetEventsSinceForChannels(ctx, int64(lastSeq), channelIDs, maxColdReplay)
+			if dbErr != nil {
+				slog.Warn("ws handleReconnect: cold-tier replay query failed",
+					"user_id", c.userID, "err", dbErr)
+			} else if len(persisted) > 0 {
+				events = make([][]byte, 0, len(persisted))
+				for _, p := range persisted {
+					events = append(events, p.Payload)
+				}
+				replaySource = "db"
+			}
+		}
+		if events == nil {
+			h.reconnectTierFull.Add(1)
+			telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
+			return false
+		}
 	}
+	switch replaySource {
+	case "buffer":
+		h.reconnectTierBuf.Add(1)
+	case "db":
+		h.reconnectTierDB.Add(1)
+	}
+	telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", replaySource))
 
 	// Register BEFORE writing replay data so broadcasts that arrive during
 	// the write window are queued in the client's send buffer instead of
@@ -147,7 +180,7 @@ func (h *Hub) handleReconnect(
 			return true
 		}
 	}
-	slog.Info("ws replay completed", "user_id", c.userID, "events_replayed", len(events), "from_seq", lastSeq)
+	slog.Info("ws replay completed", "user_id", c.userID, "events_replayed", len(events), "from_seq", lastSeq, "source", replaySource)
 
 	// Update presence but skip member_join — user was already known.
 	if updateErr := database.UpdateUserStatus(c.userID, "online"); updateErr != nil {

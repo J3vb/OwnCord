@@ -19,12 +19,59 @@ import (
 
 // Config holds the full server configuration.
 type Config struct {
-	Server   ServerConfig   `koanf:"server"`
-	Database DatabaseConfig `koanf:"database"`
-	TLS      TLSConfig      `koanf:"tls"`
-	Upload   UploadConfig   `koanf:"upload"`
-	Voice    VoiceConfig    `koanf:"voice"`
-	GitHub   GitHubConfig   `koanf:"github"`
+	Server           ServerConfig           `koanf:"server"`
+	Database         DatabaseConfig         `koanf:"database"`
+	TLS              TLSConfig              `koanf:"tls"`
+	Upload           UploadConfig           `koanf:"upload"`
+	Voice            VoiceConfig            `koanf:"voice"`
+	GitHub           GitHubConfig           `koanf:"github"`
+	EventPersistence EventPersistenceConfig `koanf:"event_persistence"`
+	Telemetry        TelemetryConfig        `koanf:"telemetry"`
+	Plugins          PluginsConfig          `koanf:"plugins"`
+}
+
+// EventPersistenceConfig (Phase B Step 7) controls the tiered event log used
+// for WebSocket reconnection replay.
+type EventPersistenceConfig struct {
+	// Enabled toggles cold-storage persistence. When false the server falls
+	// back to ring-buffer-only behaviour (Phase A semantics).
+	Enabled bool `koanf:"enabled"`
+	// RetentionHours is how long persisted events are kept before pruning.
+	RetentionHours int `koanf:"retention_hours"`
+	// BatchSize is the maximum number of events per persister flush.
+	BatchSize int `koanf:"batch_size"`
+	// BatchFlushMs is the maximum delay between persister flushes.
+	BatchFlushMs int `koanf:"batch_flush_ms"`
+	// PrunerIntervalMinutes is how often the pruner goroutine wakes up.
+	PrunerIntervalMinutes int `koanf:"pruner_interval_minutes"`
+}
+
+// TelemetryConfig (Phase B Step 8) controls the OpenTelemetry exporter.
+type TelemetryConfig struct {
+	// Enabled toggles the OTel SDK. When false the server uses no-op
+	// tracer/meter providers and the legacy /metrics endpoint stays the
+	// only metrics surface.
+	Enabled bool `koanf:"enabled"`
+	// Exporter is "none" | "prometheus" | "otlp".
+	Exporter string `koanf:"exporter"`
+	// OTLPEndpoint is the gRPC endpoint when Exporter == "otlp".
+	OTLPEndpoint string `koanf:"otlp_endpoint"`
+	// ServiceName is the resource service.name attribute.
+	ServiceName string `koanf:"service_name"`
+}
+
+// PluginsConfig (Phase C Step 9) controls the Wazero plugin runtime.
+type PluginsConfig struct {
+	// Enabled toggles plugin loading at startup.
+	Enabled bool `koanf:"enabled"`
+	// Directory is the on-disk directory scanned for plugin packages.
+	Directory string `koanf:"directory"`
+	// MaxMemoryMB caps a single plugin's WASM linear memory.
+	MaxMemoryMB int `koanf:"max_memory_mb"`
+	// CPUBudgetMs caps a single plugin invocation's CPU time.
+	CPUBudgetMs int `koanf:"cpu_budget_ms"`
+	// HTTPAllowlist enumerates host suffixes plugins may reach via host_http.
+	HTTPAllowlist []string `koanf:"http_allowlist"`
 }
 
 // GitHubConfig holds GitHub API settings for update checking.
@@ -138,6 +185,25 @@ func defaults() Config {
 			Quality:    "medium",
 		},
 		GitHub: GitHubConfig{},
+		EventPersistence: EventPersistenceConfig{
+			Enabled:               true,
+			RetentionHours:        24,
+			BatchSize:             50,
+			BatchFlushMs:          100,
+			PrunerIntervalMinutes: 60,
+		},
+		Telemetry: TelemetryConfig{
+			Enabled:     false,
+			Exporter:    "none",
+			ServiceName: "owncord-server",
+		},
+		Plugins: PluginsConfig{
+			Enabled:       false,
+			Directory:     "data/plugins",
+			MaxMemoryMB:   64,
+			CPUBudgetMs:   100,
+			HTTPAllowlist: []string{},
+		},
 	}
 }
 

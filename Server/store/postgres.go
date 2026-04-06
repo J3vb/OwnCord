@@ -574,6 +574,70 @@ func (s *PostgresStore) GetAllSettings() (map[string]string, error) {
 	return nil, ErrPostgresNotImplemented
 }
 
+// ── EventStore (stubs — Phase B Step 7) ─────────────────────────────────────
+
+func (s *PostgresStore) PersistEvent(ctx context.Context, eventType string, channelID int64, payload []byte) (int64, error) {
+	return 0, ErrPostgresNotImplemented
+}
+
+func (s *PostgresStore) GetEventsSince(ctx context.Context, afterSeq int64, limit int) ([]db.PersistedEvent, error) {
+	return nil, ErrPostgresNotImplemented
+}
+
+func (s *PostgresStore) GetEventsSinceForChannels(ctx context.Context, afterSeq int64, channelIDs []int64, limit int) ([]db.PersistedEvent, error) {
+	return nil, ErrPostgresNotImplemented
+}
+
+func (s *PostgresStore) PruneEventsOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
+	return 0, ErrPostgresNotImplemented
+}
+
+// ── PluginStore (stubs — Phase C Step 9) ────────────────────────────────────
+
+func (s *PostgresStore) InstallPlugin(ctx context.Context, name, version, manifestJSON string) (int64, error) {
+	return 0, ErrPostgresNotImplemented
+}
+
+func (s *PostgresStore) EnablePlugin(ctx context.Context, id int64) error {
+	return ErrPostgresNotImplemented
+}
+
+func (s *PostgresStore) DisablePlugin(ctx context.Context, id int64) error {
+	return ErrPostgresNotImplemented
+}
+
+func (s *PostgresStore) UninstallPlugin(ctx context.Context, id int64) error {
+	return ErrPostgresNotImplemented
+}
+
+func (s *PostgresStore) GetPlugin(ctx context.Context, id int64) (*db.PluginRow, error) {
+	return nil, ErrPostgresNotImplemented
+}
+
+func (s *PostgresStore) GetPluginByName(ctx context.Context, name string) (*db.PluginRow, error) {
+	return nil, ErrPostgresNotImplemented
+}
+
+func (s *PostgresStore) ListPlugins(ctx context.Context) ([]db.PluginRow, error) {
+	return nil, ErrPostgresNotImplemented
+}
+
+func (s *PostgresStore) PluginKVGet(ctx context.Context, pluginID int64, key string) ([]byte, error) {
+	return nil, ErrPostgresNotImplemented
+}
+
+func (s *PostgresStore) PluginKVSet(ctx context.Context, pluginID int64, key string, value []byte) error {
+	return ErrPostgresNotImplemented
+}
+
+func (s *PostgresStore) PluginKVDelete(ctx context.Context, pluginID int64, key string) error {
+	return ErrPostgresNotImplemented
+}
+
+func (s *PostgresStore) PluginKVScan(ctx context.Context, pluginID int64, prefix string, limit int) (map[string][]byte, error) {
+	return nil, ErrPostgresNotImplemented
+}
+
 // Compile-time interface check — fails to compile if any Store method is
 // missing a PostgresStore receiver.
 var _ Store = (*PostgresStore)(nil)

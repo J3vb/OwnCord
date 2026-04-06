@@ -1,12 +1,14 @@
 package service
 
 import (
+	"context"
 	"sync"
 	"time"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/store"
+	"github.com/owncord/server/telemetry"
 )
 
 // cachedPerms holds a snapshot of a user's role and channel overrides.
@@ -44,6 +46,15 @@ func NewPermissionService(st store.Store, checker *permissions.Checker) *Permiss
 // HasChannelPerm reports whether the user has the required permission bits
 // on the given channel. Uses cached role/override data when available.
 func (s *PermissionService) HasChannelPerm(userID, channelID, perm int64) bool {
+	// Phase B Step 8 — span the perm check so traces show how many permission
+	// lookups a single REST/WS request triggers. The cache hit path is fast,
+	// but knowing how often it misses is the whole point of having metrics.
+	_, span := telemetry.GlobalTracer("service/permission").Start(context.Background(),
+		"PermissionService.HasChannelPerm",
+		telemetry.Int64("user_id", userID),
+		telemetry.Int64("channel_id", channelID),
+	)
+	defer span.End()
 	cp := s.getOrPopulate(userID)
 	if cp == nil {
 		return false
