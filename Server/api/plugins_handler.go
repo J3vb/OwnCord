@@ -7,6 +7,7 @@ package api
 
 import (
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -76,7 +77,11 @@ func (h *PluginAdminHandler) install(w http.ResponseWriter, r *http.Request) {
 	}
 	name, err := h.registry.InstallFromZip(r.Context(), body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		slog.Error("plugin install failed", "error", err)
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error:   "INSTALL_FAILED",
+			Message: "plugin installation failed",
+		})
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"name": name})
