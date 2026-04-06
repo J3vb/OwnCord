@@ -202,9 +202,13 @@ type SettingsStore interface {
 //
 // Phase B Step 7 — Event Persistence Layer.
 type EventStore interface {
-	// PersistEvent appends an event to the persistent log and returns the
-	// auto-assigned seq. channelID == 0 means the event was a global broadcast.
-	PersistEvent(ctx context.Context, eventType string, channelID int64, payload []byte) (int64, error)
+	// PersistEvent appends an event with the hub-assigned seq. seq must be
+	// the same monotonic counter the wrapped payload exposes to clients so
+	// that cold-replay queries by seq return rows whose payload seq matches
+	// the row seq. channelID == 0 means the event was a global broadcast.
+	// Implementations should be tolerant of out-of-order seq insertion (e.g.
+	// they SHOULD NOT rely on AUTOINCREMENT semantics).
+	PersistEvent(ctx context.Context, seq int64, eventType string, channelID int64, payload []byte) error
 
 	// GetEventsSince returns up to limit events with seq > afterSeq, ordered
 	// by seq ascending. Used as a fallback after the ring buffer misses.
@@ -218,6 +222,12 @@ type EventStore interface {
 	// PruneEventsOlderThan deletes events with created_at < cutoff. Returns the
 	// number of deleted rows. Called periodically by the pruner goroutine.
 	PruneEventsOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
+
+	// GetMaxEventSeq returns the largest seq in the events table, or 0 if the
+	// table is empty. Used at startup to seed the hub's in-memory monotonic
+	// counter so wrapped-payload seqs stay aligned with row seqs across
+	// restarts. Returns 0 (without error) when the table is empty.
+	GetMaxEventSeq(ctx context.Context) (int64, error)
 }
 
 // PluginStore manages installed plugins and per-plugin KV namespaces.

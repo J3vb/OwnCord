@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -11,21 +12,19 @@ import (
 
 // ── EventStore (Phase B Step 7) ─────────────────────────────────────────────
 
-// PersistEvent appends a single event to the events table and returns the
-// auto-assigned seq.
-func (s *SQLiteStore) PersistEvent(ctx context.Context, eventType string, channelID int64, payload []byte) (int64, error) {
-	res, err := s.db.SQLDb().ExecContext(ctx,
-		`INSERT INTO events (event_type, channel_id, payload) VALUES (?, ?, ?)`,
-		eventType, channelID, payload,
+// PersistEvent appends a single event to the events table with the
+// caller-supplied seq. The hub assigns seq before this is called so the row
+// seq always matches the wrapped-payload seq, even if the persister drops
+// some events under load.
+func (s *SQLiteStore) PersistEvent(ctx context.Context, seq int64, eventType string, channelID int64, payload []byte) error {
+	_, err := s.db.SQLDb().ExecContext(ctx,
+		`INSERT INTO events (seq, event_type, channel_id, payload) VALUES (?, ?, ?, ?)`,
+		seq, eventType, channelID, payload,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("PersistEvent: %w", err)
+		return fmt.Errorf("PersistEvent: %w", err)
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return 0, fmt.Errorf("PersistEvent LastInsertId: %w", err)
-	}
-	return id, nil
+	return nil
 }
 
 // GetEventsSince returns events with seq > afterSeq up to limit, ordered ASC.
@@ -90,6 +89,19 @@ func (s *SQLiteStore) GetEventsSinceForChannels(ctx context.Context, afterSeq in
 	}
 	defer rows.Close()
 	return scanEventRows(rows)
+}
+
+// GetMaxEventSeq returns the largest seq in the events table, or 0 if empty.
+func (s *SQLiteStore) GetMaxEventSeq(ctx context.Context) (int64, error) {
+	var maxSeq sql.NullInt64
+	err := s.db.SQLDb().QueryRowContext(ctx, `SELECT MAX(seq) FROM events`).Scan(&maxSeq)
+	if err != nil {
+		return 0, fmt.Errorf("GetMaxEventSeq: %w", err)
+	}
+	if !maxSeq.Valid {
+		return 0, nil
+	}
+	return maxSeq.Int64, nil
 }
 
 // PruneEventsOlderThan deletes events older than cutoff. Returns rows deleted.

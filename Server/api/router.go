@@ -16,6 +16,7 @@ import (
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/plugin"
 	"github.com/owncord/server/service"
 	"github.com/owncord/server/storage"
 	dbstore "github.com/owncord/server/store"
@@ -27,7 +28,10 @@ import (
 // NewRouter builds and returns the fully configured HTTP handler, the
 // WebSocket hub (so the caller can call hub.GracefulStop on shutdown), and a
 // cleanup function that stops background goroutines (e.g. rate-limiter cleanup).
-func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.RingBuffer) (http.Handler, *ws.Hub, func()) {
+//
+// pluginRegistry may be nil — in that case the plugin admin endpoints respond
+// with 503 on lifecycle calls and an empty list on read.
+func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.RingBuffer, pluginRegistry *plugin.Registry) (http.Handler, *ws.Hub, func()) {
 	r := chi.NewRouter()
 
 	// Middleware stack.
@@ -225,11 +229,17 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		r.Use(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
 		r.Mount("/admin", adminHandler)
 
-		// Phase C Step 9 — plugin admin REST surface. Mounted alongside the
-		// admin panel so it inherits the same network ACL. Plugin runtime is
-		// owned by main.go; the handler accepts a nil registry and reports
-		// 503 on lifecycle calls when plugin support is disabled.
-		r.Mount("/api/v1/admin/plugins", NewPluginAdminHandler(nil, st))
+		// Phase C Step 9 — plugin admin REST surface. The IP gate above is
+		// only the outer perimeter; plugin lifecycle endpoints additionally
+		// require a valid admin Bearer token via admin.RequireAdminAuth so a
+		// LAN attacker on the allowed CIDR cannot install/enable plugins
+		// without a session. The handler is wired with the live registry
+		// constructed in main.go (nil when plugin support is disabled, in
+		// which case lifecycle calls return 503 and list returns []).
+		r.Group(func(r chi.Router) {
+			r.Use(admin.RequireAdminAuth(database))
+			r.Mount("/api/v1/admin/plugins", NewPluginAdminHandler(pluginRegistry, st))
+		})
 	})
 
 	// Client auto-update endpoint (unauthenticated).

@@ -42,7 +42,7 @@ type Hub struct {
 	registry     *HandlerRegistry
 	permChecker  *permissions.Checker
 
-	pubsub      *PubSub           // topic-based pub/sub for O(subscribers) broadcast
+	pubsub       *PubSub           // topic-based pub/sub for O(subscribers) broadcast
 	topicLimiter *TopicRateLimiter // per-topic throughput caps
 
 	seq            uint64           // atomic monotonic sequence counter
@@ -548,7 +548,7 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 	// Store DM event for reconnect replay; filtering is channel-based and uses
 	// allowed channel IDs computed at auth time (including open DMs).
 	h.replayBuf.Push(seq, channelID, wrapped)
-	h.persistEvent(channelID, wrapped)
+	h.persistEvent(seq, channelID, wrapped)
 
 	for _, userID := range userIDs {
 		h.SendToUser(userID, wrapped)
@@ -563,7 +563,7 @@ func (h *Hub) sendSequencedToUsersHigh(channelID int64, userIDs []int64, msg []b
 	seq := h.nextSeq()
 	wrapped := wrapWithSeq(msg, seq)
 	h.replayBuf.Push(seq, channelID, wrapped)
-	h.persistEvent(channelID, wrapped)
+	h.persistEvent(seq, channelID, wrapped)
 
 	for _, userID := range userIDs {
 		h.SendToUserHigh(userID, wrapped)
@@ -619,6 +619,22 @@ func (h *Hub) ReplayBuffer() *EventRingBuffer {
 	return h.replayBuf
 }
 
+// SeedSeq sets the hub's monotonic sequence counter to seed (atomic). Used
+// at startup to align in-memory seqs with the persisted MAX(events.seq) so
+// wrapped-payload seqs stay monotonic across restarts. Calling SeedSeq with
+// a value less than the current seq is a no-op (we never go backwards).
+func (h *Hub) SeedSeq(seed uint64) {
+	for {
+		cur := atomic.LoadUint64(&h.seq)
+		if seed <= cur {
+			return
+		}
+		if atomic.CompareAndSwapUint64(&h.seq, cur, seed) {
+			return
+		}
+	}
+}
+
 // SetEventPersister attaches a persister so subsequent broadcasts are also
 // written to the persistent EventStore. Pass nil to disable.
 func (h *Hub) SetEventPersister(p *EventPersister) {
@@ -639,8 +655,11 @@ func (h *Hub) ReconnectTierStats() (buffer, db, full uint64) {
 }
 
 // persistEvent enqueues a broadcast event for cold-storage persistence. Safe
-// to call with a nil persister; never blocks the broadcast hot path.
-func (h *Hub) persistEvent(channelID int64, payload []byte) {
+// to call with a nil persister; never blocks the broadcast hot path. seq is
+// the same hub-assigned monotonic counter embedded in payload, so the row
+// written to the EventStore has a row-seq that matches the wrapped-payload
+// seq the client tracks.
+func (h *Hub) persistEvent(seq uint64, channelID int64, payload []byte) {
 	if h.eventPersister == nil {
 		return
 	}
@@ -648,7 +667,7 @@ func (h *Hub) persistEvent(channelID int64, payload []byte) {
 	if channelID != 0 {
 		eventType = "channel_broadcast"
 	}
-	h.eventPersister.Enqueue(eventType, channelID, payload)
+	h.eventPersister.Enqueue(int64(seq), eventType, channelID, payload)
 }
 
 // wrapWithSeq injects a "seq" field into a JSON message without re-serializing.
@@ -800,7 +819,7 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 
 	// Store in replay buffer for reconnection recovery.
 	h.replayBuf.Push(seq, bm.channelID, msg)
-	h.persistEvent(bm.channelID, msg)
+	h.persistEvent(seq, bm.channelID, msg)
 
 	if bm.channelID == 0 {
 		// Global broadcast — deliver to every connected client.

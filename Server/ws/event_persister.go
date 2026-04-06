@@ -19,7 +19,10 @@ import (
 )
 
 // pendingEvent is a single event waiting to be flushed to the EventStore.
+// seq carries the hub-assigned monotonic sequence so the row written to the
+// store has the same seq as the wrapped payload sent to clients.
 type pendingEvent struct {
+	seq       int64
 	eventType string
 	channelID int64
 	payload   []byte
@@ -32,9 +35,11 @@ type EventPersister struct {
 	batchSize int
 	flushEvy  time.Duration
 
-	stopOnce sync.Once
-	stop     chan struct{}
-	done     chan struct{}
+	startOnce sync.Once
+	started   atomic.Bool
+	stopOnce  sync.Once
+	stop      chan struct{}
+	done      chan struct{}
 
 	persisted atomic.Uint64
 	dropped   atomic.Uint64
@@ -65,13 +70,21 @@ func NewEventPersister(s store.EventStore, queueSize, batchSize int, flushEvery 
 	}
 }
 
-// Start launches the background flusher goroutine.
+// Start launches the background flusher goroutine. Idempotent — calling
+// Start more than once is a no-op so test setups that share a persister
+// across cases don't spawn duplicate runners.
 func (p *EventPersister) Start(ctx context.Context) {
-	go p.run(ctx)
+	p.startOnce.Do(func() {
+		p.started.Store(true)
+		go p.run(ctx)
+	})
 }
 
 // Enqueue queues an event for persistence. Non-blocking; drops on full queue.
-func (p *EventPersister) Enqueue(eventType string, channelID int64, payload []byte) {
+// seq is the hub-assigned monotonic sequence for this event — it must be the
+// same value embedded in the wrapped payload so reconnect replay returns rows
+// whose row-seq matches the payload-seq the client tracks.
+func (p *EventPersister) Enqueue(seq int64, eventType string, channelID int64, payload []byte) {
 	if p == nil {
 		return
 	}
@@ -79,19 +92,25 @@ func (p *EventPersister) Enqueue(eventType string, channelID int64, payload []by
 	cp := make([]byte, len(payload))
 	copy(cp, payload)
 	select {
-	case p.queue <- pendingEvent{eventType: eventType, channelID: channelID, payload: cp}:
+	case p.queue <- pendingEvent{seq: seq, eventType: eventType, channelID: channelID, payload: cp}:
 	default:
 		p.dropped.Add(1)
 	}
 }
 
 // Stop signals the persister to drain remaining events and exit. Blocks until
-// the goroutine exits or ctx is cancelled.
+// the goroutine exits or ctx is cancelled. Safe to call without a prior
+// Start: in that case there's no goroutine to wait for and Stop returns
+// immediately after closing the stop channel.
 func (p *EventPersister) Stop(ctx context.Context) {
 	if p == nil {
 		return
 	}
 	p.stopOnce.Do(func() { close(p.stop) })
+	if !p.started.Load() {
+		// run() was never launched, so done will never be closed.
+		return
+	}
 	select {
 	case <-p.done:
 	case <-ctx.Done():
@@ -115,10 +134,10 @@ func (p *EventPersister) run(ctx context.Context) {
 		}
 		p.flushes.Add(1)
 		for _, evt := range batch {
-			if _, err := p.store.PersistEvent(ctx, evt.eventType, evt.channelID, evt.payload); err != nil {
+			if err := p.store.PersistEvent(ctx, evt.seq, evt.eventType, evt.channelID, evt.payload); err != nil {
 				p.errors.Add(1)
 				slog.Warn("event persister: PersistEvent failed",
-					"event_type", evt.eventType, "channel_id", evt.channelID, "err", err)
+					"seq", evt.seq, "event_type", evt.eventType, "channel_id", evt.channelID, "err", err)
 				continue
 			}
 			p.persisted.Add(1)
