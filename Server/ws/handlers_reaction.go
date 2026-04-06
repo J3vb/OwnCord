@@ -2,10 +2,8 @@ package ws
 
 import (
 	"context"
-	"fmt"
-	"log/slog"
 
-	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/service"
 )
 
 // registerReactionHandlers registers reaction_add and reaction_remove V2 handlers.
@@ -33,90 +31,27 @@ func reactionV2Handler(add bool) HandlerV2 {
 			emoji = c.Emoji()
 		}
 
-		// Rate limit.
-		ratKey := fmt.Sprintf("reaction:%d", userID)
-		if d.Limiter != nil && !d.Limiter.Allow(ratKey, reactionRateLimit, reactionWindow) {
-			return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many reactions"}}
-		}
-
-		// Validate fields.
-		if msgID <= 0 {
-			return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "message_id must be positive integer"}}
-		}
-		if emoji == "" {
-			return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "emoji cannot be empty"}}
-		}
-		if len(emoji) > 32 {
-			return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "emoji too long"}}
-		}
-		// Reject control characters (U+0000-U+001F, U+007F) to prevent injection.
-		for _, r := range emoji {
-			if r < 0x20 || r == 0x7F {
-				return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "emoji contains invalid characters"}}
-			}
-		}
-		// Sanitize HTML to prevent stored XSS via emoji field.
-		if sanitized := sanitizer.Sanitize(emoji); sanitized != emoji {
-			return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "emoji contains invalid characters"}}
-		}
-
-		// Look up message.
-		msg, err := d.DB.GetMessage(msgID)
-		if err != nil || msg == nil {
-			// Normalize: same error whether message doesn't exist or is in a
-			// channel the user can't see (prevents IDOR information leak).
-			return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "reaction failed"}}
-		}
-
-		// BUG-126: Reject reactions on soft-deleted messages.
-		if msg.Deleted {
-			return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "reaction failed"}}
-		}
-
-		// Check channel type for DM-aware permission handling.
-		reactCh, chErr := d.DB.GetChannel(msg.ChannelID)
-		reactIsDM := chErr == nil && reactCh != nil && reactCh.Type == "dm"
-
-		if reactIsDM {
-			ok, dmErr := d.DB.IsDMParticipant(userID, msg.ChannelID)
-			if dmErr != nil || !ok {
-				return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "reaction failed"}}
-			}
-		} else {
-			if denied := requirePerm(d.DB, d.Permissions, userID, msg.ChannelID, permissions.AddReactions, "ADD_REACTIONS"); denied != nil {
-				return *denied
-			}
-		}
-
-		// Execute reaction.
-		action := "add"
+		var result *service.ReactionResult
+		var err error
 		if add {
-			err = d.DB.AddReaction(msgID, userID, emoji)
+			result, err = d.MessageSvc.AddReaction(userID, msgID, emoji)
 		} else {
-			action = "remove"
-			err = d.DB.RemoveReaction(msgID, userID, emoji)
+			result, err = d.MessageSvc.RemoveReaction(userID, msgID, emoji)
 		}
 		if err != nil {
-			// Sanitize: never leak raw DB constraint errors to client.
-			slog.Warn("reaction failed", "action", action, "msg_id", msgID, "user_id", userID, "err", err)
-			return Result{Error: ClientError{Code: ErrCodeConflict, Message: "reaction failed"}}
+			return serviceErrorToResult(err)
 		}
 
-		reactionPayload := buildReactionUpdate(msgID, msg.ChannelID, userID, emoji, action)
-		if reactIsDM {
-			participantIDs, pErr := d.DB.GetDMParticipantIDs(msg.ChannelID)
-			if pErr != nil {
-				slog.Error("reactionV2Handler GetDMParticipantIDs", "err", pErr, "channel_id", msg.ChannelID)
-				return Result{}
-			}
+		reactionPayload := buildReactionUpdate(result.MessageID, result.ChannelID, result.UserID, result.Emoji, result.Action)
+		if result.IsDM {
 			return Result{Events: []Event{ReactionDMEvent{
-				channelID:      msg.ChannelID,
-				participantIDs: participantIDs,
+				channelID:      result.ChannelID,
+				participantIDs: result.ParticipantIDs,
 				payload:        reactionPayload,
 			}}}
 		}
 		return Result{Events: []Event{ReactionChannelEvent{
-			channelID: msg.ChannelID,
+			channelID: result.ChannelID,
 			payload:   reactionPayload,
 		}}}
 	}

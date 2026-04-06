@@ -6,6 +6,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/service"
 )
 
 // ClientInfo holds a read-only snapshot of client state for V2 handlers.
@@ -30,23 +31,19 @@ type PingDeps struct {
 
 // ChatDeps holds dependencies for chat handlers.
 type ChatDeps struct {
-	DB          *db.DB
-	Limiter     *auth.RateLimiter
-	Permissions *permissions.Checker
+	Limiter    *auth.RateLimiter
+	MessageSvc *service.MessageService
 }
 
 // PresenceDeps holds dependencies for presence, typing, and channel focus handlers.
 type PresenceDeps struct {
-	DB          *db.DB
-	Limiter     *auth.RateLimiter
-	Permissions *permissions.Checker
+	Limiter    *auth.RateLimiter
+	ChannelSvc *service.ChannelService
 }
 
 // ReactionDeps holds dependencies for reaction handlers.
 type ReactionDeps struct {
-	DB          *db.DB
-	Limiter     *auth.RateLimiter
-	Permissions *permissions.Checker
+	MessageSvc *service.MessageService
 }
 
 // VoiceTokenGenerator generates LiveKit access tokens. Abstracted so V2

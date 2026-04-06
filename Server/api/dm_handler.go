@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/service"
 )
 
 // DMBroadcaster is the interface needed to send WebSocket events from REST
@@ -19,20 +20,20 @@ type DMBroadcaster interface {
 // MountDMRoutes registers DM-related routes onto r.
 // All routes require authentication.
 // hub is used to send real-time WebSocket events on DM close.
-func MountDMRoutes(r chi.Router, database *db.DB, broadcaster DMBroadcaster) {
+func MountDMRoutes(r chi.Router, database *db.DB, svc *service.Services, broadcaster DMBroadcaster) {
 	r.Route("/api/v1/dms", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
-		r.Post("/", handleCreateDM(database))
-		r.Get("/", handleListDMs(database))
-		r.Delete("/{channelId}", handleCloseDM(database, broadcaster))
+		r.Post("/", handleCreateDM(svc))
+		r.Get("/", handleListDMs(svc))
+		r.Delete("/{channelId}", handleCloseDM(svc, broadcaster))
 	})
 
 	// User blocking routes — prevent DM creation and messaging.
 	r.Route("/api/v1/blocks", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
-		r.Get("/", handleListBlocks(database))
-		r.Put("/{userId}", handleBlockUser(database))
-		r.Delete("/{userId}", handleUnblockUser(database))
+		r.Get("/", handleListBlocks(svc))
+		r.Put("/{userId}", handleBlockUser(svc))
+		r.Delete("/{userId}", handleUnblockUser(svc))
 	})
 }
 
@@ -54,13 +55,12 @@ type listDMsResponse struct {
 }
 
 // handleCreateDM creates or retrieves a DM channel with a recipient.
-func handleCreateDM(database *db.DB) http.HandlerFunc {
+func handleCreateDM(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "authentication required",
+				Error: "UNAUTHORIZED", Message: "authentication required",
 			})
 			return
 		}
@@ -68,137 +68,67 @@ func handleCreateDM(database *db.DB) http.HandlerFunc {
 		var req createDMRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: "invalid request body",
+				Error: "BAD_REQUEST", Message: "invalid request body",
 			})
 			return
 		}
 
-		if req.RecipientID <= 0 {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: "recipient_id must be a positive integer",
-			})
-			return
-		}
-
-		// Cannot DM yourself.
-		if req.RecipientID == user.ID {
-			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "BAD_REQUEST",
-				Message: "cannot create a DM with yourself",
-			})
-			return
-		}
-
-		// Verify recipient exists.
-		recipient, err := database.GetUserByID(req.RecipientID)
+		result, err := svc.DMs.CreateDM(user.ID, req.RecipientID)
 		if err != nil {
-			slog.Error("handleCreateDM GetUserByID", "err", err, "recipient_id", req.RecipientID)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to look up recipient",
-			})
-			return
-		}
-		if recipient == nil {
-			writeJSON(w, http.StatusNotFound, errorResponse{
-				Error:   "NOT_FOUND",
-				Message: "recipient not found",
-			})
+			writeServiceError(w, err)
 			return
 		}
 
-		// Check if either user has blocked the other.
-		blocked, blockErr := database.IsEitherBlocked(user.ID, req.RecipientID)
-		if blockErr != nil {
-			slog.Error("handleCreateDM IsEitherBlocked", "err", blockErr,
-				"user_id", user.ID, "recipient_id", req.RecipientID)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to check block status",
-			})
-			return
-		}
-		if blocked {
-			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error:   "BLOCKED",
-				Message: "cannot create DM with this user",
-			})
-			return
-		}
-
-		// Get or create the DM channel.
-		ch, created, err := database.GetOrCreateDMChannel(user.ID, req.RecipientID) //nolint:contextcheck // TODO: propagate context through this call path
-		if err != nil {
-			slog.Error("handleCreateDM GetOrCreateDMChannel", "err", err,
-				"user_id", user.ID, "recipient_id", req.RecipientID)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to create DM channel",
-			})
-			return
-		}
-
-		// Build the recipient DMUser from the fetched user.
 		avatarStr := ""
-		if recipient.Avatar != nil {
-			avatarStr = *recipient.Avatar
+		if result.Recipient.Avatar != nil {
+			avatarStr = *result.Recipient.Avatar
 		}
 		dmUser := db.DMUser{
-			ID:       recipient.ID,
-			Username: recipient.Username,
+			ID:       result.Recipient.ID,
+			Username: result.Recipient.Username,
 			Avatar:   avatarStr,
-			Status:   recipient.Status,
+			Status:   result.Recipient.Status,
 		}
 
 		status := http.StatusOK
-		if created {
+		if result.Created {
 			status = http.StatusCreated
 		}
-
 		writeJSON(w, status, createDMResponse{
-			ChannelID: ch.ID,
+			ChannelID: result.Channel.ID,
 			Recipient: dmUser,
-			Created:   created,
+			Created:   result.Created,
 		})
 	}
 }
 
 // handleListDMs returns all open DM channels for the authenticated user.
-func handleListDMs(database *db.DB) http.HandlerFunc {
+func handleListDMs(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "authentication required",
+				Error: "UNAUTHORIZED", Message: "authentication required",
 			})
 			return
 		}
 
-		channels, err := database.GetUserDMChannels(user.ID)
+		channels, err := svc.DMs.ListDMs(user.ID)
 		if err != nil {
-			slog.Error("handleListDMs GetUserDMChannels", "err", err, "user_id", user.ID)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to list DM channels",
-			})
+			writeServiceError(w, err)
 			return
 		}
-
 		writeJSON(w, http.StatusOK, listDMsResponse{DMChannels: channels})
 	}
 }
 
 // handleCloseDM removes a DM channel from the authenticated user's open list.
-func handleCloseDM(database *db.DB, broadcaster DMBroadcaster) http.HandlerFunc {
+func handleCloseDM(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "authentication required",
+				Error: "UNAUTHORIZED", Message: "authentication required",
 			})
 			return
 		}
@@ -208,45 +138,81 @@ func handleCloseDM(database *db.DB, broadcaster DMBroadcaster) http.HandlerFunc 
 			return
 		}
 
-		// Verify user is a participant in this DM.
-		isParticipant, err := database.IsDMParticipant(user.ID, channelID)
-		if err != nil {
-			slog.Error("handleCloseDM IsDMParticipant", "err", err,
-				"user_id", user.ID, "channel_id", channelID)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to verify DM participation",
-			})
-			return
-		}
-		if !isParticipant {
-			writeJSON(w, http.StatusNotFound, errorResponse{
-				Error:   "NOT_FOUND",
-				Message: "channel not found",
-			})
+		if err := svc.DMs.CloseDM(user.ID, channelID); err != nil {
+			writeServiceError(w, err)
 			return
 		}
 
-		if err := database.CloseDM(user.ID, channelID); err != nil {
-			slog.Error("handleCloseDM CloseDM", "err", err,
-				"user_id", user.ID, "channel_id", channelID)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to close DM",
-			})
-			return
-		}
-
-		// Notify the closing user's WebSocket connections so the sidebar updates
-		// immediately without waiting for a reconnect.
+		// Notify via WebSocket so sidebar updates immediately.
 		if broadcaster != nil {
 			closeMsg := []byte(fmt.Sprintf(`{"type":"dm_channel_close","payload":{"channel_id":%d}}`, channelID))
 			if ok := broadcaster.SendToUser(user.ID, closeMsg); !ok {
-				slog.Debug("handleCloseDM: user not connected, WS notify skipped",
-					"user_id", user.ID, "channel_id", channelID)
+				slog.Debug("handleCloseDM: user not connected", "user_id", user.ID, "channel_id", channelID)
 			}
 		}
 
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// handleBlockUser blocks a user.
+func handleBlockUser(svc *service.Services) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, _ := r.Context().Value(UserKey).(*db.User)
+		if user == nil {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "authentication required"})
+			return
+		}
+
+		targetID, ok := parseIDParam(w, r, "userId")
+		if !ok {
+			return
+		}
+
+		if err := svc.Blocks.BlockUser(user.ID, targetID); err != nil {
+			writeServiceError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"message": "user blocked"})
+	}
+}
+
+// handleUnblockUser unblocks a user.
+func handleUnblockUser(svc *service.Services) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, _ := r.Context().Value(UserKey).(*db.User)
+		if user == nil {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "authentication required"})
+			return
+		}
+
+		targetID, ok := parseIDParam(w, r, "userId")
+		if !ok {
+			return
+		}
+
+		if err := svc.Blocks.UnblockUser(user.ID, targetID); err != nil {
+			writeServiceError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"message": "user unblocked"})
+	}
+}
+
+// handleListBlocks returns all blocked user IDs.
+func handleListBlocks(svc *service.Services) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, _ := r.Context().Value(UserKey).(*db.User)
+		if user == nil {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "authentication required"})
+			return
+		}
+
+		ids, err := svc.Blocks.ListBlocked(user.ID)
+		if err != nil {
+			writeServiceError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"blocked_user_ids": ids})
 	}
 }

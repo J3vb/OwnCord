@@ -55,8 +55,31 @@ type ServerConfig struct {
 }
 
 // DatabaseConfig holds database settings.
+//
+// Type selects the backend: "sqlite" (default, zero-config) or "postgres"
+// (community-hub scale, requires a running PostgreSQL server). The Path field
+// is only used by sqlite. The remaining fields apply to postgres only.
+//
+// PostgreSQL support is currently scaffolding-only: the schema, config plumbing,
+// and migrations are in place, but the store query layer is gated on the
+// in-progress sqlc adoption (Phase A Step 2). Setting Type to "postgres" will
+// cause the server to refuse to start with a clear error pointing at the
+// follow-up work — see Server/main.go.
 type DatabaseConfig struct {
+	// Type is "sqlite" or "postgres". Empty defaults to "sqlite".
+	Type string `koanf:"type"`
+
+	// Path is the SQLite database file path. Only used when Type == "sqlite".
 	Path string `koanf:"path"`
+
+	// PostgreSQL connection settings. Only used when Type == "postgres".
+	Host     string `koanf:"host"`
+	Port     int    `koanf:"port"`
+	User     string `koanf:"user"`
+	Password string `koanf:"password"`
+	Name     string `koanf:"name"`
+	SSLMode  string `koanf:"sslmode"`  // disable | require | verify-ca | verify-full
+	MaxConns int    `koanf:"max_conns"` // pgxpool max connections; 0 = pgxpool default
 }
 
 // TLSConfig holds TLS/certificate settings.
@@ -93,7 +116,12 @@ func defaults() Config {
 			},
 		},
 		Database: DatabaseConfig{
-			Path: "data/chatserver.db",
+			Type:    "sqlite",
+			Path:    "data/chatserver.db",
+			Host:    "localhost",
+			Port:    5432,
+			Name:    "owncord",
+			SSLMode: "disable",
 		},
 		TLS: TLSConfig{
 			Mode:         "self_signed",
@@ -129,7 +157,16 @@ server:
   #   - "192.168.0.0/16"
 
 database:
+  type: "sqlite"          # "sqlite" (default, zero-config) or "postgres"
   path: "data/chatserver.db"
+  # PostgreSQL settings (only used when type: "postgres"):
+  # host: "localhost"
+  # port: 5432
+  # user: "owncord"
+  # password: ""
+  # name: "owncord"
+  # sslmode: "disable"    # disable | require | verify-ca | verify-full
+  # max_conns: 0          # pgxpool connection cap (0 = pgx default)
 
 tls:
   mode: "self_signed"  # self_signed, acme, manual, off

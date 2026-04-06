@@ -71,7 +71,7 @@ func newHandlerHub(t *testing.T) (*ws.Hub, *db.DB) {
 	t.Helper()
 	database := openHandlerDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 	return hub, database

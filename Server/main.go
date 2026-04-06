@@ -84,6 +84,32 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 	printBanner(cfg, version, tlsCfg != nil)
 
 	// ── 4. Open database + run migrations ─────────────────────────────────
+	// The Phase A plan calls for two backends (sqlite, postgres) selected via
+	// config. SQLite is the only backend currently wired through the *db.DB
+	// type. The PostgreSQL scaffolding is in place (schema under
+	// Server/migrations/postgres, sqlc query files under
+	// Server/db/queries/postgres, PostgresStore behind the `postgres` build
+	// tag in Server/store/postgres.go), but PostgresStore's query methods
+	// are still stubs and the handler boundary still passes *db.DB directly
+	// rather than store.Store. Until both of those land, selecting
+	// type: "postgres" refuses to start with a clear pointer at what's left.
+	switch dbType := cfg.Database.Type; dbType {
+	case "", "sqlite":
+		// fall through to the existing SQLite path
+	case "postgres":
+		return fmt.Errorf("database.type=postgres is configured, but the postgres " +
+			"backend is not yet wired into the runtime. PostgresStore exists at " +
+			"Server/store/postgres.go behind the `postgres` build tag, with connection " +
+			"lifecycle fully implemented but query methods stubbed. What's still " +
+			"pending: (1) run `make sqlc-generate` to produce Server/db/pgdbgen/, " +
+			"(2) replace the stub query methods in postgres.go with wrappers around " +
+			"pgdbgen, and (3) refactor api/router.go and this main.go to thread " +
+			"store.Store through the handler boundary instead of *db.DB. Until those " +
+			"land, set database.type to \"sqlite\" or omit it to start the server")
+	default:
+		return fmt.Errorf("database.type=%q is not recognised; expected \"sqlite\" or \"postgres\"", dbType)
+	}
+
 	database, err := db.Open(cfg.Database.Path)
 	if err != nil {
 		return fmt.Errorf("opening database: %w", err)

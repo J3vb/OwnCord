@@ -16,7 +16,9 @@ import (
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/service"
 	"github.com/owncord/server/storage"
+	dbstore "github.com/owncord/server/store"
 	"github.com/owncord/server/updater"
 	"github.com/owncord/server/ws"
 )
@@ -82,6 +84,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		// auto-generates a key when none exists.
 	}
 
+	// Service layer — centralizes business logic for REST and WS handlers.
+	st := dbstore.NewSQLiteStore(database)
+	svc := service.New(st, limiter)
+
 	// Auth routes: register, login, logout, me.
 	MountAuthRoutes(r, database, limiter, cfg.Server.TrustedProxies, totpKey)
 
@@ -89,10 +95,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// broadcast user_update events for real-time profile changes.
 
 	// Invite management routes (require MANAGE_INVITES permission).
-	MountInviteRoutes(r, database)
+	MountInviteRoutes(r, database, svc)
 
 	// Channel and message REST routes.
-	MountChannelRoutes(r, database, limiter, cfg.Server.TrustedProxies)
+	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies)
 
 	// DM REST routes are mounted after hub creation (below) so the hub can
 	// be passed as a DMBroadcaster for real-time close events.
@@ -108,11 +114,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	if storeErr != nil {
 		slog.Error("failed to create file storage", "error", storeErr)
 	} else {
-		MountUploadRoutes(r, database, store, limiter, cfg.Server.AllowedOrigins)
+		MountUploadRoutes(r, database, store, limiter, cfg.Server.AllowedOrigins, svc.Permissions)
 	}
 
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, svc)
 	getOnlineUsers = func() int { return hub.ClientCount() }
 
 	// Create LiveKit client if voice config is present; voice is disabled on failure.
@@ -171,11 +177,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// Profile routes: update profile, change password, session management.
 	// Mounted after hub creation so the hub can broadcast user_update events.
-	MountProfileRoutes(r, database, limiter, cfg.Server.TrustedProxies, hub)
+	MountProfileRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
 
 	// DM (direct message) REST routes — mounted after hub creation so the
 	// hub can send real-time dm_channel_close events to WebSocket clients.
-	MountDMRoutes(r, database, hub)
+	MountDMRoutes(r, database, svc, hub)
 
 	// H-8: Connectivity diagnostics restricted to admin users only.
 	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.
@@ -200,7 +206,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Admin panel: static files + REST API (Phase 6).
 	// Restrict /admin to configured CIDRs (default: private networks only).
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, "J3vb", "OwnCord")
-	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins)
+	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions)
 	r.Group(func(r chi.Router) {
 		r.Use(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
 		r.Mount("/admin", adminHandler)

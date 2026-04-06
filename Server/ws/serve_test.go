@@ -59,7 +59,7 @@ func newServeHub(t *testing.T) (*ws.Hub, *db.DB) {
 	t.Helper()
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 	return hub, database

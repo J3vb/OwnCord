@@ -13,6 +13,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/service"
 	"github.com/owncord/server/syncutil"
 )
 
@@ -40,6 +41,9 @@ type Hub struct {
 	registry     *HandlerRegistry
 	permChecker  *permissions.Checker
 
+	pubsub      *PubSub           // topic-based pub/sub for O(subscribers) broadcast
+	topicLimiter *TopicRateLimiter // per-topic throughput caps
+
 	seq            uint64           // atomic monotonic sequence counter
 	seqMu          syncutil.Mutex   // serializes seq assignment + replay insertion + delivery order
 	replayBuf      *EventRingBuffer // recent broadcast events for reconnection replay
@@ -60,7 +64,8 @@ type Hub struct {
 
 // NewHub creates a Hub ready to be started with Run.
 // It also initializes the settings cache from the database.
-func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
+// If svc is non-nil, V2 handlers receive service references for business logic delegation.
+func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *Hub {
 	reg := NewHandlerRegistry()
 	registerVoiceHandlersV1(reg)
 
@@ -72,6 +77,8 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
 		register:        make(chan *Client, 32),
 		unregister:      make(chan *Client, 32),
 		stop:            make(chan struct{}),
+		pubsub:          NewPubSub(),
+		topicLimiter:    NewTopicRateLimiter(topicRateLimitPerSecond, time.Second),
 		replayBuf:       NewEventRingBuffer(1000),
 		registry:        reg,
 		permChecker:     permissions.NewChecker(database),
@@ -82,21 +89,23 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
 
 	// V2 handler registrations (need Hub fields for deps).
 	registerPingHandler(reg, PingDeps{Limiter: h.limiter})
-	registerChatHandlers(reg, ChatDeps{
-		DB:          h.db,
-		Limiter:     h.limiter,
-		Permissions: h.permChecker,
-	})
-	registerPresenceHandlers(reg, PresenceDeps{
-		DB:          h.db,
-		Limiter:     h.limiter,
-		Permissions: h.permChecker,
-	})
-	registerReactionHandlers(reg, ReactionDeps{
-		DB:          h.db,
-		Limiter:     h.limiter,
-		Permissions: h.permChecker,
-	})
+
+	chatDeps := ChatDeps{
+		Limiter: h.limiter,
+	}
+	presenceDeps := PresenceDeps{
+		Limiter: h.limiter,
+	}
+	reactionDeps := ReactionDeps{}
+	if svc != nil {
+		chatDeps.MessageSvc = svc.Messages
+		presenceDeps.ChannelSvc = svc.Channels
+		reactionDeps.MessageSvc = svc.Messages
+	}
+
+	registerChatHandlers(reg, chatDeps)
+	registerPresenceHandlers(reg, presenceDeps)
+	registerReactionHandlers(reg, reactionDeps)
 	registerVoiceControlsV2(reg, VoiceDeps{
 		DB:          h.db,
 		Limiter:     h.limiter,
@@ -374,6 +383,9 @@ func (h *Hub) registerNow(c *Client) {
 		// by the handshake path in serve.go, which runs before registerNow.
 		// registerNow only handles in-memory client replacement.
 
+		// Remove the old client from all pub/sub topics before replacing.
+		h.pubsub.UnsubscribeAll(old)
+
 		// Kick the stale connection atomically before registering
 		// the new one — prevents TOCTOU races on duplicate login.
 		slog.Warn("hub: kicking stale connection for re-registering user",
@@ -383,17 +395,23 @@ func (h *Hub) registerNow(c *Client) {
 	h.clients[c.userID] = c
 	slog.Info("hub: client registered", "user_id", c.userID, "total_clients", len(h.clients))
 	h.mu.Unlock()
+
+	// Subscribe the new client to default pub/sub topics.
+	h.pubsub.Subscribe(c, TopicGlobal)
+	h.pubsub.Subscribe(c, UserTopic(c.userID))
 }
 
 func (h *Hub) unregisterNow(c *Client) bool {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	current, exists := h.clients[c.userID]
 	if exists && current == c {
 		delete(h.clients, c.userID)
 		slog.Info("hub: client unregistered", "user_id", c.userID, "total_clients", len(h.clients))
+		h.mu.Unlock()
+		h.pubsub.UnsubscribeAll(c)
 		return false // not replaced
 	}
+	h.mu.Unlock()
 	return true // different client registered = was replaced
 }
 
@@ -488,6 +506,26 @@ func (h *Hub) SendToUser(userID int64, msg []byte) bool {
 	return c.trySendMsg(msg)
 }
 
+// SendToUserHigh sends a high-priority message to a specific user.
+func (h *Hub) SendToUserHigh(userID int64, msg []byte) bool {
+	h.mu.RLock()
+	c, ok := h.clients[userID]
+	h.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	c.sendHighMsg(msg)
+	return true
+}
+
+// BroadcastToAllLow enqueues a low-priority global broadcast.
+// Low-priority messages are silently dropped if a client's buffer is full.
+func (h *Hub) BroadcastToAllLow(msg []byte) {
+	// Low-priority global broadcasts bypass the sequenced broadcast channel
+	// and go directly through pub/sub — they don't need replay or seq numbering.
+	h.pubsub.PublishGlobalLow(msg)
+}
+
 // sendSequencedToUsers stamps msg with a monotonic seq, stores it in the replay
 // buffer under channelID, and fanouts the wrapped payload to the provided users.
 func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
@@ -503,6 +541,20 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 
 	for _, userID := range userIDs {
 		h.SendToUser(userID, wrapped)
+	}
+}
+
+// sendSequencedToUsersHigh is like sendSequencedToUsers but uses high-priority delivery.
+func (h *Hub) sendSequencedToUsersHigh(channelID int64, userIDs []int64, msg []byte) {
+	h.seqMu.Lock()
+	defer h.seqMu.Unlock()
+
+	seq := h.nextSeq()
+	wrapped := wrapWithSeq(msg, seq)
+	h.replayBuf.Push(seq, channelID, wrapped)
+
+	for _, userID := range userIDs {
+		h.SendToUserHigh(userID, wrapped)
 	}
 }
 
@@ -541,6 +593,7 @@ func (h *Hub) kickClient(c *Client) {
 		delete(h.clients, c.userID)
 	}
 	h.mu.Unlock()
+	h.pubsub.UnsubscribeAll(c)
 	c.closeSend()
 }
 
@@ -573,6 +626,11 @@ func wrapWithSeq(msg []byte, seq uint64) []byte {
 // any message before being considered stale and disconnected. The client sends
 // a ping every 30s, so 90s (3x) gives plenty of margin.
 const staleClientTimeout = 90 * time.Second
+
+// topicRateLimitPerSecond is the default maximum messages per second for any
+// single channel topic. Prevents a busy channel from saturating the broadcast
+// loop and starving other channels.
+const topicRateLimitPerSecond = 100
 
 // sweepStaleClients iterates over all connected clients and kicks any that
 // have not sent a message within staleClientTimeout.
@@ -688,7 +746,7 @@ func (h *Hub) sweepStaleVoiceStates() {
 }
 
 // deliverBroadcast stamps bm.msg with a monotonic sequence number, stores it
-// in the replay buffer, and sends it to the appropriate clients.
+// in the replay buffer, and sends it to the appropriate clients via pub/sub.
 func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	h.seqMu.Lock()
 	defer h.seqMu.Unlock()
@@ -699,27 +757,19 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	// Store in replay buffer for reconnection recovery.
 	h.replayBuf.Push(seq, bm.channelID, msg)
 
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	delivered := 0
-	skipped := 0
-	for _, c := range h.clients {
-		// channelID == 0 → global broadcast, deliver to everyone.
-		// Otherwise, only deliver to clients viewing this channel
-		// (via channel_focus) or in voice on this channel.
-		// Clients that haven't focused any channel (channelID == 0)
-		// are intentionally excluded from channel-scoped broadcasts
-		// to prevent information leakage (BUG-122).
-		if bm.channelID != 0 && c.getChannelID() != bm.channelID && c.getVoiceChID() != bm.channelID {
-			skipped++
-			continue
+	if bm.channelID == 0 {
+		// Global broadcast — deliver to every connected client.
+		h.pubsub.PublishGlobal(msg)
+	} else {
+		// Channel-scoped broadcast — deliver to subscribers of the channel topic.
+		topic := ChannelTopic(bm.channelID)
+		if !h.topicLimiter.Allow(topic) {
+			slog.Warn("hub: topic rate limit exceeded, dropping message",
+				"channel_id", bm.channelID, "seq", seq)
+			return
 		}
-		c.sendMsg(msg)
-		delivered++
-	}
-	if bm.channelID != 0 {
+		delivered := h.pubsub.Publish(topic, msg, 0)
 		slog.Debug("hub: channel broadcast",
-			"channel_id", bm.channelID, "delivered", delivered, "skipped", skipped, "seq", seq)
+			"channel_id", bm.channelID, "delivered", delivered, "seq", seq)
 	}
 }
