@@ -37,7 +37,7 @@ func (s *ChannelService) ListVisibleChannels(userID int64) ([]db.Channel, error)
 	)
 	start := time.Now()
 	defer func() {
-		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationMs, start,
+		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
 			telemetry.String("method", "ListVisibleChannels"))
 		span.End()
 	}()

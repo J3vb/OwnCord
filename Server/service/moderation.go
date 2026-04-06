@@ -29,7 +29,7 @@ func (s *ModerationService) BanUser(actorID, targetID int64, reason string, expi
 	)
 	start := time.Now()
 	defer func() {
-		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationMs, start,
+		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
 			telemetry.String("method", "BanUser"))
 		span.End()
 	}()

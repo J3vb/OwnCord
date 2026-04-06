@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
@@ -71,15 +72,30 @@ type VoiceDeps struct {
 // ── V2 permission helpers ───────────────────────────────────────────────────
 
 // requirePerm checks a channel permission via DB lookups. Returns nil if
-// allowed, or a Result with a FORBIDDEN error. Used by V2 handlers that
-// cannot access the Hub's requireChannelPerm method.
+// allowed, or a Result carrying either an INTERNAL error (when the server
+// is misconfigured or a DB lookup fails) or a FORBIDDEN error (when the
+// permission bit is genuinely absent from the user's role). Previously
+// every branch returned FORBIDDEN, which hid operator-visible failures
+// behind a user-facing permission denial.
 func requirePerm(database *db.DB, perms *permissions.Checker, userID, channelID, perm int64, label string) *Result {
 	if database == nil || perms == nil {
-		r := Result{Error: ClientError{Code: ErrCodeForbidden, Message: "missing " + label + " permission"}}
+		// Missing dependency is a server bug, not a user ACL outcome. Log
+		// here so operators see something even when the client surfaces a
+		// generic error.
+		slog.Error("ws: requirePerm called with nil dependency",
+			"have_database", database != nil, "have_perms", perms != nil, "label", label)
+		r := Result{Error: ClientError{Code: ErrCodeInternal, Message: "permission check unavailable"}}
 		return &r
 	}
 	role, err := database.GetRoleForUser(userID)
-	if err != nil || role == nil {
+	if err != nil {
+		slog.Error("ws: requirePerm GetRoleForUser failed",
+			"user_id", userID, "channel_id", channelID, "err", err)
+		r := Result{Error: ClientError{Code: ErrCodeInternal, Message: "permission check failed"}}
+		return &r
+	}
+	if role == nil {
+		// No role row is a genuine ACL outcome (no role == no perms).
 		r := Result{Error: ClientError{Code: ErrCodeForbidden, Message: "missing " + label + " permission"}}
 		return &r
 	}

@@ -29,7 +29,7 @@ func (s *BlockService) BlockUser(blockerID, targetID int64) error {
 	)
 	start := time.Now()
 	defer func() {
-		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationMs, start,
+		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
 			telemetry.String("method", "BlockUser"))
 		span.End()
 	}()

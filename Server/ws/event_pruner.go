@@ -13,6 +13,13 @@ import (
 	"github.com/owncord/server/store"
 )
 
+// maxStartupDelay caps how long StartEventPruner waits before its first
+// prune pass. We want a short delay so a freshly started server with a
+// tiny dataset doesn't keep stale rows around for a full interval, but we
+// don't want the delay to exceed the interval itself (otherwise a server
+// running with interval=5s would wait longer than its own tick).
+const maxStartupDelay = time.Minute
+
 // StartEventPruner launches a goroutine that wakes every interval and deletes
 // events older than retention. The goroutine exits when ctx is cancelled.
 func StartEventPruner(ctx context.Context, s store.EventStore, retention, interval time.Duration) {
@@ -25,9 +32,15 @@ func StartEventPruner(ctx context.Context, s store.EventStore, retention, interv
 	if interval <= 0 {
 		interval = time.Hour
 	}
+	// Bound the startup delay by the interval so short test intervals
+	// (e.g. 100ms in event_pruner_test.go) don't wait a full minute.
+	startupDelayDuration := maxStartupDelay
+	if interval < startupDelayDuration {
+		startupDelayDuration = interval
+	}
 	go func() {
 		// Run once shortly after startup so a tiny dataset stays small.
-		startupDelay := time.NewTimer(time.Minute)
+		startupDelay := time.NewTimer(startupDelayDuration)
 		defer startupDelay.Stop()
 		select {
 		case <-ctx.Done():

@@ -76,7 +76,15 @@ func isUnsafeInlineMIME(mimeType string) bool {
 
 // MountUploadRoutes registers upload and file-serving endpoints.
 // allowedOrigins controls the Access-Control-Allow-Origin header on served files.
+//
+// permSvc MUST be non-nil — handleServeFile dereferences it to enforce
+// per-channel ACLs on every file download. A nil permSvc would panic for
+// any authenticated file request, so we fail fast at mount time rather
+// than let the first user hit a 500.
 func MountUploadRoutes(r chi.Router, database *db.DB, store *storage.Storage, limiter *auth.RateLimiter, allowedOrigins []string, permSvc *service.PermissionService) {
+	if permSvc == nil {
+		panic("api: MountUploadRoutes requires a non-nil PermissionService")
+	}
 	// Upload requires authentication and a higher body size limit (100 MB).
 	r.With(
 		AuthMiddleware(database),
