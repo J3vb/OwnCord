@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/plugin"
@@ -56,12 +57,24 @@ func (h *PluginAdminHandler) install(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid multipart upload: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	file, _, err := r.FormFile("plugin")
+	file, header, err := r.FormFile("plugin")
 	if err != nil {
 		http.Error(w, "missing 'plugin' file part", http.StatusBadRequest)
 		return
 	}
 	defer file.Close() //nolint:errcheck
+
+	// Reject obviously-wrong uploads early. The real defence is the zip
+	// reader inside InstallFromZip (content-type is client-supplied and must
+	// never be trusted for authorisation), but rejecting non-zip MIME types
+	// here returns a cleaner 400 than a "not a valid zip" error from deep
+	// inside the registry.
+	if header != nil {
+		if ct := header.Header.Get("Content-Type"); ct != "" && !isZipContentType(ct) {
+			http.Error(w, "plugin upload must be a .zip archive", http.StatusUnsupportedMediaType)
+			return
+		}
+	}
 
 	// Read the entire zip into memory — InstallFromZip needs an io.ReaderAt
 	// for archive/zip and the cap is small enough to be safe.
@@ -72,6 +85,13 @@ func (h *PluginAdminHandler) install(w http.ResponseWriter, r *http.Request) {
 	}
 	if int64(len(body)) > maxPluginUploadBytes {
 		http.Error(w, "plugin upload too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	// Magic-byte check: a real .zip starts with "PK\x03\x04" (local file
+	// header) or "PK\x05\x06" (empty archive). Anything else is definitively
+	// not a zip regardless of what the client labelled it.
+	if !hasZipMagic(body) {
+		http.Error(w, "plugin upload is not a valid zip archive", http.StatusBadRequest)
 		return
 	}
 	name, err := h.registry.InstallFromZip(r.Context(), body)
@@ -142,6 +162,37 @@ func (h *PluginAdminHandler) uninstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// isZipContentType reports whether ct looks like a zip MIME type. Both the
+// IANA-registered application/zip and the legacy application/x-zip-compressed
+// (used by some Windows clients) are accepted. The comparison is case-
+// insensitive and strips any parameters after a semicolon.
+func isZipContentType(ct string) bool {
+	for i := 0; i < len(ct); i++ {
+		if ct[i] == ';' {
+			ct = ct[:i]
+			break
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(ct)) {
+	case "application/zip", "application/x-zip-compressed", "application/octet-stream":
+		return true
+	}
+	return false
+}
+
+// hasZipMagic reports whether b begins with the PK signature used by every
+// .zip archive. Empty archives use 0x50,0x4b,0x05,0x06; non-empty archives
+// start with a local file header 0x50,0x4b,0x03,0x04. Both are accepted.
+func hasZipMagic(b []byte) bool {
+	if len(b) < 4 {
+		return false
+	}
+	if b[0] != 'P' || b[1] != 'K' {
+		return false
+	}
+	return (b[2] == 0x03 && b[3] == 0x04) || (b[2] == 0x05 && b[3] == 0x06)
 }
 
 func parsePluginID(w http.ResponseWriter, r *http.Request) (int64, bool) {

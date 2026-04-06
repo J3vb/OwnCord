@@ -34,33 +34,46 @@ type AppMetrics struct {
 }
 
 var (
-	appMetricsOnce sync.Once
+	appMetricsMu   sync.Mutex
 	appMetricsInst *AppMetrics
 )
 
 // NewAppMetrics returns a process-wide AppMetrics, lazily constructed against
 // the current global provider. Calling it multiple times returns the same
-// instance — the metrics are tied to the global provider, not to a specific
-// caller.
+// instance until resetAppMetricsForInit() is called (which Init uses after
+// swapping the global provider so instruments re-bind to the new meter).
 func NewAppMetrics() *AppMetrics {
-	appMetricsOnce.Do(func() {
-		ws := GlobalMeter(scopeWS)
-		svc := GlobalMeter(scopeService)
-		db := GlobalMeter(scopeDB)
-		voice := GlobalMeter(scopeVoice)
-		appMetricsInst = &AppMetrics{
-			WSMessagesTotal:        ws.Counter("ws_messages_total", "WebSocket messages broadcast"),
-			WSActiveConnections:    ws.Gauge("ws_active_connections", "Currently connected WebSocket clients"),
-			WSBroadcastLatency:     ws.Histogram("ws_broadcast_latency_seconds", "Wall-clock seconds from enqueue to fanout completion", "s"),
-			WSReconnectTierTotal:   ws.Counter("ws_reconnect_tier_total", "Reconnection replay tier hits, attribute tier=buffer|db|full"),
-			WSEventsPersisted:      ws.Counter("ws_events_persisted_total", "Events written to the cold-tier event log"),
-			WSEventsDropped:        ws.Counter("ws_events_dropped_total", "Events dropped because the persister queue was full"),
-			WSEventsPersistErrors:  ws.Counter("ws_events_persist_errors_total", "PersistEvent calls that returned an error from the underlying store"),
-			DBQueryDurationSec:     db.Histogram("db_query_duration_seconds", "Per-query wall time", "s"),
-			VoiceActiveSessions:    voice.Gauge("voice_active_sessions", "Active LiveKit rooms"),
-			VoiceParticipants:      voice.Gauge("voice_participants", "Connected LiveKit participants across all rooms"),
-			ServiceCallDurationSec: svc.Histogram("service_call_duration_seconds", "Service-layer method execution time", "s"),
-		}
-	})
+	appMetricsMu.Lock()
+	defer appMetricsMu.Unlock()
+	if appMetricsInst != nil {
+		return appMetricsInst
+	}
+	ws := GlobalMeter(scopeWS)
+	svc := GlobalMeter(scopeService)
+	db := GlobalMeter(scopeDB)
+	voice := GlobalMeter(scopeVoice)
+	appMetricsInst = &AppMetrics{
+		WSMessagesTotal:        ws.Counter("ws_messages_total", "WebSocket messages broadcast"),
+		WSActiveConnections:    ws.Gauge("ws_active_connections", "Currently connected WebSocket clients"),
+		WSBroadcastLatency:     ws.Histogram("ws_broadcast_latency_seconds", "Wall-clock seconds from enqueue to fanout completion", "s"),
+		WSReconnectTierTotal:   ws.Counter("ws_reconnect_tier_total", "Reconnection replay tier hits, attribute tier=buffer|db|full"),
+		WSEventsPersisted:      ws.Counter("ws_events_persisted_total", "Events written to the cold-tier event log"),
+		WSEventsDropped:        ws.Counter("ws_events_dropped_total", "Events dropped because the persister queue was full"),
+		WSEventsPersistErrors:  ws.Counter("ws_events_persist_errors_total", "PersistEvent calls that returned an error from the underlying store"),
+		DBQueryDurationSec:     db.Histogram("db_query_duration_seconds", "Per-query wall time", "s"),
+		VoiceActiveSessions:    voice.Gauge("voice_active_sessions", "Active LiveKit rooms"),
+		VoiceParticipants:      voice.Gauge("voice_participants", "Connected LiveKit participants across all rooms"),
+		ServiceCallDurationSec: svc.Histogram("service_call_duration_seconds", "Service-layer method execution time", "s"),
+	}
 	return appMetricsInst
+}
+
+// resetAppMetricsForInit drops the cached AppMetrics bundle so the next
+// NewAppMetrics() call re-binds instruments against whatever provider is now
+// global. The real OTel Init uses this to migrate from the no-op provider
+// installed by the package-level init() to the SDK-backed one.
+func resetAppMetricsForInit() {
+	appMetricsMu.Lock()
+	defer appMetricsMu.Unlock()
+	appMetricsInst = nil
 }

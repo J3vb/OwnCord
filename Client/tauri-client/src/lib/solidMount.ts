@@ -14,7 +14,8 @@
  *   handle.destroy();
  */
 
-import { render, type JSX } from "solid-js/web";
+import { render } from "solid-js/web";
+import type { JSX } from "solid-js";
 
 export interface SolidMount {
   /** The DOM element the Solid root is rendered into. */
