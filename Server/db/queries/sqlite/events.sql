@@ -3,7 +3,7 @@
 INSERT INTO events (seq, event_type, channel_id, payload) VALUES (?, ?, ?, ?);
 
 -- name: GetMaxEventSeq :one
-SELECT COALESCE(MAX(seq), 0) FROM events;
+SELECT CAST(COALESCE(MAX(seq), 0) AS INTEGER) AS max_seq FROM events;
 
 -- name: GetEventsSince :many
 SELECT seq, event_type, channel_id, payload, created_at

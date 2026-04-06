@@ -29,8 +29,8 @@ type foundPlugin struct {
 }
 
 // scanPluginDirectory walks dir non-recursively and parses plugin.json from
-// every immediate subdirectory. Errors on individual plugins are wrapped and
-// returned alongside the successful entries.
+// every immediate subdirectory. Returns on the first error encountered;
+// partial results are not returned alongside errors.
 func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 	if dir == "" {
 		return nil, nil
@@ -75,9 +75,9 @@ func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 		// handler enforces that resolved paths stay rooted at pluginDir, but
 		// http.ServeFile / os.Open follow symlinks transparently — a malicious
 		// plugin .zip containing `assets/index.html -> /etc/passwd` would
-		// otherwise serve host files. Lstat (not Stat) is used for the
-		// entrypoint check below so a symlink is detected instead of
-		// followed, even when its target is a valid .wasm file.
+		// otherwise serve host files. os.Lstat is used for the entrypoint
+		// check below so a symlink is detected instead of followed, even
+		// when its target is a valid .wasm file.
 		if err := rejectSymlinksUnder(pluginDir); err != nil {
 			return nil, fmt.Errorf("plugin %q: %w", e.Name(), err)
 		}
