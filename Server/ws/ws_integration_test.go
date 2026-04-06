@@ -26,7 +26,7 @@ import (
 func TestServeWS_InvalidUpgrade_ReturnsError(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -54,7 +54,7 @@ func TestServeWS_InvalidUpgrade_ReturnsError(t *testing.T) {
 func TestAuthenticateConn_NoAuthMessage_ServerClosesConn(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -92,7 +92,7 @@ func TestAuthenticateConn_NoAuthMessage_ServerClosesConn(t *testing.T) {
 func TestAuthenticateConn_InvalidJSON_ReceivesAuthError(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -138,7 +138,7 @@ func TestAuthenticateConn_InvalidJSON_ReceivesAuthError(t *testing.T) {
 func TestAuthenticateConn_WrongMessageType_ReceivesAuthError(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -187,7 +187,7 @@ func TestAuthenticateConn_WrongMessageType_ReceivesAuthError(t *testing.T) {
 func TestAuthenticateConn_MissingToken_ReceivesAuthError(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -235,7 +235,7 @@ func TestAuthenticateConn_MissingToken_ReceivesAuthError(t *testing.T) {
 func TestAuthenticateConn_InvalidToken_ReceivesAuthError(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -283,7 +283,7 @@ func TestAuthenticateConn_InvalidToken_ReceivesAuthError(t *testing.T) {
 func TestServeWS_ValidAuth_FullHandshake(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -367,7 +367,7 @@ func TestServeWS_ValidAuth_FullHandshake(t *testing.T) {
 func TestServeWS_ImmediateDisconnect_DoesNotLeaveGhostClient(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -440,7 +440,7 @@ func TestServeWS_ImmediateDisconnect_DoesNotLeaveGhostClient(t *testing.T) {
 func TestServeWS_DuplicateLogin_KeepsUserOnline(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -522,7 +522,7 @@ func TestServeWS_DuplicateLogin_KeepsUserOnline(t *testing.T) {
 func TestServeWS_Reconnect_PreservesVoiceState(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -679,7 +679,7 @@ func TestServeWS_Reconnect_PreservesVoiceState(t *testing.T) {
 func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -902,7 +902,7 @@ func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
 func TestServeWS_writePump_MessageDelivered(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -996,7 +996,7 @@ func TestServeWS_writePump_MessageDelivered(t *testing.T) {
 func TestIntegration_MessageRoundTrip(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -1142,7 +1142,7 @@ func TestIntegration_MessageRoundTrip(t *testing.T) {
 func TestIntegration_SequenceNumbers(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 	go hub.Run()
 	defer hub.Stop()
 
@@ -1234,7 +1234,7 @@ func TestIntegration_SequenceNumbers(t *testing.T) {
 func TestServeWS_BannedUser_ReceivesError(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 	go hub.Run()
 	defer hub.Stop()
 

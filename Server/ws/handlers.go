@@ -160,9 +160,20 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 			}
 			// Apply client state mutations.
 			if result.SetChannelID != nil {
+				oldChID := c.getChannelID()
 				c.mu.Lock()
 				c.channelID = *result.SetChannelID
 				c.mu.Unlock()
+				// Update pub/sub channel topic subscriptions.
+				newChID := *result.SetChannelID
+				if oldChID != newChID {
+					if oldChID > 0 {
+						c.hub.pubsub.Unsubscribe(c, ChannelTopic(oldChID))
+					}
+					if newChID > 0 {
+						c.hub.pubsub.Subscribe(c, ChannelTopic(newChID))
+					}
+				}
 			}
 			if result.SetE2EEPubKey != nil {
 				c.setE2EEPubKey(*result.SetE2EEPubKey)
@@ -221,17 +232,21 @@ func (h *Hub) requireChannelPerm(c *Client, channelID int64, perm int64, permLab
 // This is correct for typing indicators but would be incorrect for messages
 // that should survive reconnection replay.
 func (h *Hub) broadcastExclude(channelID, excludeUserID int64, msg []byte) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	for uid, c := range h.clients {
-		if uid == excludeUserID {
-			continue
-		}
-		if channelID != 0 && c.getChannelID() != channelID {
-			continue
-		}
-		c.sendMsg(msg)
+	if channelID == 0 {
+		h.pubsub.Publish(TopicGlobal, msg, excludeUserID)
+		return
 	}
+	h.pubsub.Publish(ChannelTopic(channelID), msg, excludeUserID)
+}
+
+// broadcastExcludeLow is like broadcastExclude but at low priority.
+// Used for typing indicators — dropped on overflow instead of disconnecting.
+func (h *Hub) broadcastExcludeLow(channelID, excludeUserID int64, msg []byte) {
+	if channelID == 0 {
+		h.pubsub.PublishLow(TopicGlobal, msg, excludeUserID)
+		return
+	}
+	h.pubsub.PublishLow(ChannelTopic(channelID), msg, excludeUserID)
 }
 
 // broadcastToDMParticipants sends a message to all participants of a DM channel

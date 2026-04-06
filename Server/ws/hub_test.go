@@ -37,7 +37,7 @@ func newTestHub(t *testing.T) (*ws.Hub, *db.DB) {
 	t.Helper()
 	database := openTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 	return hub, database
 }
 

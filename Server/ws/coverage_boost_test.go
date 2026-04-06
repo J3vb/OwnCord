@@ -76,7 +76,7 @@ func newCoverageHub(t *testing.T) (*ws.Hub, *db.DB) {
 	t.Helper()
 	database := openCoverageDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, nil)
 
 	// Inject a test LiveKit client so voice_join passes the livekit!=nil guard.
 	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{

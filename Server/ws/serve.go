@@ -303,20 +303,63 @@ func (h *Hub) handleFreshConnect(
 	return nil
 }
 
-// writePump drains the client's send channel and writes to the WebSocket.
+// writePump drains the client's send channels and writes to the WebSocket.
+// Priority ordering: high > normal > low. High-priority messages (DMs, mentions)
+// are drained first. Normal messages (chat, reactions) come next. Low-priority
+// messages (typing, presence) are only sent when no higher-priority work is pending.
 func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
+	writeMsg := func(msg []byte) bool {
+		wCtx, cancel := context.WithTimeout(ctx, writeTimeout)
+		err := conn.Write(wCtx, websocket.MessageText, msg)
+		cancel()
+		if err != nil {
+			slog.Warn("ws writePump error", "user_id", c.userID, "err", err)
+			return false
+		}
+		return true
+	}
+
 	for {
+		// Priority 1: drain all pending high-priority messages first.
 		select {
+		case msg, ok := <-c.sendHigh:
+			if !ok {
+				_ = conn.Close(websocket.StatusNormalClosure, "")
+				return
+			}
+			if !writeMsg(msg) {
+				return
+			}
+			continue
+		default:
+		}
+
+		// Priority 2: try high or normal (high still gets priority via the
+		// first case in the select, but Go's select is random when both are
+		// ready — the outer drain-high loop above ensures high is truly first).
+		select {
+		case msg, ok := <-c.sendHigh:
+			if !ok {
+				_ = conn.Close(websocket.StatusNormalClosure, "")
+				return
+			}
+			if !writeMsg(msg) {
+				return
+			}
 		case msg, ok := <-c.send:
 			if !ok {
 				_ = conn.Close(websocket.StatusNormalClosure, "")
 				return
 			}
-			wCtx, cancel := context.WithTimeout(ctx, writeTimeout)
-			err := conn.Write(wCtx, websocket.MessageText, msg)
-			cancel()
-			if err != nil {
-				slog.Warn("ws writePump error", "user_id", c.userID, "err", err)
+			if !writeMsg(msg) {
+				return
+			}
+		case msg, ok := <-c.sendLow:
+			if !ok {
+				_ = conn.Close(websocket.StatusNormalClosure, "")
+				return
+			}
+			if !writeMsg(msg) {
 				return
 			}
 		case <-ctx.Done():
