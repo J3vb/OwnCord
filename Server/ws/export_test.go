@@ -104,8 +104,10 @@ func (h *Hub) PubSubForTest() *PubSub {
 }
 
 // BuildAuthOKForTest exposes Hub.buildAuthOK for external tests.
+// Defaults to replay_source="none" since most callers test the fresh-connect
+// path; tests that care about the resume tier can call buildAuthOK directly.
 func (h *Hub) BuildAuthOKForTest(user *db.User, roleName string) []byte {
-	return h.buildAuthOK(user, roleName)
+	return h.buildAuthOK(user, roleName, "none")
 }
 
 // BuildReadyForTest exposes Hub.buildReady for external tests.

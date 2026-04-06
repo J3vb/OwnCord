@@ -6,6 +6,7 @@
 package api
 
 import (
+	"io"
 	"net/http"
 	"strconv"
 
@@ -13,6 +14,11 @@ import (
 	"github.com/owncord/server/plugin"
 	"github.com/owncord/server/store"
 )
+
+// maxPluginUploadBytes caps the multipart upload at 16 MiB to match the
+// plugin.maxZipBytes ceiling. The handler enforces both layers because the
+// outer MaxBytesReader gives a clean 413 instead of a partial extract.
+const maxPluginUploadBytes = 16 * 1024 * 1024
 
 // PluginAdminHandler exposes plugin lifecycle operations to the admin panel.
 type PluginAdminHandler struct {
@@ -27,10 +33,53 @@ func NewPluginAdminHandler(registry *plugin.Registry, st store.PluginStore) http
 	h := &PluginAdminHandler{registry: registry, store: st}
 	r := chi.NewRouter()
 	r.Get("/", h.list)
+	r.Post("/install", h.install)
 	r.Post("/{id}/enable", h.enable)
 	r.Post("/{id}/disable", h.disable)
 	r.Delete("/{id}", h.uninstall)
 	return r
+}
+
+// install accepts a multipart upload with a single "plugin" file part
+// containing a .zip. The zip is validated (zip-slip safe, no symlinks,
+// uncompressed total capped, manifest required at root) and installed via
+// Registry.InstallFromZip. Returns 201 with the new plugin name on success.
+func (h *PluginAdminHandler) install(w http.ResponseWriter, r *http.Request) {
+	if h.registry == nil {
+		http.Error(w, "plugin runtime disabled", http.StatusServiceUnavailable)
+		return
+	}
+	// Hard cap on the request body before parsing multipart so a hostile
+	// client can't tie up parsing memory.
+	r.Body = http.MaxBytesReader(w, r.Body, maxPluginUploadBytes+1024)
+	if err := r.ParseMultipartForm(maxPluginUploadBytes); err != nil {
+		http.Error(w, "invalid multipart upload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	file, _, err := r.FormFile("plugin")
+	if err != nil {
+		http.Error(w, "missing 'plugin' file part", http.StatusBadRequest)
+		return
+	}
+	defer file.Close() //nolint:errcheck
+
+	// Read the entire zip into memory — InstallFromZip needs an io.ReaderAt
+	// for archive/zip and the cap is small enough to be safe.
+	body, err := io.ReadAll(io.LimitReader(file, maxPluginUploadBytes+1))
+	if err != nil {
+		http.Error(w, "read upload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if int64(len(body)) > maxPluginUploadBytes {
+		http.Error(w, "plugin upload too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	name, err := h.registry.InstallFromZip(r.Context(), body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"name": name})
 }
 
 func (h *PluginAdminHandler) list(w http.ResponseWriter, r *http.Request) {

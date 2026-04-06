@@ -164,9 +164,11 @@ func (h *Hub) handleReconnect(
 	// will be drained once the pumps begin.
 	h.registerNow(c)
 
-	// Replay succeeded — send auth_ok then missed events.
-	slog.Info("ws sending auth_ok (reconnect)", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
-	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(c.user, c.roleName)); err != nil {
+	// Replay succeeded — send auth_ok then missed events. The replay tier
+	// is included in the payload so the client can attribute reconnect
+	// behaviour without separate metric scraping.
+	slog.Info("ws sending auth_ok (reconnect)", "user_id", c.userID, "username", c.user.Username, "role", c.roleName, "replay_source", replaySource)
+	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(c.user, c.roleName, replaySource)); err != nil {
 		slog.Warn("ws: failed to send auth_ok (reconnect)", "user_id", c.userID, "err", err)
 		h.unregisterNow(c)
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
@@ -302,7 +304,7 @@ func (h *Hub) handleFreshConnect(
 
 	// Fresh connection or replay fallback: full auth_ok + ready flow.
 	slog.Info("ws sending auth_ok", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
-	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(c.user, c.roleName)); err != nil {
+	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(c.user, c.roleName, "none")); err != nil {
 		slog.Warn("ws: failed to send auth_ok", "user_id", c.userID, "err", err)
 		h.unregisterNow(c)
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
@@ -518,7 +520,12 @@ func authenticateConn(parent context.Context, conn *websocket.Conn, database *db
 
 // buildAuthOK constructs the auth_ok server→client message.
 // Per PROTOCOL.md, user object contains only id, username, avatar, role (no status).
-func (h *Hub) buildAuthOK(user *db.User, roleName string) []byte {
+//
+// replaySource records which reconnection tier served this client:
+//   - "none"   — fresh connection or full re-sync (no resume)
+//   - "buffer" — resume served from the in-memory ring buffer
+//   - "db"     — resume served from the persistent EventStore (Phase B Step 7)
+func (h *Hub) buildAuthOK(user *db.User, roleName string, replaySource string) []byte {
 	var avatarVal any
 	if user.Avatar != nil {
 		avatarVal = *user.Avatar
@@ -535,8 +542,9 @@ func (h *Hub) buildAuthOK(user *db.User, roleName string) []byte {
 				"avatar":   avatarVal,
 				"role":     roleName,
 			},
-			"server_name": serverName,
-			"motd":        motd,
+			"server_name":   serverName,
+			"motd":          motd,
+			"replay_source": replaySource,
 		},
 	})
 }
