@@ -31,6 +31,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	// pgx's stdlib driver exposes pgx as a database/sql driver, letting
@@ -574,72 +575,257 @@ func (s *PostgresStore) GetAllSettings() (map[string]string, error) {
 	return nil, ErrPostgresNotImplemented
 }
 
-// ── EventStore (stubs — Phase B Step 7) ─────────────────────────────────────
+// ── EventStore (Phase B Step 7) ──────────────────────────────────────────────
 
 func (s *PostgresStore) PersistEvent(ctx context.Context, seq int64, eventType string, channelID int64, payload []byte) error {
-	return ErrPostgresNotImplemented
+	_, err := s.sqlDB.ExecContext(ctx,
+		`INSERT INTO events (seq, event_type, channel_id, payload) VALUES ($1, $2, $3, $4)`,
+		seq, eventType, channelID, payload,
+	)
+	if err != nil {
+		return fmt.Errorf("PersistEvent: %w", err)
+	}
+	return nil
 }
 
 func (s *PostgresStore) GetEventsSince(ctx context.Context, afterSeq int64, limit int) ([]db.PersistedEvent, error) {
-	return nil, ErrPostgresNotImplemented
+	rows, err := s.sqlDB.QueryContext(ctx,
+		`SELECT seq, event_type, channel_id, payload, created_at
+		   FROM events
+		  WHERE seq > $1
+		  ORDER BY seq ASC
+		  LIMIT $2`,
+		afterSeq, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("GetEventsSince: %w", err)
+	}
+	defer rows.Close()
+	return scanPgEventRows(rows)
 }
 
 func (s *PostgresStore) GetEventsSinceForChannels(ctx context.Context, afterSeq int64, channelIDs []int64, limit int) ([]db.PersistedEvent, error) {
-	return nil, ErrPostgresNotImplemented
+	if len(channelIDs) == 0 {
+		rows, err := s.sqlDB.QueryContext(ctx,
+			`SELECT seq, event_type, channel_id, payload, created_at
+			   FROM events
+			  WHERE seq > $1 AND channel_id = 0
+			  ORDER BY seq ASC
+			  LIMIT $2`,
+			afterSeq, limit,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("GetEventsSinceForChannels (global only): %w", err)
+		}
+		defer rows.Close()
+		return scanPgEventRows(rows)
+	}
+
+	placeholders := make([]string, len(channelIDs))
+	args := make([]any, 0, len(channelIDs)+2)
+	args = append(args, afterSeq)
+	for i, cid := range channelIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+2)
+		args = append(args, cid)
+	}
+	args = append(args, limit)
+
+	query := fmt.Sprintf(
+		`SELECT seq, event_type, channel_id, payload, created_at
+		   FROM events
+		  WHERE seq > $1
+		    AND (channel_id = 0 OR channel_id IN (%s))
+		  ORDER BY seq ASC
+		  LIMIT $%d`,
+		strings.Join(placeholders, ","),
+		len(channelIDs)+2,
+	)
+	rows, err := s.sqlDB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("GetEventsSinceForChannels: %w", err)
+	}
+	defer rows.Close()
+	return scanPgEventRows(rows)
 }
 
 func (s *PostgresStore) PruneEventsOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
-	return 0, ErrPostgresNotImplemented
+	res, err := s.sqlDB.ExecContext(ctx,
+		`DELETE FROM events WHERE created_at < $1`,
+		cutoff.UTC(),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("PruneEventsOlderThan: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("PruneEventsOlderThan RowsAffected: %w", err)
+	}
+	return n, nil
 }
 
 func (s *PostgresStore) GetMaxEventSeq(ctx context.Context) (int64, error) {
-	return 0, ErrPostgresNotImplemented
+	var maxSeq int64
+	err := s.sqlDB.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(seq), 0)::BIGINT FROM events`,
+	).Scan(&maxSeq)
+	if err != nil {
+		return 0, fmt.Errorf("GetMaxEventSeq: %w", err)
+	}
+	return maxSeq, nil
 }
 
-// ── PluginStore (stubs — Phase C Step 9) ────────────────────────────────────
+// ── PluginStore (Phase C Step 9) ────────────────────────────────────────────
 
 func (s *PostgresStore) InstallPlugin(ctx context.Context, name, version, manifestJSON string) (int64, error) {
-	return 0, ErrPostgresNotImplemented
+	var id int64
+	err := s.sqlDB.QueryRowContext(ctx,
+		`INSERT INTO plugins (name, version, manifest_json)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (name) DO UPDATE
+		    SET version = excluded.version,
+		        manifest_json = excluded.manifest_json
+		 RETURNING id`,
+		name, version, manifestJSON,
+	).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("InstallPlugin: %w", err)
+	}
+	return id, nil
 }
 
 func (s *PostgresStore) EnablePlugin(ctx context.Context, id int64) error {
-	return ErrPostgresNotImplemented
+	_, err := s.sqlDB.ExecContext(ctx, `UPDATE plugins SET enabled = TRUE WHERE id = $1`, id)
+	return err
 }
 
 func (s *PostgresStore) DisablePlugin(ctx context.Context, id int64) error {
-	return ErrPostgresNotImplemented
+	_, err := s.sqlDB.ExecContext(ctx, `UPDATE plugins SET enabled = FALSE WHERE id = $1`, id)
+	return err
 }
 
 func (s *PostgresStore) UninstallPlugin(ctx context.Context, id int64) error {
-	return ErrPostgresNotImplemented
+	_, err := s.sqlDB.ExecContext(ctx, `DELETE FROM plugins WHERE id = $1`, id)
+	return err
 }
 
 func (s *PostgresStore) GetPlugin(ctx context.Context, id int64) (*db.PluginRow, error) {
-	return nil, ErrPostgresNotImplemented
+	row := s.sqlDB.QueryRowContext(ctx,
+		`SELECT id, name, version, enabled, manifest_json, installed_at FROM plugins WHERE id = $1`,
+		id,
+	)
+	return scanPgPluginRow(row)
 }
 
 func (s *PostgresStore) GetPluginByName(ctx context.Context, name string) (*db.PluginRow, error) {
-	return nil, ErrPostgresNotImplemented
+	row := s.sqlDB.QueryRowContext(ctx,
+		`SELECT id, name, version, enabled, manifest_json, installed_at FROM plugins WHERE name = $1`,
+		name,
+	)
+	return scanPgPluginRow(row)
 }
 
 func (s *PostgresStore) ListPlugins(ctx context.Context) ([]db.PluginRow, error) {
-	return nil, ErrPostgresNotImplemented
+	rows, err := s.sqlDB.QueryContext(ctx,
+		`SELECT id, name, version, enabled, manifest_json, installed_at FROM plugins ORDER BY name`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ListPlugins: %w", err)
+	}
+	defer rows.Close()
+	var out []db.PluginRow
+	for rows.Next() {
+		var p db.PluginRow
+		if err := rows.Scan(&p.ID, &p.Name, &p.Version, &p.Enabled, &p.ManifestJSON, &p.InstalledAt); err != nil {
+			return nil, fmt.Errorf("ListPlugins scan: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 func (s *PostgresStore) PluginKVGet(ctx context.Context, pluginID int64, key string) ([]byte, error) {
-	return nil, ErrPostgresNotImplemented
+	var v []byte
+	err := s.sqlDB.QueryRowContext(ctx,
+		`SELECT value FROM plugin_kv WHERE plugin_id = $1 AND key = $2`,
+		pluginID, key,
+	).Scan(&v)
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 func (s *PostgresStore) PluginKVSet(ctx context.Context, pluginID int64, key string, value []byte) error {
-	return ErrPostgresNotImplemented
+	_, err := s.sqlDB.ExecContext(ctx,
+		`INSERT INTO plugin_kv (plugin_id, key, value) VALUES ($1, $2, $3)
+		 ON CONFLICT (plugin_id, key) DO UPDATE SET value = excluded.value`,
+		pluginID, key, value,
+	)
+	return err
 }
 
 func (s *PostgresStore) PluginKVDelete(ctx context.Context, pluginID int64, key string) error {
-	return ErrPostgresNotImplemented
+	_, err := s.sqlDB.ExecContext(ctx,
+		`DELETE FROM plugin_kv WHERE plugin_id = $1 AND key = $2`,
+		pluginID, key,
+	)
+	return err
 }
 
 func (s *PostgresStore) PluginKVScan(ctx context.Context, pluginID int64, prefix string, limit int) (map[string][]byte, error) {
-	return nil, ErrPostgresNotImplemented
+	rows, err := s.sqlDB.QueryContext(ctx,
+		`SELECT key, value FROM plugin_kv WHERE plugin_id = $1 AND key LIKE $2 ORDER BY key LIMIT $3`,
+		pluginID, prefix+"%", limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("PluginKVScan: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string][]byte)
+	for rows.Next() {
+		var k string
+		var v []byte
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
+}
+
+// ── postgres scan helpers ────────────────────────────────────────────────────
+
+type pgRowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanPgPluginRow(row pgRowScanner) (*db.PluginRow, error) {
+	var p db.PluginRow
+	if err := row.Scan(&p.ID, &p.Name, &p.Version, &p.Enabled, &p.ManifestJSON, &p.InstalledAt); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+type pgRowsScanner interface {
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+}
+
+func scanPgEventRows(rows pgRowsScanner) ([]db.PersistedEvent, error) {
+	var out []db.PersistedEvent
+	for rows.Next() {
+		var e db.PersistedEvent
+		if err := rows.Scan(&e.Seq, &e.EventType, &e.ChannelID, &e.Payload, &e.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanPgEventRows: %w", err)
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // Compile-time interface check — fails to compile if any Store method is

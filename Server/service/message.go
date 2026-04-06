@@ -24,15 +24,15 @@ const maxMessageLen = 4000
 
 // Common service-layer errors.
 var (
-	ErrRateLimited     = errors.New("rate limited")
-	ErrBadRequest      = errors.New("bad request")
-	ErrNotFound        = errors.New("not found")
-	ErrForbidden       = errors.New("forbidden")
-	ErrInternal        = errors.New("internal error")
-	ErrSlowMode        = errors.New("slow mode")
-	ErrConflict        = errors.New("conflict")
-	ErrBlocked         = errors.New("blocked")
-	ErrDeletedMessage  = errors.New("message is deleted")
+	ErrRateLimited    = errors.New("rate limited")
+	ErrBadRequest     = errors.New("bad request")
+	ErrNotFound       = errors.New("not found")
+	ErrForbidden      = errors.New("forbidden")
+	ErrInternal       = errors.New("internal error")
+	ErrSlowMode       = errors.New("slow mode")
+	ErrConflict       = errors.New("conflict")
+	ErrBlocked        = errors.New("blocked")
+	ErrDeletedMessage = errors.New("message is deleted")
 )
 
 // SendMessageParams contains validated input for sending a message.
@@ -49,11 +49,11 @@ type SendMessageParams struct {
 
 // SendMessageResult contains the output of a successful message send.
 type SendMessageResult struct {
-	MessageID  int64
-	Timestamp  string
-	Content    string // sanitized content
-	IsDM       bool
-	Channel    *db.Channel
+	MessageID int64
+	Timestamp string
+	Content   string // sanitized content
+	IsDM      bool
+	Channel   *db.Channel
 
 	// DM-specific fields populated when IsDM is true.
 	ParticipantIDs []int64
@@ -421,10 +421,10 @@ func (s *MessageService) handleReaction(userID, msgID int64, emoji string, add b
 
 	msg, err := s.st.GetMessage(msgID)
 	if err != nil || msg == nil {
-		return nil, fmt.Errorf("%w: message not found", ErrForbidden)
+		return nil, fmt.Errorf("%w: message not found", ErrBadRequest)
 	}
 	if msg.Deleted {
-		return nil, fmt.Errorf("%w: cannot react to deleted message", ErrDeletedMessage)
+		return nil, fmt.Errorf("%w: cannot react to deleted message", ErrBadRequest)
 	}
 
 	ch, chErr := s.st.GetChannel(msg.ChannelID)
@@ -433,7 +433,7 @@ func (s *MessageService) handleReaction(userID, msgID int64, emoji string, add b
 	if isDM {
 		ok, dmErr := s.st.IsDMParticipant(userID, msg.ChannelID)
 		if dmErr != nil || !ok {
-			return nil, fmt.Errorf("%w: not a DM participant", ErrForbidden)
+			return nil, fmt.Errorf("%w: not a DM participant", ErrBadRequest)
 		}
 	} else {
 		if !s.perms.HasChannelPerm(userID, msg.ChannelID, permissions.AddReactions) {
@@ -491,7 +491,7 @@ func (s *MessageService) GetMessages(userID, channelID, before int64, limit int)
 	if ch.Type == "dm" {
 		ok, err := s.st.IsDMParticipant(userID, channelID)
 		if err != nil || !ok {
-			return nil, false, fmt.Errorf("%w: access denied", ErrForbidden)
+			return nil, false, fmt.Errorf("%w: access denied", ErrNotFound)
 		}
 	} else {
 		if !s.perms.HasChannelPerm(userID, channelID, permissions.ReadMessages) {
@@ -582,7 +582,7 @@ func (s *MessageService) GetPinnedMessages(userID, channelID int64) ([]db.Messag
 	if ch.Type == "dm" {
 		ok, err := s.st.IsDMParticipant(userID, channelID)
 		if err != nil || !ok {
-			return nil, fmt.Errorf("%w: access denied", ErrForbidden)
+			return nil, fmt.Errorf("%w: access denied", ErrNotFound)
 		}
 	} else if !s.perms.HasChannelPerm(userID, channelID, permissions.ReadMessages) {
 		return nil, fmt.Errorf("%w: access denied", ErrForbidden)
@@ -606,7 +606,7 @@ func (s *MessageService) SetMessagePinned(userID, channelID, msgID int64, pinned
 	if ch.Type == "dm" {
 		ok, err := s.st.IsDMParticipant(userID, channelID)
 		if err != nil || !ok {
-			return fmt.Errorf("%w: access denied", ErrForbidden)
+			return fmt.Errorf("%w: access denied", ErrNotFound)
 		}
 	} else if !s.perms.HasChannelPerm(userID, channelID, permissions.ManageMessages) {
 		return fmt.Errorf("%w: missing MANAGE_MESSAGES permission", ErrForbidden)
@@ -634,7 +634,11 @@ func (s *MessageService) GetAccessibleChannelIDs(userID int64) ([]int64, error) 
 	isAdmin := permissions.HasAdmin(role.Permissions)
 	var overrides map[int64]db.ChannelOverride
 	if !isAdmin {
-		overrides, _ = s.st.GetAllChannelPermissionsForRole(role.ID)
+		var overrideErr error
+		overrides, overrideErr = s.st.GetAllChannelPermissionsForRole(role.ID)
+		if overrideErr != nil {
+			return nil, fmt.Errorf("%w: failed to fetch channel overrides", ErrInternal)
+		}
 		if overrides == nil {
 			overrides = make(map[int64]db.ChannelOverride)
 		}

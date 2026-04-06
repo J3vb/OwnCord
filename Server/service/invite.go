@@ -55,8 +55,8 @@ func (s *InviteService) CreateInvite(createdBy int64, maxUses int, expiresInHour
 	}
 
 	invite, err := s.st.GetInvite(code)
-	if err != nil {
-		return nil, fmt.Errorf("%w: failed to fetch invite", ErrInternal)
+	if err != nil || invite == nil {
+		return nil, fmt.Errorf("%w: failed to retrieve invite", ErrInternal)
 	}
 	return invite, nil
 }

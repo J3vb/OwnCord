@@ -93,7 +93,8 @@ func (s *ChannelService) ListVisibleChannels(userID int64) ([]db.Channel, error)
 // Silent errors are returned as nil (typing indicators are best-effort).
 func (s *ChannelService) HandleTyping(userID, channelID int64, limiter interface {
 	Allow(key string, limit int, window time.Duration) bool
-}) (*db.Channel, error) {
+},
+) (*db.Channel, error) {
 	if channelID <= 0 {
 		return nil, nil
 	}
@@ -130,7 +131,8 @@ func (s *ChannelService) GetDMParticipantIDs(channelID int64) ([]int64, error) {
 // HandlePresenceUpdate validates and persists a presence status change.
 func (s *ChannelService) HandlePresenceUpdate(userID int64, status string, limiter interface {
 	Allow(key string, limit int, window time.Duration) bool
-}) error {
+},
+) error {
 	// Rate limit.
 	ratKey := fmt.Sprintf("presence:%d", userID)
 	if limiter != nil && !limiter.Allow(ratKey, 1, 10*time.Second) {
@@ -161,7 +163,7 @@ func (s *ChannelService) HandleChannelFocus(userID, channelID int64) (*db.Channe
 
 	ch, err := s.st.GetChannel(channelID)
 	if err != nil || ch == nil {
-		return nil, fmt.Errorf("%w: channel not found", ErrForbidden)
+		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
 
 	if ch.Type == "dm" {

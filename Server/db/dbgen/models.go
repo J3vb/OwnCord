@@ -4,6 +4,10 @@
 
 package dbgen
 
+import (
+	"time"
+)
+
 type Attachment struct {
 	ID         string `json:"id"`
 	MessageID  *int64 `json:"messageId"`
@@ -70,6 +74,14 @@ type Emoji struct {
 	CreatedAt  string `json:"createdAt"`
 }
 
+type Event struct {
+	Seq       int64     `json:"seq"`
+	EventType string    `json:"eventType"`
+	Payload   []byte    `json:"payload"`
+	ChannelID int64     `json:"channelId"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 type Invite struct {
 	ID         int64   `json:"id"`
 	Code       string  `json:"code"`
@@ -104,6 +116,21 @@ type Message struct {
 
 type MessagesFt struct {
 	Content string `json:"content"`
+}
+
+type Plugin struct {
+	ID           int64     `json:"id"`
+	Name         string    `json:"name"`
+	Version      string    `json:"version"`
+	Enabled      int64     `json:"enabled"`
+	ManifestJson string    `json:"manifestJson"`
+	InstalledAt  time.Time `json:"installedAt"`
+}
+
+type PluginKv struct {
+	PluginID int64  `json:"pluginId"`
+	Key      string `json:"key"`
+	Value    []byte `json:"value"`
 }
 
 type RateLockout struct {

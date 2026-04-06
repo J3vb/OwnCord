@@ -10,6 +10,8 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/service"
+	"github.com/owncord/server/store"
 	"github.com/owncord/server/ws"
 )
 
@@ -71,7 +73,9 @@ func newHandlerHub(t *testing.T) (*ws.Hub, *db.DB) {
 	t.Helper()
 	database := openHandlerDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter, nil)
+	st := store.NewSQLiteStore(database)
+	svc := service.New(st, limiter)
+	hub := ws.NewHub(database, limiter, svc)
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 	return hub, database

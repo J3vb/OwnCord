@@ -40,8 +40,12 @@ func newEmitTestHub() *Hub {
 // registerEmitTestClient creates a test client, registers it directly in the
 // hub's client map, and returns the send channel for assertions.
 func registerEmitTestClient(h *Hub, userID, channelID int64) chan []byte {
-	send := make(chan []byte, 64)
+	send := make(chan []byte, 192) // sized for all priority levels
 	c := NewTestClientWithChannel(h, userID, channelID, send)
+	// Wire high- and low-priority channels to the same observable channel so
+	// drainChan captures messages regardless of which priority path delivers.
+	c.sendHigh = send
+	c.sendLow = send
 	h.clients[userID] = c
 	// Subscribe to pub/sub topics so deliverBroadcast can reach this client.
 	h.pubsub.Subscribe(c, TopicGlobal)
@@ -54,8 +58,10 @@ func registerEmitTestClient(h *Hub, userID, channelID int64) chan []byte {
 
 // registerEmitTestVoiceClient creates a test client in a voice channel.
 func registerEmitTestVoiceClient(h *Hub, userID, channelID, voiceChID int64) chan []byte {
-	send := make(chan []byte, 64)
+	send := make(chan []byte, 192)
 	c := NewTestClientWithChannel(h, userID, channelID, send)
+	c.sendHigh = send
+	c.sendLow = send
 	SetClientVoiceChID(c, voiceChID)
 	h.clients[userID] = c
 	// Subscribe to pub/sub topics so deliverBroadcast can reach this client.

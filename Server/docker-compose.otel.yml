@@ -1,0 +1,44 @@
+# OwnCord OTel dev overlay — Jaeger all-in-one tracing + Prometheus scrape target.
+#
+# Usage:
+#   make otel-up           # starts Jaeger + Prometheus in the background
+#   make otel-down         # stops and removes the containers
+#
+# Then build and run the server with OTel enabled:
+#   go build -tags otel .
+#   OWNCORD_TELEMETRY_OTLP_ENDPOINT=localhost:4317 ./owncord-server
+#
+# Jaeger UI:      http://localhost:16686
+# Prometheus UI:  http://localhost:9090
+# OwnCord metrics (when server is running): http://localhost:8443/metrics
+
+services:
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC (used by the server's tracer exporter)
+      - "4318:4318"     # OTLP HTTP (alternative endpoint)
+    networks:
+      - otel-net
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=1h"   # dev-only short retention
+    volumes:
+      - ./prometheus.dev.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - otel-net
+
+networks:
+  otel-net:
+    driver: bridge

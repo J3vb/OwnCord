@@ -14,6 +14,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/plugin"
 	"github.com/owncord/server/service"
 	"github.com/owncord/server/store"
 	"github.com/owncord/server/syncutil"
@@ -54,6 +55,10 @@ type Hub struct {
 	// Phase B Step 7 — event persistence. nil = ring buffer only.
 	eventPersister *EventPersister
 	eventStore     store.EventStore // read path for cold-tier replay
+
+	// Phase C Step 9 — plugin wiring.
+	pluginRegistry *plugin.Registry  // slash-command dispatch; nil = no plugins
+	pluginSink     *plugin.EventSink // hub→plugin event fan-out; nil = no plugins
 
 	// Phase B Step 7 — reconnection tier metrics. Incremented per resume.
 	reconnectTierBuf  atomic.Uint64
@@ -117,6 +122,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 	registerChatHandlers(reg, chatDeps)
 	registerPresenceHandlers(reg, presenceDeps)
 	registerReactionHandlers(reg, reactionDeps)
+	registerPluginCommandHandler(reg) // Phase C Step 9 — plugin slash commands
 	registerVoiceControlsV2(reg, VoiceDeps{
 		DB:          h.db,
 		Limiter:     h.limiter,
@@ -410,6 +416,18 @@ func (h *Hub) registerNow(c *Client) {
 	// Subscribe the new client to default pub/sub topics.
 	h.pubsub.Subscribe(c, TopicGlobal)
 	h.pubsub.Subscribe(c, UserTopic(c.userID))
+	// If the client already has a focused channel (e.g. test clients created with
+	// NewTestClientWithChannel, or reconnecting clients), subscribe immediately so
+	// deliverBroadcast can reach them without waiting for a channel_focus message.
+	if chID := c.getChannelID(); chID != 0 {
+		h.pubsub.Subscribe(c, ChannelTopic(chID))
+	}
+	// If the client is already in a voice channel (e.g. reconnect or test setup),
+	// subscribe to that channel's topic so voice-scoped and channel-scoped
+	// broadcasts reach them.
+	if voiceChID := c.getVoiceChID(); voiceChID != 0 {
+		h.pubsub.Subscribe(c, ChannelTopic(voiceChID))
+	}
 }
 
 func (h *Hub) unregisterNow(c *Client) bool {
@@ -648,6 +666,19 @@ func (h *Hub) SetEventStore(s store.EventStore) {
 	h.eventStore = s
 }
 
+// SetPluginRegistry wires the plugin.Registry so the hub can dispatch
+// slash commands (chat_command messages) to plugin-owned handlers.
+// Pass nil to disable plugin command dispatch.
+func (h *Hub) SetPluginRegistry(r *plugin.Registry) {
+	h.pluginRegistry = r
+}
+
+// SetPluginEventSink wires the plugin.EventSink so the hub fans out each
+// sequenced broadcast to subscribed plugins. Pass nil to disable.
+func (h *Hub) SetPluginEventSink(s *plugin.EventSink) {
+	h.pluginSink = s
+}
+
 // ReconnectTierStats returns the per-tier resume hit counters in the order
 // (buffer, db, full). Phase B Step 7 metrics surface; OpenTelemetry meters
 // (Step 8) read from the same atomics.
@@ -855,6 +886,20 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	// Store in replay buffer for reconnection recovery.
 	h.replayBuf.Push(seq, bm.channelID, msg)
 	h.persistEvent(seq, bm.channelID, msg)
+
+	// Fan out to plugins subscribed to this event type (Phase C Step 9).
+	// Dispatch is a no-op in the default build; the wazero build calls into
+	// the WASM module. Dispatch is called outside seqMu after we release it
+	// conceptually — but since seqMu is still held here, the call MUST NOT
+	// re-enter the hub. The default build is safe; the wazero build should
+	// dispatch asynchronously once the runtime is real.
+	if h.pluginSink != nil {
+		eventType := extractEventType(msg)
+		if eventType == "" {
+			eventType = "broadcast"
+		}
+		h.pluginSink.Dispatch(context.Background(), eventType, msg)
+	}
 
 	if bm.channelID == 0 {
 		// Global broadcast — deliver to every connected client.

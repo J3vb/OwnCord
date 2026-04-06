@@ -169,6 +169,9 @@ func validateRelativePath(p string) error {
 	if cleaned != p {
 		return fmt.Errorf("path %q is not in canonical form (clean: %q)", p, cleaned)
 	}
+	if cleaned == "." {
+		return fmt.Errorf("path %q refers to the current directory", p)
+	}
 	for _, seg := range strings.Split(cleaned, "/") {
 		if seg == ".." {
 			return fmt.Errorf("path %q contains parent traversal", p)

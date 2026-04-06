@@ -93,6 +93,12 @@ func (r *Registry) AssetHandler(inst *Instance) http.Handler {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		http.ServeFile(w, req, full)
+		f, openErr := os.Open(full)
+		if openErr != nil {
+			http.NotFound(w, req)
+			return
+		}
+		defer f.Close()
+		http.ServeContent(w, req, rel, info.ModTime(), f)
 	})
 }
