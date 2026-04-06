@@ -7,6 +7,7 @@ package plugin
 
 import (
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -44,6 +45,11 @@ func (r *Registry) RegisterUI(inst *Instance) error {
 //  3. After resolving the on-disk path we use filepath.Rel and reject any
 //     result containing ".." or that is absolute, which catches symlink
 //     escapes and the prefix-without-separator class of bug.
+//  4. A serve-time os.Lstat check rejects symlinks that were created AFTER
+//     install (the install-time rejectSymlinksUnder walk only runs once).
+//     This closes the TOCTOU window where a malicious or buggy process
+//     swaps a regular file for a symlink post-install — http.ServeFile
+//     would otherwise follow the link and leak host files.
 func (r *Registry) AssetHandler(inst *Instance) http.Handler {
 	allowed := make(map[string]bool, len(inst.Manifest.UI.Tabs))
 	for _, t := range inst.Manifest.UI.Tabs {
@@ -67,6 +73,23 @@ func (r *Registry) AssetHandler(inst *Instance) http.Handler {
 		}
 		relCheck, relErr := filepath.Rel(pluginDir, full)
 		if relErr != nil || relCheck == "" || relCheck == "." || strings.HasPrefix(relCheck, "..") || filepath.IsAbs(relCheck) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		// Lstat (not Stat) so a symlink is detected instead of followed.
+		// This runs on every request — cheap relative to the file read —
+		// and closes the TOCTOU gap between install-time validation and
+		// runtime serving.
+		info, lerr := os.Lstat(full)
+		if lerr != nil {
+			http.NotFound(w, req)
+			return
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		if !info.Mode().IsRegular() {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}

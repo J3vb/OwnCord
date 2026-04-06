@@ -65,9 +65,9 @@ func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 		// handler enforces that resolved paths stay rooted at pluginDir, but
 		// http.ServeFile / os.Open follow symlinks transparently — a malicious
 		// plugin .zip containing `assets/index.html -> /etc/passwd` would
-		// otherwise serve host files. Stat (not Lstat) is used for the
-		// entrypoint because we want to refuse it being a symlink even if
-		// the target is valid.
+		// otherwise serve host files. Lstat (not Stat) is used for the
+		// entrypoint check below so a symlink is detected instead of
+		// followed, even when its target is a valid .wasm file.
 		if err := rejectSymlinksUnder(pluginDir); err != nil {
 			return nil, fmt.Errorf("plugin %q: %w", e.Name(), err)
 		}

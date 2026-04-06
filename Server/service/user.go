@@ -29,7 +29,7 @@ func (s *UserService) UpdateProfile(userID int64, username string, avatar *strin
 	)
 	start := time.Now()
 	defer func() {
-		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationMs, start,
+		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
 			telemetry.String("method", "UpdateProfile"))
 		span.End()
 	}()

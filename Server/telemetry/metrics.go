@@ -20,17 +20,17 @@ const (
 // it once at startup with NewAppMetrics() and stash it on the relevant
 // long-lived structs (Hub, services, etc).
 type AppMetrics struct {
-	WSMessagesTotal       Counter
-	WSActiveConnections   Gauge
-	WSBroadcastLatency    Histogram
-	WSReconnectTierTotal  Counter
-	WSEventsPersisted     Counter
-	WSEventsDropped       Counter
-	WSEventsPersistErrors Counter
-	DBQueryDurationSec    Histogram
-	VoiceActiveSessions   Gauge
-	VoiceParticipants     Gauge
-	ServiceCallDurationMs Histogram
+	WSMessagesTotal        Counter
+	WSActiveConnections    Gauge
+	WSBroadcastLatency     Histogram
+	WSReconnectTierTotal   Counter
+	WSEventsPersisted      Counter
+	WSEventsDropped        Counter
+	WSEventsPersistErrors  Counter
+	DBQueryDurationSec     Histogram
+	VoiceActiveSessions    Gauge
+	VoiceParticipants      Gauge
+	ServiceCallDurationSec Histogram
 }
 
 var (
@@ -49,17 +49,17 @@ func NewAppMetrics() *AppMetrics {
 		db := GlobalMeter(scopeDB)
 		voice := GlobalMeter(scopeVoice)
 		appMetricsInst = &AppMetrics{
-			WSMessagesTotal:       ws.Counter("ws_messages_total", "WebSocket messages broadcast"),
-			WSActiveConnections:   ws.Gauge("ws_active_connections", "Currently connected WebSocket clients"),
-			WSBroadcastLatency:    ws.Histogram("ws_broadcast_latency_seconds", "Wall-clock seconds from enqueue to fanout completion", "s"),
-			WSReconnectTierTotal:  ws.Counter("ws_reconnect_tier_total", "Reconnection replay tier hits, attribute tier=buffer|db|full"),
-			WSEventsPersisted:     ws.Counter("ws_events_persisted_total", "Events written to the cold-tier event log"),
-			WSEventsDropped:       ws.Counter("ws_events_dropped_total", "Events dropped because the persister queue was full"),
-			WSEventsPersistErrors: ws.Counter("ws_events_persist_errors_total", "PersistEvent calls that returned an error from the underlying store"),
-			DBQueryDurationSec:    db.Histogram("db_query_duration_seconds", "Per-query wall time", "s"),
-			VoiceActiveSessions:   voice.Gauge("voice_active_sessions", "Active LiveKit rooms"),
-			VoiceParticipants:     voice.Gauge("voice_participants", "Connected LiveKit participants across all rooms"),
-			ServiceCallDurationMs: svc.Histogram("service_call_duration_seconds", "Service-layer method execution time", "s"),
+			WSMessagesTotal:        ws.Counter("ws_messages_total", "WebSocket messages broadcast"),
+			WSActiveConnections:    ws.Gauge("ws_active_connections", "Currently connected WebSocket clients"),
+			WSBroadcastLatency:     ws.Histogram("ws_broadcast_latency_seconds", "Wall-clock seconds from enqueue to fanout completion", "s"),
+			WSReconnectTierTotal:   ws.Counter("ws_reconnect_tier_total", "Reconnection replay tier hits, attribute tier=buffer|db|full"),
+			WSEventsPersisted:      ws.Counter("ws_events_persisted_total", "Events written to the cold-tier event log"),
+			WSEventsDropped:        ws.Counter("ws_events_dropped_total", "Events dropped because the persister queue was full"),
+			WSEventsPersistErrors:  ws.Counter("ws_events_persist_errors_total", "PersistEvent calls that returned an error from the underlying store"),
+			DBQueryDurationSec:     db.Histogram("db_query_duration_seconds", "Per-query wall time", "s"),
+			VoiceActiveSessions:    voice.Gauge("voice_active_sessions", "Active LiveKit rooms"),
+			VoiceParticipants:      voice.Gauge("voice_participants", "Connected LiveKit participants across all rooms"),
+			ServiceCallDurationSec: svc.Histogram("service_call_duration_seconds", "Service-layer method execution time", "s"),
 		}
 	})
 	return appMetricsInst

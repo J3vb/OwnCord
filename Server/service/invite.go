@@ -33,7 +33,7 @@ func (s *InviteService) CreateInvite(createdBy int64, maxUses int, expiresInHour
 	)
 	start := time.Now()
 	defer func() {
-		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationMs, start,
+		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
 			telemetry.String("method", "CreateInvite"))
 		span.End()
 	}()

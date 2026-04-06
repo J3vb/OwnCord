@@ -31,10 +31,10 @@ type pendingEvent struct {
 
 // EventPersister batches broadcast events and writes them to an EventStore.
 type EventPersister struct {
-	store     store.EventStore
-	queue     chan pendingEvent
-	batchSize int
-	flushEvy  time.Duration
+	store      store.EventStore
+	queue      chan pendingEvent
+	batchSize  int
+	flushEvery time.Duration
 
 	startOnce sync.Once
 	started   atomic.Bool
@@ -48,10 +48,19 @@ type EventPersister struct {
 	errors    atomic.Uint64
 }
 
-// NewEventPersister returns a persister wired to s. queueSize sets the
-// channel buffer; once full, Enqueue increments the dropped counter without
-// blocking. batchSize and flushEvery control the flush triggers.
+// NewEventPersister returns a persister wired to s. s MUST be non-nil —
+// run() dereferences p.store on every flush, so a nil store would panic on
+// the first tick. We fail fast here so the misconfiguration surfaces at
+// construction time (main.go, tests) instead of minutes later in the
+// background goroutine.
+//
+// queueSize sets the channel buffer; once full, Enqueue increments the
+// dropped counter without blocking. batchSize and flushEvery control the
+// flush triggers.
 func NewEventPersister(s store.EventStore, queueSize, batchSize int, flushEvery time.Duration) *EventPersister {
+	if s == nil {
+		panic("ws: NewEventPersister requires a non-nil store.EventStore")
+	}
 	if queueSize <= 0 {
 		queueSize = 1024
 	}
@@ -62,12 +71,12 @@ func NewEventPersister(s store.EventStore, queueSize, batchSize int, flushEvery 
 		flushEvery = 100 * time.Millisecond
 	}
 	return &EventPersister{
-		store:     s,
-		queue:     make(chan pendingEvent, queueSize),
-		batchSize: batchSize,
-		flushEvy:  flushEvery,
-		stop:      make(chan struct{}),
-		done:      make(chan struct{}),
+		store:      s,
+		queue:      make(chan pendingEvent, queueSize),
+		batchSize:  batchSize,
+		flushEvery: flushEvery,
+		stop:       make(chan struct{}),
+		done:       make(chan struct{}),
 	}
 }
 
@@ -128,7 +137,7 @@ func (p *EventPersister) Stats() (persisted, dropped, flushes, errs uint64) {
 
 func (p *EventPersister) run(ctx context.Context) {
 	defer close(p.done)
-	tick := time.NewTicker(p.flushEvy)
+	tick := time.NewTicker(p.flushEvery)
 	defer tick.Stop()
 
 	// Cache the AppMetrics bundle once instead of looking it up per event.

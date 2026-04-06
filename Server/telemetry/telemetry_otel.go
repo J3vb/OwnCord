@@ -4,9 +4,12 @@
 // which keeps the OTel SDK out of the default sqlite-only build (matching the
 // pattern used by Server/store/postgres.go).
 //
-// IMPORTANT: This file currently contains a real-API skeleton that will fail
-// to compile until the OTel modules are added to go.mod. To finish wiring it,
-// run on a machine with network access:
+// IMPORTANT: This file currently compiles under `-tags otel` because the
+// skeleton deliberately avoids importing any upstream OTel packages. `Init`
+// returns a runtime error until the real SDK wiring lands; `Shutdown` is a
+// no-op. The CI matrix step that builds with `-tags otel` therefore passes
+// today but does NOT exercise real telemetry. To finish wiring it, run on
+// a machine with network access:
 //
 //	cd Server
 //	go get go.opentelemetry.io/otel@latest \
@@ -69,7 +72,7 @@ func Init(ctx context.Context, cfg config.TelemetryConfig) (ShutdownFunc, error)
 }
 
 // otelProvider satisfies Provider once the SDK is wired.
-func (p *otelProvider) Tracer(name string) Tracer                    { _ = name; return noopTracer{} }
-func (p *otelProvider) Meter(name string) Meter                      { _ = name; return noopMeter{} }
+func (p *otelProvider) Tracer(name string) Tracer                     { _ = name; return noopTracer{} }
+func (p *otelProvider) Meter(name string) Meter                       { _ = name; return noopMeter{} }
 func (p *otelProvider) HTTPMiddleware(next http.Handler) http.Handler { return p.httpMiddleware(next) }
-func (p *otelProvider) PrometheusHandler() http.Handler              { return p.promHandler }
+func (p *otelProvider) PrometheusHandler() http.Handler               { return p.promHandler }

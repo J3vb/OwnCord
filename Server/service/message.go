@@ -125,7 +125,7 @@ func (s *MessageService) SendMessage(p SendMessageParams) (*SendMessageResult, e
 	)
 	start := time.Now()
 	defer func() {
-		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationMs, start,
+		telemetry.TimeSince(ctx, telemetry.NewAppMetrics().ServiceCallDurationSec, start,
 			telemetry.String("method", "SendMessage"))
 		span.End()
 	}()

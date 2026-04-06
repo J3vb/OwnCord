@@ -137,9 +137,15 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 	}
 
 	// ── 4b. Telemetry (Phase B Step 8) ─────────────────────────────────────
+	// Init can return (nil, err) when the otel build-tag skeleton hasn't been
+	// finished wiring to the upstream SDK. Normalise to a no-op shutdown so
+	// the deferred closure never calls a nil function.
 	telemetryShutdown, telErr := telemetry.Init(context.Background(), cfg.Telemetry)
 	if telErr != nil {
 		log.Warn("telemetry init failed; continuing without OpenTelemetry", "error", telErr)
+	}
+	if telemetryShutdown == nil {
+		telemetryShutdown = func(context.Context) error { return nil }
 	}
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
