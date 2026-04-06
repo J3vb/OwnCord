@@ -380,9 +380,6 @@ func (r *Registry) activateAll(ctx context.Context) error {
 // ErrRuntimeUnavailable; the wazero-tagged build replaces this with the real
 // implementation via the runtimePlatform field.
 func (r *Registry) activate(ctx context.Context, inst *Instance) error {
-	if r.runtimePlatform == nil {
-		return ErrRuntimeUnavailable
-	}
 	return r.activateWithRuntime(ctx, inst)
 }
 
