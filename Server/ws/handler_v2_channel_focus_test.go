@@ -4,8 +4,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/service"
+	"github.com/owncord/server/store"
 )
 
 // newFocusTestDeps creates an in-memory DB with a user (role=Owner, id=1) and
@@ -30,8 +33,9 @@ func newFocusTestDeps(t *testing.T) (PresenceDeps, int64, int64) {
 		t.Fatalf("CreateChannel: %v", err)
 	}
 
-	perms := permissions.NewChecker(database)
-	deps := PresenceDeps{DB: database, Limiter: nil, Permissions: perms}
+	st := store.NewSQLiteStore(database)
+	svc := service.New(st, auth.NewRateLimiter())
+	deps := PresenceDeps{Limiter: nil, ChannelSvc: svc.Channels}
 	return deps, userID, chID
 }
 
@@ -107,8 +111,9 @@ func TestChannelFocusV2_NoPermission_ReturnsForbidden(t *testing.T) {
 		t.Fatalf("INSERT channel_overrides: %v", err)
 	}
 
-	perms := permissions.NewChecker(database)
-	deps := PresenceDeps{DB: database, Limiter: nil, Permissions: perms}
+	st := store.NewSQLiteStore(database)
+	svc := service.New(st, auth.NewRateLimiter())
+	deps := PresenceDeps{Limiter: nil, ChannelSvc: svc.Channels}
 
 	cmd := ChannelFocusCmd{userID: userID, channelID: chID}
 	info := ClientInfo{UserID: userID, Username: "noperm"}

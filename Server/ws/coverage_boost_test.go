@@ -14,6 +14,8 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/service"
+	"github.com/owncord/server/store"
 	"github.com/owncord/server/ws"
 )
 
@@ -76,7 +78,9 @@ func newCoverageHub(t *testing.T) (*ws.Hub, *db.DB) {
 	t.Helper()
 	database := openCoverageDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter, nil)
+	st := store.NewSQLiteStore(database)
+	svc := service.New(st, limiter)
+	hub := ws.NewHub(database, limiter, svc)
 
 	// Inject a test LiveKit client so voice_join passes the livekit!=nil guard.
 	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{

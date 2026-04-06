@@ -28,25 +28,25 @@ type Client struct {
 	ctx            context.Context // derived from WS upgrade request; cancelled on disconnect
 	userID         int64
 	user           *db.User
-	channelID      int64     // currently viewed channel for channel-scoped broadcasts
-	voiceChID      int64     // voice channel the user is in (0 = not in voice); guarded by voiceMu
-	voiceJoinToken string    // opaque join-instance token for the current voice session; guarded by voiceMu
-	e2eePubKey     string    // ECDH P-256 public key (base64) for voice E2EE; guarded by voiceMu
-	roleName       string    // cached role name for chat_message broadcasts
-	tokenHash      string    // SHA-256 hex of the session token; used for periodic revalidation
-	lastSeq        uint64    // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
-	connectedAt    time.Time // when the WS connection was established
-	remoteAddr     string    // client IP:port from the HTTP upgrade request
-	msgCount       int       // count of messages processed; resets after session check
-	msgsReceived   int64     // total messages received over the lifetime of this connection
-	msgsSent       int64     // total messages sent over the lifetime of this connection
-	msgsDropped    int64     // messages dropped due to full send buffer
-	invalidCount   int       // consecutive invalid messages; reset on valid parse
-	lastActivity   time.Time // last message received from this client; guarded by mu
-	sendClosed     bool      // true after all send channels have been closed
-	send           chan []byte // normal-priority outbound messages (chat messages, reactions)
-	sendHigh       chan []byte // high-priority outbound messages (DMs, mentions)
-	sendLow        chan []byte // low-priority outbound messages (typing, presence) — dropped on overflow
+	channelID      int64          // currently viewed channel for channel-scoped broadcasts
+	voiceChID      int64          // voice channel the user is in (0 = not in voice); guarded by voiceMu
+	voiceJoinToken string         // opaque join-instance token for the current voice session; guarded by voiceMu
+	e2eePubKey     string         // ECDH P-256 public key (base64) for voice E2EE; guarded by voiceMu
+	roleName       string         // cached role name for chat_message broadcasts
+	tokenHash      string         // SHA-256 hex of the session token; used for periodic revalidation
+	lastSeq        uint64         // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
+	connectedAt    time.Time      // when the WS connection was established
+	remoteAddr     string         // client IP:port from the HTTP upgrade request
+	msgCount       int            // count of messages processed; resets after session check
+	msgsReceived   int64          // total messages received over the lifetime of this connection
+	msgsSent       int64          // total messages sent over the lifetime of this connection
+	msgsDropped    int64          // messages dropped due to full send buffer
+	invalidCount   int            // consecutive invalid messages; reset on valid parse
+	lastActivity   time.Time      // last message received from this client; guarded by mu
+	sendClosed     bool           // true after all send channels have been closed
+	send           chan []byte    // normal-priority outbound messages (chat messages, reactions)
+	sendHigh       chan []byte    // high-priority outbound messages (DMs, mentions)
+	sendLow        chan []byte    // low-priority outbound messages (typing, presence) — dropped on overflow
 	mu             syncutil.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
 	voiceMu        syncutil.Mutex // guards voiceChID and voiceJoinToken
 }
@@ -91,8 +91,8 @@ func NewTestClient(hub *Hub, userID int64, send chan []byte) *Client {
 		ctx:      context.Background(),
 		userID:   userID,
 		send:     send,
-		sendHigh: make(chan []byte, sendHighBufSize),
-		sendLow:  make(chan []byte, sendLowBufSize),
+		sendHigh: send, // unified for test observability
+		sendLow:  send,
 	}
 }
 
@@ -104,8 +104,8 @@ func NewTestClientWithChannel(hub *Hub, userID, channelID int64, send chan []byt
 		userID:    userID,
 		channelID: channelID,
 		send:      send,
-		sendHigh:  make(chan []byte, sendHighBufSize),
-		sendLow:   make(chan []byte, sendLowBufSize),
+		sendHigh:  send, // unified for test observability
+		sendLow:   send,
 	}
 }
 
@@ -119,8 +119,8 @@ func NewTestClientWithUser(hub *Hub, user *db.User, channelID int64, send chan [
 		user:      user,
 		channelID: channelID,
 		send:      send,
-		sendHigh:  make(chan []byte, sendHighBufSize),
-		sendLow:   make(chan []byte, sendLowBufSize),
+		sendHigh:  send, // unified for test observability
+		sendLow:   send,
 	}
 }
 
@@ -164,8 +164,8 @@ func NewTestClientWithTokenHash(hub *Hub, user *db.User, tokenHash string, chann
 		tokenHash: tokenHash,
 		channelID: channelID,
 		send:      send,
-		sendHigh:  make(chan []byte, sendHighBufSize),
-		sendLow:   make(chan []byte, sendLowBufSize),
+		sendHigh:  send, // unified for test observability
+		sendLow:   send,
 	}
 }
 
@@ -358,7 +358,11 @@ func (c *Client) closeAllSendLocked() {
 	if !c.sendClosed {
 		c.sendClosed = true
 		close(c.send)
-		close(c.sendHigh)
-		close(c.sendLow)
+		if c.sendHigh != c.send {
+			close(c.sendHigh)
+		}
+		if c.sendLow != c.send && c.sendLow != c.sendHigh {
+			close(c.sendLow)
+		}
 	}
 }

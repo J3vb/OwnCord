@@ -284,6 +284,10 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusForbidden, errorResponse{Error: "FORBIDDEN", Message: err.Error()})
 	case errors.Is(err, service.ErrConflict):
 		writeJSON(w, http.StatusConflict, errorResponse{Error: "CONFLICT", Message: err.Error()})
+	case errors.Is(err, service.ErrInternal):
+		slog.Error("service error", "err", err)
+		msg := strings.TrimPrefix(err.Error(), "internal error: ")
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "INTERNAL_ERROR", Message: msg})
 	default:
 		slog.Error("service error", "err", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "INTERNAL_ERROR", Message: "internal error"})

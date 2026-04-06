@@ -130,6 +130,15 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	hub := ws.NewHub(database, limiter, svc)
 	getOnlineUsers = func() int { return hub.ClientCount() }
 
+	// Phase C Step 9 — wire plugin registry and event sink into the hub.
+	// nil pluginRegistry means plugins are disabled; the hub no-ops cleanly.
+	if pluginRegistry != nil {
+		hub.SetPluginRegistry(pluginRegistry)
+		sink := pluginRegistry.Sink()
+		sink.SetBroadcaster(hub.BroadcastToChannel)
+		hub.SetPluginEventSink(sink)
+	}
+
 	// Create LiveKit client if voice config is present; voice is disabled on failure.
 	lk, lkErr := ws.NewLiveKitClient(&cfg.Voice)
 	if lkErr != nil {

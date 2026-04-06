@@ -12,6 +12,8 @@ import (
 	"github.com/owncord/server/api"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/service"
+	"github.com/owncord/server/store"
 )
 
 // ─── schema for channel tests ─────────────────────────────────────────────────
@@ -186,7 +188,10 @@ func newChannelTestDB(t *testing.T) *db.DB {
 
 func buildChannelRouter(database *db.DB) http.Handler {
 	r := chi.NewRouter()
-	api.MountChannelRoutes(r, database, auth.NewRateLimiter(), nil)
+	limiter := auth.NewRateLimiter()
+	st := store.NewSQLiteStore(database)
+	svc := service.New(st, limiter)
+	api.MountChannelRoutes(r, database, svc, limiter, nil)
 	return r
 }
 
@@ -605,7 +610,8 @@ func TestSearch_TrustedProxyRateLimitUsesForwardedIP(t *testing.T) {
 	database := newChannelTestDB(t)
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
-	api.MountChannelRoutes(r, database, limiter, []string{"127.0.0.0/8"})
+	svc := service.New(store.NewSQLiteStore(database), limiter)
+	api.MountChannelRoutes(r, database, svc, limiter, []string{"127.0.0.0/8"})
 	token := chTestCreateToken(t, database, "proxysearch", 1)
 
 	for i := 0; i < 30; i++ {

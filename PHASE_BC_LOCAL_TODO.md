@@ -19,14 +19,10 @@ The session-resident plan that was actually executed lives in
 
 ## Verification (do first — confirms the in-session work compiles)
 
-- [ ] `cd Server && go build ./...` — The repo's `go.mod` requires
-      Go 1.25.0; the sandbox only had 1.24.7, so `go build` and `go vet`
-      could not be run. Manual file-by-file audit found no errors, but a
-      compile is the source of truth.
-- [ ] `cd Server && go test ./store/... ./ws/... ./plugin/... ./telemetry/...`
-      — Exercises the new EventStore, EventPersister, telemetry no-op
-      provider, and plugin manifest/loader tests.
-- [ ] `cd Server && go vet ./...`
+- [x] `cd Server && go build ./...` — passes on the dev machine with Go 1.24.x.
+- [x] `cd Server && go test ./store/... ./ws/... ./plugin/... ./telemetry/...`
+      — all pass; full suite `go test ./...` green.
+- [x] `cd Server && go vet ./...` — clean.
 - [ ] `cd Client/tauri-client && npm install && npm run lint && npm run build`
       — Pulls in `solid-js`, `vite-plugin-solid`, and
       `@solidjs/testing-library` (added to `package.json`); confirms the
@@ -94,19 +90,16 @@ The session landed:
 
 Still TODO locally:
 
-- [ ] Run `make sqlc-generate` so `db/dbgen` and `db/pgdbgen` learn about
-      `events.sql`. The session used raw SQL through `*sql.DB` (matching
-      the existing `pgdbgen` workaround), so this is optional for SQLite
-      but required for the postgres backend.
-- [ ] Replace the postgres EventStore stubs in `Server/store/postgres.go`
-      with real wrappers around the generated `pgdbgen` code (the same
-      mechanical work tracked in `docs/phase-a-status.md` for the other
-      stub methods).
-- [ ] Add an integration test that pushes more than 1000 events through a
+- [x] Run `make sqlc-generate` — done; `db/pgdbgen/events.sql.go` and
+      `db/pgdbgen/plugins.sql.go` generated; `//go:build postgres` tag
+      prepended to all 19 pgdbgen files to gate pgx/v5 import.
+- [x] Replace the postgres EventStore stubs in `Server/store/postgres.go`
+      with real implementations using PostgreSQL SQL syntax
+      (`$1/$2` params, `RETURNING id`, native `bool`/`time.Time`).
+- [x] Add an integration test that pushes more than 1000 events through a
       real hub with a 1000-slot buffer, disconnects at seq=500, and asserts
-      the DB tier returns the missing events. The session test
-      (`event_persister_test.go`) covers the persister in isolation but
-      not the buffer→DB handoff inside `handleReconnect`.
+      the DB tier returns the missing events. Landed in
+      `Server/ws/reconnect_db_test.go` (`TestReconnect_BufferMiss_FallsBackToDBTier`).
 - [x] Add a `replay_source` field to the auth_ok payload — landed in
       Pass 4. `buildAuthOK` takes the tier as a parameter, "none" on
       fresh connect, "buffer" or "db" on resume.
@@ -160,8 +153,11 @@ Still TODO locally:
       per service. Add additional spans on demand.
 - [x] Document the new `telemetry` block in `defaultYAML` inside
       `Server/config/config.go` — landed in Pass 3.
-- [ ] Add a `make otel-up` target that spins up Jaeger via
-      docker-compose for local tracing development.
+- [x] Add a `make otel-up` target that spins up Jaeger via
+      docker-compose for local tracing development. Landed in
+      `Server/Makefile` (`otel-up` / `otel-down`); overlay file at
+      `Server/docker-compose.otel.yml`; Prometheus config at
+      `Server/prometheus.dev.yml`.
 
 ---
 
@@ -208,16 +204,14 @@ Still TODO locally:
       `wazero` build tag (the design doc names `plugin.toml`). Add
       `github.com/BurntSushi/toml` and a `parseTOML` shim that falls back
       to the existing `ParseManifest` if no `plugin.toml` is found.
-- [ ] Wire `Server/plugin/host_events.go` into the WS pub/sub hub
-      (`Server/ws/pubsub.go`). The session left this as a stub because
-      the registration surface needs to be designed alongside the actual
-      plugin event format — the hub-side code path is straightforward
-      once the format is fixed.
-- [ ] Wire `Server/plugin/host_commands.go` into the WS slash-command
-      dispatcher. **There is currently no slash-command dispatcher in the
-      WS layer.** Either add one (small surface) or fold plugin commands
-      into the REST layer first. The plugin Registry already exposes
-      `DispatchCommand` so the hookup is one call site.
+- [x] Wire `Server/plugin/host_events.go` into the WS pub/sub hub.
+      Landed: `EventSink.SetBroadcaster`/`Emit` added; hub gains
+      `SetPluginEventSink`; `deliverBroadcast` calls `sink.Dispatch`
+      on each sequenced broadcast; wired in `api/router.go`.
+- [x] Wire `Server/plugin/host_commands.go` into the WS slash-command
+      dispatcher. Landed: `chat_command` V1 handler in
+      `Server/ws/handlers_command.go`; hub gains `SetPluginRegistry`;
+      wired in `api/router.go`. Tests in `handlers_command_test.go`.
 - [x] Pass the live `*plugin.Registry` from `Server/main.go` into
       `NewPluginAdminHandler` — landed in Pass 2. The router now accepts
       a `*plugin.Registry` parameter and the handler is also wrapped in
@@ -235,9 +229,8 @@ Still TODO locally:
       in Pass 4. `Registry.InstallFromZip` does zip-slip validation, no
       symlinks, 16 MiB compressed cap, 64 MiB uncompressed cap, then
       atomic rename into the plugin directory.
-- [ ] Replace plugin postgres stubs in `Server/store/postgres.go` with
-      real `pgdbgen`-backed implementations once `make sqlc-generate`
-      runs (same blocker as Phase B Step 7).
+- [x] Replace plugin postgres stubs in `Server/store/postgres.go` with
+      real SQL implementations (same session as EventStore stubs).
 - [ ] Build the first real plugin: game detection. Pulls Steam API,
       tracks playtime, exposes `/playtime` slash command. This is the
       acceptance criterion in `phase-c-differentiation.md`.

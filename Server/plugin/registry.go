@@ -44,6 +44,10 @@ type Registry struct {
 	commands map[string]*Instance // command name → owning plugin
 	uiTabs   []UITabBinding       // declared by `ui` capability plugins
 
+	// sink is the hub→plugin event fan-out. Plugins subscribe to topics via
+	// Subscribe; the WS hub calls sink.Dispatch on each broadcast.
+	sink *EventSink
+
 	// runtimePlatform is set by the wazero-tagged build's NewRegistry to a
 	// concrete *wazero.Runtime. The default build leaves it nil and falls
 	// back to manifest-only behaviour.
@@ -82,6 +86,7 @@ func NewRegistry(cfg Config) (*Registry, error) {
 		plugins:  make(map[int64]*Instance),
 		byName:   make(map[string]*Instance),
 		commands: make(map[string]*Instance),
+		sink:     NewEventSink(),
 	}, nil
 }
 
@@ -101,6 +106,13 @@ func (r *Registry) Close(ctx context.Context) error {
 	}
 	r.uiTabs = nil
 	return nil
+}
+
+// Sink returns the registry's EventSink, used by the WS hub to fan out
+// broadcast events to subscribed plugins and by the wazero build to deliver
+// plugin output back to WS clients.
+func (r *Registry) Sink() *EventSink {
+	return r.sink
 }
 
 // LoadAll scans cfg.Directory and persists every plugin.json found into the

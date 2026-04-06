@@ -92,7 +92,7 @@ func (s *DMService) CloseDM(userID, channelID int64) error {
 
 	ok, err := s.st.IsDMParticipant(userID, channelID)
 	if err != nil || !ok {
-		return fmt.Errorf("%w: not a participant in this DM", ErrForbidden)
+		return fmt.Errorf("%w: not a participant in this DM", ErrNotFound)
 	}
 
 	if err := s.st.CloseDM(userID, channelID); err != nil {

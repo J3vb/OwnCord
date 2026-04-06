@@ -16,6 +16,8 @@ import (
 	"nhooyr.io/websocket"
 
 	"github.com/owncord/server/auth"
+	"github.com/owncord/server/service"
+	"github.com/owncord/server/store"
 	"github.com/owncord/server/ws"
 )
 
@@ -996,7 +998,9 @@ func TestServeWS_writePump_MessageDelivered(t *testing.T) {
 func TestIntegration_MessageRoundTrip(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter, nil)
+	st := store.NewSQLiteStore(database)
+	svc := service.New(st, limiter)
+	hub := ws.NewHub(database, limiter, svc)
 	go hub.Run()
 	defer hub.Stop()
 
