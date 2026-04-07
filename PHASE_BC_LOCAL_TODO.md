@@ -131,15 +131,31 @@ The session landed:
 
 Still TODO locally:
 
-- [x] Add the OTel modules to `go.mod`:
-      otel v1.43.0, sdk v1.43.0, exporters/prometheus v0.65.0,
-      exporters/otlp/otlptrace/otlptracegrpc v1.43.0,
-      otelhttp v0.67.0 (used instead of unavailable otelchi).
+- [x] Add the OTel modules to `go.mod`: otel v1.43.0, sdk v1.43.0,
+      exporters/prometheus v0.65.0,
+      exporters/otlp/otlptrace/otlptracegrpc v1.43.0, and
+      `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp`
+      v0.67.0 (otelhttp replaces the unmaintained otelchi wrapper
+      referenced by the original plan; otelhttp is upstream-supported
+      and wraps any `http.Handler` including a Chi router).
 - [x] Replace the placeholder body of `telemetry/telemetry_otel.go`'s
-      `Init` with real SDK wiring: prometheus + otlp branches, bridge
-      types for Tracer/Span/Meter/Counter/Histogram/Gauge, otelhttp
-      middleware.
-- [x] Build with `-tags otel` — passes. Full 5-tag matrix green.
+      `Init` with the real tracer + meter provider construction. The
+      tagged build wires an OTel Prometheus exporter (pull), an OTLP/gRPC
+      trace exporter when `exporter=otlp` (with `OTLPInsecure` opt-in for
+      plaintext gRPC), `otelhttp.NewHandler` as the HTTP middleware, and
+      a real provider that re-binds `AppMetrics` instruments via
+      `resetAppMetricsForInit`. Tests in
+      `Server/telemetry/telemetry_otel_test.go`
+      (`TestOtelInitPrometheusExporter`, `TestOtelTracerRecordsSpan`,
+      `TestOtelHistogramRecordsSeconds`, `TestOtelShutdownIdempotent`,
+      `TestOtelConvertAttrsHandlesUnsignedInts`,
+      `TestOtelConvertAttrsUint64OverflowFallsBackToString`,
+      `TestOtelAppMetricsRebindsAfterInit`) run under
+      `go test -tags otel ./telemetry/...`.
+- [x] Build with `-tags otel` — passes. Full 4-tag matrix green
+      (default, otel, wazero, otel+wazero) against Go 1.25.1.
+- [ ] Add a CI job that exercises `go build -tags otel ./...` and
+      `go test -tags otel ./telemetry/...`.
 - [x] Add spans to the remaining service-layer entry points
       (`DMService`, `VoiceService`, `InviteService`, `ModerationService`,
       `BlockService`, `UserService`) — landed in Pass 3, one entrypoint
@@ -184,15 +200,36 @@ The session landed:
 
 Still TODO locally:
 
-- [x] Add wazero to `go.mod`: v1.11.0 landed.
+- [x] Add `github.com/tetratelabs/wazero v1.11.0` to `go.mod`.
 - [x] Replace the placeholder body in `Server/plugin/sandbox_wazero.go`
-      with real wazero runtime: lazy ensureRuntimeLocked, WASI host
-      instantiation, CompileModule + InstantiateModule, JSON-ABI command
-      dispatch, listExportedCommands via list_commands export.
+      with real wazero runtime construction. The tagged build owns a
+      shared `wazero.Runtime` created in `platformInit` (with the
+      configured `MaxMemoryMB` translated to `WithMemoryLimitPages` and
+      WASI preview-1 imports pre-instantiated), compiles + instantiates
+      each plugin's `.wasm` entrypoint in `activateWithRuntime`, and
+      tears modules + runtime down in `platformDeactivate` / `Close`.
+      The host-guest command ABI is JSON-over-linear-memory:
+      `allocate(size)` / `command_dispatch(ptr,len) → (ptr,len)` /
+      `deallocate(ptr,len)`, with optional `list_commands` for command
+      auto-registration. Tests in `Server/plugin/sandbox_wazero_test.go`
+      (`TestWazeroRegistryCreatesRuntime`,
+      `TestWazeroActivateCompilesModule`,
+      `TestWazeroDispatchCommandMissingExport`,
+      `TestWazeroCloseTearsDownRuntime`,
+      `TestWazeroInvalidWASMFailsActivation`,
+      `TestWazeroDisablePluginFreesModule`) run under
+      `go test -tags wazero ./plugin/...` using a 41-byte embedded WASM
+      fixture for the smoke tests.
+- [x] Add a precompiled `Server/plugin/examples/hello/hello.wasm`
+      (925 KiB) built with TinyGo 0.40.1 + Go 1.25.3 + Binaryen
+      wasm-opt 129. Source in `examples/hello/main.go`; exports:
+      `allocate`, `deallocate`, `list_commands`, `command_dispatch`,
+      `on_event`.
 - [x] Replace JSON-only manifest parsing with TOML support behind the
-      `wazero` build tag. Added BurntSushi/toml v1.6.0, manifest_toml.go
-      (wazero) + manifest_nottoml.go (!wazero), loader.go prefers plugin.toml
-      then falls back to plugin.json.
+      `wazero` build tag. Added `github.com/BurntSushi/toml` v1.6.0,
+      `manifest_toml.go` (wazero) + `manifest_nottoml.go` (!wazero);
+      `loader.go` prefers `plugin.toml` and falls back to
+      `plugin.json`.
 - [x] Wire `Server/plugin/host_events.go` into the WS pub/sub hub.
       Landed: `EventSink.SetBroadcaster`/`Emit` added; hub gains
       `SetPluginEventSink`; `deliverBroadcast` calls `sink.Dispatch`
