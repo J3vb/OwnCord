@@ -27,8 +27,8 @@ const maxInviteExpiryHoursVal = 720
 func MaxInviteExpiryHours() int { return maxInviteExpiryHoursVal }
 
 // CreateInvite creates a new invite code with optional max uses and expiry.
-func (s *InviteService) CreateInvite(createdBy int64, maxUses int, expiresInHours int) (*db.Invite, error) {
-	ctx, span := telemetry.GlobalTracer("service/invite").Start(context.Background(), "InviteService.CreateInvite",
+func (s *InviteService) CreateInvite(ctx context.Context, createdBy int64, maxUses int, expiresInHours int) (*db.Invite, error) {
+	ctx, span := telemetry.GlobalTracer("service/invite").Start(ctx, "InviteService.CreateInvite",
 		telemetry.Int64("created_by", createdBy),
 	)
 	start := time.Now()

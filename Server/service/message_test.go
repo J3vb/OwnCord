@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -34,7 +35,7 @@ func newTestMessageService() (*MessageService, *store.MemStore) {
 func TestSendMessage_Valid(t *testing.T) {
 	svc, _ := newTestMessageService()
 
-	result, err := svc.SendMessage(SendMessageParams{
+	result, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",
@@ -58,7 +59,7 @@ func TestSendMessage_Valid(t *testing.T) {
 func TestSendMessage_EmptyContent(t *testing.T) {
 	svc, _ := newTestMessageService()
 
-	_, err := svc.SendMessage(SendMessageParams{
+	_, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",
@@ -79,7 +80,7 @@ func TestSendMessage_ExceedsMaxLength(t *testing.T) {
 	// maxMessageLen is 4000 runes; create content that exceeds it.
 	longContent := strings.Repeat("a", 4001)
 
-	_, err := svc.SendMessage(SendMessageParams{
+	_, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",
@@ -97,7 +98,7 @@ func TestSendMessage_ExceedsMaxLength(t *testing.T) {
 func TestSendMessage_ChannelNotFound(t *testing.T) {
 	svc, _ := newTestMessageService()
 
-	_, err := svc.SendMessage(SendMessageParams{
+	_, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 999,
 		UserID:    1,
 		Username:  "alice",
@@ -114,7 +115,7 @@ func TestSendMessage_ChannelNotFound(t *testing.T) {
 func TestSendMessage_InvalidChannelID(t *testing.T) {
 	svc, _ := newTestMessageService()
 
-	_, err := svc.SendMessage(SendMessageParams{
+	_, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 0,
 		UserID:    1,
 		Username:  "alice",
@@ -145,7 +146,7 @@ func TestSendMessage_NoPermission(t *testing.T) {
 	permSvc := NewPermissionService(ms, checker)
 	svc := NewMessageService(ms, permSvc, nil)
 
-	_, err := svc.SendMessage(SendMessageParams{
+	_, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",
@@ -163,7 +164,7 @@ func TestEditMessage_OwnerCanEdit(t *testing.T) {
 	svc, _ := newTestMessageService()
 
 	// Send a message first.
-	result, err := svc.SendMessage(SendMessageParams{
+	result, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",
@@ -192,7 +193,7 @@ func TestEditMessage_NonOwnerFails(t *testing.T) {
 	ms.SeedUser(&db.User{ID: 2, Username: "bob"})
 
 	// User 1 sends a message.
-	result, err := svc.SendMessage(SendMessageParams{
+	result, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",
@@ -215,7 +216,7 @@ func TestEditMessage_NonOwnerFails(t *testing.T) {
 func TestEditMessage_EmptyContentFails(t *testing.T) {
 	svc, _ := newTestMessageService()
 
-	result, err := svc.SendMessage(SendMessageParams{
+	result, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",
@@ -237,7 +238,7 @@ func TestEditMessage_EmptyContentFails(t *testing.T) {
 func TestDeleteMessage_OwnerCanDelete(t *testing.T) {
 	svc, _ := newTestMessageService()
 
-	result, err := svc.SendMessage(SendMessageParams{
+	result, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",
@@ -265,7 +266,7 @@ func TestDeleteMessage_NonOwnerWithoutModFails(t *testing.T) {
 	ms.SeedUser(&db.User{ID: 2, Username: "bob"})
 
 	// User 1 sends.
-	result, err := svc.SendMessage(SendMessageParams{
+	result, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",
@@ -312,7 +313,7 @@ func TestDeleteMessage_ModCanDeleteOthersMessage(t *testing.T) {
 	svc := NewMessageService(ms, permSvc, nil)
 
 	// User 1 sends a message.
-	result, err := svc.SendMessage(SendMessageParams{
+	result, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",
@@ -347,7 +348,7 @@ func TestDeleteMessage_InvalidMessageID(t *testing.T) {
 func TestSendMessage_HTMLSanitized(t *testing.T) {
 	svc, _ := newTestMessageService()
 
-	result, err := svc.SendMessage(SendMessageParams{
+	result, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",

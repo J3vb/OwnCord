@@ -15,11 +15,11 @@ func registerChatHandlers(r *HandlerRegistry, deps ChatDeps) {
 }
 
 // handleChatSendV2 processes a chat_send command via the MessageService.
-func handleChatSendV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ChatDeps)
 	sendCmd := cmd.(ChatSendCmd)
 
-	result, err := d.MessageSvc.SendMessage(service.SendMessageParams{
+	result, err := d.MessageSvc.SendMessage(ctx, service.SendMessageParams{
 		ChannelID:     sendCmd.ChannelID(),
 		UserID:        info.UserID,
 		Username:      info.Username,

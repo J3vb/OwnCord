@@ -24,8 +24,8 @@ func NewUserService(st store.Store) *UserService {
 
 // UpdateProfile updates a user's username and/or avatar.
 // Returns the updated user for response building.
-func (s *UserService) UpdateProfile(userID int64, username string, avatar *string) (*db.User, error) {
-	ctx, span := telemetry.GlobalTracer("service/user").Start(context.Background(), "UserService.UpdateProfile",
+func (s *UserService) UpdateProfile(ctx context.Context, userID int64, username string, avatar *string) (*db.User, error) {
+	ctx, span := telemetry.GlobalTracer("service/user").Start(ctx, "UserService.UpdateProfile",
 		telemetry.Int64("user_id", userID),
 	)
 	start := time.Now()

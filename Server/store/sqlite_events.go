@@ -40,7 +40,7 @@ func (s *SQLiteStore) GetEventsSince(ctx context.Context, afterSeq int64, limit 
 	if err != nil {
 		return nil, fmt.Errorf("GetEventsSince: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanEventRows(rows)
 }
 
@@ -61,7 +61,7 @@ func (s *SQLiteStore) GetEventsSinceForChannels(ctx context.Context, afterSeq in
 		if err != nil {
 			return nil, fmt.Errorf("GetEventsSinceForChannels (global only): %w", err)
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		return scanEventRows(rows)
 	}
 
@@ -87,7 +87,7 @@ func (s *SQLiteStore) GetEventsSinceForChannels(ctx context.Context, afterSeq in
 	if err != nil {
 		return nil, fmt.Errorf("GetEventsSinceForChannels: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanEventRows(rows)
 }
 
@@ -180,7 +180,7 @@ func (s *SQLiteStore) ListPlugins(ctx context.Context) ([]db.PluginRow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ListPlugins: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []db.PluginRow
 	for rows.Next() {
 		var p db.PluginRow
@@ -233,7 +233,7 @@ func (s *SQLiteStore) PluginKVScan(ctx context.Context, pluginID int64, prefix s
 	if err != nil {
 		return nil, fmt.Errorf("PluginKVScan: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make(map[string][]byte)
 	for rows.Next() {
 		var k string

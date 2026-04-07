@@ -120,7 +120,7 @@ func (r *Registry) HTTPDo(ctx context.Context, inst *Instance, req HTTPRequest) 
 	if err != nil {
 		return nil, fmt.Errorf("plugin http: do: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	// Cap body size so a hostile/large response cannot OOM the host. We
 	// LimitReader to maxResponseBytes+1 so we can detect truncation.
 	limited := io.LimitReader(resp.Body, maxResponseBytes+1)

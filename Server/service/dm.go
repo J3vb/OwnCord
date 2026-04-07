@@ -30,8 +30,8 @@ type CreateDMResult struct {
 
 // CreateDM creates or retrieves a DM channel between two users.
 // Validates that neither user has blocked the other.
-func (s *DMService) CreateDM(userID, recipientID int64) (*CreateDMResult, error) {
-	ctx, span := telemetry.GlobalTracer("service/dm").Start(context.Background(), "DMService.CreateDM",
+func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*CreateDMResult, error) {
+	ctx, span := telemetry.GlobalTracer("service/dm").Start(ctx, "DMService.CreateDM",
 		telemetry.Int64("user_id", userID),
 		telemetry.Int64("recipient_id", recipientID),
 	)
