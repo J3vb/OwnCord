@@ -98,7 +98,7 @@ func (r *Registry) AssetHandler(inst *Instance) http.Handler {
 			http.NotFound(w, req)
 			return
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		http.ServeContent(w, req, rel, info.ModTime(), f)
 	})
 }

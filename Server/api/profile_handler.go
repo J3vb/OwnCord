@@ -133,7 +133,7 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) 
 			req.Avatar = &trimmed
 		}
 
-		updated, err := svc.Users.UpdateProfile(user.ID, req.Username, req.Avatar)
+		updated, err := svc.Users.UpdateProfile(r.Context(), user.ID, req.Username, req.Avatar)
 		if err != nil {
 			writeServiceError(w, err)
 			return

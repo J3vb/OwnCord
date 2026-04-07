@@ -29,9 +29,9 @@ func NewChannelService(st store.Store, perms *PermissionService) *ChannelService
 
 // ListVisibleChannels returns channels the user has ReadMessages permission for.
 // DM channels are excluded (they are accessed via DMService).
-func (s *ChannelService) ListVisibleChannels(userID int64) ([]db.Channel, error) {
+func (s *ChannelService) ListVisibleChannels(ctx context.Context, userID int64) ([]db.Channel, error) {
 	// Phase B Step 8 — span the public service entrypoint.
-	ctx, span := telemetry.GlobalTracer("service/channel").Start(context.Background(),
+	ctx, span := telemetry.GlobalTracer("service/channel").Start(ctx,
 		"ChannelService.ListVisibleChannels",
 		telemetry.Int64("user_id", userID),
 	)
@@ -57,9 +57,9 @@ func (s *ChannelService) ListVisibleChannels(userID int64) ([]db.Channel, error)
 	if isAdmin {
 		// Admin sees all non-DM channels.
 		var visible []db.Channel
-		for _, ch := range all {
-			if ch.Type != "dm" {
-				visible = append(visible, ch)
+		for i := range all {
+			if all[i].Type != "dm" {
+				visible = append(visible, all[i])
 			}
 		}
 		return visible, nil

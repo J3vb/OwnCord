@@ -73,7 +73,7 @@ func handleCreateInvite(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		inv, err := svc.Invites.CreateInvite(user.ID, req.MaxUses, req.ExpiresInHours)
+		inv, err := svc.Invites.CreateInvite(r.Context(), user.ID, req.MaxUses, req.ExpiresInHours)
 		if err != nil {
 			writeServiceError(w, err)
 			return

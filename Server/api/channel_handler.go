@@ -76,7 +76,7 @@ func handleListChannels(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		channels, err := svc.Channels.ListVisibleChannels(user.ID)
+		channels, err := svc.Channels.ListVisibleChannels(r.Context(), user.ID)
 		if err != nil {
 			slog.Error("handleListChannels", "err", err)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{

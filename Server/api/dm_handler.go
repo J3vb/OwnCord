@@ -73,7 +73,7 @@ func handleCreateDM(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		result, err := svc.DMs.CreateDM(user.ID, req.RecipientID)
+		result, err := svc.DMs.CreateDM(r.Context(), user.ID, req.RecipientID)
 		if err != nil {
 			writeServiceError(w, err)
 			return
@@ -169,7 +169,7 @@ func handleBlockUser(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		if err := svc.Blocks.BlockUser(user.ID, targetID); err != nil {
+		if err := svc.Blocks.BlockUser(r.Context(), user.ID, targetID); err != nil {
 			writeServiceError(w, err)
 			return
 		}

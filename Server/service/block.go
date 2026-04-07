@@ -22,8 +22,8 @@ func NewBlockService(st store.Store) *BlockService {
 
 // BlockUser blocks a target user. Validates the target exists and
 // prevents self-blocking.
-func (s *BlockService) BlockUser(blockerID, targetID int64) error {
-	ctx, span := telemetry.GlobalTracer("service/block").Start(context.Background(), "BlockService.BlockUser",
+func (s *BlockService) BlockUser(ctx context.Context, blockerID, targetID int64) error {
+	ctx, span := telemetry.GlobalTracer("service/block").Start(ctx, "BlockService.BlockUser",
 		telemetry.Int64("blocker_id", blockerID),
 		telemetry.Int64("target_id", targetID),
 	)
