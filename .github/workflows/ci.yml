@@ -100,7 +100,7 @@ jobs:
           const p = 'src/generated/events.ts';
           if (fs.existsSync(p)) {
             let c = fs.readFileSync(p, 'utf8');
-            c = c.replace(/\btype Event\b/g, 'type _Event').replace(/\binterface Event\b/g, 'interface _Event');
+            c = c.replace(/^type Event\b/gm, 'type _Event').replace(/^interface Event\b/gm, 'interface _Event');
             fs.writeFileSync(p, c);
             console.log('Patched: renamed Event -> _Event in generated/events.ts');
           } else {
