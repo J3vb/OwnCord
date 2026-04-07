@@ -311,7 +311,7 @@ async function clearLogFiles(): Promise<void> {
     const entries = await readDir(logDir);
     for (const entry of entries) {
       if (entry.name?.endsWith(".jsonl") && !entry.isDirectory) {
-        // eslint-disable-next-line no-await-in-loop -- sequential file deletion to avoid overwhelming the filesystem
+        // oxlint-disable-next-line no-await-in-loop -- sequential file deletion to avoid overwhelming the filesystem
         await remove(`${logDir}/${entry.name}`);
       }
     }

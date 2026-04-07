@@ -57,7 +57,7 @@
     "printWidth": 100,
     "tabWidth": 2,
     "arrowParens": "always",
-    "endOfLine": "crlf"
+    "endOfLine": "lf"
   },
   "dependencies": {
     "@jitsi/rnnoise-wasm": "^0.2.1",
