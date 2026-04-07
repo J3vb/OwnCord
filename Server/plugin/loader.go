@@ -29,8 +29,8 @@ type foundPlugin struct {
 }
 
 // scanPluginDirectory walks dir non-recursively and parses plugin.json from
-// every immediate subdirectory. Errors on individual plugins are wrapped and
-// returned alongside the successful entries.
+// every immediate subdirectory. Returns on the first error encountered;
+// partial results are not returned alongside errors.
 func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 	if dir == "" {
 		return nil, nil
@@ -49,25 +49,35 @@ func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 			continue
 		}
 		pluginDir := filepath.Join(dir, e.Name())
-		manifestPath := filepath.Join(pluginDir, "plugin.json")
-		raw, rdErr := os.ReadFile(manifestPath)
-		if rdErr != nil {
-			if os.IsNotExist(rdErr) {
-				continue
-			}
-			return nil, fmt.Errorf("plugin %q: read plugin.json: %w", e.Name(), rdErr)
+
+		// Prefer plugin.toml (wazero build) over plugin.json.
+		manifest, ok, tomlErr := tryLoadPluginTOML(pluginDir)
+		if tomlErr != nil {
+			return nil, fmt.Errorf("plugin %q: %w", e.Name(), tomlErr)
 		}
-		manifest, parseErr := ParseManifest(raw)
-		if parseErr != nil {
-			return nil, fmt.Errorf("plugin %q: %w", e.Name(), parseErr)
+		if !ok {
+			// Fall back to plugin.json.
+			manifestPath := filepath.Join(pluginDir, "plugin.json")
+			raw, rdErr := os.ReadFile(manifestPath)
+			if rdErr != nil {
+				if os.IsNotExist(rdErr) {
+					continue
+				}
+				return nil, fmt.Errorf("plugin %q: read plugin.json: %w", e.Name(), rdErr)
+			}
+			var parseErr error
+			manifest, parseErr = ParseManifest(raw)
+			if parseErr != nil {
+				return nil, fmt.Errorf("plugin %q: %w", e.Name(), parseErr)
+			}
 		}
 		// Reject any symlinks anywhere in the plugin directory tree. The asset
 		// handler enforces that resolved paths stay rooted at pluginDir, but
 		// http.ServeFile / os.Open follow symlinks transparently — a malicious
 		// plugin .zip containing `assets/index.html -> /etc/passwd` would
-		// otherwise serve host files. Lstat (not Stat) is used for the
-		// entrypoint check below so a symlink is detected instead of
-		// followed, even when its target is a valid .wasm file.
+		// otherwise serve host files. os.Lstat is used for the entrypoint
+		// check below so a symlink is detected instead of followed, even
+		// when its target is a valid .wasm file.
 		if err := rejectSymlinksUnder(pluginDir); err != nil {
 			return nil, fmt.Errorf("plugin %q: %w", e.Name(), err)
 		}

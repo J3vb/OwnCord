@@ -67,6 +67,44 @@ Configuration is loaded in three layers (later layers override earlier ones):
 |-----|------|---------|-------------|
 | `github.token` | string | `""` | Optional GitHub API token for higher rate limits on update checks (5000 req/hr vs 60) |
 
+### Event Persistence (`event_persistence`)
+
+Controls the tiered event log used for WebSocket reconnection replay. When enabled, missed events are stored in the database so clients that reconnect after the in-memory ring buffer window (1 000 events) can still replay missed events from the DB tier.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `event_persistence.enabled` | bool | `true` | Enable cold-storage event persistence. When `false`, only the in-memory ring buffer is used (lower durability). |
+| `event_persistence.retention_hours` | int | `24` | How long persisted events are kept before the pruner deletes them |
+| `event_persistence.batch_size` | int | `50` | Maximum events per database flush |
+| `event_persistence.batch_flush_ms` | int | `100` | Maximum delay between flushes (milliseconds) |
+| `event_persistence.pruner_interval_minutes` | int | `60` | How often the pruner goroutine wakes up to delete expired events |
+
+### Telemetry / OpenTelemetry (`telemetry`)
+
+Controls the OpenTelemetry SDK. Requires building with `-tags otel` (see [Contributing](contributing.md)). When disabled, the server uses no-op tracer/meter providers; the legacy JSON `/api/v1/metrics` endpoint is always available regardless of this setting.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `telemetry.enabled` | bool | `false` | Enable the OTel SDK |
+| `telemetry.exporter` | string | `"none"` | Exporter backend: `none`, `prometheus`, `otlp` |
+| `telemetry.otlp_endpoint` | string | `""` | gRPC endpoint for the OTLP exporter (e.g. `localhost:4317`). Only used when `exporter: otlp`. |
+| `telemetry.service_name` | string | `"owncord-server"` | OTel `service.name` resource attribute |
+
+> **Local development:** Run `make otel-up` (from `Server/`) to start Jaeger + Prometheus via Docker.
+> Jaeger UI: `http://localhost:16686` — Prometheus UI: `http://localhost:9090`
+
+### Plugins (`plugins`)
+
+Controls the Wazero WASM plugin runtime. Requires building with `-tags wazero`. When disabled, no plugins are loaded and the plugin admin endpoints return `501 Not Implemented`.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `plugins.enabled` | bool | `false` | Enable plugin loading at startup |
+| `plugins.directory` | string | `"data/plugins"` | Directory scanned for plugin packages on startup |
+| `plugins.max_memory_mb` | int | `64` | Maximum WASM linear memory per plugin (megabytes) |
+| `plugins.cpu_budget_ms` | int | `100` | Maximum CPU time per plugin invocation (milliseconds) |
+| `plugins.http_allowlist` | string[] | `[]` | Host suffixes plugins may reach via the `host_http` capability (e.g. `["api.steampowered.com"]`). Empty = no outbound HTTP. |
+
 ## Environment Variable Overrides
 
 Every config key can be overridden via environment variables using the prefix `OWNCORD_`.
@@ -90,6 +128,14 @@ Every config key can be overridden via environment variables using the prefix `O
 | `OWNCORD_VOICE_NODE_IP` | `voice.node_ip` |
 | `OWNCORD_VOICE_QUALITY` | `voice.quality` |
 | `OWNCORD_GITHUB_TOKEN` | `github.token` |
+| `OWNCORD_EVENT_PERSISTENCE_ENABLED` | `event_persistence.enabled` |
+| `OWNCORD_EVENT_PERSISTENCE_RETENTION_HOURS` | `event_persistence.retention_hours` |
+| `OWNCORD_TELEMETRY_ENABLED` | `telemetry.enabled` |
+| `OWNCORD_TELEMETRY_EXPORTER` | `telemetry.exporter` |
+| `OWNCORD_TELEMETRY_OTLP_ENDPOINT` | `telemetry.otlp_endpoint` |
+| `OWNCORD_TELEMETRY_SERVICE_NAME` | `telemetry.service_name` |
+| `OWNCORD_PLUGINS_ENABLED` | `plugins.enabled` |
+| `OWNCORD_PLUGINS_DIRECTORY` | `plugins.directory` |
 
 ## Example config.yaml
 
@@ -132,6 +178,29 @@ voice:
 
 github:
   token: ""                        # optional GitHub PAT for update check rate limits
+
+# Event persistence (tiered reconnect replay)
+event_persistence:
+  enabled: true
+  retention_hours: 24
+  batch_size: 50
+  batch_flush_ms: 100
+  pruner_interval_minutes: 60
+
+# OpenTelemetry (requires build tag: -tags otel)
+telemetry:
+  enabled: false
+  exporter: "none"                 # none | prometheus | otlp
+  otlp_endpoint: ""                # e.g. "localhost:4317" for OTLP gRPC
+  service_name: "owncord-server"
+
+# Plugin runtime (requires build tag: -tags wazero)
+plugins:
+  enabled: false
+  directory: "data/plugins"
+  max_memory_mb: 64
+  cpu_budget_ms: 100
+  http_allowlist: []               # host suffixes plugins may reach, e.g. ["api.steampowered.com"]
 ```
 
 ## See Also

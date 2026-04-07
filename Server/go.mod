@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	aead.dev/minisign v0.3.0
+	github.com/BurntSushi/toml v1.6.0
 	github.com/corazawaf/coraza/v3 v3.6.0
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/uuid v1.6.0

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -50,7 +51,7 @@ func (s *UserService) UpdateProfile(userID int64, username string, avatar *strin
 	return user, nil
 }
 
-// ChangePassword verifies the old password hash matches, then updates.
+// ChangePassword updates the user's password and revokes other sessions.
 // Returns the number of other sessions revoked.
 func (s *UserService) ChangePassword(userID int64, newPasswordHash string, keepSessionID int64) (int64, error) {
 	if err := s.st.UpdateUserPassword(userID, newPasswordHash); err != nil {
@@ -77,7 +78,10 @@ func (s *UserService) ListSessions(userID int64) ([]db.Session, error) {
 // RevokeSession deletes a specific session owned by the user.
 func (s *UserService) RevokeSession(userID, sessionID int64) error {
 	if err := s.st.DeleteSessionByID(sessionID, userID); err != nil {
-		return fmt.Errorf("%w: session not found", ErrNotFound)
+		if errors.Is(err, db.ErrNotFound) {
+			return fmt.Errorf("%w: session not found", ErrNotFound)
+		}
+		return fmt.Errorf("%w: failed to revoke session", ErrInternal)
 	}
 	_ = s.st.LogAudit(userID, "session_revoke", "session", sessionID, "session revoked")
 	slog.Info("session revoked", "user_id", userID, "session_id", sessionID)
