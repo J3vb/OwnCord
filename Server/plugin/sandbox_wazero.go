@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -76,6 +77,7 @@ func (r *Registry) activateWithRuntime(ctx context.Context, inst *Instance) erro
 
 	modCfg := wazero.NewModuleConfig().
 		WithName(inst.Manifest.Name).
+		WithStdin(strings.NewReader("")). // prevent plugins from reading server stdin
 		WithStdout(io.Discard).
 		WithStderr(io.Discard).
 		WithStartFunctions() // suppress _start; exports are called on demand

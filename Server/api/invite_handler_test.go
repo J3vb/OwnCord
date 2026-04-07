@@ -155,8 +155,8 @@ func TestCreateInvite_CreateInviteFailure(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp["message"] != "failed to create invite" {
-		t.Errorf("message = %v, want failed to create invite", resp["message"])
+	if resp["message"] != "an internal error occurred" {
+		t.Errorf("message = %v, want an internal error occurred", resp["message"])
 	}
 }
 
@@ -185,8 +185,8 @@ func TestCreateInvite_GetInviteFailure(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp["message"] != "failed to retrieve invite" {
-		t.Errorf("message = %v, want failed to retrieve invite", resp["message"])
+	if resp["message"] != "an internal error occurred" {
+		t.Errorf("message = %v, want an internal error occurred", resp["message"])
 	}
 	if _, err := database.Exec(`DROP TRIGGER delete_invite_after_insert`); err != nil {
 		t.Fatalf("drop trigger: %v", err)
@@ -387,8 +387,8 @@ func TestRevokeInvite_RevokeFailure(t *testing.T) {
 	if err := json.NewDecoder(rr2.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode revoke failure response: %v", err)
 	}
-	if resp["message"] != "failed to revoke invite" {
-		t.Errorf("message = %v, want failed to revoke invite", resp["message"])
+	if resp["message"] != "an internal error occurred" {
+		t.Errorf("message = %v, want an internal error occurred", resp["message"])
 	}
 }
 
