@@ -10,17 +10,33 @@ the registry persists it into the plugins table without executing the .wasm.
 
 ## Building the WASM
 
-The .wasm binary is intentionally NOT checked in. Build it locally with TinyGo
-or any other WASM toolchain that emits a module exporting `command_dispatch`,
-`on_event`, and `_start`:
+`main.go` in this directory implements the full plugin ABI
+(`allocate`, `deallocate`, `list_commands`, `command_dispatch`, `on_event`).
+The pre-built `hello.wasm` (925 KiB) is checked in, but you can rebuild it:
 
-```sh
-# TinyGo example (writes hello.wasm into this directory)
-tinygo build -o hello.wasm -target wasi ./main.go
+### Prerequisites
+
+| Tool | Version | Notes |
+|------|---------|-------|
+| TinyGo | 0.40.1 | Supports Go 1.19–1.25 only |
+| Go | 1.25.x | TinyGo 0.40.1 rejects Go 1.26+ |
+| wasm-opt | Binaryen 129 | Required by TinyGo for the `wasi` target |
+
+On Windows, extract TinyGo to e.g. `D:\Local-Lab\Coding\Software\tinygo` and
+add `<tinygo>\bin` plus `<binaryen>\bin` to `PATH`. Then point TinyGo at the
+compatible Go SDK:
+
+```pwsh
+$env:GOROOT = "$env:USERPROFILE\sdk\go1.25.3"   # installed via: go install golang.org/dl/go1.25.3@latest
+$env:PATH   = "$env:GOROOT\bin;$env:PATH"
 ```
 
-A trivial main.go that satisfies the host API is sketched in
-`Server/plugin/sandbox_wazero.go`'s docstring.
+### Build command
+
+```sh
+# Run from this directory (Server/plugin/examples/hello/)
+tinygo build -o hello.wasm -target wasi ./main.go
+```
 
 ## Tests
 

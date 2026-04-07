@@ -25,7 +25,5 @@ export function PluginContainer(props: PluginContainerProps): JSX.Element {
     dispose?.();
   });
 
-  return (
-    <div class="plugin-container" data-plugin-id={props.binding.pluginId} ref={host} />
-  );
+  return <div class="plugin-container" data-plugin-id={props.binding.pluginId} ref={host} />;
 }
