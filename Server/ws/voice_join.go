@@ -48,6 +48,15 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		return
 	}
 
+	// Ensure authenticated user is present before any state changes.
+	// This guard covers all downstream paths (LiveKit configured or not)
+	// that dereference c.user (e.g. c.user.Username in the success log).
+	if c.user == nil {
+		slog.Error("handleVoiceJoin: nil user on client", "user_id", c.userID)
+		c.sendMsg(buildErrorMsg(ErrCodeInternal, "not authenticated"))
+		return
+	}
+
 	// Hard-fail when LiveKit is not configured — without an SFU the client
 	// cannot connect to voice, so persisting state would create a ghost.
 	if h.livekit == nil {
@@ -134,12 +143,6 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	// NOTE: setVoiceState is deferred until after token send succeeds, so
 	// rollback does not broadcast a spurious voice_leave for an unannounced join.
 	if h.livekit != nil {
-		if c.user == nil {
-			slog.Error("handleVoiceJoin: nil user on client", "user_id", c.userID)
-			h.rollbackVoiceJoin(c, channelID, false)
-			c.sendMsg(buildErrorMsg(ErrCodeInternal, "not authenticated"))
-			return
-		}
 		// Derive publish permissions from role — prevents SFU-level bypass
 		// when client connects directly via direct_url (BUG-128).
 		canPublish := h.hasChannelPerm(c, channelID, permissions.SpeakVoice)
@@ -166,6 +169,9 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 
 	// Set voice channel on the client AFTER token is sent successfully.
 	c.setVoiceState(channelID, state.JoinedAt)
+
+	// Subscribe to voice topic for voice-scoped events.
+	h.pubsub.Subscribe(c, VoiceTopic(channelID))
 
 	// Update key holder map now that this client's voice state is set.
 	h.updateKeyHolder(channelID)
@@ -221,59 +227,57 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	)
 }
 
-// handleVoiceTokenRefresh generates a fresh LiveKit token for a client
-// that is already in a voice channel. This lets clients request a new token
-// (e.g. before a manual reconnect) without leaving and rejoining voice.
-func (h *Hub) handleVoiceTokenRefresh(_ context.Context, c *Client) {
-	ratKey := fmt.Sprintf("voice_token_refresh:%d", c.userID)
-	if !h.limiter.Allow(ratKey, 1, 60*time.Second) {
-		c.sendMsg(buildRateLimitError("token refresh rate limited", 60))
-		return
+// handleVoiceTokenRefreshV2 is the V2 (pure) handler for voice_token_refresh.
+// It generates a fresh LiveKit token for a client already in a voice channel.
+func handleVoiceTokenRefreshV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+	d := deps.(VoiceDeps)
+	userID := info.UserID
+	channelID := info.VoiceChannelID
+
+	ratKey := fmt.Sprintf("voice_token_refresh:%d", userID)
+	if d.Limiter != nil && !d.Limiter.Allow(ratKey, 1, 60*time.Second) {
+		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "token refresh rate limited"}}
 	}
 
-	channelID := c.getVoiceChID()
 	if channelID == 0 {
-		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "not in voice"))
-		return
+		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "not in voice"}}
 	}
 
-	if h.livekit == nil {
-		c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice not configured"))
-		return
+	if d.TokenGen == nil {
+		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "voice not configured"}}
 	}
 
-	if c.user == nil {
-		slog.Error("handleVoiceTokenRefresh: nil user on client", "user_id", c.userID)
-		c.sendMsg(buildErrorMsg(ErrCodeInternal, "not authenticated"))
-		return
-	}
-
-	canPublish := h.hasChannelPerm(c, channelID, permissions.SpeakVoice)
+	canPublish := hasPerm(d.DB, d.Permissions, userID, channelID, permissions.SpeakVoice)
 	canSubscribe := true
-	canVideo := h.hasChannelPerm(c, channelID, permissions.UseVideo)
-	canScreenShare := h.hasChannelPerm(c, channelID, permissions.ShareScreen)
-	joinToken := c.getVoiceJoinToken()
+	canVideo := hasPerm(d.DB, d.Permissions, userID, channelID, permissions.UseVideo)
+	canScreenShare := hasPerm(d.DB, d.Permissions, userID, channelID, permissions.ShareScreen)
+
+	joinToken := info.VoiceJoinToken
+	var result Result
 	if joinToken == "" {
-		state, stateErr := h.db.GetVoiceState(c.userID)
+		state, stateErr := d.DB.GetVoiceState(userID)
 		if stateErr != nil || state == nil {
-			slog.Error("ws handleVoiceTokenRefresh GetVoiceState", "err", stateErr, "user_id", c.userID)
-			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to refresh voice token"))
-			return
+			slog.Error("ws handleVoiceTokenRefreshV2 GetVoiceState", "err", stateErr, "user_id", userID)
+			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to refresh voice token"}}
 		}
 		joinToken = state.JoinedAt
-		c.setVoiceState(channelID, joinToken)
-	}
-	token, err := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, joinToken, canPublish, canSubscribe, canVideo, canScreenShare)
-	if err != nil {
-		slog.Error("ws handleVoiceTokenRefresh GenerateToken", "err", err, "user_id", c.userID)
-		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to generate voice token"))
-		return
+		result.SetVoiceJoinToken = &joinToken
 	}
 
-	// E2EE keys are exchanged client-side via ECDH; token refresh only
-	// provides a new LiveKit access token.
-	c.sendMsg(buildVoiceToken(channelID, token, "/livekit", h.livekit.URL(), h.isVoiceKeyHolder(channelID, c.userID)))
-	slog.Info("voice token refreshed", "user_id", c.userID, "channel_id", channelID)
+	token, err := d.TokenGen.GenerateToken(userID, info.Username, channelID, joinToken, canPublish, canSubscribe, canVideo, canScreenShare)
+	if err != nil {
+		slog.Error("ws handleVoiceTokenRefreshV2 GenerateToken", "err", err, "user_id", userID)
+		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to generate voice token"}}
+	}
+
+	isKeyHolder := false
+	if d.KeyHolder != nil {
+		isKeyHolder = d.KeyHolder.IsVoiceKeyHolder(channelID, userID)
+	}
+
+	result.Reply = buildVoiceToken(channelID, token, "/livekit", d.TokenGen.URL(), isKeyHolder)
+	slog.Info("voice token refreshed (v2)", "user_id", userID, "channel_id", channelID)
+	return result
 }
 
 // rollbackVoiceJoin undoes a partially-completed voice join: clears the

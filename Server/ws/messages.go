@@ -131,22 +131,10 @@ type voiceTokenPayload struct {
 
 // ── Voice E2EE (client-side ECDH key exchange) ─────────────────────────────
 
-// voiceE2EEAnnounceIn is the client→server payload for voice_e2ee_announce.
-type voiceE2EEAnnounceIn struct {
-	PublicKey string `json:"public_key"`
-}
-
 // voiceE2EEAnnounceBroadcast is the server→client relay with user_id added.
 type voiceE2EEAnnounceBroadcast struct {
 	UserID    int64  `json:"user_id"`
 	PublicKey string `json:"public_key"`
-}
-
-// voiceE2EEOfferIn is the client→server payload for voice_e2ee_offer.
-type voiceE2EEOfferIn struct {
-	TargetUserID int64  `json:"target_user_id"`
-	EncryptedKey string `json:"encrypted_key"`
-	IV           string `json:"iv"`
 }
 
 // voiceE2EEOfferRelay is the server→client relay with from_user_id.
@@ -215,18 +203,6 @@ func buildErrorMsg(code, message string) []byte {
 		"payload": map[string]string{
 			"code":    code,
 			"message": message,
-		},
-	})
-}
-
-// buildRateLimitError produces a RATE_LIMITED error with retry_after per PROTOCOL.md.
-func buildRateLimitError(message string, retryAfterSeconds float64) []byte {
-	return buildJSON(map[string]any{
-		"type": MsgTypeError,
-		"payload": map[string]any{
-			"code":        "RATE_LIMITED",
-			"message":     message,
-			"retry_after": retryAfterSeconds,
 		},
 	})
 }

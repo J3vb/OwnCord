@@ -13,6 +13,8 @@ import (
 	"github.com/owncord/server/api"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/service"
+	"github.com/owncord/server/store"
 )
 
 // ─── DM test schema ─────────────────────────────────────────────────────────
@@ -172,7 +174,8 @@ func dmCreateToken(t *testing.T, database *db.DB, username string, roleID int) s
 
 func buildDMRouter(database *db.DB, broadcaster api.DMBroadcaster) http.Handler {
 	r := chi.NewRouter()
-	api.MountDMRoutes(r, database, broadcaster)
+	svc := service.New(store.NewSQLiteStore(database), auth.NewRateLimiter())
+	api.MountDMRoutes(r, database, svc, broadcaster)
 	return r
 }
 

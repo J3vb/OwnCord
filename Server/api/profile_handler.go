@@ -2,9 +2,7 @@ package api
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/service"
 )
 
 // ─── Request / Response types ────────────────────────────────────────────────
@@ -54,18 +53,18 @@ type ProfileBroadcaster interface {
 
 // MountProfileRoutes registers user profile management endpoints.
 // All routes require authentication. trustedProxies is used for rate limiting.
-func MountProfileRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster) {
+func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster) {
 	r.Route("/api/v1/users/me", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
 
 		r.With(RateLimitMiddleware(limiter, profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
-			Patch("/", handleUpdateProfile(database, broadcaster))
+			Patch("/", handleUpdateProfile(svc, broadcaster))
 
 		r.With(RateLimitMiddleware(limiter, profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
-			Put("/password", handleChangePassword(database, limiter))
+			Put("/password", handleChangePassword(svc, limiter))
 
-		r.Get("/sessions", handleListSessions(database))
-		r.Delete("/sessions/{id}", handleRevokeSession(database))
+		r.Get("/sessions", handleListSessions(svc))
+		r.Delete("/sessions/{id}", handleRevokeSession(svc))
 	})
 }
 
@@ -90,13 +89,12 @@ func validateAvatarURL(avatar string) error {
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
 // handleUpdateProfile processes PATCH /api/v1/users/me.
-func handleUpdateProfile(database *db.DB, broadcaster ProfileBroadcaster) http.HandlerFunc {
+func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "not authenticated",
+				Error: "UNAUTHORIZED", Message: "not authenticated",
 			})
 			return
 		}
@@ -104,26 +102,21 @@ func handleUpdateProfile(database *db.DB, broadcaster ProfileBroadcaster) http.H
 		var req updateProfileRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "malformed request body",
+				Error: "INVALID_INPUT", Message: "malformed request body",
 			})
 			return
 		}
 
 		req.Username = strings.TrimSpace(sanitizer.Sanitize(req.Username))
-
 		if req.Username == "" {
 			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "username is required",
+				Error: "INVALID_INPUT", Message: "username is required",
 			})
 			return
 		}
-
 		if err := auth.ValidateUsername(req.Username); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: err.Error(),
+				Error: "INVALID_INPUT", Message: err.Error(),
 			})
 			return
 		}
@@ -133,43 +126,18 @@ func handleUpdateProfile(database *db.DB, broadcaster ProfileBroadcaster) http.H
 			trimmed := strings.TrimSpace(sanitizer.Sanitize(*req.Avatar))
 			if err := validateAvatarURL(trimmed); err != nil {
 				writeJSON(w, http.StatusBadRequest, errorResponse{
-					Error:   "INVALID_INPUT",
-					Message: err.Error(),
+					Error: "INVALID_INPUT", Message: err.Error(),
 				})
 				return
 			}
 			req.Avatar = &trimmed
 		}
 
-		if err := database.UpdateUserProfile(user.ID, req.Username, req.Avatar); err != nil {
-			if db.IsUniqueConstraintError(err) {
-				writeJSON(w, http.StatusConflict, errorResponse{
-					Error:   "CONFLICT",
-					Message: "username is already taken",
-				})
-				return
-			}
-			slog.Error("UpdateUserProfile failed", "err", err, "user_id", user.ID)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to update profile",
-			})
+		updated, err := svc.Users.UpdateProfile(r.Context(), user.ID, req.Username, req.Avatar)
+		if err != nil {
+			writeServiceError(w, err)
 			return
 		}
-
-		// Re-fetch user for the response.
-		updated, err := database.GetUserByID(user.ID)
-		if err != nil || updated == nil {
-			slog.Error("failed to fetch user after profile update", "user_id", user.ID, "error", err)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "profile updated but fetch failed",
-			})
-			return
-		}
-
-		slog.Info("profile updated", "user_id", user.ID, "new_username", req.Username)
-		_ = database.LogAudit(user.ID, "profile_update", "user", user.ID, "profile updated")
 
 		// Broadcast profile change to all connected WebSocket clients.
 		if broadcaster != nil {
@@ -181,13 +149,12 @@ func handleUpdateProfile(database *db.DB, broadcaster ProfileBroadcaster) http.H
 }
 
 // handleChangePassword processes PUT /api/v1/users/me/password.
-func handleChangePassword(database *db.DB, limiter *auth.RateLimiter) http.HandlerFunc {
+func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "not authenticated",
+				Error: "UNAUTHORIZED", Message: "not authenticated",
 			})
 			return
 		}
@@ -196,8 +163,7 @@ func handleChangePassword(database *db.DB, limiter *auth.RateLimiter) http.Handl
 		lockKey := fmt.Sprintf("pw_confirm_lock:%d", user.ID)
 		if limiter.IsLockedOut(lockKey) {
 			writeJSON(w, http.StatusTooManyRequests, errorResponse{
-				Error:   "RATE_LIMITED",
-				Message: "too many failed attempts, try again later",
+				Error: "RATE_LIMITED", Message: "too many failed attempts, try again later",
 			})
 			return
 		}
@@ -205,16 +171,14 @@ func handleChangePassword(database *db.DB, limiter *auth.RateLimiter) http.Handl
 		var req changePasswordRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "malformed request body",
+				Error: "INVALID_INPUT", Message: "malformed request body",
 			})
 			return
 		}
 
 		if req.OldPassword == "" || req.NewPassword == "" {
 			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "old_password and new_password are required",
+				Error: "INVALID_INPUT", Message: "old_password and new_password are required",
 			})
 			return
 		}
@@ -226,8 +190,7 @@ func handleChangePassword(database *db.DB, limiter *auth.RateLimiter) http.Handl
 				limiter.Lockout(lockKey, pwConfirmLockoutDuration)
 			}
 			writeJSON(w, http.StatusForbidden, errorResponse{
-				Error:   "FORBIDDEN",
-				Message: "incorrect password",
+				Error: "FORBIDDEN", Message: "incorrect password",
 			})
 			return
 		}
@@ -236,8 +199,7 @@ func handleChangePassword(database *db.DB, limiter *auth.RateLimiter) http.Handl
 		// Reject same old/new password.
 		if req.OldPassword == req.NewPassword {
 			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: "new password must be different from old password",
+				Error: "INVALID_INPUT", Message: "new password must be different from old password",
 			})
 			return
 		}
@@ -245,8 +207,7 @@ func handleChangePassword(database *db.DB, limiter *auth.RateLimiter) http.Handl
 		// Validate new password strength.
 		if err := auth.ValidatePasswordStrength(req.NewPassword); err != nil {
 			writeJSON(w, http.StatusBadRequest, errorResponse{
-				Error:   "INVALID_INPUT",
-				Message: err.Error(),
+				Error: "INVALID_INPUT", Message: err.Error(),
 			})
 			return
 		}
@@ -255,46 +216,34 @@ func handleChangePassword(database *db.DB, limiter *auth.RateLimiter) http.Handl
 		hash, err := auth.HashPassword(req.NewPassword)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to process password change",
+				Error: "INTERNAL_ERROR", Message: "failed to process password change",
 			})
 			return
 		}
 
-		if err := database.UpdateUserPassword(user.ID, hash); err != nil {
-			slog.Error("UpdateUserPassword failed", "err", err, "user_id", user.ID)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to update password",
-			})
+		// Delegate to service for password update + session revocation.
+		sess, _ := r.Context().Value(SessionKey).(*db.Session)
+		keepSessionID := int64(0)
+		if sess != nil {
+			keepSessionID = sess.ID
+		}
+
+		if _, err := svc.Users.ChangePassword(user.ID, hash, keepSessionID); err != nil {
+			writeServiceError(w, err)
 			return
 		}
-
-		// BUG-108: Revoke all other sessions after password change.
-		if sess, ok := r.Context().Value(SessionKey).(*db.Session); ok && sess != nil {
-			n, err := database.DeleteOtherSessions(user.ID, sess.ID)
-			if err != nil {
-				slog.Error("DeleteOtherSessions after password change", "err", err, "user_id", user.ID)
-			} else if n > 0 {
-				slog.Info("revoked other sessions after password change", "user_id", user.ID, "revoked", n)
-			}
-		}
-
-		slog.Info("password changed", "user_id", user.ID)
-		_ = database.LogAudit(user.ID, "password_change", "user", user.ID, "password changed")
 
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
 // handleListSessions processes GET /api/v1/users/me/sessions.
-func handleListSessions(database *db.DB) http.HandlerFunc {
+func handleListSessions(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "not authenticated",
+				Error: "UNAUTHORIZED", Message: "not authenticated",
 			})
 			return
 		}
@@ -302,19 +251,14 @@ func handleListSessions(database *db.DB) http.HandlerFunc {
 		sess, ok := r.Context().Value(SessionKey).(*db.Session)
 		if !ok || sess == nil {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "not authenticated",
+				Error: "UNAUTHORIZED", Message: "not authenticated",
 			})
 			return
 		}
 
-		sessions, err := database.ListUserSessions(user.ID)
+		sessions, err := svc.Users.ListSessions(user.ID)
 		if err != nil {
-			slog.Error("ListUserSessions failed", "err", err, "user_id", user.ID)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to list sessions",
-			})
+			writeServiceError(w, err)
 			return
 		}
 
@@ -337,13 +281,12 @@ func handleListSessions(database *db.DB) http.HandlerFunc {
 }
 
 // handleRevokeSession processes DELETE /api/v1/users/me/sessions/{id}.
-func handleRevokeSession(database *db.DB) http.HandlerFunc {
+func handleRevokeSession(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "not authenticated",
+				Error: "UNAUTHORIZED", Message: "not authenticated",
 			})
 			return
 		}
@@ -353,24 +296,10 @@ func handleRevokeSession(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		if err := database.DeleteSessionByID(sessionID, user.ID); err != nil {
-			if errors.Is(err, db.ErrNotFound) {
-				writeJSON(w, http.StatusNotFound, errorResponse{
-					Error:   "NOT_FOUND",
-					Message: "session not found",
-				})
-				return
-			}
-			slog.Error("DeleteSessionByID failed", "err", err, "session_id", sessionID, "user_id", user.ID)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to revoke session",
-			})
+		if err := svc.Users.RevokeSession(user.ID, sessionID); err != nil {
+			writeServiceError(w, err)
 			return
 		}
-
-		slog.Info("session revoked", "user_id", user.ID, "session_id", sessionID)
-		_ = database.LogAudit(user.ID, "session_revoke", "session", sessionID, "session revoked")
 
 		w.WriteHeader(http.StatusNoContent)
 	}

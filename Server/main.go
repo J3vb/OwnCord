@@ -23,7 +23,11 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/plugin"
 	"github.com/owncord/server/storage"
+	"github.com/owncord/server/store"
+	"github.com/owncord/server/telemetry"
+	"github.com/owncord/server/ws"
 )
 
 // version is overridden at build time via -ldflags "-X main.version=1.0.0".
@@ -47,6 +51,13 @@ func main() {
 
 // run is the real entrypoint — separated for testability.
 func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
+	// bgCtx is a cancellable context shared by all background goroutines
+	// (event persister, event pruner, plugin loader).  It is cancelled
+	// early in the shutdown sequence so in-flight DB operations do not
+	// block after the database is being torn down.
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	defer bgCancel()
+
 	// Clean up old binary from a previous update.
 	exePath, exeErr := os.Executable()
 	if exeErr != nil {
@@ -84,6 +95,32 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 	printBanner(cfg, version, tlsCfg != nil)
 
 	// ── 4. Open database + run migrations ─────────────────────────────────
+	// The Phase A plan calls for two backends (sqlite, postgres) selected via
+	// config. SQLite is the only backend currently wired through the *db.DB
+	// type. The PostgreSQL scaffolding is in place (schema under
+	// Server/migrations/postgres, sqlc query files under
+	// Server/db/queries/postgres, PostgresStore behind the `postgres` build
+	// tag in Server/store/postgres.go), but PostgresStore's query methods
+	// are still stubs and the handler boundary still passes *db.DB directly
+	// rather than store.Store. Until both of those land, selecting
+	// type: "postgres" refuses to start with a clear pointer at what's left.
+	switch dbType := cfg.Database.Type; dbType {
+	case "", "sqlite":
+		// fall through to the existing SQLite path
+	case "postgres":
+		return fmt.Errorf("database.type=postgres is configured, but the postgres " +
+			"backend is not yet wired into the runtime. PostgresStore exists at " +
+			"Server/store/postgres.go behind the `postgres` build tag, with connection " +
+			"lifecycle fully implemented but query methods stubbed. What's still " +
+			"pending: (1) run `make sqlc-generate` to produce Server/db/pgdbgen/, " +
+			"(2) replace the stub query methods in postgres.go with wrappers around " +
+			"pgdbgen, and (3) refactor api/router.go and this main.go to thread " +
+			"store.Store through the handler boundary instead of *db.DB. Until those " +
+			"land, set database.type to \"sqlite\" or omit it to start the server")
+	default:
+		return fmt.Errorf("database.type=%q is not recognised; expected \"sqlite\" or \"postgres\"", dbType)
+	}
+
 	database, err := db.Open(cfg.Database.Path)
 	if err != nil {
 		return fmt.Errorf("opening database: %w", err)
@@ -106,9 +143,94 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 		log.Info("cleared stale voice states")
 	}
 
-	// ── 5. Build HTTP router ───────────────────────────────────────────────
-	router, hub, routerCleanup := api.NewRouter(cfg, database, version, logBuf)
+	// ── 4b. Telemetry (Phase B Step 8) ─────────────────────────────────────
+	// Init can return (nil, err) when the otel build-tag skeleton hasn't been
+	// finished wiring to the upstream SDK. Normalise to a no-op shutdown so
+	// the deferred closure never calls a nil function.
+	telemetryShutdown, telErr := telemetry.Init(context.Background(), cfg.Telemetry)
+	if telErr != nil {
+		log.Warn("telemetry init failed; continuing without OpenTelemetry", "error", telErr)
+	}
+	if telemetryShutdown == nil {
+		telemetryShutdown = func(context.Context) error { return nil }
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := telemetryShutdown(shutdownCtx); err != nil {
+			log.Warn("telemetry shutdown returned error", "error", err)
+		}
+	}()
+
+	// ── 5. Construct shared store wrapper ──────────────────────────────────
+	// Used by both the event persistence layer and the plugin runtime. Once
+	// the Phase A "store everywhere" refactor lands, NewRouter will accept
+	// store.Store directly and this wrapper goes away.
+	storeWrapper := store.NewSQLiteStore(database)
+
+	// ── 5a. Construct plugin runtime BEFORE the router so the router can
+	// wire the live registry into the plugin admin handler. ────────────────
+	var pluginRegistry *plugin.Registry
+	if cfg.Plugins.Enabled {
+		registry, plugErr := plugin.NewRegistry(plugin.Config{
+			Directory:     cfg.Plugins.Directory,
+			MaxMemoryMB:   cfg.Plugins.MaxMemoryMB,
+			CPUBudgetMs:   cfg.Plugins.CPUBudgetMs,
+			HTTPAllowlist: cfg.Plugins.HTTPAllowlist,
+			Store:         storeWrapper,
+		})
+		if plugErr != nil {
+			log.Warn("plugin runtime init failed; continuing without plugins", "error", plugErr)
+		} else {
+			pluginRegistry = registry
+			if err := registry.LoadAll(bgCtx); err != nil {
+				log.Warn("plugin loader: failed to scan directory", "error", err)
+			}
+			defer func() {
+				closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = registry.Close(closeCtx)
+			}()
+		}
+	}
+
+	// ── 5b. Build HTTP router ──────────────────────────────────────────────
+	router, hub, routerCleanup := api.NewRouter(cfg, database, version, logBuf, pluginRegistry)
 	defer routerCleanup()
+
+	// ── 5c. Wire event persistence (Phase B Step 7) ────────────────────────
+	if cfg.EventPersistence.Enabled && hub != nil {
+		// Seed the hub's in-memory seq counter from the persisted MAX(seq)
+		// so wrapped-payload seqs stay monotonic across restarts. Without
+		// this, the events table accumulates rows whose payload seqs reset
+		// to 1 after every restart, breaking the reconnect "events since
+		// last_seq" contract.
+		if maxSeq, seedErr := storeWrapper.GetMaxEventSeq(bgCtx); seedErr != nil {
+			log.Warn("event persistence: failed to read MAX(events.seq); starting hub seq from 0", "error", seedErr)
+		} else if maxSeq > 0 {
+			hub.SeedSeq(uint64(maxSeq))
+			log.Info("event persistence: seeded hub seq from persisted events", "seq", maxSeq)
+		}
+
+		persister := ws.NewEventPersister(
+			storeWrapper,
+			4096,
+			cfg.EventPersistence.BatchSize,
+			time.Duration(cfg.EventPersistence.BatchFlushMs)*time.Millisecond,
+		)
+		persister.Start(bgCtx)
+		hub.SetEventPersister(persister)
+		hub.SetEventStore(storeWrapper)
+
+		retention := time.Duration(cfg.EventPersistence.RetentionHours) * time.Hour
+		prunerInterval := time.Duration(cfg.EventPersistence.PrunerIntervalMinutes) * time.Minute
+		ws.StartEventPruner(bgCtx, storeWrapper, retention, prunerInterval)
+		defer func() {
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer stopCancel()
+			persister.Stop(stopCtx)
+		}()
+	}
 
 	// ── 6. Start server ────────────────────────────────────────────────────
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

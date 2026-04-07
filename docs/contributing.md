@@ -25,9 +25,22 @@ How to set up the development environment and contribute to OwnCord.
 |---------|-------------|
 | `go build -o chatserver.exe -ldflags "-s -w" .` | Build server binary (Windows) |
 | `CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w" .` | Build server binary (Linux) |
+| `go build -tags otel .` | Build with OpenTelemetry SDK (requires `go get` first — see Phase B) |
+| `go build -tags wazero .` | Build with Wazero plugin runtime (requires `go get` first — see Phase C) |
+| `go build -tags postgres .` | Build with PostgreSQL backend (requires pgx in go.mod) |
 | `go test ./...` | Run all server tests |
 | `go test ./... -cover` | Run server tests with coverage |
 | `go test -race ./...` | Run server tests with race detection |
+
+**Make targets** (run from `Server/`):
+
+| Command | Description |
+|---------|-------------|
+| `make sqlc-install` | Install the pinned sqlc version into `$GOBIN` |
+| `make sqlc-generate` | Regenerate type-safe Go for both SQLite (`db/dbgen/`) and PostgreSQL (`db/pgdbgen/`) engines |
+| `make sqlc-verify` | Fail if committed `dbgen` / `pgdbgen` output is stale (used by CI) |
+| `make otel-up` | Start Jaeger (traces) + Prometheus (metrics) via Docker for local OTel development |
+| `make otel-down` | Stop and remove the OTel dev containers |
 
 #### Client (Tauri v2)
 
@@ -69,6 +82,24 @@ How to set up the development environment and contribute to OwnCord.
 | `npm run format` | Prettier format (src/ + tests/) |
 | `npm run format:check` | Prettier check only (no writes) |
 | `npm run knip` | Dead code and unused export detection |
+
+## Plugin Development
+
+Plugins are WASM modules loaded at runtime when the server is built with `-tags wazero`.
+See `Server/plugin/examples/hello/README.md` for the full plugin ABI and build instructions.
+
+**Toolchain requirements for building `.wasm` plugins with TinyGo:**
+
+| Tool | Version | Notes |
+|------|---------|-------|
+| TinyGo | 0.40.1 | Supports Go 1.19–1.25 only |
+| Go SDK | 1.25.x | Install alongside the system Go via `go install golang.org/dl/go1.25.3@latest && go1.25.3 download` |
+| wasm-opt | Binaryen 129 | Required by TinyGo for the `wasi` target; download from Binaryen GitHub releases |
+
+Any WASM toolchain (Rust/`wasm32-wasi`, AssemblyScript, etc.) that exports the five ABI
+functions is equally valid — TinyGo is just the example toolchain used by `examples/hello/`.
+
+---
 
 ## Active Branches
 

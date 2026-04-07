@@ -19,6 +19,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/api"
 	"github.com/owncord/server/auth"
+	"github.com/owncord/server/service"
+	"github.com/owncord/server/store"
 )
 
 // ─── handleCreateInvite: malformed JSON body ────────────────────────────────
@@ -748,9 +750,10 @@ func buildCombinedRouter(t *testing.T) (http.Handler, *auth.RateLimiter, string)
 	limiter := auth.NewRateLimiter()
 
 	r := chi.NewRouter()
+	svc := service.New(store.NewSQLiteStore(database), limiter)
 	api.MountAuthRoutes(r, database, limiter, nil, testTOTPKey)
-	api.MountProfileRoutes(r, database, limiter, nil, nil)
-	api.MountInviteRoutes(r, database)
+	api.MountProfileRoutes(r, database, svc, limiter, nil, nil)
+	api.MountInviteRoutes(r, database, svc)
 
 	token := loginAndGetToken(t, r, database, "combined1", 2)
 	return r, limiter, token

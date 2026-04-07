@@ -78,6 +78,7 @@ type PendingVoiceJoin = {
   readonly url: string;
   readonly channelId: number;
   readonly directUrl?: string;
+  readonly isKeyHolder?: boolean;
 };
 
 // --- State machine ---
@@ -397,7 +398,7 @@ export class LiveKitSession {
         attempt,
         maxAttempts: LiveKitSession.MAX_RECONNECT_ATTEMPTS,
       });
-      // eslint-disable-next-line no-await-in-loop -- intentional sequential polling with backoff delay
+      // oxlint-disable-next-line no-await-in-loop -- intentional sequential polling with backoff delay
       await new Promise((r) => setTimeout(r, LiveKitSession.RECONNECT_DELAY_MS));
       // If user manually left or joined a different channel during the delay, abort.
       if (signal.aborted || this._currentChannelId !== channelId) {
@@ -434,7 +435,7 @@ export class LiveKitSession {
           return;
         }
 
-        // eslint-disable-next-line no-await-in-loop -- sequential reconnect: resolve URL then connect
+        // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: resolve URL then connect
         const resolvedUrl = await this.resolveLiveKitUrl(url, directUrl);
 
         if (signal.aborted || this._currentChannelId !== channelId) {
@@ -448,21 +449,21 @@ export class LiveKitSession {
         // If we still have the room key from before disconnect, re-apply it now
         // so audio works immediately; the key holder will send a fresh offer if
         // the key was rotated during our absence.
-        // eslint-disable-next-line no-await-in-loop -- must set up E2EE before connect
+        // oxlint-disable-next-line no-await-in-loop -- must set up E2EE before connect
         this._ecdhKeyPair = await generateECDHKeyPair();
         this._peerPublicKeys.clear();
         if (this._roomKey) {
-          // eslint-disable-next-line no-await-in-loop -- must set key before connect
+          // oxlint-disable-next-line no-await-in-loop -- must set key before connect
           await this._e2eeKeyProvider.setKey(roomKeyToBase64(this._roomKey));
         }
-        // eslint-disable-next-line no-await-in-loop -- must export before connect
+        // oxlint-disable-next-line no-await-in-loop -- must export before connect
         const reconnectPubKey = await exportPublicKey(this._ecdhKeyPair.publicKey);
         this.ws?.send({
           type: "voice_e2ee_announce",
           payload: { public_key: reconnectPubKey },
         });
 
-        // eslint-disable-next-line no-await-in-loop -- sequential reconnect: must connect before restoring state
+        // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: must connect before restoring state
         await newRoom.connect(resolvedUrl, token);
 
         if (signal.aborted || this._currentChannelId !== channelId) {
@@ -487,7 +488,7 @@ export class LiveKitSession {
         newRoom
           .startAudio()
           .catch((err) => log.debug("Failed to start audio after reconnect", err));
-        // eslint-disable-next-line no-await-in-loop -- sequential reconnect: must restore voice state after connect
+        // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: must restore voice state after connect
         await this.restoreLocalVoiceState("reconnect");
         // BUG-099: Reapply saved audio devices after reconnect (matches initial join path).
         const savedInput = loadPref<string>("audioInputDevice", "");
@@ -906,7 +907,7 @@ export class LiveKitSession {
 
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-          // eslint-disable-next-line no-await-in-loop -- sequential retry: must attempt connect before checking result
+          // oxlint-disable-next-line no-await-in-loop -- sequential retry: must attempt connect before checking result
           await localRoom.connect(resolvedUrl, token);
 
           // Checkpoint 2: after room.connect() — the primary race window.
@@ -958,7 +959,7 @@ export class LiveKitSession {
               url: resolvedUrl,
               error: connectErr,
             });
-            // eslint-disable-next-line no-await-in-loop -- intentional backoff delay between retry attempts
+            // oxlint-disable-next-line no-await-in-loop -- intentional backoff delay between retry attempts
             await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
             // Generation check inside retry loop: a superseding join may arrive
             // during the backoff delay.
@@ -1061,7 +1062,7 @@ export class LiveKitSession {
       log.error("Failed to connect to LiveKit", { url: resolvedUrl, error: err });
       if (localRoom !== null) {
         try {
-          localRoom.disconnect();
+          void localRoom.disconnect();
         } catch {
           /* ignore */
         }
@@ -1101,7 +1102,7 @@ export class LiveKitSession {
       if (this._state.type === "connecting") {
         this.setState({
           ...this._state,
-          pendingJoin: { token, url, channelId, directUrl },
+          pendingJoin: { token, url, channelId, directUrl, isKeyHolder },
         });
       }
       log.warn("handleVoiceToken: already connecting, queued latest join request", { channelId });
@@ -1122,6 +1123,7 @@ export class LiveKitSession {
         url: pUrl,
         channelId: pChannelId,
         directUrl: pDirectUrl,
+        isKeyHolder: pIsKeyHolder,
       } = pendingJoin;
       const cur = this._state;
       if (
@@ -1131,8 +1133,8 @@ export class LiveKitSession {
       ) {
         this.handleVoiceTokenRefresh(pToken);
       } else {
-        // eslint-disable-next-line no-await-in-loop -- sequential drain of pending joins to avoid unbounded recursion
-        await this.connectAndSetup(pToken, pUrl, pChannelId, pDirectUrl);
+        // oxlint-disable-next-line no-await-in-loop -- sequential drain of pending joins to avoid unbounded recursion
+        await this.connectAndSetup(pToken, pUrl, pChannelId, pDirectUrl, pIsKeyHolder);
         // If this attempt was itself superseded (another join arrived during the
         // await), the loop will naturally pick it up via the updated pendingJoin.
       }
@@ -1363,7 +1365,7 @@ export class LiveKitSession {
     if (!this._isKeyHolder) return;
     this._keyRotationTimer = setTimeout(() => {
       this._keyRotationTimer = null;
-      this.rotateKeyPeriodically();
+      void this.rotateKeyPeriodically();
     }, LiveKitSession.KEY_ROTATION_INTERVAL_MS);
     log.debug("E2EE: key rotation timer started", {
       intervalMs: LiveKitSession.KEY_ROTATION_INTERVAL_MS,

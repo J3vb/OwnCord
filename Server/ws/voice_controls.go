@@ -2,184 +2,155 @@ package ws
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 
 	"github.com/owncord/server/permissions"
 )
 
-// handleVoiceMute processes a voice_mute message.
-// 1. Parses muted bool.
-// 2. Updates DB.
-// 3. Broadcasts voice_state update to channel.
-func (h *Hub) handleVoiceMute(_ context.Context, c *Client, payload json.RawMessage) {
-	ratKey := fmt.Sprintf("voice_mute:%d", c.userID)
-	if !h.limiter.Allow(ratKey, voiceMuteRateLimit, voiceMuteWindow) {
-		c.sendMsg(buildRateLimitError("too many mute toggles", voiceMuteWindow.Seconds()))
-		return
+// handleVoiceMuteV2 processes a voice_mute command.
+func handleVoiceMuteV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+	d := deps.(VoiceDeps)
+	muteCmd := cmd.(VoiceMuteCmd)
+	userID := info.UserID
+
+	ratKey := fmt.Sprintf("voice_mute:%d", userID)
+	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceMuteRateLimit, voiceMuteWindow) {
+		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many mute toggles"}}
 	}
 
-	if c.getVoiceChID() == 0 {
-		c.sendMsg(buildErrorMsg(ErrCodeVoiceError, "not in a voice channel"))
-		return
+	if info.VoiceChannelID == 0 {
+		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
 	}
 
-	var p struct {
-		Muted bool `json:"muted"`
+	if err := d.DB.UpdateVoiceMute(userID, muteCmd.Muted()); err != nil {
+		slog.Error("ws handleVoiceMuteV2 UpdateVoiceMute", "err", err, "user_id", userID)
+		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update mute state"}}
 	}
-	if err := json.Unmarshal(payload, &p); err != nil {
-		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "invalid voice_mute payload"))
-		return
-	}
+	slog.Debug("voice mute changed", "user_id", userID, "muted", muteCmd.Muted(), "channel_id", info.VoiceChannelID)
 
-	if err := h.db.UpdateVoiceMute(c.userID, p.Muted); err != nil {
-		slog.Error("ws handleVoiceMute UpdateVoiceMute", "err", err, "user_id", c.userID)
-		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to update mute state"))
-		return
-	}
-	slog.Debug("voice mute changed", "user_id", c.userID, "muted", p.Muted, "channel_id", c.getVoiceChID())
-
-	h.broadcastVoiceStateUpdate(c)
+	return voiceStateBroadcast(d, userID)
 }
 
-// handleVoiceDeafen processes a voice_deafen message.
-// 1. Parses deafened bool.
-// 2. Updates DB.
-// 3. Broadcasts voice_state update to channel.
-func (h *Hub) handleVoiceDeafen(_ context.Context, c *Client, payload json.RawMessage) {
-	ratKey := fmt.Sprintf("voice_deafen:%d", c.userID)
-	if !h.limiter.Allow(ratKey, voiceDeafenRateLimit, voiceDeafenWindow) {
-		c.sendMsg(buildRateLimitError("too many deafen toggles", voiceDeafenWindow.Seconds()))
-		return
+// handleVoiceDeafenV2 processes a voice_deafen command.
+func handleVoiceDeafenV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+	d := deps.(VoiceDeps)
+	deafenCmd := cmd.(VoiceDeafenCmd)
+	userID := info.UserID
+
+	ratKey := fmt.Sprintf("voice_deafen:%d", userID)
+	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceDeafenRateLimit, voiceDeafenWindow) {
+		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many deafen toggles"}}
 	}
 
-	if c.getVoiceChID() == 0 {
-		c.sendMsg(buildErrorMsg(ErrCodeVoiceError, "not in a voice channel"))
-		return
+	if info.VoiceChannelID == 0 {
+		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
 	}
 
-	var p struct {
-		Deafened bool `json:"deafened"`
+	if err := d.DB.UpdateVoiceDeafen(userID, deafenCmd.Deafened()); err != nil {
+		slog.Error("ws handleVoiceDeafenV2 UpdateVoiceDeafen", "err", err, "user_id", userID)
+		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update deafen state"}}
 	}
-	if err := json.Unmarshal(payload, &p); err != nil {
-		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "invalid voice_deafen payload"))
-		return
-	}
+	slog.Debug("voice deafen changed", "user_id", userID, "deafened", deafenCmd.Deafened(), "channel_id", info.VoiceChannelID)
 
-	if err := h.db.UpdateVoiceDeafen(c.userID, p.Deafened); err != nil {
-		slog.Error("ws handleVoiceDeafen UpdateVoiceDeafen", "err", err, "user_id", c.userID)
-		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to update deafen state"))
-		return
-	}
-	slog.Debug("voice deafen changed", "user_id", c.userID, "deafened", p.Deafened, "channel_id", c.getVoiceChID())
-
-	h.broadcastVoiceStateUpdate(c)
+	return voiceStateBroadcast(d, userID)
 }
 
-// handleVoiceCamera processes a voice_camera message.
-// 1. Rate limits at 2/sec per user.
-// 2. Checks USE_VIDEO permission.
-// 3. Parses enabled bool.
-// 4. Enforces MaxVideo limit via DB count (race-free).
-// 5. Updates DB.
-// 6. Broadcasts voice_state update to channel.
-func (h *Hub) handleVoiceCamera(_ context.Context, c *Client, payload json.RawMessage) {
-	ratKey := fmt.Sprintf("voice_camera:%d", c.userID)
-	if !h.limiter.Allow(ratKey, voiceCameraRateLimit, voiceCameraWindow) {
-		c.sendMsg(buildRateLimitError("too many camera toggles", voiceCameraWindow.Seconds()))
-		return
+// handleVoiceCameraV2 processes a voice_camera command.
+func handleVoiceCameraV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+	d := deps.(VoiceDeps)
+	cameraCmd := cmd.(VoiceCameraCmd)
+	userID := info.UserID
+	voiceChID := info.VoiceChannelID
+
+	ratKey := fmt.Sprintf("voice_camera:%d", userID)
+	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceCameraRateLimit, voiceCameraWindow) {
+		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many camera toggles"}}
 	}
 
-	voiceChID := c.getVoiceChID()
 	if voiceChID == 0 {
-		c.sendMsg(buildErrorMsg(ErrCodeVoiceError, "not in a voice channel"))
-		return
+		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
 	}
 
-	if !h.requireChannelPerm(c, voiceChID, permissions.UseVideo, "USE_VIDEO") {
-		return
+	// Permission check.
+	if r := requirePerm(d.DB, d.Permissions, userID, voiceChID, permissions.UseVideo, "USE_VIDEO"); r != nil {
+		return *r
 	}
 
-	var p struct {
-		Enabled bool `json:"enabled"`
-	}
-	if err := json.Unmarshal(payload, &p); err != nil {
-		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "invalid voice_camera payload"))
-		return
-	}
+	enabled := cameraCmd.Enabled()
 
 	// Enforce MaxVideo limit when enabling camera using an atomic check-and-update.
-	if p.Enabled {
-		ch, chErr := h.db.GetChannel(voiceChID)
+	if enabled {
+		ch, chErr := d.DB.GetChannel(voiceChID)
 		if chErr == nil && ch != nil && ch.VoiceMaxVideo > 0 {
-			ok, limitErr := h.db.EnableCameraIfUnderLimit(c.userID, voiceChID, ch.VoiceMaxVideo)
+			ok, limitErr := d.DB.EnableCameraIfUnderLimit(userID, voiceChID, ch.VoiceMaxVideo)
 			if limitErr != nil {
-				slog.Error("handleVoiceCamera EnableCameraIfUnderLimit", "err", limitErr, "channel_id", voiceChID)
-				c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to check video limit"))
-				return
+				slog.Error("handleVoiceCameraV2 EnableCameraIfUnderLimit", "err", limitErr, "channel_id", voiceChID)
+				return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check video limit"}}
 			}
 			if !ok {
-				c.sendMsg(buildErrorMsg(ErrCodeVideoLimit,
-					fmt.Sprintf("maximum %d video streams reached", ch.VoiceMaxVideo)))
-				return
+				return Result{Error: ClientError{
+					Code:    ErrCodeVideoLimit,
+					Message: fmt.Sprintf("maximum %d video streams reached", ch.VoiceMaxVideo),
+				}}
 			}
 		} else {
-			if err := h.db.UpdateVoiceCamera(c.userID, true); err != nil {
-				slog.Error("ws handleVoiceCamera UpdateVoiceCamera", "err", err, "user_id", c.userID)
-				c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to update camera state"))
-				return
+			if err := d.DB.UpdateVoiceCamera(userID, true); err != nil {
+				slog.Error("ws handleVoiceCameraV2 UpdateVoiceCamera", "err", err, "user_id", userID)
+				return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update camera state"}}
 			}
 		}
 	} else {
-		if err := h.db.UpdateVoiceCamera(c.userID, false); err != nil {
-			slog.Error("ws handleVoiceCamera UpdateVoiceCamera", "err", err, "user_id", c.userID)
-			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to update camera state"))
-			return
+		if err := d.DB.UpdateVoiceCamera(userID, false); err != nil {
+			slog.Error("ws handleVoiceCameraV2 UpdateVoiceCamera", "err", err, "user_id", userID)
+			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update camera state"}}
 		}
 	}
-	slog.Debug("voice camera changed", "user_id", c.userID, "enabled", p.Enabled, "channel_id", voiceChID)
+	slog.Debug("voice camera changed", "user_id", userID, "enabled", enabled, "channel_id", voiceChID)
 
-	h.broadcastVoiceStateUpdate(c)
+	return voiceStateBroadcast(d, userID)
 }
 
-// handleVoiceScreenshare processes a voice_screenshare message.
-// 1. Rate limits at 2/sec per user.
-// 2. Checks SHARE_SCREEN permission.
-// 3. Parses enabled bool.
-// 4. Updates DB.
-// 5. Broadcasts voice_state update to channel.
-func (h *Hub) handleVoiceScreenshare(_ context.Context, c *Client, payload json.RawMessage) {
-	ratKey := fmt.Sprintf("voice_screenshare:%d", c.userID)
-	if !h.limiter.Allow(ratKey, voiceScreenshareRateLimit, voiceScreenshareWindow) {
-		c.sendMsg(buildRateLimitError("too many screenshare toggles", voiceScreenshareWindow.Seconds()))
-		return
+// handleVoiceScreenshareV2 processes a voice_screenshare command.
+func handleVoiceScreenshareV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+	d := deps.(VoiceDeps)
+	ssCmd := cmd.(VoiceScreenshareCmd)
+	userID := info.UserID
+	voiceChID := info.VoiceChannelID
+
+	ratKey := fmt.Sprintf("voice_screenshare:%d", userID)
+	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceScreenshareRateLimit, voiceScreenshareWindow) {
+		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many screenshare toggles"}}
 	}
 
-	voiceChID := c.getVoiceChID()
 	if voiceChID == 0 {
-		c.sendMsg(buildErrorMsg(ErrCodeVoiceError, "not in a voice channel"))
-		return
+		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
 	}
 
-	if !h.requireChannelPerm(c, voiceChID, permissions.ShareScreen, "SHARE_SCREEN") {
-		return
+	// Permission check.
+	if r := requirePerm(d.DB, d.Permissions, userID, voiceChID, permissions.ShareScreen, "SHARE_SCREEN"); r != nil {
+		return *r
 	}
 
-	var p struct {
-		Enabled bool `json:"enabled"`
+	if err := d.DB.UpdateVoiceScreenshare(userID, ssCmd.Enabled()); err != nil {
+		slog.Error("ws handleVoiceScreenshareV2 UpdateVoiceScreenshare", "err", err, "user_id", userID)
+		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update screenshare state"}}
 	}
-	if err := json.Unmarshal(payload, &p); err != nil {
-		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "invalid voice_screenshare payload"))
-		return
-	}
+	slog.Debug("voice screenshare changed", "user_id", userID, "enabled", ssCmd.Enabled(), "channel_id", voiceChID)
 
-	if err := h.db.UpdateVoiceScreenshare(c.userID, p.Enabled); err != nil {
-		slog.Error("ws handleVoiceScreenshare UpdateVoiceScreenshare", "err", err, "user_id", c.userID)
-		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to update screenshare state"))
-		return
-	}
-	slog.Debug("voice screenshare changed", "user_id", c.userID, "enabled", p.Enabled, "channel_id", voiceChID)
+	return voiceStateBroadcast(d, userID)
+}
 
-	h.broadcastVoiceStateUpdate(c)
+// voiceStateBroadcast reads the current voice state from DB and returns a
+// BroadcastAll event. Shared by all voice control V2 handlers.
+func voiceStateBroadcast(d VoiceDeps, userID int64) Result {
+	state, err := d.DB.GetVoiceState(userID)
+	if err != nil {
+		slog.Error("ws voiceStateBroadcast GetVoiceState", "err", err, "user_id", userID)
+		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to broadcast voice state update"}}
+	}
+	if state == nil {
+		return Result{} // not in voice — nothing to broadcast
+	}
+	return Result{Events: []Event{VoiceStateEvent{payload: buildVoiceState(*state)}}}
 }

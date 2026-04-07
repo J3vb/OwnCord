@@ -2,6 +2,7 @@
 package ws
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -13,6 +14,9 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/plugin"
+	"github.com/owncord/server/service"
+	"github.com/owncord/server/store"
 	"github.com/owncord/server/syncutil"
 )
 
@@ -40,10 +44,26 @@ type Hub struct {
 	registry     *HandlerRegistry
 	permChecker  *permissions.Checker
 
+	pubsub       *PubSub           // topic-based pub/sub for O(subscribers) broadcast
+	topicLimiter *TopicRateLimiter // per-topic throughput caps
+
 	seq            uint64           // atomic monotonic sequence counter
 	seqMu          syncutil.Mutex   // serializes seq assignment + replay insertion + delivery order
 	replayBuf      *EventRingBuffer // recent broadcast events for reconnection replay
 	broadcastDrops atomic.Uint64    // counts messages dropped due to full broadcast channel
+
+	// Phase B Step 7 — event persistence. nil = ring buffer only.
+	eventPersister *EventPersister
+	eventStore     store.EventStore // read path for cold-tier replay
+
+	// Phase C Step 9 — plugin wiring.
+	pluginRegistry *plugin.Registry  // slash-command dispatch; nil = no plugins
+	pluginSink     *plugin.EventSink // hub→plugin event fan-out; nil = no plugins
+
+	// Phase B Step 7 — reconnection tier metrics. Incremented per resume.
+	reconnectTierBuf  atomic.Uint64
+	reconnectTierDB   atomic.Uint64
+	reconnectTierFull atomic.Uint64
 
 	// Settings cache — avoids per-connection DB queries for server_name/motd.
 	settingsMu         syncutil.RWMutex
@@ -60,13 +80,10 @@ type Hub struct {
 
 // NewHub creates a Hub ready to be started with Run.
 // It also initializes the settings cache from the database.
-func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
+// If svc is non-nil, V2 handlers receive service references for business logic delegation.
+func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *Hub {
 	reg := NewHandlerRegistry()
-	registerChatHandlers(reg)
-	registerPresenceHandlers(reg)
-	registerReactionHandlers(reg)
-	registerVoiceHandlers(reg)
-	registerPingHandler(reg)
+	registerVoiceHandlersV1(reg)
 
 	h := &Hub{
 		clients:         make(map[int64]*Client),
@@ -76,6 +93,8 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
 		register:        make(chan *Client, 32),
 		unregister:      make(chan *Client, 32),
 		stop:            make(chan struct{}),
+		pubsub:          NewPubSub(),
+		topicLimiter:    NewTopicRateLimiter(topicRateLimitPerSecond, time.Second),
 		replayBuf:       NewEventRingBuffer(1000),
 		registry:        reg,
 		permChecker:     permissions.NewChecker(database),
@@ -83,6 +102,36 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter) *Hub {
 		settingsMotd:    "Welcome!",
 		voiceKeyHolders: make(map[int64]int64),
 	}
+
+	// V2 handler registrations (need Hub fields for deps).
+	registerPingHandler(reg, PingDeps{Limiter: h.limiter})
+
+	chatDeps := ChatDeps{
+		Limiter: h.limiter,
+	}
+	presenceDeps := PresenceDeps{
+		Limiter: h.limiter,
+	}
+	reactionDeps := ReactionDeps{}
+	if svc != nil {
+		chatDeps.MessageSvc = svc.Messages
+		presenceDeps.ChannelSvc = svc.Channels
+		reactionDeps.MessageSvc = svc.Messages
+	}
+
+	registerChatHandlers(reg, chatDeps)
+	registerPresenceHandlers(reg, presenceDeps)
+	registerReactionHandlers(reg, reactionDeps)
+	registerPluginCommandHandler(reg) // Phase C Step 9 — plugin slash commands
+	registerVoiceControlsV2(reg, VoiceDeps{
+		DB:          h.db,
+		Limiter:     h.limiter,
+		Permissions: h.permChecker,
+		LiveKit:     h.livekit,
+		TokenGen:    h, // Hub delegates to h.livekit at call time (set via SetLiveKit)
+		KeyHolder:   h,
+	})
+
 	h.refreshSettingsLocked()
 	return h
 }
@@ -126,6 +175,24 @@ func (h *Hub) refreshSettingsLocked() {
 // SetLiveKit sets the LiveKit client on the hub. Must be called before Run.
 func (h *Hub) SetLiveKit(lk *LiveKitClient) {
 	h.livekit = lk
+}
+
+// GenerateToken delegates to the LiveKit client. Returns an error if LiveKit
+// is not configured. Satisfies VoiceTokenGenerator so the Hub can be passed
+// as a dep at registration time (before SetLiveKit is called).
+func (h *Hub) GenerateToken(userID int64, username string, channelID int64, voiceJoinToken string, canPublish, canSubscribe, canVideo, canScreenShare bool) (string, error) {
+	if h.livekit == nil {
+		return "", fmt.Errorf("voice not configured")
+	}
+	return h.livekit.GenerateToken(userID, username, channelID, voiceJoinToken, canPublish, canSubscribe, canVideo, canScreenShare)
+}
+
+// URL delegates to the LiveKit client. Returns empty string if not configured.
+func (h *Hub) URL() string {
+	if h.livekit == nil {
+		return ""
+	}
+	return h.livekit.URL()
 }
 
 // LiveKitHealthCheck probes the LiveKit server for connectivity.
@@ -333,6 +400,9 @@ func (h *Hub) registerNow(c *Client) {
 		// by the handshake path in serve.go, which runs before registerNow.
 		// registerNow only handles in-memory client replacement.
 
+		// Remove the old client from all pub/sub topics before replacing.
+		h.pubsub.UnsubscribeAll(old)
+
 		// Kick the stale connection atomically before registering
 		// the new one — prevents TOCTOU races on duplicate login.
 		slog.Warn("hub: kicking stale connection for re-registering user",
@@ -342,17 +412,35 @@ func (h *Hub) registerNow(c *Client) {
 	h.clients[c.userID] = c
 	slog.Info("hub: client registered", "user_id", c.userID, "total_clients", len(h.clients))
 	h.mu.Unlock()
+
+	// Subscribe the new client to default pub/sub topics.
+	h.pubsub.Subscribe(c, TopicGlobal)
+	h.pubsub.Subscribe(c, UserTopic(c.userID))
+	// If the client already has a focused channel (e.g. test clients created with
+	// NewTestClientWithChannel, or reconnecting clients), subscribe immediately so
+	// deliverBroadcast can reach them without waiting for a channel_focus message.
+	if chID := c.getChannelID(); chID != 0 {
+		h.pubsub.Subscribe(c, ChannelTopic(chID))
+	}
+	// If the client is already in a voice channel (e.g. reconnect or test setup),
+	// subscribe to that channel's topic so voice-scoped and channel-scoped
+	// broadcasts reach them.
+	if voiceChID := c.getVoiceChID(); voiceChID != 0 {
+		h.pubsub.Subscribe(c, ChannelTopic(voiceChID))
+	}
 }
 
 func (h *Hub) unregisterNow(c *Client) bool {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	current, exists := h.clients[c.userID]
 	if exists && current == c {
 		delete(h.clients, c.userID)
 		slog.Info("hub: client unregistered", "user_id", c.userID, "total_clients", len(h.clients))
+		h.mu.Unlock()
+		h.pubsub.UnsubscribeAll(c)
 		return false // not replaced
 	}
+	h.mu.Unlock()
 	return true // different client registered = was replaced
 }
 
@@ -447,6 +535,26 @@ func (h *Hub) SendToUser(userID int64, msg []byte) bool {
 	return c.trySendMsg(msg)
 }
 
+// SendToUserHigh sends a high-priority message to a specific user.
+func (h *Hub) SendToUserHigh(userID int64, msg []byte) bool {
+	h.mu.RLock()
+	c, ok := h.clients[userID]
+	h.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	c.sendHighMsg(msg)
+	return true
+}
+
+// BroadcastToAllLow enqueues a low-priority global broadcast.
+// Low-priority messages are silently dropped if a client's buffer is full.
+func (h *Hub) BroadcastToAllLow(msg []byte) {
+	// Low-priority global broadcasts bypass the sequenced broadcast channel
+	// and go directly through pub/sub — they don't need replay or seq numbering.
+	h.pubsub.PublishGlobalLow(msg)
+}
+
 // sendSequencedToUsers stamps msg with a monotonic seq, stores it in the replay
 // buffer under channelID, and fanouts the wrapped payload to the provided users.
 func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
@@ -459,9 +567,25 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 	// Store DM event for reconnect replay; filtering is channel-based and uses
 	// allowed channel IDs computed at auth time (including open DMs).
 	h.replayBuf.Push(seq, channelID, wrapped)
+	h.persistEvent(seq, channelID, wrapped)
 
 	for _, userID := range userIDs {
 		h.SendToUser(userID, wrapped)
+	}
+}
+
+// sendSequencedToUsersHigh is like sendSequencedToUsers but uses high-priority delivery.
+func (h *Hub) sendSequencedToUsersHigh(channelID int64, userIDs []int64, msg []byte) {
+	h.seqMu.Lock()
+	defer h.seqMu.Unlock()
+
+	seq := h.nextSeq()
+	wrapped := wrapWithSeq(msg, seq)
+	h.replayBuf.Push(seq, channelID, wrapped)
+	h.persistEvent(seq, channelID, wrapped)
+
+	for _, userID := range userIDs {
+		h.SendToUserHigh(userID, wrapped)
 	}
 }
 
@@ -500,6 +624,7 @@ func (h *Hub) kickClient(c *Client) {
 		delete(h.clients, c.userID)
 	}
 	h.mu.Unlock()
+	h.pubsub.UnsubscribeAll(c)
 	c.closeSend()
 }
 
@@ -511,6 +636,104 @@ func (h *Hub) nextSeq() uint64 {
 // ReplayBuffer returns the hub's event ring buffer for reconnection replay.
 func (h *Hub) ReplayBuffer() *EventRingBuffer {
 	return h.replayBuf
+}
+
+// SeedSeq sets the hub's monotonic sequence counter to seed (atomic). Used
+// at startup to align in-memory seqs with the persisted MAX(events.seq) so
+// wrapped-payload seqs stay monotonic across restarts. Calling SeedSeq with
+// a value less than the current seq is a no-op (we never go backwards).
+func (h *Hub) SeedSeq(seed uint64) {
+	for {
+		cur := atomic.LoadUint64(&h.seq)
+		if seed <= cur {
+			return
+		}
+		if atomic.CompareAndSwapUint64(&h.seq, cur, seed) {
+			return
+		}
+	}
+}
+
+// SetEventPersister attaches a persister so subsequent broadcasts are also
+// written to the persistent EventStore. Pass nil to disable.
+func (h *Hub) SetEventPersister(p *EventPersister) {
+	h.eventPersister = p
+}
+
+// SetEventStore attaches a read-side EventStore used by the cold-tier
+// reconnect replay path. Typically the same store backing SetEventPersister.
+func (h *Hub) SetEventStore(s store.EventStore) {
+	h.eventStore = s
+}
+
+// SetPluginRegistry wires the plugin.Registry so the hub can dispatch
+// slash commands (chat_command messages) to plugin-owned handlers.
+// Pass nil to disable plugin command dispatch.
+func (h *Hub) SetPluginRegistry(r *plugin.Registry) {
+	h.pluginRegistry = r
+}
+
+// SetPluginEventSink wires the plugin.EventSink so the hub fans out each
+// sequenced broadcast to subscribed plugins. Pass nil to disable.
+func (h *Hub) SetPluginEventSink(s *plugin.EventSink) {
+	h.pluginSink = s
+}
+
+// ReconnectTierStats returns the per-tier resume hit counters in the order
+// (buffer, db, full). Phase B Step 7 metrics surface; OpenTelemetry meters
+// (Step 8) read from the same atomics.
+func (h *Hub) ReconnectTierStats() (buffer, db, full uint64) {
+	return h.reconnectTierBuf.Load(), h.reconnectTierDB.Load(), h.reconnectTierFull.Load()
+}
+
+// persistEvent enqueues a broadcast event for cold-storage persistence. Safe
+// to call with a nil persister; never blocks the broadcast hot path. seq is
+// the same hub-assigned monotonic counter embedded in payload, so the row
+// written to the EventStore has a row-seq that matches the wrapped-payload
+// seq the client tracks.
+func (h *Hub) persistEvent(seq uint64, channelID int64, payload []byte) {
+	if h.eventPersister == nil {
+		return
+	}
+	eventType := extractEventType(payload)
+	if eventType == "" {
+		eventType = "broadcast"
+		if channelID != 0 {
+			eventType = "channel_broadcast"
+		}
+	}
+	h.eventPersister.Enqueue(int64(seq), eventType, channelID, payload) //nolint:gosec // seq is a monotonically increasing counter, never reaches MaxInt64
+}
+
+// extractEventType scans a wrapped JSON envelope for the value of the "type"
+// field and returns it. Returns "" on any parse failure so the caller can
+// substitute a generic label. The scan is intentionally not a full JSON
+// decode — it only looks for the literal `"type":"<value>"` token, which
+// matches every wire-format envelope produced by this server. This avoids the
+// allocation cost of `encoding/json` on the broadcast hot path.
+func extractEventType(payload []byte) string {
+	const needle = `"type":"`
+	idx := bytes.Index(payload, []byte(needle))
+	if idx < 0 {
+		return ""
+	}
+	start := idx + len(needle)
+	end := bytes.IndexByte(payload[start:], '"')
+	if end < 0 {
+		return ""
+	}
+	t := payload[start : start+end]
+	// Reject any value with control chars or escapes — we want a clean
+	// label, not arbitrary user-controlled metadata. Length-cap defensively.
+	if len(t) == 0 || len(t) > 64 {
+		return ""
+	}
+	for _, b := range t {
+		if b < 0x20 || b == '\\' {
+			return ""
+		}
+	}
+	return string(t)
 }
 
 // wrapWithSeq injects a "seq" field into a JSON message without re-serializing.
@@ -532,6 +755,11 @@ func wrapWithSeq(msg []byte, seq uint64) []byte {
 // any message before being considered stale and disconnected. The client sends
 // a ping every 30s, so 90s (3x) gives plenty of margin.
 const staleClientTimeout = 90 * time.Second
+
+// topicRateLimitPerSecond is the default maximum messages per second for any
+// single channel topic. Prevents a busy channel from saturating the broadcast
+// loop and starving other channels.
+const topicRateLimitPerSecond = 100
 
 // sweepStaleClients iterates over all connected clients and kicks any that
 // have not sent a message within staleClientTimeout.
@@ -647,7 +875,7 @@ func (h *Hub) sweepStaleVoiceStates() {
 }
 
 // deliverBroadcast stamps bm.msg with a monotonic sequence number, stores it
-// in the replay buffer, and sends it to the appropriate clients.
+// in the replay buffer, and sends it to the appropriate clients via pub/sub.
 func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	h.seqMu.Lock()
 	defer h.seqMu.Unlock()
@@ -657,28 +885,35 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 
 	// Store in replay buffer for reconnection recovery.
 	h.replayBuf.Push(seq, bm.channelID, msg)
+	h.persistEvent(seq, bm.channelID, msg)
 
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	delivered := 0
-	skipped := 0
-	for _, c := range h.clients {
-		// channelID == 0 → global broadcast, deliver to everyone.
-		// Otherwise, only deliver to clients viewing this channel
-		// (via channel_focus) or in voice on this channel.
-		// Clients that haven't focused any channel (channelID == 0)
-		// are intentionally excluded from channel-scoped broadcasts
-		// to prevent information leakage (BUG-122).
-		if bm.channelID != 0 && c.getChannelID() != bm.channelID && c.getVoiceChID() != bm.channelID {
-			skipped++
-			continue
+	// Fan out to plugins subscribed to this event type (Phase C Step 9).
+	// Dispatch is a no-op in the default build; the wazero build calls into
+	// the WASM module. Dispatch is called outside seqMu after we release it
+	// conceptually — but since seqMu is still held here, the call MUST NOT
+	// re-enter the hub. The default build is safe; the wazero build should
+	// dispatch asynchronously once the runtime is real.
+	if h.pluginSink != nil {
+		eventType := extractEventType(msg)
+		if eventType == "" {
+			eventType = "broadcast"
 		}
-		c.sendMsg(msg)
-		delivered++
+		h.pluginSink.Dispatch(context.Background(), eventType, msg)
 	}
-	if bm.channelID != 0 {
+
+	if bm.channelID == 0 {
+		// Global broadcast — deliver to every connected client.
+		h.pubsub.PublishGlobal(msg)
+	} else {
+		// Channel-scoped broadcast — deliver to subscribers of the channel topic.
+		topic := ChannelTopic(bm.channelID)
+		if !h.topicLimiter.Allow(topic) {
+			slog.Warn("hub: topic rate limit exceeded, dropping message",
+				"channel_id", bm.channelID, "seq", seq)
+			return
+		}
+		delivered := h.pubsub.Publish(topic, msg, 0)
 		slog.Debug("hub: channel broadcast",
-			"channel_id", bm.channelID, "delivered", delivered, "skipped", skipped, "seq", seq)
+			"channel_id", bm.channelID, "delivered", delivered, "seq", seq)
 	}
 }

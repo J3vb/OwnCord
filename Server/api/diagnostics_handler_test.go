@@ -33,7 +33,7 @@ func setupDiagnosticsRouter(t *testing.T) (http.Handler, string) {
 		},
 	}
 
-	handler, _, cleanup := api.NewRouter(cfg, database, "1.0.0-test", nil)
+	handler, _, cleanup := api.NewRouter(cfg, database, "1.0.0-test", nil, nil)
 	t.Cleanup(cleanup)
 
 	// Create a user and session for authenticated requests.

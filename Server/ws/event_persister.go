@@ -1,0 +1,195 @@
+// Phase B Step 7 — Event Persistence Layer.
+//
+// EventPersister is an asynchronous batched writer that drains broadcast
+// events from an in-memory channel into the EventStore. It must never block
+// the broadcast hot path: when the queue is full, events are dropped and a
+// counter is incremented. The reconnection handler tolerates gaps because the
+// in-memory ring buffer remains the primary cold-start source for clients
+// whose last_seq is recent.
+
+package ws
+
+import (
+	"context"
+	"log/slog"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/owncord/server/store"
+	"github.com/owncord/server/telemetry"
+)
+
+// pendingEvent is a single event waiting to be flushed to the EventStore.
+// seq carries the hub-assigned monotonic sequence so the row written to the
+// store has the same seq as the wrapped payload sent to clients.
+type pendingEvent struct {
+	seq       int64
+	eventType string
+	channelID int64
+	payload   []byte
+}
+
+// EventPersister batches broadcast events and writes them to an EventStore.
+type EventPersister struct {
+	store      store.EventStore
+	queue      chan pendingEvent
+	batchSize  int
+	flushEvery time.Duration
+
+	startOnce sync.Once
+	started   atomic.Bool
+	stopOnce  sync.Once
+	stop      chan struct{}
+	done      chan struct{}
+
+	persisted atomic.Uint64
+	dropped   atomic.Uint64
+	flushes   atomic.Uint64
+	errors    atomic.Uint64
+}
+
+// NewEventPersister returns a persister wired to s. s MUST be non-nil —
+// run() dereferences p.store on every flush, so a nil store would panic on
+// the first tick. We fail fast here so the misconfiguration surfaces at
+// construction time (main.go, tests) instead of minutes later in the
+// background goroutine.
+//
+// queueSize sets the channel buffer; once full, Enqueue increments the
+// dropped counter without blocking. batchSize and flushEvery control the
+// flush triggers.
+func NewEventPersister(s store.EventStore, queueSize, batchSize int, flushEvery time.Duration) *EventPersister {
+	if s == nil {
+		panic("ws: NewEventPersister requires a non-nil store.EventStore")
+	}
+	if queueSize <= 0 {
+		queueSize = 1024
+	}
+	if batchSize <= 0 {
+		batchSize = 50
+	}
+	if flushEvery <= 0 {
+		flushEvery = 100 * time.Millisecond
+	}
+	return &EventPersister{
+		store:      s,
+		queue:      make(chan pendingEvent, queueSize),
+		batchSize:  batchSize,
+		flushEvery: flushEvery,
+		stop:       make(chan struct{}),
+		done:       make(chan struct{}),
+	}
+}
+
+// Start launches the background flusher goroutine. Idempotent — calling
+// Start more than once is a no-op so test setups that share a persister
+// across cases don't spawn duplicate runners.
+func (p *EventPersister) Start(ctx context.Context) {
+	p.startOnce.Do(func() {
+		p.started.Store(true)
+		go p.run(ctx)
+	})
+}
+
+// Enqueue queues an event for persistence. Non-blocking; drops on full queue.
+// seq is the hub-assigned monotonic sequence for this event — it must be the
+// same value embedded in the wrapped payload so reconnect replay returns rows
+// whose row-seq matches the payload-seq the client tracks.
+//
+// CONTRACT: payload must not be mutated by the caller after Enqueue returns.
+// All current call sites pass a fresh slice from wrapWithSeq, so no defensive
+// copy is taken here. This matters because Enqueue is invoked under the hub's
+// seqMu lock and any per-call allocation directly serializes broadcast
+// throughput.
+func (p *EventPersister) Enqueue(seq int64, eventType string, channelID int64, payload []byte) {
+	if p == nil {
+		return
+	}
+	select {
+	case p.queue <- pendingEvent{seq: seq, eventType: eventType, channelID: channelID, payload: payload}:
+	default:
+		p.dropped.Add(1)
+	}
+}
+
+// Stop signals the persister to drain remaining events and exit. Blocks until
+// the goroutine exits or ctx is cancelled. Safe to call without a prior
+// Start: in that case there's no goroutine to wait for and Stop returns
+// immediately after closing the stop channel.
+func (p *EventPersister) Stop(ctx context.Context) {
+	if p == nil {
+		return
+	}
+	p.stopOnce.Do(func() { close(p.stop) })
+	if !p.started.Load() {
+		// run() was never launched, so done will never be closed.
+		return
+	}
+	select {
+	case <-p.done:
+	case <-ctx.Done():
+	}
+}
+
+// Stats returns lifetime counters.
+func (p *EventPersister) Stats() (persisted, dropped, flushes, errs uint64) {
+	return p.persisted.Load(), p.dropped.Load(), p.flushes.Load(), p.errors.Load()
+}
+
+func (p *EventPersister) run(ctx context.Context) {
+	defer close(p.done)
+	tick := time.NewTicker(p.flushEvery)
+	defer tick.Stop()
+
+	// Cache the AppMetrics bundle once instead of looking it up per event.
+	metrics := telemetry.NewAppMetrics()
+
+	batch := make([]pendingEvent, 0, p.batchSize)
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		p.flushes.Add(1)
+		for _, evt := range batch {
+			if err := p.store.PersistEvent(ctx, evt.seq, evt.eventType, evt.channelID, evt.payload); err != nil {
+				p.errors.Add(1)
+				metrics.WSEventsPersistErrors.Add(ctx, 1)
+				slog.Warn("event persister: PersistEvent failed",
+					"seq", evt.seq, "event_type", evt.eventType, "channel_id", evt.channelID, "err", err)
+				continue
+			}
+			p.persisted.Add(1)
+			metrics.WSEventsPersisted.Add(ctx, 1)
+		}
+		batch = batch[:0]
+	}
+
+	for {
+		select {
+		case <-p.stop:
+			// Drain anything still in the channel before exiting.
+			for {
+				select {
+				case evt := <-p.queue:
+					batch = append(batch, evt)
+					if len(batch) >= p.batchSize {
+						flush()
+					}
+				default:
+					flush()
+					return
+				}
+			}
+		case <-ctx.Done():
+			flush()
+			return
+		case evt := <-p.queue:
+			batch = append(batch, evt)
+			if len(batch) >= p.batchSize {
+				flush()
+			}
+		case <-tick.C:
+			flush()
+		}
+	}
+}

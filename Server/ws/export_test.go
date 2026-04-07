@@ -94,12 +94,20 @@ func (p *LiveKitProcess) SetProcessStoppedForTest() {
 func NewHubForTest() *Hub {
 	return &Hub{
 		clients: make(map[int64]*Client),
+		pubsub:  NewPubSub(),
 	}
 }
 
+// PubSubForTest exposes the hub's PubSub for external tests.
+func (h *Hub) PubSubForTest() *PubSub {
+	return h.pubsub
+}
+
 // BuildAuthOKForTest exposes Hub.buildAuthOK for external tests.
+// Defaults to replay_source="none" since most callers test the fresh-connect
+// path; tests that care about the resume tier can call buildAuthOK directly.
 func (h *Hub) BuildAuthOKForTest(user *db.User, roleName string) []byte {
-	return h.buildAuthOK(user, roleName)
+	return h.buildAuthOK(user, roleName, "none")
 }
 
 // BuildReadyForTest exposes Hub.buildReady for external tests.

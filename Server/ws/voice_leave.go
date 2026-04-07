@@ -28,6 +28,9 @@ func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
 		"remote", c.remoteAddr,
 	)
 
+	// Unsubscribe from voice topic.
+	h.pubsub.Unsubscribe(c, VoiceTopic(oldChID))
+
 	if err := leaveVoiceChannelWithRetry(ctx, h, c.userID, oldChID, oldJoinToken); err != nil {
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice leave failed — please rejoin if issues persist"))
 	}

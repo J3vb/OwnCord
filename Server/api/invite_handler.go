@@ -4,13 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/service"
 )
 
 // createInviteRequest is the JSON body for POST /api/v1/invites.
@@ -32,28 +31,25 @@ type inviteResponse struct {
 
 // MountInviteRoutes registers invite endpoints on the given router.
 // All routes require authentication and MANAGE_INVITES permission.
-func MountInviteRoutes(r chi.Router, database *db.DB) {
+func MountInviteRoutes(r chi.Router, database *db.DB, svc *service.Services) {
 	r.Route("/api/v1/invites", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
 		r.Use(RequirePermission(permissions.ManageInvites))
 
-		r.Post("/", handleCreateInvite(database))
-		r.Get("/", handleListInvites(database))
-		r.Delete("/{code}", handleRevokeInvite(database))
+		r.Post("/", handleCreateInvite(svc))
+		r.Get("/", handleListInvites(svc))
+		r.Delete("/{code}", handleRevokeInvite(svc))
 	})
 }
 
 // handleCreateInvite processes POST /api/v1/invites.
-func handleCreateInvite(database *db.DB) http.HandlerFunc {
+func handleCreateInvite(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req createInviteRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			// An empty body is valid (all fields optional), but malformed
-			// JSON must be rejected so callers notice typos.
 			if err != io.EOF {
 				writeJSON(w, http.StatusBadRequest, errorResponse{
-					Error:   "BAD_REQUEST",
-					Message: "malformed JSON body",
+					Error: "BAD_REQUEST", Message: "malformed JSON body",
 				})
 				return
 			}
@@ -63,62 +59,35 @@ func handleCreateInvite(database *db.DB) http.HandlerFunc {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
-				Error:   "UNAUTHORIZED",
-				Message: "not authenticated",
+				Error: "UNAUTHORIZED", Message: "not authenticated",
 			})
 			return
 		}
 
-		var expiresAt *time.Time
-		// H-4: Cap invite expiration to 30 days (720 hours) to prevent
-		// effectively permanent invites that survive admin revocation policies.
-		const maxExpiresInHours = 720
-		if req.ExpiresInHours > maxExpiresInHours {
+		// H-4: Cap invite expiration to 30 days.
+		if req.ExpiresInHours > service.MaxInviteExpiryHours() {
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error:   "BAD_REQUEST",
-				Message: fmt.Sprintf("expires_in_hours cannot exceed %d (30 days)", maxExpiresInHours),
+				Message: fmt.Sprintf("expires_in_hours cannot exceed %d (30 days)", service.MaxInviteExpiryHours()),
 			})
 			return
 		}
-		if req.ExpiresInHours > 0 {
-			t := time.Now().Add(time.Duration(req.ExpiresInHours) * time.Hour)
-			expiresAt = &t
-		}
 
-		code, err := database.CreateInvite(user.ID, req.MaxUses, expiresAt)
+		inv, err := svc.Invites.CreateInvite(r.Context(), user.ID, req.MaxUses, req.ExpiresInHours)
 		if err != nil {
-			slog.Error("handleCreateInvite CreateInvite", "err", err, "user_id", user.ID)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to create invite",
-			})
+			writeServiceError(w, err)
 			return
 		}
-
-		inv, err := database.GetInvite(code)
-		if err != nil || inv == nil {
-			slog.Error("handleCreateInvite GetInvite", "err", err, "code", code)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to retrieve invite",
-			})
-			return
-		}
-
 		writeJSON(w, http.StatusCreated, toInviteResponse(inv))
 	}
 }
 
 // handleListInvites processes GET /api/v1/invites.
-func handleListInvites(database *db.DB) http.HandlerFunc {
+func handleListInvites(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		invites, err := database.ListInvites()
+		invites, err := svc.Invites.ListInvites()
 		if err != nil {
-			slog.Error("handleListInvites ListInvites", "err", err)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to list invites",
-			})
+			writeServiceError(w, err)
 			return
 		}
 
@@ -131,36 +100,13 @@ func handleListInvites(database *db.DB) http.HandlerFunc {
 }
 
 // handleRevokeInvite processes DELETE /api/v1/invites/:code.
-func handleRevokeInvite(database *db.DB) http.HandlerFunc {
+func handleRevokeInvite(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		code := chi.URLParam(r, "code")
-
-		inv, err := database.GetInvite(code)
-		if err != nil {
-			slog.Error("handleRevokeInvite GetInvite", "err", err, "code", code)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to look up invite",
-			})
+		if err := svc.Invites.RevokeInvite(code); err != nil {
+			writeServiceError(w, err)
 			return
 		}
-		if inv == nil {
-			writeJSON(w, http.StatusNotFound, errorResponse{
-				Error:   "NOT_FOUND",
-				Message: "invite not found",
-			})
-			return
-		}
-
-		if err := database.RevokeInvite(code); err != nil {
-			slog.Error("handleRevokeInvite RevokeInvite", "err", err, "code", code)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{
-				Error:   "INTERNAL_ERROR",
-				Message: "failed to revoke invite",
-			})
-			return
-		}
-
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
