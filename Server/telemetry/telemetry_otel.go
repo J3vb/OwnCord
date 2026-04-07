@@ -9,9 +9,10 @@
 //
 //	"none"       — no-op provider; same as the default build.
 //	"prometheus" — pull-based metrics via a /metrics handler, spans are still
-//	               processed by a batching tracer provider with no exporter.
+//	               processed by a tracer provider with no exporter.
 //	"otlp"       — push-based traces over OTLP/gRPC to cfg.OTLPEndpoint AND
-//	               pull-based metrics via the Prometheus exporter.
+//	               pull-based metrics via the Prometheus exporter (operators
+//	               typically want both).
 //
 // The concrete Provider adapts our tiny telemetry.* API onto the upstream
 // OTel SDK so the rest of the codebase never depends on the SDK directly.
@@ -84,10 +85,16 @@ func Init(ctx context.Context, cfg config.TelemetryConfig) (ShutdownFunc, error)
 		if endpoint == "" {
 			endpoint = "localhost:4317"
 		}
-		traceExp, err := otlptracegrpc.New(ctx,
+		otlpOpts := []otlptracegrpc.Option{
 			otlptracegrpc.WithEndpoint(endpoint),
-			otlptracegrpc.WithInsecure(),
-		)
+		}
+		// OTLPInsecure honours the explicit operator opt-in for plaintext
+		// gRPC; production deployments should leave it false and provide
+		// a TLS endpoint.
+		if cfg.OTLPInsecure {
+			otlpOpts = append(otlpOpts, otlptracegrpc.WithInsecure())
+		}
+		traceExp, err := otlptracegrpc.New(ctx, otlpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("telemetry: otlp trace exporter: %w", err)
 		}
@@ -159,8 +166,8 @@ func (p *otelProvider) Meter(name string) Meter {
 	return &otelMeter{inner: p.mp.Meter(name)}
 }
 
-// HTTPMiddleware wraps next with otelhttp so every REST request becomes a span
-// named after its route pattern.
+// HTTPMiddleware wraps next with otelhttp so every REST request becomes a
+// span named after its route pattern.
 func (p *otelProvider) HTTPMiddleware(next http.Handler) http.Handler {
 	return otelhttp.NewHandler(next, "http.server",
 		otelhttp.WithServerName(p.serviceName),
@@ -243,9 +250,9 @@ func (g *otelGauge) Set(ctx context.Context, value float64, attrs ...Attr) {
 
 // convertAttrs maps telemetry.Attr values to attribute.KeyValue. Unknown
 // types are rendered via fmt.Sprint so callers never panic on exotic values.
-// The uint64 / uint32 / uint cases matter: sequence numbers and ID fields in
-// OwnCord are unsigned, and routing them through the default fmt.Sprint path
-// would encode them as string attributes and break metric aggregation.
+// The uint64 / uint32 / uint cases matter: sequence numbers and ID fields
+// in OwnCord are unsigned, and routing them through the default fmt.Sprint
+// path would encode them as string attributes and break metric aggregation.
 func convertAttrs(in []Attr) []attribute.KeyValue {
 	if len(in) == 0 {
 		return nil

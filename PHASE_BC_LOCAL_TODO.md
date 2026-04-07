@@ -23,12 +23,12 @@ The session-resident plan that was actually executed lives in
 - [x] `cd Server && go test ./store/... ./ws/... ./plugin/... ./telemetry/...`
       — all pass; full suite `go test ./...` green.
 - [x] `cd Server && go vet ./...` — clean.
-- [ ] `cd Client/tauri-client && npm install && npm run lint && npm run build`
+- [x] `cd Client/tauri-client && npm install && npm run lint && npm run build`
       — Pulls in `solid-js`, `vite-plugin-solid`, and
       `@solidjs/testing-library` (added to `package.json`); confirms the
       Solid pipeline compiles inside the existing Vite + TS setup.
-- [ ] `cd Client/tauri-client && npm run test` — runs the new
-      `Badge.test.tsx` smoke test.
+- [x] `cd Client/tauri-client && npm run test` — runs the new
+      `Badge.test.tsx` smoke test. All 111 test files / 3186 tests pass.
 
 ---
 
@@ -47,7 +47,7 @@ The session landed:
 
 Still TODO locally:
 
-- [ ] Run `npm install` and verify the build passes (sandbox had no
+- [x] Run `npm install` and verify the build passes (sandbox had no
       network).
 - [ ] Migrate the remaining leaf components in
       `src/components/` one PR at a time, following the recipe in
@@ -58,9 +58,9 @@ Still TODO locally:
       in containers with native Solid components and delete the old
       vanilla DOM utilities (`createComponent`, factory shells) referenced
       from `src/components/`.
-- [ ] Add a Vitest config preset under `vitest.config.ts` that pulls in
-      `@solidjs/testing-library` automatically (currently the test imports
-      it directly).
+- [x] Add Vitest config preset: vite-plugin-solid added to vitest.config.ts,
+      include expanded to pick up src/components/solid/**/*.test.tsx.
+      Badge.test.tsx now runs automatically (112 files, 3188 tests pass).
 
 ---
 
@@ -131,27 +131,31 @@ The session landed:
 
 Still TODO locally:
 
-- [x] Add the OTel modules to `go.mod` — landed on
-      `claude/review-phase-completion-PBExk`. go.mod now carries
-      `go.opentelemetry.io/otel/sdk`, `.../exporters/prometheus`,
-      `.../exporters/otlp/otlptrace/otlptracegrpc`, and
-      `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp`.
-      (otelhttp replaces the unmaintained otelchi wrapper referenced by
-      the original plan; otelhttp is upstream-supported and wraps any
-      `http.Handler` including a Chi router.)
+- [x] Add the OTel modules to `go.mod`: otel v1.43.0, sdk v1.43.0,
+      exporters/prometheus v0.65.0,
+      exporters/otlp/otlptrace/otlptracegrpc v1.43.0, and
+      `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp`
+      v0.67.0 (otelhttp replaces the unmaintained otelchi wrapper
+      referenced by the original plan; otelhttp is upstream-supported
+      and wraps any `http.Handler` including a Chi router).
 - [x] Replace the placeholder body of `telemetry/telemetry_otel.go`'s
       `Init` with the real tracer + meter provider construction. The
       tagged build wires an OTel Prometheus exporter (pull), an OTLP/gRPC
-      trace exporter when `exporter=otlp`, `otelhttp.NewHandler` as the
-      HTTP middleware, and a real provider that re-binds `AppMetrics`
-      instruments via `resetAppMetricsForInit`. Tests in
+      trace exporter when `exporter=otlp` (with `OTLPInsecure` opt-in for
+      plaintext gRPC), `otelhttp.NewHandler` as the HTTP middleware, and
+      a real provider that re-binds `AppMetrics` instruments via
+      `resetAppMetricsForInit`. Tests in
       `Server/telemetry/telemetry_otel_test.go`
       (`TestOtelInitPrometheusExporter`, `TestOtelTracerRecordsSpan`,
-      `TestOtelHistogramRecordsSeconds`, `TestOtelShutdownIdempotent`)
-      run under `go test -tags otel ./telemetry/...`.
+      `TestOtelHistogramRecordsSeconds`, `TestOtelShutdownIdempotent`,
+      `TestOtelConvertAttrsHandlesUnsignedInts`,
+      `TestOtelConvertAttrsUint64OverflowFallsBackToString`,
+      `TestOtelAppMetricsRebindsAfterInit`) run under
+      `go test -tags otel ./telemetry/...`.
+- [x] Build with `-tags otel` — passes. Full 4-tag matrix green
+      (default, otel, wazero, otel+wazero) against Go 1.25.1.
 - [ ] Add a CI job that exercises `go build -tags otel ./...` and
-      `go test -tags otel ./telemetry/...`. Both pass locally against
-      Go 1.25.1.
+      `go test -tags otel ./telemetry/...`.
 - [x] Add spans to the remaining service-layer entry points
       (`DMService`, `VoiceService`, `InviteService`, `ModerationService`,
       `BlockService`, `UserService`) — landed in Pass 3, one entrypoint
@@ -196,27 +200,36 @@ The session landed:
 
 Still TODO locally:
 
-- [x] Add wazero to `go.mod` — landed on
-      `claude/review-phase-completion-PBExk`. `go.mod` now requires
-      `github.com/tetratelabs/wazero v1.11.0`.
+- [x] Add `github.com/tetratelabs/wazero v1.11.0` to `go.mod`.
 - [x] Replace the placeholder body in `Server/plugin/sandbox_wazero.go`
-      with real wazero runtime construction. The tagged build now owns a
-      shared `wazero.Runtime` (created in `platformInit`, with WASI
-      preview-1 imports pre-instantiated), compiles + instantiates each
-      plugin's `.wasm` entrypoint in `activateWithRuntime`, and tears the
-      modules + runtime down in `platformDeactivate` / `Close`. Tests in
-      `Server/plugin/sandbox_wazero_test.go`
+      with real wazero runtime construction. The tagged build owns a
+      shared `wazero.Runtime` created in `platformInit` (with the
+      configured `MaxMemoryMB` translated to `WithMemoryLimitPages` and
+      WASI preview-1 imports pre-instantiated), compiles + instantiates
+      each plugin's `.wasm` entrypoint in `activateWithRuntime`, and
+      tears modules + runtime down in `platformDeactivate` / `Close`.
+      The host-guest command ABI is JSON-over-linear-memory:
+      `allocate(size)` / `command_dispatch(ptr,len) → (ptr,len)` /
+      `deallocate(ptr,len)`, with optional `list_commands` for command
+      auto-registration. Tests in `Server/plugin/sandbox_wazero_test.go`
       (`TestWazeroRegistryCreatesRuntime`,
       `TestWazeroActivateCompilesModule`,
       `TestWazeroDispatchCommandMissingExport`,
       `TestWazeroCloseTearsDownRuntime`,
-      `TestWazeroInvalidWASMFailsActivation`) run under
+      `TestWazeroInvalidWASMFailsActivation`,
+      `TestWazeroDisablePluginFreesModule`) run under
       `go test -tags wazero ./plugin/...` using a 41-byte embedded WASM
-      fixture — no external WASM asset required.
-- [ ] Replace JSON-only manifest parsing with TOML support behind the
-      `wazero` build tag (the design doc names `plugin.toml`). Add
-      `github.com/BurntSushi/toml` and a `parseTOML` shim that falls back
-      to the existing `ParseManifest` if no `plugin.toml` is found.
+      fixture for the smoke tests.
+- [x] Add a precompiled `Server/plugin/examples/hello/hello.wasm`
+      (925 KiB) built with TinyGo 0.40.1 + Go 1.25.3 + Binaryen
+      wasm-opt 129. Source in `examples/hello/main.go`; exports:
+      `allocate`, `deallocate`, `list_commands`, `command_dispatch`,
+      `on_event`.
+- [x] Replace JSON-only manifest parsing with TOML support behind the
+      `wazero` build tag. Added `github.com/BurntSushi/toml` v1.6.0,
+      `manifest_toml.go` (wazero) + `manifest_nottoml.go` (!wazero);
+      `loader.go` prefers `plugin.toml` and falls back to
+      `plugin.json`.
 - [x] Wire `Server/plugin/host_events.go` into the WS pub/sub hub.
       Landed: `EventSink.SetBroadcaster`/`Emit` added; hub gains
       `SetPluginEventSink`; `deliverBroadcast` calls `sink.Dispatch`
@@ -229,14 +242,10 @@ Still TODO locally:
       `NewPluginAdminHandler` — landed in Pass 2. The router now accepts
       a `*plugin.Registry` parameter and the handler is also wrapped in
       `admin.RequireAdminAuth` (Pass 2 closed the auth bypass too).
-- [ ] Add a precompiled trivial `.wasm` blob under
-      `Server/plugin/examples/hello/hello.wasm` so the example plugin can
-      actually be loaded by an integration test once wazero is wired.
-      Build it locally with TinyGo:
-  ```sh
-  cd Server/plugin/examples/hello
-  tinygo build -o hello.wasm -target wasi ./main.go
-  ```
+- [x] Add precompiled `Server/plugin/examples/hello/hello.wasm` (925 KiB).
+      Built with TinyGo 0.40.1 + Go 1.25.3 + Binaryen wasm-opt 129.
+      Source in main.go; exports: allocate, deallocate, list_commands,
+      command_dispatch, on_event.
 - [x] Implement plugin marketplace install path
       (`POST /api/v1/admin/plugins/install` with multipart zip) — landed
       in Pass 4. `Registry.InstallFromZip` does zip-slip validation, no

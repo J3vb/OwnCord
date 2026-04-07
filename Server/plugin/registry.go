@@ -143,6 +143,19 @@ func (r *Registry) LoadAll(ctx context.Context) error {
 	if r == nil {
 		return nil
 	}
+	// Clean up any staging directories left over from a previous crash
+	// during InstallFromZip.  These are named ".install-XXXXXX" and are
+	// safe to remove because a successful install always renames them away.
+	if entries, rdErr := os.ReadDir(r.cfg.Directory); rdErr == nil {
+		for _, e := range entries {
+			if e.IsDir() && strings.HasPrefix(e.Name(), ".install-") {
+				staleDir := filepath.Join(r.cfg.Directory, e.Name())
+				if rmErr := os.RemoveAll(staleDir); rmErr != nil {
+					slog.Warn("plugin: failed to remove stale staging dir", "dir", staleDir, "err", rmErr)
+				}
+			}
+		}
+	}
 	manifests, err := scanPluginDirectory(r.cfg.Directory)
 	if err != nil {
 		return fmt.Errorf("plugin: scan %q: %w", r.cfg.Directory, err)
@@ -427,11 +440,16 @@ func (r *Registry) EnablePlugin(ctx context.Context, id int64) error {
 	if !ok {
 		return ErrPluginNotFound
 	}
+	r.mu.Lock()
 	inst.Enabled = true
+	r.mu.Unlock()
 	if err := r.activate(ctx, inst); err != nil {
-		// Roll back the DB flag so the next start attempt is consistent.
+		// Roll back the DB flag and the in-memory flag so the next start
+		// attempt is consistent.
 		_ = r.cfg.Store.DisablePlugin(ctx, id)
+		r.mu.Lock()
 		inst.Enabled = false
+		r.mu.Unlock()
 		return err
 	}
 	return nil
@@ -464,16 +482,38 @@ func (r *Registry) DisablePlugin(ctx context.Context, id int64) error {
 
 // UninstallPlugin removes a plugin entirely.
 func (r *Registry) UninstallPlugin(ctx context.Context, id int64) error {
-	_ = r.DisablePlugin(ctx, id)
+	if err := r.DisablePlugin(ctx, id); err != nil {
+		slog.Warn("plugin: disable failed during uninstall", "id", id, "err", err)
+	}
+
+	// Capture the plugin's on-disk directory before removing the in-memory
+	// record so we can clean it up after the DB row is gone.
+	r.mu.RLock()
+	inst, instOK := r.plugins[id]
+	var pluginDir string
+	if instOK {
+		pluginDir = filepath.Join(r.cfg.Directory, inst.Manifest.Name)
+	}
+	r.mu.RUnlock()
+
 	if err := r.cfg.Store.UninstallPlugin(ctx, id); err != nil {
 		return err
 	}
+
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if inst, ok := r.plugins[id]; ok {
 		delete(r.byName, inst.Manifest.Name)
 	}
 	delete(r.plugins, id)
+	r.mu.Unlock()
+
+	// Remove on-disk files so the plugin isn't resurrected on the next
+	// startup by scanPluginDirectory.
+	if pluginDir != "" {
+		if err := os.RemoveAll(pluginDir); err != nil {
+			slog.Warn("plugin: failed to remove plugin directory after uninstall", "dir", pluginDir, "err", err)
+		}
+	}
 	return nil
 }
 

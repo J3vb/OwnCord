@@ -110,6 +110,9 @@ func (r *Registry) HTTPDo(ctx context.Context, inst *Instance, req HTTPRequest) 
 			if !r.hostAllowed(h) {
 				return fmt.Errorf("%w: redirect to %s", ErrHTTPHostDenied, h)
 			}
+			if err := rejectPrivateAddrs(redirReq.Context(), h); err != nil {
+				return fmt.Errorf("%w: redirect to private addr: %v", ErrHTTPHostDenied, err)
+			}
 			return nil
 		},
 	}
@@ -222,10 +225,6 @@ func ipAllowed(ip net.IP) error {
 	}
 	if v4 := ip.To4(); v4 != nil && cgnRange.Contains(v4) {
 		return fmt.Errorf("carrier-grade NAT address %s", ip)
-	}
-	// Reject IPv4-mapped IPv6 forms of the same.
-	if v4 := ip.To4(); v4 != nil && (v4.IsLoopback() || v4.IsPrivate() || v4.IsLinkLocalUnicast()) {
-		return fmt.Errorf("disallowed v4-mapped address %s", ip)
 	}
 	return nil
 }
