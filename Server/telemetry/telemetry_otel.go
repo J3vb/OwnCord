@@ -1,239 +1,296 @@
 //go:build otel
 
-// Real OpenTelemetry-backed implementation. Compiled only with `-tags otel`.
-// Replaces the no-op providers in telemetry_default.go for the duration of
-// the process.
+// Phase B Step 8 — Real OpenTelemetry-backed implementation. Compiled only
+// with `-tags otel`, matching the postgres / wazero build-tag pattern used
+// elsewhere in the repo. The default build ships telemetry_default.go with a
+// no-op provider so sqlite-only binaries do not pull the OTel SDK in.
+//
+// Exporter modes (config.TelemetryConfig.Exporter):
+//
+//	"none"       — no-op provider; same as the default build.
+//	"prometheus" — pull-based metrics via a /metrics handler, spans are still
+//	               processed by a tracer provider with no exporter.
+//	"otlp"       — push-based traces over OTLP/gRPC to cfg.OTLPEndpoint AND
+//	               pull-based metrics via the Prometheus exporter (operators
+//	               typically want both).
+//
+// The concrete Provider adapts our tiny telemetry.* API onto the upstream
+// OTel SDK so the rest of the codebase never depends on the SDK directly.
 package telemetry
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
 	"net/http"
+	"sync"
 
-	"github.com/prometheus/client_golang/prometheus"
+	"github.com/owncord/server/config"
+
+	promclient "github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	otlpgrpc "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
-	promexp "go.opentelemetry.io/otel/exporters/prometheus"
-	otelmetric "go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	sdkresource "go.opentelemetry.io/otel/sdk/resource"
+	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	oteltrace "go.opentelemetry.io/otel/trace"
-
-	"github.com/owncord/server/config"
+	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
+	"go.opentelemetry.io/otel/trace"
 )
 
-// otelProvider is the real OTel-backed Provider, active only in the otel build.
+// otelProvider adapts the OTel SDK to the telemetry.Provider interface.
 type otelProvider struct {
-	tp          oteltrace.TracerProvider
-	mp          otelmetric.MeterProvider
+	cfg         config.TelemetryConfig
 	promHandler http.Handler
-	mw          func(http.Handler) http.Handler
-	shutdowns   []func(context.Context) error
+	tp          *sdktrace.TracerProvider
+	mp          *sdkmetric.MeterProvider
+	serviceName string
 }
 
-// Init wires the OTel SDK according to cfg.Exporter and installs the result
-// as the global telemetry provider. The returned ShutdownFunc must be called
-// on server shutdown to flush pending telemetry.
+// Init wires the OTel SDK according to cfg and installs it as the global
+// Provider. The returned ShutdownFunc flushes the batchers and releases
+// exporter resources; it is safe to call more than once.
 func Init(ctx context.Context, cfg config.TelemetryConfig) (ShutdownFunc, error) {
 	if !cfg.Enabled || cfg.Exporter == "" || cfg.Exporter == "none" {
 		SetGlobal(noopProvider{})
 		return func(context.Context) error { return nil }, nil
 	}
 
-	res, err := sdkresource.New(ctx,
-		sdkresource.WithAttributes(attribute.String("service.name", cfg.ServiceName)),
-		sdkresource.WithFromEnv(),
+	svcName := cfg.ServiceName
+	if svcName == "" {
+		svcName = "owncord-server"
+	}
+
+	res, err := resource.New(ctx,
+		resource.WithAttributes(
+			semconv.ServiceName(svcName),
+		),
 	)
 	if err != nil {
-		// Non-fatal: fall back to the SDK default resource.
-		res = sdkresource.Default()
+		return nil, fmt.Errorf("telemetry: resource: %w", err)
 	}
 
-	p := &otelProvider{}
+	provider := &otelProvider{cfg: cfg, serviceName: svcName}
 
-	switch cfg.Exporter {
-	case "prometheus":
-		promReg := prometheus.NewRegistry()
-		exporter, expErr := promexp.New(promexp.WithRegisterer(promReg))
-		if expErr != nil {
-			return nil, fmt.Errorf("telemetry: prometheus exporter: %w", expErr)
+	// ── Tracing ────────────────────────────────────────────────────────────
+	tpOpts := []sdktrace.TracerProviderOption{sdktrace.WithResource(res)}
+	if cfg.Exporter == "otlp" {
+		endpoint := cfg.OTLPEndpoint
+		if endpoint == "" {
+			endpoint = "localhost:4317"
 		}
-		mp := sdkmetric.NewMeterProvider(
-			sdkmetric.WithResource(res),
-			sdkmetric.WithReader(exporter),
-		)
-		otel.SetMeterProvider(mp)
-		p.mp = mp
-		p.promHandler = promhttp.HandlerFor(promReg, promhttp.HandlerOpts{EnableOpenMetrics: true})
-		p.shutdowns = append(p.shutdowns, mp.Shutdown)
-
-	case "otlp":
-		if cfg.OTLPEndpoint == "" {
-			return nil, fmt.Errorf("telemetry: exporter=otlp requires otlp_endpoint to be set")
+		otlpOpts := []otlptracegrpc.Option{
+			otlptracegrpc.WithEndpoint(endpoint),
 		}
-		otlpOpts := []otlpgrpc.Option{
-			otlpgrpc.WithEndpoint(cfg.OTLPEndpoint),
-		}
+		// OTLPInsecure honours the explicit operator opt-in for plaintext
+		// gRPC; production deployments should leave it false and provide
+		// a TLS endpoint.
 		if cfg.OTLPInsecure {
-			otlpOpts = append(otlpOpts, otlpgrpc.WithInsecure())
+			otlpOpts = append(otlpOpts, otlptracegrpc.WithInsecure())
 		}
-		exp, expErr := otlpgrpc.New(ctx, otlpOpts...)
-		if expErr != nil {
-			return nil, fmt.Errorf("telemetry: otlp exporter: %w", expErr)
+		traceExp, err := otlptracegrpc.New(ctx, otlpOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("telemetry: otlp trace exporter: %w", err)
 		}
-		tp := sdktrace.NewTracerProvider(
-			sdktrace.WithBatcher(exp),
-			sdktrace.WithResource(res),
-		)
-		otel.SetTracerProvider(tp)
-		p.tp = tp
-		p.shutdowns = append(p.shutdowns, tp.Shutdown)
-
-	default:
-		return nil, fmt.Errorf("telemetry: unknown exporter %q (valid: none, prometheus, otlp)", cfg.Exporter)
+		tpOpts = append(tpOpts, sdktrace.WithBatcher(traceExp))
 	}
+	provider.tp = sdktrace.NewTracerProvider(tpOpts...)
+	otel.SetTracerProvider(provider.tp)
 
-	// HTTP tracing middleware using otelhttp (works with any http.Handler router).
-	p.mw = func(next http.Handler) http.Handler {
-		return otelhttp.NewHandler(next, cfg.ServiceName)
+	// ── Metrics ────────────────────────────────────────────────────────────
+	// Both prometheus and otlp modes surface metrics via a pull-based
+	// Prometheus endpoint. OTLP tracing does not preclude Prometheus metrics
+	// — operators usually want both — so we wire the exporter unconditionally
+	// for the two real modes.
+	reg := promclient.NewRegistry()
+	promExp, err := otelprom.New(otelprom.WithRegisterer(reg))
+	if err != nil {
+		// Shut the trace provider down so the OTLP exporter's gRPC
+		// connection (if any) is torn down. Init returning an error must
+		// not leak resources.
+		_ = provider.tp.Shutdown(ctx)
+		return nil, fmt.Errorf("telemetry: prometheus exporter: %w", err)
 	}
+	provider.mp = sdkmetric.NewMeterProvider(
+		sdkmetric.WithResource(res),
+		sdkmetric.WithReader(promExp),
+	)
+	otel.SetMeterProvider(provider.mp)
+	provider.promHandler = promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
 
-	SetGlobal(p)
-	return p.shutdown, nil
+	// Drop the cached AppMetrics bundle BEFORE publishing the new global
+	// provider. A concurrent NewAppMetrics() caller that observes the old
+	// no-op provider and the stale cache is harmless (it just re-populates
+	// once); the failure mode we avoid is a caller seeing the new provider
+	// but still reading the old cached (no-op) instruments.
+	resetAppMetricsForInit()
+	SetGlobal(provider)
+
+	var once sync.Once
+	return func(shutCtx context.Context) error {
+		var rerr error
+		once.Do(func() {
+			var errs []error
+			if provider.tp != nil {
+				if err := provider.tp.Shutdown(shutCtx); err != nil {
+					errs = append(errs, err)
+				}
+			}
+			if provider.mp != nil {
+				if err := provider.mp.Shutdown(shutCtx); err != nil {
+					errs = append(errs, err)
+				}
+			}
+			if len(errs) > 0 {
+				rerr = fmt.Errorf("telemetry shutdown: %w", errors.Join(errs...))
+			}
+			SetGlobal(noopProvider{})
+		})
+		return rerr
+	}, nil
 }
 
-func (p *otelProvider) shutdown(ctx context.Context) error {
-	var first error
-	for _, fn := range p.shutdowns {
-		if err := fn(ctx); err != nil && first == nil {
-			first = err
-		}
-	}
-	return first
-}
-
-// ── Provider interface ──────────────────────────────────────────────────────
-
+// Tracer returns an otel-backed tracer for the given instrumentation scope.
 func (p *otelProvider) Tracer(name string) Tracer {
-	tp := p.tp
-	if tp == nil {
-		tp = otel.GetTracerProvider()
-	}
-	return otelTracerBridge{t: tp.Tracer(name)}
+	return &otelTracer{inner: p.tp.Tracer(name)}
 }
 
+// Meter returns an otel-backed meter for the given instrumentation scope.
 func (p *otelProvider) Meter(name string) Meter {
-	mp := p.mp
-	if mp == nil {
-		mp = otel.GetMeterProvider()
-	}
-	return otelMeterBridge{m: mp.Meter(name)}
+	return &otelMeter{inner: p.mp.Meter(name)}
 }
 
+// HTTPMiddleware wraps next with otelhttp so every REST request becomes a
+// span named after its route pattern.
 func (p *otelProvider) HTTPMiddleware(next http.Handler) http.Handler {
-	if p.mw == nil {
-		return next
-	}
-	return p.mw(next)
+	return otelhttp.NewHandler(next, "http.server",
+		otelhttp.WithServerName(p.serviceName),
+	)
 }
 
+// PrometheusHandler returns the /metrics handler backed by the active
+// exporter registry.
 func (p *otelProvider) PrometheusHandler() http.Handler { return p.promHandler }
 
-// ── Bridge: Tracer / Span ───────────────────────────────────────────────────
+// ── Tracer / Span adapters ─────────────────────────────────────────────────
 
-type otelTracerBridge struct{ t oteltrace.Tracer }
+type otelTracer struct{ inner trace.Tracer }
 
-func (b otelTracerBridge) Start(ctx context.Context, name string, attrs ...Attr) (context.Context, Span) {
-	var opts []oteltrace.SpanStartOption
-	if len(attrs) > 0 {
-		opts = append(opts, oteltrace.WithAttributes(toKVs(attrs)...))
-	}
-	ctx, span := b.t.Start(ctx, name, opts...)
-	return ctx, otelSpanBridge{s: span}
+func (t *otelTracer) Start(ctx context.Context, name string, attrs ...Attr) (context.Context, Span) {
+	ctx, span := t.inner.Start(ctx, name, trace.WithAttributes(convertAttrs(attrs)...))
+	return ctx, &otelSpan{inner: span}
 }
 
-type otelSpanBridge struct{ s oteltrace.Span }
+type otelSpan struct{ inner trace.Span }
 
-func (b otelSpanBridge) End()                        { b.s.End() }
-func (b otelSpanBridge) SetAttributes(attrs ...Attr) { b.s.SetAttributes(toKVs(attrs)...) }
-func (b otelSpanBridge) RecordError(err error)       { b.s.RecordError(err) }
+func (s *otelSpan) End()                        { s.inner.End() }
+func (s *otelSpan) SetAttributes(attrs ...Attr) { s.inner.SetAttributes(convertAttrs(attrs)...) }
+func (s *otelSpan) RecordError(err error) {
+	if err == nil {
+		return
+	}
+	s.inner.RecordError(err)
+}
 
-// ── Bridge: Meter / instruments ─────────────────────────────────────────────
+// ── Meter / instrument adapters ────────────────────────────────────────────
 
-type otelMeterBridge struct{ m otelmetric.Meter }
+type otelMeter struct{ inner metric.Meter }
 
-func (b otelMeterBridge) Counter(name, description string) Counter {
-	c, err := b.m.Int64Counter(name, otelmetric.WithDescription(description))
+func (m *otelMeter) Counter(name, description string) Counter {
+	c, err := m.inner.Int64Counter(name, metric.WithDescription(description))
 	if err != nil {
 		return noopCounter{}
 	}
-	return otelCounterBridge{c: c}
+	return &otelCounter{inner: c}
 }
 
-func (b otelMeterBridge) Histogram(name, description, unit string) Histogram {
-	h, err := b.m.Float64Histogram(name,
-		otelmetric.WithDescription(description),
-		otelmetric.WithUnit(unit),
-	)
+func (m *otelMeter) Histogram(name, description, unit string) Histogram {
+	opts := []metric.Float64HistogramOption{metric.WithDescription(description)}
+	if unit != "" {
+		opts = append(opts, metric.WithUnit(unit))
+	}
+	h, err := m.inner.Float64Histogram(name, opts...)
 	if err != nil {
 		return noopHistogram{}
 	}
-	return otelHistogramBridge{h: h}
+	return &otelHistogram{inner: h}
 }
 
-func (b otelMeterBridge) Gauge(name, description string) Gauge {
-	g, err := b.m.Float64Gauge(name, otelmetric.WithDescription(description))
+func (m *otelMeter) Gauge(name, description string) Gauge {
+	g, err := m.inner.Float64Gauge(name, metric.WithDescription(description))
 	if err != nil {
 		return noopGauge{}
 	}
-	return otelGaugeBridge{g: g}
+	return &otelGauge{inner: g}
 }
 
-type otelCounterBridge struct{ c otelmetric.Int64Counter }
+type otelCounter struct{ inner metric.Int64Counter }
 
-func (b otelCounterBridge) Add(ctx context.Context, delta int64, attrs ...Attr) {
-	b.c.Add(ctx, delta, otelmetric.WithAttributes(toKVs(attrs)...))
+func (c *otelCounter) Add(ctx context.Context, delta int64, attrs ...Attr) {
+	c.inner.Add(ctx, delta, metric.WithAttributes(convertAttrs(attrs)...))
 }
 
-type otelHistogramBridge struct{ h otelmetric.Float64Histogram }
+type otelHistogram struct{ inner metric.Float64Histogram }
 
-func (b otelHistogramBridge) Record(ctx context.Context, value float64, attrs ...Attr) {
-	b.h.Record(ctx, value, otelmetric.WithAttributes(toKVs(attrs)...))
+func (h *otelHistogram) Record(ctx context.Context, value float64, attrs ...Attr) {
+	h.inner.Record(ctx, value, metric.WithAttributes(convertAttrs(attrs)...))
 }
 
-type otelGaugeBridge struct{ g otelmetric.Float64Gauge }
+type otelGauge struct{ inner metric.Float64Gauge }
 
-func (b otelGaugeBridge) Set(ctx context.Context, value float64, attrs ...Attr) {
-	b.g.Record(ctx, value, otelmetric.WithAttributes(toKVs(attrs)...))
+func (g *otelGauge) Set(ctx context.Context, value float64, attrs ...Attr) {
+	g.inner.Record(ctx, value, metric.WithAttributes(convertAttrs(attrs)...))
 }
 
-// ── Attribute helpers ───────────────────────────────────────────────────────
-
-func toKV(a Attr) attribute.KeyValue {
-	switch v := a.Value.(type) {
-	case string:
-		return attribute.String(a.Key, v)
-	case int64:
-		return attribute.Int64(a.Key, v)
-	case int:
-		return attribute.Int(a.Key, v)
-	case float64:
-		return attribute.Float64(a.Key, v)
-	case bool:
-		return attribute.Bool(a.Key, v)
-	default:
-		return attribute.String(a.Key, fmt.Sprintf("%v", v))
+// convertAttrs maps telemetry.Attr values to attribute.KeyValue. Unknown
+// types are rendered via fmt.Sprint so callers never panic on exotic values.
+// The uint64 / uint32 / uint cases matter: sequence numbers and ID fields
+// in OwnCord are unsigned, and routing them through the default fmt.Sprint
+// path would encode them as string attributes and break metric aggregation.
+func convertAttrs(in []Attr) []attribute.KeyValue {
+	if len(in) == 0 {
+		return nil
 	}
-}
-
-func toKVs(attrs []Attr) []attribute.KeyValue {
-	kvs := make([]attribute.KeyValue, 0, len(attrs))
-	for _, a := range attrs {
-		kvs = append(kvs, toKV(a))
+	out := make([]attribute.KeyValue, 0, len(in))
+	for _, a := range in {
+		switch v := a.Value.(type) {
+		case string:
+			out = append(out, attribute.String(a.Key, v))
+		case int:
+			out = append(out, attribute.Int(a.Key, v))
+		case int32:
+			out = append(out, attribute.Int64(a.Key, int64(v)))
+		case int64:
+			out = append(out, attribute.Int64(a.Key, v))
+		case uint:
+			out = append(out, attribute.Int64(a.Key, int64(v)))
+		case uint32:
+			out = append(out, attribute.Int64(a.Key, int64(v)))
+		case uint64:
+			// Most uint64 values in OwnCord (ids, seqs) fit comfortably
+			// within int64 range. A wrapped negative would corrupt
+			// metric aggregation, so we fall back to a string for the
+			// pathological case rather than silently misreporting.
+			if v <= math.MaxInt64 {
+				out = append(out, attribute.Int64(a.Key, int64(v)))
+			} else {
+				out = append(out, attribute.String(a.Key, fmt.Sprint(v)))
+			}
+		case float32:
+			out = append(out, attribute.Float64(a.Key, float64(v)))
+		case float64:
+			out = append(out, attribute.Float64(a.Key, v))
+		case bool:
+			out = append(out, attribute.Bool(a.Key, v))
+		default:
+			out = append(out, attribute.String(a.Key, fmt.Sprint(v)))
+		}
 	}
-	return kvs
+	return out
 }

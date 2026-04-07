@@ -33,9 +33,39 @@ class PluginBridge {
   private frames = new Map<number, HTMLIFrameElement>();
   private listeners = new Set<Listener>();
   private themeVars: Record<string, string> = {};
+  private hostOrigin: string;
 
   constructor() {
-    window.addEventListener("message", this.onMessage);
+    // Plugin iframes are served from /api/v1/plugins/... on the same origin
+    // as the host page, so postMessage targets that origin explicitly. Using
+    // "*" as the target origin is unsafe — any frame the user navigates to
+    // would receive host messages. window.location.origin is undefined in
+    // some test runners (jsdom prior to 16); fall back to "/" which still
+    // restricts to same-origin under the strict postMessage matching rules.
+    this.hostOrigin =
+      typeof window !== "undefined" && window.location && window.location.origin
+        ? window.location.origin
+        : "/";
+    if (typeof window !== "undefined") {
+      window.addEventListener("message", this.onMessage);
+    }
+  }
+
+  /**
+   * destroy unhooks the global message listener and clears all mounted
+   * frames. Intended for tests that create disposable bridge instances; the
+   * exported `pluginBridge` singleton lives for the lifetime of the page and
+   * does not need explicit teardown.
+   */
+  destroy(): void {
+    if (typeof window !== "undefined") {
+      window.removeEventListener("message", this.onMessage);
+    }
+    for (const frame of this.frames.values()) {
+      frame.remove();
+    }
+    this.frames.clear();
+    this.listeners.clear();
   }
 
   /** Replace the theme variables broadcast to plugin iframes. */
@@ -80,9 +110,14 @@ class PluginBridge {
   }
 
   private postToFrame(pluginId: number, frame: HTMLIFrameElement, msg: { type: string; payload: unknown }): void {
+    // Restrict the postMessage target origin to the host page origin so a
+    // navigated-away iframe (or one whose contentWindow has been swapped)
+    // cannot receive host messages intended for a sandboxed plugin. The
+    // plugin asset endpoint is same-origin with the host page, so this
+    // matches every legitimate plugin iframe.
     frame.contentWindow?.postMessage(
       { source: HOST_ORIGIN_PREFIX, pluginId, ...msg },
-      "*",
+      this.hostOrigin,
     );
   }
 
