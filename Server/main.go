@@ -51,6 +51,13 @@ func main() {
 
 // run is the real entrypoint — separated for testability.
 func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
+	// bgCtx is a cancellable context shared by all background goroutines
+	// (event persister, event pruner, plugin loader).  It is cancelled
+	// early in the shutdown sequence so in-flight DB operations do not
+	// block after the database is being torn down.
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	defer bgCancel()
+
 	// Clean up old binary from a previous update.
 	exePath, exeErr := os.Executable()
 	if exeErr != nil {
@@ -176,7 +183,7 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 			log.Warn("plugin runtime init failed; continuing without plugins", "error", plugErr)
 		} else {
 			pluginRegistry = registry
-			if err := registry.LoadAll(context.Background()); err != nil {
+			if err := registry.LoadAll(bgCtx); err != nil {
 				log.Warn("plugin loader: failed to scan directory", "error", err)
 			}
 			defer func() {
@@ -198,7 +205,7 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 		// this, the events table accumulates rows whose payload seqs reset
 		// to 1 after every restart, breaking the reconnect "events since
 		// last_seq" contract.
-		if maxSeq, seedErr := storeWrapper.GetMaxEventSeq(context.Background()); seedErr != nil {
+		if maxSeq, seedErr := storeWrapper.GetMaxEventSeq(bgCtx); seedErr != nil {
 			log.Warn("event persistence: failed to read MAX(events.seq); starting hub seq from 0", "error", seedErr)
 		} else if maxSeq > 0 {
 			hub.SeedSeq(uint64(maxSeq))
@@ -211,16 +218,14 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 			cfg.EventPersistence.BatchSize,
 			time.Duration(cfg.EventPersistence.BatchFlushMs)*time.Millisecond,
 		)
-		persister.Start(context.Background())
+		persister.Start(bgCtx)
 		hub.SetEventPersister(persister)
 		hub.SetEventStore(storeWrapper)
 
 		retention := time.Duration(cfg.EventPersistence.RetentionHours) * time.Hour
 		prunerInterval := time.Duration(cfg.EventPersistence.PrunerIntervalMinutes) * time.Minute
-		prunerCtx, prunerCancel := context.WithCancel(context.Background())
-		ws.StartEventPruner(prunerCtx, storeWrapper, retention, prunerInterval)
+		ws.StartEventPruner(bgCtx, storeWrapper, retention, prunerInterval)
 		defer func() {
-			prunerCancel()
 			stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer stopCancel()
 			persister.Stop(stopCtx)

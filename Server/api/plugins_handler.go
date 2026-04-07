@@ -54,7 +54,7 @@ func (h *PluginAdminHandler) install(w http.ResponseWriter, r *http.Request) {
 	// client can't tie up parsing memory.
 	r.Body = http.MaxBytesReader(w, r.Body, maxPluginUploadBytes+1024)
 	if err := r.ParseMultipartForm(maxPluginUploadBytes); err != nil {
-		http.Error(w, "invalid multipart upload: "+err.Error(), http.StatusBadRequest)
+		http.Error(w, "invalid multipart upload", http.StatusBadRequest)
 		return
 	}
 	file, _, err := r.FormFile("plugin")
@@ -68,7 +68,7 @@ func (h *PluginAdminHandler) install(w http.ResponseWriter, r *http.Request) {
 	// for archive/zip and the cap is small enough to be safe.
 	body, err := io.ReadAll(io.LimitReader(file, maxPluginUploadBytes+1))
 	if err != nil {
-		http.Error(w, "read upload: "+err.Error(), http.StatusBadRequest)
+		http.Error(w, "failed to read upload", http.StatusBadRequest)
 		return
 	}
 	if int64(len(body)) > maxPluginUploadBytes {
@@ -95,7 +95,8 @@ func (h *PluginAdminHandler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.store.ListPlugins(ctx)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		slog.Error("plugin list failed", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, rows)
@@ -111,7 +112,8 @@ func (h *PluginAdminHandler) enable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.registry.EnablePlugin(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		slog.Error("plugin enable failed", "id", id, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -127,7 +129,8 @@ func (h *PluginAdminHandler) disable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.registry.DisablePlugin(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		slog.Error("plugin disable failed", "id", id, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -143,7 +146,8 @@ func (h *PluginAdminHandler) uninstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.registry.UninstallPlugin(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		slog.Error("plugin uninstall failed", "id", id, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

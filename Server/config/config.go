@@ -56,6 +56,10 @@ type TelemetryConfig struct {
 	Exporter string `koanf:"exporter"`
 	// OTLPEndpoint is the gRPC endpoint when Exporter == "otlp".
 	OTLPEndpoint string `koanf:"otlp_endpoint"`
+	// OTLPInsecure disables TLS for the OTLP gRPC connection. Only set
+	// true in development / private-network deployments. Defaults to false
+	// (TLS required) to avoid transmitting trace/metric data in plaintext.
+	OTLPInsecure bool `koanf:"otlp_insecure"`
 	// ServiceName is the resource service.name attribute.
 	ServiceName string `koanf:"service_name"`
 }
@@ -273,6 +277,7 @@ voice:
 #   enabled: false            # master switch
 #   exporter: "none"          # none | prometheus | otlp
 #   otlp_endpoint: ""         # required when exporter == "otlp" (host:port of collector)
+#   otlp_insecure: false      # set true only for dev/private networks (disables TLS)
 #   service_name: "owncord-server"
 
 # Phase C Step 9 — Wazero plugin runtime. Disabled by default so existing
