@@ -3,7 +3,8 @@
 // chat_command routes a slash command from a WS client to a registered plugin.
 // If no plugin owns the command, an error is returned to the sender. If the
 // plugin returns a Reply, it is sent only to the invoking client (ephemeral).
-// If the plugin returns a Broadcast string, it is broadcast to the channel.
+// If the plugin returns a Broadcast string, it is broadcast to the channel
+// only after verifying the invoking client holds SEND_MESSAGES permission.
 package ws
 
 import (
@@ -12,9 +13,16 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+
+	"github.com/owncord/server/permissions"
 )
 
 const MsgTypeChatCommand = "chat_command"
+
+// maxCommandArgs is the maximum number of arguments accepted in a
+// chat_command payload. This prevents a malicious client from flooding
+// the plugin's allocate/dispatch ABI with thousands of strings.
+const maxCommandArgs = 64
 
 // chatCommandPayload is the client-supplied payload for a chat_command message.
 type chatCommandPayload struct {
@@ -32,6 +40,7 @@ func registerPluginCommandHandler(r *HandlerRegistry) {
 // hub.pluginRegistry. Returns an error to the client when:
 //   - the payload is malformed,
 //   - the command name is empty,
+//   - too many arguments are supplied,
 //   - no plugin owns the command (unknown command),
 //   - the plugin returns an error reply.
 func handlePluginCommand(ctx context.Context, h *Hub, c *Client, reqID string, payload json.RawMessage) {
@@ -44,6 +53,11 @@ func handlePluginCommand(ctx context.Context, h *Hub, c *Client, reqID string, p
 	cmd := strings.TrimSpace(p.Command)
 	if cmd == "" {
 		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "command must not be empty"))
+		return
+	}
+
+	if len(p.Args) > maxCommandArgs {
+		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, fmt.Sprintf("too many command arguments (max %d)", maxCommandArgs)))
 		return
 	}
 
@@ -69,6 +83,11 @@ func handlePluginCommand(ctx context.Context, h *Hub, c *Client, reqID string, p
 	}
 
 	if result.Broadcast != "" && p.ChannelID != 0 {
+		// Verify the invoking client has permission to send to this channel
+		// before broadcasting the plugin result to all channel members.
+		if !h.requireChannelPerm(c, p.ChannelID, permissions.SendMessages, "SEND_MESSAGES") {
+			return
+		}
 		// Channel broadcast — visible to everyone in the channel.
 		msg := buildCommandBroadcast(p.ChannelID, c.userID, cmd, result.Broadcast)
 		h.BroadcastToChannel(p.ChannelID, msg)
