@@ -11,6 +11,8 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
     "lib": [
       "ES2023",
       "DOM",
@@ -32,8 +34,7 @@
       "@styles/*": [
         "./src/styles/*"
       ]
-    },
-    "baseUrl": "."
+    }
   },
   "include": [
     "src",

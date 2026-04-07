@@ -19,12 +19,63 @@ import (
 
 // Config holds the full server configuration.
 type Config struct {
-	Server   ServerConfig   `koanf:"server"`
-	Database DatabaseConfig `koanf:"database"`
-	TLS      TLSConfig      `koanf:"tls"`
-	Upload   UploadConfig   `koanf:"upload"`
-	Voice    VoiceConfig    `koanf:"voice"`
-	GitHub   GitHubConfig   `koanf:"github"`
+	Server           ServerConfig           `koanf:"server"`
+	Database         DatabaseConfig         `koanf:"database"`
+	TLS              TLSConfig              `koanf:"tls"`
+	Upload           UploadConfig           `koanf:"upload"`
+	Voice            VoiceConfig            `koanf:"voice"`
+	GitHub           GitHubConfig           `koanf:"github"`
+	EventPersistence EventPersistenceConfig `koanf:"event_persistence"`
+	Telemetry        TelemetryConfig        `koanf:"telemetry"`
+	Plugins          PluginsConfig          `koanf:"plugins"`
+}
+
+// EventPersistenceConfig (Phase B Step 7) controls the tiered event log used
+// for WebSocket reconnection replay.
+type EventPersistenceConfig struct {
+	// Enabled toggles cold-storage persistence. When false the server falls
+	// back to ring-buffer-only behaviour (Phase A semantics).
+	Enabled bool `koanf:"enabled"`
+	// RetentionHours is how long persisted events are kept before pruning.
+	RetentionHours int `koanf:"retention_hours"`
+	// BatchSize is the maximum number of events per persister flush.
+	BatchSize int `koanf:"batch_size"`
+	// BatchFlushMs is the maximum delay between persister flushes.
+	BatchFlushMs int `koanf:"batch_flush_ms"`
+	// PrunerIntervalMinutes is how often the pruner goroutine wakes up.
+	PrunerIntervalMinutes int `koanf:"pruner_interval_minutes"`
+}
+
+// TelemetryConfig (Phase B Step 8) controls the OpenTelemetry exporter.
+type TelemetryConfig struct {
+	// Enabled toggles the OTel SDK. When false the server uses no-op
+	// tracer/meter providers and the legacy /metrics endpoint stays the
+	// only metrics surface.
+	Enabled bool `koanf:"enabled"`
+	// Exporter is "none" | "prometheus" | "otlp".
+	Exporter string `koanf:"exporter"`
+	// OTLPEndpoint is the gRPC endpoint when Exporter == "otlp".
+	OTLPEndpoint string `koanf:"otlp_endpoint"`
+	// OTLPInsecure disables TLS for the OTLP gRPC connection. Only set
+	// true in development / private-network deployments. Defaults to false
+	// (TLS required) to avoid transmitting trace/metric data in plaintext.
+	OTLPInsecure bool `koanf:"otlp_insecure"`
+	// ServiceName is the resource service.name attribute.
+	ServiceName string `koanf:"service_name"`
+}
+
+// PluginsConfig (Phase C Step 9) controls the Wazero plugin runtime.
+type PluginsConfig struct {
+	// Enabled toggles plugin loading at startup.
+	Enabled bool `koanf:"enabled"`
+	// Directory is the on-disk directory scanned for plugin packages.
+	Directory string `koanf:"directory"`
+	// MaxMemoryMB caps a single plugin's WASM linear memory.
+	MaxMemoryMB int `koanf:"max_memory_mb"`
+	// CPUBudgetMs caps a single plugin invocation's CPU time.
+	CPUBudgetMs int `koanf:"cpu_budget_ms"`
+	// HTTPAllowlist enumerates host suffixes plugins may reach via host_http.
+	HTTPAllowlist []string `koanf:"http_allowlist"`
 }
 
 // GitHubConfig holds GitHub API settings for update checking.
@@ -55,8 +106,31 @@ type ServerConfig struct {
 }
 
 // DatabaseConfig holds database settings.
+//
+// Type selects the backend: "sqlite" (default, zero-config) or "postgres"
+// (community-hub scale, requires a running PostgreSQL server). The Path field
+// is only used by sqlite. The remaining fields apply to postgres only.
+//
+// PostgreSQL support is currently scaffolding-only: the schema, config plumbing,
+// and migrations are in place, but the store query layer is gated on the
+// in-progress sqlc adoption (Phase A Step 2). Setting Type to "postgres" will
+// cause the server to refuse to start with a clear error pointing at the
+// follow-up work — see Server/main.go.
 type DatabaseConfig struct {
+	// Type is "sqlite" or "postgres". Empty defaults to "sqlite".
+	Type string `koanf:"type"`
+
+	// Path is the SQLite database file path. Only used when Type == "sqlite".
 	Path string `koanf:"path"`
+
+	// PostgreSQL connection settings. Only used when Type == "postgres".
+	Host     string `koanf:"host"`
+	Port     int    `koanf:"port"`
+	User     string `koanf:"user"`
+	Password string `koanf:"password"`
+	Name     string `koanf:"name"`
+	SSLMode  string `koanf:"sslmode"`  // disable | require | verify-ca | verify-full
+	MaxConns int    `koanf:"max_conns"` // pgxpool max connections; 0 = pgxpool default
 }
 
 // TLSConfig holds TLS/certificate settings.
@@ -93,7 +167,12 @@ func defaults() Config {
 			},
 		},
 		Database: DatabaseConfig{
-			Path: "data/chatserver.db",
+			Type:    "sqlite",
+			Path:    "data/chatserver.db",
+			Host:    "localhost",
+			Port:    5432,
+			Name:    "owncord",
+			SSLMode: "disable",
 		},
 		TLS: TLSConfig{
 			Mode:         "self_signed",
@@ -110,6 +189,25 @@ func defaults() Config {
 			Quality:    "medium",
 		},
 		GitHub: GitHubConfig{},
+		EventPersistence: EventPersistenceConfig{
+			Enabled:               true,
+			RetentionHours:        24,
+			BatchSize:             50,
+			BatchFlushMs:          100,
+			PrunerIntervalMinutes: 60,
+		},
+		Telemetry: TelemetryConfig{
+			Enabled:     false,
+			Exporter:    "none",
+			ServiceName: "owncord-server",
+		},
+		Plugins: PluginsConfig{
+			Enabled:       false,
+			Directory:     "data/plugins",
+			MaxMemoryMB:   64,
+			CPUBudgetMs:   100,
+			HTTPAllowlist: []string{},
+		},
 	}
 }
 
@@ -129,7 +227,16 @@ server:
   #   - "192.168.0.0/16"
 
 database:
+  type: "sqlite"          # "sqlite" (default, zero-config) or "postgres"
   path: "data/chatserver.db"
+  # PostgreSQL settings (only used when type: "postgres"):
+  # host: "localhost"
+  # port: 5432
+  # user: "owncord"
+  # password: ""
+  # name: "owncord"
+  # sslmode: "disable"    # disable | require | verify-ca | verify-full
+  # max_conns: 0          # pgxpool connection cap (0 = pgx default)
 
 tls:
   mode: "self_signed"  # self_signed, acme, manual, off
@@ -152,6 +259,36 @@ voice:
 
 # github:
 #   token: ""  # optional: GitHub API token for higher rate limits (5000 req/hr vs 60)
+
+# Phase B Step 7 — cold-tier event log used by the WebSocket reconnect path.
+# When the in-memory ring buffer can't cover a client's last_seq the server
+# falls back to these rows before forcing a full re-sync. Rows older than
+# retention_hours are pruned by a background goroutine.
+# event_persistence:
+#   enabled: true             # set false to disable cold-tier replay entirely
+#   retention_hours: 24       # how long to keep persisted broadcast events
+#   batch_size: 50            # flush after this many events buffered
+#   batch_flush_ms: 100       # OR after this many milliseconds, whichever first
+#   pruner_interval_minutes: 60  # how often the retention pruner runs
+
+# Phase B Step 8 — OpenTelemetry exporter. The default build ships a no-op
+# provider; building with -tags otel enables the real SDK.
+# telemetry:
+#   enabled: false            # master switch
+#   exporter: "none"          # none | prometheus | otlp
+#   otlp_endpoint: ""         # required when exporter == "otlp" (host:port of collector)
+#   otlp_insecure: false      # set true only for dev/private networks (disables TLS)
+#   service_name: "owncord-server"
+
+# Phase C Step 9 — Wazero plugin runtime. Disabled by default so existing
+# operators are unaffected. Plugins live in subdirectories of the configured
+# directory; see Server/plugin/examples/hello for the manifest format.
+# plugins:
+#   enabled: false
+#   directory: "data/plugins"
+#   max_memory_mb: 64         # per-plugin memory cap
+#   cpu_budget_ms: 100        # per-invocation CPU budget
+#   http_allowlist: []        # hostnames plugins may reach via the http capability
 `
 
 // Load reads configuration from the given YAML file path, merging with

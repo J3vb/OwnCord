@@ -17,6 +17,9 @@ vi.mock("@lib/notifications", () => ({
 }));
 vi.mock("@lib/livekitSession", () => ({
   handleVoiceToken: vi.fn(async () => {}),
+  handleParticipantLeft: vi.fn(async () => {}),
+  handleE2EEAnnounce: vi.fn(async () => {}),
+  handleE2EEOffer: vi.fn(async () => {}),
   leaveVoice: vi.fn(),
   cleanupAll: vi.fn(),
   isVoiceConnected: vi.fn(() => false),
@@ -693,6 +696,7 @@ describe("WS Dispatcher", () => {
       "wss://livekit.example.com",
       3,
       "wss://direct.example.com",
+      undefined,
     );
   });
 
@@ -1141,6 +1145,12 @@ describe("WS Dispatcher", () => {
       (args: unknown[]) => (args[0] as Record<string, unknown>)?.type === "voice_leave",
     );
     expect(voiceLeaveSent).toBe(false);
+  });
+
+  it("unknown event type does not throw", () => {
+    expect(() => {
+      mock.dispatch("totally_unknown_server_event", { some: "data" });
+    }).not.toThrow();
   });
 
   it("cleanup removes all listeners", () => {

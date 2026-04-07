@@ -95,7 +95,7 @@ async function rotateOldFiles(): Promise<void> {
     if (jsonlFiles.length > MAX_LOG_FILES) {
       const toRemove = jsonlFiles.slice(0, jsonlFiles.length - MAX_LOG_FILES);
       for (const file of toRemove) {
-        // eslint-disable-next-line no-await-in-loop -- sequential file deletion to avoid overwhelming the filesystem
+        // oxlint-disable-next-line no-await-in-loop -- sequential file deletion to avoid overwhelming the filesystem
         await remove(`${logDir}/${file}`);
       }
     }
@@ -187,7 +187,7 @@ export async function readAllPersistedLogs(): Promise<string> {
 
     const parts: string[] = [];
     for (const file of jsonlFiles) {
-      // eslint-disable-next-line no-await-in-loop -- files must be read in sorted order for correct log concatenation
+      // oxlint-disable-next-line no-await-in-loop -- files must be read in sorted order for correct log concatenation
       const content = await readTextFile(`${logDir}/${file}`);
       parts.push(content);
     }

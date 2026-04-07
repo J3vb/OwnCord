@@ -20,8 +20,19 @@ import (
 	"github.com/owncord/server/api"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/service"
 	"github.com/owncord/server/storage"
+	"github.com/owncord/server/store"
 )
+
+// testPermSvc wires a PermissionService around the test DB so
+// MountUploadRoutes can enforce its non-nil contract. The tests don't
+// exercise per-channel ACLs directly — they go through the live
+// permissions.Checker, which is the production path anyway.
+func testPermSvc(database *db.DB) *service.PermissionService {
+	return service.NewPermissionService(store.NewSQLiteStore(database), permissions.NewChecker(database))
+}
 
 // ─── schema for upload tests ─────────────────────────────────────────────────
 
@@ -151,7 +162,7 @@ func newUploadTestStorage(t *testing.T) *storage.Storage {
 func buildUploadRouter(database *db.DB, store *storage.Storage, allowedOrigins []string) http.Handler {
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
-	api.MountUploadRoutes(r, database, store, limiter, allowedOrigins)
+	api.MountUploadRoutes(r, database, store, limiter, allowedOrigins, testPermSvc(database))
 	return r
 }
 
@@ -160,7 +171,7 @@ func buildUploadRouterWithLimiter(database *db.DB, store *storage.Storage, limit
 	if limiter == nil {
 		limiter = auth.NewRateLimiter()
 	}
-	api.MountUploadRoutes(r, database, store, limiter, allowedOrigins)
+	api.MountUploadRoutes(r, database, store, limiter, allowedOrigins, testPermSvc(database))
 	return r
 }
 

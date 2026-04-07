@@ -16,7 +16,11 @@ import (
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/plugin"
+	"github.com/owncord/server/service"
 	"github.com/owncord/server/storage"
+	dbstore "github.com/owncord/server/store"
+	"github.com/owncord/server/telemetry"
 	"github.com/owncord/server/updater"
 	"github.com/owncord/server/ws"
 )
@@ -24,7 +28,10 @@ import (
 // NewRouter builds and returns the fully configured HTTP handler, the
 // WebSocket hub (so the caller can call hub.GracefulStop on shutdown), and a
 // cleanup function that stops background goroutines (e.g. rate-limiter cleanup).
-func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.RingBuffer) (http.Handler, *ws.Hub, func()) {
+//
+// pluginRegistry may be nil — in that case the plugin admin endpoints respond
+// with 503 on lifecycle calls and an empty list on read.
+func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.RingBuffer, pluginRegistry *plugin.Registry) (http.Handler, *ws.Hub, func()) {
 	r := chi.NewRouter()
 
 	// Middleware stack.
@@ -35,6 +42,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// handled explicitly in clientIPWithProxies using the trusted_proxies config.
 	r.Use(middleware.Recoverer)
 	r.Use(requestLogger) // structured request/response logging
+	// Phase B Step 8 — OpenTelemetry HTTP tracing. No-op when telemetry is
+	// disabled or the otel build tag is not set, so this is safe to mount
+	// unconditionally.
+	r.Use(telemetry.HTTPMiddleware())
 	r.Use(SecurityHeadersWithTLS(cfg.TLS.Mode))
 	r.Use(MaxBodySizeUnless(defaultMaxBodySize, "/api/v1/uploads")) // upload route exempt
 
@@ -46,7 +57,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Health check — unauthenticated, no versioning prefix.
 	// The online user count callback is set after hub creation below.
 	var getOnlineUsers func() int
-	r.Get("/health", handleHealth(ver, func() int {
+	r.Get("/health", handleHealth(func() int {
 		if getOnlineUsers != nil {
 			return getOnlineUsers()
 		}
@@ -64,13 +75,13 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// Versioned API routes.
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Get("/health", handleHealth(ver, func() int {
+		r.Get("/health", handleHealth(func() int {
 			if getOnlineUsers != nil {
 				return getOnlineUsers()
 			}
 			return 0
 		}))
-		r.Get("/info", handleInfo(cfg, ver))
+		r.Get("/info", handleInfo(cfg))
 	})
 
 	// Load (or auto-generate) the AES-256 key for TOTP secret encryption (M1).
@@ -82,6 +93,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		// auto-generates a key when none exists.
 	}
 
+	// Service layer — centralizes business logic for REST and WS handlers.
+	st := dbstore.NewSQLiteStore(database)
+	svc := service.New(st, limiter)
+
 	// Auth routes: register, login, logout, me.
 	MountAuthRoutes(r, database, limiter, cfg.Server.TrustedProxies, totpKey)
 
@@ -89,10 +104,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// broadcast user_update events for real-time profile changes.
 
 	// Invite management routes (require MANAGE_INVITES permission).
-	MountInviteRoutes(r, database)
+	MountInviteRoutes(r, database, svc)
 
 	// Channel and message REST routes.
-	MountChannelRoutes(r, database, limiter, cfg.Server.TrustedProxies)
+	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies)
 
 	// DM REST routes are mounted after hub creation (below) so the hub can
 	// be passed as a DMBroadcaster for real-time close events.
@@ -108,12 +123,21 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	if storeErr != nil {
 		slog.Error("failed to create file storage", "error", storeErr)
 	} else {
-		MountUploadRoutes(r, database, store, limiter, cfg.Server.AllowedOrigins)
+		MountUploadRoutes(r, database, store, limiter, cfg.Server.AllowedOrigins, svc.Permissions)
 	}
 
 	// WebSocket hub — WS does its own in-band auth, so no AuthMiddleware here.
-	hub := ws.NewHub(database, limiter)
+	hub := ws.NewHub(database, limiter, svc)
 	getOnlineUsers = func() int { return hub.ClientCount() }
+
+	// Phase C Step 9 — wire plugin registry and event sink into the hub.
+	// nil pluginRegistry means plugins are disabled; the hub no-ops cleanly.
+	if pluginRegistry != nil {
+		hub.SetPluginRegistry(pluginRegistry)
+		sink := pluginRegistry.Sink()
+		sink.SetBroadcaster(hub.BroadcastToChannel)
+		hub.SetPluginEventSink(sink)
+	}
 
 	// Create LiveKit client if voice config is present; voice is disabled on failure.
 	lk, lkErr := ws.NewLiveKitClient(&cfg.Voice)
@@ -171,11 +195,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// Profile routes: update profile, change password, session management.
 	// Mounted after hub creation so the hub can broadcast user_update events.
-	MountProfileRoutes(r, database, limiter, cfg.Server.TrustedProxies, hub)
+	MountProfileRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
 
 	// DM (direct message) REST routes — mounted after hub creation so the
 	// hub can send real-time dm_channel_close events to WebSocket clients.
-	MountDMRoutes(r, database, hub)
+	MountDMRoutes(r, database, svc, hub)
 
 	// H-8: Connectivity diagnostics restricted to admin users only.
 	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.
@@ -197,13 +221,34 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 			func(ctx context.Context) (bool, error) { return hub.LiveKitHealthCheck(ctx) },
 		))
 
+	// Phase B Step 8 — OpenTelemetry Prometheus exporter. Mounted alongside
+	// the legacy JSON endpoint when a Prometheus exporter is wired (otel
+	// build, exporter == "prometheus"). Returns 404 in the default no-op build
+	// because telemetry.PrometheusHandler() returns nil.
+	if promH := telemetry.PrometheusHandler(); promH != nil {
+		r.With(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies)).
+			Mount("/metrics", promH)
+	}
+
 	// Admin panel: static files + REST API (Phase 6).
 	// Restrict /admin to configured CIDRs (default: private networks only).
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, "J3vb", "OwnCord")
-	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins)
+	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions)
 	r.Group(func(r chi.Router) {
 		r.Use(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
 		r.Mount("/admin", adminHandler)
+
+		// Phase C Step 9 — plugin admin REST surface. The IP gate above is
+		// only the outer perimeter; plugin lifecycle endpoints additionally
+		// require a valid admin Bearer token via admin.RequireAdminAuth so a
+		// LAN attacker on the allowed CIDR cannot install/enable plugins
+		// without a session. The handler is wired with the live registry
+		// constructed in main.go (nil when plugin support is disabled, in
+		// which case lifecycle calls return 503 and list returns []).
+		r.Group(func(r chi.Router) {
+			r.Use(admin.RequireAdminAuth(database))
+			r.Mount("/api/v1/admin/plugins", NewPluginAdminHandler(pluginRegistry, st))
+		})
 	})
 
 	// Client auto-update endpoint (unauthenticated).
@@ -239,7 +284,7 @@ type infoResponse struct {
 	Name string `json:"name"`
 }
 
-func handleHealth(ver string, getOnlineUsers func() int) http.HandlerFunc {
+func handleHealth(getOnlineUsers func() int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// C-2: Version removed from unauthenticated health endpoint to prevent
 		// server fingerprinting. Version is available on the authenticated
@@ -252,7 +297,7 @@ func handleHealth(ver string, getOnlineUsers func() int) http.HandlerFunc {
 	}
 }
 
-func handleInfo(cfg *config.Config, ver string) http.HandlerFunc {
+func handleInfo(cfg *config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// C-2: Version removed from unauthenticated info endpoint.
 		writeJSON(w, http.StatusOK, infoResponse{

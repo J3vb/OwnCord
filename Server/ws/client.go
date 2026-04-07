@@ -9,7 +9,11 @@ import (
 	"github.com/owncord/server/syncutil"
 )
 
-const sendBufSize = 256 // per-client outbound send-channel capacity
+const (
+	sendBufSize     = 256 // per-client outbound send-channel capacity (normal priority)
+	sendHighBufSize = 64  // high-priority buffer (DMs, mentions)
+	sendLowBufSize  = 64  // low-priority buffer (typing, presence)
+)
 
 // SessionCheckInterval is the number of messages processed between periodic
 // session-expiry checks in readPump. Exported so tests can trigger the check
@@ -24,23 +28,25 @@ type Client struct {
 	ctx            context.Context // derived from WS upgrade request; cancelled on disconnect
 	userID         int64
 	user           *db.User
-	channelID      int64     // currently viewed channel for channel-scoped broadcasts
-	voiceChID      int64     // voice channel the user is in (0 = not in voice); guarded by voiceMu
-	voiceJoinToken string    // opaque join-instance token for the current voice session; guarded by voiceMu
-	e2eePubKey     string    // ECDH P-256 public key (base64) for voice E2EE; guarded by voiceMu
-	roleName       string    // cached role name for chat_message broadcasts
-	tokenHash      string    // SHA-256 hex of the session token; used for periodic revalidation
-	lastSeq        uint64    // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
-	connectedAt    time.Time // when the WS connection was established
-	remoteAddr     string    // client IP:port from the HTTP upgrade request
-	msgCount       int       // count of messages processed; resets after session check
-	msgsReceived   int64     // total messages received over the lifetime of this connection
-	msgsSent       int64     // total messages sent over the lifetime of this connection
-	msgsDropped    int64     // messages dropped due to full send buffer
-	invalidCount   int       // consecutive invalid messages; reset on valid parse
-	lastActivity   time.Time // last message received from this client; guarded by mu
-	sendClosed     bool      // true after the send channel has been closed
-	send           chan []byte
+	channelID      int64          // currently viewed channel for channel-scoped broadcasts
+	voiceChID      int64          // voice channel the user is in (0 = not in voice); guarded by voiceMu
+	voiceJoinToken string         // opaque join-instance token for the current voice session; guarded by voiceMu
+	e2eePubKey     string         // ECDH P-256 public key (base64) for voice E2EE; guarded by voiceMu
+	roleName       string         // cached role name for chat_message broadcasts
+	tokenHash      string         // SHA-256 hex of the session token; used for periodic revalidation
+	lastSeq        uint64         // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
+	connectedAt    time.Time      // when the WS connection was established
+	remoteAddr     string         // client IP:port from the HTTP upgrade request
+	msgCount       int            // count of messages processed; resets after session check
+	msgsReceived   int64          // total messages received over the lifetime of this connection
+	msgsSent       int64          // total messages sent over the lifetime of this connection
+	msgsDropped    int64          // messages dropped due to full send buffer
+	invalidCount   int            // consecutive invalid messages; reset on valid parse
+	lastActivity   time.Time      // last message received from this client; guarded by mu
+	sendClosed     bool           // true after all send channels have been closed
+	send           chan []byte    // normal-priority outbound messages (chat messages, reactions)
+	sendHigh       chan []byte    // high-priority outbound messages (DMs, mentions)
+	sendLow        chan []byte    // low-priority outbound messages (typing, presence) — dropped on overflow
 	mu             syncutil.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
 	voiceMu        syncutil.Mutex // guards voiceChID and voiceJoinToken
 }
@@ -66,6 +72,8 @@ func newClient(hub *Hub, conn wsConn, user *db.User, tokenHash string, lastSeq u
 		connectedAt:  now,
 		lastActivity: now,
 		send:         make(chan []byte, sendBufSize),
+		sendHigh:     make(chan []byte, sendHighBufSize),
+		sendLow:      make(chan []byte, sendLowBufSize),
 	}
 }
 
@@ -79,10 +87,12 @@ func (c *Client) GetTokenHash() string {
 // Intended for unit tests only — conn is nil.
 func NewTestClient(hub *Hub, userID int64, send chan []byte) *Client {
 	return &Client{
-		hub:    hub,
-		ctx:    context.Background(),
-		userID: userID,
-		send:   send,
+		hub:      hub,
+		ctx:      context.Background(),
+		userID:   userID,
+		send:     send,
+		sendHigh: send, // unified for test observability
+		sendLow:  send,
 	}
 }
 
@@ -94,6 +104,8 @@ func NewTestClientWithChannel(hub *Hub, userID, channelID int64, send chan []byt
 		userID:    userID,
 		channelID: channelID,
 		send:      send,
+		sendHigh:  send, // unified for test observability
+		sendLow:   send,
 	}
 }
 
@@ -107,6 +119,8 @@ func NewTestClientWithUser(hub *Hub, user *db.User, channelID int64, send chan [
 		user:      user,
 		channelID: channelID,
 		send:      send,
+		sendHigh:  send, // unified for test observability
+		sendLow:   send,
 	}
 }
 
@@ -150,6 +164,8 @@ func NewTestClientWithTokenHash(hub *Hub, user *db.User, tokenHash string, chann
 		tokenHash: tokenHash,
 		channelID: channelID,
 		send:      send,
+		sendHigh:  send, // unified for test observability
+		sendLow:   send,
 	}
 }
 
@@ -242,8 +258,7 @@ func (c *Client) getE2EEPubKey() string {
 	return c.e2eePubKey
 }
 
-// sendMsg queues a message to this client's send buffer without blocking.
-// It is a no-op if the send channel has already been closed.
+// sendMsg queues a normal-priority message (chat messages, reactions, channel events).
 // If the buffer is full, the client is disconnected to force a reconnect
 // with replay recovery instead of silently losing messages (BUG-124).
 func (c *Client) sendMsg(msg []byte) {
@@ -259,13 +274,57 @@ func (c *Client) sendMsg(msg []byte) {
 		c.msgsDropped++
 		slog.Warn("ws: client send buffer full, closing connection to force reconnect",
 			"user_id", c.userID)
-		c.sendClosed = true
-		close(c.send)
+		c.closeAllSendLocked()
 	}
 }
 
-// trySendMsg queues a message and returns true if it was accepted, false if
-// the buffer is full or the channel is closed.
+// sendHighMsg queues a high-priority message (DMs, direct mentions).
+// High-priority messages are drained before normal and low-priority messages
+// by writePump. If the high-priority buffer is full, falls back to the normal
+// buffer. If both are full, disconnects the client.
+func (c *Client) sendHighMsg(msg []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.sendClosed {
+		return
+	}
+	select {
+	case c.sendHigh <- msg:
+		c.msgsSent++
+	default:
+		// Fall back to normal priority channel.
+		select {
+		case c.send <- msg:
+			c.msgsSent++
+		default:
+			c.msgsDropped++
+			slog.Warn("ws: client high+normal buffers full, closing connection",
+				"user_id", c.userID)
+			c.closeAllSendLocked()
+		}
+	}
+}
+
+// sendLowMsg queues a low-priority message (typing indicators, presence updates).
+// If the buffer is full the message is silently dropped — the client is NOT
+// disconnected, since these events are ephemeral and can be safely lost.
+func (c *Client) sendLowMsg(msg []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.sendClosed {
+		return
+	}
+	select {
+	case c.sendLow <- msg:
+		c.msgsSent++
+	default:
+		c.msgsDropped++
+		// Do NOT disconnect — low-priority messages are safely droppable.
+	}
+}
+
+// trySendMsg queues a normal-priority message and returns true if it was
+// accepted, false if the buffer is full or the channel is closed.
 // On buffer overflow, the client is disconnected to force a reconnect (BUG-124).
 func (c *Client) trySendMsg(msg []byte) bool {
 	c.mu.Lock()
@@ -281,19 +340,29 @@ func (c *Client) trySendMsg(msg []byte) bool {
 		c.msgsDropped++
 		slog.Warn("ws: client send buffer full (trySend), closing connection to force reconnect",
 			"user_id", c.userID)
-		c.sendClosed = true
-		close(c.send)
+		c.closeAllSendLocked()
 		return false
 	}
 }
 
-// closeSend marks the send channel closed and closes it exactly once.
+// closeSend marks all send channels closed and closes them exactly once.
 // Safe to call from any goroutine.
 func (c *Client) closeSend() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.closeAllSendLocked()
+}
+
+// closeAllSendLocked closes all three send channels. Caller must hold c.mu.
+func (c *Client) closeAllSendLocked() {
 	if !c.sendClosed {
 		c.sendClosed = true
 		close(c.send)
+		if c.sendHigh != c.send {
+			close(c.sendHigh)
+		}
+		if c.sendLow != c.send && c.sendLow != c.sendHigh {
+			close(c.sendLow)
+		}
 	}
 }

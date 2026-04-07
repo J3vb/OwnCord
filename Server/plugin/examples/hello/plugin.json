@@ -1,0 +1,12 @@
+{
+  "name": "hello",
+  "version": "0.1.0",
+  "author": "OwnCord",
+  "description": "Trivial proof-of-life plugin: registers /hello and echoes message_send events.",
+  "entrypoint": "hello.wasm",
+  "permissions": ["commands", "events", "storage"],
+  "resources": {
+    "max_memory_mb": 16,
+    "cpu_budget_ms": 50
+  }
+}

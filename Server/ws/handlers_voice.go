@@ -5,36 +5,25 @@ import (
 	"encoding/json"
 )
 
-// registerVoiceHandlers registers all voice-related message handlers.
-// The handler methods themselves live in voice_join.go, voice_leave.go,
-// voice_controls.go, and voice_broadcast.go — this function only wires
-// them into the registry.
-func registerVoiceHandlers(r *HandlerRegistry) {
+// registerVoiceHandlersV1 registers voice handlers that remain V1 (complex
+// state management that hasn't been migrated yet).
+func registerVoiceHandlersV1(r *HandlerRegistry) {
 	r.Register(MsgTypeVoiceJoin, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
 		h.handleVoiceJoin(ctx, c, payload)
 	})
 	r.Register(MsgTypeVoiceLeave, func(ctx context.Context, h *Hub, c *Client, _ string, _ json.RawMessage) {
 		h.handleVoiceLeave(ctx, c)
 	})
-	r.Register(MsgTypeVoiceTokenRefresh, func(ctx context.Context, h *Hub, c *Client, _ string, _ json.RawMessage) {
-		h.handleVoiceTokenRefresh(ctx, c)
-	})
-	r.Register(MsgTypeVoiceMute, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
-		h.handleVoiceMute(ctx, c, payload)
-	})
-	r.Register(MsgTypeVoiceDeafen, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
-		h.handleVoiceDeafen(ctx, c, payload)
-	})
-	r.Register(MsgTypeVoiceCamera, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
-		h.handleVoiceCamera(ctx, c, payload)
-	})
-	r.Register(MsgTypeVoiceScreenshare, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
-		h.handleVoiceScreenshare(ctx, c, payload)
-	})
-	r.Register(MsgTypeVoiceE2EEAnnounce, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
-		h.handleVoiceE2EEAnnounce(ctx, c, payload)
-	})
-	r.Register(MsgTypeVoiceE2EEOffer, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
-		h.handleVoiceE2EEOffer(ctx, c, payload)
-	})
+}
+
+// registerVoiceControlsV2 registers V2 handlers for voice control toggles
+// and other migrated voice handlers.
+func registerVoiceControlsV2(r *HandlerRegistry, deps VoiceDeps) {
+	r.RegisterV2(MsgTypeVoiceMute, handleVoiceMuteV2, deps)
+	r.RegisterV2(MsgTypeVoiceDeafen, handleVoiceDeafenV2, deps)
+	r.RegisterV2(MsgTypeVoiceCamera, handleVoiceCameraV2, deps)
+	r.RegisterV2(MsgTypeVoiceScreenshare, handleVoiceScreenshareV2, deps)
+	r.RegisterV2(MsgTypeVoiceE2EEAnnounce, handleVoiceE2EEAnnounceV2, deps)
+	r.RegisterV2(MsgTypeVoiceE2EEOffer, handleVoiceE2EEOfferV2, deps)
+	r.RegisterV2(MsgTypeVoiceTokenRefresh, handleVoiceTokenRefreshV2, deps)
 }

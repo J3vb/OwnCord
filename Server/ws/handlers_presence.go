@@ -2,134 +2,98 @@ package ws
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"log/slog"
+	"errors"
 
-	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/service"
 )
 
 // registerPresenceHandlers registers presence, typing, and channel focus handlers.
-func registerPresenceHandlers(r *HandlerRegistry) {
-	r.Register(MsgTypeTypingStart, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
-		h.handleTyping(ctx, c, payload)
-	})
-	r.Register(MsgTypePresenceUpdate, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
-		h.handlePresence(ctx, c, payload)
-	})
-	r.Register(MsgTypeChannelFocus, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
-		h.handleChannelFocus(ctx, c, payload)
-	})
+// All three are V2 handlers.
+func registerPresenceHandlers(r *HandlerRegistry, deps PresenceDeps) {
+	r.RegisterV2(MsgTypeTypingStart, handleTypingV2, deps)
+	r.RegisterV2(MsgTypePresenceUpdate, handlePresenceV2, deps)
+	r.RegisterV2(MsgTypeChannelFocus, handleChannelFocusV2, deps)
 }
 
-// handleTyping processes a typing_start message.
-func (h *Hub) handleTyping(_ context.Context, c *Client, payload json.RawMessage) {
-	channelID, err := parseChannelID(payload)
-	if err != nil || channelID <= 0 {
-		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "channel_id must be positive integer"))
-		return
+// handleTypingV2 is the V2 handler for typing_start messages.
+// It validates the channel, checks permissions, and returns events to broadcast
+// the typing indicator to channel members (excluding the sender).
+func handleTypingV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+	d := deps.(PresenceDeps)
+	typingCmd := cmd.(TypingStartCmd)
+	channelID := typingCmd.ChannelID()
+	userID := info.UserID
+
+	ch, err := d.ChannelSvc.HandleTyping(userID, channelID, d.Limiter)
+	if err != nil || ch == nil {
+		return Result{} // silently drop
 	}
 
-	ratKey := fmt.Sprintf("typing:%d:%d", c.userID, channelID)
-	if !h.limiter.Allow(ratKey, typingRateLimit, typingWindow) {
-		return // silently drop; no error for typing throttle
-	}
+	payload := buildTypingMsg(channelID, userID, info.Username)
 
-	// DM channels require participant check instead of role-based permissions.
-	typCh, typChErr := h.db.GetChannel(channelID)
-	if typChErr != nil || typCh == nil {
-		return // silently drop for unknown channels
-	}
-	if typCh.Type == "dm" {
-		ok, dmErr := h.db.IsDMParticipant(c.userID, channelID)
-		if dmErr != nil || !ok {
-			return // silently drop — not a DM participant
-		}
-	} else if !h.hasChannelPerm(c, channelID, permissions.ReadMessages) {
-		return // silently drop — no read permission on this channel
-	}
-
-	var username string
-	if c.user != nil {
-		username = c.user.Username
-	}
-
-	// Broadcast to channel, excluding sender.
-	if typCh.Type == "dm" {
-		h.broadcastToDMParticipantsExclude(channelID, c.userID, buildTypingMsg(channelID, c.userID, username))
-	} else {
-		h.broadcastExclude(channelID, c.userID, buildTypingMsg(channelID, c.userID, username))
-	}
-}
-
-// handlePresence processes a presence_update message.
-func (h *Hub) handlePresence(_ context.Context, c *Client, payload json.RawMessage) {
-	ratKey := fmt.Sprintf("presence:%d", c.userID)
-	if !h.limiter.Allow(ratKey, presenceRateLimit, presenceWindow) {
-		c.sendMsg(buildRateLimitError("too many presence updates", presenceWindow.Seconds()))
-		return
-	}
-
-	var p struct {
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal(payload, &p); err != nil {
-		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "invalid presence_update payload"))
-		return
-	}
-	validStatuses := map[string]bool{"online": true, "idle": true, "dnd": true, "offline": true}
-	if !validStatuses[p.Status] {
-		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "status must be online|idle|dnd|offline"))
-		return
-	}
-
-	if err := h.db.UpdateUserStatus(c.userID, p.Status); err != nil {
-		slog.Error("ws handlePresence UpdateUserStatus", "err", err, "user_id", c.userID)
-		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to update status"))
-		return
-	}
-
-	h.BroadcastToAll(buildPresenceMsg(c.userID, p.Status))
-}
-
-// handleChannelFocus sets which channel the client is currently viewing,
-// so channel-scoped broadcasts (chat messages, typing) reach them.
-// Also updates read_states so unread counts decrease when the user views a channel.
-func (h *Hub) handleChannelFocus(_ context.Context, c *Client, payload json.RawMessage) {
-	chID, err := parseChannelID(payload)
-	if err != nil || chID <= 0 {
-		slog.Debug("handleChannelFocus: invalid channel_id", "user_id", c.userID, "err", err)
-		return
-	}
-
-	// DM channels use participant-based auth instead of role-based permissions.
-	ch, chErr := h.db.GetChannel(chID)
-	if chErr != nil || ch == nil {
-		slog.Debug("handleChannelFocus: channel not found", "channel_id", chID)
-		return
-	}
 	if ch.Type == "dm" {
-		ok, dmErr := h.db.IsDMParticipant(c.userID, chID)
-		if dmErr != nil || !ok {
-			c.sendMsg(buildErrorMsg(ErrCodeForbidden, "not a participant in this DM"))
-			return
+		participantIDs, pErr := d.ChannelSvc.GetDMParticipantIDs(channelID)
+		if pErr != nil {
+			return Result{}
 		}
-	} else if !h.requireChannelPerm(c, chID, permissions.ReadMessages, "READ_MESSAGES") {
-		return
+		var events []Event
+		for _, pid := range participantIDs {
+			if pid == userID {
+				continue
+			}
+			events = append(events, TypingDMEvent{
+				targetUserID: pid,
+				payload:      payload,
+			})
+		}
+		return Result{Events: events}
 	}
 
-	c.mu.Lock()
-	prevCh := c.channelID
-	c.channelID = chID
-	c.mu.Unlock()
-
-	slog.Debug("channel_focus", "user_id", c.userID, "channel_id", chID, "prev_channel_id", prevCh)
-
-	// Mark channel as read by updating read_states to the latest message.
-	latestID, latestErr := h.db.GetLatestMessageID(chID)
-	if latestErr == nil && latestID > 0 {
-		if rsErr := h.db.UpdateReadState(c.userID, chID, latestID); rsErr != nil {
-			slog.Warn("handleChannelFocus UpdateReadState", "err", rsErr, "user_id", c.userID, "channel_id", chID)
-		}
+	return Result{
+		Events: []Event{
+			TypingChannelEvent{
+				channelID:     channelID,
+				excludeUserID: userID,
+				payload:       payload,
+			},
+		},
 	}
+}
+
+// handlePresenceV2 is the V2 handler for presence_update messages.
+// It validates the status, updates the DB, and broadcasts to all clients.
+func handlePresenceV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+	d := deps.(PresenceDeps)
+	presenceCmd := cmd.(PresenceUpdateCmd)
+	userID := info.UserID
+	status := presenceCmd.Status()
+
+	if err := d.ChannelSvc.HandlePresenceUpdate(userID, status, d.Limiter); err != nil {
+		return serviceErrorToResult(err)
+	}
+
+	return Result{
+		Events: []Event{
+			PresenceEvent{payload: buildPresenceMsg(userID, status)},
+		},
+	}
+}
+
+// handleChannelFocusV2 is the V2 handler for channel_focus messages.
+// It validates permissions, signals the client's focused channel via SetChannelID,
+// and marks the channel as read.
+func handleChannelFocusV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+	d := deps.(PresenceDeps)
+	focusCmd := cmd.(ChannelFocusCmd)
+	chID := focusCmd.ChannelID()
+
+	_, err := d.ChannelSvc.HandleChannelFocus(info.UserID, chID)
+	if err != nil {
+		if errors.Is(err, service.ErrForbidden) {
+			return Result{Error: ClientError{Code: ErrCodeForbidden, Message: "access denied"}}
+		}
+		return Result{} // silently drop other errors
+	}
+
+	return Result{SetChannelID: &chID}
 }

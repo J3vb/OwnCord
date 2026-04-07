@@ -13,13 +13,16 @@ import (
 	"github.com/owncord/server/api"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/service"
+	"github.com/owncord/server/store"
 )
 
 // buildProfileRouter returns a chi router with profile routes mounted.
 func buildProfileRouter(database *db.DB) http.Handler {
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
-	api.MountProfileRoutes(r, database, limiter, nil, nil)
+	svc := service.New(store.NewSQLiteStore(database), limiter)
+	api.MountProfileRoutes(r, database, svc, limiter, nil, nil)
 	return r
 }
 

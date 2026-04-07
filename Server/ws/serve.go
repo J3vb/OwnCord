@@ -15,6 +15,7 @@ import (
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/telemetry"
 )
 
 const (
@@ -121,9 +122,41 @@ func (h *Hub) handleReconnect(
 	}
 
 	events := h.ReplayBuffer().EventsSinceFiltered(lastSeq, allowedChannelIDs)
+	replaySource := "buffer"
 	if events == nil {
-		return false
+		// Phase B Step 7 — try cold-tier replay from the EventStore before
+		// giving up and forcing a full ready re-sync.
+		if h.eventStore != nil {
+			channelIDs := make([]int64, 0, len(allowedChannelIDs))
+			for cid := range allowedChannelIDs {
+				channelIDs = append(channelIDs, cid)
+			}
+			const maxColdReplay = 5000
+			persisted, dbErr := h.eventStore.GetEventsSinceForChannels(ctx, int64(lastSeq), channelIDs, maxColdReplay) //nolint:gosec // lastSeq is a sequence counter bounded well below MaxInt64
+			if dbErr != nil {
+				slog.Warn("ws handleReconnect: cold-tier replay query failed",
+					"user_id", c.userID, "err", dbErr)
+			} else if len(persisted) > 0 {
+				events = make([][]byte, 0, len(persisted))
+				for _, p := range persisted {
+					events = append(events, p.Payload)
+				}
+				replaySource = "db"
+			}
+		}
+		if events == nil {
+			h.reconnectTierFull.Add(1)
+			telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
+			return false
+		}
 	}
+	switch replaySource {
+	case "buffer":
+		h.reconnectTierBuf.Add(1)
+	case "db":
+		h.reconnectTierDB.Add(1)
+	}
+	telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", replaySource))
 
 	// Register BEFORE writing replay data so broadcasts that arrive during
 	// the write window are queued in the client's send buffer instead of
@@ -131,9 +164,11 @@ func (h *Hub) handleReconnect(
 	// will be drained once the pumps begin.
 	h.registerNow(c)
 
-	// Replay succeeded — send auth_ok then missed events.
-	slog.Info("ws sending auth_ok (reconnect)", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
-	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(c.user, c.roleName)); err != nil {
+	// Replay succeeded — send auth_ok then missed events. The replay tier
+	// is included in the payload so the client can attribute reconnect
+	// behaviour without separate metric scraping.
+	slog.Info("ws sending auth_ok (reconnect)", "user_id", c.userID, "username", c.user.Username, "role", c.roleName, "replay_source", replaySource)
+	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(c.user, c.roleName, replaySource)); err != nil {
 		slog.Warn("ws: failed to send auth_ok (reconnect)", "user_id", c.userID, "err", err)
 		h.unregisterNow(c)
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
@@ -147,7 +182,7 @@ func (h *Hub) handleReconnect(
 			return true
 		}
 	}
-	slog.Info("ws replay completed", "user_id", c.userID, "events_replayed", len(events), "from_seq", lastSeq)
+	slog.Info("ws replay completed", "user_id", c.userID, "events_replayed", len(events), "from_seq", lastSeq, "source", replaySource)
 
 	// Update presence but skip member_join — user was already known.
 	if updateErr := database.UpdateUserStatus(c.userID, "online"); updateErr != nil {
@@ -269,7 +304,7 @@ func (h *Hub) handleFreshConnect(
 
 	// Fresh connection or replay fallback: full auth_ok + ready flow.
 	slog.Info("ws sending auth_ok", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
-	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(c.user, c.roleName)); err != nil {
+	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(c.user, c.roleName, "none")); err != nil {
 		slog.Warn("ws: failed to send auth_ok", "user_id", c.userID, "err", err)
 		h.unregisterNow(c)
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
@@ -303,20 +338,63 @@ func (h *Hub) handleFreshConnect(
 	return nil
 }
 
-// writePump drains the client's send channel and writes to the WebSocket.
+// writePump drains the client's send channels and writes to the WebSocket.
+// Priority ordering: high > normal > low. High-priority messages (DMs, mentions)
+// are drained first. Normal messages (chat, reactions) come next. Low-priority
+// messages (typing, presence) are only sent when no higher-priority work is pending.
 func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
+	writeMsg := func(msg []byte) bool {
+		wCtx, cancel := context.WithTimeout(ctx, writeTimeout)
+		err := conn.Write(wCtx, websocket.MessageText, msg)
+		cancel()
+		if err != nil {
+			slog.Warn("ws writePump error", "user_id", c.userID, "err", err)
+			return false
+		}
+		return true
+	}
+
 	for {
+		// Priority 1: drain all pending high-priority messages first.
 		select {
+		case msg, ok := <-c.sendHigh:
+			if !ok {
+				_ = conn.Close(websocket.StatusNormalClosure, "")
+				return
+			}
+			if !writeMsg(msg) {
+				return
+			}
+			continue
+		default:
+		}
+
+		// Priority 2: try high or normal (high still gets priority via the
+		// first case in the select, but Go's select is random when both are
+		// ready — the outer drain-high loop above ensures high is truly first).
+		select {
+		case msg, ok := <-c.sendHigh:
+			if !ok {
+				_ = conn.Close(websocket.StatusNormalClosure, "")
+				return
+			}
+			if !writeMsg(msg) {
+				return
+			}
 		case msg, ok := <-c.send:
 			if !ok {
 				_ = conn.Close(websocket.StatusNormalClosure, "")
 				return
 			}
-			wCtx, cancel := context.WithTimeout(ctx, writeTimeout)
-			err := conn.Write(wCtx, websocket.MessageText, msg)
-			cancel()
-			if err != nil {
-				slog.Warn("ws writePump error", "user_id", c.userID, "err", err)
+			if !writeMsg(msg) {
+				return
+			}
+		case msg, ok := <-c.sendLow:
+			if !ok {
+				_ = conn.Close(websocket.StatusNormalClosure, "")
+				return
+			}
+			if !writeMsg(msg) {
 				return
 			}
 		case <-ctx.Done():
@@ -442,7 +520,12 @@ func authenticateConn(parent context.Context, conn *websocket.Conn, database *db
 
 // buildAuthOK constructs the auth_ok server→client message.
 // Per PROTOCOL.md, user object contains only id, username, avatar, role (no status).
-func (h *Hub) buildAuthOK(user *db.User, roleName string) []byte {
+//
+// replaySource records which reconnection tier served this client:
+//   - "none"   — fresh connection or full re-sync (no resume)
+//   - "buffer" — resume served from the in-memory ring buffer
+//   - "db"     — resume served from the persistent EventStore (Phase B Step 7)
+func (h *Hub) buildAuthOK(user *db.User, roleName string, replaySource string) []byte {
 	var avatarVal any
 	if user.Avatar != nil {
 		avatarVal = *user.Avatar
@@ -459,8 +542,9 @@ func (h *Hub) buildAuthOK(user *db.User, roleName string) []byte {
 				"avatar":   avatarVal,
 				"role":     roleName,
 			},
-			"server_name": serverName,
-			"motd":        motd,
+			"server_name":   serverName,
+			"motd":          motd,
+			"replay_source": replaySource,
 		},
 	})
 }

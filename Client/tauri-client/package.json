@@ -32,6 +32,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.4",
     "@playwright/test": "^1",
+    "@solidjs/testing-library": "^0.8.10",
     "@stryker-mutator/core": "^9.6.0",
     "@stryker-mutator/typescript-checker": "^9.6.0",
     "@stryker-mutator/vitest-runner": "^9.6.0",
@@ -46,6 +47,7 @@
     "typescript": "^5.7",
     "typescript-eslint": "^8.58.0",
     "vite": "^6",
+    "vite-plugin-solid": "^2.11.0",
     "vitest": "^3"
   },
   "prettier": {
@@ -55,7 +57,7 @@
     "printWidth": 100,
     "tabWidth": 2,
     "arrowParens": "always",
-    "endOfLine": "crlf"
+    "endOfLine": "lf"
   },
   "dependencies": {
     "@jitsi/rnnoise-wasm": "^0.2.1",
@@ -70,6 +72,7 @@
     "@tauri-apps/plugin-store": "^2",
     "@tauri-apps/plugin-updater": "^2.10.0",
     "livekit-client": "^2.18.0",
+    "solid-js": "^1.9.3",
     "zod": "^4.3.6"
   }
 }

@@ -14,6 +14,8 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/service"
+	"github.com/owncord/server/store"
 	"github.com/owncord/server/ws"
 )
 
@@ -76,7 +78,9 @@ func newCoverageHub(t *testing.T) (*ws.Hub, *db.DB) {
 	t.Helper()
 	database := openCoverageDB(t)
 	limiter := auth.NewRateLimiter()
-	hub := ws.NewHub(database, limiter)
+	st := store.NewSQLiteStore(database)
+	svc := service.New(st, limiter)
+	hub := ws.NewHub(database, limiter, svc)
 
 	// Inject a test LiveKit client so voice_join passes the livekit!=nil guard.
 	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{
@@ -785,10 +789,10 @@ func TestHandleChannelFocus_InvalidChannelID(t *testing.T) {
 	hub.HandleMessageForTest(c, raw)
 	time.Sleep(20 * time.Millisecond)
 
-	// Invalid channel_id should be silently ignored — no error sent to client.
+	// V2 CommandConstructor rejects non-numeric channel_id with BAD_REQUEST.
 	code := drainForErrorCode(send, 100*time.Millisecond)
-	if code != "" {
-		t.Fatalf("expected no error for invalid channel_id, got code=%q", code)
+	if code != "BAD_REQUEST" {
+		t.Fatalf("expected BAD_REQUEST for non-numeric channel_id, got code=%q", code)
 	}
 }
 
@@ -2377,7 +2381,7 @@ func TestClearVoiceChID_DoubleClearReturnsZero(t *testing.T) {
 	}
 }
 
-// ─── handleVoiceTokenRefresh (voice_join.go:188) ────────────────────────────
+// ─── voice_token_refresh (now V2 — dispatched via handleMessage) ────────────
 
 func voiceTokenRefreshMsg() []byte {
 	raw, _ := json.Marshal(map[string]any{

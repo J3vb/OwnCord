@@ -29,20 +29,16 @@ const ECDH_CURVE = "P-256";
 // UTF-8 bytes of "owncord-voice-e2ee-v1"
 const HKDF_SALT = new Uint8Array([
   111, 119, 110, 99, 111, 114, 100, 45, 118, 111, 105, 99, 101, 45, 101, 50, 101, 101, 45, 118, 49,
-]) as Uint8Array<ArrayBuffer>;
+]);
 // UTF-8 bytes of "room-key-wrap"
-const HKDF_INFO = new Uint8Array([
-  114, 111, 111, 109, 45, 107, 101, 121, 45, 119, 114, 97, 112,
-]) as Uint8Array<ArrayBuffer>;
+const HKDF_INFO = new Uint8Array([114, 111, 111, 109, 45, 107, 101, 121, 45, 119, 114, 97, 112]);
 const ROOM_KEY_BYTES = 32; // 256-bit AES key for LiveKit SFrame
 
 // ── Key pair generation ─────────────────────────────────────────────────────
 
 /** Generate an ephemeral ECDH P-256 keypair. */
 export async function generateECDHKeyPair(): Promise<CryptoKeyPair> {
-  return crypto.subtle.generateKey({ name: "ECDH", namedCurve: ECDH_CURVE }, true, [
-    "deriveBits",
-  ]) as Promise<CryptoKeyPair>;
+  return crypto.subtle.generateKey({ name: "ECDH", namedCurve: ECDH_CURVE }, true, ["deriveBits"]);
 }
 
 /** Export a CryptoKey (public) to base64 for transmission. */
@@ -183,7 +179,7 @@ function base64ToUint8(base64: string): Uint8Array<ArrayBuffer> {
   } catch {
     throw new Error("E2EE: invalid base64 input");
   }
-  const bytes = new Uint8Array(binary.length) as Uint8Array<ArrayBuffer>;
+  const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
     bytes[i] = binary.charCodeAt(i);
   }
