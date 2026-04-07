@@ -14,7 +14,7 @@ export interface PluginContainerProps {
 }
 
 export function PluginContainer(props: PluginContainerProps): JSX.Element {
-  // eslint-disable-next-line no-unassigned-vars -- Solid ref assigned by JSX ref={host}
+  // oxlint-disable-next-line no-unassigned-vars -- Solid ref assigned by JSX ref={host}
   let host!: HTMLDivElement;
   let dispose: (() => void) | undefined;
 

@@ -46,11 +46,7 @@ export function fromStoreSlice<T, S>(
 ): Accessor<S> {
   const initial = selector(store.getState());
   const [value, setValue] = createSignal<S>(initial, { equals: false });
-  const unsub = store.subscribeSelector(
-    selector,
-    (next) => setValue(() => next),
-    isEqual,
-  );
+  const unsub = store.subscribeSelector(selector, (next) => setValue(() => next), isEqual);
   onCleanup(unsub);
   return value;
 }
