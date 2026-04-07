@@ -83,6 +83,24 @@ How to set up the development environment and contribute to OwnCord.
 | `npm run format:check` | Prettier check only (no writes) |
 | `npm run knip` | Dead code and unused export detection |
 
+## Plugin Development
+
+Plugins are WASM modules loaded at runtime when the server is built with `-tags wazero`.
+See `Server/plugin/examples/hello/README.md` for the full plugin ABI and build instructions.
+
+**Toolchain requirements for building `.wasm` plugins with TinyGo:**
+
+| Tool | Version | Notes |
+|------|---------|-------|
+| TinyGo | 0.40.1 | Supports Go 1.19–1.25 only |
+| Go SDK | 1.25.x | Install alongside the system Go via `go install golang.org/dl/go1.25.3@latest && go1.25.3 download` |
+| wasm-opt | Binaryen 129 | Required by TinyGo for the `wasi` target; download from Binaryen GitHub releases |
+
+Any WASM toolchain (Rust/`wasm32-wasi`, AssemblyScript, etc.) that exports the five ABI
+functions is equally valid — TinyGo is just the example toolchain used by `examples/hello/`.
+
+---
+
 ## Active Branches
 
 - `main` -- stable releases

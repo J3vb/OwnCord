@@ -19,7 +19,9 @@ directory, and existing leaf components are ported one PR at a time.
    handle has the same `{ destroy }` shape that the rest of the codebase uses.
 4. **Test the pipeline.** New components get a `*.test.tsx` next to them
    using `@solidjs/testing-library`. The tests run under the existing Vitest
-   configuration without any extra setup.
+   configuration without any extra setup. Do **not** call `cleanup()` manually
+   in test files — `tests/setup-solid.ts` registers `afterEach(cleanup)` globally
+   via Vitest's `setupFiles` (added in T-500).
 5. **Delete vanilla DOM code.** Once a component is fully migrated, remove
    the old factory function and update its callers to import from
    `@components/solid/...`.
@@ -38,6 +40,14 @@ directory, and existing leaf components are ported one PR at a time.
   custom store via `fromStore` instead.
 - Touching framework-agnostic code (`lib/ws.ts`, `lib/dispatcher.ts`,
   `lib/livekitSession.ts`, `lib/api.ts`). These never need to know about Solid.
+- Using `innerHTML`, `insertAdjacentHTML`, or `dangerouslySetInnerHTML` in any
+  Solid component. JSX interpolation (`{value}`) auto-escapes user content and
+  is the correct approach. Components rendering user-supplied text (e.g. message
+  attachments, toast messages) must never bypass this escaping.
+- Placing `.tsx` files outside `src/components/solid/`. The `vite-plugin-solid`
+  transform is scoped to this directory in both `vite.config.ts` and
+  `vitest.config.ts`. A `.tsx` file elsewhere will fail with cryptic JSX parse
+  errors at build time.
 
 ## Existing components
 
