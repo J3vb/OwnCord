@@ -3,6 +3,7 @@
 // All endpoints are mounted under the existing AdminIPRestrict group so they
 // inherit the same network ACL as the rest of the admin panel. Authentication
 // is handled by the admin handler's middleware before this handler runs.
+
 package api
 
 import (

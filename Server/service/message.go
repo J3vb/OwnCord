@@ -435,10 +435,8 @@ func (s *MessageService) handleReaction(userID, msgID int64, emoji string, add b
 		if dmErr != nil || !ok {
 			return nil, fmt.Errorf("%w: not a DM participant", ErrBadRequest)
 		}
-	} else {
-		if !s.perms.HasChannelPerm(userID, msg.ChannelID, permissions.AddReactions) {
-			return nil, fmt.Errorf("%w: missing ADD_REACTIONS permission", ErrForbidden)
-		}
+	} else if !s.perms.HasChannelPerm(userID, msg.ChannelID, permissions.AddReactions) {
+		return nil, fmt.Errorf("%w: missing ADD_REACTIONS permission", ErrForbidden)
 	}
 
 	action := "add"
@@ -493,10 +491,8 @@ func (s *MessageService) GetMessages(userID, channelID, before int64, limit int)
 		if err != nil || !ok {
 			return nil, false, fmt.Errorf("%w: access denied", ErrNotFound)
 		}
-	} else {
-		if !s.perms.HasChannelPerm(userID, channelID, permissions.ReadMessages) {
-			return nil, false, fmt.Errorf("%w: access denied", ErrForbidden)
-		}
+	} else if !s.perms.HasChannelPerm(userID, channelID, permissions.ReadMessages) {
+		return nil, false, fmt.Errorf("%w: access denied", ErrForbidden)
 	}
 
 	if limit <= 0 {
@@ -645,18 +641,18 @@ func (s *MessageService) GetAccessibleChannelIDs(userID int64) ([]int64, error) 
 	}
 
 	var ids []int64
-	for _, ch := range channels {
-		if ch.Type == "dm" {
+	for i := range channels {
+		if channels[i].Type == "dm" {
 			continue
 		}
 		if isAdmin {
-			ids = append(ids, ch.ID)
+			ids = append(ids, channels[i].ID)
 			continue
 		}
-		o := overrides[ch.ID]
+		o := overrides[channels[i].ID]
 		effective := permissions.EffectivePerms(role.Permissions, o.Allow, o.Deny)
 		if effective&permissions.ReadMessages == permissions.ReadMessages {
-			ids = append(ids, ch.ID)
+			ids = append(ids, channels[i].ID)
 		}
 	}
 

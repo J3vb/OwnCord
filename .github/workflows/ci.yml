@@ -90,6 +90,24 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Patch auto-generated Tauri TypeScript bindings
+        working-directory: Client/tauri-client/
+        # tauri-typegen generates an Event type that is intentionally unused in app code.
+        # Rename it to _Event so @typescript-eslint/no-unused-vars does not fail.
+        run: |
+          node -e "
+          const fs = require('fs');
+          const p = 'src/generated/events.ts';
+          if (fs.existsSync(p)) {
+            let c = fs.readFileSync(p, 'utf8');
+            c = c.replace(/\btype Event\b/g, 'type _Event').replace(/\binterface Event\b/g, 'interface _Event');
+            fs.writeFileSync(p, c);
+            console.log('Patched: renamed Event -> _Event in generated/events.ts');
+          } else {
+            console.log('src/generated/events.ts not found, skipping patch.');
+          }
+          "
+
       - name: Security audit (npm)
         run: npm audit --audit-level=high
 

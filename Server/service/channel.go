@@ -71,14 +71,14 @@ func (s *ChannelService) ListVisibleChannels(ctx context.Context, userID int64) 
 	}
 
 	var visible []db.Channel
-	for _, ch := range all {
-		if ch.Type == "dm" {
+	for i := range all {
+		if all[i].Type == "dm" {
 			continue
 		}
-		o := overrides[ch.ID]
+		o := overrides[all[i].ID]
 		effective := permissions.EffectivePerms(role.Permissions, o.Allow, o.Deny)
 		if effective&permissions.ReadMessages == permissions.ReadMessages {
-			visible = append(visible, ch)
+			visible = append(visible, all[i])
 		}
 	}
 
@@ -107,13 +107,13 @@ func (s *ChannelService) HandleTyping(userID, channelID int64, limiter interface
 
 	ch, err := s.st.GetChannel(channelID)
 	if err != nil || ch == nil {
-		return nil, nil // silent drop
+		return nil, nil //nolint:nilerr // typing indicators are best-effort; errors silently dropped
 	}
 
 	if ch.Type == "dm" {
-		ok, err := s.st.IsDMParticipant(userID, channelID)
-		if err != nil || !ok {
-			return nil, nil // silent drop
+		ok, dmErr := s.st.IsDMParticipant(userID, channelID)
+		if dmErr != nil || !ok {
+			return nil, nil //nolint:nilerr // typing indicators are best-effort; errors silently dropped
 		}
 	} else if !s.perms.HasChannelPerm(userID, channelID, permissions.ReadMessages) {
 		return nil, nil // silent drop
@@ -171,10 +171,8 @@ func (s *ChannelService) HandleChannelFocus(userID, channelID int64) (*db.Channe
 		if err != nil || !ok {
 			return nil, fmt.Errorf("%w: access denied", ErrForbidden)
 		}
-	} else {
-		if !s.perms.HasChannelPerm(userID, channelID, permissions.ReadMessages) {
-			return nil, fmt.Errorf("%w: access denied", ErrForbidden)
-		}
+	} else if !s.perms.HasChannelPerm(userID, channelID, permissions.ReadMessages) {
+		return nil, fmt.Errorf("%w: access denied", ErrForbidden)
 	}
 
 	// Mark channel as read.

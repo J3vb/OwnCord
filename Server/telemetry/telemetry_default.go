@@ -3,6 +3,7 @@
 // Default no-op build of the telemetry package — see telemetry.go for the
 // public API. The real OpenTelemetry SDK wiring lives in telemetry_otel.go and
 // is selected by `go build -tags otel ./...`.
+
 package telemetry
 
 import (

@@ -3,6 +3,7 @@
 // Plugins that declare the "commands" capability register one or more slash
 // commands at activation time. The WS command dispatcher (Server/ws/command.go)
 // calls Registry.DispatchCommand after exhausting its built-in command table.
+
 package plugin
 
 import (

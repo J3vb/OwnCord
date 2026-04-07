@@ -4,6 +4,7 @@ package ws_test
 // plugin EventSink wiring (Phase C Step 9).
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 
@@ -133,7 +134,7 @@ func TestEventSink_Emit_DeliversToBroadcaster(t *testing.T) {
 	if gotChannelID != 42 {
 		t.Fatalf("expected channelID=42, got %d", gotChannelID)
 	}
-	if string(gotPayload) != string(want) {
+	if !bytes.Equal(gotPayload, want) {
 		t.Fatalf("expected payload=%s, got %s", want, gotPayload)
 	}
 }

@@ -5,6 +5,7 @@
 // should cache the returned instrument in a struct field rather than calling
 // these helpers per request — they take a sync.RWMutex to read the global
 // provider and the cost adds up at high throughput.
+
 package telemetry
 
 import "sync"
@@ -72,7 +73,7 @@ func NewAppMetrics() *AppMetrics {
 // NewAppMetrics() call re-binds instruments against whatever provider is now
 // global. The real OTel Init uses this to migrate from the no-op provider
 // installed by the package-level init() to the SDK-backed one.
-func resetAppMetricsForInit() {
+func resetAppMetricsForInit() { //nolint:unused // called by otel-tagged build only
 	appMetricsMu.Lock()
 	defer appMetricsMu.Unlock()
 	appMetricsInst = nil

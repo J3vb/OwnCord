@@ -80,7 +80,7 @@ func (r *Registry) AssetHandler(inst *Instance) http.Handler {
 		// This runs on every request — cheap relative to the file read —
 		// and closes the TOCTOU gap between install-time validation and
 		// runtime serving.
-		info, lerr := os.Lstat(full)
+		info, lerr := os.Lstat(full) //nolint:gosec // path traversal blocked above: rel validated and cleaned
 		if lerr != nil {
 			http.NotFound(w, req)
 			return
@@ -93,7 +93,7 @@ func (r *Registry) AssetHandler(inst *Instance) http.Handler {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		f, openErr := os.Open(full)
+		f, openErr := os.Open(full) //nolint:gosec // path traversal blocked above: rel validated and cleaned
 		if openErr != nil {
 			http.NotFound(w, req)
 			return

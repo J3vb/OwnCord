@@ -111,20 +111,20 @@ func Global() Provider {
 	return globalProvider
 }
 
-// Tracer is a convenience that fetches a tracer from the global provider.
+// GlobalTracer is a convenience that fetches a tracer from the global provider.
 func GlobalTracer(name string) Tracer { return Global().Tracer(name) }
 
-// Meter is a convenience that fetches a meter from the global provider.
+// GlobalMeter is a convenience that fetches a meter from the global provider.
 func GlobalMeter(name string) Meter { return Global().Meter(name) }
 
 // ── No-op implementation ────────────────────────────────────────────────────
 
 type noopProvider struct{}
 
-func (noopProvider) Tracer(string) Tracer                  { return noopTracer{} }
-func (noopProvider) Meter(string) Meter                    { return noopMeter{} }
+func (noopProvider) Tracer(string) Tracer                          { return noopTracer{} }
+func (noopProvider) Meter(string) Meter                            { return noopMeter{} }
 func (noopProvider) HTTPMiddleware(next http.Handler) http.Handler { return next }
-func (noopProvider) PrometheusHandler() http.Handler       { return nil }
+func (noopProvider) PrometheusHandler() http.Handler               { return nil }
 
 type noopTracer struct{}
 
@@ -134,15 +134,15 @@ func (noopTracer) Start(ctx context.Context, _ string, _ ...Attr) (context.Conte
 
 type noopSpan struct{}
 
-func (noopSpan) End()                {}
+func (noopSpan) End()                  {}
 func (noopSpan) SetAttributes(...Attr) {}
-func (noopSpan) RecordError(error)   {}
+func (noopSpan) RecordError(error)     {}
 
 type noopMeter struct{}
 
-func (noopMeter) Counter(string, string) Counter           { return noopCounter{} }
+func (noopMeter) Counter(string, string) Counter             { return noopCounter{} }
 func (noopMeter) Histogram(string, string, string) Histogram { return noopHistogram{} }
-func (noopMeter) Gauge(string, string) Gauge               { return noopGauge{} }
+func (noopMeter) Gauge(string, string) Gauge                 { return noopGauge{} }
 
 type noopCounter struct{}
 
