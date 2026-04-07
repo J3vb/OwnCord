@@ -34,8 +34,7 @@
       "@styles/*": [
         "./src/styles/*"
       ]
-    },
-    "baseUrl": "."
+    }
   },
   "include": [
     "src",
