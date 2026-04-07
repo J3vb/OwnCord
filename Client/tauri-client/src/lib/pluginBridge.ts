@@ -109,7 +109,11 @@ class PluginBridge {
     this.postToFrame(pluginId, frame, { type, payload });
   }
 
-  private postToFrame(pluginId: number, frame: HTMLIFrameElement, msg: { type: string; payload: unknown }): void {
+  private postToFrame(
+    pluginId: number,
+    frame: HTMLIFrameElement,
+    msg: { type: string; payload: unknown },
+  ): void {
     // Restrict the postMessage target origin to the host page origin so a
     // navigated-away iframe (or one whose contentWindow has been swapped)
     // cannot receive host messages intended for a sandboxed plugin. The
