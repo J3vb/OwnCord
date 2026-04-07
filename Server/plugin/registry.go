@@ -65,7 +65,7 @@ type Instance struct {
 
 	// module is the wazero compiled module in the wazero-tagged build, or
 	// nil in the default build.
-	module any
+	module any //nolint:unused // assigned by wazero-tagged build
 }
 
 // UITabBinding is the public projection of a plugin's declared UI tab,
@@ -280,7 +280,7 @@ func (r *Registry) InstallFromZip(ctx context.Context, zipBytes []byte) (string,
 			cleanup()
 			return "", oErr
 		}
-		out, cErr := os.OpenFile(destAbs, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o640)
+		out, cErr := os.OpenFile(destAbs, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 		if cErr != nil {
 			_ = rc.Close()
 			cleanup()

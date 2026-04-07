@@ -6,6 +6,7 @@
 // counter is incremented. The reconnection handler tolerates gaps because the
 // in-memory ring buffer remains the primary cold-start source for clients
 // whose last_seq is recent.
+
 package ws
 
 import (

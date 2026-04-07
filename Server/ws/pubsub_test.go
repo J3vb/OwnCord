@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"bytes"
 	"sort"
 	"sync"
 	"testing"
@@ -289,7 +290,7 @@ func assertChanMsg(t *testing.T, ch <-chan []byte, want []byte) {
 	t.Helper()
 	select {
 	case got := <-ch:
-		if string(got) != string(want) {
+		if !bytes.Equal(got, want) {
 			t.Errorf("got %q, want %q", got, want)
 		}
 	case <-time.After(100 * time.Millisecond):

@@ -31,6 +31,8 @@ func (h *Hub) EmitEvents(events []Event) {
 		case UserTargetedEvent:
 			// High priority: targeted events (DM opens, mentions).
 			h.SendToUserHigh(e.TargetUserID(), e.Payload())
+		case ChannelEvent:
+			h.BroadcastToChannel(e.ChannelID(), e.Payload())
 		case BroadcastAllEvent:
 			// Check concrete type: presence is low-priority, others are normal.
 			if _, isPresence := ev.(PresenceEvent); isPresence {
@@ -38,8 +40,6 @@ func (h *Hub) EmitEvents(events []Event) {
 			} else {
 				h.BroadcastToAll(e.Payload())
 			}
-		case ChannelEvent:
-			h.BroadcastToChannel(e.ChannelID(), e.Payload())
 		default:
 			slog.Warn("EmitEvents: unknown event type", "type", fmt.Sprintf("%T", ev))
 		}

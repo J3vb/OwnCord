@@ -2,6 +2,7 @@
 // provider. The default no-op build returns next unchanged; the otel-tagged
 // build wraps next with otelchi.Middleware. Mount it from the Chi router so
 // every REST request becomes a span automatically.
+
 package telemetry
 
 import "net/http"

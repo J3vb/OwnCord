@@ -227,7 +227,7 @@ func (c VoiceE2EEOfferCmd) IV() string           { return c.iv }
 // authenticated client; raw is the JSON payload body.
 // Unexported to prevent accidental mutation; use getCommandConstructor for lookups.
 var commandConstructors = map[string]func(userID int64, reqID string, raw json.RawMessage) (Command, error){
-	MsgTypePing: func(userID int64, _ string, _ json.RawMessage) (Command, error) {
+	MsgTypePing: func(userID int64, _ string, _ json.RawMessage) (Command, error) { //nolint:unparam // error always nil; signature dictated by map type
 		return PingCmd{userID: userID}, nil
 	},
 
@@ -396,11 +396,11 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		return VoiceJoinCmd{userID: userID, channelID: chID}, nil
 	},
 
-	MsgTypeVoiceLeave: func(userID int64, _ string, _ json.RawMessage) (Command, error) {
+	MsgTypeVoiceLeave: func(userID int64, _ string, _ json.RawMessage) (Command, error) { //nolint:unparam // error always nil; signature dictated by map type
 		return VoiceLeaveCmd{userID: userID}, nil
 	},
 
-	MsgTypeVoiceTokenRefresh: func(userID int64, _ string, _ json.RawMessage) (Command, error) {
+	MsgTypeVoiceTokenRefresh: func(userID int64, _ string, _ json.RawMessage) (Command, error) { //nolint:unparam // error always nil; signature dictated by map type
 		return VoiceTokenRefreshCmd{userID: userID}, nil
 	},
 

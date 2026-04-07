@@ -702,7 +702,7 @@ func (h *Hub) persistEvent(seq uint64, channelID int64, payload []byte) {
 			eventType = "channel_broadcast"
 		}
 	}
-	h.eventPersister.Enqueue(int64(seq), eventType, channelID, payload)
+	h.eventPersister.Enqueue(int64(seq), eventType, channelID, payload) //nolint:gosec // seq is a monotonically increasing counter, never reaches MaxInt64
 }
 
 // extractEventType scans a wrapped JSON envelope for the value of the "type"

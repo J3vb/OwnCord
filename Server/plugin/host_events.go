@@ -4,6 +4,7 @@
 // At activation time the wazero-tagged build wires each subscription into
 // the WS pub/sub hub via Hub.Subscribe; the default build records the
 // subscription in-memory only.
+
 package plugin
 
 import (

@@ -4,6 +4,7 @@
 // against PluginsConfig.HTTPAllowlist (host suffix match) before being sent.
 // The wazero-tagged build invokes this from the plugin's `host_http_request`
 // import; the default build exposes it for testing.
+
 package plugin
 
 import (
