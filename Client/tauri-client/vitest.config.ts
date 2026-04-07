@@ -3,8 +3,11 @@ import { resolve } from "path";
 import solidPlugin from "vite-plugin-solid";
 
 export default defineConfig({
+  // The Solid plugin must be applied here in addition to vite.config.ts so
+  // Vitest can transform `.tsx` test files under src/components/solid/.
+  // Without it, JSX in component tests is parsed as TypeScript and fails on
+  // the angle brackets.
   plugins: [
-    // Transform Solid JSX/TSX for component tests under src/components/solid/.
     solidPlugin({
       include: ["src/components/solid/**/*.{ts,tsx,js,jsx}"],
     }),
@@ -20,10 +23,14 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    // Both the legacy `tests/**/*.test.ts` suite and component-local
+    // `src/**/*.test.{ts,tsx}` files are picked up. The latter is required
+    // for Phase B Step 6 Solid components, whose tests live alongside the
+    // component file (see src/components/solid/README.md).
     include: [
       "tests/**/*.test.ts",
-      // Solid component tests live next to the source they test.
-      "src/components/solid/**/*.test.tsx",
+      "src/**/*.test.ts",
+      "src/**/*.test.tsx",
     ],
     coverage: {
       provider: "v8",
