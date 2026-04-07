@@ -75,10 +75,13 @@ func Init(ctx context.Context, cfg config.TelemetryConfig) (ShutdownFunc, error)
 		if cfg.OTLPEndpoint == "" {
 			return nil, fmt.Errorf("telemetry: exporter=otlp requires otlp_endpoint to be set")
 		}
-		exp, expErr := otlpgrpc.New(ctx,
+		otlpOpts := []otlpgrpc.Option{
 			otlpgrpc.WithEndpoint(cfg.OTLPEndpoint),
-			otlpgrpc.WithInsecure(),
-		)
+		}
+		if cfg.OTLPInsecure {
+			otlpOpts = append(otlpOpts, otlpgrpc.WithInsecure())
+		}
+		exp, expErr := otlpgrpc.New(ctx, otlpOpts...)
 		if expErr != nil {
 			return nil, fmt.Errorf("telemetry: otlp exporter: %w", expErr)
 		}
