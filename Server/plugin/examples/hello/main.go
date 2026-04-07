@@ -11,6 +11,14 @@
 //	list_commands()         → (ptr, len) — JSON array of command names
 //	command_dispatch(p, l)  → (ptr, len) — handle a slash command, return JSON reply
 //	on_event(ptr, len)                  — receive a broadcast event (no-op here)
+//
+// The file is guarded with the "tinygo" build constraint so the standard Go
+// toolchain (go build / go vet) ignores it. Compile with:
+//
+//	tinygo build -o hello.wasm -target wasi ./main.go
+
+//go:build tinygo
+
 package main
 
 import (
