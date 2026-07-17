@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 )
 
 // registerVoiceHandlersV1 registers voice handlers that remain V1 (complex
@@ -12,6 +13,17 @@ func registerVoiceHandlersV1(r *HandlerRegistry) {
 		h.handleVoiceJoin(ctx, c, payload)
 	})
 	r.Register(MsgTypeVoiceLeave, func(ctx context.Context, h *Hub, c *Client, _ string, _ json.RawMessage) {
+		// Rate limit only the explicit client-initiated voice_leave message.
+		// handleVoiceLeave is also invoked internally for disconnect and
+		// channel-switch cleanup (serve.go, voice_join.go); those paths must
+		// never be throttled or they would leak ghost voice states, so the
+		// limit lives here in the dispatch wrapper rather than inside the shared
+		// handleVoiceLeave routine. Mirrors the voice control Limiter idiom.
+		ratKey := fmt.Sprintf("voice_leave:%d", c.userID)
+		if h.limiter != nil && !h.limiter.Allow(ratKey, voiceLeaveRateLimit, voiceLeaveWindow) {
+			c.sendMsg(buildErrorMsg(ErrCodeRateLimited, "too many voice leave attempts"))
+			return
+		}
 		h.handleVoiceLeave(ctx, c)
 	})
 }

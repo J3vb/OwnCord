@@ -60,6 +60,11 @@ func (s *UserService) ChangePassword(userID int64, newPasswordHash string, keepS
 	revoked, err := s.st.DeleteOtherSessions(userID, keepSessionID)
 	if err != nil {
 		slog.Error("UserService.ChangePassword DeleteOtherSessions", "err", err, "user_id", userID)
+		// The password was updated, but other sessions could not be revoked, so
+		// devices authenticated under the old password remain valid. Surface this
+		// as a failure instead of silently reporting success — a password change
+		// is a security action and the caller must be able to warn/retry.
+		return revoked, fmt.Errorf("%w: password changed but failed to revoke other sessions", ErrInternal)
 	}
 	_ = s.st.LogAudit(userID, "password_change", "user", userID, "password changed")
 	slog.Info("password changed", "user_id", userID, "sessions_revoked", revoked)

@@ -142,7 +142,10 @@ func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []st
 		_, _ = database.CreateChannel("General", "voice", "Voice Channels", "", 0)
 
 		// Generate a bootstrap invite code so the owner can invite others.
-		inviteCode, err := database.CreateInvite(uid, 0, nil) // unlimited uses, no expiry
+		// Bound it (5 uses / 24h) rather than minting an unlimited, non-expiring
+		// invite — the owner can create fresh invites once logged in.
+		bootstrapInviteExpiry := time.Now().Add(24 * time.Hour)
+		inviteCode, err := database.CreateInvite(uid, 5, &bootstrapInviteExpiry)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to generate invite code")
 			return

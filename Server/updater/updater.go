@@ -117,9 +117,18 @@ type Updater struct {
 	cacheExpiry    time.Time
 	cachedErr      error
 	errCacheExpiry time.Time
+	textAssetCache map[string]textAssetCacheEntry
 	mu             syncutil.Mutex
 	httpClient     *http.Client
 	signingKeyText string
+}
+
+// textAssetCacheEntry caches a small text asset (e.g. a client update .sig
+// file) alongside the release cache so repeated requests are served from
+// memory instead of re-fetching from GitHub on every call.
+type textAssetCacheEntry struct {
+	content string
+	expiry  time.Time
 }
 
 // NewUpdater creates an Updater for the given repository.
@@ -711,6 +720,36 @@ func (u *Updater) FetchTextAsset(ctx context.Context, url string) (string, error
 		return "", err
 	}
 	return string(data), nil
+}
+
+// FetchTextAssetCached is FetchTextAsset with an in-memory cache keyed by URL,
+// using the same cacheTTL as the release cache. It lets unauthenticated,
+// unrate-limited callers (e.g. the client-update endpoint) be served from
+// memory instead of triggering an outbound fetch on every request.
+func (u *Updater) FetchTextAssetCached(ctx context.Context, url string) (string, error) {
+	now := time.Now()
+
+	u.mu.Lock()
+	if entry, ok := u.textAssetCache[url]; ok && now.Before(entry.expiry) {
+		content := entry.content
+		u.mu.Unlock()
+		return content, nil
+	}
+	u.mu.Unlock()
+
+	content, err := u.FetchTextAsset(ctx, url)
+	if err != nil {
+		return "", err
+	}
+
+	u.mu.Lock()
+	if u.textAssetCache == nil {
+		u.textAssetCache = make(map[string]textAssetCacheEntry)
+	}
+	u.textAssetCache[url] = textAssetCacheEntry{content: content, expiry: now.Add(cacheTTL)}
+	u.mu.Unlock()
+
+	return content, nil
 }
 
 // downloadFile downloads the content at url and writes it to destPath.

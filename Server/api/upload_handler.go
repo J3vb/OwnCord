@@ -304,7 +304,12 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 			disposition = "attachment"
 		}
 		w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": aa.Filename}))
-		w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d, immutable", fileCacheMaxAgeSeconds))
+		// These downloads are access-controlled, so they must never be stored by
+		// shared/proxy caches (info-leak). Mark private and force revalidation.
+		w.Header().Set("Cache-Control", fmt.Sprintf("private, max-age=%d, no-cache", fileCacheMaxAgeSeconds))
+		// The Access-Control-Allow-Origin header below reflects the request
+		// Origin, so responses vary by Origin and must not be cross-served.
+		w.Header().Set("Vary", "Origin")
 		// CORS: allow webview to read the response body using configured origins.
 		if origin := r.Header.Get("Origin"); origin != "" {
 			for _, allowed := range allowedOrigins {

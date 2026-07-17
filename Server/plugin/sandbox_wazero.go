@@ -5,7 +5,7 @@
 // elsewhere in the repo so the default sqlite-only build does not pull
 // wazero into go.mod at runtime.
 //
-// Architecture
+// # Architecture
 //
 // The wazero-tagged build provides:
 //
@@ -36,8 +36,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -121,17 +123,26 @@ func (r *Registry) activateWithRuntime(ctx context.Context, platform any, inst *
 		return fmt.Errorf("plugin %q: instantiate: %w", inst.Manifest.Name, err)
 	}
 
-	// Register the module and auto-bind any commands the plugin exports
-	// via list_commands. The plugin must also have declared the `commands`
-	// capability in its manifest, otherwise no binding happens.
+	// Store the module under the lock, then auto-bind any commands the plugin
+	// exports via list_commands. Binding is routed through RegisterCommand so
+	// each name goes through the same normalization (trim "/" + lowercase) and
+	// conflict check the direct registration path uses: a command already owned
+	// by a DIFFERENT plugin is refused rather than silently clobbered, closing
+	// the cross-plugin command-hijack hole. RegisterCommand acquires r.mu
+	// itself, so it is called outside the lock below to avoid re-entrant
+	// locking. The plugin must also have declared the `commands` capability in
+	// its manifest, otherwise no binding happens.
 	r.mu.Lock()
 	inst.module = module
+	r.mu.Unlock()
 	if inst.Manifest.HasCapability(CapCommands) {
 		for _, cmd := range listExportedCommands(ctx, module) {
-			r.commands[cmd] = inst
+			if err := r.RegisterCommand(cmd, inst); err != nil {
+				slog.Warn("plugin: skipping command binding",
+					"plugin", inst.Manifest.Name, "command", cmd, "err", err)
+			}
 		}
 	}
-	r.mu.Unlock()
 	return nil
 }
 
@@ -195,9 +206,27 @@ func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, ch
 		return &CommandResult{Reply: fmt.Sprintf("plugin %s: marshal payload: %v", inst.Manifest.Name, err)}, true
 	}
 
+	// Enforce the plugin's CPU budget. The effective budget is the manifest's
+	// Resources.CPUBudgetMs, falling back to the configured default, then a
+	// hard 100ms floor so a zero/negative value can never mean "no limit".
+	// Every guest call (allocate / command_dispatch / deallocate) runs under
+	// this deadline instead of the long-lived WebSocket context. The runtime
+	// was created WithCloseOnContextDone(true), so an expired deadline closes
+	// the module and interrupts a runaway guest (e.g. `for {}`) — the Call
+	// returns an error rather than panicking, which the paths below surface.
+	budgetMs := inst.Manifest.Resources.CPUBudgetMs
+	if budgetMs <= 0 {
+		budgetMs = r.cfg.CPUBudgetMs
+	}
+	if budgetMs <= 0 {
+		budgetMs = 100
+	}
+	callCtx, cancel := context.WithTimeout(ctx, time.Duration(budgetMs)*time.Millisecond)
+	defer cancel()
+
 	// Allocate guest memory for the input payload.
 	size := uint64(len(payload))
-	ptrs, callErr := allocFn.Call(ctx, size)
+	ptrs, callErr := allocFn.Call(callCtx, size)
 	if callErr != nil || len(ptrs) == 0 {
 		return &CommandResult{Reply: fmt.Sprintf("plugin %s: allocate(%d): %v", inst.Manifest.Name, size, callErr)}, true
 	}
@@ -208,14 +237,19 @@ func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, ch
 		return &CommandResult{Reply: fmt.Sprintf("plugin %s: memory write at %d failed", inst.Manifest.Name, ptr)}, true
 	}
 
-	results, callErr := dispatchFn.Call(ctx, ptr, size)
+	results, callErr := dispatchFn.Call(callCtx, ptr, size)
 
 	// Free the input buffer regardless of dispatch outcome.
 	if deallocFn != nil {
-		_, _ = deallocFn.Call(ctx, ptr, size)
+		_, _ = deallocFn.Call(callCtx, ptr, size)
 	}
 
 	if callErr != nil {
+		// Surface a CPU-budget overrun as a clean, specific error rather than
+		// leaking the raw "module closed with context deadline exceeded".
+		if callCtx.Err() == context.DeadlineExceeded {
+			return &CommandResult{Reply: fmt.Sprintf("plugin %s: command exceeded CPU budget of %dms", inst.Manifest.Name, budgetMs)}, true
+		}
 		return &CommandResult{Reply: fmt.Sprintf("plugin %s: dispatch: %v", inst.Manifest.Name, callErr)}, true
 	}
 	if len(results) < 2 {

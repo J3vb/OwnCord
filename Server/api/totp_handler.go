@@ -66,7 +66,14 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 		}
 
 		totpRateLimitKey := fmt.Sprintf("totp_fail:%d", challenge.UserID)
-		if !limiter.Check(totpRateLimitKey, totpFailureRateLimit, totpFailureWindow) {
+		// Atomically record this attempt and reject once the per-user failure cap
+		// is reached. Recording up-front — rather than a read-only Check now and
+		// Allow only on failure — closes a TOCTOU where many concurrent requests
+		// reusing one valid partial token all pass the read-only check before any
+		// failure is recorded, defeating the per-user brute-force cap (the only
+		// cross-IP defence). A successful verification resets the counter below,
+		// so legitimate retries are not penalised.
+		if !limiter.Allow(totpRateLimitKey, totpFailureRateLimit, totpFailureWindow) {
 			writeJSON(w, http.StatusTooManyRequests, errorResponse{
 				Error:   "RATE_LIMITED",
 				Message: "too many failed attempts, try again later",
@@ -94,7 +101,8 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 		}
 
 		if !auth.VerifyTOTPCodeOnce(secret, strings.TrimSpace(req.Code), time.Now().UTC(), user.ID, usedTOTPCodes) {
-			limiter.Allow(totpRateLimitKey, totpFailureRateLimit, totpFailureWindow)
+			// The attempt was already recorded atomically up-front via
+			// limiter.Allow; only the per-partial-token counter is advanced here.
 			partialStore.RegisterFailure(partialToken, partialAuthMaxFailures)
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
 				Error:   "UNAUTHORIZED",

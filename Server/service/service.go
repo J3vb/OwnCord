@@ -36,7 +36,7 @@ func New(st store.Store, limiter *auth.RateLimiter) *Services {
 		DMs:         NewDMService(st),
 		Invites:     NewInviteService(st),
 		Blocks:      NewBlockService(st),
-		Moderation:  NewModerationService(st),
+		Moderation:  NewModerationService(st, permSvc),
 		Voice:       NewVoiceService(st, permSvc),
 	}
 }
