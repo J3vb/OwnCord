@@ -128,9 +128,9 @@ func (m *MemStore) SeedBlock(blockerID, blockedID int64) {
 
 // ---------- Store interface: top-level ----------
 
-func (m *MemStore) Close() error                                              { return nil }
-func (m *MemStore) SQLDb() *sql.DB                                            { return nil }
-func (m *MemStore) WithTx(_ context.Context, fn func(Store) error) error      { return fn(m) }
+func (m *MemStore) Close() error                                         { return nil }
+func (m *MemStore) SQLDb() *sql.DB                                       { return nil }
+func (m *MemStore) WithTx(_ context.Context, fn func(Store) error) error { return fn(m) }
 
 // ---------- MessageStore ----------
 
@@ -686,7 +686,11 @@ func (m *MemStore) CreateAttachment(_ string, _ int64, _, _, _ string, _ int64, 
 }
 
 func (m *MemStore) GetAttachmentByID(_ string) (*db.Attachment, error) {
-	panic("memstore: not implemented: GetAttachmentByID")
+	// MemStore does not track attachments (CreateAttachment is unsupported and
+	// LinkAttachmentsToMessage is a no-op), so every lookup is "not found".
+	// Returning (nil, nil) rather than panicking keeps the attachment-ownership
+	// check in MessageService.SendMessage consistent with the no-op link path.
+	return nil, nil
 }
 
 func (m *MemStore) GetAttachmentWithChannel(_ string) (*db.AttachmentAccess, error) {

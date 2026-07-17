@@ -251,8 +251,12 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		})
 	})
 
-	// Client auto-update endpoint (unauthenticated).
-	MountClientUpdateRoute(r, u)
+	// Client auto-update endpoint (unauthenticated). Per-IP rate limited to
+	// bound abuse; the signature fetch is cached inside the updater (DoS fix).
+	MountClientUpdateRoute(
+		r.With(RateLimitMiddleware(limiter, clientUpdateRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)),
+		u,
+	)
 
 	// Issue 15: Warn if AllowedOrigins contains wildcard.
 	for _, o := range cfg.Server.AllowedOrigins {

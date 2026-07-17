@@ -173,6 +173,26 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		}
 	}
 
+	// Verify attachment ownership before persisting, to prevent hijacking
+	// another user's unlinked upload (IDOR). Any referenced attachment that
+	// exists must belong to the sender (uploader_id == p.UserID) and must not
+	// already be linked to a message (message_id IS NULL). Nonexistent IDs are
+	// ignored — LinkAttachmentsToMessage silently skips them. Checked before
+	// CreateMessage so a failed ownership check never persists a message.
+	for _, aid := range p.AttachmentIDs {
+		att, attErr := s.st.GetAttachmentByID(aid)
+		if attErr != nil {
+			slog.Error("MessageService.SendMessage GetAttachmentByID", "err", attErr, "attachment_id", aid)
+			return nil, fmt.Errorf("%w: failed to verify attachment ownership", ErrInternal)
+		}
+		if att == nil {
+			continue // nonexistent — the link query will skip it
+		}
+		if att.UploaderID == nil || *att.UploaderID != p.UserID || att.MessageID != nil {
+			return nil, fmt.Errorf("%w: attachment not owned by sender or already linked", ErrForbidden)
+		}
+	}
+
 	// Persist message.
 	msgID, err := s.st.CreateMessage(p.ChannelID, p.UserID, content, p.ReplyTo)
 	if err != nil {
@@ -435,7 +455,10 @@ func (s *MessageService) handleReaction(userID, msgID int64, emoji string, add b
 		if dmErr != nil || !ok {
 			return nil, fmt.Errorf("%w: not a DM participant", ErrBadRequest)
 		}
-	} else if !s.perms.HasChannelPerm(userID, msg.ChannelID, permissions.AddReactions) {
+	} else if !s.perms.HasChannelPerm(userID, msg.ChannelID, permissions.ReadMessages|permissions.AddReactions) {
+		// Require READ_MESSAGES in addition to ADD_REACTIONS so a user cannot
+		// react in a channel they cannot read. Mirrors checkSendPermission,
+		// which requires ReadMessages|SendMessages for non-DM sends.
 		return nil, fmt.Errorf("%w: missing ADD_REACTIONS permission", ErrForbidden)
 	}
 

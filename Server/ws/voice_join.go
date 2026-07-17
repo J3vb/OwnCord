@@ -12,6 +12,19 @@ import (
 	"github.com/owncord/server/permissions"
 )
 
+// Voice join/leave rate limits. voice_join and voice_leave each fan out a
+// broadcast to every connected client, so a single user must not be able to
+// trigger them in a tight loop. Mirrors the named-constant idiom used by the
+// voice control handlers (see voice_broadcast.go / voice_controls.go).
+// voiceLeaveRateLimit/Window are consumed by the voice_leave message dispatch
+// in handlers_voice.go (same package).
+const (
+	voiceJoinRateLimit  = 5
+	voiceJoinWindow     = time.Second
+	voiceLeaveRateLimit = 5
+	voiceLeaveWindow    = time.Second
+)
+
 // validVoiceQuality returns true if q is an accepted voice quality preset.
 // Uses voiceQualities (defined in voice_broadcast.go) as the single source of truth.
 func validVoiceQuality(q string) bool {
@@ -30,6 +43,15 @@ func validVoiceQuality(q string) bool {
 // 8. Broadcasts voice_state to all clients.
 // 9. Sends voice_config to the joiner.
 func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMessage) {
+	// Rate limit: voice_join broadcasts a voice_state update to every connected
+	// client, so cap how often a single user can trigger the fan-out. Mirrors the
+	// Limiter.Allow(...) idiom used by the voice control handlers.
+	ratKey := fmt.Sprintf("voice_join:%d", c.userID)
+	if h.limiter != nil && !h.limiter.Allow(ratKey, voiceJoinRateLimit, voiceJoinWindow) {
+		c.sendMsg(buildErrorMsg(ErrCodeRateLimited, "too many voice join attempts"))
+		return
+	}
+
 	channelID, err := parseChannelID(payload)
 	if err != nil || channelID <= 0 {
 		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "channel_id must be a positive integer"))

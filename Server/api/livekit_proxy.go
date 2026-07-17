@@ -59,11 +59,9 @@ func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 	blockedSegments := map[string]bool{"admin": true, "metrics": true, "debug": true, "twirp": true}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Detect WebSocket upgrade requests.
-		if isWebSocketUpgrade(r) {
-			proxyWebSocket(w, r, &wsTarget, allowedOrigins)
-			return
-		}
+		// Enforce the path allowlist and Origin check for EVERY request,
+		// including WebSocket upgrades — otherwise a client could reach a
+		// blocked/admin endpoint simply by sending an Upgrade header.
 
 		// Block sensitive LiveKit endpoints (exact segment match).
 		for _, seg := range strings.Split(strings.ToLower(r.URL.Path), "/") {
@@ -76,12 +74,18 @@ func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 			}
 		}
 
-		// Validate Origin header for HTTP requests (mirrors WS OriginPatterns).
+		// Validate Origin header (mirrors WS OriginPatterns).
 		if !isOriginAllowed(r, allowedOrigins) {
 			writeJSON(w, http.StatusForbidden, errorResponse{
 				Error:   "FORBIDDEN",
 				Message: "access denied",
 			})
+			return
+		}
+
+		// Detect WebSocket upgrade requests.
+		if isWebSocketUpgrade(r) {
+			proxyWebSocket(w, r, &wsTarget, allowedOrigins)
 			return
 		}
 

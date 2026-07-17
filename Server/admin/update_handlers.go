@@ -2,6 +2,9 @@ package admin
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -84,6 +87,17 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 			return
 		}
 
+		// Snapshot the hash of the just-verified staged binary. It is re-checked
+		// immediately before rename+spawn to close the TOCTOU window between
+		// verification here and the swap in the background goroutine below.
+		stagedHash, err := fileSHA256(newPath)
+		if err != nil {
+			slog.Error("update: failed to hash staged binary", "err", err)
+			_ = os.Remove(newPath)
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to stage update")
+			return
+		}
+
 		// Respond to the client before shutting down.
 		writeJSON(w, http.StatusOK, map[string]string{
 			"status":  "applying",
@@ -96,6 +110,14 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 				hub.BroadcastServerRestart("update", 5)
 			}
 			time.Sleep(5 * time.Second)
+
+			// TOCTOU guard: re-verify the staged binary is byte-for-byte the one
+			// we verified before responding. If it was swapped between then and
+			// now, abort without renaming or spawning it.
+			if err := u.VerifyChecksum(newPath, stagedHash); err != nil {
+				slog.Error("update: staged binary re-verification failed, aborting update", "error", err)
+				return
+			}
 
 			// Rename: current -> .old, .new -> current
 			_ = os.Remove(oldPath) // remove any stale .old
@@ -136,4 +158,21 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 			os.Exit(0) // fallback if SIGTERM handler didn't exit
 		}()
 	})
+}
+
+// fileSHA256 returns the hex-encoded SHA256 of the file at path. Used to
+// snapshot a verified update binary so it can be re-checked (via
+// updater.VerifyChecksum) immediately before it is renamed and executed.
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close() //nolint:errcheck
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }

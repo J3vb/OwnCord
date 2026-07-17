@@ -218,13 +218,23 @@ func clientIPWithProxies(r *http.Request, trustedCIDRs []string) string {
 		}
 	}
 
-	// Fall back to the leftmost (client) entry in X-Forwarded-For.
+	// Fall back to X-Forwarded-For, walking from the RIGHT and skipping entries
+	// that are themselves trusted proxies. The first non-trusted, valid address
+	// is the real client. Taking the leftmost entry (BUG-112) would trust a
+	// client-supplied value: a client can prepend a spoofed IP
+	// (`X-Forwarded-For: <spoofed>, <real>`) that the proxy then appends to,
+	// letting it forge per-IP rate-limit and lockout keys.
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.SplitN(xff, ",", 2)
-		if client := strings.TrimSpace(parts[0]); client != "" {
-			if net.ParseIP(client) != nil {
-				return client
+		parts := strings.Split(xff, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			candidate := strings.TrimSpace(parts[i])
+			if candidate == "" || net.ParseIP(candidate) == nil {
+				continue
 			}
+			if trusted, _ := isTrustedProxy(candidate, trustedCIDRs); trusted {
+				continue // our own proxy hop, keep walking left
+			}
+			return candidate
 		}
 	}
 

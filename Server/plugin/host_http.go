@@ -76,26 +76,43 @@ func (r *Registry) HTTPDo(ctx context.Context, inst *Instance, req HTTPRequest) 
 	for k, v := range req.Header {
 		httpReq.Header.Set(k, v)
 	}
-	// Custom transport with a guarded DialContext: every actual TCP dial
-	// re-checks the resolved IP, closing the DNS-rebinding TOCTOU window
-	// between rejectPrivateAddrs above and the underlying dial.
+	// Custom transport with a guarded DialContext: the host is resolved once,
+	// every candidate IP is validated against the blocklist, and the actual
+	// connection is made to that specific vetted IP — never re-resolved by
+	// hostname. This closes the DNS-rebinding TOCTOU window where a second
+	// lookup (the one net.Dialer would perform on a hostname) could return an
+	// internal IP after rejectPrivateAddrs above had already approved the name.
 	dialer := &net.Dialer{Timeout: httpTimeout}
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			h, _, splitErr := net.SplitHostPort(addr)
+			h, port, splitErr := net.SplitHostPort(addr)
 			if splitErr != nil {
 				return nil, splitErr
 			}
-			ip := net.ParseIP(h)
-			if ip == nil {
-				// Hostname — resolve and validate every address before dial.
-				if err := rejectPrivateAddrs(ctx, h); err != nil {
+			// IP literal: validate and dial as-is (no resolution happens).
+			if ip := net.ParseIP(h); ip != nil {
+				if err := ipAllowed(ip); err != nil {
 					return nil, fmt.Errorf("%w: %v", ErrHTTPHostDenied, err)
 				}
-			} else if err := ipAllowed(ip); err != nil {
-				return nil, fmt.Errorf("%w: %v", ErrHTTPHostDenied, err)
+				return dialer.DialContext(ctx, network, addr)
 			}
-			return dialer.DialContext(ctx, network, addr)
+			// Hostname: resolve once, validate every returned address, then
+			// dial the concrete vetted IP so the connection target is exactly
+			// the address that was checked.
+			resolver := &net.Resolver{}
+			ips, lookupErr := resolver.LookupIPAddr(ctx, h)
+			if lookupErr != nil {
+				return nil, fmt.Errorf("%w: dns lookup failed: %v", ErrHTTPHostDenied, lookupErr)
+			}
+			if len(ips) == 0 {
+				return nil, fmt.Errorf("%w: no addresses for %s", ErrHTTPHostDenied, h)
+			}
+			for _, resolved := range ips {
+				if err := ipAllowed(resolved.IP); err != nil {
+					return nil, fmt.Errorf("%w: %v", ErrHTTPHostDenied, err)
+				}
+			}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
 		},
 	}
 	client := &http.Client{

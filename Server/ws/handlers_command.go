@@ -83,9 +83,12 @@ func handlePluginCommand(ctx context.Context, h *Hub, c *Client, reqID string, p
 	}
 
 	if result.Broadcast != "" && p.ChannelID != 0 {
-		// Verify the invoking client has permission to send to this channel
-		// before broadcasting the plugin result to all channel members.
-		if !h.requireChannelPerm(c, p.ChannelID, permissions.SendMessages, "SEND_MESSAGES") {
+		// Verify the invoking client can post to this channel before broadcasting
+		// the plugin result to all channel members. Mirrors the normal send path:
+		// non-DM channels require READ_MESSAGES|SEND_MESSAGES (so a user cannot
+		// post into a channel they cannot read), and DM channels are validated by
+		// participant membership rather than role permissions.
+		if !h.requireChannelBroadcastAccess(c, p.ChannelID) {
 			return
 		}
 		// Channel broadcast — visible to everyone in the channel.
@@ -93,6 +96,39 @@ func handlePluginCommand(ctx context.Context, h *Hub, c *Client, reqID string, p
 		h.BroadcastToChannel(p.ChannelID, msg)
 		slog.Info("plugin command broadcast", "cmd", cmd, "channel_id", p.ChannelID, "user_id", c.userID)
 	}
+}
+
+// requireChannelBroadcastAccess reports whether the client may post to
+// channelID, mirroring the normal message-send permission path. DM channels are
+// validated by participant membership; all other channels require
+// READ_MESSAGES|SEND_MESSAGES. On failure it sends an error to the client and
+// returns false. Routes through the shared permissions.Checker.RequireChannelAccess
+// so DM handling matches the rest of the codebase.
+func (h *Hub) requireChannelBroadcastAccess(c *Client, channelID int64) bool {
+	if c.user == nil {
+		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "not authenticated"))
+		return false
+	}
+	ch, err := h.db.GetChannel(channelID)
+	if err != nil || ch == nil {
+		c.sendMsg(buildErrorMsg(ErrCodeNotFound, "channel not found"))
+		return false
+	}
+	role, err := h.db.GetRoleByID(c.user.RoleID)
+	if err != nil || role == nil {
+		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "role not found"))
+		return false
+	}
+	if accessErr := h.permChecker.RequireChannelAccess(
+		c.userID, role.Permissions, role.ID, ch.Type, channelID,
+		permissions.ReadMessages|permissions.SendMessages,
+	); accessErr != nil {
+		slog.Warn("ws plugin broadcast permission denied",
+			"user_id", c.userID, "channel_id", channelID, "err", accessErr)
+		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "missing permission to post in this channel"))
+		return false
+	}
+	return true
 }
 
 // buildCommandReply builds an ephemeral command_reply envelope.

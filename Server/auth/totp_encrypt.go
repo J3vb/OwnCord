@@ -138,11 +138,14 @@ func DecryptTOTPSecret(key []byte, ciphertext string) (string, error) {
 	nonce, sealed := data[:nonceSize], data[nonceSize:]
 	plaintext, err := gcm.Open(nil, nonce, sealed, nil)
 	if err != nil {
-		// Decryption failed -- likely an unencrypted legacy secret or wrong key.
-		// Return as-is for backwards compatibility.
-		slog.Warn("TOTP secret decryption failed — returning as plaintext (check TOTP_ENCRYPTION_KEY)",
-			"error", err)
-		return ciphertext, nil //nolint:nilerr
+		// The value has the full encrypted shape (valid hex, long enough for
+		// nonce+tag) but GCM authentication failed. That is a real error — a
+		// wrong TOTP_ENCRYPTION_KEY or a tampered/corrupted ciphertext — not a
+		// legacy plaintext secret (those are caught by the not-hex and
+		// too-short branches above). Fail CLOSED: returning the ciphertext as
+		// if it were the secret would silently mask key misconfiguration.
+		slog.Error("TOTP secret decryption failed — check TOTP_ENCRYPTION_KEY", "error", err)
+		return "", fmt.Errorf("decrypting TOTP secret: %w", err)
 	}
 
 	return string(plaintext), nil
