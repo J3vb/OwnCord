@@ -555,26 +555,9 @@ func (h *Hub) BroadcastToAllLow(msg []byte) {
 	h.pubsub.PublishGlobalLow(msg)
 }
 
-// sendSequencedToUsers stamps msg with a monotonic seq, stores it in the replay
-// buffer under channelID, and fanouts the wrapped payload to the provided users.
-func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
-	h.seqMu.Lock()
-	defer h.seqMu.Unlock()
-
-	seq := h.nextSeq()
-	wrapped := wrapWithSeq(msg, seq)
-
-	// Store DM event for reconnect replay; filtering is channel-based and uses
-	// allowed channel IDs computed at auth time (including open DMs).
-	h.replayBuf.Push(seq, channelID, wrapped)
-	h.persistEvent(seq, channelID, wrapped)
-
-	for _, userID := range userIDs {
-		h.SendToUser(userID, wrapped)
-	}
-}
-
-// sendSequencedToUsersHigh is like sendSequencedToUsers but uses high-priority delivery.
+// sendSequencedToUsersHigh stamps msg with a monotonic seq, stores it in the
+// replay buffer under channelID, and fans the wrapped payload out to the
+// provided users with high-priority delivery.
 func (h *Hub) sendSequencedToUsersHigh(channelID int64, userIDs []int64, msg []byte) {
 	h.seqMu.Lock()
 	defer h.seqMu.Unlock()

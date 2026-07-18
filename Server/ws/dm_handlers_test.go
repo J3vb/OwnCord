@@ -294,7 +294,7 @@ func TestDM_ChatEdit_ParticipantCanEdit(t *testing.T) {
 	hub.HandleMessageForTest(cAlice, dmChatEditMsg(msgID, "edited"))
 	time.Sleep(100 * time.Millisecond)
 
-	// Alice should receive the chat_edited broadcast (via broadcastToDMParticipants).
+	// Alice should receive the chat_edited broadcast (via the sequenced DM event path).
 	msgs := dmDrainAll(sendAlice)
 	edited := dmFindMsgType(msgs, "chat_edited")
 	if edited == nil {
