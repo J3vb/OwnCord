@@ -3,6 +3,7 @@
 // StartEventPruner runs a background goroutine that deletes events older than
 // the configured retention window. It is the bounded-storage half of the
 // event persistence design: the persister appends, the pruner trims.
+
 package ws
 
 import (

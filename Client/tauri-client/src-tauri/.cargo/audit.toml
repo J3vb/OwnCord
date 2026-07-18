@@ -1,0 +1,11 @@
+[advisories]
+ignore = [
+    # quick-xml 0.37 is pinned by tauri-winrt-notification 0.7 (via
+    # tauri-plugin-notification -> notify-rust); no semver-compatible route
+    # to the fixed 0.41 exists yet. It only parses toast-notification XML
+    # templates the library itself constructs — never attacker-controlled
+    # input — so these parser-DoS advisories are not reachable here.
+    # Drop both entries when the notification chain moves to quick-xml >= 0.41.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]

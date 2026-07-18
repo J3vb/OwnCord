@@ -1,0 +1,9 @@
+# Normalize line endings: store LF in the repo and check out LF on every
+# platform, so prettier/gofmt see identical bytes locally and in CI.
+* text=auto eol=lf
+
+# Binary assets
+*.png binary
+*.ico binary
+*.wasm binary
+*.exe binary

@@ -71,3 +71,9 @@ TODOS.md
 CLAUDE.md
 DESIGN.md
 Client/CLIENT-REVIEW.md
+
+# Agent tooling state
+.serena/
+
+# Client env (holds API keys - never commit)
+Client/tauri-client/.env

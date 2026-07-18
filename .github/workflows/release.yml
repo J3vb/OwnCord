@@ -83,7 +83,8 @@ jobs:
             libasound2-dev \
             libssl-dev \
             patchelf \
-            librsvg2-dev
+            librsvg2-dev \
+            xdg-utils
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -211,7 +212,8 @@ jobs:
             libasound2-dev \
             libssl-dev \
             patchelf \
-            librsvg2-dev
+            librsvg2-dev \
+            xdg-utils
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -361,9 +363,16 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
+      - name: Create source snapshot (AGPL source availability)
+        shell: bash
+        run: |
+          git archive --format=tar.gz --prefix="OwnCord-${VERSION}/" \
+            -o "owncord-src-${{ github.ref_name }}.tar.gz" HEAD
+
       - name: Generate SHA256 checksums
         run: |
           find windows linux -type f -exec sha256sum {} \; > checksums.sha256
+          sha256sum owncord-src-*.tar.gz >> checksums.sha256
 
       - name: Generate server update manifest
         shell: bash
@@ -397,7 +406,33 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mapfile -t assets < <(find windows linux -type f)
-          assets+=(checksums.sha256)
+          assets+=(checksums.sha256 owncord-src-*.tar.gz)
           gh release create "${{ github.ref_name }}" \
+            --notes-file CHANGELOG.md \
+            "${assets[@]}"
+
+      # The public releases repo is what deployed servers and clients poll for
+      # updates, and it carries the AGPL source snapshot while the source repo
+      # is private. Publishing there must never be skipped silently once the
+      # source repo is private.
+      - name: Publish to public releases repo
+        shell: bash
+        env:
+          RELEASES_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+          SOURCE_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -z "$RELEASES_TOKEN" ]; then
+            PRIVATE=$(GH_TOKEN="$SOURCE_REPO_TOKEN" gh api "repos/$GITHUB_REPOSITORY" --jq .private)
+            if [ "$PRIVATE" = "true" ]; then
+              echo "::error::Source repo is private and RELEASES_REPO_TOKEN is unset — binaries would ship with no public source or update feed (AGPL violation, broken updater)."
+              exit 1
+            fi
+            echo "::warning::RELEASES_REPO_TOKEN not set — skipping publish to J3vb/OwnCord-releases."
+            exit 0
+          fi
+          mapfile -t assets < <(find windows linux -type f)
+          assets+=(checksums.sha256 owncord-src-*.tar.gz)
+          GH_TOKEN="$RELEASES_TOKEN" gh release create "${{ github.ref_name }}" \
+            --repo J3vb/OwnCord-releases \
             --notes-file CHANGELOG.md \
             "${assets[@]}"
