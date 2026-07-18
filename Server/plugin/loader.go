@@ -13,6 +13,7 @@
 //
 // Loader walks the directory, parses every plugin.json, and returns a slice
 // of foundPlugin records. The Registry then persists each into the store.
+
 package plugin
 
 import (

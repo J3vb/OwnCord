@@ -5,29 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"time"
 
-	"github.com/microcosm-cc/bluemonday"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 )
-
-// Rate limit windows.
-const (
-	chatRateLimit     = 10
-	chatWindow        = time.Second
-	typingRateLimit   = 1
-	typingWindow      = 3 * time.Second
-	presenceRateLimit = 1
-	presenceWindow    = 10 * time.Second
-	reactionRateLimit = 5
-	reactionWindow    = time.Second
-)
-
-// maxMessageLen is the maximum allowed message length in runes (Unicode code points).
-const maxMessageLen = 4000
-
-var sanitizer = bluemonday.StrictPolicy()
 
 // HandleMessageForTest dispatches a raw WebSocket message from client c.
 // Exported so ws_test package can invoke it directly without a real connection.
@@ -226,21 +207,11 @@ func (h *Hub) requireChannelPerm(c *Client, channelID int64, perm int64, permLab
 	return false
 }
 
-// broadcastExclude sends a message to all clients in the sender's channel
-// EXCEPT the sender. Unlike hub.BroadcastToChannel, messages sent via this
-// function are NOT stored in the replay ring buffer — they are ephemeral.
-// This is correct for typing indicators but would be incorrect for messages
-// that should survive reconnection replay.
-func (h *Hub) broadcastExclude(channelID, excludeUserID int64, msg []byte) {
-	if channelID == 0 {
-		h.pubsub.Publish(TopicGlobal, msg, excludeUserID)
-		return
-	}
-	h.pubsub.Publish(ChannelTopic(channelID), msg, excludeUserID)
-}
-
-// broadcastExcludeLow is like broadcastExclude but at low priority.
-// Used for typing indicators — dropped on overflow instead of disconnecting.
+// broadcastExcludeLow sends a message at low priority to all clients in the
+// sender's channel EXCEPT the sender. Messages sent via this function are NOT
+// stored in the replay ring buffer — they are ephemeral. This is correct for
+// typing indicators (dropped on overflow instead of disconnecting) but would
+// be incorrect for messages that should survive reconnection replay.
 func (h *Hub) broadcastExcludeLow(channelID, excludeUserID int64, msg []byte) {
 	if channelID == 0 {
 		h.pubsub.PublishLow(TopicGlobal, msg, excludeUserID)
@@ -249,31 +220,3 @@ func (h *Hub) broadcastExcludeLow(channelID, excludeUserID int64, msg []byte) {
 	h.pubsub.PublishLow(ChannelTopic(channelID), msg, excludeUserID)
 }
 
-// broadcastToDMParticipants sends a message to all participants of a DM channel
-// while preserving DM semantics (delivery is by participant, not channel focus).
-// Unlike broadcastToDMParticipantsExclude, this path is sequenced and replayable.
-func (h *Hub) broadcastToDMParticipants(channelID int64, msg []byte) {
-	participantIDs, err := h.db.GetDMParticipantIDs(channelID)
-	if err != nil {
-		slog.Error("broadcastToDMParticipants GetDMParticipantIDs", "err", err, "channel_id", channelID)
-		return
-	}
-	h.sendSequencedToUsers(channelID, participantIDs, msg)
-}
-
-// broadcastToDMParticipantsExclude sends a message to all participants of a DM
-// channel EXCEPT the specified user. Used for ephemeral events like typing
-// indicators where echoing back to the sender is undesirable.
-func (h *Hub) broadcastToDMParticipantsExclude(channelID, excludeUserID int64, msg []byte) {
-	participantIDs, err := h.db.GetDMParticipantIDs(channelID)
-	if err != nil {
-		slog.Error("broadcastToDMParticipantsExclude GetDMParticipantIDs", "err", err, "channel_id", channelID)
-		return
-	}
-	for _, pid := range participantIDs {
-		if pid == excludeUserID {
-			continue
-		}
-		h.SendToUser(pid, msg)
-	}
-}

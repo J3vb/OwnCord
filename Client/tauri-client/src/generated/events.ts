@@ -11,7 +11,7 @@
  * Event Listeners
  * Type-safe event listener helpers for Tauri events
  */
-import { listen, type UnlistenFn, type Event } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import * as types from "./types";
 
 /**
@@ -19,9 +19,7 @@ import * as types from "./types";
  * @param handler - Callback function to handle the event
  * @returns Promise that resolves to an unlisten function
  */
-export async function onStatusChange(
-  handler: (payload: string) => void,
-): Promise<UnlistenFn> {
+export async function onStatusChange(handler: (payload: string) => void): Promise<UnlistenFn> {
   return listen<string>("status-change", (event) => {
     handler(event.payload);
   });
@@ -32,9 +30,7 @@ export async function onStatusChange(
  * @param handler - Callback function to handle the event
  * @returns Promise that resolves to an unlisten function
  */
-export async function onWsState(
-  handler: (payload: string) => void,
-): Promise<UnlistenFn> {
+export async function onWsState(handler: (payload: string) => void): Promise<UnlistenFn> {
   return listen<string>("ws-state", (event) => {
     handler(event.payload);
   });
@@ -45,9 +41,7 @@ export async function onWsState(
  * @param handler - Callback function to handle the event
  * @returns Promise that resolves to an unlisten function
  */
-export async function onCertTofu(
-  handler: (payload: types.Value) => void,
-): Promise<UnlistenFn> {
+export async function onCertTofu(handler: (payload: types.Value) => void): Promise<UnlistenFn> {
   return listen<types.Value>("cert-tofu", (event) => {
     handler(event.payload);
   });

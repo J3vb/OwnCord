@@ -114,7 +114,7 @@ pub fn store_cert_fingerprint(
         // existed, or delete if there was none. Without this, a failed save
         // during cert rotation would silently lose the previously trusted cert.
         match old_value {
-            Some(v) => { let _ = store.set(&host, v); }
+            Some(v) => { store.set(&host, v); }
             None    => { let _ = store.delete(&host); }
         }
         return Err(format!("failed to persist cert fingerprint: {e}"));
@@ -150,12 +150,10 @@ pub fn get_cert_fingerprint(
 // DevTools command
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "devtools")]
 #[tauri::command]
-pub fn open_devtools(_window: tauri::WebviewWindow) {
-    #[cfg(feature = "devtools")]
-    {
-        _window.open_devtools();
-    }
+pub fn open_devtools(window: tauri::WebviewWindow) {
+    window.open_devtools();
 }
 
 // ---------------------------------------------------------------------------

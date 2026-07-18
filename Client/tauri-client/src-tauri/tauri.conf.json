@@ -54,7 +54,7 @@
         "bundleMediaFramework": true
       }
     },
-    "category": "Network",
+    "category": "SocialNetworking",
     "shortDescription": "Self-hosted chat platform",
     "longDescription": "OwnCord is a self-hosted voice and text chat platform with end-to-end encryption and full media support.",
     "windows": {

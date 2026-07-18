@@ -61,14 +61,14 @@ func (q *Queries) GetEventsSince(ctx context.Context, arg GetEventsSinceParams) 
 }
 
 const getMaxEventSeq = `-- name: GetMaxEventSeq :one
-SELECT COALESCE(MAX(seq), 0) FROM events
+SELECT CAST(COALESCE(MAX(seq), 0) AS INTEGER) AS max_seq FROM events
 `
 
-func (q *Queries) GetMaxEventSeq(ctx context.Context) (interface{}, error) {
+func (q *Queries) GetMaxEventSeq(ctx context.Context) (int64, error) {
 	row := q.db.QueryRowContext(ctx, getMaxEventSeq)
-	var coalesce interface{}
-	err := row.Scan(&coalesce)
-	return coalesce, err
+	var max_seq int64
+	err := row.Scan(&max_seq)
+	return max_seq, err
 }
 
 const persistEvent = `-- name: PersistEvent :exec
