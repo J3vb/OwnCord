@@ -83,7 +83,8 @@ jobs:
             libasound2-dev \
             libssl-dev \
             patchelf \
-            librsvg2-dev
+            librsvg2-dev \
+            xdg-utils
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -211,7 +212,8 @@ jobs:
             libasound2-dev \
             libssl-dev \
             patchelf \
-            librsvg2-dev
+            librsvg2-dev \
+            xdg-utils
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
