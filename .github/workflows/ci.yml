@@ -79,7 +79,7 @@ jobs:
           working-directory: Server/
 
   client-check:
-    name: Client Typecheck & Test
+    name: Client Static Checks
     runs-on: windows-latest
     defaults:
       run:
@@ -107,6 +107,7 @@ jobs:
           if (fs.existsSync(p)) {
             let c = fs.readFileSync(p, 'utf8');
             c = c.replace(/^type Event\b/gm, 'type _Event').replace(/^interface Event\b/gm, 'interface _Event');
+            c = c.replace(/,\s*type Event\s*(?=\})/g, ' '); // unused named import from @tauri-apps/api/event
             fs.writeFileSync(p, c);
             console.log('Patched: renamed Event -> _Event in generated/events.ts');
           } else {
@@ -131,6 +132,28 @@ jobs:
 
       - name: Knip (unused code & deps)
         run: npx knip || true
+
+  # Unit tests live in their own job so a red suite is visible as exactly one
+  # failing check instead of masking the static gates above. The suite is
+  # KNOWN RED pending the reboot-plan P2 triage — do not "fix" tests here by
+  # editing assertions; see docs/plans and the P2 triage rules.
+  client-tests:
+    name: Client Unit Tests
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: Client/tauri-client/
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: Client/tauri-client/package-lock.json
+
+      - name: Install npm dependencies
+        run: npm ci
 
       - name: Run unit tests with coverage
         run: npx vitest run --coverage --reporter=default
