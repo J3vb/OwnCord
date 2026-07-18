@@ -2,7 +2,7 @@
 
 **Status:** design only, not implemented
 **Owner:** TBD
-**Tracks:** PHASE_D_PARITY_TODO.md item #1
+**Tracks:** deferred feature backlog (post-beta; see CHANGELOG "Deferred work")
 **Estimated effort:** 1–2 weeks of focused work
 
 ## Why

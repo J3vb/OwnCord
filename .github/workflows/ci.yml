@@ -52,6 +52,12 @@ jobs:
       - name: Go vulnerability check
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4 && govulncheck ./...
 
+      # Generated sqlc output must never drift from db/queries/. One leg of
+      # the matrix is enough; make is not guaranteed on the Windows runner.
+      - name: Verify generated sqlc output (make sqlc-verify)
+        if: matrix.os == 'ubuntu-latest'
+        run: make sqlc-install sqlc-verify
+
       - name: Run tests with race detection and coverage
         run: go test -race -timeout 20m ./... -coverprofile=coverage.out -cover
 

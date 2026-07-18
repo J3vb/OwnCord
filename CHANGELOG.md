@@ -5,7 +5,13 @@ tooling (`npm run changelog`) auto-generates entries from commit messages
 on each release; this file is the curated counterpart that calls out
 behavioural changes operators must know about.
 
-## Unreleased — Phase B + C
+## Unreleased — v1.1.0-alpha series (Phase B + C)
+
+> **Project reset note:** OwnCord has re-entered alpha. The `v1.0.0` release is
+> superseded; versioning continues forward as `v1.1.0-alpha.N` so deployed
+> servers and clients keep receiving updates. Releases are published to the
+> public [`OwnCord-releases`](https://github.com/J3vb/OwnCord-releases)
+> repository, including a full source snapshot with every release.
 
 ### Phase B — Acceleration
 
@@ -29,8 +35,8 @@ behavioural changes operators must know about.
   `VoiceService.JoinChannel`, `InviteService.CreateInvite`,
   `ModerationService.BanUser`, `BlockService.BlockUser`,
   `UserService.UpdateProfile`. The real OTel SDK is gated behind
-  `-tags otel` and is currently a placeholder; wiring the upstream
-  modules is tracked in `PHASE_BC_LOCAL_TODO.md`.
+  `-tags otel` and is currently a placeholder; completing it is
+  deferred until after the beta reset.
 - **Solid.js proof of concept (Step 6).** Two leaf components migrated
   (`Badge`, `ChannelListItem`), Vite + JSX configured, store→signal
   adapter landed. The remaining vanilla components remain in place;
@@ -93,16 +99,11 @@ behavioural changes operators must know about.
   the existing IP restriction.** A previous prerelease shipped with only
   the IP gate; that has been corrected.
 
-### Known follow-up work (local toolchain required)
+### Deferred work
 
-See `PHASE_BC_LOCAL_TODO.md` for the full list. Highlights:
-
-- Real OpenTelemetry SDK wiring (needs `go get` of the upstream modules)
-- Real Wazero runtime construction (needs `go get github.com/tetratelabs/wazero`)
-- Postgres backend implementation (needs `make sqlc-generate`)
-- Tinygo `.wasm` build of the example hello plugin
-- Migration of the remaining vanilla TypeScript components to Solid.js
-- Slash-command dispatcher in the WS layer (design TBD)
-
-These items each need a real developer machine with network access; no
-in-sandbox pass can land them.
+The project is under a feature freeze until the beta reset completes.
+Explicitly deferred (not abandoned unless noted): real OpenTelemetry SDK
+wiring, the Postgres backend (scaffolding removed pending real demand),
+the slash-command dispatcher (`docs/plans/slash-commands.md`), and the
+Solid.js migration (abandoned — the experiment is being removed in favor
+of the established vanilla component pattern).
