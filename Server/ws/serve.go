@@ -411,9 +411,13 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 		voiceChID := c.getVoiceChID()
 		replaced := hub.unregisterNow(c)
 		if c.user != nil {
-			// Always clean up voice state — LeaveVoiceChannelIfMatch uses a
-			// join_token guard so it won't remove a replacement client's session.
-			if voiceChID != 0 {
+			// Clean up voice state only when this was the user's final
+			// connection. A replacement connection owns the (transferred)
+			// voice session, and the join_token guard cannot tell the
+			// difference — the transfer keeps the same joined_at — so
+			// cleaning here would delete the replacement's DB row whenever
+			// teardown snapshots voiceChID before the transfer zeroes it.
+			if voiceChID != 0 && !replaced {
 				hub.handleVoiceLeave(ctx, c)
 			}
 			c.mu.Lock()
