@@ -167,7 +167,7 @@ fn tofu_check<R: Runtime>(
                 // Restore previous in-memory state: put back old value or delete
                 // if there was none, keeping in-memory consistent with on-disk.
                 match old_value {
-                    Some(v) => { let _ = store.set(host, v); }
+                    Some(v) => { store.set(host, v); }
                     None    => { let _ = store.delete(host); }
                 }
                 return Err(format!("failed to persist cert fingerprint: {e}"));
@@ -451,7 +451,7 @@ pub fn accept_cert_fingerprint<R: Runtime>(
         // fingerprint would be trusted in-process even though it was never
         // persisted to certs.json.
         match old_value {
-            Some(v) => { let _ = store.set(&host, v); }
+            Some(v) => { store.set(&host, v); }
             None    => { let _ = store.delete(&host); }
         }
         return Err(format!("failed to persist cert fingerprint: {e}"));
