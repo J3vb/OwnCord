@@ -63,7 +63,7 @@ It includes real-time messaging, voice/video via LiveKit, file sharing, and a we
 
 ### Option A: Prebuilt binaries
 
-1. Download assets from [GitHub Releases](https://github.com/J3vb/OwnCord/releases).
+1. Download assets from [OwnCord-releases](https://github.com/J3vb/OwnCord-releases/releases) (binaries, checksums, signatures, and a full source snapshot per release).
 2. Run the server binary:
    - Windows: `chatserver.exe`
    - Linux: `./chatserver`
