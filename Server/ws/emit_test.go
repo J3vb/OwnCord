@@ -34,6 +34,7 @@ func newEmitTestHub() *Hub {
 		pubsub:          NewPubSub(),
 		replayBuf:       NewEventRingBuffer(100),
 		voiceKeyHolders: make(map[int64]int64),
+		topicLimiter:    NewTopicRateLimiter(topicRateLimitPerSecond, time.Second),
 	}
 }
 
