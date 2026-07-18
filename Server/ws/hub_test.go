@@ -489,7 +489,12 @@ func TestHub_ConcurrentRegisterUnregister(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	time.Sleep(50 * time.Millisecond)
+	// The hub loop drains register/unregister asynchronously; poll instead of
+	// a fixed sleep, which flakes under -race on slow runners.
+	deadline := time.Now().Add(5 * time.Second)
+	for hub.ClientCount() != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
 	if hub.ClientCount() != 0 {
 		t.Errorf("expected 0 clients after concurrent churn, got %d", hub.ClientCount())
 	}
