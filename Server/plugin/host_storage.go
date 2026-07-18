@@ -3,6 +3,7 @@
 // Plugins get a per-plugin namespaced KV store backed by the PluginStore
 // rows in the events/plugin schema. Capacity caps and value-size caps are
 // enforced here so a misbehaving plugin can't fill the database.
+
 package plugin
 
 import (

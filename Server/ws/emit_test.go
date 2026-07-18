@@ -186,7 +186,7 @@ func TestEmitEvents_ExcludeSenderEvent(t *testing.T) {
 
 	h.EmitEvents(events)
 
-	// broadcastExclude is synchronous — check immediately.
+	// broadcastExcludeLow is synchronous — check immediately.
 	senderMsgs := drainChan(sendSender, 50*time.Millisecond)
 	otherMsgs := drainChan(sendOther, 50*time.Millisecond)
 

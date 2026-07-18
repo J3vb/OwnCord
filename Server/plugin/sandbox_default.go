@@ -3,6 +3,7 @@
 // Default plugin runtime: no Wazero. Plugin manifests are still discovered,
 // persisted, and surfaced through the admin API, but `.wasm` modules are not
 // executed. To enable real WASM execution build with `-tags wazero`.
+
 package plugin
 
 import (
