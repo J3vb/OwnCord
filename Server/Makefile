@@ -17,9 +17,14 @@ sqlc-install:
 sqlc-generate:
 	sqlc generate
 
+# Verify only db/dbgen: the committed db/pgdbgen files carry hand-added
+# `//go:build postgres` tags that `sqlc generate` strips, so a pgdbgen diff
+# is expected noise. pgdbgen is scheduled for removal with the Postgres
+# scaffolding; restore it after generating so verify leaves a clean tree.
 sqlc-verify:
 	sqlc generate
-	@git diff --exit-code db/dbgen db/pgdbgen || ( \
+	@git checkout -- db/pgdbgen
+	@git diff --exit-code db/dbgen || ( \
 		echo "ERROR: generated sqlc output is stale. Run 'make sqlc-generate' and commit the result." ; \
 		exit 1 ; \
 	)
