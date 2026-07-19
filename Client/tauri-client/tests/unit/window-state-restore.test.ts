@@ -39,6 +39,7 @@ vi.mock("@tauri-apps/api/window", () => ({
     outerPosition: vi.fn(),
     outerSize: vi.fn(),
     isMaximized: vi.fn().mockResolvedValue(false),
+    isMinimized: vi.fn().mockResolvedValue(false),
   }),
   availableMonitors: () =>
     h.monitorsError !== null ? Promise.reject(h.monitorsError) : Promise.resolve(h.monitors),

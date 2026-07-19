@@ -188,6 +188,17 @@ export async function initWindowState(): Promise<() => void> {
     saveTimer = setTimeout(() => {
       void (async () => {
         try {
+          // A minimized window reports placeholder coordinates (-32000 on
+          // Windows) — skip so the last real geometry survives a minimized
+          // exit. Checked separately so platforms without isMinimized still
+          // save normally.
+          let minimized = false;
+          try {
+            minimized = await win.isMinimized();
+          } catch {
+            // Treat as not minimized
+          }
+          if (minimized) return;
           const pos = await win.outerPosition();
           const size = await win.outerSize();
           const maximized = await win.isMaximized();

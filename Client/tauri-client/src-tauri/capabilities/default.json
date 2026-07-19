@@ -16,6 +16,7 @@
     "core:window:allow-set-size",
     "core:window:allow-maximize",
     "core:window:allow-is-maximized",
+    "core:window:allow-is-minimized",
     "core:window:allow-outer-position",
     "core:window:allow-outer-size",
     "core:window:allow-available-monitors",
