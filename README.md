@@ -213,6 +213,7 @@ When rotating the server updater key, update [Server/updater/server_update_publi
 - [docs/protocol.md](docs/protocol.md)
 - [docs/schema.md](docs/schema.md)
 - [docs/architecture/client.md](docs/architecture/client.md) — client architecture (replaces client-architecture.md)
+- [docs/architecture/ux/](docs/architecture/ux/README.md) — client UX specification (target-state flows, per-view states, event→reaction maps)
 - [docs/contributing.md](docs/contributing.md)
 - [docs/security.md](docs/security.md)
 

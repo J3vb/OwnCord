@@ -1,0 +1,193 @@
+# Settings & Admin — target UX
+
+**Verified against:** commit `da4acc5`, 2026-07-19
+Part of the [Client UX Specification](README.md).
+
+Covers: the settings overlay and its tabs, account operations (profile, password,
+2FA, delete), appearance/theming, the client's **inline** admin surface (ban/kick/
+roles, channel CRUD, invites), and the updater. It also marks the boundary
+between what the desktop client does and what lives only on the server web panel.
+
+---
+
+## 1. Settings overlay
+
+A tabbed overlay (`SettingsOverlay`) available both authenticated (in Main) and
+unauthenticated (on Connect, for appearance/advanced). Tabs: Account,
+Appearance, Notifications, Text & Images, Accessibility, Voice & Audio, Keybinds,
+Advanced, Logs.
+
+**Target rules:**
+- Every save is confirmed: a toast on success, an inline error on failure. No
+  silent saves.
+- Preference writes are immediate and local (localStorage `owncord:settings:*`),
+  broadcast via the `owncord:pref-change` event so open views re-read live (e.g.
+  theme, message density) without a restart.
+- Structural/durable data (server profiles, window geometry, per-user volumes)
+  persists through the Rust key-allowlisted store (`settings.json`); lightweight
+  UI prefs through localStorage. This split is intentional; the spec preserves it.
+
+---
+
+## 2. Account operations
+
+The Account tab holds the identity-sensitive flows. All require the current
+password for sensitive changes and are rate-limited server-side.
+
+### 2.1 Profile edit
+
+| Step | Reaction |
+|------|----------|
+| Edit username/avatar | `PATCH /users/me`; optimistic `auth.updateUser`; server broadcasts `user_update` so the member list + own bar update live |
+| Failure | Inline field error + rollback |
+
+### 2.2 Change password (with session revocation)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant A as AccountTab
+    participant API as api.ts
+    U->>A: current + new + confirm (new min 8, new equals confirm)
+    A->>API: PUT /users/me/password
+    alt success
+        API-->>A: 204 — all other sessions revoked, this one kept
+        A->>U: "Password changed" toast, fields cleared
+    else revoke step failed
+        API-->>A: 200 warning, sessions_revoked
+        A->>U: success plus note — some sessions may still be active
+    else wrong current password
+        API-->>A: 403 — lockout counter server-side
+        A->>U: inline "Incorrect password"
+    else weak or same-as-old
+        API-->>A: 400
+        A->>U: inline validation error
+    end
+```
+
+**Target rule (the W2-2 contract, surfaced to the user):** once the password is
+committed, the operation is a **success** even if the session-revocation step
+fails — the UI must never present a committed change as an error (that would walk
+the user into the confirm-lockout). The partial-success `200 {warning}` maps to a
+success message with a soft note, never a red error. (Server contract:
+`profile_handler.go:237-248`; client already toasts success, `MainPage.ts:280-283`.)
+
+### 2.3 Two-factor (TOTP)
+
+| Flow | Steps |
+|------|-------|
+| Enable | Password prompt → `POST /totp/enable` → render QR URI + backup codes → 6-digit confirm → `POST /totp/confirm` → "Enabled" badge, `auth` user `totp_enabled:true` |
+| Disable | Password confirm → `DELETE /totp`; a `403`/"required" is rewritten to "2FA is required by this server and cannot be disabled" (already `AccountTab.ts:442-451`) |
+
+**Target rule:** backup codes are shown exactly once, with an explicit "Save these
+now — you won't see them again" and a copy affordance.
+
+### 2.4 Sessions & delete account
+
+| Action | Reaction |
+|--------|----------|
+| List sessions | `GET /users/me/sessions`; show device/IP/last-used; current session marked |
+| Revoke a session | `DELETE /users/me/sessions/{id}`; optimistic removal + toast |
+| Delete account | **Modal with password confirm** (irreversible — stronger than a two-click); `DELETE /auth/account` → `clearAuth()` → connect page |
+
+---
+
+## 3. Inline admin surface (client)
+
+The desktop client exposes a **subset** of admin operations inline, gated by the
+actor's role. Everything here must (a) only appear for users who can perform it,
+and (b) confirm destructive actions.
+
+| Operation | Affordance | REST | Reaction |
+|-----------|-----------|------|----------|
+| Change role | Member context menu → submenu | `PATCH /admin/api/users/{id}` `{role_id}` | Toast; `member_update` reflects live |
+| Kick | Member menu, two-click confirm | `DELETE /admin/api/users/{id}/sessions` | Toast "Kicked {user}"; `member_leave` |
+| Ban | Member menu, two-click confirm | `PATCH /admin/api/users/{id}` `{banned, ban_reason}` | Toast; `member_ban` removes them |
+| Create channel | Sidebar → modal | `POST /admin/api/channels` | Modal closes on success; `channel_create` |
+| Edit channel | Channel menu → modal | `PATCH /admin/api/channels/{id}` | `channel_update` |
+| Delete channel | Channel menu, two-click confirm | `DELETE /admin/api/channels/{id}` | `channel_delete`; redirect if active |
+| Reorder channels | Drag | `PATCH …/{id}` `{position}` per moved | Optimistic; roll back on failure |
+| Invites | Invite manager modal | `GET/POST/DELETE /invites` | List with masked codes, copy, revoke; empty state "No active invites" |
+
+**Target rules:**
+- Destructive admin actions should show an **in-flight** state (today the
+  two-click label reverts immediately and only a toast reports the result —
+  `AdminActions.ts:54-78`; add a pending state so a slow ban doesn't look ignored).
+- **Ban should collect a reason.** `adminBanMember` accepts a `reason` but the
+  menu passes none (`SidebarMemberSection.ts:159-166`). Target: a small reason
+  prompt on ban, since the server stores and displays it.
+
+### 3.1 What is *not* in the client (by design)
+
+The full admin panel — user list, audit log, server settings, channel
+permissions, plugin management, backups, updates, first-run setup — is the
+**server-rendered web panel** under `/admin`, gated by IP restriction + admin
+auth. The Tauri client has **no** REST methods for these (confirmed: no plugin/
+audit/settings/permissions/setup calls in `api.ts`).
+
+> **Decision point.** If the target is for admins to manage the server from the
+> desktop app (audit log, settings, plugins) rather than the web panel, that is a
+> **new surface** to build, not a gap in an existing flow. Flagged here so the
+> boundary is explicit; the current split (inline moderation in the client, full
+> administration on the web) may well be the intended design.
+
+---
+
+## 4. Appearance & theming
+
+Themes are CSS custom properties (`styles/tokens.css`), 4 built-ins
+(`dark | neon-glow | midnight | light`) plus custom overrides. **Target:** theme
+changes apply **live** — `ui.setTheme` + the `owncord:pref-change` event re-skin
+open views without reload. Appearance is editable pre-login (on the connect page)
+so the app respects the user's theme before they authenticate.
+
+---
+
+## 5. Updater
+
+Self-hosted: the update endpoint derives from the connected server URL, over
+TOFU-pinned (or system) TLS, minisign-verified inside the Tauri updater plugin.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant N as UpdateNotifier
+    participant R as Rust updater
+    N->>N: 3s after mount → check_client_update(server_url)
+    alt update available
+        R-->>N: {available, version, body}
+        N->>U: banner "Update vX available" [Update Now] [Later]
+        U->>N: Update Now
+        N->>N: banner → "Downloading update…"
+        N->>R: download_and_install_update (minisign verify + apply)
+        R-->>N: (success → relaunch())
+    else up to date / check failed
+        N->>N: no banner (or "Update failed. Try again." + Dismiss)
+    end
+```
+
+| State | Presentation |
+|-------|--------------|
+| checking | Silent (no UI until a result) |
+| available | Non-modal banner with version + Update Now / Later (already `UpdateNotifier.ts:30-62`) |
+| downloading | Banner "Downloading update…" |
+| applied | App relaunches automatically |
+| failed | "Update failed. Please try again later." + Dismiss |
+
+> **⚠ Current gap — no download progress.** The download callback is a no-op
+> (`update_commands.rs:177`), so "Downloading update…" has no percentage. For a
+> large binary this looks hung. Target: surface a progress indicator (percentage
+> or indeterminate-with-bytes) by wiring the plugin's progress callback.
+
+---
+
+## Source of truth
+
+`src/components/SettingsOverlay.ts` (+ `settings/*`), `src/components/AdminActions.ts`,
+`src/components/InviteManager.ts`, `CreateChannelModal.ts`, `EditChannelModal.ts`,
+`DeleteChannelModal.ts`, `src/components/UpdateNotifier.ts`, `src/lib/updater.ts`,
+`src/lib/api.ts`, `src/lib/themes.ts`, `src/lib/preferences.ts`,
+`src/pages/main-page/SidebarArea.ts`, `SidebarMemberSection.ts`,
+`OverlayManagers.ts`, `src-tauri/src/commands.rs`, `src-tauri/src/update_commands.rs`;
+server `Server/admin/api.go`, `Server/api/profile_handler.go`, `totp_handler.go`.
