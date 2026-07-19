@@ -82,13 +82,24 @@ fn is_key_down(vk: i32) -> bool {
     use device_query::{DeviceQuery, DeviceState};
     // Cache DeviceState per thread — creating it on every call would open/close
     // /dev/input/ file descriptors every 20ms in the polling loop.
+    // checked_new() returns None when no X11 display is reachable (e.g. a
+    // pure-Wayland session without XWayland), so PTT degrades to "key never
+    // pressed" instead of panicking on every poll.
     thread_local! {
-        static DEVICE_STATE: DeviceState = DeviceState::new();
+        static DEVICE_STATE: Option<DeviceState> = {
+            let ds = DeviceState::checked_new();
+            if ds.is_none() {
+                log::warn!(
+                    "PTT unavailable: no X11/XWayland display for global key state"
+                );
+            }
+            ds
+        };
     }
     let Some(keycode) = linux::vk_to_keycode(vk) else {
         return false;
     };
-    DEVICE_STATE.with(|ds| ds.get_keys().contains(&keycode))
+    DEVICE_STATE.with(|ds| ds.as_ref().is_some_and(|ds| ds.get_keys().contains(&keycode)))
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
@@ -400,7 +411,10 @@ pub async fn ptt_listen_for_key() -> i32 {
         #[cfg(target_os = "linux")]
         {
             use device_query::{DeviceQuery, DeviceState};
-            let device_state = DeviceState::new();
+            let Some(device_state) = DeviceState::checked_new() else {
+                log::warn!("PTT key capture unavailable: no X11/XWayland display");
+                return 0;
+            };
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
 
             while std::time::Instant::now() < deadline {
