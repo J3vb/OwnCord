@@ -38,7 +38,7 @@ type Querier interface {
 	DeleteLockout(ctx context.Context, key string) error
 	DeleteOrphanedAttachments(ctx context.Context, uploadedAt string) ([]string, error)
 	DeleteOtherSessions(ctx context.Context, arg DeleteOtherSessionsParams) (sql.Result, error)
-	DeleteSessionByID(ctx context.Context, arg DeleteSessionByIDParams) error
+	DeleteSessionByID(ctx context.Context, arg DeleteSessionByIDParams) (sql.Result, error)
 	DeleteSessionByToken(ctx context.Context, token string) error
 	DisablePlugin(ctx context.Context, id int64) error
 	EditMessageContent(ctx context.Context, arg EditMessageContentParams) error
