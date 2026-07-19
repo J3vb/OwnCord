@@ -8,27 +8,27 @@ import (
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/store"
 )
 
-// newTestModerationService seeds a MemStore with a role hierarchy:
+// newTestModerationService seeds a real in-memory DB with a role hierarchy:
 // owner (pos 100, Administrator) > mod (pos 80, BanMembers) > member (pos 40).
 // Users: 1=owner, 2=mod, 3=member, 4=member, 5=mod (equal rank to 2).
-func newTestModerationService() (*ModerationService, *store.MemStore) {
-	ms := store.NewMemStore()
-	ms.SeedRole(&db.Role{ID: 1, Name: "owner", Permissions: permissions.Administrator, Position: 100})
-	ms.SeedRole(&db.Role{ID: 2, Name: "mod", Permissions: permissions.BanMembers, Position: 80})
-	ms.SeedRole(&db.Role{ID: 3, Name: "member", Permissions: permissions.SendMessages, Position: 40})
+func newTestModerationService(t *testing.T) (*ModerationService, *db.DB) {
+	t.Helper()
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{ID: 1, Name: "owner", Permissions: permissions.Administrator, Position: 100})
+	seedRole(t, database, &db.Role{ID: 2, Name: "mod", Permissions: permissions.BanMembers, Position: 80})
+	seedRole(t, database, &db.Role{ID: 3, Name: "member", Permissions: permissions.SendMessages, Position: 40})
 	for userID, roleID := range map[int64]int64{1: 1, 2: 2, 3: 3, 4: 3, 5: 2} {
-		ms.SeedUserRole(userID, roleID)
-		ms.SeedUser(&db.User{ID: userID, Username: fmt.Sprintf("u%d", userID), Status: "offline"})
+		seedUser(t, database, &db.User{ID: userID, Username: fmt.Sprintf("u%d", userID), Status: "offline"})
+		seedUserRole(t, database, userID, roleID)
 	}
-	checker := permissions.NewChecker(ms)
-	return NewModerationService(ms, NewPermissionService(ms, checker)), ms
+	checker := permissions.NewChecker(database)
+	return NewModerationService(database, NewPermissionService(database, checker)), database
 }
 
 func TestBanUser_RequiresBanPermission(t *testing.T) {
-	svc, _ := newTestModerationService()
+	svc, _ := newTestModerationService(t)
 
 	// A member without BAN_MEMBERS is refused.
 	if err := svc.BanUser(context.Background(), 3, 4, "nope", nil); !errors.Is(err, ErrForbidden) {
@@ -42,7 +42,7 @@ func TestBanUser_RequiresBanPermission(t *testing.T) {
 }
 
 func TestBanUser_HierarchyEnforced(t *testing.T) {
-	svc, ms := newTestModerationService()
+	svc, database := newTestModerationService(t)
 
 	// Equal rank: mod cannot ban mod.
 	if err := svc.BanUser(context.Background(), 2, 5, "peer", nil); !errors.Is(err, ErrForbidden) {
@@ -52,19 +52,19 @@ func TestBanUser_HierarchyEnforced(t *testing.T) {
 	if err := svc.BanUser(context.Background(), 2, 1, "coup", nil); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("ban owner: want ErrForbidden, got %v", err)
 	}
-	owner, _ := ms.GetUserByID(1)
+	owner, _ := database.GetUserByID(1)
 	if owner.Banned {
 		t.Fatal("owner must not be banned")
 	}
 }
 
 func TestBanUser_AuthorizedSucceeds(t *testing.T) {
-	svc, ms := newTestModerationService()
+	svc, database := newTestModerationService(t)
 
 	if err := svc.BanUser(context.Background(), 2, 3, "spam", nil); err != nil {
 		t.Fatalf("authorized ban: %v", err)
 	}
-	target, _ := ms.GetUserByID(3)
+	target, _ := database.GetUserByID(3)
 	if !target.Banned {
 		t.Fatal("target should be banned")
 	}
@@ -83,7 +83,7 @@ func TestBanUser_AuthorizedSucceeds(t *testing.T) {
 }
 
 func TestUnbanUser_AuthorizationMatrix(t *testing.T) {
-	svc, ms := newTestModerationService()
+	svc, database := newTestModerationService(t)
 
 	if err := svc.BanUser(context.Background(), 1, 3, "setup", nil); err != nil {
 		t.Fatalf("setup ban: %v", err)
@@ -101,7 +101,7 @@ func TestUnbanUser_AuthorizationMatrix(t *testing.T) {
 	if err := svc.UnbanUser(context.Background(), 2, 3); err != nil {
 		t.Fatalf("authorized unban: %v", err)
 	}
-	target, _ := ms.GetUserByID(3)
+	target, _ := database.GetUserByID(3)
 	if target.Banned {
 		t.Fatal("target should be unbanned")
 	}

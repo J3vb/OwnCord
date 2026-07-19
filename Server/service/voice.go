@@ -9,18 +9,17 @@ import (
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/store"
 	"github.com/owncord/server/telemetry"
 )
 
 // VoiceService handles voice state business logic.
 type VoiceService struct {
-	st   store.Store
+	st   Store
 	perm *PermissionService
 }
 
 // NewVoiceService creates a VoiceService.
-func NewVoiceService(st store.Store, perm *PermissionService) *VoiceService {
+func NewVoiceService(st Store, perm *PermissionService) *VoiceService {
 	return &VoiceService{st: st, perm: perm}
 }
 

@@ -10,8 +10,6 @@ import (
 	"context"
 	"log/slog"
 	"time"
-
-	"github.com/owncord/server/store"
 )
 
 // maxStartupDelay caps how long StartEventPruner waits before its first
@@ -23,7 +21,7 @@ const maxStartupDelay = time.Minute
 
 // StartEventPruner launches a goroutine that wakes every interval and deletes
 // events older than retention. The goroutine exits when ctx is cancelled.
-func StartEventPruner(ctx context.Context, s store.EventStore, retention, interval time.Duration) {
+func StartEventPruner(ctx context.Context, s EventStore, retention, interval time.Duration) {
 	if s == nil {
 		return
 	}
@@ -63,7 +61,7 @@ func StartEventPruner(ctx context.Context, s store.EventStore, retention, interv
 	}()
 }
 
-func runPrune(ctx context.Context, s store.EventStore, retention time.Duration) {
+func runPrune(ctx context.Context, s EventStore, retention time.Duration) {
 	cutoff := time.Now().Add(-retention)
 	deleted, err := s.PruneEventsOlderThan(ctx, cutoff)
 	if err != nil {

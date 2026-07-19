@@ -19,7 +19,6 @@ import (
 	"github.com/owncord/server/plugin"
 	"github.com/owncord/server/service"
 	"github.com/owncord/server/storage"
-	dbstore "github.com/owncord/server/store"
 	"github.com/owncord/server/telemetry"
 	"github.com/owncord/server/updater"
 	"github.com/owncord/server/ws"
@@ -94,8 +93,9 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	}
 
 	// Service layer — centralizes business logic for REST and WS handlers.
-	st := dbstore.NewSQLiteStore(database)
-	svc := service.New(st, limiter)
+	// *db.DB satisfies service.Store directly (the store abstraction was
+	// removed in D3).
+	svc := service.New(database, limiter)
 
 	// Auth routes: register, login, logout, me.
 	MountAuthRoutes(r, database, limiter, cfg.Server.TrustedProxies, totpKey)
@@ -247,7 +247,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		// which case lifecycle calls return 503 and list returns []).
 		r.Group(func(r chi.Router) {
 			r.Use(admin.RequireAdminAuth(database))
-			r.Mount("/api/v1/admin/plugins", NewPluginAdminHandler(pluginRegistry, st))
+			r.Mount("/api/v1/admin/plugins", NewPluginAdminHandler(pluginRegistry, database))
 		})
 	})
 

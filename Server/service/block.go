@@ -6,17 +6,16 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/owncord/server/store"
 	"github.com/owncord/server/telemetry"
 )
 
 // BlockService handles user block/unblock operations.
 type BlockService struct {
-	st store.Store
+	st Store
 }
 
 // NewBlockService creates a BlockService.
-func NewBlockService(st store.Store) *BlockService {
+func NewBlockService(st Store) *BlockService {
 	return &BlockService{st: st}
 }
 

@@ -15,7 +15,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/plugin"
-	"github.com/owncord/server/store"
 )
 
 // maxPluginUploadBytes caps the multipart upload at 16 MiB to match the
@@ -26,13 +25,13 @@ const maxPluginUploadBytes = 16 * 1024 * 1024
 // PluginAdminHandler exposes plugin lifecycle operations to the admin panel.
 type PluginAdminHandler struct {
 	registry *plugin.Registry
-	store    store.PluginStore
+	store    plugin.PluginStore
 }
 
 // NewPluginAdminHandler builds an http.Handler that the router can mount.
 // Pass a nil registry when plugin support is disabled — the handler then
 // reports an empty list and 503 on lifecycle calls.
-func NewPluginAdminHandler(registry *plugin.Registry, st store.PluginStore) http.Handler {
+func NewPluginAdminHandler(registry *plugin.Registry, st plugin.PluginStore) http.Handler {
 	h := &PluginAdminHandler{registry: registry, store: st}
 	r := chi.NewRouter()
 	r.Get("/", h.list)

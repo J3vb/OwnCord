@@ -7,18 +7,17 @@ import (
 	"time"
 
 	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/store"
 	"github.com/owncord/server/telemetry"
 )
 
 // ModerationService handles user ban/unban operations.
 type ModerationService struct {
-	st    store.Store
+	st    Store
 	perms *PermissionService
 }
 
 // NewModerationService creates a ModerationService.
-func NewModerationService(st store.Store, perms *PermissionService) *ModerationService {
+func NewModerationService(st Store, perms *PermissionService) *ModerationService {
 	return &ModerationService{st: st, perms: perms}
 }
 

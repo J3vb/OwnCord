@@ -11,11 +11,27 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owncord/server/store"
+	"github.com/owncord/server/db"
 )
 
+// openPersisterTestDB opens an in-memory database with migrations applied for
+// EventPersister tests. *db.DB satisfies the EventStore interface the persister
+// depends on (D3 removed the store abstraction).
+func openPersisterTestDB(t *testing.T) *db.DB {
+	t.Helper()
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("db.Migrate: %v", err)
+	}
+	return database
+}
+
 func TestEventPersisterFlushesBatch(t *testing.T) {
-	mem := store.NewMemStore()
+	mem := openPersisterTestDB(t)
 	p := NewEventPersister(mem, 1024, 4, 50*time.Millisecond)
 	ctx := context.Background()
 	p.Start(ctx)
@@ -56,7 +72,7 @@ func TestEventPersisterFlushesBatch(t *testing.T) {
 }
 
 func TestEventPersisterDropsOnFullQueue(t *testing.T) {
-	mem := store.NewMemStore()
+	mem := openPersisterTestDB(t)
 	// Tiny queue, very long flush interval — guarantees drops because the
 	// flusher won't drain fast enough.
 	p := NewEventPersister(mem, 2, 1024, time.Hour)
@@ -75,7 +91,7 @@ func TestEventPersisterDropsOnFullQueue(t *testing.T) {
 }
 
 func TestEventPersisterStopDrains(t *testing.T) {
-	mem := store.NewMemStore()
+	mem := openPersisterTestDB(t)
 	p := NewEventPersister(mem, 256, 100, time.Hour)
 	p.Start(context.Background())
 

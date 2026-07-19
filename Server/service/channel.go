@@ -8,19 +8,18 @@ import (
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/store"
 	"github.com/owncord/server/telemetry"
 )
 
 // ChannelService handles channel-related business logic including
 // listing, permission-filtered access, typing, presence, and read state.
 type ChannelService struct {
-	st    store.Store
+	st    Store
 	perms *PermissionService
 }
 
 // NewChannelService creates a ChannelService.
-func NewChannelService(st store.Store, perms *PermissionService) *ChannelService {
+func NewChannelService(st Store, perms *PermissionService) *ChannelService {
 	return &ChannelService{
 		st:    st,
 		perms: perms,

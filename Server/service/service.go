@@ -7,7 +7,6 @@ package service
 import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/store"
 )
 
 // Services bundles all domain services for dependency injection.
@@ -25,7 +24,7 @@ type Services struct {
 }
 
 // New creates all domain services wired together.
-func New(st store.Store, limiter *auth.RateLimiter) *Services {
+func New(st Store, limiter *auth.RateLimiter) *Services {
 	permChecker := permissions.NewChecker(st)
 	permSvc := NewPermissionService(st, permChecker)
 	return &Services{

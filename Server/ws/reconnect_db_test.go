@@ -19,9 +19,25 @@ import (
 	"nhooyr.io/websocket"
 
 	"github.com/owncord/server/auth"
-	"github.com/owncord/server/store"
+	"github.com/owncord/server/db"
 	"github.com/owncord/server/ws"
 )
+
+// openEventStoreDB opens an in-memory database with the full migration set so
+// the events table exists. *db.DB satisfies the hub's EventStore interface
+// (D3 removed the store abstraction and its MemStore fake).
+func openEventStoreDB(t *testing.T) *db.DB {
+	t.Helper()
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("db.Migrate: %v", err)
+	}
+	return database
+}
 
 // TestReconnect_BufferMiss_FallsBackToDBTier verifies that when a client
 // reconnects with a last_seq that is older than the ring buffer's oldest entry,
@@ -29,7 +45,7 @@ import (
 //
 // Setup:
 //   - Ring buffer size = 1000; push seqs 501..1500 → oldestSeq = 501.
-//   - MemStore contains 100 global events at seqs 501..600.
+//   - The DB event store contains 100 global events at seqs 501..600.
 //   - Client reconnects with last_seq = 500.
 //   - Buffer: 500 <= 501 → returns nil.
 //   - DB: returns seqs > 500 with channelID = 0 (global, no permission filter).
@@ -43,8 +59,8 @@ func TestReconnect_BufferMiss_FallsBackToDBTier(t *testing.T) {
 
 	// Create a user. role_id=1 intentionally does not exist in the test DB so
 	// computeAllowedChannels returns an empty channel set — but events with
-	// channelID=0 (global) bypass the per-channel filter in MemStore and in
-	// EventsSinceFiltered, so they are always returned.
+	// channelID=0 (global) bypass the per-channel filter in the DB event store
+	// and in EventsSinceFiltered, so they are always returned.
 	userID, err := database.CreateUser("reconnect-db-user", "hash", 1)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -58,20 +74,21 @@ func TestReconnect_BufferMiss_FallsBackToDBTier(t *testing.T) {
 	}
 
 	// Pre-populate the event store with 100 global events (seqs 501..600).
-	// channelID=0 means "global broadcast" — MemStore.GetEventsSinceForChannels
-	// returns them regardless of the allowed-channel filter.
-	memStore := store.NewMemStore()
+	// channelID=0 means "global broadcast" — the DB event store's
+	// GetEventsSinceForChannels returns them regardless of the allowed-channel
+	// filter.
+	eventStore := openEventStoreDB(t)
 	bgCtx := context.Background()
 	for seq := int64(501); seq <= 600; seq++ {
 		payload := []byte(fmt.Sprintf(`{"seq":%d,"type":"broadcast"}`, seq))
-		if err := memStore.PersistEvent(bgCtx, seq, "broadcast", 0, payload); err != nil {
+		if err := eventStore.PersistEvent(bgCtx, seq, "broadcast", 0, payload); err != nil {
 			t.Fatalf("PersistEvent seq=%d: %v", seq, err)
 		}
 	}
 
-	// Build hub, attach the MemStore as the cold-tier read path.
+	// Build hub, attach the DB event store as the cold-tier read path.
 	hub := ws.NewHub(database, limiter, nil)
-	hub.SetEventStore(memStore)
+	hub.SetEventStore(eventStore)
 	go hub.Run()
 	defer hub.Stop()
 

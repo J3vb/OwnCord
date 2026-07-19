@@ -6,17 +6,16 @@ import (
 	"time"
 
 	"github.com/owncord/server/db"
-	"github.com/owncord/server/store"
 	"github.com/owncord/server/telemetry"
 )
 
 // InviteService handles invite management.
 type InviteService struct {
-	st store.Store
+	st Store
 }
 
 // NewInviteService creates an InviteService.
-func NewInviteService(st store.Store) *InviteService {
+func NewInviteService(st Store) *InviteService {
 	return &InviteService{st: st}
 }
 

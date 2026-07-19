@@ -105,21 +105,24 @@ erDiagram
 | Plugins | `plugins`, `plugin_kv` | 015. `plugin_kv` is per-plugin namespaced KV via composite PK `(plugin_id, key)`. |
 | Ops | `settings`, `audit_log`, `sounds` | `settings` is a generic KV read by admin and the WS hub (via `db.GetSetting`). Migration 003 rebuilds `audit_log` through a transient `audit_log_v6` rename — only `audit_log` exists at runtime. `sounds` is **dead schema** — the soundboard feature was removed but the table remains. |
 
-### How the schema is accessed (three coexisting styles)
+### How the schema is accessed
 
-1. **Raw SQL in `Server/db`** — hand-written queries (`*_queries.go`, ~178 call
-   sites). This is what actually runs, used directly by `Server/api` handlers,
-   `Server/admin`, and the `ws.Hub`.
-2. **`store.Store` interface** (`Server/store`) — a 14-domain composed interface
-   with `SQLiteStore` (delegates to `db.DB`) and `MemStore` (test double).
-   Consumed by the `Server/service` layer only.
-3. **sqlc-generated `Server/db/dbgen`** (~3.5k LOC, from `Server/db/queries/sqlite/`
-   per `sqlc.yaml`) — **imported by nothing**; dead code kept verified by the
-   `sqlc-verify` CI job.
+The `Server/db` package is the single data layer. Its methods live in
+`*_queries.go` and mostly delegate to the sqlc-generated `Server/db/dbgen` code
+(D2), so sqlc is the type-checked query layer rather than dead generated code; a
+documented remainder of raw queries stays hand-written where sqlc can't express
+them (variable-length `IN` lists, FTS, multi-statement transactions,
+PRAGMA/VACUUM) — see [plans/sqlc-adoption.md](../plans/sqlc-adoption.md).
 
-The coexistence of all three is the largest structural finding of the audit —
-see [audit-2026-07-19.md §3](../audit-2026-07-19.md).
+Consumers depend on narrow interfaces that `*db.DB` satisfies rather than on the
+concrete type: `service.Store` (the service layer), `ws.EventStore` (cold-tier
+replay), and `plugin.PluginStore` (plugin registry). D3 removed the former
+`store` package (a pass-through `SQLiteStore` plus a `MemStore` test double);
+tests now run against a real in-memory SQLite `db`. The residual style issue is
+that many `Server/api` handlers and the `Server/admin` package still take a raw
+`*db.DB` directly instead of going through the service layer — the remaining
+consolidation work (audit A-2026-07-06).
 
 **Source of truth:** `Server/migrations/*.sql` (schema), `Server/db/migrate.go`
-(runner), `Server/db/*_queries.go` (live queries), `Server/store/store.go`
-(interface), `sqlc.yaml` + `Server/db/dbgen/` (dormant generated layer).
+(runner), `Server/db/*_queries.go` (live queries), `Server/service/datastore.go`
+(service interface), `sqlc.yaml` + `Server/db/dbgen/` (generated query layer).

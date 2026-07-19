@@ -2,8 +2,8 @@
 //
 // The handler is covered at the HTTP boundary so the fixtures do not depend
 // on the Wazero runtime. A nil Registry exercises the "plugin runtime
-// disabled" branch; a real Registry wired against a MemStore exercises the
-// happy path.
+// disabled" branch; a real Registry wired against a real in-memory DB
+// exercises the happy path.
 package api
 
 import (
@@ -18,9 +18,25 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/owncord/server/db"
 	"github.com/owncord/server/plugin"
-	"github.com/owncord/server/store"
 )
+
+// openPluginTestDB opens an in-memory database with the full migration set so
+// the plugins and plugin_kv tables exist. *db.DB satisfies the plugin.Config
+// Store interface directly (D3 removed the store abstraction).
+func openPluginTestDB(t *testing.T) *db.DB {
+	t.Helper()
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("db.Migrate: %v", err)
+	}
+	return database
+}
 
 func TestPluginsHandlerListEmptyWhenRegistryNil(t *testing.T) {
 	h := NewPluginAdminHandler(nil, nil)
@@ -91,7 +107,7 @@ func TestPluginsHandlerInstallRejectsNonZipMagic(t *testing.T) {
 
 func TestPluginsHandlerInstallHappyPath(t *testing.T) {
 	reg := newTestPluginRegistry(t)
-	mem := store.NewMemStore()
+	mem := openPluginTestDB(t)
 	// Wire the store into the handler so /list can show the new row. The
 	// registry already writes via its own PluginStore.
 	h := NewPluginAdminHandler(reg, mem)
@@ -137,15 +153,15 @@ func TestPluginsHandlerLifecycleInvalidID(t *testing.T) {
 
 func TestIsZipContentType(t *testing.T) {
 	cases := map[string]bool{
-		"application/zip":                   true,
-		"application/zip; charset=binary":   true,
-		"APPLICATION/ZIP":                   true,
-		"application/x-zip-compressed":      true,
-		"application/octet-stream":          true,
-		"text/plain":                        false,
-		"image/png":                         false,
-		"":                                  false,
-		"application/json; charset=utf-8":   false,
+		"application/zip":                 true,
+		"application/zip; charset=binary": true,
+		"APPLICATION/ZIP":                 true,
+		"application/x-zip-compressed":    true,
+		"application/octet-stream":        true,
+		"text/plain":                      false,
+		"image/png":                       false,
+		"":                                false,
+		"application/json; charset=utf-8": false,
 	}
 	for ct, want := range cases {
 		if got := isZipContentType(ct); got != want {
@@ -156,12 +172,12 @@ func TestIsZipContentType(t *testing.T) {
 
 func TestHasZipMagic(t *testing.T) {
 	cases := map[string]bool{
-		"PK\x03\x04rest":   true,
-		"PK\x05\x06":       true,
-		"PK\x07\x08rest":   false, // spanned-archive signature; not accepted here
-		"not a zip":        false,
-		"":                 false,
-		"PK":               false,
+		"PK\x03\x04rest": true,
+		"PK\x05\x06":     true,
+		"PK\x07\x08rest": false, // spanned-archive signature; not accepted here
+		"not a zip":      false,
+		"":               false,
+		"PK":             false,
 	}
 	for body, want := range cases {
 		if got := hasZipMagic([]byte(body)); got != want {
@@ -175,7 +191,7 @@ func TestHasZipMagic(t *testing.T) {
 func newTestPluginRegistry(t *testing.T) *plugin.Registry {
 	t.Helper()
 	dir := t.TempDir()
-	mem := store.NewMemStore()
+	mem := openPluginTestDB(t)
 	reg, err := plugin.NewRegistry(plugin.Config{
 		Directory: filepath.Join(dir, "plugins"),
 		Store:     mem,

@@ -12,7 +12,6 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/store"
 	"github.com/owncord/server/telemetry"
 )
 
@@ -100,13 +99,13 @@ type ReactionResult struct {
 // MessageService handles message-related business logic including
 // send, edit, delete, reactions, pins, and search.
 type MessageService struct {
-	st      store.Store
+	st      Store
 	perms   *PermissionService
 	limiter *auth.RateLimiter
 }
 
 // NewMessageService creates a MessageService.
-func NewMessageService(st store.Store, perms *PermissionService, limiter *auth.RateLimiter) *MessageService {
+func NewMessageService(st Store, perms *PermissionService, limiter *auth.RateLimiter) *MessageService {
 	return &MessageService{
 		st:      st,
 		perms:   perms,

@@ -15,7 +15,6 @@ import (
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/service"
-	"github.com/owncord/server/store"
 	"github.com/owncord/server/ws"
 )
 
@@ -79,7 +78,7 @@ func newCoverageHub(t *testing.T) (*ws.Hub, *db.DB) {
 	t.Helper()
 	database := openCoverageDB(t)
 	limiter := auth.NewRateLimiter()
-	st := store.NewSQLiteStore(database)
+	st := database
 	svc := service.New(st, limiter)
 	hub := ws.NewHub(database, limiter, svc)
 

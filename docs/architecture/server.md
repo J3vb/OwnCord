@@ -31,10 +31,9 @@ flowchart TB
     end
 
     subgraph data ["Data"]
-        STORE["store<br/>Store interface,<br/>SQLiteStore, MemStore"]
-        DB[("db<br/>raw SQL queries,<br/>migration runner, models")]
-        DBGEN["db/dbgen<br/>sqlc-generated"]
-        MIG["migrations<br/>001–015 embedded SQL"]
+        DB[("db<br/>query methods (sqlc-backed),<br/>migration runner, models")]
+        DBGEN["db/dbgen<br/>sqlc-generated queries"]
+        MIG["migrations<br/>001–016 embedded SQL"]
     end
 
     subgraph support ["Support"]
@@ -48,7 +47,6 @@ flowchart TB
     MAIN --> CFG
     MAIN --> API
     MAIN --> DB
-    MAIN --> STORE
     API --> ADMIN
     API --> WS
     API --> SVC
@@ -56,32 +54,28 @@ flowchart TB
     API --> STORAGE
     API --> UPD
     API --> PLUGIN
-    SVC --> STORE
+    SVC --> DB
     SVC --> PERM
-    STORE --> DB
+    DB --> DBGEN
     DB --> MIG
     WS --> SVC
     WS --> PLUGIN
 
-    %% Layering violations (dashed red): raw *db.DB used above the store seam
+    %% Residual layering seam (dashed): raw *db.DB used above the service layer
     API -.->|"handlers take *db.DB directly"| DB
     ADMIN -.->|"raw *db.DB"| DB
-    WS -.->|"inline SQL for settings"| DB
-    DBGEN -.-|"generated but imported by nothing"| DB
-
-    classDef dead fill:none,stroke-dasharray: 5 5,opacity:0.6
-    class DBGEN dead
 ```
 
-**What this shows.** The intended layering is
-`api → service → store → db`, and the `service` layer does follow it. But three
-dashed edges mark where the seam is bypassed: nearly every REST handler receives
-both `svc` *and* a raw `*db.DB`; the `admin` package operates on `*db.DB`
-almost exclusively; and the `ws.Hub` runs inline SQL against the `settings`
-table. `db/dbgen` (sqlc output) is generated and CI-verified but referenced by
-no code. In effect the server has three coexisting data-access styles — see
-[data-model.md](data-model.md) and the audit for the consolidation
-recommendation.
+**What this shows.** The layering is `api → service → db` (D3 removed the former
+`store` seam). The `service` layer depends on a narrow `service.Store` interface
+that `*db.DB` satisfies; `ws` and `plugin` depend on their own small interfaces
+(`ws.EventStore`, `plugin.PluginStore`) the same way. The `db` package's query
+methods delegate to the sqlc-generated `db/dbgen` code (D2), so sqlc is now the
+type-checked query layer rather than dead generated code. Two dashed edges mark
+the residual seam: many REST handlers still receive a raw `*db.DB` alongside
+`svc`, and the `admin` package operates on `*db.DB` almost exclusively —
+consolidating those behind the service layer is the remaining work (audit
+A-2026-07-06). See [data-model.md](data-model.md).
 
 `api.NewRouter` (`Server/api/router.go`) is the composition root: it constructs
 the rate limiter, TOTP key, storage, `service.New`, the `ws.Hub`, the LiveKit
@@ -91,7 +85,7 @@ process-level wiring (config, TLS, DB, event persistence, HTTP server,
 shutdown).
 
 **Source of truth:** `Server/main.go`, `Server/api/router.go`, package import
-graph (`go list -deps`), `Server/store/store.go`, `sqlc.yaml`.
+graph (`go list -deps`), `Server/service/datastore.go`, `sqlc.yaml`.
 
 ## D3 — REST request lifecycle
 
@@ -103,7 +97,7 @@ sequenceDiagram
     participant RT as Route mount<br/>(Mount*Routes)
     participant H as Handler
     participant S as service.*
-    participant ST as store.Store
+    participant ST as service.Store<br/>(*db.DB)
     participant DB as SQLite
 
     C->>MW: HTTPS request
@@ -112,12 +106,12 @@ sequenceDiagram
     Note over RT: AuthMiddleware(database)<br/>+ per-route rate limits<br/>+ RequirePermission(...) where mounted
     RT->>H: authenticated request
     H->>S: domain call (svc.Messages, svc.Permissions, …)
-    S->>ST: Store interface method
-    ST->>DB: SQL (via db.DB)
+    S->>ST: narrow Store interface method
+    ST->>DB: SQL (db.DB query method → sqlc dbgen)
     DB-->>C: JSON response (errorResponse envelope on failure)
 
     rect rgba(200,120,120,0.15)
-        Note over H,DB: Deviation — auth routes: MountAuthRoutes(r, database, …)<br/>bypasses service/store and queries *db.DB directly.<br/>Admin REST (Server/admin) does the same behind<br/>AdminIPRestrict + RequireAdminAuth.
+        Note over H,DB: Deviation — auth routes: MountAuthRoutes(r, database, …)<br/>bypasses the service layer and queries *db.DB directly.<br/>Admin REST (Server/admin) does the same behind<br/>AdminIPRestrict + RequireAdminAuth.
     end
 ```
 

@@ -6,27 +6,27 @@ import (
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/store"
 )
 
-// newTestPermService creates a PermissionService backed by a MemStore
+// newTestPermService creates a PermissionService backed by a real in-memory DB
 // pre-populated with a single role and user.
-func newTestPermService() (*PermissionService, *store.MemStore) {
-	ms := store.NewMemStore()
-	ms.SeedRole(&db.Role{
+func newTestPermService(t *testing.T) (*PermissionService, *db.DB) {
+	t.Helper()
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
 		ID:          permissions.MemberRoleID,
 		Name:        "member",
 		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AddReactions,
 		Position:    1,
 	})
-	ms.SeedUserRole(1, permissions.MemberRoleID)
-	checker := permissions.NewChecker(ms)
-	return NewPermissionService(ms, checker), ms
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	checker := permissions.NewChecker(database)
+	return NewPermissionService(database, checker), database
 }
 
 func TestHasChannelPerm_Allowed(t *testing.T) {
-	svc, ms := newTestPermService()
-	ms.SeedChannel(&db.Channel{ID: 10, Name: "general", Type: "text"})
+	svc, database := newTestPermService(t)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 
 	// Member has SendMessages | ReadMessages; no overrides exist, so base role perms apply.
 	if !svc.HasChannelPerm(1, 10, permissions.SendMessages) {
@@ -38,8 +38,8 @@ func TestHasChannelPerm_Allowed(t *testing.T) {
 }
 
 func TestHasChannelPerm_Denied(t *testing.T) {
-	svc, ms := newTestPermService()
-	ms.SeedChannel(&db.Channel{ID: 10, Name: "general", Type: "text"})
+	svc, database := newTestPermService(t)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 
 	// ManageMessages is NOT in the member role.
 	if svc.HasChannelPerm(1, 10, permissions.ManageMessages) {
@@ -48,10 +48,10 @@ func TestHasChannelPerm_Denied(t *testing.T) {
 }
 
 func TestHasChannelPerm_OverrideDeny(t *testing.T) {
-	svc, ms := newTestPermService()
-	ms.SeedChannel(&db.Channel{ID: 10, Name: "readonly", Type: "text"})
+	svc, database := newTestPermService(t)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "readonly", Type: "text"})
 	// Deny SendMessages for this channel.
-	ms.SeedChannelOverride(permissions.MemberRoleID, 10, 0, permissions.SendMessages)
+	seedChannelOverride(t, database, permissions.MemberRoleID, 10, 0, permissions.SendMessages)
 	// Invalidate so next check re-populates cache.
 	svc.InvalidateAll()
 
@@ -65,10 +65,10 @@ func TestHasChannelPerm_OverrideDeny(t *testing.T) {
 }
 
 func TestHasChannelPerm_OverrideAllow(t *testing.T) {
-	svc, ms := newTestPermService()
-	ms.SeedChannel(&db.Channel{ID: 10, Name: "special", Type: "text"})
+	svc, database := newTestPermService(t)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "special", Type: "text"})
 	// Allow ManageMessages (not in base role) via channel override.
-	ms.SeedChannelOverride(permissions.MemberRoleID, 10, permissions.ManageMessages, 0)
+	seedChannelOverride(t, database, permissions.MemberRoleID, 10, permissions.ManageMessages, 0)
 	svc.InvalidateAll()
 
 	if !svc.HasChannelPerm(1, 10, permissions.ManageMessages) {
@@ -77,20 +77,20 @@ func TestHasChannelPerm_OverrideAllow(t *testing.T) {
 }
 
 func TestHasChannelPerm_AdminBypass(t *testing.T) {
-	ms := store.NewMemStore()
-	ms.SeedRole(&db.Role{
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
 		ID:          permissions.AdminRoleID,
 		Name:        "admin",
 		Permissions: permissions.Administrator,
 		Position:    90,
 	})
-	ms.SeedUserRole(1, permissions.AdminRoleID)
-	checker := permissions.NewChecker(ms)
-	svc := NewPermissionService(ms, checker)
+	seedUserRole(t, database, 1, permissions.AdminRoleID)
+	checker := permissions.NewChecker(database)
+	svc := NewPermissionService(database, checker)
 
-	ms.SeedChannel(&db.Channel{ID: 10, Name: "locked", Type: "text"})
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "locked", Type: "text"})
 	// Deny everything via override; admin should still bypass.
-	ms.SeedChannelOverride(permissions.AdminRoleID, 10, 0, permissions.SendMessages|permissions.ReadMessages)
+	seedChannelOverride(t, database, permissions.AdminRoleID, 10, 0, permissions.SendMessages|permissions.ReadMessages)
 
 	if !svc.HasChannelPerm(1, 10, permissions.SendMessages) {
 		t.Fatal("admin should bypass all permission checks")
@@ -101,14 +101,14 @@ func TestHasChannelPerm_AdminBypass(t *testing.T) {
 }
 
 func TestInvalidateUser_ClearsCacheForUser(t *testing.T) {
-	svc, ms := newTestPermService()
-	ms.SeedChannel(&db.Channel{ID: 10, Name: "general", Type: "text"})
+	svc, database := newTestPermService(t)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 
 	// Populate cache.
 	svc.HasChannelPerm(1, 10, permissions.SendMessages)
 
 	// Now add a deny override.
-	ms.SeedChannelOverride(permissions.MemberRoleID, 10, 0, permissions.SendMessages)
+	seedChannelOverride(t, database, permissions.MemberRoleID, 10, 0, permissions.SendMessages)
 
 	// Without invalidation, cache still says allowed.
 	if !svc.HasChannelPerm(1, 10, permissions.SendMessages) {
@@ -123,17 +123,17 @@ func TestInvalidateUser_ClearsCacheForUser(t *testing.T) {
 }
 
 func TestInvalidateAll_ClearsEntireCache(t *testing.T) {
-	svc, ms := newTestPermService()
+	svc, database := newTestPermService(t)
 	// Add a second user.
-	ms.SeedUserRole(2, permissions.MemberRoleID)
-	ms.SeedChannel(&db.Channel{ID: 10, Name: "general", Type: "text"})
+	seedUserRole(t, database, 2, permissions.MemberRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 
 	// Populate cache for both users.
 	svc.HasChannelPerm(1, 10, permissions.SendMessages)
 	svc.HasChannelPerm(2, 10, permissions.SendMessages)
 
 	// Add deny override.
-	ms.SeedChannelOverride(permissions.MemberRoleID, 10, 0, permissions.SendMessages)
+	seedChannelOverride(t, database, permissions.MemberRoleID, 10, 0, permissions.SendMessages)
 
 	// Both still cached as allowed.
 	if !svc.HasChannelPerm(1, 10, permissions.SendMessages) {
@@ -159,14 +159,14 @@ func TestPermCacheTTLExpiry(t *testing.T) {
 	// in a unit test, so we verify the structural behavior: after manually
 	// backdating the populatedAt field the cache should be stale and the
 	// next check should re-populate from the store.
-	svc, ms := newTestPermService()
-	ms.SeedChannel(&db.Channel{ID: 10, Name: "general", Type: "text"})
+	svc, database := newTestPermService(t)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 
 	// Populate cache.
 	svc.HasChannelPerm(1, 10, permissions.SendMessages)
 
 	// Add deny override.
-	ms.SeedChannelOverride(permissions.MemberRoleID, 10, 0, permissions.SendMessages)
+	seedChannelOverride(t, database, permissions.MemberRoleID, 10, 0, permissions.SendMessages)
 
 	// Manually expire the cache entry by backdating populatedAt.
 	svc.mu.Lock()
@@ -182,8 +182,8 @@ func TestPermCacheTTLExpiry(t *testing.T) {
 }
 
 func TestHasChannelPerm_UnknownUserReturnsFalse(t *testing.T) {
-	svc, ms := newTestPermService()
-	ms.SeedChannel(&db.Channel{ID: 10, Name: "general", Type: "text"})
+	svc, database := newTestPermService(t)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 
 	// User 999 has no role assigned.
 	if svc.HasChannelPerm(999, 10, permissions.SendMessages) {

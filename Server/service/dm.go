@@ -7,17 +7,16 @@ import (
 	"time"
 
 	"github.com/owncord/server/db"
-	"github.com/owncord/server/store"
 	"github.com/owncord/server/telemetry"
 )
 
 // DMService handles direct message channel operations.
 type DMService struct {
-	st store.Store
+	st Store
 }
 
 // NewDMService creates a DMService.
-func NewDMService(st store.Store) *DMService {
+func NewDMService(st Store) *DMService {
 	return &DMService{st: st}
 }
 
