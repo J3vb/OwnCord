@@ -32,7 +32,7 @@ func (q *Queries) DeleteOtherSessions(ctx context.Context, arg DeleteOtherSessio
 	return q.db.ExecContext(ctx, deleteOtherSessions, arg.UserID, arg.ID)
 }
 
-const deleteSessionByID = `-- name: DeleteSessionByID :exec
+const deleteSessionByID = `-- name: DeleteSessionByID :execresult
 DELETE FROM sessions WHERE id = ? AND user_id = ?
 `
 
@@ -41,9 +41,8 @@ type DeleteSessionByIDParams struct {
 	UserID int64 `json:"userId"`
 }
 
-func (q *Queries) DeleteSessionByID(ctx context.Context, arg DeleteSessionByIDParams) error {
-	_, err := q.db.ExecContext(ctx, deleteSessionByID, arg.ID, arg.UserID)
-	return err
+func (q *Queries) DeleteSessionByID(ctx context.Context, arg DeleteSessionByIDParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, deleteSessionByID, arg.ID, arg.UserID)
 }
 
 const deleteSessionByToken = `-- name: DeleteSessionByToken :exec

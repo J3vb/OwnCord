@@ -24,7 +24,7 @@ WHERE s.token = ?;
 -- name: DeleteSessionByToken :exec
 DELETE FROM sessions WHERE token = ?;
 
--- name: DeleteSessionByID :exec
+-- name: DeleteSessionByID :execresult
 DELETE FROM sessions WHERE id = ? AND user_id = ?;
 
 -- name: DeleteOtherSessions :execresult
