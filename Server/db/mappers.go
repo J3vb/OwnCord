@@ -18,6 +18,26 @@ func derefString(s *string) string {
 	return *s
 }
 
+// ptrI64toI narrows a *int64 (sqlc's nullable-integer type) to a *int, which
+// the domain models use for optional counts (e.g. invite max_uses).
+func ptrI64toI(p *int64) *int {
+	if p == nil {
+		return nil
+	}
+	v := int(*p)
+	return &v
+}
+
+// ptrItoI64 widens a *int to a *int64 for passing into a generated params
+// struct (the inverse of ptrI64toI).
+func ptrItoI64(p *int) *int64 {
+	if p == nil {
+		return nil
+	}
+	v := int64(*p)
+	return &v
+}
+
 // userFromGen maps a generated user row to the domain User model.
 func userFromGen(u dbgen.User) *User {
 	return &User{

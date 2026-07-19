@@ -5,27 +5,22 @@ import "fmt"
 // ListInvites returns invites ordered by creation time descending.
 // M-12: Limited to 200 rows to prevent unbounded result sets.
 func (d *DB) ListInvites() ([]*Invite, error) {
-	rows, err := d.sqlDB.Query(
-		`SELECT id, code, created_by, max_uses, use_count, expires_at, revoked, created_at
-		 FROM invites ORDER BY created_at DESC LIMIT 200`,
-	)
+	rows, err := d.q.ListInvites(dbCtx())
 	if err != nil {
 		return nil, fmt.Errorf("ListInvites: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
-
-	var invites []*Invite
-	for rows.Next() {
-		inv := &Invite{}
-		var revoked int
-		if err := rows.Scan(
-			&inv.ID, &inv.Code, &inv.CreatedBy, &inv.MaxUses,
-			&inv.Uses, &inv.ExpiresAt, &revoked, &inv.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("ListInvites scan: %w", err)
-		}
-		inv.Revoked = revoked != 0
-		invites = append(invites, inv)
+	invites := make([]*Invite, 0, len(rows))
+	for _, r := range rows {
+		invites = append(invites, &Invite{
+			ID:        r.ID,
+			Code:      r.Code,
+			CreatedBy: r.CreatedBy,
+			Uses:      int(r.UseCount),
+			MaxUses:   ptrI64toI(r.MaxUses),
+			ExpiresAt: r.ExpiresAt,
+			Revoked:   r.Revoked != 0,
+			CreatedAt: r.CreatedAt,
+		})
 	}
-	return invites, rows.Err()
+	return invites, nil
 }
