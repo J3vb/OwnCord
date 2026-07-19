@@ -3,8 +3,9 @@
 // Each server message type maps to one or more store actions.
 
 import type { WsClient } from "./ws";
+import { toConnectionStatus } from "./ws";
 import { authStore, setAuth, clearAuth } from "@stores/auth.store";
-import { setTransientError } from "@stores/ui.store";
+import { setTransientError, setConnectionStatus } from "@stores/ui.store";
 import {
   setChannels,
   setRoles,
@@ -84,6 +85,16 @@ function mapDmPayload(p: DmChannelPayload): DmChannel {
 
 /** Unsubscribe all listeners. */
 export type DispatcherCleanup = () => void;
+
+/**
+ * The single writer for ui.store.connectionStatus (UX spec §3): collapses the
+ * ws client's internal state machine onto the 3-state status. Wired once at
+ * startup and kept for the app's lifetime — deliberately separate from
+ * wireDispatcher, whose listeners are torn down per connection.
+ */
+export function wireConnectionStatus(ws: Pick<WsClient, "onStateChange">): () => void {
+  return ws.onStateChange((s) => setConnectionStatus(toConnectionStatus(s)));
+}
 
 /**
  * Wire a WsClient to all domain stores.

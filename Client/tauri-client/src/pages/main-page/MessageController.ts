@@ -99,6 +99,12 @@ export function createMessageController(opts: MessageControllerOptions): Message
         // Inline section error + Retry in the message region (UX spec §2) —
         // a toast would vanish and leave the region silently empty.
         setChannelLoadError(channelId);
+        // The inline region only renders when the channel has no rows; live
+        // broadcasts or an optimistic send may already have populated it, in
+        // which case the failure must still be surfaced (no silent drop).
+        if (getChannelMessages(channelId).length > 0) {
+          showError("Failed to load message history");
+        }
       }
     }
   }

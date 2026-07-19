@@ -9,10 +9,10 @@ import "@styles/theme-neon-glow.css";
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
 import { createRouter } from "@lib/router";
 import { createApiClient } from "@lib/api";
-import { createWsClient, toConnectionStatus } from "@lib/ws";
-import { wireDispatcher } from "@lib/dispatcher";
+import { createWsClient } from "@lib/ws";
+import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
 import { authStore, clearAuth } from "@stores/auth.store";
-import { setTransientError, setConnectionStatus } from "@stores/ui.store";
+import { setTransientError } from "@stores/ui.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import { leaveVoice as voiceSessionLeave } from "@lib/livekitSession";
 import { createConnectPage } from "@pages/ConnectPage";
@@ -99,7 +99,7 @@ const ws = createWsClient();
 // live controls read ui.store.connectionStatus reactively instead of wiring
 // their own ws.onStateChange. Lifecycle plumbing that needs the exact internal
 // transition (the connected overlay below) stays on ws.onStateChange.
-ws.onStateChange((s) => setConnectionStatus(toConnectionStatus(s)));
+wireConnectionStatus(ws);
 const profileManager = createProfileManager(createTauriBackend());
 let dispatcherCleanup: (() => void) | null = null;
 let connectedOverlay: ConnectedOverlayControl | null = null;
