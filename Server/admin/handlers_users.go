@@ -117,9 +117,9 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 			}
 			var actionErr error
 			if *req.Banned {
-				actionErr = mod.BanUser(actor, id, banReason, nil)
+				actionErr = mod.BanUser(r.Context(), actor, id, banReason, nil)
 			} else {
-				actionErr = mod.UnbanUser(actor, id)
+				actionErr = mod.UnbanUser(r.Context(), actor, id)
 			}
 			if actionErr != nil {
 				writeModerationErr(w, actionErr)
