@@ -40,7 +40,7 @@ func chdirTemp(t *testing.T) string {
 func TestHandleBackup_Success(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/backup", token, nil)
@@ -75,7 +75,7 @@ func TestHandleBackup_Success(t *testing.T) {
 func TestHandleBackup_RequiresOwner(t *testing.T) {
 	_ = chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
 	adminUID, _ := database.CreateUser("backupadmin", "hash", 2)
 	token := "backup-admin-token"
@@ -95,7 +95,7 @@ func TestHandleBackup_RequiresOwner(t *testing.T) {
 func TestHandleListBackups_EmptyWhenNoDirExists(t *testing.T) {
 	_ = chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/backups", token, nil)
@@ -118,7 +118,7 @@ func TestHandleListBackups_EmptyWhenNoDirExists(t *testing.T) {
 func TestHandleListBackups_ReturnsCreatedBackup(t *testing.T) {
 	_ = chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	// Create a backup first.
@@ -160,7 +160,7 @@ func TestHandleListBackups_ReturnsCreatedBackup(t *testing.T) {
 func TestHandleDeleteBackup_Success(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	// Create a real backup file to delete.
@@ -191,7 +191,7 @@ func TestHandleDeleteBackup_Success(t *testing.T) {
 func TestHandleDeleteBackup_NotFound(t *testing.T) {
 	_ = chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodDelete, "/backups/nonexistent.db", token, nil)
@@ -206,7 +206,7 @@ func TestHandleDeleteBackup_NotFound(t *testing.T) {
 func TestHandleDeleteBackup_InvalidNameTraversal(t *testing.T) {
 	_ = chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	// The chi router URL-decodes the path parameter, so ".." arrives decoded.
@@ -224,7 +224,7 @@ func TestHandleDeleteBackup_InvalidNameTraversal(t *testing.T) {
 func TestHandleDeleteBackup_RequiresOwner(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
 	adminUID, _ := database.CreateUser("deladmin", "hash", 2)
 	token := "del-admin-token"
@@ -249,7 +249,7 @@ func TestHandleDeleteBackup_RequiresOwner(t *testing.T) {
 func TestHandleRestoreBackup_Success(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	// Set up backup and data directories.
@@ -293,7 +293,7 @@ func TestHandleRestoreBackup_Success(t *testing.T) {
 func TestHandleRestoreBackup_NotFound(t *testing.T) {
 	_ = chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/backups/missing.db/restore", token, nil)
@@ -308,7 +308,7 @@ func TestHandleRestoreBackup_NotFound(t *testing.T) {
 func TestHandleRestoreBackup_InvalidName(t *testing.T) {
 	_ = chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/backups/..evil.db/restore", token, nil)
@@ -324,7 +324,7 @@ func TestHandleRestoreBackup_InvalidName(t *testing.T) {
 func TestHandleListBackups_ErrorReadingDir(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	// Create data/ directory but make "backups" a file instead of a directory.
@@ -352,7 +352,7 @@ func TestHandleListBackups_ErrorReadingDir(t *testing.T) {
 func TestHandleRestoreBackup_RequiresOwner(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
 	adminUID, _ := database.CreateUser("restoreadmin", "hash", 2)
 	token := "restore-admin-token"

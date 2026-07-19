@@ -13,7 +13,19 @@ import (
 	"github.com/owncord/server/admin"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/service"
+	"github.com/owncord/server/store"
 )
+
+// newTestModService builds a real ModerationService over the test database so
+// PATCH-user ban paths exercise the production authorization (BAN_MEMBERS +
+// role hierarchy) instead of a stub.
+func newTestModService(database *db.DB) *service.ModerationService {
+	st := store.NewSQLiteStore(database)
+	checker := permissions.NewChecker(st)
+	return service.NewModerationService(st, service.NewPermissionService(st, checker))
+}
 
 // adminSchema is a minimal in-memory schema for admin API tests.
 var adminSchema = []byte(`
@@ -198,7 +210,7 @@ func doRequest(t *testing.T, handler http.Handler, method, path, token string, b
 
 func TestAdminAPI_Stats_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", token, nil)
@@ -221,7 +233,7 @@ func TestAdminAPI_Stats_OK(t *testing.T) {
 
 func TestAdminAPI_Stats_Unauthenticated(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", "", nil)
 
@@ -232,7 +244,7 @@ func TestAdminAPI_Stats_Unauthenticated(t *testing.T) {
 
 func TestAdminAPI_Stats_Forbidden(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createMemberUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", token, nil)
@@ -246,7 +258,7 @@ func TestAdminAPI_Stats_Forbidden(t *testing.T) {
 
 func TestAdminAPI_ListUsers_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/users?limit=50&offset=0", token, nil)
@@ -267,7 +279,7 @@ func TestAdminAPI_ListUsers_OK(t *testing.T) {
 
 func TestAdminAPI_ListUsers_DefaultPagination(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	// No query params — should use defaults
@@ -280,7 +292,7 @@ func TestAdminAPI_ListUsers_DefaultPagination(t *testing.T) {
 
 func TestAdminAPI_ListUsers_Unauthenticated(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
 	w := doRequest(t, handler, http.MethodGet, "/users", "", nil)
 
@@ -291,9 +303,77 @@ func TestAdminAPI_ListUsers_Unauthenticated(t *testing.T) {
 
 // ─── PATCH /admin/api/users/{id} ─────────────────────────────────────────────
 
+// TestAdminAPI_PatchUser_BanHierarchy locks the W1-4 fix: the admin-auth
+// perimeter alone no longer authorizes bans — ModerationService's role
+// hierarchy runs on the live PATCH path, so an admin-panel actor cannot ban
+// an equal- or higher-ranked user (previously any panel actor could ban the
+// owner via the raw UPDATE).
+func TestAdminAPI_PatchUser_BanHierarchy(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
+	ownerToken := createAdminUser(t, database) // Owner role (pos 100)
+
+	// A second owner-rank user: equal position, cannot be banned.
+	peerUID, err := database.CreateUser("peerowner", "$2a$12$placeholder", 1)
+	if err != nil {
+		t.Fatalf("CreateUser peerowner: %v", err)
+	}
+	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(peerUID), ownerToken,
+		map[string]any{"banned": true})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("equal-rank ban: status = %d, want 403; body: %s", w.Code, w.Body.String())
+	}
+	if u, _ := database.GetUserByID(peerUID); u.Banned {
+		t.Fatal("equal-rank target must not be banned")
+	}
+
+	// A lower-positioned role that still holds ADMINISTRATOR (panel access):
+	// its holder must not be able to ban the higher-ranked owner.
+	if _, err := database.Exec(
+		`INSERT INTO roles (id, name, permissions, position, is_default) VALUES (9, 'JuniorAdmin', ?, 50, 0)`,
+		permissions.Administrator,
+	); err != nil {
+		t.Fatalf("inserting junior admin role: %v", err)
+	}
+	juniorUID, err := database.CreateUser("junioradmin", "$2a$12$placeholder", 9)
+	if err != nil {
+		t.Fatalf("CreateUser junioradmin: %v", err)
+	}
+	juniorToken := "junior-token-" + t.Name()
+	if _, err := database.CreateSession(juniorUID, auth.HashToken(juniorToken), "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession junior: %v", err)
+	}
+	ownerUser, err := database.GetUserByUsername("adminuser")
+	if err != nil || ownerUser == nil {
+		t.Fatalf("GetUserByUsername adminuser: %v", err)
+	}
+	w = doRequest(t, handler, http.MethodPatch, "/users/"+itoa(ownerUser.ID), juniorToken,
+		map[string]any{"banned": true})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("junior bans owner: status = %d, want 403; body: %s", w.Code, w.Body.String())
+	}
+	if u, _ := database.GetUserByID(ownerUser.ID); u.Banned {
+		t.Fatal("owner must not be banned by a lower rank")
+	}
+
+	// Downward ban still works: junior admin (pos 50) bans a member (pos 40).
+	memberUID, err := database.CreateUser("banme", "$2a$12$placeholder", 3)
+	if err != nil {
+		t.Fatalf("CreateUser banme: %v", err)
+	}
+	w = doRequest(t, handler, http.MethodPatch, "/users/"+itoa(memberUID), juniorToken,
+		map[string]any{"banned": true, "ban_reason": "spam"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("junior bans member: status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if u, _ := database.GetUserByID(memberUID); !u.Banned {
+		t.Fatal("member should be banned by higher-ranked actor")
+	}
+}
+
 func TestAdminAPI_PatchUser_BanUser(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	// Create a target user
@@ -321,7 +401,7 @@ func TestAdminAPI_PatchUser_BanUser(t *testing.T) {
 
 func TestAdminAPI_PatchUser_ChangeRole(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	targetUID, _ := database.CreateUser("rolechange", "hash", 3)
@@ -343,7 +423,7 @@ func TestAdminAPI_PatchUser_ChangeRole(t *testing.T) {
 
 func TestAdminAPI_PatchUser_NotFound(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	body := map[string]any{"banned": true}
@@ -356,7 +436,7 @@ func TestAdminAPI_PatchUser_NotFound(t *testing.T) {
 
 func TestAdminAPI_PatchUser_InvalidID(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPatch, "/users/abc", token, nil)
@@ -370,7 +450,7 @@ func TestAdminAPI_PatchUser_InvalidID(t *testing.T) {
 
 func TestAdminAPI_ForceLogout_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	targetUID, _ := database.CreateUser("logoutme", "hash", 3)
@@ -390,7 +470,7 @@ func TestAdminAPI_ForceLogout_OK(t *testing.T) {
 
 func TestAdminAPI_ForceLogout_Unauthenticated(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
 	w := doRequest(t, handler, http.MethodDelete, "/users/1/sessions", "", nil)
 
@@ -403,7 +483,7 @@ func TestAdminAPI_ForceLogout_Unauthenticated(t *testing.T) {
 
 func TestAdminAPI_ListChannels_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	_, _ = database.AdminCreateChannel("general", "text", "", "", 0)
@@ -427,7 +507,7 @@ func TestAdminAPI_ListChannels_OK(t *testing.T) {
 
 func TestAdminAPI_CreateChannel_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	body := map[string]any{
@@ -454,7 +534,7 @@ func TestAdminAPI_CreateChannel_OK(t *testing.T) {
 
 func TestAdminAPI_CreateChannel_MissingName(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	body := map[string]any{
@@ -471,7 +551,7 @@ func TestAdminAPI_CreateChannel_MissingName(t *testing.T) {
 
 func TestAdminAPI_UpdateChannel_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	chID, _ := database.AdminCreateChannel("old", "text", "", "", 0)
@@ -492,7 +572,7 @@ func TestAdminAPI_UpdateChannel_OK(t *testing.T) {
 
 func TestAdminAPI_UpdateChannel_NotFound(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	body := map[string]any{"name": "x"}
@@ -507,7 +587,7 @@ func TestAdminAPI_UpdateChannel_NotFound(t *testing.T) {
 
 func TestAdminAPI_DeleteChannel_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	chID, _ := database.AdminCreateChannel("del-me", "text", "", "", 0)
@@ -521,7 +601,7 @@ func TestAdminAPI_DeleteChannel_OK(t *testing.T) {
 
 func TestAdminAPI_DeleteChannel_NotFound(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodDelete, "/channels/99999", token, nil)
@@ -535,7 +615,7 @@ func TestAdminAPI_DeleteChannel_NotFound(t *testing.T) {
 
 func TestAdminAPI_AuditLog_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	uid, _ := database.CreateUser("actor", "hash", 1)
@@ -558,7 +638,7 @@ func TestAdminAPI_AuditLog_OK(t *testing.T) {
 
 func TestAdminAPI_AuditLog_Empty(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/audit-log", token, nil)
@@ -578,7 +658,7 @@ func TestAdminAPI_AuditLog_Empty(t *testing.T) {
 
 func TestAdminAPI_GetSettings_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/settings", token, nil)
@@ -600,7 +680,7 @@ func TestAdminAPI_GetSettings_OK(t *testing.T) {
 
 func TestAdminAPI_PatchSettings_OK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	body := map[string]string{
@@ -625,7 +705,7 @@ func TestAdminAPI_PatchSettings_OK(t *testing.T) {
 
 func TestAdminAPI_PatchSettings_InvalidBody(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	req := httptest.NewRequest(http.MethodPatch, "/settings", bytes.NewReader([]byte("not-json")))
@@ -642,7 +722,7 @@ func TestAdminAPI_PatchSettings_InvalidBody(t *testing.T) {
 
 func TestAdminAPI_Backup_RequiresOwner(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
 	// Admin (role 2) can authenticate but is not Owner (role 1, position 100)
 	adminUID, _ := database.CreateUser("adminonly", "hash", 2)
@@ -659,7 +739,7 @@ func TestAdminAPI_Backup_RequiresOwner(t *testing.T) {
 
 func TestAdminAPI_Backup_Unauthenticated(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
 	w := doRequest(t, handler, http.MethodPost, "/backup", "", nil)
 
@@ -676,7 +756,7 @@ func TestAdminAPI_Backup_Unauthenticated(t *testing.T) {
 // which logs an audit entry containing the actor_id.
 func TestAdminAPI_ActorFromContext_AuditEntry(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	// Create a target user to act on.
@@ -710,7 +790,7 @@ func TestAdminAPI_ActorFromContext_AuditEntry(t *testing.T) {
 // DELETE /users/{id}/sessions path.
 func TestAdminAPI_ActorFromContext_ForceLogout(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	targetUID, _ := database.CreateUser("logoutctx", "hash", 3)
@@ -742,7 +822,7 @@ func TestAdminAPI_ActorFromContext_ForceLogout(t *testing.T) {
 // returns 400 without writing anything to the database.
 func TestAdminAPI_PatchSettings_RejectsUnknownKey(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	body := map[string]string{
@@ -768,7 +848,7 @@ func TestAdminAPI_PatchSettings_RejectsUnknownKey(t *testing.T) {
 // containing both valid and invalid keys is rejected entirely (no partial write).
 func TestAdminAPI_PatchSettings_RejectsMixedKeys(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	body := map[string]string{
@@ -812,7 +892,7 @@ func TestAdminAPI_PatchSettings_AcceptsAllWhitelistedKeys(t *testing.T) {
 	for _, key := range whitelistedKeys {
 		t.Run(key, func(t *testing.T) {
 			database := openAdminTestDB(t)
-			handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+			handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 			token := createAdminUser(t, database)
 
 			value := "testvalue"
@@ -833,7 +913,7 @@ func TestAdminAPI_PatchSettings_AcceptsAllWhitelistedKeys(t *testing.T) {
 // (no-op update) is accepted and returns the current settings.
 func TestAdminAPI_PatchSettings_EmptyPayloadIsOK(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	body := map[string]string{}
@@ -846,7 +926,7 @@ func TestAdminAPI_PatchSettings_EmptyPayloadIsOK(t *testing.T) {
 
 func TestAdminAPI_PatchSettings_RejectsRequire2FAWhenUsersNotEnrolled(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	body := map[string]string{
@@ -862,7 +942,7 @@ func TestAdminAPI_PatchSettings_RejectsRequire2FAWhenUsersNotEnrolled(t *testing
 
 func TestAdminAPI_PatchSettings_AllowsRequire2FAWhenAllUsersEnrolledAndRegistrationClosed(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	if _, err := database.Exec(`UPDATE users SET totp_secret = ? WHERE id = 1`, "JBSWY3DPEHPK3PXP"); err != nil {
@@ -882,7 +962,7 @@ func TestAdminAPI_PatchSettings_AllowsRequire2FAWhenAllUsersEnrolledAndRegistrat
 
 func TestAdminAPI_PatchSettings_RejectsInvalidBooleanValue(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	body := map[string]string{
@@ -901,7 +981,7 @@ func TestAdminAPI_PatchSettings_RejectsInvalidBooleanValue(t *testing.T) {
 // expose the PasswordHash field in any returned user object.
 func TestAdminAPI_ListUsers_NoPasswordHash(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	// Create a second user so the list is non-trivial.
@@ -928,7 +1008,7 @@ func TestAdminAPI_ListUsers_NoPasswordHash(t *testing.T) {
 // expose the TOTPSecret field.
 func TestAdminAPI_ListUsers_NoTOTPSecret(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/users", token, nil)
@@ -947,7 +1027,7 @@ func TestAdminAPI_ListUsers_NoTOTPSecret(t *testing.T) {
 // are still present after the sensitive-field removal.
 func TestAdminAPI_ListUsers_PublicFieldsPresent(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/users", token, nil)
@@ -976,7 +1056,7 @@ func TestAdminAPI_ListUsers_PublicFieldsPresent(t *testing.T) {
 // not expose PasswordHash in the returned user object.
 func TestAdminAPI_PatchUser_NoPasswordHash(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	targetUID, _ := database.CreateUser("patchvictim", "topsecretbcrypt", 3)
@@ -1004,7 +1084,7 @@ func TestAdminAPI_PatchUser_NoPasswordHash(t *testing.T) {
 // not expose TOTPSecret in the returned user object.
 func TestAdminAPI_PatchUser_NoTOTPSecret(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	targetUID, _ := database.CreateUser("patchtotp", "hash", 3)
@@ -1077,7 +1157,7 @@ func (m *mockHub) ClientCount() int {
 func TestAdminAPI_CreateChannel_BroadcastsChannelCreate(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	body := map[string]any{
@@ -1100,7 +1180,7 @@ func TestAdminAPI_CreateChannel_BroadcastsChannelCreate(t *testing.T) {
 func TestAdminAPI_CreateChannel_NilHubDoesNotPanic(t *testing.T) {
 	database := openAdminTestDB(t)
 	// nil hub: handler must not panic
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	body := map[string]any{"name": "safe-channel", "type": "text"}
@@ -1114,7 +1194,7 @@ func TestAdminAPI_CreateChannel_NilHubDoesNotPanic(t *testing.T) {
 func TestAdminAPI_UpdateChannel_BroadcastsChannelUpdate(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	chID, _ := database.AdminCreateChannel("before", "text", "", "", 0)
@@ -1135,7 +1215,7 @@ func TestAdminAPI_UpdateChannel_BroadcastsChannelUpdate(t *testing.T) {
 
 func TestAdminAPI_UpdateChannel_NilHubDoesNotPanic(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	chID, _ := database.AdminCreateChannel("patchme", "text", "", "", 0)
@@ -1150,7 +1230,7 @@ func TestAdminAPI_UpdateChannel_NilHubDoesNotPanic(t *testing.T) {
 func TestAdminAPI_DeleteChannel_BroadcastsChannelDelete(t *testing.T) {
 	database := openAdminTestDB(t)
 	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	chID, _ := database.AdminCreateChannel("delete-me", "text", "", "", 0)
@@ -1170,7 +1250,7 @@ func TestAdminAPI_DeleteChannel_BroadcastsChannelDelete(t *testing.T) {
 
 func TestAdminAPI_DeleteChannel_NilHubDoesNotPanic(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
 	chID, _ := database.AdminCreateChannel("del-no-hub", "text", "", "", 0)
