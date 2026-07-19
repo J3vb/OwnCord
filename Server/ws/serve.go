@@ -564,6 +564,28 @@ func (h *Hub) buildAuthOK(user *db.User, roleName string, replaySource string) [
 	})
 }
 
+// channelCanSend reports whether a user with the given role and per-channel
+// override may post in a channel of chanType. It mirrors the non-DM branch of
+// MessageService.checkSendPermission so the client can pre-disable the composer
+// without a round-trip; the server still enforces the rule authoritatively.
+func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string) bool {
+	if role == nil {
+		return false
+	}
+	if permissions.HasAdmin(role.Permissions) {
+		return true
+	}
+	eff := permissions.EffectivePerms(role.Permissions, o.Allow, o.Deny)
+	need := permissions.ReadMessages | permissions.SendMessages
+	if eff&need != need {
+		return false
+	}
+	if chanType == "announcement" {
+		return eff&permissions.ManageMessages == permissions.ManageMessages
+	}
+	return true
+}
+
 // buildReady constructs the ready server→client message.
 // Per PROTOCOL.md, channels include unread_count and last_message_id per user,
 // and only protocol-specified fields (no slow_mode, archived, voice_* extras).
@@ -632,6 +654,12 @@ func (h *Hub) buildReady(database *db.DB, userID int64, role *db.Role) ([]byte, 
 			"type":     visibleChannels[i].Type,
 			"category": visibleChannels[i].Category,
 			"position": visibleChannels[i].Position,
+			// can_send drives the client's composer affordance. It mirrors
+			// MessageService.checkSendPermission for non-DM channels: base role
+			// ± channel overrides must grant READ|SEND, and announcement
+			// channels additionally require MANAGE_MESSAGES; admins bypass. The
+			// server remains the authority — this only pre-disables the UI.
+			"can_send": channelCanSend(role, overrides[visibleChannels[i].ID], visibleChannels[i].Type),
 		}
 		if visibleChannels[i].Type == "text" || visibleChannels[i].Type == "announcement" {
 			if u, ok := unreadMap[visibleChannels[i].ID]; ok {

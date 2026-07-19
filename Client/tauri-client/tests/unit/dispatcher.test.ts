@@ -2,7 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { wireDispatcher } from "../../src/lib/dispatcher";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
-import { messagesStore } from "../../src/stores/messages.store";
+import {
+  messagesStore,
+  addOptimisticMessage,
+  getChannelMessages,
+} from "../../src/stores/messages.store";
 import { membersStore } from "../../src/stores/members.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import { dmStore } from "../../src/stores/dm.store";
@@ -188,6 +192,7 @@ describe("WS Dispatcher", () => {
         position: 0,
         unreadCount: 0,
         lastMessageId: null,
+        canSend: true,
       });
       return { ...prev, channels: ch, activeChannelId: 1 }; // active is channel 1
     });
@@ -247,6 +252,7 @@ describe("WS Dispatcher", () => {
         position: 0,
         unreadCount: 0,
         lastMessageId: null,
+        canSend: true,
       });
       return { ...prev, channels: ch };
     });
@@ -499,6 +505,7 @@ describe("WS Dispatcher", () => {
         position: 0,
         unreadCount: 0,
         lastMessageId: null,
+        canSend: true,
       });
       return { ...prev, channels: ch };
     });
@@ -526,6 +533,7 @@ describe("WS Dispatcher", () => {
         position: 0,
         unreadCount: 0,
         lastMessageId: null,
+        canSend: true,
       });
       ch.set(20, {
         id: 20,
@@ -535,6 +543,7 @@ describe("WS Dispatcher", () => {
         position: 1,
         unreadCount: 0,
         lastMessageId: null,
+        canSend: true,
       });
       return { ...prev, channels: ch, activeChannelId: 10 };
     });
@@ -556,6 +565,7 @@ describe("WS Dispatcher", () => {
         position: 0,
         unreadCount: 0,
         lastMessageId: null,
+        canSend: true,
       });
       return { ...prev, channels: ch, activeChannelId: 10 };
     });
@@ -782,6 +792,34 @@ describe("WS Dispatcher", () => {
     expect(uiStore.getState().transientError).toBeNull();
   });
 
+  it("wires an error carrying a pending send id to mark that row failed (not a toast)", () => {
+    messagesStore.setState(() => ({
+      messagesByChannel: new Map(),
+      pendingSends: new Map(),
+      loadedChannels: new Set(),
+      hasMore: new Map(),
+    }));
+    uiStore.setState((prev) => ({ ...prev, transientError: null }));
+
+    addOptimisticMessage({
+      correlationId: "corr-1",
+      channelId: 7,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "hi",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+
+    // Error echoes the request id → the specific row is marked failed…
+    mock.dispatch("error", { code: "SLOW_MODE", message: "slow down" }, "corr-1");
+
+    const row = getChannelMessages(7)[0]!;
+    expect(row.status).toBe("failed");
+    expect(row.errorCode).toBe("SLOW_MODE");
+    // …and it is not surfaced as a global transient error.
+    expect(uiStore.getState().transientError).toBeNull();
+  });
+
   it("does not increment unread for own messages", () => {
     authStore.setState((prev) => ({
       ...prev,
@@ -798,6 +836,7 @@ describe("WS Dispatcher", () => {
         position: 0,
         unreadCount: 0,
         lastMessageId: null,
+        canSend: true,
       });
       return { ...prev, channels: ch, activeChannelId: 1 };
     });
@@ -828,6 +867,7 @@ describe("WS Dispatcher", () => {
         position: 0,
         unreadCount: 0,
         lastMessageId: null,
+        canSend: true,
       });
       return { ...prev, channels: ch, activeChannelId: 1 };
     });

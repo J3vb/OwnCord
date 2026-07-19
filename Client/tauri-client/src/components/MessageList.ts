@@ -27,6 +27,10 @@ export interface MessageListOptions {
   readonly onDeleteClick: (messageId: number) => void;
   readonly onReactionClick: (messageId: number, emoji: string) => void;
   readonly onPinClick: (messageId: number, channelId: number, currentlyPinned: boolean) => void;
+  /** Retry a failed optimistic send (by its correlation id). */
+  readonly onRetry?: (correlationId: string) => void;
+  /** Discard a failed optimistic send without retrying. */
+  readonly onDeleteDraft?: (correlationId: string) => void;
 }
 
 // -- Constants ----------------------------------------------------------------

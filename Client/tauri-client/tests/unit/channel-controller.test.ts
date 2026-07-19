@@ -78,6 +78,9 @@ vi.mock("@components/MessageInput", () => ({
       destroy: mockMessageInputDestroy,
       setReplyTo: mockSetReplyTo,
       startEdit: mockStartEdit,
+      clearReply: vi.fn(),
+      cancelEdit: vi.fn(),
+      setDisabled: vi.fn(),
     };
   }),
 }));
@@ -89,13 +92,26 @@ vi.mock("@components/TypingIndicator", () => ({
   })),
 }));
 
-const { mockSetMessagePinned } = vi.hoisted(() => ({
-  mockSetMessagePinned: vi.fn(),
-}));
+const { mockSetMessagePinned, mockAddOptimistic, mockMarkSendFailed, mockRemoveOptimistic } =
+  vi.hoisted(() => ({
+    mockSetMessagePinned: vi.fn(),
+    mockAddOptimistic: vi.fn(),
+    mockMarkSendFailed: vi.fn(),
+    mockRemoveOptimistic: vi.fn(),
+  }));
 
 vi.mock("@stores/messages.store", () => ({
   getChannelMessages: mockGetChannelMessages,
   setMessagePinned: mockSetMessagePinned,
+  addOptimisticMessage: mockAddOptimistic,
+  markSendFailed: mockMarkSendFailed,
+  removeOptimistic: mockRemoveOptimistic,
+}));
+
+vi.mock("@stores/auth.store", () => ({
+  authStore: {
+    getState: () => ({ user: { id: 1, username: "tester", avatar: null } }),
+  },
 }));
 
 const { mockUpdateChatHeaderForDm } = vi.hoisted(() => ({
@@ -152,6 +168,7 @@ function makeOpts(overrides: Partial<ChannelControllerOptions> = {}): ChannelCon
     ws: {
       send: vi.fn(),
       getState: vi.fn(() => "connected"),
+      onStateChange: vi.fn(() => vi.fn()),
     } as unknown as ChannelControllerOptions["ws"],
     api: {
       uploadFile: vi.fn().mockResolvedValue({ id: 1, url: "/f/1", filename: "f.txt" }),
@@ -331,7 +348,7 @@ describe("createChannelController", () => {
       });
     });
 
-    it("onSend shows error when not connected", () => {
+    it("onSend while disconnected records a failed optimistic row (no silent drop)", () => {
       const opts = makeOpts();
       (opts.ws.getState as ReturnType<typeof vi.fn>).mockReturnValue("disconnected");
       const ctrl = createChannelController(opts);
@@ -339,7 +356,10 @@ describe("createChannelController", () => {
 
       capturedMessageInputOpts.onSend("hello", null, []);
 
-      expect(opts.showToast).toHaveBeenCalledWith("Not connected — message not sent", "error");
+      // No socket send is attempted; the row is shown as failed with retry.
+      expect(opts.ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "chat_send" }));
+      expect(mockAddOptimistic).toHaveBeenCalled();
+      expect(mockMarkSendFailed).toHaveBeenCalledWith(expect.any(String), "OFFLINE");
     });
 
     it("onTyping sends typing_start via ws", () => {
