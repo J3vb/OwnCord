@@ -91,23 +91,32 @@ func (d *DB) GetAttachmentWithChannel(id string) (*AttachmentAccess, error) {
 }
 
 // LinkAttachmentsToMessage sets message_id on attachments that are currently
-// unlinked (message_id IS NULL). Returns the number of rows updated.
-// Uses WHERE message_id IS NULL to prevent double-linking in a race.
-func (d *DB) LinkAttachmentsToMessage(messageID int64, attachmentIDs []string) (int64, error) {
+// unlinked (message_id IS NULL) and owned by uploaderID. Legacy rows with
+// uploader_id IS NULL are treated as unowned and may be claimed by any
+// sender. Rows that are already linked, owned by another user, or
+// nonexistent are skipped rather than errors, so a client retry of a
+// partially-completed send cannot fail the whole message. This single UPDATE
+// is the atomic attachment-IDOR guard for message sends: ownership is
+// enforced in the same statement that links, so there is no check-then-link
+// race. Returns the number of rows updated.
+func (d *DB) LinkAttachmentsToMessage(messageID, uploaderID int64, attachmentIDs []string) (int64, error) {
 	if len(attachmentIDs) == 0 {
 		return 0, nil
 	}
 
 	placeholders := make([]string, len(attachmentIDs))
-	args := make([]any, 0, len(attachmentIDs)+1)
+	args := make([]any, 0, len(attachmentIDs)+2)
 	args = append(args, messageID)
 	for i, id := range attachmentIDs {
 		placeholders[i] = "?"
 		args = append(args, id)
 	}
+	args = append(args, uploaderID)
 
 	query := fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
-		`UPDATE attachments SET message_id = ? WHERE id IN (%s) AND message_id IS NULL`,
+		`UPDATE attachments SET message_id = ?
+		 WHERE id IN (%s) AND message_id IS NULL
+		   AND (uploader_id = ? OR uploader_id IS NULL)`,
 		strings.Join(placeholders, ","),
 	)
 	res, err := d.sqlDB.Exec(query, args...)

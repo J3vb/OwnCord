@@ -28,8 +28,7 @@ func newEmitTestHub() *Hub {
 	return &Hub{
 		clients:         make(map[int64]*Client),
 		broadcast:       make(chan broadcastMsg, 64),
-		register:        make(chan *Client, 16),
-		unregister:      make(chan *Client, 16),
+		clientEvents:    make(chan clientEvent, 32),
 		stop:            make(chan struct{}),
 		pubsub:          NewPubSub(),
 		replayBuf:       NewEventRingBuffer(100),

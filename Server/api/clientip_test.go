@@ -4,6 +4,7 @@ package api
 // These live in package api (not api_test) so they can reach unexported symbols.
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 )
@@ -150,6 +151,48 @@ func TestClientIP_XForwardedFor_UsedWhenNoXRealIP(t *testing.T) {
 	ip := clientIPWithProxies(req, []string{"10.0.0.0/8"})
 	if ip != "203.0.113.10" {
 		t.Errorf("clientIP X-Forwarded-For = %q, want %q", ip, "203.0.113.10")
+	}
+}
+
+// TestClientIP_BroadTrustedCIDRKeepsClientsDistinct locks the W2-5 fix: with
+// a trusted_proxies range broad enough to cover the clients themselves, the
+// right-to-left walk exhausts; falling back to RemoteAddr would collapse
+// every client into the proxy's own bucket (one user's failed logins would
+// lock out everyone). The leftmost valid XFF entry keeps clients distinct.
+func TestClientIP_BroadTrustedCIDRKeepsClientsDistinct(t *testing.T) {
+	trusted := []string{"10.0.0.0/8"} // covers proxy AND LAN clients
+
+	newReq := func(xff string) *http.Request {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = "10.0.0.2:9999" // the proxy
+		req.Header.Set("X-Forwarded-For", xff)
+		return req
+	}
+
+	ip1 := clientIPWithProxies(newReq("10.5.1.7"), trusted)
+	ip2 := clientIPWithProxies(newReq("10.5.1.8"), trusted)
+	if ip1 != "10.5.1.7" || ip2 != "10.5.1.8" {
+		t.Fatalf("clients behind broad trusted CIDR collapsed: ip1=%q ip2=%q", ip1, ip2)
+	}
+
+	// Multi-hop: leftmost valid entry (furthest upstream) wins on exhaustion.
+	ip3 := clientIPWithProxies(newReq("10.5.1.9, 10.0.0.3"), trusted)
+	if ip3 != "10.5.1.9" {
+		t.Fatalf("expected furthest-upstream entry, got %q", ip3)
+	}
+}
+
+// TestClientIP_SpoofedXFFFromUntrustedRemoteIgnored: an untrusted connecting
+// address never gets its forwarded headers honoured, exhaustion fallback or
+// not.
+func TestClientIP_SpoofedXFFFromUntrustedRemoteIgnored(t *testing.T) {
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "203.0.113.9:1234"
+	req.Header.Set("X-Forwarded-For", "10.5.1.7")
+
+	ip := clientIPWithProxies(req, []string{"10.0.0.0/8"})
+	if ip != "203.0.113.9" {
+		t.Fatalf("spoofed XFF from untrusted remote honoured: got %q", ip)
 	}
 }
 

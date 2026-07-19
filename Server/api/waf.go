@@ -92,8 +92,12 @@ func NewWAFMiddleware(paranoiaLevel int) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Process request body (if applicable)
-			if r.Body != nil && r.ContentLength > 0 {
+			// Process request body (if applicable). Use ContentLength != 0 so
+			// chunked requests (Transfer-Encoding: chunked → ContentLength == -1)
+			// are inspected too; otherwise the SQLi/XSS/RCE body rules are silently
+			// skipped for them. The read is bounded by SecRequestBodyLimit inside
+			// Coraza. ContentLength == 0 (no body) still skips inspection.
+			if r.Body != nil && r.ContentLength != 0 {
 				if it, _, err := tx.ReadRequestBodyFrom(r.Body); it != nil {
 					handleWAFInterruption(w, it)
 					return

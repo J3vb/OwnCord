@@ -1,7 +1,7 @@
 //go:build otel
 
 // Phase B Step 8 — Real OpenTelemetry-backed implementation. Compiled only
-// with `-tags otel`, matching the postgres / wazero build-tag pattern used
+// with `-tags otel`, matching the wazero build-tag pattern used
 // elsewhere in the repo. The default build ships telemetry_default.go with a
 // no-op provider so sqlite-only binaries do not pull the OTel SDK in.
 //

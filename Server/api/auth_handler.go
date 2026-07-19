@@ -317,7 +317,17 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 
 		failKey := "login_fail:" + ip
 		userFailKey := "login_user_fail:" + req.Username
-		if user == nil || !auth.CheckPassword(user.PasswordHash, req.Password) {
+		// Always run the password check — with an empty hash when the user does
+		// not exist. auth.CheckPassword performs a dummy bcrypt comparison for an
+		// empty hash, so bcrypt executes on every path and response time stays
+		// constant, preventing timing-based username enumeration. (A `user == nil
+		// || CheckPassword(...)` short-circuit would skip bcrypt entirely for
+		// unknown usernames, reintroducing the timing side-channel.)
+		storedHash := ""
+		if user != nil {
+			storedHash = user.PasswordHash
+		}
+		if !auth.CheckPassword(storedHash, req.Password) {
 			// Track failures per-IP; lockout on threshold.
 			if !limiter.Allow(failKey, loginFailureThreshold, loginFailureWindow) {
 				limiter.Lockout(lockKey, loginLockoutDuration)

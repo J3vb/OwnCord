@@ -233,7 +233,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Admin panel: static files + REST API (Phase 6).
 	// Restrict /admin to configured CIDRs (default: private networks only).
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo)
-	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions)
+	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc.Moderation)
 	r.Group(func(r chi.Router) {
 		r.Use(AdminIPRestrict(cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
 		r.Mount("/admin", adminHandler)
@@ -251,8 +251,16 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		})
 	})
 
-	// Client auto-update endpoint (unauthenticated).
-	MountClientUpdateRoute(r, u)
+	// Client auto-update endpoint (unauthenticated). Per-IP rate limited to
+	// bound abuse; the signature fetch is cached inside the updater (DoS fix).
+	// Dedicated key prefix (mirroring "livekit_proxy:"): the empty-prefix
+	// middleware would share per-IP buckets with verify-totp, password change,
+	// and the other sensitive endpoints, so a client's 30/min auto-poll could
+	// 429 its user's own 2FA or password change.
+	MountClientUpdateRoute(
+		r.With(rateLimitMiddlewareWithPrefix(limiter, "client_update:", clientUpdateRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)),
+		u,
+	)
 
 	// Issue 15: Warn if AllowedOrigins contains wildcard.
 	for _, o := range cfg.Server.AllowedOrigins {

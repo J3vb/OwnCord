@@ -2,9 +2,7 @@ package ws
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -12,7 +10,12 @@ import (
 
 	"github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
+	"github.com/livekit/protocol/webhook"
 )
+
+// webhookMaxBodyBytes bounds the webhook request body to prevent unbounded
+// reads from an unauthenticated caller.
+const webhookMaxBodyBytes = 64 * 1024
 
 // NewLiveKitWebhookHandler returns an HTTP handler that processes LiveKit
 // webhook events. It synchronises LiveKit room state back into OwnCord's
@@ -22,53 +25,32 @@ import (
 // Speaker detection is handled client-side via LiveKit's
 // RoomEvent.ActiveSpeakersChanged (lower latency than webhooks).
 func (h *Hub) NewLiveKitWebhookHandler(apiKey, apiSecret string) http.HandlerFunc {
+	// The SDK receiver verifies the token signature AND that the token's sha256
+	// claim matches the request body hash, binding verification to the body so
+	// a captured token cannot be replayed against a forged payload.
+	provider := auth.NewSimpleKeyProvider(apiKey, apiSecret)
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check Authorization header BEFORE reading the body to avoid
 		// allocating memory for unauthenticated requests.
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
+		if r.Header.Get("Authorization") == "" {
 			slog.Warn("livekit webhook: missing Authorization header")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		body, err := io.ReadAll(io.LimitReader(r.Body, 64*1024))
+		// Bound the body before the SDK reads it (ReceiveWebhookEvent uses an
+		// unbounded io.ReadAll internally).
+		r.Body = http.MaxBytesReader(w, r.Body, webhookMaxBodyBytes)
+
+		// ReceiveWebhookEvent verifies the JWT signature, the token's body-hash
+		// claim, and the exp/nbf claims, then parses the payload. This replaces
+		// the previous manual ParseAPIToken/Verify sequence, which was not bound
+		// to the request body (forgery/replay).
+		event, err := webhook.ReceiveWebhookEvent(r, provider)
 		if err != nil {
-			slog.Error("livekit webhook: read body failed", "error", err)
-			http.Error(w, "bad request", http.StatusBadRequest)
-			return
-		}
-
-		// LiveKit sends "Bearer <token>" in the Authorization header.
-		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
-		verifier, err := auth.ParseAPIToken(tokenStr)
-		if err != nil {
-			slog.Warn("livekit webhook: invalid token", "error", err)
+			slog.Warn("livekit webhook: verification failed", "error", err)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		if verifier.APIKey() != apiKey {
-			slog.Warn("livekit webhook: API key mismatch",
-				"got", verifier.APIKey(), "want", apiKey)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		// Verify checks both the HMAC signature and the exp/nbf claims
-		// (via jwt.Claims.Validate with Time: time.Now() inside the SDK).
-		// Expired tokens are rejected with an error here.
-		if _, _, err := verifier.Verify(apiSecret); err != nil {
-			slog.Warn("livekit webhook: token verification failed", "error", err)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		// Parse the webhook event payload.
-		var event livekit.WebhookEvent
-		if err := json.Unmarshal(body, &event); err != nil {
-			slog.Warn("livekit webhook: invalid JSON", "error", err)
-			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
 
@@ -80,9 +62,9 @@ func (h *Hub) NewLiveKitWebhookHandler(apiKey, apiSecret string) http.HandlerFun
 
 		switch event.Event {
 		case "participant_joined":
-			h.handleWebhookParticipantJoined(r.Context(), &event)
+			h.handleWebhookParticipantJoined(r.Context(), event)
 		case "participant_left":
-			h.handleWebhookParticipantLeft(r.Context(), &event)
+			h.handleWebhookParticipantLeft(r.Context(), event)
 		default:
 			slog.Debug("livekit webhook: unhandled event", "event", event.Event)
 		}

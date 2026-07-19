@@ -6,6 +6,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/service"
 	"github.com/owncord/server/updater"
 )
 
@@ -14,7 +15,7 @@ import (
 // NewAdminAPI returns a chi router with all /admin/api/* routes. All routes
 // are protected by adminAuthMiddleware which requires the ADMINISTRATOR bit,
 // except for the setup endpoints which are unauthenticated.
-func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator) http.Handler {
+func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator, mod *service.ModerationService) http.Handler {
 	r := chi.NewRouter()
 
 	// Setup endpoints — unauthenticated, only functional when no users exist.
@@ -39,7 +40,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 
 		r.Get("/stats", handleGetStats(database, hub))
 		r.Get("/users", handleListUsers(database))
-		r.Patch("/users/{id}", handlePatchUser(database, hub, permInvalidator))
+		r.Patch("/users/{id}", handlePatchUser(database, hub, permInvalidator, mod))
 		r.Delete("/users/{id}/sessions", handleForceLogout(database))
 		r.Get("/channels", handleListChannels(database))
 		r.Post("/channels", handleCreateChannel(database, hub))

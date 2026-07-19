@@ -180,10 +180,13 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		return nil, fmt.Errorf("%w: failed to save message", ErrInternal)
 	}
 
-	// Link attachments.
+	// Link attachments. Ownership is enforced atomically inside the link
+	// UPDATE itself (uploader match + still unlinked), so another user's
+	// upload, an already-linked attachment, or a nonexistent id is skipped by
+	// the statement — no check-then-link race and no N+1 pre-verification.
 	var attachments []db.AttachmentInfo
 	if len(p.AttachmentIDs) > 0 {
-		linked, linkErr := s.st.LinkAttachmentsToMessage(msgID, p.AttachmentIDs)
+		linked, linkErr := s.st.LinkAttachmentsToMessage(msgID, p.UserID, p.AttachmentIDs)
 		if linkErr != nil {
 			slog.Error("MessageService.SendMessage LinkAttachments", "err", linkErr, "msg_id", msgID)
 			// Cleanup: soft-delete the message.
@@ -191,6 +194,10 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 				slog.Error("MessageService.SendMessage DeleteMessage (cleanup)", "err", delErr, "msg_id", msgID)
 			}
 			return nil, fmt.Errorf("%w: failed to send message with attachments", ErrInternal)
+		}
+		if linked < int64(len(p.AttachmentIDs)) {
+			slog.Warn("MessageService.SendMessage: skipped attachments (not owned, already linked, or missing)",
+				"msg_id", msgID, "user_id", p.UserID, "requested", len(p.AttachmentIDs), "linked", linked)
 		}
 		if linked > 0 {
 			attMap, attErr := s.st.GetAttachmentsByMessageIDs([]int64{msgID})
@@ -435,7 +442,10 @@ func (s *MessageService) handleReaction(userID, msgID int64, emoji string, add b
 		if dmErr != nil || !ok {
 			return nil, fmt.Errorf("%w: not a DM participant", ErrBadRequest)
 		}
-	} else if !s.perms.HasChannelPerm(userID, msg.ChannelID, permissions.AddReactions) {
+	} else if !s.perms.HasChannelPerm(userID, msg.ChannelID, permissions.ReadMessages|permissions.AddReactions) {
+		// Require READ_MESSAGES in addition to ADD_REACTIONS so a user cannot
+		// react in a channel they cannot read. Mirrors checkSendPermission,
+		// which requires ReadMessages|SendMessages for non-DM sends.
 		return nil, fmt.Errorf("%w: missing ADD_REACTIONS permission", ErrForbidden)
 	}
 
@@ -665,6 +675,19 @@ func (s *MessageService) GetAccessibleChannelIDs(userID int64) ([]int64, error) 
 	}
 
 	return ids, nil
+}
+
+// CanPost reports whether userID may post into channelID, applying the same
+// checks as a real message send: channel permissions via the cached checker
+// for regular channels; participant membership AND block status for DMs.
+// Exists so gates outside the send flow (the plugin broadcast path) share
+// exactly this policy instead of hand-rolling a weaker copy.
+func (s *MessageService) CanPost(userID, channelID int64) error {
+	ch, err := s.st.GetChannel(channelID)
+	if err != nil || ch == nil {
+		return fmt.Errorf("%w: channel not found", ErrNotFound)
+	}
+	return s.checkSendPermission(userID, channelID, ch.Type == "dm")
 }
 
 // checkSendPermission validates send permission for DM and non-DM channels.

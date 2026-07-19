@@ -29,13 +29,18 @@ type broadcastMsg struct {
 // Hub manages all active WebSocket clients and routes messages between them.
 // All exported methods are safe to call from multiple goroutines.
 type Hub struct {
-	clients      map[int64]*Client
-	mu           syncutil.RWMutex
-	db           *db.DB
-	limiter      *auth.RateLimiter
-	broadcast    chan broadcastMsg
-	register     chan *Client
-	unregister   chan *Client
+	clients   map[int64]*Client
+	mu        syncutil.RWMutex
+	db        *db.DB
+	limiter   *auth.RateLimiter
+	broadcast chan broadcastMsg
+	// clientEvents carries register AND unregister requests on one channel so
+	// a connection's Register→Unregister sequence is processed in submission
+	// order. With two separate channels, Run's select picked randomly between
+	// them when both were ready — a fast connect/disconnect could process the
+	// unregister first (a no-op for an unknown client) and then the register,
+	// admitting an already-dead client as a ghost until the stale sweep.
+	clientEvents chan clientEvent
 	stop         chan struct{}
 	stopOnce     sync.Once
 	gracefulOnce sync.Once
@@ -43,6 +48,10 @@ type Hub struct {
 	lkProcess    *LiveKitProcess
 	registry     *HandlerRegistry
 	permChecker  *permissions.Checker
+	// messageSvc gates plugin broadcasts through the same posting policy as a
+	// real message send (permissions, DM membership, DM blocks). Nil only in
+	// bare test hubs; the broadcast gate fails closed then.
+	messageSvc *service.MessageService
 
 	pubsub       *PubSub           // topic-based pub/sub for O(subscribers) broadcast
 	topicLimiter *TopicRateLimiter // per-topic throughput caps
@@ -90,8 +99,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 		db:              database,
 		limiter:         limiter,
 		broadcast:       make(chan broadcastMsg, 1024),
-		register:        make(chan *Client, 32),
-		unregister:      make(chan *Client, 32),
+		clientEvents:    make(chan clientEvent, 64),
 		stop:            make(chan struct{}),
 		pubsub:          NewPubSub(),
 		topicLimiter:    NewTopicRateLimiter(topicRateLimitPerSecond, time.Second),
@@ -117,6 +125,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 		chatDeps.MessageSvc = svc.Messages
 		presenceDeps.ChannelSvc = svc.Channels
 		reactionDeps.MessageSvc = svc.Messages
+		h.messageSvc = svc.Messages
 	}
 
 	registerChatHandlers(reg, chatDeps)
@@ -258,10 +267,12 @@ func (h *Hub) Run() {
 				select {
 				case <-h.stop:
 					return
-				case c := <-h.register:
-					h.registerNow(c)
-				case c := <-h.unregister:
-					h.unregisterNow(c)
+				case ev := <-h.clientEvents:
+					if ev.add {
+						h.registerNow(ev.c)
+					} else {
+						h.unregisterNow(ev.c)
+					}
 				case bm := <-h.broadcast:
 					h.deliverBroadcast(bm)
 				case <-staleTicker.C:
@@ -376,12 +387,19 @@ func (h *Hub) GetClient(userID int64) *Client {
 
 // Register queues a client for registration with the hub.
 func (h *Hub) Register(c *Client) {
-	h.register <- c
+	h.clientEvents <- clientEvent{c: c, add: true}
 }
 
 // Unregister queues a client for removal from the hub.
 func (h *Hub) Unregister(c *Client) {
-	h.unregister <- c
+	h.clientEvents <- clientEvent{c: c}
+}
+
+// clientEvent is a register (add=true) or unregister (add=false) request.
+// Both kinds share one channel so per-connection ordering is preserved.
+type clientEvent struct {
+	c   *Client
+	add bool
 }
 
 func (h *Hub) registerNow(c *Client) {

@@ -109,8 +109,8 @@ func (s *SQLiteStore) GetChannelUnreadCounts(userID int64) (map[int64]db.Channel
 func (s *SQLiteStore) GetLatestMessageID(channelID int64) (int64, error) {
 	return s.db.GetLatestMessageID(channelID)
 }
-func (s *SQLiteStore) LinkAttachmentsToMessage(messageID int64, attachmentIDs []string) (int64, error) {
-	return s.db.LinkAttachmentsToMessage(messageID, attachmentIDs)
+func (s *SQLiteStore) LinkAttachmentsToMessage(messageID, uploaderID int64, attachmentIDs []string) (int64, error) {
+	return s.db.LinkAttachmentsToMessage(messageID, uploaderID, attachmentIDs)
 }
 func (s *SQLiteStore) GetAttachmentsByMessageIDs(msgIDs []int64) (map[int64][]db.AttachmentInfo, error) {
 	return s.db.GetAttachmentsByMessageIDs(msgIDs)
@@ -118,7 +118,7 @@ func (s *SQLiteStore) GetAttachmentsByMessageIDs(msgIDs []int64) (map[int64][]db
 
 // ── ChannelStore ────────────────────────────────────────────────────────────
 
-func (s *SQLiteStore) ListChannels() ([]db.Channel, error) { return s.db.ListChannels() }
+func (s *SQLiteStore) ListChannels() ([]db.Channel, error)      { return s.db.ListChannels() }
 func (s *SQLiteStore) GetChannel(id int64) (*db.Channel, error) { return s.db.GetChannel(id) }
 func (s *SQLiteStore) CreateChannel(name, chanType, category, topic string, position int) (int64, error) {
 	return s.db.CreateChannel(name, chanType, category, topic, position)
@@ -126,8 +126,10 @@ func (s *SQLiteStore) CreateChannel(name, chanType, category, topic string, posi
 func (s *SQLiteStore) UpdateChannel(id int64, name, topic string, slowMode int) error {
 	return s.db.UpdateChannel(id, name, topic, slowMode)
 }
-func (s *SQLiteStore) DeleteChannel(id int64) error           { return s.db.DeleteChannel(id) }
-func (s *SQLiteStore) SetChannelSlowMode(id int64, sm int) error { return s.db.SetChannelSlowMode(id, sm) }
+func (s *SQLiteStore) DeleteChannel(id int64) error { return s.db.DeleteChannel(id) }
+func (s *SQLiteStore) SetChannelSlowMode(id int64, sm int) error {
+	return s.db.SetChannelSlowMode(id, sm)
+}
 func (s *SQLiteStore) SetChannelVoiceMaxUsers(id int64, max int) error {
 	return s.db.SetChannelVoiceMaxUsers(id, max)
 }
@@ -192,21 +194,25 @@ func (s *SQLiteStore) DeleteSession(tokenHash string) error { return s.db.Delete
 func (s *SQLiteStore) DeleteOtherSessions(userID, keepSessionID int64) (int64, error) {
 	return s.db.DeleteOtherSessions(userID, keepSessionID)
 }
-func (s *SQLiteStore) DeleteExpiredSessions() error   { return s.db.DeleteExpiredSessions() }
-func (s *SQLiteStore) DeleteSessionByID(sid, uid int64) error { return s.db.DeleteSessionByID(sid, uid) }
-func (s *SQLiteStore) TouchSession(tokenHash string) error    { return s.db.TouchSession(tokenHash) }
+func (s *SQLiteStore) DeleteExpiredSessions() error { return s.db.DeleteExpiredSessions() }
+func (s *SQLiteStore) DeleteSessionByID(sid, uid int64) error {
+	return s.db.DeleteSessionByID(sid, uid)
+}
+func (s *SQLiteStore) TouchSession(tokenHash string) error { return s.db.TouchSession(tokenHash) }
 func (s *SQLiteStore) ListUserSessions(userID int64) ([]db.Session, error) {
 	return s.db.ListUserSessions(userID)
 }
-func (s *SQLiteStore) ForceLogoutUser(userID int64) error  { return s.db.ForceLogoutUser(userID) }
+func (s *SQLiteStore) ForceLogoutUser(userID int64) error { return s.db.ForceLogoutUser(userID) }
 func (s *SQLiteStore) GetUserSessions(userID int64) ([]db.Session, error) {
 	return s.db.GetUserSessions(userID)
 }
 
 // ── RoleStore ───────────────────────────────────────────────────────────────
 
-func (s *SQLiteStore) GetRoleByID(id int64) (*db.Role, error)         { return s.db.GetRoleByID(id) }
-func (s *SQLiteStore) GetRoleForUser(userID int64) (*db.Role, error)  { return s.db.GetRoleForUser(userID) }
+func (s *SQLiteStore) GetRoleByID(id int64) (*db.Role, error) { return s.db.GetRoleByID(id) }
+func (s *SQLiteStore) GetRoleForUser(userID int64) (*db.Role, error) {
+	return s.db.GetRoleForUser(userID)
+}
 func (s *SQLiteStore) GetUserWithRole(userID int64) (*db.User, *db.Role, error) {
 	return s.db.GetUserWithRole(userID)
 }
@@ -217,10 +223,10 @@ func (s *SQLiteStore) ListRoles() ([]*db.Role, error) { return s.db.ListRoles() 
 func (s *SQLiteStore) CreateInvite(createdBy int64, maxUses int, expiresAt *time.Time) (string, error) {
 	return s.db.CreateInvite(createdBy, maxUses, expiresAt)
 }
-func (s *SQLiteStore) GetInvite(code string) (*db.Invite, error)  { return s.db.GetInvite(code) }
-func (s *SQLiteStore) ListInvites() ([]*db.Invite, error)         { return s.db.ListInvites() }
-func (s *SQLiteStore) UseInviteAtomic(code string) error          { return s.db.UseInviteAtomic(code) }
-func (s *SQLiteStore) RevokeInvite(code string) error             { return s.db.RevokeInvite(code) }
+func (s *SQLiteStore) GetInvite(code string) (*db.Invite, error) { return s.db.GetInvite(code) }
+func (s *SQLiteStore) ListInvites() ([]*db.Invite, error)        { return s.db.ListInvites() }
+func (s *SQLiteStore) UseInviteAtomic(code string) error         { return s.db.UseInviteAtomic(code) }
+func (s *SQLiteStore) RevokeInvite(code string) error            { return s.db.RevokeInvite(code) }
 
 // ── VoiceStore ──────────────────────────────────────────────────────────────
 
@@ -240,15 +246,21 @@ func (s *SQLiteStore) GetVoiceState(userID int64) (*db.VoiceState, error) {
 func (s *SQLiteStore) GetChannelVoiceStates(channelID int64) ([]db.VoiceState, error) {
 	return s.db.GetChannelVoiceStates(channelID)
 }
-func (s *SQLiteStore) GetAllVoiceStates() ([]db.VoiceState, error)   { return s.db.GetAllVoiceStates() }
-func (s *SQLiteStore) UpdateVoiceMute(userID int64, m bool) error    { return s.db.UpdateVoiceMute(userID, m) }
-func (s *SQLiteStore) UpdateVoiceDeafen(userID int64, d bool) error  { return s.db.UpdateVoiceDeafen(userID, d) }
-func (s *SQLiteStore) ClearVoiceState(userID int64) error            { return s.db.ClearVoiceState(userID) }
-func (s *SQLiteStore) ClearAllVoiceStates() error                    { return s.db.ClearAllVoiceStates() }
+func (s *SQLiteStore) GetAllVoiceStates() ([]db.VoiceState, error) { return s.db.GetAllVoiceStates() }
+func (s *SQLiteStore) UpdateVoiceMute(userID int64, m bool) error {
+	return s.db.UpdateVoiceMute(userID, m)
+}
+func (s *SQLiteStore) UpdateVoiceDeafen(userID int64, d bool) error {
+	return s.db.UpdateVoiceDeafen(userID, d)
+}
+func (s *SQLiteStore) ClearVoiceState(userID int64) error { return s.db.ClearVoiceState(userID) }
+func (s *SQLiteStore) ClearAllVoiceStates() error         { return s.db.ClearAllVoiceStates() }
 func (s *SQLiteStore) CountActiveCameras(channelID int64) (int, error) {
 	return s.db.CountActiveCameras(channelID)
 }
-func (s *SQLiteStore) UpdateVoiceCamera(userID int64, c bool) error { return s.db.UpdateVoiceCamera(userID, c) }
+func (s *SQLiteStore) UpdateVoiceCamera(userID int64, c bool) error {
+	return s.db.UpdateVoiceCamera(userID, c)
+}
 func (s *SQLiteStore) EnableCameraIfUnderLimit(userID, channelID int64, maxVideo int) (bool, error) {
 	return s.db.EnableCameraIfUnderLimit(userID, channelID, maxVideo)
 }
@@ -267,7 +279,7 @@ func (s *SQLiteStore) GetOrCreateDMChannel(user1ID, user2ID int64) (*db.Channel,
 func (s *SQLiteStore) GetUserDMChannels(userID int64) ([]db.DMChannelInfo, error) {
 	return s.db.GetUserDMChannels(userID)
 }
-func (s *SQLiteStore) OpenDM(userID, channelID int64) error { return s.db.OpenDM(userID, channelID) }
+func (s *SQLiteStore) OpenDM(userID, channelID int64) error  { return s.db.OpenDM(userID, channelID) }
 func (s *SQLiteStore) CloseDM(userID, channelID int64) error { return s.db.CloseDM(userID, channelID) }
 func (s *SQLiteStore) IsDMParticipant(userID, channelID int64) (bool, error) {
 	return s.db.IsDMParticipant(userID, channelID)
@@ -314,7 +326,7 @@ func (s *SQLiteStore) DeleteOrphanedAttachments(cutoff string) ([]string, error)
 
 // ── AdminStore ──────────────────────────────────────────────────────────────
 
-func (s *SQLiteStore) UserCount() (int64, error)             { return s.db.UserCount() }
+func (s *SQLiteStore) UserCount() (int64, error)                { return s.db.UserCount() }
 func (s *SQLiteStore) GetServerStats() (*db.ServerStats, error) { return s.db.GetServerStats() }
 func (s *SQLiteStore) ListAllUsers(limit, offset int) ([]db.UserWithRole, error) {
 	return s.db.ListAllUsers(limit, offset)

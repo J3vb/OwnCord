@@ -19,7 +19,7 @@ import (
 // http.Handler with all dependencies wired.
 func TestNewHandler_ReturnsNonNilHandler(t *testing.T) {
 	database := openAdminTestDB(t)
-	h := admin.NewHandler(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	h := admin.NewHandler(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	if h == nil {
 		t.Fatal("NewHandler returned nil handler")
 	}
@@ -29,7 +29,7 @@ func TestNewHandler_ReturnsNonNilHandler(t *testing.T) {
 // responds with 200 and HTML content (the embedded admin SPA).
 func TestNewHandler_ServesStaticRoot(t *testing.T) {
 	database := openAdminTestDB(t)
-	h := admin.NewHandler(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	h := admin.NewHandler(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
@@ -60,7 +60,7 @@ func TestNewHandler_ServesStaticRoot(t *testing.T) {
 // Content-Security-Policy header allowing inline scripts and styles.
 func TestNewHandler_SetsCSPOnRoot(t *testing.T) {
 	database := openAdminTestDB(t)
-	h := admin.NewHandler(database, "1.0.0", nil, nil, nil, nil, nil)
+	h := admin.NewHandler(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
@@ -76,7 +76,7 @@ func TestNewHandler_SetsCSPOnRoot(t *testing.T) {
 // through the NewHandler-returned handler (setup/status endpoint is unauthenticated).
 func TestNewHandler_APIRoutesMounted(t *testing.T) {
 	database := openAdminTestDB(t)
-	h := admin.NewHandler(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	h := admin.NewHandler(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/setup/status", nil)
 	w := httptest.NewRecorder()
@@ -92,7 +92,7 @@ func TestNewHandler_APIRoutesMounted(t *testing.T) {
 // /api require a valid token.
 func TestNewHandler_AuthProtectedRoute(t *testing.T) {
 	database := openAdminTestDB(t)
-	h := admin.NewHandler(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	h := admin.NewHandler(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
 	// /api/stats requires authentication
 	req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
@@ -109,7 +109,7 @@ func TestNewHandler_AuthProtectedRoute(t *testing.T) {
 func TestNewHandler_WithUpdater(t *testing.T) {
 	database := openAdminTestDB(t)
 	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
-	h := admin.NewHandler(database, "1.0.0", &mockHub{}, u, nil, nil, nil)
+	h := admin.NewHandler(database, "1.0.0", &mockHub{}, u, nil, nil, nil, newTestModService(database))
 	if h == nil {
 		t.Fatal("NewHandler with updater returned nil handler")
 	}
@@ -148,7 +148,7 @@ func TestHandler_ServesEmbeddedFiles(t *testing.T) {
 // (position == 100) can reach backup endpoints.
 func TestOwnerOnlyMiddleware_OwnerAllowed(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
 	// createAdminUser creates an Owner-role user (role_id=1, position=100)
 	ownerToken := createAdminUser(t, database)
@@ -183,7 +183,7 @@ func TestOwnerOnlyMiddleware_OwnerAllowed(t *testing.T) {
 // (position < 100) cannot reach owner-only endpoints.
 func TestOwnerOnlyMiddleware_AdminDenied(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
 	// Create admin user (role_id=2, position=80)
 	adminUID, _ := database.CreateUser("middlewareadmin", "hash", 2)
@@ -201,7 +201,7 @@ func TestOwnerOnlyMiddleware_AdminDenied(t *testing.T) {
 // reach owner-only endpoints.
 func TestOwnerOnlyMiddleware_MemberDenied(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
 	memberToken := createMemberUser(t, database)
 
@@ -218,7 +218,7 @@ func TestOwnerOnlyMiddleware_MemberDenied(t *testing.T) {
 // rejected before reaching ownerOnlyMiddleware.
 func TestOwnerOnlyMiddleware_Unauthenticated(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
 	w := doRequest(t, handler, http.MethodPost, "/backup", "", nil)
 
