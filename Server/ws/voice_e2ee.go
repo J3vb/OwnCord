@@ -147,7 +147,16 @@ func handleVoiceE2EEOfferV2(_ context.Context, cmd Command, info ClientInfo, dep
 	offerCmd := cmd.(VoiceE2EEOfferCmd)
 	voiceChID := info.VoiceChannelID
 
-	ratKey := fmt.Sprintf("voice_e2ee_offer:%d", info.UserID)
+	// A legitimate rotation is a burst of one offer per peer (fired on
+	// join/leave and the periodic re-key), so the budget must not depend on
+	// channel size — keyed per sender alone, the 6th+ peer's offer was
+	// silently rate-limited and that peer could never decrypt audio again.
+	// Keying per (sender, target) admits any single rotation regardless of
+	// participant count while still capping repeated offers at one victim —
+	// the abuse this limit exists for, since an offer can force the target to
+	// re-key or disconnect. Cross-target spray stays bounded per victim and
+	// requires holding key-holder status in that channel.
+	ratKey := fmt.Sprintf("voice_e2ee_offer:%d:%d", info.UserID, offerCmd.TargetUserID())
 	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceE2EERateLimit, voiceE2EEWindow) {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many e2ee offers"}}
 	}
