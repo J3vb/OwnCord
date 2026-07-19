@@ -23,12 +23,12 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# NOTE: dangerous-settings is required for self-signed certificate support.
-# The app is designed for self-hosted servers which commonly use self-signed certs.
-# The Rust TOFU WS proxy handles WebSocket certs, but HTTP API calls (health,
-# login, upload) and attachment downloads need this feature to accept self-signed
-# certs via the `danger` fetch option. Scoped to server URLs only in attachments.ts.
-tauri-plugin-http = { version = "2.5.7", features = ["rustls-tls", "dangerous-settings"] }
+# Self-signed server certificates are handled by the Rust TOFU proxies
+# (ws_proxy, livekit_proxy, http_proxy), NOT by the plugin's dangerous-settings
+# feature — REST traffic is tunneled through http_proxy which pins the cert to
+# the trust-on-first-use fingerprint. The plugin therefore does default TLS
+# validation (used only for external hosts: image CDNs, OG previews, YouTube).
+tauri-plugin-http = { version = "2.5.7", features = ["rustls-tls"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
