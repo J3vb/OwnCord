@@ -12,3 +12,6 @@ SELECT 1 FROM user_blocks
 WHERE (blocker_id = ? AND blocked_id = ?)
    OR (blocker_id = ? AND blocked_id = ?)
 LIMIT 1;
+
+-- name: ListBlockedUsers :many
+SELECT blocked_id FROM user_blocks WHERE blocker_id = ? ORDER BY created_at DESC;

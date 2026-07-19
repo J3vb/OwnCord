@@ -25,8 +25,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/owncord/server/store"
 )
 
 // addWASM is the bytes of a minimal (module (func (export "add") ... )).
@@ -55,9 +53,9 @@ func writeTestPlugin(t *testing.T, root, name string, manifest string, wasmBytes
 	}
 }
 
-func newWazeroTestRegistry(t *testing.T, dir string) (*Registry, store.PluginStore) {
+func newWazeroTestRegistry(t *testing.T, dir string) (*Registry, PluginStore) {
 	t.Helper()
-	mem := store.NewMemStore()
+	mem := openPluginTestDB(t)
 	reg, err := NewRegistry(Config{
 		Directory:   dir,
 		MaxMemoryMB: 16,

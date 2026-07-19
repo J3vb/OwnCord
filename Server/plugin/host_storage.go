@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	maxPluginValueBytes = 64 * 1024  // 64 KB per value
-	maxPluginScanLimit  = 1000       // hard cap on PluginKVScan results
+	maxPluginValueBytes = 64 * 1024 // 64 KB per value
+	maxPluginScanLimit  = 1000      // hard cap on PluginKVScan results
 )
 
 // StoragePut writes a single key/value pair on behalf of inst.

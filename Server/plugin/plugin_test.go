@@ -15,8 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/owncord/server/store"
 )
 
 func TestParseManifestRoundTrip(t *testing.T) {
@@ -100,7 +98,7 @@ func TestRegistryInstallFromDisk(t *testing.T) {
 		0o644)
 	_ = os.WriteFile(filepath.Join(pluginDir, "hello.wasm"), []byte("\x00asm\x01\x00\x00\x00"), 0o644)
 
-	mem := store.NewMemStore()
+	mem := openPluginTestDB(t)
 	reg, err := NewRegistry(Config{Directory: dir, Store: mem})
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +116,7 @@ func TestRegistryInstallFromDisk(t *testing.T) {
 }
 
 func TestStorageGatedByCapability(t *testing.T) {
-	mem := store.NewMemStore()
+	mem := openPluginTestDB(t)
 	reg, err := NewRegistry(Config{Store: mem})
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +150,7 @@ func TestStorageGatedByCapability(t *testing.T) {
 // reinstall and ownership compared by plugin identity — the same plugin can
 // re-bind its own commands while a different plugin still cannot hijack them.
 func TestReinstallRebindsCommands(t *testing.T) {
-	mem := store.NewMemStore()
+	mem := openPluginTestDB(t)
 	reg, err := NewRegistry(Config{Directory: t.TempDir(), Store: mem})
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)

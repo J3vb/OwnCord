@@ -16,7 +16,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/owncord/server/store"
 	"github.com/owncord/server/telemetry"
 )
 
@@ -32,7 +31,7 @@ type pendingEvent struct {
 
 // EventPersister batches broadcast events and writes them to an EventStore.
 type EventPersister struct {
-	store      store.EventStore
+	store      EventStore
 	queue      chan pendingEvent
 	batchSize  int
 	flushEvery time.Duration
@@ -58,9 +57,9 @@ type EventPersister struct {
 // queueSize sets the channel buffer; once full, Enqueue increments the
 // dropped counter without blocking. batchSize and flushEvery control the
 // flush triggers.
-func NewEventPersister(s store.EventStore, queueSize, batchSize int, flushEvery time.Duration) *EventPersister {
+func NewEventPersister(s EventStore, queueSize, batchSize int, flushEvery time.Duration) *EventPersister {
 	if s == nil {
-		panic("ws: NewEventPersister requires a non-nil store.EventStore")
+		panic("ws: NewEventPersister requires a non-nil EventStore")
 	}
 	if queueSize <= 0 {
 		queueSize = 1024

@@ -1,47 +1,23 @@
-// Package store defines the database abstraction layer for OwnCord.
-// The Store interface decouples services from the concrete database
-// implementation, enabling SQLite (default) and future PostgreSQL support.
-package store
+package service
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
 	"github.com/owncord/server/db"
 )
 
-// Store is the top-level interface combining all domain-specific stores.
-// Services accept Store instead of *db.DB, enabling swappable backends.
+// Store is the data-access surface the service layer depends on. It is the
+// set of *db.DB methods the services call — no event/plugin/transaction
+// methods, which belong to other layers. *db.DB satisfies this interface
+// directly (D3 removed the former store package's pass-through wrapper), and
+// tests inject fakes that embed a real in-memory *db.DB and override the one
+// method they need to exercise an error path.
+//
+// permissions.NewChecker takes its own narrower interface (permissions.DB),
+// which *db.DB and this Store both satisfy.
 type Store interface {
-	MessageStore
-	ChannelStore
-	UserStore
-	SessionStore
-	RoleStore
-	InviteStore
-	VoiceStore
-	DMStore
-	BlockStore
-	AttachmentStore
-	AdminStore
-	SettingsStore
-	EventStore
-	PluginStore
-
-	// Close releases the underlying database connection.
-	Close() error
-
-	// WithTx executes fn within a transaction. The transaction is committed
-	// if fn returns nil, rolled back otherwise.
-	WithTx(ctx context.Context, fn func(Store) error) error
-
-	// Raw access for callers that need it (migration, backup, etc.).
-	SQLDb() *sql.DB
-}
-
-// MessageStore handles message CRUD, reactions, search, and read state.
-type MessageStore interface {
+	// ── Messages / reactions / read-state ──
 	CreateMessage(channelID, userID int64, content string, replyTo *int64) (int64, error)
 	GetMessage(id int64) (*db.Message, error)
 	GetMessages(channelID, before int64, limit int) ([]db.MessageWithUser, error)
@@ -60,10 +36,8 @@ type MessageStore interface {
 	GetLatestMessageID(channelID int64) (int64, error)
 	LinkAttachmentsToMessage(messageID, uploaderID int64, attachmentIDs []string) (int64, error)
 	GetAttachmentsByMessageIDs(msgIDs []int64) (map[int64][]db.AttachmentInfo, error)
-}
 
-// ChannelStore handles channel CRUD and permission overrides.
-type ChannelStore interface {
+	// ── Channels ──
 	ListChannels() ([]db.Channel, error)
 	GetChannel(id int64) (*db.Channel, error)
 	CreateChannel(name, chanType, category, topic string, position int) (int64, error)
@@ -74,10 +48,8 @@ type ChannelStore interface {
 	GetChannelPermissions(channelID, roleID int64) (allow, deny int64, err error)
 	GetAllChannelPermissionsForRole(roleID int64) (map[int64]db.ChannelOverride, error)
 	GetChannelTypes(ids []int64) (map[int64]string, error)
-}
 
-// UserStore handles user lookup and profile operations.
-type UserStore interface {
+	// ── Users ──
 	GetUserByID(id int64) (*db.User, error)
 	GetUserByUsername(username string) (*db.User, error)
 	CreateUser(username, passwordHash string, roleID int) (int64, error)
@@ -91,10 +63,8 @@ type UserStore interface {
 	ResetAllUserStatuses() error
 	DeleteAccount(ctx context.Context, userID int64) error
 	ListMembers() ([]db.MemberSummary, error)
-}
 
-// SessionStore handles authentication session management.
-type SessionStore interface {
+	// ── Sessions ──
 	CreateSession(userID int64, tokenHash, device, ip string) (int64, error)
 	GetSessionByTokenHash(tokenHash string) (*db.Session, error)
 	GetSessionWithBanStatus(tokenHash string) (*db.SessionWithBanStatus, error)
@@ -106,27 +76,21 @@ type SessionStore interface {
 	ListUserSessions(userID int64) ([]db.Session, error)
 	ForceLogoutUser(userID int64) error
 	GetUserSessions(userID int64) ([]db.Session, error)
-}
 
-// RoleStore handles role lookups.
-type RoleStore interface {
+	// ── Roles ──
 	GetRoleByID(id int64) (*db.Role, error)
 	GetRoleForUser(userID int64) (*db.Role, error)
 	GetUserWithRole(userID int64) (*db.User, *db.Role, error)
 	ListRoles() ([]*db.Role, error)
-}
 
-// InviteStore handles invite management.
-type InviteStore interface {
+	// ── Invites ──
 	CreateInvite(createdBy int64, maxUses int, expiresAt *time.Time) (string, error)
 	GetInvite(code string) (*db.Invite, error)
 	ListInvites() ([]*db.Invite, error)
 	UseInviteAtomic(code string) error
 	RevokeInvite(code string) error
-}
 
-// VoiceStore handles voice state management.
-type VoiceStore interface {
+	// ── Voice ──
 	JoinVoiceChannel(userID, channelID int64) error
 	JoinVoiceChannelIfCapacity(userID, channelID int64, maxUsers int) error
 	LeaveVoiceChannel(userID int64) error
@@ -143,10 +107,8 @@ type VoiceStore interface {
 	EnableCameraIfUnderLimit(userID, channelID int64, maxVideo int) (bool, error)
 	UpdateVoiceScreenshare(userID int64, screenshare bool) error
 	CountChannelVoiceUsers(channelID int64) (int, error)
-}
 
-// DMStore handles direct message channels.
-type DMStore interface {
+	// ── Direct messages ──
 	GetOrCreateDMChannel(user1ID, user2ID int64) (*db.Channel, bool, error)
 	GetUserDMChannels(userID int64) ([]db.DMChannelInfo, error)
 	OpenDM(userID, channelID int64) error
@@ -154,27 +116,21 @@ type DMStore interface {
 	IsDMParticipant(userID, channelID int64) (bool, error)
 	GetDMParticipantIDs(channelID int64) ([]int64, error)
 	GetDMRecipient(channelID, requestingUserID int64) (*db.User, error)
-}
 
-// BlockStore handles user blocks.
-type BlockStore interface {
+	// ── Blocks ──
 	BlockUser(blockerID, blockedID int64) error
 	UnblockUser(blockerID, blockedID int64) error
 	IsBlocked(blockerID, blockedID int64) (bool, error)
 	IsEitherBlocked(userA, userB int64) (bool, error)
 	ListBlockedUsers(blockerID int64) ([]int64, error)
-}
 
-// AttachmentStore handles file attachment metadata.
-type AttachmentStore interface {
+	// ── Attachments ──
 	CreateAttachment(id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error
 	GetAttachmentByID(id string) (*db.Attachment, error)
 	GetAttachmentWithChannel(id string) (*db.AttachmentAccess, error)
 	DeleteOrphanedAttachments(cutoff string) ([]string, error)
-}
 
-// AdminStore handles admin operations.
-type AdminStore interface {
+	// ── Admin ──
 	UserCount() (int64, error)
 	GetServerStats() (*db.ServerStats, error)
 	ListAllUsers(limit, offset int) ([]db.UserWithRole, error)
@@ -188,62 +144,9 @@ type AdminStore interface {
 	BackupTo(path string) error
 	BackupToSafe(path, safeRoot string) error
 	CountUsersWithoutTOTP() (int, error)
-}
 
-// SettingsStore handles server settings.
-type SettingsStore interface {
+	// ── Settings ──
 	GetSetting(key string) (string, error)
 	SetSetting(key, value string) error
 	GetAllSettings() (map[string]string, error)
-}
-
-// EventStore persists broadcast events for cold-replay during reconnection
-// when the in-memory ring buffer no longer covers the client's last_seq.
-//
-// Phase B Step 7 — Event Persistence Layer.
-type EventStore interface {
-	// PersistEvent appends an event with the hub-assigned seq. seq must be
-	// the same monotonic counter the wrapped payload exposes to clients so
-	// that cold-replay queries by seq return rows whose payload seq matches
-	// the row seq. channelID == 0 means the event was a global broadcast.
-	// Implementations should be tolerant of out-of-order seq insertion (e.g.
-	// they SHOULD NOT rely on AUTOINCREMENT semantics).
-	PersistEvent(ctx context.Context, seq int64, eventType string, channelID int64, payload []byte) error
-
-	// GetEventsSince returns up to limit events with seq > afterSeq, ordered
-	// by seq ascending. Used as a fallback after the ring buffer misses.
-	GetEventsSince(ctx context.Context, afterSeq int64, limit int) ([]db.PersistedEvent, error)
-
-	// GetEventsSinceForChannels returns up to limit events with seq > afterSeq
-	// whose channel_id is in channelIDs OR is 0 (global broadcasts), ordered by
-	// seq ascending. Mirrors EventRingBuffer.EventsSinceFiltered.
-	GetEventsSinceForChannels(ctx context.Context, afterSeq int64, channelIDs []int64, limit int) ([]db.PersistedEvent, error)
-
-	// PruneEventsOlderThan deletes events with created_at < cutoff. Returns the
-	// number of deleted rows. Called periodically by the pruner goroutine.
-	PruneEventsOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
-
-	// GetMaxEventSeq returns the largest seq in the events table, or 0 if the
-	// table is empty. Used at startup to seed the hub's in-memory monotonic
-	// counter so wrapped-payload seqs stay aligned with row seqs across
-	// restarts. Returns 0 (without error) when the table is empty.
-	GetMaxEventSeq(ctx context.Context) (int64, error)
-}
-
-// PluginStore manages installed plugins and per-plugin KV namespaces.
-//
-// Phase C Step 9 — Wazero Plugin Runtime.
-type PluginStore interface {
-	InstallPlugin(ctx context.Context, name, version, manifestJSON string) (int64, error)
-	EnablePlugin(ctx context.Context, id int64) error
-	DisablePlugin(ctx context.Context, id int64) error
-	UninstallPlugin(ctx context.Context, id int64) error
-	GetPlugin(ctx context.Context, id int64) (*db.PluginRow, error)
-	GetPluginByName(ctx context.Context, name string) (*db.PluginRow, error)
-	ListPlugins(ctx context.Context) ([]db.PluginRow, error)
-
-	PluginKVGet(ctx context.Context, pluginID int64, key string) ([]byte, error)
-	PluginKVSet(ctx context.Context, pluginID int64, key string, value []byte) error
-	PluginKVDelete(ctx context.Context, pluginID int64, key string) error
-	PluginKVScan(ctx context.Context, pluginID int64, prefix string, limit int) (map[string][]byte, error)
 }

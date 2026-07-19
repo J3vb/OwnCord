@@ -469,7 +469,7 @@ List all channels the authenticated user has `READ_MESSAGES` permission for. DM 
 | ----- | ---- | ----------- |
 | `id` | int64 | Channel ID |
 | `name` | string | Channel name |
-| `type` | string | `text` or `voice` (`announcement` is planned; the DB currently rejects it) |
+| `type` | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post) |
 | `topic` | string | Channel topic/description |
 | `category` | string | Category grouping |
 | `position` | int | Sort order within category |
