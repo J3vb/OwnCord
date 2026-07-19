@@ -266,6 +266,7 @@ voice:
   livekit_api_key: "mykey"
   livekit_api_secret: "mysecret"
   livekit_url: "ws://lk.example.com:7880"
+  advertise_internal_ip: true
 `
 	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
 		t.Fatalf("failed to write yaml: %v", err)
@@ -287,6 +288,27 @@ voice:
 	}
 	if cfg.Voice.LiveKitURL != "ws://lk.example.com:7880" {
 		t.Errorf("Voice.LiveKitURL = %q, want 'ws://lk.example.com:7880'", cfg.Voice.LiveKitURL)
+	}
+	if !cfg.Voice.AdvertiseInternalIP {
+		t.Error("Voice.AdvertiseInternalIP = false, want true")
+	}
+}
+
+func TestLoadVoiceAdvertiseInternalIPFromEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("voice:\n  quality: high\n"), 0o644); err != nil {
+		t.Fatalf("failed to write yaml: %v", err)
+	}
+
+	t.Setenv("OWNCORD_VOICE_ADVERTISE_INTERNAL_IP", "true")
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if !cfg.Voice.AdvertiseInternalIP {
+		t.Error("Voice.AdvertiseInternalIP = false, want true from env override")
 	}
 }
 

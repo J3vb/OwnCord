@@ -860,6 +860,130 @@ func TestHub_VoiceSessionCount(t *testing.T) {
 	}
 }
 
+// ─── RefreshChannelVisibility ─────────────────────────────────────────────────
+
+// drainForMsgType reads messages from send until one with the given type
+// arrives or the timeout expires. Returns the decoded payload-bearing message.
+func drainForMsgType(t *testing.T, send chan []byte, msgType string) map[string]any {
+	t.Helper()
+	deadline := time.After(500 * time.Millisecond)
+	for {
+		select {
+		case raw := <-send:
+			var msg map[string]any
+			if err := json.Unmarshal(raw, &msg); err != nil {
+				continue
+			}
+			if msg["type"] == msgType {
+				return msg
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for %q message", msgType)
+			return nil
+		}
+	}
+}
+
+// assertNoMsgType asserts that no message of the given type is buffered.
+func assertNoMsgType(t *testing.T, send chan []byte, msgType string) {
+	t.Helper()
+	for {
+		select {
+		case raw := <-send:
+			var msg map[string]any
+			if err := json.Unmarshal(raw, &msg); err != nil {
+				continue
+			}
+			if msg["type"] == msgType {
+				t.Fatalf("unexpected %q message", msgType)
+			}
+		default:
+			return
+		}
+	}
+}
+
+func TestRefreshChannelVisibility_TargetedSends(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	chID := seedTestChannel(t, database, "secret-room")
+	ch, err := database.GetChannel(chID)
+	if err != nil || ch == nil {
+		t.Fatalf("GetChannel: %v", err)
+	}
+
+	owner := seedOwnerUser(t, database, "vis-owner")
+	memberID := seedTestUser(t, database, "vis-member")
+	member, err := database.GetUserByID(memberID)
+	if err != nil || member == nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+
+	ownerSend := make(chan []byte, 16)
+	memberSend := make(chan []byte, 16)
+	ownerClient := ws.NewTestClientWithUser(hub, owner, chID, ownerSend)
+	memberClient := ws.NewTestClientWithUser(hub, member, chID, memberSend)
+	hub.Register(ownerClient)
+	hub.Register(memberClient)
+	time.Sleep(30 * time.Millisecond)
+
+	// Hide the channel from the Member role (deny ReadMessages).
+	if _, err := database.Exec(
+		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, 4, 0, 2)`,
+		chID,
+	); err != nil {
+		t.Fatalf("insert override: %v", err)
+	}
+
+	hub.RefreshChannelVisibility(ch)
+
+	// Member loses the channel; owner (admin bit) keeps it.
+	drainForMsgType(t, memberSend, "channel_delete")
+	drainForMsgType(t, ownerSend, "channel_create")
+
+	// Restore visibility — the member gets the channel back.
+	if _, err := database.Exec(
+		`DELETE FROM channel_overrides WHERE channel_id = ? AND role_id = 4`, chID,
+	); err != nil {
+		t.Fatalf("delete override: %v", err)
+	}
+	hub.RefreshChannelVisibility(ch)
+	drainForMsgType(t, memberSend, "channel_create")
+	assertNoMsgType(t, memberSend, "channel_delete")
+}
+
+func TestRefreshChannelVisibility_ForcesFullResyncForStaleResumes(t *testing.T) {
+	hub, database := newTestHub(t)
+
+	chID := seedTestChannel(t, database, "watermark-room")
+	ch, err := database.GetChannel(chID)
+	if err != nil || ch == nil {
+		t.Fatalf("GetChannel: %v", err)
+	}
+
+	// No visibility change yet — resume is allowed regardless of seq.
+	if hub.MustFullResyncForTest(1) {
+		t.Error("expected replay allowed before any visibility change")
+	}
+
+	hub.SeedSeq(41)
+	hub.RefreshChannelVisibility(ch)
+
+	// Clients resuming from at/before the change must take the full path.
+	if !hub.MustFullResyncForTest(41) {
+		t.Error("expected forced full resync for lastSeq at the watermark")
+	}
+	if !hub.MustFullResyncForTest(10) {
+		t.Error("expected forced full resync for lastSeq before the watermark")
+	}
+	// Clients that saw sequenced traffic after the change may replay.
+	if hub.MustFullResyncForTest(42) {
+		t.Error("expected replay allowed for lastSeq after the watermark")
+	}
+}
+
 // hubTestSchema is the minimal schema needed for hub tests.
 var hubTestSchema = []byte(`
 CREATE TABLE IF NOT EXISTS roles (

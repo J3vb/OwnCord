@@ -73,6 +73,67 @@ export function getStreamQuality(): StreamQuality {
 }
 
 // ---------------------------------------------------------------------------
+// Screen share frame rate
+// ---------------------------------------------------------------------------
+
+/** Saved screen share FPS preference. 30 is the default and preserves the
+ *  historical per-quality caps (5/15/30); 60/120 are explicit overrides. */
+export function getScreenShareFps(): number {
+  const saved = loadPref<number>("screenShareFps", 30);
+  return saved === 60 || saved === 120 ? saved : 30;
+}
+
+/** Effective capture/publish frame rate for a quality + fps preference. */
+export function getEffectiveScreenShareFps(quality: StreamQuality, fps: number): number {
+  if (fps !== 60 && fps !== 120) {
+    return quality === "low" ? 5 : quality === "medium" ? 15 : 30;
+  }
+  return fps;
+}
+
+/** High frame rates need proportionally more bitrate to stay sharp. */
+const FPS_BITRATE_MULTIPLIER: Readonly<Record<number, number>> = { 60: 1.5, 120: 2 };
+
+export function getScreenShareMaxBitrate(quality: StreamQuality, fps: number): number {
+  const multiplier = FPS_BITRATE_MULTIPLIER[fps] ?? 1;
+  return Math.round(SCREENSHARE_PUBLISH_BITRATES[quality] * multiplier);
+}
+
+/** Capture options for a quality with the fps preference applied. Presets with
+ *  a fixed resolution get frameRate injected into the getDisplayMedia
+ *  constraints. Always returns a copy: createLocalScreenTracks mutates the
+ *  options object in place (it injects a default 1080p30 resolution when none
+ *  is set), which would otherwise corrupt the shared presets.
+ *
+ *  For "source" (no resolution cap) with an explicit 60/120 override, a
+ *  zero-size resolution suppresses the library's 1080p30 default (the
+ *  constraint translation treats 0 as uncapped) and the frame rate is passed
+ *  through the raw video constraints instead. */
+export function getScreenShareCaptureOptions(
+  quality: StreamQuality,
+  fps: number,
+): ScreenShareCaptureOptions {
+  const preset = SCREENSHARE_PRESETS[quality];
+  const effectiveFps = getEffectiveScreenShareFps(quality, fps);
+  if (preset.resolution === undefined) {
+    if (fps === 60 || fps === 120) {
+      return {
+        ...preset,
+        resolution: { width: 0, height: 0, frameRate: effectiveFps },
+        // Runtime passes this object verbatim to getDisplayMedia; the declared
+        // type is narrower than what the library actually accepts.
+        video: { frameRate: effectiveFps } as ScreenShareCaptureOptions["video"],
+      };
+    }
+    return { ...preset };
+  }
+  return {
+    ...preset,
+    resolution: { ...preset.resolution, frameRate: effectiveFps },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Dependencies injected by the caller (LiveKitSession)
 // ---------------------------------------------------------------------------
 
@@ -203,9 +264,12 @@ export async function enableScreenshare(
   }
   setLocalScreenshare(true);
   const quality = getStreamQuality();
+  const fps = getScreenShareFps();
+  const effectiveFps = getEffectiveScreenShareFps(quality, fps);
+  const maxBitrate = getScreenShareMaxBitrate(quality, fps);
   try {
     stopManualScreenTracks(state, room);
-    const screenTracks = await createLocalScreenTracks(SCREENSHARE_PRESETS[quality]);
+    const screenTracks = await createLocalScreenTracks(getScreenShareCaptureOptions(quality, fps));
     state.manualScreenTracks = screenTracks;
     for (const track of screenTracks) {
       const isVideo = track.kind === Track.Kind.Video;
@@ -216,8 +280,8 @@ export async function enableScreenshare(
         ...(isVideo
           ? {
               videoEncoding: {
-                maxBitrate: SCREENSHARE_PUBLISH_BITRATES[quality],
-                maxFramerate: quality === "low" ? 5 : quality === "medium" ? 15 : 30,
+                maxBitrate,
+                maxFramerate: effectiveFps,
               },
             }
           : {}),
@@ -237,7 +301,7 @@ export async function enableScreenshare(
     }
     ws.send({ type: "voice_screenshare", payload: { enabled: true } });
     deps.reapplyAudioPipeline();
-    log.info("Screenshare enabled", { quality, maxBitrate: SCREENSHARE_PUBLISH_BITRATES[quality] });
+    log.info("Screenshare enabled", { quality, fps: effectiveFps, maxBitrate });
   } catch (err) {
     // BUG-100: Stop created tracks to release screen capture if publish failed.
     for (const t of state.manualScreenTracks) {

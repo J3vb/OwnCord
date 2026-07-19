@@ -97,7 +97,11 @@ type VoiceConfig struct {
 	LiveKitURL        string `koanf:"livekit_url"`        // LiveKit server WebSocket URL (e.g. ws://localhost:7880)
 	LiveKitBinaryPath string `koanf:"livekit_binary"`     // path to livekit-server binary; empty = don't auto-start
 	NodeIP            string `koanf:"node_ip"`            // public IP for WebRTC ICE candidates; empty = auto-detect
-	Quality           string `koanf:"quality"`            // low | medium | high
+	// AdvertiseInternalIP makes LiveKit advertise internal (LAN) host candidates
+	// in addition to the external node_ip mapping, so clients on the local
+	// network can connect while remote clients use the public IP.
+	AdvertiseInternalIP bool   `koanf:"advertise_internal_ip"`
+	Quality             string `koanf:"quality"` // low | medium | high
 }
 
 // ServerConfig holds HTTP server settings.
@@ -248,6 +252,7 @@ voice:
   livekit_url: "ws://localhost:7880"  # LiveKit server WebSocket URL
   # livekit_binary: ""             # path to livekit-server binary; empty = don't auto-start
   # node_ip: ""                    # public IP for WebRTC media (required for remote users behind NAT)
+  # advertise_internal_ip: false   # also advertise LAN IPs so local-network clients can connect
   # quality: "medium"              # low | medium | high
 
 # github:

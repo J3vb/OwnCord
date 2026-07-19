@@ -26,6 +26,13 @@ const (
 	Administrator  = int64(0x40000000) // bit 30 — bypasses all permission checks
 )
 
+// AllPerms is the union of every defined permission bit. Use it to mask
+// externally supplied permission values so unknown bits are dropped.
+const AllPerms = SendMessages | ReadMessages | AttachFiles | AddReactions |
+	ConnectVoice | SpeakVoice | UseVideo | ShareScreen |
+	ManageMessages | ManageChannels | KickMembers | BanMembers | MuteMembers |
+	ManageRoles | ManageServer | ManageInvites | ViewAuditLog | Administrator
+
 // ─── Role ID constants (default roles inserted on first run) ─────────────────
 
 const (

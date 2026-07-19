@@ -197,8 +197,8 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     const selects = el.querySelectorAll("select");
-    // Input, output, stream quality, video = 4 selects
-    expect(selects.length).toBe(4);
+    // Input, output, stream quality, screen share fps, video = 5 selects
+    expect(selects.length).toBe(5);
     ac.abort();
   });
 
@@ -357,6 +357,24 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
+  it("screen share fps select persists the preference as a number", () => {
+    stubNavigator();
+    const ac = new AbortController();
+    const tab = createVoiceAudioTab(ac.signal);
+    const el = tab.build();
+    document.body.appendChild(el);
+
+    // Screen share FPS is the 4th select (index 3)
+    const fpsSelect = el.querySelectorAll("select")[3] as HTMLSelectElement;
+    expect(fpsSelect.value).toBe("30"); // default
+    fpsSelect.value = "60";
+    fpsSelect.dispatchEvent(new Event("change"));
+
+    const saved = localStorage.getItem("owncord:settings:screenShareFps");
+    expect(saved).toBe("60");
+    ac.abort();
+  });
+
   it("contains audio processing toggles", () => {
     stubNavigator();
     const ac = new AbortController();
@@ -488,11 +506,11 @@ describe("VoiceAudioTab UI structure", () => {
 
     // Wait for devices to load
     await vi.waitFor(() => {
-      const videoSelect = el.querySelectorAll("select")[3] as HTMLSelectElement;
+      const videoSelect = el.querySelectorAll("select")[4] as HTMLSelectElement;
       expect(videoSelect.querySelectorAll("option").length).toBeGreaterThan(1);
     });
 
-    const videoSelect = el.querySelectorAll("select")[3] as HTMLSelectElement;
+    const videoSelect = el.querySelectorAll("select")[4] as HTMLSelectElement;
     videoSelect.value = "cam-1";
     videoSelect.dispatchEvent(new Event("change"));
 

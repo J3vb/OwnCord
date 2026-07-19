@@ -174,6 +174,81 @@ func (d *DB) GetAllChannelPermissionsForRole(roleID int64) (map[int64]ChannelOve
 	return result, nil
 }
 
+// UpsertChannelOverride inserts or updates the allow/deny permission override
+// for a role on a channel.
+func (d *DB) UpsertChannelOverride(channelID, roleID, allow, deny int64) error {
+	_, err := d.sqlDB.Exec(
+		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(channel_id, role_id)
+		 DO UPDATE SET allow = excluded.allow, deny = excluded.deny`,
+		channelID, roleID, allow, deny,
+	)
+	if err != nil {
+		return fmt.Errorf("UpsertChannelOverride: %w", err)
+	}
+	return nil
+}
+
+// DeleteChannelOverride removes the permission override for a role on a
+// channel. Deleting a non-existent override is a no-op.
+func (d *DB) DeleteChannelOverride(channelID, roleID int64) error {
+	_, err := d.sqlDB.Exec(
+		`DELETE FROM channel_overrides WHERE channel_id = ? AND role_id = ?`,
+		channelID, roleID,
+	)
+	if err != nil {
+		return fmt.Errorf("DeleteChannelOverride: %w", err)
+	}
+	return nil
+}
+
+// ChannelRoleOverride pairs a role with its (possibly zero) permission
+// override on a specific channel. Permissions carries the role's base bits so
+// callers can tell which roles bypass overrides via Administrator.
+type ChannelRoleOverride struct {
+	RoleID      int64  `json:"role_id"`
+	RoleName    string `json:"role_name"`
+	Position    int    `json:"position"`
+	Permissions int64  `json:"permissions"`
+	Allow       int64  `json:"allow"`
+	Deny        int64  `json:"deny"`
+}
+
+// ListChannelRoleOverrides returns every role together with its override bits
+// on the given channel (zero allow/deny when no override row exists), ordered
+// by role position descending.
+func (d *DB) ListChannelRoleOverrides(channelID int64) ([]ChannelRoleOverride, error) {
+	rows, err := d.sqlDB.Query(
+		`SELECT r.id, r.name, r.position, r.permissions,
+		        COALESCE(o.allow, 0), COALESCE(o.deny, 0)
+		 FROM roles r
+		 LEFT JOIN channel_overrides o ON o.role_id = r.id AND o.channel_id = ?
+		 ORDER BY r.position DESC, r.id ASC`,
+		channelID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ListChannelRoleOverrides: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	var result []ChannelRoleOverride
+	for rows.Next() {
+		var o ChannelRoleOverride
+		if scanErr := rows.Scan(&o.RoleID, &o.RoleName, &o.Position, &o.Permissions, &o.Allow, &o.Deny); scanErr != nil {
+			return nil, fmt.Errorf("ListChannelRoleOverrides scan: %w", scanErr)
+		}
+		result = append(result, o)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("ListChannelRoleOverrides rows: %w", rows.Err())
+	}
+	if result == nil {
+		result = []ChannelRoleOverride{}
+	}
+	return result, nil
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 // scanChannel scans a single channel row from *sql.Rows.
