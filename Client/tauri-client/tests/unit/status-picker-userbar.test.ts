@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { authStore } from "@stores/auth.store";
-
-vi.mock("@stores/ui.store", () => ({
-  openSettings: vi.fn(),
-  uiStore: { getState: () => ({}), subscribe: () => () => {} },
-}));
+import { uiStore, setConnectionStatus } from "@stores/ui.store";
 
 import { createUserBar } from "@components/UserBar";
 import type { WsClient } from "@lib/ws";
@@ -52,11 +48,14 @@ describe("StatusPicker wired to UserBar", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     vi.clearAllMocks();
+    // The picker gates on the store-backed connection status (UX spec §3).
+    setConnectionStatus("connected");
   });
 
   afterEach(() => {
     comp?.destroy?.();
     container.remove();
+    setConnectionStatus("disconnected");
     authStore.setState(() => ({
       token: null,
       user: null,
@@ -103,6 +102,7 @@ describe("StatusPicker wired to UserBar", () => {
 
   it("status picker is disabled when WS is disconnected", () => {
     setAuthState({ username: "alice" }, true);
+    setConnectionStatus("disconnected");
     const ws = createMockWs("disconnected");
     comp = createUserBar({ ws });
     comp.mount(container);
@@ -111,5 +111,32 @@ describe("StatusPicker wired to UserBar", () => {
     expect(wrap).not.toBeNull();
     expect(wrap.classList.contains("ub-status-picker--disabled")).toBe(true);
     expect(wrap.title).toBe("Offline");
+  });
+
+  it("status picker reacts to a connection status change through the store", async () => {
+    setAuthState({ username: "alice" }, true);
+    const ws = createMockWs("connected");
+    comp = createUserBar({ ws });
+    comp.mount(container);
+
+    const wrap = container.querySelector("[data-testid='status-picker-wrap']") as HTMLElement;
+    expect(wrap.classList.contains("ub-status-picker--disabled")).toBe(false);
+
+    setConnectionStatus("reconnecting");
+    uiStore.flush();
+
+    expect(wrap.classList.contains("ub-status-picker--disabled")).toBe(true);
+    expect(wrap.title).toBe("Offline");
+  });
+
+  it("status picker is disabled without a ws send path even when connected", () => {
+    setAuthState({ username: "alice" }, true);
+    comp = createUserBar({});
+    comp.mount(container);
+
+    // Without a ws client, selecting a status would be a silent no-op —
+    // the control stays disabled instead (no-silent-failure principle).
+    const wrap = container.querySelector("[data-testid='status-picker-wrap']") as HTMLElement;
+    expect(wrap.classList.contains("ub-status-picker--disabled")).toBe(true);
   });
 });

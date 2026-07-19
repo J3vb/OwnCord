@@ -420,6 +420,18 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
     }),
   );
 
+  // Local transport failures (proxy not open, outbound channel full/closed):
+  // fail the matching optimistic row exactly like a server error reply would.
+  // Fire-and-forget sends (typing, presence, voice) have no pendingSends entry
+  // and stay logged-only.
+  unsubs.push(
+    ws.onSendFailure((id, code) => {
+      if (messagesStore.getState().pendingSends.has(id)) {
+        markSendFailed(id, code);
+      }
+    }),
+  );
+
   unsubs.push(
     ws.on(S.ERROR, (payload, id) => {
       log.error("Server error", {

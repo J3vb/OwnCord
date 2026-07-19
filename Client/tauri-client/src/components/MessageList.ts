@@ -6,7 +6,12 @@
 import { createElement, clearChildren } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/safe-render";
-import { messagesStore, getChannelMessages, hasMoreMessages } from "@stores/messages.store";
+import {
+  messagesStore,
+  getChannelMessages,
+  hasMoreMessages,
+  getHistoryLoadState,
+} from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 
@@ -31,6 +36,8 @@ export interface MessageListOptions {
   readonly onRetry?: (correlationId: string) => void;
   /** Discard a failed optimistic send without retrying. */
   readonly onDeleteDraft?: (correlationId: string) => void;
+  /** Retry a failed first-page history fetch. */
+  readonly onRetryLoad?: () => void;
 }
 
 // -- Constants ----------------------------------------------------------------
@@ -131,6 +138,32 @@ function renderEmptyState(channelName: string, channelType?: string): HTMLDivEle
   wrapper.appendChild(title);
   wrapper.appendChild(text);
 
+  return wrapper;
+}
+
+/** In-region placeholder while the first page of history is loading. */
+function renderLoadingState(): HTMLDivElement {
+  const wrapper = createElement("div", { class: "messages-loading" });
+  wrapper.appendChild(createElement("div", { class: "spinner" }));
+  const text = createElement("p", { class: "messages-loading-text" });
+  text.textContent = "Loading messages…";
+  wrapper.appendChild(text);
+  return wrapper;
+}
+
+/** In-region inline error + Retry when the first-page history fetch failed. */
+function renderLoadErrorState(onRetryLoad?: () => void): HTMLDivElement {
+  const wrapper = createElement("div", { class: "messages-load-error" });
+  const text = createElement("p", { class: "messages-load-error-text" });
+  text.textContent = "Couldn't load messages";
+  wrapper.appendChild(text);
+  const retry = createElement("button", {
+    class: "messages-retry-btn",
+    "data-testid": "messages-retry",
+  });
+  retry.textContent = "Retry";
+  retry.addEventListener("click", () => onRetryLoad?.());
+  wrapper.appendChild(retry);
   return wrapper;
 }
 
@@ -298,7 +331,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     if (virtualItems.length === 0) {
       clearChildren(contentContainer);
-      contentContainer.appendChild(renderEmptyState(options.channelName, options.channelType));
+      // With no rows, the region shows the fetch state: an in-region loading
+      // placeholder, an inline error + Retry, or the welcome/empty state once
+      // the channel is actually loaded and empty (UX spec §1/§2).
+      const loadState = getHistoryLoadState(options.channelId);
+      if (loadState === "loading") {
+        contentContainer.appendChild(renderLoadingState());
+      } else if (loadState === "error") {
+        contentContainer.appendChild(renderLoadErrorState(options.onRetryLoad));
+      } else {
+        contentContainer.appendChild(renderEmptyState(options.channelName, options.channelType));
+      }
       topSpacer.style.height = "0px";
       bottomSpacer.style.height = "0px";
       renderedStart = 0;
@@ -576,6 +619,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     unsubscribers.push(
       messagesStore.subscribeSelector(
         (s) => s.messagesByChannel,
+        () => {
+          renderAll();
+        },
+      ),
+    );
+
+    // Re-render the (empty) region when the first-page fetch transitions
+    // between loading / error / idle.
+    unsubscribers.push(
+      messagesStore.subscribeSelector(
+        (s) => s.historyLoadState.get(options.channelId),
         () => {
           renderAll();
         },

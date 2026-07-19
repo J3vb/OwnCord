@@ -41,7 +41,7 @@ vi.spyOn(console, "warn").mockImplementation(() => {});
 vi.spyOn(console, "error").mockImplementation(() => {});
 
 // Import after mocks are set up
-import { createWsClient } from "../../src/lib/ws";
+import { createWsClient, toConnectionStatus } from "../../src/lib/ws";
 
 /** Simulate Tauri emitting an event to JS */
 function emitTauriEvent(event: string, payload: unknown): void {
@@ -2837,6 +2837,175 @@ describe("send edge cases", () => {
     expect(client.getState()).toBe("connected");
   });
 
+  it("onSendFailure fires with NETWORK when ws_send hits backpressure (channel full)", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
+
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "ws_send") throw new Error("ws_send: channel full, message dropped");
+      return undefined;
+    });
+
+    const failures: Array<{ id: string; code: string }> = [];
+    client.onSendFailure((id, code) => failures.push({ id, code }));
+
+    const id = client.send({
+      type: "chat_send",
+      payload: { channel_id: 1, content: "hi", reply_to: null, attachments: [] },
+    });
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(failures).toEqual([{ id, code: "NETWORK" }]);
+  });
+
+  it("onSendFailure fires with OFFLINE when ws_send reports the channel closed", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
+
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "ws_send") throw new Error("ws_send: channel closed");
+      return undefined;
+    });
+
+    const failures: Array<{ id: string; code: string }> = [];
+    client.onSendFailure((id, code) => failures.push({ id, code }));
+
+    const id = client.send({
+      type: "chat_send",
+      payload: { channel_id: 1, content: "hi", reply_to: null, attachments: [] },
+    });
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(failures).toEqual([{ id, code: "OFFLINE" }]);
+  });
+
+  it("onSendFailure fires with OFFLINE when sending while the proxy is not open", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
+
+    // Drop the proxy: subsequent sends take the not-open early return.
+    emitTauriEvent("ws-state", "closed");
+
+    const failures: Array<{ id: string; code: string }> = [];
+    client.onSendFailure((id, code) => failures.push({ id, code }));
+
+    const id = client.send({
+      type: "chat_send",
+      payload: { channel_id: 1, content: "hi", reply_to: null, attachments: [] },
+    });
+    // The early-return notification is deferred a microtask so callers can
+    // register the id (optimistic row) before the failure lands.
+    expect(failures).toEqual([]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(failures).toEqual([{ id, code: "OFFLINE" }]);
+  });
+
+  it("heartbeat ping failures do not fire onSendFailure (no envelope id)", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
+
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "ws_send") throw new Error("ws_send: channel full, message dropped");
+      return undefined;
+    });
+
+    const failures: Array<{ id: string; code: string }> = [];
+    client.onSendFailure((id, code) => failures.push({ id, code }));
+
+    // Let the 30s heartbeat fire (and its ws_send reject).
+    await vi.advanceTimersByTimeAsync(30_100);
+
+    expect(failures).toEqual([]);
+  });
+
+  it("onSendFailure unsubscribe works", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 1,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
+
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "ws_send") throw new Error("ws_send: channel full, message dropped");
+      return undefined;
+    });
+
+    const failures: Array<{ id: string; code: string }> = [];
+    const unsub = client.onSendFailure((id, code) => failures.push({ id, code }));
+    unsub();
+
+    client.send({
+      type: "chat_send",
+      payload: { channel_id: 1, content: "hi", reply_to: null, attachments: [] },
+    });
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(failures).toEqual([]);
+  });
+
   it("ws_disconnect error is ignored during disconnectProxy", async () => {
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
@@ -3101,5 +3270,17 @@ describe("listener registry mechanics (on/off/dispatch)", () => {
 
     // Both non-throwing listeners should have received the message
     expect(received).toEqual(["hello", "fourth:hello"]);
+  });
+});
+
+describe("toConnectionStatus", () => {
+  it("maps the internal 5-state machine onto the UX-facing 3-state status", () => {
+    expect(toConnectionStatus("connected")).toBe("connected");
+    expect(toConnectionStatus("disconnected")).toBe("disconnected");
+    // Mid-retry states must read as "reconnecting", not "disconnected" —
+    // a reconnect cycle passes through connecting/authenticating.
+    expect(toConnectionStatus("reconnecting")).toBe("reconnecting");
+    expect(toConnectionStatus("connecting")).toBe("reconnecting");
+    expect(toConnectionStatus("authenticating")).toBe("reconnecting");
   });
 });

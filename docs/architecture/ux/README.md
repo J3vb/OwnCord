@@ -79,14 +79,20 @@ source of truth in `ui.store.connectionStatus`
 (`connected | reconnecting | disconnected`), written from the WS client's
 `onStateChange`, and read by any control that needs a live socket.
 
-> **⚠ Current gap.** The authoritative connection state lives in a closure inside
-> `src/lib/ws.ts` (`state`, `ws.ts:33-38`) and is surfaced only through
-> `onStateChange` callbacks wired ad hoc in `MainPage.ts:199-211`;
-> `ui.store.connectionStatus` exists (`ui.store.ts:14`) but is not the single
-> writer/reader. Consolidating onto the store lets every control reactively
-> disable itself when the socket drops, instead of each call site guarding
-> `ws.getState() !== "connected"` and reporting failure *after* the click
-> (as the composer does today, `ChannelController.ts:200-204`).
+> **✓ Implemented (2026-07).** `ui.store.connectionStatus` is now the single
+> source of truth: `main.ts` registers the one writer
+> (`ws.onStateChange` → `toConnectionStatus` → `setConnectionStatus`), mapping
+> the internal 5-state machine onto the 3-state status (`connecting` /
+> `authenticating` read as `reconnecting`, since a reconnect cycle passes
+> through them). Consumers subscribe to the store instead of wiring ad-hoc
+> callbacks: the reconnect banner (`MainPage`, which now also shows
+> "Disconnected" instead of going stale), the composer gating
+> (`ChannelController`), and the presence picker (`UserBar` — previously dead in
+> production because `SidebarArea` never passed it a `ws`; it now gates on the
+> store and receives the `ws` send path). The one-shot connected-overlay wiring
+> in `main.ts` stays on `ws.onStateChange` deliberately — it needs the exact
+> internal transition. Voice controls remain independent: LiveKit reconnection
+> "retries underneath" per the table below.
 
 | Status | Composer / send | Voice controls | Presence picker | Reconnect banner |
 |--------|-----------------|----------------|-----------------|------------------|
@@ -139,7 +145,7 @@ handling is per-call-site with no shared mapper (`api.ts:81-140` centralizes onl
 
 | Class | Source | Target reaction |
 |-------|--------|-----------------|
-| **401 Unauthorized** | any REST call | Global: `clearAuth()` → disconnect → connect page, with "Your session expired — sign in again." (already centralized in `api.ts:116-120` + `main.ts:92-95`; extend to `uploadFile`, which skips it today, `api.ts:380-383`) |
+| **401 Unauthorized** | any REST call | Global: `clearAuth()` → disconnect → connect page, with "Your session expired — sign in again." (centralized in `api.ts` + `main.ts`; since 2026-07 `uploadFile` honors it too, and the connect page shows the session-expired reason) |
 | **403 Forbidden** (action) | REST/WS | Toast "You don't have permission to do that." **and** pre-disable the control so it can't be attempted again in that context |
 | **403 Suspended/Banned** | login REST / WS `BANNED` | Transient-error store → connect page: "Your account has been suspended." Force logout, no reconnect |
 | **429 Rate-limited** | REST/WS `RATE_LIMITED` | Non-destructive toast "You're doing that too fast — try again in a moment." Keep the user's input; re-enable the control after a short cooldown |
@@ -147,7 +153,7 @@ handling is per-call-site with no shared mapper (`api.ts:81-140` centralizes onl
 | **Validation (400)** | REST | Inline field error with the server message (capped to a safe length — the login form caps at 200 chars, `LoginForm.ts:598`; apply everywhere) |
 | **Conflict/Not-found (404/409)** | REST/WS | Contextual inline message + refresh the affected view (the target moved/vanished) |
 | **5xx / network** | REST | Inline section error + **Retry**; for one-shot actions, a toast "Couldn't reach the server." Never a silent drop |
-| **Transport backpressure** | WS `ws_send` "channel full" | Surface it: mark the optimistic row failed with Retry. Today it's dropped silently (`ws.ts:432-437`) |
+| **Transport backpressure** | WS `ws_send` "channel full" | Mark the optimistic row failed with Retry (✓ since 2026-07: `ws.onSendFailure` → dispatcher → `markSendFailed` with `NETWORK`/`OFFLINE`; id-less sends like heartbeats stay silent) |
 | **Cert first-use** | Rust `cert-tofu: trusted_first_use` | 8 s informational banner (already: `main.ts:105-129`) |
 | **Cert mismatch** | Rust `cert-tofu: mismatch` | Blocking `CertMismatchModal`; Accept re-pins + reconnects, Reject disconnects + returns to connect (already: `main.ts:133-164`) |
 

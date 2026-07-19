@@ -4,13 +4,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // Mocks
 // ---------------------------------------------------------------------------
 
-const { mockSetMessages, mockPrependMessages, mockIsChannelLoaded, mockGetChannelMessages } =
-  vi.hoisted(() => ({
-    mockSetMessages: vi.fn(),
-    mockPrependMessages: vi.fn(),
-    mockIsChannelLoaded: vi.fn((): boolean => false),
-    mockGetChannelMessages: vi.fn((): Array<{ id: number; content?: string }> => []),
-  }));
+const {
+  mockSetMessages,
+  mockPrependMessages,
+  mockIsChannelLoaded,
+  mockGetChannelMessages,
+  mockSetChannelLoading,
+  mockSetChannelLoadError,
+} = vi.hoisted(() => ({
+  mockSetMessages: vi.fn(),
+  mockPrependMessages: vi.fn(),
+  mockIsChannelLoaded: vi.fn((): boolean => false),
+  mockGetChannelMessages: vi.fn((): Array<{ id: number; content?: string }> => []),
+  mockSetChannelLoading: vi.fn(),
+  mockSetChannelLoadError: vi.fn(),
+}));
 
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({
@@ -26,6 +34,8 @@ vi.mock("@stores/messages.store", () => ({
   prependMessages: mockPrependMessages,
   isChannelLoaded: mockIsChannelLoaded,
   getChannelMessages: mockGetChannelMessages,
+  setChannelLoading: mockSetChannelLoading,
+  setChannelLoadError: mockSetChannelLoadError,
 }));
 
 // ---------------------------------------------------------------------------
@@ -83,6 +93,18 @@ describe("createMessageController", () => {
       expect(mockSetMessages).toHaveBeenCalledWith(42, [{ id: 1, content: "hi" }], false);
     });
 
+    it("marks the channel loading before the fetch resolves", async () => {
+      const api = makeApi();
+      const ctrl = createMessageController({ api, showError });
+
+      const pending = ctrl.loadMessages(42, makeAbort().signal);
+
+      // Synchronous prefix: the loading placeholder is visible from the
+      // first render, before the first await.
+      expect(mockSetChannelLoading).toHaveBeenCalledWith(42);
+      await pending;
+    });
+
     it("skips fetch when channel is already loaded", async () => {
       mockIsChannelLoaded.mockReturnValue(true);
       const api = makeApi();
@@ -92,6 +114,7 @@ describe("createMessageController", () => {
 
       expect(api.getMessages).not.toHaveBeenCalled();
       expect(mockSetMessages).not.toHaveBeenCalled();
+      expect(mockSetChannelLoading).not.toHaveBeenCalled();
     });
 
     it("does not store messages after abort", async () => {
@@ -109,7 +132,7 @@ describe("createMessageController", () => {
       expect(mockSetMessages).not.toHaveBeenCalled();
     });
 
-    it("shows error on fetch failure", async () => {
+    it("marks the channel load-errored on fetch failure (inline error, not a toast)", async () => {
       const api = makeApi({
         getMessages: vi.fn().mockRejectedValue(new Error("network error")),
       });
@@ -117,10 +140,12 @@ describe("createMessageController", () => {
 
       await ctrl.loadMessages(42, makeAbort().signal);
 
-      expect(showError).toHaveBeenCalledWith("Failed to load messages");
+      // The region renders an inline error + Retry (UX spec §2); no toast.
+      expect(mockSetChannelLoadError).toHaveBeenCalledWith(42);
+      expect(showError).not.toHaveBeenCalled();
     });
 
-    it("does not show error when aborted before failure", async () => {
+    it("does not mark an error when aborted before failure", async () => {
       const { signal, abort } = makeAbort();
       abort();
       const api = makeApi({
@@ -130,6 +155,7 @@ describe("createMessageController", () => {
 
       await ctrl.loadMessages(42, signal);
 
+      expect(mockSetChannelLoadError).not.toHaveBeenCalled();
       expect(showError).not.toHaveBeenCalled();
     });
   });

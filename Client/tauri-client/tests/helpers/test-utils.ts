@@ -46,6 +46,7 @@ const MESSAGES_INITIAL: MessagesState = {
   pendingSends: new Map(),
   loadedChannels: new Set(),
   hasMore: new Map(),
+  historyLoadState: new Map(),
 };
 
 const VOICE_INITIAL: VoiceState = {
@@ -96,6 +97,7 @@ export function resetAllStores(): void {
     pendingSends: new Map(),
     loadedChannels: new Set(),
     hasMore: new Map(),
+    historyLoadState: new Map(),
   }));
   voiceStore.setState(() => ({
     ...VOICE_INITIAL,

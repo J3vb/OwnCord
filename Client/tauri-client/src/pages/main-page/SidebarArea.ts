@@ -764,7 +764,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // ---------------------------------------------------------------------------
 
   const userBarSlot = createElement("div", {});
-  const userBar = createUserBar({ onDisconnect: openQuickSwitch });
+  const userBar = createUserBar({ onDisconnect: openQuickSwitch, ws });
   userBar.mount(userBarSlot);
   children.push(userBar);
   sidebarWrapper.appendChild(userBarSlot);

@@ -8,7 +8,7 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
 import { authStore } from "@stores/auth.store";
-import { openSettings } from "@stores/ui.store";
+import { openSettings, uiStore } from "@stores/ui.store";
 import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
 import type { UserStatus } from "@lib/types";
 import type { WsClient } from "@lib/ws";
@@ -73,28 +73,30 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       "data-testid": "status-picker-wrap",
     });
 
-    const isWsConnected = (): boolean => {
+    // The picker is usable only when the socket is live (store-backed status,
+    // docs/architecture/ux §3) AND a ws client was provided to send through —
+    // without a send path, selecting a status would be a silent no-op.
+    const canSetStatus = (): boolean => {
       const ws = options?.ws;
-      return ws !== undefined && ws !== null && ws.getState() === "connected";
+      return ws !== undefined && ws !== null && uiStore.getState().connectionStatus === "connected";
     };
 
     statusPicker = createStatusPicker({
       currentStatus: "online" as UserStatus,
       onStatusChange: (status: UserStatus) => {
         const ws = options?.ws;
-        if (ws !== null && ws !== undefined && isWsConnected()) {
+        if (ws !== null && ws !== undefined && canSetStatus()) {
           ws.send({ type: "presence_update", payload: { status } } as never);
         }
       },
     });
     statusPicker.mount(statusPickerWrap);
 
-    // Disable picker when WS is disconnected
+    // Disable picker (with a reason) when the connection is down
     const updatePickerDisabled = (): void => {
-      const ws = options?.ws;
-      const connected = ws !== undefined && ws !== null && ws.getState() === "connected";
-      statusPickerWrap.classList.toggle("ub-status-picker--disabled", !connected);
-      if (!connected) {
+      const enabled = canSetStatus();
+      statusPickerWrap.classList.toggle("ub-status-picker--disabled", !enabled);
+      if (!enabled) {
         statusPickerWrap.title = "Offline";
       } else {
         statusPickerWrap.title = "";
@@ -102,11 +104,11 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     };
     updatePickerDisabled();
 
-    // Subscribe to WS state changes if ws is provided
-    if (options?.ws !== undefined && options?.ws !== null) {
-      const unsub = options.ws.onStateChange(() => updatePickerDisabled());
-      disposable.addCleanup(unsub);
-    }
+    disposable.onStoreChange(
+      uiStore,
+      (s) => s.connectionStatus,
+      () => updatePickerDisabled(),
+    );
 
     info.appendChild(statusPickerWrap);
 
