@@ -16,7 +16,16 @@ natively) followed by a prose explanation and a **Source of truth** file list.
 | [websocket.md](websocket.md) | D4 WS connect / replay / dispatch | Real-time engine: auth handshake, 3-tier reconnect replay, backpressure, V1/V2 dispatch |
 | [data-model.md](data-model.md) | D5 Entity-relationship overview | All 23 tables from migrations 001–015, grouped by domain |
 | [voice-e2ee.md](voice-e2ee.md) | D6 Voice + E2EE flow | LiveKit token flow, loopback TLS tunnel, ECDH key-holder relay |
-| [client.md](client.md) | D7 Client module map | Tauri client: bootstrap, dispatcher, stores, Rust sidecars |
+| [client.md](client.md) | D7 Client module map | Tauri client: bootstrap, dispatcher, stores, Rust sidecars (structure, as-built) |
+| [ux/](ux/README.md) | UX flow + state diagrams | Client **behavior** spec (target state): what every view does and how it reacts to events, permissions, and failure |
+
+### Structure vs. behavior
+
+[client.md](client.md) maps the client *as-built* (modules, stores, wiring). The
+[ux/](ux/README.md) set is the complementary *behavior* spec — prescriptive
+(to-be) flows for every view, with per-view state matrices and event→reaction
+maps. Where today's code diverges from the target, the UX docs carry dated
+**⚠ Current gap** callouts, so the set doubles as a UX improvement backlog.
 
 ## Maintenance rule
 
