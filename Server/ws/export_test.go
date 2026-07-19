@@ -217,3 +217,8 @@ func (h *Hub) HandleWebhookParticipantLeftForTest(userID int64, channelID int64,
 	}
 	h.handleWebhookParticipantLeft(context.Background(), event)
 }
+
+// MustFullResyncForTest exposes mustFullResync for external tests.
+func (h *Hub) MustFullResyncForTest(lastSeq uint64) bool {
+	return h.mustFullResync(lastSeq)
+}

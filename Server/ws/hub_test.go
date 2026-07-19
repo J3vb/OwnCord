@@ -954,6 +954,36 @@ func TestRefreshChannelVisibility_TargetedSends(t *testing.T) {
 	assertNoMsgType(t, memberSend, "channel_delete")
 }
 
+func TestRefreshChannelVisibility_ForcesFullResyncForStaleResumes(t *testing.T) {
+	hub, database := newTestHub(t)
+
+	chID := seedTestChannel(t, database, "watermark-room")
+	ch, err := database.GetChannel(chID)
+	if err != nil || ch == nil {
+		t.Fatalf("GetChannel: %v", err)
+	}
+
+	// No visibility change yet — resume is allowed regardless of seq.
+	if hub.MustFullResyncForTest(1) {
+		t.Error("expected replay allowed before any visibility change")
+	}
+
+	hub.SeedSeq(41)
+	hub.RefreshChannelVisibility(ch)
+
+	// Clients resuming from at/before the change must take the full path.
+	if !hub.MustFullResyncForTest(41) {
+		t.Error("expected forced full resync for lastSeq at the watermark")
+	}
+	if !hub.MustFullResyncForTest(10) {
+		t.Error("expected forced full resync for lastSeq before the watermark")
+	}
+	// Clients that saw sequenced traffic after the change may replay.
+	if hub.MustFullResyncForTest(42) {
+		t.Error("expected replay allowed for lastSeq after the watermark")
+	}
+}
+
 // hubTestSchema is the minimal schema needed for hub tests.
 var hubTestSchema = []byte(`
 CREATE TABLE IF NOT EXISTS roles (

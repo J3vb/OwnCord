@@ -301,6 +301,10 @@ async function api(method,path,body){
 
 /* ═══ Utilities ═══ */
 function esc(s){if(s===null||s===undefined)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+/* Escape for embedding inside a single-quoted JS string in an inline onclick
+   attribute: JS-escape backslashes and single quotes first, then HTML-escape.
+   Without this a name containing ' breaks out of the string literal (XSS). */
+function jsq(s){return esc(String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"))}
 function fmtBytes(b){if(b<1024)return b+' B';if(b<1048576)return(b/1024).toFixed(1)+' KB';if(b<1073741824)return(b/1048576).toFixed(1)+' MB';return(b/1073741824).toFixed(2)+' GB'}
 function actionBadge(a){if(!a)return'badge-muted';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'badge-red';if(a.includes('create'))return'badge-green';if(a.includes('update'))return'badge-yellow';return'badge-accent'}
 function actionColor(a){if(!a)return'var(--accent)';if(a.includes('ban')||a.includes('kick')||a.includes('delete'))return'var(--red)';if(a.includes('create'))return'var(--green)';if(a.includes('update'))return'var(--yellow)';return'var(--accent)'}
@@ -467,10 +471,10 @@ async function renderUsers(){
     html+='<td><span class="dot '+statusDot+'"></span>'+statusLabel+'</td>';
     html+='<td>'+(banned?'<span class="badge badge-red">Yes</span>':'<span class="badge badge-muted">No</span>')+'</td>';
     html+='<td><div class="act-group" style="justify-content:flex-end">';
-    html+='<button class="act-btn" title="Edit role" onclick="openEditUser('+uid+',\''+esc(uname)+'\','+rid+')">'+I.edit+'</button>';
+    html+='<button class="act-btn" title="Edit role" onclick="openEditUser('+uid+',\''+jsq(uname)+'\','+rid+')">'+I.edit+'</button>';
     html+='<button class="act-btn" title="Force logout" onclick="forceLogout('+uid+')">'+I.disconnect+'</button>';
     if(banned)html+='<button class="act-btn" title="Unban" onclick="unbanUser('+uid+')">'+I.check+'</button>';
-    else html+='<button class="act-btn danger" title="Ban" onclick="openBanUser('+uid+',\''+esc(uname)+'\')">'+I.ban+'</button>';
+    else html+='<button class="act-btn danger" title="Ban" onclick="openBanUser('+uid+',\''+jsq(uname)+'\')">'+I.ban+'</button>';
     html+='</div></td></tr>';
   });
   html+='</tbody></table></div></div>';
@@ -528,8 +532,8 @@ async function renderChannels(){
     html+='<td><span class="badge '+(type==='voice'?'badge-yellow':type==='announcement'?'badge-accent':'badge-muted')+'">'+esc(type)+'</span></td>';
     html+='<td style="font-size:12px;color:var(--text-faint)">'+esc(cat)+'</td>';
     html+='<td>'+(archived?'<span class="badge badge-muted">Yes</span>':'<span class="badge badge-green">No</span>')+'</td>';
-    const lockBtn=type==='dm'?'':'<button class="act-btn" title="Access (private channel)" onclick="openChannelPermsModal('+id+',\''+esc(name)+'\')">'+I.lock+'</button>';
-    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn" title="Edit" onclick="openChannelEditModal('+id+',\''+esc(name)+'\')">'+I.edit+'</button>'+lockBtn+'<button class="act-btn danger" title="Delete" onclick="openDeleteChannel('+id+',\''+esc(name)+'\')">'+I.trash+'</button></div></td></tr>';
+    const lockBtn=type==='dm'?'':'<button class="act-btn" title="Access (private channel)" onclick="openChannelPermsModal('+id+',\''+jsq(name)+'\')">'+I.lock+'</button>';
+    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn" title="Edit" onclick="openChannelEditModal('+id+',\''+jsq(name)+'\')">'+I.edit+'</button>'+lockBtn+'<button class="act-btn danger" title="Delete" onclick="openDeleteChannel('+id+',\''+jsq(name)+'\')">'+I.trash+'</button></div></td></tr>';
   });
   html+='</tbody></table></div></div>';
   return html;
@@ -847,7 +851,7 @@ async function createBackup(){
 }
 
 function openRestoreModal(name){
-  openModal('<div class="modal-header"><h3>Restore Backup</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Overwrite the current database with <strong style="color:white">'+esc(name)+'</strong>? A pre-restore backup will be created. Server restart recommended after restore.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmRestore(\''+esc(name)+'\')">Restore</button></div>');
+  openModal('<div class="modal-header"><h3>Restore Backup</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Overwrite the current database with <strong style="color:white">'+esc(name)+'</strong>? A pre-restore backup will be created. Server restart recommended after restore.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmRestore(\''+jsq(name)+'\')">Restore</button></div>');
 }
 
 async function confirmRestore(name){

@@ -74,6 +74,13 @@ type Hub struct {
 	reconnectTierDB   atomic.Uint64
 	reconnectTierFull atomic.Uint64
 
+	// Sequence watermark of the last channel-visibility change. Visibility
+	// updates are sent as targeted, unsequenced messages, so clients resuming
+	// from a seq at or before this point must take the full-ready path to
+	// converge (replay cannot deliver them). Reset on restart — a fresh
+	// connection always gets a correctly filtered ready payload anyway.
+	visibilityChangeSeq atomic.Uint64
+
 	// Settings cache — avoids per-connection DB queries for server_name/motd.
 	settingsMu         syncutil.RWMutex
 	settingsName       string
@@ -557,7 +564,16 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		if c.user == nil {
 			continue
 		}
-		if roleVisible(c.user.RoleID) {
+		// c.user is a connect-time snapshot; an admin may have changed the
+		// user's role mid-session, so resolve the current role from the DB.
+		// Fail closed: on error send nothing rather than mis-target.
+		fresh, err := h.db.GetUserByID(c.user.ID)
+		if err != nil || fresh == nil {
+			slog.Warn("hub: RefreshChannelVisibility could not resolve user role",
+				"user_id", c.user.ID, "err", err)
+			continue
+		}
+		if roleVisible(fresh.RoleID) {
 			// Idempotent add on the client; also refreshes channel metadata.
 			c.sendMsg(buildChannelCreate(ch))
 			continue
@@ -570,6 +586,20 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		}
 		c.mu.Unlock()
 	}
+
+	// Clients not connected right now missed the targeted sends above. Move
+	// the watermark so any resume from a seq at or before this point is
+	// forced onto the full-ready path instead of replay (stored after the
+	// sends so a concurrent seq advance errs toward re-syncing more clients).
+	h.visibilityChangeSeq.Store(atomic.LoadUint64(&h.seq))
+}
+
+// mustFullResync reports whether a client resuming from lastSeq predates the
+// most recent channel-visibility change and therefore cannot converge via
+// replay.
+func (h *Hub) mustFullResync(lastSeq uint64) bool {
+	w := h.visibilityChangeSeq.Load()
+	return w > 0 && lastSeq <= w
 }
 
 // BroadcastMemberBan sends a member_ban message to all connected clients
