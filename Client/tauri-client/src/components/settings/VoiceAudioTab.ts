@@ -269,6 +269,43 @@ function buildVoiceAudioTabInner(
   section.appendChild(qualityDesc);
   section.appendChild(qualitySelect);
 
+  // Screen share FPS selector
+  const fpsHeader = createElement("h3", {}, "Screen Share FPS");
+  const fpsDesc = createElement(
+    "p",
+    {
+      style: "color:var(--text-muted);font-size:12px;margin:0 0 8px",
+    },
+    "Higher frame rates use more bandwidth and depend on what the capture source and display can deliver. Takes effect the next time you start sharing.",
+  );
+  const fpsSelect = createElement("select", {
+    class: "form-input",
+    style: "width:100%;margin-bottom:16px",
+  });
+  const fpsOptions: Array<[number, string]> = [
+    [30, "30 FPS (default)"],
+    [60, "60 FPS"],
+    [120, "120 FPS"],
+  ];
+  const savedFpsRaw = loadPref<number>("screenShareFps", 30);
+  const savedFps = savedFpsRaw === 60 || savedFpsRaw === 120 ? savedFpsRaw : 30;
+  for (const [value, label] of fpsOptions) {
+    const opt = createElement("option", { value: String(value) }, label);
+    if (value === savedFps) opt.setAttribute("selected", "");
+    fpsSelect.appendChild(opt);
+  }
+  fpsSelect.value = String(savedFps);
+  fpsSelect.addEventListener(
+    "change",
+    () => {
+      savePref("screenShareFps", Number(fpsSelect.value));
+    },
+    { signal },
+  );
+  section.appendChild(fpsHeader);
+  section.appendChild(fpsDesc);
+  section.appendChild(fpsSelect);
+
   // Video device selector
   const videoHeader = createElement("h3", {}, "Video Device");
   const videoSelect = createElement("select", {

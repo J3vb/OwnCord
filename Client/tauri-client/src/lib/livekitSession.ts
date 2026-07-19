@@ -32,8 +32,10 @@ import {
   type ScreenTrackState,
   CAMERA_PRESETS,
   CAMERA_PUBLISH_BITRATES,
-  SCREENSHARE_PUBLISH_BITRATES,
   getStreamQuality,
+  getScreenShareFps,
+  getEffectiveScreenShareFps,
+  getScreenShareMaxBitrate,
   enableCamera as doEnableCamera,
   disableCamera as doDisableCamera,
   stopManualCameraTrack,
@@ -344,9 +346,11 @@ export class LiveKitSession {
           maxBitrate: CAMERA_PUBLISH_BITRATES[quality],
           maxFramerate: quality === "low" ? 15 : 30,
         },
+        // Fallback for setScreenShareEnabled paths — the manual publish in
+        // screenShare.ts passes explicit per-track encoding that overrides this.
         screenShareEncoding: {
-          maxBitrate: SCREENSHARE_PUBLISH_BITRATES[quality],
-          maxFramerate: quality === "low" ? 5 : quality === "medium" ? 15 : 30,
+          maxBitrate: getScreenShareMaxBitrate(quality, getScreenShareFps()),
+          maxFramerate: getEffectiveScreenShareFps(quality, getScreenShareFps()),
         },
       },
       // End-to-end encryption: SFrame-based E2EE using a server-distributed
