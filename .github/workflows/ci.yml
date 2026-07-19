@@ -58,6 +58,12 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: make sqlc-install sqlc-verify
 
+      # Protocol message-type constants (Go + TS) must never drift from
+      # docs/protocol-schema.json — the single source of truth.
+      - name: Verify generated protocol constants (make protocol-verify)
+        if: matrix.os == 'ubuntu-latest'
+        run: make protocol-verify
+
       - name: Run tests with race detection and coverage
         run: go test -race -timeout 20m ./... -coverprofile=coverage.out -cover
 

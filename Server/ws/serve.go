@@ -136,13 +136,14 @@ func (h *Hub) handleReconnect(
 	if events == nil {
 		// Phase B Step 7 — try cold-tier replay from the EventStore before
 		// giving up and forcing a full ready re-sync.
-		if h.eventStore != nil {
+		if esp := h.eventStore.Load(); esp != nil {
+			es := *esp
 			channelIDs := make([]int64, 0, len(allowedChannelIDs))
 			for cid := range allowedChannelIDs {
 				channelIDs = append(channelIDs, cid)
 			}
 			const maxColdReplay = 5000
-			persisted, dbErr := h.eventStore.GetEventsSinceForChannels(ctx, int64(lastSeq), channelIDs, maxColdReplay) //nolint:gosec // lastSeq is a sequence counter bounded well below MaxInt64
+			persisted, dbErr := es.GetEventsSinceForChannels(ctx, int64(lastSeq), channelIDs, maxColdReplay) //nolint:gosec // lastSeq is a sequence counter bounded well below MaxInt64
 			if dbErr != nil {
 				slog.Warn("ws handleReconnect: cold-tier replay query failed",
 					"user_id", c.userID, "err", dbErr)

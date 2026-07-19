@@ -306,7 +306,9 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 		w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": aa.Filename}))
 		// These downloads are access-controlled, so they must never be stored by
 		// shared/proxy caches (info-leak). Mark private and force revalidation.
-		w.Header().Set("Cache-Control", fmt.Sprintf("private, max-age=%d, no-cache", fileCacheMaxAgeSeconds))
+		// W3-4: no-cache forces revalidation on every use, so a max-age is dead
+		// weight alongside it — private + no-cache expresses the intent exactly.
+		w.Header().Set("Cache-Control", "private, no-cache")
 		// The Access-Control-Allow-Origin header below reflects the request
 		// Origin, so responses vary by Origin and must not be cross-served.
 		w.Header().Set("Vary", "Origin")
