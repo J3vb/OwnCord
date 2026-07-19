@@ -56,6 +56,72 @@ func TestSendMessage_Valid(t *testing.T) {
 	}
 }
 
+// TestSendMessage_AttachmentOwnershipAtomic locks the W1-3 semantics: the
+// link UPDATE itself enforces ownership, so a foreign, already-linked, or
+// nonexistent attachment is skipped (never linked) while the message still
+// sends — no check-then-link race, and retries cannot hard-fail.
+func TestSendMessage_AttachmentOwnershipAtomic(t *testing.T) {
+	ms := store.NewMemStore()
+	ms.SeedRole(&db.Role{
+		ID:          permissions.MemberRoleID,
+		Name:        "member",
+		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AttachFiles,
+		Position:    1,
+	})
+	ms.SeedUserRole(1, permissions.MemberRoleID)
+	ms.SeedUserRole(2, permissions.MemberRoleID)
+	ms.SeedUser(&db.User{ID: 1, Username: "alice", Status: "online"})
+	ms.SeedUser(&db.User{ID: 2, Username: "mallory", Status: "online"})
+	ms.SeedChannel(&db.Channel{ID: 10, Name: "general", Type: "text"})
+	checker := permissions.NewChecker(ms)
+	svc := NewMessageService(ms, NewPermissionService(ms, checker), nil)
+
+	if err := ms.CreateAttachment("att-own", 1, "a.png", "s-a.png", "image/png", 10, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.CreateAttachment("att-foreign", 2, "b.png", "s-b.png", "image/png", 10, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 10, UserID: 1, Username: "alice", RoleName: "member",
+		Content:       "with files",
+		AttachmentIDs: []string{"att-own", "att-foreign", "att-missing"},
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if result.MessageID <= 0 {
+		t.Fatal("message should persist even when some attachments are skipped")
+	}
+
+	own, _ := ms.GetAttachmentByID("att-own")
+	if own.MessageID == nil || *own.MessageID != result.MessageID {
+		t.Error("sender's own attachment should be linked to the new message")
+	}
+	foreign, _ := ms.GetAttachmentByID("att-foreign")
+	if foreign.MessageID != nil {
+		t.Error("another user's attachment must never be linked (IDOR guard)")
+	}
+
+	// A retry naming the now-linked attachment must still send.
+	retry, err := svc.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 10, UserID: 1, Username: "alice", RoleName: "member",
+		Content:       "retry",
+		AttachmentIDs: []string{"att-own"},
+	})
+	if err != nil {
+		t.Fatalf("retry with already-linked attachment should still send: %v", err)
+	}
+	if retry.MessageID <= 0 {
+		t.Fatal("retry should persist a message")
+	}
+	own2, _ := ms.GetAttachmentByID("att-own")
+	if own2.MessageID == nil || *own2.MessageID != result.MessageID {
+		t.Error("already-linked attachment must stay linked to the original message")
+	}
+}
+
 func TestSendMessage_EmptyContent(t *testing.T) {
 	svc, _ := newTestMessageService()
 
