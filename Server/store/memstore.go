@@ -673,7 +673,14 @@ func (m *MemStore) GetDMParticipantIDs(channelID int64) ([]int64, error) {
 	return ids, nil
 }
 
-func (m *MemStore) GetDMRecipient(_ int64, _ int64) (*db.User, error) {
+func (m *MemStore) GetDMRecipient(channelID, userID int64) (*db.User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for uid := range m.dmParticipants[channelID] {
+		if uid != userID {
+			return m.users[uid], nil
+		}
+	}
 	return nil, nil
 }
 
