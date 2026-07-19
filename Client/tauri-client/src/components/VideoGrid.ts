@@ -6,6 +6,8 @@
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import {
+  getScreenshareAudioMuted,
+  getScreenshareAudioVolume,
   muteScreenshareAudio,
   setScreenshareAudioVolume,
   setUserVolume,
@@ -304,8 +306,13 @@ export function createVideoGrid(): VideoGridComponent {
 
     // Add audio control overlay for remote tiles
     if (config !== undefined && !config.isSelf) {
-      let muted = false;
-      let currentVolume = 100;
+      // Screenshare audio state survives tile rebuilds — initialize from it.
+      // Screenshare sliders are 0-100 (HTMLAudioElement.volume caps at 1.0);
+      // mic sliders keep 0-200 (LiveKit setVolume supports boost up to 2.0).
+      let muted = config.isScreenshare ? getScreenshareAudioMuted(config.audioUserId) : false;
+      let currentVolume = config.isScreenshare
+        ? Math.round(getScreenshareAudioVolume(config.audioUserId) * 100)
+        : 100;
 
       const overlay = createElement("div", { class: "video-tile-overlay" });
 
@@ -313,8 +320,8 @@ export function createVideoGrid(): VideoGridComponent {
       const volumeSlider = createElement("input", {
         type: "range",
         min: "0",
-        max: "200",
-        value: "100",
+        max: config.isScreenshare ? "100" : "200",
+        value: String(currentVolume),
         class: "tile-volume-slider",
         "aria-label": "Volume",
       });
@@ -324,9 +331,10 @@ export function createVideoGrid(): VideoGridComponent {
         const wasMuted = muted;
         muted = currentVolume === 0;
         if (config.isScreenshare) {
-          // BUG-102: Set actual volume, not just mute toggle.
+          // BUG-102: Set actual volume, not just mute toggle. Slider 100 maps
+          // to element volume 1.0 (the attach-time default).
           muteScreenshareAudio(config.audioUserId, muted);
-          setScreenshareAudioVolume(config.audioUserId, currentVolume / 200);
+          setScreenshareAudioVolume(config.audioUserId, currentVolume / 100);
         } else {
           setUserVolume(config.audioUserId, currentVolume);
         }
@@ -340,9 +348,10 @@ export function createVideoGrid(): VideoGridComponent {
       // Mute button
       const muteBtn = createElement("button", {
         class: "tile-mute-btn",
-        "aria-label": "Mute",
+        "aria-label": muted ? "Unmute" : "Mute",
       });
-      muteBtn.appendChild(volumeIcon());
+      muteBtn.appendChild(muted ? volumeXIcon() : volumeIcon());
+      if (muted) overlay.classList.add("muted");
 
       muteBtn.addEventListener("click", () => {
         muted = !muted;
@@ -357,6 +366,7 @@ export function createVideoGrid(): VideoGridComponent {
           if (currentVolume === 0) currentVolume = 100;
           if (config.isScreenshare) {
             muteScreenshareAudio(config.audioUserId, false);
+            setScreenshareAudioVolume(config.audioUserId, currentVolume / 100);
           } else {
             setUserVolume(config.audioUserId, currentVolume);
           }
