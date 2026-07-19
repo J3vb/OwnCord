@@ -13,6 +13,44 @@ func okHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// TestRateLimitMiddlewareWithPrefix_SeparatesClientUpdateBucket locks the
+// W2-1 fix: exhausting the client-update budget must not 429 the sensitive
+// endpoints (verify-totp, password change) that ride the empty-prefix
+// bucket for the same IP.
+func TestRateLimitMiddlewareWithPrefix_SeparatesClientUpdateBucket(t *testing.T) {
+	limiter := auth.NewRateLimiter()
+	trustedProxies := []string{"127.0.0.0/8"}
+
+	clientUpdate := rateLimitMiddlewareWithPrefix(limiter, "client_update:", 1, time.Minute, trustedProxies)(http.HandlerFunc(okHandler))
+	sensitive := RateLimitMiddleware(limiter, 1, time.Minute, trustedProxies)(http.HandlerFunc(okHandler))
+
+	newReq := func(path string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		r.RemoteAddr = "127.0.0.1:9999"
+		r.Header.Set("X-Forwarded-For", "203.0.113.7")
+		return r
+	}
+
+	// Exhaust the client-update bucket for this IP.
+	rec := httptest.NewRecorder()
+	clientUpdate.ServeHTTP(rec, newReq("/client-update"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first client-update status = %d, want 200", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	clientUpdate.ServeHTTP(rec, newReq("/client-update"))
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("second client-update status = %d, want 429", rec.Code)
+	}
+
+	// The same IP's sensitive-endpoint budget must be untouched.
+	rec = httptest.NewRecorder()
+	sensitive.ServeHTTP(rec, newReq("/api/v1/auth/verify-totp"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sensitive endpoint shares the client-update bucket: status = %d, want 200", rec.Code)
+	}
+}
+
 func TestRateLimitMiddlewareWithPrefix_SeparatesLiveKitBucket(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 	trustedProxies := []string{"127.0.0.0/8"}
