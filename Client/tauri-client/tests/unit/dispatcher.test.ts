@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { wireDispatcher } from "../../src/lib/dispatcher";
+import { wireDispatcher, wireConnectionStatus } from "../../src/lib/dispatcher";
+import { createMockWsClient } from "../helpers/mock-ws";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import {
@@ -43,6 +44,7 @@ vi.spyOn(console, "error").mockImplementation(() => {});
  */
 function createMockWs() {
   const listeners = new Map<string, Set<WsListener<ServerMessage["type"]>>>();
+  const sendFailureListeners = new Set<(id: string, code: string) => void>();
 
   const ws: WsClient = {
     connect: vi.fn(),
@@ -58,6 +60,10 @@ function createMockWs() {
       };
     },
     onStateChange: vi.fn(() => () => {}),
+    onSendFailure(listener: (id: string, code: string) => void): () => void {
+      sendFailureListeners.add(listener);
+      return () => sendFailureListeners.delete(listener);
+    },
     onCertFirstTrust: vi.fn(() => () => {}),
     onCertMismatch: vi.fn(() => () => {}),
     acceptCertFingerprint: vi.fn(async () => {}),
@@ -75,7 +81,13 @@ function createMockWs() {
     }
   }
 
-  return { ws, dispatch, listeners };
+  function dispatchSendFailure(id: string, code: string): void {
+    for (const listener of sendFailureListeners) {
+      listener(id, code);
+    }
+  }
+
+  return { ws, dispatch, dispatchSendFailure, listeners };
 }
 
 describe("WS Dispatcher", () => {
@@ -102,6 +114,7 @@ describe("WS Dispatcher", () => {
       pendingSends: new Map(),
       loadedChannels: new Set(),
       hasMore: new Map(),
+      historyLoadState: new Map(),
     }));
     membersStore.setState(() => ({
       members: new Map(),
@@ -798,6 +811,7 @@ describe("WS Dispatcher", () => {
       pendingSends: new Map(),
       loadedChannels: new Set(),
       hasMore: new Map(),
+      historyLoadState: new Map(),
     }));
     uiStore.setState((prev) => ({ ...prev, transientError: null }));
 
@@ -818,6 +832,37 @@ describe("WS Dispatcher", () => {
     expect(row.errorCode).toBe("SLOW_MODE");
     // …and it is not surfaced as a global transient error.
     expect(uiStore.getState().transientError).toBeNull();
+  });
+
+  it("wires a local transport send failure to mark the pending row failed", () => {
+    uiStore.setState((prev) => ({ ...prev, transientError: null }));
+
+    addOptimisticMessage({
+      correlationId: "corr-2",
+      channelId: 7,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "hi",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+
+    // ws_send rejected locally (outbound channel full) → the row fails with retry…
+    mock.dispatchSendFailure("corr-2", "NETWORK");
+
+    const row = getChannelMessages(7)[0]!;
+    expect(row.status).toBe("failed");
+    expect(row.errorCode).toBe("NETWORK");
+    // …and no global transient error is raised.
+    expect(uiStore.getState().transientError).toBeNull();
+  });
+
+  it("ignores a transport send failure for an id with no pending send (fire-and-forget)", () => {
+    const before = messagesStore.getState();
+
+    mock.dispatchSendFailure("typing-id", "NETWORK");
+
+    // No store mutation: fire-and-forget sends (typing, presence…) stay silent.
+    expect(messagesStore.getState()).toBe(before);
   });
 
   it("does not increment unread for own messages", () => {
@@ -1208,5 +1253,32 @@ describe("WS Dispatcher", () => {
     });
 
     expect(messagesStore.getState().messagesByChannel.get(1)).toBeUndefined();
+  });
+});
+
+describe("wireConnectionStatus", () => {
+  beforeEach(() => {
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "disconnected" }));
+  });
+
+  it("writes ws state changes into ui.store.connectionStatus via the 5→3 mapping", () => {
+    const mockWs = createMockWsClient();
+    const unsub = wireConnectionStatus(mockWs);
+
+    mockWs.simulateStateChange("connecting");
+    expect(uiStore.getState().connectionStatus).toBe("reconnecting");
+
+    mockWs.simulateStateChange("authenticating");
+    expect(uiStore.getState().connectionStatus).toBe("reconnecting");
+
+    mockWs.simulateStateChange("connected");
+    expect(uiStore.getState().connectionStatus).toBe("connected");
+
+    mockWs.simulateStateChange("disconnected");
+    expect(uiStore.getState().connectionStatus).toBe("disconnected");
+
+    unsub();
+    mockWs.simulateStateChange("connected");
+    expect(uiStore.getState().connectionStatus).toBe("disconnected");
   });
 });

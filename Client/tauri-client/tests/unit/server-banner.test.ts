@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createServerBanner } from "@components/ServerBanner";
+import { createServerBanner, applyConnectionStatus } from "@components/ServerBanner";
 
 describe("ServerBanner", () => {
   beforeEach(() => {
@@ -42,6 +42,33 @@ describe("ServerBanner", () => {
     expect(banner.element.classList.contains("visible")).toBe(true);
 
     banner.hide();
+    expect(banner.element.classList.contains("visible")).toBe(false);
+
+    banner.destroy();
+  });
+
+  it('showDisconnected adds visible class with "Disconnected" text', () => {
+    const banner = createServerBanner();
+    banner.showDisconnected();
+
+    expect(banner.element.classList.contains("visible")).toBe(true);
+    expect(banner.element.textContent).toBe("Disconnected");
+
+    banner.destroy();
+  });
+
+  it("applyConnectionStatus maps each store status to the right banner state", () => {
+    const banner = createServerBanner();
+
+    applyConnectionStatus(banner, "reconnecting");
+    expect(banner.element.classList.contains("visible")).toBe(true);
+    expect(banner.element.textContent).toBe("Reconnecting...");
+
+    applyConnectionStatus(banner, "disconnected");
+    expect(banner.element.classList.contains("visible")).toBe(true);
+    expect(banner.element.textContent).toBe("Disconnected");
+
+    applyConnectionStatus(banner, "connected");
     expect(banner.element.classList.contains("visible")).toBe(false);
 
     banner.destroy();

@@ -60,6 +60,11 @@ export interface MessagesState {
   readonly loadedChannels: ReadonlySet<number>;
   /** Whether more messages exist above for a channel */
   readonly hasMore: ReadonlyMap<number, boolean>;
+  /**
+   * First-page history fetch state per channel. Absent entry = idle (loaded or
+   * never requested) — the message region then renders normally/empty.
+   */
+  readonly historyLoadState: ReadonlyMap<number, "loading" | "error">;
 }
 
 // -----------------------------------------------------------------------------
@@ -116,6 +121,7 @@ const INITIAL_STATE: MessagesState = {
   pendingSends: new Map(),
   loadedChannels: new Set(),
   hasMore: new Map(),
+  historyLoadState: new Map(),
 };
 
 // -----------------------------------------------------------------------------
@@ -263,6 +269,24 @@ export function removeOptimistic(correlationId: string): void {
   });
 }
 
+/** Mark a channel's first-page history fetch as in flight. */
+export function setChannelLoading(channelId: number): void {
+  messagesStore.setState((prev) => {
+    const updated = new Map(prev.historyLoadState);
+    updated.set(channelId, "loading");
+    return { ...prev, historyLoadState: updated };
+  });
+}
+
+/** Mark a channel's first-page history fetch as failed (the region offers Retry). */
+export function setChannelLoadError(channelId: number): void {
+  messagesStore.setState((prev) => {
+    const updated = new Map(prev.historyLoadState);
+    updated.set(channelId, "error");
+    return { ...prev, historyLoadState: updated };
+  });
+}
+
 /** Bulk set messages from a REST response. Marks channel as loaded.
  *  The server returns messages newest-first; we reverse to chronological order. */
 export function setMessages(
@@ -285,11 +309,15 @@ export function setMessages(
     const updatedHasMore = new Map(prev.hasMore);
     updatedHasMore.set(channelId, hasMore || converted.length > MAX_MESSAGES_PER_CHANNEL);
 
+    const updatedLoadState = new Map(prev.historyLoadState);
+    updatedLoadState.delete(channelId);
+
     return {
       ...prev,
       messagesByChannel: updatedMessages,
       loadedChannels: updatedLoaded,
       hasMore: updatedHasMore,
+      historyLoadState: updatedLoadState,
     };
   });
 }
@@ -426,11 +454,15 @@ export function clearChannelMessages(channelId: number): void {
     const updatedHasMore = new Map(prev.hasMore);
     updatedHasMore.delete(channelId);
 
+    const updatedLoadState = new Map(prev.historyLoadState);
+    updatedLoadState.delete(channelId);
+
     return {
       ...prev,
       messagesByChannel: updatedMessages,
       loadedChannels: updatedLoaded,
       hasMore: updatedHasMore,
+      historyLoadState: updatedLoadState,
     };
   });
 }
@@ -493,4 +525,9 @@ export function isChannelLoaded(channelId: number): boolean {
 /** Check whether a channel has more older messages to fetch. */
 export function hasMoreMessages(channelId: number): boolean {
   return messagesStore.select((s) => s.hasMore.get(channelId) ?? false);
+}
+
+/** First-page history fetch state for a channel; null when idle/loaded. */
+export function getHistoryLoadState(channelId: number): "loading" | "error" | null {
+  return messagesStore.select((s) => s.historyLoadState.get(channelId) ?? null);
 }

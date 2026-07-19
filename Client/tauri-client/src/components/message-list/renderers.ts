@@ -140,6 +140,8 @@ function sendErrorReason(code: string | null): string {
       return "You don't have permission to post here";
     case "OFFLINE":
       return "Not connected — message not sent";
+    case "NETWORK":
+      return "Connection problem — message not sent";
     case "BAD_REQUEST":
       return "Message rejected";
     default:
