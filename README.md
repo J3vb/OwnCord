@@ -207,6 +207,8 @@ When rotating the server updater key, update [Server/updater/server_update_publi
 - [docs/livekit-setup.md](docs/livekit-setup.md)
 - [docs/port-forwarding.md](docs/port-forwarding.md)
 - [docs/tailscale.md](docs/tailscale.md)
+- [docs/architecture/](docs/architecture/README.md) — system blueprints (diagrams + flows)
+- [docs/audit-2026-07-19.md](docs/audit-2026-07-19.md) — latest architecture & spec-conformance audit
 - [docs/api.md](docs/api.md)
 - [docs/protocol.md](docs/protocol.md)
 - [docs/schema.md](docs/schema.md)
