@@ -23,6 +23,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/owncord/server/store"
@@ -208,6 +209,118 @@ func TestWazeroDisablePluginFreesModule(t *testing.T) {
 	}
 	if inst.module == nil {
 		t.Fatal("re-Enable should repopulate inst.module")
+	}
+}
+
+// spinWASM implements the command-dispatch ABI with input-dependent runtime:
+//
+//	(module
+//	  (memory (export "memory") 1)
+//	  (func (export "allocate") (param i32) (result i32) i32.const 8)
+//	  (func (export "deallocate") (param i32 i32))
+//	  (func (export "command_dispatch") (param i32 i32) (result i32 i32)
+//	    local.get 1          ;; payload length
+//	    i32.const 100
+//	    i32.gt_u
+//	    if (loop br 0 end) end  ;; payloads over 100 bytes spin forever
+//	    i32.const 0 i32.const 0))
+//
+// A dispatch with no args stays under 100 payload bytes and returns
+// immediately; long args push the JSON payload over 100 bytes and trigger an
+// infinite loop, which the CPU budget must interrupt.
+var spinWASM = []byte{
+	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // \0asm v1
+	// type section: (i32)->i32, (i32,i32)->(), (i32,i32)->(i32,i32)
+	0x01, 0x12, 0x03,
+	0x60, 0x01, 0x7f, 0x01, 0x7f,
+	0x60, 0x02, 0x7f, 0x7f, 0x00,
+	0x60, 0x02, 0x7f, 0x7f, 0x02, 0x7f, 0x7f,
+	// function section: 3 funcs using types 0,1,2
+	0x03, 0x04, 0x03, 0x00, 0x01, 0x02,
+	// memory section: 1 page, no max
+	0x05, 0x03, 0x01, 0x00, 0x01,
+	// export section: memory, allocate, deallocate, command_dispatch
+	0x07, 0x35, 0x04,
+	0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00,
+	0x08, 0x61, 0x6c, 0x6c, 0x6f, 0x63, 0x61, 0x74, 0x65, 0x00, 0x00,
+	0x0a, 0x64, 0x65, 0x61, 0x6c, 0x6c, 0x6f, 0x63, 0x61, 0x74, 0x65, 0x00, 0x01,
+	0x10, 0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x5f, 0x64, 0x69, 0x73, 0x70, 0x61, 0x74, 0x63, 0x68, 0x00, 0x02,
+	// code section
+	0x0a, 0x1e, 0x03,
+	// allocate: return 8
+	0x04, 0x00, 0x41, 0x08, 0x0b,
+	// deallocate: nop
+	0x02, 0x00, 0x0b,
+	// command_dispatch: spin if len>100 else return (0,0)
+	0x14, 0x00,
+	0x20, 0x01, // local.get 1
+	0x41, 0xe4, 0x00, // i32.const 100
+	0x4b,       // i32.gt_u
+	0x04, 0x40, // if
+	0x03, 0x40, // loop
+	0x0c, 0x00, // br 0
+	0x0b,       // end loop
+	0x0b,       // end if
+	0x41, 0x00, // i32.const 0
+	0x41, 0x00, // i32.const 0
+	0x0b, // end
+}
+
+// TestWazeroCPUBudgetOverrunDoesNotBrickPlugin locks in the W1-1 fix: an
+// over-budget command must return the budget error, and the SAME plugin must
+// serve the next command via lazy re-instantiation — not stay dead until an
+// admin disable/enable cycle or server restart.
+func TestWazeroCPUBudgetOverrunDoesNotBrickPlugin(t *testing.T) {
+	dir := t.TempDir()
+	manifest := `{"name":"spinner","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"]}`
+	writeTestPlugin(t, dir, "spinner", manifest, spinWASM)
+
+	reg, mem := newWazeroTestRegistry(t, dir)
+	ctx := context.Background()
+	if err := reg.LoadAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := mem.ListPlugins(ctx)
+	if err := reg.EnablePlugin(ctx, rows[0].ID); err != nil {
+		t.Fatalf("EnablePlugin: %v", err)
+	}
+	reg.mu.RLock()
+	inst := reg.plugins[rows[0].ID]
+	reg.mu.RUnlock()
+	if err := reg.RegisterCommand("spin", inst); err != nil {
+		t.Fatalf("RegisterCommand: %v", err)
+	}
+
+	// Baseline: a small payload dispatches fine.
+	result, ok := reg.DispatchCommand(ctx, 1, 2, "spin", nil)
+	if !ok || result == nil {
+		t.Fatalf("baseline dispatch failed: ok=%v result=%+v", ok, result)
+	}
+	if strings.Contains(result.Reply, "CPU budget") {
+		t.Fatalf("baseline dispatch should not hit the budget: %q", result.Reply)
+	}
+
+	// Overrun: a long arg pushes the payload over the spin threshold; the
+	// 100ms budget must interrupt it and surface the budget error.
+	result, ok = reg.DispatchCommand(ctx, 1, 2, "spin", []string{strings.Repeat("x", 200)})
+	if !ok || result == nil {
+		t.Fatalf("overrun dispatch returned no result: ok=%v", ok)
+	}
+	if !strings.Contains(result.Reply, "CPU budget") {
+		t.Fatalf("expected CPU budget error, got %q", result.Reply)
+	}
+
+	// The plugin must still work: the next small dispatch re-instantiates the
+	// module lazily instead of dispatching into the closed one forever.
+	result, ok = reg.DispatchCommand(ctx, 1, 2, "spin", nil)
+	if !ok || result == nil {
+		t.Fatalf("post-overrun dispatch failed: ok=%v result=%+v", ok, result)
+	}
+	if strings.Contains(result.Reply, "CPU budget") || strings.Contains(result.Reply, "module closed") {
+		t.Fatalf("plugin still bricked after overrun: %q", result.Reply)
+	}
+	if !inst.Enabled {
+		t.Fatal("overrun must not disable the plugin")
 	}
 }
 
