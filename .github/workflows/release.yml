@@ -369,9 +369,14 @@ jobs:
           git archive --format=tar.gz --prefix="OwnCord-${VERSION}/" \
             -o "owncord-src-${{ github.ref_name }}.tar.gz" HEAD
 
+      # Checksum lines must use bare asset filenames: the v1.0.0 updater's
+      # ParseChecksumFile does an exact match on the last field, so a
+      # "windows/" prefix would strand every deployed server on 1.0.0.
       - name: Generate SHA256 checksums
+        shell: bash
         run: |
-          find windows linux -type f -exec sha256sum {} \; > checksums.sha256
+          (cd windows && sha256sum *) > checksums.sha256
+          (cd linux && sha256sum *) >> checksums.sha256
           sha256sum owncord-src-*.tar.gz >> checksums.sha256
 
       - name: Generate server update manifest
@@ -391,8 +396,22 @@ jobs:
           printf '%s' "$SERVER_UPDATE_SIGNING_PRIVATE_KEY" > "$KEY_PATH"
           trap 'rm -f "$KEY_PATH"' EXIT
           npm ci
-          npx tauri signer sign -k "$KEY_PATH" -p "$SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD" ../../windows/chatserver.exe
-          npx tauri signer sign -k "$KEY_PATH" -p "$SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD" ../../windows/server-update-manifest.json
+          npx tauri signer sign -f "$KEY_PATH" -p "$SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD" ../../windows/chatserver.exe
+          npx tauri signer sign -f "$KEY_PATH" -p "$SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD" ../../windows/server-update-manifest.json
+
+      # Fail closed before publishing: prove the freshly signed assets verify
+      # against the pinned public key that ships inside the server binary.
+      # Catches key/pubkey mismatch, signature format drift, and signer flag
+      # regressions — each of which has silently broken this pipeline before.
+      - name: Verify signed assets against pinned server update key
+        shell: bash
+        run: |
+          sudo apt-get update && sudo apt-get install -y minisign
+          base64 -d Server/updater/server_update_public_key.txt > "$RUNNER_TEMP/server_update.pub"
+          for f in windows/chatserver.exe windows/server-update-manifest.json; do
+            base64 -d "$f.sig" > "$RUNNER_TEMP/asset.minisig"
+            minisign -Vm "$f" -x "$RUNNER_TEMP/asset.minisig" -p "$RUNNER_TEMP/server_update.pub"
+          done
 
       - name: Install root dependencies (changelogen)
         run: npm ci
