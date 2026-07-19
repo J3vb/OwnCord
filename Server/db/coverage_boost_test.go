@@ -460,7 +460,7 @@ func TestDeleteOrphanedAttachments_KeepsLinked(t *testing.T) {
 	// Create attachment and link it to a message.
 	_ = database.CreateAttachment("linked-1", userID, "file.txt", "stored-linked.txt", "text/plain", 100, nil, nil)
 	msgID, _ := database.CreateMessage(chID, userID, "with attachment", nil)
-	_, _ = database.LinkAttachmentsToMessage(msgID, []string{"linked-1"})
+	_, _ = database.LinkAttachmentsToMessage(msgID, userID, []string{"linked-1"})
 
 	files, err := database.DeleteOrphanedAttachments("2099-01-01T00:00:00Z")
 	if err != nil {

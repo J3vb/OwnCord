@@ -57,7 +57,7 @@ func TestGetAttachmentByID_Found(t *testing.T) {
 func TestLinkAttachmentsToMessage_Empty(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	n, err := database.LinkAttachmentsToMessage(1, nil)
+	n, err := database.LinkAttachmentsToMessage(1, 1, nil)
 	if err != nil {
 		t.Fatalf("LinkAttachmentsToMessage(nil): %v", err)
 	}
@@ -84,7 +84,7 @@ func TestLinkAttachmentsToMessage_LinksUnlinked(t *testing.T) {
 		}
 	}
 
-	n, err := database.LinkAttachmentsToMessage(msgID, []string{"att-a", "att-b"})
+	n, err := database.LinkAttachmentsToMessage(msgID, userID, []string{"att-a", "att-b"})
 	if err != nil {
 		t.Fatalf("LinkAttachmentsToMessage: %v", err)
 	}
@@ -113,12 +113,56 @@ func TestLinkAttachmentsToMessage_SkipsAlreadyLinked(t *testing.T) {
 	)
 
 	// Try to re-link to a different message — should skip (WHERE message_id IS NULL).
-	n, err := database.LinkAttachmentsToMessage(msg2, []string{"att-linked"})
+	n, err := database.LinkAttachmentsToMessage(msg2, userID, []string{"att-linked"})
 	if err != nil {
 		t.Fatalf("LinkAttachmentsToMessage: %v", err)
 	}
 	if n != 0 {
 		t.Errorf("expected 0 rows (already linked), got %d", n)
+	}
+}
+
+// TestLinkAttachmentsToMessage_OwnershipGuard locks the atomic IDOR guard
+// (W1-3): the link UPDATE itself enforces ownership, so a foreign attachment
+// can never be claimed, legacy NULL-uploader rows remain claimable, and
+// nonexistent ids are skipped without failing the statement.
+func TestLinkAttachmentsToMessage_OwnershipGuard(t *testing.T) {
+	database := openMigratedMemory(t)
+	owner := seedUser(t, database, "att-owner")
+	other := seedUser(t, database, "att-other")
+	chID := seedChannel(t, database, "att-owner-ch")
+	msgID, _ := database.CreateMessage(chID, owner, "attachment carrier", nil)
+
+	if err := database.CreateAttachment("att-owned", owner, "o.txt", "s-o.txt", "text/plain", 1, nil, nil); err != nil {
+		t.Fatalf("CreateAttachment att-owned: %v", err)
+	}
+	if err := database.CreateAttachment("att-foreign", other, "f.txt", "s-f.txt", "text/plain", 1, nil, nil); err != nil {
+		t.Fatalf("CreateAttachment att-foreign: %v", err)
+	}
+	// Legacy row from before uploader tracking: uploader_id IS NULL.
+	if _, err := database.Exec(
+		`INSERT INTO attachments (id, filename, stored_as, mime_type, size)
+		 VALUES ('att-legacy', 'l.txt', 's-l.txt', 'text/plain', 1)`,
+	); err != nil {
+		t.Fatalf("inserting legacy attachment: %v", err)
+	}
+
+	n, err := database.LinkAttachmentsToMessage(msgID, owner,
+		[]string{"att-owned", "att-foreign", "att-legacy", "att-missing"})
+	if err != nil {
+		t.Fatalf("LinkAttachmentsToMessage: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("expected 2 linked (owned + legacy), got %d", n)
+	}
+	if att, _ := database.GetAttachmentByID("att-owned"); att.MessageID == nil || *att.MessageID != msgID {
+		t.Error("owner's unlinked attachment should link")
+	}
+	if att, _ := database.GetAttachmentByID("att-foreign"); att.MessageID != nil {
+		t.Error("another user's attachment must never link (IDOR guard)")
+	}
+	if att, _ := database.GetAttachmentByID("att-legacy"); att.MessageID == nil {
+		t.Error("legacy NULL-uploader attachment should be claimable")
 	}
 }
 
