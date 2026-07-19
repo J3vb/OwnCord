@@ -426,8 +426,13 @@ func (m *MemStore) UpdateUserProfile(_ int64, _ string, _ *string) error {
 	panic("memstore: not implemented: UpdateUserProfile")
 }
 
-func (m *MemStore) UpdateUserPassword(_ int64, _ string) error {
-	panic("memstore: not implemented: UpdateUserPassword")
+func (m *MemStore) UpdateUserPassword(userID int64, hash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if u, ok := m.users[userID]; ok {
+		u.PasswordHash = hash
+	}
+	return nil
 }
 
 func (m *MemStore) UpdateUserStatus(id int64, status string) error {
