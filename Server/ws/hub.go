@@ -61,13 +61,19 @@ type Hub struct {
 	replayBuf      *EventRingBuffer // recent broadcast events for reconnection replay
 	broadcastDrops atomic.Uint64    // counts messages dropped due to full broadcast channel
 
-	// Phase B Step 7 — event persistence. nil = ring buffer only.
-	eventPersister *EventPersister
-	eventStore     store.EventStore // read path for cold-tier replay
+	// Phase B Step 7 — event persistence. nil = ring buffer only. Atomic
+	// because main.go wires these after NewRouter has already started the
+	// Run loop, which reads them on the broadcast/replay paths.
+	eventPersister atomic.Pointer[EventPersister]
+	eventStore     atomic.Pointer[store.EventStore] // read path for cold-tier replay
 
 	// Phase C Step 9 — plugin wiring.
-	pluginRegistry *plugin.Registry  // slash-command dispatch; nil = no plugins
-	pluginSink     *plugin.EventSink // hub→plugin event fan-out; nil = no plugins
+	pluginRegistry *plugin.Registry                 // slash-command dispatch; nil = no plugins; wire before Run
+	pluginSink     atomic.Pointer[plugin.EventSink] // hub→plugin event fan-out; nil = no plugins
+
+	// running flips when Run starts; plain-field setters check it so a late
+	// call fails loudly instead of racing the dispatch loop.
+	running atomic.Bool
 
 	// Phase B Step 7 — reconnection tier metrics. Incremented per resume.
 	reconnectTierBuf  atomic.Uint64
@@ -178,18 +184,21 @@ func (h *Hub) refreshSettingsLocked() {
 	if h.db == nil {
 		return
 	}
-	var name, motd string
-	if err := h.db.QueryRow("SELECT value FROM settings WHERE key='server_name'").Scan(&name); err == nil {
+	if name, err := h.db.GetSetting("server_name"); err == nil {
 		h.settingsName = name
 	}
-	if err := h.db.QueryRow("SELECT value FROM settings WHERE key='motd'").Scan(&motd); err == nil {
+	if motd, err := h.db.GetSetting("motd"); err == nil {
 		h.settingsMotd = motd
 	}
 	h.settingsLastUpdate = time.Now()
 }
 
-// SetLiveKit sets the LiveKit client on the hub. Must be called before Run.
+// SetLiveKit sets the LiveKit client on the hub. Must be called before Run;
+// late calls are ignored with an error log.
 func (h *Hub) SetLiveKit(lk *LiveKitClient) {
+	if h.rejectIfRunning("SetLiveKit") {
+		return
+	}
 	h.livekit = lk
 }
 
@@ -222,8 +231,12 @@ func (h *Hub) LiveKitHealthCheck(ctx context.Context) (bool, error) {
 	return h.livekit.HealthCheck(ctx)
 }
 
-// SetLiveKitProcess sets the LiveKit process manager on the hub.
+// SetLiveKitProcess sets the LiveKit process manager on the hub. Must be
+// called before Run; late calls are ignored with an error log.
 func (h *Hub) SetLiveKitProcess(p *LiveKitProcess) {
+	if h.rejectIfRunning("SetLiveKitProcess") {
+		return
+	}
 	h.lkProcess = p
 }
 
@@ -234,6 +247,7 @@ func (h *Hub) SetLiveKitProcess(p *LiveKitProcess) {
 // panics more than 3 times within a 60-second window it stops permanently to
 // avoid a tight crash loop.
 func (h *Hub) Run() {
+	h.running.Store(true)
 	var panicCount int
 	var lastPanicReset time.Time
 
@@ -749,28 +763,53 @@ func (h *Hub) SeedSeq(seed uint64) {
 }
 
 // SetEventPersister attaches a persister so subsequent broadcasts are also
-// written to the persistent EventStore. Pass nil to disable.
+// written to the persistent EventStore. Pass nil to disable. Safe to call
+// at any time, including after Run has started.
 func (h *Hub) SetEventPersister(p *EventPersister) {
-	h.eventPersister = p
+	h.eventPersister.Store(p)
 }
 
 // SetEventStore attaches a read-side EventStore used by the cold-tier
 // reconnect replay path. Typically the same store backing SetEventPersister.
+// Pass nil to disable. Safe to call at any time, including after Run has
+// started.
 func (h *Hub) SetEventStore(s store.EventStore) {
-	h.eventStore = s
+	if s == nil {
+		h.eventStore.Store(nil)
+		return
+	}
+	h.eventStore.Store(&s)
 }
 
 // SetPluginRegistry wires the plugin.Registry so the hub can dispatch
 // slash commands (chat_command messages) to plugin-owned handlers.
-// Pass nil to disable plugin command dispatch.
+// Pass nil to disable plugin command dispatch. Must be called before Run;
+// late calls are ignored with an error log.
 func (h *Hub) SetPluginRegistry(r *plugin.Registry) {
+	if h.rejectIfRunning("SetPluginRegistry") {
+		return
+	}
 	h.pluginRegistry = r
 }
 
 // SetPluginEventSink wires the plugin.EventSink so the hub fans out each
-// sequenced broadcast to subscribed plugins. Pass nil to disable.
+// sequenced broadcast to subscribed plugins. Pass nil to disable. Safe to
+// call at any time, including after Run has started.
 func (h *Hub) SetPluginEventSink(s *plugin.EventSink) {
-	h.pluginSink = s
+	h.pluginSink.Store(s)
+}
+
+// rejectIfRunning reports whether Run has already started, logging an error
+// when it has. Plain-field setters must be wired before Run: the dispatch
+// loop and connection goroutines read those fields without synchronization,
+// so a late set would be a data race. Late calls are dropped.
+func (h *Hub) rejectIfRunning(setter string) bool {
+	if h.running.Load() {
+		slog.Error("ws: setter called after Hub.Run started; ignoring (must be wired before Run)",
+			"setter", setter)
+		return true
+	}
+	return false
 }
 
 // ReconnectTierStats returns the per-tier resume hit counters in the order
@@ -786,7 +825,8 @@ func (h *Hub) ReconnectTierStats() (buffer, db, full uint64) {
 // written to the EventStore has a row-seq that matches the wrapped-payload
 // seq the client tracks.
 func (h *Hub) persistEvent(seq uint64, channelID int64, payload []byte) {
-	if h.eventPersister == nil {
+	p := h.eventPersister.Load()
+	if p == nil {
 		return
 	}
 	eventType := extractEventType(payload)
@@ -796,7 +836,7 @@ func (h *Hub) persistEvent(seq uint64, channelID int64, payload []byte) {
 			eventType = "channel_broadcast"
 		}
 	}
-	h.eventPersister.Enqueue(int64(seq), eventType, channelID, payload) //nolint:gosec // seq is a monotonically increasing counter, never reaches MaxInt64
+	p.Enqueue(int64(seq), eventType, channelID, payload) //nolint:gosec // seq is a monotonically increasing counter, never reaches MaxInt64
 }
 
 // extractEventType scans a wrapped JSON envelope for the value of the "type"
@@ -987,12 +1027,12 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	// conceptually — but since seqMu is still held here, the call MUST NOT
 	// re-enter the hub. The default build is safe; the wazero build should
 	// dispatch asynchronously once the runtime is real.
-	if h.pluginSink != nil {
+	if sink := h.pluginSink.Load(); sink != nil {
 		eventType := extractEventType(msg)
 		if eventType == "" {
 			eventType = "broadcast"
 		}
-		h.pluginSink.Dispatch(context.Background(), eventType, msg)
+		sink.Dispatch(context.Background(), eventType, msg)
 	}
 
 	if bm.channelID == 0 {

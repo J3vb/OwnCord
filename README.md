@@ -96,7 +96,7 @@ The client uses TOFU (Trust On First Use) for self-signed certificates: it promp
 - TOTP 2FA support and API rate limiting
 - Desktop client auto-update with signature verification
 
-See deeper feature and architecture docs in [docs/client-architecture.md](docs/client-architecture.md) and [docs/protocol.md](docs/protocol.md).
+See deeper feature and architecture docs in [docs/architecture/](docs/architecture/README.md) and [docs/protocol.md](docs/protocol.md).
 
 ## Architecture
 
@@ -212,7 +212,7 @@ When rotating the server updater key, update [Server/updater/server_update_publi
 - [docs/api.md](docs/api.md)
 - [docs/protocol.md](docs/protocol.md)
 - [docs/schema.md](docs/schema.md)
-- [docs/client-architecture.md](docs/client-architecture.md)
+- [docs/architecture/client.md](docs/architecture/client.md) — client architecture (replaces client-architecture.md)
 - [docs/contributing.md](docs/contributing.md)
 - [docs/security.md](docs/security.md)
 

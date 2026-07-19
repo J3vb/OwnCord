@@ -25,11 +25,12 @@ All client-server real-time communication happens over a single WebSocket connec
 13. [Channel Updates](#channel-updates)
 14. [Member Updates](#member-updates)
 15. [Voice Signaling](#voice-signaling)
-16. [Direct Messages](#direct-messages)
-17. [Server Restart](#server-restart)
-18. [Error Handling](#error-handling)
-19. [Rate Limits](#rate-limits)
-20. [Message Type Reference Table](#message-type-reference-table)
+16. [Voice End-to-End Encryption](#voice-end-to-end-encryption)
+17. [Direct Messages](#direct-messages)
+18. [Server Restart](#server-restart)
+19. [Error Handling](#error-handling)
+20. [Rate Limits](#rate-limits)
+21. [Message Type Reference Table](#message-type-reference-table)
 
 ---
 
@@ -132,10 +133,16 @@ After the WebSocket connection is established, the client sends the first messag
       "role": "admin"
     },
     "server_name": "My Server",
-    "motd": "Welcome!"
+    "motd": "Welcome!",
+    "replay_source": "none"
   }
 }
 ```
+
+`replay_source` reports which replay tier served this (re)connection:
+`"none"` (fresh connection / full re-sync), `"buffer"` (in-memory ring
+buffer), or `"db"` (persistent `events` table). See
+[Reconnection with State Recovery](#reconnection-with-state-recovery).
 
 ### Step 3: Failure -- auth_error
 
@@ -195,15 +202,22 @@ Every 30 seconds, the server checks all clients. Any client with no activity for
 
 ## Reconnection with State Recovery
 
-When a connection drops, the client automatically reconnects with exponential backoff (1s to 30s max) and sends `last_seq` in the `auth` message.
+When a connection drops, the client automatically reconnects with exponential backoff (1s to 30s max) and sends `last_seq` in the `auth` message. The server resolves the reconnect through a **3-tier replay pipeline** (cheapest first):
 
-| Condition | Server Behavior |
-|-----------|-----------------|
-| `last_seq == 0` | Full flow: `auth_ok` + `ready` + `member_join` + `presence` |
-| `last_seq > 0` AND seq in buffer | Replay flow: `auth_ok` + missed events + `presence` (no `member_join`, no `ready`) |
-| `last_seq > 0` AND seq NOT in buffer | Full flow (fallback): same as `last_seq == 0` |
+| Tier | Condition | Server Behavior | `replay_source` |
+|------|-----------|-----------------|-----------------|
+| — | `last_seq == 0` | Full flow: `auth_ok` + `ready` + `member_join` + `presence` | `none` |
+| 1 | seq within the in-memory ring buffer (1000 events) | Replay flow: `auth_ok` + missed events + `presence` (no `member_join`, no `ready`). Channel-scoped events are permission-filtered (fail-closed). | `buffer` |
+| 2 | seq within the persistent `events` table (max 5000 events, subject to retention) | Same replay flow, served from the cold tier | `db` |
+| 3 | seq too far behind, or channel visibility changed while away | Full flow (fallback): same as `last_seq == 0` | `none` |
 
-DM events are not stored in the ring buffer and are only recoverable via the full `ready` payload.
+A visibility watermark forces the tier-3 full re-sync whenever channel
+visibility changed while the client was disconnected, so permission changes
+can never be replayed around.
+
+DM events are not stored in the ring buffer; DM history persisted to the
+`events` table is replayable via tier 2, and everything is always recoverable
+via the full `ready` payload.
 
 ---
 
@@ -228,7 +242,7 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `position`, `unread_count` (text only), `last_message_id` (text only)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`), `category`, `position`, `unread_count` (text only), `last_message_id` (text only)
 
 **dm_channels[]:** `channel_id`, `recipient` (user object with `id`, `username`, `avatar`, `status`), `last_message_id`, `last_message`, `last_message_at`, `unread_count`
 
@@ -548,6 +562,31 @@ Triggered when an admin changes a user's role.
 }
 ```
 
+### user_update (Server -> Client, broadcast)
+
+Broadcast when a user changes their own profile via `PATCH /api/v1/users/me`
+(username and/or avatar).
+
+```json
+{
+  "seq": 73,
+  "type": "user_update",
+  "payload": {
+    "user_id": 5,
+    "username": "newname",
+    "avatar": "uuid.png"
+  }
+}
+```
+
+`avatar` may be `null` when unset.
+
+### member_leave (reserved)
+
+`member_leave` is a defined message type that the server does not currently
+emit (clients handle it defensively). Reserved for future member-removal
+flows.
+
 ---
 
 ## Voice Signaling
@@ -575,10 +614,16 @@ On success, server sends (in order):
     "channel_id": 10,
     "token": "eyJhbGciOiJIUzI1NiIs...",
     "url": "/livekit",
-    "direct_url": "ws://localhost:7880"
+    "direct_url": "ws://localhost:7880",
+    "is_key_holder": false
   }
 }
 ```
+
+`is_key_holder` tells the joiner whether they are the channel's E2EE key
+holder (see [Voice End-to-End Encryption](#voice-end-to-end-encryption)).
+Tokens are 5-minute scoped JWTs whose publish sources (mic/camera/screen) are
+restricted by the user's permissions.
 
 ### voice_config (Server -> Client, direct)
 
@@ -589,7 +634,10 @@ On success, server sends (in order):
     "channel_id": 10,
     "quality": "medium",
     "bitrate": 64000,
-    "max_users": 50
+    "max_users": 50,
+    "threshold_mode": "top_speakers",
+    "mixing_threshold": 0,
+    "top_speakers": 5
   }
 }
 ```
@@ -620,6 +668,12 @@ Quality presets:
   }
 }
 ```
+
+### voice_speakers (reserved)
+
+`voice_speakers` (`{ channel_id, speakers: [user_id, ...], threshold_mode }`)
+is a defined message type that the server does not currently emit; clients
+already handle it. Reserved for active-speaker signaling.
 
 ### voice_state (Server -> Client, broadcast)
 
@@ -670,6 +724,72 @@ Rate limited: 2/sec. Requires `SHARE_SCREEN` permission.
 ```
 
 Rate limited: 1 per 60 seconds. Must be in a voice channel.
+
+---
+
+## Voice End-to-End Encryption
+
+Voice/video media can be end-to-end encrypted. The server never holds the room
+key — it only relays the ECDH key exchange between participants and tracks who
+the **key holder** is (deterministically, the participant with the lowest user
+ID in the channel). The joiner learns whether they are the key holder from
+`voice_token.is_key_holder`. When a participant leaves, the key holder rotates
+the room key so departed members cannot decrypt future media.
+
+Both E2EE message types are rate limited at 5 per second per user. Key
+material must be standard-alphabet base64 (padded or unpadded).
+
+### voice_e2ee_announce (Client -> Server)
+
+Announce this participant's ECDH public key to the channel.
+
+```json
+{ "type": "voice_e2ee_announce", "payload": { "public_key": "base64-ecdh-pubkey" } }
+```
+
+### voice_e2ee_announce (Server -> Client, broadcast to voice channel)
+
+Relayed to the other participants with the sender's user ID attached:
+
+```json
+{
+  "type": "voice_e2ee_announce",
+  "payload": {
+    "user_id": 1,
+    "public_key": "base64-ecdh-pubkey"
+  }
+}
+```
+
+### voice_e2ee_offer (Client -> Server)
+
+The key holder wraps the room key for a specific participant:
+
+```json
+{
+  "type": "voice_e2ee_offer",
+  "payload": {
+    "target_user_id": 2,
+    "encrypted_key": "base64-wrapped-room-key",
+    "iv": "base64-iv"
+  }
+}
+```
+
+### voice_e2ee_offer (Server -> Client, relay to target)
+
+Delivered only to `target_user_id`, with the sender attached:
+
+```json
+{
+  "type": "voice_e2ee_offer",
+  "payload": {
+    "from_user_id": 1,
+    "encrypted_key": "base64-wrapped-room-key",
+    "iv": "base64-iv"
+  }
+}
+```
 
 ---
 
@@ -779,12 +899,18 @@ All rate limits are enforced server-side using a token bucket rate limiter.
 | Voice camera | 2 | 1 second | `RATE_LIMITED` error |
 | Voice screenshare | 2 | 1 second | `RATE_LIMITED` error |
 | Voice token refresh | 1 | 60 seconds | `RATE_LIMITED` error |
+| Voice E2EE announce/offer | 5 | 1 second | `RATE_LIMITED` error |
 
 ---
 
 ## Message Type Reference Table
 
-### Client -> Server (18 types)
+The authoritative type inventory is [protocol-schema.json](protocol-schema.json),
+from which the Go and TypeScript constant files are generated
+(`make protocol-generate` / verified in CI by `make protocol-verify`). The
+tables below add per-type behavioral notes.
+
+### Client -> Server (19 types)
 
 | Type | Rate Limit | Notes |
 |------|-----------|-------|
@@ -804,9 +930,11 @@ All rate limits are enforced server-side using a token bucket rate limiter.
 | `voice_camera` | 2/sec | Requires USE_VIDEO |
 | `voice_screenshare` | 2/sec | Requires SHARE_SCREEN |
 | `voice_token_refresh` | 1/60sec | Must be in voice |
+| `voice_e2ee_announce` | 5/sec | ECDH pubkey announce |
+| `voice_e2ee_offer` | 5/sec | Wrapped room key to target |
 | `ping` | None | Heartbeat |
 
-### Server -> Client (25+ types)
+### Server -> Client (30 types)
 
 | Type | Has seq? | Delivery |
 |------|----------|----------|
@@ -827,11 +955,16 @@ All rate limits are enforced server-side using a token bucket rate limiter.
 | `voice_leave` | Yes | All clients |
 | `voice_config` | No | Direct to joiner |
 | `voice_token` | No | Direct to joiner |
+| `voice_speakers` | No | Reserved — not currently emitted |
 | `member_join` | Yes | All clients |
+| `member_leave` | Yes | Reserved — not currently emitted |
 | `member_update` | Yes | All clients |
+| `user_update` | Yes | All clients (profile changes) |
 | `member_ban` | Yes | All clients |
 | `dm_channel_open` | No | Direct to participant |
 | `dm_channel_close` | No | Direct to participant |
+| `voice_e2ee_announce` | No | Voice channel (excl. sender) |
+| `voice_e2ee_offer` | No | Direct to target participant |
 | `server_restart` | Yes | All clients |
 | `error` | No | Direct to requester |
 | `pong` | No | Direct to pinger |

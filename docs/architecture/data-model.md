@@ -51,7 +51,6 @@ erDiagram
     events
     settings
     audit_log
-    audit_log_v6
     login_attempts
     rate_lockouts
     emoji
@@ -104,7 +103,7 @@ erDiagram
 | Voice | `voice_states` | One row per user (`user_id` is the PK) — a user occupies at most one voice channel. |
 | Real-time replay | `events` | Cold tier of the 3-tier reconnect replay ([websocket.md](websocket.md)); written by the async `EventPersister`, pruned by retention. Hub seq counter is seeded from `MAX(events.seq)` at startup so seqs stay monotonic across restarts. |
 | Plugins | `plugins`, `plugin_kv` | 015. `plugin_kv` is per-plugin namespaced KV via composite PK `(plugin_id, key)`. |
-| Ops | `settings`, `audit_log`, `audit_log_v6`, `sounds` | `settings` is a generic KV read by admin and (directly, via inline SQL) by the WS hub. `audit_log` + `audit_log_v6` coexist after the 003 rebuild. `sounds` is **dead schema** — the soundboard feature was removed but the table remains. |
+| Ops | `settings`, `audit_log`, `sounds` | `settings` is a generic KV read by admin and the WS hub (via `db.GetSetting`). Migration 003 rebuilds `audit_log` through a transient `audit_log_v6` rename — only `audit_log` exists at runtime. `sounds` is **dead schema** — the soundboard feature was removed but the table remains. |
 
 ### How the schema is accessed (three coexisting styles)
 

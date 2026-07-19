@@ -52,8 +52,10 @@ func handleBackup(database *db.DB) http.Handler {
 		actor := actorFromContext(r)
 		backupName := filepath.Base(backupPath)
 		slog.Info("database backup created", "actor_id", actor, "name", backupName)
-		_ = database.LogAudit(actor, "backup_create", "server", 0,
-			fmt.Sprintf("backup saved: %s", backupName))
+		if err := database.LogAudit(actor, "backup_create", "server", 0,
+			fmt.Sprintf("backup saved: %s", backupName)); err != nil {
+			slog.Error("audit log write failed", "action", "backup_create", "actor_id", actor, "error", err)
+		}
 
 		writeJSON(w, http.StatusOK, map[string]string{
 			"path":    filepath.Base(backupPath),
@@ -136,7 +138,9 @@ func handleDeleteBackup(database *db.DB) http.Handler {
 
 		actor := actorFromContext(r)
 		slog.Info("backup deleted", "actor_id", actor, "name", name)
-		_ = database.LogAudit(actor, "backup_delete", "server", 0, "deleted backup "+name)
+		if err := database.LogAudit(actor, "backup_delete", "server", 0, "deleted backup "+name); err != nil {
+			slog.Error("audit log write failed", "action", "backup_delete", "actor_id", actor, "error", err)
+		}
 
 		w.WriteHeader(http.StatusNoContent)
 	})
