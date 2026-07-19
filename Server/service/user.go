@@ -8,17 +8,16 @@ import (
 	"time"
 
 	"github.com/owncord/server/db"
-	"github.com/owncord/server/store"
 	"github.com/owncord/server/telemetry"
 )
 
 // UserService handles user profile and session operations.
 type UserService struct {
-	st store.Store
+	st Store
 }
 
 // NewUserService creates a UserService.
-func NewUserService(st store.Store) *UserService {
+func NewUserService(st Store) *UserService {
 	return &UserService{st: st}
 }
 

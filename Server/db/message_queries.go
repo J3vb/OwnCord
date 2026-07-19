@@ -6,7 +6,24 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+
+	"github.com/owncord/server/db/dbgen"
 )
+
+// messageFromGen maps a generated message row to the domain Message model.
+func messageFromGen(m dbgen.Message) *Message {
+	return &Message{
+		ID:        m.ID,
+		ChannelID: m.ChannelID,
+		UserID:    m.UserID,
+		Content:   m.Content,
+		ReplyTo:   m.ReplyTo,
+		EditedAt:  m.EditedAt,
+		Deleted:   m.Deleted != 0,
+		Pinned:    m.Pinned != 0,
+		Timestamp: m.Timestamp,
+	}
+}
 
 // sanitizeFTSQuery strips FTS5 operator characters from user input to prevent
 // query injection. Only allows letters, digits, spaces, and hyphens.
@@ -30,10 +47,12 @@ func sanitizeFTSQuery(q string) string {
 // CreateMessage inserts a new message and returns the assigned ID.
 // Content should already be sanitized before calling this function.
 func (d *DB) CreateMessage(channelID, userID int64, content string, replyTo *int64) (int64, error) {
-	res, err := d.sqlDB.Exec(
-		`INSERT INTO messages (channel_id, user_id, content, reply_to) VALUES (?, ?, ?, ?)`,
-		channelID, userID, content, replyTo,
-	)
+	res, err := d.q.CreateMessage(dbCtx(), dbgen.CreateMessageParams{
+		ChannelID: channelID,
+		UserID:    userID,
+		Content:   content,
+		ReplyTo:   replyTo,
+	})
 	if err != nil {
 		return 0, fmt.Errorf("CreateMessage: %w", err)
 	}
@@ -43,12 +62,14 @@ func (d *DB) CreateMessage(channelID, userID int64, content string, replyTo *int
 // GetMessage returns the message with the given ID, or nil if not found.
 // Soft-deleted messages are returned so callers can broadcast the deletion event.
 func (d *DB) GetMessage(id int64) (*Message, error) {
-	row := d.sqlDB.QueryRow(
-		`SELECT id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp
-		 FROM messages WHERE id = ?`,
-		id,
-	)
-	return scanMessage(row)
+	m, err := d.q.GetMessage(dbCtx(), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("GetMessage: %w", err)
+	}
+	return messageFromGen(m), nil
 }
 
 // GetMessages returns up to limit messages in a channel, ordered newest-first.
@@ -115,11 +136,10 @@ func (d *DB) EditMessage(id, userID int64, content string) error {
 		return fmt.Errorf("EditMessage: user %d does not own message %d: %w", userID, id, ErrForbidden)
 	}
 
-	_, err = d.sqlDB.Exec(
-		`UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ?`,
-		content, id,
-	)
-	if err != nil {
+	if err := d.q.EditMessageContent(dbCtx(), dbgen.EditMessageContentParams{
+		Content: content,
+		ID:      id,
+	}); err != nil {
 		return fmt.Errorf("EditMessage: %w", err)
 	}
 	return nil
@@ -139,8 +159,7 @@ func (d *DB) DeleteMessage(id, userID int64, ismod bool) error {
 		return fmt.Errorf("DeleteMessage: user %d does not own message %d: %w", userID, id, ErrForbidden)
 	}
 
-	_, err = d.sqlDB.Exec(`UPDATE messages SET deleted = 1 WHERE id = ?`, id)
-	if err != nil {
+	if err := d.q.SoftDeleteMessage(dbCtx(), id); err != nil {
 		return fmt.Errorf("DeleteMessage: %w", err)
 	}
 	return nil
@@ -148,11 +167,11 @@ func (d *DB) DeleteMessage(id, userID int64, ismod bool) error {
 
 // AddReaction inserts a reaction. Returns an error on duplicate (same user+emoji+message).
 func (d *DB) AddReaction(messageID, userID int64, emoji string) error {
-	_, err := d.sqlDB.Exec(
-		`INSERT INTO reactions (message_id, user_id, emoji) VALUES (?, ?, ?)`,
-		messageID, userID, emoji,
-	)
-	if err != nil {
+	if err := d.q.AddReaction(dbCtx(), dbgen.AddReactionParams{
+		MessageID: messageID,
+		UserID:    userID,
+		Emoji:     emoji,
+	}); err != nil {
 		return fmt.Errorf("AddReaction: %w", err)
 	}
 	return nil
@@ -160,10 +179,11 @@ func (d *DB) AddReaction(messageID, userID int64, emoji string) error {
 
 // RemoveReaction deletes a reaction. Returns an error if it does not exist.
 func (d *DB) RemoveReaction(messageID, userID int64, emoji string) error {
-	res, err := d.sqlDB.Exec(
-		`DELETE FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?`,
-		messageID, userID, emoji,
-	)
+	res, err := d.q.RemoveReaction(dbCtx(), dbgen.RemoveReactionParams{
+		MessageID: messageID,
+		UserID:    userID,
+		Emoji:     emoji,
+	})
 	if err != nil {
 		return fmt.Errorf("RemoveReaction: %w", err)
 	}
@@ -177,28 +197,13 @@ func (d *DB) RemoveReaction(messageID, userID int64, emoji string) error {
 // GetReactions returns aggregated reaction counts for a message.
 // MeReacted is always false here (caller passes requesting userID if needed).
 func (d *DB) GetReactions(messageID int64) ([]ReactionCount, error) {
-	rows, err := d.sqlDB.Query(
-		`SELECT emoji, COUNT(*) FROM reactions WHERE message_id = ? GROUP BY emoji`,
-		messageID,
-	)
+	rows, err := d.q.GetReactionCounts(dbCtx(), messageID)
 	if err != nil {
 		return nil, fmt.Errorf("GetReactions: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
-
-	var counts []ReactionCount
-	for rows.Next() {
-		var rc ReactionCount
-		if scanErr := rows.Scan(&rc.Emoji, &rc.Count); scanErr != nil {
-			return nil, fmt.Errorf("GetReactions scan: %w", scanErr)
-		}
-		counts = append(counts, rc)
-	}
-	if rows.Err() != nil {
-		return nil, fmt.Errorf("GetReactions rows: %w", rows.Err())
-	}
-	if counts == nil {
-		counts = []ReactionCount{}
+	counts := make([]ReactionCount, 0, len(rows))
+	for _, r := range rows {
+		counts = append(counts, ReactionCount{Emoji: r.Emoji, Count: int(r.Count)})
 	}
 	return counts, nil
 }
@@ -419,13 +424,11 @@ func (d *DB) getReactionsBatch(msgIDs []int64, requestingUserID int64) (map[int6
 
 // UpdateReadState upserts the read state for a user in a channel.
 func (d *DB) UpdateReadState(userID, channelID, lastReadMessageID int64) error {
-	_, err := d.sqlDB.Exec(
-		`INSERT INTO read_states (user_id, channel_id, last_message_id)
-		 VALUES (?, ?, ?)
-		 ON CONFLICT(user_id, channel_id) DO UPDATE SET last_message_id = excluded.last_message_id`,
-		userID, channelID, lastReadMessageID,
-	)
-	if err != nil {
+	if err := d.q.UpdateReadState(dbCtx(), dbgen.UpdateReadStateParams{
+		UserID:        userID,
+		ChannelID:     channelID,
+		LastMessageID: lastReadMessageID,
+	}); err != nil {
 		return fmt.Errorf("UpdateReadState: %w", err)
 	}
 	return nil
@@ -441,7 +444,7 @@ func (d *DB) GetChannelUnreadCounts(userID int64) (map[int64]ChannelUnread, erro
 		 FROM channels c
 		 LEFT JOIN messages m ON m.channel_id = c.id AND m.deleted = 0
 		 LEFT JOIN read_states rs ON rs.channel_id = c.id AND rs.user_id = ?
-		 WHERE c.type = 'text'
+		 WHERE c.type IN ('text', 'announcement')
 		 GROUP BY c.id`,
 		userID,
 	)
@@ -553,11 +556,10 @@ func (d *DB) scanAndEnrichMessages(rows *sql.Rows, requestingUserID int64) ([]Me
 // SetMessagePinned updates the pinned column on a message.
 // Returns ErrNotFound if the message does not exist.
 func (d *DB) SetMessagePinned(id int64, pinned bool) error {
-	val := 0
-	if pinned {
-		val = 1
-	}
-	res, err := d.sqlDB.Exec(`UPDATE messages SET pinned = ? WHERE id = ? AND deleted = 0`, val, id)
+	res, err := d.q.SetMessagePinned(dbCtx(), dbgen.SetMessagePinnedParams{
+		Pinned: b2i64(pinned),
+		ID:     id,
+	})
 	if err != nil {
 		return fmt.Errorf("SetMessagePinned: %w", err)
 	}
@@ -569,25 +571,6 @@ func (d *DB) SetMessagePinned(id int64, pinned bool) error {
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
-
-// scanMessage scans a single message from *sql.Row.
-func scanMessage(row *sql.Row) (*Message, error) {
-	m := &Message{}
-	var deleted, pinned int
-	err := row.Scan(
-		&m.ID, &m.ChannelID, &m.UserID, &m.Content, &m.ReplyTo,
-		&m.EditedAt, &deleted, &pinned, &m.Timestamp,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("scanMessage: %w", err)
-	}
-	m.Deleted = deleted != 0
-	m.Pinned = pinned != 0
-	return m, nil
-}
 
 // scanMessageWithUser scans a MessageWithUser from *sql.Rows.
 func scanMessageWithUser(rows *sql.Rows) (MessageWithUser, error) {

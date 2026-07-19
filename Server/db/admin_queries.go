@@ -6,14 +6,16 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/owncord/server/db/dbgen"
 )
 
 // ─── Setup ───────────────────────────────────────────────────────────────────
 
 // UserCount returns the total number of registered users.
 func (d *DB) UserCount() (int64, error) {
-	var count int64
-	if err := d.sqlDB.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
+	count, err := d.q.UserCount(dbCtx())
+	if err != nil {
 		return 0, fmt.Errorf("UserCount: %w", err)
 	}
 	return count, nil
@@ -26,21 +28,23 @@ func (d *DB) UserCount() (int64, error) {
 // a meaningful value only for file-backed databases).
 func (d *DB) GetServerStats() (*ServerStats, error) {
 	stats := &ServerStats{}
+	var err error
 
-	if err := d.sqlDB.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&stats.UserCount); err != nil {
+	if stats.UserCount, err = d.q.CountUsers(dbCtx()); err != nil {
 		return nil, fmt.Errorf("GetServerStats users: %w", err)
 	}
-	if err := d.sqlDB.QueryRow(`SELECT COUNT(*) FROM messages WHERE deleted = 0`).Scan(&stats.MessageCount); err != nil {
+	if stats.MessageCount, err = d.q.CountActiveMessages(dbCtx()); err != nil {
 		return nil, fmt.Errorf("GetServerStats messages: %w", err)
 	}
-	if err := d.sqlDB.QueryRow(`SELECT COUNT(*) FROM channels`).Scan(&stats.ChannelCount); err != nil {
+	if stats.ChannelCount, err = d.q.CountChannels(dbCtx()); err != nil {
 		return nil, fmt.Errorf("GetServerStats channels: %w", err)
 	}
-	if err := d.sqlDB.QueryRow(`SELECT COUNT(*) FROM invites WHERE revoked = 0`).Scan(&stats.InviteCount); err != nil {
+	if stats.InviteCount, err = d.q.CountActiveInvites(dbCtx()); err != nil {
 		return nil, fmt.Errorf("GetServerStats invites: %w", err)
 	}
 
-	// page_count * page_size gives the database size in bytes.
+	// page_count * page_size gives the database size in bytes. PRAGMAs are not
+	// expressible as sqlc queries, so they stay on the raw connection.
 	// For :memory: databases this still works (returns the in-memory size).
 	var pageCount, pageSize int64
 	if err := d.sqlDB.QueryRow(`PRAGMA page_count`).Scan(&pageCount); err != nil {
@@ -59,53 +63,40 @@ func (d *DB) GetServerStats() (*ServerStats, error) {
 // ListAllUsers returns users joined with their role name, ordered by ID.
 // limit=0 returns no rows.
 func (d *DB) ListAllUsers(limit, offset int) ([]UserWithRole, error) {
-	rows, err := d.sqlDB.Query(
-		`SELECT u.id, u.username, u.avatar, u.role_id,
-		        u.status, u.created_at, u.last_seen, u.banned, u.ban_reason, u.ban_expires,
-		        COALESCE(r.name, '') AS role_name
-		 FROM users u
-		 LEFT JOIN roles r ON r.id = u.role_id
-		 ORDER BY u.id ASC
-		 LIMIT ? OFFSET ?`,
-		limit, offset,
-	)
+	rows, err := d.q.ListAllUsers(dbCtx(), dbgen.ListAllUsersParams{
+		Limit:  int64(limit),
+		Offset: int64(offset),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("ListAllUsers: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
-
-	var result []UserWithRole
-	for rows.Next() {
-		var uwr UserWithRole
-		var banned int
-		err := rows.Scan(
-			&uwr.ID, &uwr.Username, &uwr.Avatar, &uwr.RoleID,
-			&uwr.Status, &uwr.CreatedAt, &uwr.LastSeen,
-			&banned, &uwr.BanReason, &uwr.BanExpires,
-			&uwr.RoleName,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("ListAllUsers scan: %w", err)
-		}
-		uwr.Banned = banned != 0
-		result = append(result, uwr)
-	}
-	if rows.Err() != nil {
-		return nil, fmt.Errorf("ListAllUsers rows: %w", rows.Err())
-	}
-	if result == nil {
-		result = []UserWithRole{}
+	result := make([]UserWithRole, 0, len(rows))
+	for _, r := range rows {
+		result = append(result, UserWithRole{
+			User: User{
+				ID:         r.ID,
+				Username:   r.Username,
+				Avatar:     r.Avatar,
+				RoleID:     r.RoleID,
+				Status:     r.Status,
+				CreatedAt:  r.CreatedAt,
+				LastSeen:   r.LastSeen,
+				Banned:     r.Banned != 0,
+				BanReason:  r.BanReason,
+				BanExpires: r.BanExpires,
+			},
+			RoleName: r.RoleName,
+		})
 	}
 	return result, nil
 }
 
 // UpdateUserRole changes the role_id of a user.
 func (d *DB) UpdateUserRole(userID, roleID int64) error {
-	_, err := d.sqlDB.Exec(
-		`UPDATE users SET role_id = ? WHERE id = ?`,
-		roleID, userID,
-	)
-	if err != nil {
+	if err := d.q.UpdateUserRole(dbCtx(), dbgen.UpdateUserRoleParams{
+		RoleID: roleID,
+		ID:     userID,
+	}); err != nil {
 		return fmt.Errorf("UpdateUserRole: %w", err)
 	}
 	return nil
@@ -113,8 +104,7 @@ func (d *DB) UpdateUserRole(userID, roleID int64) error {
 
 // ForceLogoutUser deletes all sessions for the given user ID.
 func (d *DB) ForceLogoutUser(userID int64) error {
-	_, err := d.sqlDB.Exec(`DELETE FROM sessions WHERE user_id = ?`, userID)
-	if err != nil {
+	if err := d.q.ForceLogoutUser(dbCtx(), userID); err != nil {
 		return fmt.Errorf("ForceLogoutUser: %w", err)
 	}
 	return nil
@@ -122,33 +112,13 @@ func (d *DB) ForceLogoutUser(userID int64) error {
 
 // GetUserSessions returns all active sessions for the given user ID.
 func (d *DB) GetUserSessions(userID int64) ([]Session, error) {
-	rows, err := d.sqlDB.Query(
-		`SELECT id, user_id, token, device, ip_address, created_at, last_used, expires_at
-		 FROM sessions WHERE user_id = ? ORDER BY created_at DESC`,
-		userID,
-	)
+	rows, err := d.q.GetUserSessions(dbCtx(), userID)
 	if err != nil {
 		return nil, fmt.Errorf("GetUserSessions: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
-
-	var sessions []Session
-	for rows.Next() {
-		var s Session
-		err := rows.Scan(
-			&s.ID, &s.UserID, &s.TokenHash, &s.Device, &s.IP,
-			&s.CreatedAt, &s.LastUsed, &s.ExpiresAt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("GetUserSessions scan: %w", err)
-		}
-		sessions = append(sessions, s)
-	}
-	if rows.Err() != nil {
-		return nil, fmt.Errorf("GetUserSessions rows: %w", rows.Err())
-	}
-	if sessions == nil {
-		sessions = []Session{}
+	sessions := make([]Session, 0, len(rows))
+	for _, s := range rows {
+		sessions = append(sessions, sessionFromGen(s))
 	}
 	return sessions, nil
 }
@@ -156,11 +126,12 @@ func (d *DB) GetUserSessions(userID int64) ([]Session, error) {
 // ─── Channel Management (admin) ───────────────────────────────────────────────
 
 // AdminCreateChannel creates a channel with full field control including position.
+// No sqlc query covers this exact INSERT shape, so it stays on raw SQL.
 func (d *DB) AdminCreateChannel(name, chanType, category, topic string, position int) (int64, error) {
 	res, err := d.sqlDB.Exec(
 		`INSERT INTO channels (name, type, category, topic, position)
 		 VALUES (?, ?, ?, ?, ?)`,
-		name, chanType, nullableString(category), nullableString(topic), position,
+		name, chanType, strToNullPtr(category), strToNullPtr(topic), position,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("AdminCreateChannel: %w", err)
@@ -170,17 +141,14 @@ func (d *DB) AdminCreateChannel(name, chanType, category, topic string, position
 
 // AdminUpdateChannel updates all mutable channel fields.
 func (d *DB) AdminUpdateChannel(id int64, name, topic string, slowMode, position int, archived bool) error {
-	archivedInt := 0
-	if archived {
-		archivedInt = 1
-	}
-	_, err := d.sqlDB.Exec(
-		`UPDATE channels
-		 SET name = ?, topic = ?, slow_mode = ?, position = ?, archived = ?
-		 WHERE id = ?`,
-		name, nullableString(topic), slowMode, position, archivedInt, id,
-	)
-	if err != nil {
+	if err := d.q.AdminUpdateChannel(dbCtx(), dbgen.AdminUpdateChannelParams{
+		Name:     name,
+		Topic:    strToNullPtr(topic),
+		SlowMode: int64(slowMode),
+		Position: int64(position),
+		Archived: b2i64(archived),
+		ID:       id,
+	}); err != nil {
 		return fmt.Errorf("AdminUpdateChannel: %w", err)
 	}
 	return nil
@@ -188,8 +156,7 @@ func (d *DB) AdminUpdateChannel(id int64, name, topic string, slowMode, position
 
 // AdminDeleteChannel removes a channel by ID (cascades to messages, etc.).
 func (d *DB) AdminDeleteChannel(id int64) error {
-	_, err := d.sqlDB.Exec(`DELETE FROM channels WHERE id = ?`, id)
-	if err != nil {
+	if err := d.q.DeleteChannel(dbCtx(), id); err != nil {
 		return fmt.Errorf("AdminDeleteChannel: %w", err)
 	}
 	return nil
@@ -199,12 +166,13 @@ func (d *DB) AdminDeleteChannel(id int64) error {
 
 // LogAudit inserts an audit log entry.
 func (d *DB) LogAudit(actorID int64, action, targetType string, targetID int64, detail string) error {
-	_, err := d.sqlDB.Exec(
-		`INSERT INTO audit_log (actor_id, action, target_type, target_id, detail)
-		 VALUES (?, ?, ?, ?, ?)`,
-		actorID, action, targetType, targetID, detail,
-	)
-	if err != nil {
+	if err := d.q.LogAudit(dbCtx(), dbgen.LogAuditParams{
+		ActorID:    actorID,
+		Action:     action,
+		TargetType: targetType,
+		TargetID:   targetID,
+		Detail:     detail,
+	}); err != nil {
 		return fmt.Errorf("LogAudit: %w", err)
 	}
 	return nil
@@ -212,36 +180,25 @@ func (d *DB) LogAudit(actorID int64, action, targetType string, targetID int64, 
 
 // GetAuditLog returns audit log entries ordered newest-first with pagination.
 func (d *DB) GetAuditLog(limit, offset int) ([]AuditEntry, error) {
-	rows, err := d.sqlDB.Query(
-		`SELECT a.id, a.actor_id, COALESCE(u.username, ''), a.action,
-		        a.target_type, a.target_id, a.detail, a.created_at
-		 FROM audit_log a
-		 LEFT JOIN users u ON u.id = a.actor_id
-		 ORDER BY a.id DESC
-		 LIMIT ? OFFSET ?`,
-		limit, offset,
-	)
+	rows, err := d.q.GetAuditLog(dbCtx(), dbgen.GetAuditLogParams{
+		Limit:  int64(limit),
+		Offset: int64(offset),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("GetAuditLog: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
-
-	var entries []AuditEntry
-	for rows.Next() {
-		var e AuditEntry
-		if err := rows.Scan(
-			&e.ID, &e.ActorID, &e.ActorName, &e.Action,
-			&e.TargetType, &e.TargetID, &e.Detail, &e.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("GetAuditLog scan: %w", err)
-		}
-		entries = append(entries, e)
-	}
-	if rows.Err() != nil {
-		return nil, fmt.Errorf("GetAuditLog rows: %w", rows.Err())
-	}
-	if entries == nil {
-		entries = []AuditEntry{}
+	entries := make([]AuditEntry, 0, len(rows))
+	for _, r := range rows {
+		entries = append(entries, AuditEntry{
+			ID:         r.ID,
+			ActorID:    r.ActorID,
+			ActorName:  r.ActorName,
+			Action:     r.Action,
+			TargetType: r.TargetType,
+			TargetID:   r.TargetID,
+			Detail:     r.Detail,
+			CreatedAt:  r.CreatedAt,
+		})
 	}
 	return entries, nil
 }
@@ -251,8 +208,7 @@ func (d *DB) GetAuditLog(limit, offset int) ([]AuditEntry, error) {
 // GetSetting returns the value for the given settings key.
 // Returns an error (wrapping sql.ErrNoRows) when the key does not exist.
 func (d *DB) GetSetting(key string) (string, error) {
-	var value string
-	err := d.sqlDB.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
+	value, err := d.q.GetSetting(dbCtx(), key)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", fmt.Errorf("GetSetting: key %q: %w", key, ErrNotFound)
 	}
@@ -264,12 +220,10 @@ func (d *DB) GetSetting(key string) (string, error) {
 
 // SetSetting upserts a setting value for the given key.
 func (d *DB) SetSetting(key, value string) error {
-	_, err := d.sqlDB.Exec(
-		`INSERT INTO settings (key, value) VALUES (?, ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-		key, value,
-	)
-	if err != nil {
+	if err := d.q.SetSetting(dbCtx(), dbgen.SetSettingParams{
+		Key:   key,
+		Value: value,
+	}); err != nil {
 		return fmt.Errorf("SetSetting: %w", err)
 	}
 	return nil
@@ -277,22 +231,13 @@ func (d *DB) SetSetting(key, value string) error {
 
 // GetAllSettings returns all settings as a key→value map.
 func (d *DB) GetAllSettings() (map[string]string, error) {
-	rows, err := d.sqlDB.Query(`SELECT key, value FROM settings`)
+	rows, err := d.q.GetAllSettings(dbCtx())
 	if err != nil {
 		return nil, fmt.Errorf("GetAllSettings: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
-
-	result := make(map[string]string)
-	for rows.Next() {
-		var k, v string
-		if err := rows.Scan(&k, &v); err != nil {
-			return nil, fmt.Errorf("GetAllSettings scan: %w", err)
-		}
-		result[k] = v
-	}
-	if rows.Err() != nil {
-		return nil, fmt.Errorf("GetAllSettings rows: %w", rows.Err())
+	result := make(map[string]string, len(rows))
+	for _, s := range rows {
+		result[s.Key] = s.Value
 	}
 	return result, nil
 }
@@ -300,12 +245,11 @@ func (d *DB) GetAllSettings() (map[string]string, error) {
 // CountUsersWithoutTOTP returns the number of non-banned users that do not
 // currently have a confirmed TOTP secret.
 func (d *DB) CountUsersWithoutTOTP() (int, error) {
-	var count int
-	err := d.sqlDB.QueryRow(`SELECT COUNT(*) FROM users WHERE banned = 0 AND totp_secret IS NULL`).Scan(&count)
+	count, err := d.q.CountUsersWithoutTOTP(dbCtx())
 	if err != nil {
 		return 0, fmt.Errorf("CountUsersWithoutTOTP: %w", err)
 	}
-	return count, nil
+	return int(count), nil
 }
 
 // ─── Backup ───────────────────────────────────────────────────────────────────

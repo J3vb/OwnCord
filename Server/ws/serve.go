@@ -633,7 +633,7 @@ func (h *Hub) buildReady(database *db.DB, userID int64, role *db.Role) ([]byte, 
 			"category": visibleChannels[i].Category,
 			"position": visibleChannels[i].Position,
 		}
-		if visibleChannels[i].Type == "text" {
+		if visibleChannels[i].Type == "text" || visibleChannels[i].Type == "announcement" {
 			if u, ok := unreadMap[visibleChannels[i].ID]; ok {
 				entry["unread_count"] = u.UnreadCount
 				entry["last_message_id"] = u.LastMessageID

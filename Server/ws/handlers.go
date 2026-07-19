@@ -219,4 +219,3 @@ func (h *Hub) broadcastExcludeLow(channelID, excludeUserID int64, msg []byte) {
 	}
 	h.pubsub.PublishLow(ChannelTopic(channelID), msg, excludeUserID)
 }
-

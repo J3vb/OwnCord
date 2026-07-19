@@ -17,7 +17,6 @@ import (
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/service"
-	"github.com/owncord/server/store"
 	"github.com/owncord/server/ws"
 )
 
@@ -998,7 +997,7 @@ func TestServeWS_writePump_MessageDelivered(t *testing.T) {
 func TestIntegration_MessageRoundTrip(t *testing.T) {
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
-	st := store.NewSQLiteStore(database)
+	st := database
 	svc := service.New(st, limiter)
 	hub := ws.NewHub(database, limiter, svc)
 	go hub.Run()

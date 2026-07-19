@@ -8,32 +8,33 @@ import (
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/store"
 )
 
-// newTestMessageService creates a MessageService with a MemStore pre-populated
-// with one text channel, one user, and a member role that has basic permissions.
-// The rate limiter is nil (disabled) to avoid flakiness in unit tests.
-func newTestMessageService() (*MessageService, *store.MemStore) {
-	ms := store.NewMemStore()
-	ms.SeedRole(&db.Role{
+// newTestMessageService creates a MessageService against a real in-memory DB
+// pre-populated with one text channel, one user, and a member role that has
+// basic permissions. The rate limiter is nil (disabled) to avoid flakiness in
+// unit tests.
+func newTestMessageService(t *testing.T) (*MessageService, *db.DB) {
+	t.Helper()
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
 		ID:          permissions.MemberRoleID,
 		Name:        "member",
 		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AddReactions,
 		Position:    1,
 	})
-	ms.SeedUserRole(1, permissions.MemberRoleID)
-	ms.SeedUser(&db.User{ID: 1, Username: "alice", Status: "online"})
-	ms.SeedChannel(&db.Channel{ID: 10, Name: "general", Type: "text"})
+	seedUser(t, database, &db.User{ID: 1, Username: "alice", Status: "online"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 
-	checker := permissions.NewChecker(ms)
-	permSvc := NewPermissionService(ms, checker)
-	msgSvc := NewMessageService(ms, permSvc, nil)
-	return msgSvc, ms
+	checker := permissions.NewChecker(database)
+	permSvc := NewPermissionService(database, checker)
+	msgSvc := NewMessageService(database, permSvc, nil)
+	return msgSvc, database
 }
 
 func TestSendMessage_Valid(t *testing.T) {
-	svc, _ := newTestMessageService()
+	svc, _ := newTestMessageService(t)
 
 	result, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 10,
@@ -60,25 +61,25 @@ func TestSendMessage_Valid(t *testing.T) {
 // gate delegates to CanPost, so a blocked user is refused from posting into
 // a DM — the old broadcast gate's DM branch skipped the block check entirely.
 func TestCanPost_DMBlockEnforced(t *testing.T) {
-	ms := store.NewMemStore()
-	ms.SeedRole(&db.Role{
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
 		ID: permissions.MemberRoleID, Name: "member",
 		Permissions: permissions.SendMessages | permissions.ReadMessages, Position: 1,
 	})
-	ms.SeedUserRole(1, permissions.MemberRoleID)
-	ms.SeedUserRole(2, permissions.MemberRoleID)
-	ms.SeedUser(&db.User{ID: 1, Username: "alice"})
-	ms.SeedUser(&db.User{ID: 2, Username: "bob"})
-	ms.SeedChannel(&db.Channel{ID: 50, Name: "dm-1-2", Type: "dm"})
-	ms.SeedDMParticipant(50, 1)
-	ms.SeedDMParticipant(50, 2)
-	checker := permissions.NewChecker(ms)
-	svc := NewMessageService(ms, NewPermissionService(ms, checker), nil)
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedUserRole(t, database, 2, permissions.MemberRoleID)
+	seedChannel(t, database, &db.Channel{ID: 50, Name: "dm-1-2", Type: "dm"})
+	seedDMParticipant(t, database, 50, 1)
+	seedDMParticipant(t, database, 50, 2)
+	checker := permissions.NewChecker(database)
+	svc := NewMessageService(database, NewPermissionService(database, checker), nil)
 
 	if err := svc.CanPost(1, 50); err != nil {
 		t.Fatalf("unblocked DM participant should be allowed: %v", err)
 	}
-	ms.SeedBlock(2, 1) // bob blocks alice
+	seedBlock(t, database, 2, 1) // bob blocks alice
 	if err := svc.CanPost(1, 50); !errors.Is(err, ErrBlocked) {
 		t.Fatalf("blocked user must be refused: got %v", err)
 	}
@@ -93,19 +94,50 @@ func TestCanPost_DMBlockEnforced(t *testing.T) {
 // TestCanPost_ChannelPermissionRequired: regular channels still require
 // READ|SEND via the cached checker.
 func TestCanPost_ChannelPermissionRequired(t *testing.T) {
-	ms := store.NewMemStore()
-	ms.SeedRole(&db.Role{
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
 		ID: permissions.MemberRoleID, Name: "member",
 		Permissions: permissions.ReadMessages, Position: 1, // no SendMessages
 	})
-	ms.SeedUserRole(1, permissions.MemberRoleID)
-	ms.SeedUser(&db.User{ID: 1, Username: "alice"})
-	ms.SeedChannel(&db.Channel{ID: 10, Name: "general", Type: "text"})
-	checker := permissions.NewChecker(ms)
-	svc := NewMessageService(ms, NewPermissionService(ms, checker), nil)
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+	checker := permissions.NewChecker(database)
+	svc := NewMessageService(database, NewPermissionService(database, checker), nil)
 
 	if err := svc.CanPost(1, 10); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("missing SEND_MESSAGES must refuse: got %v", err)
+	}
+}
+
+// TestCanPost_AnnouncementRequiresManageMessages: announcement channels are
+// postable only by users with MANAGE_MESSAGES, even when they hold
+// READ|SEND. A plain member is refused; a moderator with MANAGE_MESSAGES posts.
+func TestCanPost_AnnouncementRequiresManageMessages(t *testing.T) {
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
+		ID: permissions.MemberRoleID, Name: "member",
+		Permissions: permissions.ReadMessages | permissions.SendMessages, Position: 1,
+	})
+	seedRole(t, database, &db.Role{
+		ID: permissions.ModeratorRoleID, Name: "moderator",
+		Permissions: permissions.ReadMessages | permissions.SendMessages | permissions.ManageMessages, Position: 60,
+	})
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "mod"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedUserRole(t, database, 2, permissions.ModeratorRoleID)
+	seedChannel(t, database, &db.Channel{ID: 20, Name: "announcements", Type: "announcement"})
+	checker := permissions.NewChecker(database)
+	svc := NewMessageService(database, NewPermissionService(database, checker), nil)
+
+	// Member has READ|SEND but not MANAGE_MESSAGES → refused in an announcement channel.
+	if err := svc.CanPost(1, 20); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("member without MANAGE_MESSAGES must be refused in announcement channel: got %v", err)
+	}
+	// Moderator with MANAGE_MESSAGES → allowed.
+	if err := svc.CanPost(2, 20); err != nil {
+		t.Fatalf("moderator with MANAGE_MESSAGES must post in announcement channel: got %v", err)
 	}
 }
 
@@ -114,25 +146,25 @@ func TestCanPost_ChannelPermissionRequired(t *testing.T) {
 // nonexistent attachment is skipped (never linked) while the message still
 // sends — no check-then-link race, and retries cannot hard-fail.
 func TestSendMessage_AttachmentOwnershipAtomic(t *testing.T) {
-	ms := store.NewMemStore()
-	ms.SeedRole(&db.Role{
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
 		ID:          permissions.MemberRoleID,
 		Name:        "member",
 		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AttachFiles,
 		Position:    1,
 	})
-	ms.SeedUserRole(1, permissions.MemberRoleID)
-	ms.SeedUserRole(2, permissions.MemberRoleID)
-	ms.SeedUser(&db.User{ID: 1, Username: "alice", Status: "online"})
-	ms.SeedUser(&db.User{ID: 2, Username: "mallory", Status: "online"})
-	ms.SeedChannel(&db.Channel{ID: 10, Name: "general", Type: "text"})
-	checker := permissions.NewChecker(ms)
-	svc := NewMessageService(ms, NewPermissionService(ms, checker), nil)
+	seedUser(t, database, &db.User{ID: 1, Username: "alice", Status: "online"})
+	seedUser(t, database, &db.User{ID: 2, Username: "mallory", Status: "online"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedUserRole(t, database, 2, permissions.MemberRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+	checker := permissions.NewChecker(database)
+	svc := NewMessageService(database, NewPermissionService(database, checker), nil)
 
-	if err := ms.CreateAttachment("att-own", 1, "a.png", "s-a.png", "image/png", 10, nil, nil); err != nil {
+	if err := database.CreateAttachment("att-own", 1, "a.png", "s-a.png", "image/png", 10, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := ms.CreateAttachment("att-foreign", 2, "b.png", "s-b.png", "image/png", 10, nil, nil); err != nil {
+	if err := database.CreateAttachment("att-foreign", 2, "b.png", "s-b.png", "image/png", 10, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -148,11 +180,11 @@ func TestSendMessage_AttachmentOwnershipAtomic(t *testing.T) {
 		t.Fatal("message should persist even when some attachments are skipped")
 	}
 
-	own, _ := ms.GetAttachmentByID("att-own")
+	own, _ := database.GetAttachmentByID("att-own")
 	if own.MessageID == nil || *own.MessageID != result.MessageID {
 		t.Error("sender's own attachment should be linked to the new message")
 	}
-	foreign, _ := ms.GetAttachmentByID("att-foreign")
+	foreign, _ := database.GetAttachmentByID("att-foreign")
 	if foreign.MessageID != nil {
 		t.Error("another user's attachment must never be linked (IDOR guard)")
 	}
@@ -169,14 +201,14 @@ func TestSendMessage_AttachmentOwnershipAtomic(t *testing.T) {
 	if retry.MessageID <= 0 {
 		t.Fatal("retry should persist a message")
 	}
-	own2, _ := ms.GetAttachmentByID("att-own")
+	own2, _ := database.GetAttachmentByID("att-own")
 	if own2.MessageID == nil || *own2.MessageID != result.MessageID {
 		t.Error("already-linked attachment must stay linked to the original message")
 	}
 }
 
 func TestSendMessage_EmptyContent(t *testing.T) {
-	svc, _ := newTestMessageService()
+	svc, _ := newTestMessageService(t)
 
 	_, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 10,
@@ -194,7 +226,7 @@ func TestSendMessage_EmptyContent(t *testing.T) {
 }
 
 func TestSendMessage_ExceedsMaxLength(t *testing.T) {
-	svc, _ := newTestMessageService()
+	svc, _ := newTestMessageService(t)
 
 	// maxMessageLen is 4000 runes; create content that exceeds it.
 	longContent := strings.Repeat("a", 4001)
@@ -215,7 +247,7 @@ func TestSendMessage_ExceedsMaxLength(t *testing.T) {
 }
 
 func TestSendMessage_ChannelNotFound(t *testing.T) {
-	svc, _ := newTestMessageService()
+	svc, _ := newTestMessageService(t)
 
 	_, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 999,
@@ -232,7 +264,7 @@ func TestSendMessage_ChannelNotFound(t *testing.T) {
 }
 
 func TestSendMessage_InvalidChannelID(t *testing.T) {
-	svc, _ := newTestMessageService()
+	svc, _ := newTestMessageService(t)
 
 	_, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 0,
@@ -249,21 +281,21 @@ func TestSendMessage_InvalidChannelID(t *testing.T) {
 }
 
 func TestSendMessage_NoPermission(t *testing.T) {
-	ms := store.NewMemStore()
+	database := newTestDB(t)
 	// Role with ReadMessages only (no SendMessages).
-	ms.SeedRole(&db.Role{
+	seedRole(t, database, &db.Role{
 		ID:          permissions.MemberRoleID,
 		Name:        "member",
 		Permissions: permissions.ReadMessages,
 		Position:    1,
 	})
-	ms.SeedUserRole(1, permissions.MemberRoleID)
-	ms.SeedUser(&db.User{ID: 1, Username: "alice"})
-	ms.SeedChannel(&db.Channel{ID: 10, Name: "readonly", Type: "text"})
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "readonly", Type: "text"})
 
-	checker := permissions.NewChecker(ms)
-	permSvc := NewPermissionService(ms, checker)
-	svc := NewMessageService(ms, permSvc, nil)
+	checker := permissions.NewChecker(database)
+	permSvc := NewPermissionService(database, checker)
+	svc := NewMessageService(database, permSvc, nil)
 
 	_, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 10,
@@ -280,7 +312,7 @@ func TestSendMessage_NoPermission(t *testing.T) {
 }
 
 func TestEditMessage_OwnerCanEdit(t *testing.T) {
-	svc, _ := newTestMessageService()
+	svc, _ := newTestMessageService(t)
 
 	// Send a message first.
 	result, err := svc.SendMessage(context.Background(), SendMessageParams{
@@ -306,10 +338,10 @@ func TestEditMessage_OwnerCanEdit(t *testing.T) {
 }
 
 func TestEditMessage_NonOwnerFails(t *testing.T) {
-	svc, ms := newTestMessageService()
+	svc, database := newTestMessageService(t)
 	// Add a second user.
-	ms.SeedUserRole(2, permissions.MemberRoleID)
-	ms.SeedUser(&db.User{ID: 2, Username: "bob"})
+	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	seedUserRole(t, database, 2, permissions.MemberRoleID)
 
 	// User 1 sends a message.
 	result, err := svc.SendMessage(context.Background(), SendMessageParams{
@@ -333,7 +365,7 @@ func TestEditMessage_NonOwnerFails(t *testing.T) {
 }
 
 func TestEditMessage_EmptyContentFails(t *testing.T) {
-	svc, _ := newTestMessageService()
+	svc, _ := newTestMessageService(t)
 
 	result, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 10,
@@ -355,7 +387,7 @@ func TestEditMessage_EmptyContentFails(t *testing.T) {
 }
 
 func TestDeleteMessage_OwnerCanDelete(t *testing.T) {
-	svc, _ := newTestMessageService()
+	svc, _ := newTestMessageService(t)
 
 	result, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 10,
@@ -380,9 +412,9 @@ func TestDeleteMessage_OwnerCanDelete(t *testing.T) {
 }
 
 func TestDeleteMessage_NonOwnerWithoutModFails(t *testing.T) {
-	svc, ms := newTestMessageService()
-	ms.SeedUserRole(2, permissions.MemberRoleID)
-	ms.SeedUser(&db.User{ID: 2, Username: "bob"})
+	svc, database := newTestMessageService(t)
+	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	seedUserRole(t, database, 2, permissions.MemberRoleID)
 
 	// User 1 sends.
 	result, err := svc.SendMessage(context.Background(), SendMessageParams{
@@ -406,30 +438,30 @@ func TestDeleteMessage_NonOwnerWithoutModFails(t *testing.T) {
 }
 
 func TestDeleteMessage_ModCanDeleteOthersMessage(t *testing.T) {
-	ms := store.NewMemStore()
+	database := newTestDB(t)
 	// Mod role has ManageMessages + SendMessages + ReadMessages.
 	modPerms := permissions.SendMessages | permissions.ReadMessages | permissions.ManageMessages
-	ms.SeedRole(&db.Role{
+	seedRole(t, database, &db.Role{
 		ID:          permissions.ModeratorRoleID,
 		Name:        "moderator",
 		Permissions: modPerms,
 		Position:    10,
 	})
-	ms.SeedRole(&db.Role{
+	seedRole(t, database, &db.Role{
 		ID:          permissions.MemberRoleID,
 		Name:        "member",
 		Permissions: permissions.SendMessages | permissions.ReadMessages,
 		Position:    1,
 	})
-	ms.SeedUserRole(1, permissions.MemberRoleID)
-	ms.SeedUserRole(2, permissions.ModeratorRoleID)
-	ms.SeedUser(&db.User{ID: 1, Username: "alice"})
-	ms.SeedUser(&db.User{ID: 2, Username: "mod_bob"})
-	ms.SeedChannel(&db.Channel{ID: 10, Name: "general", Type: "text"})
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "mod_bob"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedUserRole(t, database, 2, permissions.ModeratorRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 
-	checker := permissions.NewChecker(ms)
-	permSvc := NewPermissionService(ms, checker)
-	svc := NewMessageService(ms, permSvc, nil)
+	checker := permissions.NewChecker(database)
+	permSvc := NewPermissionService(database, checker)
+	svc := NewMessageService(database, permSvc, nil)
 
 	// User 1 sends a message.
 	result, err := svc.SendMessage(context.Background(), SendMessageParams{
@@ -453,7 +485,7 @@ func TestDeleteMessage_ModCanDeleteOthersMessage(t *testing.T) {
 }
 
 func TestDeleteMessage_InvalidMessageID(t *testing.T) {
-	svc, _ := newTestMessageService()
+	svc, _ := newTestMessageService(t)
 
 	_, err := svc.DeleteMessage(1, 0)
 	if err == nil {
@@ -465,7 +497,7 @@ func TestDeleteMessage_InvalidMessageID(t *testing.T) {
 }
 
 func TestSendMessage_HTMLSanitized(t *testing.T) {
-	svc, _ := newTestMessageService()
+	svc, _ := newTestMessageService(t)
 
 	result, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 10,

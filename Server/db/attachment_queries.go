@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/owncord/server/db/dbgen"
 )
 
 // Attachment represents a row in the attachments table.
@@ -32,11 +34,16 @@ type AttachmentAccess struct {
 // uploaderID records who uploaded the file for ownership checks on unlinked files.
 // width and height are optional image dimensions (pass nil for non-image files).
 func (d *DB) CreateAttachment(id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error {
-	_, err := d.sqlDB.Exec(
-		`INSERT INTO attachments (id, uploader_id, filename, stored_as, mime_type, size, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, uploaderID, filename, storedAs, mimeType, size, width, height,
-	)
-	if err != nil {
+	if err := d.q.CreateAttachment(dbCtx(), dbgen.CreateAttachmentParams{
+		ID:         id,
+		UploaderID: &uploaderID,
+		Filename:   filename,
+		StoredAs:   storedAs,
+		MimeType:   mimeType,
+		Size:       size,
+		Width:      ptrItoI64(width),
+		Height:     ptrItoI64(height),
+	}); err != nil {
 		return fmt.Errorf("CreateAttachment: %w", err)
 	}
 	return nil
@@ -44,19 +51,23 @@ func (d *DB) CreateAttachment(id string, uploaderID int64, filename, storedAs, m
 
 // GetAttachmentByID returns the attachment with the given ID, or nil if not found.
 func (d *DB) GetAttachmentByID(id string) (*Attachment, error) {
-	row := d.sqlDB.QueryRow(
-		`SELECT id, message_id, filename, stored_as, mime_type, size, uploaded_at, uploader_id
-		 FROM attachments WHERE id = ?`, id,
-	)
-	a := &Attachment{}
-	err := row.Scan(&a.ID, &a.MessageID, &a.Filename, &a.StoredAs, &a.MimeType, &a.Size, &a.UploadedAt, &a.UploaderID)
+	r, err := d.q.GetAttachmentByID(dbCtx(), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("GetAttachmentByID: %w", err)
 	}
-	return a, nil
+	return &Attachment{
+		ID:         r.ID,
+		MessageID:  r.MessageID,
+		Filename:   r.Filename,
+		StoredAs:   r.StoredAs,
+		MimeType:   r.MimeType,
+		Size:       r.Size,
+		UploadedAt: r.UploadedAt,
+		UploaderID: r.UploaderID,
+	}, nil
 }
 
 // GetAttachmentWithChannel returns the attachment plus the channel context
@@ -64,30 +75,27 @@ func (d *DB) GetAttachmentByID(id string) (*Attachment, error) {
 // attachment does not exist. ChannelID/ChannelType are nil/empty when the
 // attachment is unlinked or its message/channel was deleted.
 func (d *DB) GetAttachmentWithChannel(id string) (*AttachmentAccess, error) {
-	row := d.sqlDB.QueryRow(
-		`SELECT a.id, a.message_id, a.filename, a.stored_as, a.mime_type, a.size,
-		        a.uploaded_at, a.uploader_id, m.channel_id, c.type
-		 FROM attachments a
-		 LEFT JOIN messages m ON m.id = a.message_id
-		 LEFT JOIN channels c ON c.id = m.channel_id
-		 WHERE a.id = ?`, id,
-	)
-	aa := &AttachmentAccess{}
-	var chType *string
-	err := row.Scan(
-		&aa.ID, &aa.MessageID, &aa.Filename, &aa.StoredAs, &aa.MimeType,
-		&aa.Size, &aa.UploadedAt, &aa.UploaderID, &aa.ChannelID, &chType,
-	)
+	r, err := d.q.GetAttachmentWithChannel(dbCtx(), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("GetAttachmentWithChannel: %w", err)
 	}
-	if chType != nil {
-		aa.ChannelType = *chType
-	}
-	return aa, nil
+	return &AttachmentAccess{
+		Attachment: Attachment{
+			ID:         r.ID,
+			MessageID:  r.MessageID,
+			Filename:   r.Filename,
+			StoredAs:   r.StoredAs,
+			MimeType:   r.MimeType,
+			Size:       r.Size,
+			UploadedAt: r.UploadedAt,
+			UploaderID: r.UploaderID,
+		},
+		ChannelID:   r.ChannelID,
+		ChannelType: derefString(r.Type),
+	}, nil
 }
 
 // LinkAttachmentsToMessage sets message_id on attachments that are currently
@@ -177,26 +185,9 @@ func (d *DB) GetAttachmentsByMessageIDs(msgIDs []int64) (map[int64][]AttachmentI
 // preventing a race where an attachment linked between SELECT and DELETE
 // would have its file deleted while the DB row survives.
 func (d *DB) DeleteOrphanedAttachments(cutoff string) ([]string, error) {
-	rows, err := d.sqlDB.Query(
-		`DELETE FROM attachments WHERE message_id IS NULL AND uploaded_at < ? RETURNING stored_as`,
-		cutoff,
-	)
+	files, err := d.q.DeleteOrphanedAttachments(dbCtx(), cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("DeleteOrphanedAttachments: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
-
-	var files []string
-	for rows.Next() {
-		var storedAs string
-		if scanErr := rows.Scan(&storedAs); scanErr != nil {
-			return nil, fmt.Errorf("DeleteOrphanedAttachments scan: %w", scanErr)
-		}
-		files = append(files, storedAs)
-	}
-	if rows.Err() != nil {
-		return nil, fmt.Errorf("DeleteOrphanedAttachments rows: %w", rows.Err())
-	}
-
 	return files, nil
 }
