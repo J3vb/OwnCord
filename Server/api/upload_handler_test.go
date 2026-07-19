@@ -730,8 +730,8 @@ func TestServeFile_Success(t *testing.T) {
 	// Verify cache control header. Access-controlled downloads must be marked
 	// private + no-cache so shared/proxy caches never store them (info-leak).
 	cc := rr2.Header().Get("Cache-Control")
-	if cc != "private, max-age=31536000, no-cache" {
-		t.Errorf("Cache-Control = %q, want 'private, max-age=31536000, no-cache'", cc)
+	if cc != "private, no-cache" {
+		t.Errorf("Cache-Control = %q, want 'private, no-cache'", cc)
 	}
 
 	// Verify Content-Disposition header.
