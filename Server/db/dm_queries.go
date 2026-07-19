@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"github.com/owncord/server/db/dbgen"
 )
 
 // ─── DM Models ──────────────────────────────────────────────────────────────
@@ -202,11 +204,10 @@ func (d *DB) GetUserDMChannels(userID int64) ([]DMChannelInfo, error) {
 
 // OpenDM adds a DM channel to a user's open list (idempotent).
 func (d *DB) OpenDM(userID, channelID int64) error {
-	_, err := d.sqlDB.Exec(
-		`INSERT OR IGNORE INTO dm_open_state (user_id, channel_id) VALUES (?, ?)`,
-		userID, channelID,
-	)
-	if err != nil {
+	if err := d.q.OpenDM(dbCtx(), dbgen.OpenDMParams{
+		UserID:    userID,
+		ChannelID: channelID,
+	}); err != nil {
 		return fmt.Errorf("OpenDM: %w", err)
 	}
 	return nil
@@ -214,11 +215,10 @@ func (d *DB) OpenDM(userID, channelID int64) error {
 
 // CloseDM removes a DM channel from a user's open list.
 func (d *DB) CloseDM(userID, channelID int64) error {
-	_, err := d.sqlDB.Exec(
-		`DELETE FROM dm_open_state WHERE user_id = ? AND channel_id = ?`,
-		userID, channelID,
-	)
-	if err != nil {
+	if err := d.q.CloseDM(dbCtx(), dbgen.CloseDMParams{
+		UserID:    userID,
+		ChannelID: channelID,
+	}); err != nil {
 		return fmt.Errorf("CloseDM: %w", err)
 	}
 	return nil
@@ -228,11 +228,10 @@ func (d *DB) CloseDM(userID, channelID int64) error {
 
 // IsDMParticipant checks if a user is a participant in a DM channel.
 func (d *DB) IsDMParticipant(userID, channelID int64) (bool, error) {
-	var id int64
-	err := d.sqlDB.QueryRow(
-		`SELECT user_id FROM dm_participants WHERE user_id = ? AND channel_id = ?`,
-		userID, channelID,
-	).Scan(&id)
+	_, err := d.q.IsDMParticipant(dbCtx(), dbgen.IsDMParticipantParams{
+		UserID:    userID,
+		ChannelID: channelID,
+	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -244,25 +243,9 @@ func (d *DB) IsDMParticipant(userID, channelID int64) (bool, error) {
 
 // GetDMParticipantIDs returns all participant user IDs for a DM channel.
 func (d *DB) GetDMParticipantIDs(channelID int64) ([]int64, error) {
-	rows, err := d.sqlDB.Query(
-		`SELECT user_id FROM dm_participants WHERE channel_id = ?`,
-		channelID,
-	)
+	ids, err := d.q.GetDMParticipantIDs(dbCtx(), channelID)
 	if err != nil {
 		return nil, fmt.Errorf("GetDMParticipantIDs: %w", err)
-	}
-	defer rows.Close() //nolint:errcheck
-
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if scanErr := rows.Scan(&id); scanErr != nil {
-			return nil, fmt.Errorf("GetDMParticipantIDs scan: %w", scanErr)
-		}
-		ids = append(ids, id)
-	}
-	if rows.Err() != nil {
-		return nil, fmt.Errorf("GetDMParticipantIDs rows: %w", rows.Err())
 	}
 	return ids, nil
 }
