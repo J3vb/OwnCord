@@ -22,29 +22,36 @@ func NewModerationService(st store.Store, perms *PermissionService) *ModerationS
 	return &ModerationService{st: st, perms: perms}
 }
 
-// requireBanAuthority verifies the actor is allowed to ban/unban the target.
-// The actor must hold BAN_MEMBERS (or Administrator, which bypasses permission
-// checks) and must outrank the target in the role hierarchy — mirroring the
-// position-based hierarchy used elsewhere (see admin/middleware.go and
-// permissions.OwnerRolePosition). Returns ErrForbidden when either check fails.
-func (s *ModerationService) requireBanAuthority(actorID, targetID int64) error {
+// requireBanPermission verifies the actor holds BAN_MEMBERS (or the
+// Administrator bypass). It deliberately takes no target: it runs before any
+// target lookup so an actor without ban authority always sees Forbidden and
+// never NotFound — the ban path cannot be used to enumerate user ids.
+func (s *ModerationService) requireBanPermission(actorID int64) error {
 	if s.perms == nil {
 		// No permission service wired — fail closed rather than allow unchecked bans.
 		return fmt.Errorf("%w: permission service unavailable", ErrForbidden)
 	}
-
 	actorRole, err := s.perms.GetRoleForUser(actorID)
 	if err != nil || actorRole == nil {
 		return fmt.Errorf("%w: failed to load actor role", ErrForbidden)
 	}
-
 	if !permissions.HasAdmin(actorRole.Permissions) &&
 		!permissions.HasPerm(actorRole.Permissions, permissions.BanMembers) {
 		return fmt.Errorf("%w: missing BAN_MEMBERS permission", ErrForbidden)
 	}
+	return nil
+}
 
-	// Role hierarchy: the actor must strictly outrank the target so a user
-	// cannot ban a peer or a higher-ranked user (e.g. the owner).
+// requireOutranks enforces the role hierarchy: the actor must strictly
+// outrank the target so a user cannot ban a peer or a higher-ranked user
+// (e.g. the owner) — mirroring the position-based hierarchy used elsewhere.
+// Runs after requireBanPermission and the existence check, so only callers
+// that already hold ban authority reach it.
+func (s *ModerationService) requireOutranks(actorID, targetID int64) error {
+	actorRole, err := s.perms.GetRoleForUser(actorID)
+	if err != nil || actorRole == nil {
+		return fmt.Errorf("%w: failed to load actor role", ErrForbidden)
+	}
 	targetRole, err := s.perms.GetRoleForUser(targetID)
 	if err != nil || targetRole == nil {
 		return fmt.Errorf("%w: failed to load target role", ErrForbidden)
@@ -52,7 +59,6 @@ func (s *ModerationService) requireBanAuthority(actorID, targetID int64) error {
 	if actorRole.Position <= targetRole.Position {
 		return fmt.Errorf("%w: cannot moderate a user of equal or higher rank", ErrForbidden)
 	}
-
 	return nil
 }
 
@@ -77,13 +83,16 @@ func (s *ModerationService) BanUser(actorID, targetID int64, reason string, expi
 		return fmt.Errorf("%w: cannot ban yourself", ErrBadRequest)
 	}
 
+	// Authorization before existence: an actor without ban authority learns
+	// nothing about which user ids exist.
+	if err := s.requireBanPermission(actorID); err != nil {
+		return err
+	}
 	target, err := s.st.GetUserByID(targetID)
 	if err != nil || target == nil {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
 	}
-
-	// Authorization: actor must hold BAN_MEMBERS and outrank the target.
-	if err := s.requireBanAuthority(actorID, targetID); err != nil {
+	if err := s.requireOutranks(actorID, targetID); err != nil {
 		return err
 	}
 
@@ -91,7 +100,7 @@ func (s *ModerationService) BanUser(actorID, targetID int64, reason string, expi
 		return fmt.Errorf("%w: failed to ban user", ErrInternal)
 	}
 
-	if err := s.st.LogAudit(actorID, "ban", "user", targetID, reason); err != nil {
+	if err := s.st.LogAudit(actorID, "user_ban", "user", targetID, reason); err != nil {
 		slog.Error("failed to log audit entry", "error", err)
 	}
 
@@ -105,13 +114,15 @@ func (s *ModerationService) UnbanUser(actorID, targetID int64) error {
 		return fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
 	}
 
+	// Authorization before existence — see BanUser.
+	if err := s.requireBanPermission(actorID); err != nil {
+		return err
+	}
 	target, err := s.st.GetUserByID(targetID)
 	if err != nil || target == nil {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
 	}
-
-	// Authorization: actor must hold BAN_MEMBERS and outrank the target.
-	if err := s.requireBanAuthority(actorID, targetID); err != nil {
+	if err := s.requireOutranks(actorID, targetID); err != nil {
 		return err
 	}
 
@@ -119,7 +130,7 @@ func (s *ModerationService) UnbanUser(actorID, targetID int64) error {
 		return fmt.Errorf("%w: failed to unban user", ErrInternal)
 	}
 
-	if err := s.st.LogAudit(actorID, "unban", "user", targetID, ""); err != nil {
+	if err := s.st.LogAudit(actorID, "user_unban", "user", targetID, ""); err != nil {
 		slog.Error("failed to log audit entry", "error", err)
 	}
 
