@@ -20,6 +20,8 @@ export interface MessageInputOptions {
   readonly onUploadFile?: (file: File) => Promise<{ id: string; url: string; filename: string }>;
   readonly onTyping: () => void;
   readonly onEditMessage: (messageId: number, content: string) => void;
+  /** Initial disabled reason (e.g. read-only / no-permission / offline). */
+  readonly disabledReason?: string | null;
 }
 
 export type MessageInputComponent = MountableComponent & {
@@ -27,6 +29,12 @@ export type MessageInputComponent = MountableComponent & {
   clearReply(): void;
   startEdit(messageId: number, content: string): void;
   cancelEdit(): void;
+  /**
+   * Disable the composer with a visible reason (permission / connection), or
+   * pass null to re-enable. Permission is expressed as affordance: a send that
+   * the server would refuse is prevented here, not attempted and rejected.
+   */
+  setDisabled(reason: string | null): void;
 };
 
 const TYPING_THROTTLE_MS = 3_000;
@@ -59,6 +67,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   let replyBar: HTMLDivElement | null = null;
   let replyText: HTMLSpanElement | null = null;
   let editBar: HTMLDivElement | null = null;
+  let disabledReason: string | null = options.disabledReason ?? null;
+  const controlButtons: HTMLButtonElement[] = [];
   let attachmentPreviewBar: HTMLDivElement | null = null;
 
   /** Pending attachment IDs to send with the next message. */
@@ -128,7 +138,33 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     activeTimers.add(t);
   }
 
+  /** Reflect the current disabledReason onto the DOM (textarea + controls). */
+  function applyDisabledState(): void {
+    if (textarea === null) return;
+    const disabled = disabledReason !== null;
+    textarea.disabled = disabled;
+    textarea.placeholder = disabled ? disabledReason! : `Message #${options.channelName}`;
+    for (const btn of controlButtons) {
+      if (disabled) {
+        btn.setAttribute("disabled", "true");
+      } else {
+        // Don't re-enable the attach button when uploads aren't wired.
+        if (btn.classList.contains("attach-btn") && options.onUploadFile === undefined) continue;
+        btn.removeAttribute("disabled");
+      }
+    }
+    if (root !== null) {
+      root.classList.toggle("composer-disabled", disabled);
+    }
+  }
+
+  function setDisabled(reason: string | null): void {
+    disabledReason = reason;
+    applyDisabledState();
+  }
+
   function handleSend(): void {
+    if (disabledReason !== null) return;
     if (textarea === null) return;
     const content = textarea.value.trim();
     const hasAttachments = pendingAttachments.length > 0;
@@ -398,6 +434,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       "data-testid": "send-btn",
     });
     sendBtn.appendChild(createIcon("send", 20));
+    // Register interactive controls so the disabled state can toggle them.
+    controlButtons.length = 0;
+    controlButtons.push(sendBtn, emojiBtn, gifBtn);
+    if (options.onUploadFile !== undefined) {
+      controlButtons.push(attachBtn);
+    }
 
     textarea.addEventListener(
       "input",
@@ -572,7 +614,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     appendChildren(inputBox, attachBtn, textarea, emojiBtn, gifBtn, sendBtn);
     appendChildren(root, replyBar, editBar, attachmentPreviewBar, inputBox);
     container.appendChild(root);
-    textarea.focus();
+    // Apply any initial disabled reason before focusing.
+    applyDisabledState();
+    if (disabledReason === null) {
+      textarea.focus();
+    }
   }
 
   function destroy(): void {
@@ -595,5 +641,5 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     attachmentPreviewBar = null;
   }
 
-  return { mount, destroy, setReplyTo, clearReply, startEdit, cancelEdit };
+  return { mount, destroy, setReplyTo, clearReply, startEdit, cancelEdit, setDisabled };
 }

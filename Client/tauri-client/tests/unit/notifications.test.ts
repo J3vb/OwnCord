@@ -124,6 +124,7 @@ describe("notifyIncomingMessage", () => {
             position: 0,
             unreadCount: 0,
             lastMessageId: null,
+            canSend: true,
           },
         ],
       ]),

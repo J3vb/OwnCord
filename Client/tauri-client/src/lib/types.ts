@@ -92,6 +92,13 @@ export interface ReadyChannel {
   readonly position: number;
   readonly unread_count?: number;
   readonly last_message_id?: number;
+  /**
+   * Whether the current user may post in this channel — authoritative,
+   * server-computed (base role ± channel overrides, admin bypass, and the
+   * announcement MANAGE_MESSAGES rule). Drives the composer affordance; the
+   * server still enforces. Absent from older servers.
+   */
+  readonly can_send?: boolean;
 }
 
 /** Member object in the ready payload. */

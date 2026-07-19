@@ -896,6 +896,26 @@
   min-height: 36px; max-height: 200px; line-height: 1.4;
 }
 .msg-textarea::placeholder { color: var(--text-micro); }
+.msg-textarea:disabled { cursor: not-allowed; opacity: 0.7; }
+/* Composer disabled (offline / read-only / no permission): dim the whole bar. */
+.message-input-wrap.composer-disabled .message-input-box { opacity: 0.6; }
+.message-input-wrap.composer-disabled .input-btn { cursor: not-allowed; }
+
+/* ── Optimistic send states ── */
+/* Pending: the row is dimmed until the server confirms it. */
+.message.pending { opacity: 0.6; }
+/* Failed: tint + an inline retry/discard affordance. */
+.message.failed { opacity: 0.9; }
+.msg-send-failed {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 4px; font-size: 12px; color: var(--danger, #e57373);
+}
+.msg-send-failed-text { flex-shrink: 0; }
+.msg-send-retry, .msg-send-discard {
+  background: transparent; border: 1px solid currentColor; color: inherit;
+  border-radius: 4px; padding: 1px 8px; font-size: 12px; cursor: pointer;
+}
+.msg-send-retry:hover, .msg-send-discard:hover { background: rgba(229, 115, 115, 0.15); }
 
 /* ── Member List ── */
 .member-list {

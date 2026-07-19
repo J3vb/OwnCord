@@ -20,6 +20,8 @@ export interface Channel {
   readonly position: number;
   readonly unreadCount: number;
   readonly lastMessageId: number | null;
+  /** Whether the current user may post here (drives the composer affordance). */
+  readonly canSend: boolean;
 }
 
 export interface ChannelsState {
@@ -48,6 +50,9 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
       position: ch.position,
       unreadCount: ch.unread_count ?? 0,
       lastMessageId: ch.last_message_id ?? null,
+      // The current server always sends can_send; older servers omit it, in
+      // which case we default permissive (no gating) rather than guessing.
+      canSend: ch.can_send ?? true,
     });
   }
   channelsStore.setState((prev) => ({
@@ -80,6 +85,9 @@ export function addChannel(channel: ChannelCreatePayload): void {
       position: channel.position,
       unreadCount: 0,
       lastMessageId: null,
+      // Broadcasts carry no per-user data; default permissive. The next ready
+      // payload delivers the authoritative can_send. Server enforces regardless.
+      canSend: true,
     });
     return { ...prev, channels: next };
   });

@@ -207,6 +207,24 @@ func buildErrorMsg(code, message string) []byte {
 	})
 }
 
+// buildErrorMsgWithID produces an error envelope that echoes the originating
+// command's request id, so the client can correlate the failure with the
+// specific command it sent (e.g. mark an optimistic chat_send row as failed).
+// When reqID is empty it falls back to the id-less envelope.
+func buildErrorMsgWithID(code, message, reqID string) []byte {
+	if reqID == "" {
+		return buildErrorMsg(code, message)
+	}
+	return buildJSON(map[string]any{
+		"type": MsgTypeError,
+		"id":   reqID,
+		"payload": map[string]string{
+			"code":    code,
+			"message": message,
+		},
+	})
+}
+
 // buildAuthError produces an auth_error envelope per PROTOCOL.md.
 // The client treats this type as non-recoverable and stops reconnecting.
 func buildAuthError(message string) []byte {
