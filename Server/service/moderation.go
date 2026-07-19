@@ -64,8 +64,8 @@ func (s *ModerationService) requireOutranks(actorID, targetID int64) error {
 
 // BanUser bans a target user. Validates the target exists and
 // prevents self-banning.
-func (s *ModerationService) BanUser(actorID, targetID int64, reason string, expires *time.Time) error {
-	ctx, span := telemetry.GlobalTracer("service/moderation").Start(context.Background(), "ModerationService.BanUser",
+func (s *ModerationService) BanUser(ctx context.Context, actorID, targetID int64, reason string, expires *time.Time) error {
+	ctx, span := telemetry.GlobalTracer("service/moderation").Start(ctx, "ModerationService.BanUser",
 		telemetry.Int64("actor_id", actorID),
 		telemetry.Int64("target_id", targetID),
 	)
@@ -109,7 +109,7 @@ func (s *ModerationService) BanUser(actorID, targetID int64, reason string, expi
 }
 
 // UnbanUser removes a ban on a target user.
-func (s *ModerationService) UnbanUser(actorID, targetID int64) error {
+func (s *ModerationService) UnbanUser(_ context.Context, actorID, targetID int64) error {
 	if targetID <= 0 {
 		return fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
 	}
