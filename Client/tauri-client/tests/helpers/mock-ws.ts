@@ -20,6 +20,7 @@ export function createMockWsClient() {
   const sent: SentEnvelope[] = [];
   const listeners = new Map<string, Set<WsListener<ServerMessage["type"]>>>();
   const stateListeners = new Set<(state: ConnectionState) => void>();
+  const sendFailureListeners = new Set<(id: string, code: string) => void>();
 
   let idCounter = 0;
 
@@ -72,6 +73,11 @@ export function createMockWsClient() {
       return () => stateListeners.delete(listener);
     },
 
+    onSendFailure(listener: (id: string, code: string) => void): () => void {
+      sendFailureListeners.add(listener);
+      return () => sendFailureListeners.delete(listener);
+    },
+
     onCertFirstTrust(): () => void {
       return () => {};
     },
@@ -121,6 +127,16 @@ export function createMockWsClient() {
      */
     simulateStateChange(newState: ConnectionState): void {
       setState(newState);
+    },
+
+    /**
+     * Simulate a local transport send failure (proxy not open, channel
+     * full/closed) for the given envelope id.
+     */
+    simulateSendFailure(id: string, code: string): void {
+      for (const listener of sendFailureListeners) {
+        listener(id, code);
+      }
     },
 
     /**

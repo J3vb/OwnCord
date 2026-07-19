@@ -10,6 +10,8 @@ import {
   prependMessages,
   isChannelLoaded,
   getChannelMessages,
+  setChannelLoading,
+  setChannelLoadError,
 } from "@stores/messages.store";
 
 const log = createLogger("message-ctrl");
@@ -75,6 +77,9 @@ export function createMessageController(opts: MessageControllerOptions): Message
       log.debug("Messages already loaded", { channelId });
       return;
     }
+    // Runs synchronously before the first await, so the message region shows
+    // its in-region loading placeholder from the very first render.
+    setChannelLoading(channelId);
     try {
       const resp = await api.getMessages(channelId, { limit: PAGE_SIZE }, signal);
       if (!signal.aborted) {
@@ -91,7 +96,9 @@ export function createMessageController(opts: MessageControllerOptions): Message
           channelId,
           error: String(err),
         });
-        showError("Failed to load messages");
+        // Inline section error + Retry in the message region (UX spec §2) —
+        // a toast would vanish and leave the region silently empty.
+        setChannelLoadError(channelId);
       }
     }
   }

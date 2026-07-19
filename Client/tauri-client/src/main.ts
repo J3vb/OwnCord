@@ -9,10 +9,10 @@ import "@styles/theme-neon-glow.css";
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
 import { createRouter } from "@lib/router";
 import { createApiClient } from "@lib/api";
-import { createWsClient } from "@lib/ws";
+import { createWsClient, toConnectionStatus } from "@lib/ws";
 import { wireDispatcher } from "@lib/dispatcher";
 import { authStore, clearAuth } from "@stores/auth.store";
-import { setTransientError } from "@stores/ui.store";
+import { setTransientError, setConnectionStatus } from "@stores/ui.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import { leaveVoice as voiceSessionLeave } from "@lib/livekitSession";
 import { createConnectPage } from "@pages/ConnectPage";
@@ -91,9 +91,15 @@ const router = createRouter("connect");
 // accepted; the bearer token never rides an unpinned TLS connection.
 const api = createApiClient({ host: "" }, () => {
   log.warn("Session expired (401), clearing auth");
+  setTransientError("Your session expired — sign in again.");
   clearAuth();
 });
 const ws = createWsClient();
+// Single writer for the UX-facing connection status (docs/architecture/ux §3):
+// live controls read ui.store.connectionStatus reactively instead of wiring
+// their own ws.onStateChange. Lifecycle plumbing that needs the exact internal
+// transition (the connected overlay below) stays on ws.onStateChange.
+ws.onStateChange((s) => setConnectionStatus(toConnectionStatus(s)));
 const profileManager = createProfileManager(createTauriBackend());
 let dispatcherCleanup: (() => void) | null = null;
 let connectedOverlay: ConnectedOverlayControl | null = null;

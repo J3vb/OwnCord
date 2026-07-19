@@ -145,11 +145,12 @@ and `IsEitherBlocked` is bidirectional). **Target UX:**
 | Being blocked | Composer read-only with a neutral "You can't message this user right now." (do not reveal the block state explicitly — the server returns a generic refusal) |
 | Unblock | Composer re-enables |
 
-> **⚠ Current gap.** There is no client-side block-state composer gating (the
-> composer has no read-only mode at all — see [messaging.md §2](messaging.md)).
-> The block/unblock REST surface exists server-side; the client would refuse a
-> DM send only via the generic WS `error`/`FORBIDDEN` path today. Target ties DM
-> block state into the same composer-state machine.
+> **⚠ Current gap.** There is no client-side block-state composer gating. The
+> composer now has a disabled-with-reason mode (see [messaging.md §2](messaging.md)),
+> but DM channels are left ungated: the block/unblock REST surface exists
+> server-side, and the client refuses a DM send only via the failed-row /
+> `FORBIDDEN` path today. Target ties DM block state into the same
+> composer-state machine.
 
 ---
 

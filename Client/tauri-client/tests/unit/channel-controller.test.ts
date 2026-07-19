@@ -150,6 +150,7 @@ vi.mock("@stores/members.store", () => ({
 
 import { createChannelController } from "../../src/pages/main-page/ChannelController";
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
+import { setConnectionStatus } from "@stores/ui.store";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -201,6 +202,9 @@ describe("createChannelController", () => {
     vi.clearAllMocks();
     capturedMessageListOpts = null;
     capturedMessageInputOpts = null;
+    // The controller gates sends on the store-backed connection status
+    // (docs/architecture/ux §3), not on ws.getState().
+    setConnectionStatus("connected");
   });
 
   it("starts with no channel mounted", () => {
@@ -350,7 +354,7 @@ describe("createChannelController", () => {
 
     it("onSend while disconnected records a failed optimistic row (no silent drop)", () => {
       const opts = makeOpts();
-      (opts.ws.getState as ReturnType<typeof vi.fn>).mockReturnValue("disconnected");
+      setConnectionStatus("disconnected");
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 

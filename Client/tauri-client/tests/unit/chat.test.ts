@@ -36,6 +36,7 @@ function resetStores(): void {
     pendingSends: new Map(),
     loadedChannels: new Set(),
     hasMore: new Map(),
+    historyLoadState: new Map(),
   }));
   membersStore.setState(() => ({
     members: new Map(),

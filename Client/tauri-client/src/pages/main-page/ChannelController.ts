@@ -32,6 +32,7 @@ import type { ChatHeaderRefs } from "./ChatHeader";
 import { dmStore } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
 import { channelsStore } from "@stores/channels.store";
+import { uiStore } from "@stores/ui.store";
 
 const log = createLogger("channel-ctrl");
 
@@ -164,7 +165,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       const user = currentMessageUser();
       if (user === null) return;
       const timestamp = new Date().toISOString();
-      if (ws.getState() !== "connected") {
+      if (uiStore.getState().connectionStatus !== "connected") {
         // Composer gating normally prevents this, but stay consistent: show a
         // failed row with retry rather than silently dropping the message.
         const cid = crypto.randomUUID();
@@ -206,6 +207,11 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       onScrollTop: () => {
         if (channelAbort !== null) {
           void msgCtrl.loadOlderMessages(channelId, channelAbort.signal);
+        }
+      },
+      onRetryLoad: () => {
+        if (channelAbort !== null) {
+          void msgCtrl.loadMessages(channelId, channelAbort.signal);
         }
       },
       onReplyClick: (msgId: number) => {
@@ -313,7 +319,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // server still enforces block/permission and a refused send shows as a
     // failed row.
     const computeComposerReason = (): string | null => {
-      if (ws.getState() !== "connected") return "Reconnecting…";
+      if (uiStore.getState().connectionStatus !== "connected") return "Reconnecting…";
       const ch = channelsStore.getState().channels.get(channelId);
       if (ch === undefined) return null;
       if (!ch.canSend) {
@@ -327,7 +333,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       messageInput?.setDisabled(computeComposerReason());
     };
     refreshComposerState();
-    composerGatingUnsubs.push(ws.onStateChange(() => refreshComposerState()));
+    composerGatingUnsubs.push(
+      uiStore.subscribeSelector(
+        (s) => s.connectionStatus,
+        () => refreshComposerState(),
+      ),
+    );
     composerGatingUnsubs.push(
       channelsStore.subscribeSelector(
         (s) => s.channels.get(channelId)?.canSend ?? true,

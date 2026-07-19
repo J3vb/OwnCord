@@ -250,6 +250,25 @@ describe("renderers", () => {
       ac.abort();
     });
 
+    it("renders a transport-failure (NETWORK) row with the connection-problem reason", () => {
+      const msg = makeMessage({
+        status: "failed",
+        correlationId: "c2",
+        id: 0,
+        errorCode: "NETWORK",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(el.classList.contains("failed")).toBe(true);
+      expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe(
+        "Connection problem — message not sent",
+      );
+
+      ac.abort();
+    });
+
     it("renders deleted message with italic text", () => {
       const msg = makeMessage({ deleted: true });
       const ac = new AbortController();

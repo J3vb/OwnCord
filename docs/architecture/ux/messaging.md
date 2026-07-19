@@ -22,11 +22,13 @@ The list renders from `messages.store` (`messagesByChannel`, capped 500/channel)
 | `loading older` | Scroll-to-top with `hasMore` | Top spinner while `prependMessages` resolves (already `MessageList.ts:459-468`) |
 | `error` | History fetch failed | **Inline section error + Retry** in the message area |
 
-> **⚠ Current gap — no loading state on history fetch.** `MessageController.loadMessages`
-> fetches silently; there is no placeholder in the message slot, only the
-> post-render empty state or a toast on failure (`MessageController.ts:73-97`).
-> Target: show an in-region loading placeholder while the first page loads, and
-> an inline **Retry** on failure instead of a transient toast.
+> **✓ Implemented (2026-07).** `messages.store` tracks a per-channel
+> `historyLoadState` (`loading` / `error`, absent = idle); `loadMessages` sets it
+> synchronously before the fetch and `setMessages` clears it. With no rows,
+> `MessageList` renders the matching region state: a `.messages-loading` spinner
+> placeholder, or `.messages-load-error` with an inline **Retry** button
+> (`onRetryLoad` re-invokes `loadMessages`) — no toast. The welcome/empty state
+> renders only once the channel is actually loaded and empty.
 
 ---
 
@@ -98,7 +100,7 @@ sequenceDiagram
         SRV-->>WS: error{code}  %% SLOW_MODE / RATE_LIMITED / FORBIDDEN / INVALID_INPUT
         WS->>S: markSendFailed(correlationId, code)  %% row → "failed", Retry
     else transport drop
-        WS-->>S: markSendFailed(correlationId, "network")  %% ws_send channel-full/closed
+        WS-->>S: markSendFailed(correlationId, "NETWORK")  %% ws_send channel-full/closed
     end
 ```
 
@@ -122,6 +124,10 @@ existing pending/sent row for that id and replace-in-place rather than append.
 > (`ws/handlers.go` → `buildErrorMsgWithID`), so the dispatcher's `error` handler
 > maps `SLOW_MODE` / `FORBIDDEN` / `RATE_LIMITED` / `BAD_REQUEST` to the exact
 > row (`dispatcher.ts`), and an offline send is shown failed rather than dropped.
+> The transport-drop arm is wired too: `ws.ts` notifies `onSendFailure(id, code)`
+> when `ws_send` fails locally (channel full → `NETWORK`, closed/not-open →
+> `OFFLINE`), and the dispatcher fails the matching pending row — fire-and-forget
+> sends (typing, presence) have no pending entry and stay silent by design.
 
 ---
 
@@ -164,8 +170,10 @@ upload state (already thorough — `MessageInput.ts`).
 | uploaded | Chip ready; ids attached to the `chat_send` payload |
 | failed | Inline error on the chip with remove/retry |
 
-Upload goes through `POST /uploads` (multipart). **Target:** `uploadFile` should
-honor the global 401 handler like other calls (today it does not — `api.ts:380-383`).
+Upload goes through `POST /uploads` (multipart). **✓ Implemented (2026-07):**
+`uploadFile` now honors the global 401 handler like every other call — a 401
+calls `onUnauthorized` (clearAuth → connect page with "Your session expired —
+sign in again.") and throws `ApiClientError(401)`.
 
 ---
 

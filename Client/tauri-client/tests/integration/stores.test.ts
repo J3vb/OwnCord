@@ -63,6 +63,10 @@ function createMockWsClient(): MockWsClient {
       return () => stateListeners.delete(listener);
     },
 
+    onSendFailure(): () => void {
+      return () => {};
+    },
+
     onCertFirstTrust(): () => void {
       return () => {};
     },
@@ -118,6 +122,7 @@ function resetAllStores(): void {
     pendingSends: new Map(),
     loadedChannels: new Set(),
     hasMore: new Map(),
+    historyLoadState: new Map(),
   }));
   voiceStore.setState(() => ({
     currentChannelId: null,

@@ -9,6 +9,7 @@ export interface ServerBannerControl {
   readonly element: HTMLDivElement;
   showRestart(seconds: number): void;
   showReconnecting(): void;
+  showDisconnected(): void;
   hide(): void;
   destroy(): void;
 }
@@ -48,6 +49,12 @@ export function createServerBanner(): ServerBannerControl {
     setText(root, "Reconnecting...");
   }
 
+  function showDisconnected(): void {
+    clearCountdown();
+    root.classList.add("visible");
+    setText(root, "Disconnected");
+  }
+
   function hide(): void {
     clearCountdown();
     root.classList.remove("visible");
@@ -58,5 +65,5 @@ export function createServerBanner(): ServerBannerControl {
     root.remove();
   }
 
-  return { element: root, showRestart, showReconnecting, hide, destroy };
+  return { element: root, showRestart, showReconnecting, showDisconnected, hide, destroy };
 }
