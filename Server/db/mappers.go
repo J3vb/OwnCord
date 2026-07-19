@@ -38,6 +38,24 @@ func ptrItoI64(p *int) *int64 {
 	return &v
 }
 
+// b2i64 converts a bool to sqlc's int64 representation of a SQLite boolean.
+func b2i64(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// strToNullPtr returns nil for an empty string, else a pointer to it — so
+// empty strings are written as NULL in optional TEXT columns (matches the
+// former nullableString helper).
+func strToNullPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 // userFromGen maps a generated user row to the domain User model.
 func userFromGen(u dbgen.User) *User {
 	return &User{

@@ -5,76 +5,82 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/owncord/server/db/dbgen"
 )
+
+// channelFields carries the 13 columns shared by GetChannelRow and
+// ListChannelsRow; both generated row types are structurally identical, so a
+// single mapper narrows either to the domain Channel model.
+type channelFields struct {
+	ID              int64
+	Name            string
+	Type            string
+	Category        string
+	Topic           string
+	Position        int64
+	SlowMode        int64
+	Archived        int64
+	CreatedAt       string
+	VoiceMaxUsers   int64
+	VoiceQuality    *string
+	MixingThreshold *int64
+	VoiceMaxVideo   int64
+}
+
+func channelFromFields(f channelFields) Channel {
+	return Channel{
+		ID:              f.ID,
+		Name:            f.Name,
+		Type:            f.Type,
+		Category:        f.Category,
+		Topic:           f.Topic,
+		Position:        int(f.Position),
+		SlowMode:        int(f.SlowMode),
+		Archived:        f.Archived != 0,
+		CreatedAt:       f.CreatedAt,
+		VoiceMaxUsers:   int(f.VoiceMaxUsers),
+		VoiceQuality:    f.VoiceQuality,
+		MixingThreshold: ptrI64toI(f.MixingThreshold),
+		VoiceMaxVideo:   int(f.VoiceMaxVideo),
+	}
+}
 
 // ListChannels returns all channels ordered by position.
 func (d *DB) ListChannels() ([]Channel, error) {
-	rows, err := d.sqlDB.Query(
-		`SELECT id, name, type, COALESCE(category,''), COALESCE(topic,''),
-		        position, slow_mode, archived, created_at,
-		        COALESCE(voice_max_users, 0),
-		        voice_quality,
-		        mixing_threshold,
-		        COALESCE(voice_max_video, 0)
-		 FROM channels ORDER BY position ASC, id ASC`,
-	)
+	rows, err := d.q.ListChannels(dbCtx())
 	if err != nil {
 		return nil, fmt.Errorf("ListChannels: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
-
-	var channels []Channel
-	for rows.Next() {
-		ch, scanErr := scanChannel(rows)
-		if scanErr != nil {
-			return nil, fmt.Errorf("ListChannels scan: %w", scanErr)
-		}
-		channels = append(channels, ch)
-	}
-	if rows.Err() != nil {
-		return nil, fmt.Errorf("ListChannels rows: %w", rows.Err())
-	}
-	if channels == nil {
-		channels = []Channel{}
+	channels := make([]Channel, 0, len(rows))
+	for _, r := range rows {
+		channels = append(channels, channelFromFields(channelFields(r)))
 	}
 	return channels, nil
 }
 
 // GetChannel returns the channel with the given id, or nil if not found.
 func (d *DB) GetChannel(id int64) (*Channel, error) {
-	row := d.sqlDB.QueryRow(
-		`SELECT id, name, type, COALESCE(category,''), COALESCE(topic,''),
-		        position, slow_mode, archived, created_at,
-		        COALESCE(voice_max_users, 0),
-		        voice_quality,
-		        mixing_threshold,
-		        COALESCE(voice_max_video, 0)
-		 FROM channels WHERE id = ?`,
-		id,
-	)
-	ch := &Channel{}
-	var archived int
-	err := row.Scan(
-		&ch.ID, &ch.Name, &ch.Type, &ch.Category, &ch.Topic,
-		&ch.Position, &ch.SlowMode, &archived, &ch.CreatedAt,
-		&ch.VoiceMaxUsers, &ch.VoiceQuality, &ch.MixingThreshold, &ch.VoiceMaxVideo,
-	)
+	r, err := d.q.GetChannel(dbCtx(), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("GetChannel: %w", err)
 	}
-	ch.Archived = archived != 0
-	return ch, nil
+	ch := channelFromFields(channelFields(r))
+	return &ch, nil
 }
 
 // CreateChannel inserts a new channel and returns the assigned ID.
 func (d *DB) CreateChannel(name, chanType, category, topic string, position int) (int64, error) {
-	res, err := d.sqlDB.Exec(
-		`INSERT INTO channels (name, type, category, topic, position) VALUES (?, ?, ?, ?, ?)`,
-		name, chanType, nullableString(category), nullableString(topic), position,
-	)
+	res, err := d.q.CreateChannel(dbCtx(), dbgen.CreateChannelParams{
+		Name:     name,
+		Type:     chanType,
+		Category: strToNullPtr(category),
+		Topic:    strToNullPtr(topic),
+		Position: int64(position),
+	})
 	if err != nil {
 		return 0, fmt.Errorf("CreateChannel: %w", err)
 	}
@@ -83,11 +89,12 @@ func (d *DB) CreateChannel(name, chanType, category, topic string, position int)
 
 // UpdateChannel modifies name, topic, and slow_mode for the given channel.
 func (d *DB) UpdateChannel(id int64, name, topic string, slowMode int) error {
-	_, err := d.sqlDB.Exec(
-		`UPDATE channels SET name = ?, topic = ?, slow_mode = ? WHERE id = ?`,
-		name, nullableString(topic), slowMode, id,
-	)
-	if err != nil {
+	if err := d.q.UpdateChannel(dbCtx(), dbgen.UpdateChannelParams{
+		Name:     name,
+		Topic:    strToNullPtr(topic),
+		SlowMode: int64(slowMode),
+		ID:       id,
+	}); err != nil {
 		return fmt.Errorf("UpdateChannel: %w", err)
 	}
 	return nil
@@ -95,11 +102,10 @@ func (d *DB) UpdateChannel(id int64, name, topic string, slowMode int) error {
 
 // SetChannelSlowMode updates only the slow_mode field for the given channel.
 func (d *DB) SetChannelSlowMode(id int64, slowMode int) error {
-	_, err := d.sqlDB.Exec(
-		`UPDATE channels SET slow_mode = ? WHERE id = ?`,
-		slowMode, id,
-	)
-	if err != nil {
+	if err := d.q.SetChannelSlowMode(dbCtx(), dbgen.SetChannelSlowModeParams{
+		SlowMode: int64(slowMode),
+		ID:       id,
+	}); err != nil {
 		return fmt.Errorf("SetChannelSlowMode: %w", err)
 	}
 	return nil
@@ -107,8 +113,10 @@ func (d *DB) SetChannelSlowMode(id int64, slowMode int) error {
 
 // SetChannelVoiceMaxUsers updates the voice_max_users field for the given channel.
 func (d *DB) SetChannelVoiceMaxUsers(id int64, maxUsers int) error {
-	_, err := d.sqlDB.Exec(`UPDATE channels SET voice_max_users = ? WHERE id = ?`, maxUsers, id)
-	if err != nil {
+	if err := d.q.SetChannelVoiceMaxUsers(dbCtx(), dbgen.SetChannelVoiceMaxUsersParams{
+		VoiceMaxUsers: int64(maxUsers),
+		ID:            id,
+	}); err != nil {
 		return fmt.Errorf("SetChannelVoiceMaxUsers: %w", err)
 	}
 	return nil
@@ -116,8 +124,7 @@ func (d *DB) SetChannelVoiceMaxUsers(id int64, maxUsers int) error {
 
 // DeleteChannel removes the channel row (cascades to messages, overrides, etc.).
 func (d *DB) DeleteChannel(id int64) error {
-	_, err := d.sqlDB.Exec(`DELETE FROM channels WHERE id = ?`, id)
-	if err != nil {
+	if err := d.q.DeleteChannel(dbCtx(), id); err != nil {
 		return fmt.Errorf("DeleteChannel: %w", err)
 	}
 	return nil
@@ -126,18 +133,17 @@ func (d *DB) DeleteChannel(id int64) error {
 // GetChannelPermissions returns the allow/deny override bits for a role on a
 // channel. Returns (0, 0, nil) when no override exists.
 func (d *DB) GetChannelPermissions(channelID, roleID int64) (allow, deny int64, err error) {
-	row := d.sqlDB.QueryRow(
-		`SELECT allow, deny FROM channel_overrides WHERE channel_id = ? AND role_id = ?`,
-		channelID, roleID,
-	)
-	scanErr := row.Scan(&allow, &deny)
+	r, scanErr := d.q.GetChannelPermission(dbCtx(), dbgen.GetChannelPermissionParams{
+		ChannelID: channelID,
+		RoleID:    roleID,
+	})
 	if errors.Is(scanErr, sql.ErrNoRows) {
 		return 0, 0, nil
 	}
 	if scanErr != nil {
 		return 0, 0, fmt.Errorf("GetChannelPermissions: %w", scanErr)
 	}
-	return allow, deny, nil
+	return r.Allow, r.Deny, nil
 }
 
 // ChannelOverride holds the allow/deny permission bits for a single channel.
@@ -150,26 +156,13 @@ type ChannelOverride struct {
 // a role in a single query, keyed by channel ID. Eliminates N+1 queries when
 // filtering channels by permission.
 func (d *DB) GetAllChannelPermissionsForRole(roleID int64) (map[int64]ChannelOverride, error) {
-	rows, err := d.sqlDB.Query(
-		`SELECT channel_id, allow, deny FROM channel_overrides WHERE role_id = ?`,
-		roleID,
-	)
+	rows, err := d.q.GetRoleChannelPermissions(dbCtx(), roleID)
 	if err != nil {
 		return nil, fmt.Errorf("GetAllChannelPermissionsForRole: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
-
-	result := make(map[int64]ChannelOverride)
-	for rows.Next() {
-		var chID int64
-		var o ChannelOverride
-		if scanErr := rows.Scan(&chID, &o.Allow, &o.Deny); scanErr != nil {
-			return nil, fmt.Errorf("GetAllChannelPermissionsForRole scan: %w", scanErr)
-		}
-		result[chID] = o
-	}
-	if rows.Err() != nil {
-		return nil, fmt.Errorf("GetAllChannelPermissionsForRole rows: %w", rows.Err())
+	result := make(map[int64]ChannelOverride, len(rows))
+	for _, r := range rows {
+		result[r.ChannelID] = ChannelOverride{Allow: r.Allow, Deny: r.Deny}
 	}
 	return result, nil
 }
@@ -177,14 +170,12 @@ func (d *DB) GetAllChannelPermissionsForRole(roleID int64) (map[int64]ChannelOve
 // UpsertChannelOverride inserts or updates the allow/deny permission override
 // for a role on a channel.
 func (d *DB) UpsertChannelOverride(channelID, roleID, allow, deny int64) error {
-	_, err := d.sqlDB.Exec(
-		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny)
-		 VALUES (?, ?, ?, ?)
-		 ON CONFLICT(channel_id, role_id)
-		 DO UPDATE SET allow = excluded.allow, deny = excluded.deny`,
-		channelID, roleID, allow, deny,
-	)
-	if err != nil {
+	if err := d.q.UpsertChannelPermission(dbCtx(), dbgen.UpsertChannelPermissionParams{
+		ChannelID: channelID,
+		RoleID:    roleID,
+		Allow:     allow,
+		Deny:      deny,
+	}); err != nil {
 		return fmt.Errorf("UpsertChannelOverride: %w", err)
 	}
 	return nil
@@ -193,11 +184,10 @@ func (d *DB) UpsertChannelOverride(channelID, roleID, allow, deny int64) error {
 // DeleteChannelOverride removes the permission override for a role on a
 // channel. Deleting a non-existent override is a no-op.
 func (d *DB) DeleteChannelOverride(channelID, roleID int64) error {
-	_, err := d.sqlDB.Exec(
-		`DELETE FROM channel_overrides WHERE channel_id = ? AND role_id = ?`,
-		channelID, roleID,
-	)
-	if err != nil {
+	if err := d.q.DeleteChannelPermission(dbCtx(), dbgen.DeleteChannelPermissionParams{
+		ChannelID: channelID,
+		RoleID:    roleID,
+	}); err != nil {
 		return fmt.Errorf("DeleteChannelOverride: %w", err)
 	}
 	return nil
@@ -250,34 +240,6 @@ func (d *DB) ListChannelRoleOverrides(channelID int64) ([]ChannelRoleOverride, e
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
-
-// scanChannel scans a single channel row from *sql.Rows.
-// The query must select the 13 columns: id, name, type, category, topic,
-// position, slow_mode, archived, created_at, voice_max_users,
-// voice_quality, mixing_threshold, voice_max_video.
-func scanChannel(rows *sql.Rows) (Channel, error) {
-	var ch Channel
-	var archived int
-	err := rows.Scan(
-		&ch.ID, &ch.Name, &ch.Type, &ch.Category, &ch.Topic,
-		&ch.Position, &ch.SlowMode, &archived, &ch.CreatedAt,
-		&ch.VoiceMaxUsers, &ch.VoiceQuality, &ch.MixingThreshold, &ch.VoiceMaxVideo,
-	)
-	if err != nil {
-		return Channel{}, err
-	}
-	ch.Archived = archived != 0
-	return ch, nil
-}
-
-// nullableString returns nil when s is empty, otherwise a pointer to s.
-// Used so empty strings are stored as NULL in optional TEXT columns.
-func nullableString(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
-}
 
 // GetChannelTypes returns a map of channel ID → type string for the given IDs
 // in a single query, avoiding N+1 lookups.
