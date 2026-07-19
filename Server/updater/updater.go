@@ -615,21 +615,30 @@ func assetFilenameFromURL(rawURL string) (string, error) {
 	return filename, nil
 }
 
-// VerifyChecksum computes the SHA256 hash of the file at filePath and
-// compares it (case-insensitive) against expectedHash.
-func (u *Updater) VerifyChecksum(filePath, expectedHash string) error {
-	f, err := os.Open(filePath)
+// FileSHA256 returns the hex-encoded SHA256 of the file at path. Exported so
+// callers that snapshot a verified binary (the admin update TOCTOU re-check)
+// share this exact hashing instead of duplicating it.
+func FileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("opening file for checksum: %w", err)
+		return "", fmt.Errorf("opening file for checksum: %w", err)
 	}
 	defer f.Close() //nolint:errcheck
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
-		return fmt.Errorf("computing checksum: %w", err)
+		return "", fmt.Errorf("computing checksum: %w", err)
 	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
 
-	actual := hex.EncodeToString(h.Sum(nil))
+// VerifyChecksum computes the SHA256 hash of the file at filePath and
+// compares it (case-insensitive) against expectedHash.
+func (u *Updater) VerifyChecksum(filePath, expectedHash string) error {
+	actual, err := FileSHA256(filePath)
+	if err != nil {
+		return err
+	}
 	if !strings.EqualFold(actual, expectedHash) {
 		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHash, actual)
 	}
