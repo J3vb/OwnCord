@@ -9,14 +9,14 @@ import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { createRateLimiterSet } from "@lib/rate-limiter";
 import type { VideoGridComponent } from "@components/VideoGrid";
-import { createServerBanner } from "@components/ServerBanner";
+import { createServerBanner, applyConnectionStatus } from "@components/ServerBanner";
 import type { ServerBannerControl } from "@components/ServerBanner";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
 import { createToastContainer } from "@components/Toast";
 import type { ToastContainer } from "@components/Toast";
 import { initToast, teardownToast, showToast } from "@lib/toast";
 import { authStore, clearAuth, updateUser } from "@stores/auth.store";
-import { closeSettings } from "@stores/ui.store";
+import { closeSettings, uiStore } from "@stores/ui.store";
 import { updatePresence } from "@stores/members.store";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
@@ -195,20 +195,28 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     banner = createServerBanner();
     root.appendChild(banner.element);
 
+    // Banner reacts to the store-backed connection status (single source of
+    // truth, docs/architecture/ux §3). "disconnected" keeps the banner visible
+    // — a fatal drop navigates away via clearAuth, and anything short of that
+    // must not leave a stale "Reconnecting..." on screen.
     unsubscribers.push(
-      ws.onStateChange((wsState) => {
-        try {
-          if (banner === null) return;
-          if (wsState === "reconnecting") {
-            banner.showReconnecting();
-          } else if (wsState === "connected") {
-            banner.hide();
+      uiStore.subscribeSelector(
+        (s) => s.connectionStatus,
+        (status) => {
+          try {
+            if (banner === null) return;
+            applyConnectionStatus(banner, status);
+          } catch (err) {
+            log.error("Connection status handler error", err);
           }
-        } catch (err) {
-          log.error("State change handler error", err);
-        }
-      }),
+        },
+      ),
     );
+    // Synchronous initial sync: the selector subscription baselines on the
+    // current value and only fires on change, so a MainPage mounted mid-outage
+    // (status already "reconnecting") would otherwise never show the banner —
+    // the whole retry cycle maps to the same 3-state value.
+    applyConnectionStatus(banner, uiStore.getState().connectionStatus);
 
     unsubscribers.push(
       ws.on("server_restart", (payload) => {

@@ -5,7 +5,11 @@ import { createUserBar } from "@components/UserBar";
 
 vi.mock("@stores/ui.store", () => ({
   openSettings: vi.fn(),
-  uiStore: { getState: () => ({}), subscribe: () => () => {} },
+  uiStore: {
+    getState: () => ({ connectionStatus: "connected" }),
+    subscribe: () => () => {},
+    subscribeSelector: () => () => {},
+  },
 }));
 
 function setAuthState(user: { username: string } | null, isAuthenticated: boolean): void {

@@ -522,6 +522,20 @@ describe("API Client", () => {
       });
     });
 
+    it("uploadFile calls onUnauthorized on 401 like other REST calls", async () => {
+      mockFetch.mockResolvedValue(errorResponse(401, "UNAUTHORIZED", "Invalid session"));
+      const file = new File(["x"], "f.txt");
+      await expect(api.uploadFile(file)).rejects.toMatchObject({ status: 401 });
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    });
+
+    it("uploadFile does not call onUnauthorized on other errors", async () => {
+      mockFetch.mockResolvedValue(errorResponse(500, "SERVER_ERROR", "Internal error"));
+      const file = new File(["x"], "f.txt");
+      await expect(api.uploadFile(file)).rejects.toThrow();
+      expect(onUnauthorized).not.toHaveBeenCalled();
+    });
+
     it("uploadFile omits Authorization header when no token set", async () => {
       const noTokenApi = createApiClient({ host: "localhost:8443" });
       mockFetch.mockResolvedValue(jsonResponse({ url: "https://cdn/f.png", filename: "f.png" }));

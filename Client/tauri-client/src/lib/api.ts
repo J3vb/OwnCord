@@ -100,7 +100,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     let res: Response;
     try {
-      res = await fetch(url, init as RequestInit);
+      res = await fetch(url, init);
     } catch (fetchErr) {
       log.error(`${label} fetch failed`, { method, path, error: String(fetchErr) });
       if (fetchErr instanceof Error) {
@@ -231,7 +231,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
       let res: Response;
       try {
-        res = await fetch(url, init as RequestInit);
+        res = await fetch(url, init);
       } catch (fetchErr) {
         log.error("API fetch failed", {
           method: "POST",
@@ -376,6 +376,12 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         body: formData,
         signal,
       });
+
+      if (res.status === 401) {
+        onUnauthorized?.();
+        const err = await parseError(res);
+        throw new ApiClientError(401, err.error, err.message);
+      }
 
       if (!res.ok) {
         const err = await parseError(res);

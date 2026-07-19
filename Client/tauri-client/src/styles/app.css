@@ -423,6 +423,21 @@
   font-size: 14px; color: var(--text-muted); margin: 0;
 }
 
+/* ── Message history fetch states (loading / inline error + Retry) ── */
+.messages-loading, .messages-load-error {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; padding: 48px 0; color: var(--text-muted);
+}
+.messages-loading .spinner { width: 24px; height: 24px; }
+.messages-loading-text, .messages-load-error-text {
+  font-size: 13px; color: var(--text-muted); margin: 0;
+}
+.messages-retry-btn {
+  background: transparent; border: 1px solid currentColor; color: var(--text-muted);
+  border-radius: 4px; padding: 4px 16px; font-size: 13px; cursor: pointer;
+}
+.messages-retry-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+
 .msg-day-divider {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 16px 16px; margin-bottom: 8px;

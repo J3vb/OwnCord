@@ -17,6 +17,9 @@ import {
   isChannelLoaded,
   hasMoreMessages,
   clearChannelMessages,
+  setChannelLoading,
+  setChannelLoadError,
+  getHistoryLoadState,
 } from "../../src/stores/messages.store";
 import type {
   ChatMessagePayload,
@@ -977,6 +980,34 @@ describe("messages store", () => {
       expect(msgs).toHaveLength(1);
       expect(msgs[0]!.id).toBe(800);
       expect(msgs[0]!.status).toBe("sent");
+    });
+  });
+
+  // 10. First-page history load state
+  describe("history load state", () => {
+    it("is idle (null) by default", () => {
+      expect(getHistoryLoadState(1)).toBeNull();
+    });
+
+    it("setChannelLoading and setChannelLoadError set the per-channel state", () => {
+      setChannelLoading(1);
+      expect(getHistoryLoadState(1)).toBe("loading");
+      expect(getHistoryLoadState(2)).toBeNull();
+
+      setChannelLoadError(1);
+      expect(getHistoryLoadState(1)).toBe("error");
+    });
+
+    it("setMessages clears the channel's load state", () => {
+      setChannelLoading(1);
+      setMessages(1, [makeMessageResponse({ id: 1 })], false);
+      expect(getHistoryLoadState(1)).toBeNull();
+    });
+
+    it("clearChannelMessages clears the channel's load state", () => {
+      setChannelLoadError(1);
+      clearChannelMessages(1);
+      expect(getHistoryLoadState(1)).toBeNull();
     });
   });
 });

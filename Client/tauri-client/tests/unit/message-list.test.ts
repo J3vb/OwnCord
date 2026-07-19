@@ -27,6 +27,7 @@ function resetStores(): void {
     pendingSends: new Map(),
     loadedChannels: new Set(),
     hasMore: new Map(),
+    historyLoadState: new Map(),
   }));
   membersStore.setState(() => ({
     members: new Map(),
@@ -66,6 +67,14 @@ function setHasMore(channelId: number, value: boolean): void {
     const next = new Map(prev.hasMore);
     next.set(channelId, value);
     return { ...prev, hasMore: next };
+  });
+}
+
+function setHistoryLoadState(channelId: number, value: "loading" | "error"): void {
+  messagesStore.setState((prev) => {
+    const next = new Map(prev.historyLoadState);
+    next.set(channelId, value);
+    return { ...prev, historyLoadState: next };
   });
 }
 
@@ -134,6 +143,45 @@ describe("MessageList", () => {
     expect(title?.textContent).toBe("Welcome to #general!");
     const text = container.querySelector(".channel-welcome-text");
     expect(text?.textContent).toBe("This is the start of the #general channel.");
+  });
+
+  it("renders the in-region loading placeholder while history is loading", () => {
+    setHistoryLoadState(1, "loading");
+    msgList.mount(container);
+
+    expect(container.querySelector(".messages-loading")).not.toBeNull();
+    expect(container.querySelector(".channel-welcome")).toBeNull();
+  });
+
+  it("renders inline error with Retry on load failure, and Retry calls onRetryLoad", () => {
+    const onRetryLoad = vi.fn();
+    msgList.destroy?.();
+    msgList = createMessageList({ ...options, onRetryLoad });
+    setHistoryLoadState(1, "error");
+    msgList.mount(container);
+
+    expect(container.querySelector(".messages-load-error")).not.toBeNull();
+    expect(container.querySelector(".channel-welcome")).toBeNull();
+    const retry = container.querySelector("[data-testid='messages-retry']") as HTMLButtonElement;
+    expect(retry).not.toBeNull();
+    retry.click();
+    expect(onRetryLoad).toHaveBeenCalledTimes(1);
+  });
+
+  it("transitions loading → welcome once the load state clears", () => {
+    setHistoryLoadState(1, "loading");
+    msgList.mount(container);
+    expect(container.querySelector(".messages-loading")).not.toBeNull();
+
+    messagesStore.setState((prev) => {
+      const next = new Map(prev.historyLoadState);
+      next.delete(1);
+      return { ...prev, historyLoadState: next };
+    });
+    messagesStore.flush();
+
+    expect(container.querySelector(".messages-loading")).toBeNull();
+    expect(container.querySelector(".channel-welcome")).not.toBeNull();
   });
 
   it("destroy removes DOM and cleans up", () => {

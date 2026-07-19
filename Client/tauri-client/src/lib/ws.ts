@@ -37,6 +37,26 @@ export type ConnectionState =
   | "connected"
   | "reconnecting";
 
+/** The UX-facing 3-state status stored in ui.store.connectionStatus. */
+export type ConnectionStatus = "connected" | "reconnecting" | "disconnected";
+
+/**
+ * Collapse the internal 5-state machine into the UX-facing status.
+ * "connecting"/"authenticating" map to "reconnecting" because a reconnect
+ * cycle passes through them (reconnecting → connecting → authenticating →
+ * connected); mapping them to "disconnected" would flap the banner mid-retry.
+ */
+export function toConnectionStatus(state: ConnectionState): ConnectionStatus {
+  switch (state) {
+    case "connected":
+      return "connected";
+    case "disconnected":
+      return "disconnected";
+    default:
+      return "reconnecting";
+  }
+}
+
 export type WsListener<T extends ServerMessage["type"]> = (
   payload: Extract<ServerMessage, { type: T }>["payload"],
   id?: string,
@@ -100,6 +120,11 @@ export function createWsClient() {
 
   // State change listeners
   const stateListeners = new Set<(state: ConnectionState) => void>();
+
+  // Local send-failure listeners (transport level: proxy not open, outbound
+  // channel full/closed). Notified with the envelope id so the dispatcher can
+  // fail the matching optimistic row instead of dropping the send silently.
+  const sendFailureListeners = new Set<(id: string, code: string) => void>();
 
   // TOFU cert mismatch listeners
   const certMismatchListeners = new Set<CertMismatchListener>();
@@ -422,21 +447,38 @@ export function createWsClient() {
     }
   }
 
-  function sendRaw(json: string): void {
+  function notifySendFailure(id: string | undefined, code: string): void {
+    if (id === undefined) return;
+    for (const listener of sendFailureListeners) {
+      try {
+        listener(id, code);
+      } catch (err) {
+        log.error("Send-failure listener error", err);
+      }
+    }
+  }
+
+  function sendRaw(json: string, id?: string): void {
     if (tauriInvoke === null || !proxyOpen) {
       log.warn("Cannot send, WebSocket not open");
+      // Deferred so a caller that registers the envelope id right after send()
+      // returns (the optimistic-row flow) sees the failure after registration.
+      queueMicrotask(() => notifySendFailure(id, "OFFLINE"));
       return;
     }
     tauriInvoke("ws_send", { message: json }).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("channel full")) {
-        // Outbound channel is saturated — log a prominent warning so callers
-        // can detect backpressure rather than silently losing messages.
+        // Outbound channel is saturated — surface the drop to listeners so an
+        // optimistic row fails with retry instead of silently losing the send.
         log.warn("ws_send: outbound channel full, message dropped (backpressure)", {
           messagePreview: json.slice(0, 120),
         });
+        notifySendFailure(id, "NETWORK");
       } else {
         log.error("ws_send failed", err);
+        const offline = msg.includes("channel closed") || msg.includes("not connected");
+        notifySendFailure(id, offline ? "OFFLINE" : "NETWORK");
       }
     });
   }
@@ -445,7 +487,7 @@ export function createWsClient() {
     const id = uuid();
     const envelope = { ...msg, id };
     log.debug("WS →", { type: msg.type, id });
-    sendRaw(JSON.stringify(envelope));
+    sendRaw(JSON.stringify(envelope), id);
     return id;
   }
 
@@ -501,6 +543,17 @@ export function createWsClient() {
     onStateChange(listener: (state: ConnectionState) => void): () => void {
       stateListeners.add(listener);
       return () => stateListeners.delete(listener);
+    },
+
+    /**
+     * Register a listener for local transport send failures (proxy not open,
+     * outbound channel full/closed). Called with the envelope id returned by
+     * send() and an error code ("OFFLINE" | "NETWORK"). Heartbeat pings and
+     * other id-less raw sends never fire it.
+     */
+    onSendFailure(listener: (id: string, code: string) => void): () => void {
+      sendFailureListeners.add(listener);
+      return () => sendFailureListeners.delete(listener);
     },
 
     /** Register a listener for TOFU first-trust events (BUG-133). */
