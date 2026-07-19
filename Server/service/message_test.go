@@ -56,6 +56,59 @@ func TestSendMessage_Valid(t *testing.T) {
 	}
 }
 
+// TestCanPost_DMBlockEnforced locks the W2-7 property: the plugin-broadcast
+// gate delegates to CanPost, so a blocked user is refused from posting into
+// a DM — the old broadcast gate's DM branch skipped the block check entirely.
+func TestCanPost_DMBlockEnforced(t *testing.T) {
+	ms := store.NewMemStore()
+	ms.SeedRole(&db.Role{
+		ID: permissions.MemberRoleID, Name: "member",
+		Permissions: permissions.SendMessages | permissions.ReadMessages, Position: 1,
+	})
+	ms.SeedUserRole(1, permissions.MemberRoleID)
+	ms.SeedUserRole(2, permissions.MemberRoleID)
+	ms.SeedUser(&db.User{ID: 1, Username: "alice"})
+	ms.SeedUser(&db.User{ID: 2, Username: "bob"})
+	ms.SeedChannel(&db.Channel{ID: 50, Name: "dm-1-2", Type: "dm"})
+	ms.SeedDMParticipant(50, 1)
+	ms.SeedDMParticipant(50, 2)
+	checker := permissions.NewChecker(ms)
+	svc := NewMessageService(ms, NewPermissionService(ms, checker), nil)
+
+	if err := svc.CanPost(1, 50); err != nil {
+		t.Fatalf("unblocked DM participant should be allowed: %v", err)
+	}
+	ms.SeedBlock(2, 1) // bob blocks alice
+	if err := svc.CanPost(1, 50); !errors.Is(err, ErrBlocked) {
+		t.Fatalf("blocked user must be refused: got %v", err)
+	}
+	if err := svc.CanPost(3, 50); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("non-participant must be refused: got %v", err)
+	}
+	if err := svc.CanPost(1, 999); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing channel must be NotFound: got %v", err)
+	}
+}
+
+// TestCanPost_ChannelPermissionRequired: regular channels still require
+// READ|SEND via the cached checker.
+func TestCanPost_ChannelPermissionRequired(t *testing.T) {
+	ms := store.NewMemStore()
+	ms.SeedRole(&db.Role{
+		ID: permissions.MemberRoleID, Name: "member",
+		Permissions: permissions.ReadMessages, Position: 1, // no SendMessages
+	})
+	ms.SeedUserRole(1, permissions.MemberRoleID)
+	ms.SeedUser(&db.User{ID: 1, Username: "alice"})
+	ms.SeedChannel(&db.Channel{ID: 10, Name: "general", Type: "text"})
+	checker := permissions.NewChecker(ms)
+	svc := NewMessageService(ms, NewPermissionService(ms, checker), nil)
+
+	if err := svc.CanPost(1, 10); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("missing SEND_MESSAGES must refuse: got %v", err)
+	}
+}
+
 // TestSendMessage_AttachmentOwnershipAtomic locks the W1-3 semantics: the
 // link UPDATE itself enforces ownership, so a foreign, already-linked, or
 // nonexistent attachment is skipped (never linked) while the message still
