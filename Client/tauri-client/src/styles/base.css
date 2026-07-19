@@ -57,6 +57,18 @@ select {
   outline: none;
 }
 
+/* WebView2/Edge injects a native password-reveal eye; the app ships its own
+   toggle (LoginForm), producing two icons. Hide the native controls.
+   Kept as standalone rules — an unknown pseudo-element in a shared selector
+   list would invalidate the other selectors. */
+input::-ms-reveal {
+  display: none;
+}
+
+input::-ms-clear {
+  display: none;
+}
+
 a {
   color: var(--text-link);
   text-decoration: none;
