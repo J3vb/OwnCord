@@ -65,6 +65,33 @@ func (q *Queries) IsEitherBlocked(ctx context.Context, arg IsEitherBlockedParams
 	return column_1, err
 }
 
+const listBlockedUsers = `-- name: ListBlockedUsers :many
+SELECT blocked_id FROM user_blocks WHERE blocker_id = ? ORDER BY created_at DESC
+`
+
+func (q *Queries) ListBlockedUsers(ctx context.Context, blockerID int64) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listBlockedUsers, blockerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var blocked_id int64
+		if err := rows.Scan(&blocked_id); err != nil {
+			return nil, err
+		}
+		items = append(items, blocked_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const unblockUser = `-- name: UnblockUser :exec
 DELETE FROM user_blocks WHERE blocker_id = ? AND blocked_id = ?
 `
