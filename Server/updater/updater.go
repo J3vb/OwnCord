@@ -555,7 +555,7 @@ func (u *Updater) verifySignatureReader(reader io.Reader, signatureText []byte, 
 		return fmt.Errorf("reading file for signature verification: %w", err)
 	}
 
-	normalizedSig := []byte(strings.TrimSpace(string(signatureText)))
+	normalizedSig := normalizeSignatureText(signatureText)
 	var parsedSig minisign.Signature
 	if err := parsedSig.UnmarshalText(normalizedSig); err != nil {
 		return fmt.Errorf("invalid update signature format: %w", err)
@@ -565,6 +565,21 @@ func (u *Updater) verifySignatureReader(reader io.Reader, signatureText []byte, 
 		return fmt.Errorf("signature verification failed for %s", subject)
 	}
 	return nil
+}
+
+// normalizeSignatureText returns the raw minisign signature document from
+// signatureText. `tauri signer sign` emits .sig files that are base64-wrapped
+// minisign documents (the same wrapping used for the pinned public key file);
+// raw minisign documents pass through unchanged.
+func normalizeSignatureText(signatureText []byte) []byte {
+	trimmed := []byte(strings.TrimSpace(string(signatureText)))
+	if bytes.HasPrefix(trimmed, []byte("untrusted comment:")) {
+		return trimmed
+	}
+	if decoded, err := base64.StdEncoding.DecodeString(string(trimmed)); err == nil {
+		return []byte(strings.TrimSpace(string(decoded)))
+	}
+	return trimmed
 }
 
 func (u *Updater) serverSignaturePublicKey() (minisign.PublicKey, error) {
