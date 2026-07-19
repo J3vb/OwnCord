@@ -33,7 +33,12 @@ func (r *Registry) RegisterCommand(cmd string, inst *Instance) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if existing, ok := r.commands[cmd]; ok && existing != inst {
+	// Ownership is compared by plugin identity (manifest name — unique per
+	// registry), not instance pointer: an in-place upgrade replaces the
+	// *Instance, and the same plugin must be able to re-bind its own
+	// commands. A *different* plugin claiming an owned command is still
+	// refused (cross-plugin command-hijack protection).
+	if existing, ok := r.commands[cmd]; ok && existing.Manifest.Name != inst.Manifest.Name {
 		return fmt.Errorf("plugin: command %q already registered by %q", cmd, existing.Manifest.Name)
 	}
 	r.commands[cmd] = inst
