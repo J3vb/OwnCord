@@ -344,11 +344,12 @@ func (d *DB) CreateInvite(createdBy int64, maxUses int, expiresAt *time.Time) (s
 		expiresStr = &s
 	}
 
-	_, err = d.sqlDB.Exec(
-		`INSERT INTO invites (code, created_by, max_uses, expires_at) VALUES (?, ?, ?, ?)`,
-		code, createdBy, maxUsesVal, expiresStr,
-	)
-	if err != nil {
+	if err := d.q.CreateInvite(dbCtx(), dbgen.CreateInviteParams{
+		Code:      code,
+		CreatedBy: createdBy,
+		MaxUses:   ptrItoI64(maxUsesVal),
+		ExpiresAt: expiresStr,
+	}); err != nil {
 		return "", fmt.Errorf("CreateInvite insert: %w", err)
 	}
 	return code, nil
@@ -356,25 +357,23 @@ func (d *DB) CreateInvite(createdBy int64, maxUses int, expiresAt *time.Time) (s
 
 // GetInvite returns the invite for the given code, or nil if not found.
 func (d *DB) GetInvite(code string) (*Invite, error) {
-	row := d.sqlDB.QueryRow(
-		`SELECT id, code, created_by, max_uses, use_count, expires_at, revoked, created_at
-		 FROM invites WHERE code = ?`,
-		code,
-	)
-	inv := &Invite{}
-	var revoked int
-	err := row.Scan(
-		&inv.ID, &inv.Code, &inv.CreatedBy, &inv.MaxUses,
-		&inv.Uses, &inv.ExpiresAt, &revoked, &inv.CreatedAt,
-	)
+	r, err := d.q.GetInvite(dbCtx(), code)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("GetInvite: %w", err)
 	}
-	inv.Revoked = revoked != 0
-	return inv, nil
+	return &Invite{
+		ID:        r.ID,
+		Code:      r.Code,
+		CreatedBy: r.CreatedBy,
+		Uses:      int(r.UseCount),
+		MaxUses:   ptrI64toI(r.MaxUses),
+		ExpiresAt: r.ExpiresAt,
+		Revoked:   r.Revoked != 0,
+		CreatedAt: r.CreatedAt,
+	}, nil
 }
 
 // UseInviteAtomic validates and increments the use_count in a single SQL
@@ -390,13 +389,7 @@ func (d *DB) GetInvite(code string) (*Invite, error) {
 // If zero rows are affected the invite is missing, revoked, expired, or
 // exhausted — an error is returned in all such cases.
 func (d *DB) UseInviteAtomic(code string) error {
-	result, err := d.sqlDB.Exec(
-		`UPDATE invites SET use_count = use_count + 1
-		 WHERE code = ? AND revoked = 0
-		 AND (max_uses IS NULL OR use_count < max_uses)
-		 AND (expires_at IS NULL OR strftime('%s', expires_at) > strftime('%s', 'now'))`,
-		code,
-	)
+	result, err := d.q.UseInviteAtomic(dbCtx(), code)
 	if err != nil {
 		return fmt.Errorf("UseInviteAtomic: %w", err)
 	}
@@ -412,8 +405,7 @@ func (d *DB) UseInviteAtomic(code string) error {
 
 // RevokeInvite marks an invite as revoked.
 func (d *DB) RevokeInvite(code string) error {
-	_, err := d.sqlDB.Exec(`UPDATE invites SET revoked = 1 WHERE code = ?`, code)
-	if err != nil {
+	if err := d.q.RevokeInvite(dbCtx(), code); err != nil {
 		return fmt.Errorf("RevokeInvite: %w", err)
 	}
 	return nil
