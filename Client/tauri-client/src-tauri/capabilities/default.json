@@ -18,6 +18,7 @@
     "core:window:allow-is-maximized",
     "core:window:allow-outer-position",
     "core:window:allow-outer-size",
+    "core:window:allow-available-monitors",
     "store:default",
     "global-shortcut:default",
     "global-shortcut:allow-register",
