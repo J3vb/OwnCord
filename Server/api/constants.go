@@ -121,9 +121,6 @@ const (
 
 	// hstsMaxAgeSeconds is the max-age value for the Strict-Transport-Security header.
 	hstsMaxAgeSeconds = 31536000
-
-	// fileCacheMaxAgeSeconds is the max-age value for the Cache-Control header on served files.
-	fileCacheMaxAgeSeconds = 31536000
 )
 
 // ─── Size limits ────────────────────────────────────────────────────────────

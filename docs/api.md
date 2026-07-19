@@ -343,6 +343,103 @@ Disable TOTP for the authenticated user.
 
 ---
 
+## User Profile & Sessions
+
+### PATCH /api/v1/users/me
+
+Update the authenticated user's profile (username and/or avatar).
+Broadcasts a `user_update` WebSocket message to all clients on success.
+
+**Auth:** Required
+**Rate limit:** 10 requests/minute
+
+#### Request
+
+```json
+{
+  "username": "newname",
+  "avatar": "upload-uuid.png"
+}
+```
+
+Both fields optional; `avatar` may be `null` to clear it.
+
+#### Response 200 OK
+
+Returns the updated user object (same shape as `GET /api/v1/auth/me`).
+
+---
+
+### PUT /api/v1/users/me/password
+
+Change the authenticated user's password. Verifies the old password, enforces
+password strength, and revokes all *other* sessions on success.
+
+**Auth:** Required
+**Rate limit:** 5 requests/minute, plus a failed-confirmation lockout on
+repeated wrong old passwords
+
+#### Request
+
+```json
+{
+  "old_password": "OldPass!1",
+  "new_password": "NewStr0ng!Pass"
+}
+```
+
+#### Response 204 No Content
+
+Password changed and other sessions revoked. If the password change committed
+but revoking other sessions failed, the endpoint returns **200 OK** with a
+warning body instead (the new password is in effect — do not retry with the
+old one).
+
+#### Errors
+
+| Status | Code | Cause |
+| ------ | ---- | ----- |
+| 400 | `INVALID_INPUT` | Weak new password, or new password equals old |
+| 403 | `FORBIDDEN` | Incorrect old password |
+| 429 | `RATE_LIMITED` | Too many attempts / lockout |
+
+---
+
+### GET /api/v1/users/me/sessions
+
+List the authenticated user's active sessions.
+
+**Auth:** Required
+
+#### Response 200 OK
+
+```json
+{
+  "sessions": [
+    {
+      "id": 12,
+      "device": "Mozilla/5.0 ...",
+      "ip": "192.168.1.100",
+      "created_at": "2026-07-01T10:00:00Z",
+      "last_used": "2026-07-19T09:00:00Z",
+      "is_current": true
+    }
+  ]
+}
+```
+
+---
+
+### DELETE /api/v1/users/me/sessions/{id}
+
+Revoke one of the authenticated user's sessions by ID.
+
+**Auth:** Required
+
+#### Response 204 No Content
+
+---
+
 ## Channel Endpoints
 
 ### GET /api/v1/channels
@@ -372,7 +469,7 @@ List all channels the authenticated user has `READ_MESSAGES` permission for. DM 
 | ----- | ---- | ----------- |
 | `id` | int64 | Channel ID |
 | `name` | string | Channel name |
-| `type` | string | `text`, `voice`, or `announcement` |
+| `type` | string | `text` or `voice` (`announcement` is planned; the DB currently rejects it) |
 | `topic` | string | Channel topic/description |
 | `category` | string | Category grouping |
 | `position` | int | Sort order within category |
@@ -492,6 +589,7 @@ Unpin a message from a channel.
 Full-text search across messages in channels the user can read. Uses SQLite FTS5 for matching.
 
 **Auth:** Required
+**Rate limit:** 30 requests/minute
 
 #### Query Parameters
 
@@ -598,6 +696,47 @@ Close a DM channel for the authenticated user (hides it from their sidebar). The
 
 ---
 
+## User Blocks
+
+Blocking a user prevents DM creation and messaging in both directions
+(backed by the `user_blocks` table).
+
+### GET /api/v1/blocks
+
+List the IDs of users the authenticated user has blocked.
+
+**Auth:** Required
+
+#### Response 200 OK
+
+```json
+{ "blocked_user_ids": [2, 7] }
+```
+
+---
+
+### PUT /api/v1/blocks/{userId}
+
+Block a user.
+
+**Auth:** Required
+
+#### Response 200 OK
+
+```json
+{ "message": "user blocked" }
+```
+
+---
+
+### DELETE /api/v1/blocks/{userId}
+
+Unblock a user.
+
+**Auth:** Required
+
+---
+
 ## Invite Endpoints
 
 All invite endpoints require authentication and the `MANAGE_INVITES` permission.
@@ -667,6 +806,7 @@ Revoke an invite by its code string.
 Upload a file as multipart form data.
 
 **Auth:** Required
+**Rate limit:** 10 requests/minute
 **Body size limit:** 100 MiB
 **Content-Type:** `multipart/form-data`
 
@@ -694,10 +834,12 @@ Files are validated against blocked magic bytes (PE executables, ELF binaries, M
 
 Serve a previously uploaded file by its UUID.
 
-**Auth:** None (URLs are unguessable UUIDs)
-**Caching:** `Cache-Control: public, max-age=31536000, immutable`
+**Auth:** Required (Bearer token) — downloads are access-controlled
+**Caching:** `Cache-Control: private, no-cache` (never stored by shared/proxy caches; browsers must revalidate)
 
-Supports HTTP range requests and conditional requests.
+Supports HTTP range requests and conditional requests. MIME types that could
+execute under the app origin (HTML, SVG, XML, PDF) are served with
+`Content-Disposition: attachment` to force download.
 
 ---
 
@@ -707,12 +849,12 @@ Supports HTTP range requests and conditional requests.
 
 ### GET /api/v1/health
 
-Public health check endpoint, no authentication required.
+Public health check endpoint, no authentication required. The server version
+is deliberately not exposed here (anti-fingerprinting hardening, C-2).
 
 ```json
 {
   "status": "ok",
-  "version": "1.0.0",
   "uptime": 86400,
   "online_users": 3
 }
@@ -724,14 +866,14 @@ Public health check endpoint, no authentication required.
 
 ### GET /api/v1/info
 
-Returns the server name and version.
+Returns the server name. The version field was removed from this
+unauthenticated endpoint (anti-fingerprinting hardening, C-2).
 
 **Auth:** None
 
 ```json
 {
-  "name": "My OwnCord Server",
-  "version": "1.2.0"
+  "name": "My OwnCord Server"
 }
 ```
 
@@ -757,6 +899,46 @@ Runtime server metrics. Restricted to admin-allowed CIDRs.
   "livekit_healthy": true
 }
 ```
+
+---
+
+## Plugin Administration
+
+Manage WASM plugins. These endpoints sit behind **both** the admin IP
+restriction (allowed CIDRs) **and** admin bearer-token authentication.
+Plugin execution additionally requires a server built with `-tags wazero`
+and `plugins.enabled: true` in config.
+
+### GET /api/v1/admin/plugins
+
+List installed plugins.
+
+#### Response 200 OK
+
+Array of plugin rows: `ID`, `Name`, `Version`, `Enabled`, `ManifestJSON`,
+`InstalledAt`.
+
+### POST /api/v1/admin/plugins/install
+
+Install a plugin from an uploaded zip (multipart form). The archive is
+size-capped (16 MiB compressed / 64 MiB uncompressed) and hardened against
+zip-slip and symlinks; installation is staged and atomically renamed.
+
+#### Response 201 Created
+
+```json
+{ "name": "plugin-name" }
+```
+
+### POST /api/v1/admin/plugins/{id}/enable
+
+### POST /api/v1/admin/plugins/{id}/disable
+
+Enable or disable an installed plugin.
+
+### DELETE /api/v1/admin/plugins/{id}
+
+Uninstall a plugin.
 
 ---
 
