@@ -118,6 +118,7 @@ describe("SidebarDmHelpers", () => {
           position: 0,
           unreadCount: 0,
           lastMessageId: null,
+          canSend: true,
         });
         return { ...prev, channels: next };
       });
@@ -142,6 +143,7 @@ describe("SidebarDmHelpers", () => {
           position: 0,
           unreadCount: 0,
           lastMessageId: null,
+          canSend: true,
         });
         return { ...prev, channels: next };
       });
@@ -172,6 +174,7 @@ describe("SidebarDmHelpers", () => {
           position: 0,
           unreadCount: 0,
           lastMessageId: null,
+          canSend: true,
         });
         return { ...prev, channels: next, activeChannelId: 1 };
       });
@@ -195,6 +198,7 @@ describe("SidebarDmHelpers", () => {
           position: 0,
           unreadCount: 0,
           lastMessageId: null,
+          canSend: true,
         });
         return { ...prev, channels: next, activeChannelId: 50 };
       });

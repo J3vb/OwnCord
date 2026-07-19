@@ -61,18 +61,15 @@ stateDiagram-v2
 | `slow-mode` | Disabled with a live countdown | "Slow mode: wait Ns." |
 | `uploading` | Send disabled until uploads settle (already `MessageInput.ts:138-141`) | per-attachment spinner |
 
-> **⚠ Current gap — the composer has no permission/read-only mode.**
-> `MessageInput` always renders an enabled textarea (`MessageInput.ts:379-384`);
-> the only disabled control is the attach button when uploads aren't wired. There
-> is **no** client gating for announcement channels, missing `SEND_MESSAGES`, or
-> slow-mode — even though the server enforces all three (announcement requires
-> MANAGE_MESSAGES since D1; `ChannelType` `"announcement"` is already threaded to
-> `mountChannel`, `ChannelController.ts:114`, but unused). Today the only
-> send-time block is "not connected", surfaced as a toast *after* the click
-> (`ChannelController.ts:200-204`). Target: derive composer state from
-> `permissions` + channel type + connection status and disable with a reason,
-> so a forbidden send is never attempted. This needs the client to know the
-> user's effective per-channel permission — see the note at the end.
+> **✓ Implemented (2026-07).** The server sends an authoritative per-channel
+> `can_send` in the ready payload (`ws/serve.go` `channelCanSend`, mirroring
+> `MessageService.checkSendPermission`: READ|SEND, plus MANAGE_MESSAGES for
+> announcement, admin bypass, channel overrides). `channels.store` carries it as
+> `Channel.canSend`; `MessageInput.setDisabled(reason)` disables the composer
+> with a visible reason, and `ChannelController` derives that reason from
+> `can_send` + channel type + connection status. Older servers that omit
+> `can_send` default permissive. Remaining: slow-mode countdown (see §8) and DM
+> block-state gating (handled today via the failed-row path in §3).
 
 ---
 
@@ -115,17 +112,16 @@ sequenceDiagram
 `chat_send_ok.id`) is the join key. `addMessage` from the broadcast must detect an
 existing pending/sent row for that id and replace-in-place rather than append.
 
-> **⚠ Current gap — sending is not optimistic and acks are dropped.** The send
-> path fires `chat_send` and does nothing locally; the message appears only when
-> the server's `chat_message` broadcast arrives (`ChannelController.ts:199-214`,
-> `dispatcher.ts:174-218`). The `pendingSends`/`addPendingSend`/`confirmSend`
-> machinery already exists in `messages.store.ts` (`:243-258`) but `addPendingSend`
-> has **zero callers**, and `confirmSend` discards the real `message_id`/`timestamp`
-> (`messages.store.ts:252`). Transport backpressure ("channel full") is dropped
-> silently (`ws.ts:432-437`), and rejection codes other than
-> RATE_LIMITED/FORBIDDEN/BANNED are ignored (`dispatcher.ts:433-436`). Target:
-> wire the existing pending-send machinery into an optimistic row with
-> pending/sent/failed states and a Retry — the store scaffolding is already there.
+> **✓ Implemented (2026-07).** `messages.store` now has `addOptimisticMessage`
+> (pending row), `confirmSend` (stamps the real id + "sent" on the `chat_send_ok`
+> ack), `markSendFailed`, and `removeOptimistic`; `addMessage` reconciles the
+> broadcast by real id (idempotent, replay-safe) with a defensive author match.
+> `ChannelController.performSend` renders the pending row and `MessageList`
+> shows pending (dimmed) and failed (reason + **Retry** / **Delete**) states.
+> Failures are precise: the server now echoes the request id on error replies
+> (`ws/handlers.go` → `buildErrorMsgWithID`), so the dispatcher's `error` handler
+> maps `SLOW_MODE` / `FORBIDDEN` / `RATE_LIMITED` / `BAD_REQUEST` to the exact
+> row (`dispatcher.ts`), and an offline send is shown failed rather than dropped.
 
 ---
 
@@ -196,24 +192,25 @@ channel's `slow_mode` seconds) and re-enable at zero; on a WS `SLOW_MODE`
 rejection, snap the composer to the countdown state without dropping the drafted
 text.
 
-> **⚠ Current gap.** `SLOW_MODE` errors are received but ignored
-> (`dispatcher.ts:433-436`); there is no countdown UI. Part of the composer-state
-> work in §2.
+> **Partially implemented (2026-07).** `SLOW_MODE` errors are now surfaced: they
+> mark the optimistic row failed with a "Slow mode — wait before sending again"
+> reason and a **Retry** (via the request-id error correlation in §3). The live
+> **countdown** in the composer is still outstanding — it needs the channel's
+> `slow_mode` seconds, which the ready payload does not yet carry.
 
 ---
 
-## Note — the client needs effective per-channel permissions
+## Note — effective per-channel permissions (resolved)
 
-Several targets here (§2 composer gating, §4 delete affordance) require the client
-to know the user's **effective permission on the active channel** (base role bits
-± channel overrides, with the announcement-channel MANAGE_MESSAGES rule). The
-client currently receives roles (`ready.roles`) and member roles but does **not**
-compute effective per-channel permissions the way the server does
-(`Server/permissions`). Delivering the gated composer cleanly likely means either
-(a) the server sending a per-channel `can_send`/`permissions` hint (e.g. on
-`ready`/`channel_focus`), or (b) porting the permission-bit evaluation to the
-client. This is a prerequisite decision for §2 and is flagged as such rather than
-hand-waved.
+§2's composer gating needs the user's **effective permission on the active
+channel** (base role ± channel overrides, with the announcement MANAGE_MESSAGES
+rule). This was resolved by **option (a)**: the server sends an authoritative
+per-channel `can_send` in the ready payload, computed by `channelCanSend`
+(`ws/serve.go`) as a mirror of `MessageService.checkSendPermission`. The client
+consumes it directly rather than re-deriving permission math, so overrides and
+the announcement rule are always correct. The delete affordance (§4) remains
+role-name based; tightening it to effective per-channel permission could reuse
+the same signal in future.
 
 ---
 

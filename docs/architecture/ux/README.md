@@ -122,11 +122,12 @@ detail each; this is the index.
 | `server_restart` | `ui.setTransientError` | Restart banner with countdown |
 | `error` | `ui.setTransientError` (+ `clearAuth` on `BANNED`) | Map the code → the reaction in §5 |
 
-> **⚠ Current gap.** Several codes are received and dropped. `error` handles only
-> `BANNED`/`RATE_LIMITED`/`FORBIDDEN`; `SLOW_MODE`, `INVALID_INPUT`, conflict,
-> etc. are silently ignored (`dispatcher.ts:421-436`). WS `chat_send_ok` carries
-> the real `message_id`/`timestamp` but they are discarded
-> (`messages.store.ts:252-258`). Both are addressed in [messaging.md](messaging.md).
+> **✓ Implemented (2026-07).** Error codes are no longer silently dropped for
+> sends: the server echoes the request id on error replies, so `SLOW_MODE`,
+> `FORBIDDEN`, `RATE_LIMITED`, `BAD_REQUEST`, etc. are mapped to the exact
+> optimistic row that failed (retry offered), and `chat_send_ok`'s
+> `message_id`/`timestamp` now reconcile the pending row. See the optimistic
+> lifecycle in [messaging.md](messaging.md).
 
 ---
 

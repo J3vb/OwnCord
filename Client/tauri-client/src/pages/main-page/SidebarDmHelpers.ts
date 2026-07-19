@@ -72,6 +72,9 @@ export function addDmToChannelsStore(dmChannel: DmChannel): void {
     position: 0,
     unreadCount: dmChannel.unreadCount,
     lastMessageId: dmChannel.lastMessageId,
+    // DMs are always postable from the client; the server enforces block state,
+    // and a refused send surfaces as a failed row rather than a disabled composer.
+    canSend: true,
   };
   channelsStore.setState((prev) => {
     const next = new Map(prev.channels);

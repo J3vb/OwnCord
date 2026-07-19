@@ -46,6 +46,9 @@ function makeMessage(overrides: Partial<Message> & { id: number }): Message {
     editedAt: null,
     deleted: false,
     timestamp: "2024-01-15T12:00:00Z",
+    status: "sent",
+    correlationId: null,
+    errorCode: null,
     ...overrides,
   };
 }

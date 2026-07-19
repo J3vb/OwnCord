@@ -103,7 +103,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 			cmd, parseErr := ctor(c.userID, env.ID, env.Payload)
 			if parseErr != nil {
 				reqLog.Warn("ws command parse error", "err", parseErr)
-				c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "invalid payload"))
+				c.sendMsg(buildErrorMsgWithID(ErrCodeBadRequest, "invalid payload", env.ID))
 				return
 			}
 
@@ -127,15 +127,15 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 			result, dispatched := h.registry.DispatchV2(c.ctx, cmd, info)
 			if !dispatched {
 				reqLog.Error("ws V2 handler registered but DispatchV2 returned false", "type", env.Type)
-				c.sendMsg(buildErrorMsg(ErrCodeInternal, "internal error"))
+				c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "internal error", env.ID))
 				return
 			}
 			if result.Error != nil {
 				if ce, ok := result.Error.(ClientError); ok {
-					c.sendMsg(buildErrorMsg(ce.Code, ce.Message))
+					c.sendMsg(buildErrorMsgWithID(ce.Code, ce.Message, env.ID))
 				} else {
 					reqLog.Error("ws handler internal error", "err", result.Error)
-					c.sendMsg(buildErrorMsg(ErrCodeInternal, "internal error"))
+					c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "internal error", env.ID))
 				}
 				return
 			}

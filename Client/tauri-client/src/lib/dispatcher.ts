@@ -21,6 +21,8 @@ import {
   deleteMessage,
   updateReaction,
   confirmSend,
+  markSendFailed,
+  messagesStore,
 } from "@stores/messages.store";
 import {
   setMembers,
@@ -419,15 +421,23 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
   );
 
   unsubs.push(
-    ws.on(S.ERROR, (payload) => {
+    ws.on(S.ERROR, (payload, id) => {
       log.error("Server error", {
         code: payload.code,
         message: payload.message,
+        id,
       });
       if (payload.code === "BANNED") {
         // Banned users must not reconnect — show error and force logout.
         setTransientError(payload.message || "You have been banned");
         clearAuth();
+        return;
+      }
+      // If the error carries the request id of a pending optimistic send, mark
+      // that specific row failed (with retry) instead of a global toast. This
+      // covers SLOW_MODE, FORBIDDEN, RATE_LIMITED, BAD_REQUEST, etc. on send.
+      if (id && messagesStore.getState().pendingSends.has(id)) {
+        markSendFailed(id, payload.code);
         return;
       }
       if (payload.code === "RATE_LIMITED" || payload.code === "FORBIDDEN") {

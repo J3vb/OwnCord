@@ -73,6 +73,7 @@ describe("channels store", () => {
         position: 0,
         unreadCount: 3,
         lastMessageId: 100,
+        canSend: true,
       });
 
       const voice = state.channels.get(2);
@@ -84,6 +85,7 @@ describe("channels store", () => {
         position: 0,
         unreadCount: 0,
         lastMessageId: null,
+        canSend: true,
       });
     });
 
@@ -120,6 +122,7 @@ describe("channels store", () => {
         position: 2,
         unreadCount: 0,
         lastMessageId: null,
+        canSend: true,
       });
     });
 
@@ -282,6 +285,7 @@ describe("channels store", () => {
         position: 0,
         unreadCount: 0,
         lastMessageId: 100,
+        canSend: true,
       });
     });
 

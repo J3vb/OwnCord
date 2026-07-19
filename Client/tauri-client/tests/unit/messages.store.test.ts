@@ -10,6 +10,9 @@ import {
   updateReaction,
   addPendingSend,
   confirmSend,
+  addOptimisticMessage,
+  markSendFailed,
+  removeOptimistic,
   getChannelMessages,
   isChannelLoaded,
   hasMoreMessages,
@@ -869,6 +872,111 @@ describe("messages store", () => {
 
       const msg = getChannelMessages(1)[0]!;
       expect(msg.deleted).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Optimistic send lifecycle
+  // -------------------------------------------------------------------------
+
+  describe("optimistic send", () => {
+    it("addOptimisticMessage inserts a pending row and tracks the correlation id", () => {
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "hi",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0]!.status).toBe("pending");
+      expect(msgs[0]!.correlationId).toBe("c1");
+      expect(msgs[0]!.id).toBe(0);
+      expect(messagesStore.getState().pendingSends.get("c1")).toBe(1);
+    });
+
+    it("confirmSend then the broadcast reconciles into a single sent message", () => {
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "hi",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      // Ack arrives first (server sends chat_send_ok before the broadcast).
+      confirmSend("c1", 555, "2026-03-15T10:00:01Z");
+      let msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0]!.status).toBe("sent");
+      expect(msgs[0]!.id).toBe(555);
+      expect(messagesStore.getState().pendingSends.has("c1")).toBe(false);
+
+      // The broadcast for our own message arrives with the real id → replace,
+      // not duplicate, upgrading to the full server row.
+      addMessage(makeChatPayload({ id: 555, content: "hi", attachments: [ATTACHMENT] }));
+      msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0]!.id).toBe(555);
+      expect(msgs[0]!.status).toBe("sent");
+      expect(msgs[0]!.correlationId).toBeNull();
+      expect(msgs[0]!.attachments).toHaveLength(1);
+    });
+
+    it("markSendFailed flips the row to failed with the error code", () => {
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "hi",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      markSendFailed("c1", "SLOW_MODE");
+      const msg = getChannelMessages(1)[0]!;
+      expect(msg.status).toBe("failed");
+      expect(msg.errorCode).toBe("SLOW_MODE");
+      expect(messagesStore.getState().pendingSends.has("c1")).toBe(false);
+    });
+
+    it("removeOptimistic drops the row (retry / dismiss)", () => {
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "hi",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      removeOptimistic("c1");
+      expect(getChannelMessages(1)).toHaveLength(0);
+      expect(messagesStore.getState().pendingSends.has("c1")).toBe(false);
+    });
+
+    it("addMessage is idempotent by real id (replay-safe)", () => {
+      addMessage(makeChatPayload({ id: 700, content: "once" }));
+      addMessage(makeChatPayload({ id: 700, content: "once" }));
+      expect(getChannelMessages(1)).toHaveLength(1);
+    });
+
+    it("defensively reconciles a broadcast that raced ahead of its ack", () => {
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "race",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      // Broadcast arrives before confirmSend; matched by author against the
+      // oldest pending row → replaced, not duplicated.
+      addMessage(makeChatPayload({ id: 800, user: TEST_USER, content: "race" }));
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0]!.id).toBe(800);
+      expect(msgs[0]!.status).toBe("sent");
     });
   });
 });

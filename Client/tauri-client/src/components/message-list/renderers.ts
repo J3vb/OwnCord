@@ -129,6 +129,24 @@ function renderSystemMessage(msg: Message): HTMLDivElement {
   return el;
 }
 
+/** Map a send-failure error code to a short, user-facing reason. */
+function sendErrorReason(code: string | null): string {
+  switch (code) {
+    case "SLOW_MODE":
+      return "Slow mode — wait before sending again";
+    case "RATE_LIMITED":
+      return "You're sending too fast — try again in a moment";
+    case "FORBIDDEN":
+      return "You don't have permission to post here";
+    case "OFFLINE":
+      return "Not connected — message not sent";
+    case "BAD_REQUEST":
+      return "Message rejected";
+    default:
+      return "Failed to send";
+  }
+}
+
 export function renderMessage(
   msg: Message,
   isGrouped: boolean,
@@ -140,8 +158,10 @@ export function renderMessage(
     return renderSystemMessage(msg);
   }
 
+  const statusClass =
+    msg.status === "pending" ? " pending" : msg.status === "failed" ? " failed" : "";
   const el = createElement("div", {
-    class: isGrouped ? "message grouped" : "message",
+    class: (isGrouped ? "message grouped" : "message") + statusClass,
     "data-testid": `message-${msg.id}`,
   });
 
@@ -217,7 +237,32 @@ export function renderMessage(
     }
   }
 
-  if (!msg.deleted) {
+  // Failed optimistic send: show the reason and offer retry / discard.
+  if (msg.status === "failed" && msg.correlationId !== null) {
+    const cid = msg.correlationId;
+    const bar = createElement("div", { class: "msg-send-failed" });
+    bar.appendChild(
+      createElement("span", { class: "msg-send-failed-text" }, sendErrorReason(msg.errorCode)),
+    );
+    const retryBtn = createElement(
+      "button",
+      { class: "msg-send-retry", "data-testid": `msg-retry-${cid}` },
+      "Retry",
+    );
+    retryBtn.addEventListener("click", () => opts.onRetry?.(cid), { signal });
+    const discardBtn = createElement(
+      "button",
+      { class: "msg-send-discard", "data-testid": `msg-discard-${cid}` },
+      "Delete",
+    );
+    discardBtn.addEventListener("click", () => opts.onDeleteDraft?.(cid), { signal });
+    appendChildren(bar, retryBtn, discardBtn);
+    el.appendChild(bar);
+  }
+
+  // The hover action bar (react/reply/pin/edit/delete) only applies to
+  // confirmed server messages — not deleted rows or unsent optimistic rows.
+  if (!msg.deleted && msg.status === "sent") {
     const actionsBar = createElement("div", { class: "msg-actions-bar" });
 
     const reactBtn = createElement("button", {
