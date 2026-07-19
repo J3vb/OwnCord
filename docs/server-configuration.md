@@ -57,9 +57,16 @@ Configuration is loaded in three layers (later layers override earlier ones):
 | `voice.livekit_url` | string | `"ws://localhost:7880"` | LiveKit server WebSocket URL |
 | `voice.livekit_binary` | string | `""` | Path to `livekit-server` binary; empty = don't auto-start |
 | `voice.node_ip` | string | `""` | Public IP for WebRTC ICE candidates; empty = auto-detect. Required for remote users behind NAT. |
+| `voice.advertise_internal_ip` | bool | `false` | Also advertise internal (LAN) IPs as ICE candidates. Enable when the server is reachable via both a LAN IP and a public IP so local-network clients can connect to voice. |
 | `voice.quality` | string | `"medium"` | Voice quality preset: `low`, `medium`, `high` |
 
 > **Warning:** If `livekit_api_key` or `livekit_api_secret` are left empty, random credentials are generated on each startup. This means voice tokens break on restart. Always set stable credentials in production. See [LiveKit Setup](livekit-setup.md) for details.
+
+#### Server with both a LAN and a public IP
+
+If your server is dual-homed (e.g. `192.168.1.10` on the LAN and `47.x.x.x` public), set `voice.node_ip` to the public IP **and** `voice.advertise_internal_ip: true`. LiveKit then advertises the LAN address in addition to the public one, so clients on the local network connect directly while remote clients use the public IP.
+
+For LiveKit options OwnCord does not model, you can take ownership of the auto-started server's config: edit `data/livekit.yaml` and delete the header line containing the auto-generated marker — OwnCord will stop regenerating the file on startup (your `keys:` entry must still match `voice.livekit_api_key` / `voice.livekit_api_secret`).
 
 ### GitHub / Updates (`github`)
 
@@ -128,6 +135,7 @@ Every config key can be overridden via environment variables using the prefix `O
 | `OWNCORD_VOICE_LIVEKIT_API_SECRET` | `voice.livekit_api_secret` |
 | `OWNCORD_VOICE_LIVEKIT_URL` | `voice.livekit_url` |
 | `OWNCORD_VOICE_NODE_IP` | `voice.node_ip` |
+| `OWNCORD_VOICE_ADVERTISE_INTERNAL_IP` | `voice.advertise_internal_ip` |
 | `OWNCORD_VOICE_QUALITY` | `voice.quality` |
 | `OWNCORD_GITHUB_TOKEN` | `github.token` |
 | `OWNCORD_EVENT_PERSISTENCE_ENABLED` | `event_persistence.enabled` |
@@ -176,6 +184,7 @@ voice:
   livekit_url: "ws://localhost:7880"
   livekit_binary: ""               # path to livekit-server binary
   node_ip: ""                      # public IP for remote users behind NAT
+  advertise_internal_ip: false     # also advertise LAN IPs (dual-homed servers)
   quality: "medium"                # low | medium | high
 
 github:

@@ -86,6 +86,8 @@ voice:
 | `livekit_api_secret` | Shared secret for JWT signing (min 32 chars) | `"owncord-dev-secret-key-min-32chars"` |
 | `livekit_url` | LiveKit WebSocket URL | `ws://localhost:7880` |
 | `livekit_binary` | Path to `livekit-server` binary. Empty = assume externally managed | `""` (disabled) |
+| `node_ip` | Public IP for WebRTC ICE candidates (remote users behind NAT) | `""` (auto-detect) |
+| `advertise_internal_ip` | Also advertise LAN IPs — enable on dual-homed servers (LAN + public IP) so local clients can connect | `false` |
 | `quality` | Default voice quality preset | `"medium"` |
 
 Environment variable overrides use the `OWNCORD_` prefix: `OWNCORD_VOICE_LIVEKIT_API_KEY`, `OWNCORD_VOICE_LIVEKIT_API_SECRET`, etc.
@@ -110,7 +112,7 @@ For LAN-only setups, ensure these ports are open on Windows Firewall. For remote
 
 When `livekit_binary` is set, OwnCord manages LiveKit as a companion process:
 
-1. **Config generation**: OwnCord auto-generates `data/livekit.yaml` with the API key/secret, port 7880, and UDP range 50000-60000
+1. **Config generation**: OwnCord auto-generates `data/livekit.yaml` with the API key/secret, port 7880, and UDP range 50000-60000. To manage the file yourself (custom `rtc` options, multiple interfaces, ...), delete the header line containing the auto-generated marker — OwnCord then leaves the file untouched on future starts. Your `keys:` entry must still match `voice.livekit_api_key` / `voice.livekit_api_secret`.
 2. **Process launch**: `livekit-server --config data/livekit.yaml`
 3. **Crash recovery**: Exponential backoff restart (3s -> 6s -> 12s ... up to 60s), gives up after 10 consecutive rapid failures
 4. **Health checks**: `GET http://localhost:7880/` verifies LiveKit is responding
@@ -169,6 +171,7 @@ LiveKit sends webhooks to `POST /api/v1/livekit/webhook`. The endpoint verifies 
 | "backend unavailable" from `/livekit` proxy | LiveKit not running on port 7880 | Check `livekit_binary` path or start LiveKit manually |
 | "too many rapid failures, giving up" in logs | LiveKit binary crashes on startup | Run `livekit-server --config data/livekit.yaml` manually to see errors |
 | Mixed content / insecure WS error | Client using direct URL over HTTPS page | Client should use the `/livekit` proxy path |
+| Voice works via public IP but not on the LAN (dual-homed server) | LiveKit only advertises the public `node_ip` | Set `voice.advertise_internal_ip: true` so LAN host candidates are advertised too |
 | `GET /api/v1/livekit/health` returns degraded | LiveKit server not reachable | Verify LiveKit is running: `curl http://localhost:7880` |
 
 ---
