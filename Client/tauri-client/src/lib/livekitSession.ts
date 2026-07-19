@@ -1590,6 +1590,10 @@ export class LiveKitSession {
     this._audioElements.setScreenshareAudioVolume(userId, volume);
   }
 
+  getScreenshareAudioVolume(userId: number): number {
+    return this._audioElements.getScreenshareAudioVolume(userId);
+  }
+
   muteScreenshareAudio(userId: number, muted: boolean): void {
     this._audioElements.muteScreenshareAudio(userId, muted);
   }
@@ -1697,6 +1701,7 @@ export const getLocalScreenshareStream = session.getLocalScreenshareStream.bind(
 export const getRemoteVideoStream = session.getRemoteVideoStream.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
 export const setScreenshareAudioVolume = session.setScreenshareAudioVolume.bind(session);
+export const getScreenshareAudioVolume = session.getScreenshareAudioVolume.bind(session);
 export const muteScreenshareAudio = session.muteScreenshareAudio.bind(session);
 export const getScreenshareAudioMuted = session.getScreenshareAudioMuted.bind(session);
 
