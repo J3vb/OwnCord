@@ -5,6 +5,8 @@
 package plugin
 
 import (
+	"context"
+	"errors"
 	"net"
 	"testing"
 )
@@ -111,6 +113,70 @@ func TestIPAllowedAcceptsPublic(t *testing.T) {
 		if err := ipAllowed(ip); err != nil {
 			t.Errorf("ipAllowed(%s) should have been allowed, got %v", addr, err)
 		}
+	}
+}
+
+// TestGuardedDial_FallsBackAcrossVettedIPs locks the W2-6 fix: an allowlisted
+// dual-stack/round-robin host whose first record is unreachable must connect
+// via the next vetted record instead of hard-failing.
+func TestGuardedDial_FallsBackAcrossVettedIPs(t *testing.T) {
+	origLookup, origDial := lookupIPAddr, dialContext
+	t.Cleanup(func() { lookupIPAddr, dialContext = origLookup, origDial })
+
+	lookupIPAddr = func(_ context.Context, _ string) ([]net.IPAddr, error) {
+		return []net.IPAddr{
+			{IP: net.ParseIP("192.0.2.1")}, // TEST-NET, "down"
+			{IP: net.ParseIP("192.0.2.2")}, // "reachable"
+		}, nil
+	}
+	var attempts []string
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() { _ = c1.Close(); _ = c2.Close() })
+	dialContext = func(_ context.Context, _ string, addr string) (net.Conn, error) {
+		attempts = append(attempts, addr)
+		if addr == "192.0.2.1:443" {
+			return nil, errors.New("connection refused")
+		}
+		return c1, nil
+	}
+
+	conn, err := guardedDialContext()(context.Background(), "tcp", "api.example.com:443")
+	if err != nil {
+		t.Fatalf("guarded dial should fall back to the next vetted IP: %v", err)
+	}
+	if conn != c1 {
+		t.Fatal("expected the fallback connection")
+	}
+	want := []string{"192.0.2.1:443", "192.0.2.2:443"}
+	if len(attempts) != 2 || attempts[0] != want[0] || attempts[1] != want[1] {
+		t.Fatalf("dial attempts = %v, want %v", attempts, want)
+	}
+}
+
+// TestGuardedDial_PrivateRecordRefusesBeforeAnyDial: one private record among
+// the resolved set refuses the whole request before a single dial happens.
+func TestGuardedDial_PrivateRecordRefusesBeforeAnyDial(t *testing.T) {
+	origLookup, origDial := lookupIPAddr, dialContext
+	t.Cleanup(func() { lookupIPAddr, dialContext = origLookup, origDial })
+
+	lookupIPAddr = func(_ context.Context, _ string) ([]net.IPAddr, error) {
+		return []net.IPAddr{
+			{IP: net.ParseIP("192.0.2.1")},
+			{IP: net.ParseIP("10.0.0.5")}, // poisoned private record
+		}, nil
+	}
+	dialed := false
+	dialContext = func(_ context.Context, _ string, _ string) (net.Conn, error) {
+		dialed = true
+		return nil, errors.New("must not be reached")
+	}
+
+	_, err := guardedDialContext()(context.Background(), "tcp", "api.example.com:443")
+	if !errors.Is(err, ErrHTTPHostDenied) {
+		t.Fatalf("want ErrHTTPHostDenied, got %v", err)
+	}
+	if dialed {
+		t.Fatal("no dial may happen when any resolved record is private")
 	}
 }
 
