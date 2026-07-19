@@ -123,20 +123,12 @@ type ServerConfig struct {
 // cause the server to refuse to start with a clear error pointing at the
 // follow-up work — see Server/main.go.
 type DatabaseConfig struct {
-	// Type is "sqlite" or "postgres". Empty defaults to "sqlite".
+	// Type selects the database backend. "sqlite" (or empty, which defaults
+	// to it) is the only supported value.
 	Type string `koanf:"type"`
 
-	// Path is the SQLite database file path. Only used when Type == "sqlite".
+	// Path is the SQLite database file path.
 	Path string `koanf:"path"`
-
-	// PostgreSQL connection settings. Only used when Type == "postgres".
-	Host     string `koanf:"host"`
-	Port     int    `koanf:"port"`
-	User     string `koanf:"user"`
-	Password string `koanf:"password"`
-	Name     string `koanf:"name"`
-	SSLMode  string `koanf:"sslmode"`  // disable | require | verify-ca | verify-full
-	MaxConns int    `koanf:"max_conns"` // pgxpool max connections; 0 = pgxpool default
 }
 
 // TLSConfig holds TLS/certificate settings.
@@ -173,12 +165,8 @@ func defaults() Config {
 			},
 		},
 		Database: DatabaseConfig{
-			Type:    "sqlite",
-			Path:    "data/chatserver.db",
-			Host:    "localhost",
-			Port:    5432,
-			Name:    "owncord",
-			SSLMode: "disable",
+			Type: "sqlite",
+			Path: "data/chatserver.db",
 		},
 		TLS: TLSConfig{
 			Mode:         "self_signed",
@@ -236,16 +224,8 @@ server:
   #   - "192.168.0.0/16"
 
 database:
-  type: "sqlite"          # "sqlite" (default, zero-config) or "postgres"
+  type: "sqlite"          # "sqlite" is the only supported backend
   path: "data/chatserver.db"
-  # PostgreSQL settings (only used when type: "postgres"):
-  # host: "localhost"
-  # port: 5432
-  # user: "owncord"
-  # password: ""
-  # name: "owncord"
-  # sslmode: "disable"    # disable | require | verify-ca | verify-full
-  # max_conns: 0          # pgxpool connection cap (0 = pgx default)
 
 tls:
   mode: "self_signed"  # self_signed, acme, manual, off
