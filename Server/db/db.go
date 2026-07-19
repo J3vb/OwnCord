@@ -7,14 +7,28 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/owncord/server/db/dbgen"
 	"github.com/owncord/server/migrations"
 	_ "modernc.org/sqlite" // register the sqlite3 driver
 )
 
 // DB wraps *sql.DB and exposes the subset of methods needed by the server.
+//
+// q is the sqlc-generated query layer (db/dbgen). Query method bodies delegate
+// to it — sqlc is the source of truth for the SQL text and parameter binding
+// (verified in CI by `make sqlc-verify`), while this package keeps the stable
+// public API and the domain model types the rest of the server consumes.
+// Migration is incremental (decision D2); methods not yet delegated still run
+// their raw SQL directly against sqlDB.
 type DB struct {
 	sqlDB *sql.DB
+	q     *dbgen.Queries
 }
+
+// dbCtx is the context used for delegated dbgen calls. The public db.DB API is
+// context-free today; callers that need cancellation use the *Context helpers
+// directly. Using Background here preserves the existing behavior exactly.
+func dbCtx() context.Context { return context.Background() }
 
 // Open opens (or creates) a SQLite database at path, enables WAL mode and
 // foreign key enforcement, and returns a ready-to-use DB.
@@ -72,7 +86,7 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("setting cache_size: %w", err)
 	}
 
-	return &DB{sqlDB: sqlDB}, nil
+	return &DB{sqlDB: sqlDB, q: dbgen.New(sqlDB)}, nil
 }
 
 // Migrate runs all SQL migration files from the embedded migrations FS in
