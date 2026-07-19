@@ -69,7 +69,12 @@ function renderTextChannelItem(
   const item = createElement("div", { class: classes, "data-testid": `channel-${channel.id}` });
   item.dataset.channelId = String(channel.id);
 
-  const prefix = createElement("span", { class: "ch-icon" }, "#");
+  const prefix = createElement("span", { class: "ch-icon" });
+  if (channel.type === "announcement") {
+    prefix.appendChild(createIcon("megaphone", 16));
+  } else {
+    prefix.textContent = "#";
+  }
   const name = createElement("span", { class: "ch-name" }, channel.name);
 
   appendChildren(item, prefix, name);

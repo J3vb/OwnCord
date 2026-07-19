@@ -98,7 +98,7 @@ erDiagram
 | Domain | Tables | Notes |
 |--------|--------|-------|
 | Identity & access | `roles`, `users`, `sessions`, `channel_overrides`, `user_blocks`, `invites`, `login_attempts`, `rate_lockouts` | Sessions store only SHA-256 token hashes. Permissions are a bitfield on `roles.permissions`; channel overrides use Discord semantics `(role &^ deny) \| allow`. `rate_lockouts` (011) persists rate-limiter lockouts across restarts. |
-| Messaging | `channels`, `messages`, `attachments`, `reactions`, `read_states`, `emoji` | `channels.type` is constrained to `text \| voice \| dm` by INSERT/UPDATE triggers from migration 013 — the `announcement` type in the specs/admin UI is rejected at this layer. `attachments.uploader_id` (010) backs upload-ownership checks. |
+| Messaging | `channels`, `messages`, `attachments`, `reactions`, `read_states`, `emoji` | `channels.type` is constrained to `text \| voice \| announcement \| dm` by INSERT/UPDATE triggers (migration 013, extended by 016 to allow `announcement`). Announcement channels read like text but require `MANAGE_MESSAGES` to post. `attachments.uploader_id` (010) backs upload-ownership checks. |
 | Direct messages | `dm_participants`, `dm_open_state` | DMs are `channels` rows with `type='dm'`; these tables track membership and per-user open/closed UI state (009). |
 | Voice | `voice_states` | One row per user (`user_id` is the PK) — a user occupies at most one voice channel. |
 | Real-time replay | `events` | Cold tier of the 3-tier reconnect replay ([websocket.md](websocket.md)); written by the async `EventPersister`, pruned by retention. Hub seq counter is seeded from `MAX(events.seq)` at startup so seqs stay monotonic across restarts. |

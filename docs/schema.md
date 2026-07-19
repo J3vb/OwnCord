@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 | `013_channel_type_constraint.sql` | INSERT/UPDATE triggers restricting `channels.type` to `text`/`voice`/`dm` |
 | `014_events_table.sql` | Adds `events` — persistent broadcast log for reconnect cold-tier replay |
 | `015_plugins.sql` | Adds `plugins` and `plugin_kv` for the WASM plugin runtime |
+| `016_announcement_channel_type.sql` | Recreates the channel-type triggers to allow `announcement` |
 
 ---
 
@@ -151,10 +152,11 @@ CREATE TABLE channels (
 );
 ```
 
-Channel types: `text`, `voice`, `dm`. Migration 013 installs INSERT/UPDATE
-triggers that reject any other value at the database layer. (An `announcement`
-type is planned but not yet implemented — see the D1 decision in
-[plans/audit-2026-07-19-decisions.md](plans/audit-2026-07-19-decisions.md).)
+Channel types: `text`, `voice`, `announcement`, `dm`. Migration 013 installs
+INSERT/UPDATE triggers restricting the value to this set (migration 016 added
+`announcement`). Announcement channels are readable like text channels but
+posting is restricted to users with `MANAGE_MESSAGES` (enforced in the service
+layer, `Server/service/message.go`).
 
 ---
 

@@ -444,7 +444,7 @@ func (d *DB) GetChannelUnreadCounts(userID int64) (map[int64]ChannelUnread, erro
 		 FROM channels c
 		 LEFT JOIN messages m ON m.channel_id = c.id AND m.deleted = 0
 		 LEFT JOIN read_states rs ON rs.channel_id = c.id AND rs.user_id = ?
-		 WHERE c.type = 'text'
+		 WHERE c.type IN ('text', 'announcement')
 		 GROUP BY c.id`,
 		userID,
 	)

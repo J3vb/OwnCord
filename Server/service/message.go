@@ -148,7 +148,7 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	isDM := ch.Type == "dm"
 
 	// Permission check.
-	if err := s.checkSendPermission(p.UserID, p.ChannelID, isDM); err != nil {
+	if err := s.checkSendPermission(p.UserID, p.ChannelID, ch.Type); err != nil {
 		return nil, err
 	}
 
@@ -687,11 +687,15 @@ func (s *MessageService) CanPost(userID, channelID int64) error {
 	if err != nil || ch == nil {
 		return fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
-	return s.checkSendPermission(userID, channelID, ch.Type == "dm")
+	return s.checkSendPermission(userID, channelID, ch.Type)
 }
 
-// checkSendPermission validates send permission for DM and non-DM channels.
-func (s *MessageService) checkSendPermission(userID, channelID int64, isDM bool) error {
+// checkSendPermission validates send permission for a channel of the given
+// type. Announcement channels are readable by anyone with READ_MESSAGES but
+// only postable by users with MANAGE_MESSAGES (posting is restricted to
+// moderators/admins); all other non-DM channels require SEND_MESSAGES.
+func (s *MessageService) checkSendPermission(userID, channelID int64, chanType string) error {
+	isDM := chanType == "dm"
 	if isDM {
 		ok, err := s.st.IsDMParticipant(userID, channelID)
 		if err != nil {
@@ -714,6 +718,11 @@ func (s *MessageService) checkSendPermission(userID, channelID int64, isDM bool)
 	}
 	if !s.perms.HasChannelPerm(userID, channelID, permissions.ReadMessages|permissions.SendMessages) {
 		return fmt.Errorf("%w: missing SEND_MESSAGES permission", ErrForbidden)
+	}
+	// Announcement channels: posting is restricted to users who can manage
+	// messages, even though everyone with READ_MESSAGES can view them.
+	if chanType == "announcement" && !s.perms.HasChannelPerm(userID, channelID, permissions.ManageMessages) {
+		return fmt.Errorf("%w: announcement channels require MANAGE_MESSAGES to post", ErrForbidden)
 	}
 	return nil
 }
