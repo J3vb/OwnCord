@@ -100,10 +100,20 @@ describe("screen share FPS", () => {
       expect(getScreenShareCaptureOptions("medium", 30).resolution?.frameRate).toBe(15);
     });
 
-    it("returns the source preset unchanged (no resolution to constrain)", () => {
-      const opts = getScreenShareCaptureOptions("source", 120);
-      expect(opts).toBe(SCREENSHARE_PRESETS.source);
+    it("returns a copy of the source preset at the default fps", () => {
+      const opts = getScreenShareCaptureOptions("source", 30);
+      expect(opts).not.toBe(SCREENSHARE_PRESETS.source);
       expect(opts.resolution).toBeUndefined();
+      expect(opts.audio).toBe(true);
+    });
+
+    it("uses a zero-size resolution sentinel for source with explicit fps", () => {
+      const opts = getScreenShareCaptureOptions("source", 120);
+      expect(opts).not.toBe(SCREENSHARE_PRESETS.source);
+      // Zero width/height = uncapped in livekit's constraint translation, and
+      // a defined resolution stops the library injecting its 1080p30 default.
+      expect(opts.resolution).toEqual({ width: 0, height: 0, frameRate: 120 });
+      expect(opts.video).toEqual({ frameRate: 120 });
     });
 
     it("does not mutate the shared presets", () => {

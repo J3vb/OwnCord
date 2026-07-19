@@ -101,18 +101,35 @@ export function getScreenShareMaxBitrate(quality: StreamQuality, fps: number): n
 
 /** Capture options for a quality with the fps preference applied. Presets with
  *  a fixed resolution get frameRate injected into the getDisplayMedia
- *  constraints; "source" (no resolution) is handled post-capture via
- *  applyConstraints because livekit-client only translates the resolution
- *  object into constraints when width/height are set. */
+ *  constraints. Always returns a copy: createLocalScreenTracks mutates the
+ *  options object in place (it injects a default 1080p30 resolution when none
+ *  is set), which would otherwise corrupt the shared presets.
+ *
+ *  For "source" (no resolution cap) with an explicit 60/120 override, a
+ *  zero-size resolution suppresses the library's 1080p30 default (the
+ *  constraint translation treats 0 as uncapped) and the frame rate is passed
+ *  through the raw video constraints instead. */
 export function getScreenShareCaptureOptions(
   quality: StreamQuality,
   fps: number,
 ): ScreenShareCaptureOptions {
   const preset = SCREENSHARE_PRESETS[quality];
-  if (preset.resolution === undefined) return preset;
+  const effectiveFps = getEffectiveScreenShareFps(quality, fps);
+  if (preset.resolution === undefined) {
+    if (fps === 60 || fps === 120) {
+      return {
+        ...preset,
+        resolution: { width: 0, height: 0, frameRate: effectiveFps },
+        // Runtime passes this object verbatim to getDisplayMedia; the declared
+        // type is narrower than what the library actually accepts.
+        video: { frameRate: effectiveFps } as ScreenShareCaptureOptions["video"],
+      };
+    }
+    return { ...preset };
+  }
   return {
     ...preset,
-    resolution: { ...preset.resolution, frameRate: getEffectiveScreenShareFps(quality, fps) },
+    resolution: { ...preset.resolution, frameRate: effectiveFps },
   };
 }
 
@@ -273,14 +290,6 @@ export async function enableScreenshare(
     // BUG-101: Listen for OS "Stop sharing" so the app runs the full disable path.
     const videoTrack = screenTracks.find((t) => t.kind === Track.Kind.Video);
     if (videoTrack) {
-      // "source" quality has no resolution preset, so the fps preference is
-      // applied to the live capture track instead. Best-effort: the browser
-      // delivers whatever the source/display can sustain.
-      if (quality === "source" && (fps === 60 || fps === 120)) {
-        videoTrack.mediaStreamTrack.applyConstraints({ frameRate: fps }).catch((err: unknown) => {
-          log.warn("Screen share FPS constraint rejected", err);
-        });
-      }
       videoTrack.mediaStreamTrack.addEventListener(
         "ended",
         () => {
