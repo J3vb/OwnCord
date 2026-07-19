@@ -234,6 +234,96 @@ func TestGetChannelPermissions_WithOverride(t *testing.T) {
 	}
 }
 
+// ─── Channel override write path ─────────────────────────────────────────────
+
+func TestUpsertChannelOverride_InsertAndUpdate(t *testing.T) {
+	database := openMigratedMemory(t)
+	chID, _ := database.CreateChannel("private", "text", "", "", 0)
+
+	if err := database.UpsertChannelOverride(chID, 4, 0, 0x202); err != nil {
+		t.Fatalf("UpsertChannelOverride insert: %v", err)
+	}
+	allow, deny, err := database.GetChannelPermissions(chID, 4)
+	if err != nil {
+		t.Fatalf("GetChannelPermissions: %v", err)
+	}
+	if allow != 0 || deny != 0x202 {
+		t.Errorf("after insert: got (%#x, %#x), want (0, 0x202)", allow, deny)
+	}
+
+	// Upsert again with different bits — must update, not duplicate.
+	if err := database.UpsertChannelOverride(chID, 4, 0x2, 0x200); err != nil {
+		t.Fatalf("UpsertChannelOverride update: %v", err)
+	}
+	allow, deny, err = database.GetChannelPermissions(chID, 4)
+	if err != nil {
+		t.Fatalf("GetChannelPermissions: %v", err)
+	}
+	if allow != 0x2 || deny != 0x200 {
+		t.Errorf("after update: got (%#x, %#x), want (0x2, 0x200)", allow, deny)
+	}
+}
+
+func TestDeleteChannelOverride(t *testing.T) {
+	database := openMigratedMemory(t)
+	chID, _ := database.CreateChannel("private2", "text", "", "", 0)
+
+	if err := database.UpsertChannelOverride(chID, 4, 0, 0x202); err != nil {
+		t.Fatalf("UpsertChannelOverride: %v", err)
+	}
+	if err := database.DeleteChannelOverride(chID, 4); err != nil {
+		t.Fatalf("DeleteChannelOverride: %v", err)
+	}
+	allow, deny, err := database.GetChannelPermissions(chID, 4)
+	if err != nil {
+		t.Fatalf("GetChannelPermissions: %v", err)
+	}
+	if allow != 0 || deny != 0 {
+		t.Errorf("after delete: got (%#x, %#x), want (0, 0)", allow, deny)
+	}
+
+	// Deleting again is a no-op.
+	if err := database.DeleteChannelOverride(chID, 4); err != nil {
+		t.Errorf("DeleteChannelOverride non-existent should not error: %v", err)
+	}
+}
+
+func TestListChannelRoleOverrides(t *testing.T) {
+	database := openMigratedMemory(t)
+	chID, _ := database.CreateChannel("private3", "text", "", "", 0)
+
+	if err := database.UpsertChannelOverride(chID, 4, 0, 0x202); err != nil {
+		t.Fatalf("UpsertChannelOverride: %v", err)
+	}
+
+	overrides, err := database.ListChannelRoleOverrides(chID)
+	if err != nil {
+		t.Fatalf("ListChannelRoleOverrides: %v", err)
+	}
+	// All four seeded roles must be present, position descending (Owner first).
+	if len(overrides) != 4 {
+		t.Fatalf("expected 4 roles, got %d", len(overrides))
+	}
+	if overrides[0].RoleID != 1 || overrides[0].RoleName != "Owner" {
+		t.Errorf("first role = (%d, %q), want (1, Owner)", overrides[0].RoleID, overrides[0].RoleName)
+	}
+	for _, o := range overrides {
+		switch o.RoleID {
+		case 4:
+			if o.Deny != 0x202 || o.Allow != 0 {
+				t.Errorf("member override = (%#x, %#x), want (0, 0x202)", o.Allow, o.Deny)
+			}
+		default:
+			if o.Allow != 0 || o.Deny != 0 {
+				t.Errorf("role %d override = (%#x, %#x), want zeros", o.RoleID, o.Allow, o.Deny)
+			}
+		}
+		if o.Permissions == 0 {
+			t.Errorf("role %d permissions should be non-zero", o.RoleID)
+		}
+	}
+}
+
 // ─── SetChannelSlowMode ─────────────────────────────────────────────────────
 
 func TestSetChannelSlowMode(t *testing.T) {

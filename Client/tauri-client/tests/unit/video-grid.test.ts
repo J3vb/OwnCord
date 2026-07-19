@@ -7,11 +7,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const mockMuteScreenshareAudio = vi.fn();
 const mockSetScreenshareAudioVolume = vi.fn();
 const mockSetUserVolume = vi.fn();
+const mockGetScreenshareAudioMuted = vi.fn((_userId?: unknown) => false);
+const mockGetScreenshareAudioVolume = vi.fn((_userId?: unknown) => 1);
 
 vi.mock("@lib/livekitSession", () => ({
   muteScreenshareAudio: (...args: unknown[]) => mockMuteScreenshareAudio(...args),
   setScreenshareAudioVolume: (...args: unknown[]) => mockSetScreenshareAudioVolume(...args),
   setUserVolume: (...args: unknown[]) => mockSetUserVolume(...args),
+  getScreenshareAudioMuted: (userId: unknown) => mockGetScreenshareAudioMuted(userId),
+  getScreenshareAudioVolume: (userId: unknown) => mockGetScreenshareAudioVolume(userId),
 }));
 
 // ---------------------------------------------------------------------------
@@ -485,6 +489,45 @@ describe("VideoGrid", () => {
       slider.value = "100";
       slider.dispatchEvent(new Event("input"));
       expect(mockMuteScreenshareAudio).toHaveBeenCalledWith(88, false);
+    });
+
+    it("screenshare slider uses 0-100 range where 100 maps to volume 1.0", () => {
+      const config = makeTileConfig({ isSelf: false, audioUserId: 88, isScreenshare: true });
+      grid.addStream(88, "screen", fakeStream(), config);
+
+      const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
+      expect(slider.max).toBe("100");
+      expect(slider.value).toBe("100"); // stored default 1.0 → 100
+
+      slider.value = "50";
+      slider.dispatchEvent(new Event("input"));
+      expect(mockSetScreenshareAudioVolume).toHaveBeenCalledWith(88, 0.5);
+
+      slider.value = "100";
+      slider.dispatchEvent(new Event("input"));
+      expect(mockSetScreenshareAudioVolume).toHaveBeenCalledWith(88, 1);
+    });
+
+    it("screenshare slider initializes from stored volume and mute state", () => {
+      mockGetScreenshareAudioVolume.mockReturnValueOnce(0.3);
+      mockGetScreenshareAudioMuted.mockReturnValueOnce(true);
+      const config = makeTileConfig({ isSelf: false, audioUserId: 88, isScreenshare: true });
+      grid.addStream(88, "screen", fakeStream(), config);
+
+      const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
+      const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
+      const overlay = container.querySelector(".video-tile-overlay");
+      expect(slider.value).toBe("30");
+      expect(muteBtn.getAttribute("aria-label")).toBe("Unmute");
+      expect(overlay!.classList.contains("muted")).toBe(true);
+    });
+
+    it("mic slider keeps the 0-200 boost range", () => {
+      const config = makeTileConfig({ isSelf: false, audioUserId: 77, isScreenshare: false });
+      grid.addStream(77, "dave", fakeStream(), config);
+
+      const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
+      expect(slider.max).toBe("200");
     });
 
     it("mute button unmutes with previous volume when currentVolume was non-zero", () => {

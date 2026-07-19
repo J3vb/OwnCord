@@ -402,6 +402,7 @@ func (m *mockHubWB) BroadcastChannelUpdate(ch *db.Channel)                  {}
 func (m *mockHubWB) BroadcastChannelDelete(channelID int64)                 {}
 func (m *mockHubWB) BroadcastMemberBan(userID int64)                        {}
 func (m *mockHubWB) BroadcastMemberUpdate(userID int64, roleName string)    {}
+func (m *mockHubWB) RefreshChannelVisibility(ch *db.Channel)                {}
 func (m *mockHubWB) ClientCount() int                                       { return 0 }
 
 // TestSpawnDetached_ValidExecutable verifies that spawnDetached can start a

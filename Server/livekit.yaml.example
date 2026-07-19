@@ -16,6 +16,11 @@ rtc:
   node_ip: "YOUR_SERVER_PUBLIC_IP"
   # use_external_ip: true   # uncomment on cloud VMs instead of node_ip
 
+  # If the server is reachable via both a LAN IP and a public IP (dual-homed),
+  # uncomment this so LiveKit also advertises the internal address — clients on
+  # the local network then connect via LAN while remote clients use node_ip.
+  # advertise_internal_ip: true
+
 keys:
   # Must match LIVEKIT_API_KEY / LIVEKIT_API_SECRET in your .env file
   YOUR_API_KEY: YOUR_API_SECRET

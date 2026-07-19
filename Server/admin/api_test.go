@@ -87,6 +87,15 @@ CREATE TABLE IF NOT EXISTS channels (
     voice_max_video  INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS channel_overrides (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    role_id    INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    allow      INTEGER NOT NULL DEFAULT 0,
+    deny       INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(channel_id, role_id)
+);
+
 CREATE TABLE IF NOT EXISTS messages (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
@@ -1107,13 +1116,14 @@ func TestAdminAPI_PatchUser_NoTOTPSecret(t *testing.T) {
 
 // mockHub records which broadcast methods were called and with what arguments.
 type mockHub struct {
-	restartCalls     []restartCall
-	channelCreates   []*db.Channel
-	channelUpdates   []*db.Channel
-	channelDeleteIDs []int64
-	memberBanIDs     []int64
-	memberUpdates    []memberUpdateCall
-	clientCount      int
+	restartCalls        []restartCall
+	channelCreates      []*db.Channel
+	channelUpdates      []*db.Channel
+	channelDeleteIDs    []int64
+	memberBanIDs        []int64
+	memberUpdates       []memberUpdateCall
+	visibilityRefreshes []*db.Channel
+	clientCount         int
 }
 
 type memberUpdateCall struct {
@@ -1148,6 +1158,10 @@ func (m *mockHub) BroadcastMemberBan(userID int64) {
 
 func (m *mockHub) BroadcastMemberUpdate(userID int64, roleName string) {
 	m.memberUpdates = append(m.memberUpdates, memberUpdateCall{userID, roleName})
+}
+
+func (m *mockHub) RefreshChannelVisibility(ch *db.Channel) {
+	m.visibilityRefreshes = append(m.visibilityRefreshes, ch)
 }
 
 func (m *mockHub) ClientCount() int {

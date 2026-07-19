@@ -112,6 +112,16 @@ func (h *Hub) upgradeAndAuth(
 func (h *Hub) handleReconnect(
 	ctx context.Context, conn *websocket.Conn, c *Client, database *db.DB, lastSeq uint64,
 ) bool {
+	// Channel-visibility changes are delivered as targeted, unsequenced
+	// messages, so replay cannot bring a client that missed one back into a
+	// coherent state — force the full-ready path instead.
+	if h.mustFullResync(lastSeq) {
+		slog.Info("ws replay skipped (visibility changed since last_seq), sending full ready",
+			"user_id", c.userID, "last_seq", lastSeq)
+		h.reconnectTierFull.Add(1)
+		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
+		return false
+	}
 	// Compute the set of channel IDs the reconnecting user can access so that
 	// channel-scoped replay events are filtered by current permissions (M3).
 	allowedChannelIDs, err := h.computeAllowedChannels(database, c.user)

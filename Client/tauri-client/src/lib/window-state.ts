@@ -18,6 +18,34 @@ export interface WindowState {
 const STORAGE_KEY = "windowState";
 const SAVE_DEBOUNCE_MS = 500;
 
+/** Minimum horizontal overlap (physical px) required with some monitor. */
+const MIN_VISIBLE_WIDTH = 100;
+/** Allow the title bar to sit slightly above a monitor's top edge. */
+const TITLEBAR_TOP_TOLERANCE = 8;
+/** The title bar must be at least this far above a monitor's bottom edge. */
+const TITLEBAR_GRAB_MARGIN = 40;
+
+interface MonitorRect {
+  readonly position: { x: number; y: number };
+  readonly size: { width: number; height: number };
+}
+
+/**
+ * Check whether a saved window rect is reachable on one of the given
+ * monitors: enough horizontal overlap to grab, and the title bar row within
+ * the monitor's vertical range. All values are physical pixels.
+ */
+export function isRectOnScreen(monitors: readonly MonitorRect[], rect: WindowState): boolean {
+  return monitors.some((m) => {
+    const overlapX =
+      Math.min(rect.x + rect.width, m.position.x + m.size.width) - Math.max(rect.x, m.position.x);
+    const titleBarReachable =
+      rect.y >= m.position.y - TITLEBAR_TOP_TOLERANCE &&
+      rect.y <= m.position.y + m.size.height - TITLEBAR_GRAB_MARGIN;
+    return overlapX >= MIN_VISIBLE_WIDTH && titleBarReachable;
+  });
+}
+
 const invokePromise: Promise<
   ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null
 > = import("@tauri-apps/api/core")
@@ -56,7 +84,13 @@ async function loadState(): Promise<WindowState | null> {
         typeof s.y === "number" &&
         typeof s.width === "number" &&
         typeof s.height === "number" &&
-        typeof s.maximized === "boolean"
+        typeof s.maximized === "boolean" &&
+        Number.isFinite(s.x) &&
+        Number.isFinite(s.y) &&
+        Number.isFinite(s.width) &&
+        Number.isFinite(s.height) &&
+        s.width >= 1 &&
+        s.height >= 1
       ) {
         return {
           x: s.x,
@@ -72,6 +106,27 @@ async function loadState(): Promise<WindowState | null> {
     log.error("Failed to load window state", { error: String(err) });
     return null;
   }
+}
+
+/**
+ * Check whether the saved rect is visible on a connected monitor. Fails open:
+ * if monitors cannot be queried, restore proceeds as before.
+ */
+async function isSavedRectVisible(
+  tauriWindow: typeof import("@tauri-apps/api/window"),
+  saved: WindowState,
+): Promise<boolean> {
+  let monitors: MonitorRect[];
+  try {
+    monitors = await tauriWindow.availableMonitors();
+  } catch (err) {
+    log.warn("Could not query monitors; restoring window state unchecked", {
+      error: String(err),
+    });
+    return true;
+  }
+  if (monitors.length === 0) return true;
+  return isRectOnScreen(monitors, saved);
 }
 
 /**
@@ -96,18 +151,28 @@ export async function initWindowState(): Promise<() => void> {
     try {
       if (saved.maximized) {
         await win.maximize();
-      } else {
+        log.info("Restored window state (maximized)");
+      } else if (await isSavedRectVisible(tauriWindow, saved)) {
         const pos = new tauriWindow.PhysicalPosition(saved.x, saved.y);
         const size = new tauriWindow.PhysicalSize(saved.width, saved.height);
         await win.setPosition(pos);
         await win.setSize(size);
+        log.info("Restored window state", {
+          x: saved.x,
+          y: saved.y,
+          width: saved.width,
+          height: saved.height,
+        });
+      } else {
+        // Saved rect is not reachable on any connected monitor (e.g. a
+        // disconnected display) — keep the default centered placement.
+        log.warn("Saved window position is off-screen; using default placement", {
+          x: saved.x,
+          y: saved.y,
+          width: saved.width,
+          height: saved.height,
+        });
       }
-      log.info("Restored window state", {
-        x: saved.x,
-        y: saved.y,
-        width: saved.width,
-        height: saved.height,
-      });
     } catch (err) {
       log.warn("Failed to restore window state", { error: String(err) });
     }
@@ -123,6 +188,17 @@ export async function initWindowState(): Promise<() => void> {
     saveTimer = setTimeout(() => {
       void (async () => {
         try {
+          // A minimized window reports placeholder coordinates (-32000 on
+          // Windows) — skip so the last real geometry survives a minimized
+          // exit. Checked separately so platforms without isMinimized still
+          // save normally.
+          let minimized = false;
+          try {
+            minimized = await win.isMinimized();
+          } catch {
+            // Treat as not minimized
+          }
+          if (minimized) return;
           const pos = await win.outerPosition();
           const size = await win.outerSize();
           const maximized = await win.isMaximized();

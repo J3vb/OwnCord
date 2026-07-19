@@ -31,6 +31,9 @@ export class AudioElements {
   private screenshareAudioElements = new Map<number, Set<HTMLAudioElement>>();
   /** Persisted mute state for screenshare audio so replacement tracks inherit UI state. */
   private screenshareAudioMutedByUser = new Map<number, boolean>();
+  /** Per-user screenshare volume (0-1, default 1) — kept independent of the
+   *  element map so a volume chosen before the track attaches still applies. */
+  private screenshareVolumeByUser = new Map<number, number>();
 
   /** Master output volume multiplier (0-2.0). Per-user volumes are scaled by this. */
   private outputVolumeMultiplier: number;
@@ -54,8 +57,12 @@ export class AudioElements {
     return (userVol / 100) * this.outputVolumeMultiplier;
   }
 
-  private getScreenshareOutputVolume(): number {
-    return Math.max(0, Math.min(1, this.outputVolumeMultiplier));
+  /** Effective element volume for a user's screenshare audio: per-user volume
+   *  scaled by the master output multiplier, clamped to the 0-1 range that
+   *  HTMLAudioElement.volume supports. */
+  private getEffectiveScreenshareVolume(userId: number): number {
+    const userVol = this.screenshareVolumeByUser.get(userId) ?? 1;
+    return Math.max(0, Math.min(1, userVol * this.outputVolumeMultiplier));
   }
 
   // --- Track subscription handlers ---
@@ -80,7 +87,7 @@ export class AudioElements {
       const audioEl = track.attach();
       audioEl.style.display = "none";
       document.body.appendChild(audioEl);
-      audioEl.volume = this.getScreenshareOutputVolume();
+      audioEl.volume = this.getEffectiveScreenshareVolume(userId);
       audioEl.muted = this.screenshareAudioMutedByUser.get(userId) ?? false;
       let audioEls = this.screenshareAudioElements.get(userId);
       if (audioEls === undefined) {
@@ -187,10 +194,12 @@ export class AudioElements {
     savePref("outputVolume", clamped);
     this.outputVolumeMultiplier = clamped / 100;
     this.applyAllVolumes();
-    const screenshareVolume = this.getScreenshareOutputVolume();
-    for (const audioEls of this.screenshareAudioElements.values()) {
+    // Re-apply per-user screenshare volumes scaled by the new master value
+    // (BUG: previously overwrote them with just the master multiplier).
+    for (const [userId, audioEls] of this.screenshareAudioElements) {
+      const effective = this.getEffectiveScreenshareVolume(userId);
       for (const audioEl of audioEls) {
-        audioEl.volume = screenshareVolume;
+        audioEl.volume = effective;
       }
     }
   }
@@ -198,10 +207,19 @@ export class AudioElements {
   // --- Screenshare audio ---
 
   setScreenshareAudioVolume(userId: number, volume: number): void {
+    const clamped = Math.max(0, Math.min(1, volume));
+    // Always store, even before the audio track attaches — the stored value
+    // is applied in handleTrackSubscribedAudio when the element appears.
+    this.screenshareVolumeByUser.set(userId, clamped);
     const audioEls = this.screenshareAudioElements.get(userId);
     if (audioEls === undefined) return;
-    const clamped = Math.max(0, Math.min(1, volume));
-    for (const el of audioEls) el.volume = clamped;
+    const effective = this.getEffectiveScreenshareVolume(userId);
+    for (const el of audioEls) el.volume = effective;
+  }
+
+  /** Stored per-user screenshare volume (0-1, default 1) for slider init. */
+  getScreenshareAudioVolume(userId: number): number {
+    return this.screenshareVolumeByUser.get(userId) ?? 1;
   }
 
   muteScreenshareAudio(userId: number, muted: boolean): void {
@@ -242,9 +260,10 @@ export class AudioElements {
     this.screenshareAudioElements.clear();
   }
 
-  /** Full cleanup including screenshare mute state — used on intentional leave. */
+  /** Full cleanup including screenshare mute/volume state — used on intentional leave. */
   cleanupAllAudioElementsFull(): void {
     this.cleanupAllAudioElements();
     this.screenshareAudioMutedByUser.clear();
+    this.screenshareVolumeByUser.clear();
   }
 }

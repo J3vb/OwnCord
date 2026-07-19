@@ -237,6 +237,43 @@ describe("AudioElements", () => {
       expect(audioEl.volume).toBe(1);
     });
 
+    it("getScreenshareAudioVolume defaults to 1 and reflects stored value", () => {
+      expect(elements.getScreenshareAudioVolume(42)).toBe(1);
+      elements.setScreenshareAudioVolume(42, 0.4);
+      expect(elements.getScreenshareAudioVolume(42)).toBe(0.4);
+    });
+
+    it("volume chosen before the track attaches applies on attach", () => {
+      elements.setScreenshareAudioVolume(42, 0.25);
+
+      const { track, audioEl } = createMockTrack("audio", "track-ss-early");
+      const publication = { source: "screenShareAudio" };
+      const participant = { identity: "user-42", setVolume: vi.fn() };
+      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+
+      expect(audioEl.volume).toBe(0.25);
+    });
+
+    it("setOutputVolume preserves per-user screenshare volume", () => {
+      const audioEl = document.createElement("audio");
+      (elements as any).screenshareAudioElements = new Map([[42, new Set([audioEl])]]);
+
+      elements.setScreenshareAudioVolume(42, 0.5);
+      elements.setOutputVolume(50);
+
+      expect(audioEl.volume).toBe(0.25); // 0.5 user * 0.5 master
+    });
+
+    it("setScreenshareAudioVolume scales by the master output multiplier", () => {
+      const audioEl = document.createElement("audio");
+      (elements as any).screenshareAudioElements = new Map([[42, new Set([audioEl])]]);
+
+      elements.setOutputVolume(50);
+      elements.setScreenshareAudioVolume(42, 0.8);
+
+      expect(audioEl.volume).toBe(0.4); // 0.8 user * 0.5 master
+    });
+
     it("muteScreenshareAudio persists muted state", () => {
       elements.muteScreenshareAudio(42, true);
       expect(elements.getScreenshareAudioMuted(42)).toBe(true);
