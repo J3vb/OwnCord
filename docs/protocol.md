@@ -242,7 +242,7 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`), `category`, `position`, `unread_count` (text only), `last_message_id` (text only)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `position`, `unread_count` (text + announcement), `last_message_id` (text + announcement)
 
 **dm_channels[]:** `channel_id`, `recipient` (user object with `id`, `username`, `avatar`, `status`), `last_message_id`, `last_message`, `last_message_at`, `unread_count`
 

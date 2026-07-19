@@ -109,6 +109,37 @@ func TestCanPost_ChannelPermissionRequired(t *testing.T) {
 	}
 }
 
+// TestCanPost_AnnouncementRequiresManageMessages: announcement channels are
+// postable only by users with MANAGE_MESSAGES, even when they hold
+// READ|SEND. A plain member is refused; a moderator with MANAGE_MESSAGES posts.
+func TestCanPost_AnnouncementRequiresManageMessages(t *testing.T) {
+	ms := store.NewMemStore()
+	ms.SeedRole(&db.Role{
+		ID: permissions.MemberRoleID, Name: "member",
+		Permissions: permissions.ReadMessages | permissions.SendMessages, Position: 1,
+	})
+	ms.SeedRole(&db.Role{
+		ID: permissions.ModeratorRoleID, Name: "moderator",
+		Permissions: permissions.ReadMessages | permissions.SendMessages | permissions.ManageMessages, Position: 60,
+	})
+	ms.SeedUserRole(1, permissions.MemberRoleID)
+	ms.SeedUserRole(2, permissions.ModeratorRoleID)
+	ms.SeedUser(&db.User{ID: 1, Username: "alice"})
+	ms.SeedUser(&db.User{ID: 2, Username: "mod"})
+	ms.SeedChannel(&db.Channel{ID: 20, Name: "announcements", Type: "announcement"})
+	checker := permissions.NewChecker(ms)
+	svc := NewMessageService(ms, NewPermissionService(ms, checker), nil)
+
+	// Member has READ|SEND but not MANAGE_MESSAGES → refused in an announcement channel.
+	if err := svc.CanPost(1, 20); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("member without MANAGE_MESSAGES must be refused in announcement channel: got %v", err)
+	}
+	// Moderator with MANAGE_MESSAGES → allowed.
+	if err := svc.CanPost(2, 20); err != nil {
+		t.Fatalf("moderator with MANAGE_MESSAGES must post in announcement channel: got %v", err)
+	}
+}
+
 // TestSendMessage_AttachmentOwnershipAtomic locks the W1-3 semantics: the
 // link UPDATE itself enforces ownership, so a foreign, already-linked, or
 // nonexistent attachment is skipped (never linked) while the message still
