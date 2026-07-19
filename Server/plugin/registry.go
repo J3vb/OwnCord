@@ -183,6 +183,21 @@ func (r *Registry) installFromDisk(ctx context.Context, found foundPlugin) error
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// Re-install: tear down the old instance and drop its command bindings.
+	// Bindings are keyed to the old *Instance, so leaving them in place both
+	// blocked the fresh instance from re-registering its own commands and
+	// kept dispatch routing into the orphaned old module until restart.
+	if old := r.byName[found.Manifest.Name]; old != nil {
+		r.platformDeactivate(old)
+		for cmd, owner := range r.commands {
+			if owner == old {
+				delete(r.commands, cmd)
+			}
+		}
+		if old.ID != id {
+			delete(r.plugins, old.ID)
+		}
+	}
 	inst := &Instance{
 		ID:       id,
 		Manifest: found.Manifest,
