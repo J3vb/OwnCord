@@ -40,6 +40,9 @@ function makeMessage(overrides: Partial<Message> = {}): Message {
     editedAt: null,
     deleted: false,
     timestamp: "2025-01-15T12:30:00Z",
+    status: "sent",
+    correlationId: null,
+    errorCode: null,
     ...overrides,
   };
 }
@@ -201,6 +204,48 @@ describe("renderers", () => {
       const el = renderMessage(msg, true, [msg], makeOpts(), ac.signal);
 
       expect(el.classList.contains("grouped")).toBe(true);
+
+      ac.abort();
+    });
+
+    it("marks a pending optimistic row and hides the action bar", () => {
+      const msg = makeMessage({ status: "pending", correlationId: "c1", id: 0 });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(el.classList.contains("pending")).toBe(true);
+      // No hover actions on an unsent row.
+      expect(container.querySelector(".msg-actions-bar")).toBeNull();
+
+      ac.abort();
+    });
+
+    it("renders a failed row with reason, retry, and discard", () => {
+      const onRetry = vi.fn();
+      const onDeleteDraft = vi.fn();
+      const msg = makeMessage({
+        status: "failed",
+        correlationId: "c1",
+        id: 0,
+        errorCode: "SLOW_MODE",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts({ onRetry, onDeleteDraft }), ac.signal);
+      container.appendChild(el);
+
+      expect(el.classList.contains("failed")).toBe(true);
+      expect(container.querySelector(".msg-send-failed-text")?.textContent).toContain("Slow mode");
+
+      const retry = container.querySelector<HTMLButtonElement>('[data-testid="msg-retry-c1"]');
+      const discard = container.querySelector<HTMLButtonElement>('[data-testid="msg-discard-c1"]');
+      expect(retry).not.toBeNull();
+      expect(discard).not.toBeNull();
+
+      retry!.click();
+      discard!.click();
+      expect(onRetry).toHaveBeenCalledWith("c1");
+      expect(onDeleteDraft).toHaveBeenCalledWith("c1");
 
       ac.abort();
     });

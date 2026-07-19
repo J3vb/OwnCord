@@ -15,7 +15,15 @@ import type { MessageListComponent } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
 import type { MessageInputComponent } from "@components/MessageInput";
 import { createTypingIndicator } from "@components/TypingIndicator";
-import { getChannelMessages, setMessagePinned } from "@stores/messages.store";
+import {
+  getChannelMessages,
+  setMessagePinned,
+  addOptimisticMessage,
+  markSendFailed,
+  removeOptimistic,
+} from "@stores/messages.store";
+import { authStore } from "@stores/auth.store";
+import type { MessageUser } from "@lib/types";
 import type { MessageController } from "./MessageController";
 import type { PendingDeleteManager } from "./MessageController";
 import type { ReactionController } from "./ReactionController";
@@ -23,6 +31,7 @@ import { updateChatHeaderForDm } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
 import { dmStore } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
+import { channelsStore } from "@stores/channels.store";
 
 const log = createLogger("channel-ctrl");
 
@@ -83,9 +92,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   let messageList: MessageListComponent | null = null;
   let messageInput: MessageInputComponent | null = null;
   let typingIndicator: MountableComponent | null = null;
+  // Store/ws subscriptions that keep the composer's disabled state in sync.
+  let composerGatingUnsubs: (() => void)[] = [];
 
   function destroyChannel(): void {
     pendingDeleteManager.cleanup();
+
+    for (const unsub of composerGatingUnsubs) unsub();
+    composerGatingUnsubs = [];
 
     if (channelAbort !== null) {
       channelAbort.abort();
@@ -127,6 +141,59 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     channelAbort = new AbortController();
     const signal = channelAbort.signal;
     const userId = getCurrentUserId();
+
+    // Optimistic send: keep the raw payload per correlation id so a failed
+    // send can be retried (including its attachments). Channel-scoped — cleared
+    // when the channel unmounts.
+    const draftByCorrelation = new Map<
+      string,
+      { content: string; replyTo: number | null; attachments: readonly string[] }
+    >();
+
+    function currentMessageUser(): MessageUser | null {
+      const u = authStore.getState().user;
+      if (u === null) return null;
+      return { id: u.id, username: u.username, avatar: u.avatar };
+    }
+
+    function performSend(
+      content: string,
+      replyTo: number | null,
+      attachments: readonly string[],
+    ): void {
+      const user = currentMessageUser();
+      if (user === null) return;
+      const timestamp = new Date().toISOString();
+      if (ws.getState() !== "connected") {
+        // Composer gating normally prevents this, but stay consistent: show a
+        // failed row with retry rather than silently dropping the message.
+        const cid = crypto.randomUUID();
+        addOptimisticMessage({ correlationId: cid, channelId, user, content, replyTo, timestamp });
+        draftByCorrelation.set(cid, { content, replyTo, attachments });
+        markSendFailed(cid, "OFFLINE");
+        return;
+      }
+      const cid = ws.send({
+        type: "chat_send",
+        payload: { channel_id: channelId, content, reply_to: replyTo, attachments },
+      });
+      addOptimisticMessage({ correlationId: cid, channelId, user, content, replyTo, timestamp });
+      draftByCorrelation.set(cid, { content, replyTo, attachments });
+    }
+
+    function retrySend(correlationId: string): void {
+      const draft = draftByCorrelation.get(correlationId);
+      draftByCorrelation.delete(correlationId);
+      removeOptimistic(correlationId);
+      if (draft !== undefined) {
+        performSend(draft.content, draft.replyTo, draft.attachments);
+      }
+    }
+
+    function deleteDraft(correlationId: string): void {
+      draftByCorrelation.delete(correlationId);
+      removeOptimistic(correlationId);
+    }
 
     void msgCtrl.loadMessages(channelId, signal);
 
@@ -182,6 +249,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
             showToast("Failed to pin/unpin message", "error");
           });
       },
+      onRetry: (correlationId: string) => retrySend(correlationId),
+      onDeleteDraft: (correlationId: string) => deleteDraft(correlationId),
     });
     messageList.mount(slots.messagesSlot);
 
@@ -197,20 +266,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       channelId,
       channelName,
       onSend: (content: string, replyTo: number | null, attachments: readonly string[]) => {
-        if (ws.getState() !== "connected") {
-          log.warn("Cannot send message: not connected");
-          showToast("Not connected — message not sent", "error");
-          return;
-        }
-        ws.send({
-          type: "chat_send",
-          payload: {
-            channel_id: channelId,
-            content,
-            reply_to: replyTo,
-            attachments,
-          },
-        });
+        performSend(content, replyTo, attachments);
       },
       onUploadFile: async (file: File) => {
         try {
@@ -249,6 +305,35 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       },
     });
     messageInput.mount(slots.inputSlot);
+
+    // Composer gating: express permission + connection as affordance. The
+    // composer disables (with a reason) when the socket is down or the user
+    // may not post here, instead of accepting a click and failing. DM channels
+    // are not in channelsStore (dmStore), so they are left ungated here — the
+    // server still enforces block/permission and a refused send shows as a
+    // failed row.
+    const computeComposerReason = (): string | null => {
+      if (ws.getState() !== "connected") return "Reconnecting…";
+      const ch = channelsStore.getState().channels.get(channelId);
+      if (ch === undefined) return null;
+      if (!ch.canSend) {
+        return ch.type === "announcement"
+          ? "Only moderators can post in announcement channels"
+          : "You don't have permission to send messages here";
+      }
+      return null;
+    };
+    const refreshComposerState = (): void => {
+      messageInput?.setDisabled(computeComposerReason());
+    };
+    refreshComposerState();
+    composerGatingUnsubs.push(ws.onStateChange(() => refreshComposerState()));
+    composerGatingUnsubs.push(
+      channelsStore.subscribeSelector(
+        (s) => s.channels.get(channelId)?.canSend ?? true,
+        () => refreshComposerState(),
+      ),
+    );
 
     // Arrow-up edit: listen for edit-last-message bubbling from MessageInput
     slots.inputSlot.addEventListener(
