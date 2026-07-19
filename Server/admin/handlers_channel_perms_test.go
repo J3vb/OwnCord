@@ -155,7 +155,7 @@ func TestPutChannelPermission_MasksUnknownBits(t *testing.T) {
 	}
 
 	// 0x4 and 0x8 are undefined bits — they must be dropped.
-	body := map[string]any{"allow": 0x4 | int64(permissions.SendMessages), "deny": 0x8}
+	body := map[string]any{"allow": 0x4 | permissions.SendMessages, "deny": 0x8}
 	w := doRequest(t, handler, http.MethodPut,
 		"/channels/"+itoa(chID)+"/permissions/3", token, body)
 	if w.Code != http.StatusOK {
