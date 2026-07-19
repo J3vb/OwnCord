@@ -83,9 +83,7 @@ describe("screen share FPS", () => {
 
     it("scales bitrate up for 60 and 120 fps", () => {
       expect(getScreenShareMaxBitrate("high", 60)).toBe(SCREENSHARE_PUBLISH_BITRATES.high * 1.5);
-      expect(getScreenShareMaxBitrate("source", 120)).toBe(
-        SCREENSHARE_PUBLISH_BITRATES.source * 2,
-      );
+      expect(getScreenShareMaxBitrate("source", 120)).toBe(SCREENSHARE_PUBLISH_BITRATES.source * 2);
     });
   });
 
