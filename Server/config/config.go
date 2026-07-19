@@ -79,8 +79,14 @@ type PluginsConfig struct {
 }
 
 // GitHubConfig holds GitHub API settings for update checking.
+//
+// Owner/Repo point at the public releases repository. Server and client
+// update checks fetch release assets from this repo, so it must stay
+// publicly readable even when the source repository is private.
 type GitHubConfig struct {
 	Token string `koanf:"token"`
+	Owner string `koanf:"owner"`
+	Repo  string `koanf:"repo"`
 }
 
 // VoiceConfig holds LiveKit server connection and voice quality settings.
@@ -188,7 +194,10 @@ func defaults() Config {
 			LiveKitURL: "ws://localhost:7880",
 			Quality:    "medium",
 		},
-		GitHub: GitHubConfig{},
+		GitHub: GitHubConfig{
+			Owner: "J3vb",
+			Repo:  "OwnCord-releases",
+		},
 		EventPersistence: EventPersistenceConfig{
 			Enabled:               true,
 			RetentionHours:        24,

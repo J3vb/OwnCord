@@ -3,6 +3,7 @@
 // A plugin that declares the `ui` capability ships HTML/CSS/JS assets and a
 // list of tabs. The host serves those assets at /api/v1/plugins/<name>/ui/...
 // and the Solid.js client bridge renders each tab inside a sandboxed iframe.
+
 package plugin
 
 import (

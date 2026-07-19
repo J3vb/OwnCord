@@ -1696,7 +1696,7 @@ func TestTyping_RateLimited_SilentlyDropped(t *testing.T) {
 
 // TestBroadcastExclude_SendsToOthersNotSelf verifies that broadcastExclude
 // delivers to all channel members except the excluded user.
-// This is exercised indirectly via typing_start (which calls broadcastExclude).
+// This is exercised indirectly via typing_start (which calls broadcastExcludeLow).
 func TestBroadcastExclude_SendsToOthersNotSelf(t *testing.T) {
 	hub, database := newHandlerHub(t)
 	chID := seedTestChannel(t, database, "excl-chan1")

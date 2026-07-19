@@ -74,7 +74,7 @@ pub fn run() {
             #[cfg(not(target_os = "linux"))]
             rfd::MessageDialog::new()
                 .set_title("OwnCord failed to start")
-                .set_description(&format!(
+                .set_description(format!(
                     "The application encountered a startup error and cannot continue.\n\n{e}"
                 ))
                 .set_level(rfd::MessageLevel::Error)

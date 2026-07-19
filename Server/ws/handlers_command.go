@@ -5,6 +5,7 @@
 // plugin returns a Reply, it is sent only to the invoking client (ephemeral).
 // If the plugin returns a Broadcast string, it is broadcast to the channel
 // only after verifying the invoking client holds SEND_MESSAGES permission.
+
 package ws
 
 import (

@@ -93,8 +93,9 @@ func (p *LiveKitProcess) SetProcessStoppedForTest() {
 // NewHubForTest creates a minimal Hub with no DB or limiter for webhook testing.
 func NewHubForTest() *Hub {
 	return &Hub{
-		clients: make(map[int64]*Client),
-		pubsub:  NewPubSub(),
+		clients:      make(map[int64]*Client),
+		pubsub:       NewPubSub(),
+		topicLimiter: NewTopicRateLimiter(topicRateLimitPerSecond, time.Second),
 	}
 }
 
