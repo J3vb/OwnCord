@@ -253,8 +253,12 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	// Client auto-update endpoint (unauthenticated). Per-IP rate limited to
 	// bound abuse; the signature fetch is cached inside the updater (DoS fix).
+	// Dedicated key prefix (mirroring "livekit_proxy:"): the empty-prefix
+	// middleware would share per-IP buckets with verify-totp, password change,
+	// and the other sensitive endpoints, so a client's 30/min auto-poll could
+	// 429 its user's own 2FA or password change.
 	MountClientUpdateRoute(
-		r.With(RateLimitMiddleware(limiter, clientUpdateRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)),
+		r.With(rateLimitMiddlewareWithPrefix(limiter, "client_update:", clientUpdateRateLimitPerMinute, time.Minute, cfg.Server.TrustedProxies)),
 		u,
 	)
 
