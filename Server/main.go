@@ -25,7 +25,6 @@ import (
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/plugin"
 	"github.com/owncord/server/storage"
-	"github.com/owncord/server/store"
 	"github.com/owncord/server/telemetry"
 	"github.com/owncord/server/ws"
 )
@@ -143,12 +142,6 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 		}
 	}()
 
-	// ── 5. Construct shared store wrapper ──────────────────────────────────
-	// Used by both the event persistence layer and the plugin runtime. Once
-	// the Phase A "store everywhere" refactor lands, NewRouter will accept
-	// store.Store directly and this wrapper goes away.
-	storeWrapper := store.NewSQLiteStore(database)
-
 	// ── 5a. Construct plugin runtime BEFORE the router so the router can
 	// wire the live registry into the plugin admin handler. ────────────────
 	var pluginRegistry *plugin.Registry
@@ -158,7 +151,7 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 			MaxMemoryMB:   cfg.Plugins.MaxMemoryMB,
 			CPUBudgetMs:   cfg.Plugins.CPUBudgetMs,
 			HTTPAllowlist: cfg.Plugins.HTTPAllowlist,
-			Store:         storeWrapper,
+			Store:         database,
 		})
 		if plugErr != nil {
 			log.Warn("plugin runtime init failed; continuing without plugins", "error", plugErr)
@@ -186,7 +179,7 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 		// this, the events table accumulates rows whose payload seqs reset
 		// to 1 after every restart, breaking the reconnect "events since
 		// last_seq" contract.
-		if maxSeq, seedErr := storeWrapper.GetMaxEventSeq(bgCtx); seedErr != nil {
+		if maxSeq, seedErr := database.GetMaxEventSeq(bgCtx); seedErr != nil {
 			log.Warn("event persistence: failed to read MAX(events.seq); starting hub seq from 0", "error", seedErr)
 		} else if maxSeq > 0 {
 			hub.SeedSeq(uint64(maxSeq))
@@ -194,18 +187,18 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 		}
 
 		persister := ws.NewEventPersister(
-			storeWrapper,
+			database,
 			4096,
 			cfg.EventPersistence.BatchSize,
 			time.Duration(cfg.EventPersistence.BatchFlushMs)*time.Millisecond,
 		)
 		persister.Start(bgCtx)
 		hub.SetEventPersister(persister)
-		hub.SetEventStore(storeWrapper)
+		hub.SetEventStore(database)
 
 		retention := time.Duration(cfg.EventPersistence.RetentionHours) * time.Hour
 		prunerInterval := time.Duration(cfg.EventPersistence.PrunerIntervalMinutes) * time.Minute
-		ws.StartEventPruner(bgCtx, storeWrapper, retention, prunerInterval)
+		ws.StartEventPruner(bgCtx, database, retention, prunerInterval)
 		defer func() {
 			stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer stopCancel()

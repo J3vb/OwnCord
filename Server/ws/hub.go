@@ -16,7 +16,6 @@ import (
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/plugin"
 	"github.com/owncord/server/service"
-	"github.com/owncord/server/store"
 	"github.com/owncord/server/syncutil"
 )
 
@@ -65,7 +64,7 @@ type Hub struct {
 	// because main.go wires these after NewRouter has already started the
 	// Run loop, which reads them on the broadcast/replay paths.
 	eventPersister atomic.Pointer[EventPersister]
-	eventStore     atomic.Pointer[store.EventStore] // read path for cold-tier replay
+	eventStore     atomic.Pointer[EventStore] // read path for cold-tier replay
 
 	// Phase C Step 9 — plugin wiring.
 	pluginRegistry *plugin.Registry                 // slash-command dispatch; nil = no plugins; wire before Run
@@ -773,7 +772,7 @@ func (h *Hub) SetEventPersister(p *EventPersister) {
 // reconnect replay path. Typically the same store backing SetEventPersister.
 // Pass nil to disable. Safe to call at any time, including after Run has
 // started.
-func (h *Hub) SetEventStore(s store.EventStore) {
+func (h *Hub) SetEventStore(s EventStore) {
 	if s == nil {
 		h.eventStore.Store(nil)
 		return

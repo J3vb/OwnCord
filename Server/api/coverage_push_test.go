@@ -20,7 +20,6 @@ import (
 	"github.com/owncord/server/api"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/service"
-	"github.com/owncord/server/store"
 )
 
 // ─── handleCreateInvite: malformed JSON body ────────────────────────────────
@@ -750,7 +749,7 @@ func buildCombinedRouter(t *testing.T) (http.Handler, *auth.RateLimiter, string)
 	limiter := auth.NewRateLimiter()
 
 	r := chi.NewRouter()
-	svc := service.New(store.NewSQLiteStore(database), limiter)
+	svc := service.New(database, limiter)
 	api.MountAuthRoutes(r, database, limiter, nil, testTOTPKey)
 	api.MountProfileRoutes(r, database, svc, limiter, nil, nil)
 	api.MountInviteRoutes(r, database, svc)

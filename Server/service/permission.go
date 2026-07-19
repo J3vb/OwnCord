@@ -7,7 +7,6 @@ import (
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
-	"github.com/owncord/server/store"
 	"github.com/owncord/server/telemetry"
 )
 
@@ -27,7 +26,7 @@ const permCacheTTL = 30 * time.Second
 // at scale. The cache is populated lazily on first access and invalidated
 // on role or channel override changes.
 type PermissionService struct {
-	st      store.Store
+	st      Store
 	checker *permissions.Checker
 
 	mu    sync.RWMutex
@@ -35,7 +34,7 @@ type PermissionService struct {
 }
 
 // NewPermissionService creates a PermissionService backed by the given DB.
-func NewPermissionService(st store.Store, checker *permissions.Checker) *PermissionService {
+func NewPermissionService(st Store, checker *permissions.Checker) *PermissionService {
 	return &PermissionService{
 		st:      st,
 		checker: checker,

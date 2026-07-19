@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/owncord/server/plugin"
-	"github.com/owncord/server/store"
 	"github.com/owncord/server/ws"
 )
 
@@ -55,14 +54,12 @@ func TestChatCommand_NoRegistry_ReturnsError(t *testing.T) {
 // plugin owning the command.
 func TestChatCommand_UnknownCommand_ReturnsError(t *testing.T) {
 	hub, database := newTestHub(t)
-	_ = database
 	send := make(chan []byte, 4)
 	c := ws.NewTestClient(hub, 1, send)
 	hub.Register(c)
 	defer hub.Unregister(c)
 
-	mem := store.NewMemStore()
-	reg, err := plugin.NewRegistry(plugin.Config{Store: mem})
+	reg, err := plugin.NewRegistry(plugin.Config{Store: database})
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}

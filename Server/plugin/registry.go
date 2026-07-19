@@ -22,8 +22,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-
-	"github.com/owncord/server/store"
 )
 
 // Config is the runtime configuration sourced from PluginsConfig.
@@ -32,7 +30,7 @@ type Config struct {
 	MaxMemoryMB   int
 	CPUBudgetMs   int
 	HTTPAllowlist []string
-	Store         store.PluginStore
+	Store         PluginStore
 }
 
 // Registry is the central plugin coordinator.

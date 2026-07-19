@@ -15,14 +15,13 @@ import (
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/service"
-	"github.com/owncord/server/store"
 )
 
 // newTestModService builds a real ModerationService over the test database so
 // PATCH-user ban paths exercise the production authorization (BAN_MEMBERS +
 // role hierarchy) instead of a stub.
 func newTestModService(database *db.DB) *service.ModerationService {
-	st := store.NewSQLiteStore(database)
+	st := database
 	checker := permissions.NewChecker(st)
 	return service.NewModerationService(st, service.NewPermissionService(st, checker))
 }

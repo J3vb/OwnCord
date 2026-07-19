@@ -11,13 +11,12 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/service"
-	"github.com/owncord/server/store"
 )
 
 // buildInviteRouter returns a chi router with invite routes and auth middleware.
 func buildInviteRouter(database *db.DB, limiter *auth.RateLimiter) http.Handler {
 	r := chi.NewRouter()
-	svc := service.New(store.NewSQLiteStore(database), limiter)
+	svc := service.New(database, limiter)
 	api.MountAuthRoutes(r, database, limiter, nil, testTOTPKey)
 	api.MountInviteRoutes(r, database, svc)
 	return r

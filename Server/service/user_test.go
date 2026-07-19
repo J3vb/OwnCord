@@ -6,14 +6,15 @@ import (
 	"testing"
 
 	"github.com/owncord/server/db"
-	"github.com/owncord/server/store"
 )
 
-// pwStore wraps MemStore with controllable DeleteOtherSessions behavior and
-// audit capture, so the committed-password partial-success contract (W2-2)
-// is testable.
+// pwStore wraps a real *db.DB with controllable DeleteOtherSessions behavior
+// and audit capture, so the committed-password partial-success contract (W2-2)
+// is testable. Embedding *db.DB satisfies the service Store interface; the two
+// overridden methods intercept the calls the contract turns on while every
+// other call (UpdateUserPassword, GetUserByID) hits the real database.
 type pwStore struct {
-	*store.MemStore
+	*db.DB
 	failRevokes int // number of DeleteOtherSessions calls that fail before succeeding
 	revokeCalls int
 	audits      []string
@@ -37,9 +38,9 @@ func (f *pwStore) LogAudit(_ int64, action, _ string, _ int64, _ string) error {
 // error (the old password is dead; a "failed" report walks the user into the
 // confirm lockout), and the audit row must still be written.
 func TestChangePassword_RevokeFailureIsPartialSuccess(t *testing.T) {
-	ms := store.NewMemStore()
-	ms.SeedUser(&db.User{ID: 7, Username: "pat", PasswordHash: "oldhash"})
-	fs := &pwStore{MemStore: ms, failRevokes: 99}
+	database := newTestDB(t)
+	seedUser(t, database, &db.User{ID: 7, Username: "pat", PasswordHash: "oldhash"})
+	fs := &pwStore{DB: database, failRevokes: 99}
 	svc := NewUserService(fs)
 
 	res, err := svc.ChangePassword(7, "newhash", 1)
@@ -49,7 +50,7 @@ func TestChangePassword_RevokeFailureIsPartialSuccess(t *testing.T) {
 	if !res.RevokeFailed {
 		t.Fatal("RevokeFailed should be set when revocation keeps failing")
 	}
-	if u, _ := ms.GetUserByID(7); u.PasswordHash != "newhash" {
+	if u, _ := database.GetUserByID(7); u.PasswordHash != "newhash" {
 		t.Fatal("password should be committed")
 	}
 	if !slices.Contains(fs.audits, "password_change") {
@@ -60,9 +61,9 @@ func TestChangePassword_RevokeFailureIsPartialSuccess(t *testing.T) {
 // TestChangePassword_RetryRecoversRevocation: a single transient revocation
 // failure is absorbed by the bounded compensating retry.
 func TestChangePassword_RetryRecoversRevocation(t *testing.T) {
-	ms := store.NewMemStore()
-	ms.SeedUser(&db.User{ID: 7, Username: "pat", PasswordHash: "oldhash"})
-	fs := &pwStore{MemStore: ms, failRevokes: 1}
+	database := newTestDB(t)
+	seedUser(t, database, &db.User{ID: 7, Username: "pat", PasswordHash: "oldhash"})
+	fs := &pwStore{DB: database, failRevokes: 1}
 	svc := NewUserService(fs)
 
 	res, err := svc.ChangePassword(7, "newhash", 1)

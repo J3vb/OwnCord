@@ -23,7 +23,6 @@ import (
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/service"
 	"github.com/owncord/server/storage"
-	"github.com/owncord/server/store"
 )
 
 // testPermSvc wires a PermissionService around the test DB so
@@ -31,7 +30,7 @@ import (
 // exercise per-channel ACLs directly — they go through the live
 // permissions.Checker, which is the production path anyway.
 func testPermSvc(database *db.DB) *service.PermissionService {
-	return service.NewPermissionService(store.NewSQLiteStore(database), permissions.NewChecker(database))
+	return service.NewPermissionService(database, permissions.NewChecker(database))
 }
 
 // ─── schema for upload tests ─────────────────────────────────────────────────
