@@ -129,8 +129,8 @@ ci: add lint step to GitHub Actions
 
 ## Pull Request Process
 
-1. Branch from `dev` (the active development branch)
-2. PRs target `dev`; `main` is for stable releases only
+1. Branch from `main`
+2. PRs target `main`; releases are cut from tagged commits on `main`
 3. CI must pass (build + test + lint)
 4. Request code review
 5. Squash merge preferred
