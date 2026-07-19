@@ -11,11 +11,12 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 
-	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/service"
 )
 
 const MsgTypeChatCommand = "chat_command"
@@ -100,32 +101,31 @@ func handlePluginCommand(ctx context.Context, h *Hub, c *Client, reqID string, p
 }
 
 // requireChannelBroadcastAccess reports whether the client may post to
-// channelID, mirroring the normal message-send permission path. DM channels are
-// validated by participant membership; all other channels require
-// READ_MESSAGES|SEND_MESSAGES. On failure it sends an error to the client and
-// returns false. Routes through the shared permissions.Checker.RequireChannelAccess
-// so DM handling matches the rest of the codebase.
+// channelID, by delegating to the SAME service-layer check a real message
+// send runs (MessageService.CanPost: cached channel permissions; DM
+// membership AND DM blocks). The previous RequireChannelAccess route skipped
+// the block check in its DM branch — a blocked user's plugin broadcast could
+// reach the person who blocked them — and issued a raw GetRoleByID per
+// broadcast, bypassing the permission cache. On failure it sends an error to
+// the client and returns false.
 func (h *Hub) requireChannelBroadcastAccess(c *Client, channelID int64) bool {
 	if c.user == nil {
 		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "not authenticated"))
 		return false
 	}
-	ch, err := h.db.GetChannel(channelID)
-	if err != nil || ch == nil {
-		c.sendMsg(buildErrorMsg(ErrCodeNotFound, "channel not found"))
+	if h.messageSvc == nil {
+		// No service wired (bare test hub) — fail closed rather than allow
+		// an ungated broadcast.
+		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "broadcast gate unavailable"))
 		return false
 	}
-	role, err := h.db.GetRoleByID(c.user.RoleID)
-	if err != nil || role == nil {
-		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "role not found"))
-		return false
-	}
-	if accessErr := h.permChecker.RequireChannelAccess(
-		c.userID, role.Permissions, role.ID, ch.Type, channelID,
-		permissions.ReadMessages|permissions.SendMessages,
-	); accessErr != nil {
+	if err := h.messageSvc.CanPost(c.userID, channelID); err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			c.sendMsg(buildErrorMsg(ErrCodeNotFound, "channel not found"))
+			return false
+		}
 		slog.Warn("ws plugin broadcast permission denied",
-			"user_id", c.userID, "channel_id", channelID, "err", accessErr)
+			"user_id", c.userID, "channel_id", channelID, "err", err)
 		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "missing permission to post in this channel"))
 		return false
 	}

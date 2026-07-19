@@ -677,6 +677,19 @@ func (s *MessageService) GetAccessibleChannelIDs(userID int64) ([]int64, error) 
 	return ids, nil
 }
 
+// CanPost reports whether userID may post into channelID, applying the same
+// checks as a real message send: channel permissions via the cached checker
+// for regular channels; participant membership AND block status for DMs.
+// Exists so gates outside the send flow (the plugin broadcast path) share
+// exactly this policy instead of hand-rolling a weaker copy.
+func (s *MessageService) CanPost(userID, channelID int64) error {
+	ch, err := s.st.GetChannel(channelID)
+	if err != nil || ch == nil {
+		return fmt.Errorf("%w: channel not found", ErrNotFound)
+	}
+	return s.checkSendPermission(userID, channelID, ch.Type == "dm")
+}
+
 // checkSendPermission validates send permission for DM and non-DM channels.
 func (s *MessageService) checkSendPermission(userID, channelID int64, isDM bool) error {
 	if isDM {

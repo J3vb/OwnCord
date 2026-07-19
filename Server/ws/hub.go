@@ -43,6 +43,10 @@ type Hub struct {
 	lkProcess    *LiveKitProcess
 	registry     *HandlerRegistry
 	permChecker  *permissions.Checker
+	// messageSvc gates plugin broadcasts through the same posting policy as a
+	// real message send (permissions, DM membership, DM blocks). Nil only in
+	// bare test hubs; the broadcast gate fails closed then.
+	messageSvc *service.MessageService
 
 	pubsub       *PubSub           // topic-based pub/sub for O(subscribers) broadcast
 	topicLimiter *TopicRateLimiter // per-topic throughput caps
@@ -117,6 +121,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 		chatDeps.MessageSvc = svc.Messages
 		presenceDeps.ChannelSvc = svc.Channels
 		reactionDeps.MessageSvc = svc.Messages
+		h.messageSvc = svc.Messages
 	}
 
 	registerChatHandlers(reg, chatDeps)
