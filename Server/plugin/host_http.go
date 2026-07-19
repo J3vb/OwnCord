@@ -65,9 +65,10 @@ func (r *Registry) HTTPDo(ctx context.Context, inst *Instance, req HTTPRequest) 
 	if !r.hostAllowed(host) {
 		return nil, fmt.Errorf("%w: %s", ErrHTTPHostDenied, host)
 	}
-	if err := rejectPrivateAddrs(ctx, host); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrHTTPHostDenied, err)
-	}
+	// No pre-resolve here: the transport's guarded dial resolves once,
+	// validates every address, and dials only vetted IPs — it is the
+	// authoritative SSRF check, and a second lookup would just cost an extra
+	// DNS round trip while re-opening the rebinding TOCTOU it exists to close.
 
 	httpReq, err := http.NewRequestWithContext(ctx, req.Method, req.URL, bytes.NewReader(req.Body))
 	if err != nil {
@@ -78,43 +79,11 @@ func (r *Registry) HTTPDo(ctx context.Context, inst *Instance, req HTTPRequest) 
 	}
 	// Custom transport with a guarded DialContext: the host is resolved once,
 	// every candidate IP is validated against the blocklist, and the actual
-	// connection is made to that specific vetted IP — never re-resolved by
+	// connection is made to a specific vetted IP — never re-resolved by
 	// hostname. This closes the DNS-rebinding TOCTOU window where a second
 	// lookup (the one net.Dialer would perform on a hostname) could return an
-	// internal IP after rejectPrivateAddrs above had already approved the name.
-	dialer := &net.Dialer{Timeout: httpTimeout}
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			h, port, splitErr := net.SplitHostPort(addr)
-			if splitErr != nil {
-				return nil, splitErr
-			}
-			// IP literal: validate and dial as-is (no resolution happens).
-			if ip := net.ParseIP(h); ip != nil {
-				if err := ipAllowed(ip); err != nil {
-					return nil, fmt.Errorf("%w: %v", ErrHTTPHostDenied, err)
-				}
-				return dialer.DialContext(ctx, network, addr)
-			}
-			// Hostname: resolve once, validate every returned address, then
-			// dial the concrete vetted IP so the connection target is exactly
-			// the address that was checked.
-			resolver := &net.Resolver{}
-			ips, lookupErr := resolver.LookupIPAddr(ctx, h)
-			if lookupErr != nil {
-				return nil, fmt.Errorf("%w: dns lookup failed: %v", ErrHTTPHostDenied, lookupErr)
-			}
-			if len(ips) == 0 {
-				return nil, fmt.Errorf("%w: no addresses for %s", ErrHTTPHostDenied, h)
-			}
-			for _, resolved := range ips {
-				if err := ipAllowed(resolved.IP); err != nil {
-					return nil, fmt.Errorf("%w: %v", ErrHTTPHostDenied, err)
-				}
-			}
-			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
-		},
-	}
+	// internal IP after an earlier check had approved the name.
+	transport := &http.Transport{DialContext: guardedDialContext()}
 	client := &http.Client{
 		Timeout:   httpTimeout,
 		Transport: transport,
@@ -128,9 +97,8 @@ func (r *Registry) HTTPDo(ctx context.Context, inst *Instance, req HTTPRequest) 
 			if !r.hostAllowed(h) {
 				return fmt.Errorf("%w: redirect to %s", ErrHTTPHostDenied, h)
 			}
-			if err := rejectPrivateAddrs(redirReq.Context(), h); err != nil {
-				return fmt.Errorf("%w: redirect to private addr: %v", ErrHTTPHostDenied, err)
-			}
+			// Address vetting happens in the guarded dial the redirect will
+			// flow through — no pre-resolve needed here either.
 			return nil
 		},
 	}
@@ -189,29 +157,59 @@ func (r *Registry) hostAllowed(host string) bool {
 	return false
 }
 
-// rejectPrivateAddrs resolves host and returns an error if any resolved
-// address is loopback, link-local, private (RFC1918), or unspecified.
-// This prevents an allowlisted hostname from being repointed at internal
-// services via DNS.
-func rejectPrivateAddrs(ctx context.Context, host string) error {
-	// If host is already an IP literal, check it directly.
-	if ip := net.ParseIP(host); ip != nil {
-		return ipAllowed(ip)
+// lookupIPAddr and dialContext are swappable seams so the guarded dial can be
+// tested without real DNS or network reachability.
+var (
+	lookupIPAddr = func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		return (&net.Resolver{}).LookupIPAddr(ctx, host)
 	}
-	resolver := &net.Resolver{}
-	ips, err := resolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return fmt.Errorf("dns lookup failed: %w", err)
+	dialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		d := &net.Dialer{Timeout: httpTimeout}
+		return d.DialContext(ctx, network, addr)
 	}
-	if len(ips) == 0 {
-		return fmt.Errorf("no addresses for %s", host)
-	}
-	for _, addr := range ips {
-		if err := ipAllowed(addr.IP); err != nil {
-			return err
+)
+
+// guardedDialContext returns the SSRF-guarded dial used by HTTPDo's
+// transport: resolve once, validate every returned address, then dial vetted
+// concrete IPs. All addresses are validated before any dial (one poisoned
+// record among them refuses the whole request), and every vetted address is
+// tried in order — a dual-stack or round-robin host whose first record is
+// down must still connect via the next one.
+func guardedDialContext() func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		h, port, splitErr := net.SplitHostPort(addr)
+		if splitErr != nil {
+			return nil, splitErr
 		}
+		// IP literal: validate and dial as-is (no resolution happens).
+		if ip := net.ParseIP(h); ip != nil {
+			if err := ipAllowed(ip); err != nil {
+				return nil, fmt.Errorf("%w: %v", ErrHTTPHostDenied, err)
+			}
+			return dialContext(ctx, network, addr)
+		}
+		ips, lookupErr := lookupIPAddr(ctx, h)
+		if lookupErr != nil {
+			return nil, fmt.Errorf("%w: dns lookup failed: %v", ErrHTTPHostDenied, lookupErr)
+		}
+		if len(ips) == 0 {
+			return nil, fmt.Errorf("%w: no addresses for %s", ErrHTTPHostDenied, h)
+		}
+		for _, resolved := range ips {
+			if err := ipAllowed(resolved.IP); err != nil {
+				return nil, fmt.Errorf("%w: %v", ErrHTTPHostDenied, err)
+			}
+		}
+		var dialErr error
+		for _, resolved := range ips {
+			conn, err := dialContext(ctx, network, net.JoinHostPort(resolved.IP.String(), port))
+			if err == nil {
+				return conn, nil
+			}
+			dialErr = err
+		}
+		return nil, dialErr
 	}
-	return nil
 }
 
 // cgnRange covers RFC6598 carrier-grade NAT (100.64.0.0/10). net.IP.IsPrivate
