@@ -743,12 +743,26 @@ func (m *MemStore) ListAllUsers(_ int, _ int) ([]db.UserWithRole, error) {
 	panic("memstore: not implemented: ListAllUsers")
 }
 
-func (m *MemStore) BanUser(_ int64, _ string, _ *time.Time) error {
-	panic("memstore: not implemented: BanUser")
+func (m *MemStore) BanUser(userID int64, reason string, _ *time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if u, ok := m.users[userID]; ok {
+		u.Banned = true
+		r := reason
+		u.BanReason = &r
+	}
+	return nil
 }
 
-func (m *MemStore) UnbanUser(_ int64) error {
-	panic("memstore: not implemented: UnbanUser")
+func (m *MemStore) UnbanUser(userID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if u, ok := m.users[userID]; ok {
+		u.Banned = false
+		u.BanReason = nil
+		u.BanExpires = nil
+	}
+	return nil
 }
 
 func (m *MemStore) LogAudit(_ int64, _, _ string, _ int64, _ string) error {
