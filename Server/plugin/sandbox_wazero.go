@@ -133,6 +133,14 @@ func (r *Registry) activateWithRuntime(ctx context.Context, platform any, inst *
 	// locking. The plugin must also have declared the `commands` capability in
 	// its manifest, otherwise no binding happens.
 	r.mu.Lock()
+	if inst.module != nil {
+		// Lost a concurrent activation race (e.g. two dispatches both saw a
+		// closed module); keep the winner's module and discard ours. The
+		// winner already handled command binding.
+		r.mu.Unlock()
+		_ = module.Close(ctx)
+		return nil
+	}
 	inst.module = module
 	r.mu.Unlock()
 	if inst.Manifest.HasCapability(CapCommands) {
@@ -171,10 +179,33 @@ func (r *Registry) platformDeactivate(inst *Instance) {
 // fall back to the not-found response. A plugin that exports
 // command_dispatch but lacks allocate returns a user-facing diagnostic.
 func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, channelID int64, cmd string, args []string) (*CommandResult, bool) {
-	if inst == nil || inst.module == nil {
+	if inst == nil {
 		return nil, false
 	}
-	mod, ok := inst.module.(api.Module)
+	r.mu.RLock()
+	moduleAny := inst.module
+	enabled := inst.Enabled
+	r.mu.RUnlock()
+	if moduleAny == nil {
+		// A previous CPU-budget overrun or guest trap closed the module
+		// (releaseClosedModule cleared it). Re-instantiate lazily so one bad
+		// command doesn't brick the plugin until an admin disable/enable
+		// cycle or a server restart. Re-instantiation resets the guest's
+		// in-memory state. Disabled plugins stay dark.
+		if !enabled {
+			return nil, false
+		}
+		if err := r.activate(ctx, inst); err != nil {
+			return &CommandResult{Reply: fmt.Sprintf("plugin %s: reactivate: %v", inst.Manifest.Name, err)}, true
+		}
+		r.mu.RLock()
+		moduleAny = inst.module
+		r.mu.RUnlock()
+		if moduleAny == nil {
+			return nil, false
+		}
+	}
+	mod, ok := moduleAny.(api.Module)
 	if !ok {
 		return nil, false
 	}
@@ -213,7 +244,16 @@ func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, ch
 	// this deadline instead of the long-lived WebSocket context. The runtime
 	// was created WithCloseOnContextDone(true), so an expired deadline closes
 	// the module and interrupts a runaway guest (e.g. `for {}`) — the Call
-	// returns an error rather than panicking, which the paths below surface.
+	// returns an error rather than panicking, which the paths below surface,
+	// and releaseClosedModule then marks the instance for lazy
+	// re-instantiation on the next dispatch.
+	//
+	// The budget is wall-clock over guest execution. No host imports are
+	// wired into the runtime yet, so host-call time cannot be attributed to
+	// the guest today; when host functions (host_http, host_storage, …) land,
+	// their execution time must be excluded from this budget — otherwise the
+	// floor would kill any command performing a host HTTP call (httpTimeout
+	// is 10s against a 100ms floor).
 	budgetMs := inst.Manifest.Resources.CPUBudgetMs
 	if budgetMs <= 0 {
 		budgetMs = r.cfg.CPUBudgetMs
@@ -228,6 +268,7 @@ func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, ch
 	size := uint64(len(payload))
 	ptrs, callErr := allocFn.Call(callCtx, size)
 	if callErr != nil || len(ptrs) == 0 {
+		r.releaseClosedModule(inst, mod)
 		return &CommandResult{Reply: fmt.Sprintf("plugin %s: allocate(%d): %v", inst.Manifest.Name, size, callErr)}, true
 	}
 	ptr := ptrs[0]
@@ -245,6 +286,10 @@ func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, ch
 	}
 
 	if callErr != nil {
+		// A failed guest call may have closed the module (deadline, trap,
+		// parent-context cancellation); release it so the next dispatch
+		// re-instantiates instead of dispatching into a dead module forever.
+		r.releaseClosedModule(inst, mod)
 		// Surface a CPU-budget overrun as a clean, specific error rather than
 		// leaking the raw "module closed with context deadline exceeded".
 		if callCtx.Err() == context.DeadlineExceeded {
@@ -271,6 +316,22 @@ func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, ch
 		return &CommandResult{Reply: string(resBytes)}, true
 	}
 	return &CommandResult{Reply: dr.Reply}, true
+}
+
+// releaseClosedModule drops inst.module when the wazero runtime closed it out
+// from under us (CPU-budget deadline via WithCloseOnContextDone, a guest
+// trap, or parent-context cancellation), so the next dispatch lazily
+// re-instantiates the plugin instead of erroring on a dead module forever.
+// The pointer guard keeps a concurrent re-activation's fresh module intact.
+func (r *Registry) releaseClosedModule(inst *Instance, mod api.Module) {
+	if !mod.IsClosed() {
+		return
+	}
+	r.mu.Lock()
+	if inst.module == mod {
+		inst.module = nil
+	}
+	r.mu.Unlock()
 }
 
 // listExportedCommands calls the plugin's optional `list_commands` export
