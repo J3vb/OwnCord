@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -30,12 +31,12 @@ func TestBanUser_RequiresBanPermission(t *testing.T) {
 	svc, _ := newTestModerationService()
 
 	// A member without BAN_MEMBERS is refused.
-	if err := svc.BanUser(3, 4, "nope", nil); !errors.Is(err, ErrForbidden) {
+	if err := svc.BanUser(context.Background(), 3, 4, "nope", nil); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("member ban attempt: want ErrForbidden, got %v", err)
 	}
 	// And gets Forbidden — not NotFound — for a nonexistent target, so the
 	// ban path cannot be used to enumerate user ids.
-	if err := svc.BanUser(3, 999, "probe", nil); !errors.Is(err, ErrForbidden) {
+	if err := svc.BanUser(context.Background(), 3, 999, "probe", nil); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("unauthorized probe of missing id: want ErrForbidden, got %v", err)
 	}
 }
@@ -44,11 +45,11 @@ func TestBanUser_HierarchyEnforced(t *testing.T) {
 	svc, ms := newTestModerationService()
 
 	// Equal rank: mod cannot ban mod.
-	if err := svc.BanUser(2, 5, "peer", nil); !errors.Is(err, ErrForbidden) {
+	if err := svc.BanUser(context.Background(), 2, 5, "peer", nil); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("equal-rank ban: want ErrForbidden, got %v", err)
 	}
 	// Higher rank target: mod cannot ban the owner.
-	if err := svc.BanUser(2, 1, "coup", nil); !errors.Is(err, ErrForbidden) {
+	if err := svc.BanUser(context.Background(), 2, 1, "coup", nil); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("ban owner: want ErrForbidden, got %v", err)
 	}
 	owner, _ := ms.GetUserByID(1)
@@ -60,7 +61,7 @@ func TestBanUser_HierarchyEnforced(t *testing.T) {
 func TestBanUser_AuthorizedSucceeds(t *testing.T) {
 	svc, ms := newTestModerationService()
 
-	if err := svc.BanUser(2, 3, "spam", nil); err != nil {
+	if err := svc.BanUser(context.Background(), 2, 3, "spam", nil); err != nil {
 		t.Fatalf("authorized ban: %v", err)
 	}
 	target, _ := ms.GetUserByID(3)
@@ -72,11 +73,11 @@ func TestBanUser_AuthorizedSucceeds(t *testing.T) {
 	}
 
 	// Authorized actor gets a real NotFound for a missing target.
-	if err := svc.BanUser(2, 999, "gone", nil); !errors.Is(err, ErrNotFound) {
+	if err := svc.BanUser(context.Background(), 2, 999, "gone", nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("authorized ban of missing id: want ErrNotFound, got %v", err)
 	}
 	// Self-ban is a bad request regardless of authority.
-	if err := svc.BanUser(2, 2, "self", nil); !errors.Is(err, ErrBadRequest) {
+	if err := svc.BanUser(context.Background(), 2, 2, "self", nil); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("self ban: want ErrBadRequest, got %v", err)
 	}
 }
@@ -84,20 +85,20 @@ func TestBanUser_AuthorizedSucceeds(t *testing.T) {
 func TestUnbanUser_AuthorizationMatrix(t *testing.T) {
 	svc, ms := newTestModerationService()
 
-	if err := svc.BanUser(1, 3, "setup", nil); err != nil {
+	if err := svc.BanUser(context.Background(), 1, 3, "setup", nil); err != nil {
 		t.Fatalf("setup ban: %v", err)
 	}
 
 	// No BAN_MEMBERS → Forbidden (member 4 trying to unban member 3).
-	if err := svc.UnbanUser(4, 3); !errors.Is(err, ErrForbidden) {
+	if err := svc.UnbanUser(context.Background(), 4, 3); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("member unban: want ErrForbidden, got %v", err)
 	}
 	// Equal rank → Forbidden.
-	if err := svc.UnbanUser(2, 5); !errors.Is(err, ErrForbidden) {
+	if err := svc.UnbanUser(context.Background(), 2, 5); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("equal-rank unban: want ErrForbidden, got %v", err)
 	}
 	// Authorized → succeeds.
-	if err := svc.UnbanUser(2, 3); err != nil {
+	if err := svc.UnbanUser(context.Background(), 2, 3); err != nil {
 		t.Fatalf("authorized unban: %v", err)
 	}
 	target, _ := ms.GetUserByID(3)
