@@ -9,6 +9,7 @@
 // directory and persists each manifest into the PluginStore so admins can see
 // what is "installed", but the .wasm files are NOT executed. Calling
 // Dispatch() in the default build returns ErrRuntimeUnavailable.
+
 package plugin
 
 import (

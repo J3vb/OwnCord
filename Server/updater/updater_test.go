@@ -1130,3 +1130,38 @@ func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	newReq, _ := http.NewRequestWithContext(req.Context(), req.Method, newURL, req.Body)
 	return http.DefaultTransport.RoundTrip(newReq)
 }
+
+// TestVerifySignature_TauriBase64WrappedFormat locks in support for the .sig
+// format that `tauri signer sign` produces in the release pipeline: a
+// base64-wrapped minisign document. Raw minisign documents must keep working.
+func TestVerifySignature_TauriBase64WrappedFormat(t *testing.T) {
+	u, privateKey := newSignedTestUpdater(t, "", "1.0.0")
+	content := []byte("tauri wrapped signature test")
+	rawSig := signTestAsset(t, privateKey, content)
+	wrappedSig := []byte(base64.StdEncoding.EncodeToString(rawSig))
+
+	path := filepath.Join(t.TempDir(), "chatserver.exe")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatalf("writing test asset: %v", err)
+	}
+
+	if err := u.VerifySignature(path, wrappedSig); err != nil {
+		t.Errorf("base64-wrapped tauri signature should verify: %v", err)
+	}
+	if err := u.VerifySignature(path, rawSig); err != nil {
+		t.Errorf("raw minisign signature should verify: %v", err)
+	}
+	// Valid base64 that decodes to garbage must fail cleanly, not verify.
+	garbage := []byte(base64.StdEncoding.EncodeToString([]byte("not a signature")))
+	if err := u.VerifySignature(path, garbage); err == nil {
+		t.Error("garbage base64 signature should fail verification")
+	}
+	// Wrapped signature over different content must fail verification.
+	otherPath := filepath.Join(t.TempDir(), "other.bin")
+	if err := os.WriteFile(otherPath, []byte("tampered"), 0o600); err != nil {
+		t.Fatalf("writing tampered asset: %v", err)
+	}
+	if err := u.VerifySignature(otherPath, wrappedSig); err == nil {
+		t.Error("wrapped signature must not verify tampered content")
+	}
+}

@@ -10,9 +10,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import * as types from "./types";
 
-export async function startLivekitProxy(
-  params: types.StartLivekitProxyParams,
-): Promise<number> {
+export async function startLivekitProxy(params: types.StartLivekitProxyParams): Promise<number> {
   return invoke("start_livekit_proxy", params);
 }
 
@@ -52,9 +50,7 @@ export async function pttListenForKey(): Promise<number> {
   return invoke("ptt_listen_for_key");
 }
 
-export async function saveCredential(
-  params: types.SaveCredentialParams,
-): Promise<void> {
+export async function saveCredential(params: types.SaveCredentialParams): Promise<void> {
   return invoke("save_credential", params);
 }
 
@@ -64,9 +60,7 @@ export async function loadCredential(
   return invoke("load_credential", params);
 }
 
-export async function deleteCredential(
-  params: types.DeleteCredentialParams,
-): Promise<void> {
+export async function deleteCredential(params: types.DeleteCredentialParams): Promise<void> {
   return invoke("delete_credential", params);
 }
 
@@ -92,9 +86,7 @@ export async function getSettings(): Promise<types.Value> {
   return invoke("get_settings");
 }
 
-export async function saveSettings(
-  params: types.SaveSettingsParams,
-): Promise<void> {
+export async function saveSettings(params: types.SaveSettingsParams): Promise<void> {
   return invoke("save_settings", params);
 }
 

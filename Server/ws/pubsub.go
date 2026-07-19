@@ -2,7 +2,6 @@ package ws
 
 import (
 	"fmt"
-	"log/slog"
 	"sync"
 )
 
@@ -216,17 +215,4 @@ func (ps *PubSub) TopicsForClient(userID int64) []Topic {
 		result = append(result, t)
 	}
 	return result
-}
-
-// debugDump logs the current subscription state. For development use only.
-func (ps *PubSub) debugDump() {
-	ps.mu.RLock()
-	defer ps.mu.RUnlock()
-	for topic, subs := range ps.topics {
-		ids := make([]int64, 0, len(subs))
-		for uid := range subs {
-			ids = append(ids, uid)
-		}
-		slog.Debug("pubsub: topic", "topic", string(topic), "subscribers", ids)
-	}
 }

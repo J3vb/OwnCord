@@ -61,7 +61,7 @@ type Querier interface {
 	GetEventsSince(ctx context.Context, arg GetEventsSinceParams) ([]GetEventsSinceRow, error)
 	GetInvite(ctx context.Context, code string) (GetInviteRow, error)
 	GetLatestMessageID(ctx context.Context, channelID int64) (interface{}, error)
-	GetMaxEventSeq(ctx context.Context) (interface{}, error)
+	GetMaxEventSeq(ctx context.Context) (int64, error)
 	GetMessage(ctx context.Context, id int64) (Message, error)
 	GetMessagesByChannel(ctx context.Context, arg GetMessagesByChannelParams) ([]GetMessagesByChannelRow, error)
 	GetMessagesByChannelBeforeCursor(ctx context.Context, arg GetMessagesByChannelBeforeCursorParams) ([]GetMessagesByChannelBeforeCursorRow, error)

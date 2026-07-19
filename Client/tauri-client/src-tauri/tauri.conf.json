@@ -1,6 +1,6 @@
 {
   "productName": "OwnCord",
-  "version": "1.0.0",
+  "version": "1.1.0-alpha.1",
   "identifier": "com.owncord.client",
   "build": {
     "frontendDist": "../dist",
@@ -54,7 +54,7 @@
         "bundleMediaFramework": true
       }
     },
-    "category": "Network",
+    "category": "SocialNetworking",
     "shortDescription": "Self-hosted chat platform",
     "longDescription": "OwnCord is a self-hosted voice and text chat platform with end-to-end encryption and full media support.",
     "windows": {
