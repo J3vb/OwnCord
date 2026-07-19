@@ -1,7 +1,7 @@
 //go:build wazero
 
 // Phase C Step 9 — Real Wazero-backed plugin runtime. Compiled only with
-// `-tags wazero`; matches the postgres / otel build-tag pattern used
+// `-tags wazero`; matches the otel build-tag pattern used
 // elsewhere in the repo so the default sqlite-only build does not pull
 // wazero into go.mod at runtime.
 //
