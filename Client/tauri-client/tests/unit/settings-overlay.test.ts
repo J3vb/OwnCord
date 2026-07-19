@@ -256,8 +256,8 @@ describe("SettingsOverlay", () => {
     getTab(container, 5).click();
 
     const selects = container.querySelectorAll("select.form-input");
-    // input device, output device, video quality, video device = 4
-    expect(selects.length).toBe(4);
+    // input device, output device, video quality, screen share fps, video device = 5
+    expect(selects.length).toBe(5);
 
     const sliders = container.querySelectorAll(".settings-slider");
     expect(sliders.length).toBeGreaterThanOrEqual(1);
