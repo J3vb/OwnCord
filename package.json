@@ -2,7 +2,8 @@
   "private": true,
   "scripts": {
     "changelog": "changelogen",
-    "release": "changelogen --release"
+    "release": "changelogen --release",
+    "hooks:install": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
     "changelogen": "^0.6.2"
