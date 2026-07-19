@@ -2,6 +2,14 @@
 
 OwnCord uses a single SQLite database file (`data/chatserver.db`) with the pure-Go driver `modernc.org/sqlite` (no CGO). Migrations run automatically on startup.
 
+> **Data-access layers:** queries currently run as hand-written SQL in
+> `Server/db`; an sqlc-generated layer (`Server/db/dbgen`, from
+> `Server/db/queries/`) exists and is slated to become the real query layer
+> per decision D2 in
+> [plans/audit-2026-07-19-decisions.md](plans/audit-2026-07-19-decisions.md).
+> See [architecture/data-model.md](architecture/data-model.md) for the full
+> picture.
+
 ---
 
 ## Database Configuration
@@ -37,13 +45,19 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 |------|-------------|
 | `001_initial_schema.sql` | All core tables, default roles and settings |
 | `002_voice_states.sql` | Adds `voice_states` table |
-| `003_audit_log.sql` | Recreates `audit_log` with renamed columns |
-| `003_voice_optimization.sql` | Adds `camera`, `screenshare` to voice_states; voice settings to channels |
-| `004_fix_member_permissions.sql` | Fixes Member role permissions |
-| `005_channel_overrides_index.sql` | Adds composite index on channel_overrides |
-| `006_member_video_permissions.sql` | Adds USE_VIDEO and SHARE_SCREEN to Member role |
-| `007_attachment_dimensions.sql` | Adds `width` and `height` to attachments |
-| `008_dm_tables.sql` | Adds `dm_participants` and `dm_open_state` tables |
+| `003_audit_log.sql` | Recreates `audit_log` with canonical column names (via a transient `audit_log_v6` rename) |
+| `004_voice_optimization.sql` | Adds `camera`, `screenshare` to voice_states; voice settings to channels |
+| `005_fix_member_permissions.sql` | Fixes Member role permissions |
+| `006_channel_overrides_index.sql` | Adds composite index on channel_overrides |
+| `007_member_video_permissions.sql` | Adds USE_VIDEO and SHARE_SCREEN to Member role |
+| `008_attachment_dimensions.sql` | Adds `width` and `height` to attachments |
+| `009_dm_tables.sql` | Adds `dm_participants` and `dm_open_state` tables |
+| `010_attachment_uploader.sql` | Adds `attachments.uploader_id` + index for upload-ownership checks |
+| `011_rate_lockouts.sql` | Adds `rate_lockouts` so rate-limit lockouts survive restarts |
+| `012_user_blocks.sql` | Adds `user_blocks` (blocks DM creation/messaging between users) |
+| `013_channel_type_constraint.sql` | INSERT/UPDATE triggers restricting `channels.type` to `text`/`voice`/`dm` |
+| `014_events_table.sql` | Adds `events` — persistent broadcast log for reconnect cold-tier replay |
+| `015_plugins.sql` | Adds `plugins` and `plugin_kv` for the WASM plugin runtime |
 
 ---
 
@@ -137,7 +151,10 @@ CREATE TABLE channels (
 );
 ```
 
-Channel types: `text`, `voice`, `announcement`, `dm`.
+Channel types: `text`, `voice`, `dm`. Migration 013 installs INSERT/UPDATE
+triggers that reject any other value at the database layer. (An `announcement`
+type is planned but not yet implemented — see the D1 decision in
+[plans/audit-2026-07-19-decisions.md](plans/audit-2026-07-19-decisions.md).)
 
 ---
 
@@ -208,11 +225,14 @@ CREATE TABLE attachments (
     size        INTEGER NOT NULL,
     uploaded_at TEXT    NOT NULL DEFAULT (datetime('now')),
     width       INTEGER,
-    height      INTEGER
+    height      INTEGER,
+    uploader_id INTEGER REFERENCES users(id)
 );
 ```
 
-Uses UUID primary keys. `message_id` is NULL during upload, linked when the message is sent.
+Uses UUID primary keys. `message_id` is NULL during upload, linked when the
+message is sent. `uploader_id` (added by migration 010) records who uploaded
+the file and backs the ownership check when attaching an upload to a message.
 
 ---
 
@@ -324,6 +344,148 @@ CREATE TABLE dm_open_state (
 
 ---
 
+### login_attempts
+
+Login attempt log used for IP-based rate limiting and lockouts.
+
+```sql
+CREATE TABLE login_attempts (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip_address TEXT    NOT NULL,
+    username   TEXT,
+    success    INTEGER NOT NULL DEFAULT 0,
+    timestamp  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+---
+
+### settings
+
+Generic key/value store for server settings (`server_name`, `motd`,
+`registration_open`, …). Written by the admin API; read by the REST layer and
+the WebSocket hub (cached with a short TTL).
+
+```sql
+CREATE TABLE settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+```
+
+---
+
+### emoji
+
+Custom emoji metadata.
+
+```sql
+CREATE TABLE emoji (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    shortcode   TEXT    NOT NULL UNIQUE,
+    filename    TEXT    NOT NULL,
+    uploaded_by INTEGER NOT NULL REFERENCES users(id),
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+---
+
+### sounds
+
+**Dead schema.** Created by the initial schema for the soundboard feature,
+which has since been removed; the table remains but nothing reads or writes it.
+Slated for a cleanup migration (audit A-2026-07-13).
+
+```sql
+CREATE TABLE sounds (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL,
+    filename    TEXT    NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    uploaded_by INTEGER NOT NULL REFERENCES users(id),
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+---
+
+### rate_lockouts
+
+Persists rate-limiter lockouts (e.g. repeated failed logins) so they survive
+server restarts. Sliding-window counters themselves stay in memory.
+
+```sql
+CREATE TABLE rate_lockouts (
+    key        TEXT    PRIMARY KEY,
+    expires_at TEXT    NOT NULL
+);
+```
+
+---
+
+### user_blocks
+
+User blocking (added by migration 012): a block prevents DM creation and
+messaging between the two users.
+
+```sql
+CREATE TABLE user_blocks (
+    blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (blocker_id, blocked_id),
+    CHECK (blocker_id != blocked_id)
+);
+```
+
+---
+
+### events
+
+Persistent broadcast log (migration 014) — the cold tier of the reconnect
+replay pipeline (see [protocol.md](protocol.md)). Written asynchronously by
+the event persister, pruned by retention (configurable, default 24h). The
+hub's in-memory sequence counter is seeded from `MAX(events.seq)` at startup
+so sequence numbers stay monotonic across restarts.
+
+```sql
+CREATE TABLE events (
+    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT    NOT NULL,
+    payload    BLOB    NOT NULL,
+    channel_id INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
+### plugins / plugin_kv
+
+Plugin registry and per-plugin key/value storage (migration 015). `plugin_kv`
+is namespaced per plugin via the composite primary key.
+
+```sql
+CREATE TABLE plugins (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT    NOT NULL UNIQUE,
+    version       TEXT    NOT NULL,
+    enabled       INTEGER NOT NULL DEFAULT 0,
+    manifest_json TEXT    NOT NULL,
+    installed_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE plugin_kv (
+    plugin_id INTEGER NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+    key       TEXT    NOT NULL,
+    value     BLOB    NOT NULL,
+    PRIMARY KEY (plugin_id, key)
+);
+```
+
+---
+
 ## Indexes
 
 | Index Name | Table | Columns | Purpose |
@@ -339,6 +501,10 @@ CREATE TABLE dm_open_state (
 | `idx_voice_states_channel` | voice_states | `(channel_id)` | All users in a voice channel |
 | `idx_channel_overrides_channel_role` | channel_overrides | `(channel_id, role_id)` | Permission lookup |
 | `idx_dm_participants_user` | dm_participants | `(user_id)` | DM channel lookup |
+| `idx_attachments_uploader` | attachments | `(uploader_id)` | Upload-ownership checks |
+| `idx_user_blocks_blocked` | user_blocks | `(blocked_id, blocker_id)` | Reverse block lookup |
+| `idx_events_channel_seq` | events | `(channel_id, seq)` | Cold-tier replay per channel |
+| `idx_events_created_at` | events | `(created_at)` | Retention pruning |
 
 ---
 
@@ -377,9 +543,13 @@ Bits 2-4, 7, 13-15, 21-23, 28-29, 31 are reserved.
 1. Get the user's role -> role.Permissions (base)
 2. If (base & ADMINISTRATOR) != 0 -> ALLOW everything
 3. Get channel_overrides for (channel_id, role_id) -> allow, deny
-4. effective = (base | allow) & ~deny
+4. effective = (base & ~deny) | allow
 5. Check: (effective & required_permission) != 0
 ```
+
+Deny is applied first (strips bits), then allow (adds bits), so allow wins
+when both target the same bit — matching Discord's channel-override semantics
+(`permissions.EffectivePerms`).
 
 DM channels bypass role permissions entirely and use participant-based authorization instead.
 
