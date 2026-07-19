@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { wireDispatcher } from "../../src/lib/dispatcher";
+import { wireDispatcher, wireConnectionStatus } from "../../src/lib/dispatcher";
+import { createMockWsClient } from "../helpers/mock-ws";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import {
@@ -1252,5 +1253,32 @@ describe("WS Dispatcher", () => {
     });
 
     expect(messagesStore.getState().messagesByChannel.get(1)).toBeUndefined();
+  });
+});
+
+describe("wireConnectionStatus", () => {
+  beforeEach(() => {
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "disconnected" }));
+  });
+
+  it("writes ws state changes into ui.store.connectionStatus via the 5→3 mapping", () => {
+    const mockWs = createMockWsClient();
+    const unsub = wireConnectionStatus(mockWs);
+
+    mockWs.simulateStateChange("connecting");
+    expect(uiStore.getState().connectionStatus).toBe("reconnecting");
+
+    mockWs.simulateStateChange("authenticating");
+    expect(uiStore.getState().connectionStatus).toBe("reconnecting");
+
+    mockWs.simulateStateChange("connected");
+    expect(uiStore.getState().connectionStatus).toBe("connected");
+
+    mockWs.simulateStateChange("disconnected");
+    expect(uiStore.getState().connectionStatus).toBe("disconnected");
+
+    unsub();
+    mockWs.simulateStateChange("connected");
+    expect(uiStore.getState().connectionStatus).toBe("disconnected");
   });
 });

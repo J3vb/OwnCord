@@ -59,7 +59,7 @@ stateDiagram-v2
 | `enabled` | Editable textarea, attach + pickers active | — |
 | `read-only` (announcement, no MANAGE_MESSAGES) | Textarea replaced by a disabled bar | "Only moderators can post in announcement channels." |
 | `no-permission` | Disabled bar | "You don't have permission to send messages here." |
-| `offline` | Disabled, "Reconnecting…" | connection status (README §3) |
+| `offline` | Disabled — "Reconnecting…" while retrying, "Not connected" when disconnected | connection status (README §3) |
 | `slow-mode` | Disabled with a live countdown | "Slow mode: wait Ns." |
 | `uploading` | Send disabled until uploads settle (already `MessageInput.ts:138-141`) | per-attachment spinner |
 
@@ -100,7 +100,7 @@ sequenceDiagram
         SRV-->>WS: error{code}  %% SLOW_MODE / RATE_LIMITED / FORBIDDEN / INVALID_INPUT
         WS->>S: markSendFailed(correlationId, code)  %% row → "failed", Retry
     else transport drop
-        WS-->>S: markSendFailed(correlationId, "NETWORK")  %% ws_send channel-full/closed
+        WS-->>S: markSendFailed(correlationId, code)  %% channel full → "NETWORK"; closed/not-open → "OFFLINE"
     end
 ```
 

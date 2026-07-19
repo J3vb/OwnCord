@@ -145,6 +145,22 @@ describe("createMessageController", () => {
       expect(showError).not.toHaveBeenCalled();
     });
 
+    it("falls back to a toast on failure when the channel already has rows", async () => {
+      // Live broadcasts or an optimistic send can populate a channel before
+      // history loads; the inline region won't render then, so the failure
+      // must surface as a toast instead of silently.
+      mockGetChannelMessages.mockReturnValue([{ id: 5, content: "live row" }]);
+      const api = makeApi({
+        getMessages: vi.fn().mockRejectedValue(new Error("network error")),
+      });
+      const ctrl = createMessageController({ api, showError });
+
+      await ctrl.loadMessages(42, makeAbort().signal);
+
+      expect(mockSetChannelLoadError).toHaveBeenCalledWith(42);
+      expect(showError).toHaveBeenCalledWith("Failed to load message history");
+    });
+
     it("does not mark an error when aborted before failure", async () => {
       const { signal, abort } = makeAbort();
       abort();

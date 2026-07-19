@@ -67,3 +67,21 @@ export function createServerBanner(): ServerBannerControl {
 
   return { element: root, showRestart, showReconnecting, showDisconnected, hide, destroy };
 }
+
+/**
+ * Apply a store connection status to the banner (UX spec §3 table):
+ * reconnecting → "Reconnecting...", disconnected → "Disconnected",
+ * connected → hidden.
+ */
+export function applyConnectionStatus(
+  banner: ServerBannerControl,
+  status: "connected" | "reconnecting" | "disconnected",
+): void {
+  if (status === "reconnecting") {
+    banner.showReconnecting();
+  } else if (status === "disconnected") {
+    banner.showDisconnected();
+  } else {
+    banner.hide();
+  }
+}

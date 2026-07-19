@@ -15,6 +15,7 @@ const {
   mockSetReplyTo,
   mockStartEdit,
   mockScrollToMessage,
+  mockSetDisabled,
 } = vi.hoisted(() => ({
   mockMessageListMount: vi.fn(),
   mockMessageListDestroy: vi.fn(),
@@ -33,6 +34,7 @@ const {
   mockSetReplyTo: vi.fn(),
   mockStartEdit: vi.fn(),
   mockScrollToMessage: vi.fn(() => true),
+  mockSetDisabled: vi.fn(),
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -80,7 +82,7 @@ vi.mock("@components/MessageInput", () => ({
       startEdit: mockStartEdit,
       clearReply: vi.fn(),
       cancelEdit: vi.fn(),
-      setDisabled: vi.fn(),
+      setDisabled: mockSetDisabled,
     };
   }),
 }));
@@ -364,6 +366,68 @@ describe("createChannelController", () => {
       expect(opts.ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "chat_send" }));
       expect(mockAddOptimistic).toHaveBeenCalled();
       expect(mockMarkSendFailed).toHaveBeenCalledWith(expect.any(String), "OFFLINE");
+    });
+
+    it("composer disable reason distinguishes reconnecting from disconnected", () => {
+      const opts = makeOpts();
+      setConnectionStatus("reconnecting");
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      expect(mockSetDisabled).toHaveBeenLastCalledWith("Reconnecting…");
+
+      ctrl.destroyChannel();
+      setConnectionStatus("disconnected");
+      ctrl.mountChannel(43, "general-2");
+      expect(mockSetDisabled).toHaveBeenLastCalledWith("Not connected");
+    });
+
+    it("onRetryLoad re-invokes loadMessages for the mounted channel", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      (opts.msgCtrl.loadMessages as ReturnType<typeof vi.fn>).mockClear();
+
+      capturedMessageListOpts.onRetryLoad();
+
+      expect(opts.msgCtrl.loadMessages).toHaveBeenCalledWith(42, expect.any(AbortSignal));
+    });
+
+    it("onRetry re-sends the failed draft with a fresh correlation id", () => {
+      const opts = makeOpts();
+      let n = 0;
+      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      // cid-1 is channel_focus; the chat_send gets cid-2.
+      capturedMessageInputOpts.onSend("hello", null, []);
+      expect(mockAddOptimistic).toHaveBeenCalledWith(
+        expect.objectContaining({ correlationId: "cid-2", content: "hello" }),
+      );
+
+      capturedMessageListOpts.onRetry("cid-2");
+
+      // The old row is discarded and the draft re-sent under a new id.
+      expect(mockRemoveOptimistic).toHaveBeenCalledWith("cid-2");
+      expect(mockAddOptimistic).toHaveBeenLastCalledWith(
+        expect.objectContaining({ correlationId: "cid-3", content: "hello" }),
+      );
+    });
+
+    it("onDeleteDraft discards the failed row without re-sending", () => {
+      const opts = makeOpts();
+      let n = 0;
+      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageInputOpts.onSend("hello", null, []);
+      const sendCalls = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.length;
+
+      capturedMessageListOpts.onDeleteDraft("cid-2");
+
+      expect(mockRemoveOptimistic).toHaveBeenCalledWith("cid-2");
+      expect((opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.length).toBe(sendCalls);
     });
 
     it("onTyping sends typing_start via ws", () => {

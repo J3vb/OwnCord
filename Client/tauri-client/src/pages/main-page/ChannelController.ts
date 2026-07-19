@@ -319,7 +319,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // server still enforces block/permission and a refused send shows as a
     // failed row.
     const computeComposerReason = (): string | null => {
-      if (uiStore.getState().connectionStatus !== "connected") return "Reconnecting…";
+      const status = uiStore.getState().connectionStatus;
+      if (status === "reconnecting") return "Reconnecting…";
+      if (status === "disconnected") return "Not connected";
       const ch = channelsStore.getState().channels.get(channelId);
       if (ch === undefined) return null;
       if (!ch.canSend) {

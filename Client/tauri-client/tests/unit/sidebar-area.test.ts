@@ -1104,6 +1104,18 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
+    it("passes the ws client to the user bar (presence picker send path)", () => {
+      const opts = defaultOpts();
+      const result = createSidebarArea(opts);
+      container.appendChild(result.sidebarWrapper);
+
+      // Without ws, the status picker is permanently disabled and
+      // presence_update can never be sent — this pins the fix.
+      expect(createUserBar).toHaveBeenCalledWith(expect.objectContaining({ ws: opts.ws }));
+
+      cleanup(result);
+    });
+
     it("voice widget and user bar are included in children", () => {
       const result = createSidebarArea(defaultOpts());
       expect(result.children.length).toBe(2);

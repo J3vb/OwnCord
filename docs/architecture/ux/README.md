@@ -85,14 +85,16 @@ source of truth in `ui.store.connectionStatus`
 > the internal 5-state machine onto the 3-state status (`connecting` /
 > `authenticating` read as `reconnecting`, since a reconnect cycle passes
 > through them). Consumers subscribe to the store instead of wiring ad-hoc
-> callbacks: the reconnect banner (`MainPage`, which now also shows
-> "Disconnected" instead of going stale), the composer gating
-> (`ChannelController`), and the presence picker (`UserBar` — previously dead in
-> production because `SidebarArea` never passed it a `ws`; it now gates on the
-> store and receives the `ws` send path). The one-shot connected-overlay wiring
-> in `main.ts` stays on `ws.onStateChange` deliberately — it needs the exact
-> internal transition. Voice controls remain independent: LiveKit reconnection
-> "retries underneath" per the table below.
+> callbacks: the reconnect banner (`MainPage`, synced at mount and now also
+> showing "Disconnected" instead of going stale), the composer gating
+> (`ChannelController`, "Reconnecting…" / "Not connected" per the table), and
+> the presence picker (`UserBar` — previously dead in production because
+> `SidebarArea` never passed it a `ws`; it now gates on the store and receives
+> the `ws` send path). The one-shot connected-overlay wiring in `main.ts` stays
+> on `ws.onStateChange` deliberately — it needs the exact internal transition.
+> **Remaining gap:** the table's voice column. Voice controls are not yet
+> frozen during a WS reconnect — LiveKit reconnection retries underneath, but
+> join/leave controls stay enabled and would send over the down socket.
 
 | Status | Composer / send | Voice controls | Presence picker | Reconnect banner |
 |--------|-----------------|----------------|-----------------|------------------|

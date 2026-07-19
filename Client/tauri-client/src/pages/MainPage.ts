@@ -9,7 +9,7 @@ import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { createRateLimiterSet } from "@lib/rate-limiter";
 import type { VideoGridComponent } from "@components/VideoGrid";
-import { createServerBanner } from "@components/ServerBanner";
+import { createServerBanner, applyConnectionStatus } from "@components/ServerBanner";
 import type { ServerBannerControl } from "@components/ServerBanner";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
 import { createToastContainer } from "@components/Toast";
@@ -205,19 +205,18 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         (status) => {
           try {
             if (banner === null) return;
-            if (status === "reconnecting") {
-              banner.showReconnecting();
-            } else if (status === "disconnected") {
-              banner.showDisconnected();
-            } else {
-              banner.hide();
-            }
+            applyConnectionStatus(banner, status);
           } catch (err) {
             log.error("Connection status handler error", err);
           }
         },
       ),
     );
+    // Synchronous initial sync: the selector subscription baselines on the
+    // current value and only fires on change, so a MainPage mounted mid-outage
+    // (status already "reconnecting") would otherwise never show the banner —
+    // the whole retry cycle maps to the same 3-state value.
+    applyConnectionStatus(banner, uiStore.getState().connectionStatus);
 
     unsubscribers.push(
       ws.on("server_restart", (payload) => {
