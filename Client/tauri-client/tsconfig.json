@@ -11,36 +11,15 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "preserve",
-    "jsxImportSource": "solid-js",
-    "lib": [
-      "ES2023",
-      "DOM",
-      "DOM.Iterable"
-    ],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "paths": {
-      "@lib/*": [
-        "./src/lib/*"
-      ],
-      "@stores/*": [
-        "./src/stores/*"
-      ],
-      "@components/*": [
-        "./src/components/*"
-      ],
-      "@pages/*": [
-        "./src/pages/*"
-      ],
-      "@styles/*": [
-        "./src/styles/*"
-      ]
+      "@lib/*": ["./src/lib/*"],
+      "@stores/*": ["./src/stores/*"],
+      "@components/*": ["./src/components/*"],
+      "@pages/*": ["./src/pages/*"],
+      "@styles/*": ["./src/styles/*"]
     }
   },
-  "include": [
-    "src",
-    "tests"
-  ],
-  "exclude": [
-    "tests/e2e"
-  ]
+  "include": ["src", "tests"],
+  "exclude": ["tests/e2e"]
 }
