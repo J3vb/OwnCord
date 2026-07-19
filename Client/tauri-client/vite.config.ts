@@ -1,10 +1,5 @@
 import { defineConfig, type Plugin } from "vite";
 import { resolve } from "path";
-// Phase B Step 6 — Solid.js incremental migration. The plugin compiles
-// JSX/TSX files anywhere under src/components/solid/ to direct DOM ops, while
-// the rest of the vanilla codebase keeps building unchanged. The plugin is a
-// no-op for files that don't contain Solid syntax.
-import solidPlugin from "vite-plugin-solid";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -19,13 +14,7 @@ function stripCrossOrigin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [
-    // Solid first so its JSX transform runs before any other transforms.
-    solidPlugin({
-      include: ["src/components/solid/**/*.{ts,tsx,js,jsx}"],
-    }),
-    stripCrossOrigin(),
-  ],
+  plugins: [stripCrossOrigin()],
   build: {
     modulePreload: { polyfill: false },
     cssCodeSplit: false,
@@ -44,8 +33,6 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     host: host || false,
-    hmr: host
-      ? { protocol: "ws", host, port: 1421 }
-      : undefined,
+    hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
   },
 });
