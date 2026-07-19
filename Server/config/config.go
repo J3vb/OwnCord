@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"strings"
 
@@ -215,7 +216,10 @@ server:
   name: "OwnCord Server"
   data_dir: "data"
   # allowed_origins: []       # empty = deny cross-origin; set to ["*"] for dev or specific origins for prod
-  # trusted_proxies: []       # CIDRs of trusted reverse proxies, e.g. ["10.0.0.0/8"]
+  # trusted_proxies: []       # CIDRs of the reverse-proxy HOPS only (e.g. ["10.0.0.2/32"]).
+  #                           # Never list client networks here: a range that covers
+  #                           # clients degrades per-client rate limiting and lets
+  #                           # covered clients influence their own rate-limit key.
   # admin_allowed_cidrs:      # CIDRs allowed to access /admin (default: private networks only)
   #   - "127.0.0.0/8"
   #   - "::1/128"
@@ -349,7 +353,24 @@ func Load(cfgPath string) (*Config, error) {
 		cfg.Voice.LiveKitAPISecret = ""
 	}
 
+	// Invalid CIDR entries are skipped at request time (they must not crash
+	// handling), which silently un-trusts a misconfigured proxy — warn once
+	// at startup instead. Common mistake: a bare IP without the /32 mask.
+	warnInvalidCIDRs("server.trusted_proxies", cfg.Server.TrustedProxies)
+	warnInvalidCIDRs("server.admin_allowed_cidrs", cfg.Server.AdminAllowedCIDRs)
+
 	return &cfg, nil
+}
+
+// warnInvalidCIDRs logs a startup warning for each list entry that is not
+// valid CIDR notation.
+func warnInvalidCIDRs(key string, cidrs []string) {
+	for _, c := range cidrs {
+		if _, _, err := net.ParseCIDR(c); err != nil {
+			slog.Warn("config: ignoring invalid CIDR entry (use address/prefix notation, e.g. 10.0.0.1/32)",
+				"key", key, "entry", c)
+		}
+	}
 }
 
 // defaultLiveKitAPIKey and defaultLiveKitAPISecret are the well-known dev
