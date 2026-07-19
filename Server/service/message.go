@@ -173,26 +173,6 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		}
 	}
 
-	// Verify attachment ownership before persisting, to prevent hijacking
-	// another user's unlinked upload (IDOR). Any referenced attachment that
-	// exists must belong to the sender (uploader_id == p.UserID) and must not
-	// already be linked to a message (message_id IS NULL). Nonexistent IDs are
-	// ignored — LinkAttachmentsToMessage silently skips them. Checked before
-	// CreateMessage so a failed ownership check never persists a message.
-	for _, aid := range p.AttachmentIDs {
-		att, attErr := s.st.GetAttachmentByID(aid)
-		if attErr != nil {
-			slog.Error("MessageService.SendMessage GetAttachmentByID", "err", attErr, "attachment_id", aid)
-			return nil, fmt.Errorf("%w: failed to verify attachment ownership", ErrInternal)
-		}
-		if att == nil {
-			continue // nonexistent — the link query will skip it
-		}
-		if att.UploaderID == nil || *att.UploaderID != p.UserID || att.MessageID != nil {
-			return nil, fmt.Errorf("%w: attachment not owned by sender or already linked", ErrForbidden)
-		}
-	}
-
 	// Persist message.
 	msgID, err := s.st.CreateMessage(p.ChannelID, p.UserID, content, p.ReplyTo)
 	if err != nil {
@@ -200,10 +180,13 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		return nil, fmt.Errorf("%w: failed to save message", ErrInternal)
 	}
 
-	// Link attachments.
+	// Link attachments. Ownership is enforced atomically inside the link
+	// UPDATE itself (uploader match + still unlinked), so another user's
+	// upload, an already-linked attachment, or a nonexistent id is skipped by
+	// the statement — no check-then-link race and no N+1 pre-verification.
 	var attachments []db.AttachmentInfo
 	if len(p.AttachmentIDs) > 0 {
-		linked, linkErr := s.st.LinkAttachmentsToMessage(msgID, p.AttachmentIDs)
+		linked, linkErr := s.st.LinkAttachmentsToMessage(msgID, p.UserID, p.AttachmentIDs)
 		if linkErr != nil {
 			slog.Error("MessageService.SendMessage LinkAttachments", "err", linkErr, "msg_id", msgID)
 			// Cleanup: soft-delete the message.
@@ -211,6 +194,10 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 				slog.Error("MessageService.SendMessage DeleteMessage (cleanup)", "err", delErr, "msg_id", msgID)
 			}
 			return nil, fmt.Errorf("%w: failed to send message with attachments", ErrInternal)
+		}
+		if linked < int64(len(p.AttachmentIDs)) {
+			slog.Warn("MessageService.SendMessage: skipped attachments (not owned, already linked, or missing)",
+				"msg_id", msgID, "user_id", p.UserID, "requested", len(p.AttachmentIDs), "linked", linked)
 		}
 		if linked > 0 {
 			attMap, attErr := s.st.GetAttachmentsByMessageIDs([]int64{msgID})
