@@ -40,6 +40,10 @@ type HubBroadcaster interface {
 	BroadcastChannelDelete(channelID int64)
 	BroadcastMemberBan(userID int64)
 	BroadcastMemberUpdate(userID int64, roleName string)
+	// RefreshChannelVisibility sends targeted channel_create/channel_delete
+	// messages after a channel permission override change so each connected
+	// client's sidebar reflects its new visibility without a reconnect.
+	RefreshChannelVisibility(ch *db.Channel)
 	ClientCount() int
 }
 

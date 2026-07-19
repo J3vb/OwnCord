@@ -509,6 +509,69 @@ func (h *Hub) BroadcastChannelDelete(channelID int64) {
 	h.BroadcastToAll(buildChannelDelete(channelID))
 }
 
+// RefreshChannelVisibility re-evaluates which connected clients may see ch
+// after a channel_overrides change and sends targeted channel_create /
+// channel_delete messages so sidebars converge without a reconnect. Clients
+// that lose visibility are also unsubscribed from the channel topic and have
+// their focused channel cleared so live messages stop flowing.
+//
+// The sends deliberately bypass the sequenced broadcast/replay path: a
+// replayed channel_delete would be filtered by the allowed-channel set
+// computed at replay time, which after an override change is exactly the
+// inverse of the intended audience. Clients tolerate seq-less messages.
+func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
+	if ch == nil {
+		return
+	}
+
+	h.mu.RLock()
+	clients := make([]*Client, 0, len(h.clients))
+	for _, c := range h.clients {
+		clients = append(clients, c)
+	}
+	h.mu.RUnlock()
+
+	// Visibility is a function of the role, so resolve each role once.
+	visibleByRole := make(map[int64]bool)
+	roleVisible := func(roleID int64) bool {
+		if v, ok := visibleByRole[roleID]; ok {
+			return v
+		}
+		visible := false
+		role, err := h.db.GetRoleByID(roleID)
+		if err == nil && role != nil {
+			if permissions.HasAdmin(role.Permissions) {
+				visible = true
+			} else {
+				allow, deny, permErr := h.db.GetChannelPermissions(ch.ID, roleID)
+				// Fail closed: an error hides the channel rather than leaking it.
+				visible = permErr == nil &&
+					permissions.EffectivePerms(role.Permissions, allow, deny)&permissions.ReadMessages != 0
+			}
+		}
+		visibleByRole[roleID] = visible
+		return visible
+	}
+
+	for _, c := range clients {
+		if c.user == nil {
+			continue
+		}
+		if roleVisible(c.user.RoleID) {
+			// Idempotent add on the client; also refreshes channel metadata.
+			c.sendMsg(buildChannelCreate(ch))
+			continue
+		}
+		c.sendMsg(buildChannelDelete(ch.ID))
+		h.pubsub.Unsubscribe(c, ChannelTopic(ch.ID))
+		c.mu.Lock()
+		if c.channelID == ch.ID {
+			c.channelID = 0
+		}
+		c.mu.Unlock()
+	}
+}
+
 // BroadcastMemberBan sends a member_ban message to all connected clients
 // and immediately disconnects the banned user's WebSocket connection (BUG-113).
 func (h *Hub) BroadcastMemberBan(userID int64) {
