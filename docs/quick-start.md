@@ -78,6 +78,9 @@ npm run tauri build
 - The desktop client uses TOFU certificate pinning:
 	- First connection prompts for trust.
 	- Future connections require the same cert fingerprint.
+- Linux/Wayland: the client automatically sets `WEBKIT_DISABLE_DMABUF_RENDERER=1`
+	on Wayland sessions to work around WebKitGTK rendering crashes. Export the
+	variable yourself (any value) before launching to override this.
 
 ## If Remote Users Cannot Connect
 
