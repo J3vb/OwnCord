@@ -25,27 +25,35 @@ Two mechanical frictions drive the per-domain effort:
 
 ## Status
 
-### Phase 1 — done (2026-07-19)
-sqlc is now **load-bearing in production** (previously dead code):
+### Phase 1 + 2 — done (2026-07-19)
+sqlc is now **load-bearing in production** (previously dead code). **97 `db.DB`
+methods delegate** to `dbgen` across every domain; 43 raw `d.sqlDB` calls
+remain (the `db.go` passthrough helpers, `migrate.go`, and the intentionally
+raw queries listed below). Shared mappers live in `db/mappers.go`
+(`userFromGen`, `sessionFromGen`, `roleFromGen`, `ptrI64toI`/`ptrItoI64`,
+`b2i64`, `strToNullPtr`, `derefString`).
 
-| Domain | Methods delegated | Notes |
-|--------|-------------------|-------|
-| blocks (`block_queries.go`) | BlockUser, UnblockUser, IsBlocked, IsEitherBlocked, ListBlockedUsers | Added `ListBlockedUsers` query. Empty result now `[]int64{}` (matches MemStore; was `nil`). |
-| lockouts (`lockout_queries.go`) | UpsertLockout, LoadActiveLockouts, CleanupExpiredLockouts, DeleteLockout | Time formatting/parsing kept in the wrapper. |
-| roles (`role_queries.go`) | GetRoleByID, ListRoles, GetRoleForUser | Shared `roleFromGen` mapper. `GetUserWithRole` (joined User+Role) stays raw. |
+Delegated domains: blocks, lockouts, roles, users + sessions, invites, profile,
+attachments, voice, dm (simple ops), channels + permission overrides, admin
+(users/settings/audit/counts), messages (create/get/edit/delete/reactions/
+pins/read-state).
 
-### Phase 2 — remaining domains (raw SQL still, each survives D3)
-Convert with the same pattern; add missing queries + a `fromGen` mapper where
-needed. Rough order by mapping simplicity:
+### Deliberately kept raw (no clean sqlc mapping)
+- **Variable-length `IN(...)`** (sqlc can't express): `GetAttachmentsByMessageIDs`,
+  `LinkAttachmentsToMessage`, `GetChannelTypes`.
+- **FTS / dynamic WHERE / cursor pagination**: `GetMessages`, `SearchMessages`,
+  `SearchMessagesInChannels`, `GetMessagesForAPI`, `GetPinnedMessages`,
+  `getReactionsBatch`, `GetChannelUnreadCounts`, `GetLatestMessageID`
+  (sqlc types the `MAX()` result as `interface{}`).
+- **Multi-statement transactions**: `GetOrCreateDMChannel` (serializable tx),
+  `GetUserDMChannels` (aggregate), `GetDMRecipient`, `CreateOwnerIfEmpty`,
+  `CreateUserWithInvite`, `GetUserWithRole`.
+- **Non-query SQL**: `GetServerStats` PRAGMAs, `BackupToSafe` (`VACUUM INTO`),
+  `AdminCreateChannel`, `CountChannelVoiceUsers`, `account.go`.
 
-- **Simple/exec-heavy:** invites (`invite_queries.go`), profile
-  (`profile_queries.go`), attachments (`attachment_queries.go`).
-- **Model-mapped reads:** sessions (`auth_queries.go`), users
-  (`auth_queries.go` — `GetUserByID`/`GetUserByUsername`/`ListAllUsers`),
-  channels (`channel_queries.go`), voice (`voice_queries.go`),
-  dm (`dm_queries.go`), admin/settings (`admin_queries.go`).
-- **Complex/joined:** messages (`message_queries.go` — search, cursor
-  pagination, reactions), `GetUserWithRole`, `GetServerStats`.
+These are candidates for follow-up (add `sqlc.arg`/`sqlc.slice` queries or
+accept they stay raw), but none block the D2 goal: `dbgen` is no longer dead
+and owns the SQL for the overwhelming majority of the data layer.
 
 ### Out of scope for D2
 - `store/` event + plugin SQL (`store/sqlite_events.go`, plugin store) — these
