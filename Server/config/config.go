@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"strings"
 
@@ -123,20 +124,12 @@ type ServerConfig struct {
 // cause the server to refuse to start with a clear error pointing at the
 // follow-up work — see Server/main.go.
 type DatabaseConfig struct {
-	// Type is "sqlite" or "postgres". Empty defaults to "sqlite".
+	// Type selects the database backend. "sqlite" (or empty, which defaults
+	// to it) is the only supported value.
 	Type string `koanf:"type"`
 
-	// Path is the SQLite database file path. Only used when Type == "sqlite".
+	// Path is the SQLite database file path.
 	Path string `koanf:"path"`
-
-	// PostgreSQL connection settings. Only used when Type == "postgres".
-	Host     string `koanf:"host"`
-	Port     int    `koanf:"port"`
-	User     string `koanf:"user"`
-	Password string `koanf:"password"`
-	Name     string `koanf:"name"`
-	SSLMode  string `koanf:"sslmode"`  // disable | require | verify-ca | verify-full
-	MaxConns int    `koanf:"max_conns"` // pgxpool max connections; 0 = pgxpool default
 }
 
 // TLSConfig holds TLS/certificate settings.
@@ -173,12 +166,8 @@ func defaults() Config {
 			},
 		},
 		Database: DatabaseConfig{
-			Type:    "sqlite",
-			Path:    "data/chatserver.db",
-			Host:    "localhost",
-			Port:    5432,
-			Name:    "owncord",
-			SSLMode: "disable",
+			Type: "sqlite",
+			Path: "data/chatserver.db",
 		},
 		TLS: TLSConfig{
 			Mode:         "self_signed",
@@ -227,7 +216,10 @@ server:
   name: "OwnCord Server"
   data_dir: "data"
   # allowed_origins: []       # empty = deny cross-origin; set to ["*"] for dev or specific origins for prod
-  # trusted_proxies: []       # CIDRs of trusted reverse proxies, e.g. ["10.0.0.0/8"]
+  # trusted_proxies: []       # CIDRs of the reverse-proxy HOPS only (e.g. ["10.0.0.2/32"]).
+  #                           # Never list client networks here: a range that covers
+  #                           # clients degrades per-client rate limiting and lets
+  #                           # covered clients influence their own rate-limit key.
   # admin_allowed_cidrs:      # CIDRs allowed to access /admin (default: private networks only)
   #   - "127.0.0.0/8"
   #   - "::1/128"
@@ -236,16 +228,8 @@ server:
   #   - "192.168.0.0/16"
 
 database:
-  type: "sqlite"          # "sqlite" (default, zero-config) or "postgres"
+  type: "sqlite"          # "sqlite" is the only supported backend
   path: "data/chatserver.db"
-  # PostgreSQL settings (only used when type: "postgres"):
-  # host: "localhost"
-  # port: 5432
-  # user: "owncord"
-  # password: ""
-  # name: "owncord"
-  # sslmode: "disable"    # disable | require | verify-ca | verify-full
-  # max_conns: 0          # pgxpool connection cap (0 = pgx default)
 
 tls:
   mode: "self_signed"  # self_signed, acme, manual, off
@@ -369,7 +353,24 @@ func Load(cfgPath string) (*Config, error) {
 		cfg.Voice.LiveKitAPISecret = ""
 	}
 
+	// Invalid CIDR entries are skipped at request time (they must not crash
+	// handling), which silently un-trusts a misconfigured proxy — warn once
+	// at startup instead. Common mistake: a bare IP without the /32 mask.
+	warnInvalidCIDRs("server.trusted_proxies", cfg.Server.TrustedProxies)
+	warnInvalidCIDRs("server.admin_allowed_cidrs", cfg.Server.AdminAllowedCIDRs)
+
 	return &cfg, nil
+}
+
+// warnInvalidCIDRs logs a startup warning for each list entry that is not
+// valid CIDR notation.
+func warnInvalidCIDRs(key string, cidrs []string) {
+	for _, c := range cidrs {
+		if _, _, err := net.ParseCIDR(c); err != nil {
+			slog.Warn("config: ignoring invalid CIDR entry (use address/prefix notation, e.g. 10.0.0.1/32)",
+				"key", key, "entry", c)
+		}
+	}
 }
 
 // defaultLiveKitAPIKey and defaultLiveKitAPISecret are the well-known dev

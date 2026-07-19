@@ -2,11 +2,13 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/service"
 )
 
 // ─── User Handlers ───────────────────────────────────────────────────────────
@@ -51,7 +53,21 @@ type patchUserRequest struct {
 	BanReason *string `json:"ban_reason"`
 }
 
-func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator PermissionInvalidator) http.HandlerFunc {
+// writeModerationErr maps ModerationService errors onto admin API responses.
+func writeModerationErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrForbidden):
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+	case errors.Is(err, service.ErrNotFound):
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "user not found")
+	case errors.Is(err, service.ErrBadRequest):
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+	default:
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation action failed")
+	}
+}
+
+func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator PermissionInvalidator, mod *service.ModerationService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
 		if err != nil {
@@ -84,21 +100,38 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 			return
 		}
 
-		// Wrap role + ban updates in a transaction so both succeed or fail atomically.
-		tx, txErr := database.Begin()
-		if txErr != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to begin transaction")
-			return
-		}
-		committed := false
-		defer func() {
-			if !committed {
-				_ = tx.Rollback()
+		// Ban/unban first: it routes through ModerationService, which enforces
+		// BAN_MEMBERS + role hierarchy (the admin-auth perimeter alone does
+		// not — any admin-panel actor could previously ban the owner). The
+		// service also audits and refuses before the role change runs, so a
+		// rejected ban never leaves a half-applied PATCH behind.
+		if req.Banned != nil {
+			if mod == nil {
+				// Fail closed rather than fall back to an unchecked UPDATE.
+				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+				return
 			}
-		}()
+			banReason := ""
+			if req.BanReason != nil {
+				banReason = *req.BanReason
+			}
+			var actionErr error
+			if *req.Banned {
+				actionErr = mod.BanUser(r.Context(), actor, id, banReason, nil)
+			} else {
+				actionErr = mod.UnbanUser(r.Context(), actor, id)
+			}
+			if actionErr != nil {
+				writeModerationErr(w, actionErr)
+				return
+			}
+			if *req.Banned && hub != nil {
+				hub.BroadcastMemberBan(id)
+			}
+		}
 
 		if req.RoleID != nil {
-			if _, err := tx.Exec(`UPDATE users SET role_id = ? WHERE id = ?`, *req.RoleID, id); err != nil {
+			if _, err := database.Exec(`UPDATE users SET role_id = ? WHERE id = ?`, *req.RoleID, id); err != nil {
 				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update role")
 				return
 			}
@@ -106,63 +139,12 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 			if permInvalidator != nil {
 				permInvalidator.InvalidateUser(id)
 			}
-		}
-
-		banReason := ""
-		if req.Banned != nil {
-			if req.BanReason != nil {
-				banReason = *req.BanReason
-			}
-			if *req.Banned {
-				var expiresStr *string
-				if _, err := tx.Exec(
-					`UPDATE users SET banned = 1, ban_reason = ?, ban_expires = ? WHERE id = ?`,
-					banReason, expiresStr, id,
-				); err != nil {
-					writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to ban user")
-					return
-				}
-				slog.Warn("user banned", "actor_id", actor, "target_user", user.Username, "reason", banReason)
-			} else {
-				if _, err := tx.Exec(
-					`UPDATE users SET banned = 0, ban_reason = NULL, ban_expires = NULL WHERE id = ?`,
-					id,
-				); err != nil {
-					writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to unban user")
-					return
-				}
-				slog.Info("user unbanned", "actor_id", actor, "target_user", user.Username)
-			}
-		}
-
-		if err := tx.Commit(); err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to commit user update")
-			return
-		}
-		committed = true
-
-		// Post-commit side effects: audit logging and broadcasts.
-		// These run outside the transaction to avoid SQLite write-lock
-		// contention (LogAudit uses the main *sql.DB, not the tx).
-		if req.RoleID != nil {
 			_ = database.LogAudit(actor, "role_change", "user", id,
 				fmt.Sprintf("changed %s role to %d", user.Username, *req.RoleID))
 			if role, err := database.GetRoleByID(*req.RoleID); err == nil && role != nil {
 				if hub != nil {
 					hub.BroadcastMemberUpdate(id, role.Name)
 				}
-			}
-		}
-		if req.Banned != nil {
-			if *req.Banned {
-				_ = database.LogAudit(actor, "user_ban", "user", id,
-					fmt.Sprintf("banned %s: %s", user.Username, banReason))
-				if hub != nil {
-					hub.BroadcastMemberBan(id)
-				}
-			} else {
-				_ = database.LogAudit(actor, "user_unban", "user", id,
-					fmt.Sprintf("unbanned %s", user.Username))
 			}
 		}
 

@@ -58,7 +58,7 @@ type MessageStore interface {
 	UpdateReadState(userID, channelID, lastReadMessageID int64) error
 	GetChannelUnreadCounts(userID int64) (map[int64]db.ChannelUnread, error)
 	GetLatestMessageID(channelID int64) (int64, error)
-	LinkAttachmentsToMessage(messageID int64, attachmentIDs []string) (int64, error)
+	LinkAttachmentsToMessage(messageID, uploaderID int64, attachmentIDs []string) (int64, error)
 	GetAttachmentsByMessageIDs(msgIDs []int64) (map[int64][]db.AttachmentInfo, error)
 }
 

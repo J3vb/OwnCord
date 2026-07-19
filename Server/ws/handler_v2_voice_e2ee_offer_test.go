@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"strings"
 	"testing"
+
+	"github.com/owncord/server/auth"
 )
 
 var (
@@ -47,6 +49,47 @@ func TestVoiceE2EEOfferV2_HappyPath(t *testing.T) {
 	}
 	if evt.VoiceChannelID() != 100 {
 		t.Errorf("expected voice channel 100, got %d", evt.VoiceChannelID())
+	}
+}
+
+// TestVoiceE2EEOfferV2_RotationBurstNotRateLimited locks the W1-2 fix: the
+// key holder rotates by sending one offer per peer back-to-back, so the
+// limiter is keyed per (sender, target) and must admit an entire rotation
+// burst in a large call — while repeated offers at one victim stay capped.
+func TestVoiceE2EEOfferV2_RotationBurstNotRateLimited(t *testing.T) {
+	deps := offerDeps(true)
+	deps.Limiter = auth.NewRateLimiter()
+	info := ClientInfo{UserID: 1, VoiceChannelID: 100}
+
+	// 8-participant call: one offer to each of 7 peers, immediately.
+	for target := int64(2); target <= 8; target++ {
+		cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: target, encryptedKey: validEncKey, iv: validIV}
+		if result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps); result.Error != nil {
+			t.Fatalf("rotation offer to peer %d rejected: %v", target, result.Error)
+		}
+	}
+
+	// Join/leave churn triggers back-to-back rotations — a second full burst
+	// must also pass.
+	for target := int64(2); target <= 8; target++ {
+		cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: target, encryptedKey: validEncKey, iv: validIV}
+		if result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps); result.Error != nil {
+			t.Fatalf("second rotation offer to peer %d rejected: %v", target, result.Error)
+		}
+	}
+
+	// Spamming a single victim is still limited: 2 offers spent above, the
+	// per-target budget is 5/sec, so within 4 more attempts one must trip.
+	var limited bool
+	for i := 0; i < 4; i++ {
+		cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: validEncKey, iv: validIV}
+		if result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps); result.Error != nil {
+			limited = true
+			break
+		}
+	}
+	if !limited {
+		t.Fatal("same-target offer spam must still hit the rate limit")
 	}
 }
 

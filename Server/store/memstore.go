@@ -39,6 +39,10 @@ type MemStore struct {
 	blocks map[int64]map[int64]bool
 	// userID -> channelID -> lastReadMessageID
 	readStates map[int64]map[int64]int64
+	// attachment id -> row. Tracks uploader_id/message_id so the atomic
+	// link-ownership guard is exercised against a store that really records
+	// ownership instead of a (nil, nil) stub.
+	attachments map[string]*db.Attachment
 
 	// Phase B Step 7 / Phase C Step 9 — events + plugin KV. Lazily initialised
 	// via ensureEvents() so existing tests that constructed a bare MemStore
@@ -58,6 +62,7 @@ func NewMemStore() *MemStore {
 		channelOverrides: make(map[int64]map[int64]db.ChannelOverride),
 		reactions:        make(map[int64]map[int64]map[string]bool),
 		dmParticipants:   make(map[int64]map[int64]bool),
+		attachments:      make(map[string]*db.Attachment),
 		blocks:           make(map[int64]map[int64]bool),
 		readStates:       make(map[int64]map[int64]int64),
 	}
@@ -128,9 +133,9 @@ func (m *MemStore) SeedBlock(blockerID, blockedID int64) {
 
 // ---------- Store interface: top-level ----------
 
-func (m *MemStore) Close() error                                              { return nil }
-func (m *MemStore) SQLDb() *sql.DB                                            { return nil }
-func (m *MemStore) WithTx(_ context.Context, fn func(Store) error) error      { return fn(m) }
+func (m *MemStore) Close() error                                         { return nil }
+func (m *MemStore) SQLDb() *sql.DB                                       { return nil }
+func (m *MemStore) WithTx(_ context.Context, fn func(Store) error) error { return fn(m) }
 
 // ---------- MessageStore ----------
 
@@ -273,8 +278,26 @@ func (m *MemStore) GetLatestMessageID(channelID int64) (int64, error) {
 	return latest, nil
 }
 
-func (m *MemStore) LinkAttachmentsToMessage(_ int64, _ []string) (int64, error) {
-	return 0, nil
+// LinkAttachmentsToMessage mirrors the SQL guard in db.LinkAttachmentsToMessage:
+// only unlinked attachments owned by uploaderID (or legacy rows with a nil
+// uploader) are claimed; everything else is skipped, not an error.
+func (m *MemStore) LinkAttachmentsToMessage(messageID, uploaderID int64, attachmentIDs []string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var n int64
+	for _, id := range attachmentIDs {
+		att, ok := m.attachments[id]
+		if !ok || att.MessageID != nil {
+			continue
+		}
+		if att.UploaderID != nil && *att.UploaderID != uploaderID {
+			continue
+		}
+		mid := messageID
+		att.MessageID = &mid
+		n++
+	}
+	return n, nil
 }
 
 func (m *MemStore) GetAttachmentsByMessageIDs(_ []int64) (map[int64][]db.AttachmentInfo, error) {
@@ -403,8 +426,13 @@ func (m *MemStore) UpdateUserProfile(_ int64, _ string, _ *string) error {
 	panic("memstore: not implemented: UpdateUserProfile")
 }
 
-func (m *MemStore) UpdateUserPassword(_ int64, _ string) error {
-	panic("memstore: not implemented: UpdateUserPassword")
+func (m *MemStore) UpdateUserPassword(userID int64, hash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if u, ok := m.users[userID]; ok {
+		u.PasswordHash = hash
+	}
+	return nil
 }
 
 func (m *MemStore) UpdateUserStatus(id int64, status string) error {
@@ -645,7 +673,14 @@ func (m *MemStore) GetDMParticipantIDs(channelID int64) ([]int64, error) {
 	return ids, nil
 }
 
-func (m *MemStore) GetDMRecipient(_ int64, _ int64) (*db.User, error) {
+func (m *MemStore) GetDMRecipient(channelID, userID int64) (*db.User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for uid := range m.dmParticipants[channelID] {
+		if uid != userID {
+			return m.users[uid], nil
+		}
+	}
 	return nil, nil
 }
 
@@ -681,12 +716,21 @@ func (m *MemStore) ListBlockedUsers(_ int64) ([]int64, error) {
 
 // ---------- AttachmentStore ----------
 
-func (m *MemStore) CreateAttachment(_ string, _ int64, _, _, _ string, _ int64, _, _ *int) error {
-	panic("memstore: not implemented: CreateAttachment")
+func (m *MemStore) CreateAttachment(id string, uploaderID int64, filename, storedAs, mimeType string, size int64, _, _ *int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	uid := uploaderID
+	m.attachments[id] = &db.Attachment{
+		ID: id, UploaderID: &uid, Filename: filename,
+		StoredAs: storedAs, MimeType: mimeType, Size: size,
+	}
+	return nil
 }
 
-func (m *MemStore) GetAttachmentByID(_ string) (*db.Attachment, error) {
-	panic("memstore: not implemented: GetAttachmentByID")
+func (m *MemStore) GetAttachmentByID(id string) (*db.Attachment, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.attachments[id], nil
 }
 
 func (m *MemStore) GetAttachmentWithChannel(_ string) (*db.AttachmentAccess, error) {
@@ -711,12 +755,26 @@ func (m *MemStore) ListAllUsers(_ int, _ int) ([]db.UserWithRole, error) {
 	panic("memstore: not implemented: ListAllUsers")
 }
 
-func (m *MemStore) BanUser(_ int64, _ string, _ *time.Time) error {
-	panic("memstore: not implemented: BanUser")
+func (m *MemStore) BanUser(userID int64, reason string, _ *time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if u, ok := m.users[userID]; ok {
+		u.Banned = true
+		r := reason
+		u.BanReason = &r
+	}
+	return nil
 }
 
-func (m *MemStore) UnbanUser(_ int64) error {
-	panic("memstore: not implemented: UnbanUser")
+func (m *MemStore) UnbanUser(userID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if u, ok := m.users[userID]; ok {
+		u.Banned = false
+		u.BanReason = nil
+		u.BanExpires = nil
+	}
+	return nil
 }
 
 func (m *MemStore) LogAudit(_ int64, _, _ string, _ int64, _ string) error {

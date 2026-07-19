@@ -205,8 +205,12 @@ func clientIPWithProxies(r *http.Request, trustedCIDRs []string) string {
 		return remoteHost
 	}
 
-	trusted, _ := isTrustedProxy(remoteHost, trustedCIDRs)
-	if !trusted {
+	// Parse the CIDR list once per request instead of once per XFF candidate.
+	// ponytail: parse at middleware construction if this ever shows in a
+	// profile — it would mean threading a parsed type through every caller.
+	nets := parseCIDRList(trustedCIDRs)
+
+	if !ipInNets(remoteHost, nets) {
 		return remoteHost
 	}
 
@@ -218,17 +222,68 @@ func clientIPWithProxies(r *http.Request, trustedCIDRs []string) string {
 		}
 	}
 
-	// Fall back to the leftmost (client) entry in X-Forwarded-For.
+	// Fall back to X-Forwarded-For, walking from the RIGHT and skipping entries
+	// that are themselves trusted proxies. The first non-trusted, valid address
+	// is the real client. Taking the leftmost entry (BUG-112) would trust a
+	// client-supplied value: a client can prepend a spoofed IP
+	// (`X-Forwarded-For: <spoofed>, <real>`) that the proxy then appends to,
+	// letting it forge per-IP rate-limit and lockout keys.
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.SplitN(xff, ",", 2)
-		if client := strings.TrimSpace(parts[0]); client != "" {
-			if net.ParseIP(client) != nil {
-				return client
+		parts := strings.Split(xff, ",")
+		leftmostValid := ""
+		for i := len(parts) - 1; i >= 0; i-- {
+			candidate := strings.TrimSpace(parts[i])
+			if candidate == "" || net.ParseIP(candidate) == nil {
+				continue
 			}
+			leftmostValid = candidate
+			if ipInNets(candidate, nets) {
+				continue // our own proxy hop, keep walking left
+			}
+			return candidate
+		}
+		// Every entry fell inside trustedCIDRs — a config that covers client
+		// networks too (e.g. trusted_proxies: 10.0.0.0/8 with LAN clients).
+		// Falling back to RemoteAddr here would collapse ALL clients behind
+		// the proxy into one rate-limit/lockout bucket, so one user's failed
+		// logins would lock out everyone. The leftmost valid entry is the
+		// furthest-upstream hop — the best distinct per-client key available
+		// under such a config. trusted_proxies must list only proxy hops;
+		// startup validation warns about entries that cannot be proxies.
+		if leftmostValid != "" {
+			return leftmostValid
 		}
 	}
 
 	return remoteHost
+}
+
+// parseCIDRList parses CIDR strings, silently skipping invalid entries — a
+// misconfigured entry must not crash request handling (config load warns
+// about them at startup).
+func parseCIDRList(cidrs []string) []*net.IPNet {
+	nets := make([]*net.IPNet, 0, len(cidrs))
+	for _, c := range cidrs {
+		if _, n, err := net.ParseCIDR(c); err == nil {
+			nets = append(nets, n)
+		}
+	}
+	return nets
+}
+
+// ipInNets reports whether ipStr (a plain IP, no port) falls inside any of
+// the parsed networks.
+func ipInNets(ipStr string, nets []*net.IPNet) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	for _, n := range nets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // isTrustedProxy reports whether remoteIP (a plain IP string, no port) falls

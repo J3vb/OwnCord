@@ -3,6 +3,17 @@ package ws
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
+	"time"
+)
+
+// Voice E2EE rate limits. Both the announce and offer relays fan out to every
+// other voice participant (and an offer can force a key rotation / disconnect
+// for peers), so a single user must not be able to spam them. Mirrors the
+// named-constant Limiter idiom used by the voice control handlers.
+const (
+	voiceE2EERateLimit = 5
+	voiceE2EEWindow    = time.Second
 )
 
 // validateBase64Loose checks that s is valid padded (StdEncoding) or unpadded
@@ -82,10 +93,15 @@ func (h *Hub) computeIsKeyHolder(channelID, userID int64) bool {
 // It validates the public key and returns a SetE2EEPubKey mutation plus a
 // VoiceE2EEAnnounceEvent for relay to other voice channel participants.
 func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
-	_ = deps.(VoiceDeps)
+	d := deps.(VoiceDeps)
 	announceCmd := cmd.(VoiceE2EEAnnounceCmd)
 	userID := info.UserID
 	voiceChID := info.VoiceChannelID
+
+	ratKey := fmt.Sprintf("voice_e2ee_announce:%d", userID)
+	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceE2EERateLimit, voiceE2EEWindow) {
+		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many e2ee announcements"}}
+	}
 
 	if voiceChID == 0 {
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
@@ -130,6 +146,20 @@ func handleVoiceE2EEOfferV2(_ context.Context, cmd Command, info ClientInfo, dep
 	d := deps.(VoiceDeps)
 	offerCmd := cmd.(VoiceE2EEOfferCmd)
 	voiceChID := info.VoiceChannelID
+
+	// A legitimate rotation is a burst of one offer per peer (fired on
+	// join/leave and the periodic re-key), so the budget must not depend on
+	// channel size — keyed per sender alone, the 6th+ peer's offer was
+	// silently rate-limited and that peer could never decrypt audio again.
+	// Keying per (sender, target) admits any single rotation regardless of
+	// participant count while still capping repeated offers at one victim —
+	// the abuse this limit exists for, since an offer can force the target to
+	// re-key or disconnect. Cross-target spray stays bounded per victim and
+	// requires holding key-holder status in that channel.
+	ratKey := fmt.Sprintf("voice_e2ee_offer:%d:%d", info.UserID, offerCmd.TargetUserID())
+	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceE2EERateLimit, voiceE2EEWindow) {
+		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many e2ee offers"}}
+	}
 
 	if voiceChID == 0 {
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}

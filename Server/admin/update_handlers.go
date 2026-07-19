@@ -84,6 +84,17 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 			return
 		}
 
+		// Snapshot the hash of the just-verified staged binary. It is re-checked
+		// immediately before rename+spawn to close the TOCTOU window between
+		// verification here and the swap in the background goroutine below.
+		stagedHash, err := updater.FileSHA256(newPath)
+		if err != nil {
+			slog.Error("update: failed to hash staged binary", "err", err)
+			_ = os.Remove(newPath)
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to stage update")
+			return
+		}
+
 		// Respond to the client before shutting down.
 		writeJSON(w, http.StatusOK, map[string]string{
 			"status":  "applying",
@@ -96,6 +107,14 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 				hub.BroadcastServerRestart("update", 5)
 			}
 			time.Sleep(5 * time.Second)
+
+			// TOCTOU guard: re-verify the staged binary is byte-for-byte the one
+			// we verified before responding. If it was swapped between then and
+			// now, abort without renaming or spawning it.
+			if err := u.VerifyChecksum(newPath, stagedHash); err != nil {
+				slog.Error("update: staged binary re-verification failed, aborting update", "error", err)
+				return
+			}
 
 			// Rename: current -> .old, .new -> current
 			_ = os.Remove(oldPath) // remove any stale .old

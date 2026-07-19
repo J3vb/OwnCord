@@ -67,8 +67,10 @@ func handleClientUpdate(u *updater.Updater) http.HandlerFunc {
 			return
 		}
 
-		// Fetch the signature file content (small text file).
-		sigContent, err := u.FetchTextAsset(r.Context(), sigURL)
+		// Fetch the signature file content (small text file). Cached with the
+		// same TTL as the release info so this unauthenticated endpoint does not
+		// perform an outbound fetch on every request (DoS hardening).
+		sigContent, err := u.FetchTextAssetCached(r.Context(), sigURL)
 		if err != nil {
 			http.Error(w, "failed to fetch signature", http.StatusBadGateway)
 			return

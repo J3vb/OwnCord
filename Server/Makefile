@@ -1,8 +1,7 @@
 # OwnCord Server — developer convenience targets
 #
-# sqlc-generate  Regenerate type-safe Go for both the sqlite and postgres
-#                engines defined in sqlc.yaml (db/dbgen + db/pgdbgen).
-# sqlc-verify    Fail if either committed dbgen output is stale (used by CI).
+# sqlc-generate  Regenerate type-safe Go from sqlc.yaml (db/dbgen).
+# sqlc-verify    Fail if the committed dbgen output is stale (used by CI).
 # sqlc-install   Install the pinned sqlc version into $GOBIN.
 # otel-up        Start Jaeger + Prometheus for local tracing development.
 # otel-down      Stop and remove the OTel dev containers.
@@ -17,13 +16,8 @@ sqlc-install:
 sqlc-generate:
 	sqlc generate
 
-# Verify only db/dbgen: the committed db/pgdbgen files carry hand-added
-# `//go:build postgres` tags that `sqlc generate` strips, so a pgdbgen diff
-# is expected noise. pgdbgen is scheduled for removal with the Postgres
-# scaffolding; restore it after generating so verify leaves a clean tree.
 sqlc-verify:
 	sqlc generate
-	@git checkout -- db/pgdbgen
 	@git diff --exit-code db/dbgen || ( \
 		echo "ERROR: generated sqlc output is stale. Run 'make sqlc-generate' and commit the result." ; \
 		exit 1 ; \

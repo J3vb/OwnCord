@@ -228,8 +228,20 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http
 			keepSessionID = sess.ID
 		}
 
-		if _, err := svc.Users.ChangePassword(user.ID, hash, keepSessionID); err != nil {
+		res, err := svc.Users.ChangePassword(user.ID, hash, keepSessionID)
+		if err != nil {
+			// Only reachable when the password itself failed to commit.
 			writeServiceError(w, err)
+			return
+		}
+		if res.RevokeFailed {
+			// Partial success: the password IS changed; only revoking the
+			// other sessions failed. A 5xx here would tell the user to retry
+			// with a password that no longer works.
+			writeJSON(w, http.StatusOK, map[string]any{
+				"warning":          "password changed, but other sessions could not be revoked; revoke them from the sessions list",
+				"sessions_revoked": res.SessionsRevoked,
+			})
 			return
 		}
 

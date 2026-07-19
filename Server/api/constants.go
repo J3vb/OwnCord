@@ -31,6 +31,9 @@ const (
 	// livekitProxyRateLimitPerMinute is the maximum LiveKit proxy requests per IP per minute.
 	livekitProxyRateLimitPerMinute = 30
 
+	// clientUpdateRateLimitPerMinute is the maximum client-update checks per IP per minute.
+	clientUpdateRateLimitPerMinute = 30
+
 	// loginFailureThreshold is the number of failed login attempts (within
 	// loginFailureWindow) before the IP is locked out.
 	loginFailureThreshold = 9

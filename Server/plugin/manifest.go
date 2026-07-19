@@ -17,7 +17,7 @@
 //	go get github.com/tetratelabs/wazero
 //	go build -tags wazero ./...
 //
-// This mirrors the postgres / otel build-tag approach used elsewhere in the
+// This mirrors the otel / wazero build-tag approach used elsewhere in the
 // repo so the default build stays self-contained.
 package plugin
 
