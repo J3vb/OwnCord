@@ -51,24 +51,43 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, username 
 	return user, nil
 }
 
+// ChangePasswordResult reports a completed password change. RevokeFailed is
+// set when the password committed but other sessions could not be revoked —
+// a partial success the caller must surface as a warning, never as a 5xx:
+// the old password is already unusable, so telling the user the change
+// "failed" walks them into retrying with a dead password and tripping the
+// password-confirm lockout.
+type ChangePasswordResult struct {
+	SessionsRevoked int64
+	RevokeFailed    bool
+}
+
 // ChangePassword updates the user's password and revokes other sessions.
-// Returns the number of other sessions revoked.
-func (s *UserService) ChangePassword(userID int64, newPasswordHash string, keepSessionID int64) (int64, error) {
+func (s *UserService) ChangePassword(userID int64, newPasswordHash string, keepSessionID int64) (ChangePasswordResult, error) {
 	if err := s.st.UpdateUserPassword(userID, newPasswordHash); err != nil {
-		return 0, fmt.Errorf("%w: failed to update password", ErrInternal)
+		return ChangePasswordResult{}, fmt.Errorf("%w: failed to update password", ErrInternal)
 	}
+
+	// The password is committed from here on: every path below reports
+	// success and writes the audit row.
+	var res ChangePasswordResult
 	revoked, err := s.st.DeleteOtherSessions(userID, keepSessionID)
+	res.SessionsRevoked = revoked
 	if err != nil {
 		slog.Error("UserService.ChangePassword DeleteOtherSessions", "err", err, "user_id", userID)
-		// The password was updated, but other sessions could not be revoked, so
-		// devices authenticated under the old password remain valid. Surface this
-		// as a failure instead of silently reporting success — a password change
-		// is a security action and the caller must be able to warn/retry.
-		return revoked, fmt.Errorf("%w: password changed but failed to revoke other sessions", ErrInternal)
+		// One bounded compensating retry: revocation is the security tail of
+		// the change and a single immediate retry covers transient write-lock
+		// contention. ponytail: one retry, add backoff only if logs show it.
+		if revokedRetry, retryErr := s.st.DeleteOtherSessions(userID, keepSessionID); retryErr == nil {
+			res.SessionsRevoked += revokedRetry
+		} else {
+			res.RevokeFailed = true
+		}
 	}
 	_ = s.st.LogAudit(userID, "password_change", "user", userID, "password changed")
-	slog.Info("password changed", "user_id", userID, "sessions_revoked", revoked)
-	return revoked, nil
+	slog.Info("password changed", "user_id", userID,
+		"sessions_revoked", res.SessionsRevoked, "revoke_failed", res.RevokeFailed)
+	return res, nil
 }
 
 // ListSessions returns all active sessions for a user.
