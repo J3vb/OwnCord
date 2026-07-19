@@ -85,12 +85,11 @@ if (!appEl) {
 
 // Create core services
 const router = createRouter("connect");
-// NOTE: allowSelfSigned must be true because the app targets self-hosted servers
-// that commonly use self-signed certificates. The Rust TOFU WS proxy handles
-// WebSocket certs, but HTTP API calls (health, login, register, upload) have no
-// equivalent proxy and need this flag to function. The ideal future fix is adding
-// a TOFU HTTP proxy in Rust alongside the existing WS proxy.
-const api = createApiClient({ host: "", allowSelfSigned: true }, () => {
+// REST traffic is tunneled through the Rust HTTP TOFU proxy (src/lib/httpProxy.ts
+// → src-tauri/src/http_proxy.rs), which pins the server certificate to the same
+// trust-on-first-use fingerprint as the WS proxy. No cert is ever blindly
+// accepted; the bearer token never rides an unpinned TLS connection.
+const api = createApiClient({ host: "" }, () => {
   log.warn("Session expired (401), clearing auth");
   clearAuth();
 });

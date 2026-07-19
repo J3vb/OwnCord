@@ -10,6 +10,15 @@ vi.mock("@tauri-apps/plugin-http", () => ({
   fetch: mockFetch,
 }));
 
+// Mock the Rust HTTP TOFU proxy so ensureHttpProxy resolves synchronously to a
+// stable origin. Returning `https://{host}` keeps the URL assertions below
+// unchanged — the proxy indirection is exercised by the Rust unit tests and by
+// httpProxy's own tests, not here.
+vi.mock("../../src/lib/httpProxy", () => ({
+  ensureHttpProxy: (host: string) => Promise.resolve(`https://${host}`),
+  stopHttpProxy: () => Promise.resolve(),
+}));
+
 import { createApiClient, ApiClientError } from "../../src/lib/api";
 
 function jsonResponse(data: unknown, status = 200): Response {
@@ -425,25 +434,19 @@ describe("API Client", () => {
       expect(fetchCallOpts().signal).toBe(controller.signal);
     });
 
-    it("does not set danger.acceptInvalidCerts without allowSelfSigned", async () => {
+    it("never sets danger.acceptInvalidCerts (cert pinning is handled by the Rust proxy)", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ token: "t", user: { id: 1 } }));
       await api.verifyTotp("123456", "pt");
       const opts = fetchCallOpts();
       expect((opts as Record<string, unknown>).danger).toBeUndefined();
     });
 
-    it("sets danger.acceptInvalidCerts when allowSelfSigned is true", async () => {
-      const selfSignedApi = createApiClient(
-        { host: "localhost:8443", token: "test-token", allowSelfSigned: true },
-        onUnauthorized,
-      );
+    it("routes verify-totp through the resolved proxy origin", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ token: "t", user: { id: 1 } }));
-      await selfSignedApi.verifyTotp("123456", "pt");
-      const opts = fetchCallOpts();
-      expect((opts as Record<string, unknown>).danger).toEqual({
-        acceptInvalidCerts: true,
-        acceptInvalidHostnames: false,
-      });
+      await api.verifyTotp("123456", "pt");
+      // The httpProxy mock resolves ensureHttpProxy("localhost:8443") to
+      // https://localhost:8443, so the tunneled URL matches the direct one.
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/auth/verify-totp");
     });
   });
 
@@ -702,23 +705,16 @@ describe("API Client", () => {
       setTimeoutSpy.mockRestore();
     });
 
-    it("getHealth does not set danger without allowSelfSigned", async () => {
+    it("getHealth never sets danger (cert pinning handled by the Rust proxy)", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ status: "ok", version: "1.0.0", uptime: 0 }));
       await api.getHealth();
       expect((fetchCallOpts() as Record<string, unknown>).danger).toBeUndefined();
     });
 
-    it("getHealth sets danger.acceptInvalidCerts when allowSelfSigned", async () => {
-      const selfSignedApi = createApiClient(
-        { host: "localhost:8443", token: "test-token", allowSelfSigned: true },
-        onUnauthorized,
-      );
+    it("getHealth fetches through the resolved proxy origin", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ status: "ok", version: "1.0.0", uptime: 0 }));
-      await selfSignedApi.getHealth();
-      expect((fetchCallOpts() as Record<string, unknown>).danger).toEqual({
-        acceptInvalidCerts: true,
-        acceptInvalidHostnames: false,
-      });
+      await api.getHealth();
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/health");
     });
   });
 
@@ -820,24 +816,17 @@ describe("API Client", () => {
     });
   });
 
-  describe("doFetch danger option", () => {
-    it("regular requests without allowSelfSigned do not set danger", async () => {
+  describe("doFetch transport", () => {
+    it("never sets danger — TLS trust is enforced by the Rust HTTP proxy", async () => {
       mockFetch.mockResolvedValue(jsonResponse({}));
       await api.getMe();
       expect((fetchCallOpts() as Record<string, unknown>).danger).toBeUndefined();
     });
 
-    it("requests with allowSelfSigned set danger.acceptInvalidCerts", async () => {
-      const selfSignedApi = createApiClient(
-        { host: "localhost:8443", token: "test-token", allowSelfSigned: true },
-        onUnauthorized,
-      );
+    it("fetches through the resolved proxy origin", async () => {
       mockFetch.mockResolvedValue(jsonResponse({}));
-      await selfSignedApi.getMe();
-      expect((fetchCallOpts() as Record<string, unknown>).danger).toEqual({
-        acceptInvalidCerts: true,
-        acceptInvalidHostnames: false,
-      });
+      await api.getMe();
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me");
     });
   });
 
