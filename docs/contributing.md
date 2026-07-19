@@ -83,6 +83,21 @@ How to set up the development environment and contribute to OwnCord.
 | `npm run format:check` | Prettier check only (no writes) |
 | `npm run knip` | Dead code and unused export detection |
 
+### Git hooks (recommended)
+
+Committed hooks in `.githooks/` catch the most common CI failures locally. Enable once per clone (from the repo root):
+
+```bash
+npm run hooks:install    # = git config core.hooksPath .githooks
+```
+
+| Hook | What it runs |
+|------|--------------|
+| `pre-commit` | gofmt + `go vet` (when Go files staged), oxlint + prettier + `tsc --noEmit` (when client TS staged), `sqlc-verify` / `protocol-verify` (when their inputs staged) |
+| `pre-push` | Server build in all build-tag variants, client typecheck + type-aware ESLint. Set `OWNCORD_PREPUSH_TESTS=1` to also run `go test -race ./...` |
+
+Bypass with `--no-verify` or `OWNCORD_SKIP_HOOKS=1` when needed — CI still enforces everything.
+
 ## Plugin Development
 
 Plugins are WASM modules loaded at runtime when the server is built with `-tags wazero`.
