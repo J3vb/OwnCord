@@ -146,3 +146,70 @@ func TestStorageGatedByCapability(t *testing.T) {
 		t.Fatalf("expected v, got %q", got)
 	}
 }
+
+// TestReinstallRebindsCommands locks the W2-3 fix: an in-place upgrade
+// replaces the *Instance, so stale command bindings must be cleared on
+// reinstall and ownership compared by plugin identity — the same plugin can
+// re-bind its own commands while a different plugin still cannot hijack them.
+func TestReinstallRebindsCommands(t *testing.T) {
+	mem := store.NewMemStore()
+	reg, err := NewRegistry(Config{Directory: t.TempDir(), Store: mem})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	t.Cleanup(func() { _ = reg.Close(context.Background()) })
+
+	ctx := context.Background()
+	manifest, err := ParseManifest([]byte(`{"name":"upgrader","version":"0.1.0","entrypoint":"p.wasm","permissions":["commands"]}`))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if err := reg.installFromDisk(ctx, foundPlugin{Manifest: manifest, WASMPath: "p.wasm"}); err != nil {
+		t.Fatalf("install v1: %v", err)
+	}
+	reg.mu.RLock()
+	v1 := reg.byName["upgrader"]
+	reg.mu.RUnlock()
+	if err := reg.RegisterCommand("greet", v1); err != nil {
+		t.Fatalf("RegisterCommand v1: %v", err)
+	}
+
+	// In-place upgrade: same plugin name, fresh instance.
+	manifest2, err := ParseManifest([]byte(`{"name":"upgrader","version":"0.2.0","entrypoint":"p.wasm","permissions":["commands"]}`))
+	if err != nil {
+		t.Fatalf("ParseManifest v2: %v", err)
+	}
+	if err := reg.installFromDisk(ctx, foundPlugin{Manifest: manifest2, WASMPath: "p.wasm"}); err != nil {
+		t.Fatalf("install v2: %v", err)
+	}
+	reg.mu.RLock()
+	v2 := reg.byName["upgrader"]
+	_, stillBound := reg.commands["greet"]
+	reg.mu.RUnlock()
+	if v2 == v1 {
+		t.Fatal("reinstall should produce a fresh instance")
+	}
+	if stillBound {
+		t.Fatal("stale command binding survived reinstall")
+	}
+
+	// The upgraded plugin re-binds its own command.
+	if err := reg.RegisterCommand("greet", v2); err != nil {
+		t.Fatalf("RegisterCommand after upgrade: %v", err)
+	}
+
+	// A different plugin still cannot hijack an owned command.
+	other, err := ParseManifest([]byte(`{"name":"other","version":"0.1.0","entrypoint":"o.wasm","permissions":["commands"]}`))
+	if err != nil {
+		t.Fatalf("ParseManifest other: %v", err)
+	}
+	if err := reg.installFromDisk(ctx, foundPlugin{Manifest: other, WASMPath: "o.wasm"}); err != nil {
+		t.Fatalf("install other: %v", err)
+	}
+	reg.mu.RLock()
+	otherInst := reg.byName["other"]
+	reg.mu.RUnlock()
+	if err := reg.RegisterCommand("greet", otherInst); err == nil {
+		t.Fatal("cross-plugin hijack must still be refused")
+	}
+}
