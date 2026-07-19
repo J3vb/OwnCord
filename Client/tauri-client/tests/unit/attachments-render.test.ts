@@ -17,6 +17,13 @@ vi.mock("@tauri-apps/plugin-http", () => ({
   fetch: fetchMock,
 }));
 
+// The HTTP TOFU proxy resolves a server host to a fixed loopback origin so
+// server-bound fetches are cert-pinned; external URLs bypass it.
+vi.mock("@lib/httpProxy", () => ({
+  ensureHttpProxy: () => Promise.resolve("http://127.0.0.1:9999"),
+  stopHttpProxy: () => Promise.resolve(),
+}));
+
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
@@ -408,21 +415,17 @@ describe("fetchImageAsDataUrl — network fetch failure", () => {
     expect(result!.startsWith("data:image/jpeg;")).toBe(true);
   });
 
-  it("uses acceptInvalidCerts for server URLs only", async () => {
+  it("routes server URLs through the cert-pinned proxy and external URLs directly", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       headers: { get: () => "image/png" },
       arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
     });
 
-    // Fetch a server URL
+    // A server URL is rewritten to the loopback proxy origin (path + query
+    // preserved) and carries no danger option — the proxy pins the cert.
     await fetchImageAsDataUrl("https://myserver.local:8443/img.png");
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://myserver.local:8443/img.png",
-      expect.objectContaining({
-        danger: expect.objectContaining({ acceptInvalidCerts: true }),
-      }),
-    );
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:9999/img.png");
 
     fetchMock.mockReset();
     clearAttachmentCaches();
@@ -432,8 +435,8 @@ describe("fetchImageAsDataUrl — network fetch failure", () => {
       arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
     });
 
-    // Fetch a third-party URL
+    // A third-party URL is fetched directly with normal TLS validation.
     await fetchImageAsDataUrl("https://cdn.example.com/img.png");
-    expect(fetchMock).toHaveBeenCalledWith("https://cdn.example.com/img.png", {});
+    expect(fetchMock).toHaveBeenCalledWith("https://cdn.example.com/img.png");
   });
 });

@@ -8,6 +8,7 @@
 
 import { createStore, type Store } from "./store";
 import { fetch } from "@tauri-apps/plugin-http";
+import { ensureHttpProxy } from "./httpProxy";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -192,6 +193,15 @@ export function createProfileManager(
   // Resolve which fetch to use: injected mock, Tauri plugin, or global
   const doFetch: FetchFn = fetchFn ?? fetch;
 
+  // Resolve the origin for a health check. With an injected fetch (tests) we
+  // keep the direct https URL the mock expects; otherwise we route through the
+  // Rust HTTP TOFU proxy so profile health checks are cert-pinned like the
+  // rest of the REST surface.
+  async function resolveHealthOrigin(host: string): Promise<string> {
+    if (fetchFn) return `https://${host}`;
+    return ensureHttpProxy(host);
+  }
+
   // ── Helpers ────────────────────────────────────────────────
 
   function currentProfiles(): readonly ServerProfile[] {
@@ -228,7 +238,8 @@ export function createProfileManager(
     const start = performance.now();
 
     try {
-      const res = await doFetch(`https://${host}/api/v1/health`, {
+      const origin = await resolveHealthOrigin(host);
+      const res = await doFetch(`${origin}/api/v1/health`, {
         signal: controller.signal,
       });
       const elapsed = Math.round(performance.now() - start);

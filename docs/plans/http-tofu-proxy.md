@@ -1,8 +1,33 @@
 # Client HTTP TOFU Proxy (D5) — Design
 
-**Status:** design only, not implemented
+**Status:** implemented 2026-07-19
 **Decision:** D5 in [audit-2026-07-19-decisions.md](audit-2026-07-19-decisions.md) — "next security work"
 **Closes:** audit finding A-2026-07-02 (client HTTP path accepts any TLS certificate)
+
+## Implementation summary (what shipped)
+
+Chose **variant 1 (byte tunnel)** with a targeted header rewrite: the first
+request's `Host` is rewritten to the real host and `Connection: close` is
+injected so exactly one request rides each tunnel connection (no keep-alive
+reuse that would bypass the rewrite).
+
+- `src-tauri/src/http_proxy.rs` — per-host loopback TCP→TLS tunnels
+  (`HttpProxyState` = `HashMap<host, ProxyEntry>`); per-connection TOFU
+  (`CaptureVerifier` + `tofu_check`) sharing ws_proxy's cert store
+  (`cert_store_key`) and emitting the same `cert-tofu` events (first-use
+  banner / mismatch modal); commands `start_http_proxy` / `stop_http_proxy`;
+  mismatch returns a clean `502` to the loopback fetch. Registered in
+  `lib.rs`.
+- `src/lib/httpProxy.ts` — `ensureHttpProxy(host)` (per-host cache +
+  concurrent-start dedup) / `stopHttpProxy(host)`.
+- `api.ts`, `profiles.ts` (health), `attachments.ts` (image + download) now
+  resolve server URLs to `http://127.0.0.1:{port}`; **all `acceptInvalidCerts`
+  usage and the `allowSelfSigned` config field are removed**, and the
+  `dangerous-settings` feature is dropped from `Cargo.toml`.
+- `capabilities/default.json` gains `http://127.0.0.1:*` fetch scope; CSP
+  already allowed loopback.
+
+External hosts (image CDNs, OG previews, YouTube) keep normal TLS validation.
 
 ## Problem
 

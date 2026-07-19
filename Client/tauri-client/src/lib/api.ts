@@ -3,6 +3,7 @@
 
 import { fetch } from "@tauri-apps/plugin-http";
 import { createLogger } from "./logger";
+import { ensureHttpProxy } from "./httpProxy";
 import type {
   AuthResponse,
   RegisterResponse,
@@ -27,8 +28,6 @@ import type {
 export interface ApiClientConfig {
   readonly host: string;
   readonly token?: string;
-  /** Accept self-signed TLS certificates (for local/dev OwnCord servers). */
-  readonly allowSelfSigned?: boolean;
 }
 
 /** API client error with parsed error body. */
@@ -57,12 +56,16 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
   let config = { ...initialConfig };
 
-  function baseUrl(): string {
-    return `https://${config.host}/api/v1`;
+  // REST traffic is tunneled through the Rust HTTP TOFU proxy: instead of
+  // hitting https://{host} directly (which used to require accepting invalid
+  // certs), we hit http://127.0.0.1:{port} where the proxy pins the server
+  // certificate to the same trust-on-first-use fingerprint as the WS proxy.
+  async function baseUrl(): Promise<string> {
+    return `${await ensureHttpProxy(config.host)}/api/v1`;
   }
 
-  function adminBaseUrl(): string {
-    return `https://${config.host}/admin/api`;
+  async function adminBaseUrl(): Promise<string> {
+    return `${await ensureHttpProxy(config.host)}/admin/api`;
   }
 
   function headers(): Record<string, string> {
@@ -84,15 +87,10 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     signal?: AbortSignal,
   ): Promise<T> {
     const url = `${urlBase}${path}`;
-    const init: RequestInit & {
-      danger?: { acceptInvalidCerts: boolean; acceptInvalidHostnames: boolean };
-    } = {
+    const init: RequestInit = {
       method,
       headers: headers(),
       signal,
-      ...(config.allowSelfSigned === true
-        ? { danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } }
-        : {}),
     };
     if (body !== undefined) {
       init.body = JSON.stringify(body);
@@ -141,22 +139,22 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     return res.json() as Promise<T>;
   }
 
-  function request<T>(
+  async function request<T>(
     method: string,
     path: string,
     body?: unknown,
     signal?: AbortSignal,
   ): Promise<T> {
-    return doFetch<T>("API", baseUrl(), method, path, body, signal);
+    return doFetch<T>("API", await baseUrl(), method, path, body, signal);
   }
 
-  function adminRequest<T>(
+  async function adminRequest<T>(
     method: string,
     path: string,
     body?: unknown,
     signal?: AbortSignal,
   ): Promise<T> {
-    return doFetch<T>("Admin API", adminBaseUrl(), method, path, body, signal);
+    return doFetch<T>("Admin API", await adminBaseUrl(), method, path, body, signal);
   }
 
   // oxlint-disable-next-line consistent-function-scoping -- co-located with doFetch for encapsulation
@@ -220,10 +218,8 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       signal?: AbortSignal,
     ): Promise<AuthResponse> {
       // Don't mutate shared config — make direct fetch with the partial token
-      const url = `${baseUrl()}/auth/verify-totp`;
-      const init: RequestInit & {
-        danger?: { acceptInvalidCerts: boolean; acceptInvalidHostnames: boolean };
-      } = {
+      const url = `${await baseUrl()}/auth/verify-totp`;
+      const init: RequestInit = {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -231,9 +227,6 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         },
         body: JSON.stringify({ code }),
         signal,
-        ...(config.allowSelfSigned === true
-          ? { danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } }
-          : {}),
       };
 
       let res: Response;
@@ -370,7 +363,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       const formData = new FormData();
       formData.append("file", file);
 
-      const url = `${baseUrl()}/uploads`;
+      const url = `${await baseUrl()}/uploads`;
       const h: Record<string, string> = {};
       if (config.token) {
         h["Authorization"] = `Bearer ${config.token}`;
@@ -382,10 +375,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         headers: h,
         body: formData,
         signal,
-        ...(config.allowSelfSigned === true
-          ? { danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } }
-          : {}),
-      } as RequestInit);
+      });
 
       if (!res.ok) {
         const err = await parseError(res);
@@ -462,12 +452,10 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const res = await fetch(`https://${targetHost}/api/v1/health`, {
+        const origin = await ensureHttpProxy(targetHost);
+        const res = await fetch(`${origin}/api/v1/health`, {
           signal: controller.signal,
-          ...(config.allowSelfSigned === true
-            ? { danger: { acceptInvalidCerts: true, acceptInvalidHostnames: false } }
-            : {}),
-        } as RequestInit);
+        });
         if (!res.ok) {
           throw new ApiClientError(res.status, "HEALTH_CHECK_FAILED", "Health check failed");
         }
