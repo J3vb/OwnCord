@@ -1,8 +1,10 @@
-![stability-experimental](https://img.shields.io/badge/stability-experimental-orange.svg?style=for-the-badge)
-
-![Go](https://img.shields.io/badge/go-%2300ADD8.svg?style=for-the-badge&logo=go&logoColor=white)
-![TypeScript](https://img.shields.io/badge/typescript-%23007ACC.svg?style=for-the-badge&logo=typescript&logoColor=white)
-![NPM](https://img.shields.io/badge/NPM-%23CB3837.svg?style=for-the-badge&logo=npm&logoColor=white)
+[![CI](https://github.com/J3vb/OwnCord/actions/workflows/ci.yml/badge.svg)](https://github.com/J3vb/OwnCord/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/J3vb/OwnCord-releases?include_prereleases&label=release)](https://github.com/J3vb/OwnCord-releases/releases/latest)
+![Status](https://img.shields.io/badge/status-alpha-orange)
+![Go](https://img.shields.io/badge/go-1.25%2B-00ADD8?logo=go&logoColor=white)
+![Tauri](https://img.shields.io/badge/tauri-v2-24C8DB?logo=tauri&logoColor=white)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20x64%20%7C%20Linux%20x64%20%7C%20Linux%20ARM64-informational)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
 # OwnCord
 
@@ -42,15 +44,15 @@ It includes real-time messaging, voice/video via LiveKit, file sharing, and a we
 | Core chat flow | Working in alpha |
 | Voice/video | Working in alpha |
 | Admin panel | Working in alpha |
-| Security hardening | In progress |
+| Security hardening | First full review pass landed in v1.1.0-alpha.2; ongoing |
 
 ## Platform Support (Current Releases)
 
 | Component | Windows x64 | Linux x64 | Linux ARM64 |
 | --------- | ----------- | --------- | ----------- |
-| Server binary | Yes | Not published yet | N/A |
-| Desktop client | Yes | Not published yet | Not published yet |
-| Docker server | N/A | Not published yet | N/A |
+| Server binary | Yes | Yes | Not yet |
+| Desktop client | Yes (NSIS installer) | Yes (AppImage, .deb) | Yes (AppImage, .deb) |
+| Docker server | N/A | Build from source (compose) | Not yet |
 
 ## Start Here
 
@@ -136,11 +138,11 @@ Two main components:
 ```bash
 # Server (Windows)
 cd Server
-go build -o chatserver.exe -ldflags "-s -w -X main.version=1.0.0" .
+go build -o chatserver.exe -ldflags "-s -w -X main.version=1.1.0-alpha.2" .
 
 # Server (Linux)
 cd Server
-CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.0.0" .
+CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.1.0-alpha.2" .
 
 # Client
 cd Client/tauri-client
@@ -214,9 +216,9 @@ When rotating the server updater key, update [Server/updater/server_update_publi
 
 ## Contributing
 
-1. Create a branch from `dev`.
+1. Create a branch from `main`.
 2. Keep changes focused and tested.
-3. Open a PR targeting `dev`.
+3. Open a PR targeting `main`.
 
 See [docs/contributing.md](docs/contributing.md) for the full process.
 
