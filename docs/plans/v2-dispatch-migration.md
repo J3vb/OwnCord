@@ -1,6 +1,6 @@
 # Finish the V2 Dispatch Migration (backlog item 11) — Design
 
-**Status:** greenlit 2026-07-20 (D10), not yet implemented
+**Status:** implemented 2026-07-20 (D10)
 **Decision:** D10 in [audit-2026-07-19-decisions.md](audit-2026-07-19-decisions.md)
 **Closes:** audit finding A-2026-07-09 (backlog §6 item 11)
 
@@ -97,3 +97,25 @@ V1-shadowing guard inside `RegisterV2`. `registerVoiceHandlersV1` /
 - Not decomposing the Hub or reworking replay/seq (backlog 12).
 - `handleVoiceLeave` remains a hub-internal routine for the disconnect/switch
   callers; only its message *dispatch* moves to V2.
+
+## As implemented (2026-07-20)
+
+The voice handlers landed with the **applier-trigger** shape rather than a
+fully-pure port, because the effect is inseparable from the hub: `handleVoiceJoin`
+itself calls `handleVoiceLeave` on a channel switch, and a pure `(cmd, info, deps)`
+handler cannot invoke a hub routine. So both symmetric routines stay hub-internal
+and the V2 handlers gate parse/rate-limit, then hand off via two new `Result`
+side-effect fields the `handleMessage` applier acts on:
+
+- `Result.LeaveVoice bool` → applier runs `h.handleVoiceLeave(c.ctx, c)`
+  (matches the design's "one small Result field for leave voice"; the handler
+  does the rate-limit that previously lived in the V1 dispatch wrapper).
+- `Result.JoinVoice bool` → applier runs `h.handleVoiceJoin(c.ctx, c, env.Payload)`.
+  `handleVoiceJoin` is unchanged (keeps its own rate-limit and re-reads the
+  already-validated `channel_id`); the `VoiceJoinCmd` constructor is the parse gate.
+
+This keeps `voice_join.go`/`voice_leave.go` and `parseChannelID` (plus their
+tests) untouched while still collapsing dispatch to the single typed path and
+deleting all V1 machinery. `chat_command` was ported to a genuinely pure V2
+handler (`Result.Reply` + a `PluginBroadcastEvent` on `Result.Events`, gated by
+`MessageService.CanPost`) as the design described.

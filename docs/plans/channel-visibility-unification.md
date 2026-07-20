@@ -1,6 +1,6 @@
 # Channel-Visibility Unification (backlog item 3) — Design
 
-**Status:** greenlit 2026-07-20 (D9), not yet implemented
+**Status:** implemented 2026-07-20 (D9)
 **Decision:** D9 in [audit-2026-07-19-decisions.md](audit-2026-07-19-decisions.md)
 **Closes:** audit finding A-2026-07-07 (backlog §6 item 3)
 
