@@ -1,4 +1,4 @@
-// Phase C Step 9 — plugin slash-command dispatcher.
+// Phase C Step 9 — plugin slash-command dispatcher (V2).
 //
 // chat_command routes a slash command from a WS client to a registered plugin.
 // If no plugin owns the command, an error is returned to the sender. If the
@@ -14,8 +14,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 
+	"github.com/owncord/server/plugin"
 	"github.com/owncord/server/service"
 )
 
@@ -26,110 +26,79 @@ const MsgTypeChatCommand = "chat_command"
 // the plugin's allocate/dispatch ABI with thousands of strings.
 const maxCommandArgs = 64
 
-// chatCommandPayload is the client-supplied payload for a chat_command message.
-type chatCommandPayload struct {
-	ChannelID int64    `json:"channel_id"`
-	Command   string   `json:"command"` // including leading slash, e.g. "/hello"
-	Args      []string `json:"args"`
-}
+// handleChatCommandV2 dispatches a slash command to the owning plugin via the
+// live plugin registry (wired post-construction). It returns:
+//   - a ClientError when no plugin registry is wired, the command is unknown,
+//     or the invoking user may not post the plugin's broadcast;
+//   - Result.Reply for an ephemeral plugin reply (sender only);
+//   - Result.Events with a PluginBroadcastEvent for a channel broadcast, gated
+//     by MessageService.CanPost (same policy as a real message send).
+func handleChatCommandV2(ctx context.Context, cmd Command, _ ClientInfo, deps any) Result {
+	d := deps.(PluginDeps)
+	cc := cmd.(ChatCommandCmd)
 
-// registerPluginCommandHandler registers the chat_command V1 handler.
-func registerPluginCommandHandler(r *HandlerRegistry) {
-	r.Register(MsgTypeChatCommand, handlePluginCommand)
-}
-
-// handlePluginCommand dispatches a slash command to the owning plugin via
-// hub.pluginRegistry. Returns an error to the client when:
-//   - the payload is malformed,
-//   - the command name is empty,
-//   - too many arguments are supplied,
-//   - no plugin owns the command (unknown command),
-//   - the plugin returns an error reply.
-func handlePluginCommand(ctx context.Context, h *Hub, c *Client, reqID string, payload json.RawMessage) {
-	var p chatCommandPayload
-	if err := json.Unmarshal(payload, &p); err != nil {
-		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "invalid chat_command payload"))
-		return
+	var reg *plugin.Registry
+	if d.Registry != nil {
+		reg = d.Registry()
+	}
+	if reg == nil {
+		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: fmt.Sprintf("unknown command: %s (no plugins loaded)", cc.command)}}
 	}
 
-	cmd := strings.TrimSpace(p.Command)
-	if cmd == "" {
-		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, "command must not be empty"))
-		return
-	}
-
-	if len(p.Args) > maxCommandArgs {
-		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, fmt.Sprintf("too many command arguments (max %d)", maxCommandArgs)))
-		return
-	}
-
-	if h.pluginRegistry == nil {
-		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, fmt.Sprintf("unknown command: %s (no plugins loaded)", cmd)))
-		return
-	}
-
-	result, handled := h.pluginRegistry.DispatchCommand(ctx, c.userID, p.ChannelID, cmd, p.Args)
+	result, handled := reg.DispatchCommand(ctx, cc.userID, cc.channelID, cc.command, cc.args)
 	if !handled {
-		c.sendMsg(buildErrorMsg(ErrCodeBadRequest, fmt.Sprintf("unknown command: %s", cmd)))
-		return
+		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: fmt.Sprintf("unknown command: %s", cc.command)}}
 	}
-
 	if result == nil {
 		// Plugin acknowledged with no output.
-		return
+		return Result{}
 	}
 
+	var out Result
 	if result.Reply != "" {
 		// Ephemeral reply — sent only to the invoking client.
-		c.sendMsg(buildCommandReply(reqID, result.Reply))
+		out.Reply = buildCommandReply(cc.reqID, result.Reply)
 	}
 
-	if result.Broadcast != "" && p.ChannelID != 0 {
+	if result.Broadcast != "" && cc.channelID != 0 {
 		// Verify the invoking client can post to this channel before broadcasting
-		// the plugin result to all channel members. Mirrors the normal send path:
-		// non-DM channels require READ_MESSAGES|SEND_MESSAGES (so a user cannot
-		// post into a channel they cannot read), and DM channels are validated by
-		// participant membership rather than role permissions.
-		if !h.requireChannelBroadcastAccess(c, p.ChannelID) {
-			return
+		// (same gate a real send uses: channel role perms + DM membership/blocks).
+		// ponytail: if the plugin returned both a reply and a broadcast and the
+		// gate denies, the error wins and the ephemeral reply is dropped (Result
+		// carries either an error or a reply, not both) — an untested edge; V1
+		// sent both. Preserve the security signal (denial) over the ack.
+		if gate := canPluginBroadcast(d.MessageSvc, cc.userID, cc.channelID); gate != nil {
+			return *gate
 		}
-		// Channel broadcast — visible to everyone in the channel.
-		msg := buildCommandBroadcast(p.ChannelID, c.userID, cmd, result.Broadcast)
-		h.BroadcastToChannel(p.ChannelID, msg)
-		slog.Info("plugin command broadcast", "cmd", cmd, "channel_id", p.ChannelID, "user_id", c.userID)
+		msg := buildCommandBroadcast(cc.channelID, cc.userID, cc.command, result.Broadcast)
+		out.Events = append(out.Events, PluginBroadcastEvent{channelID: cc.channelID, payload: msg})
+		slog.Info("plugin command broadcast", "cmd", cc.command, "channel_id", cc.channelID, "user_id", cc.userID)
 	}
+	return out
 }
 
-// requireChannelBroadcastAccess reports whether the client may post to
-// channelID, by delegating to the SAME service-layer check a real message
-// send runs (MessageService.CanPost: cached channel permissions; DM
-// membership AND DM blocks). The previous RequireChannelAccess route skipped
-// the block check in its DM branch — a blocked user's plugin broadcast could
-// reach the person who blocked them — and issued a raw GetRoleByID per
-// broadcast, bypassing the permission cache. On failure it sends an error to
-// the client and returns false.
-func (h *Hub) requireChannelBroadcastAccess(c *Client, channelID int64) bool {
-	if c.user == nil {
-		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "not authenticated"))
-		return false
+// canPluginBroadcast reports whether userID may post to channelID by delegating
+// to the SAME service-layer check a real message send runs (MessageService.CanPost:
+// cached channel permissions; DM membership AND DM blocks). Returns nil when
+// allowed, or a Result carrying the appropriate ClientError otherwise. A nil
+// MessageSvc (bare test hub) fails closed rather than allowing an ungated
+// broadcast.
+func canPluginBroadcast(messageSvc *service.MessageService, userID, channelID int64) *Result {
+	if messageSvc == nil {
+		r := Result{Error: ClientError{Code: ErrCodeForbidden, Message: "broadcast gate unavailable"}}
+		return &r
 	}
-	if h.messageSvc == nil {
-		// No service wired (bare test hub) — fail closed rather than allow
-		// an ungated broadcast.
-		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "broadcast gate unavailable"))
-		return false
-	}
-	if err := h.messageSvc.CanPost(c.userID, channelID); err != nil {
+	if err := messageSvc.CanPost(userID, channelID); err != nil {
 		if errors.Is(err, service.ErrNotFound) {
-			c.sendMsg(buildErrorMsg(ErrCodeNotFound, "channel not found"))
-			return false
+			r := Result{Error: ClientError{Code: ErrCodeNotFound, Message: "channel not found"}}
+			return &r
 		}
 		slog.Warn("ws plugin broadcast permission denied",
-			"user_id", c.userID, "channel_id", channelID, "err", err)
-		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "missing permission to post in this channel"))
-		return false
+			"user_id", userID, "channel_id", channelID, "err", err)
+		r := Result{Error: ClientError{Code: ErrCodeForbidden, Message: "missing permission to post in this channel"}}
+		return &r
 	}
-	return true
+	return nil
 }
 
 // buildCommandReply builds an ephemeral command_reply envelope.

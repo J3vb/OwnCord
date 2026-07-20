@@ -21,7 +21,7 @@ flowchart TB
     end
 
     subgraph realtime ["Real-time"]
-        WS["ws<br/>Hub, pub/sub, replay,<br/>V1+V2 dispatch, LiveKit, E2EE relay"]
+        WS["ws<br/>Hub, pub/sub, replay,<br/>typed command dispatch, LiveKit, E2EE relay"]
     end
 
     subgraph domain ["Domain"]

@@ -5,7 +5,7 @@
 The `Server/ws` package (~6.9k LOC, the largest in the server) implements the
 real-time engine: a single `Hub` owning all client connections, a topic-based
 pub/sub, a monotonic sequence counter, a 3-tier reconnect replay pipeline, and a
-dual (V1 legacy + V2 typed) command dispatch. Message-type constants live in
+single typed (V2) command dispatch. Message-type constants live in
 `Server/ws/message_types.go` (client↔server) and mirror
 `Client/tauri-client/src/lib/protocolTypes.ts`.
 
@@ -79,25 +79,31 @@ replay pipeline restores consistency; typing/presence are lossy by design. The
 global `broadcast` channel (1024) drops with a `broadcastDrops` counter when
 saturated.
 
-## D4c — Dual dispatch (V1 → V2 strangler-fig)
+## D4c — Typed command dispatch
 
 ```mermaid
 stateDiagram-v2
     [*] --> handleMessage
-    handleMessage --> V2: registry.hasV2(type)
-    handleMessage --> V1: no V2 handler
-    V2: V2 typed command path
-    V2: strict parse → Command → Result{mutations, events}
-    V1: V1 legacy path
-    V1: lenient parse → registry.Dispatch → imperative handler
-    V2 --> [*]
-    V1 --> [*]
+    handleMessage --> Unknown: no constructor for type
+    handleMessage --> Parse: getCommandConstructor(type)
+    Parse --> BadRequest: parse error
+    Parse --> Dispatch: strict parse → Command
+    Dispatch: DispatchV2 → Result{mutations, events, side-effects}
+    Dispatch --> Apply: apply Result
+    Apply: reply · EmitEvents · SetChannelID · JoinVoice/LeaveVoice
+    Apply --> [*]
+    Unknown --> [*]
+    BadRequest --> [*]
 ```
 
-**What this shows.** Both dispatch generations are registered in `NewHub` and
-live simultaneously; each message type is tried against the stricter V2 typed
-path first and falls back to V1. Two parsers and two handler registries must be
-kept in sync until the migration completes — tracked as an audit finding.
+**What this shows.** The V1→V2 strangler-fig migration is complete (audit
+A-2026-07-09, done 2026-07-20): every inbound type parses through its constructor
+into a typed `Command`, dispatches to a single V2 handler, and the handler's
+`Result` is applied by one applier. There is no second (V1) generation, no
+lenient parser, and no second registry. Handlers stay effect-light — the two
+hub-coupled voice routines (`handleVoiceJoin`/`handleVoiceLeave`, also called
+un-throttled on disconnect and channel switch) are triggered from the applier via
+`Result.JoinVoice` / `Result.LeaveVoice` rather than re-expressed as pure events.
 
 The `Hub` also owns: stale-client sweep (90s), revoked-session sweep (30s, plus
 per-connection revalidation every 10 messages), stale-voice-state sweep (60s),

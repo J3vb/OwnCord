@@ -7,6 +7,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
+	"github.com/owncord/server/plugin"
 	"github.com/owncord/server/service"
 )
 
@@ -57,6 +58,16 @@ type VoiceTokenGenerator interface {
 // KeyHolderChecker reports whether a user is the E2EE key holder for a voice channel.
 type KeyHolderChecker interface {
 	IsVoiceKeyHolder(channelID, userID int64) bool
+}
+
+// PluginDeps holds dependencies for the chat_command (plugin slash-command)
+// handler. Registry is a getter, not a captured value, because the plugin
+// registry is wired via SetPluginRegistry AFTER NewHub builds the deps; reading
+// it live at dispatch time picks up the late wiring. MessageSvc gates channel
+// broadcasts through the same posting policy as a real message send.
+type PluginDeps struct {
+	Registry   func() *plugin.Registry
+	MessageSvc *service.MessageService
 }
 
 // VoiceDeps holds dependencies for voice handlers.
