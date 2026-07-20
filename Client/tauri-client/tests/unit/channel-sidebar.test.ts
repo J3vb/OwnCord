@@ -42,7 +42,9 @@ function resetStores(): void {
     settingsOpen: false,
     activeModal: null,
     theme: "dark" as const,
-    connectionStatus: "disconnected" as const,
+    // Default to a live socket: the voice join/leave affordance is only usable
+    // when connected. Frozen-state behavior is exercised explicitly below.
+    connectionStatus: "connected" as const,
     transientError: null,
     persistentError: null,
     collapsedCategories: new Set<string>(),
@@ -289,6 +291,70 @@ describe("ChannelSidebar", () => {
 
     expect(onVoiceLeave).toHaveBeenCalled();
     expect(onVoiceJoin).not.toHaveBeenCalled();
+  });
+
+  // ── Voice join/leave freeze while the WS socket is not connected (§3) ──
+
+  it("disables voice channel join with a 'Reconnecting…' reason while reconnecting", () => {
+    setChannels(testChannels);
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
+    sidebar.mount(container);
+
+    const voiceItem = container.querySelector('[data-channel-id="3"]') as HTMLElement;
+    expect(voiceItem.classList.contains("disabled")).toBe(true);
+    expect(voiceItem.getAttribute("aria-disabled")).toBe("true");
+    expect(voiceItem.title).toBe("Reconnecting…");
+
+    // Frozen: the click must not fire the join callback.
+    voiceItem.click();
+    expect(onVoiceJoin).not.toHaveBeenCalled();
+  });
+
+  it("disables voice channel join with a 'Not connected' reason while disconnected", () => {
+    setChannels(testChannels);
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "disconnected" }));
+    sidebar.mount(container);
+
+    const voiceItem = container.querySelector('[data-channel-id="3"]') as HTMLElement;
+    expect(voiceItem.classList.contains("disabled")).toBe(true);
+    expect(voiceItem.title).toBe("Not connected");
+
+    voiceItem.click();
+    expect(onVoiceJoin).not.toHaveBeenCalled();
+  });
+
+  it("frozen voice channel does not fire onVoiceLeave even when joined", () => {
+    setChannels(testChannels);
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
+    sidebar.mount(container);
+
+    const voiceItem = container.querySelector('[data-channel-id="3"]') as HTMLElement;
+    expect(voiceItem.classList.contains("disabled")).toBe(true);
+
+    voiceItem.click();
+    expect(onVoiceLeave).not.toHaveBeenCalled();
+  });
+
+  it("re-enables voice channel join when the connection returns to connected", () => {
+    setChannels(testChannels);
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
+    sidebar.mount(container);
+
+    // Initially frozen.
+    let voiceItem = container.querySelector('[data-channel-id="3"]') as HTMLElement;
+    expect(voiceItem.classList.contains("disabled")).toBe(true);
+
+    // Connection restored — the sidebar re-renders and unfreezes the row.
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    uiStore.flush();
+
+    voiceItem = container.querySelector('[data-channel-id="3"]') as HTMLElement;
+    expect(voiceItem.classList.contains("disabled")).toBe(false);
+    expect(voiceItem.hasAttribute("aria-disabled")).toBe(false);
+
+    voiceItem.click();
+    expect(onVoiceJoin).toHaveBeenCalledWith(3);
   });
 
   it("shows connected voice users under voice channel", () => {

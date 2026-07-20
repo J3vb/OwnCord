@@ -105,13 +105,26 @@ function renderVoiceChannelItem(
 ): HTMLDivElement {
   const voiceState = voiceStore.getState();
   const isJoined = voiceState.currentChannelId === channel.id;
+  // Freeze the join/leave affordance while the WS socket is not live — the same
+  // disabled-with-reason pattern the VoiceWidget uses for its in-call controls
+  // (docs/architecture/ux/README.md §3). LiveKit keeps retrying underneath; we
+  // only gate the UI so the click isn't a silent no-op.
+  const connectionStatus = uiStore.getState().connectionStatus;
+  const frozen = connectionStatus !== "connected";
+  const frozenReason = connectionStatus === "reconnecting" ? "Reconnecting…" : "Not connected";
 
   const wrapper = createElement("div", {});
 
-  const classes = ["channel-item", "voice", isJoined ? "active" : ""].filter(Boolean).join(" ");
+  const classes = ["channel-item", "voice", isJoined ? "active" : "", frozen ? "disabled" : ""]
+    .filter(Boolean)
+    .join(" ");
 
   const item = createElement("div", { class: classes, "data-testid": `channel-${channel.id}` });
   item.dataset.channelId = String(channel.id);
+  if (frozen) {
+    item.title = frozenReason;
+    item.setAttribute("aria-disabled", "true");
+  }
 
   const prefix = createElement("span", { class: "ch-icon" });
   prefix.appendChild(createIcon("volume-2", 16));
@@ -122,6 +135,8 @@ function renderVoiceChannelItem(
   item.addEventListener(
     "click",
     () => {
+      // Frozen while the WS socket is down — no-op; the reason is shown via title.
+      if (uiStore.getState().connectionStatus !== "connected") return;
       if (isJoined) {
         onVoiceLeave();
       } else {
@@ -497,6 +512,14 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       () => renderChannels(),
     );
     unsubscribers.push(unsubUi);
+
+    // Re-render voice rows when the WS connection status flips so the join/leave
+    // affordance freezes/unfreezes with a visible reason (§3 connection status).
+    const unsubConnStatus = uiStore.subscribeSelector(
+      (s) => s.connectionStatus,
+      () => renderChannels(),
+    );
+    unsubscribers.push(unsubConnStatus);
 
     // Subscribe to voice store — only full re-render when users join/leave
     // or mute/deafen/camera changes. Speaking state is patched in-place via
