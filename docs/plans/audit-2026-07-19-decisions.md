@@ -1,8 +1,8 @@
 # Audit 2026-07-19 — Maintainer Decisions
 
-**Date decided:** 2026-07-19
+**Date decided:** 2026-07-19 (D1–D8); 2026-07-20 (D9–D10)
 **Decided by:** J3vb
-**Status:** decisions recorded; greenlit items (D4, D7, D8) implemented 2026-07-19 — see per-row Status
+**Status:** decisions recorded; greenlit items (D4, D7, D8) implemented 2026-07-19 — see per-row Status. **2026-07-20:** backlog items 3 and 11 greenlit for implementation (D9, D10); design notes written, code pending.
 **Source:** decision points raised by [docs/audit-2026-07-19.md](../audit-2026-07-19.md)
 
 This document records the maintainer's answers to the open decision points from
@@ -22,6 +22,8 @@ here (and the audit's closure table) as items land.
 | D6 | Abandoned SolidJS beachhead + stale `docs/client-architecture.md` | A-2026-07-12 | **Delete it all**: remove `src/components/solid/`, `solidMount`/`solidAdapter`, `vite-plugin-solid`, and Solid test deps; retire `client-architecture.md` in favor of [docs/architecture/client.md](../architecture/client.md). | **Implemented 2026-07-19** — solid/ dir, solidMount/solidAdapter, setup-solid tests, vite-plugin-solid, jsx tsconfig settings, and solid-js/@solidjs deps all removed; client-architecture.md is now a pointer. |
 | D7 | Spec refresh strategy for api.md / protocol.md / schema.md | A-2026-07-03 | **One refresh PR first**, using the audit's §2 conformance matrix as the checklist; afterwards specs are kept current per-PR (see the maintenance rule in [docs/architecture/README.md](../architecture/README.md)). Announcement channels (D1) later update the *fresh* specs. | **Implemented 2026-07-19** — all three specs refreshed against the code (incl. E2EE protocol section, migrations 001–015, profile/blocks/plugin-admin endpoints); reference tables now point at `protocol-schema.json`. |
 | D8 | What to implement first | backlog §6 | **Greenlit now: Protocol codegen (D4) + the quick-wins batch** — `LogAudit` error handling (`admin/handlers_backup.go`), contradictory upload `Cache-Control` (`upload_handler.go`), hub inline settings SQL through the data layer (`ws/hub.go`), Hub constructor cleanup (required collaborators into `NewHub`). | **Implemented 2026-07-19** (all four quick wins + D4). Hub cleanup shipped as: race fix — `eventPersister`/`eventStore`/`pluginSink` are now atomic (they were plain fields written by `main.go` after `NewRouter` had already started `Run`); remaining pre-Run setters now reject late calls with an error log instead of racing silently. Note discovered during the work: the discarded-`LogAudit` pattern is repo-wide (23 call sites) — the two tracker-flagged backup handlers are fixed; whether best-effort audit writes stay the convention elsewhere needs a policy decision. |
+| D9 | Channel-visibility unification (rule duplicated across ~4 "must mirror" sites) | A-2026-07-07 / backlog 3 | **Greenlit 2026-07-20 — implement**: funnel all four sites through the existing `permissions.Checker` predicate + one filter helper; add a REST/WS agreement test. See [channel-visibility-unification.md](channel-visibility-unification.md). | Design note written 2026-07-20; code pending. |
+| D10 | Finish the V2 dispatch migration; delete V1 | A-2026-07-09 / backlog 11 | **Greenlit 2026-07-20 — implement**: port the 3 remaining V1 types (`chat_command`, `voice_join`, `voice_leave`) to V2, then delete the V1 registry + fallback path. Server-internal only, no wire change. See [v2-dispatch-migration.md](v2-dispatch-migration.md). | Design note written 2026-07-20; code pending. |
 
 ## Suggested sequencing
 
@@ -41,8 +43,8 @@ here (and the audit's closure table) as items land.
 
 ## Explicitly not decided here
 
-- Channel-visibility unification (audit backlog 3) and finishing the V2
-  dispatch migration (backlog 11) were not greenlit yet — they remain open
-  backlog items, not rejected.
+- ~~Channel-visibility unification (audit backlog 3) and finishing the V2
+  dispatch migration (backlog 11) were not greenlit yet.~~ **Greenlit 2026-07-20
+  (D9, D10)** — design notes written; see the rows above.
 - Client unit suite triage to green/blocking (A-2026-07-04) remains tracked in
   the audit; no scheduling decision was taken.
