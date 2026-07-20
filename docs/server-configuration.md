@@ -114,6 +114,23 @@ Controls the Wazero WASM plugin runtime. Requires building with `-tags wazero`. 
 | `plugins.cpu_budget_ms` | int | `100` | Maximum CPU time per plugin invocation (milliseconds) |
 | `plugins.http_allowlist` | string[] | `[]` | Host suffixes plugins may reach via the `host_http` capability (e.g. `["api.steampowered.com"]`). Empty = no outbound HTTP. |
 
+### GIF Picker (`gif`)
+
+Powers the client's GIF picker. The server proxies the Klipy API so the key
+never ships in the desktop bundle — the client only ever calls
+`/api/v1/gif/*` on its own server.
+
+**Disabled by default.** With no `gif.api_key` set, `/api/v1/gif/*` returns
+`503 GIF_DISABLED` and clients hide their GIF button. Nothing else changes.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `gif.api_key` | string | `""` | Klipy API key. Get one at [partner.klipy.com](https://partner.klipy.com). Empty = feature off. |
+
+> **Treat this as a credential.** Prefer `OWNCORD_GIF_API_KEY` (or a secrets
+> manager) over writing it into `config.yaml`, and rotate it if it has ever
+> been exposed to a client build.
+
 ## Environment Variable Overrides
 
 Every config key can be overridden via environment variables using the prefix `OWNCORD_`.
@@ -146,6 +163,7 @@ Every config key can be overridden via environment variables using the prefix `O
 | `OWNCORD_TELEMETRY_SERVICE_NAME` | `telemetry.service_name` |
 | `OWNCORD_PLUGINS_ENABLED` | `plugins.enabled` |
 | `OWNCORD_PLUGINS_DIRECTORY` | `plugins.directory` |
+| `OWNCORD_GIF_API_KEY` | `gif.api_key` |
 
 ## Example config.yaml
 
@@ -214,6 +232,11 @@ plugins:
   max_memory_mb: 64
   cpu_budget_ms: 100
   http_allowlist: []               # host suffixes plugins may reach, e.g. ["api.steampowered.com"]
+
+# GIF picker (server-side Klipy proxy). Empty key = feature off.
+# Prefer OWNCORD_GIF_API_KEY over storing the key in this file.
+gif:
+  api_key: ""
 ```
 
 ## See Also
