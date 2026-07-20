@@ -2,7 +2,7 @@ package ws_test
 
 // ws_integration_test.go covers ServeWS, authenticateConn, writePump, and
 // readPump by spinning up a real httptest server and dialing it with the
-// nhooyr.io/websocket client.
+// github.com/coder/websocket client.
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/service"
@@ -42,7 +42,7 @@ func TestServeWS_InvalidUpgrade_ReturnsError(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// nhooyr.io/websocket returns 400 or 426 when upgrade is absent.
+	// github.com/coder/websocket returns 400 or 426 when upgrade is absent.
 	if resp.StatusCode == 200 {
 		t.Errorf("expected non-200 for plain HTTP, got %d", resp.StatusCode)
 	}
@@ -823,7 +823,7 @@ func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
 	ws.SetClientVoiceStateForTest(originalClient, chID, vsBeforeReload.JoinedAt)
 
 	// Connect the observer (will receive broadcasts).
-	// Do NOT drain the observer — nhooyr.io/websocket closes the conn
+	// Do NOT drain the observer — github.com/coder/websocket closes the conn
 	// when a Read context expires. Instead, collect all messages below
 	// and filter for voice_leave in the assertion.
 	obsConn := dialAndAuthFresh(obsToken)

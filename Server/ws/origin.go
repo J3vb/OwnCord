@@ -3,7 +3,7 @@ package ws
 import (
 	"log/slog"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // OriginAcceptOptions builds a *websocket.AcceptOptions that enforces origin
