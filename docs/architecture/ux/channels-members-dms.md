@@ -144,12 +144,22 @@ and `IsEitherBlocked` is bidirectional). **Target UX:**
 | Being blocked | Composer read-only with a neutral "You can't message this user right now." (do not reveal the block state explicitly — the server returns a generic refusal) |
 | Unblock | Composer re-enables |
 
-> **⚠ Current gap.** There is no client-side block-state composer gating. The
-> composer now has a disabled-with-reason mode (see [messaging.md §2](messaging.md)),
-> but DM channels are left ungated: the block/unblock REST surface exists
-> server-side, and the client refuses a DM send only via the failed-row /
-> `FORBIDDEN` path today. Target ties DM block state into the same
-> composer-state machine.
+> **✅ Wired (composer gating).** DM block state now drives the same
+> disabled-with-reason composer mode (see [messaging.md §2](messaging.md)) via
+> `blocks.store`. `blockedByMe` is loaded authoritatively from `GET /blocks` on
+> every `ready` (`dispatcher.ts`) → the explicit "You've blocked this user…"
+> reason. `blockedByThem` is inferred from a refused DM send (`ErrBlocked` →
+> `FORBIDDEN`, bidirectional) → the neutral "You can't message this user right
+> now." reason, and is cleared on the next `ready` so a reconnect re-evaluates.
+> `ChannelController` reads `dmComposerBlockReason(recipientId)` and subscribes to
+> `blocks.store`, so an unblock (shrunken `GET /blocks`) re-enables the composer
+> live. `blockedByMe` takes precedence when both directions apply.
+>
+> **Remaining gap.** There is no in-client **block button** yet (the block/unblock
+> REST surface exists server-side; blocks made from the web panel or a prior
+> session are honoured via `GET /blocks`). Adding the block affordance to the DM
+> profile sidebar would call `PUT/DELETE /blocks/{userId}` and update `blocks.store`
+> directly for an instant local un-gate.
 
 ---
 

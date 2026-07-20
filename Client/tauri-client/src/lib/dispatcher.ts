@@ -52,7 +52,9 @@ import {
   updateDmLastMessagePreview,
 } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
+import { setBlockedByMe, setUserBlockedByThem, clearBlockedByThem } from "@stores/blocks.store";
 import type { DmChannelPayload } from "./types";
+import type { ApiClient } from "./api";
 import {
   handleVoiceToken,
   handleE2EEAnnounce,
@@ -99,8 +101,14 @@ export function wireConnectionStatus(ws: Pick<WsClient, "onStateChange">): () =>
 /**
  * Wire a WsClient to all domain stores.
  * Returns a cleanup function that removes all listeners.
+ *
+ * `api` is optional so tests can wire the dispatcher without a client; when
+ * present it is used to refresh DM block state (GET /blocks) on ready.
  */
-export function wireDispatcher(ws: WsClient): DispatcherCleanup {
+export function wireDispatcher(
+  ws: WsClient,
+  api?: Pick<ApiClient, "listBlocks">,
+): DispatcherCleanup {
   const unsubs: Array<() => void> = [];
 
   // ── Auth ──────────────────────────────────────────────
@@ -154,6 +162,17 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
       const dmPayloads = payload.dm_channels ?? [];
       if (dmPayloads.length > 0) {
         setDmChannels(dmPayloads.map(mapDmPayload));
+      }
+
+      // Refresh DM block state (channels-members-dms.md §3.2). "Being blocked"
+      // is only known from a refused send, so it's stale after a reconnect —
+      // clear it and re-fetch our own outgoing blocks authoritatively.
+      clearBlockedByThem();
+      if (api !== undefined) {
+        api
+          .listBlocks()
+          .then((r) => setBlockedByMe(r.blocked_user_ids))
+          .catch((err) => log.warn("Failed to load block list", { error: String(err) }));
       }
 
       log.info("Ready payload applied", {
@@ -460,6 +479,19 @@ export function wireDispatcher(ws: WsClient): DispatcherCleanup {
       // that specific row failed (with retry) instead of a global toast. This
       // covers SLOW_MODE, FORBIDDEN, RATE_LIMITED, BAD_REQUEST, etc. on send.
       if (id && messagesStore.getState().pendingSends.has(id)) {
+        // A FORBIDDEN on a DM send is the server's generic block refusal
+        // (ErrBlocked → FORBIDDEN, bidirectional). Gate the composer with the
+        // neutral "being blocked" reason; blocks.store precedence still shows
+        // the explicit reason if we are the blocker. Read the channel before
+        // markSendFailed clears the pending row.
+        if (payload.code === "FORBIDDEN") {
+          const chId = messagesStore.getState().pendingSends.get(id);
+          const dm =
+            chId === undefined
+              ? undefined
+              : dmStore.getState().channels.find((c) => c.channelId === chId);
+          if (dm !== undefined) setUserBlockedByThem(dm.recipient.id, true);
+        }
         markSendFailed(id, payload.code);
         return;
       }
