@@ -9,6 +9,7 @@ import {
   setLocalScreenshare,
   leaveVoiceChannel,
   setListenOnly,
+  setVoiceStatus,
 } from "@stores/voice.store";
 import { authStore } from "@stores/auth.store";
 import { loadPref } from "@components/settings/helpers";
@@ -292,6 +293,7 @@ export class LiveKitSession {
             lastDirectUrl,
             ac,
           });
+          setVoiceStatus("reconnecting");
         }
         // ac === null: reconnect succeeded — connectAndSetup already set "connected".
         // No transition needed; just discard stale pending fields if any.
@@ -486,6 +488,7 @@ export class LiveKitSession {
           lastUrl: url,
           lastDirectUrl: directUrl,
         });
+        setVoiceStatus("connected");
         this._deviceManager.setOnError(this.onErrorCallback);
         this._deviceManager.setOnToast(this.onErrorCallback);
         logIceConnectionInfo(newRoom);
@@ -803,6 +806,8 @@ export class LiveKitSession {
     const prevGeneration = prevState.type === "connecting" ? prevState.joinGeneration : 0;
     const myGeneration = prevGeneration + 1;
     this.setState({ type: "connecting", pendingJoin: null, joinGeneration: myGeneration });
+    // "joining" = connecting to the room; the E2EE "securing" phase is set below.
+    setVoiceStatus("joining");
     let resolvedUrl = "";
     // Track the room being built in this attempt so we can disconnect it on
     // supersession without touching the shared state (which may already have
@@ -832,6 +837,10 @@ export class LiveKitSession {
       const RETRY_DELAY_MS = 2000;
 
       // ── Client-side E2EE key exchange (ECDH) ──────────────────────────
+      // "securing" — until the room key is ready the call is not yet private.
+      // Non-key-holders block here waiting for the key holder's offer (up to
+      // ~15s); key holders pass through near-instantly.
+      setVoiceStatus("securing");
       // Generate a fresh ECDH keypair for this session.
       this._ecdhKeyPair = await generateECDHKeyPair();
       this._peerPublicKeys.clear();
@@ -999,6 +1008,8 @@ export class LiveKitSession {
           lastUrl: url,
           lastDirectUrl: directUrl,
         });
+        // Room connected and E2EE key ready — the call is now secured.
+        setVoiceStatus("connected");
         // Optimistic startAudio — may succeed if the join was triggered by a
         // recent user gesture. If not, the AudioPlaybackStatusChanged handler
         // will register a click-to-unlock fallback.
@@ -1500,6 +1511,7 @@ export class LiveKitSession {
     // pendingJoin, and the joinGeneration (idle has none). Any in-flight
     // connectAndSetup() will detect the state type change at its next checkpoint.
     this.setState({ type: "idle" });
+    setVoiceStatus("idle");
     this.syncModuleRooms();
     setLocalCamera(false);
     setLocalScreenshare(false);

@@ -11,6 +11,7 @@ import {
 import { membersStore } from "../../src/stores/members.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import { dmStore } from "../../src/stores/dm.store";
+import { blocksStore } from "../../src/stores/blocks.store";
 import { uiStore } from "../../src/stores/ui.store";
 import type { WsClient, WsListener } from "../../src/lib/ws";
 import type { ServerMessage } from "../../src/lib/types";
@@ -130,8 +131,10 @@ describe("WS Dispatcher", () => {
       localScreenshare: false,
       joinedAt: null,
       listenOnly: false,
+      voiceStatus: "idle",
     }));
     dmStore.setState(() => ({ channels: [] }));
+    blocksStore.setState(() => ({ blockedByMe: new Set(), blockedByThem: new Set() }));
     uiStore.setState((prev) => ({ ...prev, transientError: null }));
 
     mock = createMockWs();
@@ -832,6 +835,68 @@ describe("WS Dispatcher", () => {
     expect(row.errorCode).toBe("SLOW_MODE");
     // …and it is not surfaced as a global transient error.
     expect(uiStore.getState().transientError).toBeNull();
+  });
+
+  it("gates the DM composer (blockedByThem) when a DM send is refused with FORBIDDEN", () => {
+    dmStore.setState(() => ({
+      channels: [
+        {
+          channelId: 7,
+          recipient: { id: 5, username: "alice", avatar: "", status: "online" },
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+        },
+      ],
+    }));
+    addOptimisticMessage({
+      correlationId: "corr-dm",
+      channelId: 7,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "hi",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+
+    mock.dispatch("error", { code: "FORBIDDEN", message: "blocked" }, "corr-dm");
+
+    expect(blocksStore.getState().blockedByThem.has(5)).toBe(true);
+    // Still marks the row failed (existing behaviour preserved).
+    expect(getChannelMessages(7)[0]!.status).toBe("failed");
+  });
+
+  it("does not gate on a FORBIDDEN send outside a DM channel", () => {
+    // channel 7 is not in dmStore → no block state is inferred.
+    addOptimisticMessage({
+      correlationId: "corr-nondm",
+      channelId: 7,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "hi",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+
+    mock.dispatch("error", { code: "FORBIDDEN", message: "nope" }, "corr-nondm");
+
+    expect(blocksStore.getState().blockedByThem.size).toBe(0);
+  });
+
+  it("on ready clears being-blocked state and refreshes blocked-by-me via api", async () => {
+    cleanup(); // tear down the no-api dispatcher wired in beforeEach
+    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [11, 22] });
+    cleanup = wireDispatcher(mock.ws, { listBlocks });
+
+    // Pre-seed a stale being-blocked entry that a fresh ready must clear.
+    blocksStore.setState(() => ({ blockedByMe: new Set(), blockedByThem: new Set([5]) }));
+
+    mock.dispatch("ready", { channels: [], members: [], voice_states: [], roles: [] });
+
+    expect(blocksStore.getState().blockedByThem.size).toBe(0);
+    expect(listBlocks).toHaveBeenCalled();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect([...blocksStore.getState().blockedByMe]).toEqual([11, 22]);
   });
 
   it("wires a local transport send failure to mark the pending row failed", () => {

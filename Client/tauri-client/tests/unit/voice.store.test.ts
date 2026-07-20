@@ -16,6 +16,7 @@ import {
   setSpeakers,
   setVoiceConfig,
   getChannelVoiceUsers,
+  setVoiceStatus,
 } from "../../src/stores/voice.store";
 import type { ReadyVoiceState, VoiceStatePayload, VoiceLeavePayload } from "../../src/lib/types";
 import { authStore } from "../../src/stores/auth.store";
@@ -31,6 +32,7 @@ function resetStore(): void {
     localScreenshare: false,
     joinedAt: null,
     listenOnly: false,
+    voiceStatus: "idle",
   }));
 }
 
@@ -473,6 +475,28 @@ describe("voice store", () => {
       joinVoiceChannel(99);
       expect(voiceStore.getState().joinedAt).not.toBeNull();
       expect(voiceStore.getState().currentChannelId).toBe(99);
+    });
+  });
+
+  describe("voiceStatus", () => {
+    it("seeds 'joining' optimistically on a fresh join", () => {
+      expect(voiceStore.getState().voiceStatus).toBe("idle");
+      joinVoiceChannel(42);
+      expect(voiceStore.getState().voiceStatus).toBe("joining");
+    });
+
+    it("resets to 'idle' on leaveVoiceChannel", () => {
+      joinVoiceChannel(42);
+      setVoiceStatus("connected");
+      leaveVoiceChannel();
+      expect(voiceStore.getState().voiceStatus).toBe("idle");
+    });
+
+    it("setVoiceStatus writes the given status", () => {
+      setVoiceStatus("securing");
+      expect(voiceStore.getState().voiceStatus).toBe("securing");
+      setVoiceStatus("reconnecting");
+      expect(voiceStore.getState().voiceStatus).toBe("reconnecting");
     });
   });
 

@@ -103,7 +103,7 @@ func (h *Hub) upgradeAndAuth(
 	c.roleName = roleName
 
 	slog.Info("websocket connected", "username", user.Username, "user_id", user.ID, "remote", r.RemoteAddr)
-	_ = database.LogAudit(user.ID, "ws_connect", "user", user.ID,
+	db.WriteAudit(database, user.ID, "ws_connect", "user", user.ID,
 		"WebSocket connected from "+r.RemoteAddr)
 
 	return c, lastSeq, nil

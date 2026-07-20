@@ -139,10 +139,9 @@ jobs:
       - name: Knip (unused code & deps)
         run: npx knip || true
 
-  # Unit tests live in their own job so a red suite is visible as exactly one
-  # failing check instead of masking the static gates above. The suite is
-  # KNOWN RED pending the reboot-plan P2 triage — do not "fix" tests here by
-  # editing assertions; see docs/plans and the P2 triage rules.
+  # Unit tests live in their own job so a suite failure is visible as exactly one
+  # failing check instead of masking the static gates above. The suite is GREEN
+  # and must stay green — never "fix" a failing test by editing its assertions.
   client-tests:
     name: Client Unit Tests
     runs-on: windows-latest

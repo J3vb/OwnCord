@@ -24,14 +24,21 @@ Plus the user-facing booleans in `voice.store` (`localMuted`, `localDeafened`,
 roster (`voiceUsers` with per-user `speaking/muted/deafened/camera/screenshare`).
 
 **Target:** expose the voice session as one observable `voiceStatus` the widgets
-read — `idle | joining | securing | connected | reconnecting | failed` — rather
-than inferring it from `isVoiceConnected()` alone.
+read — `idle | joining | securing | connected | reconnecting` — rather than
+inferring it from `isVoiceConnected()` alone.
 
-> **⚠ Current gap.** The voice session FSM is internal; the only UI-observable
-> connection signal is `isVoiceConnected()` (`livekitSession.ts:1713`, true only
-> in `connected`). There is **no** store-backed `joining`/`securing`/`reconnecting`
-> indicator, so the UI can't distinguish "connecting to the room" from "securing
-> the encryption" from "reconnecting". Target adds an explicit status field.
+> **✓ Implemented (2026-07).** `voice.store.voiceStatus`
+> (`idle | joining | securing | connected | reconnecting`) is now the observable
+> voice-session status. `livekitSession.ts` is the single writer: `joining` at the
+> start of `connectAndSetup`, `securing` when the ECDH key exchange begins,
+> `connected` on the atomic `connected` transition (both the initial join and a
+> successful auto-reconnect), `reconnecting` when the room drops and the reconnect
+> loop forms its state, and `idle` on `leaveVoice`. `joinVoiceChannel` seeds
+> `joining` optimistically on click so the widget reacts before the `voice_token`
+> round-trip. The VoiceWidget reads it to distinguish "connecting to the room"
+> from "securing the encryption" from "reconnecting". `failed` is not a persisted
+> status: an E2EE-timeout / connection error auto-leaves to `idle` and surfaces a
+> toast via `onErrorCallback` (§2).
 
 ---
 
@@ -66,13 +73,17 @@ stateDiagram-v2
 - Leaving is immediate and local (`leaveVoice`): tear down tracks, clear E2EE
   state, reset camera/screenshare, `idle`.
 
-> **⚠ Current gap — E2EE has no visible indicator.** Key exchange produces only
-> log lines; the sole user-facing effects are (a) the join *blocking* while the
-> key is fetched and (b) an `"e2ee_timeout"` error string on failure
-> (`livekitSession.ts:893`). There is no "securing" state and no persistent
-> "secured 🔒" affirmation once connected. Target: a `voiceStatus: "securing"`
-> phase + a secured indicator on the connected widget, so users can *see* the
-> call is end-to-end encrypted (and see when it isn't yet).
+> **✓ Implemented (2026-07).** The VoiceWidget header now renders the E2EE phase
+> from `voiceStatus`: a "Securing…" label (amber) while the key exchange runs and
+> a persistent "🔒 Secured" badge once the room key is ready and the room is
+> connected — replacing the log-line-only feedback. `joining` shows "Connecting…"
+> and `reconnecting` shows "Reconnecting voice…", neither showing the secured
+> badge. An E2EE-timeout still surfaces its `"e2ee_timeout"` toast and auto-leaves
+> (`livekitSession.ts` `connectAndSetup`). **Code vs. diagram note:** the client
+> actually runs the ECDH key exchange *before* `room.connect()`, so `securing`
+> spans the key wait and the media connect; the state diagram below draws them in
+> the reverse order for readability. The distinction users see is unchanged:
+> non-key-holders sit in `securing` until a room key arrives.
 
 ---
 
@@ -147,6 +158,7 @@ forward-secrecy keypair rotation on reconnect are mechanics the user never sees.
 
 `src/lib/livekitSession.ts`, `src/stores/voice.store.ts`, `src/lib/screenShare.ts`,
 `src/lib/ptt.ts`, `src/lib/roomEventHandlers.ts`, `src/components/VoiceWidget.ts`,
+`src/components/ChannelSidebar.ts` (voice-row join freeze on WS reconnect),
 `VoiceChannel.ts`, `VideoGrid.ts`, `src-tauri/src/livekit_proxy.rs`,
 `src-tauri/src/ptt.rs`, `src/lib/e2eeCrypto.ts`; and the structural map in
 [../voice-e2ee.md](../voice-e2ee.md).

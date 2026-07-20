@@ -240,7 +240,7 @@ function renderPage(pageId: "connect" | "main"): void {
     lastConnectHost = host;
     lastConnectToken = token;
     ws.connect({ host, token });
-    dispatcherCleanup = wireDispatcher(ws);
+    dispatcherCleanup = wireDispatcher(ws, api);
     log.info("Dispatcher wired, connecting WS");
 
     // BUG-135: Only persist credentials when the user opted in.
