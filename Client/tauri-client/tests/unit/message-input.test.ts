@@ -14,10 +14,15 @@ vi.mock("@components/EmojiPicker", () => ({
 }));
 
 /** Captured GIF picker callbacks so tests can simulate selection. */
-let lastGifPickerOptions: { onSelect: (url: string) => void; onClose: () => void } | null = null;
+type CapturedGifPickerOptions = {
+  onSelect: (url: string) => void;
+  onClose: () => void;
+  onUnavailable?: (reason: string) => void;
+};
+let lastGifPickerOptions: CapturedGifPickerOptions | null = null;
 
 vi.mock("@components/GifPicker", () => ({
-  createGifPicker: (opts: { onSelect: (url: string) => void; onClose: () => void }) => {
+  createGifPicker: (opts: CapturedGifPickerOptions) => {
     lastGifPickerOptions = opts;
     const element = document.createElement("div");
     element.classList.add("gif-picker");
@@ -26,11 +31,19 @@ vi.mock("@components/GifPicker", () => ({
 }));
 
 import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
+import type { GifApi } from "@lib/gifProvider";
+
+/** GIF endpoints on the user's own server (never api.klipy.com). */
+const stubGifApi: GifApi = {
+  gifSearch: vi.fn(async () => ({ results: [] })),
+  gifTrending: vi.fn(async () => ({ results: [] })),
+};
 
 function makeOptions(overrides: Partial<MessageInputOptions> = {}): MessageInputOptions {
   return {
     channelId: 1,
     channelName: "general",
+    gifApi: stubGifApi,
     onSend: vi.fn(),
     onTyping: vi.fn(),
     onEditMessage: vi.fn(),
@@ -895,5 +908,68 @@ describe("MessageInput", () => {
     expect(container.querySelector(".emoji-picker")).toBeNull();
 
     comp.destroy?.();
+  });
+
+  // ── GIF affordance degrades when the server has no GIF provider ───────────
+
+  describe("GIF button degradation", () => {
+    it("is enabled when a gifApi is wired", () => {
+      const comp = createMessageInput(makeOptions());
+      comp.mount(container);
+
+      const gifBtn = container.querySelector(".gif-btn") as HTMLButtonElement;
+      expect(gifBtn.hasAttribute("disabled")).toBe(false);
+
+      comp.destroy?.();
+    });
+
+    it("renders disabled with a visible reason when no gifApi is wired", () => {
+      const comp = createMessageInput(makeOptions({ gifApi: undefined }));
+      comp.mount(container);
+
+      const gifBtn = container.querySelector(".gif-btn") as HTMLButtonElement;
+      expect(gifBtn.hasAttribute("disabled")).toBe(true);
+      expect(gifBtn.title).toBe("GIFs are not enabled on this server");
+      expect(gifBtn.getAttribute("aria-label")).toContain("not enabled");
+
+      comp.destroy?.();
+    });
+
+    it("does not open a picker when no gifApi is wired", () => {
+      const comp = createMessageInput(makeOptions({ gifApi: undefined }));
+      comp.mount(container);
+
+      (container.querySelector(".gif-btn") as HTMLElement).click();
+      expect(container.querySelector(".gif-picker")).toBeNull();
+
+      comp.destroy?.();
+    });
+
+    it("disables the GIF button when the picker reports the server has GIFs off", () => {
+      const comp = createMessageInput(makeOptions());
+      comp.mount(container);
+
+      const gifBtn = container.querySelector(".gif-btn") as HTMLButtonElement;
+      gifBtn.click();
+      lastGifPickerOptions!.onUnavailable!("GIFs are not enabled on this server");
+
+      expect(gifBtn.hasAttribute("disabled")).toBe(true);
+      expect(gifBtn.title).toBe("GIFs are not enabled on this server");
+
+      comp.destroy?.();
+    });
+
+    it("keeps the GIF button disabled after the composer is re-enabled", () => {
+      const comp = createMessageInput(makeOptions({ gifApi: undefined }));
+      comp.mount(container);
+
+      comp.setDisabled("Read-only channel");
+      comp.setDisabled(null);
+
+      const gifBtn = container.querySelector(".gif-btn") as HTMLButtonElement;
+      expect(gifBtn.hasAttribute("disabled")).toBe(true);
+
+      comp.destroy?.();
+    });
   });
 });

@@ -23,6 +23,7 @@ import type {
   DmChannelsResponse,
   CreateDmResponse,
   BlockedUsersResponse,
+  GifSearchResponse,
 } from "./types";
 
 /** Configuration for the API client. */
@@ -356,6 +357,32 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       if (options?.channelId !== undefined) params.set("channel_id", String(options.channelId));
       if (options?.limit !== undefined) params.set("limit", String(options.limit));
       return request<SearchResponse>("GET", `/search?${params.toString()}`, undefined, signal);
+    },
+
+    // ── GIFs ──────────────────────────────────────────────
+    //
+    // Proxied by the user's own server so the GIF provider API key never
+    // ships in this bundle. A 503 GIF_DISABLED means the operator has not
+    // configured a key — callers must degrade, not retry.
+
+    gifSearch(query: string, limit: number, signal?: AbortSignal): Promise<GifSearchResponse> {
+      const params = new URLSearchParams({ q: query, limit: String(limit) });
+      return request<GifSearchResponse>(
+        "GET",
+        `/gif/search?${params.toString()}`,
+        undefined,
+        signal,
+      );
+    },
+
+    gifTrending(limit: number, signal?: AbortSignal): Promise<GifSearchResponse> {
+      const params = new URLSearchParams({ limit: String(limit) });
+      return request<GifSearchResponse>(
+        "GET",
+        `/gif/trending?${params.toString()}`,
+        undefined,
+        signal,
+      );
     },
 
     // ── File Uploads ──────────────────────────────────────

@@ -83,7 +83,7 @@ func (r *Registry) HTTPDo(ctx context.Context, inst *Instance, req HTTPRequest) 
 	// hostname. This closes the DNS-rebinding TOCTOU window where a second
 	// lookup (the one net.Dialer would perform on a hostname) could return an
 	// internal IP after an earlier check had approved the name.
-	transport := &http.Transport{DialContext: guardedDialContext()}
+	transport := &http.Transport{DialContext: GuardedDialContext()}
 	client := &http.Client{
 		Timeout:   httpTimeout,
 		Transport: transport,
@@ -169,13 +169,17 @@ var (
 	}
 )
 
-// guardedDialContext returns the SSRF-guarded dial used by HTTPDo's
-// transport: resolve once, validate every returned address, then dial vetted
+// GuardedDialContext returns the SSRF-guarded dial used by HTTPDo's
+// transport. It is exported so every other outbound-HTTP call site in the
+// server (e.g. the GIF proxy in package api) shares one vetted dialer instead
+// of reaching for a bare net.Dialer.
+//
+// Behaviour: resolve once, validate every returned address, then dial vetted
 // concrete IPs. All addresses are validated before any dial (one poisoned
 // record among them refuses the whole request), and every vetted address is
 // tried in order — a dual-stack or round-robin host whose first record is
 // down must still connect via the next one.
-func guardedDialContext() func(ctx context.Context, network, addr string) (net.Conn, error) {
+func GuardedDialContext() func(ctx context.Context, network, addr string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		h, port, splitErr := net.SplitHostPort(addr)
 		if splitErr != nil {

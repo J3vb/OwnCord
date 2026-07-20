@@ -48,7 +48,8 @@ All error responses use this JSON envelope:
 | `CONFLICT` | 409 | Duplicate username on register, or server already up-to-date on update |
 | `TOO_LARGE` | 413 | File exceeds upload size limit |
 | `SERVER_ERROR` / `INTERNAL` | 500 | Internal server error |
-| `BAD_GATEWAY` | 502 | Upstream failure (GitHub API, LiveKit, asset download) |
+| `BAD_GATEWAY` | 502 | Upstream failure (GitHub API, LiveKit, GIF provider, asset download) |
+| `GIF_DISABLED` | 503 | GIF proxy is not configured on this server (no `gif.api_key`) |
 
 ---
 
@@ -618,6 +619,74 @@ Full-text search across messages in channels the user can read. Uses SQLite FTS5
   ]
 }
 ```
+
+---
+
+## GIFs
+
+The server proxies the Klipy GIF API so the provider API key stays server-side.
+Clients never contact `api.klipy.com` — a key shipped in the desktop bundle
+would be public by construction. The key is configured as `gif.api_key`
+(see [Server Configuration](server-configuration.md#gif-picker-gif)).
+
+**Default-off contract:** with no key configured, both endpoints return
+`503` with error code `GIF_DISABLED`. Clients must treat that as "this server
+does not have GIFs" and hide/disable the GIF affordance — not retry.
+
+The media URLs in the response point at Klipy's CDN; the client still validates
+them against its `klipy.com` CDN allowlist before rendering.
+
+### GET /api/v1/gif/search
+
+**Auth:** Required
+**Rate limit:** 30 requests/minute (dedicated per-IP bucket)
+
+#### Query Parameters
+
+| Param | Type | Default | Range | Description |
+| ----- | ---- | ------- | ----- | ----------- |
+| `q` | string | (required) | 1-100 chars | Search term |
+| `limit` | int | 20 | 1-50 | Maximum results to return |
+
+#### Response 200 OK
+
+```json
+{
+  "results": [
+    {
+      "id": "abc123",
+      "title": "happy cat",
+      "media_formats": {
+        "tinygif": { "url": "https://media.klipy.com/abc123_tiny.gif" },
+        "gif": { "url": "https://media.klipy.com/abc123.gif" }
+      }
+    }
+  ]
+}
+```
+
+Only `id`, `title`, and the two `media_formats` URLs are forwarded. Every other
+field the upstream returns is dropped, so an upstream that echoed the API key
+could not leak it to clients. Results missing either format are omitted.
+
+#### Errors
+
+| Status | Code | When |
+| ------ | ---- | ---- |
+| 400 | `INVALID_INPUT` | Missing/blank `q`, `q` over 100 chars, or `limit` outside 1-50 |
+| 401 | `UNAUTHORIZED` | No valid session (checked before the disabled check) |
+| 429 | `RATE_LIMITED` | Over 30 requests/minute |
+| 502 | `BAD_GATEWAY` | Upstream error, timeout, or unparseable response |
+| 503 | `GIF_DISABLED` | `gif.api_key` is not configured |
+
+### GET /api/v1/gif/trending
+
+Same auth, rate limit, response shape, and error codes as
+`/api/v1/gif/search`, minus the `q` parameter.
+
+| Param | Type | Default | Range | Description |
+| ----- | ---- | ------- | ----- | ----------- |
+| `limit` | int | 20 | 1-50 | Maximum results to return |
 
 ---
 
