@@ -680,6 +680,32 @@ describe("LiveKitSession", () => {
       expect(setVoiceStatus).toHaveBeenCalledWith("idle");
     });
 
+    it("writes reconnecting when the room drops unexpectedly", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+
+      // Capture the Disconnected handler registered during room creation.
+      let disconnectedHandler: ((reason?: number) => void) | undefined;
+      mockRoom.on.mockImplementation((event: string, handler: any) => {
+        if (event === "disconnected") disconnectedHandler = handler;
+        return mockRoom;
+      });
+
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      expect(disconnectedHandler).toBeDefined();
+      expect((session as any)._state.type).toBe("connected");
+
+      // Isolate the write triggered purely by the unexpected room drop.
+      (setVoiceStatus as any).mockClear();
+
+      // Fire an unexpected disconnect (non-CLIENT_INITIATED) — this is the primary
+      // reconnecting write, from setReconnectAc via handleDisconnected.
+      disconnectedHandler!(/* SERVER_SHUTDOWN */ 1);
+
+      expect((session as any)._state.type).toBe("reconnecting");
+      expect(setVoiceStatus).toHaveBeenCalledWith("reconnecting");
+    });
+
     it("writes connected after a successful auto-reconnect", async () => {
       (session as any)._state = {
         type: "reconnecting",
