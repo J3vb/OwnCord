@@ -215,6 +215,7 @@ function resetStores(): void {
     localScreenshare: false,
     joinedAt: null,
     listenOnly: false,
+    voiceStatus: "idle",
   }));
   localStorage.removeItem("owncord:member-list-height");
   localStorage.removeItem("owncord:member-list-collapsed");

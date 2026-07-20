@@ -134,6 +134,7 @@ function resetAllStores(): void {
     localScreenshare: false,
     joinedAt: null,
     listenOnly: false,
+    voiceStatus: "idle",
   }));
   authStore.setState(() => ({
     token: null,
