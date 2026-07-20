@@ -131,7 +131,7 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 		}
 
 		slog.Info("totp verified", "user_id", user.ID, "ip", challenge.IP)
-		_ = database.LogAudit(user.ID, "totp_verified", "user", user.ID,
+		db.WriteAudit(database, user.ID, "totp_verified", "user", user.ID,
 			"two-factor verification completed from "+challenge.IP)
 
 		writeJSON(w, http.StatusOK, authSuccessResponse{
@@ -296,7 +296,7 @@ func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, use
 		}
 
 		slog.Info("totp enabled", "user_id", user.ID)
-		_ = database.LogAudit(user.ID, "totp_enabled", "user", user.ID,
+		db.WriteAudit(database, user.ID, "totp_enabled", "user", user.ID,
 			"two-factor authentication enrolled")
 
 		w.WriteHeader(http.StatusNoContent)
@@ -379,7 +379,7 @@ func handleDisableTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, lim
 		}
 
 		slog.Info("totp disabled", "user_id", user.ID)
-		_ = database.LogAudit(user.ID, "totp_disabled", "user", user.ID,
+		db.WriteAudit(database, user.ID, "totp_disabled", "user", user.ID,
 			"two-factor authentication disabled")
 
 		w.WriteHeader(http.StatusNoContent)

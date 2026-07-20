@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/telemetry"
 )
@@ -99,9 +100,7 @@ func (s *ModerationService) BanUser(ctx context.Context, actorID, targetID int64
 		return fmt.Errorf("%w: failed to ban user", ErrInternal)
 	}
 
-	if err := s.st.LogAudit(actorID, "user_ban", "user", targetID, reason); err != nil {
-		slog.Error("failed to log audit entry", "error", err)
-	}
+	db.WriteAudit(s.st, actorID, "user_ban", "user", targetID, reason)
 
 	slog.Info("user banned", "actor_id", actorID, "target_id", targetID, "reason", reason)
 	return nil
@@ -129,9 +128,7 @@ func (s *ModerationService) UnbanUser(_ context.Context, actorID, targetID int64
 		return fmt.Errorf("%w: failed to unban user", ErrInternal)
 	}
 
-	if err := s.st.LogAudit(actorID, "user_unban", "user", targetID, ""); err != nil {
-		slog.Error("failed to log audit entry", "error", err)
-	}
+	db.WriteAudit(s.st, actorID, "user_unban", "user", targetID, "")
 
 	slog.Info("user unbanned", "actor_id", actorID, "target_id", targetID)
 	return nil

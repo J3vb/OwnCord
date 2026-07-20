@@ -108,7 +108,7 @@ func handlePutChannelPermission(database *db.DB, hub HubBroadcaster, permInvalid
 		actor := actorFromContext(r)
 		slog.Info("channel permissions updated", "actor_id", actor, "channel_id", ch.ID,
 			"role_id", roleID, "allow", allow, "deny", deny)
-		_ = database.LogAudit(actor, "channel_perms_update", "channel", ch.ID,
+		db.WriteAudit(database, actor, "channel_perms_update", "channel", ch.ID,
 			fmt.Sprintf("set overrides for role %s on #%s (allow=%#x deny=%#x)", role.Name, ch.Name, allow, deny))
 
 		if permInvalidator != nil {
@@ -147,7 +147,7 @@ func handleDeleteChannelPermission(database *db.DB, hub HubBroadcaster, permInva
 
 		actor := actorFromContext(r)
 		slog.Info("channel permissions cleared", "actor_id", actor, "channel_id", ch.ID, "role_id", roleID)
-		_ = database.LogAudit(actor, "channel_perms_clear", "channel", ch.ID,
+		db.WriteAudit(database, actor, "channel_perms_clear", "channel", ch.ID,
 			fmt.Sprintf("cleared overrides for role %d on #%s", roleID, ch.Name))
 
 		if permInvalidator != nil {

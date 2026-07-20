@@ -79,7 +79,7 @@ func handlePatchSettings(database *db.DB) http.HandlerFunc {
 		}
 		for key := range normalizedUpdates {
 			slog.Info("setting changed", "actor_id", actor, "key", key)
-			_ = database.LogAudit(actor, "setting_change", "setting", 0,
+			db.WriteAudit(database, actor, "setting_change", "setting", 0,
 				fmt.Sprintf("%s updated", key))
 		}
 

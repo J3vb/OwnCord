@@ -44,7 +44,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, username 
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to fetch updated user", ErrInternal)
 	}
-	_ = s.st.LogAudit(userID, "profile_update", "user", userID,
+	db.WriteAudit(s.st, userID, "profile_update", "user", userID,
 		fmt.Sprintf("username=%s", username))
 	slog.Info("profile updated", "user_id", userID, "username", username)
 	return user, nil
@@ -83,7 +83,7 @@ func (s *UserService) ChangePassword(userID int64, newPasswordHash string, keepS
 			res.RevokeFailed = true
 		}
 	}
-	_ = s.st.LogAudit(userID, "password_change", "user", userID, "password changed")
+	db.WriteAudit(s.st, userID, "password_change", "user", userID, "password changed")
 	slog.Info("password changed", "user_id", userID,
 		"sessions_revoked", res.SessionsRevoked, "revoke_failed", res.RevokeFailed)
 	return res, nil
@@ -106,7 +106,7 @@ func (s *UserService) RevokeSession(userID, sessionID int64) error {
 		}
 		return fmt.Errorf("%w: failed to revoke session", ErrInternal)
 	}
-	_ = s.st.LogAudit(userID, "session_revoke", "session", sessionID, "session revoked")
+	db.WriteAudit(s.st, userID, "session_revoke", "session", sessionID, "session revoked")
 	slog.Info("session revoked", "user_id", userID, "session_id", sessionID)
 	return nil
 }

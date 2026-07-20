@@ -369,7 +369,7 @@ func (s *MessageService) DeleteMessage(userID, msgID int64) (*DeleteMessageResul
 	}
 
 	slog.Debug("message deleted", "user_id", userID, "msg_id", msgID, "channel_id", msg.ChannelID, "is_mod", isMod)
-	_ = s.st.LogAudit(userID, "message_delete", "message", msgID,
+	db.WriteAudit(s.st, userID, "message_delete", "message", msgID,
 		fmt.Sprintf("channel %d, mod_action=%v", msg.ChannelID, isMod))
 
 	result := &DeleteMessageResult{
