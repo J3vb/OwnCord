@@ -8,10 +8,17 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import { createEmojiPicker } from "@components/EmojiPicker";
 import { createGifPicker } from "@components/GifPicker";
+import type { GifApi } from "@lib/gifProvider";
 
 export interface MessageInputOptions {
   readonly channelId: number;
   readonly channelName: string;
+  /**
+   * GIF endpoints on the user's own server. Omit to hide the GIF affordance
+   * entirely — the button is rendered disabled rather than offering a picker
+   * that cannot load.
+   */
+  readonly gifApi?: GifApi;
   readonly onSend: (
     content: string,
     replyTo: number | null,
@@ -52,6 +59,13 @@ const ALLOWED_TYPES = [
   "application/json",
 ];
 
+/** Disable the GIF button and say why, instead of silently doing nothing. */
+function markGifUnavailable(gifBtn: HTMLButtonElement, reason: string): void {
+  gifBtn.setAttribute("disabled", "true");
+  gifBtn.title = reason;
+  gifBtn.setAttribute("aria-label", `GIF — ${reason}`);
+}
+
 export function createMessageInput(options: MessageInputOptions): MessageInputComponent {
   const ac = new AbortController();
   const signal = ac.signal;
@@ -68,6 +82,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   let replyText: HTMLSpanElement | null = null;
   let editBar: HTMLDivElement | null = null;
   let disabledReason: string | null = options.disabledReason ?? null;
+  /** True once the server has told us GIFs are off, or if no GIF api was wired. */
+  let gifUnavailable = options.gifApi === undefined;
   const controlButtons: HTMLButtonElement[] = [];
   let attachmentPreviewBar: HTMLDivElement | null = null;
 
@@ -150,6 +166,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       } else {
         // Don't re-enable the attach button when uploads aren't wired.
         if (btn.classList.contains("attach-btn") && options.onUploadFile === undefined) continue;
+        // Likewise for GIFs when this server has no GIF provider configured.
+        if (btn.classList.contains("gif-btn") && gifUnavailable) continue;
         btn.removeAttribute("disabled");
       }
     }
@@ -428,6 +446,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       { class: "input-btn gif-btn", "aria-label": "GIF" },
       "GIF",
     );
+    if (gifUnavailable) {
+      markGifUnavailable(gifBtn, "GIFs are not enabled on this server");
+    }
     const sendBtn = createElement("button", {
       class: "input-btn send-btn",
       "aria-label": "Send message",
@@ -573,6 +594,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
 
     function toggleGifPicker(): void {
+      const gifApi = options.gifApi;
+      if (gifApi === undefined) return;
       // Close emoji picker if open
       if (emojiPicker !== null) {
         closeEmojiPicker();
@@ -582,6 +605,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         return;
       }
       gifPicker = createGifPicker({
+        api: gifApi,
+        onUnavailable: (reason: string) => {
+          gifUnavailable = true;
+          markGifUnavailable(gifBtn, reason);
+        },
         onSelect: (gifUrl: string) => {
           if (textarea !== null) {
             textarea.value = gifUrl;

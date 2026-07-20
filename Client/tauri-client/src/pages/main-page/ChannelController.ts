@@ -272,6 +272,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     messageInput = createMessageInput({
       channelId,
       channelName,
+      gifApi: api,
       onSend: (content: string, replyTo: number | null, attachments: readonly string[]) => {
         performSend(content, replyTo, attachments);
       },

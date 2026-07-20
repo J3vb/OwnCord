@@ -34,6 +34,11 @@ const (
 	// clientUpdateRateLimitPerMinute is the maximum client-update checks per IP per minute.
 	clientUpdateRateLimitPerMinute = 30
 
+	// gifRateLimitPerMinute is the maximum GIF proxy requests per IP per minute.
+	// The picker debounces at 300ms, so a user typing continuously for a minute
+	// stays under this; it exists to bound abuse of the operator's Klipy quota.
+	gifRateLimitPerMinute = 30
+
 	// loginFailureThreshold is the number of failed login attempts (within
 	// loginFailureWindow) before the IP is locked out.
 	loginFailureThreshold = 9

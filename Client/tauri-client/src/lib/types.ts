@@ -42,6 +42,8 @@ export type ApiErrorCode =
   | "CONFLICT"
   | "TOO_LARGE"
   | "SERVER_ERROR"
+  /** GIF proxy is not configured on this server (no gif.api_key). */
+  | "GIF_DISABLED"
   | "UNKNOWN";
 
 // -----------------------------------------------------------------------------
@@ -636,6 +638,27 @@ export interface UploadResponse {
   readonly size: number;
   readonly mime: string;
   readonly url: string;
+}
+
+/**
+ * GET /api/v1/gif/{search,trending} response.
+ *
+ * The GIF provider key lives on the server; the client only ever talks to its
+ * own server here. The media URLs still point at Klipy's CDN and are validated
+ * against the CDN allowlist in gifProvider before being rendered.
+ */
+export interface GifApiResult {
+  readonly id: string;
+  readonly title: string;
+  readonly media_formats: {
+    readonly tinygif?: { readonly url: string };
+    readonly gif?: { readonly url: string };
+  };
+}
+
+/** Envelope for both GIF endpoints. */
+export interface GifSearchResponse {
+  readonly results: readonly GifApiResult[];
 }
 
 /** GET /api/v1/dms response. */

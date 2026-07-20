@@ -1,18 +1,31 @@
-// GifPicker — searchable GIF selector powered by Klipy API.
-// Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
+// GifPicker — searchable GIF selector, served by the user's own OwnCord server
+// (which proxies Klipy). Uses @lib/dom helpers exclusively. Never sets
+// innerHTML with user content.
 
 import { createElement, setText, clearChildren } from "@lib/dom";
+import { ApiClientError } from "@lib/api";
 import { searchGifs, getTrendingGifs } from "@lib/gifProvider";
-import type { GifResult } from "@lib/gifProvider";
+import type { GifApi, GifResult } from "@lib/gifProvider";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export interface GifPickerOptions {
+  /** GIF endpoints on the user's own server. */
+  readonly api: GifApi;
   readonly onSelect: (gifUrl: string) => void;
   readonly onClose: () => void;
+  /**
+   * Called when the server reports GIFs are not configured (503 GIF_DISABLED).
+   * The caller uses this to disable its GIF affordance so the user is not
+   * offered a feature this server does not have.
+   */
+  readonly onUnavailable?: (reason: string) => void;
 }
+
+/** Shown in-picker and passed to onUnavailable when the server has no key. */
+export const GIF_UNAVAILABLE_MESSAGE = "GIFs are not enabled on this server";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -114,18 +127,28 @@ export function createGifPicker(options: GifPickerOptions): {
 
     try {
       const gifs =
-        query.length > 0 ? await searchGifs(query, GIF_LIMIT) : await getTrendingGifs(GIF_LIMIT);
+        query.length > 0
+          ? await searchGifs(options.api, query, GIF_LIMIT)
+          : await getTrendingGifs(options.api, GIF_LIMIT);
 
       // Only render if this is still the latest request
       if (requestId === currentRequestId) {
         renderGifs(gifs);
       }
     } catch (err) {
+      // The server has no GIF key configured — degrade calmly and tell the
+      // caller so it can disable its GIF button, rather than looking broken.
+      const disabled = err instanceof ApiClientError && err.code === "GIF_DISABLED";
+      if (disabled) {
+        root.classList.add("gp-unavailable");
+        searchInput.disabled = true;
+        options.onUnavailable?.(GIF_UNAVAILABLE_MESSAGE);
+      }
       if (requestId === currentRequestId) {
         clearChildren(gridArea);
         const errEl = createElement("div", { class: "gp-empty" });
-        const msg = err instanceof Error ? err.message : "Failed to load GIFs";
-        setText(errEl, msg);
+        const fallback = err instanceof Error ? err.message : "Failed to load GIFs";
+        setText(errEl, disabled ? GIF_UNAVAILABLE_MESSAGE : fallback);
         gridArea.appendChild(errEl);
       }
     }
