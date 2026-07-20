@@ -30,6 +30,7 @@ import type { ReactionController } from "./ReactionController";
 import { updateChatHeaderForDm } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
 import { dmStore } from "@stores/dm.store";
+import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { membersStore } from "@stores/members.store";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
@@ -314,14 +315,20 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
     // Composer gating: express permission + connection as affordance. The
     // composer disables (with a reason) when the socket is down or the user
-    // may not post here, instead of accepting a click and failing. DM channels
-    // are not in channelsStore (dmStore), so they are left ungated here — the
-    // server still enforces block/permission and a refused send shows as a
-    // failed row.
+    // may not post here, instead of accepting a click and failing. For DM
+    // channels the reason also covers block state (channels-members-dms.md §3.2).
+    const dmRecipientId =
+      channelType === "dm"
+        ? (dmStore.getState().channels.find((c) => c.channelId === channelId)?.recipient.id ?? null)
+        : null;
     const computeComposerReason = (): string | null => {
       const status = uiStore.getState().connectionStatus;
       if (status === "reconnecting") return "Reconnecting…";
       if (status === "disconnected") return "Not connected";
+      if (dmRecipientId !== null) {
+        const blockReason = dmComposerBlockReason(blocksStore.getState(), dmRecipientId);
+        if (blockReason !== null) return blockReason;
+      }
       const ch = channelsStore.getState().channels.get(channelId);
       if (ch === undefined) return null;
       if (!ch.canSend) {
@@ -347,6 +354,15 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         () => refreshComposerState(),
       ),
     );
+    if (dmRecipientId !== null) {
+      // Un-gate live when the block clears (unblock) and gate on a refused send.
+      composerGatingUnsubs.push(
+        blocksStore.subscribeSelector(
+          (s) => dmComposerBlockReason(s, dmRecipientId),
+          () => refreshComposerState(),
+        ),
+      );
+    }
 
     // Arrow-up edit: listen for edit-last-message bubbling from MessageInput
     slots.inputSlot.addEventListener(

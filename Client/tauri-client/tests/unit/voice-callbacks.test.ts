@@ -15,6 +15,7 @@ const {
   mockDisableCamera,
   mockEnableScreenshare,
   mockDisableScreenshare,
+  mockUiGetState,
 } = vi.hoisted(() => ({
   mockVoiceStoreGetState: vi.fn(),
   mockJoinVoiceChannel: vi.fn(),
@@ -26,6 +27,7 @@ const {
   mockDisableCamera: vi.fn(() => Promise.resolve()),
   mockEnableScreenshare: vi.fn(() => Promise.resolve()),
   mockDisableScreenshare: vi.fn(() => Promise.resolve()),
+  mockUiGetState: vi.fn(() => ({ connectionStatus: "connected" })),
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -41,6 +43,10 @@ vi.mock("@stores/voice.store", () => ({
   voiceStore: { getState: mockVoiceStoreGetState },
   joinVoiceChannel: mockJoinVoiceChannel,
   leaveVoiceChannel: mockLeaveVoiceChannel,
+}));
+
+vi.mock("@stores/ui.store", () => ({
+  uiStore: { getState: mockUiGetState },
 }));
 
 vi.mock("@lib/livekitSession", () => ({
@@ -105,6 +111,7 @@ describe("createVoiceWidgetCallbacks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockVoiceStoreGetState.mockReturnValue(makeVoiceState());
+    mockUiGetState.mockReturnValue({ connectionStatus: "connected" });
   });
 
   describe("onDisconnect", () => {
@@ -126,6 +133,17 @@ describe("createVoiceWidgetCallbacks", () => {
 
       cbs.onDisconnect();
 
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
+    it("does not send over a down socket while reconnecting", () => {
+      mockUiGetState.mockReturnValue({ connectionStatus: "reconnecting" });
+      const ws = makeWs();
+      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+
+      cbs.onDisconnect();
+
+      expect(mockVoiceSessionLeave).not.toHaveBeenCalled();
       expect(ws.send).not.toHaveBeenCalled();
     });
   });
@@ -276,6 +294,7 @@ describe("createVoiceWidgetCallbacks", () => {
 describe("createSidebarVoiceCallbacks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUiGetState.mockReturnValue({ connectionStatus: "connected" });
   });
 
   it("onVoiceJoin sends voice_join and updates store", () => {
@@ -300,5 +319,27 @@ describe("createSidebarVoiceCallbacks", () => {
     expect(mockVoiceSessionLeave).toHaveBeenCalledWith(false);
     expect(mockLeaveVoiceChannel).toHaveBeenCalled();
     expect(ws.send).toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
+  });
+
+  it("onVoiceJoin does not send over a down socket", () => {
+    mockUiGetState.mockReturnValue({ connectionStatus: "disconnected" });
+    const ws = makeWs();
+    const cbs = createSidebarVoiceCallbacks(ws);
+
+    cbs.onVoiceJoin(42);
+
+    expect(mockJoinVoiceChannel).not.toHaveBeenCalled();
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it("onVoiceLeave does not send over a down socket", () => {
+    mockUiGetState.mockReturnValue({ connectionStatus: "reconnecting" });
+    const ws = makeWs();
+    const cbs = createSidebarVoiceCallbacks(ws);
+
+    cbs.onVoiceLeave();
+
+    expect(mockVoiceSessionLeave).not.toHaveBeenCalled();
+    expect(ws.send).not.toHaveBeenCalled();
   });
 });

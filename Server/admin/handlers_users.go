@@ -139,7 +139,7 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 			if permInvalidator != nil {
 				permInvalidator.InvalidateUser(id)
 			}
-			_ = database.LogAudit(actor, "role_change", "user", id,
+			db.WriteAudit(database, actor, "role_change", "user", id,
 				fmt.Sprintf("changed %s role to %d", user.Username, *req.RoleID))
 			if role, err := database.GetRoleByID(*req.RoleID); err == nil && role != nil {
 				if hub != nil {
@@ -171,7 +171,7 @@ func handleForceLogout(database *db.DB) http.HandlerFunc {
 		}
 		actor := actorFromContext(r)
 		slog.Info("force logout", "actor_id", actor, "target_user_id", id)
-		_ = database.LogAudit(actor, "force_logout", "user", id, "all sessions terminated")
+		db.WriteAudit(database, actor, "force_logout", "user", id, "all sessions terminated")
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

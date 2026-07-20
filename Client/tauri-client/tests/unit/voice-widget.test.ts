@@ -34,9 +34,10 @@ vi.mock("@lib/connectionStats", () => ({
 }));
 
 import { createVoiceWidget } from "../../src/components/VoiceWidget";
-import { voiceStore } from "../../src/stores/voice.store";
+import { voiceStore, type VoiceStatus } from "../../src/stores/voice.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { membersStore } from "../../src/stores/members.store";
+import { uiStore, setConnectionStatus } from "../../src/stores/ui.store";
 import type { VoiceUser } from "../../src/stores/voice.store";
 
 function resetStores(): void {
@@ -50,6 +51,7 @@ function resetStores(): void {
     localScreenshare: false,
     joinedAt: null,
     listenOnly: false,
+    voiceStatus: "idle",
   }));
   channelsStore.setState(() => ({
     channels: new Map(),
@@ -60,6 +62,14 @@ function resetStores(): void {
     members: new Map(),
     typingUsers: new Map(),
   }));
+  // Voice controls freeze when the socket is down; keep it live by default so
+  // the interaction tests below operate on enabled controls.
+  setConnectionStatus("connected");
+}
+
+function setVoiceStatus(status: VoiceStatus): void {
+  voiceStore.setState((prev) => ({ ...prev, voiceStatus: status }));
+  voiceStore.flush();
 }
 
 function setVoiceChannel(channelId: number, users: VoiceUser[]): void {
@@ -621,6 +631,172 @@ describe("VoiceWidget", () => {
 
     expect(muteBtn.classList.contains("active-ctrl")).toBe(true);
     expect(muteBtn.getAttribute("aria-pressed")).toBe("true");
+
+    widget.destroy?.();
+  });
+
+  // --- E2EE / voice-session status (docs/architecture/ux/voice-and-e2ee.md §2) ---
+
+  it("shows 'Connecting…' during the joining phase, no secured badge", () => {
+    setVoiceChannel(1, []);
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    setVoiceStatus("joining");
+
+    const status = container.querySelector('[data-testid="vw-status"]');
+    const secured = container.querySelector('[data-testid="vw-secured"]') as HTMLElement;
+    expect(status?.textContent).toBe("Connecting…");
+    expect(secured.style.display).toBe("none");
+
+    widget.destroy?.();
+  });
+
+  it("shows 'Securing…' while E2EE key exchange runs, no secured badge yet", () => {
+    setVoiceChannel(1, []);
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    setVoiceStatus("securing");
+
+    const status = container.querySelector('[data-testid="vw-status"]') as HTMLElement;
+    const secured = container.querySelector('[data-testid="vw-secured"]') as HTMLElement;
+    expect(status.textContent).toBe("Securing…");
+    expect(status.classList.contains("vw-securing")).toBe(true);
+    expect(secured.style.display).toBe("none");
+
+    widget.destroy?.();
+  });
+
+  it("shows a persistent secured indicator once connected", () => {
+    setVoiceChannel(1, []);
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    setVoiceStatus("connected");
+
+    const status = container.querySelector('[data-testid="vw-status"]');
+    const secured = container.querySelector('[data-testid="vw-secured"]') as HTMLElement;
+    expect(status?.textContent).toBe("Voice Connected");
+    expect(secured.style.display).toBe("inline-flex");
+    expect(secured.textContent).toContain("Secured");
+
+    widget.destroy?.();
+  });
+
+  it("shows 'Reconnecting voice…' during a voice reconnect", () => {
+    setVoiceChannel(1, []);
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    setVoiceStatus("reconnecting");
+
+    const status = container.querySelector('[data-testid="vw-status"]') as HTMLElement;
+    const secured = container.querySelector('[data-testid="vw-secured"]') as HTMLElement;
+    expect(status.textContent).toBe("Reconnecting voice…");
+    expect(status.classList.contains("vw-reconnecting")).toBe(true);
+    expect(secured.style.display).toBe("none");
+
+    widget.destroy?.();
+  });
+
+  // --- Freeze controls during WS reconnect (docs/architecture/ux/README.md §3) ---
+
+  it("disables voice controls with a reason while the WS socket is reconnecting", () => {
+    setVoiceChannel(1, []);
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    setConnectionStatus("reconnecting");
+    uiStore.flush();
+
+    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
+    const disconnectBtn = container.querySelector('[aria-label="Disconnect"]') as HTMLButtonElement;
+    expect(muteBtn.disabled).toBe(true);
+    expect(muteBtn.title).toBe("Reconnecting…");
+    expect(disconnectBtn.disabled).toBe(true);
+
+    widget.destroy?.();
+  });
+
+  it("shows 'Not connected' reason while the WS socket is disconnected", () => {
+    setVoiceChannel(1, []);
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    setConnectionStatus("disconnected");
+    uiStore.flush();
+
+    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
+    expect(muteBtn.disabled).toBe(true);
+    expect(muteBtn.title).toBe("Not connected");
+
+    widget.destroy?.();
+  });
+
+  it("re-enables voice controls when the WS socket reconnects", () => {
+    setVoiceChannel(1, []);
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    setConnectionStatus("reconnecting");
+    uiStore.flush();
+    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
+    expect(muteBtn.disabled).toBe(true);
+
+    setConnectionStatus("connected");
+    uiStore.flush();
+    expect(muteBtn.disabled).toBe(false);
+    expect(muteBtn.title).toBe("");
 
     widget.destroy?.();
   });

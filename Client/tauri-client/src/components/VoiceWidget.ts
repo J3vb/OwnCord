@@ -9,8 +9,9 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon, createSignalIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
-import { voiceStore } from "@stores/voice.store";
+import { voiceStore, type VoiceStatus } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
+import { uiStore } from "@stores/ui.store";
 import {
   createConnectionStatsPoller,
   formatBytes,
@@ -44,6 +45,16 @@ const QUALITY_BARS: Record<QualityLevel, number> = {
   bad: 1,
 };
 
+/** Header status text per voice-session lifecycle state
+ *  (docs/architecture/ux/voice-and-e2ee.md §2). */
+const STATUS_LABELS: Record<VoiceStatus, string> = {
+  idle: "Voice Connected",
+  joining: "Connecting…",
+  securing: "Securing…",
+  connected: "Voice Connected",
+  reconnecting: "Reconnecting voice…",
+};
+
 /** Format milliseconds elapsed into HH:MM:SS or MM:SS. */
 function formatElapsed(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -59,10 +70,14 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   const ac = new AbortController();
   let root: HTMLDivElement | null = null;
   let channelNameEl: HTMLSpanElement | null = null;
+  let statusLabel: HTMLSpanElement | null = null;
+  let securedBadge: HTMLSpanElement | null = null;
+  let controlsRow: HTMLDivElement | null = null;
   let muteBtn: HTMLButtonElement | null = null;
   let deafenBtn: HTMLButtonElement | null = null;
   let cameraBtn: HTMLButtonElement | null = null;
   let shareBtn: HTMLButtonElement | null = null;
+  let disconnectBtn: HTMLButtonElement | null = null;
 
   // Listen-only mode: "Grant Microphone" button
   let grantMicBtn: HTMLButtonElement | null = null;
@@ -168,6 +183,33 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     if (timerEl !== null) setText(timerEl, "00:00");
   }
 
+  /** Header E2EE status: dynamic label + a persistent "secured" lock once the
+   *  room key is ready (docs/architecture/ux/voice-and-e2ee.md §2). */
+  function updateStatus(status: VoiceStatus): void {
+    if (statusLabel !== null) {
+      setText(statusLabel, STATUS_LABELS[status]);
+      statusLabel.classList.toggle("vw-securing", status === "securing");
+      statusLabel.classList.toggle("vw-reconnecting", status === "reconnecting");
+    }
+    if (securedBadge !== null) {
+      securedBadge.style.display = status === "connected" ? "inline-flex" : "none";
+    }
+  }
+
+  /** Freeze voice controls while the WS socket is not live — the controls would
+   *  otherwise send over a down socket (docs/architecture/ux/README.md §3).
+   *  LiveKit's own reconnect keeps retrying underneath; we only gate the UI. */
+  function updateFrozen(status: "connected" | "reconnecting" | "disconnected"): void {
+    const frozen = status !== "connected";
+    const reason = status === "reconnecting" ? "Reconnecting…" : "Not connected";
+    controlsRow?.classList.toggle("vw-controls--frozen", frozen);
+    for (const btn of [muteBtn, deafenBtn, cameraBtn, shareBtn, disconnectBtn, grantMicBtn]) {
+      if (btn === null) continue;
+      btn.disabled = frozen;
+      btn.title = frozen ? reason : "";
+    }
+  }
+
   function render(): void {
     if (root === null || channelNameEl === null) return;
 
@@ -185,6 +227,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     root.classList.add("visible");
     startStatsPoller();
     startElapsedTimer();
+    updateStatus(voice.voiceStatus);
+    updateFrozen(uiStore.getState().connectionStatus);
 
     // Channel name
     const channel = channelsStore.getState().channels.get(channelId);
@@ -244,9 +288,21 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   function mount(container: Element): void {
     root = createElement("div", { class: "voice-widget", "data-testid": "voice-widget" });
 
-    // Header row: "Voice Connected" + channel name + signal icon
+    // Header row: lifecycle status + secured lock + channel name + signal icon
     const header = createElement("div", { class: "vw-header" });
-    const connLabel = createElement("span", { class: "vw-connected" }, "Voice Connected");
+    statusLabel = createElement("span", {
+      class: "vw-connected",
+      "data-testid": "vw-status",
+    });
+    setText(statusLabel, STATUS_LABELS.connected);
+    // Persistent E2EE affirmation, shown only once the room key is ready.
+    securedBadge = createElement("span", {
+      class: "vw-secured",
+      "data-testid": "vw-secured",
+      title: "End-to-end encrypted",
+    });
+    setText(securedBadge, "🔒 Secured");
+    securedBadge.style.display = "none";
     timerEl = createElement("span", { class: "vw-timer" }, "00:00");
     channelNameEl = createElement("span", { class: "vw-channel" }, "Voice Channel");
 
@@ -263,7 +319,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       { signal: ac.signal },
     );
 
-    appendChildren(header, connLabel, timerEl, channelNameEl, signalWrap);
+    appendChildren(header, statusLabel, securedBadge, timerEl, channelNameEl, signalWrap);
 
     // Expanded stats pane (hidden by default)
     statsPane = createElement("div", { class: "vw-stats" });
@@ -326,6 +382,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     // Controls row
     const controls = createElement("div", { class: "vw-controls" });
+    controlsRow = controls;
     muteBtn = createControlButton("Mute", "mic", options.onMuteToggle);
     deafenBtn = createControlButton("Deafen", "headphones", options.onDeafenToggle);
     cameraBtn = createControlButton("Camera", "camera", options.onCameraToggle);
@@ -338,12 +395,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     const shareLabelSpan = createElement("span", { class: "vw-share-label" });
     shareLabelSpan.style.display = "none";
     shareBtn.appendChild(shareLabelSpan);
-    const disconnectBtn = createControlButton(
-      "Disconnect",
-      "phone",
-      options.onDisconnect,
-      "disconnect",
-    );
+    disconnectBtn = createControlButton("Disconnect", "phone", options.onDisconnect, "disconnect");
     appendChildren(controls, muteBtn, deafenBtn, cameraBtn, shareBtn, disconnectBtn);
 
     // "Grant Microphone" button for listen-only mode
@@ -386,6 +438,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           camera: s.localCamera,
           screenshare: s.localScreenshare,
           listenOnly: s.listenOnly,
+          voiceStatus: s.voiceStatus,
         }),
         () => render(),
         (a, b) =>
@@ -394,7 +447,15 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           a.deafened === b.deafened &&
           a.camera === b.camera &&
           a.screenshare === b.screenshare &&
-          a.listenOnly === b.listenOnly,
+          a.listenOnly === b.listenOnly &&
+          a.voiceStatus === b.voiceStatus,
+      ),
+    );
+    // Freeze controls reactively when the WS socket drops (§3 connection status).
+    unsubs.push(
+      uiStore.subscribeSelector(
+        (s) => s.connectionStatus,
+        () => render(),
       ),
     );
     unsubs.push(
@@ -418,10 +479,14 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     root?.remove();
     root = null;
     channelNameEl = null;
+    statusLabel = null;
+    securedBadge = null;
+    controlsRow = null;
     muteBtn = null;
     deafenBtn = null;
     cameraBtn = null;
     shareBtn = null;
+    disconnectBtn = null;
     grantMicBtn = null;
     signalWrap = null;
     pingLabel = null;

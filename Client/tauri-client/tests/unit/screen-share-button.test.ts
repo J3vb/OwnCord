@@ -36,6 +36,7 @@ import { createVoiceWidget } from "@components/VoiceWidget";
 import { voiceStore } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
+import { setConnectionStatus } from "@stores/ui.store";
 
 function resetStores(): void {
   voiceStore.setState(() => ({
@@ -48,6 +49,7 @@ function resetStores(): void {
     localScreenshare: false,
     joinedAt: null,
     listenOnly: false,
+    voiceStatus: "idle",
   }));
   channelsStore.setState(() => ({
     channels: new Map(),
@@ -58,6 +60,8 @@ function resetStores(): void {
     members: new Map(),
     typingUsers: new Map(),
   }));
+  // Voice controls freeze while the socket is down; an active call is live.
+  setConnectionStatus("connected");
 }
 
 function setVoiceConnected(screenshare = false): void {
