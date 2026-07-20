@@ -22,6 +22,7 @@ import type {
   MemberResponse,
   DmChannelsResponse,
   CreateDmResponse,
+  BlockedUsersResponse,
 } from "./types";
 
 /** Configuration for the API client. */
@@ -443,6 +444,11 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     /** Close a DM (hide from sidebar). */
     closeDm(channelId: number, signal?: AbortSignal): Promise<void> {
       return request<void>("DELETE", `/dms/${channelId}`, undefined, signal);
+    },
+
+    /** List recipient user IDs the current user has blocked. */
+    listBlocks(signal?: AbortSignal): Promise<BlockedUsersResponse> {
+      return request<BlockedUsersResponse>("GET", "/blocks", undefined, signal);
     },
 
     // ── Voice ─────────────────────────────────────────────

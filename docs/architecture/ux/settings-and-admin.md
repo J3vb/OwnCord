@@ -171,14 +171,17 @@ sequenceDiagram
 |-------|--------------|
 | checking | Silent (no UI until a result) |
 | available | Non-modal banner with version + Update Now / Later (already `UpdateNotifier.ts:30-62`) |
-| downloading | Banner "Downloading update…" |
+| downloading | Banner "Downloading update… N%" (or "… N.N MB" until Content-Length is known) |
 | applied | App relaunches automatically |
 | failed | "Update failed. Please try again later." + Dismiss |
 
-> **⚠ Current gap — no download progress.** The download callback is a no-op
-> (`update_commands.rs:177`), so "Downloading update…" has no percentage. For a
-> large binary this looks hung. Target: surface a progress indicator (percentage
-> or indeterminate-with-bytes) by wiring the plugin's progress callback.
+> **✅ Wired — download progress.** The Rust download callback
+> (`download_and_install_update` in `update_commands.rs`) accumulates received
+> bytes and emits an `update-progress` event (`{ received, total }`) to the
+> webview. `downloadAndInstallUpdate(serverUrl, onProgress)` (`updater.ts`) listens
+> for it and forwards to `UpdateNotifier`, whose `formatDownloadProgress` renders a
+> percentage when `total` is known and falls back to bytes (MB) otherwise, so the
+> banner never looks hung. (Rust change is minimal and CI-gated only.)
 
 ---
 

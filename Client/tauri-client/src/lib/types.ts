@@ -650,6 +650,11 @@ export interface CreateDmResponse {
   readonly created: boolean;
 }
 
+/** GET /api/v1/blocks response. */
+export interface BlockedUsersResponse {
+  readonly blocked_user_ids: readonly number[];
+}
+
 /** TURN/STUN credentials from GET /api/voice/credentials. */
 export interface IceServer {
   readonly urls: string;

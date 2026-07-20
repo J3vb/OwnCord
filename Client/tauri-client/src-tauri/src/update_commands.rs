@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use serde::Serialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 
 use crate::livekit_proxy::{cert_store_key, load_stored_fingerprint, PinnedVerifier};
@@ -10,6 +10,15 @@ pub struct UpdateCheckResult {
     pub available: bool,
     pub version: Option<String>,
     pub body: Option<String>,
+}
+
+/// Download progress, emitted to the webview as `update-progress` so the banner
+/// can show a percentage/bytes instead of looking hung. `total` is None until
+/// the server sends a Content-Length.
+#[derive(Clone, Serialize)]
+struct DownloadProgress {
+    received: u64,
+    total: Option<u64>,
 }
 
 /// Extract the host (with port if non-443) from an https:// URL for cert store lookup.
@@ -174,9 +183,20 @@ pub async fn download_and_install_update(
 
     match update {
         Some(u) => {
-            u.download_and_install(|_chunk_len, _total| {}, || {})
-                .await
-                .map_err(|e| format!("download/install failed: {e}"))?;
+            // Accumulate downloaded bytes and emit progress to the webview.
+            // A failed emit must never abort the install, hence `let _ =`.
+            let progress_app = app.clone();
+            let mut received: u64 = 0;
+            u.download_and_install(
+                move |chunk_len, total| {
+                    received += chunk_len as u64;
+                    let _ =
+                        progress_app.emit("update-progress", DownloadProgress { received, total });
+                },
+                || {},
+            )
+            .await
+            .map_err(|e| format!("download/install failed: {e}"))?;
             Ok(())
         }
         None => Err("no update available".into()),

@@ -146,6 +146,25 @@ vi.mock("@stores/members.store", () => ({
   membersStore: { getState: mockMembersStoreGetState },
 }));
 
+// Block-state gating: capture the subscription callback so tests can simulate a
+// live change (block/unblock) and mock the reason the store reports.
+const { mockBlocksGetState, mockDmComposerBlockReason, blocksSubscribers } = vi.hoisted(() => ({
+  mockBlocksGetState: vi.fn(() => ({ blockedByMe: new Set<number>(), blockedByThem: new Set() })),
+  mockDmComposerBlockReason: vi.fn((): string | null => null),
+  blocksSubscribers: [] as Array<() => void>,
+}));
+
+vi.mock("@stores/blocks.store", () => ({
+  blocksStore: {
+    getState: mockBlocksGetState,
+    subscribeSelector: vi.fn((_sel: unknown, cb: () => void) => {
+      blocksSubscribers.push(cb);
+      return () => {};
+    }),
+  },
+  dmComposerBlockReason: mockDmComposerBlockReason,
+}));
+
 // ---------------------------------------------------------------------------
 // Imports
 // ---------------------------------------------------------------------------
@@ -204,6 +223,8 @@ describe("createChannelController", () => {
     vi.clearAllMocks();
     capturedMessageListOpts = null;
     capturedMessageInputOpts = null;
+    blocksSubscribers.length = 0;
+    mockDmComposerBlockReason.mockReturnValue(null);
     // The controller gates sends on the store-backed connection status
     // (docs/architecture/ux §3), not on ws.getState().
     setConnectionStatus("connected");
@@ -841,6 +862,60 @@ describe("createChannelController", () => {
 
       expect(opts.chatHeaderName!.textContent).toBe("random");
       expect(mockUpdateChatHeaderForDm).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("DM composer block gating", () => {
+    function mountDm(reason: string | null): void {
+      mockDmStoreGetState.mockReturnValue({
+        channels: [
+          {
+            channelId: 42,
+            recipient: { id: 5, username: "alice", avatar: "", status: "online" },
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+          },
+        ],
+      });
+      mockDmComposerBlockReason.mockReturnValue(reason);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "alice", "dm");
+    }
+
+    it("disables the DM composer with the explicit reason when the user blocked them", () => {
+      mountDm("You've blocked this user. Unblock to send messages.");
+      expect(mockSetDisabled).toHaveBeenLastCalledWith(
+        "You've blocked this user. Unblock to send messages.",
+      );
+    });
+
+    it("disables the DM composer with the neutral reason when being blocked", () => {
+      mountDm("You can't message this user right now.");
+      expect(mockSetDisabled).toHaveBeenLastCalledWith("You can't message this user right now.");
+    });
+
+    it("leaves the DM composer enabled when not blocked", () => {
+      mountDm(null);
+      expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+    });
+
+    it("un-gates live when the block clears (unblock)", () => {
+      mountDm("You've blocked this user. Unblock to send messages.");
+      expect(mockSetDisabled).toHaveBeenLastCalledWith(
+        "You've blocked this user. Unblock to send messages.",
+      );
+      // Simulate an unblock: the store reports no reason and notifies subscribers.
+      mockDmComposerBlockReason.mockReturnValue(null);
+      for (const cb of blocksSubscribers) cb();
+      expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+    });
+
+    it("does not subscribe to block state for non-DM channels", () => {
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general", "text");
+      expect(blocksSubscribers).toHaveLength(0);
     });
   });
 
