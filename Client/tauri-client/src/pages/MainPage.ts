@@ -15,6 +15,7 @@ import { createSettingsOverlay } from "@components/SettingsOverlay";
 import { createToastContainer } from "@components/Toast";
 import type { ToastContainer } from "@components/Toast";
 import { initToast, teardownToast, showToast } from "@lib/toast";
+import { logout } from "@lib/logout";
 import { authStore, clearAuth, updateUser } from "@stores/auth.store";
 import { closeSettings, uiStore } from "@stores/ui.store";
 import { updatePresence } from "@stores/members.store";
@@ -303,7 +304,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           throw err;
         }
       },
-      onLogout: () => clearAuth(),
+      onLogout: () => logout(api),
       onDeleteAccount: async (password) => {
         await api.deleteAccount(password);
         clearAuth();
