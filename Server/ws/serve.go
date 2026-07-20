@@ -206,8 +206,10 @@ func (h *Hub) handleReconnect(
 
 // computeAllowedChannels returns the set of channel IDs a user may access,
 // including both server channels (filtered by ReadMessages permission) and
-// the user's open DM channels. This mirrors the buildReady logic so that
-// replay-buffer filtering matches the ready payload's visible channels.
+// the user's open DM channels. The server-channel set comes from the single
+// permissions.Checker predicate shared with buildReady and REST
+// ListVisibleChannels, so replay-buffer filtering can never drift from the
+// ready payload's visible channels.
 func (h *Hub) computeAllowedChannels(database *db.DB, user *db.User) (map[int64]bool, error) {
 	channels, err := database.ListChannels()
 	if err != nil {
@@ -219,33 +221,17 @@ func (h *Hub) computeAllowedChannels(database *db.DB, user *db.User) (map[int64]
 		return nil, fmt.Errorf("computeAllowedChannels GetRoleByID: %w", err)
 	}
 
+	// Nil role = zero access (fail closed). Admins skip the override fetch.
 	allowed := make(map[int64]bool)
-
-	// Nil role = zero access (fail closed, same as buildReady).
 	if role != nil {
-		if permissions.HasAdmin(role.Permissions) {
-			// Admin bypasses all channel permission checks.
-			for i := range channels {
-				if channels[i].Type != "dm" {
-					allowed[channels[i].ID] = true
-				}
-			}
-		} else {
-			overrides, oErr := database.GetAllChannelPermissionsForRole(role.ID)
-			if oErr != nil {
-				return nil, fmt.Errorf("computeAllowedChannels GetAllChannelPermissionsForRole: %w", oErr)
-			}
-			for i := range channels {
-				if channels[i].Type == "dm" {
-					continue
-				}
-				o := overrides[channels[i].ID]
-				effective := permissions.EffectivePerms(role.Permissions, o.Allow, o.Deny)
-				if effective&permissions.ReadMessages == permissions.ReadMessages {
-					allowed[channels[i].ID] = true
-				}
+		var overrides map[int64]db.ChannelOverride
+		if !permissions.HasAdmin(role.Permissions) {
+			overrides, err = database.GetAllChannelPermissionsForRole(role.ID)
+			if err != nil {
+				return nil, fmt.Errorf("computeAllowedChannels GetAllChannelPermissionsForRole: %w", err)
 			}
 		}
+		allowed = h.permChecker.VisibleChannelIDs(role.Permissions, channelRefs(channels), permOverrides(overrides))
 	}
 
 	// Include the user's open DM channels.
@@ -564,6 +550,25 @@ func (h *Hub) buildAuthOK(user *db.User, roleName string, replaySource string) [
 	})
 }
 
+// channelRefs maps db channels to the checker's db-agnostic ChannelRef so
+// buildReady and computeAllowedChannels can share permissions.VisibleChannelIDs.
+func channelRefs(channels []db.Channel) []permissions.ChannelRef {
+	refs := make([]permissions.ChannelRef, len(channels))
+	for i := range channels {
+		refs[i] = permissions.ChannelRef{ID: channels[i].ID, Type: channels[i].Type}
+	}
+	return refs
+}
+
+// permOverrides maps a db override map to the checker's override map.
+func permOverrides(overrides map[int64]db.ChannelOverride) map[int64]permissions.ChannelOverride {
+	out := make(map[int64]permissions.ChannelOverride, len(overrides))
+	for id, o := range overrides {
+		out[id] = permissions.ChannelOverride{Allow: o.Allow, Deny: o.Deny}
+	}
+	return out
+}
+
 // channelCanSend reports whether a user with the given role and per-channel
 // override may post in a channel of chanType. It mirrors the non-DM branch of
 // MessageService.checkSendPermission so the client can pre-disable the composer
@@ -605,7 +610,11 @@ func (h *Hub) buildReady(database *db.DB, userID int64, role *db.Role) ([]byte, 
 		members = []db.MemberSummary{}
 	}
 
-	// Filter channels by READ_MESSAGES permission (mirrors REST handleListChannels).
+	// Filter channels by READ_MESSAGES through the single permissions.Checker
+	// predicate shared with REST ListVisibleChannels and reconnect replay
+	// filtering (computeAllowedChannels). The overrides map is fetched once and
+	// reused below for the per-channel can_send affordance. DM channels are
+	// excluded by the checker — they are delivered via the dm_channels field.
 	overrides := map[int64]db.ChannelOverride{}
 	if role != nil && !permissions.HasAdmin(role.Permissions) {
 		var oErr error
@@ -615,23 +624,13 @@ func (h *Hub) buildReady(database *db.DB, userID int64, role *db.Role) ([]byte, 
 		}
 	}
 	var visibleChannels []db.Channel
-	for i := range channels {
-		// DM channels are excluded — they are delivered via dm_channels field.
-		if channels[i].Type == "dm" {
-			continue
-		}
-		// Nil role = zero access (fail closed). Admin role bypasses all checks.
-		if role == nil {
-			continue
-		}
-		if permissions.HasAdmin(role.Permissions) {
-			visibleChannels = append(visibleChannels, channels[i])
-			continue
-		}
-		o := overrides[channels[i].ID]
-		effective := permissions.EffectivePerms(role.Permissions, o.Allow, o.Deny)
-		if effective&permissions.ReadMessages == permissions.ReadMessages {
-			visibleChannels = append(visibleChannels, channels[i])
+	if role != nil {
+		// Nil role = zero access (fail closed), handled by skipping the filter.
+		visibleIDs := h.permChecker.VisibleChannelIDs(role.Permissions, channelRefs(channels), permOverrides(overrides))
+		for i := range channels {
+			if visibleIDs[channels[i].ID] {
+				visibleChannels = append(visibleChannels, channels[i])
+			}
 		}
 	}
 	if visibleChannels == nil {

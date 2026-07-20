@@ -52,39 +52,43 @@ func (s *ChannelService) ListVisibleChannels(ctx context.Context, userID int64) 
 		return nil, fmt.Errorf("%w: failed to get role", ErrInternal)
 	}
 
-	isAdmin := permissions.HasAdmin(role.Permissions)
-	if isAdmin {
-		// Admin sees all non-DM channels.
-		var visible []db.Channel
-		for i := range all {
-			if all[i].Type != "dm" {
-				visible = append(visible, all[i])
-			}
+	// Admins skip the override fetch (they bypass all channel checks anyway).
+	var overrides map[int64]db.ChannelOverride
+	if !permissions.HasAdmin(role.Permissions) {
+		overrides, err = s.st.GetAllChannelPermissionsForRole(role.ID)
+		if err != nil {
+			overrides = make(map[int64]db.ChannelOverride)
 		}
-		return visible, nil
 	}
 
-	overrides, err := s.st.GetAllChannelPermissionsForRole(role.ID)
-	if err != nil {
-		overrides = make(map[int64]db.ChannelOverride)
-	}
-
-	var visible []db.Channel
+	// Single visibility predicate shared with the ws ready payload and reconnect
+	// replay filtering, so REST and WS can never disagree on what a role sees.
+	visibleIDs := s.perms.Checker().VisibleChannelIDs(role.Permissions, channelRefs(all), permOverrides(overrides))
+	visible := make([]db.Channel, 0, len(visibleIDs))
 	for i := range all {
-		if all[i].Type == "dm" {
-			continue
-		}
-		o := overrides[all[i].ID]
-		effective := permissions.EffectivePerms(role.Permissions, o.Allow, o.Deny)
-		if effective&permissions.ReadMessages == permissions.ReadMessages {
+		if visibleIDs[all[i].ID] {
 			visible = append(visible, all[i])
 		}
 	}
-
-	if visible == nil {
-		visible = []db.Channel{}
-	}
 	return visible, nil
+}
+
+// channelRefs maps db channels to the checker's db-agnostic ChannelRef.
+func channelRefs(channels []db.Channel) []permissions.ChannelRef {
+	refs := make([]permissions.ChannelRef, len(channels))
+	for i := range channels {
+		refs[i] = permissions.ChannelRef{ID: channels[i].ID, Type: channels[i].Type}
+	}
+	return refs
+}
+
+// permOverrides maps a db override map to the checker's override map.
+func permOverrides(overrides map[int64]db.ChannelOverride) map[int64]permissions.ChannelOverride {
+	out := make(map[int64]permissions.ChannelOverride, len(overrides))
+	for id, o := range overrides {
+		out[id] = permissions.ChannelOverride{Allow: o.Allow, Deny: o.Deny}
+	}
+	return out
 }
 
 // HandleTyping processes a typing start event for a channel.

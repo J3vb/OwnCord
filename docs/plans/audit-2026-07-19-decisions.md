@@ -1,8 +1,8 @@
 # Audit 2026-07-19 — Maintainer Decisions
 
-**Date decided:** 2026-07-19
+**Date decided:** 2026-07-19 (D1–D8); 2026-07-20 (D9–D10)
 **Decided by:** J3vb
-**Status:** decisions recorded; greenlit items (D4, D7, D8) implemented 2026-07-19; D9 (repo-wide `LogAudit` policy, flagged by the D8 note) decided + implemented 2026-07-20 — see per-row Status
+**Status:** decisions recorded; greenlit items (D4, D7, D8) implemented 2026-07-19 — see per-row Status. **2026-07-20:** backlog items 3 and 11 (D9, D10) implemented — channel-visibility unified through `permissions.Checker`; V2 dispatch migration finished and V1 deleted.
 **Source:** decision points raised by [docs/audit-2026-07-19.md](../audit-2026-07-19.md)
 
 This document records the maintainer's answers to the open decision points from
@@ -22,7 +22,8 @@ here (and the audit's closure table) as items land.
 | D6 | Abandoned SolidJS beachhead + stale `docs/client-architecture.md` | A-2026-07-12 | **Delete it all**: remove `src/components/solid/`, `solidMount`/`solidAdapter`, `vite-plugin-solid`, and Solid test deps; retire `client-architecture.md` in favor of [docs/architecture/client.md](../architecture/client.md). | **Implemented 2026-07-19** — solid/ dir, solidMount/solidAdapter, setup-solid tests, vite-plugin-solid, jsx tsconfig settings, and solid-js/@solidjs deps all removed; client-architecture.md is now a pointer. |
 | D7 | Spec refresh strategy for api.md / protocol.md / schema.md | A-2026-07-03 | **One refresh PR first**, using the audit's §2 conformance matrix as the checklist; afterwards specs are kept current per-PR (see the maintenance rule in [docs/architecture/README.md](../architecture/README.md)). Announcement channels (D1) later update the *fresh* specs. | **Implemented 2026-07-19** — all three specs refreshed against the code (incl. E2EE protocol section, migrations 001–015, profile/blocks/plugin-admin endpoints); reference tables now point at `protocol-schema.json`. |
 | D8 | What to implement first | backlog §6 | **Greenlit now: Protocol codegen (D4) + the quick-wins batch** — `LogAudit` error handling (`admin/handlers_backup.go`), contradictory upload `Cache-Control` (`upload_handler.go`), hub inline settings SQL through the data layer (`ws/hub.go`), Hub constructor cleanup (required collaborators into `NewHub`). | **Implemented 2026-07-19** (all four quick wins + D4). Hub cleanup shipped as: race fix — `eventPersister`/`eventStore`/`pluginSink` are now atomic (they were plain fields written by `main.go` after `NewRouter` had already started `Run`); remaining pre-Run setters now reject late calls with an error log instead of racing silently. Note discovered during the work: the discarded-`LogAudit` pattern is repo-wide (23 call sites) — the two tracker-flagged backup handlers are fixed; whether best-effort audit writes stay the convention elsewhere needs a policy decision. |
-| D9 | Repo-wide `LogAudit` error-handling policy (the open question the D8 note flagged) | backlog §6 / D8 | **Decided 2026-07-20:** audit writes stay **best-effort** — a `LogAudit` failure must never fail or abort the request — but a failed write must never be silently discarded either. Every call site routes through one small shared helper that logs the failure with request context (actor/action/target). Not a blanket "make audit failures fatal": the request path is unchanged, only the silent `_ =` discard is removed. | **Implemented 2026-07-20:** `db.WriteAudit(auditor, actor, action, targetType, targetID, detail)` helper added in `db/audit.go` (structural `Auditor` interface — both `*db.DB` and the service-layer `Store` satisfy it, so api/admin/ws/service all reach it without an import cycle). All ~26 `LogAudit` call sites converted from `_ = LogAudit(...)` (and the two backup handlers' inline `if err` blocks) to `db.WriteAudit`; the `detail` string is deliberately not logged (may be sensitive). Pinned by `db/audit_test.go`: failure is logged and never propagated, success logs nothing, detail never leaks. |
+| D9 | Channel-visibility unification (rule duplicated across ~4 "must mirror" sites) | A-2026-07-07 / backlog 3 | **Greenlit 2026-07-20 — implement**: funnel all four sites through the existing `permissions.Checker` predicate + one filter helper; add a REST/WS agreement test. See [channel-visibility-unification.md](channel-visibility-unification.md). | **Implemented 2026-07-20** — `permissions.Checker.VisibleChannelIDs` + `ChannelRef`; `ListVisibleChannels`, `buildReady`, `computeAllowedChannels` delegate; `RefreshChannelVisibility` uses `HasChannelPerm`. REST/WS agreement test asserts all three sites yield the identical non-DM set. |
+| D10 | Finish the V2 dispatch migration; delete V1 | A-2026-07-09 / backlog 11 | **Greenlit 2026-07-20 — implement**: port the 3 remaining V1 types (`chat_command`, `voice_join`, `voice_leave`) to V2, then delete the V1 registry + fallback path. Server-internal only, no wire change. See [v2-dispatch-migration.md](v2-dispatch-migration.md). | **Implemented 2026-07-20** — the 3 types ported to typed V2 handlers (voice join/leave hand off to the hub routines via new `Result.JoinVoice`/`LeaveVoice` appliers); V1 registry + `handleMessage` fallback deleted; a constructor↔handler parity guard test locks it shut. No wire change. |
 
 ## Suggested sequencing
 
@@ -42,8 +43,8 @@ here (and the audit's closure table) as items land.
 
 ## Explicitly not decided here
 
-- Channel-visibility unification (audit backlog 3) and finishing the V2
-  dispatch migration (backlog 11) were not greenlit yet — they remain open
-  backlog items, not rejected.
+- ~~Channel-visibility unification (audit backlog 3) and finishing the V2
+  dispatch migration (backlog 11) were not greenlit yet.~~ **Greenlit 2026-07-20
+  (D9, D10)** — design notes written; see the rows above.
 - Client unit suite triage to green/blocking (A-2026-07-04) remains tracked in
   the audit; no scheduling decision was taken.

@@ -21,6 +21,14 @@ type ChannelOverride struct {
 	Deny  int64
 }
 
+// ChannelRef is the minimal channel description VisibleChannelIDs needs.
+// Declared here (not imported from db) so the permissions package stays free
+// of a db dependency; callers map their []db.Channel down to []ChannelRef.
+type ChannelRef struct {
+	ID   int64
+	Type string
+}
+
 // DB is the minimal database interface the Checker needs.
 // Defined at the consumer (per Go convention: accept interfaces, return structs).
 type DB interface {
@@ -68,6 +76,27 @@ func (ck *Checker) HasChannelPermBatch(rolePerms int64, overrides map[int64]Chan
 	o := overrides[channelID] // zero-value (0, 0) when no override exists
 	effective := EffectivePerms(rolePerms, o.Allow, o.Deny)
 	return effective&perm == perm
+}
+
+// VisibleChannelIDs returns the set of non-DM channel IDs the role (identified
+// by rolePerms) may READ, using a pre-fetched overrides map. It is the single
+// predicate behind every "which channels does this role see" site (REST
+// ListVisibleChannels, the ws ready payload, and reconnect replay filtering) so
+// they can never drift apart. DM channels are skipped — their visibility is
+// membership-based, layered on top by the caller. A nil/zero role yields an
+// empty set naturally (no admin bypass, no base READ, and no override map
+// entries to grant it).
+func (ck *Checker) VisibleChannelIDs(rolePerms int64, channels []ChannelRef, overrides map[int64]ChannelOverride) map[int64]bool {
+	visible := make(map[int64]bool)
+	for _, ch := range channels {
+		if ch.Type == "dm" {
+			continue
+		}
+		if ck.HasChannelPermBatch(rolePerms, overrides, ch.ID, ReadMessages) {
+			visible[ch.ID] = true
+		}
+	}
+	return visible
 }
 
 // RequireChannelAccess checks whether the user can access the channel with the

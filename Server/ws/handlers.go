@@ -94,91 +94,100 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 
 	reqLog.Debug("ws ← client message")
 
-	// ── V2 dispatch (strangler fig) ──────────────────────────────────────
-	// Only attempt V2 parsing+dispatch if a V2 handler is registered for
-	// this type. This prevents the stricter V2 parser from rejecting
-	// payloads that V1 handlers handle leniently.
-	if h.registry.hasV2(env.Type) {
-		if ctor, ok := getCommandConstructor(env.Type); ok {
-			cmd, parseErr := ctor(c.userID, env.ID, env.Payload)
-			if parseErr != nil {
-				reqLog.Warn("ws command parse error", "err", parseErr)
-				c.sendMsg(buildErrorMsgWithID(ErrCodeBadRequest, "invalid payload", env.ID))
-				return
-			}
-
-			var username string
-			var avatar *string
-			if c.user != nil {
-				username = c.user.Username
-				avatar = c.user.Avatar
-			}
-			voiceChID, voiceJoinTok := c.getVoiceState()
-			info := ClientInfo{
-				UserID:         c.userID,
-				Username:       username,
-				Avatar:         avatar,
-				RoleName:       c.roleName,
-				ReqID:          env.ID,
-				VoiceChannelID: voiceChID,
-				VoiceJoinToken: voiceJoinTok,
-			}
-
-			result, dispatched := h.registry.DispatchV2(c.ctx, cmd, info)
-			if !dispatched {
-				reqLog.Error("ws V2 handler registered but DispatchV2 returned false", "type", env.Type)
-				c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "internal error", env.ID))
-				return
-			}
-			if result.Error != nil {
-				if ce, ok := result.Error.(ClientError); ok {
-					c.sendMsg(buildErrorMsgWithID(ce.Code, ce.Message, env.ID))
-				} else {
-					reqLog.Error("ws handler internal error", "err", result.Error)
-					c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "internal error", env.ID))
-				}
-				return
-			}
-			// Apply client state mutations.
-			if result.SetChannelID != nil {
-				oldChID := c.getChannelID()
-				c.mu.Lock()
-				c.channelID = *result.SetChannelID
-				c.mu.Unlock()
-				// Update pub/sub channel topic subscriptions.
-				newChID := *result.SetChannelID
-				if oldChID != newChID {
-					if oldChID > 0 {
-						c.hub.pubsub.Unsubscribe(c, ChannelTopic(oldChID))
-					}
-					if newChID > 0 {
-						c.hub.pubsub.Subscribe(c, ChannelTopic(newChID))
-					}
-				}
-			}
-			if result.SetE2EEPubKey != nil {
-				c.setE2EEPubKey(*result.SetE2EEPubKey)
-			}
-			if result.SetVoiceJoinToken != nil {
-				chID := c.getVoiceChID()
-				if chID != 0 {
-					c.setVoiceState(chID, *result.SetVoiceJoinToken)
-				}
-			}
-			if result.Reply != nil {
-				c.sendMsg(result.Reply)
-			}
-			if len(result.Events) > 0 {
-				h.EmitEvents(result.Events)
-			}
-			return
-		}
-	}
-	// ── End V2 dispatch ──────────────────────────────────────────────────
-
-	if !h.registry.Dispatch(c.ctx, env.Type, h, c, env.ID, env.Payload) {
+	// ── Typed command dispatch ───────────────────────────────────────────
+	// Every message type parses through its constructor into a typed Command,
+	// then dispatches to its V2 handler, which returns a Result the applier
+	// below acts on. There is no second (V1) generation — the strangler-fig
+	// migration is complete.
+	ctor, ok := getCommandConstructor(env.Type)
+	if !ok {
 		reqLog.Warn("ws handleMessage unknown type")
 		c.sendMsg(buildErrorMsg(ErrCodeUnknownType, fmt.Sprintf("unknown message type: %s", msgType)))
+		return
+	}
+
+	cmd, parseErr := ctor(c.userID, env.ID, env.Payload)
+	if parseErr != nil {
+		reqLog.Warn("ws command parse error", "err", parseErr)
+		c.sendMsg(buildErrorMsgWithID(ErrCodeBadRequest, "invalid payload", env.ID))
+		return
+	}
+
+	var username string
+	var avatar *string
+	if c.user != nil {
+		username = c.user.Username
+		avatar = c.user.Avatar
+	}
+	voiceChID, voiceJoinTok := c.getVoiceState()
+	info := ClientInfo{
+		UserID:         c.userID,
+		Username:       username,
+		Avatar:         avatar,
+		RoleName:       c.roleName,
+		ReqID:          env.ID,
+		VoiceChannelID: voiceChID,
+		VoiceJoinToken: voiceJoinTok,
+	}
+
+	result, dispatched := h.registry.DispatchV2(c.ctx, cmd, info)
+	if !dispatched {
+		// A registered constructor with no V2 handler is a wiring bug — the
+		// guard test (TestEveryConstructorHasV2Handler) locks this shut.
+		reqLog.Error("ws no V2 handler for constructed command", "type", env.Type)
+		c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "internal error", env.ID))
+		return
+	}
+	if result.Error != nil {
+		if ce, ok := result.Error.(ClientError); ok {
+			c.sendMsg(buildErrorMsgWithID(ce.Code, ce.Message, env.ID))
+		} else {
+			reqLog.Error("ws handler internal error", "err", result.Error)
+			c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "internal error", env.ID))
+		}
+		return
+	}
+
+	// Apply client state mutations and side effects.
+	if result.SetChannelID != nil {
+		oldChID := c.getChannelID()
+		c.mu.Lock()
+		c.channelID = *result.SetChannelID
+		c.mu.Unlock()
+		// Update pub/sub channel topic subscriptions.
+		newChID := *result.SetChannelID
+		if oldChID != newChID {
+			if oldChID > 0 {
+				c.hub.pubsub.Unsubscribe(c, ChannelTopic(oldChID))
+			}
+			if newChID > 0 {
+				c.hub.pubsub.Subscribe(c, ChannelTopic(newChID))
+			}
+		}
+	}
+	if result.SetE2EEPubKey != nil {
+		c.setE2EEPubKey(*result.SetE2EEPubKey)
+	}
+	if result.SetVoiceJoinToken != nil {
+		chID := c.getVoiceChID()
+		if chID != 0 {
+			c.setVoiceState(chID, *result.SetVoiceJoinToken)
+		}
+	}
+	if result.Reply != nil {
+		c.sendMsg(result.Reply)
+	}
+	if len(result.Events) > 0 {
+		h.EmitEvents(result.Events)
+	}
+	// Voice join/leave hand off to the hub-internal routines (also called
+	// un-throttled on disconnect/switch). handleVoiceJoin re-reads channel_id
+	// from the already-validated envelope payload.
+	if result.LeaveVoice {
+		h.handleVoiceLeave(c.ctx, c)
+	}
+	if result.JoinVoice {
+		h.handleVoiceJoin(c.ctx, c, env.Payload)
 	}
 }
 

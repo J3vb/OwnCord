@@ -2,35 +2,21 @@ package ws
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 )
 
-// registerVoiceHandlersV1 registers voice handlers that remain V1 (complex
-// state management that hasn't been migrated yet).
-func registerVoiceHandlersV1(r *HandlerRegistry) {
-	r.Register(MsgTypeVoiceJoin, func(ctx context.Context, h *Hub, c *Client, _ string, payload json.RawMessage) {
-		h.handleVoiceJoin(ctx, c, payload)
-	})
-	r.Register(MsgTypeVoiceLeave, func(ctx context.Context, h *Hub, c *Client, _ string, _ json.RawMessage) {
-		// Rate limit only the explicit client-initiated voice_leave message.
-		// handleVoiceLeave is also invoked internally for disconnect and
-		// channel-switch cleanup (serve.go, voice_join.go); those paths must
-		// never be throttled or they would leak ghost voice states, so the
-		// limit lives here in the dispatch wrapper rather than inside the shared
-		// handleVoiceLeave routine. Mirrors the voice control Limiter idiom.
-		ratKey := fmt.Sprintf("voice_leave:%d", c.userID)
-		if h.limiter != nil && !h.limiter.Allow(ratKey, voiceLeaveRateLimit, voiceLeaveWindow) {
-			c.sendMsg(buildErrorMsg(ErrCodeRateLimited, "too many voice leave attempts"))
-			return
-		}
-		h.handleVoiceLeave(ctx, c)
-	})
-}
-
-// registerVoiceControlsV2 registers V2 handlers for voice control toggles
-// and other migrated voice handlers.
+// registerVoiceControlsV2 registers all voice V2 handlers: the control toggles,
+// E2EE relays, token refresh, and the join/leave dispatch.
+//
+// voice_join and voice_leave return a Result that triggers the hub's
+// handleVoiceJoin / handleVoiceLeave routines via the applier in handleMessage.
+// Those routines stay hub-internal: handleVoiceLeave is also called un-throttled
+// on disconnect and channel-switch (serve.go, voice_join.go), and handleVoiceJoin
+// is a large, hub-coupled sequence that itself calls handleVoiceLeave on a switch.
+// Only the message dispatch moved to V2, not the imperative effect.
 func registerVoiceControlsV2(r *HandlerRegistry, deps VoiceDeps) {
+	r.RegisterV2(MsgTypeVoiceJoin, handleVoiceJoinV2, deps)
+	r.RegisterV2(MsgTypeVoiceLeave, handleVoiceLeaveV2, deps)
 	r.RegisterV2(MsgTypeVoiceMute, handleVoiceMuteV2, deps)
 	r.RegisterV2(MsgTypeVoiceDeafen, handleVoiceDeafenV2, deps)
 	r.RegisterV2(MsgTypeVoiceCamera, handleVoiceCameraV2, deps)
@@ -38,4 +24,25 @@ func registerVoiceControlsV2(r *HandlerRegistry, deps VoiceDeps) {
 	r.RegisterV2(MsgTypeVoiceE2EEAnnounce, handleVoiceE2EEAnnounceV2, deps)
 	r.RegisterV2(MsgTypeVoiceE2EEOffer, handleVoiceE2EEOfferV2, deps)
 	r.RegisterV2(MsgTypeVoiceTokenRefresh, handleVoiceTokenRefreshV2, deps)
+}
+
+// handleVoiceJoinV2 gates parsing via the VoiceJoinCmd constructor (which
+// rejects a malformed or non-positive channel_id with a BAD_REQUEST) and hands
+// off to the hub's handleVoiceJoin routine via the applier. The rate-limit and
+// all side effects live in handleVoiceJoin, which re-reads channel_id from the
+// already-validated envelope payload.
+func handleVoiceJoinV2(_ context.Context, _ Command, _ ClientInfo, _ any) Result {
+	return Result{JoinVoice: true}
+}
+
+// handleVoiceLeaveV2 rate-limits the explicit client-initiated leave (the
+// disconnect/switch callers of handleVoiceLeave must never be throttled) and
+// then hands off to the hub's handleVoiceLeave routine via the applier.
+func handleVoiceLeaveV2(_ context.Context, cmd Command, _ ClientInfo, deps any) Result {
+	d := deps.(VoiceDeps)
+	ratKey := fmt.Sprintf("voice_leave:%d", cmd.UserID())
+	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceLeaveRateLimit, voiceLeaveWindow) {
+		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many voice leave attempts"}}
+	}
+	return Result{LeaveVoice: true}
 }

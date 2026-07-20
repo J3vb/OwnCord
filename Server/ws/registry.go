@@ -2,16 +2,10 @@ package ws
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"runtime"
 )
-
-// MessageHandler is the function signature for all WebSocket message handlers.
-// It receives a context (derived from the client's WS connection), the hub,
-// the sending client, the request ID from the envelope, and the raw JSON payload.
-type MessageHandler func(ctx context.Context, h *Hub, c *Client, reqID string, payload json.RawMessage)
 
 // handlerV2Entry pairs a V2 handler with its domain-specific dependency struct.
 type handlerV2Entry struct {
@@ -19,58 +13,25 @@ type handlerV2Entry struct {
 	deps    any // concrete deps struct for this handler's domain
 }
 
-// HandlerRegistry maps message type strings to their handler functions.
-// It is not safe for concurrent use after initialization; all Register
-// calls must happen before any Dispatch calls.
+// HandlerRegistry maps message type strings to their typed V2 handlers.
+// It is not safe for concurrent use after initialization; all RegisterV2
+// calls must happen before any DispatchV2 calls.
 type HandlerRegistry struct {
-	handlers   map[string]MessageHandler // V1 — unchanged
-	handlersV2 map[string]handlerV2Entry // V2 — new
+	handlersV2 map[string]handlerV2Entry
 }
 
 // NewHandlerRegistry creates an empty handler registry.
 func NewHandlerRegistry() *HandlerRegistry {
 	return &HandlerRegistry{
-		handlers:   make(map[string]MessageHandler),
 		handlersV2: make(map[string]handlerV2Entry),
 	}
 }
 
-// Register associates a message type with a handler function.
-func (r *HandlerRegistry) Register(msgType string, handler MessageHandler) {
-	r.handlers[msgType] = handler
-}
-
-// Dispatch looks up the handler for msgType and invokes it. Returns true if a
-// handler was found and called, false if no handler is registered for the type.
-func (r *HandlerRegistry) Dispatch(ctx context.Context, msgType string, h *Hub, c *Client, reqID string, payload json.RawMessage) bool {
-	handler, ok := r.handlers[msgType]
-	if !ok {
-		return false
-	}
-	handler(ctx, h, c, reqID, payload)
-	return true
-}
-
-// RegisteredTypes returns all registered message types (unordered).
-// Intended for testing and diagnostics.
-func (r *HandlerRegistry) RegisteredTypes() []string {
-	types := make([]string, 0, len(r.handlers))
-	for t := range r.handlers {
-		types = append(types, t)
-	}
-	return types
-}
-
 // RegisterV2 registers a V2 handler for the given command type.
-// PANICS if cmdType is already registered in V1 (shadowing guard) or V2 (duplicate guard).
-// The shadowing guard prevents accidentally having both V1 and V2 handlers for the
-// same type. When migrating a handler, remove V1 registration BEFORE adding V2.
+// PANICS if cmdType is already registered (duplicate guard).
 func (r *HandlerRegistry) RegisterV2(cmdType string, handler HandlerV2, deps any) {
-	if _, exists := r.handlers[cmdType]; exists {
-		panic(fmt.Sprintf("RegisterV2: cmdType %q already registered in V1 (remove V1 first)", cmdType))
-	}
 	if _, exists := r.handlersV2[cmdType]; exists {
-		panic(fmt.Sprintf("RegisterV2: cmdType %q already registered in V2", cmdType))
+		panic(fmt.Sprintf("RegisterV2: cmdType %q already registered", cmdType))
 	}
 	r.handlersV2[cmdType] = handlerV2Entry{handler: handler, deps: deps}
 }
@@ -111,16 +72,4 @@ func (r *HandlerRegistry) RegisteredV2Types() []string {
 		types = append(types, t)
 	}
 	return types
-}
-
-// hasV2 reports whether a V2 handler is registered for msgType.
-func (r *HandlerRegistry) hasV2(msgType string) bool {
-	_, ok := r.handlersV2[msgType]
-	return ok
-}
-
-// IsRegisteredV1 checks if a type is registered in the V1 map.
-func (r *HandlerRegistry) IsRegisteredV1(msgType string) bool {
-	_, ok := r.handlers[msgType]
-	return ok
 }
