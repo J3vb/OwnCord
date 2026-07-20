@@ -224,18 +224,19 @@ locks it.
 
 | Trigger | Target behavior |
 |---------|-----------------|
-| User logout | `clearAuth()` → leave voice, disconnect WS, delete stored credential for the host, → connect page |
+| User logout | best-effort `POST /auth/logout` (fire-and-forget) → `clearAuth()` → leave voice, disconnect WS, delete stored credential for the host, → connect page |
 | 401 anywhere | Same as logout, with "Your session expired — sign in again." |
 | WS `BANNED` | Transient-error → connect page, no reconnect |
 | Cert reject | Disconnect → connect page |
 
-> **⚠ Current gap — server session not revoked on logout.** `api.logout()`
-> (`POST /auth/logout`, `api.ts:211`) is defined but never called; logout is
-> client-local only (`MainPage.ts:298` → `clearAuth()`), so the bearer token
-> stays valid server-side until it expires. Target: user-initiated logout should
-> `POST /auth/logout` (best-effort, before tearing down) so the session is
-> actually revoked. The credential *is* deleted locally (`main.ts:491-515`), but
-> the server token is not.
+> **✓ Resolved 2026-07-20 — server session revoked on logout.** User-initiated
+> logout now calls `api.logout()` (`POST /auth/logout`) via the `logout()` helper
+> (`src/lib/logout.ts`), wired into the settings Log Out button
+> (`MainPage.ts` → `logout(api)`). The revocation is strictly best-effort:
+> fire-and-forget with its rejection swallowed, so a slow/offline/rejecting
+> server never blocks or delays the local teardown — `clearAuth()` always runs
+> synchronously. The credential is still deleted locally (`main.ts`), and the
+> server token is now invalidated too.
 
 ---
 
