@@ -152,7 +152,7 @@ func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []st
 		}
 
 		slog.Info("server setup completed", "owner", req.Username, "user_id", uid)
-		_ = database.LogAudit(uid, "server_setup", "server", 0,
+		db.WriteAudit(database, uid, "server_setup", "server", 0,
 			"initial setup: owner account created, default channel and invite generated")
 
 		writeJSON(w, http.StatusCreated, setupResponse{

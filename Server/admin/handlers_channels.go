@@ -115,7 +115,7 @@ func handleCreateChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 		}
 		actor := actorFromContext(r)
 		slog.Info("channel created", "actor_id", actor, "channel", req.Name, "type", req.Type)
-		_ = database.LogAudit(actor, "channel_create", "channel", id,
+		db.WriteAudit(database, actor, "channel_create", "channel", id,
 			fmt.Sprintf("created #%s (%s)", req.Name, req.Type))
 		if hub != nil {
 			hub.BroadcastChannelCreate(ch)
@@ -171,7 +171,7 @@ func handlePatchChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 
 		actor := actorFromContext(r)
 		slog.Info("channel updated", "actor_id", actor, "channel_id", id, "name", req.Name)
-		_ = database.LogAudit(actor, "channel_update", "channel", id,
+		db.WriteAudit(database, actor, "channel_update", "channel", id,
 			fmt.Sprintf("updated #%s", req.Name))
 
 		updated, err := database.GetChannel(id)
@@ -210,7 +210,7 @@ func handleDeleteChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 		}
 		actor := actorFromContext(r)
 		slog.Warn("channel deleted", "actor_id", actor, "channel_id", id, "name", existing.Name)
-		_ = database.LogAudit(actor, "channel_delete", "channel", id,
+		db.WriteAudit(database, actor, "channel_delete", "channel", id,
 			fmt.Sprintf("deleted #%s", existing.Name))
 		if hub != nil {
 			hub.BroadcastChannelDelete(id)
