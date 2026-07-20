@@ -85,6 +85,7 @@ vi.mock("@stores/voice.store", () => ({
   setSpeakers: vi.fn(),
   leaveVoiceChannel: vi.fn(),
   setListenOnly: vi.fn(),
+  setVoiceStatus: vi.fn(),
 }));
 
 const mockInvoke = vi.hoisted(() =>
@@ -149,6 +150,7 @@ import {
   setLocalScreenshare,
   setListenOnly,
   leaveVoiceChannel,
+  setVoiceStatus,
 } from "@stores/voice.store";
 import {
   isVoiceConnected,
@@ -648,6 +650,85 @@ describe("LiveKitSession", () => {
       expect(mockRoom.connect).toHaveBeenNthCalledWith(2, "ws://localhost:7882", "second-token");
       expect(mockRoom.startAudio).toHaveBeenCalledTimes(1);
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("voiceStatus transitions (voice-and-e2ee.md §1–2)", () => {
+    function statusCalls(): string[] {
+      return (setVoiceStatus as any).mock.calls.map((c: unknown[]) => c[0] as string);
+    }
+
+    it("writes joining → securing → connected on a successful join", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      (setVoiceStatus as any).mockClear();
+
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+
+      const calls = statusCalls();
+      expect(calls).toContain("joining");
+      expect(calls).toContain("securing");
+      expect(calls).toContain("connected");
+      // Ordering: joining before securing before connected.
+      expect(calls.indexOf("joining")).toBeLessThan(calls.indexOf("securing"));
+      expect(calls.indexOf("securing")).toBeLessThan(calls.indexOf("connected"));
+    });
+
+    it("writes idle on leaveVoice", () => {
+      (setVoiceStatus as any).mockClear();
+      session.leaveVoice(false);
+      expect(setVoiceStatus).toHaveBeenCalledWith("idle");
+    });
+
+    it("writes reconnecting when the room drops unexpectedly", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+
+      // Capture the Disconnected handler registered during room creation.
+      let disconnectedHandler: ((reason?: number) => void) | undefined;
+      mockRoom.on.mockImplementation((event: string, handler: any) => {
+        if (event === "disconnected") disconnectedHandler = handler;
+        return mockRoom;
+      });
+
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      expect(disconnectedHandler).toBeDefined();
+      expect((session as any)._state.type).toBe("connected");
+
+      // Isolate the write triggered purely by the unexpected room drop.
+      (setVoiceStatus as any).mockClear();
+
+      // Fire an unexpected disconnect (non-CLIENT_INITIATED) — this is the primary
+      // reconnecting write, from setReconnectAc via handleDisconnected.
+      disconnectedHandler!(/* SERVER_SHUTDOWN */ 1);
+
+      expect((session as any)._state.type).toBe("reconnecting");
+      expect(setVoiceStatus).toHaveBeenCalledWith("reconnecting");
+    });
+
+    it("writes connected after a successful auto-reconnect", async () => {
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 7,
+        latestToken: "reconnect-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+      (setVoiceStatus as any).mockClear();
+
+      const ac = new AbortController();
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "reconnect-token",
+        "/livekit",
+        7,
+        "ws://localhost:7880",
+        ac.signal,
+      );
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      expect(setVoiceStatus).toHaveBeenCalledWith("connected");
     });
   });
 

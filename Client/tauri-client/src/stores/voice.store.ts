@@ -24,6 +24,12 @@ export interface VoiceUser {
   readonly screenshare: boolean;
 }
 
+/** Observable voice-session lifecycle status, surfaced so the UI can
+ *  distinguish "connecting to the room" (joining) from "securing E2EE"
+ *  (securing) from a live, encrypted call (connected). Written from
+ *  livekitSession.ts. See docs/architecture/ux/voice-and-e2ee.md §1–2. */
+export type VoiceStatus = "idle" | "joining" | "securing" | "connected" | "reconnecting";
+
 export interface VoiceConfig {
   readonly quality: string;
   readonly bitrate: number;
@@ -45,6 +51,9 @@ export interface VoiceState {
   readonly joinedAt: number | null;
   /** True when joined in listen-only mode (mic permission denied or no mic found). */
   readonly listenOnly: boolean;
+  /** Voice-session lifecycle status (drives the widget's connecting/securing/
+   *  secured indicators). Written from livekitSession.ts. */
+  readonly voiceStatus: VoiceStatus;
 }
 
 const INITIAL_STATE: VoiceState = {
@@ -57,6 +66,7 @@ const INITIAL_STATE: VoiceState = {
   localScreenshare: false,
   joinedAt: null,
   listenOnly: false,
+  voiceStatus: "idle",
 };
 
 export const voiceStore = createStore<VoiceState>(INITIAL_STATE);
@@ -73,6 +83,7 @@ export function resetVoiceStore(): void {
     localScreenshare: false,
     joinedAt: null,
     listenOnly: false,
+    voiceStatus: "idle",
   }));
 }
 
@@ -173,6 +184,9 @@ export function joinVoiceChannel(channelId: number): void {
       ...prev,
       currentChannelId: channelId,
       joinedAt: Date.now(),
+      // Optimistic: the widget shows "Connecting…" the moment the user clicks,
+      // before the voice_token round-trip. livekitSession advances it from here.
+      voiceStatus: "joining",
     };
   });
 }
@@ -183,11 +197,11 @@ export function leaveVoiceChannel(): void {
   voiceStore.setState((prev) => {
     const channelId = prev.currentChannelId;
     if (channelId === null || currentUserId === 0) {
-      return { ...prev, currentChannelId: null, joinedAt: null };
+      return { ...prev, currentChannelId: null, joinedAt: null, voiceStatus: "idle" };
     }
     const existingChannel = prev.voiceUsers.get(channelId);
     if (!existingChannel || !existingChannel.has(currentUserId)) {
-      return { ...prev, currentChannelId: null, joinedAt: null };
+      return { ...prev, currentChannelId: null, joinedAt: null, voiceStatus: "idle" };
     }
     const nextChannels = new Map(prev.voiceUsers);
     const nextUsers = new Map(existingChannel);
@@ -197,8 +211,22 @@ export function leaveVoiceChannel(): void {
     } else {
       nextChannels.set(channelId, nextUsers);
     }
-    return { ...prev, currentChannelId: null, joinedAt: null, voiceUsers: nextChannels };
+    return {
+      ...prev,
+      currentChannelId: null,
+      joinedAt: null,
+      voiceStatus: "idle",
+      voiceUsers: nextChannels,
+    };
   });
+}
+
+/** Set the voice-session lifecycle status. Single-writer from livekitSession.ts
+ *  at each connection-lifecycle transition. */
+export function setVoiceStatus(status: VoiceStatus): void {
+  voiceStore.setState((prev) =>
+    prev.voiceStatus === status ? prev : { ...prev, voiceStatus: status },
+  );
 }
 
 /** Toggle local mute state. */

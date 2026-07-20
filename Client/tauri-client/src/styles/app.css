@@ -87,6 +87,9 @@
 }
 .channel-item:hover { background: var(--bg-hover); color: var(--text-normal); }
 .channel-item.active { background: var(--bg-active); color: white; }
+/* Voice join/leave frozen while the WS socket is down (docs/architecture/ux/README.md §3). */
+.channel-item.voice.disabled { opacity: 0.5; cursor: not-allowed; }
+.channel-item.voice.disabled:hover { background: transparent; color: var(--text-muted); }
 .channel-draggable { cursor: grab; }
 .channel-draggable:active { cursor: grabbing; }
 .channel-reordering { user-select: none; cursor: grabbing !important; }
@@ -217,8 +220,17 @@
 .voice-widget.visible { display: block; }
 .vw-header { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font-size: 12px; }
 .vw-connected { color: var(--green); font-weight: 700; }
+/* In-progress lifecycle states use amber; the call is not yet secured/live. */
+.vw-connected.vw-securing, .vw-connected.vw-reconnecting { color: var(--yellow, #f0b232); }
+.vw-secured {
+  display: inline-flex; align-items: center; gap: 3px;
+  color: var(--green); font-size: 11px; font-weight: 600;
+}
 .vw-timer { color: var(--green); font-size: 11px; opacity: 0.8; font-variant-numeric: tabular-nums; }
 .vw-channel { color: var(--text-muted); }
+/* Frozen while the WS socket is down: controls are visibly non-interactive. */
+.vw-controls--frozen button { opacity: 0.5; cursor: not-allowed; }
+.vw-controls--frozen button:hover { background: var(--bg-active); color: var(--text-muted); }
 .vw-controls { display: flex; gap: 4px; padding: 4px 4px 0; }
 .vw-controls button {
   flex: 1; height: 32px; border-radius: var(--radius-sm);

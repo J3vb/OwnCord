@@ -130,6 +130,7 @@ describe("WS Dispatcher", () => {
       localScreenshare: false,
       joinedAt: null,
       listenOnly: false,
+      voiceStatus: "idle",
     }));
     dmStore.setState(() => ({ channels: [] }));
     uiStore.setState((prev) => ({ ...prev, transientError: null }));
