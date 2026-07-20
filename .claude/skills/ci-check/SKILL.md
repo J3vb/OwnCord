@@ -30,13 +30,13 @@ npx oxlint src/
 npm run typecheck
 npx eslint src/
 npm run format:check
-npx vitest run          # KNOWN RED — see below
+npx vitest run          # must be 100% green — see below
 ```
 
 ## Interpreting results
 
 - `sqlc-verify` / `protocol-verify` failure → regenerate (`make sqlc-generate` / `make protocol-generate`) and commit the output; never hand-edit generated files.
-- Client unit failures: the suite is KNOWN RED pending P2 triage (`docs/plans/`). Only failures in tests **you added or in code you touched** block a push; never weaken existing assertions to go green. Compare against a run on the base branch if unsure whether you introduced a failure.
+- Client unit failures: the suite is green and **any** failure blocks a push; never weaken existing assertions to go green. One exception: on Node 22+, native Web Storage shadows jsdom's `localStorage` and fails ~478 unrelated tests — re-run with `NODE_OPTIONS=--no-experimental-webstorage` (CI pins Node 20) before concluding anything about a failure.
 - Rust (clippy/cargo audit) and full Tauri builds only run in CI on PRs to `main`; don't attempt locally unless the Rust toolchain and system deps are present.
 - CI additionally runs `govulncheck` and `npm audit --audit-level=high`; run them if dependencies changed.
 
