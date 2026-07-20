@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
