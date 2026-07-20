@@ -1,14 +1,20 @@
-// Klipy GIF API client — provides GIF search and trending.
-// Drop-in replacement for Tenor (EOL June 30, 2026).
-// Register at partner.klipy.com to get a production API key.
-// Override via VITE_KLIPY_API_KEY at build time.
-const KLIPY_API_KEY = import.meta.env.VITE_KLIPY_API_KEY ?? "";
-const GIF_API_BASE = "https://api.klipy.com/v2";
+// GIF search and trending, proxied by the user's own OwnCord server.
+//
+// The client NEVER talks to api.klipy.com and never holds the provider API
+// key: a VITE_ build variable is inlined into the shipped bundle by design, so
+// it can never hold a secret. The key lives in the server's `gif.api_key`
+// config and the server makes the upstream call — see Server/api/gif_handler.go.
+//
+// The returned media URLs still point at Klipy's CDN, so they are validated
+// against the CDN allowlist below before anything is rendered.
+
+import type { ApiClient } from "./api";
+import type { GifSearchResponse } from "./types";
+
 const DEFAULT_LIMIT = 20;
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+/** The slice of the API client the GIF picker needs. */
+export type GifApi = Pick<ApiClient, "gifSearch" | "gifTrending">;
 
 export interface GifResult {
   readonly id: string;
@@ -17,23 +23,6 @@ export interface GifResult {
   readonly url: string;
   /** Full-size gif URL for sending */
   readonly fullUrl: string;
-}
-
-interface GifMediaFormat {
-  readonly url: string;
-}
-
-interface GifApiResult {
-  readonly id: string;
-  readonly title: string;
-  readonly media_formats: {
-    readonly tinygif?: GifMediaFormat;
-    readonly gif?: GifMediaFormat;
-  };
-}
-
-interface GifSearchResponse {
-  readonly results: readonly GifApiResult[];
 }
 
 // ---------------------------------------------------------------------------
@@ -72,44 +61,19 @@ function parseResults(data: GifSearchResponse): readonly GifResult[] {
 // Public API
 // ---------------------------------------------------------------------------
 
-/**
- * Search Klipy for GIFs matching the given query.
- */
+/** Search the server's GIF proxy for GIFs matching the given query. */
 export async function searchGifs(
+  api: GifApi,
   query: string,
   limit: number = DEFAULT_LIMIT,
 ): Promise<readonly GifResult[]> {
-  const params = new URLSearchParams({
-    q: query,
-    key: KLIPY_API_KEY,
-    limit: String(limit),
-    media_filter: "gif,tinygif",
-  });
-
-  const res = await fetch(`${GIF_API_BASE}/search?${params.toString()}`);
-  if (!res.ok) {
-    throw new Error(`GIF search failed: ${res.status} ${res.statusText}`);
-  }
-  const data: GifSearchResponse = await res.json();
-  return parseResults(data);
+  return parseResults(await api.gifSearch(query, limit));
 }
 
-/**
- * Fetch currently trending GIFs from Klipy.
- */
+/** Fetch currently trending GIFs via the server's GIF proxy. */
 export async function getTrendingGifs(
+  api: GifApi,
   limit: number = DEFAULT_LIMIT,
 ): Promise<readonly GifResult[]> {
-  const params = new URLSearchParams({
-    key: KLIPY_API_KEY,
-    limit: String(limit),
-    media_filter: "gif,tinygif",
-  });
-
-  const res = await fetch(`${GIF_API_BASE}/featured?${params.toString()}`);
-  if (!res.ok) {
-    throw new Error(`GIF trending failed: ${res.status} ${res.statusText}`);
-  }
-  const data: GifSearchResponse = await res.json();
-  return parseResults(data);
+  return parseResults(await api.gifTrending(limit));
 }

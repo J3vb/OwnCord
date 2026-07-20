@@ -1,32 +1,36 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { searchGifs, getTrendingGifs } from "../../src/lib/gifProvider";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { searchGifs, getTrendingGifs, type GifApi } from "../../src/lib/gifProvider";
+import type { GifSearchResponse } from "../../src/lib/types";
 
 // ---------------------------------------------------------------------------
-// Fetch mock — global fetch used by gifProvider.ts (no plugin wrapper)
+// The GIF provider must go through the user's OWN server (api.ts, which is
+// TOFU-pinned via the Rust http proxy) — never api.klipy.com, and never with
+// an API key in this bundle.
 // ---------------------------------------------------------------------------
 
-const mockFetch = vi.fn();
+const gifSearch = vi.fn<GifApi["gifSearch"]>();
+const gifTrending = vi.fn<GifApi["gifTrending"]>();
+const api: GifApi = { gifSearch, gifTrending };
 
 beforeEach(() => {
-  vi.stubGlobal("fetch", mockFetch);
-  mockFetch.mockReset();
-});
-
-afterEach(() => {
-  vi.unstubAllGlobals();
+  gifSearch.mockReset();
+  gifTrending.mockReset();
+  // A real fetch must never happen from this module.
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => {
+      throw new Error("gifProvider must not call fetch directly");
+    }),
+  );
 });
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Fixtures
 // ---------------------------------------------------------------------------
 
 function gifResult(
   id: string,
-  overrides: {
-    tinygif?: string | null;
-    gif?: string | null;
-    title?: string;
-  } = {},
+  overrides: { tinygif?: string | null; gif?: string | null; title?: string } = {},
 ) {
   const {
     tinygif = `https://media.klipy.com/${id}_tiny.gif`,
@@ -41,32 +45,8 @@ function gifResult(
   return { id, title, media_formats };
 }
 
-function okResponse(results: unknown[], status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: "OK",
-    json: () => Promise.resolve({ results }),
-  } as unknown as Response;
-}
-
-function errorResponse(status: number, statusText: string): Response {
-  return {
-    ok: false,
-    status,
-    statusText,
-    json: () => Promise.resolve({}),
-  } as unknown as Response;
-}
-
-// Extracts a URLSearchParams object from the URL string passed to fetch.
-function capturedParams(): URLSearchParams {
-  const url = mockFetch.mock.calls[0]?.[0] as string;
-  return new URLSearchParams(url.split("?")[1] ?? "");
-}
-
-function capturedUrl(): string {
-  return mockFetch.mock.calls[0]?.[0] as string;
+function response(results: unknown[]): GifSearchResponse {
+  return { results } as GifSearchResponse;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,61 +54,53 @@ function capturedUrl(): string {
 // ---------------------------------------------------------------------------
 
 describe("searchGifs", () => {
-  describe("URL construction", () => {
-    it("calls the Klipy search endpoint", async () => {
-      mockFetch.mockResolvedValue(okResponse([]));
-      await searchGifs("cats");
-      expect(capturedUrl()).toMatch(/^https:\/\/api\.klipy\.com\/v2\/search/);
+  describe("transport", () => {
+    it("calls the server's GIF search endpoint via the api client", async () => {
+      gifSearch.mockResolvedValue(response([]));
+      await searchGifs(api, "cats");
+      expect(gifSearch).toHaveBeenCalledTimes(1);
     });
 
-    it("includes the query param q", async () => {
-      mockFetch.mockResolvedValue(okResponse([]));
-      await searchGifs("dogs");
-      expect(capturedParams().get("q")).toBe("dogs");
-    });
-
-    it("includes the API key param", async () => {
-      mockFetch.mockResolvedValue(okResponse([]));
-      await searchGifs("dogs");
-      expect(capturedParams().has("key")).toBe(true);
-    });
-
-    it("includes media_filter param", async () => {
-      mockFetch.mockResolvedValue(okResponse([]));
-      await searchGifs("dogs");
-      expect(capturedParams().get("media_filter")).toBe("gif,tinygif");
+    it("passes the query through", async () => {
+      gifSearch.mockResolvedValue(response([]));
+      await searchGifs(api, "dogs");
+      expect(gifSearch).toHaveBeenCalledWith("dogs", 20);
     });
 
     it("defaults limit to 20", async () => {
-      mockFetch.mockResolvedValue(okResponse([]));
-      await searchGifs("cats");
-      expect(capturedParams().get("limit")).toBe("20");
+      gifSearch.mockResolvedValue(response([]));
+      await searchGifs(api, "cats");
+      expect(gifSearch.mock.calls[0]?.[1]).toBe(20);
     });
 
     it("passes an explicit limit override", async () => {
-      mockFetch.mockResolvedValue(okResponse([]));
-      await searchGifs("cats", 5);
-      expect(capturedParams().get("limit")).toBe("5");
+      gifSearch.mockResolvedValue(response([]));
+      await searchGifs(api, "cats", 5);
+      expect(gifSearch.mock.calls[0]?.[1]).toBe(5);
     });
 
-    it("URL-encodes special characters in the query", async () => {
-      mockFetch.mockResolvedValue(okResponse([]));
-      await searchGifs("hello world & more");
-      const q = capturedParams().get("q");
-      expect(q).toBe("hello world & more");
+    it("never calls global fetch (no direct api.klipy.com traffic)", async () => {
+      gifSearch.mockResolvedValue(response([]));
+      await searchGifs(api, "cats");
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it("does not use the trending endpoint", async () => {
+      gifSearch.mockResolvedValue(response([]));
+      await searchGifs(api, "cats");
+      expect(gifTrending).not.toHaveBeenCalled();
     });
   });
 
   describe("result parsing", () => {
     it("returns an empty array when results are empty", async () => {
-      mockFetch.mockResolvedValue(okResponse([]));
-      const gifs = await searchGifs("nothing");
-      expect(gifs).toEqual([]);
+      gifSearch.mockResolvedValue(response([]));
+      expect(await searchGifs(api, "nothing")).toEqual([]);
     });
 
     it("maps id, title, url (tinygif), and fullUrl (gif) correctly", async () => {
-      mockFetch.mockResolvedValue(okResponse([gifResult("abc123")]));
-      const gifs = await searchGifs("cats");
+      gifSearch.mockResolvedValue(response([gifResult("abc123")]));
+      const gifs = await searchGifs(api, "cats");
       expect(gifs).toHaveLength(1);
       expect(gifs[0]).toEqual({
         id: "abc123",
@@ -139,49 +111,39 @@ describe("searchGifs", () => {
     });
 
     it("maps multiple results in order", async () => {
-      mockFetch.mockResolvedValue(okResponse([gifResult("a"), gifResult("b"), gifResult("c")]));
-      const gifs = await searchGifs("cats");
+      gifSearch.mockResolvedValue(response([gifResult("a"), gifResult("b"), gifResult("c")]));
+      const gifs = await searchGifs(api, "cats");
       expect(gifs.map((g) => g.id)).toEqual(["a", "b", "c"]);
     });
 
     it("filters out results with no tinygif format", async () => {
-      mockFetch.mockResolvedValue(
-        okResponse([gifResult("keep"), gifResult("drop", { tinygif: null })]),
+      gifSearch.mockResolvedValue(
+        response([gifResult("keep"), gifResult("drop", { tinygif: null })]),
       );
-      const gifs = await searchGifs("cats");
-      expect(gifs).toHaveLength(1);
-      expect(gifs[0]?.id).toBe("keep");
+      const gifs = await searchGifs(api, "cats");
+      expect(gifs.map((g) => g.id)).toEqual(["keep"]);
     });
 
     it("filters out results with no gif format", async () => {
-      mockFetch.mockResolvedValue(
-        okResponse([gifResult("keep"), gifResult("drop", { gif: null })]),
-      );
-      const gifs = await searchGifs("cats");
-      expect(gifs).toHaveLength(1);
-      expect(gifs[0]?.id).toBe("keep");
-    });
-
-    it("filters out results missing both formats", async () => {
-      mockFetch.mockResolvedValue(
-        okResponse([gifResult("drop", { tinygif: null, gif: null }), gifResult("keep")]),
-      );
-      const gifs = await searchGifs("cats");
-      expect(gifs).toHaveLength(1);
-      expect(gifs[0]?.id).toBe("keep");
+      gifSearch.mockResolvedValue(response([gifResult("keep"), gifResult("drop", { gif: null })]));
+      const gifs = await searchGifs(api, "cats");
+      expect(gifs.map((g) => g.id)).toEqual(["keep"]);
     });
 
     it("returns an empty array when all results lack required formats", async () => {
-      mockFetch.mockResolvedValue(
-        okResponse([gifResult("x", { tinygif: null }), gifResult("y", { gif: null })]),
+      gifSearch.mockResolvedValue(
+        response([gifResult("x", { tinygif: null }), gifResult("y", { gif: null })]),
       );
-      const gifs = await searchGifs("cats");
-      expect(gifs).toEqual([]);
+      expect(await searchGifs(api, "cats")).toEqual([]);
     });
+  });
 
+  // The server is trusted to hold the key, but not to dictate what the client
+  // renders — media URLs are still pinned to the Klipy CDN.
+  describe("CDN allowlist", () => {
     it("filters out results with non-Klipy CDN URLs", async () => {
-      mockFetch.mockResolvedValue(
-        okResponse([
+      gifSearch.mockResolvedValue(
+        response([
           gifResult("drop", {
             tinygif: "https://media.tenor.com/drop_tiny.gif",
             gif: "https://media.tenor.com/drop.gif",
@@ -192,31 +154,58 @@ describe("searchGifs", () => {
           }),
         ]),
       );
-      const gifs = await searchGifs("cats");
-      expect(gifs).toHaveLength(1);
-      expect(gifs[0]?.id).toBe("keep");
+      const gifs = await searchGifs(api, "cats");
+      expect(gifs.map((g) => g.id)).toEqual(["keep"]);
+    });
+
+    it("rejects http:// URLs on the allowed host", async () => {
+      gifSearch.mockResolvedValue(
+        response([
+          gifResult("drop", {
+            tinygif: "http://media.klipy.com/a_tiny.gif",
+            gif: "http://media.klipy.com/a.gif",
+          }),
+        ]),
+      );
+      expect(await searchGifs(api, "cats")).toEqual([]);
+    });
+
+    it("rejects lookalike hosts that merely end in the allowed name", async () => {
+      gifSearch.mockResolvedValue(
+        response([
+          gifResult("drop", {
+            tinygif: "https://evilklipy.com/a_tiny.gif",
+            gif: "https://evilklipy.com/a.gif",
+          }),
+        ]),
+      );
+      expect(await searchGifs(api, "cats")).toEqual([]);
+    });
+
+    it("rejects a klipy.com path on an attacker host", async () => {
+      gifSearch.mockResolvedValue(
+        response([
+          gifResult("drop", {
+            tinygif: "https://evil.example.com/klipy.com/a_tiny.gif",
+            gif: "https://evil.example.com/klipy.com/a.gif",
+          }),
+        ]),
+      );
+      expect(await searchGifs(api, "cats")).toEqual([]);
+    });
+
+    it("rejects malformed URLs", async () => {
+      gifSearch.mockResolvedValue(
+        response([gifResult("drop", { tinygif: "not a url", gif: "also not a url" })]),
+      );
+      expect(await searchGifs(api, "cats")).toEqual([]);
     });
   });
 
-  describe("HTTP error handling", () => {
-    it("throws when the response is not ok", async () => {
-      mockFetch.mockResolvedValue(errorResponse(429, "Too Many Requests"));
-      await expect(searchGifs("cats")).rejects.toThrow();
-    });
-
-    it("error message includes the HTTP status code", async () => {
-      mockFetch.mockResolvedValue(errorResponse(403, "Forbidden"));
-      await expect(searchGifs("cats")).rejects.toThrow("403");
-    });
-
-    it("error message includes the status text", async () => {
-      mockFetch.mockResolvedValue(errorResponse(403, "Forbidden"));
-      await expect(searchGifs("cats")).rejects.toThrow("Forbidden");
-    });
-
-    it("throws when fetch itself rejects (network error)", async () => {
-      mockFetch.mockRejectedValue(new Error("Network failure"));
-      await expect(searchGifs("cats")).rejects.toThrow("Network failure");
+  describe("error propagation", () => {
+    it("propagates the api client's error so the picker can degrade", async () => {
+      gifSearch.mockRejectedValue(new Error("Service Unavailable"));
+      await expect(searchGifs(api, "cats")).rejects.toThrow("Service Unavailable");
     });
   });
 });
@@ -226,54 +215,47 @@ describe("searchGifs", () => {
 // ---------------------------------------------------------------------------
 
 describe("getTrendingGifs", () => {
-  describe("URL construction", () => {
-    it("calls the Klipy featured endpoint", async () => {
-      mockFetch.mockResolvedValue(okResponse([]));
-      await getTrendingGifs();
-      expect(capturedUrl()).toMatch(/^https:\/\/api\.klipy\.com\/v2\/featured/);
-    });
-
-    it("does not include a q param", async () => {
-      mockFetch.mockResolvedValue(okResponse([]));
-      await getTrendingGifs();
-      expect(capturedParams().has("q")).toBe(false);
-    });
-
-    it("includes the API key param", async () => {
-      mockFetch.mockResolvedValue(okResponse([]));
-      await getTrendingGifs();
-      expect(capturedParams().has("key")).toBe(true);
-    });
-
-    it("includes media_filter param", async () => {
-      mockFetch.mockResolvedValue(okResponse([]));
-      await getTrendingGifs();
-      expect(capturedParams().get("media_filter")).toBe("gif,tinygif");
+  describe("transport", () => {
+    it("calls the server's trending endpoint via the api client", async () => {
+      gifTrending.mockResolvedValue(response([]));
+      await getTrendingGifs(api);
+      expect(gifTrending).toHaveBeenCalledTimes(1);
     });
 
     it("defaults limit to 20", async () => {
-      mockFetch.mockResolvedValue(okResponse([]));
-      await getTrendingGifs();
-      expect(capturedParams().get("limit")).toBe("20");
+      gifTrending.mockResolvedValue(response([]));
+      await getTrendingGifs(api);
+      expect(gifTrending).toHaveBeenCalledWith(20);
     });
 
     it("passes an explicit limit override", async () => {
-      mockFetch.mockResolvedValue(okResponse([]));
-      await getTrendingGifs(10);
-      expect(capturedParams().get("limit")).toBe("10");
+      gifTrending.mockResolvedValue(response([]));
+      await getTrendingGifs(api, 10);
+      expect(gifTrending).toHaveBeenCalledWith(10);
+    });
+
+    it("never calls global fetch (no direct api.klipy.com traffic)", async () => {
+      gifTrending.mockResolvedValue(response([]));
+      await getTrendingGifs(api);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
+    it("does not use the search endpoint", async () => {
+      gifTrending.mockResolvedValue(response([]));
+      await getTrendingGifs(api);
+      expect(gifSearch).not.toHaveBeenCalled();
     });
   });
 
   describe("result parsing", () => {
     it("returns an empty array when results are empty", async () => {
-      mockFetch.mockResolvedValue(okResponse([]));
-      const gifs = await getTrendingGifs();
-      expect(gifs).toEqual([]);
+      gifTrending.mockResolvedValue(response([]));
+      expect(await getTrendingGifs(api)).toEqual([]);
     });
 
     it("maps fields correctly", async () => {
-      mockFetch.mockResolvedValue(okResponse([gifResult("trend1")]));
-      const gifs = await getTrendingGifs();
+      gifTrending.mockResolvedValue(response([gifResult("trend1")]));
+      const gifs = await getTrendingGifs(api);
       expect(gifs[0]).toEqual({
         id: "trend1",
         title: "Title trend1",
@@ -283,41 +265,36 @@ describe("getTrendingGifs", () => {
     });
 
     it("filters out results with missing tinygif", async () => {
-      mockFetch.mockResolvedValue(
-        okResponse([gifResult("keep"), gifResult("drop", { tinygif: null })]),
+      gifTrending.mockResolvedValue(
+        response([gifResult("keep"), gifResult("drop", { tinygif: null })]),
       );
-      const gifs = await getTrendingGifs();
-      expect(gifs.map((g) => g.id)).toEqual(["keep"]);
+      expect((await getTrendingGifs(api)).map((g) => g.id)).toEqual(["keep"]);
     });
 
     it("filters out results with missing gif", async () => {
-      mockFetch.mockResolvedValue(
-        okResponse([gifResult("keep"), gifResult("drop", { gif: null })]),
+      gifTrending.mockResolvedValue(
+        response([gifResult("keep"), gifResult("drop", { gif: null })]),
       );
-      const gifs = await getTrendingGifs();
-      expect(gifs.map((g) => g.id)).toEqual(["keep"]);
+      expect((await getTrendingGifs(api)).map((g) => g.id)).toEqual(["keep"]);
+    });
+
+    it("enforces the CDN allowlist on trending results too", async () => {
+      gifTrending.mockResolvedValue(
+        response([
+          gifResult("drop", {
+            tinygif: "https://media.tenor.com/drop_tiny.gif",
+            gif: "https://media.tenor.com/drop.gif",
+          }),
+        ]),
+      );
+      expect(await getTrendingGifs(api)).toEqual([]);
     });
   });
 
-  describe("HTTP error handling", () => {
-    it("throws when the response is not ok", async () => {
-      mockFetch.mockResolvedValue(errorResponse(500, "Internal Server Error"));
-      await expect(getTrendingGifs()).rejects.toThrow();
-    });
-
-    it("error message includes the HTTP status code", async () => {
-      mockFetch.mockResolvedValue(errorResponse(503, "Service Unavailable"));
-      await expect(getTrendingGifs()).rejects.toThrow("503");
-    });
-
-    it("error message includes the status text", async () => {
-      mockFetch.mockResolvedValue(errorResponse(503, "Service Unavailable"));
-      await expect(getTrendingGifs()).rejects.toThrow("Service Unavailable");
-    });
-
-    it("throws when fetch itself rejects (network error)", async () => {
-      mockFetch.mockRejectedValue(new Error("DNS lookup failed"));
-      await expect(getTrendingGifs()).rejects.toThrow("DNS lookup failed");
+  describe("error propagation", () => {
+    it("propagates the api client's error so the picker can degrade", async () => {
+      gifTrending.mockRejectedValue(new Error("DNS lookup failed"));
+      await expect(getTrendingGifs(api)).rejects.toThrow("DNS lookup failed");
     });
   });
 });

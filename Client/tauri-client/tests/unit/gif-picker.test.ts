@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createGifPicker } from "@components/GifPicker";
+import { createGifPicker, GIF_UNAVAILABLE_MESSAGE } from "@components/GifPicker";
+import { ApiClientError } from "@lib/api";
 import type { GifPickerOptions } from "@components/GifPicker";
-import type { GifResult } from "@lib/gifProvider";
+import type { GifApi, GifResult } from "@lib/gifProvider";
 
 // ---------------------------------------------------------------------------
 // Module mock — must be hoisted before imports in vitest
@@ -36,10 +37,17 @@ const SEARCH_GIFS: readonly GifResult[] = [makeGif("s1"), makeGif("s2")];
 // Helpers
 // ---------------------------------------------------------------------------
 
+const stubApi: GifApi = {
+  gifSearch: vi.fn(),
+  gifTrending: vi.fn(),
+};
+
 function makePicker(overrides?: Partial<GifPickerOptions>) {
   const options: GifPickerOptions = {
+    api: overrides?.api ?? stubApi,
     onSelect: overrides?.onSelect ?? vi.fn(),
     onClose: overrides?.onClose ?? vi.fn(),
+    onUnavailable: overrides?.onUnavailable,
   };
   const picker = createGifPicker(options);
   return { picker, options };
@@ -131,7 +139,7 @@ describe("GifPicker", () => {
       vi.advanceTimersByTime(300);
       await Promise.resolve(); // flush microtasks
 
-      expect(vi.mocked(searchGifs)).toHaveBeenCalledWith("cats", 20);
+      expect(vi.mocked(searchGifs)).toHaveBeenCalledWith(stubApi, "cats", 20);
       picker.destroy();
     });
 
@@ -152,7 +160,7 @@ describe("GifPicker", () => {
 
       // Only one call — the second one after the full debounce window
       expect(vi.mocked(searchGifs)).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(searchGifs)).toHaveBeenCalledWith("cats", 20);
+      expect(vi.mocked(searchGifs)).toHaveBeenCalledWith(stubApi, "cats", 20);
       picker.destroy();
     });
 
@@ -167,7 +175,7 @@ describe("GifPicker", () => {
       vi.advanceTimersByTime(300);
       await Promise.resolve();
 
-      expect(vi.mocked(searchGifs)).toHaveBeenCalledWith("dogs", 20);
+      expect(vi.mocked(searchGifs)).toHaveBeenCalledWith(stubApi, "dogs", 20);
       picker.destroy();
     });
 
@@ -201,7 +209,7 @@ describe("GifPicker", () => {
     it("calls getTrendingGifs on creation", () => {
       const { picker } = makePicker();
       // getTrendingGifs is called synchronously (no timer needed) at init
-      expect(vi.mocked(getTrendingGifs)).toHaveBeenCalledWith(20);
+      expect(vi.mocked(getTrendingGifs)).toHaveBeenCalledWith(stubApi, 20);
       picker.destroy();
     });
 
@@ -519,6 +527,81 @@ describe("GifPicker", () => {
       const errEl = picker.element.querySelector(".gp-empty");
       expect(errEl).not.toBeNull();
       expect(errEl!.textContent).toBe("Failed to load GIFs");
+      picker.destroy();
+    });
+  });
+
+  // ── Server has no GIF key configured (503 GIF_DISABLED) ───────────────────
+
+  describe("graceful degradation when the server has no GIF key", () => {
+    const disabledError = new ApiClientError(
+      503,
+      "GIF_DISABLED",
+      "GIF search is not configured on this server",
+    );
+
+    it("shows a calm reason instead of a raw error", async () => {
+      vi.mocked(getTrendingGifs).mockRejectedValue(disabledError);
+
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const el = picker.element.querySelector(".gp-empty");
+      expect(el).not.toBeNull();
+      expect(el!.textContent).toBe(GIF_UNAVAILABLE_MESSAGE);
+      picker.destroy();
+    });
+
+    it("marks the picker unavailable and disables the search input", async () => {
+      vi.mocked(getTrendingGifs).mockRejectedValue(disabledError);
+
+      const { picker } = makePicker();
+      container.appendChild(picker.element);
+
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(picker.element.classList.contains("gp-unavailable")).toBe(true);
+      const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
+      expect(input.disabled).toBe(true);
+      picker.destroy();
+    });
+
+    it("notifies the caller via onUnavailable so it can hide its GIF button", async () => {
+      vi.mocked(getTrendingGifs).mockRejectedValue(disabledError);
+      const onUnavailable = vi.fn();
+
+      const { picker } = makePicker({ onUnavailable });
+      container.appendChild(picker.element);
+
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(onUnavailable).toHaveBeenCalledWith(GIF_UNAVAILABLE_MESSAGE);
+      picker.destroy();
+    });
+
+    it("does not treat other API errors as unavailable", async () => {
+      vi.mocked(getTrendingGifs).mockRejectedValue(
+        new ApiClientError(502, "BAD_GATEWAY", "GIF provider is unavailable"),
+      );
+      const onUnavailable = vi.fn();
+
+      const { picker } = makePicker({ onUnavailable });
+      container.appendChild(picker.element);
+
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(onUnavailable).not.toHaveBeenCalled();
+      expect(picker.element.classList.contains("gp-unavailable")).toBe(false);
       picker.destroy();
     });
   });
