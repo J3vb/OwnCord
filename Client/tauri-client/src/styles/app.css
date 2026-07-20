@@ -87,6 +87,9 @@
 }
 .channel-item:hover { background: var(--bg-hover); color: var(--text-normal); }
 .channel-item.active { background: var(--bg-active); color: white; }
+/* Voice join/leave frozen while the WS socket is down (docs/architecture/ux/README.md §3). */
+.channel-item.voice.disabled { opacity: 0.5; cursor: not-allowed; }
+.channel-item.voice.disabled:hover { background: transparent; color: var(--text-muted); }
 .channel-draggable { cursor: grab; }
 .channel-draggable:active { cursor: grabbing; }
 .channel-reordering { user-select: none; cursor: grabbing !important; }

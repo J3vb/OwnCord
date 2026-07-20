@@ -158,6 +158,7 @@ forward-secrecy keypair rotation on reconnect are mechanics the user never sees.
 
 `src/lib/livekitSession.ts`, `src/stores/voice.store.ts`, `src/lib/screenShare.ts`,
 `src/lib/ptt.ts`, `src/lib/roomEventHandlers.ts`, `src/components/VoiceWidget.ts`,
+`src/components/ChannelSidebar.ts` (voice-row join freeze on WS reconnect),
 `VoiceChannel.ts`, `VideoGrid.ts`, `src-tauri/src/livekit_proxy.rs`,
 `src-tauri/src/ptt.rs`, `src/lib/e2eeCrypto.ts`; and the structural map in
 [../voice-e2ee.md](../voice-e2ee.md).
