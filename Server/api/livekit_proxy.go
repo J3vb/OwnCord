@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"strings"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // NewLiveKitProxy creates a reverse proxy handler that forwards both HTTP
