@@ -140,7 +140,7 @@ func TestGuardedDial_FallsBackAcrossVettedIPs(t *testing.T) {
 		return c1, nil
 	}
 
-	conn, err := guardedDialContext()(context.Background(), "tcp", "api.example.com:443")
+	conn, err := GuardedDialContext()(context.Background(), "tcp", "api.example.com:443")
 	if err != nil {
 		t.Fatalf("guarded dial should fall back to the next vetted IP: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestGuardedDial_PrivateRecordRefusesBeforeAnyDial(t *testing.T) {
 		return nil, errors.New("must not be reached")
 	}
 
-	_, err := guardedDialContext()(context.Background(), "tcp", "api.example.com:443")
+	_, err := GuardedDialContext()(context.Background(), "tcp", "api.example.com:443")
 	if !errors.Is(err, ErrHTTPHostDenied) {
 		t.Fatalf("want ErrHTTPHostDenied, got %v", err)
 	}

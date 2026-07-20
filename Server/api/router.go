@@ -109,6 +109,14 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Channel and message REST routes.
 	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies)
 
+	// GIF proxy — keeps the Klipy API key server-side. Mounted unconditionally;
+	// with no key configured the endpoints answer 503 GIF_DISABLED so the
+	// client can hide the picker rather than discover a 404.
+	MountGIFRoutes(r, database, limiter, cfg)
+	if cfg.GIF.APIKey == "" {
+		slog.Info("gif.api_key not set — GIF picker disabled (clients will hide it)")
+	}
+
 	// DM REST routes are mounted after hub creation (below) so the hub can
 	// be passed as a DMBroadcaster for real-time close events.
 

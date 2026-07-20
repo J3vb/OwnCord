@@ -29,6 +29,17 @@ type Config struct {
 	EventPersistence EventPersistenceConfig `koanf:"event_persistence"`
 	Telemetry        TelemetryConfig        `koanf:"telemetry"`
 	Plugins          PluginsConfig          `koanf:"plugins"`
+	GIF              GIFConfig              `koanf:"gif"`
+}
+
+// GIFConfig holds the credentials for the server-side GIF (Klipy) proxy.
+//
+// The API key is deliberately server-only: the client never receives it and
+// never talks to api.klipy.com directly, it calls /api/v1/gif/* on its own
+// server instead. An empty APIKey means the feature is OFF — the proxy
+// endpoints answer 503 GIF_DISABLED and the client hides the picker.
+type GIFConfig struct {
+	APIKey string `koanf:"api_key"`
 }
 
 // EventPersistenceConfig (Phase B Step 7) controls the tiered event log used
@@ -287,6 +298,13 @@ voice:
 #   max_memory_mb: 64         # per-plugin memory cap
 #   cpu_budget_ms: 100        # per-invocation CPU budget
 #   http_allowlist: []        # hostnames plugins may reach via the http capability
+
+# GIF picker (Klipy). Disabled by default: with no api_key the /api/v1/gif/*
+# endpoints answer 503 GIF_DISABLED and the client hides its GIF button. The
+# key stays on the server — it is never sent to clients.
+# Get a key at https://partner.klipy.com
+# gif:
+#   api_key: ""
 `
 
 // Load reads configuration from the given YAML file path, merging with
