@@ -4,12 +4,26 @@
 import { createElement, appendChildren } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { checkForUpdate, downloadAndInstallUpdate } from "@lib/updater";
+import type { DownloadProgress } from "@lib/updater";
 import type { MountableComponent } from "@lib/safe-render";
 
 const log = createLogger("update-notifier");
 
 export interface UpdateNotifierOptions {
   readonly serverUrl: string;
+}
+
+/**
+ * Human-readable download status. Shows a percentage when the total size is
+ * known, otherwise the bytes received so the banner never looks hung.
+ */
+export function formatDownloadProgress(p: DownloadProgress): string {
+  if (p.total !== null && p.total > 0) {
+    const pct = Math.min(100, Math.max(0, Math.round((p.received / p.total) * 100)));
+    return `Downloading update… ${pct}%`;
+  }
+  const mb = (p.received / (1024 * 1024)).toFixed(1);
+  return `Downloading update… ${mb} MB`;
 }
 
 export function createUpdateNotifier(options: UpdateNotifierOptions): MountableComponent {
@@ -66,15 +80,13 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
 
     // Replace banner content with progress indicator
     while (banner.firstChild) banner.removeChild(banner.firstChild);
-    const progress = createElement(
-      "span",
-      { class: "update-banner-text" },
-      "Downloading update...",
-    );
+    const progress = createElement("span", { class: "update-banner-text" }, "Downloading update…");
     banner.appendChild(progress);
 
     try {
-      await downloadAndInstallUpdate(serverUrl);
+      await downloadAndInstallUpdate(serverUrl, (p) => {
+        progress.textContent = formatDownloadProgress(p);
+      });
       // App will relaunch — this code won't execute after relaunch()
     } catch (err) {
       log.error("Update install failed", { error: String(err) });
