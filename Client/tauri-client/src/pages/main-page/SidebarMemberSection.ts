@@ -8,7 +8,7 @@ import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { createMemberList } from "@components/MemberList";
 import { authStore } from "@stores/auth.store";
-import { getRoleIdByName } from "@stores/roles.store";
+import { getRoleIdByName } from "@stores/channels.store";
 import type { ApiClient } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
 
