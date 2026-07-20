@@ -58,6 +58,11 @@ func (s *EventSink) Emit(channelID int64, payload []byte) {
 
 // Subscribe binds inst to topic. Multiple plugins may subscribe to the same
 // topic — events fan out to every subscriber.
+//
+// No production code calls Subscribe today (only this package's tests), so
+// subs is always empty at runtime and Dispatch's loop never iterates. The
+// first caller added here turns Dispatch's loop live on the hub's broadcast
+// path — see the SECURITY GATE comment on Dispatch before adding one.
 func (s *EventSink) Subscribe(topic string, inst *Instance) error {
 	if !inst.Manifest.HasCapability(CapEvents) {
 		return ErrCapabilityNotGranted
@@ -90,17 +95,28 @@ func (s *EventSink) UnsubscribeAll(inst *Instance) {
 // Dispatch invokes every subscriber's on_event for topic.
 //
 // SECURITY GATE (audit 2026-04-07 finding #4 — "no rate limit on event
-// delivery to plugins"). Guest delivery is NOT implemented in either build:
-// the loop below touches no module, and nothing in the server calls Dispatch,
-// so a plugin cannot slow the hub by handling events slowly. Wiring the
-// guest call is what makes the finding real, so whoever does it must land, in
-// the same change:
+// delivery to plugins"). Read this before adding anything to the loop below.
+//
+// Dispatch already has a production caller: ws/hub.go calls it on every
+// broadcast message when an operator has enabled plugins (api/router.go wires
+// h.pluginSink whenever the registry is non-nil). That call site runs on the
+// hub's broadcast goroutine while seqMu is held, so anything this function
+// does is on the hub's hot path and must not block or re-enter the hub.
+//
+// Guest delivery is nonetheless NOT implemented in either build: the loop
+// below touches no module, and no production code calls Subscribe (only this
+// package's tests), so subs is empty and the loop never iterates. No guest
+// code executes on the event path today — that, not an absent call site, is
+// why a plugin cannot currently slow the hub by handling events slowly.
+//
+// Wiring guest delivery is what makes the finding real, so whoever does it
+// must land, in the same change:
 //
 //   - a per-plugin delivery rate limit (drop, never block the caller), and
 //   - the same per-call CPU-budget deadline invokeCommand applies
 //     (sandbox_wazero.go), and
 //   - delivery off the hub's broadcast goroutine so a slow guest cannot
-//     backpressure fan-out to WS clients.
+//     backpressure fan-out to WS clients or extend the seqMu hold.
 //
 // Until then this stays inert on purpose.
 func (s *EventSink) Dispatch(ctx context.Context, topic string, payload []byte) {
