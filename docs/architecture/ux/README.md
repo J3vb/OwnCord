@@ -92,9 +92,12 @@ source of truth in `ui.store.connectionStatus`
 > `SidebarArea` never passed it a `ws`; it now gates on the store and receives
 > the `ws` send path). The one-shot connected-overlay wiring in `main.ts` stays
 > on `ws.onStateChange` deliberately — it needs the exact internal transition.
-> **Remaining gap:** the table's voice column. Voice controls are not yet
-> frozen during a WS reconnect — LiveKit reconnection retries underneath, but
-> join/leave controls stay enabled and would send over the down socket.
+> The voice column is now wired too: the VoiceWidget freezes its controls
+> (disabled + a "Reconnecting…" / "Not connected" reason) while
+> `connectionStatus !== "connected"`, and the join/leave callbacks
+> (`VoiceCallbacks.ts`) refuse to fire `voice_join`/`voice_leave` over a down
+> socket. LiveKit's own reconnection keeps retrying underneath — only the UI is
+> gated, never LiveKit's machinery.
 
 | Status | Composer / send | Voice controls | Presence picker | Reconnect banner |
 |--------|-----------------|----------------|-----------------|------------------|
