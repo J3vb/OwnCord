@@ -87,8 +87,22 @@ func (s *EventSink) UnsubscribeAll(inst *Instance) {
 	}
 }
 
-// Dispatch invokes every subscriber's on_event for topic. The default build
-// is a no-op; the wazero-tagged build calls into the WASM module.
+// Dispatch invokes every subscriber's on_event for topic.
+//
+// SECURITY GATE (audit 2026-04-07 finding #4 — "no rate limit on event
+// delivery to plugins"). Guest delivery is NOT implemented in either build:
+// the loop below touches no module, and nothing in the server calls Dispatch,
+// so a plugin cannot slow the hub by handling events slowly. Wiring the
+// guest call is what makes the finding real, so whoever does it must land, in
+// the same change:
+//
+//   - a per-plugin delivery rate limit (drop, never block the caller), and
+//   - the same per-call CPU-budget deadline invokeCommand applies
+//     (sandbox_wazero.go), and
+//   - delivery off the hub's broadcast goroutine so a slow guest cannot
+//     backpressure fan-out to WS clients.
+//
+// Until then this stays inert on purpose.
 func (s *EventSink) Dispatch(ctx context.Context, topic string, payload []byte) {
 	s.mu.Lock()
 	subs := append([]*Instance(nil), s.subs[topic]...)
