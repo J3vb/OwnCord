@@ -59,6 +59,7 @@ function resetStores(): void {
     localScreenshare: false,
     joinedAt: null,
     listenOnly: false,
+    voiceStatus: "idle",
   }));
   membersStore.setState(() => ({
     members: new Map(),
@@ -1072,6 +1073,7 @@ describe("ChannelSidebar", () => {
       localScreenshare: false,
       joinedAt: null,
       listenOnly: false,
+      voiceStatus: "idle",
     }));
     sidebarWithWatch.mount(container);
 
@@ -1116,6 +1118,7 @@ describe("ChannelSidebar", () => {
       localScreenshare: false,
       joinedAt: null,
       listenOnly: false,
+      voiceStatus: "idle",
     }));
     sidebarWithWatch.mount(container);
 
@@ -1166,6 +1169,7 @@ describe("ChannelSidebar", () => {
       localScreenshare: false,
       joinedAt: null,
       listenOnly: false,
+      voiceStatus: "idle",
     }));
     sidebar.mount(container);
 
@@ -1207,6 +1211,7 @@ describe("ChannelSidebar", () => {
       localScreenshare: false,
       joinedAt: null,
       listenOnly: false,
+      voiceStatus: "idle",
     }));
     sidebarWithWatch.mount(container);
 
@@ -1248,6 +1253,7 @@ describe("ChannelSidebar", () => {
       localScreenshare: false,
       joinedAt: null,
       listenOnly: false,
+      voiceStatus: "idle",
     }));
     sidebar.mount(container);
 
