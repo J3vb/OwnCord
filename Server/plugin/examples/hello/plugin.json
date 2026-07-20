@@ -5,6 +5,9 @@
   "description": "Trivial proof-of-life plugin: registers /hello and echoes message_send events.",
   "entrypoint": "hello.wasm",
   "permissions": ["commands", "events", "storage"],
+  "commands": [
+    { "name": "hello" }
+  ],
   "resources": {
     "max_memory_mb": 16,
     "cpu_budget_ms": 50

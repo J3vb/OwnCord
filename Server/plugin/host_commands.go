@@ -31,6 +31,14 @@ func (r *Registry) RegisterCommand(cmd string, inst *Instance) error {
 	if !inst.Manifest.HasCapability(CapCommands) {
 		return ErrCapabilityNotGranted
 	}
+	// Per-command ACL. The `commands` capability alone used to bind whatever
+	// the guest module returned from list_commands, so an admin enabling a
+	// plugin could not know which commands it would claim. The manifest is now
+	// the authority: only declared names bind, and this is the single choke
+	// point both auto-registration and direct registration route through.
+	if !inst.Manifest.DeclaresCommand(cmd) {
+		return fmt.Errorf("%w: %s/%s", ErrCommandNotDeclared, inst.Manifest.Name, cmd)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// Ownership is compared by plugin identity (manifest name — unique per

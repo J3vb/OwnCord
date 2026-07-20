@@ -8,6 +8,11 @@ Phase C Step 9 — proof-of-life plugin used by `Server/plugin/plugin_test.go`.
 The manifest is the only file the default (no-`-tags wazero`) build needs —
 the registry persists it into the plugins table without executing the .wasm.
 
+The `commands` block is the per-command ACL: activation binds only the names
+listed there, so `list_commands` returning anything else is ignored. Keep
+`plugin.json`'s list and `listCommandsJSON` in `main.go` in sync — a name in
+the WASM but not the manifest simply never binds.
+
 ## Building the WASM
 
 `main.go` in this directory implements the full plugin ABI

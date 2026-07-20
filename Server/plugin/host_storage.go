@@ -11,7 +11,14 @@ import (
 	"fmt"
 )
 
+// Key isolation is structural rather than checked: every call below passes
+// inst.ID as the namespace and there is no parameter by which a caller (let
+// alone a guest module) can name a different plugin's namespace. The
+// plugin_kv table's PRIMARY KEY (plugin_id, key) — migrations/015_plugins.sql
+// — makes the same split the storage layout, so two plugins using the same
+// key never collide. Audit 2026-04-07 finding #2.
 const (
+	maxPluginKeyBytes   = 256       // 256 B per key
 	maxPluginValueBytes = 64 * 1024 // 64 KB per value
 	maxPluginScanLimit  = 1000      // hard cap on PluginKVScan results
 )
@@ -20,6 +27,12 @@ const (
 func (r *Registry) StoragePut(ctx context.Context, inst *Instance, key string, value []byte) error {
 	if !inst.Manifest.HasCapability(CapStorage) {
 		return ErrCapabilityNotGranted
+	}
+	if key == "" {
+		return fmt.Errorf("plugin storage: key must not be empty")
+	}
+	if len(key) > maxPluginKeyBytes {
+		return fmt.Errorf("plugin storage: key exceeds %d bytes", maxPluginKeyBytes)
 	}
 	if len(value) > maxPluginValueBytes {
 		return fmt.Errorf("plugin storage: value exceeds %d bytes", maxPluginValueBytes)
