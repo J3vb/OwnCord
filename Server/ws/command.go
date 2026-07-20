@@ -3,6 +3,7 @@ package ws
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // Command is the minimal interface for all client-to-server commands.
@@ -205,6 +206,26 @@ type VoiceE2EEAnnounceCmd struct {
 func (c VoiceE2EEAnnounceCmd) Type() string      { return MsgTypeVoiceE2EEAnnounce }
 func (c VoiceE2EEAnnounceCmd) UserID() int64     { return c.userID }
 func (c VoiceE2EEAnnounceCmd) PublicKey() string { return c.publicKey }
+
+// ChatCommandCmd represents a chat_command (plugin slash command) message.
+type ChatCommandCmd struct {
+	userID    int64
+	reqID     string
+	channelID int64
+	command   string // trimmed, including leading slash, e.g. "/hello"
+	args      []string
+}
+
+func (c ChatCommandCmd) Type() string     { return MsgTypeChatCommand }
+func (c ChatCommandCmd) UserID() int64    { return c.userID }
+func (c ChatCommandCmd) ChannelID() int64 { return c.channelID }
+func (c ChatCommandCmd) ReqID() string    { return c.reqID }
+func (c ChatCommandCmd) Command() string  { return c.command }
+func (c ChatCommandCmd) Args() []string {
+	dst := make([]string, len(c.args))
+	copy(dst, c.args)
+	return dst
+}
 
 // VoiceE2EEOfferCmd represents a voice_e2ee_offer message.
 type VoiceE2EEOfferCmd struct {
@@ -452,6 +473,34 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 			return nil, fmt.Errorf("invalid voice_e2ee_announce payload: %w", err)
 		}
 		return VoiceE2EEAnnounceCmd{userID: userID, publicKey: p.PublicKey}, nil
+	},
+
+	MsgTypeChatCommand: func(userID int64, reqID string, raw json.RawMessage) (Command, error) {
+		var p struct {
+			ChannelID int64    `json:"channel_id"`
+			Command   string   `json:"command"`
+			Args      []string `json:"args"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("invalid chat_command payload: %w", err)
+		}
+		cmd := strings.TrimSpace(p.Command)
+		if cmd == "" {
+			return nil, fmt.Errorf("command must not be empty")
+		}
+		// Guard against a client flooding the plugin allocate/dispatch ABI.
+		if len(p.Args) > maxCommandArgs {
+			return nil, fmt.Errorf("too many command arguments (max %d)", maxCommandArgs)
+		}
+		args := make([]string, len(p.Args))
+		copy(args, p.Args)
+		return ChatCommandCmd{
+			userID:    userID,
+			reqID:     reqID,
+			channelID: p.ChannelID,
+			command:   cmd,
+			args:      args,
+		}, nil
 	},
 
 	MsgTypeVoiceE2EEOffer: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
