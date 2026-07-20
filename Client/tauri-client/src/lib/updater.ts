@@ -14,6 +14,12 @@ export interface UpdateCheckResult {
   readonly body: string | null;
 }
 
+/** Download progress reported by the Rust updater during install. */
+export interface DownloadProgress {
+  readonly received: number;
+  readonly total: number | null;
+}
+
 /** Check if a newer client version is available on the connected server. */
 export async function checkForUpdate(serverUrl: string): Promise<UpdateCheckResult> {
   try {
@@ -32,10 +38,28 @@ export async function checkForUpdate(serverUrl: string): Promise<UpdateCheckResu
   }
 }
 
-/** Download and install a pending update, then relaunch the app. */
-export async function downloadAndInstallUpdate(serverUrl: string): Promise<void> {
+/**
+ * Download and install a pending update, then relaunch the app.
+ * `onProgress`, when given, is fed the Rust updater's `update-progress` events
+ * so the caller can show download progress instead of a hung spinner.
+ */
+export async function downloadAndInstallUpdate(
+  serverUrl: string,
+  onProgress?: (progress: DownloadProgress) => void,
+): Promise<void> {
   log.info("Downloading and installing update...");
-  await invoke("download_and_install_update", { serverUrl });
+  let unlisten: (() => void) | undefined;
+  if (onProgress !== undefined) {
+    const { listen } = await import("@tauri-apps/api/event");
+    unlisten = await listen<DownloadProgress>("update-progress", (event) => {
+      onProgress({ received: event.payload.received, total: event.payload.total ?? null });
+    });
+  }
+  try {
+    await invoke("download_and_install_update", { serverUrl });
+  } finally {
+    unlisten?.();
+  }
   log.info("Update installed, relaunching...");
   await relaunch();
 }
