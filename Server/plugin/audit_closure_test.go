@@ -162,12 +162,14 @@ func TestStorageRejectsOversizedKeyAndValue(t *testing.T) {
 	}
 }
 
-// TestEventDeliveryHasNoGuestPath locks finding #4. The finding (a plugin
-// slowing the server by handling events slowly) is not reachable today:
-// Subscribe requires the capability and Dispatch invokes no guest code in
-// either build. If this test has to change because Dispatch grew a real
-// delivery path, that change must also bring the per-plugin rate limit — see
-// the SECURITY GATE comment on EventSink.Dispatch.
+// TestEventDeliveryHasNoGuestPath locks finding #4. Dispatch is called on the
+// hub's broadcast path (ws/hub.go) whenever plugins are enabled, but the
+// finding (a plugin slowing the server by handling events slowly) is not
+// reachable today: Subscribe requires the capability and has no production
+// callers, and Dispatch invokes no guest code in either build. If this test
+// has to change because Dispatch grew a real delivery path, that change must
+// also bring the per-plugin rate limit — see the SECURITY GATE comment on
+// EventSink.Dispatch.
 func TestEventDeliveryHasNoGuestPath(t *testing.T) {
 	sink := NewEventSink()
 	noCap := &Instance{ID: 1, Manifest: &Manifest{Name: "nocap"}}
