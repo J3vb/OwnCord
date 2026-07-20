@@ -96,6 +96,7 @@ other (auth→voice→members), and the Solid beachhead is dead weight.
 | Cert trust | `src-tauri/src/ws_proxy.rs` | TOFU: first fingerprint pinned per host (`certs.json`); mismatch → modal (`CertMismatchModal`) |
 | Credentials | `src-tauri/src/credentials.rs` | OS keychain per host; password field `serde(skip)` so it never crosses IPC back to JS |
 | Multi-server | `src/lib/profiles.ts` | Server profiles w/ 15s health polling and auto-connect; one active connection, quick-switch replaces WS + tunnels |
+| HTTP capability | `src-tauri/capabilities/default.json` | `http:allow-fetch` is the only URL-scoped identifier (the other two `fetch_*` commands take a validated `ResourceId`); allows `https://*` + `http://127.0.0.1:*`, denies https loopback. Wildcard is required by link previews — see [docs/plans/tauri-capability-narrowing.md](../plans/tauri-capability-narrowing.md) |
 | Updates | `src/lib/updater.ts` + `update_commands.rs` | Endpoint derived from the connected server URL, https-only, TLS pinned to TOFU fingerprint, minisign-verified |
 | Settings | `commands.rs` + `src/lib/preferences.ts` | Split persistence: Rust store (`settings.json`, key-allowlisted) *and* raw `localStorage` for UI prefs/themes |
 | Theming | `src/lib/themes.ts` + `styles/tokens.css` | CSS custom properties; 4 built-in themes + custom overrides |
