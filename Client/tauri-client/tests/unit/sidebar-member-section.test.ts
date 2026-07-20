@@ -26,7 +26,7 @@ import {
 } from "../../src/pages/main-page/SidebarMemberSection";
 import { authStore } from "../../src/stores/auth.store";
 import { membersStore } from "../../src/stores/members.store";
-import { rolesStore } from "../../src/stores/roles.store";
+import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { createMemberList } from "@components/MemberList";
 import type { Member } from "../../src/stores/members.store";
 import type { UserStatus } from "../../src/lib/types";
@@ -50,7 +50,11 @@ function resetStores(): void {
     members: new Map(),
     typingUsers: new Map(),
   }));
-  rolesStore.setState(() => ({
+  // Role lookups read the dispatcher-updated channels.store (see the role-source
+  // unification). Seed via the same setRoles action the dispatcher calls.
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
     roles: [
       { id: 1, name: "owner", color: null, permissions: 0 },
       { id: 2, name: "admin", color: null, permissions: 0 },
@@ -625,6 +629,33 @@ describe("SidebarMemberSection", () => {
       // Should not call API or show toast because roleId is undefined
       expect(mockApi.adminChangeRole).not.toHaveBeenCalled();
       expect(mockShow).not.toHaveBeenCalled();
+
+      section.destroy();
+    });
+
+    it("changeRole: resolves role id from the dispatcher-updated channels store", async () => {
+      // Regression guard for the old role-source split: the dispatcher writes
+      // roles via channels.store.setRoles, so the member UI must read from that
+      // same store (previously it read a stale, never-updated roles.store).
+      setRoles([{ id: 42, name: "vip", color: null, permissions: 0 }]);
+
+      const mockApi = {
+        adminKickMember: vi.fn(),
+        adminBanMember: vi.fn(),
+        adminChangeRole: vi.fn().mockResolvedValue(undefined),
+      };
+      const opts = {
+        api: mockApi as unknown as SidebarMemberSectionOptions["api"],
+        getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
+      };
+
+      const section = createSidebarMemberSection(opts);
+      container.appendChild(section.element);
+
+      const callbacks = getCapturedCallbacks();
+      await callbacks.onChangeRole(7, "Dave", "vip");
+
+      expect(mockApi.adminChangeRole).toHaveBeenCalledWith(7, 42);
 
       section.destroy();
     });

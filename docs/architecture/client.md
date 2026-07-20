@@ -105,7 +105,8 @@ other (auth→voice→members), and the Solid beachhead is dead weight.
 157 test files (~63k LOC — about 2× the source): Vitest unit + integration,
 Playwright E2E (web and native Tauri suites), Stryker mutation testing, oxlint +
 type-checked ESLint, Prettier, Knip, strict `tsc`. The client unit suite is
-currently marked "KNOWN RED" and non-blocking in CI — an audit finding.
+green and blocking; it must pass 100% before a push (audit item A-2026-07-04,
+closed 2026-07-20).
 
 **Source of truth:** `src/main.ts`, `src/lib/dispatcher.ts`, `src/lib/ws.ts`,
 `src/lib/api.ts`, `src/lib/store.ts`, `src/stores/*.store.ts`,
