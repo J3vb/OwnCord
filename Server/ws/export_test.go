@@ -122,6 +122,12 @@ func (h *Hub) BuildReadyWithRoleForTest(database *db.DB, userID int64, role *db.
 	return h.buildReady(database, userID, role)
 }
 
+// ComputeAllowedChannelsForTest exposes Hub.computeAllowedChannels for external
+// tests (the REST/WS channel-visibility agreement test).
+func (h *Hub) ComputeAllowedChannelsForTest(database *db.DB, user *db.User) (map[int64]bool, error) {
+	return h.computeAllowedChannels(database, user)
+}
+
 // GetCachedSettingsForTest exposes Hub.getCachedSettings for external tests.
 func (h *Hub) GetCachedSettingsForTest() (string, string) {
 	return h.getCachedSettings()

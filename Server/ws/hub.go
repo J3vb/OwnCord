@@ -560,14 +560,10 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		visible := false
 		role, err := h.db.GetRoleByID(roleID)
 		if err == nil && role != nil {
-			if permissions.HasAdmin(role.Permissions) {
-				visible = true
-			} else {
-				allow, deny, permErr := h.db.GetChannelPermissions(ch.ID, roleID)
-				// Fail closed: an error hides the channel rather than leaking it.
-				visible = permErr == nil &&
-					permissions.EffectivePerms(role.Permissions, allow, deny)&permissions.ReadMessages != 0
-			}
+			// Single visibility predicate shared with buildReady / REST
+			// ListVisibleChannels; the checker fails closed on a lookup error
+			// and bypasses for admins, matching the other sites exactly.
+			visible = h.permChecker.HasChannelPerm(role.Permissions, roleID, ch.ID, permissions.ReadMessages)
 		}
 		visibleByRole[roleID] = visible
 		return visible
