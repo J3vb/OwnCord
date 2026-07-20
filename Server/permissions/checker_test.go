@@ -193,6 +193,73 @@ func TestHasChannelPermBatch(t *testing.T) {
 	}
 }
 
+// ─── VisibleChannelIDs tests ────────────────────────────────────────────────
+
+func TestVisibleChannelIDs(t *testing.T) {
+	channels := []ChannelRef{
+		{ID: 1, Type: "text"},
+		{ID: 2, Type: "announcement"},
+		{ID: 3, Type: "voice"},
+		{ID: 4, Type: "dm"}, // always skipped
+	}
+
+	tests := []struct {
+		name      string
+		rolePerms int64
+		overrides map[int64]ChannelOverride
+		want      map[int64]bool
+	}{
+		{
+			name:      "admin sees every non-dm channel",
+			rolePerms: Administrator,
+			overrides: nil,
+			want:      map[int64]bool{1: true, 2: true, 3: true},
+		},
+		{
+			name:      "base ReadMessages inherits to all non-dm channels",
+			rolePerms: ReadMessages,
+			overrides: nil,
+			want:      map[int64]bool{1: true, 2: true, 3: true},
+		},
+		{
+			name:      "deny override hides a single channel",
+			rolePerms: ReadMessages,
+			overrides: map[int64]ChannelOverride{2: {Deny: ReadMessages}},
+			want:      map[int64]bool{1: true, 3: true},
+		},
+		{
+			name:      "allow override grants read to a role that otherwise lacks it",
+			rolePerms: 0,
+			overrides: map[int64]ChannelOverride{3: {Allow: ReadMessages}},
+			want:      map[int64]bool{3: true},
+		},
+		{
+			name:      "nil/zero role with no overrides sees nothing",
+			rolePerms: 0,
+			overrides: nil,
+			want:      map[int64]bool{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ck := NewChecker(newMockDB())
+			got := ck.VisibleChannelIDs(tt.rolePerms, channels, tt.overrides)
+			if got[4] {
+				t.Errorf("dm channel 4 must never be visible, got %v", got)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("VisibleChannelIDs() = %v, want %v", got, tt.want)
+			}
+			for id := range tt.want {
+				if !got[id] {
+					t.Errorf("VisibleChannelIDs() missing channel %d; got %v", id, got)
+				}
+			}
+		})
+	}
+}
+
 // ─── RequireChannelAccess tests ─────────────────────────────────────────────
 
 func TestRequireChannelAccess(t *testing.T) {
