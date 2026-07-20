@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default capability granting core permissions to the main window",
+  "description": "Default capability granting core permissions to the main window. NOTE: http:allow-fetch is the ONLY URL-scoped HTTP identifier — tauri-plugin-http validates the URL once, in the `fetch` command; `fetch_send` and `fetch_read_body` take an already-validated ResourceId and never consult a scope, so allow/deny blocks on those identifiers are inert. Do not re-add them.",
   "windows": [
     "main"
   ],
@@ -42,36 +42,24 @@
         {
           "url": "http://127.0.0.1:*"
         }
-      ]
-    },
-    {
-      "identifier": "http:allow-fetch-send",
-      "allow": [
+      ],
+      "deny": [
         {
-          "url": "https://*:*"
+          "url": "https://localhost"
         },
         {
-          "url": "https://*"
+          "url": "https://localhost:*"
         },
         {
-          "url": "http://127.0.0.1:*"
+          "url": "https://127.0.0.1"
+        },
+        {
+          "url": "https://127.0.0.1:*"
         }
       ]
     },
-    {
-      "identifier": "http:allow-fetch-read-body",
-      "allow": [
-        {
-          "url": "https://*:*"
-        },
-        {
-          "url": "https://*"
-        },
-        {
-          "url": "http://127.0.0.1:*"
-        }
-      ]
-    },
+    "http:allow-fetch-send",
+    "http:allow-fetch-read-body",
     "http:allow-fetch-cancel",
     "opener:default",
     "dialog:default",
