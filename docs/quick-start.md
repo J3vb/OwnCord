@@ -87,6 +87,30 @@ npm run tauri build
 1. Use [Tailscale](tailscale.md) for the simplest remote setup.
 2. Or configure [Port Forwarding](port-forwarding.md).
 
+## Optional: enable the GIF picker
+
+GIFs are **off by default** and each server supplies its own key — OwnCord does
+not ship one, so nothing is shared between servers.
+
+1. Request a key at [partner.klipy.com](https://partner.klipy.com).
+2. Set it on the server, then restart:
+
+```bash
+# Preferred — keeps the credential out of config.yaml
+OWNCORD_GIF_API_KEY=your_key_here
+```
+
+Or in `config.yaml`:
+
+```yaml
+gif:
+  api_key: "your_key_here"
+```
+
+The key stays server-side; clients only ever call `/api/v1/gif/*` on their own
+server. Until one is set, the client's GIF button is disabled with
+"GIFs are not enabled on this server" — nothing else is affected.
+
 ## Next Steps
 
 - [Server Configuration](server-configuration.md)
