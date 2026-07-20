@@ -29,6 +29,7 @@ import (
 	"github.com/owncord/server/syncutil"
 
 	"golang.org/x/mod/semver"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -118,6 +119,7 @@ type Updater struct {
 	cachedErr      error
 	errCacheExpiry time.Time
 	textAssetCache map[string]textAssetCacheEntry
+	textAssetSF    singleflight.Group
 	mu             syncutil.Mutex
 	httpClient     *http.Client
 	signingKeyText string
@@ -128,7 +130,11 @@ type Updater struct {
 // memory instead of re-fetching from GitHub on every call.
 type textAssetCacheEntry struct {
 	content string
-	expiry  time.Time
+	// err caches a failed fetch so an upstream outage is not re-dialled on
+	// every request. Cached errors expire after errorCacheTTL, successes
+	// after cacheTTL.
+	err    error
+	expiry time.Time
 }
 
 // NewUpdater creates an Updater for the given repository.
@@ -751,29 +757,65 @@ func (u *Updater) FetchTextAsset(ctx context.Context, url string) (string, error
 // unrate-limited callers (e.g. the client-update endpoint) be served from
 // memory instead of triggering an outbound fetch on every request.
 func (u *Updater) FetchTextAssetCached(ctx context.Context, url string) (string, error) {
-	now := time.Now()
-
-	u.mu.Lock()
-	if entry, ok := u.textAssetCache[url]; ok && now.Before(entry.expiry) {
-		content := entry.content
-		u.mu.Unlock()
-		return content, nil
+	if entry, ok := u.lookupTextAsset(url, time.Now()); ok {
+		return entry.content, entry.err
 	}
-	u.mu.Unlock()
 
-	content, err := u.FetchTextAsset(ctx, url)
+	// Coalesce concurrent misses: when the TTL expires under load, every caller
+	// would otherwise issue its own outbound fetch. One flight per URL runs and
+	// the rest wait on its result.
+	//
+	// ponytail: the leader's ctx drives the fetch, so a cancelled leader fails
+	// its followers too. Acceptable here — callers are the unauthenticated
+	// client-update endpoint, and the outcome is cached either way.
+	v, err, _ := u.textAssetSF.Do(url, func() (any, error) {
+		now := time.Now()
+		// Re-check: another flight may have filled the cache while we queued.
+		if entry, ok := u.lookupTextAsset(url, now); ok {
+			return entry.content, entry.err
+		}
+		content, fetchErr := u.FetchTextAsset(ctx, url)
+		u.storeTextAsset(url, content, fetchErr, now)
+		return content, fetchErr
+	})
 	if err != nil {
 		return "", err
 	}
+	return v.(string), nil
+}
 
+// lookupTextAsset returns a live cache entry for url, if one exists. A cached
+// entry may hold either content or an error; both are honoured until expiry.
+func (u *Updater) lookupTextAsset(url string, now time.Time) (textAssetCacheEntry, bool) {
 	u.mu.Lock()
+	defer u.mu.Unlock()
+	entry, ok := u.textAssetCache[url]
+	if !ok || !now.Before(entry.expiry) {
+		return textAssetCacheEntry{}, false
+	}
+	return entry, true
+}
+
+// storeTextAsset records the outcome of a fetch, caching failures briefly so an
+// upstream outage does not trigger an outbound request per caller.
+func (u *Updater) storeTextAsset(url, content string, err error, now time.Time) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
 	if u.textAssetCache == nil {
 		u.textAssetCache = make(map[string]textAssetCacheEntry)
 	}
-	u.textAssetCache[url] = textAssetCacheEntry{content: content, expiry: now.Add(cacheTTL)}
-	u.mu.Unlock()
-
-	return content, nil
+	// Drop superseded keys: asset URLs carry a version, so without this the map
+	// grows by one entry per release for the lifetime of the process.
+	for k, e := range u.textAssetCache {
+		if !now.Before(e.expiry) {
+			delete(u.textAssetCache, k)
+		}
+	}
+	ttl := cacheTTL
+	if err != nil {
+		ttl = errorCacheTTL
+	}
+	u.textAssetCache[url] = textAssetCacheEntry{content: content, err: err, expiry: now.Add(ttl)}
 }
 
 // downloadFile downloads the content at url and writes it to destPath.
