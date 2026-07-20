@@ -131,7 +131,10 @@ func (r *Registry) activateWithRuntime(ctx context.Context, platform any, inst *
 	// the cross-plugin command-hijack hole. RegisterCommand acquires r.mu
 	// itself, so it is called outside the lock below to avoid re-entrant
 	// locking. The plugin must also have declared the `commands` capability in
-	// its manifest, otherwise no binding happens.
+	// its manifest, otherwise no binding happens — and RegisterCommand refuses
+	// any name the manifest's `commands` block did not declare, so a guest
+	// module cannot widen its own command surface by returning extra names
+	// from list_commands.
 	r.mu.Lock()
 	if inst.module != nil {
 		// Lost a concurrent activation race (e.g. two dispatches both saw a
