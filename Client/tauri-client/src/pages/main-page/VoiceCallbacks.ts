@@ -6,6 +6,7 @@
 import { createLogger } from "@lib/logger";
 import type { WsClient } from "@lib/ws";
 import { voiceStore, joinVoiceChannel, leaveVoiceChannel } from "@stores/voice.store";
+import { uiStore } from "@stores/ui.store";
 import {
   leaveVoice as voiceSessionLeave,
   setMuted as voiceSessionSetMuted,
@@ -17,6 +18,14 @@ import {
 } from "@lib/livekitSession";
 
 const log = createLogger("voice-callbacks");
+
+/** Voice join/leave send over the WS socket; refuse when it's not live so we
+ *  never fire voice_join/voice_leave into a down socket. The VoiceWidget freezes
+ *  its controls with a visible reason (docs/architecture/ux/README.md §3); this
+ *  is the defensive backstop for the sidebar join/leave path. */
+function socketLive(): boolean {
+  return uiStore.getState().connectionStatus === "connected";
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -51,6 +60,7 @@ export function createVoiceWidgetCallbacks(
   return {
     onDisconnect: () => {
       if (voiceStore.getState().currentChannelId === null) return;
+      if (!socketLive()) return;
       log.info("Leaving voice channel (widget disconnect)");
       voiceSessionLeave(false);
       leaveVoiceChannel();
@@ -122,11 +132,13 @@ export function createVoiceWidgetCallbacks(
 export function createSidebarVoiceCallbacks(ws: WsClient): SidebarVoiceCallbacks {
   return {
     onVoiceJoin: (channelId: number) => {
+      if (!socketLive()) return;
       log.info("Joining voice channel", { channelId });
       joinVoiceChannel(channelId);
       ws.send({ type: "voice_join", payload: { channel_id: channelId } });
     },
     onVoiceLeave: () => {
+      if (!socketLive()) return;
       log.info("Leaving voice channel");
       voiceSessionLeave(false);
       leaveVoiceChannel();
