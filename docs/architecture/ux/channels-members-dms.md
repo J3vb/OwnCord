@@ -95,12 +95,11 @@ affordances covered in [settings-and-admin.md §3](settings-and-admin.md). Actio
 the user lacks permission for are **not shown** (menu items gated by the actor's
 role), consistent with the affordance principle.
 
-> **⚠ Current gap — role source split.** Role lookups read from two stores that
-> aren't kept in sync: `channels.store` carries `roles`/`getRoleIdByName` (wired
-> in the dispatcher) while a parallel `roles.store` exposes the same API, consumed
-> by `SidebarMemberSection.ts:11` — only `channels.store.setRoles` is updated by
-> `ready` (`dispatcher.ts:10`). Target: one role store, one writer. A stale
-> `roles.store` can mis-map a role name→id in the member context menu.
+> **✓ Resolved 2026-07-20 — single role store.** Roles live only in
+> `channels.store` (`roles`/`getRoleIdByName`), the store the dispatcher writes on
+> `ready` (`dispatcher.ts`). `SidebarMemberSection.ts` now reads from it, and the
+> parallel, never-updated `roles.store` has been deleted — so the member context
+> menu can no longer mis-map a role name→id from stale data.
 
 ---
 
@@ -161,5 +160,5 @@ and `IsEitherBlocked` is bidirectional). **Target UX:**
 `src/components/DmSidebar.ts`, `src/components/DmProfileSidebar.ts`,
 `src/pages/main-page/SidebarArea.ts`, `SidebarMemberSection.ts`,
 `SidebarDmSection.ts`, `SidebarDmHelpers.ts`, `src/stores/channels.store.ts`,
-`members.store.ts`, `dm.store.ts`, `roles.store.ts`, `src/lib/dispatcher.ts`;
+`members.store.ts`, `dm.store.ts`, `src/lib/dispatcher.ts`;
 server `Server/service/channel.go`, `dm.go`, `block.go`.
