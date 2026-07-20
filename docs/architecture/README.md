@@ -13,7 +13,7 @@ natively) followed by a prose explanation and a **Source of truth** file list.
 |-----|----------|--------|
 | [system-overview.md](system-overview.md) | D1 System context, D8 Deployment topology | All processes, trust boundaries, ports, single-instance constraints |
 | [server.md](server.md) | D2 Server package map, D3 REST request lifecycle | Go package structure, DB-access styles, middleware chain |
-| [websocket.md](websocket.md) | D4 WS connect / replay / dispatch | Real-time engine: auth handshake, 3-tier reconnect replay, backpressure, V1/V2 dispatch |
+| [websocket.md](websocket.md) | D4 WS connect / replay / dispatch | Real-time engine: auth handshake, 3-tier reconnect replay, backpressure, typed dispatch |
 | [data-model.md](data-model.md) | D5 Entity-relationship overview | All 23 tables from migrations 001–015, grouped by domain |
 | [voice-e2ee.md](voice-e2ee.md) | D6 Voice + E2EE flow | LiveKit token flow, loopback TLS tunnel, ECDH key-holder relay |
 | [client.md](client.md) | D7 Client module map | Tauri client: bootstrap, dispatcher, stores, Rust sidecars (structure, as-built) |
