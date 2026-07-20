@@ -109,6 +109,14 @@ Plugin manifests gain a `commands` block. The manifest is the source of
 truth for the per-command schema; the runtime never trusts what the plugin
 says at dispatch time. Example:
 
+> **Partially landed 2026-07-20** (audit-2026-04-07 CRITICAL #3): the
+> *name-only* slice of this block exists today — `plugin.json` accepts
+> `"commands": [{"name": "kick"}]` and `Registry.RegisterCommand` refuses any
+> command the manifest did not declare, so `list_commands` can no longer bind
+> names behind the admin's back. `description` / `options` /
+> `default_member_permissions` below are still design-only; unknown keys parse
+> and are ignored, so manifests written against the full schema already load.
+
 ```json
 {
   "name": "moderation-tools",

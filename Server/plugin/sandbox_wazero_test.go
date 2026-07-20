@@ -81,7 +81,7 @@ func TestWazeroRegistryCreatesRuntime(t *testing.T) {
 
 func TestWazeroActivateCompilesModule(t *testing.T) {
 	dir := t.TempDir()
-	manifest := `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"]}`
+	manifest := `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"hello"}]}`
 	writeTestPlugin(t, dir, "hello", manifest, addWASM)
 
 	reg, mem := newWazeroTestRegistry(t, dir)
@@ -116,7 +116,7 @@ func TestWazeroActivateCompilesModule(t *testing.T) {
 
 func TestWazeroDispatchCommandMissingExport(t *testing.T) {
 	dir := t.TempDir()
-	manifest := `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"]}`
+	manifest := `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"hello"}]}`
 	writeTestPlugin(t, dir, "hello", manifest, addWASM)
 
 	reg, mem := newWazeroTestRegistry(t, dir)
@@ -147,7 +147,7 @@ func TestWazeroDispatchCommandMissingExport(t *testing.T) {
 
 func TestWazeroCloseTearsDownRuntime(t *testing.T) {
 	dir := t.TempDir()
-	manifest := `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"]}`
+	manifest := `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"hello"}]}`
 	writeTestPlugin(t, dir, "hello", manifest, addWASM)
 
 	reg, mem := newWazeroTestRegistry(t, dir)
@@ -174,7 +174,7 @@ func TestWazeroCloseTearsDownRuntime(t *testing.T) {
 
 func TestWazeroDisablePluginFreesModule(t *testing.T) {
 	dir := t.TempDir()
-	manifest := `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"]}`
+	manifest := `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"hello"}]}`
 	writeTestPlugin(t, dir, "hello", manifest, addWASM)
 
 	reg, mem := newWazeroTestRegistry(t, dir)
@@ -270,7 +270,7 @@ var spinWASM = []byte{
 // admin disable/enable cycle or server restart.
 func TestWazeroCPUBudgetOverrunDoesNotBrickPlugin(t *testing.T) {
 	dir := t.TempDir()
-	manifest := `{"name":"spinner","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"]}`
+	manifest := `{"name":"spinner","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"spin"}]}`
 	writeTestPlugin(t, dir, "spinner", manifest, spinWASM)
 
 	reg, mem := newWazeroTestRegistry(t, dir)

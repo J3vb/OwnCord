@@ -158,7 +158,7 @@ func TestReinstallRebindsCommands(t *testing.T) {
 	t.Cleanup(func() { _ = reg.Close(context.Background()) })
 
 	ctx := context.Background()
-	manifest, err := ParseManifest([]byte(`{"name":"upgrader","version":"0.1.0","entrypoint":"p.wasm","permissions":["commands"]}`))
+	manifest, err := ParseManifest([]byte(`{"name":"upgrader","version":"0.1.0","entrypoint":"p.wasm","permissions":["commands"],"commands":[{"name":"greet"}]}`))
 	if err != nil {
 		t.Fatalf("ParseManifest: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestReinstallRebindsCommands(t *testing.T) {
 	}
 
 	// In-place upgrade: same plugin name, fresh instance.
-	manifest2, err := ParseManifest([]byte(`{"name":"upgrader","version":"0.2.0","entrypoint":"p.wasm","permissions":["commands"]}`))
+	manifest2, err := ParseManifest([]byte(`{"name":"upgrader","version":"0.2.0","entrypoint":"p.wasm","permissions":["commands"],"commands":[{"name":"greet"}]}`))
 	if err != nil {
 		t.Fatalf("ParseManifest v2: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestReinstallRebindsCommands(t *testing.T) {
 	}
 
 	// A different plugin still cannot hijack an owned command.
-	other, err := ParseManifest([]byte(`{"name":"other","version":"0.1.0","entrypoint":"o.wasm","permissions":["commands"]}`))
+	other, err := ParseManifest([]byte(`{"name":"other","version":"0.1.0","entrypoint":"o.wasm","permissions":["commands"],"commands":[{"name":"greet"}]}`))
 	if err != nil {
 		t.Fatalf("ParseManifest other: %v", err)
 	}

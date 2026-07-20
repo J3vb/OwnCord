@@ -36,18 +36,39 @@ import (
 // with a letter or digit.
 var pluginNameRegexp = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
+// pluginCommandRegexp restricts declared slash-command names to the same
+// lowercase charset the dispatcher normalizes to (RegisterCommand lowercases
+// and strips a leading "/"), so a declaration always compares equal to the
+// name a client can actually invoke.
+var pluginCommandRegexp = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+
+// maxManifestCommands caps how many commands one plugin may claim.
+const maxManifestCommands = 64
+
 // Manifest is the parsed plugin metadata declared in plugin.json (or
 // plugin.toml in the wazero-tagged build). The on-disk schema is intentionally
 // flat so the default JSON parser handles it without a TOML dependency.
 type Manifest struct {
-	Name        string    `json:"name"`
-	Version     string    `json:"version"`
-	Author      string    `json:"author"`
-	Description string    `json:"description"`
-	Entrypoint  string    `json:"entrypoint"` // relative .wasm path
-	Permissions []string  `json:"permissions"`
-	Resources   Resources `json:"resources"`
-	UI          UISpec    `json:"ui"`
+	Name        string        `json:"name"`
+	Version     string        `json:"version"`
+	Author      string        `json:"author"`
+	Description string        `json:"description"`
+	Entrypoint  string        `json:"entrypoint"` // relative .wasm path
+	Permissions []string      `json:"permissions"`
+	Commands    []CommandSpec `json:"commands"`
+	Resources   Resources     `json:"resources"`
+	UI          UISpec        `json:"ui"`
+}
+
+// CommandSpec is one slash command the plugin declares. The declaration is
+// the per-command ACL: activation only binds names listed here, so a guest
+// module cannot claim commands its manifest never advertised.
+//
+// Only Name is enforced today. docs/plans/slash-commands.md extends this
+// object with description/options/permission fields later; unknown JSON keys
+// are ignored, so manifests written against that richer schema still parse.
+type CommandSpec struct {
+	Name string `json:"name"`
 }
 
 // Resources caps the plugin's runtime budget. Zero means "use the runtime
@@ -130,6 +151,9 @@ func (m *Manifest) Validate() error {
 			return fmt.Errorf("plugin manifest: unknown permission %q", p)
 		}
 	}
+	if err := m.validateCommands(); err != nil {
+		return err
+	}
 	if m.Resources.MaxMemoryMB < 0 || m.Resources.CPUBudgetMs < 0 {
 		return fmt.Errorf("plugin manifest: resources must be non-negative")
 	}
@@ -178,6 +202,43 @@ func validateRelativePath(p string) error {
 		}
 	}
 	return nil
+}
+
+// validateCommands enforces the per-command ACL schema: declaring commands
+// requires the `commands` capability, names must be canonical (the form the
+// dispatcher normalizes to), and the list is bounded and duplicate-free.
+func (m *Manifest) validateCommands() error {
+	if len(m.Commands) == 0 {
+		return nil
+	}
+	if !m.HasCapability(CapCommands) {
+		return fmt.Errorf("plugin manifest: commands declared without the %q permission", CapCommands)
+	}
+	if len(m.Commands) > maxManifestCommands {
+		return fmt.Errorf("plugin manifest: too many commands (%d, max %d)", len(m.Commands), maxManifestCommands)
+	}
+	seen := make(map[string]bool, len(m.Commands))
+	for i, c := range m.Commands {
+		if !pluginCommandRegexp.MatchString(c.Name) {
+			return fmt.Errorf("plugin manifest: commands[%d].name %q must match %s", i, c.Name, pluginCommandRegexp.String())
+		}
+		if seen[c.Name] {
+			return fmt.Errorf("plugin manifest: duplicate command %q", c.Name)
+		}
+		seen[c.Name] = true
+	}
+	return nil
+}
+
+// DeclaresCommand reports whether the manifest listed cmd in its `commands`
+// block. cmd is expected in normalized form (lowercase, no leading "/").
+func (m *Manifest) DeclaresCommand(cmd string) bool {
+	for _, c := range m.Commands {
+		if c.Name == cmd {
+			return true
+		}
+	}
+	return false
 }
 
 // HasCapability reports whether the manifest declared cap.
