@@ -30,6 +30,18 @@ type Result struct {
 	// SetVoiceJoinToken, if non-nil, caches the voice join token on the client.
 	// Used by voice_token_refresh when falling back to the DB for the token.
 	SetVoiceJoinToken *string
+	// JoinVoice, if true, triggers the hub's voice-join routine after the handler
+	// returns. voice_join's effect is a large, hub-coupled sequence (DB
+	// persistence, LiveKit token, existing-state fan-out, key-holder election,
+	// topic subscription) that also invokes the leave routine on a channel
+	// switch, so the applier runs handleVoiceJoin (re-parsing the envelope
+	// payload it already validated) rather than re-expressing it as pure events.
+	JoinVoice bool
+	// LeaveVoice, if true, triggers the hub's voice-leave routine after the
+	// handler returns. handleVoiceLeave stays hub-internal because disconnect and
+	// channel-switch cleanup call it un-throttled; only the message dispatch
+	// moved to V2 (which does the rate-limit before setting this flag).
+	LeaveVoice bool
 }
 
 // Event is the base interface for all server-to-client events.
@@ -248,14 +260,27 @@ func (e VoiceStateEvent) EventType() string { return MsgTypeVoiceState }
 func (e VoiceStateEvent) Payload() []byte   { return e.payload }
 
 // VoiceLeaveEvent is a voice_leave broadcast to all connected clients.
-// NOTE: Currently unused by V2 handlers — voice_leave remains V1 and emits
-// via h.BroadcastToAll directly. Retained as forward-compatible scaffolding.
+// NOTE: Currently unused — the voice_leave V2 handler triggers the hub's
+// handleVoiceLeave routine (via Result.LeaveVoice), which broadcasts the leave
+// directly. Retained as forward-compatible scaffolding.
 type VoiceLeaveEvent struct {
 	payload []byte
 }
 
 func (e VoiceLeaveEvent) EventType() string { return MsgTypeVoiceLeaveBC }
 func (e VoiceLeaveEvent) Payload() []byte   { return e.payload }
+
+// PluginBroadcastEvent is a plugin slash-command result broadcast to a channel
+// (sequenced, replayable). Emitted by the chat_command handler after the
+// invoking user's post permission is verified.
+type PluginBroadcastEvent struct {
+	channelID int64
+	payload   []byte
+}
+
+func (e PluginBroadcastEvent) EventType() string { return "plugin_broadcast" }
+func (e PluginBroadcastEvent) ChannelID() int64  { return e.channelID }
+func (e PluginBroadcastEvent) Payload() []byte   { return e.payload }
 
 // VoiceE2EEAnnounceEvent relays an ECDH public key to other voice channel participants.
 type VoiceE2EEAnnounceEvent struct {

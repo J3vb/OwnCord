@@ -104,7 +104,6 @@ type Hub struct {
 // If svc is non-nil, V2 handlers receive service references for business logic delegation.
 func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *Hub {
 	reg := NewHandlerRegistry()
-	registerVoiceHandlersV1(reg)
 
 	h := &Hub{
 		clients:         make(map[int64]*Client),
@@ -143,7 +142,12 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 	registerChatHandlers(reg, chatDeps)
 	registerPresenceHandlers(reg, presenceDeps)
 	registerReactionHandlers(reg, reactionDeps)
-	registerPluginCommandHandler(reg) // Phase C Step 9 — plugin slash commands
+	// Phase C Step 9 — plugin slash commands. Registry is read live because
+	// SetPluginRegistry wires it after NewHub; MessageSvc gates broadcasts.
+	reg.RegisterV2(MsgTypeChatCommand, handleChatCommandV2, PluginDeps{
+		Registry:   func() *plugin.Registry { return h.pluginRegistry },
+		MessageSvc: h.messageSvc,
+	})
 	registerVoiceControlsV2(reg, VoiceDeps{
 		DB:          h.db,
 		Limiter:     h.limiter,
