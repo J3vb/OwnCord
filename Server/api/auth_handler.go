@@ -211,7 +211,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 
 		ip := clientIP(r)
 		slog.Info("user registered", "username", req.Username, "user_id", uid, "ip", ip)
-		_ = database.LogAudit(uid, "user_register", "user", uid,
+		db.WriteAudit(database, uid, "user_register", "user", uid,
 			"new account created via invite")
 
 		// Issue session.
@@ -350,7 +350,7 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 
 		if auth.IsEffectivelyBanned(user) {
 			slog.Warn("banned user login attempt", "username", user.Username, "user_id", user.ID, "ip", ip)
-			_ = database.LogAudit(user.ID, "login_blocked_banned", "user", user.ID,
+			db.WriteAudit(database, user.ID, "login_blocked_banned", "user", user.ID,
 				"banned user attempted login from "+ip)
 			writeJSON(w, http.StatusForbidden, errorResponse{
 				Error:   "FORBIDDEN",
@@ -405,7 +405,7 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 		// would leave the user permanently "online" if they never open a WS
 		// connection or if the client crashes before connecting.
 		slog.Info("user logged in", "username", user.Username, "user_id", user.ID, "ip", ip)
-		_ = database.LogAudit(user.ID, "user_login", "user", user.ID,
+		db.WriteAudit(database, user.ID, "user_login", "user", user.ID,
 			"logged in from "+ip)
 		writeJSON(w, http.StatusOK, authSuccessResponse{
 			Token:       token,
@@ -436,7 +436,7 @@ func handleLogout(database *db.DB) http.HandlerFunc {
 		}
 
 		slog.Info("user logged out", "user_id", sess.UserID)
-		_ = database.LogAudit(sess.UserID, "user_logout", "user", sess.UserID, "")
+		db.WriteAudit(database, sess.UserID, "user_logout", "user", sess.UserID, "")
 
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -535,7 +535,7 @@ func handleDeleteAccount(database *db.DB, limiter *auth.RateLimiter) http.Handle
 
 		ip := clientIP(r)
 		slog.Info("account deleted", "username", user.Username, "user_id", user.ID, "ip", ip)
-		_ = database.LogAudit(user.ID, "account_deleted", "user", user.ID,
+		db.WriteAudit(database, user.ID, "account_deleted", "user", user.ID,
 			"account self-deleted from "+ip)
 
 		w.WriteHeader(http.StatusNoContent)
