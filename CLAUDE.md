@@ -10,7 +10,7 @@ Docs live in `docs/` — start with `docs/architecture/README.md`, `docs/protoco
 ## Golden rules
 
 1. **Never hand-edit generated code.** `Server/db/dbgen/` comes from `make sqlc-generate`; `Server/ws/message_types.go` and `Client/tauri-client/src/lib/protocolTypes.ts` come from `make protocol-generate` (source of truth: `docs/protocol-schema.json`). CI fails if generated output drifts. Use the `db-change` / `protocol-change` skills for these workflows.
-2. **The client unit test suite is KNOWN RED** pending the reboot-plan P2 triage. Do not "fix" failing tests by editing assertions — see `docs/plans/` and the P2 triage rules. New tests you add must pass.
+2. **The client unit test suite is GREEN and must stay green.** Run `npm test` before pushing; the full suite must pass 100%. Never make a failing test pass by weakening its assertions, and any test you add must pass.
 3. **Run the CI mirror before pushing** (use the `ci-check` skill, or the commands below). CI runs on every PR to `main`/`dev` and takes ~15 min; catching errors locally is much faster.
 4. Conventional commits (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`, `perf:`, `ci:`). Branch from `main`; PRs target `main`; squash merge preferred.
 5. Security issues go through GitHub Security Advisories, never public issues (`docs/security.md`).
