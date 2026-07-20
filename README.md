@@ -95,6 +95,9 @@ The client uses TOFU (Trust On First Use) for self-signed certificates: it promp
 - File uploads and inline media rendering
 - TOTP 2FA support and API rate limiting
 - Desktop client auto-update with signature verification
+- GIF picker — off by default; each server supplies its own
+  [Klipy](https://partner.klipy.com) key via `gif.api_key`
+  ([setup](docs/server-configuration.md#gif-picker-gif))
 
 See deeper feature and architecture docs in [docs/architecture/](docs/architecture/README.md) and [docs/protocol.md](docs/protocol.md).
 
