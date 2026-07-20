@@ -59,6 +59,7 @@ const VOICE_INITIAL: VoiceState = {
   localScreenshare: false,
   joinedAt: null,
   listenOnly: false,
+  voiceStatus: "idle",
 };
 
 const UI_INITIAL: UiState = {

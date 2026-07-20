@@ -33,6 +33,7 @@ function resetStores(): void {
     localScreenshare: false,
     joinedAt: null,
     listenOnly: false,
+    voiceStatus: "idle",
   }));
   membersStore.setState(() => ({
     members: new Map(),
