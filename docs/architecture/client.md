@@ -99,6 +99,7 @@ other (auth→voice→members), and the Solid beachhead is dead weight.
 | Updates | `src/lib/updater.ts` + `update_commands.rs` | Endpoint derived from the connected server URL, https-only, TLS pinned to TOFU fingerprint, minisign-verified |
 | Settings | `commands.rs` + `src/lib/preferences.ts` | Split persistence: Rust store (`settings.json`, key-allowlisted) *and* raw `localStorage` for UI prefs/themes |
 | Theming | `src/lib/themes.ts` + `styles/tokens.css` | CSS custom properties; 4 built-in themes + custom overrides |
+| GIF picker | `src/lib/gifProvider.ts` + `components/GifPicker.ts` | Calls the user's own server (`/api/v1/gif/*`) through `api.ts` — no provider API key in the bundle. Server answers `503 GIF_DISABLED` when unconfigured: the picker shows "GIFs are not enabled on this server" and `onUnavailable` disables the composer's GIF button (with a `title`/`aria-label` reason) instead of failing silently. Returned media URLs are still pinned to the `klipy.com` CDN. |
 
 ### Quality tooling
 
