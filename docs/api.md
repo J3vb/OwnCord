@@ -19,7 +19,7 @@ All authenticated endpoints require a session token delivered via the `Authoriza
 1. **RequestID** -- assigns a unique `X-Request-Id` response header.
 2. **Recoverer** -- catches panics and returns 500.
 3. **Request Logger** -- structured logging of method, path, status, duration.
-4. **SecurityHeaders** -- sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Referrer-Policy: strict-origin-when-cross-origin`, `Content-Security-Policy: default-src 'self'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Cache-Control: no-store`.
+4. **SecurityHeadersWithTLS** -- (adds `Strict-Transport-Security` when TLS is on) sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Referrer-Policy: strict-origin-when-cross-origin`, `Content-Security-Policy: default-src 'self'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Cache-Control: no-store`.
 5. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (which has its own 100 MiB limit).
 
 ---

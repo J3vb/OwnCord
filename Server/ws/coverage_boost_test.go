@@ -2300,43 +2300,6 @@ func TestGetLastActivity_MultipleTouch(t *testing.T) {
 	}
 }
 
-// ─── setVoiceChID (client.go:186) ───────────────────────────────────────────
-
-func TestSetVoiceChID_SetsAndGetsValue(t *testing.T) {
-	hub, _ := newCoverageHub(t)
-	send := make(chan []byte, 4)
-	c := ws.NewTestClient(hub, 1, send)
-
-	ws.SetVoiceChIDForTest(c, 77)
-	if got := ws.GetClientVoiceChIDForTest(c); got != 77 {
-		t.Fatalf("voiceChID = %d, want 77", got)
-	}
-}
-
-func TestSetVoiceChID_OverwritesPreviousValue(t *testing.T) {
-	hub, _ := newCoverageHub(t)
-	send := make(chan []byte, 4)
-	c := ws.NewTestClient(hub, 1, send)
-
-	ws.SetVoiceChIDForTest(c, 10)
-	ws.SetVoiceChIDForTest(c, 20)
-	if got := ws.GetClientVoiceChIDForTest(c); got != 20 {
-		t.Fatalf("voiceChID = %d, want 20", got)
-	}
-}
-
-func TestSetVoiceChID_ZeroMeansNotInVoice(t *testing.T) {
-	hub, _ := newCoverageHub(t)
-	send := make(chan []byte, 4)
-	c := ws.NewTestClient(hub, 1, send)
-
-	ws.SetVoiceChIDForTest(c, 50)
-	ws.SetVoiceChIDForTest(c, 0)
-	if got := ws.GetClientVoiceChIDForTest(c); got != 0 {
-		t.Fatalf("voiceChID = %d, want 0", got)
-	}
-}
-
 // ─── clearVoiceChID (client.go:203) ─────────────────────────────────────────
 
 func TestClearVoiceChID_ReturnsOldValueAndClearsToZero(t *testing.T) {

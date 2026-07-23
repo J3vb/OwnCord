@@ -44,3 +44,9 @@ func SetGIFUpstreamForTest(baseURL string, client *http.Client) func() {
 	gifAPIBase, gifClient = baseURL, client
 	return func() { gifAPIBase, gifClient = prevBase, prevClient }
 }
+
+// SecurityHeaders is SecurityHeadersWithTLS with TLS disabled (no HSTS).
+// Test-only convenience — production always goes through SecurityHeadersWithTLS.
+func SecurityHeaders(next http.Handler) http.Handler {
+	return SecurityHeadersWithTLS("")(next)
+}

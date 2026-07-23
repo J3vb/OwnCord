@@ -28,9 +28,6 @@ func init() {
 	}
 }
 
-// SetBackupBaseDir overrides backupBaseDir. Intended for tests only.
-func SetBackupBaseDir(dir string) { backupBaseDir = dir }
-
 // ─── Backup Handlers ─────────────────────────────────────────────────────────
 
 func handleBackup(database *db.DB) http.Handler {
