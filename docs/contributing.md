@@ -12,7 +12,7 @@ How to set up the development environment and contribute to OwnCord.
 | Linux x64 | ✅ | ✅ |
 | Linux ARM64 | ✅ | ✅ (CI only) |
 
-- **Go 1.25+** (server)
+- **Go 1.26+** (server)
 - **Node.js 20+** (client)
 - **Rust / Cargo** (Tauri client — not needed for server-only work)
 - **Docker + Compose v2** (optional — alternative to building the server locally)

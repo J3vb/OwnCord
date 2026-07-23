@@ -5,7 +5,7 @@ Production deployment guide for OwnCord server on Windows and Linux.
 ## Prerequisites
 
 - **Windows 10+** (x64) or **Linux** (x64)
-- **Go 1.25+** (only if building from source)
+- **Go 1.26+** (only if building from source)
 - **LiveKit Server** binary (only if enabling voice/video) -- see [LiveKit Setup](livekit-setup.md)
 - Required port: `8443` (OwnCord HTTPS/WebSocket)
 - Additional ports for voice/video: `7880/TCP`, `7881/TCP`, `50000-60000/UDP`
