@@ -409,6 +409,40 @@ func TestLogin_UsernameLockoutBlocksCorrectPasswordFromFreshIP(t *testing.T) {
 	}
 }
 
+// TestLogin_UsernameLockoutIgnoresCasing locks F1: the per-username lockout key
+// must be case-folded so it matches the DB's COLLATE NOCASE username lookup.
+// Otherwise an attacker splits the 9-attempt lockout budget across case variants
+// of one account (admin, Admin, ADMIN, …), all of which authenticate the same row.
+func TestLogin_UsernameLockoutIgnoresCasing(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	_, _ = database.CreateUser("casehunt", hash, 4)
+
+	// Trip the per-username lockout using the lowercase spelling, from many IPs
+	// so the per-IP limiter is never the binding cap.
+	for i := 0; i < 10; i++ {
+		rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
+			"username": "casehunt",
+			"password": "wrongpassword",
+		}, fmt.Sprintf("198.51.100.%d", i+1))
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("setup attempt %d status = %d, want 401; body = %s", i+1, rr.Code, rr.Body.String())
+		}
+	}
+
+	// A different casing of the SAME account must land in the same lockout bucket.
+	rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
+		"username": "CASEHUNT",
+		"password": "wrongpassword",
+	}, "198.51.100.250")
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("case-variant username bypassed the per-username lockout: status = %d, want 429; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestLogin_SuccessResetsUsernameFailureCounter(t *testing.T) {
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
