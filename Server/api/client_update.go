@@ -58,11 +58,14 @@ func handleClientUpdate(u *updater.Updater) http.HandlerFunc {
 			return
 		}
 
-		// Find the .nsis.zip and .nsis.zip.sig assets from the release.
-		clientAssets := u.FindClientAssets()
-		nsisURL := clientAssets.InstallerURL
+		// Find the updater artifact and its signature for the requested
+		// target ("{os}-{arch}-{installer}", e.g. "windows-x86_64-nsis").
+		// Targets without a published updater artifact get 204 — never a
+		// foreign OS's or foreign installer's artifact.
+		clientAssets := u.FindClientAssets(target)
+		installerURL := clientAssets.InstallerURL
 		sigURL := clientAssets.SignatureURL
-		if nsisURL == "" || sigURL == "" {
+		if installerURL == "" || sigURL == "" {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -82,7 +85,7 @@ func handleClientUpdate(u *updater.Updater) http.HandlerFunc {
 			Platforms: map[string]tauriPlatformResponse{
 				target: {
 					Signature: strings.TrimSpace(sigContent),
-					URL:       nsisURL,
+					URL:       installerURL,
 				},
 			},
 		}

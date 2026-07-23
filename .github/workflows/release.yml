@@ -237,20 +237,18 @@ jobs:
         run: |
           mkdir -p linux-arm64-staging
           BUNDLE_DIR="Client/tauri-client/src-tauri/target/release/bundle"
-          # AppImage (ensure arch is in filename)
-          for f in "$BUNDLE_DIR"/appimage/*.AppImage; do
+          # AppImage + updater artifact (.tar.gz) + signatures. Every filename
+          # must carry the arch: FindClientAssets matches on the
+          # _aarch64.AppImage.tar.gz suffix, and arch-less names would collide
+          # with the x86_64 assets when both artifact sets are downloaded into
+          # the same linux/ directory at publish time. Inserting _aarch64
+          # before ".AppImage" renames installer, tar.gz, and .sig
+          # consistently, so signatures keep pairing with their artifacts.
+          for f in "$BUNDLE_DIR"/appimage/*.AppImage "$BUNDLE_DIR"/appimage/*.AppImage.tar.gz "$BUNDLE_DIR"/appimage/*.sig; do
             [ -f "$f" ] || continue
-            [[ "$f" == *.sig ]] && continue
-            dest="linux-arm64-staging/$(basename "$f")"
-            # Append _aarch64 if bundler omits arch from filename
-            [[ "$(basename "$f")" == *aarch64* ]] || dest="${dest%.AppImage}_aarch64.AppImage"
-            cp "$f" "$dest"
-          done
-          for f in "$BUNDLE_DIR"/appimage/*.AppImage.tar.gz; do
-            [ -f "$f" ] && cp "$f" linux-arm64-staging/
-          done
-          for f in "$BUNDLE_DIR"/appimage/*.sig; do
-            [ -f "$f" ] && cp "$f" linux-arm64-staging/
+            base="$(basename "$f")"
+            [[ "$base" == *aarch64* ]] || base="${base/.AppImage/_aarch64.AppImage}"
+            cp "$f" "linux-arm64-staging/$base"
           done
           # .deb
           for f in "$BUNDLE_DIR"/deb/*.deb; do
@@ -376,11 +374,17 @@ jobs:
           (cd linux && sha256sum *) >> checksums.sha256
           sha256sum owncord-src-*.tar.gz >> checksums.sha256
 
+      # The legacy top-level asset/sha256 pair stays bound to the Windows
+      # binary so already-deployed servers (which only understand the
+      # single-asset schema) can still verify and update; the assets list
+      # binds every OS. Server-side schema: updater.releaseManifest.
       - name: Generate server update manifest
         shell: bash
         run: |
-          SERVER_HASH=$(sha256sum windows/chatserver.exe | awk '{print $1}')
-          printf '{"version":"v%s","asset":"chatserver.exe","sha256":"%s"}' "$VERSION" "$SERVER_HASH" > windows/server-update-manifest.json
+          WIN_HASH=$(sha256sum windows/chatserver.exe | awk '{print $1}')
+          LINUX_HASH=$(sha256sum linux/chatserver-linux-amd64.tar.gz | awk '{print $1}')
+          printf '{"version":"v%s","asset":"chatserver.exe","sha256":"%s","assets":[{"asset":"chatserver.exe","sha256":"%s"},{"asset":"chatserver-linux-amd64.tar.gz","sha256":"%s"}]}' \
+            "$VERSION" "$WIN_HASH" "$WIN_HASH" "$LINUX_HASH" > windows/server-update-manifest.json
 
       - name: Sign server update assets
         working-directory: Client/tauri-client

@@ -31,7 +31,10 @@ tauri-plugin-http = { version = "2.5.7", features = ["rustls-tls"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
-tauri-plugin-updater = "2"
+# Minor-pinned per the plugin's own guidance: configure_client hands it a
+# preconfigured rustls ClientConfig, and a 2.x minor bump can change the
+# plugin's bundled reqwest/rustls and break that seam at runtime.
+tauri-plugin-updater = "2.10"
 tauri-plugin-process = "2"
 url = "2"
 tokio-tungstenite = { version = "0.28.0", features = ["rustls-tls-webpki-roots"] }
@@ -39,6 +42,10 @@ futures-util = "0.3.32"
 tokio = { version = "1", features = ["sync", "net", "io-util", "rt", "macros"] }
 tokio-rustls = { version = "0.26", default-features = false }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+# Mozilla root bundle for the updater's HostScopedVerifier: non-pinned hosts
+# (the GitHub installer download) get web-PKI validation. Already in the
+# dependency tree via tokio-tungstenite's rustls-tls-webpki-roots feature.
+webpki-roots = "1"
 ring = "0.17"
 log = "0.4"
 env_logger = "0.11"
