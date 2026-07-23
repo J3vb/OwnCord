@@ -228,3 +228,8 @@ func (h *Hub) HandleWebhookParticipantLeftForTest(userID int64, channelID int64,
 func (h *Hub) MustFullResyncForTest(lastSeq uint64) bool {
 	return h.mustFullResync(lastSeq)
 }
+
+// HasChannelPermForTest exposes Hub.hasChannelPerm for external tests.
+func (h *Hub) HasChannelPermForTest(c *Client, channelID, perm int64) bool {
+	return h.hasChannelPerm(c, channelID, perm)
+}
