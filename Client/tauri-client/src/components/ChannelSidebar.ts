@@ -5,7 +5,7 @@
  */
 
 import { createElement, setText, clearChildren, appendChildren } from "@lib/dom";
-import { createIcon } from "@lib/icons";
+import { createIcon, type IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import {
   channelsStore,
@@ -16,12 +16,113 @@ import {
 import type { Channel } from "@stores/channels.store";
 import { authStore, getCurrentUser } from "@stores/auth.store";
 import { uiStore, toggleCategory, isCategoryCollapsed } from "@stores/ui.store";
-import { voiceStore, getChannelVoiceUsers } from "@stores/voice.store";
+import { voiceStore, getChannelVoiceUsers, getPeerVerification } from "@stores/voice.store";
+import type { PeerVerification } from "@stores/voice.store";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import { attachStreamPreview, attachScrollCollapse } from "@lib/streamPreview";
 import { showUserVolumeMenu } from "./channel-sidebar/volume-menu";
 import { attachChannelContextMenu } from "./channel-sidebar/context-menu";
 import { attachDragHandlers, releaseGlobalDragListeners } from "./channel-sidebar/drag-reorder";
+import { rePinPeerIdentity } from "@lib/livekitSession";
+import { createIdentityMismatchModal } from "./CertMismatchModal";
+import { createLogger } from "@lib/logger";
+import { membersStore } from "@stores/members.store";
+import { importIdentityPublicKey, computeKeyFingerprint } from "@lib/e2eeCrypto";
+
+const log = createLogger("ChannelSidebar");
+
+/** Icon, color, and tooltip for a peer's E2EE identity verification badge
+ *  (F3 TOFU). The three states mirror the voice store's PeerVerification:
+ *  a green shield-check when the announce signature verified against the pinned
+ *  key, a muted shield when the peer published no key (legacy), and a red
+ *  shield-alert when the delivered key differs from the pinned one. */
+function verifyPresentation(v: PeerVerification): {
+  icon: IconName;
+  color: string;
+  title: string;
+} {
+  if (v.status === "verified") {
+    return {
+      icon: "shield-check",
+      color: "var(--green, #23a559)",
+      title:
+        v.safetyNumber !== null
+          ? `Identity verified · Safety number: ${v.safetyNumber}`
+          : "Identity verified",
+    };
+  }
+  if (v.status === "mismatch") {
+    return {
+      icon: "shield-alert",
+      color: "var(--red, #f23f43)",
+      title: "Identity key changed — click to review and re-pin",
+    };
+  }
+  // "unverified" — the remaining status: peer published no identity key (legacy).
+  return {
+    icon: "shield",
+    color: "var(--text-muted, #949ba4)",
+    title: "Identity not verified — this participant published no key",
+  };
+}
+
+// Identity-mismatch re-pin modal (F3 TOFU). One instance at a time, mounted on
+// document.body; torn down on re-open and when the owning sidebar aborts.
+// ponytail: module-level singleton mirrors ./channel-sidebar/volume-menu — there
+// is only ever one sidebar. Extract to its own submodule if that ever changes.
+let activeIdentityModal: MountableComponent | null = null;
+
+function closeIdentityModal(): void {
+  if (activeIdentityModal !== null) {
+    activeIdentityModal.destroy?.();
+    activeIdentityModal = null;
+  }
+}
+
+async function openIdentityMismatchModal(
+  userId: number,
+  username: string,
+  signal: AbortSignal,
+): Promise<void> {
+  closeIdentityModal();
+  // Compute the newly-delivered key's fingerprint so the user can verify it
+  // out-of-band before trusting — the whole purpose of the mismatch prompt (the
+  // same importIdentityPublicKey→computeKeyFingerprint round-trip verifyPeerAnnounce
+  // runs on the verified path). Without it the modal's "verify out-of-band"
+  // instruction is unfollowable and "Trust New Key" is a blind accept.
+  let fingerprint: string | null = null;
+  const publishedKey = membersStore.getState().members.get(userId)?.identityPublicKey ?? null;
+  if (publishedKey !== null) {
+    try {
+      fingerprint = await computeKeyFingerprint(await importIdentityPublicKey(publishedKey));
+    } catch (err) {
+      log.warn("E2EE: could not compute changed-key fingerprint for re-pin modal", err);
+    }
+  }
+  // The sidebar (or a newer open) may have superseded us during the async compute.
+  if (signal.aborted) return;
+  closeIdentityModal();
+  const modal = createIdentityMismatchModal({
+    username,
+    fingerprint,
+    onAccept: () => {
+      closeIdentityModal();
+      // Surface keyring/IO failures instead of dropping them — this re-pins a
+      // trust anchor, so a silent failure would leave the user believing they
+      // recovered when they did not.
+      void rePinPeerIdentity(userId).catch((err: unknown) => {
+        log.error("E2EE: failed to re-pin peer identity", err);
+      });
+    },
+    onReject: () => {
+      closeIdentityModal();
+    },
+  });
+  modal.mount(document.body);
+  activeIdentityModal = modal;
+  // Close if the owning sidebar is destroyed while the modal is still open.
+  signal.addEventListener("abort", closeIdentityModal, { once: true });
+}
 
 export interface ChannelReorderData {
   readonly channelId: number;
@@ -195,6 +296,33 @@ function renderVoiceChannelItem(
         const muteIcon = createElement("span", { class: "vu-muted" });
         muteIcon.appendChild(createIcon("mic-off", 14));
         row.appendChild(muteIcon);
+      }
+
+      // E2EE identity verification badge (F3 TOFU). Absent until the peer's
+      // announce resolves; the local user is never in peerVerifications.
+      const verification = getPeerVerification(user.userId);
+      if (verification !== null) {
+        const {
+          icon: badgeIcon,
+          color: badgeColor,
+          title: badgeTitle,
+        } = verifyPresentation(verification);
+        const badge = createElement("span", { class: `vu-verify ${verification.status}` });
+        badge.style.color = badgeColor;
+        badge.title = badgeTitle;
+        badge.appendChild(createIcon(badgeIcon, 14));
+        if (verification.status === "mismatch") {
+          badge.style.cursor = "pointer";
+          badge.addEventListener(
+            "click",
+            (e) => {
+              e.stopPropagation();
+              void openIdentityMismatchModal(user.userId, user.username || "Unknown", signal);
+            },
+            { signal },
+          );
+        }
+        row.appendChild(badge);
       }
 
       // Right-click for per-user volume (skip for own user)
@@ -532,7 +660,10 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       for (const [chId, users] of state.voiceUsers) {
         structSig += `|${chId}`;
         for (const [uid, u] of users) {
-          structSig += `:${uid}${u.muted ? "m" : ""}${u.deafened ? "d" : ""}${u.camera ? "c" : ""}${u.screenshare ? "s" : ""}`;
+          // Include the E2EE verification status so a verified↔unverified↔mismatch
+          // flip re-renders the badge (it lives outside voiceUsers, in peerVerifications).
+          const verif = state.peerVerifications?.get(uid);
+          structSig += `:${uid}${u.muted ? "m" : ""}${u.deafened ? "d" : ""}${u.camera ? "c" : ""}${u.screenshare ? "s" : ""}${verif ? `@${verif.status}` : ""}`;
         }
       }
       if (structSig !== prevVoiceStructureSig) {
