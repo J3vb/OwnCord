@@ -2,7 +2,7 @@
 
 Self-hosted chat platform (alpha). Two components in one repo:
 
-- `Server/` — Go 1.25 server: REST API (chi), WebSocket hub, SQLite (sqlc), LiveKit voice/video, admin panel.
+- `Server/` — Go 1.26 server: REST API (chi), WebSocket hub, SQLite (sqlc), LiveKit voice/video, admin panel.
 - `Client/tauri-client/` — Tauri v2 desktop client: Rust backend, TypeScript frontend (Vite, no framework), vitest + Playwright tests.
 
 Docs live in `docs/` — start with `docs/architecture/README.md`, `docs/protocol.md`, `docs/schema.md`. Deeper per-component guidance is in `Server/CLAUDE.md` and `Client/tauri-client/CLAUDE.md`.
@@ -30,7 +30,7 @@ make sqlc-install sqlc-verify     # generated db code must not be stale
 make protocol-verify              # generated protocol constants must not be stale
 ```
 
-Lint: `golangci-lint run` (CI pins v2.11.3). Go 1.25 required — older local toolchains auto-download it via `GOTOOLCHAIN=auto`.
+Lint: `golangci-lint run` (CI pins v2.11.3). Go 1.26 required — older local toolchains auto-download it via `GOTOOLCHAIN=auto`.
 
 ### Client (run from `Client/tauri-client/`)
 
