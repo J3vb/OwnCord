@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -370,5 +371,87 @@ func TestRevokeSession_CurrentSession(t *testing.T) {
 	// Revoking own session is allowed.
 	if rr.Code != http.StatusNoContent {
 		t.Errorf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+// ─── PATCH /api/v1/users/me — identity_public_key (F3 voice E2EE TOFU) ───────
+
+func TestUpdateProfile_PublishIdentityKey(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+	token := profileCreateToken(t, database, "idkeyuser", 4)
+
+	key := "BPZ8bfkPz8B64iDeNtItYkEy0123456789abcdef+/=="
+	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
+		"username":            "idkeyuser",
+		"identity_public_key": key,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+
+	u, err := database.GetUserByUsername(context.Background(), "idkeyuser")
+	if err != nil || u == nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	if u.IdentityPublicKey == nil || *u.IdentityPublicKey != key {
+		t.Errorf("IdentityPublicKey = %v, want %q", u.IdentityPublicKey, key)
+	}
+}
+
+func TestUpdateProfile_IdentityKeyOmitted_Unchanged(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+	token := profileCreateToken(t, database, "idkeykeep", 4)
+
+	key := "a2VlcHRoaXNrZXk="
+	u, err := database.GetUserByUsername(context.Background(), "idkeykeep")
+	if err != nil || u == nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	if err := database.UpdateUserIdentityKey(context.Background(), u.ID, &key); err != nil {
+		t.Fatalf("UpdateUserIdentityKey: %v", err)
+	}
+
+	// PATCH without identity_public_key must not clear the stored key.
+	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
+		"username": "idkeykeep",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+	after, err := database.GetUserByID(context.Background(), u.ID)
+	if err != nil || after == nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if after.IdentityPublicKey == nil || *after.IdentityPublicKey != key {
+		t.Errorf("IdentityPublicKey = %v, want %q (unchanged)", after.IdentityPublicKey, key)
+	}
+}
+
+func TestUpdateProfile_IdentityKeyInvalid(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+
+	cases := []struct {
+		name string
+		key  string
+	}{
+		{"not base64", "!!!not-base64!!!"},
+		{"url-safe alphabet", "abc-_def"},
+		{"too large", strings.Repeat("A", 132)},
+		{"empty", ""},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			token := profileCreateToken(t, database, fmt.Sprintf("idkeybad%d", i), 4)
+			rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
+				"username":            fmt.Sprintf("idkeybad%d", i),
+				"identity_public_key": tc.key,
+			})
+			if rr.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+			}
+		})
 	}
 }

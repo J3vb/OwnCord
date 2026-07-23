@@ -33,6 +33,7 @@ function resetStore(): void {
     joinedAt: null,
     listenOnly: false,
     voiceStatus: "idle",
+    peerVerifications: new Map(),
   }));
 }
 

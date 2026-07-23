@@ -51,6 +51,23 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, username 
 	return user, nil
 }
 
+// UpdateIdentityKey publishes the user's long-term E2EE identity public key
+// (F3 voice E2EE TOFU). Last write wins; every write is audited so a key
+// rotation — which peers surface as a TOFU mismatch — leaves a trail.
+// Returns the updated user for response building.
+func (s *UserService) UpdateIdentityKey(ctx context.Context, userID int64, key string) (*db.User, error) {
+	if err := s.st.UpdateUserIdentityKey(ctx, userID, &key); err != nil {
+		return nil, fmt.Errorf("%w: failed to update identity key", ErrInternal)
+	}
+	user, err := s.st.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to fetch updated user", ErrInternal)
+	}
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "identity_key_update", "user", userID, "")
+	slog.Info("identity key published", "user_id", userID)
+	return user, nil
+}
+
 // ChangePasswordResult reports a completed password change. RevokeFailed is
 // set when the password committed but other sessions could not be revoked —
 // a partial success the caller must surface as a warning, never as a 5xx:

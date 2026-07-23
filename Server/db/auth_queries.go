@@ -166,6 +166,19 @@ func (d *DB) UpdateUserTOTPSecret(ctx context.Context, id int64, secret *string)
 	return nil
 }
 
+// UpdateUserIdentityKey sets or clears the E2EE identity public key for a user
+// (F3 voice E2EE TOFU). Last write wins; key changes are audited at the
+// service layer so peers can detect a rotation.
+func (d *DB) UpdateUserIdentityKey(ctx context.Context, id int64, key *string) error {
+	if err := d.q.UpdateUserIdentityKey(ctx, dbgen.UpdateUserIdentityKeyParams{
+		IdentityPublicKey: key,
+		ID:                id,
+	}); err != nil {
+		return fmt.Errorf("UpdateUserIdentityKey: %w", err)
+	}
+	return nil
+}
+
 // ResetAllUserStatuses sets all users to "offline". Called on server startup
 // to clear stale statuses from a previous run or crash.
 func (d *DB) ResetAllUserStatuses(ctx context.Context) error {
@@ -421,6 +434,10 @@ type MemberSummary struct {
 	Avatar   *string `json:"avatar"`
 	Status   string  `json:"status"`
 	Role     string  `json:"role"`
+	// IdentityPublicKey is the user's long-term E2EE identity public key
+	// (base64), pinned by peers on first sight (F3 TOFU). Omitted when the
+	// user has not published one.
+	IdentityPublicKey *string `json:"identity_public_key,omitempty"`
 }
 
 // ListMembers returns non-banned users as lightweight summaries.
@@ -433,11 +450,12 @@ func (d *DB) ListMembers(ctx context.Context) ([]MemberSummary, error) {
 	members := make([]MemberSummary, 0, len(rows))
 	for _, r := range rows {
 		members = append(members, MemberSummary{
-			ID:       r.ID,
-			Username: r.Username,
-			Avatar:   r.Avatar,
-			Status:   r.Status,
-			Role:     r.Lower,
+			ID:                r.ID,
+			Username:          r.Username,
+			Avatar:            r.Avatar,
+			Status:            r.Status,
+			Role:              r.Lower,
+			IdentityPublicKey: r.IdentityPublicKey,
 		})
 	}
 	return members, nil

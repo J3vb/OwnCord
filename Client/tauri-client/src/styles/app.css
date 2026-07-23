@@ -154,6 +154,9 @@
 .voice-user-item .vu-muted { color: var(--red); }
 .voice-user-item .vu-name + .vu-status,
 .voice-user-item .vu-name + .vu-muted { margin-left: auto; }
+/* E2EE identity verification badge (F3 TOFU); color + cursor set inline per state. */
+.voice-user-item .vu-verify { margin-left: 2px; display: flex; align-items: center; flex-shrink: 0; }
+.voice-user-item .vu-name + .vu-verify { margin-left: auto; }
 
 /* ── LIVE badge (voice channel sidebar) ── */
 .vu-live-badge {

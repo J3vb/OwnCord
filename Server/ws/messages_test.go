@@ -603,7 +603,7 @@ func TestBuildVoiceToken_ValidJSON(t *testing.T) {
 // ─── buildVoiceE2EEAnnounce ─────────────────────────────────────────────────
 
 func TestBuildVoiceE2EEAnnounce_ValidJSON(t *testing.T) {
-	msg := buildVoiceE2EEAnnounce(42, "dGVzdC1wdWJrZXk=")
+	msg := buildVoiceE2EEAnnounce(42, "dGVzdC1wdWJrZXk=", "")
 	if !json.Valid(msg) {
 		t.Error("buildVoiceE2EEAnnounce output is not valid JSON")
 	}
@@ -657,5 +657,67 @@ func TestBuildVoiceE2EEOffer_ValidJSON(t *testing.T) {
 	}
 	if env.Payload.IV != "random-iv" {
 		t.Errorf("iv = %q, want random-iv", env.Payload.IV)
+	}
+}
+
+// ─── identity_public_key in member payloads (F3 voice E2EE TOFU) ─────────────
+
+func TestBuildMemberJoin_IncludesIdentityKey(t *testing.T) {
+	key := "aWRlbnRpdHlrZXk="
+	user := &db.User{ID: 7, Username: "pinned", IdentityPublicKey: &key}
+	msg := buildMemberJoin(user, "member")
+	var env struct {
+		Payload struct {
+			User struct {
+				IdentityPublicKey string `json:"identity_public_key"`
+			} `json:"user"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Payload.User.IdentityPublicKey != key {
+		t.Errorf("identity_public_key = %q, want %q", env.Payload.User.IdentityPublicKey, key)
+	}
+}
+
+func TestBuildMemberJoin_NoIdentityKey_Omitted(t *testing.T) {
+	user := &db.User{ID: 8, Username: "legacy"}
+	msg := buildMemberJoin(user, "member")
+	var env struct {
+		Payload struct {
+			User map[string]any `json:"user"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, present := env.Payload.User["identity_public_key"]; present {
+		t.Error("identity_public_key should be omitted when the user has no key")
+	}
+}
+
+func TestBuildUserUpdate_IncludesIdentityKey(t *testing.T) {
+	key := "dXBkYXRlZGtleQ=="
+	msg := buildUserUpdate(9, "rotator", nil, &key)
+	var env struct {
+		Type    string `json:"type"`
+		Payload struct {
+			UserID            int64  `json:"user_id"`
+			Username          string `json:"username"`
+			IdentityPublicKey string `json:"identity_public_key"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Type != "user_update" {
+		t.Errorf("type = %q, want user_update", env.Type)
+	}
+	if env.Payload.UserID != 9 || env.Payload.Username != "rotator" {
+		t.Errorf("payload = %+v, want user_id 9 username rotator", env.Payload)
+	}
+	if env.Payload.IdentityPublicKey != key {
+		t.Errorf("identity_public_key = %q, want %q", env.Payload.IdentityPublicKey, key)
 	}
 }

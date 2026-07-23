@@ -465,3 +465,145 @@ func TestE2EE_ConcurrentPubKeyAccess(t *testing.T) {
 	}
 	<-done
 }
+
+// ─── F3: announce signature — relay + late-joiner replay ─────────────────────
+
+// e2eeAnnounceMsgSigned builds a voice_e2ee_announce message with a signature.
+func e2eeAnnounceMsgSigned(publicKey, signature string) []byte {
+	raw, _ := json.Marshal(map[string]any{
+		"type": "voice_e2ee_announce",
+		"payload": map[string]any{
+			"public_key": publicKey,
+			"signature":  signature,
+		},
+	})
+	return raw
+}
+
+// validB64Sig returns a valid base64-encoded 64-byte ECDSA signature.
+func validB64SigStr() string {
+	sig := make([]byte, 64)
+	sig[0] = 0x01
+	return base64.StdEncoding.EncodeToString(sig)
+}
+
+func TestE2EE_AnnounceSignature_RelayedToPeers(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	chanID := seedVoiceChan(t, database, "vc-sig-relay")
+
+	user1 := seedVoiceOwner(t, database, "sig-user1")
+	send1 := make(chan []byte, 32)
+	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
+	hub.Register(c1)
+	user2 := seedVoiceOwner(t, database, "sig-user2")
+	send2 := make(chan []byte, 32)
+	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
+	hub.Register(c2)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
+	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
+	time.Sleep(30 * time.Millisecond)
+	drainChan(send1)
+	drainChan(send2)
+
+	key := validB64Key()
+	sig := validB64SigStr()
+	hub.HandleMessageForTest(c1, e2eeAnnounceMsgSigned(key, sig))
+	time.Sleep(30 * time.Millisecond)
+
+	found := false
+	for _, m := range drainChan(send2) {
+		if extractType(t, m) != "voice_e2ee_announce" {
+			continue
+		}
+		found = true
+		gotSig, _ := extractPayloadField(t, m, "signature").(string)
+		if gotSig != sig {
+			t.Errorf("relayed signature = %q, want %q", gotSig, sig)
+		}
+		gotKey, _ := extractPayloadField(t, m, "public_key").(string)
+		if gotKey != key {
+			t.Errorf("relayed public_key = %q, want %q", gotKey, key)
+		}
+	}
+	if !found {
+		t.Error("peer should receive the signed announce")
+	}
+}
+
+func TestE2EE_AnnounceSignature_ReplayedToLateJoiner(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	chanID := seedVoiceChan(t, database, "vc-sig-replay")
+
+	user1 := seedVoiceOwner(t, database, "sigrp-user1")
+	send1 := make(chan []byte, 32)
+	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
+	hub.Register(c1)
+	time.Sleep(20 * time.Millisecond)
+	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
+	time.Sleep(30 * time.Millisecond)
+
+	key := validB64Key()
+	sig := validB64SigStr()
+	hub.HandleMessageForTest(c1, e2eeAnnounceMsgSigned(key, sig))
+	time.Sleep(30 * time.Millisecond)
+	drainChan(send1)
+
+	// A late joiner must receive the stored announce WITH its signature.
+	user2 := seedVoiceOwner(t, database, "sigrp-user2")
+	send2 := make(chan []byte, 32)
+	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
+	hub.Register(c2)
+	time.Sleep(20 * time.Millisecond)
+	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
+	time.Sleep(30 * time.Millisecond)
+
+	found := false
+	for _, m := range drainChan(send2) {
+		if extractType(t, m) != "voice_e2ee_announce" {
+			continue
+		}
+		found = true
+		gotSig, _ := extractPayloadField(t, m, "signature").(string)
+		if gotSig != sig {
+			t.Errorf("replayed signature = %q, want %q", gotSig, sig)
+		}
+	}
+	if !found {
+		t.Error("late joiner should receive the replayed announce")
+	}
+}
+
+func TestE2EE_AnnounceNoSignature_ReplayOmitsField(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	chanID := seedVoiceChan(t, database, "vc-nosig")
+
+	user1 := seedVoiceOwner(t, database, "nosig-user1")
+	send1 := make(chan []byte, 32)
+	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
+	hub.Register(c1)
+	time.Sleep(20 * time.Millisecond)
+	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
+	time.Sleep(30 * time.Millisecond)
+	hub.HandleMessageForTest(c1, e2eeAnnounceMsg(validB64Key()))
+	time.Sleep(30 * time.Millisecond)
+	drainChan(send1)
+
+	user2 := seedVoiceOwner(t, database, "nosig-user2")
+	send2 := make(chan []byte, 32)
+	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
+	hub.Register(c2)
+	time.Sleep(20 * time.Millisecond)
+	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
+	time.Sleep(30 * time.Millisecond)
+
+	for _, m := range drainChan(send2) {
+		if extractType(t, m) != "voice_e2ee_announce" {
+			continue
+		}
+		if v := extractPayloadField(t, m, "signature"); v != nil {
+			t.Errorf("legacy replay must omit signature, got %v", v)
+		}
+	}
+}

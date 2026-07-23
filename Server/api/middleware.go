@@ -164,9 +164,10 @@ func rateLimitMiddlewareWithPrefix(limiter *auth.RateLimiter, prefix string, lim
 	if len(trustedProxies) > 0 {
 		proxies = trustedProxies[0]
 	}
+	proxyNets := parseCIDRList(proxies) // W3-3a: parse once at construction
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := clientIPWithProxies(r, proxies)
+			ip := clientIPWithProxies(r, proxyNets)
 			key := prefix + ip
 
 			if !limiter.Allow(key, limit, window) {
@@ -198,30 +199,25 @@ func clientIP(r *http.Request) string {
 // Security model:
 //   - Always parse the actual connecting address from r.RemoteAddr.
 //   - Only honour X-Real-IP or X-Forwarded-For if the connecting address matches
-//     one of the trustedCIDRs. This prevents clients from forging their IP to
+//     one of the trustedNets. This prevents clients from forging their IP to
 //     bypass rate limits.
-//   - If trustedCIDRs is empty (the default), RemoteAddr is always used.
+//   - If trustedNets is empty (the default), RemoteAddr is always used.
 //
-// Invalid CIDR entries in trustedCIDRs are silently skipped so that a
-// misconfigured entry cannot crash the server; the connecting IP is used as the
-// fallback.
-func clientIPWithProxies(r *http.Request, trustedCIDRs []string) string {
+// trustedNets is the pre-parsed trusted-proxy list — parse the configured CIDR
+// strings ONCE at middleware/handler construction with parseCIDRList (W3-3a);
+// never parse on the request path.
+func clientIPWithProxies(r *http.Request, trustedNets []*net.IPNet) string {
 	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		// RemoteAddr without port (e.g. Unix socket or test stub) — use as-is.
 		remoteHost = r.RemoteAddr
 	}
 
-	if len(trustedCIDRs) == 0 {
+	if len(trustedNets) == 0 {
 		return remoteHost
 	}
 
-	// Parse the CIDR list once per request instead of once per XFF candidate.
-	// ponytail: parse at middleware construction if this ever shows in a
-	// profile — it would mean threading a parsed type through every caller.
-	nets := parseCIDRList(trustedCIDRs)
-
-	if !ipInNets(remoteHost, nets) {
+	if !ipInNets(remoteHost, trustedNets) {
 		return remoteHost
 	}
 
@@ -248,7 +244,7 @@ func clientIPWithProxies(r *http.Request, trustedCIDRs []string) string {
 				continue
 			}
 			leftmostValid = candidate
-			if ipInNets(candidate, nets) {
+			if ipInNets(candidate, trustedNets) {
 				continue // our own proxy hop, keep walking left
 			}
 			return candidate
@@ -269,15 +265,20 @@ func clientIPWithProxies(r *http.Request, trustedCIDRs []string) string {
 	return remoteHost
 }
 
-// parseCIDRList parses CIDR strings, silently skipping invalid entries — a
-// misconfigured entry must not crash request handling (config load warns
-// about them at startup).
+// parseCIDRList parses CIDR strings into networks, skipping invalid entries
+// with a warning — a misconfigured entry must not take the server down. It is
+// called once per middleware/handler at construction (startup), never on the
+// request path (W3-3a).
 func parseCIDRList(cidrs []string) []*net.IPNet {
 	nets := make([]*net.IPNet, 0, len(cidrs))
 	for _, c := range cidrs {
-		if _, n, err := net.ParseCIDR(c); err == nil {
-			nets = append(nets, n)
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			slog.Warn("ignoring invalid CIDR entry (use address/prefix notation, e.g. 10.0.0.1/32)",
+				"cidr", c, "error", err)
+			continue
 		}
+		nets = append(nets, n)
 	}
 	return nets
 }
@@ -297,26 +298,6 @@ func ipInNets(ipStr string, nets []*net.IPNet) bool {
 	return false
 }
 
-// isTrustedProxy reports whether remoteIP (a plain IP string, no port) falls
-// within any of the provided CIDR ranges. It returns an error if any CIDR is
-// malformed.
-func isTrustedProxy(remoteIP string, cidrList []string) (bool, error) {
-	ip := net.ParseIP(remoteIP)
-	if ip == nil {
-		return false, nil
-	}
-	for _, cidr := range cidrList {
-		_, network, err := net.ParseCIDR(cidr)
-		if err != nil {
-			return false, fmt.Errorf("isTrustedProxy: invalid CIDR %q: %w", cidr, err)
-		}
-		if network.Contains(ip) {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 // AdminIPRestrict returns middleware that blocks requests from IPs not in the
 // allowed CIDR list. Returns 403 Forbidden for disallowed IPs. If the CIDR
 // list is empty, all requests are allowed (no restriction).
@@ -324,17 +305,24 @@ func isTrustedProxy(remoteIP string, cidrList []string) (bool, error) {
 // trustedProxyCIDRs specifies which connecting IPs are trusted reverse proxies.
 // When the connecting IP matches a trusted proxy, the real client IP is read
 // from X-Real-IP or X-Forwarded-For headers (BUG-116).
+//
+// Both lists are parsed once at construction (W3-3a); invalid entries are
+// skipped with a warning. A non-empty allowedCIDRs list whose entries are all
+// invalid yields zero networks — nothing matches, so access is denied (fail
+// closed), same as before the hoist.
 func AdminIPRestrict(allowedCIDRs, trustedProxyCIDRs []string) func(http.Handler) http.Handler {
+	allowedNets := parseCIDRList(allowedCIDRs)
+	proxyNets := parseCIDRList(trustedProxyCIDRs)
+	restrict := len(allowedCIDRs) > 0
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if len(allowedCIDRs) == 0 {
+			if !restrict {
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			ip := clientIPWithProxies(r, trustedProxyCIDRs)
-			allowed, _ := isTrustedProxy(ip, allowedCIDRs)
-			if !allowed {
+			ip := clientIPWithProxies(r, proxyNets)
+			if !ipInNets(ip, allowedNets) {
 				writeJSON(w, http.StatusForbidden, errorResponse{
 					Error:   "FORBIDDEN",
 					Message: "access denied",

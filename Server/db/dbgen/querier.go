@@ -113,6 +113,7 @@ type Querier interface {
 	UninstallPlugin(ctx context.Context, id int64) error
 	UpdateChannel(ctx context.Context, arg UpdateChannelParams) error
 	UpdateReadState(ctx context.Context, arg UpdateReadStateParams) error
+	UpdateUserIdentityKey(ctx context.Context, arg UpdateUserIdentityKeyParams) error
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (sql.Result, error)
 	UpdateUserRole(ctx context.Context, arg UpdateUserRoleParams) error
