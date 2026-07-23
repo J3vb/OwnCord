@@ -15,7 +15,7 @@ This is a continuation/handoff doc: what is done, what remains, and how to resum
 | F3 | MED | Voice E2EE trusts server-relayed ECDH keys (server MITM) | ⏳ **TODO — designed, not started** |
 | F4 | MED | HTTP TOFU proxy accepts any cert on first use (credential exposure) | ✅ done, committed `f22985a` |
 | F5 | LOW | Voice perms use stale connect-time role snapshot | ✅ done, committed `260d038` |
-| F6 | LOW | Lost cache invalidation in `PermissionService.getOrPopulate` | ✅ done, **uncommitted** (see note) |
+| F6 | LOW | Lost cache invalidation in `PermissionService.getOrPopulate` | ✅ done, committed `e6a0d87` |
 | F7 | LOW | ReDoS regex on link-preview HTML | ✅ done, committed `6952202` |
 | F8 | LOW | WS TOFU verifier accepts any cert on first use | ✅ done, committed `f22985a` (with F4) |
 
@@ -26,12 +26,11 @@ This is a continuation/handoff doc: what is done, what remains, and how to resum
    `cd Client/tauri-client/src-tauri && cargo clippy -- -D warnings` (or push and
    let CI do it). Pure `tofu` logic has `#[cfg(test)]` unit tests; the frontend is
    covered by the 3311-green unit suite.
-2. **F6 commit:** F6 lives in `Server/service/permission.go`, entangled with the
-   uncommitted permission-consolidation edits. It rides with that work (per
-   decision) — commit it when the consolidation branch lands, or cherry-pick.
-3. **Then F3** — the only remaining finding (below).
+2. **Then F3** — the only remaining finding (below). (F6 landed 2026-07-23 as
+   `e6a0d87`, split out from the D13 permission-consolidation commits that
+   followed it on this branch.)
 
-## F6 detail (done, pending commit)
+## F6 detail (done, committed `e6a0d87`)
 
 `getOrPopulate` read the DB then cached the snapshot with no version guard, so a
 concurrent `InvalidateUser` racing the populate was silently overwritten (stale
