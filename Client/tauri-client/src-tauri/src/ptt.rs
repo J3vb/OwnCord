@@ -479,13 +479,20 @@ pub async fn ptt_listen_for_key() -> i32 {
 mod tests {
     use super::*;
 
+    // PTT_VKEY is a process-global AtomicI32 and cargo runs tests on parallel
+    // threads, so every mutating assertion lives in this ONE test — splitting
+    // them across tests makes the get/set assertions racy.
     #[test]
-    fn ptt_set_key_accepts_valid_codes() {
+    fn ptt_set_key_accepts_valid_codes_and_get_reflects_them() {
         assert!(ptt_set_key(0).is_ok());
         assert!(ptt_set_key(1).is_ok());
         assert!(ptt_set_key(0x20).is_ok()); // Space
-        assert!(ptt_set_key(0x41).is_ok()); // A
         assert!(ptt_set_key(254).is_ok());
+
+        ptt_set_key(0x41).unwrap(); // A
+        assert_eq!(ptt_get_key(), 0x41);
+        ptt_set_key(0).unwrap();
+        assert_eq!(ptt_get_key(), 0);
     }
 
     #[test]
@@ -515,14 +522,6 @@ mod tests {
         assert!(!is_allowed_ptt_capture_vk(0x11)); // Ctrl
         assert!(!is_allowed_ptt_capture_vk(0x12)); // Alt
         assert!(!is_allowed_ptt_capture_vk(0x5B)); // Meta
-    }
-
-    #[test]
-    fn ptt_get_key_reflects_set_key() {
-        ptt_set_key(0x41).unwrap();
-        assert_eq!(ptt_get_key(), 0x41);
-        ptt_set_key(0).unwrap();
-        assert_eq!(ptt_get_key(), 0);
     }
 
     #[cfg(target_os = "linux")]
