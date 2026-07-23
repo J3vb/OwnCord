@@ -1,9 +1,18 @@
 # Plan: Remediate security-hardening review regressions
 
-**Status:** design only, not implemented
+**Status:** mostly landed — verified 2026-07-23 (deletion audit): every item
+except **W2-4** and **W3-3** has been implemented or superseded. This doc is
+the tracker of record for those two; close it when they land.
 **Owner:** TBD
 **Tracks:** code review of branch `fix/security-hardening-review` (2026-07-17)
 **Estimated effort:** 2–4 focused days
+
+> **Staleness note (2026-07-23, closes audit A-2026-07-15):** item bodies below
+> predate two structural changes — the Postgres backend was deleted outright
+> (P1, 2026-07-20) and the `Server/store/` seam was removed in favor of direct
+> narrow interfaces on `db` (D3, 2026-07-19). Read `Server/store/postgres.go`
+> / `sqlite.go` references as historical; the Postgres halves of W1-3 are moot,
+> and its atomic-link half is what W2-4 still needs.
 
 ## Why
 
