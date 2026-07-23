@@ -193,11 +193,15 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 
 // hasChannelPerm reports whether the client's role has all the given permission bits.
 // Delegates to the unified permissions.Checker.
+//
+// F5: resolve the user's CURRENT role via GetRoleForUser(c.userID) rather than the
+// role snapshotted onto c.user at connect time. A mid-session role reassignment
+// (e.g. stripping CONNECT_VOICE) must take effect immediately for the live
+// connection — including the SPEAK/VIDEO grants baked into a freshly minted
+// LiveKit token — instead of persisting until the user reconnects. This mirrors
+// the V2 handlers, which already resolve the live role (deps.go).
 func (h *Hub) hasChannelPerm(c *Client, channelID int64, perm int64) bool {
-	if c.user == nil {
-		return false
-	}
-	role, err := h.db.GetRoleByID(c.user.RoleID)
+	role, err := h.db.GetRoleForUser(c.userID)
 	if err != nil || role == nil {
 		return false
 	}
