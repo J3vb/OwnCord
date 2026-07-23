@@ -4,7 +4,8 @@
   "project": ["src/**/*.ts"],
   "ignore": [
     "public/**",
-    "src-tauri/**"
+    "src-tauri/**",
+    "src/lib/protocolTypes.ts"
   ],
   "ignoreDependencies": [
     "@tauri-apps/cli"

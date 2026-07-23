@@ -286,5 +286,3 @@ export function createConnectPage(
     },
   };
 }
-
-export type ConnectPage = ReturnType<typeof createConnectPage>;
