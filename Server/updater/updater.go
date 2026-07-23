@@ -76,8 +76,19 @@ type UpdateInfo struct {
 
 type releaseManifest struct {
 	Version string `json:"version"`
-	Asset   string `json:"asset"`
-	SHA256  string `json:"sha256"`
+	// Asset/SHA256 bind a single artifact. Releases before the multi-OS
+	// manifest bound only this pair; newer releases keep it pointing at the
+	// Windows binary so already-deployed servers can still verify and update.
+	Asset  string `json:"asset"`
+	SHA256 string `json:"sha256"`
+	// Assets binds every server artifact the release ships (one per OS).
+	Assets []releaseManifestAsset `json:"assets,omitempty"`
+}
+
+// releaseManifestAsset is one artifact binding in a multi-OS release manifest.
+type releaseManifestAsset struct {
+	Asset  string `json:"asset"`
+	SHA256 string `json:"sha256"`
 }
 
 // Asset is a simplified release asset with name and download URL.
@@ -525,26 +536,37 @@ func (u *Updater) VerifyReleaseManifest(manifestData, signatureText []byte, expe
 		return releaseManifest{}, fmt.Errorf("parsing release manifest: %w", err)
 	}
 	manifest.Version = ensureVPrefix(strings.TrimSpace(manifest.Version))
-	manifest.Asset = strings.TrimSpace(manifest.Asset)
-	manifest.SHA256 = strings.ToLower(strings.TrimSpace(manifest.SHA256))
 
-	if manifest.Version == "" || manifest.Asset == "" || manifest.SHA256 == "" {
+	if manifest.Version == "v" {
 		return releaseManifest{}, fmt.Errorf("release manifest is missing required fields")
 	}
 	if manifest.Version != ensureVPrefix(expectedVersion) {
 		return releaseManifest{}, fmt.Errorf("release manifest version %q does not match release %q", manifest.Version, ensureVPrefix(expectedVersion))
 	}
-	if manifest.Asset != expectedAsset {
-		return releaseManifest{}, fmt.Errorf("release manifest asset %q does not match expected asset %q", manifest.Asset, expectedAsset)
-	}
-	if len(manifest.SHA256) != sha256.Size*2 {
-		return releaseManifest{}, fmt.Errorf("release manifest checksum for %s has invalid length", manifest.Asset)
-	}
-	if _, err := hex.DecodeString(manifest.SHA256); err != nil {
-		return releaseManifest{}, fmt.Errorf("release manifest checksum for %s is invalid: %w", manifest.Asset, err)
-	}
 
-	return manifest, nil
+	// Candidate bindings: the per-OS assets list plus the legacy single-asset
+	// pair (the only binding manifests from older releases carry).
+	candidates := append([]releaseManifestAsset{}, manifest.Assets...)
+	candidates = append(candidates, releaseManifestAsset{Asset: manifest.Asset, SHA256: manifest.SHA256})
+	for _, c := range candidates {
+		asset := strings.TrimSpace(c.Asset)
+		if asset == "" || asset != expectedAsset {
+			continue
+		}
+		sum := strings.ToLower(strings.TrimSpace(c.SHA256))
+		if len(sum) != sha256.Size*2 {
+			return releaseManifest{}, fmt.Errorf("release manifest checksum for %s has invalid length", asset)
+		}
+		if _, err := hex.DecodeString(sum); err != nil {
+			return releaseManifest{}, fmt.Errorf("release manifest checksum for %s is invalid: %w", asset, err)
+		}
+		// Normalize the returned binding to the matched entry so callers can
+		// keep reading manifest.Asset/manifest.SHA256 regardless of schema.
+		manifest.Asset = asset
+		manifest.SHA256 = sum
+		return manifest, nil
+	}
+	return releaseManifest{}, fmt.Errorf("release manifest does not bind expected asset %q", expectedAsset)
 }
 
 // VerifySignature checks whether the detached minisign signature matches the
@@ -720,9 +742,28 @@ func (u *Updater) fetchBody(ctx context.Context, url string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, maxFetchBytes))
 }
 
-// FindClientAssets scans the cached release assets for the Tauri NSIS
-// installer zip and its Ed25519 signature file.
-func (u *Updater) FindClientAssets() ClientAssets {
+// clientAssetSuffixByTarget maps a Tauri updater target
+// ("{os}-{arch}-{installer}") to the release asset suffix for that platform's
+// updater artifact. The matching signature asset is the same suffix plus
+// ".sig". Targets without a published updater artifact are absent — notably
+// linux-*-deb: the release ships .deb packages but no signed deb updater
+// artifact, and serving the AppImage archive instead would make the plugin's
+// install_deb reject every update.
+var clientAssetSuffixByTarget = map[string]string{
+	"windows-x86_64-nsis":    "_x64-setup.nsis.zip",
+	"linux-x86_64-appimage":  "_amd64.AppImage.tar.gz",
+	"linux-aarch64-appimage": "_aarch64.AppImage.tar.gz",
+}
+
+// FindClientAssets scans the cached release assets for the client updater
+// artifact and its signature matching the given Tauri updater target
+// (e.g. "windows-x86_64-nsis"). Unknown targets return empty ClientAssets.
+func (u *Updater) FindClientAssets(target string) ClientAssets {
+	suffix, ok := clientAssetSuffixByTarget[target]
+	if !ok {
+		return ClientAssets{}
+	}
+
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
@@ -733,9 +774,9 @@ func (u *Updater) FindClientAssets() ClientAssets {
 	var ca ClientAssets
 	for _, a := range u.cache.Assets {
 		switch {
-		case strings.HasSuffix(a.Name, "_x64-setup.nsis.zip.sig"):
+		case strings.HasSuffix(a.Name, suffix+".sig"):
 			ca.SignatureURL = a.DownloadURL
-		case strings.HasSuffix(a.Name, "_x64-setup.nsis.zip"):
+		case strings.HasSuffix(a.Name, suffix):
 			ca.InstallerURL = a.DownloadURL
 		}
 	}

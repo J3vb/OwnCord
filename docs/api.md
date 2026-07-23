@@ -1098,7 +1098,7 @@ Tauri-compatible update endpoint. The desktop client checks this to see if a new
 
 | Param | Type | Description |
 | ----- | ---- | ----------- |
-| `target` | string | Platform target (e.g., `windows-x86_64`) |
+| `target` | string | Tauri updater target `{os}-{arch}-{installer}` (e.g., `windows-x86_64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`). Selects the platform's updater artifact and is echoed back as the `platforms` key. Targets without a published updater artifact (e.g., `linux-x86_64-deb`) get 204. |
 | `current_version` | string | Client's current semver version (e.g., `1.0.0`) |
 
 #### Response 200 OK (update available)
@@ -1109,7 +1109,7 @@ Tauri-compatible update endpoint. The desktop client checks this to see if a new
   "notes": "## What's Changed\n...",
   "pub_date": "2026-03-28T00:00:00Z",
   "platforms": {
-    "windows-x86_64": {
+    "windows-x86_64-nsis": {
       "signature": "base64-encoded-signature",
       "url": "https://github.com/J3vb/OwnCord/releases/download/v1.2.0/OwnCord_1.2.0_x64-setup.nsis.zip"
     }
@@ -1119,7 +1119,7 @@ Tauri-compatible update endpoint. The desktop client checks this to see if a new
 
 #### Response 204 No Content
 
-Client is already up-to-date.
+Client is already up-to-date, or no client build is published for `target`.
 
 ---
 

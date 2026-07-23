@@ -2955,6 +2955,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-tungstenite",
  "url",
+ "webpki-roots 1.0.6",
  "windows 0.58.0",
 ]
 
