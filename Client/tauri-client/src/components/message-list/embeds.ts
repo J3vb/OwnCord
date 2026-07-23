@@ -37,48 +37,38 @@ export function clearEmbedCaches(): void {
 
 // -- OG tag parsing -----------------------------------------------------------
 
-/** Escape special regex characters in a string for safe use in `new RegExp()`. */
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/** Extract Open Graph meta tags from raw HTML using regex (no DOM parser needed). */
+/**
+ * Extract Open Graph meta tags from raw HTML.
+ *
+ * F7: parse with the platform HTML tokenizer (DOMParser) instead of backtracking
+ * regexes. Untrusted preview HTML previously ran through patterns with two
+ * `[^>]*` quantifiers around a required literal, which backtrack polynomially and
+ * froze the UI thread on crafted input (ReDoS). A real tokenizer is linear and
+ * additionally ignores meta-like strings inside comments/scripts.
+ *
+ * The 50 KB slice at the call site (fetchOgMeta) is kept as a plain memory bound.
+ */
 export function parseOgTags(html: string): OgMeta {
-  function getMetaContent(property: string): string | null {
-    // Match both property="og:X" and name="og:X" patterns
-    const escaped = escapeRegex(property);
-    const regex = new RegExp(
-      `<meta[^>]*(?:property|name)=["']${escaped}["'][^>]*content=["']([^"']*)["']` +
-        `|<meta[^>]*content=["']([^"']*)["'][^>]*(?:property|name)=["']${escaped}["']`,
-      "i",
-    );
-    const match = html.match(regex);
-    if (match !== null) {
-      return match[1] ?? match[2] ?? null;
+  const doc = new DOMParser().parseFromString(html, "text/html");
+
+  // First matching element wins (document order), mirroring the old first-match
+  // behaviour. Returns "" for an empty content attribute but null when the
+  // attribute (or element) is absent, so the title→host fallback still fires.
+  function metaContent(...ogNames: readonly string[]): string | null {
+    for (const name of ogNames) {
+      const el =
+        doc.querySelector(`meta[property="${name}"]`) ?? doc.querySelector(`meta[name="${name}"]`);
+      const content = el?.getAttribute("content");
+      if (content != null) return content;
     }
     return null;
   }
 
-  // Fallback: extract <title> tag if no og:title
-  function getTitle(): string | null {
-    const og = getMetaContent("og:title");
-    if (og !== null) return og;
-    const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
-    return titleMatch?.[1]?.trim() ?? null;
-  }
-
-  // Fallback: extract meta description if no og:description
-  function getDescription(): string | null {
-    const og = getMetaContent("og:description");
-    if (og !== null) return og;
-    return getMetaContent("description");
-  }
-
   return {
-    title: getTitle(),
-    description: getDescription(),
-    image: getMetaContent("og:image"),
-    siteName: getMetaContent("og:site_name"),
+    title: metaContent("og:title") ?? doc.querySelector("title")?.textContent?.trim() ?? null,
+    description: metaContent("og:description", "description"),
+    image: metaContent("og:image"),
+    siteName: metaContent("og:site_name"),
   };
 }
 
