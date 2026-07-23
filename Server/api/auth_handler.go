@@ -253,6 +253,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 
 // handleLogin processes POST /api/v1/auth/login.
 func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.PartialAuthStore, trustedProxies []string) http.HandlerFunc {
+	proxyNets := parseCIDRList(trustedProxies) // W3-3a: parse once at construction
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req loginRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -275,7 +276,7 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 			return
 		}
 
-		ip := clientIPWithProxies(r, trustedProxies)
+		ip := clientIPWithProxies(r, proxyNets)
 
 		// Check per-IP lockout first.
 		lockKey := "login_lock:" + ip

@@ -1,10 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-// Mock livekitSession (required by streamPreview)
+// Mock livekitSession (required by streamPreview). rePinPeerIdentity is hoisted
+// so the mock factory can reference it and tests can assert re-pin was invoked.
+const { mockRePinPeerIdentity } = vi.hoisted(() => ({
+  mockRePinPeerIdentity: vi.fn(() => Promise.resolve(true)),
+}));
 vi.mock("@lib/livekitSession", () => ({
   setUserVolume: vi.fn(),
   getUserVolume: vi.fn(() => 1),
   getRemoteVideoStream: vi.fn(() => null),
+  rePinPeerIdentity: mockRePinPeerIdentity,
 }));
 
 // Mock streamPreview to isolate sidebar tests from preview DOM logic
@@ -15,11 +20,23 @@ vi.mock("@lib/streamPreview", () => ({
   attachScrollCollapse: (...args: unknown[]) => mockAttachScrollCollapse(...args),
 }));
 
+// Stub the identity-key crypto so the mismatch modal's fingerprint compute is
+// deterministic in jsdom (real WebCrypto key import needs a valid SPKI blob).
+vi.mock("@lib/e2eeCrypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/lib/e2eeCrypto")>();
+  return {
+    ...actual,
+    importIdentityPublicKey: vi.fn(() => Promise.resolve({} as CryptoKey)),
+    computeKeyFingerprint: vi.fn(() => Promise.resolve("FEED FACE 1234 5678")),
+  };
+});
+
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
 import { channelsStore, setChannels, setActiveChannel } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore, toggleCategory } from "../../src/stores/ui.store";
 import { voiceStore, updateVoiceState } from "../../src/stores/voice.store";
+import type { PeerVerification } from "../../src/stores/voice.store";
 import { membersStore } from "../../src/stores/members.store";
 import type { ReadyChannel } from "../../src/lib/types";
 
@@ -62,11 +79,39 @@ function resetStores(): void {
     joinedAt: null,
     listenOnly: false,
     voiceStatus: "idle",
+    peerVerifications: new Map(),
   }));
   membersStore.setState(() => ({
     members: new Map(),
     typingUsers: new Map(),
   }));
+}
+
+/** Add a connected voice user to a channel (via the same store path the WS uses). */
+function addVoiceUser(channelId: number, userId: number, username: string): void {
+  updateVoiceState({
+    channel_id: channelId,
+    user_id: userId,
+    username,
+    muted: false,
+    deafened: false,
+    speaking: false,
+    camera: false,
+    screenshare: false,
+  });
+}
+
+/** Record a peer's E2EE identity verification result in the voice store. */
+function setPeerVerif(
+  userId: number,
+  status: PeerVerification["status"],
+  safetyNumber: string | null = null,
+): void {
+  voiceStore.setState((prev) => {
+    const peerVerifications = new Map(prev.peerVerifications ?? []);
+    peerVerifications.set(userId, { userId, status, safetyNumber });
+    return { ...prev, peerVerifications };
+  });
 }
 
 const testChannels: ReadyChannel[] = [
@@ -1324,5 +1369,153 @@ describe("ChannelSidebar", () => {
     sidebar.mount(container);
 
     expect(mockAttachScrollCollapse).toHaveBeenCalled();
+  });
+});
+
+// ── E2EE identity verification badge on voice user rows (F3 TOFU) ──
+
+describe("ChannelSidebar voice identity badge", () => {
+  let container: HTMLDivElement;
+  let sidebar: ReturnType<typeof createChannelSidebar>;
+
+  const VOICE_CH = 3; // "voice-lobby" in testChannels
+
+  beforeEach(() => {
+    resetStores();
+    setChannels(testChannels);
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onVoiceLeave: vi.fn() });
+  });
+
+  afterEach(() => {
+    sidebar.destroy?.();
+    container.remove();
+    document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
+    mockRePinPeerIdentity.mockClear();
+  });
+
+  function badgeFor(userId: number): HTMLElement | null {
+    return container.querySelector(`.voice-user-item[data-voice-uid="${userId}"] .vu-verify`);
+  }
+
+  it("shows a verified badge carrying the safety number in its title", () => {
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    setPeerVerif(10, "verified", "AB12 CD34 EF56 7890");
+    sidebar.mount(container);
+
+    const badge = badgeFor(10);
+    expect(badge).not.toBeNull();
+    expect(badge!.classList.contains("verified")).toBe(true);
+    expect(badge!.getAttribute("title")).toContain("AB12 CD34 EF56 7890");
+  });
+
+  it("shows an unverified badge for a legacy peer", () => {
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    setPeerVerif(10, "unverified", null);
+    sidebar.mount(container);
+
+    const badge = badgeFor(10);
+    expect(badge).not.toBeNull();
+    expect(badge!.classList.contains("unverified")).toBe(true);
+  });
+
+  it("shows a mismatch badge for a peer whose identity key changed", () => {
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    setPeerVerif(10, "mismatch", null);
+    sidebar.mount(container);
+
+    const badge = badgeFor(10);
+    expect(badge).not.toBeNull();
+    expect(badge!.classList.contains("mismatch")).toBe(true);
+  });
+
+  it("shows no badge when the peer's verification is unresolved", () => {
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    sidebar.mount(container);
+
+    expect(badgeFor(10)).toBeNull();
+  });
+
+  it("re-renders the badge when a peer's verification changes after mount", () => {
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    setPeerVerif(10, "unverified", null);
+    sidebar.mount(container);
+    expect(badgeFor(10)!.classList.contains("unverified")).toBe(true);
+
+    setPeerVerif(10, "verified", "AB12 CD34");
+    voiceStore.flush();
+
+    const badge = badgeFor(10);
+    expect(badge).not.toBeNull();
+    expect(badge!.classList.contains("verified")).toBe(true);
+  });
+
+  it("opens the identity-mismatch modal when the mismatch badge is clicked", async () => {
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    setPeerVerif(10, "mismatch", null);
+    sidebar.mount(container);
+
+    // Opening is async (computes the changed key's fingerprint before mounting).
+    (badgeFor(10) as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(document.body.querySelector(".modal-overlay")).not.toBeNull();
+    });
+  });
+
+  it("shows the changed key's fingerprint in the mismatch modal for out-of-band verification", async () => {
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    // The peer must have a published identity key for its fingerprint to be shown.
+    membersStore.setState((prev) => {
+      const members = new Map(prev.members);
+      members.set(10, {
+        id: 10,
+        username: "Alice",
+        avatar: null,
+        role: "member",
+        status: "online",
+        identityPublicKey: "alice-published-key-b64",
+      });
+      return { ...prev, members };
+    });
+    setPeerVerif(10, "mismatch", null);
+    sidebar.mount(container);
+
+    (badgeFor(10) as HTMLElement).click();
+    await vi.waitFor(() => {
+      const fp = document.body.querySelector(".modal-overlay .cert-fingerprint");
+      expect(fp?.textContent).toBe("FEED FACE 1234 5678");
+    });
+  });
+
+  it("re-pins the peer when the mismatch modal's Trust button is clicked", async () => {
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    setPeerVerif(10, "mismatch", null);
+    sidebar.mount(container);
+
+    (badgeFor(10) as HTMLElement).click();
+    const trustBtn = await vi.waitFor(() => {
+      const btn = document.body.querySelector(".modal-overlay .btn-danger") as HTMLButtonElement;
+      expect(btn).not.toBeNull();
+      return btn;
+    });
+    trustBtn.click();
+
+    expect(mockRePinPeerIdentity).toHaveBeenCalledWith(10);
+    expect(document.body.querySelector(".modal-overlay")).toBeNull();
+  });
+
+  it("closes an open mismatch modal on sidebar destroy", async () => {
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    setPeerVerif(10, "mismatch", null);
+    sidebar.mount(container);
+
+    (badgeFor(10) as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(document.body.querySelector(".modal-overlay")).not.toBeNull();
+    });
+
+    sidebar.destroy?.();
+    expect(document.body.querySelector(".modal-overlay")).toBeNull();
   });
 });

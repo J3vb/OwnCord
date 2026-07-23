@@ -78,20 +78,14 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 		defer cancel()
 
-		if err := u.DownloadAndVerify(ctx, info.Latest, info.DownloadURL, info.ChecksumURL, info.SignatureURL, info.ManifestURL, info.ManifestSignatureURL, newPath); err != nil {
+		// DownloadAndVerify stages the binary and returns its trusted hash
+		// (bound to the signed release manifest). The apply goroutine below
+		// re-verifies the staged file against this hash through an open
+		// handle — never by path — before the rename+spawn.
+		stagedHash, err := u.DownloadAndVerify(ctx, info.Latest, info.DownloadURL, info.ChecksumURL, info.SignatureURL, info.ManifestURL, info.ManifestSignatureURL, newPath)
+		if err != nil {
 			slog.Error("update download/verify failed", "err", err)
 			writeErr(w, http.StatusBadGateway, "DOWNLOAD_FAILED", "download or verification failed — see server logs")
-			return
-		}
-
-		// Snapshot the hash of the just-verified staged binary. It is re-checked
-		// immediately before rename+spawn to close the TOCTOU window between
-		// verification here and the swap in the background goroutine below.
-		stagedHash, err := updater.FileSHA256(newPath)
-		if err != nil {
-			slog.Error("update: failed to hash staged binary", "err", err)
-			_ = os.Remove(newPath)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to stage update")
 			return
 		}
 
@@ -108,23 +102,27 @@ func handleApplyUpdate(u *updater.Updater, hub HubBroadcaster, _ string) http.Ha
 			}
 			time.Sleep(5 * time.Second)
 
-			// TOCTOU guard: re-verify the staged binary is byte-for-byte the one
-			// we verified before responding. If it was swapped between then and
-			// now, abort without renaming or spawning it.
-			if err := u.VerifyChecksum(newPath, stagedHash); err != nil {
+			// TOCTOU guard: open the staged binary once, verify its hash
+			// through that handle, and commit (rename) that exact file.
+			// Commit fails if the path was swapped after verification, so
+			// the bytes verified are the bytes spawned.
+			staged, err := updater.OpenVerifiedBinary(newPath, stagedHash)
+			if err != nil {
 				slog.Error("update: staged binary re-verification failed, aborting update", "error", err)
 				return
 			}
+			defer staged.Close() //nolint:errcheck
 
-			// Rename: current -> .old, .new -> current
+			// Rename: current -> .old, verified staged binary -> current
 			_ = os.Remove(oldPath) // remove any stale .old
 			if err := os.Rename(exePath, oldPath); err != nil {
 				slog.Error("update: rename current to old failed", "error", err)
 				return
 			}
-			if err := os.Rename(newPath, exePath); err != nil {
-				slog.Error("update: rename new to current failed", "error", err)
-				// Try to restore the original binary.
+			if err := staged.Commit(exePath); err != nil {
+				slog.Error("update: committing staged binary failed, restoring original binary", "error", err)
+				// Whatever is at exePath now (if anything) is not the verified
+				// binary; restoring .old replaces it.
 				if restoreErr := os.Rename(oldPath, exePath); restoreErr != nil {
 					slog.Error("update: CRITICAL — recovery rename also failed, server binary may be missing",
 						"restore_error", restoreErr, "original_error", err,

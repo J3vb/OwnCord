@@ -12,7 +12,7 @@ This is a continuation/handoff doc: what is done, what remains, and how to resum
 |---|-----|---------|--------|
 | F1 | MED | Login lockout keyed on un-canonicalized username (vs `COLLATE NOCASE`) | ✅ done, committed `7145f76` |
 | F2 | MED | Unsynchronized concurrent wazero module invocation (data race) | ✅ done, committed `71b5f13` |
-| F3 | MED | Voice E2EE trusts server-relayed ECDH keys (server MITM) | ⏳ **TODO — designed, not started** |
+| F3 | MED | Voice E2EE trusts server-relayed ECDH keys (server MITM) | ✅ **implemented (branch `feat/e2ee-identity-tofu`)** — MITM closed for published+pinned peers; UI surfacing is follow-up (see below) |
 | F4 | MED | HTTP TOFU proxy accepts any cert on first use (credential exposure) | ✅ done, committed `f22985a` |
 | F5 | LOW | Voice perms use stale connect-time role snapshot | ✅ done, committed `260d038` |
 | F6 | LOW | Lost cache invalidation in `PermissionService.getOrPopulate` | ✅ done, committed `e6a0d87` |
@@ -26,7 +26,8 @@ This is a continuation/handoff doc: what is done, what remains, and how to resum
    `cd Client/tauri-client/src-tauri && cargo clippy -- -D warnings` (or push and
    let CI do it). Pure `tofu` logic has `#[cfg(test)]` unit tests; the frontend is
    covered by the 3311-green unit suite.
-2. **Then F3** — the only remaining finding (below). (F6 landed 2026-07-23 as
+2. ~~**Then F3**~~ — **DONE 2026-07-23** on branch `feat/e2ee-identity-tofu` (see the
+   "F3 status 2026-07-23" block directly below). (F6 landed 2026-07-23 as
    `e6a0d87`, split out from the D13 permission-consolidation commits that
    followed it on this branch.)
 
@@ -38,6 +39,46 @@ perms served up to `permCacheTTL`). Fix: a `gen uint64` counter bumped by every
 `Invalidate*`; `getOrPopulate` snapshots `gen` before its DB read and refuses to
 cache if it changed. Test `TestGetOrPopulate_InvalidationDuringPopulateNotLost`
 locks it. Verified `-race` + `-tags deadlock` green.
+
+## F3 status 2026-07-23 (branch `feat/e2ee-identity-tofu`)
+
+**Implemented, test-first, MITM path verified closed by a 3-lens adversarial panel + a
+dedicated re-verification pass.** The original implementation shipped the crypto but had a
+dead publish path (the feature was inert); that and three related defects were caught by
+review and fixed. What is done:
+
+- **Server:** migration `017_user_identity_key.sql` (`users.identity_public_key`);
+  `UpdateUserIdentityKey` + column in user/`ListMembers` SELECTs; `PATCH /users/me`
+  accepts+persists the key (via `UserService.UpdateIdentityKey`, audited); key carried in
+  `ready`/`member_join`/`user_update`; `voice_e2ee_announce` gains an optional `signature`
+  validated + stored + relayed (incl. the late-joiner replay). Legacy unsigned announces
+  still accepted (client enforces fail-closed). `make sqlc-verify`/`protocol-verify` green;
+  server `-race` + `-tags deadlock` green.
+- **Client:** ECDSA P-256 identity keypair (OS keyring via new Rust
+  `save/load/delete_identity_key` + pin store `identity_pins.json`); ephemeral announces
+  signed at all sites; **publish wired into the `ready` flow** (dispatcher publishes the key
+  once, with username, when the server copy is absent/stale); `verifyPeerAnnounce` resolves
+  the **pin before** the legacy shortcut (a stripping server can't downgrade a pinned peer);
+  `rePinPeerIdentity` for key-rotation recovery. Full client suite 3337 green;
+  typecheck/lint/format clean. (Rust halves compile-checked only — no local MSVC; **CI
+  must verify `cargo`**.)
+
+**Verified closed:** a malicious/stripping server can no longer silently MITM a peer whose
+identity key is published and locally pinned — an ephemeral-key swap fails ECDSA
+verification and the room key is never wrapped for the attacker.
+
+**Follow-up (not MITM holes — deferred, none block the crypto):**
+1. **Surface the safety number in the voice panel.** `safetyNumber`/`peerVerifications` are
+   computed and stored but **no component renders them**, so the out-of-band check that
+   detects the inherent TOFU *first-contact* window is not user-reachable yet.
+2. **Wire the verified/unverified/mismatch badge + a re-pin affordance.** `rePinPeerIdentity`
+   exists but no UI calls it — a legitimately rotated peer key currently blocks voice with no
+   in-app recovery (mirror `main.ts`'s `createCertMismatchModal onAccept` flow).
+3. `getIdentityPin` **fail-opens** on a transient local keyring/store read error (one announce
+   falls through to legacy). Not server-controllable; consider fail-closed when a pin *may*
+   exist.
+4. Fast-join timing: a peer joining voice before peers process its `user_update` is seen as
+   legacy for that announce — degrades to *unverified*, never wrongly-*verified*.
 
 ## F3 — Voice E2EE identity keys + TOFU (the remaining work)
 

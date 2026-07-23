@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,9 +18,12 @@ import (
 // ─── Request / Response types ────────────────────────────────────────────────
 
 // updateProfileRequest is the JSON body for PATCH /api/v1/users/me.
+// identity_public_key, when present, publishes the client's long-term E2EE
+// identity public key (F3 voice E2EE TOFU); omitted = leave unchanged.
 type updateProfileRequest struct {
-	Username string  `json:"username"`
-	Avatar   *string `json:"avatar"`
+	Username          string  `json:"username"`
+	Avatar            *string `json:"avatar"`
+	IdentityPublicKey *string `json:"identity_public_key"`
 }
 
 // changePasswordRequest is the JSON body for PUT /api/v1/users/me/password.
@@ -48,7 +52,7 @@ type sessionsListResponse struct {
 // ProfileBroadcaster is the interface the profile handler uses to notify
 // connected WebSocket clients about profile changes.
 type ProfileBroadcaster interface {
-	BroadcastUserUpdate(userID int64, username string, avatar *string)
+	BroadcastUserUpdate(userID int64, username string, avatar *string, identityPublicKey *string)
 }
 
 // MountProfileRoutes registers user profile management endpoints.
@@ -69,6 +73,25 @@ func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, li
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+// validateIdentityKey checks that key is non-empty, at most 128 characters and
+// valid standard-alphabet base64 (padded or unpadded) — the same posture as
+// the WS voice_e2ee_announce public_key validation.
+func validateIdentityKey(key string) error {
+	if key == "" {
+		return fmt.Errorf("identity_public_key must not be empty")
+	}
+	if len(key) > 128 {
+		return fmt.Errorf("identity_public_key too large (max 128 characters)")
+	}
+	if _, err := base64.StdEncoding.DecodeString(key); err == nil {
+		return nil
+	}
+	if _, err := base64.RawStdEncoding.DecodeString(key); err != nil {
+		return fmt.Errorf("identity_public_key is not valid base64")
+	}
+	return nil
+}
 
 // validateAvatarURL checks that avatar is either empty or a valid https:// URL
 // no longer than maxAvatarURLLen characters.
@@ -133,15 +156,36 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) 
 			req.Avatar = &trimmed
 		}
 
+		// Validate the identity key before any write so the request is
+		// all-or-nothing.
+		if req.IdentityPublicKey != nil {
+			trimmed := strings.TrimSpace(*req.IdentityPublicKey)
+			if err := validateIdentityKey(trimmed); err != nil {
+				writeJSON(w, http.StatusBadRequest, errorResponse{
+					Error: "INVALID_INPUT", Message: err.Error(),
+				})
+				return
+			}
+			req.IdentityPublicKey = &trimmed
+		}
+
 		updated, err := svc.Users.UpdateProfile(r.Context(), user.ID, req.Username, req.Avatar)
 		if err != nil {
 			writeServiceError(w, err)
 			return
 		}
 
+		if req.IdentityPublicKey != nil {
+			updated, err = svc.Users.UpdateIdentityKey(r.Context(), user.ID, *req.IdentityPublicKey)
+			if err != nil {
+				writeServiceError(w, err)
+				return
+			}
+		}
+
 		// Broadcast profile change to all connected WebSocket clients.
 		if broadcaster != nil {
-			broadcaster.BroadcastUserUpdate(updated.ID, updated.Username, updated.Avatar)
+			broadcaster.BroadcastUserUpdate(updated.ID, updated.Username, updated.Avatar, updated.IdentityPublicKey)
 		}
 
 		writeJSON(w, http.StatusOK, toUserResponse(updated))

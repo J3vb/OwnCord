@@ -1,12 +1,15 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -376,6 +379,62 @@ func TestRateLimitMiddleware_XRealIPIgnoredWithoutTrustedProxy(t *testing.T) {
 	}
 }
 
+// lockedBuffer is a goroutine-safe writer for capturing log output.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// TestRateLimitMiddleware_InvalidCIDRWarnsAtConstructionNotPerRequest locks
+// the W3-3a hoist: the trusted-proxy CIDR list is parsed once when the
+// middleware is constructed — warning about invalid entries there — never on
+// the per-request path.
+func TestRateLimitMiddleware_InvalidCIDRWarnsAtConstructionNotPerRequest(t *testing.T) {
+	logBuf := &lockedBuffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logBuf, nil)))
+	defer slog.SetDefault(prev)
+
+	limiter := auth.NewRateLimiter()
+	h := api.RateLimitMiddleware(limiter, 100, time.Minute,
+		[]string{"not-a-cidr", "10.0.0.0/8"})(http.HandlerFunc(ok))
+
+	const warnMsg = "ignoring invalid CIDR entry"
+	if got := strings.Count(logBuf.String(), warnMsg); got != 1 {
+		t.Fatalf("invalid-CIDR warnings at construction = %d, want 1 (log: %q)",
+			got, logBuf.String())
+	}
+
+	// The valid entry still works: X-Real-IP honoured from the trusted proxy.
+	for range 3 {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "10.0.0.1:9999"
+		req.Header.Set("X-Real-IP", "203.0.113.77")
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("request status = %d, want 200", rr.Code)
+		}
+	}
+
+	if got := strings.Count(logBuf.String(), warnMsg); got != 1 {
+		t.Fatalf("invalid-CIDR warnings after 3 requests = %d, want 1 — CIDRs re-parsed on the request path (log: %q)",
+			got, logBuf.String())
+	}
+}
+
 func TestRateLimitMiddleware_XRealIPHonouredFromTrustedProxy(t *testing.T) {
 	// With a trusted proxy configured, X-Real-IP from that proxy is used.
 	limiter := auth.NewRateLimiter()
@@ -690,8 +749,9 @@ func TestAdminIPRestrict_EmptyAllowsAll(t *testing.T) {
 }
 
 func TestAdminIPRestrict_InvalidCIDR(t *testing.T) {
-	// Invalid CIDR should fail closed (deny access since isTrustedProxy
-	// returns false on parse error).
+	// Invalid CIDR should fail closed: the entry is skipped at construction,
+	// leaving a non-empty allowed list with zero parsed networks — nothing
+	// matches, so access is denied.
 	h := api.AdminIPRestrict([]string{"not-a-cidr"}, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -954,7 +1014,8 @@ CREATE TABLE IF NOT EXISTS users (
     last_seen   TEXT,
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
-    ban_expires TEXT
+    ban_expires TEXT,
+    identity_public_key TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (

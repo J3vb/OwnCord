@@ -63,7 +63,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (sql.Res
 
 const getUserByID = `-- name: GetUserByID :one
 SELECT id, username, password, avatar, role_id, totp_secret, status,
-       created_at, last_seen, banned, ban_reason, ban_expires
+       created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key
 FROM users WHERE id = ?
 `
 
@@ -83,13 +83,14 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 		&i.Banned,
 		&i.BanReason,
 		&i.BanExpires,
+		&i.IdentityPublicKey,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
 SELECT id, username, password, avatar, role_id, totp_secret, status,
-       created_at, last_seen, banned, ban_reason, ban_expires
+       created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key
 FROM users WHERE username = ? COLLATE NOCASE
 `
 
@@ -109,12 +110,13 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.Banned,
 		&i.BanReason,
 		&i.BanExpires,
+		&i.IdentityPublicKey,
 	)
 	return i, err
 }
 
 const listMembers = `-- name: ListMembers :many
-SELECT u.id, u.username, u.avatar, u.status, LOWER(r.name)
+SELECT u.id, u.username, u.avatar, u.status, LOWER(r.name), u.identity_public_key
 FROM users u
 JOIN roles r ON u.role_id = r.id
 WHERE u.banned = 0
@@ -123,11 +125,12 @@ LIMIT 1000
 `
 
 type ListMembersRow struct {
-	ID       int64   `json:"id"`
-	Username string  `json:"username"`
-	Avatar   *string `json:"avatar"`
-	Status   string  `json:"status"`
-	Lower    string  `json:"lower"`
+	ID                int64   `json:"id"`
+	Username          string  `json:"username"`
+	Avatar            *string `json:"avatar"`
+	Status            string  `json:"status"`
+	Lower             string  `json:"lower"`
+	IdentityPublicKey *string `json:"identityPublicKey"`
 }
 
 func (q *Queries) ListMembers(ctx context.Context) ([]ListMembersRow, error) {
@@ -145,6 +148,7 @@ func (q *Queries) ListMembers(ctx context.Context) ([]ListMembersRow, error) {
 			&i.Avatar,
 			&i.Status,
 			&i.Lower,
+			&i.IdentityPublicKey,
 		); err != nil {
 			return nil, err
 		}
@@ -174,6 +178,20 @@ UPDATE users SET banned = 0, ban_reason = NULL, ban_expires = NULL WHERE id = ?
 
 func (q *Queries) UnbanUser(ctx context.Context, id int64) error {
 	_, err := q.db.ExecContext(ctx, unbanUser, id)
+	return err
+}
+
+const updateUserIdentityKey = `-- name: UpdateUserIdentityKey :exec
+UPDATE users SET identity_public_key = ? WHERE id = ?
+`
+
+type UpdateUserIdentityKeyParams struct {
+	IdentityPublicKey *string `json:"identityPublicKey"`
+	ID                int64   `json:"id"`
+}
+
+func (q *Queries) UpdateUserIdentityKey(ctx context.Context, arg UpdateUserIdentityKeyParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserIdentityKey, arg.IdentityPublicKey, arg.ID)
 	return err
 }
 

@@ -16,6 +16,10 @@ type User struct {
 	Banned       bool
 	BanReason    *string
 	BanExpires   *string
+	// IdentityPublicKey is the long-term E2EE identity public key (base64,
+	// ECDSA P-256) used for TOFU pinning of voice E2EE announces. Nil = not
+	// published (legacy client).
+	IdentityPublicKey *string
 }
 
 // Session represents a row in the sessions table.

@@ -74,14 +74,15 @@ func SetClientVoiceStateForTest(c *Client, channelID int64, joinToken string) {
 	c.voiceJoinToken = joinToken
 }
 
-// SetClientE2EEPubKeyForTest sets the E2EE public key on a client.
+// SetClientE2EEPubKeyForTest sets the E2EE public key on a client (no signature).
 func SetClientE2EEPubKeyForTest(c *Client, key string) {
-	c.setE2EEPubKey(key)
+	c.setE2EEPubKey(key, "")
 }
 
 // GetClientE2EEPubKeyForTest returns the E2EE public key from a client.
 func GetClientE2EEPubKeyForTest(c *Client) string {
-	return c.getE2EEPubKey()
+	key, _ := c.getE2EEPubKey()
+	return key
 }
 
 // NewTestClient creates a client with a caller-supplied send channel; conn is nil.

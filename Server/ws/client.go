@@ -32,6 +32,7 @@ type Client struct {
 	voiceChID      int64          // voice channel the user is in (0 = not in voice); guarded by voiceMu
 	voiceJoinToken string         // opaque join-instance token for the current voice session; guarded by voiceMu
 	e2eePubKey     string         // ECDH P-256 public key (base64) for voice E2EE; guarded by voiceMu
+	e2eeSignature  string         // identity-key signature over e2eePubKey (F3 TOFU); "" for legacy announces; guarded by voiceMu
 	roleName       string         // cached role name for chat_message broadcasts
 	tokenHash      string         // SHA-256 hex of the session token; used for periodic revalidation
 	lastSeq        uint64         // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
@@ -139,21 +140,24 @@ func (c *Client) clearVoiceState() (int64, string) {
 	c.voiceChID = 0
 	c.voiceJoinToken = ""
 	c.e2eePubKey = ""
+	c.e2eeSignature = ""
 	return oldChID, oldJoinToken
 }
 
-// setE2EEPubKey stores the ECDH public key for voice E2EE key exchange.
-func (c *Client) setE2EEPubKey(key string) {
+// setE2EEPubKey stores the ECDH public key for voice E2EE key exchange,
+// together with its identity-key signature ("" for legacy announces).
+func (c *Client) setE2EEPubKey(key, signature string) {
 	c.voiceMu.Lock()
 	defer c.voiceMu.Unlock()
 	c.e2eePubKey = key
+	c.e2eeSignature = signature
 }
 
-// getE2EEPubKey returns the stored ECDH public key.
-func (c *Client) getE2EEPubKey() string {
+// getE2EEPubKey returns the stored ECDH public key and its signature.
+func (c *Client) getE2EEPubKey() (string, string) {
 	c.voiceMu.Lock()
 	defer c.voiceMu.Unlock()
-	return c.e2eePubKey
+	return c.e2eePubKey, c.e2eeSignature
 }
 
 // sendMsg queues a normal-priority message (chat messages, reactions, channel events).

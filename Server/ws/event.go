@@ -27,6 +27,11 @@ type Result struct {
 	// SetE2EEPubKey, if non-nil, stores the ECDH public key on the client.
 	// Used by voice_e2ee_announce to persist the key for later retrieval.
 	SetE2EEPubKey *string
+	// SetE2EESignature, if non-nil, stores the identity-key signature over
+	// the announced ephemeral key (F3 TOFU) alongside SetE2EEPubKey, so the
+	// late-joiner replay path relays it. Only meaningful when SetE2EEPubKey
+	// is also set; nil for legacy announces without a signature.
+	SetE2EESignature *string
 	// SetVoiceJoinToken, if non-nil, caches the voice join token on the client.
 	// Used by voice_token_refresh when falling back to the DB for the token.
 	SetVoiceJoinToken *string

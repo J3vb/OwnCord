@@ -12,6 +12,10 @@ export interface Member {
   readonly avatar: string | null;
   readonly role: string;
   readonly status: UserStatus;
+  /** Long-term E2EE identity public key (base64) for voice TOFU (F3). The store
+   *  always sets it (null when the user has not published one); optional only so
+   *  the many inline Member test fixtures need not restate it. */
+  readonly identityPublicKey?: string | null;
 }
 
 export interface MembersState {
@@ -45,6 +49,7 @@ export function setMembers(members: readonly ReadyMember[]): void {
       avatar: m.avatar,
       role: m.role,
       status: m.status,
+      identityPublicKey: m.identity_public_key ?? null,
     });
   }
   // Clear all outstanding typing timers
@@ -68,6 +73,7 @@ export function addMember(payload: MemberJoinPayload): void {
       avatar: payload.user.avatar,
       role: payload.user.role,
       status: "online" as UserStatus,
+      identityPublicKey: payload.user.identity_public_key ?? null,
     });
     return { ...prev, members: next };
   });
@@ -93,13 +99,26 @@ export function updateMemberRole(userId: number, role: string): void {
   });
 }
 
-/** Update a member's profile (username, avatar) from a user_update event. */
-export function updateMemberProfile(userId: number, username: string, avatar: string | null): void {
+/** Update a member's profile (username, avatar, identity key) from a
+ *  user_update event. `identityPublicKey` is only applied when provided, so a
+ *  profile update that omits it doesn't clobber a pinned key. */
+export function updateMemberProfile(
+  userId: number,
+  username: string,
+  avatar: string | null,
+  identityPublicKey?: string | null,
+): void {
   membersStore.setState((prev) => {
     const existing = prev.members.get(userId);
     if (!existing) return prev;
     const next = new Map(prev.members);
-    next.set(userId, { ...existing, username, avatar });
+    next.set(userId, {
+      ...existing,
+      username,
+      avatar,
+      identityPublicKey:
+        identityPublicKey === undefined ? existing.identityPublicKey : identityPublicKey,
+    });
     return { ...prev, members: next };
   });
 }

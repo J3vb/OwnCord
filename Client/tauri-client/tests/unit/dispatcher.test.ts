@@ -30,9 +30,16 @@ vi.mock("@lib/livekitSession", () => ({
   cleanupAll: vi.fn(),
   isVoiceConnected: vi.fn(() => false),
 }));
+// F3: the ready handler publishes our identity key. Mock the orchestrator so
+// the wiring is asserted without real keygen/keyring.
+vi.mock("@lib/identity", () => ({
+  ensureIdentityKeyPublished: vi.fn(async () => true),
+}));
 
 import { isVoiceConnected as _isVoiceConnected } from "../../src/lib/livekitSession";
+import { ensureIdentityKeyPublished as _ensureIdentityKeyPublished } from "../../src/lib/identity";
 const mockIsVoiceConnected = vi.mocked(_isVoiceConnected);
+const mockEnsurePublished = vi.mocked(_ensureIdentityKeyPublished);
 
 // Suppress console output
 vi.spyOn(console, "info").mockImplementation(() => {});
@@ -881,6 +888,55 @@ describe("WS Dispatcher", () => {
     mock.dispatch("error", { code: "FORBIDDEN", message: "nope" }, "corr-nondm");
 
     expect(blocksStore.getState().blockedByThem.size).toBe(0);
+  });
+
+  it("on ready publishes the client's identity key when the server copy is stale", async () => {
+    cleanup(); // tear down the no-api dispatcher wired in beforeEach
+    mockEnsurePublished.mockClear();
+    const updateProfile = vi.fn().mockResolvedValue({});
+    const getConfig = vi.fn(() => ({
+      host: "chat.example",
+      token: "[redacted]" as string | undefined,
+    }));
+    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+    cleanup = wireDispatcher(mock.ws, { listBlocks, updateProfile, getConfig });
+
+    // We are user 7, "alex"; the server holds no identity key for us yet.
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 7, username: "alex", avatar: null, role: "member" },
+    }));
+
+    mock.dispatch("ready", {
+      channels: [],
+      members: [
+        {
+          id: 7,
+          username: "alex",
+          avatar: null,
+          role: "member",
+          status: "online",
+          identity_public_key: null,
+        },
+      ],
+      voice_states: [],
+      roles: [],
+    });
+
+    await Promise.resolve();
+    expect(mockEnsurePublished).toHaveBeenCalledWith(
+      "chat.example",
+      "alex",
+      null,
+      expect.any(Function),
+    );
+    // The publish closure must route through api.updateProfile (server requires
+    // the username, injected by the orchestrator's caller).
+    const closure = mockEnsurePublished.mock.calls[0]![3] as (d: {
+      identity_public_key: string;
+    }) => Promise<unknown>;
+    await closure({ identity_public_key: "k" });
+    expect(updateProfile).toHaveBeenCalledWith({ identity_public_key: "k" });
   });
 
   it("on ready clears being-blocked state and refreshes blocked-by-me via api", async () => {

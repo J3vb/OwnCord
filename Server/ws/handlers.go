@@ -166,7 +166,11 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		}
 	}
 	if result.SetE2EEPubKey != nil {
-		c.setE2EEPubKey(*result.SetE2EEPubKey)
+		sig := ""
+		if result.SetE2EESignature != nil {
+			sig = *result.SetE2EESignature
+		}
+		c.setE2EEPubKey(*result.SetE2EEPubKey, sig)
 	}
 	if result.SetVoiceJoinToken != nil {
 		chID := c.getVoiceChID()

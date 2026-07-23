@@ -273,7 +273,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     },
 
     updateProfile(
-      data: { username?: string; avatar?: string },
+      data: { username?: string; avatar?: string; identity_public_key?: string },
       signal?: AbortSignal,
     ): Promise<MemberResponse> {
       return request<MemberResponse>("PATCH", "/users/me", data, signal);

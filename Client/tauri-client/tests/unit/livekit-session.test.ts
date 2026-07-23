@@ -86,6 +86,9 @@ vi.mock("@stores/voice.store", () => ({
   leaveVoiceChannel: vi.fn(),
   setListenOnly: vi.fn(),
   setVoiceStatus: vi.fn(),
+  setPeerVerification: vi.fn(),
+  clearPeerVerification: vi.fn(),
+  clearPeerVerifications: vi.fn(),
 }));
 
 const mockInvoke = vi.hoisted(() =>
@@ -128,14 +131,33 @@ const mockKeyPair = vi.hoisted(() => ({
   privateKey: { type: "private" } as unknown as CryptoKey,
 }));
 
+const mockIdentityKeyPair = vi.hoisted(() => ({
+  publicKey: { type: "id-public" } as unknown as CryptoKey,
+  privateKey: { type: "id-private" } as unknown as CryptoKey,
+}));
+
 vi.mock("@lib/e2eeCrypto", () => ({
   generateECDHKeyPair: vi.fn(async () => mockKeyPair),
-  exportPublicKey: vi.fn(async () => "mock-pub-key-base64"),
+  exportPublicKey: vi.fn(async () => "bW9ja2VwaGVtZXJhbA=="),
   importPublicKey: vi.fn(async () => ({ type: "public" }) as unknown as CryptoKey),
   generateRoomKey: vi.fn(() => new Uint8Array(32)),
   roomKeyToBase64: vi.fn(() => "mock-room-key-base64"),
   wrapRoomKey: vi.fn(async () => ({ encryptedKey: "enc", iv: "iv" })),
   unwrapRoomKey: vi.fn(async () => new Uint8Array(32)),
+  // F3 TOFU identity signing/verification
+  signEphemeralKey: vi.fn(async () => "mock-signature"),
+  verifyEphemeralKeySignature: vi.fn(async () => true),
+  importIdentityPublicKey: vi.fn(
+    async () => ({ type: "id-public-imported" }) as unknown as CryptoKey,
+  ),
+  computeKeyFingerprint: vi.fn(async () => "AB12 CD34 EF56 7890"),
+}));
+
+// F3 TOFU: identity keyring + peer pin store (Tauri-backed; mocked here).
+vi.mock("@lib/identity", () => ({
+  getOrCreateIdentityKeyPair: vi.fn(async () => mockIdentityKeyPair),
+  getIdentityPin: vi.fn(async () => null),
+  storeIdentityPin: vi.fn(async () => true),
 }));
 
 // Stub Worker for E2EE web worker (not available in Node/vitest)
@@ -151,7 +173,13 @@ import {
   setListenOnly,
   leaveVoiceChannel,
   setVoiceStatus,
+  setPeerVerification,
+  clearPeerVerifications,
 } from "@stores/voice.store";
+import { getIdentityPin, storeIdentityPin } from "@lib/identity";
+import { verifyEphemeralKeySignature } from "@lib/e2eeCrypto";
+import { setMembers } from "@stores/members.store";
+import type { ReadyMember } from "../../src/lib/types";
 import {
   isVoiceConnected,
   leaveVoice as boundLeaveVoice,
@@ -2066,6 +2094,206 @@ describe("LiveKitSession", () => {
       expect(mockWs.send).not.toHaveBeenCalledWith(
         expect.objectContaining({ type: "voice_token_refresh" }),
       );
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // F3: Voice E2EE identity-key signing + TOFU verification (receive path)
+  // -----------------------------------------------------------------------
+
+  describe("E2EE announce verification (F3 TOFU)", () => {
+    const HOST = "localhost:7880";
+    const PEER_ID = 42;
+
+    function seedPeer(identityPublicKey: string | null): void {
+      const peer: ReadyMember = {
+        id: PEER_ID,
+        username: "peer",
+        avatar: null,
+        role: "member",
+        status: "online",
+        identity_public_key: identityPublicKey,
+      };
+      setMembers([peer]);
+    }
+
+    async function joinAsKeyHolder(ws: { send: ReturnType<typeof vi.fn> }): Promise<void> {
+      session.setServerHost(HOST);
+      session.setWsClient(ws as any);
+      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
+    }
+
+    function offerSends(ws: { send: ReturnType<typeof vi.fn> }): unknown[] {
+      return ws.send.mock.calls.map((c) => c[0]).filter((m: any) => m?.type === "voice_e2ee_offer");
+    }
+
+    beforeEach(() => {
+      // Restore TOFU mock defaults — persistent overrides survive clearAllMocks.
+      (getIdentityPin as any).mockResolvedValue(null);
+      (storeIdentityPin as any).mockResolvedValue(true);
+      (verifyEphemeralKeySignature as any).mockResolvedValue(true);
+    });
+
+    it("signs the ephemeral announce sent on join", async () => {
+      seedPeer("peer-identity-b64");
+      const ws = { send: vi.fn() };
+      await joinAsKeyHolder(ws);
+
+      const announce = ws.send.mock.calls
+        .map((c) => c[0])
+        .find((m: any) => m?.type === "voice_e2ee_announce");
+      expect(announce).toBeDefined();
+      expect((announce as any).payload.signature).toBe("mock-signature");
+    });
+
+    it("rejects a server-substituted peer ephemeral key (signature verify fails)", async () => {
+      seedPeer("peer-identity-b64");
+      (verifyEphemeralKeySignature as any).mockResolvedValue(false);
+      const ws = { send: vi.fn() };
+      await joinAsKeyHolder(ws);
+      ws.send.mockClear();
+
+      await session.handleE2EEAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+      // No room-key offer wrapped for an unverifiable peer, key not stored.
+      expect(offerSends(ws)).toHaveLength(0);
+      expect((session as any)._peerPublicKeys.has(PEER_ID)).toBe(false);
+      expect(setPeerVerification).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: PEER_ID, status: "mismatch" }),
+      );
+      expect(storeIdentityPin).not.toHaveBeenCalled();
+    });
+
+    it("pins the peer identity key on first sight and marks it verified", async () => {
+      seedPeer("peer-identity-b64");
+      (getIdentityPin as any).mockResolvedValue(null);
+      const ws = { send: vi.fn() };
+      await joinAsKeyHolder(ws);
+      ws.send.mockClear();
+
+      await session.handleE2EEAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+      expect(storeIdentityPin).toHaveBeenCalledWith(HOST, String(PEER_ID), "peer-identity-b64");
+      expect(setPeerVerification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: PEER_ID,
+          status: "verified",
+          safetyNumber: "AB12 CD34 EF56 7890",
+        }),
+      );
+      // Verified peer is stored and (we are key holder) receives a room-key offer.
+      expect((session as any)._peerPublicKeys.has(PEER_ID)).toBe(true);
+      expect(offerSends(ws)).toHaveLength(1);
+    });
+
+    it("blocks and emits identity-tofu when the pinned identity key changed", async () => {
+      seedPeer("new-identity-b64");
+      (getIdentityPin as any).mockResolvedValue("old-identity-b64");
+      const ws = { send: vi.fn() };
+      await joinAsKeyHolder(ws);
+      ws.send.mockClear();
+
+      await session.handleE2EEAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+      expect(setPeerVerification).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: PEER_ID, status: "mismatch" }),
+      );
+      // Blocked before verify — no pin overwrite, no signature check, no offer.
+      expect(storeIdentityPin).not.toHaveBeenCalled();
+      expect(verifyEphemeralKeySignature).not.toHaveBeenCalled();
+      expect(offerSends(ws)).toHaveLength(0);
+      expect((session as any)._peerPublicKeys.has(PEER_ID)).toBe(false);
+    });
+
+    it("blocks a pinned peer when the server strips its published identity key", async () => {
+      // Peer was pinned before; the server now omits identity_public_key to
+      // shove the peer onto the legacy accept path (finding #2). A pinned peer
+      // must never fall back to legacy — this is an identity mismatch.
+      seedPeer(null);
+      (getIdentityPin as any).mockResolvedValue("old-identity-b64");
+      const ws = { send: vi.fn() };
+      await joinAsKeyHolder(ws);
+      ws.send.mockClear();
+
+      await session.handleE2EEAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+      expect(setPeerVerification).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: PEER_ID, status: "mismatch" }),
+      );
+      // Blocked: not accepted as legacy/unverified, key not stored, no offer.
+      expect(setPeerVerification).not.toHaveBeenCalledWith(
+        expect.objectContaining({ userId: PEER_ID, status: "unverified" }),
+      );
+      expect((session as any)._peerPublicKeys.has(PEER_ID)).toBe(false);
+      expect(offerSends(ws)).toHaveLength(0);
+      expect(storeIdentityPin).not.toHaveBeenCalled();
+      expect(verifyEphemeralKeySignature).not.toHaveBeenCalled();
+    });
+
+    it("accepts a legacy peer with no identity key but marks it unverified", async () => {
+      seedPeer(null);
+      const ws = { send: vi.fn() };
+      await joinAsKeyHolder(ws);
+      ws.send.mockClear();
+
+      await session.handleE2EEAnnounce(PEER_ID, "cGVlcg==", undefined);
+
+      expect(setPeerVerification).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: PEER_ID, status: "unverified", safetyNumber: null }),
+      );
+      // Legacy peer still works: stored + wrapped, without verify or pin.
+      expect((session as any)._peerPublicKeys.has(PEER_ID)).toBe(true);
+      expect(offerSends(ws)).toHaveLength(1);
+      expect(verifyEphemeralKeySignature).not.toHaveBeenCalled();
+      expect(storeIdentityPin).not.toHaveBeenCalled();
+    });
+
+    it("re-pin recovers a mismatched peer so a later valid announce verifies", async () => {
+      // Peer legitimately rotated its identity key (reinstall / new device).
+      // Its pinned key mismatches the new published one → blocked.
+      seedPeer("new-identity-b64");
+      (getIdentityPin as any).mockResolvedValue("old-identity-b64");
+      const ws = { send: vi.fn() };
+      await joinAsKeyHolder(ws);
+      ws.send.mockClear();
+
+      await session.handleE2EEAnnounce(PEER_ID, "cGVlcg==", "sig");
+      expect(setPeerVerification).toHaveBeenLastCalledWith(
+        expect.objectContaining({ userId: PEER_ID, status: "mismatch" }),
+      );
+
+      // User accepts the new key (analogous to accepting a changed TLS cert):
+      // re-pin overwrites the stored pin and clears the mismatch block.
+      const recovered = await session.rePinPeerIdentity(PEER_ID);
+      expect(recovered).toBe(true);
+      expect(storeIdentityPin).toHaveBeenCalledWith(HOST, String(PEER_ID), "new-identity-b64");
+
+      // Store now holds the new pin; a fresh valid announce verifies.
+      (getIdentityPin as any).mockResolvedValue("new-identity-b64");
+      (storeIdentityPin as any).mockClear();
+      ws.send.mockClear();
+      await session.handleE2EEAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+      expect(setPeerVerification).toHaveBeenLastCalledWith(
+        expect.objectContaining({ userId: PEER_ID, status: "verified" }),
+      );
+      expect((session as any)._peerPublicKeys.has(PEER_ID)).toBe(true);
+      expect(offerSends(ws)).toHaveLength(1);
+    });
+
+    it("verifies a server-substituted key when drained from the pending queue", async () => {
+      seedPeer("peer-identity-b64");
+      (verifyEphemeralKeySignature as any).mockResolvedValue(false);
+      const ws = { send: vi.fn() };
+      // Announce arrives BEFORE the keypair is ready → queued, drained on join.
+      await session.handleE2EEAnnounce(PEER_ID, "cGVlcg==", "sig");
+      expect((session as any)._pendingAnnounces).toHaveLength(1);
+
+      await joinAsKeyHolder(ws);
+
+      // Drain ran through the verifying path → substituted key rejected.
+      expect((session as any)._peerPublicKeys.has(PEER_ID)).toBe(false);
+      expect(offerSends(ws)).toHaveLength(0);
     });
   });
 });
