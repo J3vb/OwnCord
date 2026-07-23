@@ -270,6 +270,12 @@ jobs:
         working-directory: Client/tauri-client/src-tauri/
         run: cargo clippy -- -D warnings
 
+      # Without this, #[cfg(test)] code is never compiled or run in CI
+      # (clippy above skips test targets), so Rust unit tests would rot.
+      - name: Rust unit tests
+        working-directory: Client/tauri-client/src-tauri/
+        run: cargo test --lib
+
       - name: Security audit (Rust dependencies)
         working-directory: Client/tauri-client/src-tauri/
         run: |

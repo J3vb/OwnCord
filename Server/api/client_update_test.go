@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -12,7 +13,8 @@ import (
 )
 
 // fakeGitHubRelease returns a test HTTP server that mimics the GitHub
-// Releases API, serving a release with the given tag and NSIS assets.
+// Releases API, serving a release with the given tag and the client update
+// assets for every platform the release workflow publishes.
 // Asset download URLs point back to the test server so FetchTextAsset works.
 func fakeGitHubRelease(t *testing.T, tag string) *httptest.Server {
 	t.Helper()
@@ -20,34 +22,64 @@ func fakeGitHubRelease(t *testing.T, tag string) *httptest.Server {
 	var srv *httptest.Server
 	mux := http.NewServeMux()
 
+	assetNames := []string{
+		"OwnCord_1.0.0_x64-setup.nsis.zip",
+		"OwnCord_1.0.0_x64-setup.nsis.zip.sig",
+		"OwnCord_1.0.0_amd64.AppImage.tar.gz",
+		"OwnCord_1.0.0_amd64.AppImage.tar.gz.sig",
+		"OwnCord_1.0.0_aarch64.AppImage.tar.gz",
+		"OwnCord_1.0.0_aarch64.AppImage.tar.gz.sig",
+	}
+
 	mux.HandleFunc("/repos/test/repo/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		assets := make([]map[string]any, 0, len(assetNames))
+		for _, name := range assetNames {
+			assets = append(assets, map[string]any{
+				"name":                 name,
+				"browser_download_url": srv.URL + "/download/" + name,
+			})
+		}
 		resp := map[string]any{
 			"tag_name": tag,
 			"body":     "Release notes here",
 			"html_url": "https://github.com/test/repo/releases/" + tag,
-			"assets": []map[string]any{
-				{
-					"name":                 "OwnCord_1.0.0_x64-setup.nsis.zip",
-					"browser_download_url": srv.URL + "/download/OwnCord_1.0.0_x64-setup.nsis.zip",
-				},
-				{
-					"name":                 "OwnCord_1.0.0_x64-setup.nsis.zip.sig",
-					"browser_download_url": srv.URL + "/download/OwnCord_1.0.0_x64-setup.nsis.zip.sig",
-				},
-			},
+			"assets":   assets,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 	})
 
-	// Serve the signature file content.
-	mux.HandleFunc("/download/OwnCord_1.0.0_x64-setup.nsis.zip.sig", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("dW50cnVzdGVkIGNvbW1lbnQ="))
+	// Serve signature file content for any .sig asset.
+	mux.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".sig") {
+			_, _ = w.Write([]byte("dW50cnVzdGVkIGNvbW1lbnQ="))
+			return
+		}
+		http.NotFound(w, r)
 	})
 
 	srv = httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// platformEntry decodes the response body and returns the platforms entry for
+// the given target, failing the test if it is missing.
+func platformEntry(t *testing.T, rr *httptest.ResponseRecorder, target string) map[string]any {
+	t.Helper()
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	platforms, ok := resp["platforms"].(map[string]any)
+	if !ok {
+		t.Fatalf("response missing platforms map: %v", resp)
+	}
+	entry, ok := platforms[target].(map[string]any)
+	if !ok {
+		t.Fatalf("platforms missing key %q: %v", target, platforms)
+	}
+	return entry
 }
 
 func buildClientUpdateRouter(u *updater.Updater) http.Handler {
@@ -63,7 +95,7 @@ func TestClientUpdate_NewVersionAvailable(t *testing.T) {
 
 	router := buildClientUpdateRouter(u)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64/1.0.0", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64-nsis/1.0.0", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -91,7 +123,7 @@ func TestClientUpdate_AlreadyLatest(t *testing.T) {
 
 	router := buildClientUpdateRouter(u)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64/1.0.0", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64-nsis/1.0.0", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -108,7 +140,111 @@ func TestClientUpdate_FutureVersion(t *testing.T) {
 	router := buildClientUpdateRouter(u)
 
 	// Client has a newer version than the release.
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64/2.0.0", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64-nsis/2.0.0", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want 204; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestClientUpdate_WindowsTargetGetsNSISInstaller(t *testing.T) {
+	srv := fakeGitHubRelease(t, "v2.0.0")
+	u := updater.NewUpdater("1.0.0", "", "test", "repo")
+	u.SetBaseURL(srv.URL)
+
+	router := buildClientUpdateRouter(u)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64-nsis/1.0.0", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	entry := platformEntry(t, rr, "windows-x86_64-nsis")
+	url, _ := entry["url"].(string)
+	if !strings.HasSuffix(url, "_x64-setup.nsis.zip") {
+		t.Errorf("windows url = %q, want NSIS installer", url)
+	}
+}
+
+func TestClientUpdate_LinuxTargetGetsAppImage(t *testing.T) {
+	srv := fakeGitHubRelease(t, "v2.0.0")
+	u := updater.NewUpdater("1.0.0", "", "test", "repo")
+	u.SetBaseURL(srv.URL)
+
+	router := buildClientUpdateRouter(u)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/linux-x86_64-appimage/1.0.0", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	entry := platformEntry(t, rr, "linux-x86_64-appimage")
+	url, _ := entry["url"].(string)
+	if !strings.HasSuffix(url, "_amd64.AppImage.tar.gz") {
+		t.Errorf("linux url = %q, want x86_64 AppImage updater archive", url)
+	}
+	if sig, _ := entry["signature"].(string); sig == "" {
+		t.Error("linux platform entry missing signature")
+	}
+}
+
+func TestClientUpdate_LinuxArm64TargetGetsAarch64AppImage(t *testing.T) {
+	srv := fakeGitHubRelease(t, "v2.0.0")
+	u := updater.NewUpdater("1.0.0", "", "test", "repo")
+	u.SetBaseURL(srv.URL)
+
+	router := buildClientUpdateRouter(u)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/linux-aarch64-appimage/1.0.0", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	entry := platformEntry(t, rr, "linux-aarch64-appimage")
+	url, _ := entry["url"].(string)
+	if !strings.HasSuffix(url, "_aarch64.AppImage.tar.gz") {
+		t.Errorf("linux arm64 url = %q, want aarch64 AppImage updater archive", url)
+	}
+}
+
+func TestClientUpdate_UnsupportedTargetNoContent(t *testing.T) {
+	srv := fakeGitHubRelease(t, "v2.0.0")
+	u := updater.NewUpdater("1.0.0", "", "test", "repo")
+	u.SetBaseURL(srv.URL)
+
+	router := buildClientUpdateRouter(u)
+
+	// No darwin client is published; the updater must not be offered a
+	// Windows installer for it.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/darwin-aarch64-app/1.0.0", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want 204; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestClientUpdate_DebTargetNoContent(t *testing.T) {
+	srv := fakeGitHubRelease(t, "v2.0.0")
+	u := updater.NewUpdater("1.0.0", "", "test", "repo")
+	u.SetBaseURL(srv.URL)
+
+	router := buildClientUpdateRouter(u)
+
+	// The release ships .deb packages but no signed deb UPDATER artifact.
+	// A deb client falling back to the AppImage archive would fail install
+	// forever (the plugin's install_deb rejects gzip bytes), so it must get
+	// 204 rather than an artifact for a different installer.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/linux-x86_64-deb/1.0.0", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -129,7 +265,7 @@ func TestClientUpdate_GitHubError(t *testing.T) {
 
 	router := buildClientUpdateRouter(u)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64/1.0.0", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64-nsis/1.0.0", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 

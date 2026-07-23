@@ -14,30 +14,49 @@ import (
 func TestFindClientAssets_NilCache(t *testing.T) {
 	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
 
-	ca := u.FindClientAssets()
+	ca := u.FindClientAssets("windows-x86_64-nsis")
 	if ca.InstallerURL != "" || ca.SignatureURL != "" {
 		t.Error("expected empty ClientAssets when no cache")
 	}
 }
 
-func TestFindClientAssets_WithMatchingAssets(t *testing.T) {
+func TestFindClientAssets_ByTarget(t *testing.T) {
 	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
 	u.mu.Lock()
 	u.cache = &UpdateInfo{
 		Assets: []Asset{
 			{Name: "OwnCord_1.0.0_x64-setup.nsis.zip", DownloadURL: "https://example.com/installer.zip"},
 			{Name: "OwnCord_1.0.0_x64-setup.nsis.zip.sig", DownloadURL: "https://example.com/installer.zip.sig"},
+			{Name: "OwnCord_1.0.0_amd64.AppImage.tar.gz", DownloadURL: "https://example.com/amd64.AppImage.tar.gz"},
+			{Name: "OwnCord_1.0.0_amd64.AppImage.tar.gz.sig", DownloadURL: "https://example.com/amd64.AppImage.tar.gz.sig"},
+			{Name: "OwnCord_1.0.0_aarch64.AppImage.tar.gz", DownloadURL: "https://example.com/aarch64.AppImage.tar.gz"},
+			{Name: "OwnCord_1.0.0_aarch64.AppImage.tar.gz.sig", DownloadURL: "https://example.com/aarch64.AppImage.tar.gz.sig"},
 			{Name: "chatserver.exe", DownloadURL: "https://example.com/chatserver.exe"},
 		},
 	}
 	u.mu.Unlock()
 
-	ca := u.FindClientAssets()
-	if ca.InstallerURL != "https://example.com/installer.zip" {
-		t.Errorf("InstallerURL = %q, want installer URL", ca.InstallerURL)
+	cases := []struct {
+		target        string
+		wantInstaller string
+		wantSig       string
+	}{
+		{"windows-x86_64-nsis", "https://example.com/installer.zip", "https://example.com/installer.zip.sig"},
+		{"linux-x86_64-appimage", "https://example.com/amd64.AppImage.tar.gz", "https://example.com/amd64.AppImage.tar.gz.sig"},
+		{"linux-aarch64-appimage", "https://example.com/aarch64.AppImage.tar.gz", "https://example.com/aarch64.AppImage.tar.gz.sig"},
+		// No deb updater artifact is published — a deb client must get
+		// nothing rather than an AppImage archive its installer rejects.
+		{"linux-x86_64-deb", "", ""},
+		{"darwin-aarch64-app", "", ""},
+		{"windows-x86_64-unknown", "", ""},
+		{"", "", ""},
 	}
-	if ca.SignatureURL != "https://example.com/installer.zip.sig" {
-		t.Errorf("SignatureURL = %q, want signature URL", ca.SignatureURL)
+	for _, tc := range cases {
+		ca := u.FindClientAssets(tc.target)
+		if ca.InstallerURL != tc.wantInstaller || ca.SignatureURL != tc.wantSig {
+			t.Errorf("FindClientAssets(%q) = {%q, %q}, want {%q, %q}",
+				tc.target, ca.InstallerURL, ca.SignatureURL, tc.wantInstaller, tc.wantSig)
+		}
 	}
 }
 
@@ -52,7 +71,7 @@ func TestFindClientAssets_NoMatchingAssets(t *testing.T) {
 	}
 	u.mu.Unlock()
 
-	ca := u.FindClientAssets()
+	ca := u.FindClientAssets("windows-x86_64-nsis")
 	if ca.InstallerURL != "" || ca.SignatureURL != "" {
 		t.Error("expected empty ClientAssets when no NSIS assets")
 	}

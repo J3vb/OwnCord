@@ -181,6 +181,103 @@ impl rustls::client::danger::ServerCertVerifier for PinnedVerifier {
     }
 }
 
+/// A rustls verifier that applies the pinned-fingerprint check ONLY to the
+/// named host and normal web-PKI validation to every other host. Used by the
+/// updater, whose single HTTP client talks both to the (possibly self-signed,
+/// TOFU-pinned) OwnCord server for update metadata and to GitHub for the
+/// installer download — a client-wide pin would reject GitHub's certificate.
+#[derive(Debug)]
+pub(crate) struct HostScopedVerifier {
+    pinned_host: String,
+    pinned: PinnedVerifier,
+    default: Arc<dyn rustls::client::danger::ServerCertVerifier>,
+}
+
+impl HostScopedVerifier {
+    pub(crate) fn new(pinned_host: String, expected_fingerprint: String) -> Result<Self, String> {
+        let mut roots = rustls::RootCertStore::empty();
+        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let default = rustls::client::WebPkiServerVerifier::builder_with_provider(
+            Arc::new(roots),
+            Arc::new(rustls::crypto::ring::default_provider()),
+        )
+        .build()
+        .map_err(|e| format!("failed to build web-PKI verifier: {e}"))?;
+        Ok(Self::with_default(pinned_host, expected_fingerprint, default))
+    }
+
+    /// Seam for tests: inject the verifier used for non-pinned hosts.
+    fn with_default(
+        pinned_host: String,
+        expected_fingerprint: String,
+        default: Arc<dyn rustls::client::danger::ServerCertVerifier>,
+    ) -> Self {
+        // url::Url wraps IPv6 hosts in brackets; ServerName renders them bare.
+        let pinned_host = pinned_host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .to_ascii_lowercase();
+        Self {
+            pinned_host,
+            pinned: PinnedVerifier::new(expected_fingerprint),
+            default,
+        }
+    }
+
+    fn is_pinned_host(&self, server_name: &rustls::pki_types::ServerName<'_>) -> bool {
+        match server_name {
+            rustls::pki_types::ServerName::DnsName(d) => {
+                d.as_ref().eq_ignore_ascii_case(&self.pinned_host)
+            }
+            rustls::pki_types::ServerName::IpAddress(ip) => {
+                std::net::IpAddr::from(*ip).to_string() == self.pinned_host
+            }
+            _ => false,
+        }
+    }
+}
+
+impl rustls::client::danger::ServerCertVerifier for HostScopedVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &rustls::pki_types::CertificateDer<'_>,
+        intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        server_name: &rustls::pki_types::ServerName<'_>,
+        ocsp_response: &[u8],
+        now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        if self.is_pinned_host(server_name) {
+            self.pinned
+                .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
+        } else {
+            self.default
+                .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
+        }
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        verify_tls12(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        verify_tls13(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        default_verify_schemes()
+    }
+}
+
 // ── store keys ──────────────────────────────────────────────────────────────
 
 /// Cert-store key for a host. Strips a default `:443` so the ws proxy (which
@@ -310,5 +407,126 @@ mod tests {
             fingerprint_hex(b""),
             "e3:b0:c4:42:98:fc:1c:14:9a:fb:f4:c8:99:6f:b9:24:27:ae:41:e4:64:9b:93:4c:a4:95:99:1b:78:52:b8:55"
         );
+    }
+
+    // ── HostScopedVerifier ──────────────────────────────────────────────────
+
+    /// Stub for the non-pinned-host verifier: records nothing, just returns a
+    /// fixed verdict so tests can prove which path a connection was routed to.
+    #[derive(Debug)]
+    struct StubVerifier {
+        accept: bool,
+    }
+
+    impl rustls::client::danger::ServerCertVerifier for StubVerifier {
+        fn verify_server_cert(
+            &self,
+            _end_entity: &rustls::pki_types::CertificateDer<'_>,
+            _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+            _server_name: &rustls::pki_types::ServerName<'_>,
+            _ocsp_response: &[u8],
+            _now: rustls::pki_types::UnixTime,
+        ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+            if self.accept {
+                Ok(rustls::client::danger::ServerCertVerified::assertion())
+            } else {
+                Err(rustls::Error::General("stub rejected".into()))
+            }
+        }
+
+        fn verify_tls12_signature(
+            &self,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            verify_tls12(message, cert, dss)
+        }
+
+        fn verify_tls13_signature(
+            &self,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            verify_tls13(message, cert, dss)
+        }
+
+        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+            default_verify_schemes()
+        }
+    }
+
+    fn host_scoped(pinned_host: &str, cert_bytes: &[u8], stub_accepts: bool) -> HostScopedVerifier {
+        HostScopedVerifier::with_default(
+            pinned_host.to_string(),
+            fingerprint_hex(cert_bytes),
+            Arc::new(StubVerifier { accept: stub_accepts }),
+        )
+    }
+
+    fn verify(
+        v: &HostScopedVerifier,
+        host: &str,
+        cert_bytes: &[u8],
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        use rustls::client::danger::ServerCertVerifier;
+        let cert = rustls::pki_types::CertificateDer::from(cert_bytes.to_vec());
+        let name = rustls::pki_types::ServerName::try_from(host.to_string()).unwrap();
+        v.verify_server_cert(
+            &cert,
+            &[],
+            &name,
+            &[],
+            rustls::pki_types::UnixTime::since_unix_epoch(std::time::Duration::from_secs(0)),
+        )
+    }
+
+    #[test]
+    fn host_scoped_pins_matching_host() {
+        // Stub rejects, so success proves the PINNED path handled it.
+        let v = host_scoped("chat.example.com", b"server-cert", false);
+        assert!(verify(&v, "chat.example.com", b"server-cert").is_ok());
+    }
+
+    #[test]
+    fn host_scoped_rejects_wrong_cert_on_pinned_host() {
+        let err = verify(
+            &host_scoped("chat.example.com", b"server-cert", true),
+            "chat.example.com",
+            b"mitm-cert",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("fingerprint mismatch"), "{err}");
+    }
+
+    #[test]
+    fn host_scoped_delegates_other_hosts_to_default() {
+        // Cert does NOT match the pin; success proves the DEFAULT path handled it.
+        let v = host_scoped("chat.example.com", b"server-cert", true);
+        assert!(verify(&v, "github.com", b"github-cert").is_ok());
+    }
+
+    #[test]
+    fn host_scoped_default_rejection_propagates() {
+        let err = verify(
+            &host_scoped("chat.example.com", b"server-cert", false),
+            "github.com",
+            b"github-cert",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("stub rejected"), "{err}");
+    }
+
+    #[test]
+    fn host_scoped_host_match_is_case_insensitive() {
+        let v = host_scoped("Chat.Example.COM", b"server-cert", false);
+        assert!(verify(&v, "chat.example.com", b"server-cert").is_ok());
+    }
+
+    #[test]
+    fn host_scoped_matches_ip_pinned_host() {
+        let v = host_scoped("192.168.1.10", b"server-cert", false);
+        assert!(verify(&v, "192.168.1.10", b"server-cert").is_ok());
     }
 }
