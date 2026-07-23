@@ -26,13 +26,10 @@
 // - The accept loop exits after 5 consecutive errors to prevent CPU spin.
 
 use log::{debug, error, info, warn};
-use ring::digest::{digest, SHA256};
 use std::net::IpAddr;
 use std::sync::Arc;
 use rustls::pki_types::ServerName;
-use serde_json::Value;
 use tauri::Runtime;
-use tauri_plugin_store::StoreExt;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
@@ -65,117 +62,15 @@ impl LiveKitProxyState {
 }
 
 // ---------------------------------------------------------------------------
-// TLS certificate verifier — pinned fingerprint check
+// TLS verification & cert-store helpers live in the shared `tofu` module
+// (crate::tofu): PinnedVerifier, cert_store_key, load_stored_fingerprint.
 // ---------------------------------------------------------------------------
 
-use crate::constants::CERTS_STORE;
-
-/// Verifies the server certificate against a known SHA-256 fingerprint.
-/// Reuses the fingerprint stored by ws_proxy's TOFU handshake for the same
-/// host, so LiveKit connections are pinned to the same certificate the user
-/// already trusted during WebSocket setup.
-#[derive(Debug)]
-pub(crate) struct PinnedVerifier {
-    /// Expected SHA-256 colon-hex fingerprint (e.g. "aa:bb:cc:...").
-    expected_fingerprint: String,
-}
-
-impl PinnedVerifier {
-    pub(crate) fn new(expected_fingerprint: String) -> Self {
-        Self { expected_fingerprint }
-    }
-}
-
-impl rustls::client::danger::ServerCertVerifier for PinnedVerifier {
-    fn verify_server_cert(
-        &self,
-        end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        let hash = digest(&SHA256, end_entity.as_ref());
-        let hex = hash
-            .as_ref()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<Vec<_>>()
-            .join(":");
-
-        if hex == self.expected_fingerprint {
-            Ok(rustls::client::danger::ServerCertVerified::assertion())
-        } else {
-            Err(rustls::Error::General(format!(
-                "certificate fingerprint mismatch: expected {}, got {}",
-                self.expected_fingerprint, hex
-            )))
-        }
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        rustls::crypto::ring::default_provider()
-            .signature_verification_algorithms
-            .supported_schemes()
-    }
-}
+use crate::tofu;
 
 // ---------------------------------------------------------------------------
 // Tauri commands
 // ---------------------------------------------------------------------------
-
-/// Produce the cert store key matching ws_proxy's format.
-/// ws_proxy extracts the host from "wss://host/path" which omits port 443.
-/// We normalise by stripping the default ":443" suffix so the keys match.
-pub(crate) fn cert_store_key(remote_host: &str) -> String {
-    remote_host.strip_suffix(":443").unwrap_or(remote_host).to_string()
-}
-
-/// Load the stored certificate fingerprint for a host from the Tauri cert store.
-pub(crate) fn load_stored_fingerprint<R: Runtime>(
-    app: &tauri::AppHandle<R>,
-    host: &str,
-) -> Result<Option<String>, String> {
-    let store = app
-        .store(CERTS_STORE)
-        .map_err(|e| format!("failed to open certs store: {e}"))?;
-
-    Ok(store.get(host).and_then(|v| {
-        if let Value::String(s) = v {
-            Some(s)
-        } else {
-            None
-        }
-    }))
-}
 
 /// Start a local TCP proxy that tunnels LiveKit signal connections to the
 /// remote OwnCord server over TLS, pinning the certificate to the fingerprint
@@ -221,8 +116,8 @@ pub async fn start_livekit_proxy<R: Runtime>(
     // have connected first (establishing the TOFU trust), so the fingerprint
     // should already be stored. If not, reject — we refuse to connect without
     // a pinned cert.
-    let store_key = cert_store_key(&remote_host);
-    let fingerprint = load_stored_fingerprint(&app, &store_key)?
+    let store_key = tofu::cert_store_key(&remote_host);
+    let fingerprint = tofu::load_stored_fingerprint(&app, &store_key)?
         .ok_or_else(|| format!(
             "no trusted certificate fingerprint for {remote_host}. \
              Connect via WebSocket first to establish TOFU trust."
@@ -384,7 +279,7 @@ async fn handle_connection(
     let tls_config = rustls::ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(
-            PinnedVerifier::new(pinned_fingerprint.to_string()),
+            tofu::PinnedVerifier::new(pinned_fingerprint.to_string()),
         ))
         .with_no_client_auth();
 
@@ -426,36 +321,4 @@ async fn handle_connection(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cert_store_key_strips_default_port() {
-        assert_eq!(cert_store_key("example.com:443"), "example.com");
-    }
-
-    #[test]
-    fn cert_store_key_keeps_non_default_port() {
-        assert_eq!(cert_store_key("example.com:8443"), "example.com:8443");
-    }
-
-    #[test]
-    fn cert_store_key_no_port() {
-        assert_eq!(cert_store_key("example.com"), "example.com");
-    }
-
-    #[test]
-    fn cert_store_key_ipv4_default_port() {
-        assert_eq!(cert_store_key("192.168.1.1:443"), "192.168.1.1");
-    }
-
-    #[test]
-    fn cert_store_key_ipv4_custom_port() {
-        assert_eq!(cert_store_key("192.168.1.1:7880"), "192.168.1.1:7880");
-    }
-}
+// cert_store_key is covered by unit tests in the shared `tofu` module.

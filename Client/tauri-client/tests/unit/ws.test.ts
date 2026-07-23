@@ -629,6 +629,42 @@ describe("cert mismatch blocking", () => {
     expect(mockInvoke).toHaveBeenCalledWith("ws_connect", expect.anything());
   });
 
+  it("routes first_use cert events to onCertFirstUse, not onCertMismatch (F4/F8)", async () => {
+    const firstUse: unknown[] = [];
+    const mismatch: unknown[] = [];
+    client.onCertFirstUse((e) => firstUse.push(e));
+    client.onCertMismatch((e) => mismatch.push(e));
+
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+
+    emitTauriEvent("cert-tofu", {
+      host: "localhost:8443",
+      fingerprint: "sha256:NEW",
+      status: "first_use",
+    });
+
+    expect(firstUse).toHaveLength(1);
+    expect(mismatch).toHaveLength(0);
+  });
+
+  it("startCertListener catches cert events before any WS connect (connect-page path)", async () => {
+    const firstUse: unknown[] = [];
+    client.onCertFirstUse((e) => firstUse.push(e));
+
+    // No connect() — main.ts registers the listener at bootstrap so first-use
+    // fires during the connect page's health check, before login.
+    await client.startCertListener();
+
+    emitTauriEvent("cert-tofu", {
+      host: "localhost:8443",
+      fingerprint: "sha256:NEW",
+      status: "first_use",
+    });
+
+    expect(firstUse).toHaveLength(1);
+  });
+
   it("should not schedule reconnect when certMismatchBlock is true", async () => {
     const mismatchEvents: unknown[] = [];
     client.onCertMismatch((evt) => mismatchEvents.push(evt));
