@@ -62,6 +62,12 @@ type Instance struct {
 	WASMPath string
 	Enabled  bool
 
+	// invokeMu serializes guest calls for this instance. wazero's Function.Call
+	// is not goroutine-safe, and concurrent invocations race the module's shared
+	// linear-memory buffer (F2). Held by the wazero-tagged invokeCommand around
+	// the whole allocate/write/dispatch/read sequence.
+	invokeMu sync.Mutex //nolint:unused // used only by the wazero-tagged build
+
 	// module is the wazero compiled module in the wazero-tagged build, or
 	// nil in the default build.
 	module any //nolint:unused // assigned by wazero-tagged build
