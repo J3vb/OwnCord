@@ -19,7 +19,7 @@ Get OwnCord running with the fewest possible steps.
 
 ## Prerequisites
 
-- Go 1.25+ (only if building server from source)
+- Go 1.26+ (only if building server from source)
 - Node.js 20+ and Rust (only if building client from source)
 - Docker + Compose v2 (Docker path only)
 - LiveKit (optional, required for voice/video)
