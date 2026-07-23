@@ -4,6 +4,7 @@ mod credentials;
 mod http_proxy;
 mod livekit_proxy;
 mod ptt;
+mod tofu;
 mod tray;
 mod update_commands;
 mod ws_proxy;
