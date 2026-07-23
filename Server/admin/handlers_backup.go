@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -28,9 +29,6 @@ func init() {
 	}
 }
 
-// SetBackupBaseDir overrides backupBaseDir. Intended for tests only.
-func SetBackupBaseDir(dir string) { backupBaseDir = dir }
-
 // ─── Backup Handlers ─────────────────────────────────────────────────────────
 
 func handleBackup(database *db.DB) http.Handler {
@@ -44,7 +42,10 @@ func handleBackup(database *db.DB) http.Handler {
 		timestamp := time.Now().UTC().Format("20060102_150405")
 		backupPath := filepath.Join(backupDir, "chatserver_"+timestamp+".db")
 
-		if err := database.BackupTo(backupPath); err != nil {
+		// Detached like the restore path's safety backup: an interrupted
+		// VACUUM INTO leaves a truncated .db that handleListBackups would
+		// present as restorable.
+		if err := database.BackupTo(context.WithoutCancel(r.Context()), backupPath); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "backup failed")
 			return
 		}
@@ -52,7 +53,7 @@ func handleBackup(database *db.DB) http.Handler {
 		actor := actorFromContext(r)
 		backupName := filepath.Base(backupPath)
 		slog.Info("database backup created", "actor_id", actor, "name", backupName)
-		db.WriteAudit(database, actor, "backup_create", "server", 0,
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "backup_create", "server", 0,
 			fmt.Sprintf("backup saved: %s", backupName))
 
 		writeJSON(w, http.StatusOK, map[string]string{
@@ -136,7 +137,7 @@ func handleDeleteBackup(database *db.DB) http.Handler {
 
 		actor := actorFromContext(r)
 		slog.Info("backup deleted", "actor_id", actor, "name", name)
-		db.WriteAudit(database, actor, "backup_delete", "server", 0, "deleted backup "+name)
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "backup_delete", "server", 0, "deleted backup "+name)
 
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -163,9 +164,12 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 
 		dbPath := filepath.Join("data", "chatserver.db")
 
-		// Safety: create a pre-restore backup before overwriting.
+		// Safety: create a pre-restore backup before overwriting. WithoutCancel:
+		// the restore proceeds regardless of client disconnect (Close/copyFile
+		// below are not ctx-aware), so the safety backup must not be skippable
+		// by a canceled request ctx.
 		preRestore := filepath.Join("data", "backups", "pre_restore_"+time.Now().UTC().Format("20060102_150405")+".db")
-		if err := database.BackupTo(preRestore); err != nil {
+		if err := database.BackupTo(context.WithoutCancel(r.Context()), preRestore); err != nil {
 			slog.Warn("pre-restore backup failed", "err", err)
 		}
 
@@ -174,7 +178,7 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 
 		// Checkpoint the WAL and close the database connection before overwriting
 		// to prevent corruption from concurrent writes (BUG-096).
-		if _, checkpointErr := database.SQLDb().Exec("PRAGMA wal_checkpoint(TRUNCATE)"); checkpointErr != nil {
+		if _, checkpointErr := database.SQLDb().ExecContext(context.WithoutCancel(r.Context()), "PRAGMA wal_checkpoint(TRUNCATE)"); checkpointErr != nil {
 			slog.Warn("pre-restore WAL checkpoint failed", "err", checkpointErr)
 		}
 

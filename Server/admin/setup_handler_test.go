@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -86,7 +87,7 @@ func TestSetup_CreatesOwner(t *testing.T) {
 	}
 
 	// Verify user was created with Owner role.
-	user, err := database.GetUserByUsername("myadmin")
+	user, err := database.GetUserByUsername(context.Background(), "myadmin")
 	if err != nil || user == nil {
 		t.Fatal("user not found in database after setup")
 	}
@@ -185,7 +186,7 @@ func TestSetup_ConcurrentRace(t *testing.T) {
 	}
 
 	// Verify only one user exists in the database.
-	count, err := database.UserCount()
+	count, err := database.UserCount(context.Background())
 	if err != nil {
 		t.Fatalf("UserCount: %v", err)
 	}

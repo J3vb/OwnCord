@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -43,7 +44,7 @@ func TestBackupToSafe_ValidPath(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	backupPath := filepath.Join(backupDir, "chatserver_20260315_120000.db")
-	if err := database.BackupToSafe(backupPath, backupDir); err != nil {
+	if err := database.BackupToSafe(context.Background(), backupPath, backupDir); err != nil {
 		t.Fatalf("BackupToSafe() with valid path returned error: %v", err)
 	}
 
@@ -67,7 +68,7 @@ func TestBackupToSafe_RejectsPathOutsideRoot(t *testing.T) {
 	}
 	// Try to write outside backupDir
 	escapePath := filepath.Join(tmpDir, "escaped.db")
-	err := database.BackupToSafe(escapePath, backupDir)
+	err := database.BackupToSafe(context.Background(), escapePath, backupDir)
 	if err == nil {
 		t.Error("BackupToSafe() should reject path outside safe root, got nil")
 	}
@@ -83,7 +84,7 @@ func TestBackupToSafe_RejectsSingleQuote(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	malicious := filepath.Join(backupDir, "evil'.db")
-	err := database.BackupToSafe(malicious, backupDir)
+	err := database.BackupToSafe(context.Background(), malicious, backupDir)
 	if err == nil {
 		t.Error("BackupToSafe() with single-quote in path should return error, got nil")
 	}
@@ -98,7 +99,7 @@ func TestBackupToSafe_RejectsSemicolon(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	malicious := filepath.Join(backupDir, "evil;drop.db")
-	err := database.BackupToSafe(malicious, backupDir)
+	err := database.BackupToSafe(context.Background(), malicious, backupDir)
 	if err == nil {
 		t.Error("BackupToSafe() with semicolon in path should return error, got nil")
 	}
@@ -113,7 +114,7 @@ func TestBackupToSafe_RejectsSQLComment(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	malicious := filepath.Join(backupDir, "evil--comment.db")
-	err := database.BackupToSafe(malicious, backupDir)
+	err := database.BackupToSafe(context.Background(), malicious, backupDir)
 	if err == nil {
 		t.Error("BackupToSafe() with '--' in path should return error, got nil")
 	}
@@ -128,7 +129,7 @@ func TestBackupToSafe_RejectsNullByte(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	malicious := filepath.Join(backupDir, "evil\x00.db") //nolint:gocritic // intentional null byte for security test
-	err := database.BackupToSafe(malicious, backupDir)
+	err := database.BackupToSafe(context.Background(), malicious, backupDir)
 	if err == nil {
 		t.Error("BackupToSafe() with null byte in path should return error, got nil")
 	}
@@ -144,7 +145,7 @@ func TestBackupToSafe_RejectsDoubleQuote(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	malicious := filepath.Join(backupDir, `evil".db`)
-	err := database.BackupToSafe(malicious, backupDir)
+	err := database.BackupToSafe(context.Background(), malicious, backupDir)
 	if err == nil {
 		t.Error("BackupToSafe() with double-quote in path should return error, got nil")
 	}

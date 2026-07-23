@@ -1,6 +1,10 @@
 package admin
 
-import "github.com/owncord/server/db"
+import (
+	"context"
+
+	"github.com/owncord/server/db"
+)
 
 // ─── Context keys ─────────────────────────────────────────────────────────────
 
@@ -93,9 +97,9 @@ func toAdminUserResponse(u db.UserWithRole) adminUserResponse {
 
 // toAdminUserResponseFromUser converts a plain db.User to the safe response
 // shape, resolving the role name via the database.
-func toAdminUserResponseFromUser(database *db.DB, u *db.User) adminUserResponse {
+func toAdminUserResponseFromUser(ctx context.Context, database *db.DB, u *db.User) adminUserResponse {
 	roleName := ""
-	if role, err := database.GetRoleByID(u.RoleID); err == nil && role != nil {
+	if role, err := database.GetRoleByID(ctx, u.RoleID); err == nil && role != nil {
 		roleName = role.Name
 	}
 	return adminUserResponse{

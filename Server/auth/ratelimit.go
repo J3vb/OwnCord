@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"time"
 
 	"github.com/owncord/server/syncutil"
@@ -20,11 +21,11 @@ type lockoutEntry struct {
 // When provided, lockouts survive server restarts. The interface uses only
 // stdlib types to avoid circular dependencies between packages.
 type LockoutPersister interface {
-	UpsertLockout(key string, expiresAt time.Time) error
-	DeleteLockout(key string) error
-	CleanupExpiredLockouts() error
+	UpsertLockout(ctx context.Context, key string, expiresAt time.Time) error
+	DeleteLockout(ctx context.Context, key string) error
+	CleanupExpiredLockouts(ctx context.Context) error
 	// LoadActiveLockouts returns (keys, expiresAt) slices of equal length.
-	LoadActiveLockouts() (keys []string, expiresAt []time.Time, err error)
+	LoadActiveLockouts(ctx context.Context) (keys []string, expiresAt []time.Time, err error)
 }
 
 // RateLimiter is an in-memory, thread-safe sliding-window rate limiter with
@@ -58,8 +59,9 @@ func NewPersistentRateLimiter(store LockoutPersister) *RateLimiter {
 		lockouts: make(map[string]*lockoutEntry),
 		store:    store,
 	}
-	// Load surviving lockouts from the store.
-	if keys, expiresAt, err := store.LoadActiveLockouts(); err == nil {
+	// Load surviving lockouts from the store. Constructor runs at startup
+	// with no request in flight, so background context.
+	if keys, expiresAt, err := store.LoadActiveLockouts(context.Background()); err == nil {
 		for i, key := range keys {
 			rl.lockouts[key] = &lockoutEntry{expiresAt: expiresAt[i]}
 		}
@@ -111,14 +113,16 @@ func (r *RateLimiter) Allow(key string, limit int, window time.Duration) bool {
 
 // Lockout prevents any requests from key for duration regardless of the
 // sliding-window counter. When a LockoutStore is configured, the lockout
-// is persisted so it survives server restarts.
-func (r *RateLimiter) Lockout(key string, duration time.Duration) {
+// is persisted so it survives server restarts. The persist write must land
+// once the lockout is decided, so the caller's cancellation is detached
+// (WithoutCancel) rather than aborting the write mid-request.
+func (r *RateLimiter) Lockout(ctx context.Context, key string, duration time.Duration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	expiresAt := time.Now().Add(duration)
 	r.lockouts[key] = &lockoutEntry{expiresAt: expiresAt}
 	if r.store != nil {
-		_ = r.store.UpsertLockout(key, expiresAt)
+		_ = r.store.UpsertLockout(context.WithoutCancel(ctx), key, expiresAt)
 	}
 }
 
@@ -170,13 +174,14 @@ func (r *RateLimiter) Check(key string, limit int, window time.Duration) bool {
 }
 
 // Reset clears all rate-limit state (timestamps and lockout) for key.
-func (r *RateLimiter) Reset(key string) {
+// Like Lockout, the store delete must complete once decided (WithoutCancel).
+func (r *RateLimiter) Reset(ctx context.Context, key string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.windows, key)
 	delete(r.lockouts, key)
 	if r.store != nil {
-		_ = r.store.DeleteLockout(key)
+		_ = r.store.DeleteLockout(context.WithoutCancel(ctx), key)
 	}
 }
 
@@ -217,7 +222,8 @@ func (r *RateLimiter) Cleanup(maxWindow time.Duration) {
 	}
 
 	if r.store != nil {
-		_ = r.store.CleanupExpiredLockouts()
+		// Runs from the StartCleanup background goroutine — no request ctx.
+		_ = r.store.CleanupExpiredLockouts(context.Background())
 	}
 }
 

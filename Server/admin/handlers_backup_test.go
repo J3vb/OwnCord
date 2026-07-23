@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -77,9 +78,9 @@ func TestHandleBackup_RequiresOwner(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
-	adminUID, _ := database.CreateUser("backupadmin", "hash", 2)
+	adminUID, _ := database.CreateUser(context.Background(), "backupadmin", "hash", 2)
 	token := "backup-admin-token"
-	_, _ = database.CreateSession(adminUID, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), adminUID, auth.HashToken(token), "test", "127.0.0.1")
 
 	w := doRequest(t, handler, http.MethodPost, "/backup", token, nil)
 
@@ -226,9 +227,9 @@ func TestHandleDeleteBackup_RequiresOwner(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
-	adminUID, _ := database.CreateUser("deladmin", "hash", 2)
+	adminUID, _ := database.CreateUser(context.Background(), "deladmin", "hash", 2)
 	token := "del-admin-token"
-	_, _ = database.CreateSession(adminUID, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), adminUID, auth.HashToken(token), "test", "127.0.0.1")
 
 	// Create the file so path validation doesn't return 404 before the 403.
 	backupDir := filepath.Join(tmpDir, "data", "backups")
@@ -354,9 +355,9 @@ func TestHandleRestoreBackup_RequiresOwner(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
-	adminUID, _ := database.CreateUser("restoreadmin", "hash", 2)
+	adminUID, _ := database.CreateUser(context.Background(), "restoreadmin", "hash", 2)
 	token := "restore-admin-token"
-	_, _ = database.CreateSession(adminUID, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), adminUID, auth.HashToken(token), "test", "127.0.0.1")
 
 	// Create files so path checks pass before auth check.
 	backupDir := filepath.Join(tmpDir, "data", "backups")

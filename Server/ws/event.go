@@ -259,17 +259,6 @@ type VoiceStateEvent struct {
 func (e VoiceStateEvent) EventType() string { return MsgTypeVoiceState }
 func (e VoiceStateEvent) Payload() []byte   { return e.payload }
 
-// VoiceLeaveEvent is a voice_leave broadcast to all connected clients.
-// NOTE: Currently unused — the voice_leave V2 handler triggers the hub's
-// handleVoiceLeave routine (via Result.LeaveVoice), which broadcasts the leave
-// directly. Retained as forward-compatible scaffolding.
-type VoiceLeaveEvent struct {
-	payload []byte
-}
-
-func (e VoiceLeaveEvent) EventType() string { return MsgTypeVoiceLeaveBC }
-func (e VoiceLeaveEvent) Payload() []byte   { return e.payload }
-
 // PluginBroadcastEvent is a plugin slash-command result broadcast to a channel
 // (sequenced, replayable). Emitted by the chat_command handler after the
 // invoking user's post permission is verified.

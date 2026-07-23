@@ -1,6 +1,7 @@
 package ws_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"testing/fstest"
@@ -72,11 +73,11 @@ func newVoiceHub(t *testing.T) (*ws.Hub, *db.DB) {
 // seedVoiceOwner inserts an Owner-role user for permission-passing tests.
 func seedVoiceOwner(t *testing.T, database *db.DB, username string) *db.User {
 	t.Helper()
-	_, err := database.CreateUser(username, "hash", 1) // roleID=1 → Owner
+	_, err := database.CreateUser(context.Background(), username, "hash", 1) // roleID=1 → Owner
 	if err != nil {
 		t.Fatalf("seedVoiceOwner CreateUser: %v", err)
 	}
-	user, err := database.GetUserByUsername(username)
+	user, err := database.GetUserByUsername(context.Background(), username)
 	if err != nil || user == nil {
 		t.Fatalf("seedVoiceOwner GetUserByUsername: %v", err)
 	}
@@ -86,7 +87,7 @@ func seedVoiceOwner(t *testing.T, database *db.DB, username string) *db.User {
 // seedVoiceChan creates a voice-type channel.
 func seedVoiceChan(t *testing.T, database *db.DB, name string) int64 {
 	t.Helper()
-	id, err := database.CreateChannel(name, "voice", "", "", 0)
+	id, err := database.CreateChannel(context.Background(), name, "voice", "", "", 0)
 	if err != nil {
 		t.Fatalf("seedVoiceChan: %v", err)
 	}
@@ -187,7 +188,7 @@ func TestVoice_Join_SetsStateInDB(t *testing.T) {
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 	time.Sleep(30 * time.Millisecond)
 
-	state, err := database.GetVoiceState(user.ID)
+	state, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
@@ -339,7 +340,7 @@ func TestVoice_Leave_ClearsStateInDB(t *testing.T) {
 	hub.HandleMessageForTest(c, voiceLeaveMsg())
 	time.Sleep(30 * time.Millisecond)
 
-	state, err := database.GetVoiceState(user.ID)
+	state, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil {
 		t.Fatalf("GetVoiceState after leave: %v", err)
 	}
@@ -403,7 +404,7 @@ func TestVoice_Mute_UpdatesStateInDB(t *testing.T) {
 	hub.HandleMessageForTest(c, voiceMuteMsg(true))
 	time.Sleep(30 * time.Millisecond)
 
-	state, err := database.GetVoiceState(user.ID)
+	state, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
@@ -467,7 +468,7 @@ func TestVoice_Deafen_UpdatesStateInDB(t *testing.T) {
 	hub.HandleMessageForTest(c, voiceDeafenMsg(true))
 	time.Sleep(30 * time.Millisecond)
 
-	state, err := database.GetVoiceState(user.ID)
+	state, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
@@ -552,7 +553,7 @@ func TestVoice_Camera_UpdatesState(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Verify DB state.
-	state, err := database.GetVoiceState(user.ID)
+	state, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
@@ -684,7 +685,7 @@ func TestVoice_Screenshare_UpdatesState(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Verify DB state.
-	state, err := database.GetVoiceState(user.ID)
+	state, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
@@ -854,11 +855,11 @@ func TestVoice_HandleMessage_VoiceScreenshare_Dispatched(t *testing.T) {
 // seedVoiceChanMaxUsers creates a voice channel with a custom voice_max_users limit.
 func seedVoiceChanMaxUsers(t *testing.T, database *db.DB, name string, maxUsers int) int64 {
 	t.Helper()
-	id, err := database.CreateChannel(name, "voice", "", "", 0)
+	id, err := database.CreateChannel(context.Background(), name, "voice", "", "", 0)
 	if err != nil {
 		t.Fatalf("seedVoiceChanMaxUsers CreateChannel: %v", err)
 	}
-	if err := database.SetChannelVoiceMaxUsers(id, maxUsers); err != nil {
+	if err := database.SetChannelVoiceMaxUsers(context.Background(), id, maxUsers); err != nil {
 		t.Fatalf("seedVoiceChanMaxUsers SetChannelVoiceMaxUsers: %v", err)
 	}
 	return id
@@ -881,7 +882,7 @@ func TestVoice_Join_ChannelFull(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Verify first user is in DB.
-	state1, err := database.GetVoiceState(user1.ID)
+	state1, err := database.GetVoiceState(context.Background(), user1.ID)
 	if err != nil || state1 == nil {
 		t.Fatalf("user1 voice state missing after join: %v", err)
 	}
@@ -919,7 +920,7 @@ func TestVoice_Join_ChannelFull(t *testing.T) {
 	}
 
 	// Second user should NOT be in DB voice state.
-	state2, err := database.GetVoiceState(user2.ID)
+	state2, err := database.GetVoiceState(context.Background(), user2.ID)
 	if err != nil {
 		t.Fatalf("GetVoiceState user2: %v", err)
 	}
@@ -999,7 +1000,7 @@ func TestVoice_Join_SwitchChannel_LeavesOldChannel(t *testing.T) {
 	drainChan(send)
 
 	// Verify in channel A via DB.
-	stateA, _ := database.GetVoiceState(userA.ID)
+	stateA, _ := database.GetVoiceState(context.Background(), userA.ID)
 	if stateA == nil || stateA.ChannelID != chanA {
 		t.Fatal("user should be in channel A")
 	}
@@ -1009,7 +1010,7 @@ func TestVoice_Join_SwitchChannel_LeavesOldChannel(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// DB state should show channel B.
-	stateB, _ := database.GetVoiceState(userA.ID)
+	stateB, _ := database.GetVoiceState(context.Background(), userA.ID)
 	if stateB == nil || stateB.ChannelID != chanB {
 		t.Error("user should be in channel B after switching")
 	}
@@ -1070,7 +1071,7 @@ func TestVoice_Leave_OnDisconnect(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 
 	// DB state should be cleared.
-	state, err := database.GetVoiceState(user.ID)
+	state, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil {
 		t.Fatalf("GetVoiceState after disconnect: %v", err)
 	}

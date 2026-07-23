@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -177,13 +178,13 @@ func buildUploadRouterWithLimiter(database *db.DB, store *storage.Storage, limit
 // uploadCreateToken creates a user+session and returns the plaintext token.
 func uploadCreateToken(t *testing.T, database *db.DB, username string, roleID int) string {
 	t.Helper()
-	_, err := database.CreateUser(username, "$2a$12$fake", roleID)
+	_, err := database.CreateUser(context.Background(), username, "$2a$12$fake", roleID)
 	if err != nil {
 		t.Fatalf("CreateUser %q: %v", username, err)
 	}
 	token := "upload-test-token-" + username
 	hash := auth.HashToken(token)
-	_, err = database.Exec(
+	_, err = database.ExecContext(context.Background(),
 		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at)
 		 SELECT id, ?, 'test', '127.0.0.1', '2099-01-01T00:00:00Z' FROM users WHERE username = ?`,
 		hash, username,
@@ -320,7 +321,7 @@ func TestUpload_Success_TextFile(t *testing.T) {
 	}
 
 	// Verify attachment record was created in DB.
-	att, err := database.GetAttachmentByID(resp["id"].(string))
+	att, err := database.GetAttachmentByID(context.Background(), resp["id"].(string))
 	if err != nil {
 		t.Fatalf("GetAttachmentByID: %v", err)
 	}
@@ -557,7 +558,7 @@ func TestUpload_DBCreateAttachmentFailureDeletesStoredFile(t *testing.T) {
 	router := buildUploadRouter(database, store, nil)
 	token := uploadCreateToken(t, database, "dbfailupload", 1)
 
-	if _, err := database.Exec(`DROP TABLE attachments`); err != nil {
+	if _, err := database.ExecContext(context.Background(), `DROP TABLE attachments`); err != nil {
 		t.Fatalf("drop attachments table: %v", err)
 	}
 
@@ -604,7 +605,7 @@ func TestUpload_SanitizesReservedFilenameToUnnamed(t *testing.T) {
 		t.Fatalf("filename = %v, want unnamed", resp["filename"])
 	}
 
-	att, err := database.GetAttachmentByID(resp["id"].(string))
+	att, err := database.GetAttachmentByID(context.Background(), resp["id"].(string))
 	if err != nil {
 		t.Fatalf("GetAttachmentByID: %v", err)
 	}
@@ -633,7 +634,7 @@ func TestUpload_SuccessfulUploadCreatesDBRecord(t *testing.T) {
 	_ = json.NewDecoder(rr.Body).Decode(&resp)
 
 	fileID := resp["id"].(string)
-	att, err := database.GetAttachmentByID(fileID)
+	att, err := database.GetAttachmentByID(context.Background(), fileID)
 	if err != nil {
 		t.Fatalf("GetAttachmentByID: %v", err)
 	}
@@ -1159,20 +1160,20 @@ func TestServeFile_LinkedToGuildChannel_MemberWithPerm(t *testing.T) {
 	fileID := resp["id"].(string)
 
 	// Create a guild channel and link the attachment via a message.
-	_, err := database.Exec(`INSERT INTO channels (id, name, type) VALUES (1, 'general', 'text')`)
+	_, err := database.ExecContext(context.Background(), `INSERT INTO channels (id, name, type) VALUES (1, 'general', 'text')`)
 	if err != nil {
 		t.Fatalf("insert channel: %v", err)
 	}
 	// Get the uploader's user ID.
 	var userID int64
-	if err := database.QueryRow(`SELECT id FROM users WHERE username = 'guildmember'`).Scan(&userID); err != nil {
+	if err := database.QueryRowContext(context.Background(), `SELECT id FROM users WHERE username = 'guildmember'`).Scan(&userID); err != nil {
 		t.Fatalf("get user id: %v", err)
 	}
-	_, err = database.Exec(`INSERT INTO messages (id, channel_id, user_id, content) VALUES (1, 1, ?, 'test')`, userID)
+	_, err = database.ExecContext(context.Background(), `INSERT INTO messages (id, channel_id, user_id, content) VALUES (1, 1, ?, 'test')`, userID)
 	if err != nil {
 		t.Fatalf("insert message: %v", err)
 	}
-	_, err = database.Exec(`UPDATE attachments SET message_id = 1 WHERE id = ?`, fileID)
+	_, err = database.ExecContext(context.Background(), `UPDATE attachments SET message_id = 1 WHERE id = ?`, fileID)
 	if err != nil {
 		t.Fatalf("link attachment: %v", err)
 	}
@@ -1202,24 +1203,24 @@ func TestServeFile_LinkedToGuildChannel_MemberWithoutPerm(t *testing.T) {
 	fileID := resp["id"].(string)
 
 	// Create channel and link.
-	_, err := database.Exec(`INSERT INTO channels (id, name, type) VALUES (1, 'secret', 'text')`)
+	_, err := database.ExecContext(context.Background(), `INSERT INTO channels (id, name, type) VALUES (1, 'secret', 'text')`)
 	if err != nil {
 		t.Fatalf("insert channel: %v", err)
 	}
 	var uploaderID int64
-	if err := database.QueryRow(`SELECT id FROM users WHERE username = 'guilduploader2'`).Scan(&uploaderID); err != nil {
+	if err := database.QueryRowContext(context.Background(), `SELECT id FROM users WHERE username = 'guilduploader2'`).Scan(&uploaderID); err != nil {
 		t.Fatalf("get user id: %v", err)
 	}
-	_, err = database.Exec(`INSERT INTO messages (id, channel_id, user_id, content) VALUES (1, 1, ?, 'test')`, uploaderID)
+	_, err = database.ExecContext(context.Background(), `INSERT INTO messages (id, channel_id, user_id, content) VALUES (1, 1, ?, 'test')`, uploaderID)
 	if err != nil {
 		t.Fatalf("insert message: %v", err)
 	}
-	_, err = database.Exec(`UPDATE attachments SET message_id = 1 WHERE id = ?`, fileID)
+	_, err = database.ExecContext(context.Background(), `UPDATE attachments SET message_id = 1 WHERE id = ?`, fileID)
 	if err != nil {
 		t.Fatalf("link attachment: %v", err)
 	}
 	// Deny ReadMessages (0x0002) for role 4 (Member) on channel 1.
-	_, err = database.Exec(`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (1, 4, 0, 2)`)
+	_, err = database.ExecContext(context.Background(), `INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (1, 4, 0, 2)`)
 	if err != nil {
 		t.Fatalf("insert channel_override: %v", err)
 	}
@@ -1249,17 +1250,17 @@ func TestServeFile_LinkedToDM_ParticipantAllowed(t *testing.T) {
 	fileID := resp["id"].(string)
 
 	// Create DM channel, add participants, link attachment.
-	_, err := database.Exec(`INSERT INTO channels (id, name, type) VALUES (1, 'dm-1', 'dm')`)
+	_, err := database.ExecContext(context.Background(), `INSERT INTO channels (id, name, type) VALUES (1, 'dm-1', 'dm')`)
 	if err != nil {
 		t.Fatalf("insert channel: %v", err)
 	}
 	var aliceID, bobID int64
-	_ = database.QueryRow(`SELECT id FROM users WHERE username = 'dmalice'`).Scan(&aliceID)
-	_ = database.QueryRow(`SELECT id FROM users WHERE username = 'dmbob'`).Scan(&bobID)
-	_, _ = database.Exec(`INSERT INTO dm_participants (user_id, channel_id) VALUES (?, 1)`, aliceID)
-	_, _ = database.Exec(`INSERT INTO dm_participants (user_id, channel_id) VALUES (?, 1)`, bobID)
-	_, _ = database.Exec(`INSERT INTO messages (id, channel_id, user_id, content) VALUES (1, 1, ?, 'hi')`, aliceID)
-	_, _ = database.Exec(`UPDATE attachments SET message_id = 1 WHERE id = ?`, fileID)
+	_ = database.QueryRowContext(context.Background(), `SELECT id FROM users WHERE username = 'dmalice'`).Scan(&aliceID)
+	_ = database.QueryRowContext(context.Background(), `SELECT id FROM users WHERE username = 'dmbob'`).Scan(&bobID)
+	_, _ = database.ExecContext(context.Background(), `INSERT INTO dm_participants (user_id, channel_id) VALUES (?, 1)`, aliceID)
+	_, _ = database.ExecContext(context.Background(), `INSERT INTO dm_participants (user_id, channel_id) VALUES (?, 1)`, bobID)
+	_, _ = database.ExecContext(context.Background(), `INSERT INTO messages (id, channel_id, user_id, content) VALUES (1, 1, ?, 'hi')`, aliceID)
+	_, _ = database.ExecContext(context.Background(), `UPDATE attachments SET message_id = 1 WHERE id = ?`, fileID)
 
 	// DM participant can access.
 	rr2 := doServeFile(t, router, fileID, token1, nil)
@@ -1287,17 +1288,17 @@ func TestServeFile_LinkedToDM_NonParticipantForbidden(t *testing.T) {
 	fileID := resp["id"].(string)
 
 	// Create DM channel with two participants (not the outsider).
-	_, err := database.Exec(`INSERT INTO channels (id, name, type) VALUES (1, 'dm-1', 'dm')`)
+	_, err := database.ExecContext(context.Background(), `INSERT INTO channels (id, name, type) VALUES (1, 'dm-1', 'dm')`)
 	if err != nil {
 		t.Fatalf("insert channel: %v", err)
 	}
 	var ownerID, partnerID int64
-	_ = database.QueryRow(`SELECT id FROM users WHERE username = 'dmowner'`).Scan(&ownerID)
-	_ = database.QueryRow(`SELECT id FROM users WHERE username = 'dmpartner'`).Scan(&partnerID)
-	_, _ = database.Exec(`INSERT INTO dm_participants (user_id, channel_id) VALUES (?, 1)`, ownerID)
-	_, _ = database.Exec(`INSERT INTO dm_participants (user_id, channel_id) VALUES (?, 1)`, partnerID)
-	_, _ = database.Exec(`INSERT INTO messages (id, channel_id, user_id, content) VALUES (1, 1, ?, 'hi')`, ownerID)
-	_, _ = database.Exec(`UPDATE attachments SET message_id = 1 WHERE id = ?`, fileID)
+	_ = database.QueryRowContext(context.Background(), `SELECT id FROM users WHERE username = 'dmowner'`).Scan(&ownerID)
+	_ = database.QueryRowContext(context.Background(), `SELECT id FROM users WHERE username = 'dmpartner'`).Scan(&partnerID)
+	_, _ = database.ExecContext(context.Background(), `INSERT INTO dm_participants (user_id, channel_id) VALUES (?, 1)`, ownerID)
+	_, _ = database.ExecContext(context.Background(), `INSERT INTO dm_participants (user_id, channel_id) VALUES (?, 1)`, partnerID)
+	_, _ = database.ExecContext(context.Background(), `INSERT INTO messages (id, channel_id, user_id, content) VALUES (1, 1, ?, 'hi')`, ownerID)
+	_, _ = database.ExecContext(context.Background(), `UPDATE attachments SET message_id = 1 WHERE id = ?`, fileID)
 
 	// Non-participant gets 403.
 	rr2 := doServeFile(t, router, fileID, outsiderToken, nil)

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -107,7 +108,7 @@ func MountAuthRoutes(r chi.Router, database *db.DB, limiter *auth.RateLimiter, t
 // handleRegister processes POST /api/v1/auth/register.
 func handleRegister(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		registrationOpen, err := isRegistrationOpen(database)
+		registrationOpen, err := isRegistrationOpen(r.Context(), database)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL_ERROR",
@@ -123,7 +124,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		require2FA, err := isRequire2FAEnabled(database)
+		require2FA, err := isRequire2FAEnabled(r.Context(), database)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL_ERROR",
@@ -190,7 +191,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 
 		// Atomically consume the invite and create the user so failed
 		// registrations do not burn a valid invite code.
-		uid, err := database.CreateUserWithInvite(req.Username, hash, int(permissions.MemberRoleID), req.InviteCode)
+		uid, err := database.CreateUserWithInvite(r.Context(), req.Username, hash, int(permissions.MemberRoleID), req.InviteCode)
 		if err != nil {
 			// UNIQUE constraint violation → duplicate username → 400.
 			// Any other DB error → 500.
@@ -211,7 +212,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 
 		ip := clientIP(r)
 		slog.Info("user registered", "username", req.Username, "user_id", uid, "ip", ip)
-		db.WriteAudit(database, uid, "user_register", "user", uid,
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, uid, "user_register", "user", uid,
 			"new account created via invite")
 
 		// Issue session.
@@ -225,7 +226,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 		}
 
 		device := truncateDevice(r.Header.Get("User-Agent"))
-		if _, err := database.CreateSession(uid, auth.HashToken(token), device, ip); err != nil {
+		if _, err := database.CreateSession(r.Context(), uid, auth.HashToken(token), device, ip); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL_ERROR",
 				Message: "failed to create session",
@@ -233,7 +234,7 @@ func handleRegister(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		user, err := database.GetUserByID(uid)
+		user, err := database.GetUserByID(r.Context(), uid)
 		if err != nil || user == nil {
 			slog.Error("failed to fetch user after registration", "user_id", uid, "error", err)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
@@ -287,7 +288,11 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 		}
 
 		// BUG-110: Also check per-username lockout to prevent distributed brute force.
-		userLockKey := "login_user_lock:" + req.Username
+		// F1: canonicalize the username the same way GetUserByUsername does (COLLATE
+		// NOCASE) before keying the lockout, so case variants of one account
+		// (admin/Admin/ADMIN) share a single bucket instead of each getting its own.
+		unameKey := strings.ToLower(req.Username)
+		userLockKey := "login_user_lock:" + unameKey
 		if limiter.IsLockedOut(userLockKey) {
 			writeJSON(w, http.StatusTooManyRequests, errorResponse{
 				Error:   "RATE_LIMITED",
@@ -298,7 +303,7 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 
 		// Constant-time lookup: always attempt bcrypt compare even when user
 		// does not exist to prevent timing-based username enumeration.
-		user, err := database.GetUserByUsername(req.Username)
+		user, err := database.GetUserByUsername(r.Context(), req.Username)
 
 		// Distinguish DB errors from authentication failures. DB errors
 		// should NOT increment the rate limiter — otherwise a transient
@@ -316,7 +321,7 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 		}
 
 		failKey := "login_fail:" + ip
-		userFailKey := "login_user_fail:" + req.Username
+		userFailKey := "login_user_fail:" + unameKey
 		// Always run the password check — with an empty hash when the user does
 		// not exist. auth.CheckPassword performs a dummy bcrypt comparison for an
 		// empty hash, so bcrypt executes on every path and response time stays
@@ -330,11 +335,11 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 		if !auth.CheckPassword(storedHash, req.Password) {
 			// Track failures per-IP; lockout on threshold.
 			if !limiter.Allow(failKey, loginFailureThreshold, loginFailureWindow) {
-				limiter.Lockout(lockKey, loginLockoutDuration)
+				limiter.Lockout(r.Context(), lockKey, loginLockoutDuration)
 			}
 			// BUG-110: Track failures per-username; lockout on threshold.
 			if !limiter.Allow(userFailKey, loginUserFailureThreshold, loginUserFailureWindow) {
-				limiter.Lockout(userLockKey, loginUserLockoutDuration)
+				limiter.Lockout(r.Context(), userLockKey, loginUserLockoutDuration)
 			}
 			slog.Info("login failed", "ip", ip, "username_len", len(req.Username))
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
@@ -345,12 +350,12 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 		}
 
 		// Reset failure counters on success.
-		limiter.Reset(failKey)
-		limiter.Reset(userFailKey)
+		limiter.Reset(r.Context(), failKey)
+		limiter.Reset(r.Context(), userFailKey)
 
 		if auth.IsEffectivelyBanned(user) {
 			slog.Warn("banned user login attempt", "username", user.Username, "user_id", user.ID, "ip", ip)
-			db.WriteAudit(database, user.ID, "login_blocked_banned", "user", user.ID,
+			db.WriteAudit(context.WithoutCancel(r.Context()), database, user.ID, "login_blocked_banned", "user", user.ID,
 				"banned user attempted login from "+ip)
 			writeJSON(w, http.StatusForbidden, errorResponse{
 				Error:   "FORBIDDEN",
@@ -359,7 +364,7 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 			return
 		}
 
-		require2FA, err := isRequire2FAEnabled(database)
+		require2FA, err := isRequire2FAEnabled(r.Context(), database)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL_ERROR",
@@ -391,7 +396,7 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 		}
 
 		// Issue session.
-		token, err := issueSession(database, user.ID, truncateDevice(r.Header.Get("User-Agent")), ip)
+		token, err := issueSession(r.Context(), database, user.ID, truncateDevice(r.Header.Get("User-Agent")), ip)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL_ERROR",
@@ -405,7 +410,7 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 		// would leave the user permanently "online" if they never open a WS
 		// connection or if the client crashes before connecting.
 		slog.Info("user logged in", "username", user.Username, "user_id", user.ID, "ip", ip)
-		db.WriteAudit(database, user.ID, "user_login", "user", user.ID,
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, user.ID, "user_login", "user", user.ID,
 			"logged in from "+ip)
 		writeJSON(w, http.StatusOK, authSuccessResponse{
 			Token:       token,
@@ -427,7 +432,9 @@ func handleLogout(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		if err := database.DeleteSession(sess.TokenHash); err != nil {
+		// The client clears its token optimistically — once logout reaches the
+		// server, the revocation must not die with a dropped connection.
+		if err := database.DeleteSession(context.WithoutCancel(r.Context()), sess.TokenHash); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL_ERROR",
 				Message: "failed to logout",
@@ -436,7 +443,7 @@ func handleLogout(database *db.DB) http.HandlerFunc {
 		}
 
 		slog.Info("user logged out", "user_id", sess.UserID)
-		db.WriteAudit(database, sess.UserID, "user_logout", "user", sess.UserID, "")
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, sess.UserID, "user_logout", "user", sess.UserID, "")
 
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -507,7 +514,7 @@ func handleDeleteAccount(database *db.DB, limiter *auth.RateLimiter) http.Handle
 		failKey := fmt.Sprintf("delete_fail:%d", user.ID)
 		if !auth.CheckPassword(user.PasswordHash, req.Password) {
 			if !limiter.Allow(failKey, deleteAccountFailureThreshold, deleteAccountFailureWindow) {
-				limiter.Lockout(lockKey, deleteAccountLockoutDuration)
+				limiter.Lockout(r.Context(), lockKey, deleteAccountLockoutDuration)
 			}
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error:   "INVALID_INPUT",
@@ -515,7 +522,7 @@ func handleDeleteAccount(database *db.DB, limiter *auth.RateLimiter) http.Handle
 			})
 			return
 		}
-		limiter.Reset(failKey)
+		limiter.Reset(r.Context(), failKey)
 
 		if err := database.DeleteAccount(r.Context(), user.ID); err != nil {
 			if errors.Is(err, db.ErrLastAdmin) {
@@ -535,7 +542,7 @@ func handleDeleteAccount(database *db.DB, limiter *auth.RateLimiter) http.Handle
 
 		ip := clientIP(r)
 		slog.Info("account deleted", "username", user.Username, "user_id", user.ID, "ip", ip)
-		db.WriteAudit(database, user.ID, "account_deleted", "user", user.ID,
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, user.ID, "account_deleted", "user", user.ID,
 			"account self-deleted from "+ip)
 
 		w.WriteHeader(http.StatusNoContent)
@@ -570,27 +577,27 @@ func truncateDevice(ua string) string {
 	return ua
 }
 
-func issueSession(database *db.DB, userID int64, device, ip string) (string, error) {
+func issueSession(ctx context.Context, database *db.DB, userID int64, device, ip string) (string, error) {
 	token, err := auth.GenerateToken()
 	if err != nil {
 		return "", err
 	}
-	if _, err := database.CreateSession(userID, auth.HashToken(token), device, ip); err != nil {
+	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), device, ip); err != nil {
 		return "", err
 	}
 	return token, nil
 }
 
-func isRequire2FAEnabled(database *db.DB) (bool, error) {
-	return getBooleanSetting(database, "require_2fa", false)
+func isRequire2FAEnabled(ctx context.Context, database *db.DB) (bool, error) {
+	return getBooleanSetting(ctx, database, "require_2fa", false)
 }
 
-func isRegistrationOpen(database *db.DB) (bool, error) {
-	return getBooleanSetting(database, "registration_open", true)
+func isRegistrationOpen(ctx context.Context, database *db.DB) (bool, error) {
+	return getBooleanSetting(ctx, database, "registration_open", true)
 }
 
-func getBooleanSetting(database *db.DB, key string, defaultValue bool) (bool, error) {
-	value, err := database.GetSetting(key)
+func getBooleanSetting(ctx context.Context, database *db.DB, key string, defaultValue bool) (bool, error) {
+	value, err := database.GetSetting(ctx, key)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			return defaultValue, nil

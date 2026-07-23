@@ -7,7 +7,6 @@ package dbgen
 
 import (
 	"context"
-	"database/sql"
 )
 
 const createAttachment = `-- name: CreateAttachment :exec
@@ -37,15 +36,6 @@ func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentPara
 		arg.Width,
 		arg.Height,
 	)
-	return err
-}
-
-const deleteAttachment = `-- name: DeleteAttachment :exec
-DELETE FROM attachments WHERE id = ?
-`
-
-func (q *Queries) DeleteAttachment(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, deleteAttachment, id)
 	return err
 }
 
@@ -146,17 +136,4 @@ func (q *Queries) GetAttachmentWithChannel(ctx context.Context, id string) (GetA
 		&i.Type,
 	)
 	return i, err
-}
-
-const linkAttachmentToMessage = `-- name: LinkAttachmentToMessage :execresult
-UPDATE attachments SET message_id = ? WHERE id = ? AND message_id IS NULL
-`
-
-type LinkAttachmentToMessageParams struct {
-	MessageID *int64 `json:"messageId"`
-	ID        string `json:"id"`
-}
-
-func (q *Queries) LinkAttachmentToMessage(ctx context.Context, arg LinkAttachmentToMessageParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, linkAttachmentToMessage, arg.MessageID, arg.ID)
 }

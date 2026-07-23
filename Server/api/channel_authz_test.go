@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,7 +19,7 @@ import (
 // given role on the given channel.
 func denyReadMessages(t *testing.T, database *db.DB, channelID, roleID int64) {
 	t.Helper()
-	_, err := database.Exec(
+	_, err := database.ExecContext(context.Background(),
 		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, ?, 0, ?)`,
 		channelID, roleID, permissions.ReadMessages,
 	)
@@ -36,8 +37,8 @@ func TestChannelList_FiltersOutDeniedChannels(t *testing.T) {
 	// Create member user (roleID=4, has READ_MESSAGES by default).
 	token := chTestCreateToken(t, database, "authz-member1", 4)
 
-	chVisible, _ := database.CreateChannel("visible", "text", "", "", 0)
-	chHidden, _ := database.CreateChannel("hidden", "text", "", "", 1)
+	chVisible, _ := database.CreateChannel(context.Background(), "visible", "text", "", "", 0)
+	chHidden, _ := database.CreateChannel(context.Background(), "hidden", "text", "", "", 1)
 	_ = chVisible // used implicitly in response
 
 	// Deny READ_MESSAGES on the hidden channel for the Member role.
@@ -70,8 +71,8 @@ func TestChannelList_AdminSeesAllChannels(t *testing.T) {
 	// Owner (roleID=1) has Administrator bit — bypasses all checks.
 	token := chTestCreateToken(t, database, "authz-owner1", 1)
 
-	chA, _ := database.CreateChannel("a", "text", "", "", 0)
-	chB, _ := database.CreateChannel("b", "text", "", "", 1)
+	chA, _ := database.CreateChannel(context.Background(), "a", "text", "", "", 0)
+	chB, _ := database.CreateChannel(context.Background(), "b", "text", "", "", 1)
 
 	// Deny READ_MESSAGES on both channels for all roles.
 	denyReadMessages(t, database, chA, permissions.MemberRoleID)
@@ -96,7 +97,7 @@ func TestChannelMessages_DeniedByPermission(t *testing.T) {
 	router := buildChannelRouter(database)
 
 	token := chTestCreateToken(t, database, "authz-member2", 4)
-	chID, _ := database.CreateChannel("restricted", "text", "", "", 0)
+	chID, _ := database.CreateChannel(context.Background(), "restricted", "text", "", "", 0)
 
 	// Deny READ_MESSAGES for Member role on this channel.
 	denyReadMessages(t, database, chID, permissions.MemberRoleID)
@@ -112,7 +113,7 @@ func TestChannelMessages_AdminBypassesDeny(t *testing.T) {
 	router := buildChannelRouter(database)
 
 	token := chTestCreateToken(t, database, "authz-owner2", 1)
-	chID, _ := database.CreateChannel("restricted", "text", "", "", 0)
+	chID, _ := database.CreateChannel(context.Background(), "restricted", "text", "", "", 0)
 
 	// Deny READ_MESSAGES for Member role — should not affect Owner.
 	denyReadMessages(t, database, chID, permissions.MemberRoleID)
@@ -131,17 +132,17 @@ func TestSearch_FiltersResultsByPermission(t *testing.T) {
 
 	// Create an owner to insert messages (owner can write anywhere).
 	_ = chTestCreateToken(t, database, "authz-owner3", 1)
-	owner, _ := database.GetUserByUsername("authz-owner3")
+	owner, _ := database.GetUserByUsername(context.Background(), "authz-owner3")
 
 	// Member user for search.
 	memberToken := chTestCreateToken(t, database, "authz-member3", 4)
 
-	chVisible, _ := database.CreateChannel("pub", "text", "", "", 0)
-	chHidden, _ := database.CreateChannel("priv", "text", "", "", 1)
+	chVisible, _ := database.CreateChannel(context.Background(), "pub", "text", "", "", 0)
+	chHidden, _ := database.CreateChannel(context.Background(), "priv", "text", "", "", 1)
 
 	// Insert messages in both channels with a common keyword.
-	_, _ = database.CreateMessage(chVisible, owner.ID, "searchable keyword public", nil)
-	_, _ = database.CreateMessage(chHidden, owner.ID, "searchable keyword private", nil)
+	_, _ = database.CreateMessage(context.Background(), chVisible, owner.ID, "searchable keyword public", nil)
+	_, _ = database.CreateMessage(context.Background(), chHidden, owner.ID, "searchable keyword private", nil)
 
 	// Deny READ_MESSAGES on the hidden channel for members.
 	denyReadMessages(t, database, chHidden, permissions.MemberRoleID)
@@ -167,13 +168,13 @@ func TestSearch_AdminSeesAllResults(t *testing.T) {
 	router := buildChannelRouter(database)
 
 	token := chTestCreateToken(t, database, "authz-owner4", 1)
-	owner, _ := database.GetUserByUsername("authz-owner4")
+	owner, _ := database.GetUserByUsername(context.Background(), "authz-owner4")
 
-	chA, _ := database.CreateChannel("a", "text", "", "", 0)
-	chB, _ := database.CreateChannel("b", "text", "", "", 1)
+	chA, _ := database.CreateChannel(context.Background(), "a", "text", "", "", 0)
+	chB, _ := database.CreateChannel(context.Background(), "b", "text", "", "", 1)
 
-	_, _ = database.CreateMessage(chA, owner.ID, "findme alpha", nil)
-	_, _ = database.CreateMessage(chB, owner.ID, "findme beta", nil)
+	_, _ = database.CreateMessage(context.Background(), chA, owner.ID, "findme alpha", nil)
+	_, _ = database.CreateMessage(context.Background(), chB, owner.ID, "findme beta", nil)
 
 	// Deny READ_MESSAGES on both for member role — admin bypasses.
 	denyReadMessages(t, database, chA, permissions.MemberRoleID)
@@ -200,8 +201,8 @@ func TestChannelList_ExcludesDMChannels_Member(t *testing.T) {
 	token := chTestCreateToken(t, database, "dm-excl-member", 4)
 
 	// Create a normal text channel and a DM channel.
-	database.CreateChannel("general", "text", "", "", 0)
-	database.Exec(`INSERT INTO channels (name, type, position) VALUES ('dm-1', 'dm', 0)`)
+	database.CreateChannel(context.Background(), "general", "text", "", "", 0)
+	database.ExecContext(context.Background(), `INSERT INTO channels (name, type, position) VALUES ('dm-1', 'dm', 0)`)
 
 	rr := chGet(t, router, "/api/v1/channels", token)
 	if rr.Code != http.StatusOK {
@@ -227,9 +228,9 @@ func TestChannelList_ExcludesDMChannels_Admin(t *testing.T) {
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "dm-excl-admin", 1) // Owner
 
-	database.CreateChannel("general", "text", "", "", 0)
-	database.CreateChannel("voice", "voice", "", "", 1)
-	database.Exec(`INSERT INTO channels (name, type, position) VALUES ('dm-1', 'dm', 0)`)
+	database.CreateChannel(context.Background(), "general", "text", "", "", 0)
+	database.CreateChannel(context.Background(), "voice", "voice", "", "", 1)
+	database.ExecContext(context.Background(), `INSERT INTO channels (name, type, position) VALUES ('dm-1', 'dm', 0)`)
 
 	rr := chGet(t, router, "/api/v1/channels", token)
 	if rr.Code != http.StatusOK {

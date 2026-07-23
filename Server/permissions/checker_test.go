@@ -1,6 +1,7 @@
 package permissions
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -27,7 +28,7 @@ func newMockDB() *mockDB {
 	}
 }
 
-func (m *mockDB) GetChannelPermissions(channelID, roleID int64) (int64, int64, error) {
+func (m *mockDB) GetChannelPermissions(_ context.Context, channelID, roleID int64) (int64, int64, error) {
 	if m.chanErr != nil {
 		return 0, 0, m.chanErr
 	}
@@ -39,7 +40,7 @@ func (m *mockDB) GetChannelPermissions(channelID, roleID int64) (int64, int64, e
 	return p.allow, p.deny, nil
 }
 
-func (m *mockDB) IsDMParticipant(userID, channelID int64) (bool, error) {
+func (m *mockDB) IsDMParticipant(_ context.Context, userID, channelID int64) (bool, error) {
 	if m.dmErr != nil {
 		return false, m.dmErr
 	}
@@ -125,7 +126,7 @@ func TestHasChannelPerm(t *testing.T) {
 			}
 			ck := NewChecker(db)
 
-			got := ck.HasChannelPerm(tt.rolePerms, tt.roleID, tt.channelID, tt.perm)
+			got := ck.HasChannelPerm(context.Background(), tt.rolePerms, tt.roleID, tt.channelID, tt.perm)
 			if got != tt.want {
 				t.Errorf("HasChannelPerm() = %v, want %v", got, tt.want)
 			}
@@ -379,7 +380,7 @@ func TestRequireChannelAccess(t *testing.T) {
 			}
 			ck := NewChecker(db)
 
-			err := ck.RequireChannelAccess(tt.userID, tt.rolePerms, tt.roleID, tt.channelType, tt.channelID, tt.perm)
+			err := ck.RequireChannelAccess(context.Background(), tt.userID, tt.rolePerms, tt.roleID, tt.channelType, tt.channelID, tt.perm)
 
 			if tt.dmErr != nil {
 				// Expect wrapped error.

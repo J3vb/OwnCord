@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,9 +18,9 @@ func TestContract_Messages_HasRequiredFields(t *testing.T) {
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "contract-msg1", 1)
-	user, _ := database.GetUserByUsername("contract-msg1")
-	chID, _ := database.CreateChannel("contract-ch", "text", "", "", 0)
-	_, _ = database.CreateMessage(chID, user.ID, "contract test message", nil)
+	user, _ := database.GetUserByUsername(context.Background(), "contract-msg1")
+	chID, _ := database.CreateChannel(context.Background(), "contract-ch", "text", "", "", 0)
+	_, _ = database.CreateMessage(context.Background(), chID, user.ID, "contract test message", nil)
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages", chID), token)
 	if rr.Code != http.StatusOK {
@@ -85,10 +86,10 @@ func TestContract_Messages_ReactionsHaveMeFlag(t *testing.T) {
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "contract-react1", 1)
-	user, _ := database.GetUserByUsername("contract-react1")
-	chID, _ := database.CreateChannel("react-ch", "text", "", "", 0)
-	msgID, _ := database.CreateMessage(chID, user.ID, "reaction target", nil)
-	_ = database.AddReaction(msgID, user.ID, "👍")
+	user, _ := database.GetUserByUsername(context.Background(), "contract-react1")
+	chID, _ := database.CreateChannel(context.Background(), "react-ch", "text", "", "", 0)
+	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "reaction target", nil)
+	_ = database.AddReaction(context.Background(), msgID, user.ID, "👍")
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages", chID), token)
 	if rr.Code != http.StatusOK {
@@ -133,9 +134,9 @@ func TestContract_Search_HasRequiredFields(t *testing.T) {
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "contract-search1", 1)
-	user, _ := database.GetUserByUsername("contract-search1")
-	chID, _ := database.CreateChannel("search-ch", "text", "", "", 0)
-	_, _ = database.CreateMessage(chID, user.ID, "contractsearchterm in body", nil)
+	user, _ := database.GetUserByUsername(context.Background(), "contract-search1")
+	chID, _ := database.CreateChannel(context.Background(), "search-ch", "text", "", "", 0)
+	_, _ = database.CreateMessage(context.Background(), chID, user.ID, "contractsearchterm in body", nil)
 
 	rr := chGet(t, router, "/api/v1/search?q=contractsearchterm", token)
 	if rr.Code != http.StatusOK {

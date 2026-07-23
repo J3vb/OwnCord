@@ -289,7 +289,7 @@ func TestServeWS_ValidAuth_FullHandshake(t *testing.T) {
 	defer hub.Stop()
 
 	// Seed user and session.
-	userID, err := database.CreateUser("ws-handshake-user", "hash", 1)
+	userID, err := database.CreateUser(context.Background(), "ws-handshake-user", "hash", 1)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestServeWS_ValidAuth_FullHandshake(t *testing.T) {
 		t.Fatalf("GenerateToken: %v", err)
 	}
 	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(userID, tokenHash, "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -372,13 +372,13 @@ func TestServeWS_ImmediateDisconnect_DoesNotLeaveGhostClient(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	userID, err := database.CreateUser("abruptclose", "hash", 4)
+	userID, err := database.CreateUser(context.Background(), "abruptclose", "hash", 4)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	token := "abrupt-close-token"
 	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(userID, tokenHash, "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -415,7 +415,7 @@ func TestServeWS_ImmediateDisconnect_DoesNotLeaveGhostClient(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	cleanedUp := false
 	for time.Now().Before(deadline) {
-		user, getErr := database.GetUserByID(userID)
+		user, getErr := database.GetUserByID(context.Background(), userID)
 		if getErr != nil {
 			t.Fatalf("GetUserByID: %v", getErr)
 		}
@@ -427,7 +427,7 @@ func TestServeWS_ImmediateDisconnect_DoesNotLeaveGhostClient(t *testing.T) {
 	}
 
 	if !cleanedUp {
-		user, getErr := database.GetUserByID(userID)
+		user, getErr := database.GetUserByID(context.Background(), userID)
 		if getErr != nil {
 			t.Fatalf("GetUserByID final: %v", getErr)
 		}
@@ -445,7 +445,7 @@ func TestServeWS_DuplicateLogin_KeepsUserOnline(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	userID, err := database.CreateUser("ws-reconnect-user", "hash", 1)
+	userID, err := database.CreateUser(context.Background(), "ws-reconnect-user", "hash", 1)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -454,7 +454,7 @@ func TestServeWS_DuplicateLogin_KeepsUserOnline(t *testing.T) {
 		t.Fatalf("GenerateToken: %v", err)
 	}
 	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(userID, tokenHash, "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -500,7 +500,7 @@ func TestServeWS_DuplicateLogin_KeepsUserOnline(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		user, getErr := database.GetUserByID(userID)
+		user, getErr := database.GetUserByID(context.Background(), userID)
 		if getErr != nil {
 			t.Fatalf("GetUserByID: %v", getErr)
 		}
@@ -510,7 +510,7 @@ func TestServeWS_DuplicateLogin_KeepsUserOnline(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	user, getErr := database.GetUserByID(userID)
+	user, getErr := database.GetUserByID(context.Background(), userID)
 	if getErr != nil {
 		t.Fatalf("GetUserByID final: %v", getErr)
 	}
@@ -527,7 +527,7 @@ func TestServeWS_Reconnect_PreservesVoiceState(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	userID, err := database.CreateUser("ws-voice-reconnect", "hash", 1)
+	userID, err := database.CreateUser(context.Background(), "ws-voice-reconnect", "hash", 1)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -536,12 +536,12 @@ func TestServeWS_Reconnect_PreservesVoiceState(t *testing.T) {
 		t.Fatalf("GenerateToken: %v", err)
 	}
 	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(userID, tokenHash, "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
 	// Create a voice channel.
-	chID, err := database.CreateChannel("voice-reconnect", "voice", "", "", 0)
+	chID, err := database.CreateChannel(context.Background(), "voice-reconnect", "voice", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
@@ -603,10 +603,10 @@ func TestServeWS_Reconnect_PreservesVoiceState(t *testing.T) {
 	// Simulate voice join AFTER conn1 is established — both in-memory and DB.
 	// (Setting it before conn1 would cause serve.go's fresh-connect cleanup
 	// to delete the DB row during conn1's handshake.)
-	if err := database.JoinVoiceChannel(userID, chID); err != nil {
+	if err := database.JoinVoiceChannel(context.Background(), userID, chID); err != nil {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
-	vsBeforeReconnect, err := database.GetVoiceState(userID)
+	vsBeforeReconnect, err := database.GetVoiceState(context.Background(), userID)
 	if err != nil {
 		t.Fatalf("GetVoiceState(before reconnect): %v", err)
 	}
@@ -641,7 +641,7 @@ func TestServeWS_Reconnect_PreservesVoiceState(t *testing.T) {
 	}
 
 	// Assert: DB row still intact
-	vs, vsErr := database.GetVoiceState(userID)
+	vs, vsErr := database.GetVoiceState(context.Background(), userID)
 	if vsErr != nil {
 		t.Fatalf("GetVoiceState: %v", vsErr)
 	}
@@ -685,7 +685,7 @@ func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
 	defer hub.Stop()
 
 	// Create two users: the voice user who F5-reloads, and an observer.
-	userID, err := database.CreateUser("ws-voice-f5", "hash", 1)
+	userID, err := database.CreateUser(context.Background(), "ws-voice-f5", "hash", 1)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -694,11 +694,11 @@ func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
 		t.Fatalf("GenerateToken: %v", err)
 	}
 	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(userID, tokenHash, "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	observerID, err := database.CreateUser("ws-observer", "hash", 1)
+	observerID, err := database.CreateUser(context.Background(), "ws-observer", "hash", 1)
 	if err != nil {
 		t.Fatalf("CreateUser (observer): %v", err)
 	}
@@ -707,12 +707,12 @@ func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
 		t.Fatalf("GenerateToken (observer): %v", err)
 	}
 	obsTokenHash := auth.HashToken(obsToken)
-	if _, err := database.CreateSession(observerID, obsTokenHash, "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), observerID, obsTokenHash, "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession (observer): %v", err)
 	}
 
 	// Create a voice channel for the user to be "in".
-	chID, err := database.CreateChannel("voice-test", "voice", "", "", 0)
+	chID, err := database.CreateChannel(context.Background(), "voice-test", "voice", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
@@ -810,10 +810,10 @@ func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
 	}
 
 	// Simulate voice join — both in-memory and DB
-	if err := database.JoinVoiceChannel(userID, chID); err != nil {
+	if err := database.JoinVoiceChannel(context.Background(), userID, chID); err != nil {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
-	vsBeforeReload, err := database.GetVoiceState(userID)
+	vsBeforeReload, err := database.GetVoiceState(context.Background(), userID)
 	if err != nil {
 		t.Fatalf("GetVoiceState(before reload): %v", err)
 	}
@@ -846,7 +846,7 @@ func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
 	}
 
 	// Assert 2: DB voice row is gone
-	vs, vsErr := database.GetVoiceState(userID)
+	vs, vsErr := database.GetVoiceState(context.Background(), userID)
 	if vsErr != nil {
 		t.Fatalf("GetVoiceState: %v", vsErr)
 	}
@@ -908,7 +908,7 @@ func TestServeWS_writePump_MessageDelivered(t *testing.T) {
 	defer hub.Stop()
 
 	// Seed user and session.
-	userID, err := database.CreateUser("ws-pump-user", "hash", 1)
+	userID, err := database.CreateUser(context.Background(), "ws-pump-user", "hash", 1)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -917,7 +917,7 @@ func TestServeWS_writePump_MessageDelivered(t *testing.T) {
 		t.Fatalf("GenerateToken: %v", err)
 	}
 	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(userID, tokenHash, "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -1004,7 +1004,7 @@ func TestIntegration_MessageRoundTrip(t *testing.T) {
 	defer hub.Stop()
 
 	// Seed two users with sessions.
-	userIDA, err := database.CreateUser("roundtrip-a", "hash", 1)
+	userIDA, err := database.CreateUser(context.Background(), "roundtrip-a", "hash", 1)
 	if err != nil {
 		t.Fatalf("CreateUser A: %v", err)
 	}
@@ -1012,11 +1012,11 @@ func TestIntegration_MessageRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateToken A: %v", err)
 	}
-	if _, err := database.CreateSession(userIDA, auth.HashToken(tokenA), "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), userIDA, auth.HashToken(tokenA), "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession A: %v", err)
 	}
 
-	userIDB, err := database.CreateUser("roundtrip-b", "hash", 1)
+	userIDB, err := database.CreateUser(context.Background(), "roundtrip-b", "hash", 1)
 	if err != nil {
 		t.Fatalf("CreateUser B: %v", err)
 	}
@@ -1024,12 +1024,12 @@ func TestIntegration_MessageRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateToken B: %v", err)
 	}
-	if _, err := database.CreateSession(userIDB, auth.HashToken(tokenB), "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), userIDB, auth.HashToken(tokenB), "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession B: %v", err)
 	}
 
 	// Create a text channel for the chat.
-	chID, err := database.CreateChannel("integration-chat", "text", "", "", 0)
+	chID, err := database.CreateChannel(context.Background(), "integration-chat", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
@@ -1149,7 +1149,7 @@ func TestIntegration_SequenceNumbers(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	userID, err := database.CreateUser("seq-user", "hash", 1)
+	userID, err := database.CreateUser(context.Background(), "seq-user", "hash", 1)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -1157,7 +1157,7 @@ func TestIntegration_SequenceNumbers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}
-	if _, err := database.CreateSession(userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -1242,7 +1242,7 @@ func TestServeWS_BannedUser_ReceivesError(t *testing.T) {
 	defer hub.Stop()
 
 	// Seed user, then ban them.
-	userID, err := database.CreateUser("ws-banned-user", "hash", 1)
+	userID, err := database.CreateUser(context.Background(), "ws-banned-user", "hash", 1)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -1251,11 +1251,11 @@ func TestServeWS_BannedUser_ReceivesError(t *testing.T) {
 		t.Fatalf("GenerateToken: %v", err)
 	}
 	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(userID, tokenHash, "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	// Ban the user permanently.
-	if err := database.BanUser(userID, "test ban", nil); err != nil {
+	if err := database.BanUser(context.Background(), userID, "test ban", nil); err != nil {
 		t.Fatalf("BanUser: %v", err)
 	}
 

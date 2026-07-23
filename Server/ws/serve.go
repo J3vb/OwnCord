@@ -97,13 +97,13 @@ func (h *Hub) upgradeAndAuth(
 
 	// Look up role name for protocol-compliant payloads and cache on client.
 	roleName := "member"
-	if role, roleErr := database.GetRoleByID(user.RoleID); roleErr == nil && role != nil {
+	if role, roleErr := database.GetRoleByID(r.Context(), user.RoleID); roleErr == nil && role != nil {
 		roleName = strings.ToLower(role.Name)
 	}
 	c.roleName = roleName
 
 	slog.Info("websocket connected", "username", user.Username, "user_id", user.ID, "remote", r.RemoteAddr)
-	db.WriteAudit(database, user.ID, "ws_connect", "user", user.ID,
+	db.WriteAudit(context.WithoutCancel(r.Context()), database, user.ID, "ws_connect", "user", user.ID,
 		"WebSocket connected from "+r.RemoteAddr)
 
 	return c, lastSeq, nil
@@ -124,7 +124,7 @@ func (h *Hub) handleReconnect(
 	}
 	// Compute the set of channel IDs the reconnecting user can access so that
 	// channel-scoped replay events are filtered by current permissions (M3).
-	allowedChannelIDs, err := h.computeAllowedChannels(database, c.user)
+	allowedChannelIDs, err := h.computeAllowedChannels(ctx, database, c.user)
 	if err != nil {
 		slog.Warn("ws handleReconnect: computeAllowedChannels failed, falling back to full ready",
 			"user_id", c.userID, "err", err)
@@ -179,7 +179,7 @@ func (h *Hub) handleReconnect(
 	// is included in the payload so the client can attribute reconnect
 	// behaviour without separate metric scraping.
 	slog.Info("ws sending auth_ok (reconnect)", "user_id", c.userID, "username", c.user.Username, "role", c.roleName, "replay_source", replaySource)
-	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(c.user, c.roleName, replaySource)); err != nil {
+	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(ctx, c.user, c.roleName, replaySource)); err != nil {
 		slog.Warn("ws: failed to send auth_ok (reconnect)", "user_id", c.userID, "err", err)
 		h.unregisterNow(c)
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
@@ -196,7 +196,7 @@ func (h *Hub) handleReconnect(
 	slog.Info("ws replay completed", "user_id", c.userID, "events_replayed", len(events), "from_seq", lastSeq, "source", replaySource)
 
 	// Update presence but skip member_join — user was already known.
-	if updateErr := database.UpdateUserStatus(c.userID, "online"); updateErr != nil {
+	if updateErr := database.UpdateUserStatus(ctx, c.userID, "online"); updateErr != nil {
 		slog.Warn("ws UpdateUserStatus", "err", updateErr)
 	}
 	h.BroadcastToAll(buildPresenceMsg(c.userID, "online"))
@@ -210,13 +210,13 @@ func (h *Hub) handleReconnect(
 // permissions.Checker predicate shared with buildReady and REST
 // ListVisibleChannels, so replay-buffer filtering can never drift from the
 // ready payload's visible channels.
-func (h *Hub) computeAllowedChannels(database *db.DB, user *db.User) (map[int64]bool, error) {
-	channels, err := database.ListChannels()
+func (h *Hub) computeAllowedChannels(ctx context.Context, database *db.DB, user *db.User) (map[int64]bool, error) {
+	channels, err := database.ListChannels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("computeAllowedChannels ListChannels: %w", err)
 	}
 
-	role, err := database.GetRoleByID(user.RoleID)
+	role, err := database.GetRoleByID(ctx, user.RoleID)
 	if err != nil {
 		return nil, fmt.Errorf("computeAllowedChannels GetRoleByID: %w", err)
 	}
@@ -226,7 +226,7 @@ func (h *Hub) computeAllowedChannels(database *db.DB, user *db.User) (map[int64]
 	if role != nil {
 		var overrides map[int64]db.ChannelOverride
 		if !permissions.HasAdmin(role.Permissions) {
-			overrides, err = database.GetAllChannelPermissionsForRole(role.ID)
+			overrides, err = database.GetAllChannelPermissionsForRole(ctx, role.ID)
 			if err != nil {
 				return nil, fmt.Errorf("computeAllowedChannels GetAllChannelPermissionsForRole: %w", err)
 			}
@@ -235,7 +235,7 @@ func (h *Hub) computeAllowedChannels(database *db.DB, user *db.User) (map[int64]
 	}
 
 	// Include the user's open DM channels.
-	dmChannels, dmErr := database.GetUserDMChannels(user.ID)
+	dmChannels, dmErr := database.GetUserDMChannels(ctx, user.ID)
 	if dmErr != nil {
 		slog.Warn("computeAllowedChannels GetUserDMChannels", "err", dmErr)
 		// Non-fatal: DM events will simply be filtered out.
@@ -255,10 +255,10 @@ func (h *Hub) handleFreshConnect(
 	// When a user F5-reloads while in voice, the DB row from the previous
 	// session must be removed so the ready payload doesn't include it and
 	// other clients see a voice_leave broadcast.
-	if vs, err := database.GetVoiceState(c.userID); err == nil && vs != nil {
+	if vs, err := database.GetVoiceState(ctx, c.userID); err == nil && vs != nil {
 		slog.Info("ws fresh connect: cleaning stale voice state",
 			"user_id", c.userID, "channel_id", vs.ChannelID)
-		if _, delErr := database.LeaveVoiceChannelIfMatch(c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
+		if _, delErr := database.LeaveVoiceChannelIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
 			slog.Warn("ws fresh connect: LeaveVoiceChannelIfMatch failed", "err", delErr)
 		}
 		h.BroadcastToAll(buildVoiceLeave(vs.ChannelID, c.userID))
@@ -266,16 +266,18 @@ func (h *Hub) handleFreshConnect(
 			// BUG-089: Capture stale join token so the goroutine only removes
 			// the exact stale participant. The identity includes joinedAt, so
 			// even if the user rejoins voice quickly, the new session has a
-			// different identity and won't be removed. Use a hub-stop-aware
-			// context to avoid goroutine leaks on shutdown.
+			// different identity and won't be removed. The removal must
+			// complete even if this connection drops mid-handshake, so detach
+			// from cancellation (values kept); shutdown is handled via h.stop.
 			staleChID, staleUserID, staleJoinToken := vs.ChannelID, c.userID, vs.JoinedAt
-			go func() { //nolint:contextcheck // goroutine intentionally detaches from request context; lifecycle managed via h.stop
+			lkCtx := context.WithoutCancel(ctx)
+			go func() {
 				select {
 				case <-h.stop:
 					return
 				default:
 				}
-				if err := h.livekit.RemoveParticipant(staleChID, staleUserID, staleJoinToken); err != nil {
+				if err := h.livekit.RemoveParticipant(lkCtx, staleChID, staleUserID, staleJoinToken); err != nil {
 					slog.Warn("ws fresh connect: RemoveParticipant failed (may already be gone)",
 						"err", err, "user_id", staleUserID, "channel_id", staleChID)
 				}
@@ -286,7 +288,7 @@ func (h *Hub) handleFreshConnect(
 	// Look up role for permission-filtered ready payload.
 	// Fail closed: if the role lookup fails, disconnect rather than serving
 	// a permissive ready payload with nil role (BUG-094).
-	userRole, roleErr := database.GetRoleByID(c.user.RoleID)
+	userRole, roleErr := database.GetRoleByID(ctx, c.user.RoleID)
 	if roleErr != nil || userRole == nil {
 		slog.Error("ws: role lookup failed, disconnecting", "user_id", c.userID, "role_id", c.user.RoleID, "err", roleErr)
 		_ = conn.Close(websocket.StatusInternalError, "role lookup failed")
@@ -301,13 +303,13 @@ func (h *Hub) handleFreshConnect(
 
 	// Fresh connection or replay fallback: full auth_ok + ready flow.
 	slog.Info("ws sending auth_ok", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
-	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(c.user, c.roleName, "none")); err != nil {
+	if err := conn.Write(ctx, websocket.MessageText, h.buildAuthOK(ctx, c.user, c.roleName, "none")); err != nil {
 		slog.Warn("ws: failed to send auth_ok", "user_id", c.userID, "err", err)
 		h.unregisterNow(c)
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
 		return err
 	}
-	if ready, readyErr := h.buildReady(database, c.userID, userRole); readyErr == nil {
+	if ready, readyErr := h.buildReady(ctx, database, c.userID, userRole); readyErr == nil {
 		slog.Info("ws sending ready payload", "user_id", c.userID, "payload_bytes", len(ready))
 		if err := conn.Write(ctx, websocket.MessageText, ready); err != nil {
 			slog.Warn("ws: failed to send ready payload", "user_id", c.userID, "err", err)
@@ -324,7 +326,7 @@ func (h *Hub) handleFreshConnect(
 		return readyErr
 	}
 
-	if updateErr := database.UpdateUserStatus(c.userID, "online"); updateErr != nil {
+	if updateErr := database.UpdateUserStatus(ctx, c.userID, "online"); updateErr != nil {
 		slog.Warn("ws UpdateUserStatus", "err", updateErr)
 	}
 
@@ -404,6 +406,10 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 	var lastReadErr error
 	defer func() {
+		// The connection is gone, so ctx is (or is about to be) cancelled.
+		// Teardown DB writes must still complete — a dead connection must not
+		// cancel its own cleanup — so detach cancellation but keep values.
+		cleanupCtx := context.WithoutCancel(ctx)
 		// Snapshot voice state BEFORE unregister to avoid TOCTOU with replacement connections.
 		voiceChID := c.getVoiceChID()
 		replaced := hub.unregisterNow(c)
@@ -415,7 +421,7 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 			// cleaning here would delete the replacement's DB row whenever
 			// teardown snapshots voiceChID before the transfer zeroes it.
 			if voiceChID != 0 && !replaced {
-				hub.handleVoiceLeave(ctx, c)
+				hub.handleVoiceLeave(cleanupCtx, c)
 			}
 			c.mu.Lock()
 			received := c.msgsReceived
@@ -445,7 +451,7 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 			slog.Info("websocket disconnected", attrs...)
 
 			if !replaced {
-				_ = hub.db.UpdateUserStatus(c.userID, "offline")
+				_ = hub.db.UpdateUserStatus(cleanupCtx, c.userID, "offline")
 				hub.BroadcastToAll(buildPresenceMsg(c.userID, "offline"))
 			}
 		}
@@ -494,7 +500,7 @@ func authenticateConn(parent context.Context, conn *websocket.Conn, database *db
 	}
 
 	hash := auth.HashToken(p.Token)
-	sess, err := database.GetSessionByTokenHash(hash)
+	sess, err := database.GetSessionByTokenHash(ctx, hash)
 	if err != nil || sess == nil {
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("invalid token"))
 		return nil, "", 0, fmt.Errorf("auth: invalid session")
@@ -505,7 +511,7 @@ func authenticateConn(parent context.Context, conn *websocket.Conn, database *db
 		return nil, "", 0, fmt.Errorf("auth: session expired")
 	}
 
-	user, err := database.GetUserByID(sess.UserID)
+	user, err := database.GetUserByID(ctx, sess.UserID)
 	if err != nil || user == nil {
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("user not found"))
 		return nil, "", 0, fmt.Errorf("auth: user not found")
@@ -526,13 +532,13 @@ func authenticateConn(parent context.Context, conn *websocket.Conn, database *db
 //   - "none"   — fresh connection or full re-sync (no resume)
 //   - "buffer" — resume served from the in-memory ring buffer
 //   - "db"     — resume served from the persistent EventStore (Phase B Step 7)
-func (h *Hub) buildAuthOK(user *db.User, roleName string, replaySource string) []byte {
+func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, replaySource string) []byte {
 	var avatarVal any
 	if user.Avatar != nil {
 		avatarVal = *user.Avatar
 	}
 
-	serverName, motd := h.getCachedSettings()
+	serverName, motd := h.getCachedSettings(ctx)
 
 	return buildJSON(map[string]any{
 		"type": MsgTypeAuthOK,
@@ -594,17 +600,17 @@ func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string) bool {
 // buildReady constructs the ready server→client message.
 // Per PROTOCOL.md, channels include unread_count and last_message_id per user,
 // and only protocol-specified fields (no slow_mode, archived, voice_* extras).
-func (h *Hub) buildReady(database *db.DB, userID int64, role *db.Role) ([]byte, error) {
-	channels, err := database.ListChannels()
+func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, role *db.Role) ([]byte, error) {
+	channels, err := database.ListChannels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady ListChannels: %w", err)
 	}
-	roles, err := database.ListRoles()
+	roles, err := database.ListRoles(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady ListRoles: %w", err)
 	}
 
-	members, err := database.ListMembers()
+	members, err := database.ListMembers(ctx)
 	if err != nil {
 		slog.Warn("buildReady ListMembers", "err", err)
 		members = []db.MemberSummary{}
@@ -618,7 +624,7 @@ func (h *Hub) buildReady(database *db.DB, userID int64, role *db.Role) ([]byte, 
 	overrides := map[int64]db.ChannelOverride{}
 	if role != nil && !permissions.HasAdmin(role.Permissions) {
 		var oErr error
-		overrides, oErr = database.GetAllChannelPermissionsForRole(role.ID)
+		overrides, oErr = database.GetAllChannelPermissionsForRole(ctx, role.ID)
 		if oErr != nil {
 			return nil, fmt.Errorf("buildReady GetAllChannelPermissionsForRole: %w", oErr)
 		}
@@ -638,7 +644,7 @@ func (h *Hub) buildReady(database *db.DB, userID int64, role *db.Role) ([]byte, 
 	}
 
 	// Per-user unread counts.
-	unreadMap, err := database.GetChannelUnreadCounts(userID)
+	unreadMap, err := database.GetChannelUnreadCounts(ctx, userID)
 	if err != nil {
 		slog.Warn("buildReady GetChannelUnreadCounts", "err", err)
 		unreadMap = map[int64]db.ChannelUnread{}
@@ -673,7 +679,7 @@ func (h *Hub) buildReady(database *db.DB, userID int64, role *db.Role) ([]byte, 
 	}
 
 	// Collect voice states, filtered to only visible channels (BUG-095).
-	allVoiceStates, err := collectAllVoiceStates(database, channels)
+	allVoiceStates, err := collectAllVoiceStates(ctx, database, channels)
 	if err != nil {
 		// Non-fatal: send empty list rather than failing the whole ready payload.
 		slog.Warn("buildReady collectAllVoiceStates", "err", err)
@@ -691,13 +697,13 @@ func (h *Hub) buildReady(database *db.DB, userID int64, role *db.Role) ([]byte, 
 	}
 
 	// Load open DM channels for this user.
-	dmChannels, err := database.GetUserDMChannels(userID)
+	dmChannels, err := database.GetUserDMChannels(ctx, userID)
 	if err != nil {
 		slog.Warn("buildReady GetUserDMChannels", "err", err)
 		dmChannels = []db.DMChannelInfo{}
 	}
 
-	serverName, motd := h.getCachedSettings()
+	serverName, motd := h.getCachedSettings(ctx)
 
 	return buildJSON(map[string]any{
 		"type": MsgTypeReady,
@@ -715,6 +721,6 @@ func (h *Hub) buildReady(database *db.DB, userID int64, role *db.Role) ([]byte, 
 
 // collectAllVoiceStates gathers voice states across all channels in a single
 // query, replacing the previous N+1 per-channel pattern.
-func collectAllVoiceStates(database *db.DB, _ []db.Channel) ([]db.VoiceState, error) {
-	return database.GetAllVoiceStates()
+func collectAllVoiceStates(ctx context.Context, database *db.DB, _ []db.Channel) ([]db.VoiceState, error) {
+	return database.GetAllVoiceStates(ctx)
 }

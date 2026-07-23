@@ -28,42 +28,6 @@ func (q *Queries) EnablePlugin(ctx context.Context, id int64) error {
 	return err
 }
 
-const getPlugin = `-- name: GetPlugin :one
-SELECT id, name, version, enabled, manifest_json, installed_at FROM plugins WHERE id = ?
-`
-
-func (q *Queries) GetPlugin(ctx context.Context, id int64) (Plugin, error) {
-	row := q.db.QueryRowContext(ctx, getPlugin, id)
-	var i Plugin
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Version,
-		&i.Enabled,
-		&i.ManifestJson,
-		&i.InstalledAt,
-	)
-	return i, err
-}
-
-const getPluginByName = `-- name: GetPluginByName :one
-SELECT id, name, version, enabled, manifest_json, installed_at FROM plugins WHERE name = ?
-`
-
-func (q *Queries) GetPluginByName(ctx context.Context, name string) (Plugin, error) {
-	row := q.db.QueryRowContext(ctx, getPluginByName, name)
-	var i Plugin
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Version,
-		&i.Enabled,
-		&i.ManifestJson,
-		&i.InstalledAt,
-	)
-	return i, err
-}
-
 const installPlugin = `-- name: InstallPlugin :execresult
 INSERT INTO plugins (name, version, manifest_json) VALUES (?, ?, ?)
 ON CONFLICT(name) DO UPDATE SET version = excluded.version, manifest_json = excluded.manifest_json

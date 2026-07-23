@@ -18,135 +18,135 @@ import (
 // which *db.DB and this Store both satisfy.
 type Store interface {
 	// ── Messages / reactions / read-state ──
-	CreateMessage(channelID, userID int64, content string, replyTo *int64) (int64, error)
-	GetMessage(id int64) (*db.Message, error)
-	GetMessages(channelID, before int64, limit int) ([]db.MessageWithUser, error)
-	GetMessagesForAPI(channelID, before int64, limit int, requestingUserID int64) ([]db.MessageAPIResponse, error)
-	EditMessage(id, userID int64, content string) error
-	DeleteMessage(id, userID int64, isMod bool) error
-	SearchMessages(query string, channelID *int64, limit int) ([]db.MessageSearchResult, error)
-	SearchMessagesInChannels(query string, channelIDs []int64, limit int) ([]db.MessageSearchResult, error)
-	GetPinnedMessages(channelID int64, requestingUserID int64) ([]db.MessageAPIResponse, error)
-	SetMessagePinned(id int64, pinned bool) error
-	AddReaction(messageID, userID int64, emoji string) error
-	RemoveReaction(messageID, userID int64, emoji string) error
-	GetReactions(messageID int64) ([]db.ReactionCount, error)
-	UpdateReadState(userID, channelID, lastReadMessageID int64) error
-	GetChannelUnreadCounts(userID int64) (map[int64]db.ChannelUnread, error)
-	GetLatestMessageID(channelID int64) (int64, error)
-	LinkAttachmentsToMessage(messageID, uploaderID int64, attachmentIDs []string) (int64, error)
-	GetAttachmentsByMessageIDs(msgIDs []int64) (map[int64][]db.AttachmentInfo, error)
+	CreateMessage(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (int64, error)
+	GetMessage(ctx context.Context, id int64) (*db.Message, error)
+	GetMessages(ctx context.Context, channelID, before int64, limit int) ([]db.MessageWithUser, error)
+	GetMessagesForAPI(ctx context.Context, channelID, before int64, limit int, requestingUserID int64) ([]db.MessageAPIResponse, error)
+	EditMessage(ctx context.Context, id, userID int64, content string) error
+	DeleteMessage(ctx context.Context, id, userID int64, isMod bool) error
+	SearchMessages(ctx context.Context, query string, channelID *int64, limit int) ([]db.MessageSearchResult, error)
+	SearchMessagesInChannels(ctx context.Context, query string, channelIDs []int64, limit int) ([]db.MessageSearchResult, error)
+	GetPinnedMessages(ctx context.Context, channelID int64, requestingUserID int64) ([]db.MessageAPIResponse, error)
+	SetMessagePinned(ctx context.Context, id int64, pinned bool) error
+	AddReaction(ctx context.Context, messageID, userID int64, emoji string) error
+	RemoveReaction(ctx context.Context, messageID, userID int64, emoji string) error
+	GetReactions(ctx context.Context, messageID int64) ([]db.ReactionCount, error)
+	UpdateReadState(ctx context.Context, userID, channelID, lastReadMessageID int64) error
+	GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]db.ChannelUnread, error)
+	GetLatestMessageID(ctx context.Context, channelID int64) (int64, error)
+	LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) (int64, error)
+	GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (map[int64][]db.AttachmentInfo, error)
 
 	// ── Channels ──
-	ListChannels() ([]db.Channel, error)
-	GetChannel(id int64) (*db.Channel, error)
-	CreateChannel(name, chanType, category, topic string, position int) (int64, error)
-	UpdateChannel(id int64, name, topic string, slowMode int) error
-	DeleteChannel(id int64) error
-	SetChannelSlowMode(id int64, slowMode int) error
-	SetChannelVoiceMaxUsers(id int64, maxUsers int) error
-	GetChannelPermissions(channelID, roleID int64) (allow, deny int64, err error)
-	GetAllChannelPermissionsForRole(roleID int64) (map[int64]db.ChannelOverride, error)
-	GetChannelTypes(ids []int64) (map[int64]string, error)
+	ListChannels(ctx context.Context) ([]db.Channel, error)
+	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
+	CreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error)
+	UpdateChannel(ctx context.Context, id int64, name, topic string, slowMode int) error
+	DeleteChannel(ctx context.Context, id int64) error
+	SetChannelSlowMode(ctx context.Context, id int64, slowMode int) error
+	SetChannelVoiceMaxUsers(ctx context.Context, id int64, maxUsers int) error
+	GetChannelPermissions(ctx context.Context, channelID, roleID int64) (allow, deny int64, err error)
+	GetAllChannelPermissionsForRole(ctx context.Context, roleID int64) (map[int64]db.ChannelOverride, error)
+	GetChannelTypes(ctx context.Context, ids []int64) (map[int64]string, error)
 
 	// ── Users ──
-	GetUserByID(id int64) (*db.User, error)
-	GetUserByUsername(username string) (*db.User, error)
-	CreateUser(username, passwordHash string, roleID int) (int64, error)
-	CreateOwnerIfEmpty(username, passwordHash string, roleID int) (int64, error)
-	CreateUserWithInvite(username, passwordHash string, roleID int, inviteCode string) (int64, error)
-	UpdateUserProfile(userID int64, username string, avatar *string) error
-	UpdateUserPassword(userID int64, newPasswordHash string) error
-	UpdateUserStatus(id int64, status string) error
-	UpdateUserTOTPSecret(id int64, secret *string) error
-	UpdateUserRole(userID, roleID int64) error
-	ResetAllUserStatuses() error
+	GetUserByID(ctx context.Context, id int64) (*db.User, error)
+	GetUserByUsername(ctx context.Context, username string) (*db.User, error)
+	CreateUser(ctx context.Context, username, passwordHash string, roleID int) (int64, error)
+	CreateOwnerIfEmpty(ctx context.Context, username, passwordHash string, roleID int) (int64, error)
+	CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode string) (int64, error)
+	UpdateUserProfile(ctx context.Context, userID int64, username string, avatar *string) error
+	UpdateUserPassword(ctx context.Context, userID int64, newPasswordHash string) error
+	UpdateUserStatus(ctx context.Context, id int64, status string) error
+	UpdateUserTOTPSecret(ctx context.Context, id int64, secret *string) error
+	UpdateUserRole(ctx context.Context, userID, roleID int64) error
+	ResetAllUserStatuses(ctx context.Context) error
 	DeleteAccount(ctx context.Context, userID int64) error
-	ListMembers() ([]db.MemberSummary, error)
+	ListMembers(ctx context.Context) ([]db.MemberSummary, error)
 
 	// ── Sessions ──
-	CreateSession(userID int64, tokenHash, device, ip string) (int64, error)
-	GetSessionByTokenHash(tokenHash string) (*db.Session, error)
-	GetSessionWithBanStatus(tokenHash string) (*db.SessionWithBanStatus, error)
-	DeleteSession(tokenHash string) error
-	DeleteOtherSessions(userID, keepSessionID int64) (int64, error)
-	DeleteExpiredSessions() error
-	DeleteSessionByID(sessionID, userID int64) error
-	TouchSession(tokenHash string) error
-	ListUserSessions(userID int64) ([]db.Session, error)
-	ForceLogoutUser(userID int64) error
-	GetUserSessions(userID int64) ([]db.Session, error)
+	CreateSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error)
+	GetSessionByTokenHash(ctx context.Context, tokenHash string) (*db.Session, error)
+	GetSessionWithBanStatus(ctx context.Context, tokenHash string) (*db.SessionWithBanStatus, error)
+	DeleteSession(ctx context.Context, tokenHash string) error
+	DeleteOtherSessions(ctx context.Context, userID, keepSessionID int64) (int64, error)
+	DeleteExpiredSessions(ctx context.Context) error
+	DeleteSessionByID(ctx context.Context, sessionID, userID int64) error
+	TouchSession(ctx context.Context, tokenHash string) error
+	ListUserSessions(ctx context.Context, userID int64) ([]db.Session, error)
+	ForceLogoutUser(ctx context.Context, userID int64) error
+	GetUserSessions(ctx context.Context, userID int64) ([]db.Session, error)
 
 	// ── Roles ──
-	GetRoleByID(id int64) (*db.Role, error)
-	GetRoleForUser(userID int64) (*db.Role, error)
-	GetUserWithRole(userID int64) (*db.User, *db.Role, error)
-	ListRoles() ([]*db.Role, error)
+	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
+	GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error)
+	GetUserWithRole(ctx context.Context, userID int64) (*db.User, *db.Role, error)
+	ListRoles(ctx context.Context) ([]*db.Role, error)
 
 	// ── Invites ──
-	CreateInvite(createdBy int64, maxUses int, expiresAt *time.Time) (string, error)
-	GetInvite(code string) (*db.Invite, error)
-	ListInvites() ([]*db.Invite, error)
-	UseInviteAtomic(code string) error
-	RevokeInvite(code string) error
+	CreateInvite(ctx context.Context, createdBy int64, maxUses int, expiresAt *time.Time) (string, error)
+	GetInvite(ctx context.Context, code string) (*db.Invite, error)
+	ListInvites(ctx context.Context) ([]*db.Invite, error)
+	UseInviteAtomic(ctx context.Context, code string) error
+	RevokeInvite(ctx context.Context, code string) error
 
 	// ── Voice ──
-	JoinVoiceChannel(userID, channelID int64) error
-	JoinVoiceChannelIfCapacity(userID, channelID int64, maxUsers int) error
-	LeaveVoiceChannel(userID int64) error
-	LeaveVoiceChannelIfMatch(userID, expectedChannelID int64, expectedJoinedAt string) (bool, error)
-	GetVoiceState(userID int64) (*db.VoiceState, error)
-	GetChannelVoiceStates(channelID int64) ([]db.VoiceState, error)
-	GetAllVoiceStates() ([]db.VoiceState, error)
-	UpdateVoiceMute(userID int64, muted bool) error
-	UpdateVoiceDeafen(userID int64, deafened bool) error
-	ClearVoiceState(userID int64) error
-	ClearAllVoiceStates() error
-	CountActiveCameras(channelID int64) (int, error)
-	UpdateVoiceCamera(userID int64, camera bool) error
-	EnableCameraIfUnderLimit(userID, channelID int64, maxVideo int) (bool, error)
-	UpdateVoiceScreenshare(userID int64, screenshare bool) error
-	CountChannelVoiceUsers(channelID int64) (int, error)
+	JoinVoiceChannel(ctx context.Context, userID, channelID int64) error
+	JoinVoiceChannelIfCapacity(ctx context.Context, userID, channelID int64, maxUsers int) error
+	LeaveVoiceChannel(ctx context.Context, userID int64) error
+	LeaveVoiceChannelIfMatch(ctx context.Context, userID, expectedChannelID int64, expectedJoinedAt string) (bool, error)
+	GetVoiceState(ctx context.Context, userID int64) (*db.VoiceState, error)
+	GetChannelVoiceStates(ctx context.Context, channelID int64) ([]db.VoiceState, error)
+	GetAllVoiceStates(ctx context.Context) ([]db.VoiceState, error)
+	UpdateVoiceMute(ctx context.Context, userID int64, muted bool) error
+	UpdateVoiceDeafen(ctx context.Context, userID int64, deafened bool) error
+	ClearVoiceState(ctx context.Context, userID int64) error
+	ClearAllVoiceStates(ctx context.Context) error
+	CountActiveCameras(ctx context.Context, channelID int64) (int, error)
+	UpdateVoiceCamera(ctx context.Context, userID int64, camera bool) error
+	EnableCameraIfUnderLimit(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error)
+	UpdateVoiceScreenshare(ctx context.Context, userID int64, screenshare bool) error
+	CountChannelVoiceUsers(ctx context.Context, channelID int64) (int, error)
 
 	// ── Direct messages ──
-	GetOrCreateDMChannel(user1ID, user2ID int64) (*db.Channel, bool, error)
-	GetUserDMChannels(userID int64) ([]db.DMChannelInfo, error)
-	OpenDM(userID, channelID int64) error
-	CloseDM(userID, channelID int64) error
-	IsDMParticipant(userID, channelID int64) (bool, error)
-	GetDMParticipantIDs(channelID int64) ([]int64, error)
-	GetDMRecipient(channelID, requestingUserID int64) (*db.User, error)
+	GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (*db.Channel, bool, error)
+	GetUserDMChannels(ctx context.Context, userID int64) ([]db.DMChannelInfo, error)
+	OpenDM(ctx context.Context, userID, channelID int64) error
+	CloseDM(ctx context.Context, userID, channelID int64) error
+	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
+	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
+	GetDMRecipient(ctx context.Context, channelID, requestingUserID int64) (*db.User, error)
 
 	// ── Blocks ──
-	BlockUser(blockerID, blockedID int64) error
-	UnblockUser(blockerID, blockedID int64) error
-	IsBlocked(blockerID, blockedID int64) (bool, error)
-	IsEitherBlocked(userA, userB int64) (bool, error)
-	ListBlockedUsers(blockerID int64) ([]int64, error)
+	BlockUser(ctx context.Context, blockerID, blockedID int64) error
+	UnblockUser(ctx context.Context, blockerID, blockedID int64) error
+	IsBlocked(ctx context.Context, blockerID, blockedID int64) (bool, error)
+	IsEitherBlocked(ctx context.Context, userA, userB int64) (bool, error)
+	ListBlockedUsers(ctx context.Context, blockerID int64) ([]int64, error)
 
 	// ── Attachments ──
-	CreateAttachment(id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error
-	GetAttachmentByID(id string) (*db.Attachment, error)
-	GetAttachmentWithChannel(id string) (*db.AttachmentAccess, error)
-	DeleteOrphanedAttachments(cutoff string) ([]string, error)
+	CreateAttachment(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error
+	GetAttachmentByID(ctx context.Context, id string) (*db.Attachment, error)
+	GetAttachmentWithChannel(ctx context.Context, id string) (*db.AttachmentAccess, error)
+	DeleteOrphanedAttachments(ctx context.Context, cutoff string) ([]string, error)
 
 	// ── Admin ──
-	UserCount() (int64, error)
-	GetServerStats() (*db.ServerStats, error)
-	ListAllUsers(limit, offset int) ([]db.UserWithRole, error)
-	BanUser(id int64, reason string, expires *time.Time) error
-	UnbanUser(id int64) error
-	LogAudit(actorID int64, action, targetType string, targetID int64, detail string) error
-	GetAuditLog(limit, offset int) ([]db.AuditEntry, error)
-	AdminCreateChannel(name, chanType, category, topic string, position int) (int64, error)
-	AdminUpdateChannel(id int64, name, topic string, slowMode, position int, archived bool) error
-	AdminDeleteChannel(id int64) error
-	BackupTo(path string) error
-	BackupToSafe(path, safeRoot string) error
-	CountUsersWithoutTOTP() (int, error)
+	UserCount(ctx context.Context) (int64, error)
+	GetServerStats(ctx context.Context) (*db.ServerStats, error)
+	ListAllUsers(ctx context.Context, limit, offset int) ([]db.UserWithRole, error)
+	BanUser(ctx context.Context, id int64, reason string, expires *time.Time) error
+	UnbanUser(ctx context.Context, id int64) error
+	LogAudit(ctx context.Context, actorID int64, action, targetType string, targetID int64, detail string) error
+	GetAuditLog(ctx context.Context, limit, offset int) ([]db.AuditEntry, error)
+	AdminCreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error)
+	AdminUpdateChannel(ctx context.Context, id int64, name, topic string, slowMode, position int, archived bool) error
+	AdminDeleteChannel(ctx context.Context, id int64) error
+	BackupTo(ctx context.Context, path string) error
+	BackupToSafe(ctx context.Context, path, safeRoot string) error
+	CountUsersWithoutTOTP(ctx context.Context) (int, error)
 
 	// ── Settings ──
-	GetSetting(key string) (string, error)
-	SetSetting(key, value string) error
-	GetAllSettings() (map[string]string, error)
+	GetSetting(ctx context.Context, key string) (string, error)
+	SetSetting(ctx context.Context, key, value string) error
+	GetAllSettings(ctx context.Context) (map[string]string, error)
 }

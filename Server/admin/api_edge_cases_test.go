@@ -41,8 +41,8 @@ func TestAdminAPI_PatchUser_UnbanUser(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	// Create and ban a target user first.
-	targetUID, _ := database.CreateUser("unbanme", "hash", 3)
-	_ = database.BanUser(targetUID, "test ban", nil)
+	targetUID, _ := database.CreateUser(context.Background(), "unbanme", "hash", 3)
+	_ = database.BanUser(context.Background(), targetUID, "test ban", nil)
 
 	body := map[string]any{"banned": false}
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
@@ -52,7 +52,7 @@ func TestAdminAPI_PatchUser_UnbanUser(t *testing.T) {
 	}
 
 	// Verify the user is now unbanned.
-	user, _ := database.GetUserByID(targetUID)
+	user, _ := database.GetUserByID(context.Background(), targetUID)
 	if user.Banned {
 		t.Error("user is still banned after unban request")
 	}
@@ -64,7 +64,7 @@ func TestAdminAPI_PatchUser_InvalidBody(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	targetUID, _ := database.CreateUser("invalidbody", "hash", 3)
+	targetUID, _ := database.CreateUser(context.Background(), "invalidbody", "hash", 3)
 
 	req := httptest.NewRequest(http.MethodPatch, "/users/"+itoa(targetUID), bytes.NewReader([]byte("not-json")))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -147,7 +147,7 @@ func TestAdminAPI_PatchChannel_InvalidBody(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	chID, _ := database.AdminCreateChannel("malformed", "text", "", "", 0)
+	chID, _ := database.AdminCreateChannel(context.Background(), "malformed", "text", "", "", 0)
 
 	req := httptest.NewRequest(http.MethodPatch, "/channels/"+itoa(chID), bytes.NewReader([]byte("not-json")))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -235,9 +235,9 @@ func TestAdminAPI_AuditLog_Pagination(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	// Create several audit entries.
-	uid, _ := database.CreateUser("auditpager", "hash", 1)
+	uid, _ := database.CreateUser(context.Background(), "auditpager", "hash", 1)
 	for i := 0; i < 5; i++ {
-		_ = database.LogAudit(uid, "TEST", "test", int64(i), "")
+		_ = database.LogAudit(context.Background(), uid, "TEST", "test", int64(i), "")
 	}
 
 	// Fetch page 2 with limit=2, offset=2 — should return 2 entries.
@@ -324,7 +324,7 @@ func TestAdminAPI_PatchUser_BanNilHubDoesNotPanic(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	targetUID, _ := database.CreateUser("ban-nohub", "hash", 3)
+	targetUID, _ := database.CreateUser(context.Background(), "ban-nohub", "hash", 3)
 
 	body := map[string]any{"banned": true, "ban_reason": "nil hub test"}
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
@@ -334,7 +334,7 @@ func TestAdminAPI_PatchUser_BanNilHubDoesNotPanic(t *testing.T) {
 	}
 
 	// Verify ban was still applied despite nil hub.
-	user, _ := database.GetUserByID(targetUID)
+	user, _ := database.GetUserByID(context.Background(), targetUID)
 	if !user.Banned {
 		t.Error("user should be banned even with nil hub")
 	}
@@ -363,7 +363,7 @@ func TestAdminAPI_LogStreamTicketFlow(t *testing.T) {
 	if payload.Ticket == "" {
 		t.Fatal("expected non-empty log stream ticket")
 	}
-	if err := database.DeleteSession(auth.HashToken(token)); err != nil {
+	if err := database.DeleteSession(context.Background(), auth.HashToken(token)); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
 	}
 
@@ -412,7 +412,7 @@ func TestAdminAPI_LogStreamTicketFlow(t *testing.T) {
 		t.Fatalf("legacy token stream status = %d, want 401; body: %s", legacyResp.StatusCode, string(body))
 	}
 
-	if _, err := database.CreateSession(1, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), 1, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	ticketResp = doRequest(t, handler, http.MethodPost, "/logs/ticket", token, nil)
@@ -422,7 +422,7 @@ func TestAdminAPI_LogStreamTicketFlow(t *testing.T) {
 	if err := json.Unmarshal(ticketResp.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("unmarshal restored ticket response: %v", err)
 	}
-	if err := database.UpdateUserRole(1, 3); err != nil {
+	if err := database.UpdateUserRole(context.Background(), 1, 3); err != nil {
 		t.Fatalf("UpdateUserRole: %v", err)
 	}
 	demotedResp, err := http.Get(srv.URL + "/logs/stream?ticket=" + payload.Ticket)
@@ -444,7 +444,7 @@ func TestAdminAPI_PatchUser_RoleChangeNilHubDoesNotPanic(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	targetUID, _ := database.CreateUser("role-nohub", "hash", 3)
+	targetUID, _ := database.CreateUser(context.Background(), "role-nohub", "hash", 3)
 
 	body := map[string]any{"role_id": float64(2)}
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
@@ -454,7 +454,7 @@ func TestAdminAPI_PatchUser_RoleChangeNilHubDoesNotPanic(t *testing.T) {
 	}
 
 	// Verify role was still changed despite nil hub.
-	user, _ := database.GetUserByID(targetUID)
+	user, _ := database.GetUserByID(context.Background(), targetUID)
 	if user.RoleID != 2 {
 		t.Errorf("RoleID = %d, want 2", user.RoleID)
 	}
@@ -469,7 +469,7 @@ func TestAdminAPI_PatchUser_BanWithoutReason(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	targetUID, _ := database.CreateUser("banwithout", "hash", 3)
+	targetUID, _ := database.CreateUser(context.Background(), "banwithout", "hash", 3)
 
 	// No ban_reason in body — the nil check in handlePatchUser uses empty string.
 	body := map[string]any{"banned": true}
@@ -490,7 +490,7 @@ func TestAdminAPI_PatchUser_RoleChangeBroadcast(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	targetUID, _ := database.CreateUser("rolebroadcast", "hash", 3)
+	targetUID, _ := database.CreateUser(context.Background(), "rolebroadcast", "hash", 3)
 
 	body := map[string]any{"role_id": float64(2)}
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
@@ -531,7 +531,7 @@ func TestAdminAPI_SetupStatus_AlreadySetup(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
 
-	_, _ = database.CreateUser("existing", "hash", 1)
+	_, _ = database.CreateUser(context.Background(), "existing", "hash", 1)
 
 	w := doRequest(t, handler, http.MethodGet, "/setup/status", "", nil)
 
@@ -583,7 +583,7 @@ func TestAdminAPI_Setup_AlreadyCompleted(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
 
-	_, _ = database.CreateUser("existing", "hash", 1)
+	_, _ = database.CreateUser(context.Background(), "existing", "hash", 1)
 
 	body := map[string]string{
 		"username": "hacker",

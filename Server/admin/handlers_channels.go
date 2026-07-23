@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -63,7 +64,7 @@ func validateCategoryType(channelType, category string) string {
 
 func handleListChannels(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		channels, err := database.ListChannels()
+		channels, err := database.ListChannels(r.Context())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channels")
 			return
@@ -102,20 +103,20 @@ func handleCreateChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 			return
 		}
 
-		id, err := database.AdminCreateChannel(req.Name, req.Type, req.Category, req.Topic, req.Position)
+		id, err := database.AdminCreateChannel(r.Context(), req.Name, req.Type, req.Category, req.Topic, req.Position)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create channel")
 			return
 		}
 
-		ch, err := database.GetChannel(id)
+		ch, err := database.GetChannel(r.Context(), id)
 		if err != nil || ch == nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch created channel")
 			return
 		}
 		actor := actorFromContext(r)
 		slog.Info("channel created", "actor_id", actor, "channel", req.Name, "type", req.Type)
-		db.WriteAudit(database, actor, "channel_create", "channel", id,
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "channel_create", "channel", id,
 			fmt.Sprintf("created #%s (%s)", req.Name, req.Type))
 		if hub != nil {
 			hub.BroadcastChannelCreate(ch)
@@ -141,7 +142,7 @@ func handlePatchChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 			return
 		}
 
-		existing, err := database.GetChannel(id)
+		existing, err := database.GetChannel(r.Context(), id)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch channel")
 			return
@@ -164,17 +165,17 @@ func handlePatchChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 			return
 		}
 
-		if err := database.AdminUpdateChannel(id, req.Name, req.Topic, req.SlowMode, req.Position, req.Archived); err != nil {
+		if err := database.AdminUpdateChannel(r.Context(), id, req.Name, req.Topic, req.SlowMode, req.Position, req.Archived); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update channel")
 			return
 		}
 
 		actor := actorFromContext(r)
 		slog.Info("channel updated", "actor_id", actor, "channel_id", id, "name", req.Name)
-		db.WriteAudit(database, actor, "channel_update", "channel", id,
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "channel_update", "channel", id,
 			fmt.Sprintf("updated #%s", req.Name))
 
-		updated, err := database.GetChannel(id)
+		updated, err := database.GetChannel(r.Context(), id)
 		if err != nil || updated == nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch updated channel")
 			return
@@ -194,7 +195,7 @@ func handleDeleteChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 			return
 		}
 
-		existing, err := database.GetChannel(id)
+		existing, err := database.GetChannel(r.Context(), id)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch channel")
 			return
@@ -204,13 +205,13 @@ func handleDeleteChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 			return
 		}
 
-		if err := database.AdminDeleteChannel(id); err != nil {
+		if err := database.AdminDeleteChannel(r.Context(), id); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete channel")
 			return
 		}
 		actor := actorFromContext(r)
 		slog.Warn("channel deleted", "actor_id", actor, "channel_id", id, "name", existing.Name)
-		db.WriteAudit(database, actor, "channel_delete", "channel", id,
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "channel_delete", "channel", id,
 			fmt.Sprintf("deleted #%s", existing.Name))
 		if hub != nil {
 			hub.BroadcastChannelDelete(id)
@@ -224,7 +225,7 @@ func handleGetAuditLog(database *db.DB) http.HandlerFunc {
 		limit := queryInt(r, "limit", 50, 1)
 		offset := queryInt(r, "offset", 0, 0)
 
-		entries, err := database.GetAuditLog(limit, offset)
+		entries, err := database.GetAuditLog(r.Context(), limit, offset)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get audit log")
 			return

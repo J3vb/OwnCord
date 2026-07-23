@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -42,7 +43,7 @@ type setupResponse struct {
 // handleSetupStatus returns whether initial setup is needed (no users exist).
 func handleSetupStatus(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		count, err := database.UserCount()
+		count, err := database.UserCount(r.Context())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check user count")
 			return
@@ -110,7 +111,7 @@ func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []st
 
 		// Atomically check no users exist and create the owner (BUG-119).
 		// This closes the TOCTOU race between UserCount() and CreateUser().
-		uid, err := database.CreateOwnerIfEmpty(req.Username, hash, ownerRoleID)
+		uid, err := database.CreateOwnerIfEmpty(r.Context(), req.Username, hash, ownerRoleID)
 		if errors.Is(err, db.ErrConflict) {
 			writeErr(w, http.StatusForbidden, "FORBIDDEN", "setup has already been completed")
 			return
@@ -132,27 +133,27 @@ func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []st
 		if len(device) > maxDeviceLen {
 			device = device[:maxDeviceLen]
 		}
-		if _, err := database.CreateSession(uid, auth.HashToken(token), device, host); err != nil {
+		if _, err := database.CreateSession(r.Context(), uid, auth.HashToken(token), device, host); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create session")
 			return
 		}
 
 		// Create default channels under canonical categories.
-		_, _ = database.CreateChannel("general", "text", "Text Channels", "Welcome to the server!", 0)
-		_, _ = database.CreateChannel("General", "voice", "Voice Channels", "", 0)
+		_, _ = database.CreateChannel(r.Context(), "general", "text", "Text Channels", "Welcome to the server!", 0)
+		_, _ = database.CreateChannel(r.Context(), "General", "voice", "Voice Channels", "", 0)
 
 		// Generate a bootstrap invite code so the owner can invite others.
 		// Bound it (5 uses / 24h) rather than minting an unlimited, non-expiring
 		// invite — the owner can create fresh invites once logged in.
 		bootstrapInviteExpiry := time.Now().Add(24 * time.Hour)
-		inviteCode, err := database.CreateInvite(uid, 5, &bootstrapInviteExpiry)
+		inviteCode, err := database.CreateInvite(r.Context(), uid, 5, &bootstrapInviteExpiry)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to generate invite code")
 			return
 		}
 
 		slog.Info("server setup completed", "owner", req.Username, "user_id", uid)
-		db.WriteAudit(database, uid, "server_setup", "server", 0,
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, uid, "server_setup", "server", 0,
 			"initial setup: owner account created, default channel and invite generated")
 
 		writeJSON(w, http.StatusCreated, setupResponse{

@@ -65,7 +65,8 @@ function createMockWs() {
       sendFailureListeners.add(listener);
       return () => sendFailureListeners.delete(listener);
     },
-    onCertFirstTrust: vi.fn(() => () => {}),
+    startCertListener: vi.fn(async () => {}),
+    onCertFirstUse: vi.fn(() => () => {}),
     onCertMismatch: vi.fn(() => () => {}),
     acceptCertFingerprint: vi.fn(async () => {}),
     getState: vi.fn(() => "disconnected" as const),

@@ -44,7 +44,7 @@ func newTestHub(t *testing.T) (*ws.Hub, *db.DB) {
 // seedTestUser inserts a Member-role user and returns its ID.
 func seedTestUser(t *testing.T, database *db.DB, username string) int64 {
 	t.Helper()
-	id, err := database.CreateUser(username, "hash", 4)
+	id, err := database.CreateUser(context.Background(), username, "hash", 4)
 	if err != nil {
 		t.Fatalf("seedUser: %v", err)
 	}
@@ -55,11 +55,11 @@ func seedTestUser(t *testing.T, database *db.DB, username string) int64 {
 // Owner role (id=1) has all permissions (0x7FFFFFFF), so it passes all checks.
 func seedOwnerUser(t *testing.T, database *db.DB, username string) *db.User {
 	t.Helper()
-	_, err := database.CreateUser(username, "hash", 1) // roleID=1 → Owner
+	_, err := database.CreateUser(context.Background(), username, "hash", 1) // roleID=1 → Owner
 	if err != nil {
 		t.Fatalf("seedOwnerUser: %v", err)
 	}
-	user, err := database.GetUserByUsername(username)
+	user, err := database.GetUserByUsername(context.Background(), username)
 	if err != nil || user == nil {
 		t.Fatalf("seedOwnerUser GetUserByUsername: %v", err)
 	}
@@ -69,7 +69,7 @@ func seedOwnerUser(t *testing.T, database *db.DB, username string) *db.User {
 // seedTestChannel inserts a channel and returns its ID.
 func seedTestChannel(t *testing.T, database *db.DB, name string) int64 {
 	t.Helper()
-	id, err := database.CreateChannel(name, "text", "", "", 0)
+	id, err := database.CreateChannel(context.Background(), name, "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("seedChannel: %v", err)
 	}
@@ -716,27 +716,27 @@ func TestHub_SweepRevokedSessions_KicksRevokedClient(t *testing.T) {
 	defer hub.Stop()
 
 	// Create two users with sessions.
-	uid1, err := database.CreateUser("alice-revoke", "hash", 3)
+	uid1, err := database.CreateUser(context.Background(), "alice-revoke", "hash", 3)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	uid2, err := database.CreateUser("bob-valid", "hash", 3)
+	uid2, err := database.CreateUser(context.Background(), "bob-valid", "hash", 3)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	u1, _ := database.GetUserByID(uid1)
-	u2, _ := database.GetUserByID(uid2)
+	u1, _ := database.GetUserByID(context.Background(), uid1)
+	u2, _ := database.GetUserByID(context.Background(), uid2)
 
 	token1 := "revoke-token-1"
 	token2 := "valid-token-2"
 	hash1 := auth.HashToken(token1)
 	hash2 := auth.HashToken(token2)
 
-	if _, err := database.CreateSession(uid1, hash1, "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), uid1, hash1, "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession 1: %v", err)
 	}
-	if _, err := database.CreateSession(uid2, hash2, "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), uid2, hash2, "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession 2: %v", err)
 	}
 
@@ -750,7 +750,7 @@ func TestHub_SweepRevokedSessions_KicksRevokedClient(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// Delete alice's session (simulating logout from another device).
-	if err := database.DeleteSession(hash1); err != nil {
+	if err := database.DeleteSession(context.Background(), hash1); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
 	}
 
@@ -909,14 +909,14 @@ func TestRefreshChannelVisibility_TargetedSends(t *testing.T) {
 	defer hub.Stop()
 
 	chID := seedTestChannel(t, database, "secret-room")
-	ch, err := database.GetChannel(chID)
+	ch, err := database.GetChannel(context.Background(), chID)
 	if err != nil || ch == nil {
 		t.Fatalf("GetChannel: %v", err)
 	}
 
 	owner := seedOwnerUser(t, database, "vis-owner")
 	memberID := seedTestUser(t, database, "vis-member")
-	member, err := database.GetUserByID(memberID)
+	member, err := database.GetUserByID(context.Background(), memberID)
 	if err != nil || member == nil {
 		t.Fatalf("GetUserByID: %v", err)
 	}
@@ -930,7 +930,7 @@ func TestRefreshChannelVisibility_TargetedSends(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 
 	// Hide the channel from the Member role (deny ReadMessages).
-	if _, err := database.Exec(
+	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, 4, 0, 2)`,
 		chID,
 	); err != nil {
@@ -944,7 +944,7 @@ func TestRefreshChannelVisibility_TargetedSends(t *testing.T) {
 	drainForMsgType(t, ownerSend, "channel_create")
 
 	// Restore visibility — the member gets the channel back.
-	if _, err := database.Exec(
+	if _, err := database.ExecContext(context.Background(),
 		`DELETE FROM channel_overrides WHERE channel_id = ? AND role_id = 4`, chID,
 	); err != nil {
 		t.Fatalf("delete override: %v", err)
@@ -958,7 +958,7 @@ func TestRefreshChannelVisibility_ForcesFullResyncForStaleResumes(t *testing.T) 
 	hub, database := newTestHub(t)
 
 	chID := seedTestChannel(t, database, "watermark-room")
-	ch, err := database.GetChannel(chID)
+	ch, err := database.GetChannel(context.Background(), chID)
 	if err != nil || ch == nil {
 		t.Fatalf("GetChannel: %v", err)
 	}

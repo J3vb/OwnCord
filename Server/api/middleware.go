@@ -42,7 +42,7 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			}
 
 			hash := auth.HashToken(token)
-			sess, err := database.GetSessionByTokenHash(hash)
+			sess, err := database.GetSessionByTokenHash(r.Context(), hash)
 			if err != nil || sess == nil {
 				writeJSON(w, http.StatusUnauthorized, errorResponse{
 					Error:   "UNAUTHORIZED",
@@ -54,8 +54,11 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			// Check expiry.
 			if auth.IsSessionExpired(sess.ExpiresAt) {
 				// Clean up expired session in background to prevent accumulation.
+				// The request ctx is cancelled as soon as the 401 below is
+				// written, so detach cancellation: the deletion must complete.
+				cleanupCtx := context.WithoutCancel(r.Context())
 				go func(h string) {
-					_ = database.DeleteSession(h)
+					_ = database.DeleteSession(cleanupCtx, h)
 				}(hash)
 				writeJSON(w, http.StatusUnauthorized, errorResponse{
 					Error:   "UNAUTHORIZED",
@@ -65,7 +68,7 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			}
 
 			// Load user.
-			user, err := database.GetUserByID(sess.UserID)
+			user, err := database.GetUserByID(r.Context(), sess.UserID)
 			if err != nil || user == nil {
 				writeJSON(w, http.StatusUnauthorized, errorResponse{
 					Error:   "UNAUTHORIZED",
@@ -84,8 +87,11 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			}
 
 			// Load role for permission checks.
-			role, err := database.GetRoleByID(user.RoleID)
-			if err != nil {
+			// A dangling role_id returns (nil, nil) from GetRoleByID, so the nil
+			// check is load-bearing: without it a nil role reaches the context
+			// and every downstream permission check has to re-guard it.
+			role, err := database.GetRoleByID(r.Context(), user.RoleID)
+			if err != nil || role == nil {
 				writeJSON(w, http.StatusUnauthorized, errorResponse{
 					Error:   "UNAUTHORIZED",
 					Message: "role not found",
@@ -94,7 +100,7 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			}
 
 			// Touch session in background — non-fatal if it fails.
-			if err := database.TouchSession(hash); err != nil {
+			if err := database.TouchSession(r.Context(), hash); err != nil {
 				slog.Warn("failed to touch session", "error", err, "user_id", user.ID)
 			}
 
@@ -106,9 +112,20 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 	}
 }
 
-// RequirePermission returns middleware that checks the authenticated user's
-// role permissions. Returns 403 if the user lacks the required permission.
-// The ADMINISTRATOR bit (0x40000000) bypasses all checks.
+// RequirePermission returns middleware gating a route on SERVER-WIDE role
+// permissions. Returns 403 if the user lacks them.
+//
+// Scope contract — this is the whole reason the middleware and the service
+// layer look like two permission systems:
+//   - It consults the role bitfield only. Channel overrides are NOT applied,
+//     because a route reaching this middleware has no channel id to resolve
+//     them against, and a per-channel allow must never open a server-wide gate.
+//   - Anything channel-scoped belongs in the service layer behind
+//     permissions.Checker (via svc.Permissions), which resolves overrides.
+//   - ADMINISTRATOR bypasses; multi-bit masks require ALL bits.
+//
+// The rule itself lives in permissions.HasServerPerm so no call site can
+// re-derive it.
 func RequirePermission(perm int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -121,13 +138,7 @@ func RequirePermission(perm int64) func(http.Handler) http.Handler {
 				return
 			}
 
-			// ADMINISTRATOR bypasses all permission checks.
-			if permissions.HasAdmin(role.Permissions) {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			if role.Permissions&perm == 0 {
+			if !permissions.HasServerPerm(role.Permissions, perm) {
 				writeJSON(w, http.StatusForbidden, errorResponse{
 					Error:   "FORBIDDEN",
 					Message: "insufficient permissions",
@@ -365,12 +376,6 @@ func SecurityHeadersWithTLS(tlsMode string) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
-}
-
-// SecurityHeaders is a convenience wrapper for SecurityHeadersWithTLS with TLS
-// disabled (no HSTS header). Kept for backwards compatibility with tests.
-func SecurityHeaders(next http.Handler) http.Handler {
-	return SecurityHeadersWithTLS("")(next)
 }
 
 // MaxBodySize wraps r.Body with http.MaxBytesReader so that reads beyond

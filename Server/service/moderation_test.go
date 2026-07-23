@@ -52,7 +52,7 @@ func TestBanUser_HierarchyEnforced(t *testing.T) {
 	if err := svc.BanUser(context.Background(), 2, 1, "coup", nil); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("ban owner: want ErrForbidden, got %v", err)
 	}
-	owner, _ := database.GetUserByID(1)
+	owner, _ := database.GetUserByID(context.Background(), 1)
 	if owner.Banned {
 		t.Fatal("owner must not be banned")
 	}
@@ -64,7 +64,7 @@ func TestBanUser_AuthorizedSucceeds(t *testing.T) {
 	if err := svc.BanUser(context.Background(), 2, 3, "spam", nil); err != nil {
 		t.Fatalf("authorized ban: %v", err)
 	}
-	target, _ := database.GetUserByID(3)
+	target, _ := database.GetUserByID(context.Background(), 3)
 	if !target.Banned {
 		t.Fatal("target should be banned")
 	}
@@ -101,7 +101,7 @@ func TestUnbanUser_AuthorizationMatrix(t *testing.T) {
 	if err := svc.UnbanUser(context.Background(), 2, 3); err != nil {
 		t.Fatalf("authorized unban: %v", err)
 	}
-	target, _ := database.GetUserByID(3)
+	target, _ := database.GetUserByID(context.Background(), 3)
 	if target.Banned {
 		t.Fatal("target should be unbanned")
 	}

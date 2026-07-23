@@ -559,5 +559,3 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   return { mount, destroy };
 }
-
-export type MainPage = ReturnType<typeof createMainPage>;

@@ -48,12 +48,12 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 		return nil, fmt.Errorf("%w: cannot create DM with yourself", ErrBadRequest)
 	}
 
-	recipient, err := s.st.GetUserByID(recipientID)
+	recipient, err := s.st.GetUserByID(ctx, recipientID)
 	if err != nil || recipient == nil {
 		return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
 	}
 
-	blocked, err := s.st.IsEitherBlocked(userID, recipientID)
+	blocked, err := s.st.IsEitherBlocked(ctx, userID, recipientID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to check block status", ErrInternal)
 	}
@@ -61,7 +61,7 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 		return nil, fmt.Errorf("%w: cannot create DM — user is blocked", ErrForbidden)
 	}
 
-	ch, created, err := s.st.GetOrCreateDMChannel(userID, recipientID)
+	ch, created, err := s.st.GetOrCreateDMChannel(ctx, userID, recipientID)
 	if err != nil {
 		slog.Error("DMService.CreateDM", "err", err)
 		return nil, fmt.Errorf("%w: failed to create DM channel", ErrInternal)
@@ -75,8 +75,8 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 }
 
 // ListDMs returns all open DM channels for a user.
-func (s *DMService) ListDMs(userID int64) ([]db.DMChannelInfo, error) {
-	dms, err := s.st.GetUserDMChannels(userID)
+func (s *DMService) ListDMs(ctx context.Context, userID int64) ([]db.DMChannelInfo, error) {
+	dms, err := s.st.GetUserDMChannels(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to list DMs", ErrInternal)
 	}
@@ -84,17 +84,17 @@ func (s *DMService) ListDMs(userID int64) ([]db.DMChannelInfo, error) {
 }
 
 // CloseDM closes a DM channel for a user.
-func (s *DMService) CloseDM(userID, channelID int64) error {
+func (s *DMService) CloseDM(ctx context.Context, userID, channelID int64) error {
 	if channelID <= 0 {
 		return fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
 	}
 
-	ok, err := s.st.IsDMParticipant(userID, channelID)
+	ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
 	if err != nil || !ok {
 		return fmt.Errorf("%w: not a participant in this DM", ErrNotFound)
 	}
 
-	if err := s.st.CloseDM(userID, channelID); err != nil {
+	if err := s.st.CloseDM(ctx, userID, channelID); err != nil {
 		return fmt.Errorf("%w: failed to close DM", ErrInternal)
 	}
 

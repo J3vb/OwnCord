@@ -21,6 +21,7 @@ package db_test
 //   TestMigrate_AppliedAtIsISO8601              — applied_at timestamp format is valid
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"io/fs"
@@ -58,7 +59,7 @@ func (badDirFile) ReadDir(int) ([]fs.DirEntry, error) {
 func countVersions(t *testing.T, database *db.DB) int {
 	t.Helper()
 	var n int
-	err := database.QueryRow("SELECT COUNT(*) FROM schema_versions").Scan(&n)
+	err := database.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM schema_versions").Scan(&n)
 	if err != nil {
 		t.Fatalf("counting schema_versions: %v", err)
 	}
@@ -69,7 +70,7 @@ func countVersions(t *testing.T, database *db.DB) int {
 func hasVersion(t *testing.T, database *db.DB, filename string) bool {
 	t.Helper()
 	var v string
-	err := database.QueryRow(
+	err := database.QueryRowContext(context.Background(),
 		"SELECT version FROM schema_versions WHERE version = ?", filename,
 	).Scan(&v)
 	if err == sql.ErrNoRows {
@@ -85,7 +86,7 @@ func hasVersion(t *testing.T, database *db.DB, filename string) bool {
 func tableExists(t *testing.T, database *db.DB, name string) bool {
 	t.Helper()
 	var n string
-	err := database.QueryRow(
+	err := database.QueryRowContext(context.Background(),
 		"SELECT name FROM sqlite_master WHERE type='table' AND name=?", name,
 	).Scan(&n)
 	if err == sql.ErrNoRows {
@@ -175,7 +176,7 @@ func TestMigrate_SkipsAlreadyApplied(t *testing.T) {
 
 	// Confirm the row exists exactly once.
 	var count int
-	if err := database.QueryRow("SELECT COUNT(*) FROM unique_check WHERE val='singleton'").Scan(&count); err != nil {
+	if err := database.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM unique_check WHERE val='singleton'").Scan(&count); err != nil {
 		t.Fatalf("counting unique_check: %v", err)
 	}
 	if count != 1 {
@@ -246,7 +247,7 @@ func TestMigrate_OrderIsLexicographic(t *testing.T) {
 	}
 
 	var label string
-	if err := database.QueryRow("SELECT label FROM order_check LIMIT 1").Scan(&label); err != nil {
+	if err := database.QueryRowContext(context.Background(), "SELECT label FROM order_check LIMIT 1").Scan(&label); err != nil {
 		t.Fatalf("selecting from order_check: %v", err)
 	}
 	if label != "second" {
@@ -263,7 +264,7 @@ func TestMigrate_SeedExistingDatabase(t *testing.T) {
 
 	// Manually create a table to simulate a previously-migrated database
 	// that does not yet have schema_versions.
-	if _, err := database.Exec(
+	if _, err := database.ExecContext(context.Background(),
 		"CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY);",
 	); err != nil {
 		t.Fatalf("setup: creating users table: %v", err)
@@ -289,7 +290,7 @@ func TestMigrate_SeedExistingDatabase(t *testing.T) {
 
 	// The users table must still have its original schema (no 'name' column),
 	// proving the DROP/CREATE did not run.
-	_, err := database.Exec("INSERT INTO users (id) VALUES (42)")
+	_, err := database.ExecContext(context.Background(), "INSERT INTO users (id) VALUES (42)")
 	if err != nil {
 		t.Errorf("users table appears to have been recreated (DROP ran): %v", err)
 	}
@@ -304,12 +305,12 @@ func TestMigrate_SeedDoesNotReRunMigrations(t *testing.T) {
 
 	// Simulate an existing DB: create the "users" sentinel table so the seeding
 	// heuristic fires, plus the table that the migration would modify.
-	if _, err := database.Exec(
+	if _, err := database.ExecContext(context.Background(),
 		"CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY);",
 	); err != nil {
 		t.Fatalf("setup users: %v", err)
 	}
-	if _, err := database.Exec(
+	if _, err := database.ExecContext(context.Background(),
 		"CREATE TABLE IF NOT EXISTS existing (id INTEGER PRIMARY KEY);",
 	); err != nil {
 		t.Fatalf("setup existing: %v", err)
@@ -335,7 +336,7 @@ func TestMigrate_SeedDoesNotReRunMigrations(t *testing.T) {
 
 	// existing table should be empty — the INSERT was never executed (seeded only).
 	var count int
-	if err := database.QueryRow("SELECT COUNT(*) FROM existing").Scan(&count); err != nil {
+	if err := database.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM existing").Scan(&count); err != nil {
 		t.Fatalf("counting existing: %v", err)
 	}
 	if count != 0 {
@@ -357,7 +358,7 @@ func TestMigrate_SchemaVersionsAppliedAtRecorded(t *testing.T) {
 	}
 
 	var appliedAt string
-	err := database.QueryRow(
+	err := database.QueryRowContext(context.Background(),
 		"SELECT applied_at FROM schema_versions WHERE version = '001_ts.sql'",
 	).Scan(&appliedAt)
 	if err != nil {
@@ -381,7 +382,7 @@ func TestMigrate_AppliedAtIsISO8601(t *testing.T) {
 	}
 
 	var appliedAt string
-	if err := database.QueryRow(
+	if err := database.QueryRowContext(context.Background(),
 		"SELECT applied_at FROM schema_versions WHERE version = '001_dt.sql'",
 	).Scan(&appliedAt); err != nil {
 		t.Fatalf("querying applied_at: %v", err)
@@ -538,7 +539,7 @@ func TestMigrate_SeedDetectionUsesKnownTable(t *testing.T) {
 	database := openMemory(t)
 
 	// Create only an unrelated table — not one of the known sentinel tables.
-	if _, err := database.Exec(
+	if _, err := database.ExecContext(context.Background(),
 		"CREATE TABLE IF NOT EXISTS unrelated (id INTEGER PRIMARY KEY);",
 	); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -603,7 +604,7 @@ func TestMigrate_SchemaVersionsHasPrimaryKey(t *testing.T) {
 	}
 
 	// Attempting a duplicate insert must fail.
-	_, err := database.Exec(
+	_, err := database.ExecContext(context.Background(),
 		"INSERT INTO schema_versions (version, applied_at) VALUES ('001_pk.sql', datetime('now'))",
 	)
 	if err == nil {
@@ -617,7 +618,7 @@ func TestMigrate_SeedRecordsAllFilesFromFS(t *testing.T) {
 	database := openMemory(t)
 
 	// Create the users sentinel to trigger seeding on first call.
-	if _, err := database.Exec("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY);"); err != nil {
+	if _, err := database.ExecContext(context.Background(), "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY);"); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 

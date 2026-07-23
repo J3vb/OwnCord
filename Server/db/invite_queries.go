@@ -1,11 +1,14 @@
 package db
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // ListInvites returns invites ordered by creation time descending.
 // M-12: Limited to 200 rows to prevent unbounded result sets.
-func (d *DB) ListInvites() ([]*Invite, error) {
-	rows, err := d.q.ListInvites(dbCtx())
+func (d *DB) ListInvites(ctx context.Context) ([]*Invite, error) {
+	rows, err := d.q.ListInvites(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ListInvites: %w", err)
 	}

@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/owncord/server/db"
@@ -9,7 +10,7 @@ import (
 // seedUser inserts a minimal test user and returns its ID.
 func seedUser(t *testing.T, database *db.DB, username string) int64 {
 	t.Helper()
-	id, err := database.CreateUser(username, "hash", 4)
+	id, err := database.CreateUser(context.Background(), username, "hash", 4)
 	if err != nil {
 		t.Fatalf("seedUser(%q): %v", username, err)
 	}
@@ -19,7 +20,7 @@ func seedUser(t *testing.T, database *db.DB, username string) int64 {
 // seedChannel inserts a minimal test channel and returns its ID.
 func seedChannel(t *testing.T, database *db.DB, name string) int64 {
 	t.Helper()
-	id, err := database.CreateChannel(name, "text", "", "", 0)
+	id, err := database.CreateChannel(context.Background(), name, "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("seedChannel(%q): %v", name, err)
 	}
@@ -33,7 +34,7 @@ func TestCreateMessage_ReturnsID(t *testing.T) {
 	userID := seedUser(t, database, "alice")
 	chID := seedChannel(t, database, "general")
 
-	id, err := database.CreateMessage(chID, userID, "hello", nil)
+	id, err := database.CreateMessage(context.Background(), chID, userID, "hello", nil)
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
@@ -47,13 +48,13 @@ func TestCreateMessage_WithReplyTo(t *testing.T) {
 	userID := seedUser(t, database, "alice")
 	chID := seedChannel(t, database, "general")
 
-	parentID, _ := database.CreateMessage(chID, userID, "parent", nil)
-	replyID, err := database.CreateMessage(chID, userID, "reply", &parentID)
+	parentID, _ := database.CreateMessage(context.Background(), chID, userID, "parent", nil)
+	replyID, err := database.CreateMessage(context.Background(), chID, userID, "reply", &parentID)
 	if err != nil {
 		t.Fatalf("CreateMessage with reply: %v", err)
 	}
 
-	msg, _ := database.GetMessage(replyID)
+	msg, _ := database.GetMessage(context.Background(), replyID)
 	if msg.ReplyTo == nil || *msg.ReplyTo != parentID {
 		t.Errorf("ReplyTo = %v, want %d", msg.ReplyTo, parentID)
 	}
@@ -64,8 +65,8 @@ func TestCreateMessage_ContentPreserved(t *testing.T) {
 	userID := seedUser(t, database, "bob")
 	chID := seedChannel(t, database, "ch")
 
-	id, _ := database.CreateMessage(chID, userID, "test content", nil)
-	msg, _ := database.GetMessage(id)
+	id, _ := database.CreateMessage(context.Background(), chID, userID, "test content", nil)
+	msg, _ := database.GetMessage(context.Background(), id)
 	if msg.Content != "test content" {
 		t.Errorf("Content = %q, want 'test content'", msg.Content)
 	}
@@ -76,7 +77,7 @@ func TestCreateMessage_ContentPreserved(t *testing.T) {
 func TestGetMessage_NotFound(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	msg, err := database.GetMessage(9999)
+	msg, err := database.GetMessage(context.Background(), 9999)
 	if err != nil {
 		t.Fatalf("GetMessage: %v", err)
 	}
@@ -90,9 +91,9 @@ func TestGetMessage_Fields(t *testing.T) {
 	userID := seedUser(t, database, "carol")
 	chID := seedChannel(t, database, "ch")
 
-	id, _ := database.CreateMessage(chID, userID, "hello world", nil)
+	id, _ := database.CreateMessage(context.Background(), chID, userID, "hello world", nil)
 
-	msg, err := database.GetMessage(id)
+	msg, err := database.GetMessage(context.Background(), id)
 	if err != nil {
 		t.Fatalf("GetMessage: %v", err)
 	}
@@ -122,7 +123,7 @@ func TestGetMessages_EmptyChannel(t *testing.T) {
 	database := openMigratedMemory(t)
 	chID := seedChannel(t, database, "empty")
 
-	msgs, err := database.GetMessages(chID, 0, 50)
+	msgs, err := database.GetMessages(context.Background(), chID, 0, 50)
 	if err != nil {
 		t.Fatalf("GetMessages: %v", err)
 	}
@@ -137,13 +138,13 @@ func TestGetMessages_ReturnsMessages(t *testing.T) {
 	chID := seedChannel(t, database, "ch")
 
 	for i := range 3 {
-		_, err := database.CreateMessage(chID, userID, "msg", nil)
+		_, err := database.CreateMessage(context.Background(), chID, userID, "msg", nil)
 		if err != nil {
 			t.Fatalf("CreateMessage %d: %v", i, err)
 		}
 	}
 
-	msgs, err := database.GetMessages(chID, 0, 50)
+	msgs, err := database.GetMessages(context.Background(), chID, 0, 50)
 	if err != nil {
 		t.Fatalf("GetMessages: %v", err)
 	}
@@ -158,10 +159,10 @@ func TestGetMessages_LimitRespected(t *testing.T) {
 	chID := seedChannel(t, database, "ch")
 
 	for range 10 {
-		_, _ = database.CreateMessage(chID, userID, "msg", nil)
+		_, _ = database.CreateMessage(context.Background(), chID, userID, "msg", nil)
 	}
 
-	msgs, _ := database.GetMessages(chID, 0, 5)
+	msgs, _ := database.GetMessages(context.Background(), chID, 0, 5)
 	if len(msgs) != 5 {
 		t.Errorf("expected 5 messages (limit), got %d", len(msgs))
 	}
@@ -174,12 +175,12 @@ func TestGetMessages_BeforePagination(t *testing.T) {
 
 	ids := make([]int64, 0, 5)
 	for range 5 {
-		id, _ := database.CreateMessage(chID, userID, "msg", nil)
+		id, _ := database.CreateMessage(context.Background(), chID, userID, "msg", nil)
 		ids = append(ids, id)
 	}
 
 	// Get messages before the 4th message (should get 3 messages: ids 0,1,2).
-	msgs, _ := database.GetMessages(chID, ids[3], 50)
+	msgs, _ := database.GetMessages(context.Background(), chID, ids[3], 50)
 	if len(msgs) != 3 {
 		t.Errorf("expected 3 messages before id %d, got %d", ids[3], len(msgs))
 	}
@@ -190,8 +191,8 @@ func TestGetMessages_IncludesUsername(t *testing.T) {
 	userID := seedUser(t, database, "grace")
 	chID := seedChannel(t, database, "ch")
 
-	_, _ = database.CreateMessage(chID, userID, "hi", nil)
-	msgs, _ := database.GetMessages(chID, 0, 50)
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "hi", nil)
+	msgs, _ := database.GetMessages(context.Background(), chID, 0, 50)
 
 	if len(msgs) == 0 {
 		t.Fatal("expected messages")
@@ -208,13 +209,13 @@ func TestEditMessage_OwnerCanEdit(t *testing.T) {
 	userID := seedUser(t, database, "henry")
 	chID := seedChannel(t, database, "ch")
 
-	id, _ := database.CreateMessage(chID, userID, "original", nil)
+	id, _ := database.CreateMessage(context.Background(), chID, userID, "original", nil)
 
-	if err := database.EditMessage(id, userID, "updated"); err != nil {
+	if err := database.EditMessage(context.Background(), id, userID, "updated"); err != nil {
 		t.Fatalf("EditMessage: %v", err)
 	}
 
-	msg, _ := database.GetMessage(id)
+	msg, _ := database.GetMessage(context.Background(), id)
 	if msg.Content != "updated" {
 		t.Errorf("Content = %q, want 'updated'", msg.Content)
 	}
@@ -229,9 +230,9 @@ func TestEditMessage_NonOwnerCannotEdit(t *testing.T) {
 	otherID := seedUser(t, database, "julia")
 	chID := seedChannel(t, database, "ch")
 
-	id, _ := database.CreateMessage(chID, ownerID, "original", nil)
+	id, _ := database.CreateMessage(context.Background(), chID, ownerID, "original", nil)
 
-	err := database.EditMessage(id, otherID, "hacked")
+	err := database.EditMessage(context.Background(), id, otherID, "hacked")
 	if err == nil {
 		t.Error("EditMessage by non-owner should return error")
 	}
@@ -241,7 +242,7 @@ func TestEditMessage_NotFound(t *testing.T) {
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "kim")
 
-	err := database.EditMessage(9999, userID, "x")
+	err := database.EditMessage(context.Background(), 9999, userID, "x")
 	if err == nil {
 		t.Error("EditMessage non-existent should return error")
 	}
@@ -254,13 +255,13 @@ func TestDeleteMessage_OwnerCanDelete(t *testing.T) {
 	userID := seedUser(t, database, "larry")
 	chID := seedChannel(t, database, "ch")
 
-	id, _ := database.CreateMessage(chID, userID, "bye", nil)
+	id, _ := database.CreateMessage(context.Background(), chID, userID, "bye", nil)
 
-	if err := database.DeleteMessage(id, userID, false); err != nil {
+	if err := database.DeleteMessage(context.Background(), id, userID, false); err != nil {
 		t.Fatalf("DeleteMessage: %v", err)
 	}
 
-	msg, _ := database.GetMessage(id)
+	msg, _ := database.GetMessage(context.Background(), id)
 	if msg == nil {
 		t.Fatal("soft-deleted message should still exist in DB")
 	}
@@ -274,10 +275,10 @@ func TestDeleteMessage_ContentPreservedAfterSoftDelete(t *testing.T) {
 	userID := seedUser(t, database, "mia")
 	chID := seedChannel(t, database, "ch")
 
-	id, _ := database.CreateMessage(chID, userID, "sensitive", nil)
-	_ = database.DeleteMessage(id, userID, false)
+	id, _ := database.CreateMessage(context.Background(), chID, userID, "sensitive", nil)
+	_ = database.DeleteMessage(context.Background(), id, userID, false)
 
-	msg, _ := database.GetMessage(id)
+	msg, _ := database.GetMessage(context.Background(), id)
 	// Content preserved for broadcast (soft delete only flags deleted=1).
 	if msg.Content == "" {
 		t.Error("content should be preserved on soft delete for broadcast purposes")
@@ -290,9 +291,9 @@ func TestDeleteMessage_NonOwnerBlockedWithoutMod(t *testing.T) {
 	otherID := seedUser(t, database, "olivia")
 	chID := seedChannel(t, database, "ch")
 
-	id, _ := database.CreateMessage(chID, ownerID, "msg", nil)
+	id, _ := database.CreateMessage(context.Background(), chID, ownerID, "msg", nil)
 
-	err := database.DeleteMessage(id, otherID, false)
+	err := database.DeleteMessage(context.Background(), id, otherID, false)
 	if err == nil {
 		t.Error("DeleteMessage by non-owner non-mod should return error")
 	}
@@ -304,13 +305,13 @@ func TestDeleteMessage_ModCanDeleteAny(t *testing.T) {
 	modID := seedUser(t, database, "quinn")
 	chID := seedChannel(t, database, "ch")
 
-	id, _ := database.CreateMessage(chID, ownerID, "msg", nil)
+	id, _ := database.CreateMessage(context.Background(), chID, ownerID, "msg", nil)
 
-	if err := database.DeleteMessage(id, modID, true); err != nil {
+	if err := database.DeleteMessage(context.Background(), id, modID, true); err != nil {
 		t.Fatalf("DeleteMessage by mod: %v", err)
 	}
 
-	msg, _ := database.GetMessage(id)
+	msg, _ := database.GetMessage(context.Background(), id)
 	if !msg.Deleted {
 		t.Error("expected Deleted=true after mod delete")
 	}
@@ -320,7 +321,7 @@ func TestDeleteMessage_NotFound(t *testing.T) {
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "rachel")
 
-	err := database.DeleteMessage(9999, userID, true)
+	err := database.DeleteMessage(context.Background(), 9999, userID, true)
 	if err == nil {
 		t.Error("DeleteMessage non-existent should return error")
 	}
@@ -332,9 +333,9 @@ func TestAddReaction_Success(t *testing.T) {
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "sam")
 	chID := seedChannel(t, database, "ch")
-	msgID, _ := database.CreateMessage(chID, userID, "hi", nil)
+	msgID, _ := database.CreateMessage(context.Background(), chID, userID, "hi", nil)
 
-	if err := database.AddReaction(msgID, userID, "👍"); err != nil {
+	if err := database.AddReaction(context.Background(), msgID, userID, "👍"); err != nil {
 		t.Fatalf("AddReaction: %v", err)
 	}
 }
@@ -343,10 +344,10 @@ func TestAddReaction_UniqueConstraint(t *testing.T) {
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "tina")
 	chID := seedChannel(t, database, "ch")
-	msgID, _ := database.CreateMessage(chID, userID, "hi", nil)
+	msgID, _ := database.CreateMessage(context.Background(), chID, userID, "hi", nil)
 
-	_ = database.AddReaction(msgID, userID, "❤️")
-	err := database.AddReaction(msgID, userID, "❤️")
+	_ = database.AddReaction(context.Background(), msgID, userID, "❤️")
+	err := database.AddReaction(context.Background(), msgID, userID, "❤️")
 	if err == nil {
 		t.Error("adding duplicate reaction should return error")
 	}
@@ -356,10 +357,10 @@ func TestRemoveReaction_Success(t *testing.T) {
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "uma")
 	chID := seedChannel(t, database, "ch")
-	msgID, _ := database.CreateMessage(chID, userID, "hi", nil)
+	msgID, _ := database.CreateMessage(context.Background(), chID, userID, "hi", nil)
 
-	_ = database.AddReaction(msgID, userID, "😂")
-	if err := database.RemoveReaction(msgID, userID, "😂"); err != nil {
+	_ = database.AddReaction(context.Background(), msgID, userID, "😂")
+	if err := database.RemoveReaction(context.Background(), msgID, userID, "😂"); err != nil {
 		t.Fatalf("RemoveReaction: %v", err)
 	}
 }
@@ -368,9 +369,9 @@ func TestRemoveReaction_NotFound(t *testing.T) {
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "victor")
 	chID := seedChannel(t, database, "ch")
-	msgID, _ := database.CreateMessage(chID, userID, "hi", nil)
+	msgID, _ := database.CreateMessage(context.Background(), chID, userID, "hi", nil)
 
-	err := database.RemoveReaction(msgID, userID, "🔥")
+	err := database.RemoveReaction(context.Background(), msgID, userID, "🔥")
 	if err == nil {
 		t.Error("removing non-existent reaction should return error")
 	}
@@ -380,9 +381,9 @@ func TestGetReactions_Empty(t *testing.T) {
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "wendy")
 	chID := seedChannel(t, database, "ch")
-	msgID, _ := database.CreateMessage(chID, userID, "hi", nil)
+	msgID, _ := database.CreateMessage(context.Background(), chID, userID, "hi", nil)
 
-	counts, err := database.GetReactions(msgID)
+	counts, err := database.GetReactions(context.Background(), msgID)
 	if err != nil {
 		t.Fatalf("GetReactions: %v", err)
 	}
@@ -396,13 +397,13 @@ func TestGetReactions_Counts(t *testing.T) {
 	u1 := seedUser(t, database, "xavier")
 	u2 := seedUser(t, database, "yvonne")
 	chID := seedChannel(t, database, "ch")
-	msgID, _ := database.CreateMessage(chID, u1, "hi", nil)
+	msgID, _ := database.CreateMessage(context.Background(), chID, u1, "hi", nil)
 
-	_ = database.AddReaction(msgID, u1, "👍")
-	_ = database.AddReaction(msgID, u2, "👍")
-	_ = database.AddReaction(msgID, u1, "❤️")
+	_ = database.AddReaction(context.Background(), msgID, u1, "👍")
+	_ = database.AddReaction(context.Background(), msgID, u2, "👍")
+	_ = database.AddReaction(context.Background(), msgID, u1, "❤️")
 
-	counts, _ := database.GetReactions(msgID)
+	counts, _ := database.GetReactions(context.Background(), msgID)
 	if len(counts) != 2 {
 		t.Fatalf("expected 2 emoji types, got %d", len(counts))
 	}
@@ -429,10 +430,10 @@ func TestSearchMessages_FindsMatch(t *testing.T) {
 	userID := seedUser(t, database, "zara")
 	chID := seedChannel(t, database, "searchch")
 
-	_, _ = database.CreateMessage(chID, userID, "hello world fts test", nil)
-	_, _ = database.CreateMessage(chID, userID, "unrelated content here", nil)
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "hello world fts test", nil)
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "unrelated content here", nil)
 
-	results, err := database.SearchMessages("hello", nil, 10)
+	results, err := database.SearchMessages(context.Background(), "hello", nil, 10)
 	if err != nil {
 		t.Fatalf("SearchMessages: %v", err)
 	}
@@ -450,10 +451,10 @@ func TestSearchMessages_FilterByChannel(t *testing.T) {
 	ch1 := seedChannel(t, database, "ch1")
 	ch2 := seedChannel(t, database, "ch2")
 
-	_, _ = database.CreateMessage(ch1, userID, "needle in channel 1", nil)
-	_, _ = database.CreateMessage(ch2, userID, "needle in channel 2", nil)
+	_, _ = database.CreateMessage(context.Background(), ch1, userID, "needle in channel 1", nil)
+	_, _ = database.CreateMessage(context.Background(), ch2, userID, "needle in channel 2", nil)
 
-	results, _ := database.SearchMessages("needle", &ch1, 10)
+	results, _ := database.SearchMessages(context.Background(), "needle", &ch1, 10)
 	if len(results) != 1 {
 		t.Errorf("expected 1 result in ch1, got %d", len(results))
 	}
@@ -466,9 +467,9 @@ func TestSearchMessages_NoResults(t *testing.T) {
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "beth")
 	chID := seedChannel(t, database, "ch")
-	_, _ = database.CreateMessage(chID, userID, "hello there", nil)
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "hello there", nil)
 
-	results, _ := database.SearchMessages("xyzzy", nil, 10)
+	results, _ := database.SearchMessages(context.Background(), "xyzzy", nil, 10)
 	if len(results) != 0 {
 		t.Errorf("expected 0 results, got %d", len(results))
 	}
@@ -480,10 +481,10 @@ func TestSearchMessages_LimitRespected(t *testing.T) {
 	chID := seedChannel(t, database, "ch")
 
 	for range 5 {
-		_, _ = database.CreateMessage(chID, userID, "searchable keyword content", nil)
+		_, _ = database.CreateMessage(context.Background(), chID, userID, "searchable keyword content", nil)
 	}
 
-	results, _ := database.SearchMessages("keyword", nil, 3)
+	results, _ := database.SearchMessages(context.Background(), "keyword", nil, 3)
 	if len(results) != 3 {
 		t.Errorf("expected 3 results (limit), got %d", len(results))
 	}
@@ -494,10 +495,10 @@ func TestSearchMessages_DeletedNotReturned(t *testing.T) {
 	userID := seedUser(t, database, "diana")
 	chID := seedChannel(t, database, "ch")
 
-	id, _ := database.CreateMessage(chID, userID, "vanishing keyword message", nil)
-	_ = database.DeleteMessage(id, userID, false)
+	id, _ := database.CreateMessage(context.Background(), chID, userID, "vanishing keyword message", nil)
+	_ = database.DeleteMessage(context.Background(), id, userID, false)
 
-	results, _ := database.SearchMessages("vanishing", nil, 10)
+	results, _ := database.SearchMessages(context.Background(), "vanishing", nil, 10)
 	if len(results) != 0 {
 		t.Errorf("expected 0 results (deleted excluded), got %d", len(results))
 	}
@@ -509,15 +510,15 @@ func TestUpdateReadState_Upsert(t *testing.T) {
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "ella")
 	chID := seedChannel(t, database, "ch")
-	msgID, _ := database.CreateMessage(chID, userID, "msg", nil)
+	msgID, _ := database.CreateMessage(context.Background(), chID, userID, "msg", nil)
 
-	if err := database.UpdateReadState(userID, chID, msgID); err != nil {
+	if err := database.UpdateReadState(context.Background(), userID, chID, msgID); err != nil {
 		t.Fatalf("UpdateReadState: %v", err)
 	}
 
 	// Update again with higher message ID — should not error.
-	msgID2, _ := database.CreateMessage(chID, userID, "msg2", nil)
-	if err := database.UpdateReadState(userID, chID, msgID2); err != nil {
+	msgID2, _ := database.CreateMessage(context.Background(), chID, userID, "msg2", nil)
+	if err := database.UpdateReadState(context.Background(), userID, chID, msgID2); err != nil {
 		t.Fatalf("UpdateReadState second call: %v", err)
 	}
 }
@@ -529,7 +530,7 @@ func TestGetMessagesForAPI_Empty(t *testing.T) {
 	chID := seedChannel(t, database, "apichan")
 	userID := seedUser(t, database, "apiuser")
 
-	msgs, err := database.GetMessagesForAPI(chID, 0, 50, userID)
+	msgs, err := database.GetMessagesForAPI(context.Background(), chID, 0, 50, userID)
 	if err != nil {
 		t.Fatalf("GetMessagesForAPI: %v", err)
 	}
@@ -543,9 +544,9 @@ func TestGetMessagesForAPI_ReturnsUserObject(t *testing.T) {
 	userID := seedUser(t, database, "apiuser2")
 	chID := seedChannel(t, database, "apichan2")
 
-	_, _ = database.CreateMessage(chID, userID, "hello api", nil)
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "hello api", nil)
 
-	msgs, err := database.GetMessagesForAPI(chID, 0, 50, userID)
+	msgs, err := database.GetMessagesForAPI(context.Background(), chID, 0, 50, userID)
 	if err != nil {
 		t.Fatalf("GetMessagesForAPI: %v", err)
 	}
@@ -570,11 +571,11 @@ func TestGetMessagesForAPI_BeforePagination(t *testing.T) {
 
 	ids := make([]int64, 0, 5)
 	for range 5 {
-		id, _ := database.CreateMessage(chID, userID, "msg", nil)
+		id, _ := database.CreateMessage(context.Background(), chID, userID, "msg", nil)
 		ids = append(ids, id)
 	}
 
-	msgs, err := database.GetMessagesForAPI(chID, ids[3], 50, userID)
+	msgs, err := database.GetMessagesForAPI(context.Background(), chID, ids[3], 50, userID)
 	if err != nil {
 		t.Fatalf("GetMessagesForAPI with before: %v", err)
 	}
@@ -589,11 +590,11 @@ func TestGetMessagesForAPI_WithReactions(t *testing.T) {
 	u2 := seedUser(t, database, "reactuser2")
 	chID := seedChannel(t, database, "reactchan")
 
-	msgID, _ := database.CreateMessage(chID, u1, "react me", nil)
-	_ = database.AddReaction(msgID, u1, "👍")
-	_ = database.AddReaction(msgID, u2, "👍")
+	msgID, _ := database.CreateMessage(context.Background(), chID, u1, "react me", nil)
+	_ = database.AddReaction(context.Background(), msgID, u1, "👍")
+	_ = database.AddReaction(context.Background(), msgID, u2, "👍")
 
-	msgs, err := database.GetMessagesForAPI(chID, 0, 50, u1)
+	msgs, err := database.GetMessagesForAPI(context.Background(), chID, 0, 50, u1)
 	if err != nil {
 		t.Fatalf("GetMessagesForAPI: %v", err)
 	}
@@ -616,11 +617,11 @@ func TestGetMessagesForAPI_ExcludesDeleted(t *testing.T) {
 	userID := seedUser(t, database, "apidel")
 	chID := seedChannel(t, database, "apidelchan")
 
-	id, _ := database.CreateMessage(chID, userID, "deleted msg", nil)
-	_ = database.DeleteMessage(id, userID, false)
-	_, _ = database.CreateMessage(chID, userID, "visible msg", nil)
+	id, _ := database.CreateMessage(context.Background(), chID, userID, "deleted msg", nil)
+	_ = database.DeleteMessage(context.Background(), id, userID, false)
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "visible msg", nil)
 
-	msgs, err := database.GetMessagesForAPI(chID, 0, 50, userID)
+	msgs, err := database.GetMessagesForAPI(context.Background(), chID, 0, 50, userID)
 	if err != nil {
 		t.Fatalf("GetMessagesForAPI: %v", err)
 	}
@@ -636,7 +637,7 @@ func TestGetChannelUnreadCounts_NoMessages(t *testing.T) {
 	userID := seedUser(t, database, "unreaduser")
 	_ = seedChannel(t, database, "unreadchan")
 
-	counts, err := database.GetChannelUnreadCounts(userID)
+	counts, err := database.GetChannelUnreadCounts(context.Background(), userID)
 	if err != nil {
 		t.Fatalf("GetChannelUnreadCounts: %v", err)
 	}
@@ -652,13 +653,13 @@ func TestGetChannelUnreadCounts_WithUnreadMessages(t *testing.T) {
 	chID := seedChannel(t, database, "unreadchan2")
 
 	// Create 3 messages, mark first as read.
-	msg1, _ := database.CreateMessage(chID, userID, "msg1", nil)
-	_, _ = database.CreateMessage(chID, userID, "msg2", nil)
-	_, _ = database.CreateMessage(chID, userID, "msg3", nil)
+	msg1, _ := database.CreateMessage(context.Background(), chID, userID, "msg1", nil)
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "msg2", nil)
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "msg3", nil)
 
-	_ = database.UpdateReadState(userID, chID, msg1)
+	_ = database.UpdateReadState(context.Background(), userID, chID, msg1)
 
-	counts, err := database.GetChannelUnreadCounts(userID)
+	counts, err := database.GetChannelUnreadCounts(context.Background(), userID)
 	if err != nil {
 		t.Fatalf("GetChannelUnreadCounts: %v", err)
 	}
@@ -677,7 +678,7 @@ func TestGetLatestMessageID_Empty(t *testing.T) {
 	database := openMigratedMemory(t)
 	chID := seedChannel(t, database, "latestchan")
 
-	id, err := database.GetLatestMessageID(chID)
+	id, err := database.GetLatestMessageID(context.Background(), chID)
 	if err != nil {
 		t.Fatalf("GetLatestMessageID: %v", err)
 	}
@@ -691,11 +692,11 @@ func TestGetLatestMessageID_ReturnsHighest(t *testing.T) {
 	userID := seedUser(t, database, "latestuser")
 	chID := seedChannel(t, database, "latestchan2")
 
-	_, _ = database.CreateMessage(chID, userID, "first", nil)
-	_, _ = database.CreateMessage(chID, userID, "second", nil)
-	lastID, _ := database.CreateMessage(chID, userID, "third", nil)
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "first", nil)
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "second", nil)
+	lastID, _ := database.CreateMessage(context.Background(), chID, userID, "third", nil)
 
-	id, err := database.GetLatestMessageID(chID)
+	id, err := database.GetLatestMessageID(context.Background(), chID)
 	if err != nil {
 		t.Fatalf("GetLatestMessageID: %v", err)
 	}
@@ -709,11 +710,11 @@ func TestGetLatestMessageID_ExcludesDeleted(t *testing.T) {
 	userID := seedUser(t, database, "latestdel")
 	chID := seedChannel(t, database, "latestdelchan")
 
-	id1, _ := database.CreateMessage(chID, userID, "keep", nil)
-	id2, _ := database.CreateMessage(chID, userID, "delete me", nil)
-	_ = database.DeleteMessage(id2, userID, false)
+	id1, _ := database.CreateMessage(context.Background(), chID, userID, "keep", nil)
+	id2, _ := database.CreateMessage(context.Background(), chID, userID, "delete me", nil)
+	_ = database.DeleteMessage(context.Background(), id2, userID, false)
 
-	latestID, err := database.GetLatestMessageID(chID)
+	latestID, err := database.GetLatestMessageID(context.Background(), chID)
 	if err != nil {
 		t.Fatalf("GetLatestMessageID: %v", err)
 	}

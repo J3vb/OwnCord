@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"context"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -93,7 +94,7 @@ CREATE INDEX IF NOT EXISTS idx_invites_code ON invites(code);
 
 func TestCreateUser_Success(t *testing.T) {
 	database := newTestDB(t)
-	id, err := database.CreateUser("alice", "hash123", 4)
+	id, err := database.CreateUser(context.Background(), "alice", "hash123", 4)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -104,10 +105,10 @@ func TestCreateUser_Success(t *testing.T) {
 
 func TestCreateUser_DuplicateUsername(t *testing.T) {
 	database := newTestDB(t)
-	if _, err := database.CreateUser("bob", "hash1", 4); err != nil {
+	if _, err := database.CreateUser(context.Background(), "bob", "hash1", 4); err != nil {
 		t.Fatalf("first CreateUser: %v", err)
 	}
-	_, err := database.CreateUser("bob", "hash2", 4)
+	_, err := database.CreateUser(context.Background(), "bob", "hash2", 4)
 	if err == nil {
 		t.Error("CreateUser() with duplicate username returned nil error, want error")
 	}
@@ -115,10 +116,10 @@ func TestCreateUser_DuplicateUsername(t *testing.T) {
 
 func TestCreateUser_CaseInsensitiveDuplicate(t *testing.T) {
 	database := newTestDB(t)
-	if _, err := database.CreateUser("Charlie", "hash1", 4); err != nil {
+	if _, err := database.CreateUser(context.Background(), "Charlie", "hash1", 4); err != nil {
 		t.Fatalf("first CreateUser: %v", err)
 	}
-	_, err := database.CreateUser("charlie", "hash2", 4)
+	_, err := database.CreateUser(context.Background(), "charlie", "hash2", 4)
 	if err == nil {
 		t.Error("CreateUser() with case-insensitive duplicate returned nil error, want error")
 	}
@@ -126,9 +127,9 @@ func TestCreateUser_CaseInsensitiveDuplicate(t *testing.T) {
 
 func TestGetUserByUsername_Found(t *testing.T) {
 	database := newTestDB(t)
-	_, _ = database.CreateUser("dave", "hashDave", 4)
+	_, _ = database.CreateUser(context.Background(), "dave", "hashDave", 4)
 
-	user, err := database.GetUserByUsername("dave")
+	user, err := database.GetUserByUsername(context.Background(), "dave")
 	if err != nil {
 		t.Fatalf("GetUserByUsername: %v", err)
 	}
@@ -142,9 +143,9 @@ func TestGetUserByUsername_Found(t *testing.T) {
 
 func TestGetUserByUsername_CaseInsensitive(t *testing.T) {
 	database := newTestDB(t)
-	_, _ = database.CreateUser("Eve", "hashEve", 4)
+	_, _ = database.CreateUser(context.Background(), "Eve", "hashEve", 4)
 
-	user, err := database.GetUserByUsername("EVE")
+	user, err := database.GetUserByUsername(context.Background(), "EVE")
 	if err != nil {
 		t.Fatalf("GetUserByUsername case-insensitive: %v", err)
 	}
@@ -155,7 +156,7 @@ func TestGetUserByUsername_CaseInsensitive(t *testing.T) {
 
 func TestGetUserByUsername_NotFound(t *testing.T) {
 	database := newTestDB(t)
-	user, err := database.GetUserByUsername("nobody")
+	user, err := database.GetUserByUsername(context.Background(), "nobody")
 	if err != nil {
 		t.Fatalf("GetUserByUsername(not found): %v", err)
 	}
@@ -166,9 +167,9 @@ func TestGetUserByUsername_NotFound(t *testing.T) {
 
 func TestGetUserByID_Found(t *testing.T) {
 	database := newTestDB(t)
-	id, _ := database.CreateUser("frank", "hashFrank", 4)
+	id, _ := database.CreateUser(context.Background(), "frank", "hashFrank", 4)
 
-	user, err := database.GetUserByID(id)
+	user, err := database.GetUserByID(context.Background(), id)
 	if err != nil {
 		t.Fatalf("GetUserByID: %v", err)
 	}
@@ -179,7 +180,7 @@ func TestGetUserByID_Found(t *testing.T) {
 
 func TestGetUserByID_NotFound(t *testing.T) {
 	database := newTestDB(t)
-	user, err := database.GetUserByID(999)
+	user, err := database.GetUserByID(context.Background(), 999)
 	if err != nil {
 		t.Fatalf("GetUserByID(not found): %v", err)
 	}
@@ -190,12 +191,12 @@ func TestGetUserByID_NotFound(t *testing.T) {
 
 func TestUpdateUserStatus(t *testing.T) {
 	database := newTestDB(t)
-	id, _ := database.CreateUser("grace", "hash", 4)
+	id, _ := database.CreateUser(context.Background(), "grace", "hash", 4)
 
-	if err := database.UpdateUserStatus(id, "online"); err != nil {
+	if err := database.UpdateUserStatus(context.Background(), id, "online"); err != nil {
 		t.Fatalf("UpdateUserStatus: %v", err)
 	}
-	user, _ := database.GetUserByID(id)
+	user, _ := database.GetUserByID(context.Background(), id)
 	if user.Status != "online" {
 		t.Errorf("Status = %q, want %q", user.Status, "online")
 	}
@@ -203,12 +204,12 @@ func TestUpdateUserStatus(t *testing.T) {
 
 func TestBanUser_Permanent(t *testing.T) {
 	database := newTestDB(t)
-	id, _ := database.CreateUser("hank", "hash", 4)
+	id, _ := database.CreateUser(context.Background(), "hank", "hash", 4)
 
-	if err := database.BanUser(id, "spam", nil); err != nil {
+	if err := database.BanUser(context.Background(), id, "spam", nil); err != nil {
 		t.Fatalf("BanUser: %v", err)
 	}
-	user, _ := database.GetUserByID(id)
+	user, _ := database.GetUserByID(context.Background(), id)
 	if !user.Banned {
 		t.Error("Banned = false after BanUser, want true")
 	}
@@ -219,13 +220,13 @@ func TestBanUser_Permanent(t *testing.T) {
 
 func TestBanUser_Temporary(t *testing.T) {
 	database := newTestDB(t)
-	id, _ := database.CreateUser("ivan", "hash", 4)
+	id, _ := database.CreateUser(context.Background(), "ivan", "hash", 4)
 	expires := time.Now().Add(24 * time.Hour)
 
-	if err := database.BanUser(id, "temp ban", &expires); err != nil {
+	if err := database.BanUser(context.Background(), id, "temp ban", &expires); err != nil {
 		t.Fatalf("BanUser (temp): %v", err)
 	}
-	user, _ := database.GetUserByID(id)
+	user, _ := database.GetUserByID(context.Background(), id)
 	if !user.Banned {
 		t.Error("Banned = false after temp ban")
 	}
@@ -238,9 +239,9 @@ func TestBanUser_Temporary(t *testing.T) {
 
 func TestCreateSession_Success(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("jack", "hash", 4)
+	uid, _ := database.CreateUser(context.Background(), "jack", "hash", 4)
 
-	id, err := database.CreateSession(uid, "tokenHash1", "GoTest/1.0", "127.0.0.1")
+	id, err := database.CreateSession(context.Background(), uid, "tokenHash1", "GoTest/1.0", "127.0.0.1")
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -251,10 +252,10 @@ func TestCreateSession_Success(t *testing.T) {
 
 func TestGetSessionByTokenHash_Found(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("kate", "hash", 4)
-	_, _ = database.CreateSession(uid, "myTokenHash", "GoTest/1.0", "127.0.0.1")
+	uid, _ := database.CreateUser(context.Background(), "kate", "hash", 4)
+	_, _ = database.CreateSession(context.Background(), uid, "myTokenHash", "GoTest/1.0", "127.0.0.1")
 
-	sess, err := database.GetSessionByTokenHash("myTokenHash")
+	sess, err := database.GetSessionByTokenHash(context.Background(), "myTokenHash")
 	if err != nil {
 		t.Fatalf("GetSessionByTokenHash: %v", err)
 	}
@@ -268,7 +269,7 @@ func TestGetSessionByTokenHash_Found(t *testing.T) {
 
 func TestGetSessionByTokenHash_NotFound(t *testing.T) {
 	database := newTestDB(t)
-	sess, err := database.GetSessionByTokenHash("nonexistent")
+	sess, err := database.GetSessionByTokenHash(context.Background(), "nonexistent")
 	if err != nil {
 		t.Fatalf("GetSessionByTokenHash(not found): %v", err)
 	}
@@ -279,10 +280,10 @@ func TestGetSessionByTokenHash_NotFound(t *testing.T) {
 
 func TestGetSessionWithBanStatus_Found(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("zara", "hash", 4)
-	_, _ = database.CreateSession(uid, "banCheckToken", "GoTest/1.0", "127.0.0.1")
+	uid, _ := database.CreateUser(context.Background(), "zara", "hash", 4)
+	_, _ = database.CreateSession(context.Background(), uid, "banCheckToken", "GoTest/1.0", "127.0.0.1")
 
-	result, err := database.GetSessionWithBanStatus("banCheckToken")
+	result, err := database.GetSessionWithBanStatus(context.Background(), "banCheckToken")
 	if err != nil {
 		t.Fatalf("GetSessionWithBanStatus: %v", err)
 	}
@@ -299,13 +300,13 @@ func TestGetSessionWithBanStatus_Found(t *testing.T) {
 
 func TestGetSessionWithBanStatus_BannedUser(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("banned-zara", "hash", 4)
-	_, _ = database.CreateSession(uid, "bannedToken", "GoTest/1.0", "127.0.0.1")
-	if err := database.BanUser(uid, "rule violation", nil); err != nil {
+	uid, _ := database.CreateUser(context.Background(), "banned-zara", "hash", 4)
+	_, _ = database.CreateSession(context.Background(), uid, "bannedToken", "GoTest/1.0", "127.0.0.1")
+	if err := database.BanUser(context.Background(), uid, "rule violation", nil); err != nil {
 		t.Fatalf("BanUser: %v", err)
 	}
 
-	result, err := database.GetSessionWithBanStatus("bannedToken")
+	result, err := database.GetSessionWithBanStatus(context.Background(), "bannedToken")
 	if err != nil {
 		t.Fatalf("GetSessionWithBanStatus: %v", err)
 	}
@@ -322,7 +323,7 @@ func TestGetSessionWithBanStatus_BannedUser(t *testing.T) {
 
 func TestGetSessionWithBanStatus_NotFound(t *testing.T) {
 	database := newTestDB(t)
-	result, err := database.GetSessionWithBanStatus("nonexistent")
+	result, err := database.GetSessionWithBanStatus(context.Background(), "nonexistent")
 	if err != nil {
 		t.Fatalf("GetSessionWithBanStatus(not found): %v", err)
 	}
@@ -333,13 +334,13 @@ func TestGetSessionWithBanStatus_NotFound(t *testing.T) {
 
 func TestDeleteSession(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("leo", "hash", 4)
-	_, _ = database.CreateSession(uid, "delToken", "GoTest/1.0", "127.0.0.1")
+	uid, _ := database.CreateUser(context.Background(), "leo", "hash", 4)
+	_, _ = database.CreateSession(context.Background(), uid, "delToken", "GoTest/1.0", "127.0.0.1")
 
-	if err := database.DeleteSession("delToken"); err != nil {
+	if err := database.DeleteSession(context.Background(), "delToken"); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
 	}
-	sess, _ := database.GetSessionByTokenHash("delToken")
+	sess, _ := database.GetSessionByTokenHash(context.Background(), "delToken")
 	if sess != nil {
 		t.Error("Session still exists after DeleteSession")
 	}
@@ -347,12 +348,12 @@ func TestDeleteSession(t *testing.T) {
 
 func TestDeleteExpiredSessions(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("mia", "hash", 4)
+	uid, _ := database.CreateUser(context.Background(), "mia", "hash", 4)
 
 	// Insert an already-expired session directly via Exec.
 	// Use SQLite datetime format (space separator) to match what datetime('now') produces.
 	pastTime := time.Now().Add(-time.Hour).UTC().Format("2006-01-02 15:04:05")
-	_, err := database.Exec(
+	_, err := database.ExecContext(context.Background(),
 		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at) VALUES (?, ?, ?, ?, ?)`,
 		uid, "expiredToken", "test", "127.0.0.1", pastTime,
 	)
@@ -361,17 +362,17 @@ func TestDeleteExpiredSessions(t *testing.T) {
 	}
 
 	// Insert a valid session through the normal path.
-	_, _ = database.CreateSession(uid, "validToken", "GoTest/1.0", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, "validToken", "GoTest/1.0", "127.0.0.1")
 
-	if err := database.DeleteExpiredSessions(); err != nil {
+	if err := database.DeleteExpiredSessions(context.Background()); err != nil {
 		t.Fatalf("DeleteExpiredSessions: %v", err)
 	}
 
-	expired, _ := database.GetSessionByTokenHash("expiredToken")
+	expired, _ := database.GetSessionByTokenHash(context.Background(), "expiredToken")
 	if expired != nil {
 		t.Error("Expired session still exists after DeleteExpiredSessions")
 	}
-	valid, _ := database.GetSessionByTokenHash("validToken")
+	valid, _ := database.GetSessionByTokenHash(context.Background(), "validToken")
 	if valid == nil {
 		t.Error("Valid session was deleted by DeleteExpiredSessions")
 	}
@@ -379,17 +380,17 @@ func TestDeleteExpiredSessions(t *testing.T) {
 
 func TestTouchSession(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("noah", "hash", 4)
-	_, _ = database.CreateSession(uid, "touchToken", "GoTest/1.0", "127.0.0.1")
+	uid, _ := database.CreateUser(context.Background(), "noah", "hash", 4)
+	_, _ = database.CreateSession(context.Background(), uid, "touchToken", "GoTest/1.0", "127.0.0.1")
 
-	sess1, _ := database.GetSessionByTokenHash("touchToken")
+	sess1, _ := database.GetSessionByTokenHash(context.Background(), "touchToken")
 	time.Sleep(2 * time.Millisecond)
 
-	if err := database.TouchSession("touchToken"); err != nil {
+	if err := database.TouchSession(context.Background(), "touchToken"); err != nil {
 		t.Fatalf("TouchSession: %v", err)
 	}
 
-	sess2, _ := database.GetSessionByTokenHash("touchToken")
+	sess2, _ := database.GetSessionByTokenHash(context.Background(), "touchToken")
 	if sess1.LastUsed == sess2.LastUsed {
 		// last_used should have advanced; if they're equal the touch had no effect
 		// (This can be flaky at millisecond resolution, but is a reasonable sanity check.)
@@ -401,9 +402,9 @@ func TestTouchSession(t *testing.T) {
 
 func TestCreateInvite_Success(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("olivia", "hash", 4)
+	uid, _ := database.CreateUser(context.Background(), "olivia", "hash", 4)
 
-	code, err := database.CreateInvite(uid, 0, nil)
+	code, err := database.CreateInvite(context.Background(), uid, 0, nil)
 	if err != nil {
 		t.Fatalf("CreateInvite: %v", err)
 	}
@@ -414,10 +415,10 @@ func TestCreateInvite_Success(t *testing.T) {
 
 func TestGetInvite_Found(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("pedro", "hash", 4)
-	code, _ := database.CreateInvite(uid, 5, nil)
+	uid, _ := database.CreateUser(context.Background(), "pedro", "hash", 4)
+	code, _ := database.CreateInvite(context.Background(), uid, 5, nil)
 
-	inv, err := database.GetInvite(code)
+	inv, err := database.GetInvite(context.Background(), code)
 	if err != nil {
 		t.Fatalf("GetInvite: %v", err)
 	}
@@ -434,7 +435,7 @@ func TestGetInvite_Found(t *testing.T) {
 
 func TestGetInvite_NotFound(t *testing.T) {
 	database := newTestDB(t)
-	inv, err := database.GetInvite("bogus")
+	inv, err := database.GetInvite(context.Background(), "bogus")
 	if err != nil {
 		t.Fatalf("GetInvite(not found): %v", err)
 	}
@@ -445,14 +446,14 @@ func TestGetInvite_NotFound(t *testing.T) {
 
 func TestRevokeInvite(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("uma", "hash", 4)
-	code, _ := database.CreateInvite(uid, 0, nil)
+	uid, _ := database.CreateUser(context.Background(), "uma", "hash", 4)
+	code, _ := database.CreateInvite(context.Background(), uid, 0, nil)
 
-	if err := database.RevokeInvite(code); err != nil {
+	if err := database.RevokeInvite(context.Background(), code); err != nil {
 		t.Fatalf("RevokeInvite: %v", err)
 	}
 
-	inv, _ := database.GetInvite(code)
+	inv, _ := database.GetInvite(context.Background(), code)
 	if !inv.Revoked {
 		t.Error("Revoked = false after RevokeInvite, want true")
 	}
@@ -460,10 +461,10 @@ func TestRevokeInvite(t *testing.T) {
 
 func TestCreateInvite_UnlimitedUses(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("vera", "hash", 4)
-	code, _ := database.CreateInvite(uid, 0, nil) // 0 = unlimited
+	uid, _ := database.CreateUser(context.Background(), "vera", "hash", 4)
+	code, _ := database.CreateInvite(context.Background(), uid, 0, nil) // 0 = unlimited
 
-	inv, _ := database.GetInvite(code)
+	inv, _ := database.GetInvite(context.Background(), code)
 	if inv.MaxUses != nil {
 		t.Errorf("MaxUses = %v, want nil for unlimited", inv.MaxUses)
 	}
@@ -475,14 +476,14 @@ func TestCreateInvite_UnlimitedUses(t *testing.T) {
 // its use_count incremented in one operation.
 func TestUseInviteAtomic_Success(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("atomic_user1", "hash", 4)
-	code, _ := database.CreateInvite(uid, 0, nil)
+	uid, _ := database.CreateUser(context.Background(), "atomic_user1", "hash", 4)
+	code, _ := database.CreateInvite(context.Background(), uid, 0, nil)
 
-	if err := database.UseInviteAtomic(code); err != nil {
+	if err := database.UseInviteAtomic(context.Background(), code); err != nil {
 		t.Fatalf("UseInviteAtomic: %v", err)
 	}
 
-	inv, _ := database.GetInvite(code)
+	inv, _ := database.GetInvite(context.Background(), code)
 	if inv.Uses != 1 {
 		t.Errorf("Uses = %d, want 1", inv.Uses)
 	}
@@ -492,16 +493,16 @@ func TestUseInviteAtomic_Success(t *testing.T) {
 // multiple sequential calls.
 func TestUseInviteAtomic_IncrementsUses(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("atomic_user2", "hash", 4)
-	code, _ := database.CreateInvite(uid, 5, nil)
+	uid, _ := database.CreateUser(context.Background(), "atomic_user2", "hash", 4)
+	code, _ := database.CreateInvite(context.Background(), uid, 5, nil)
 
 	for i := range 3 {
-		if err := database.UseInviteAtomic(code); err != nil {
+		if err := database.UseInviteAtomic(context.Background(), code); err != nil {
 			t.Fatalf("UseInviteAtomic iteration %d: %v", i, err)
 		}
 	}
 
-	inv, _ := database.GetInvite(code)
+	inv, _ := database.GetInvite(context.Background(), code)
 	if inv.Uses != 3 {
 		t.Errorf("Uses = %d, want 3", inv.Uses)
 	}
@@ -511,16 +512,16 @@ func TestUseInviteAtomic_IncrementsUses(t *testing.T) {
 // modifying the database.
 func TestUseInviteAtomic_Revoked(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("atomic_user3", "hash", 4)
-	code, _ := database.CreateInvite(uid, 0, nil)
-	_ = database.RevokeInvite(code)
+	uid, _ := database.CreateUser(context.Background(), "atomic_user3", "hash", 4)
+	code, _ := database.CreateInvite(context.Background(), uid, 0, nil)
+	_ = database.RevokeInvite(context.Background(), code)
 
-	if err := database.UseInviteAtomic(code); err == nil {
+	if err := database.UseInviteAtomic(context.Background(), code); err == nil {
 		t.Error("UseInviteAtomic returned nil error for revoked invite, want error")
 	}
 
 	// use_count must not have changed.
-	inv, _ := database.GetInvite(code)
+	inv, _ := database.GetInvite(context.Background(), code)
 	if inv.Uses != 0 {
 		t.Errorf("Uses = %d after revoked attempt, want 0", inv.Uses)
 	}
@@ -529,12 +530,12 @@ func TestUseInviteAtomic_Revoked(t *testing.T) {
 // TestUseInviteAtomic_Expired returns an error for an expired invite.
 func TestUseInviteAtomic_Expired(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("atomic_user4", "hash", 4)
+	uid, _ := database.CreateUser(context.Background(), "atomic_user4", "hash", 4)
 
 	past := time.Now().Add(-time.Hour)
-	code, _ := database.CreateInvite(uid, 0, &past)
+	code, _ := database.CreateInvite(context.Background(), uid, 0, &past)
 
-	if err := database.UseInviteAtomic(code); err == nil {
+	if err := database.UseInviteAtomic(context.Background(), code); err == nil {
 		t.Error("UseInviteAtomic returned nil error for expired invite, want error")
 	}
 }
@@ -543,13 +544,13 @@ func TestUseInviteAtomic_Expired(t *testing.T) {
 // reached its maximum use count.
 func TestUseInviteAtomic_ExceedsMaxUses(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("atomic_user5", "hash", 4)
-	code, _ := database.CreateInvite(uid, 1, nil)
+	uid, _ := database.CreateUser(context.Background(), "atomic_user5", "hash", 4)
+	code, _ := database.CreateInvite(context.Background(), uid, 1, nil)
 
-	if err := database.UseInviteAtomic(code); err != nil {
+	if err := database.UseInviteAtomic(context.Background(), code); err != nil {
 		t.Fatalf("UseInviteAtomic first use: %v", err)
 	}
-	if err := database.UseInviteAtomic(code); err == nil {
+	if err := database.UseInviteAtomic(context.Background(), code); err == nil {
 		t.Error("UseInviteAtomic returned nil error after exceeding max_uses, want error")
 	}
 }
@@ -558,7 +559,7 @@ func TestUseInviteAtomic_ExceedsMaxUses(t *testing.T) {
 func TestUseInviteAtomic_NotFound(t *testing.T) {
 	database := newTestDB(t)
 
-	if err := database.UseInviteAtomic("doesnotexist"); err == nil {
+	if err := database.UseInviteAtomic(context.Background(), "doesnotexist"); err == nil {
 		t.Error("UseInviteAtomic returned nil error for unknown code, want error")
 	}
 }
@@ -568,15 +569,15 @@ func TestUseInviteAtomic_NotFound(t *testing.T) {
 // fail; the use_count must end up at 1.
 func TestUseInviteAtomic_ConcurrentSameCode(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("atomic_user6", "hash", 4)
-	code, _ := database.CreateInvite(uid, 1, nil)
+	uid, _ := database.CreateUser(context.Background(), "atomic_user6", "hash", 4)
+	code, _ := database.CreateInvite(context.Background(), uid, 1, nil)
 
 	type result struct{ err error }
 	results := make(chan result, 2)
 
 	for range 2 {
 		go func() {
-			results <- result{err: database.UseInviteAtomic(code)}
+			results <- result{err: database.UseInviteAtomic(context.Background(), code)}
 		}()
 	}
 
@@ -592,7 +593,7 @@ func TestUseInviteAtomic_ConcurrentSameCode(t *testing.T) {
 		t.Errorf("concurrent redemptions: %d succeeded, want exactly 1", successes)
 	}
 
-	inv, _ := database.GetInvite(code)
+	inv, _ := database.GetInvite(context.Background(), code)
 	if inv.Uses != 1 {
 		t.Errorf("use_count = %d after concurrent race, want 1", inv.Uses)
 	}
@@ -602,22 +603,22 @@ func TestUseInviteAtomic_ConcurrentSameCode(t *testing.T) {
 
 func TestUnbanUser_ClearsBan(t *testing.T) {
 	database := newTestDB(t)
-	id, _ := database.CreateUser("unban_target", "hash", 4)
+	id, _ := database.CreateUser(context.Background(), "unban_target", "hash", 4)
 
-	if err := database.BanUser(id, "spam", nil); err != nil {
+	if err := database.BanUser(context.Background(), id, "spam", nil); err != nil {
 		t.Fatalf("BanUser: %v", err)
 	}
 
-	user, _ := database.GetUserByID(id)
+	user, _ := database.GetUserByID(context.Background(), id)
 	if !user.Banned {
 		t.Fatal("user should be banned before unban")
 	}
 
-	if err := database.UnbanUser(id); err != nil {
+	if err := database.UnbanUser(context.Background(), id); err != nil {
 		t.Fatalf("UnbanUser: %v", err)
 	}
 
-	user, _ = database.GetUserByID(id)
+	user, _ = database.GetUserByID(context.Background(), id)
 	if user.Banned {
 		t.Error("Banned = true after UnbanUser, want false")
 	}
@@ -633,7 +634,7 @@ func TestUnbanUser_NonexistentUser(t *testing.T) {
 	database := newTestDB(t)
 
 	// Unbanning nonexistent user should not error.
-	if err := database.UnbanUser(99999); err != nil {
+	if err := database.UnbanUser(context.Background(), 99999); err != nil {
 		t.Errorf("UnbanUser(nonexistent) error: %v", err)
 	}
 }
@@ -642,18 +643,18 @@ func TestUnbanUser_NonexistentUser(t *testing.T) {
 
 func TestResetAllUserStatuses(t *testing.T) {
 	database := newTestDB(t)
-	id1, _ := database.CreateUser("status_u1", "hash", 4)
-	id2, _ := database.CreateUser("status_u2", "hash", 4)
+	id1, _ := database.CreateUser(context.Background(), "status_u1", "hash", 4)
+	id2, _ := database.CreateUser(context.Background(), "status_u2", "hash", 4)
 
-	_ = database.UpdateUserStatus(id1, "online")
-	_ = database.UpdateUserStatus(id2, "dnd")
+	_ = database.UpdateUserStatus(context.Background(), id1, "online")
+	_ = database.UpdateUserStatus(context.Background(), id2, "dnd")
 
-	if err := database.ResetAllUserStatuses(); err != nil {
+	if err := database.ResetAllUserStatuses(context.Background()); err != nil {
 		t.Fatalf("ResetAllUserStatuses: %v", err)
 	}
 
-	u1, _ := database.GetUserByID(id1)
-	u2, _ := database.GetUserByID(id2)
+	u1, _ := database.GetUserByID(context.Background(), id1)
+	u2, _ := database.GetUserByID(context.Background(), id2)
 	if u1.Status != "offline" {
 		t.Errorf("user1 status = %q, want 'offline'", u1.Status)
 	}
@@ -664,10 +665,10 @@ func TestResetAllUserStatuses(t *testing.T) {
 
 func TestResetAllUserStatuses_AlreadyOffline(t *testing.T) {
 	database := newTestDB(t)
-	_, _ = database.CreateUser("offline_user", "hash", 4)
+	_, _ = database.CreateUser(context.Background(), "offline_user", "hash", 4)
 
 	// Should not error when all users are already offline.
-	if err := database.ResetAllUserStatuses(); err != nil {
+	if err := database.ResetAllUserStatuses(context.Background()); err != nil {
 		t.Errorf("ResetAllUserStatuses: %v", err)
 	}
 }
@@ -677,7 +678,7 @@ func TestResetAllUserStatuses_AlreadyOffline(t *testing.T) {
 func TestListMembers_Empty(t *testing.T) {
 	database := newTestDB(t)
 
-	members, err := database.ListMembers()
+	members, err := database.ListMembers(context.Background())
 	if err != nil {
 		t.Fatalf("ListMembers: %v", err)
 	}
@@ -688,12 +689,12 @@ func TestListMembers_Empty(t *testing.T) {
 
 func TestListMembers_ExcludesBanned(t *testing.T) {
 	database := newTestDB(t)
-	id1, _ := database.CreateUser("member_visible", "hash", 4)
-	id2, _ := database.CreateUser("member_banned", "hash", 4)
-	_ = database.BanUser(id2, "test ban", nil)
+	id1, _ := database.CreateUser(context.Background(), "member_visible", "hash", 4)
+	id2, _ := database.CreateUser(context.Background(), "member_banned", "hash", 4)
+	_ = database.BanUser(context.Background(), id2, "test ban", nil)
 	_ = id1 // suppress unused
 
-	members, err := database.ListMembers()
+	members, err := database.ListMembers(context.Background())
 	if err != nil {
 		t.Fatalf("ListMembers: %v", err)
 	}
@@ -710,11 +711,11 @@ func TestListMembers_ExcludesBanned(t *testing.T) {
 
 func TestListMembers_SortedByUsername(t *testing.T) {
 	database := newTestDB(t)
-	_, _ = database.CreateUser("zeta_user", "hash", 4)
-	_, _ = database.CreateUser("alpha_user", "hash", 4)
-	_, _ = database.CreateUser("mid_user", "hash", 4)
+	_, _ = database.CreateUser(context.Background(), "zeta_user", "hash", 4)
+	_, _ = database.CreateUser(context.Background(), "alpha_user", "hash", 4)
+	_, _ = database.CreateUser(context.Background(), "mid_user", "hash", 4)
 
-	members, err := database.ListMembers()
+	members, err := database.ListMembers(context.Background())
 	if err != nil {
 		t.Fatalf("ListMembers: %v", err)
 	}

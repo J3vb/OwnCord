@@ -51,9 +51,9 @@ func main() {
 // run is the real entrypoint — separated for testability.
 func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 	// bgCtx is a cancellable context shared by all background goroutines
-	// (event persister, event pruner, plugin loader).  It is cancelled
-	// early in the shutdown sequence so in-flight DB operations do not
-	// block after the database is being torn down.
+	// (event persister, event pruner, plugin loader, maintenance loop).
+	// It is cancelled early in the shutdown sequence so in-flight DB
+	// operations do not block after the database is being torn down.
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	defer bgCancel()
 
@@ -111,13 +111,14 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 		return fmt.Errorf("running migrations: %w", err)
 	}
 
-	// Clear stale state from a previous run or crash.
-	if err := database.ResetAllUserStatuses(); err != nil {
+	// Clear stale state from a previous run or crash. Startup work — nothing
+	// to inherit a context from yet.
+	if err := database.ResetAllUserStatuses(context.Background()); err != nil {
 		log.Warn("failed to reset stale user statuses", "error", err)
 	} else {
 		log.Info("reset all user statuses to offline")
 	}
-	if err := database.ClearAllVoiceStates(); err != nil {
+	if err := database.ClearAllVoiceStates(context.Background()); err != nil {
 		log.Warn("failed to clear stale voice states", "error", err)
 	} else {
 		log.Info("cleared stale voice states")
@@ -262,14 +263,14 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 				}
 
 				tickFailed := false
-				if err := database.DeleteExpiredSessions(); err != nil {
+				if err := database.DeleteExpiredSessions(bgCtx); err != nil {
 					log.Warn("failed to delete expired sessions", "error", err)
 					tickFailed = true
 				}
 
 				// Clean up orphaned attachments (uploaded but never linked to a message).
 				cutoff := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339)
-				orphanFiles, orphanErr := database.DeleteOrphanedAttachments(cutoff)
+				orphanFiles, orphanErr := database.DeleteOrphanedAttachments(bgCtx, cutoff)
 				if orphanErr != nil {
 					log.Warn("failed to delete orphaned attachments", "error", orphanErr)
 					tickFailed = true

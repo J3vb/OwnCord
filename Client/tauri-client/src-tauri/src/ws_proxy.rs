@@ -1,14 +1,17 @@
 // WebSocket proxy — routes WSS through Rust to bypass self-signed cert rejection.
 // JS sends/receives messages via Tauri events instead of native WebSocket.
 //
-// Implements TOFU (Trust On First Use) certificate pinning:
-// - On first connect to a host, the cert SHA-256 fingerprint is stored.
-// - On subsequent connects, the fingerprint is compared with the stored value.
-// - If the fingerprint changes, the connection is rejected (potential MitM).
+// Implements TOFU (Trust On First Use) certificate pinning via the shared
+// `tofu` module:
+// - The cert SHA-256 fingerprint is captured during the handshake.
+// - On a known host it must match the stored pin, or the connection is rejected.
+// - On first use (no pin yet) the connection is rejected and a `cert-tofu`
+//   "first_use" event is emitted so the user can confirm the fingerprint. F4/F8:
+//   the proxy never silently pins or forwards to an unconfirmed host — the only
+//   writer of a pin is the explicit `accept_cert_fingerprint` command.
 
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
-use ring::digest::{digest, SHA256};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,6 +25,7 @@ use tokio_tungstenite::tungstenite::Message;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 use crate::constants::CERTS_STORE;
+use crate::tofu::{self, TofuOutcome};
 
 /// Sender half kept in Tauri state so `ws_send` can push messages.
 /// `tx` is wrapped in `Arc` so the monitoring task can clone a reference
@@ -34,157 +38,6 @@ impl WsState {
     pub fn new() -> Self {
         Self {
             tx: Arc::new(Mutex::new(None)),
-        }
-    }
-}
-
-/// Shared fingerprint captured during TLS handshake.
-type CapturedFingerprint = Arc<std::sync::Mutex<Option<String>>>;
-
-/// TOFU certificate verifier that captures the server cert fingerprint
-/// during the TLS handshake. Still accepts self-signed certs (required
-/// for self-hosted servers), but records the fingerprint for comparison
-/// with the stored value after the connection is established.
-#[derive(Debug)]
-struct TofuVerifier {
-    captured: CapturedFingerprint,
-}
-
-impl TofuVerifier {
-    fn new() -> (Self, CapturedFingerprint) {
-        let fp = Arc::new(std::sync::Mutex::new(None));
-        (Self { captured: fp.clone() }, fp)
-    }
-}
-
-impl rustls::client::danger::ServerCertVerifier for TofuVerifier {
-    fn verify_server_cert(
-        &self,
-        end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        // Compute SHA-256 fingerprint of the DER-encoded leaf certificate.
-        let hash = digest(&SHA256, end_entity.as_ref());
-        let hex = hash
-            .as_ref()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<Vec<_>>()
-            .join(":");
-
-        if let Ok(mut guard) = self.captured.lock() {
-            *guard = Some(hex);
-        }
-
-        // Accept the cert — TOFU check happens after the handshake completes.
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        vec![
-            rustls::SignatureScheme::RSA_PKCS1_SHA256,
-            rustls::SignatureScheme::RSA_PKCS1_SHA384,
-            rustls::SignatureScheme::RSA_PKCS1_SHA512,
-            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
-            rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
-            rustls::SignatureScheme::ECDSA_NISTP521_SHA512,
-            rustls::SignatureScheme::RSA_PSS_SHA256,
-            rustls::SignatureScheme::RSA_PSS_SHA384,
-            rustls::SignatureScheme::RSA_PSS_SHA512,
-            rustls::SignatureScheme::ED25519,
-            rustls::SignatureScheme::ED448,
-        ]
-    }
-}
-
-/// Extract the host (with port) from a wss:// URL.
-fn extract_host(url: &str) -> String {
-    url.strip_prefix("wss://")
-        .unwrap_or(url)
-        .split('/')
-        .next()
-        .unwrap_or(url)
-        .to_string()
-}
-
-/// Perform TOFU fingerprint check against the Tauri cert store.
-/// Returns Ok(()) if trusted, Err(message) if fingerprint mismatch.
-fn tofu_check<R: Runtime>(
-    app: &AppHandle<R>,
-    host: &str,
-    fingerprint: &str,
-) -> Result<String, String> {
-    let store = app
-        .store(CERTS_STORE)
-        .map_err(|e| format!("failed to open certs store: {e}"))?;
-
-    let stored = store.get(host).and_then(|v| {
-        if let Value::String(s) = v {
-            Some(s)
-        } else {
-            None
-        }
-    });
-
-    match stored {
-        None => {
-            // First use — store the fingerprint.
-            // Capture old value before mutating (None here, but consistent pattern).
-            let old_value = store.get(host);
-            store.set(host, Value::String(fingerprint.to_string()));
-            if let Err(e) = store.save() {
-                // Restore previous in-memory state: put back old value or delete
-                // if there was none, keeping in-memory consistent with on-disk.
-                match old_value {
-                    Some(v) => { store.set(host, v); }
-                    None    => { let _ = store.delete(host); }
-                }
-                return Err(format!("failed to persist cert fingerprint: {e}"));
-            }
-            Ok("trusted_first_use".to_string())
-        }
-        Some(ref stored_fp) if stored_fp == fingerprint => {
-            Ok("trusted".to_string())
-        }
-        Some(stored_fp) => {
-            Err(format!(
-                "Certificate fingerprint changed for {host}.\n\
-                 Stored:  {stored_fp}\n\
-                 Current: {fingerprint}\n\
-                 This may indicate a man-in-the-middle attack or a server certificate rotation.\n\
-                 Use accept_cert_fingerprint to trust the new certificate."
-            ))
         }
     }
 }
@@ -229,8 +82,9 @@ pub async fn ws_connect<R: Runtime>(
 
     emit_ws_state(&app, "connecting");
 
-    // Create TOFU verifier that captures the cert fingerprint during handshake.
-    let (verifier, captured_fp) = TofuVerifier::new();
+    // Capture the cert fingerprint during the handshake; the TOFU decision runs
+    // afterward, before the socket is used.
+    let (verifier, captured_fp) = tofu::CaptureVerifier::new();
 
     let tls_config = rustls::ClientConfig::builder()
         .dangerous()
@@ -261,7 +115,7 @@ pub async fn ws_connect<R: Runtime>(
     debug!("[ws_proxy] WebSocket handshake complete");
 
     // ── TOFU check ───────────────────────────────────────────────────────
-    let host = extract_host(&url);
+    let host = tofu::extract_host(&url);
     let fingerprint = captured_fp
         .lock()
         .map_err(|e| format!("failed to read captured fingerprint: {e}"))?
@@ -272,26 +126,41 @@ pub async fn ws_connect<R: Runtime>(
         return Err("TLS handshake completed but no certificate fingerprint was captured".into());
     }
 
-    match tofu_check(&app, &host, &fingerprint) {
-        Ok(status) => {
-            info!("[ws_proxy] TOFU check passed for {}: {}", host, status);
+    match tofu::evaluate(&app, &host, &fingerprint)? {
+        TofuOutcome::Trusted => {
+            info!("[ws_proxy] TOFU check passed for {}", host);
             emit_cert_tofu(&app, serde_json::json!({
                 "host": host,
                 "fingerprint": fingerprint,
-                "status": status,
+                "status": "trusted",
             }));
         }
-        Err(mismatch_msg) => {
+        TofuOutcome::FirstUse => {
+            info!("[ws_proxy] first-use cert for {} — awaiting user confirmation", host);
+            emit_cert_tofu(&app, serde_json::json!({
+                "host": host,
+                "fingerprint": fingerprint,
+                "status": "first_use",
+            }));
+            // Do not open the socket: the user must confirm the fingerprint
+            // (accept_cert_fingerprint) before anything is sent over it.
+            return Err(format!(
+                "certificate for {host} is not yet trusted; confirm the fingerprint to continue"
+            ));
+        }
+        TofuOutcome::Mismatch { stored } => {
+            let msg = tofu::mismatch_message(&host, &stored, &fingerprint);
             warn!("[ws_proxy] TOFU check FAILED for {} — certificate fingerprint mismatch", host);
-            debug!("[ws_proxy] TOFU detail: {}", mismatch_msg);
+            debug!("[ws_proxy] TOFU detail: {}", msg);
             emit_cert_tofu(&app, serde_json::json!({
                 "host": host,
                 "fingerprint": fingerprint,
                 "status": "mismatch",
-                "message": mismatch_msg,
+                "message": msg,
+                "storedFingerprint": stored,
             }));
             // Reject the connection — do not proceed.
-            return Err(mismatch_msg);
+            return Err(msg);
         }
     }
     // ── End TOFU check ───────────────────────────────────────────────────
@@ -413,8 +282,8 @@ pub async fn ws_disconnect(state: tauri::State<'_, WsState>) -> Result<(), Strin
     Ok(())
 }
 
-/// Accept a changed certificate fingerprint for a host.
-/// Call this after the user acknowledges a cert-mismatch warning.
+/// Accept a certificate fingerprint for a host — the ONLY path that writes a pin.
+/// Called after the user acknowledges a first-use or cert-mismatch prompt.
 #[tauri::command]
 pub fn accept_cert_fingerprint<R: Runtime>(
     app: AppHandle<R>,
@@ -457,43 +326,4 @@ pub fn accept_cert_fingerprint<R: Runtime>(
         return Err(format!("failed to persist cert fingerprint: {e}"));
     }
     Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn extract_host_basic_wss_url() {
-        assert_eq!(extract_host("wss://example.com/chat"), "example.com");
-    }
-
-    #[test]
-    fn extract_host_with_port() {
-        assert_eq!(extract_host("wss://example.com:8443/chat"), "example.com:8443");
-    }
-
-    #[test]
-    fn extract_host_no_path() {
-        assert_eq!(extract_host("wss://example.com"), "example.com");
-    }
-
-    #[test]
-    fn extract_host_no_scheme() {
-        assert_eq!(extract_host("example.com/path"), "example.com");
-    }
-
-    #[test]
-    fn extract_host_empty() {
-        assert_eq!(extract_host(""), "");
-    }
-
-    #[test]
-    fn extract_host_with_port_and_deep_path() {
-        assert_eq!(extract_host("wss://myhost:9443/api/v1/ws"), "myhost:9443");
-    }
 }

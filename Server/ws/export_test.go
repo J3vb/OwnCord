@@ -49,9 +49,95 @@ func ClearVoiceChIDForTest(c *Client) int64 {
 	return c.clearVoiceChID()
 }
 
-// SetVoiceChIDForTest exposes Client.setVoiceChID for external tests.
+// SetVoiceChIDForTest sets the voice channel ID atomically, clearing the join
+// token when leaving (chID 0) — the same contract production keeps via
+// setVoiceState. Test-only: production has no set-channel-without-token path.
 func SetVoiceChIDForTest(c *Client, chID int64) {
-	c.setVoiceChID(chID)
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	c.voiceChID = chID
+	if chID == 0 {
+		c.voiceJoinToken = ""
+	}
+}
+
+// SetClientVoiceChID is an alias kept for existing tests.
+func SetClientVoiceChID(c *Client, channelID int64) {
+	SetVoiceChIDForTest(c, channelID)
+}
+
+// SetClientVoiceStateForTest sets both the voice channel and join token.
+func SetClientVoiceStateForTest(c *Client, channelID int64, joinToken string) {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	c.voiceChID = channelID
+	c.voiceJoinToken = joinToken
+}
+
+// SetClientE2EEPubKeyForTest sets the E2EE public key on a client.
+func SetClientE2EEPubKeyForTest(c *Client, key string) {
+	c.setE2EEPubKey(key)
+}
+
+// GetClientE2EEPubKeyForTest returns the E2EE public key from a client.
+func GetClientE2EEPubKeyForTest(c *Client) string {
+	return c.getE2EEPubKey()
+}
+
+// NewTestClient creates a client with a caller-supplied send channel; conn is nil.
+func NewTestClient(hub *Hub, userID int64, send chan []byte) *Client {
+	return &Client{
+		hub:      hub,
+		ctx:      context.Background(),
+		userID:   userID,
+		send:     send,
+		sendHigh: send, // unified for test observability
+		sendLow:  send,
+	}
+}
+
+// NewTestClientWithChannel creates a test client subscribed to a specific channel.
+func NewTestClientWithChannel(hub *Hub, userID, channelID int64, send chan []byte) *Client {
+	return &Client{
+		hub:       hub,
+		ctx:       context.Background(),
+		userID:    userID,
+		channelID: channelID,
+		send:      send,
+		sendHigh:  send, // unified for test observability
+		sendLow:   send,
+	}
+}
+
+// NewTestClientWithUser creates a test client with an authenticated user record
+// set. Use this when tests need the client to pass permission checks.
+func NewTestClientWithUser(hub *Hub, user *db.User, channelID int64, send chan []byte) *Client {
+	return &Client{
+		hub:       hub,
+		ctx:       context.Background(),
+		userID:    user.ID,
+		user:      user,
+		channelID: channelID,
+		send:      send,
+		sendHigh:  send, // unified for test observability
+		sendLow:   send,
+	}
+}
+
+// NewTestClientWithTokenHash creates a test client that carries a session token
+// hash. Use this when tests need to exercise the periodic session-expiry check.
+func NewTestClientWithTokenHash(hub *Hub, user *db.User, tokenHash string, channelID int64, send chan []byte) *Client {
+	return &Client{
+		hub:       hub,
+		ctx:       context.Background(),
+		userID:    user.ID,
+		user:      user,
+		tokenHash: tokenHash,
+		channelID: channelID,
+		send:      send,
+		sendHigh:  send, // unified for test observability
+		sendLow:   send,
+	}
 }
 
 // TouchForTest exposes Client.touch for external tests.
@@ -61,7 +147,7 @@ func TouchForTest(c *Client) {
 
 // RollbackVoiceJoinForTest exposes Hub.rollbackVoiceJoin for external tests.
 func (h *Hub) RollbackVoiceJoinForTest(c *Client, channelID int64) {
-	h.rollbackVoiceJoin(c, channelID, true)
+	h.rollbackVoiceJoin(context.Background(), c, channelID, true)
 }
 
 // LeaveVoiceChannelWithRetryForTest exposes leaveVoiceChannelWithRetry for external tests.
@@ -108,29 +194,29 @@ func (h *Hub) PubSubForTest() *PubSub {
 // Defaults to replay_source="none" since most callers test the fresh-connect
 // path; tests that care about the resume tier can call buildAuthOK directly.
 func (h *Hub) BuildAuthOKForTest(user *db.User, roleName string) []byte {
-	return h.buildAuthOK(user, roleName, "none")
+	return h.buildAuthOK(context.Background(), user, roleName, "none")
 }
 
 // BuildReadyForTest exposes Hub.buildReady for external tests.
 // Passes nil role so no channels are visible (fail-closed, BUG-094).
 func (h *Hub) BuildReadyForTest(database *db.DB, userID int64) ([]byte, error) {
-	return h.buildReady(database, userID, nil)
+	return h.buildReady(context.Background(), database, userID, nil)
 }
 
 // BuildReadyWithRoleForTest exposes Hub.buildReady with a role for external tests.
 func (h *Hub) BuildReadyWithRoleForTest(database *db.DB, userID int64, role *db.Role) ([]byte, error) {
-	return h.buildReady(database, userID, role)
+	return h.buildReady(context.Background(), database, userID, role)
 }
 
 // ComputeAllowedChannelsForTest exposes Hub.computeAllowedChannels for external
 // tests (the REST/WS channel-visibility agreement test).
 func (h *Hub) ComputeAllowedChannelsForTest(database *db.DB, user *db.User) (map[int64]bool, error) {
-	return h.computeAllowedChannels(database, user)
+	return h.computeAllowedChannels(context.Background(), database, user)
 }
 
 // GetCachedSettingsForTest exposes Hub.getCachedSettings for external tests.
 func (h *Hub) GetCachedSettingsForTest() (string, string) {
-	return h.getCachedSettings()
+	return h.getCachedSettings(context.Background())
 }
 
 // GetClientVoiceChIDForTest exposes Client.getVoiceChID for external tests.
@@ -138,9 +224,11 @@ func GetClientVoiceChIDForTest(c *Client) int64 {
 	return c.getVoiceChID()
 }
 
-// GetClientVoiceJoinTokenForTest exposes Client.getVoiceJoinToken.
+// GetClientVoiceJoinTokenForTest reads the join token under voiceMu.
 func GetClientVoiceJoinTokenForTest(c *Client) string {
-	return c.getVoiceJoinToken()
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	return c.voiceJoinToken
 }
 
 // ExpireSettingsCacheForTest forces the settings cache to appear stale so that
@@ -161,9 +249,11 @@ func BuildJSONForTest(v any) []byte {
 	return buildJSON(v)
 }
 
-// ParseIdentityForTest exposes parseIdentity for external tests.
+// ParseIdentityForTest parses a LiveKit participant identity and discards the
+// join token, exercising the production parseParticipantIdentity.
 func ParseIdentityForTest(identity string) (int64, error) {
-	return parseIdentity(identity)
+	userID, _, err := parseParticipantIdentity(identity)
+	return userID, err
 }
 
 // ParseParticipantIdentityForTest exposes parseParticipantIdentity for tests.
@@ -202,11 +292,6 @@ func BuildDMChannelOpenForTest(channelID int64, recipient *db.User) []byte {
 	return buildDMChannelOpen(channelID, recipient)
 }
 
-// BroadcastVoiceStateUpdateForTest exposes broadcastVoiceStateUpdate for external tests.
-func (h *Hub) BroadcastVoiceStateUpdateForTest(c *Client) {
-	h.broadcastVoiceStateUpdate(c)
-}
-
 // HandleWebhookParticipantLeftForTest exposes handleWebhookParticipantLeft for
 // external tests so they can simulate LiveKit webhook events without HTTP.
 func (h *Hub) HandleWebhookParticipantLeftForTest(userID int64, channelID int64, joinToken string) {
@@ -227,4 +312,9 @@ func (h *Hub) HandleWebhookParticipantLeftForTest(userID int64, channelID int64,
 // MustFullResyncForTest exposes mustFullResync for external tests.
 func (h *Hub) MustFullResyncForTest(lastSeq uint64) bool {
 	return h.mustFullResync(lastSeq)
+}
+
+// HasChannelPermForTest exposes Hub.hasChannelPerm for external tests.
+func (h *Hub) HasChannelPermForTest(c *Client, channelID, perm int64) bool {
+	return h.hasChannelPerm(context.Background(), c, channelID, perm)
 }

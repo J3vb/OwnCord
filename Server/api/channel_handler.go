@@ -131,7 +131,7 @@ func handleGetMessages(svc *service.Services) http.HandlerFunc {
 			limit = v
 		}
 
-		msgs, hasMore, err := svc.Messages.GetMessages(user.ID, channelID, before, limit)
+		msgs, hasMore, err := svc.Messages.GetMessages(r.Context(), user.ID, channelID, before, limit)
 		if err != nil {
 			writeServiceError(w, err)
 			return
@@ -191,7 +191,7 @@ func handleSearch(svc *service.Services) http.HandlerFunc {
 			limit = v
 		}
 
-		results, err := svc.Messages.SearchMessages(user.ID, q, channelID, limit)
+		results, err := svc.Messages.SearchMessages(r.Context(), user.ID, q, channelID, limit)
 		if err != nil {
 			if isInvalidSearchQueryError(err) {
 				writeJSON(w, http.StatusBadRequest, errorResponse{
@@ -229,7 +229,7 @@ func handleGetPins(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		msgs, err := svc.Messages.GetPinnedMessages(user.ID, channelID)
+		msgs, err := svc.Messages.GetPinnedMessages(r.Context(), user.ID, channelID)
 		if err != nil {
 			writeServiceError(w, err)
 			return
@@ -263,7 +263,7 @@ func handleSetPinned(svc *service.Services, pinned bool) http.HandlerFunc {
 			return
 		}
 
-		if err := svc.Messages.SetMessagePinned(user.ID, channelID, messageID, pinned); err != nil {
+		if err := svc.Messages.SetMessagePinned(r.Context(), user.ID, channelID, messageID, pinned); err != nil {
 			writeServiceError(w, err)
 			return
 		}

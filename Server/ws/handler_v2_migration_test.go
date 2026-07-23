@@ -140,7 +140,7 @@ func TestHandleChatCommandV2_NoRegistry(t *testing.T) {
 
 // canPluginBroadcast fails closed when the posting-gate service is absent.
 func TestCanPluginBroadcast_NilServiceFailsClosed(t *testing.T) {
-	gate := canPluginBroadcast(nil, 1, 2)
+	gate := canPluginBroadcast(context.Background(), nil, 1, 2)
 	if gate == nil {
 		t.Fatal("expected a forbidden Result when MessageSvc is nil")
 	}

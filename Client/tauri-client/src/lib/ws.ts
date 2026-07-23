@@ -62,11 +62,15 @@ export type WsListener<T extends ServerMessage["type"]> = (
   id?: string,
 ) => void;
 
-/** TOFU certificate event emitted by the Rust WS proxy. */
+/** TOFU certificate event emitted by the Rust proxies (http / ws).
+ *  - "first_use": no pin yet — the proxy REJECTED the connection; the user must
+ *    confirm this fingerprint (acceptCertFingerprint) before anything is sent.
+ *  - "trusted": pin matches — proceed.
+ *  - "mismatch": pin differs — reject (possible MITM or cert rotation). */
 export interface CertTofuEvent {
   readonly host: string;
   readonly fingerprint: string;
-  readonly status: "trusted_first_use" | "trusted" | "mismatch";
+  readonly status: "first_use" | "trusted" | "mismatch";
   readonly message?: string;
   readonly storedFingerprint?: string;
 }
@@ -79,7 +83,7 @@ export function parseStoredFingerprint(message?: string): string | undefined {
 }
 
 export type CertMismatchListener = (event: CertTofuEvent) => void;
-export type CertFirstTrustListener = (event: CertTofuEvent) => void;
+export type CertFirstUseListener = (event: CertTofuEvent) => void;
 
 export interface WsClientConfig {
   readonly host: string;
@@ -129,8 +133,13 @@ export function createWsClient() {
   // TOFU cert mismatch listeners
   const certMismatchListeners = new Set<CertMismatchListener>();
 
-  // TOFU first-trust listeners (BUG-133)
-  const certFirstTrustListeners = new Set<CertFirstTrustListener>();
+  // TOFU first-use confirmation listeners (F4/F8)
+  const certFirstUseListeners = new Set<CertFirstUseListener>();
+
+  // Global cert-tofu Tauri listener unsub (registered once via startCertListener,
+  // active for the whole app lifetime so first-use/mismatch events are received
+  // during the connect page's health checks — before any WS connect).
+  let certListenerUnsub: (() => void) | null = null;
 
   function setState(newState: ConnectionState): void {
     if (state !== newState) {
@@ -299,6 +308,38 @@ export function createWsClient() {
     }
   }
 
+  // Route a cert-tofu event (from the http or ws proxy) to the right listeners.
+  // Registered globally via startCertListener so first-use/mismatch events are
+  // received during the connect page's health checks, before any WS connect.
+  function handleCertTofu(raw: CertTofuEvent): void {
+    log.info("TOFU cert event", { host: raw.host, status: raw.status });
+    if (raw.status === "first_use") {
+      log.warn("TOFU: first-use certificate — awaiting user confirmation", {
+        host: raw.host,
+        fingerprint: raw.fingerprint,
+      });
+      for (const listener of certFirstUseListeners) {
+        listener(raw);
+      }
+    } else if (raw.status === "mismatch") {
+      const evt: CertTofuEvent = {
+        ...raw,
+        storedFingerprint: raw.storedFingerprint ?? parseStoredFingerprint(raw.message),
+      };
+      log.error("Certificate fingerprint mismatch!", {
+        host: evt.host,
+        fingerprint: evt.fingerprint,
+        storedFingerprint: evt.storedFingerprint,
+      });
+      certMismatchBlock = true;
+      setState("disconnected");
+      for (const listener of certMismatchListeners) {
+        listener(evt);
+      }
+    }
+    // "trusted" → no action
+  }
+
   async function setupEventListeners(): Promise<void> {
     if (tauriListen === null) return;
 
@@ -356,38 +397,15 @@ export function createWsClient() {
     });
     eventUnsubs.push(unsubErr);
 
-    // TOFU certificate events
-    const unsubCert = await tauriListen("cert-tofu", (e) => {
-      if (gen !== wsGeneration) return;
-      const raw = e.payload as CertTofuEvent;
-      log.info("TOFU cert event", { host: raw.host, status: raw.status });
-
-      if (raw.status === "trusted_first_use") {
-        log.warn("TOFU: first-use certificate trust", {
-          host: raw.host,
-          fingerprint: raw.fingerprint,
-        });
-        for (const listener of certFirstTrustListeners) {
-          listener(raw);
-        }
-      } else if (raw.status === "mismatch") {
-        const evt: CertTofuEvent = {
-          ...raw,
-          storedFingerprint: parseStoredFingerprint(raw.message),
-        };
-        log.error("Certificate fingerprint mismatch!", {
-          host: evt.host,
-          fingerprint: evt.fingerprint,
-          storedFingerprint: evt.storedFingerprint,
-        });
-        certMismatchBlock = true;
-        setState("disconnected");
-        for (const listener of certMismatchListeners) {
-          listener(evt);
-        }
-      }
-    });
-    eventUnsubs.push(unsubCert);
+    // Register the global cert-tofu listener on first connect (idempotent).
+    // startCertListener() registers the same listener at app bootstrap so
+    // first-use/mismatch events are also caught during the connect page's health
+    // checks, before any WS connection exists.
+    if (certListenerUnsub === null) {
+      certListenerUnsub = await tauriListen("cert-tofu", (e) => {
+        handleCertTofu(e.payload as CertTofuEvent);
+      });
+    }
   }
 
   function cleanupEventListeners(): void {
@@ -556,10 +574,24 @@ export function createWsClient() {
       return () => sendFailureListeners.delete(listener);
     },
 
-    /** Register a listener for TOFU first-trust events (BUG-133). */
-    onCertFirstTrust(listener: CertFirstTrustListener): () => void {
-      certFirstTrustListeners.add(listener);
-      return () => certFirstTrustListeners.delete(listener);
+    /**
+     * Register the global cert-tofu event listener. Idempotent. Call once at app
+     * bootstrap (before the connect page's health checks) so first-use and
+     * mismatch events are received even before a WS connection exists.
+     */
+    async startCertListener(): Promise<void> {
+      if (certListenerUnsub !== null) return;
+      await ensureTauriApis();
+      if (tauriListen === null) return;
+      certListenerUnsub = await tauriListen("cert-tofu", (e) => {
+        handleCertTofu(e.payload as CertTofuEvent);
+      });
+    },
+
+    /** Register a listener for TOFU first-use confirmation events (F4/F8). */
+    onCertFirstUse(listener: CertFirstUseListener): () => void {
+      certFirstUseListeners.add(listener);
+      return () => certFirstUseListeners.delete(listener);
     },
 
     /** Register a listener for TOFU certificate mismatch events. */

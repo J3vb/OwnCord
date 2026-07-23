@@ -67,7 +67,7 @@ func handleChatCommandV2(ctx context.Context, cmd Command, _ ClientInfo, deps an
 		// gate denies, the error wins and the ephemeral reply is dropped (Result
 		// carries either an error or a reply, not both) — an untested edge; V1
 		// sent both. Preserve the security signal (denial) over the ack.
-		if gate := canPluginBroadcast(d.MessageSvc, cc.userID, cc.channelID); gate != nil {
+		if gate := canPluginBroadcast(ctx, d.MessageSvc, cc.userID, cc.channelID); gate != nil {
 			return *gate
 		}
 		msg := buildCommandBroadcast(cc.channelID, cc.userID, cc.command, result.Broadcast)
@@ -83,12 +83,12 @@ func handleChatCommandV2(ctx context.Context, cmd Command, _ ClientInfo, deps an
 // allowed, or a Result carrying the appropriate ClientError otherwise. A nil
 // MessageSvc (bare test hub) fails closed rather than allowing an ungated
 // broadcast.
-func canPluginBroadcast(messageSvc *service.MessageService, userID, channelID int64) *Result {
+func canPluginBroadcast(ctx context.Context, messageSvc *service.MessageService, userID, channelID int64) *Result {
 	if messageSvc == nil {
 		r := Result{Error: ClientError{Code: ErrCodeForbidden, Message: "broadcast gate unavailable"}}
 		return &r
 	}
-	if err := messageSvc.CanPost(userID, channelID); err != nil {
+	if err := messageSvc.CanPost(ctx, userID, channelID); err != nil {
 		if errors.Is(err, service.ErrNotFound) {
 			r := Result{Error: ClientError{Code: ErrCodeNotFound, Message: "channel not found"}}
 			return &r

@@ -1,6 +1,7 @@
 package ws_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -162,75 +163,6 @@ func TestBuildDMChannelOpen_NilAvatar(t *testing.T) {
 	}
 }
 
-// ─── broadcastVoiceStateUpdate ──────────────────────────────────────────────
-
-func TestBroadcastVoiceStateUpdate_NotInVoice(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "bvsu-noop")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	// User not in voice — should be a no-op.
-	hub.BroadcastVoiceStateUpdateForTest(c)
-	time.Sleep(20 * time.Millisecond)
-
-	// No voice_state message should have been sent since user is not in voice.
-	for len(send) > 0 {
-		msg := <-send
-		var m struct {
-			Type string `json:"type"`
-		}
-		_ = json.Unmarshal(msg, &m)
-		if m.Type == "voice_state" {
-			t.Error("expected no voice_state broadcast when user is not in voice")
-		}
-	}
-}
-
-func TestBroadcastVoiceStateUpdate_InVoice(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "bvsu-voice")
-
-	// Create a voice channel.
-	chanID, err := database.CreateChannel("bvsu-ch", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-
-	// Join the voice channel in DB.
-	if err := database.JoinVoiceChannel(user.ID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
-
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	ws.SetClientVoiceChID(c, chanID)
-	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
-
-	// Should broadcast a voice_state message.
-	hub.BroadcastVoiceStateUpdateForTest(c)
-
-	// Drain the channel and check for voice_state message.
-	time.Sleep(20 * time.Millisecond)
-	found := false
-	for len(send) > 0 {
-		msg := <-send
-		var m struct {
-			Type string `json:"type"`
-		}
-		_ = json.Unmarshal(msg, &m)
-		if m.Type == "voice_state" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected voice_state broadcast")
-	}
-}
-
 // ─── handleVoiceMute via HandleMessageForTest ───────────────────────────────
 
 func TestHandleVoiceMute_NotInVoice2(t *testing.T) {
@@ -360,8 +292,8 @@ func TestHandleVoiceScreenshare_NotInVoice2(t *testing.T) {
 func TestHandleVoiceMute_BadPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "mute-bad-payload")
-	chanID, _ := database.CreateChannel("mute-bp-ch", "voice", "", "", 0)
-	_ = database.JoinVoiceChannel(user.ID, chanID)
+	chanID, _ := database.CreateChannel(context.Background(), "mute-bp-ch", "voice", "", "", 0)
+	_ = database.JoinVoiceChannel(context.Background(), user.ID, chanID)
 
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
@@ -391,8 +323,8 @@ func TestHandleVoiceMute_BadPayload(t *testing.T) {
 func TestHandleVoiceDeafen_BadPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "deafen-bad-payload")
-	chanID, _ := database.CreateChannel("deafen-bp-ch", "voice", "", "", 0)
-	_ = database.JoinVoiceChannel(user.ID, chanID)
+	chanID, _ := database.CreateChannel(context.Background(), "deafen-bp-ch", "voice", "", "", 0)
+	_ = database.JoinVoiceChannel(context.Background(), user.ID, chanID)
 
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
@@ -424,8 +356,8 @@ func TestHandleVoiceDeafen_BadPayload(t *testing.T) {
 func TestHandleVoiceCamera_BadPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "cam-bad-payload")
-	chanID, _ := database.CreateChannel("cam-bp-ch", "voice", "", "", 0)
-	_ = database.JoinVoiceChannel(user.ID, chanID)
+	chanID, _ := database.CreateChannel(context.Background(), "cam-bp-ch", "voice", "", "", 0)
+	_ = database.JoinVoiceChannel(context.Background(), user.ID, chanID)
 
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
@@ -458,8 +390,8 @@ func TestHandleVoiceCamera_BadPayload(t *testing.T) {
 func TestHandleVoiceScreenshare_BadPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "share-bad-payload")
-	chanID, _ := database.CreateChannel("share-bp-ch", "voice", "", "", 0)
-	_ = database.JoinVoiceChannel(user.ID, chanID)
+	chanID, _ := database.CreateChannel(context.Background(), "share-bp-ch", "voice", "", "", 0)
+	_ = database.JoinVoiceChannel(context.Background(), user.ID, chanID)
 
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)

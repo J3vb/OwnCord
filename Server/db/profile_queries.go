@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/owncord/server/db/dbgen"
@@ -9,8 +10,8 @@ import (
 // UpdateUserProfile updates the username and avatar for the given user.
 // Returns ErrNotFound if the user does not exist. Returns an error wrapping
 // a UNIQUE constraint violation if the username is already taken.
-func (d *DB) UpdateUserProfile(userID int64, username string, avatar *string) error {
-	result, err := d.q.UpdateUserProfile(dbCtx(), dbgen.UpdateUserProfileParams{
+func (d *DB) UpdateUserProfile(ctx context.Context, userID int64, username string, avatar *string) error {
+	result, err := d.q.UpdateUserProfile(ctx, dbgen.UpdateUserProfileParams{
 		Username: username,
 		Avatar:   avatar,
 		ID:       userID,
@@ -29,8 +30,8 @@ func (d *DB) UpdateUserProfile(userID int64, username string, avatar *string) er
 }
 
 // UpdateUserPassword sets a new password hash for the given user.
-func (d *DB) UpdateUserPassword(userID int64, newPasswordHash string) error {
-	if err := d.q.UpdateUserPassword(dbCtx(), dbgen.UpdateUserPasswordParams{
+func (d *DB) UpdateUserPassword(ctx context.Context, userID int64, newPasswordHash string) error {
+	if err := d.q.UpdateUserPassword(ctx, dbgen.UpdateUserPasswordParams{
 		Password: newPasswordHash,
 		ID:       userID,
 	}); err != nil {
@@ -41,8 +42,8 @@ func (d *DB) UpdateUserPassword(userID int64, newPasswordHash string) error {
 
 // ListUserSessions returns all sessions for the given user in a single query.
 // Results are ordered by created_at descending (newest first).
-func (d *DB) ListUserSessions(userID int64) ([]Session, error) {
-	rows, err := d.q.ListUserSessions(dbCtx(), userID)
+func (d *DB) ListUserSessions(ctx context.Context, userID int64) ([]Session, error) {
+	rows, err := d.q.ListUserSessions(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("ListUserSessions: %w", err)
 	}
@@ -56,8 +57,8 @@ func (d *DB) ListUserSessions(userID int64) ([]Session, error) {
 // DeleteSessionByID removes a session by its ID, but only if it belongs to
 // the specified user. Returns ErrNotFound if the session does not exist or
 // does not belong to the user.
-func (d *DB) DeleteSessionByID(sessionID, userID int64) error {
-	result, err := d.q.DeleteSessionByID(dbCtx(), dbgen.DeleteSessionByIDParams{
+func (d *DB) DeleteSessionByID(ctx context.Context, sessionID, userID int64) error {
+	result, err := d.q.DeleteSessionByID(ctx, dbgen.DeleteSessionByIDParams{
 		ID:     sessionID,
 		UserID: userID,
 	})

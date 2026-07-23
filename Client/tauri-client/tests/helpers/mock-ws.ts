@@ -78,7 +78,11 @@ export function createMockWsClient() {
       return () => sendFailureListeners.delete(listener);
     },
 
-    onCertFirstTrust(): () => void {
+    async startCertListener(): Promise<void> {
+      // no-op in mock
+    },
+
+    onCertFirstUse(): () => void {
       return () => {};
     },
 

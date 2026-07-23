@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -23,8 +24,8 @@ func roleFromGen(r dbgen.Role) *Role {
 }
 
 // GetRoleByID returns the role with the given ID, or nil if not found.
-func (d *DB) GetRoleByID(id int64) (*Role, error) {
-	r, err := d.q.GetRoleByID(dbCtx(), id)
+func (d *DB) GetRoleByID(ctx context.Context, id int64) (*Role, error) {
+	r, err := d.q.GetRoleByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -35,8 +36,8 @@ func (d *DB) GetRoleByID(id int64) (*Role, error) {
 }
 
 // ListRoles returns all roles ordered by position descending.
-func (d *DB) ListRoles() ([]*Role, error) {
-	rows, err := d.q.ListRoles(dbCtx())
+func (d *DB) ListRoles(ctx context.Context) ([]*Role, error) {
+	rows, err := d.q.ListRoles(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ListRoles: %w", err)
 	}
@@ -51,8 +52,8 @@ func (d *DB) ListRoles() ([]*Role, error) {
 // Unlike GetUserWithRole, this does not fetch sensitive user columns (password,
 // TOTP secret). Use this on hot paths like permission checks.
 // Returns (nil, nil) when the user is not found.
-func (d *DB) GetRoleForUser(userID int64) (*Role, error) {
-	r, err := d.q.GetRoleForUser(dbCtx(), userID)
+func (d *DB) GetRoleForUser(ctx context.Context, userID int64) (*Role, error) {
+	r, err := d.q.GetRoleForUser(ctx, userID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -64,8 +65,8 @@ func (d *DB) GetRoleForUser(userID int64) (*Role, error) {
 
 // GetUserWithRole returns the user and their role in a single query.
 // Returns (nil, nil, nil) when the user is not found.
-func (d *DB) GetUserWithRole(userID int64) (*User, *Role, error) {
-	row := d.sqlDB.QueryRow(
+func (d *DB) GetUserWithRole(ctx context.Context, userID int64) (*User, *Role, error) {
+	row := d.sqlDB.QueryRowContext(ctx,
 		`SELECT u.id, u.username, u.password, u.avatar, u.role_id,
 		        u.totp_secret, u.status, u.created_at, u.last_seen,
 		        u.banned, u.ban_reason, u.ban_expires,
