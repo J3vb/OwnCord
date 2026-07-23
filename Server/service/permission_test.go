@@ -1,12 +1,48 @@
 package service
 
 import (
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/permissions"
 )
+
+// errOverrideStore wraps a real *db.DB but always fails the channel-override
+// fetch, so the fail-closed contract (A-2026-07-16) is testable. Embedding
+// *db.DB satisfies the service Store interface; only the one overridden method
+// diverges, every other call still hits the real database.
+type errOverrideStore struct {
+	*db.DB
+}
+
+func (errOverrideStore) GetAllChannelPermissionsForRole(int64) (map[int64]db.ChannelOverride, error) {
+	return nil, errors.New("boom")
+}
+
+// TestHasChannelPerm_OverrideFetchErrorDenies locks the fail-closed rule: when
+// the override fetch errors we must NOT substitute an empty map, because that
+// restores every bit a channel-level deny had stripped — and PermissionService
+// would then cache that degraded snapshot for permCacheTTL.
+func TestHasChannelPerm_OverrideFetchErrorDenies(t *testing.T) {
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
+		ID:          permissions.MemberRoleID,
+		Name:        "member",
+		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AddReactions,
+		Position:    1,
+	})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "readonly", Type: "text"})
+	seedChannelOverride(t, database, permissions.MemberRoleID, 10, 0, permissions.ReadMessages)
+
+	svc := NewPermissionService(errOverrideStore{DB: database}, permissions.NewChecker(database))
+
+	if svc.HasChannelPerm(1, 10, permissions.ReadMessages) {
+		t.Fatal("override fetch failure must deny, not fall back to the base role bits")
+	}
+}
 
 // newTestPermService creates a PermissionService backed by a real in-memory DB
 // pre-populated with a single role and user.
@@ -97,6 +133,28 @@ func TestHasChannelPerm_AdminBypass(t *testing.T) {
 	}
 	if !svc.HasChannelPerm(1, 10, permissions.ManageMessages) {
 		t.Fatal("admin should bypass all permission checks")
+	}
+}
+
+// TestHasChannelPerm_AdminSkipsOverrideFetch locks the admin skip in
+// getOrPopulate: fail-closed must not extend to admins, who bypass every
+// channel check anyway. Without the skip, an override-fetch outage would
+// deny admins everything instead of nothing.
+func TestHasChannelPerm_AdminSkipsOverrideFetch(t *testing.T) {
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
+		ID:          permissions.AdminRoleID,
+		Name:        "admin",
+		Permissions: permissions.Administrator,
+		Position:    90,
+	})
+	seedUserRole(t, database, 1, permissions.AdminRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+
+	svc := NewPermissionService(errOverrideStore{DB: database}, permissions.NewChecker(database))
+
+	if !svc.HasChannelPerm(1, 10, permissions.ManageMessages) {
+		t.Fatal("admin must not be denied by an override-fetch outage; the fetch is skipped for admins")
 	}
 }
 

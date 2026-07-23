@@ -10,6 +10,7 @@ import (
 	"github.com/owncord/server/api"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/service"
 )
 
@@ -86,6 +87,40 @@ func TestCreateInvite_MemberForbidden(t *testing.T) {
 
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("CreateInvite member status = %d, want 403", rr.Code)
+	}
+}
+
+// TestCreateInvite_ChannelAllowOverrideDoesNotGrant pins the scope boundary of
+// RequirePermission: it gates on SERVER-WIDE bits, so a per-channel allow must
+// never open it. The state is reachable — the admin channel-permission handler
+// masks override input with permissions.AllPerms, which includes ManageInvites.
+// This kills the plausible-looking "just route RequirePermission through
+// Checker.HasChannelPerm" refactor, which would pass naive review because
+// GetChannelPermissions returns (0, 0, nil) when no override row exists.
+func TestCreateInvite_ChannelAllowOverrideDoesNotGrant(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildInviteRouter(database, limiter)
+
+	token := loginAndGetToken(t, router, database, "overrideuser", 4)
+
+	if _, err := database.Exec(
+		`INSERT INTO channels (id, name, type) VALUES (1, 'general', 'text')`); err != nil {
+		t.Fatalf("insert channel: %v", err)
+	}
+	if _, err := database.Exec(
+		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (1, 4, ?, 0)`,
+		permissions.ManageInvites,
+	); err != nil {
+		t.Fatalf("insert channel override: %v", err)
+	}
+
+	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{
+		"max_uses": 1,
+	})
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("CreateInvite with channel allow override status = %d, want 403", rr.Code)
 	}
 }
 

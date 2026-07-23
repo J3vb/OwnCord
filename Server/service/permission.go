@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 type cachedPerms struct {
 	roleID      int64
 	rolePerms   int64
-	overrides   map[int64]db.ChannelOverride
+	overrides   map[int64]permissions.ChannelOverride
 	populatedAt time.Time
 }
 
@@ -62,12 +63,7 @@ func (s *PermissionService) HasChannelPerm(userID, channelID, perm int64) bool {
 	if cp == nil {
 		return false
 	}
-	if permissions.HasAdmin(cp.rolePerms) {
-		return true
-	}
-	o := cp.overrides[channelID] // zero-value (0,0) when no override exists
-	effective := permissions.EffectivePerms(cp.rolePerms, o.Allow, o.Deny)
-	return effective&perm == perm
+	return s.checker.HasChannelPermBatch(cp.rolePerms, cp.overrides, channelID, perm)
 }
 
 // RequireChannelAccess checks whether the user can access the channel with
@@ -150,10 +146,18 @@ func (s *PermissionService) getOrPopulate(userID int64) *cachedPerms {
 	if err != nil || role == nil {
 		return nil
 	}
-	overrides, err := s.st.GetAllChannelPermissionsForRole(role.ID)
-	if err != nil {
-		// Fall back to uncached if override fetch fails.
-		overrides = make(map[int64]db.ChannelOverride)
+	// Admins bypass every channel check, so skip the fetch entirely (mirrors
+	// ChannelService.ListVisibleChannels and ws.buildReady).
+	var overrides map[int64]permissions.ChannelOverride
+	if !permissions.HasAdmin(role.Permissions) {
+		raw, oErr := s.st.GetAllChannelPermissionsForRole(role.ID)
+		if oErr != nil {
+			// Fail closed: an empty map would silently drop every deny bit,
+			// and caching it would keep doing so for permCacheTTL.
+			slog.Error("PermissionService.getOrPopulate override fetch failed, denying", "err", oErr, "user_id", userID, "role_id", role.ID)
+			return nil
+		}
+		overrides = permOverrides(raw)
 	}
 
 	cp = &cachedPerms{

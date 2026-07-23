@@ -14,6 +14,7 @@ import (
 	"github.com/owncord/server/api"
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 )
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -143,6 +144,51 @@ func TestAuthMiddleware_MalformedAuthHeader(t *testing.T) {
 	}
 }
 
+// TestAuthMiddleware_DanglingRoleUnauthorized pins the `role == nil` guard:
+// GetRoleByID returns (nil, nil) for a role_id with no roles row, so without
+// the guard a nil role reached the request context and the request only died
+// later, at RequirePermission's own nil check (403) — or not at all on routes
+// that have no RequirePermission.
+func TestAuthMiddleware_DanglingRoleUnauthorized(t *testing.T) {
+	database := newAPITestDB(t)
+
+	// users.role_id has a FK to roles(id), so the dangling row can only be
+	// created with FK enforcement momentarily off (db.Open pins the pool to a
+	// single connection, so the pragma applies to the inserts that follow).
+	if _, err := database.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		t.Fatalf("disable foreign keys: %v", err)
+	}
+	res, err := database.Exec(
+		`INSERT INTO users (username, password, role_id) VALUES ('dangling', '$2a$12$fake', 999)`)
+	if err != nil {
+		t.Fatalf("insert dangling user: %v", err)
+	}
+	uid, _ := res.LastInsertId()
+	if _, err := database.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+		t.Fatalf("re-enable foreign keys: %v", err)
+	}
+
+	token, _ := auth.GenerateToken()
+	if _, err := database.Exec(
+		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at)
+		 VALUES (?, ?, 'test', '127.0.0.1', '2099-01-01T00:00:00Z')`,
+		uid, auth.HashToken(token),
+	); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+
+	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	withBearer(req, token)
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("AuthMiddleware dangling role status = %d, want 401", rr.Code)
+	}
+}
+
 // ─── RequirePermission tests ──────────────────────────────────────────────────
 
 func TestRequirePermission_Allowed(t *testing.T) {
@@ -152,9 +198,8 @@ func TestRequirePermission_Allowed(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(uid, hash, "test", "127.0.0.1")
 
-	// SEND_MESSAGES = 0x1 — Member role has this bit
 	h := api.AuthMiddleware(database)(
-		api.RequirePermission(0x1)(http.HandlerFunc(ok)),
+		api.RequirePermission(permissions.SendMessages)(http.HandlerFunc(ok)),
 	)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	withBearer(req, token)
@@ -174,9 +219,8 @@ func TestRequirePermission_Forbidden(t *testing.T) {
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(uid, hash, "test", "127.0.0.1")
 
-	// MANAGE_ROLES = 0x1000000 — Member does not have this
 	h := api.AuthMiddleware(database)(
-		api.RequirePermission(0x1000000)(http.HandlerFunc(ok)),
+		api.RequirePermission(permissions.ManageRoles)(http.HandlerFunc(ok)),
 	)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	withBearer(req, token)
@@ -199,7 +243,7 @@ func TestRequirePermission_Administrator_Bypass(t *testing.T) {
 
 	// Any permission should pass for ADMINISTRATOR
 	h := api.AuthMiddleware(database)(
-		api.RequirePermission(0x1000000)(http.HandlerFunc(ok)),
+		api.RequirePermission(permissions.ManageRoles)(http.HandlerFunc(ok)),
 	)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	withBearer(req, token)
@@ -209,6 +253,31 @@ func TestRequirePermission_Administrator_Bypass(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("RequirePermission administrator bypass status = %d, want 200", rr.Code)
+	}
+}
+
+// TestRequirePermission_MultiBitRequiresAllBits pins the one behaviour the
+// HasServerPerm consolidation changed: a multi-bit mask is ALL-of, not any-of.
+// The previous raw `role.Permissions&perm == 0` test returned 200 here because
+// Member holds SendMessages, which was enough to make the mask non-zero.
+func TestRequirePermission_MultiBitRequiresAllBits(t *testing.T) {
+	database := newAPITestDB(t)
+	uid, _ := database.CreateUser("multibit", "hash", 4) // Member role = 1635, has SendMessages, not ManageRoles
+	token, _ := auth.GenerateToken()
+	hash := auth.HashToken(token)
+	_, _ = database.CreateSession(uid, hash, "test", "127.0.0.1")
+
+	h := api.AuthMiddleware(database)(
+		api.RequirePermission(permissions.SendMessages | permissions.ManageRoles)(http.HandlerFunc(ok)),
+	)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	withBearer(req, token)
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("RequirePermission partial multi-bit mask status = %d, want 403", rr.Code)
 	}
 }
 
@@ -938,6 +1007,15 @@ CREATE TABLE IF NOT EXISTS channels (
     voice_quality    TEXT,
     mixing_threshold INTEGER,
     voice_max_video  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS channel_overrides (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    role_id    INTEGER NOT NULL REFERENCES roles(id)    ON DELETE CASCADE,
+    allow      INTEGER NOT NULL DEFAULT 0,
+    deny       INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(channel_id, role_id)
 );
 
 CREATE TABLE IF NOT EXISTS messages (

@@ -71,6 +71,14 @@ func HasAdmin(rolePerms int64) bool {
 	return rolePerms&Administrator != 0
 }
 
+// HasServerPerm reports whether a role holds a SERVER-WIDE permission.
+// Administrator bypasses. Channel overrides are deliberately NOT consulted —
+// use Checker.HasChannelPerm/HasChannelPermBatch whenever a channel id exists.
+// Multi-bit masks are ALL-of (every bit must be present), matching HasPerm.
+func HasServerPerm(rolePerms, perm int64) bool {
+	return HasAdmin(rolePerms) || HasPerm(rolePerms, perm)
+}
+
 // EffectivePerms computes the resolved permission set for a channel override.
 // The formula matches Discord's channel override semantics:
 //
