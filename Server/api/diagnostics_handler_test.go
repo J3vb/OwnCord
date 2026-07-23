@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -38,10 +39,10 @@ func setupDiagnosticsRouter(t *testing.T) (http.Handler, string, *db.DB) {
 	t.Cleanup(cleanup)
 
 	// Create a user and session for authenticated requests.
-	uid, _ := database.CreateUser("diaguser", "$2a$12$fake", 1)
+	uid, _ := database.CreateUser(context.Background(), "diaguser", "$2a$12$fake", 1)
 	token := "diagtest-token-123"
 	hash := auth.HashToken(token)
-	_, _ = database.Exec(
+	_, _ = database.ExecContext(context.Background(),
 		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at)
 		 VALUES (?, ?, 'test', '127.0.0.1', '2099-01-01T00:00:00Z')`,
 		uid, hash,
@@ -102,12 +103,12 @@ func TestDiagnosticsConnectivity_Unauthenticated(t *testing.T) {
 func TestDiagnosticsConnectivity_MemberForbidden(t *testing.T) {
 	router, _, database := setupDiagnosticsRouter(t)
 
-	uid, err := database.CreateUser("diagmember", "$2a$12$fake", int(permissions.MemberRoleID))
+	uid, err := database.CreateUser(context.Background(), "diagmember", "$2a$12$fake", int(permissions.MemberRoleID))
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	token := "diagtest-member-token"
-	if _, err := database.Exec(
+	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at)
 		 VALUES (?, ?, 'test', '127.0.0.1', '2099-01-01T00:00:00Z')`,
 		uid, auth.HashToken(token),

@@ -1,6 +1,7 @@
 package ws_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -15,7 +16,7 @@ import (
 // seedDMChannel creates a DM channel between two users and returns the channel ID.
 func seedDMChannel(t *testing.T, database *db.DB, user1ID, user2ID int64) int64 {
 	t.Helper()
-	ch, _, err := database.GetOrCreateDMChannel(user1ID, user2ID)
+	ch, _, err := database.GetOrCreateDMChannel(context.Background(), user1ID, user2ID)
 	if err != nil {
 		t.Fatalf("seedDMChannel: %v", err)
 	}
@@ -244,7 +245,7 @@ func TestDM_ChatSend_AutoReopenForRecipient(t *testing.T) {
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
 	// Bob closes the DM.
-	if err := database.CloseDM(bob.ID, dmChID); err != nil {
+	if err := database.CloseDM(context.Background(), bob.ID, dmChID); err != nil {
 		t.Fatalf("CloseDM: %v", err)
 	}
 
@@ -281,7 +282,7 @@ func TestDM_ChatEdit_ParticipantCanEdit(t *testing.T) {
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
 	// Create a message directly in the DB.
-	msgID, err := database.CreateMessage(dmChID, alice.ID, "original", nil)
+	msgID, err := database.CreateMessage(context.Background(), dmChID, alice.ID, "original", nil)
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
@@ -310,7 +311,7 @@ func TestDM_ChatEdit_NonParticipantForbidden(t *testing.T) {
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
 	// Alice creates a message.
-	msgID, err := database.CreateMessage(dmChID, alice.ID, "private", nil)
+	msgID, err := database.CreateMessage(context.Background(), dmChID, alice.ID, "private", nil)
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
@@ -338,7 +339,7 @@ func TestDM_ChatDelete_ParticipantCanDeleteOwn(t *testing.T) {
 	bob := seedMemberUser(t, database, "dm-del-bob")
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	msgID, err := database.CreateMessage(dmChID, alice.ID, "to delete", nil)
+	msgID, err := database.CreateMessage(context.Background(), dmChID, alice.ID, "to delete", nil)
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
@@ -372,7 +373,7 @@ func TestDM_ChatDelete_NonParticipantForbidden(t *testing.T) {
 	charlie := seedMemberUser(t, database, "dm-delforbid-charlie")
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	msgID, err := database.CreateMessage(dmChID, alice.ID, "protected", nil)
+	msgID, err := database.CreateMessage(context.Background(), dmChID, alice.ID, "protected", nil)
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
@@ -400,7 +401,7 @@ func TestDM_ChatDelete_NoModeratorOverride(t *testing.T) {
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
 	// Bob's message.
-	msgID, err := database.CreateMessage(dmChID, bob.ID, "bob says hi", nil)
+	msgID, err := database.CreateMessage(context.Background(), dmChID, bob.ID, "bob says hi", nil)
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
@@ -540,7 +541,7 @@ func TestDM_ReactionAdd_ParticipantSuccess(t *testing.T) {
 	bob := seedMemberUser(t, database, "dm-react-bob")
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	msgID, err := database.CreateMessage(dmChID, alice.ID, "react to me", nil)
+	msgID, err := database.CreateMessage(context.Background(), dmChID, alice.ID, "react to me", nil)
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
@@ -574,7 +575,7 @@ func TestDM_ReactionAdd_NonParticipantError(t *testing.T) {
 	charlie := seedMemberUser(t, database, "dm-reactforbid-charlie")
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	msgID, err := database.CreateMessage(dmChID, alice.ID, "private msg", nil)
+	msgID, err := database.CreateMessage(context.Background(), dmChID, alice.ID, "private msg", nil)
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
@@ -601,7 +602,7 @@ func TestDM_ReactionRemove_ParticipantSuccess(t *testing.T) {
 	bob := seedMemberUser(t, database, "dm-reactrm-bob")
 	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	msgID, err := database.CreateMessage(dmChID, bob.ID, "remove reaction", nil)
+	msgID, err := database.CreateMessage(context.Background(), dmChID, bob.ID, "remove reaction", nil)
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}

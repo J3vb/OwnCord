@@ -113,7 +113,7 @@ func handleListDMs(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		channels, err := svc.DMs.ListDMs(user.ID)
+		channels, err := svc.DMs.ListDMs(r.Context(), user.ID)
 		if err != nil {
 			writeServiceError(w, err)
 			return
@@ -138,7 +138,7 @@ func handleCloseDM(svc *service.Services, broadcaster DMBroadcaster) http.Handle
 			return
 		}
 
-		if err := svc.DMs.CloseDM(user.ID, channelID); err != nil {
+		if err := svc.DMs.CloseDM(r.Context(), user.ID, channelID); err != nil {
 			writeServiceError(w, err)
 			return
 		}
@@ -191,7 +191,7 @@ func handleUnblockUser(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		if err := svc.Blocks.UnblockUser(user.ID, targetID); err != nil {
+		if err := svc.Blocks.UnblockUser(r.Context(), user.ID, targetID); err != nil {
 			writeServiceError(w, err)
 			return
 		}
@@ -208,7 +208,7 @@ func handleListBlocks(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		ids, err := svc.Blocks.ListBlocked(user.ID)
+		ids, err := svc.Blocks.ListBlocked(r.Context(), user.ID)
 		if err != nil {
 			writeServiceError(w, err)
 			return

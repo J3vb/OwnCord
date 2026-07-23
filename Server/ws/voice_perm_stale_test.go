@@ -1,6 +1,7 @@
 package ws_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/owncord/server/permissions"
@@ -26,14 +27,14 @@ func TestHasChannelPerm_UsesLiveRoleNotConnectSnapshot(t *testing.T) {
 
 	// Admin reassigns the user to a role WITHOUT CONNECT_VOICE. The live WS
 	// connection is not refreshed, so c.user.RoleID is now stale.
-	if _, err := database.Exec(
+	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO roles (id, name, color, permissions, position, is_default)
 		 VALUES (100, 'novoice', NULL, ?, 5, 0)`,
 		permissions.ReadMessages,
 	); err != nil {
 		t.Fatalf("seed novoice role: %v", err)
 	}
-	if _, err := database.Exec(`UPDATE users SET role_id = 100 WHERE id = ?`, user.ID); err != nil {
+	if _, err := database.ExecContext(context.Background(), `UPDATE users SET role_id = 100 WHERE id = ?`, user.ID); err != nil {
 		t.Fatalf("reassign user role: %v", err)
 	}
 

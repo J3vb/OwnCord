@@ -1,6 +1,7 @@
 package ws_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 )
@@ -10,11 +11,11 @@ import (
 func TestBuildReady_IncludesCanSend(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "cansend-user")
-	role, err := database.GetRoleByID(1)
+	role, err := database.GetRoleByID(context.Background(), 1)
 	if err != nil || role == nil {
 		t.Fatalf("GetRoleByID: %v", err)
 	}
-	if _, err := database.CreateChannel("general", "text", "", "", 0); err != nil {
+	if _, err := database.CreateChannel(context.Background(), "general", "text", "", "", 0); err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
 	msg, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)

@@ -61,7 +61,7 @@ func TestReconnect_BufferMiss_FallsBackToDBTier(t *testing.T) {
 	// computeAllowedChannels returns an empty channel set — but events with
 	// channelID=0 (global) bypass the per-channel filter in the DB event store
 	// and in EventsSinceFiltered, so they are always returned.
-	userID, err := database.CreateUser("reconnect-db-user", "hash", 1)
+	userID, err := database.CreateUser(context.Background(), "reconnect-db-user", "hash", 1)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestReconnect_BufferMiss_FallsBackToDBTier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}
-	if _, err := database.CreateSession(userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 

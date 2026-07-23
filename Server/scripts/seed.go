@@ -9,6 +9,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -190,7 +191,7 @@ func createUsers(database *db.DB) ([]int64, error) {
 	ids := make([]int64, len(seedUsers))
 
 	for i, su := range seedUsers {
-		existing, err := database.GetUserByUsername(su.Username)
+		existing, err := database.GetUserByUsername(context.Background(), su.Username)
 		if err != nil {
 			return nil, fmt.Errorf("checking user %q: %w", su.Username, err)
 		}
@@ -205,7 +206,7 @@ func createUsers(database *db.DB) ([]int64, error) {
 			return nil, fmt.Errorf("hashing password for %q: %w", su.Username, err)
 		}
 
-		id, err := database.CreateUser(su.Username, hash, su.RoleID)
+		id, err := database.CreateUser(context.Background(), su.Username, hash, su.RoleID)
 		if err != nil {
 			return nil, fmt.Errorf("creating user %q: %w", su.Username, err)
 		}
@@ -240,7 +241,7 @@ func createChannels(database *db.DB) ([]int64, error) {
 	ids := make([]int64, len(seedChannels))
 
 	// Fetch existing channels once to check for duplicates.
-	existing, err := database.ListChannels()
+	existing, err := database.ListChannels(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("listing channels: %w", err)
 	}
@@ -256,7 +257,7 @@ func createChannels(database *db.DB) ([]int64, error) {
 			continue
 		}
 
-		id, err := database.CreateChannel(sc.Name, sc.Type, sc.Category, sc.Topic, sc.Position)
+		id, err := database.CreateChannel(context.Background(), sc.Name, sc.Type, sc.Category, sc.Topic, sc.Position)
 		if err != nil {
 			return nil, fmt.Errorf("creating channel %q: %w", sc.Name, err)
 		}
@@ -286,7 +287,7 @@ func createMessages(database *db.DB, channelIDs, userIDs []int64) (int, error) {
 			continue
 		}
 
-		if _, err := database.CreateMessage(channelID, userID, sm.Content, nil); err != nil {
+		if _, err := database.CreateMessage(context.Background(), channelID, userID, sm.Content, nil); err != nil {
 			return 0, fmt.Errorf("creating message in channel %d: %w", channelID, err)
 		}
 		created++
@@ -305,7 +306,7 @@ func createMessages(database *db.DB, channelIDs, userIDs []int64) (int, error) {
 // user already exists in the channel. Used for idempotency.
 func messageExists(database *db.DB, channelID, userID int64, content string) (bool, error) {
 	var count int
-	err := database.QueryRow(
+	err := database.QueryRowContext(context.Background(),
 		`SELECT COUNT(*) FROM messages WHERE channel_id = ? AND user_id = ? AND content = ? AND deleted = 0`,
 		channelID, userID, content,
 	).Scan(&count)
@@ -321,7 +322,7 @@ func createDMConversation(database *db.DB, userIDs []int64) (int, error) {
 	adminID := userIDs[uAdmin]
 	aliceID := userIDs[uAlice]
 
-	ch, isNew, err := database.GetOrCreateDMChannel(adminID, aliceID)
+	ch, isNew, err := database.GetOrCreateDMChannel(context.Background(), adminID, aliceID)
 	if err != nil {
 		return 0, fmt.Errorf("creating DM channel: %w", err)
 	}
@@ -344,7 +345,7 @@ func createDMConversation(database *db.DB, userIDs []int64) (int, error) {
 			continue
 		}
 
-		if _, err := database.CreateMessage(ch.ID, senderID, dm.Content, nil); err != nil {
+		if _, err := database.CreateMessage(context.Background(), ch.ID, senderID, dm.Content, nil); err != nil {
 			return 0, fmt.Errorf("creating DM message: %w", err)
 		}
 		created++

@@ -76,17 +76,17 @@ func TestCanPost_DMBlockEnforced(t *testing.T) {
 	checker := permissions.NewChecker(database)
 	svc := NewMessageService(database, NewPermissionService(database, checker), nil)
 
-	if err := svc.CanPost(1, 50); err != nil {
+	if err := svc.CanPost(context.Background(), 1, 50); err != nil {
 		t.Fatalf("unblocked DM participant should be allowed: %v", err)
 	}
 	seedBlock(t, database, 2, 1) // bob blocks alice
-	if err := svc.CanPost(1, 50); !errors.Is(err, ErrBlocked) {
+	if err := svc.CanPost(context.Background(), 1, 50); !errors.Is(err, ErrBlocked) {
 		t.Fatalf("blocked user must be refused: got %v", err)
 	}
-	if err := svc.CanPost(3, 50); !errors.Is(err, ErrForbidden) {
+	if err := svc.CanPost(context.Background(), 3, 50); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("non-participant must be refused: got %v", err)
 	}
-	if err := svc.CanPost(1, 999); !errors.Is(err, ErrNotFound) {
+	if err := svc.CanPost(context.Background(), 1, 999); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing channel must be NotFound: got %v", err)
 	}
 }
@@ -105,7 +105,7 @@ func TestCanPost_ChannelPermissionRequired(t *testing.T) {
 	checker := permissions.NewChecker(database)
 	svc := NewMessageService(database, NewPermissionService(database, checker), nil)
 
-	if err := svc.CanPost(1, 10); !errors.Is(err, ErrForbidden) {
+	if err := svc.CanPost(context.Background(), 1, 10); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("missing SEND_MESSAGES must refuse: got %v", err)
 	}
 }
@@ -132,11 +132,11 @@ func TestCanPost_AnnouncementRequiresManageMessages(t *testing.T) {
 	svc := NewMessageService(database, NewPermissionService(database, checker), nil)
 
 	// Member has READ|SEND but not MANAGE_MESSAGES → refused in an announcement channel.
-	if err := svc.CanPost(1, 20); !errors.Is(err, ErrForbidden) {
+	if err := svc.CanPost(context.Background(), 1, 20); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("member without MANAGE_MESSAGES must be refused in announcement channel: got %v", err)
 	}
 	// Moderator with MANAGE_MESSAGES → allowed.
-	if err := svc.CanPost(2, 20); err != nil {
+	if err := svc.CanPost(context.Background(), 2, 20); err != nil {
 		t.Fatalf("moderator with MANAGE_MESSAGES must post in announcement channel: got %v", err)
 	}
 }
@@ -161,10 +161,10 @@ func TestSendMessage_AttachmentOwnershipAtomic(t *testing.T) {
 	checker := permissions.NewChecker(database)
 	svc := NewMessageService(database, NewPermissionService(database, checker), nil)
 
-	if err := database.CreateAttachment("att-own", 1, "a.png", "s-a.png", "image/png", 10, nil, nil); err != nil {
+	if err := database.CreateAttachment(context.Background(), "att-own", 1, "a.png", "s-a.png", "image/png", 10, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.CreateAttachment("att-foreign", 2, "b.png", "s-b.png", "image/png", 10, nil, nil); err != nil {
+	if err := database.CreateAttachment(context.Background(), "att-foreign", 2, "b.png", "s-b.png", "image/png", 10, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -180,11 +180,11 @@ func TestSendMessage_AttachmentOwnershipAtomic(t *testing.T) {
 		t.Fatal("message should persist even when some attachments are skipped")
 	}
 
-	own, _ := database.GetAttachmentByID("att-own")
+	own, _ := database.GetAttachmentByID(context.Background(), "att-own")
 	if own.MessageID == nil || *own.MessageID != result.MessageID {
 		t.Error("sender's own attachment should be linked to the new message")
 	}
-	foreign, _ := database.GetAttachmentByID("att-foreign")
+	foreign, _ := database.GetAttachmentByID(context.Background(), "att-foreign")
 	if foreign.MessageID != nil {
 		t.Error("another user's attachment must never be linked (IDOR guard)")
 	}
@@ -201,7 +201,7 @@ func TestSendMessage_AttachmentOwnershipAtomic(t *testing.T) {
 	if retry.MessageID <= 0 {
 		t.Fatal("retry should persist a message")
 	}
-	own2, _ := database.GetAttachmentByID("att-own")
+	own2, _ := database.GetAttachmentByID(context.Background(), "att-own")
 	if own2.MessageID == nil || *own2.MessageID != result.MessageID {
 		t.Error("already-linked attachment must stay linked to the original message")
 	}
@@ -325,7 +325,7 @@ func TestEditMessage_OwnerCanEdit(t *testing.T) {
 		t.Fatalf("send: %v", err)
 	}
 
-	editResult, err := svc.EditMessage(1, result.MessageID, "edited content")
+	editResult, err := svc.EditMessage(context.Background(), 1, result.MessageID, "edited content")
 	if err != nil {
 		t.Fatalf("edit: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestEditMessage_NonOwnerFails(t *testing.T) {
 	}
 
 	// User 2 tries to edit it.
-	_, err = svc.EditMessage(2, result.MessageID, "hacked")
+	_, err = svc.EditMessage(context.Background(), 2, result.MessageID, "hacked")
 	if err == nil {
 		t.Fatal("expected error when non-owner edits message")
 	}
@@ -377,7 +377,7 @@ func TestEditMessage_EmptyContentFails(t *testing.T) {
 		t.Fatalf("send: %v", err)
 	}
 
-	_, err = svc.EditMessage(1, result.MessageID, "")
+	_, err = svc.EditMessage(context.Background(), 1, result.MessageID, "")
 	if err == nil {
 		t.Fatal("expected error for empty edit content")
 	}
@@ -399,7 +399,7 @@ func TestDeleteMessage_OwnerCanDelete(t *testing.T) {
 		t.Fatalf("send: %v", err)
 	}
 
-	delResult, err := svc.DeleteMessage(1, result.MessageID)
+	delResult, err := svc.DeleteMessage(context.Background(), 1, result.MessageID)
 	if err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -428,7 +428,7 @@ func TestDeleteMessage_NonOwnerWithoutModFails(t *testing.T) {
 	}
 
 	// User 2 (no ManageMessages) tries to delete user 1's message.
-	_, err = svc.DeleteMessage(2, result.MessageID)
+	_, err = svc.DeleteMessage(context.Background(), 2, result.MessageID)
 	if err == nil {
 		t.Fatal("expected error when non-owner without mod perms deletes message")
 	}
@@ -475,7 +475,7 @@ func TestDeleteMessage_ModCanDeleteOthersMessage(t *testing.T) {
 	}
 
 	// Mod (user 2) deletes it.
-	delResult, err := svc.DeleteMessage(2, result.MessageID)
+	delResult, err := svc.DeleteMessage(context.Background(), 2, result.MessageID)
 	if err != nil {
 		t.Fatalf("mod delete: %v", err)
 	}
@@ -487,7 +487,7 @@ func TestDeleteMessage_ModCanDeleteOthersMessage(t *testing.T) {
 func TestDeleteMessage_InvalidMessageID(t *testing.T) {
 	svc, _ := newTestMessageService(t)
 
-	_, err := svc.DeleteMessage(1, 0)
+	_, err := svc.DeleteMessage(context.Background(), 1, 0)
 	if err == nil {
 		t.Fatal("expected error for zero message ID")
 	}

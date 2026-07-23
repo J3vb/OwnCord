@@ -88,7 +88,7 @@ type VoiceDeps struct {
 // permission bit is genuinely absent from the user's role). Previously
 // every branch returned FORBIDDEN, which hid operator-visible failures
 // behind a user-facing permission denial.
-func requirePerm(database *db.DB, perms *permissions.Checker, userID, channelID, perm int64, label string) *Result {
+func requirePerm(ctx context.Context, database *db.DB, perms *permissions.Checker, userID, channelID, perm int64, label string) *Result {
 	if database == nil || perms == nil {
 		// Missing dependency is a server bug, not a user ACL outcome. Log
 		// here so operators see something even when the client surfaces a
@@ -98,7 +98,7 @@ func requirePerm(database *db.DB, perms *permissions.Checker, userID, channelID,
 		r := Result{Error: ClientError{Code: ErrCodeInternal, Message: "permission check unavailable"}}
 		return &r
 	}
-	role, err := database.GetRoleForUser(userID)
+	role, err := database.GetRoleForUser(ctx, userID)
 	if err != nil {
 		slog.Error("ws: requirePerm GetRoleForUser failed",
 			"user_id", userID, "channel_id", channelID, "err", err)
@@ -110,7 +110,7 @@ func requirePerm(database *db.DB, perms *permissions.Checker, userID, channelID,
 		r := Result{Error: ClientError{Code: ErrCodeForbidden, Message: "missing " + label + " permission"}}
 		return &r
 	}
-	if !perms.HasChannelPerm(role.Permissions, role.ID, channelID, perm) {
+	if !perms.HasChannelPerm(ctx, role.Permissions, role.ID, channelID, perm) {
 		r := Result{Error: ClientError{Code: ErrCodeForbidden, Message: "missing " + label + " permission"}}
 		return &r
 	}
@@ -118,15 +118,15 @@ func requirePerm(database *db.DB, perms *permissions.Checker, userID, channelID,
 }
 
 // hasPerm checks a channel permission via DB lookups. Returns true if allowed.
-func hasPerm(database *db.DB, perms *permissions.Checker, userID, channelID, perm int64) bool {
+func hasPerm(ctx context.Context, database *db.DB, perms *permissions.Checker, userID, channelID, perm int64) bool {
 	if database == nil || perms == nil {
 		return false
 	}
-	role, err := database.GetRoleForUser(userID)
+	role, err := database.GetRoleForUser(ctx, userID)
 	if err != nil || role == nil {
 		return false
 	}
-	return perms.HasChannelPerm(role.Permissions, role.ID, channelID, perm)
+	return perms.HasChannelPerm(ctx, role.Permissions, role.ID, channelID, perm)
 }
 
 // ── V2 handler type ─────────────────────────────────────────────────────────

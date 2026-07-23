@@ -85,7 +85,7 @@ func handleCreateInvite(svc *service.Services) http.HandlerFunc {
 // handleListInvites processes GET /api/v1/invites.
 func handleListInvites(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		invites, err := svc.Invites.ListInvites()
+		invites, err := svc.Invites.ListInvites(r.Context())
 		if err != nil {
 			writeServiceError(w, err)
 			return
@@ -103,7 +103,7 @@ func handleListInvites(svc *service.Services) http.HandlerFunc {
 func handleRevokeInvite(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		code := chi.URLParam(r, "code")
-		if err := svc.Invites.RevokeInvite(code); err != nil {
+		if err := svc.Invites.RevokeInvite(r.Context(), code); err != nil {
 			writeServiceError(w, err)
 			return
 		}

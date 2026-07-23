@@ -341,7 +341,10 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 			http.Error(w, string(errResp), http.StatusUnauthorized)
 			return
 		}
-		sess, err := database.GetSessionByTokenHash(entry.tokenHash)
+		// Stream lifetime == request lifetime, so all session re-checks below
+		// use the stream request's context.
+		ctx := r.Context()
+		sess, err := database.GetSessionByTokenHash(ctx, entry.tokenHash)
 		if err != nil || sess == nil || auth.IsSessionExpired(sess.ExpiresAt) {
 			errResp, _ := json.Marshal(map[string]string{
 				"error":   "UNAUTHORIZED",
@@ -351,15 +354,15 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 			return
 		}
 		sessionStillAuthorized := func() bool {
-			current, currentErr := database.GetSessionByTokenHash(entry.tokenHash)
+			current, currentErr := database.GetSessionByTokenHash(ctx, entry.tokenHash)
 			if currentErr != nil || current == nil || auth.IsSessionExpired(current.ExpiresAt) {
 				return false
 			}
-			user, userErr := database.GetUserByID(current.UserID)
+			user, userErr := database.GetUserByID(ctx, current.UserID)
 			if userErr != nil || user == nil {
 				return false
 			}
-			role, roleErr := database.GetRoleByID(user.RoleID)
+			role, roleErr := database.GetRoleByID(ctx, user.RoleID)
 			if roleErr != nil || role == nil {
 				return false
 			}
@@ -408,7 +411,6 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 		keepalive := time.NewTicker(15 * time.Second)
 		defer keepalive.Stop()
 
-		ctx := r.Context()
 		for {
 			select {
 			case entry := <-ch:

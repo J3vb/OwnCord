@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -22,8 +23,8 @@ func TestVerifyTOTP_Success(t *testing.T) {
 	// Create user with TOTP enabled.
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
-	uid, _ := database.CreateUser("totpuser", hash, 4)
-	_ = database.UpdateUserTOTPSecret(uid, &secret)
+	uid, _ := database.CreateUser(context.Background(), "totpuser", hash, 4)
+	_ = database.UpdateUserTOTPSecret(context.Background(), uid, &secret)
 
 	// Login should return requires_2fa + partial_token.
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
@@ -70,8 +71,8 @@ func TestVerifyTOTP_InvalidCode(t *testing.T) {
 
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
-	uid, _ := database.CreateUser("totpuser2", hash, 4)
-	_ = database.UpdateUserTOTPSecret(uid, &secret)
+	uid, _ := database.CreateUser(context.Background(), "totpuser2", hash, 4)
+	_ = database.UpdateUserTOTPSecret(context.Background(), uid, &secret)
 
 	// Login to get partial token.
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
@@ -122,8 +123,8 @@ func TestVerifyTOTP_MalformedBody(t *testing.T) {
 	// Need a valid partial token to get past the token check.
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
-	uid, _ := database.CreateUser("totpuser3", hash, 4)
-	_ = database.UpdateUserTOTPSecret(uid, &secret)
+	uid, _ := database.CreateUser(context.Background(), "totpuser3", hash, 4)
+	_ = database.UpdateUserTOTPSecret(context.Background(), uid, &secret)
 
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
 		"username": "totpuser3",
@@ -154,8 +155,8 @@ func TestVerifyTOTP_ReplayProtection(t *testing.T) {
 
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
-	uid, _ := database.CreateUser("totpuser4", hash, 4)
-	_ = database.UpdateUserTOTPSecret(uid, &secret)
+	uid, _ := database.CreateUser(context.Background(), "totpuser4", hash, 4)
+	_ = database.UpdateUserTOTPSecret(context.Background(), uid, &secret)
 
 	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
 
@@ -271,7 +272,7 @@ func TestConfirmTOTP_Success(t *testing.T) {
 	}
 
 	// Verify TOTP is now stored on user.
-	user, _ := database.GetUserByUsername("confirmuser")
+	user, _ := database.GetUserByUsername(context.Background(), "confirmuser")
 	if user == nil {
 		t.Fatal("user not found after confirm")
 	}
@@ -392,7 +393,7 @@ func TestDisableTOTP_BlockedByServerPolicy(t *testing.T) {
 	token := loginAndGetToken(t, router, database, "disableuser3", 4)
 
 	// Enable require_2fa server policy.
-	_, _ = database.Exec(`INSERT OR REPLACE INTO settings (key, value) VALUES ('require_2fa', '1')`)
+	_, _ = database.ExecContext(context.Background(), `INSERT OR REPLACE INTO settings (key, value) VALUES ('require_2fa', '1')`)
 
 	rr := deleteWithToken(t, router, "/api/v1/users/me/totp", token,
 		map[string]string{"password": "Password1!"})

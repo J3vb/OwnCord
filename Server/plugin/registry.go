@@ -112,7 +112,7 @@ func NewRegistry(cfg Config) (*Registry, error) {
 func (r *Registry) Close(ctx context.Context) error {
 	r.mu.Lock()
 	for _, inst := range r.plugins {
-		r.platformDeactivate(inst)
+		r.platformDeactivate(ctx, inst)
 	}
 	for id := range r.plugins {
 		delete(r.plugins, id)
@@ -192,7 +192,7 @@ func (r *Registry) installFromDisk(ctx context.Context, found foundPlugin) error
 	// blocked the fresh instance from re-registering its own commands and
 	// kept dispatch routing into the orphaned old module until restart.
 	if old := r.byName[found.Manifest.Name]; old != nil {
-		r.platformDeactivate(old)
+		r.platformDeactivate(ctx, old)
 		for cmd, owner := range r.commands {
 			if owner == old {
 				delete(r.commands, cmd)
@@ -495,7 +495,7 @@ func (r *Registry) DisablePlugin(ctx context.Context, id int64) error {
 		// Free the wazero module so memory is returned to the runtime
 		// immediately rather than waiting for registry Close. Safe to call
 		// on an instance that was never activated.
-		r.platformDeactivate(inst)
+		r.platformDeactivate(ctx, inst)
 	}
 	return nil
 }

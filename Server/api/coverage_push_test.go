@@ -485,7 +485,7 @@ func TestCloseDM_BroadcasterUserOffline(t *testing.T) {
 
 	tokenAlice := dmCreateToken(t, database, "offline_alice", 4)
 	_ = dmCreateToken(t, database, "offline_bob", 4)
-	bob, _ := database.GetUserByUsername("offline_bob")
+	bob, _ := database.GetUserByUsername(context.Background(), "offline_bob")
 
 	// Create a DM.
 	rr := dmPost(t, router, "/api/v1/dms", tokenAlice, map[string]any{
@@ -565,7 +565,7 @@ func TestGetMessages_InvalidLimit(t *testing.T) {
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "msglimit", 1)
-	chID, _ := database.CreateChannel("limit-ch", "text", "", "", 0)
+	chID, _ := database.CreateChannel(context.Background(), "limit-ch", "text", "", "", 0)
 
 	// Negative limit.
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages?limit=-1", chID), token)
@@ -592,7 +592,7 @@ func TestGetPins_Success(t *testing.T) {
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinuser", 1)
-	chID, _ := database.CreateChannel("pin-ch", "text", "", "", 0)
+	chID, _ := database.CreateChannel(context.Background(), "pin-ch", "text", "", "", 0)
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/pins", chID), token)
 	if rr.Code != http.StatusOK {
@@ -603,7 +603,7 @@ func TestGetPins_Success(t *testing.T) {
 func TestGetPins_Unauthorized(t *testing.T) {
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
-	chID, _ := database.CreateChannel("pin-unauth-ch", "text", "", "", 0)
+	chID, _ := database.CreateChannel(context.Background(), "pin-unauth-ch", "text", "", "", 0)
 
 	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/channels/%d/pins", chID), nil)
 	req.RemoteAddr = "127.0.0.1:9999"
@@ -620,7 +620,7 @@ func TestGetPins_Unauthorized(t *testing.T) {
 func TestSetPinned_Unauthorized(t *testing.T) {
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
-	chID, _ := database.CreateChannel("setpin-ch", "text", "", "", 0)
+	chID, _ := database.CreateChannel(context.Background(), "setpin-ch", "text", "", "", 0)
 
 	req := httptest.NewRequest(http.MethodPut,
 		fmt.Sprintf("/api/v1/channels/%d/messages/1/pin", chID),
@@ -712,8 +712,8 @@ func TestListSessions_MultipleSessions(t *testing.T) {
 	token := profileCreateToken(t, database, "multisess", 4)
 
 	// Create additional session.
-	user, _ := database.GetUserByUsername("multisess")
-	_, _ = database.CreateSession(user.ID, auth.HashToken("extra-token"), "Chrome", "1.2.3.4")
+	user, _ := database.GetUserByUsername(context.Background(), "multisess")
+	_, _ = database.CreateSession(context.Background(), user.ID, auth.HashToken("extra-token"), "Chrome", "1.2.3.4")
 
 	rr := getWithToken(t, router, "/api/v1/users/me/sessions", token)
 	if rr.Code != http.StatusOK {
@@ -784,7 +784,7 @@ func TestSetPinned_MessageNotFound_Push(t *testing.T) {
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinmissmsg", 1)
-	chID, _ := database.CreateChannel("pinmiss-ch", "text", "", "", 0)
+	chID, _ := database.CreateChannel(context.Background(), "pinmiss-ch", "text", "", "", 0)
 
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, 99999), token)
 	if rr.Code != http.StatusNotFound {
@@ -818,7 +818,7 @@ func TestSetPinned_InvalidMessageID(t *testing.T) {
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinbadmsg", 1)
-	chID, _ := database.CreateChannel("badmsgid-ch", "text", "", "", 0)
+	chID, _ := database.CreateChannel(context.Background(), "badmsgid-ch", "text", "", "", 0)
 
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/abc", chID), token)
 	if rr.Code != http.StatusBadRequest {
@@ -830,10 +830,10 @@ func TestUnpin_Success(t *testing.T) {
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "unpinner", 1)
-	user, _ := database.GetUserByUsername("unpinner")
-	chID, _ := database.CreateChannel("unpin-ch", "text", "", "", 0)
-	msgID, _ := database.CreateMessage(chID, user.ID, "to unpin", nil)
-	_ = database.SetMessagePinned(msgID, true)
+	user, _ := database.GetUserByUsername(context.Background(), "unpinner")
+	chID, _ := database.CreateChannel(context.Background(), "unpin-ch", "text", "", "", 0)
+	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "to unpin", nil)
+	_ = database.SetMessagePinned(context.Background(), msgID, true)
 
 	rr := chDelete(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
 	if rr.Code != http.StatusNoContent {
@@ -845,9 +845,9 @@ func TestSetPinned_MemberForbidden(t *testing.T) {
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinmember", 4)
-	user, _ := database.GetUserByUsername("pinmember")
-	chID, _ := database.CreateChannel("pinforbid-ch", "text", "", "", 0)
-	msgID, _ := database.CreateMessage(chID, user.ID, "cant pin", nil)
+	user, _ := database.GetUserByUsername(context.Background(), "pinmember")
+	chID, _ := database.CreateChannel(context.Background(), "pinforbid-ch", "text", "", "", 0)
+	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "cant pin", nil)
 
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
 	if rr.Code != http.StatusForbidden {
@@ -859,10 +859,10 @@ func TestSetPinned_WrongChannel(t *testing.T) {
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinwrongch", 1)
-	user, _ := database.GetUserByUsername("pinwrongch")
-	chID1, _ := database.CreateChannel("pin-ch1", "text", "", "", 0)
-	chID2, _ := database.CreateChannel("pin-ch2", "text", "", "", 0)
-	msgID, _ := database.CreateMessage(chID1, user.ID, "wrong channel", nil)
+	user, _ := database.GetUserByUsername(context.Background(), "pinwrongch")
+	chID1, _ := database.CreateChannel(context.Background(), "pin-ch1", "text", "", "", 0)
+	chID2, _ := database.CreateChannel(context.Background(), "pin-ch2", "text", "", "", 0)
+	msgID, _ := database.CreateMessage(context.Background(), chID1, user.ID, "wrong channel", nil)
 
 	// Try to pin a message from chID1 using chID2.
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID2, msgID), token)
@@ -878,11 +878,11 @@ func TestSetPinned_DMChannel_ParticipantSuccess(t *testing.T) {
 	router := buildChannelRouter(database)
 	tokenAlice := chTestCreateToken(t, database, "dmpin_alice", 4)
 	_ = chTestCreateToken(t, database, "dmpin_bob", 4)
-	alice, _ := database.GetUserByUsername("dmpin_alice")
-	bob, _ := database.GetUserByUsername("dmpin_bob")
+	alice, _ := database.GetUserByUsername(context.Background(), "dmpin_alice")
+	bob, _ := database.GetUserByUsername(context.Background(), "dmpin_bob")
 
-	dmCh, _, _ := database.GetOrCreateDMChannel(alice.ID, bob.ID)
-	msgID, _ := database.CreateMessage(dmCh.ID, alice.ID, "pin this dm msg", nil)
+	dmCh, _, _ := database.GetOrCreateDMChannel(context.Background(), alice.ID, bob.ID)
+	msgID, _ := database.CreateMessage(context.Background(), dmCh.ID, alice.ID, "pin this dm msg", nil)
 
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", dmCh.ID, msgID), tokenAlice)
 	if rr.Code != http.StatusNoContent {
@@ -896,11 +896,11 @@ func TestSetPinned_DMChannel_NonParticipantForbidden(t *testing.T) {
 	_ = chTestCreateToken(t, database, "dmpinforbid_alice", 4)
 	_ = chTestCreateToken(t, database, "dmpinforbid_bob", 4)
 	tokenCharlie := chTestCreateToken(t, database, "dmpinforbid_charlie", 4)
-	alice, _ := database.GetUserByUsername("dmpinforbid_alice")
-	bob, _ := database.GetUserByUsername("dmpinforbid_bob")
+	alice, _ := database.GetUserByUsername(context.Background(), "dmpinforbid_alice")
+	bob, _ := database.GetUserByUsername(context.Background(), "dmpinforbid_bob")
 
-	dmCh, _, _ := database.GetOrCreateDMChannel(alice.ID, bob.ID)
-	msgID, _ := database.CreateMessage(dmCh.ID, alice.ID, "secret msg", nil)
+	dmCh, _, _ := database.GetOrCreateDMChannel(context.Background(), alice.ID, bob.ID)
+	msgID, _ := database.CreateMessage(context.Background(), dmCh.ID, alice.ID, "secret msg", nil)
 
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", dmCh.ID, msgID), tokenCharlie)
 	if rr.Code != http.StatusNotFound {
@@ -914,9 +914,9 @@ func TestSearch_WithChannelID_Push(t *testing.T) {
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "searchch", 1)
-	user, _ := database.GetUserByUsername("searchch")
-	chID, _ := database.CreateChannel("search-ch1", "text", "", "", 0)
-	_, _ = database.CreateMessage(chID, user.ID, "findable in channel", nil)
+	user, _ := database.GetUserByUsername(context.Background(), "searchch")
+	chID, _ := database.CreateChannel(context.Background(), "search-ch1", "text", "", "", 0)
+	_, _ = database.CreateMessage(context.Background(), chID, user.ID, "findable in channel", nil)
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/search?q=findable&channel_id=%d", chID), token)
 	if rr.Code != http.StatusOK {
@@ -1028,10 +1028,10 @@ func TestGetMessages_WithBeforeParam(t *testing.T) {
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "msgbefore", 1)
-	user, _ := database.GetUserByUsername("msgbefore")
-	chID, _ := database.CreateChannel("before-ch", "text", "", "", 0)
-	_, _ = database.CreateMessage(chID, user.ID, "msg one", nil)
-	msgID2, _ := database.CreateMessage(chID, user.ID, "msg two", nil)
+	user, _ := database.GetUserByUsername(context.Background(), "msgbefore")
+	chID, _ := database.CreateChannel(context.Background(), "before-ch", "text", "", "", 0)
+	_, _ = database.CreateMessage(context.Background(), chID, user.ID, "msg one", nil)
+	msgID2, _ := database.CreateMessage(context.Background(), chID, user.ID, "msg two", nil)
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages?before=%d", chID, msgID2), token)
 	if rr.Code != http.StatusOK {
@@ -1043,7 +1043,7 @@ func TestGetMessages_WithCustomLimit(t *testing.T) {
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "msglimitcust", 1)
-	chID, _ := database.CreateChannel("limitch", "text", "", "", 0)
+	chID, _ := database.CreateChannel(context.Background(), "limitch", "text", "", "", 0)
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages?limit=5", chID), token)
 	if rr.Code != http.StatusOK {
@@ -1057,7 +1057,7 @@ func TestListChannels_MemberRole(t *testing.T) {
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "memberchanlist", 4)
-	_, _ = database.CreateChannel("visible-ch", "text", "", "", 0)
+	_, _ = database.CreateChannel(context.Background(), "visible-ch", "text", "", "", 0)
 
 	rr := chGet(t, router, "/api/v1/channels", token)
 	if rr.Code != http.StatusOK {
@@ -1069,7 +1069,7 @@ func TestListChannels_AdminSeesAll(t *testing.T) {
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "adminchanlist", 2)
-	_, _ = database.CreateChannel("admin-visible-ch", "text", "", "", 0)
+	_, _ = database.CreateChannel(context.Background(), "admin-visible-ch", "text", "", "", 0)
 
 	rr := chGet(t, router, "/api/v1/channels", token)
 	if rr.Code != http.StatusOK {
@@ -1091,10 +1091,10 @@ func TestGetMessages_DMChannel_NonParticipant(t *testing.T) {
 	_ = chTestCreateToken(t, database, "dmmsg_alice", 4)
 	_ = chTestCreateToken(t, database, "dmmsg_bob", 4)
 	tokenCharlie := chTestCreateToken(t, database, "dmmsg_charlie", 4)
-	alice, _ := database.GetUserByUsername("dmmsg_alice")
-	bob, _ := database.GetUserByUsername("dmmsg_bob")
+	alice, _ := database.GetUserByUsername(context.Background(), "dmmsg_alice")
+	bob, _ := database.GetUserByUsername(context.Background(), "dmmsg_bob")
 
-	dmCh, _, _ := database.GetOrCreateDMChannel(alice.ID, bob.ID)
+	dmCh, _, _ := database.GetOrCreateDMChannel(context.Background(), alice.ID, bob.ID)
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages", dmCh.ID), tokenCharlie)
 	if rr.Code != http.StatusNotFound {
@@ -1107,10 +1107,10 @@ func TestGetMessages_DMChannel_ParticipantSuccess(t *testing.T) {
 	router := buildChannelRouter(database)
 	tokenAlice := chTestCreateToken(t, database, "dmmsgok_alice", 4)
 	_ = chTestCreateToken(t, database, "dmmsgok_bob", 4)
-	alice, _ := database.GetUserByUsername("dmmsgok_alice")
-	bob, _ := database.GetUserByUsername("dmmsgok_bob")
+	alice, _ := database.GetUserByUsername(context.Background(), "dmmsgok_alice")
+	bob, _ := database.GetUserByUsername(context.Background(), "dmmsgok_bob")
 
-	dmCh, _, _ := database.GetOrCreateDMChannel(alice.ID, bob.ID)
+	dmCh, _, _ := database.GetOrCreateDMChannel(context.Background(), alice.ID, bob.ID)
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages", dmCh.ID), tokenAlice)
 	if rr.Code != http.StatusOK {
@@ -1126,10 +1126,10 @@ func TestSearch_DMChannelFilter_NonParticipant(t *testing.T) {
 	_ = chTestCreateToken(t, database, "dmsearch_alice", 4)
 	_ = chTestCreateToken(t, database, "dmsearch_bob", 4)
 	tokenCharlie := chTestCreateToken(t, database, "dmsearch_charlie", 4)
-	alice, _ := database.GetUserByUsername("dmsearch_alice")
-	bob, _ := database.GetUserByUsername("dmsearch_bob")
+	alice, _ := database.GetUserByUsername(context.Background(), "dmsearch_alice")
+	bob, _ := database.GetUserByUsername(context.Background(), "dmsearch_bob")
 
-	dmCh, _, _ := database.GetOrCreateDMChannel(alice.ID, bob.ID)
+	dmCh, _, _ := database.GetOrCreateDMChannel(context.Background(), alice.ID, bob.ID)
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/search?q=test&channel_id=%d", dmCh.ID), tokenCharlie)
 	if rr.Code != http.StatusForbidden {

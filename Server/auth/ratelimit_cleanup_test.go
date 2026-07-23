@@ -1,6 +1,7 @@
 package auth_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -36,7 +37,7 @@ func TestCleanup_RemovesExpiredWindows(t *testing.T) {
 func TestCleanup_RemovesExpiredLockouts(t *testing.T) {
 	rl := auth.NewRateLimiter()
 
-	rl.Lockout("stale-lockout", 20*time.Millisecond)
+	rl.Lockout(context.Background(), "stale-lockout", 20*time.Millisecond)
 	time.Sleep(40 * time.Millisecond)
 
 	rl.Cleanup(15 * time.Minute)
@@ -69,7 +70,7 @@ func TestCleanup_PreservesActiveWindows(t *testing.T) {
 func TestCleanup_PreservesActiveLockouts(t *testing.T) {
 	rl := auth.NewRateLimiter()
 
-	rl.Lockout("live-lockout", time.Hour)
+	rl.Lockout(context.Background(), "live-lockout", time.Hour)
 
 	rl.Cleanup(15 * time.Minute)
 
@@ -92,14 +93,14 @@ func TestCleanup_MixedEntries(t *testing.T) {
 	// Stale window entry — its timestamp will be older than shortWindow.
 	rl.Allow("stale", 10, shortWindow)
 	// Stale lockout — expires in shortWindow.
-	rl.Lockout("stale-lock", shortWindow)
+	rl.Lockout(context.Background(), "stale-lock", shortWindow)
 
 	// Wait until the stale timestamps fall outside shortWindow.
 	time.Sleep(shortWindow + 10*time.Millisecond)
 
 	// Active entries added AFTER the sleep — their timestamps are fresh.
 	rl.Allow("active", 10, time.Hour)
-	rl.Lockout("live-lock", time.Hour)
+	rl.Lockout(context.Background(), "live-lock", time.Hour)
 
 	// Cleanup with shortWindow: "stale" was recorded before the cutoff, so it
 	// is evicted.  "active" was just recorded, so it is kept.
@@ -143,8 +144,8 @@ func TestLen_AfterAllows(t *testing.T) {
 // active lockout entries.
 func TestLen_AfterLockouts(t *testing.T) {
 	rl := auth.NewRateLimiter()
-	rl.Lockout("x", time.Hour)
-	rl.Lockout("y", time.Hour)
+	rl.Lockout(context.Background(), "x", time.Hour)
+	rl.Lockout(context.Background(), "y", time.Hour)
 
 	_, locks := rl.Len()
 	if locks != 2 {

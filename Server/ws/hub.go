@@ -157,12 +157,12 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 		KeyHolder:   h,
 	})
 
-	h.refreshSettingsLocked()
+	h.refreshSettingsLocked(context.Background())
 	return h
 }
 
 // getCachedSettings returns server_name and motd, refreshing the cache if stale.
-func (h *Hub) getCachedSettings() (string, string) {
+func (h *Hub) getCachedSettings(ctx context.Context) (string, string) {
 	h.settingsMu.RLock()
 	if time.Since(h.settingsLastUpdate) < settingsCacheTTL {
 		name, motd := h.settingsName, h.settingsMotd
@@ -177,20 +177,24 @@ func (h *Hub) getCachedSettings() (string, string) {
 	if time.Since(h.settingsLastUpdate) < settingsCacheTTL {
 		return h.settingsName, h.settingsMotd
 	}
-	h.refreshSettingsLocked()
+	h.refreshSettingsLocked(ctx)
 	return h.settingsName, h.settingsMotd
 }
 
 // refreshSettingsLocked reloads server_name and motd from the DB.
 // Caller must hold settingsMu (write lock) or call during init.
-func (h *Hub) refreshSettingsLocked() {
+func (h *Hub) refreshSettingsLocked(ctx context.Context) {
 	if h.db == nil {
 		return
 	}
-	if name, err := h.db.GetSetting("server_name"); err == nil {
+	// The refresh serves the hub-wide settings cache, not the connection that
+	// happened to trigger it — a dying connection's ctx must not fail the
+	// fetches (the TTL stamp below would then pin stale values for 30s).
+	ctx = context.WithoutCancel(ctx)
+	if name, err := h.db.GetSetting(ctx, "server_name"); err == nil {
 		h.settingsName = name
 	}
-	if motd, err := h.db.GetSetting("motd"); err == nil {
+	if motd, err := h.db.GetSetting(ctx, "motd"); err == nil {
 		h.settingsMotd = motd
 	}
 	h.settingsLastUpdate = time.Now()
@@ -357,8 +361,10 @@ func (h *Hub) GracefulStop() {
 // CleanupVoiceForChannel removes all voice participants from the given channel.
 // Called when a channel is deleted.
 func (h *Hub) CleanupVoiceForChannel(channelID int64) {
+	// Cleanup must complete even if the triggering request goes away.
+	ctx := context.Background()
 	// Get all users in the channel's voice state from DB.
-	states, err := h.db.GetChannelVoiceStates(channelID)
+	states, err := h.db.GetChannelVoiceStates(ctx, channelID)
 	if err != nil {
 		slog.Error("CleanupVoiceForChannel GetChannelVoiceStates", "err", err, "channel_id", channelID)
 		return
@@ -369,7 +375,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 
 	// Clean up DB state and LiveKit for each participant.
 	for _, vs := range states {
-		if err := h.db.LeaveVoiceChannel(vs.UserID); err != nil {
+		if err := h.db.LeaveVoiceChannel(ctx, vs.UserID); err != nil {
 			slog.Error("CleanupVoiceForChannel LeaveVoiceChannel", "err", err, "user_id", vs.UserID, "channel_id", channelID)
 		}
 
@@ -382,7 +388,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 
 		// Remove from LiveKit (best-effort).
 		if h.livekit != nil {
-			_ = h.livekit.RemoveParticipant(channelID, vs.UserID, vs.JoinedAt)
+			_ = h.livekit.RemoveParticipant(ctx, channelID, vs.UserID, vs.JoinedAt)
 		}
 	}
 
@@ -555,6 +561,10 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	}
 	h.mu.RUnlock()
 
+	// Called via the admin HubBroadcaster interface, which carries no context;
+	// the targeted re-sync must complete regardless of the triggering request.
+	ctx := context.Background()
+
 	// Visibility is a function of the role, so resolve each role once.
 	visibleByRole := make(map[int64]bool)
 	roleVisible := func(roleID int64) bool {
@@ -562,12 +572,12 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 			return v
 		}
 		visible := false
-		role, err := h.db.GetRoleByID(roleID)
+		role, err := h.db.GetRoleByID(ctx, roleID)
 		if err == nil && role != nil {
 			// Single visibility predicate shared with buildReady / REST
 			// ListVisibleChannels; the checker fails closed on a lookup error
 			// and bypasses for admins, matching the other sites exactly.
-			visible = h.permChecker.HasChannelPerm(role.Permissions, roleID, ch.ID, permissions.ReadMessages)
+			visible = h.permChecker.HasChannelPerm(ctx, role.Permissions, roleID, ch.ID, permissions.ReadMessages)
 		}
 		visibleByRole[roleID] = visible
 		return visible
@@ -580,7 +590,7 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		// c.user is a connect-time snapshot; an admin may have changed the
 		// user's role mid-session, so resolve the current role from the DB.
 		// Fail closed: on error send nothing rather than mis-target.
-		fresh, err := h.db.GetUserByID(c.user.ID)
+		fresh, err := h.db.GetUserByID(ctx, c.user.ID)
 		if err != nil || fresh == nil {
 			slog.Warn("hub: RefreshChannelVisibility could not resolve user role",
 				"user_id", c.user.ID, "err", err)
@@ -922,6 +932,8 @@ func (h *Hub) sweepRevokedSessions() {
 	if h.db == nil {
 		return
 	}
+	// Hub run-loop sweeper — no request tie.
+	ctx := context.Background()
 
 	h.mu.RLock()
 	snapshot := make([]*Client, 0, len(h.clients))
@@ -933,7 +945,7 @@ func (h *Hub) sweepRevokedSessions() {
 	h.mu.RUnlock()
 
 	for _, c := range snapshot {
-		result, err := h.db.GetSessionWithBanStatus(c.tokenHash)
+		result, err := h.db.GetSessionWithBanStatus(ctx, c.tokenHash)
 		if err != nil || result == nil || auth.IsSessionExpired(result.ExpiresAt) {
 			slog.Info("session sweep: revoked/expired session, disconnecting",
 				"user_id", c.userID)
@@ -958,7 +970,9 @@ func (h *Hub) sweepStaleVoiceStates() {
 	if h.db == nil {
 		return
 	}
-	allStates, err := h.db.GetAllVoiceStates()
+	// Hub run-loop sweeper — no request tie.
+	ctx := context.Background()
+	allStates, err := h.db.GetAllVoiceStates(ctx)
 	if err != nil {
 		slog.Warn("sweepStaleVoiceStates: GetAllVoiceStates failed", "err", err)
 		return
@@ -989,7 +1003,7 @@ func (h *Hub) sweepStaleVoiceStates() {
 		// Channel-conditional delete: only removes the row if it still points
 		// at the channel we snapshotted. If the user rejoined or moved between
 		// the snapshot and now, the delete is a no-op and we skip the broadcast.
-		deleted, err := h.db.LeaveVoiceChannelIfMatch(s.userID, s.channelID, s.joinedAt)
+		deleted, err := h.db.LeaveVoiceChannelIfMatch(ctx, s.userID, s.channelID, s.joinedAt)
 		if err != nil {
 			slog.Error("sweepStaleVoiceStates: LeaveVoiceChannelIfMatch failed",
 				"err", err, "user_id", s.userID, "channel_id", s.channelID)
@@ -1002,7 +1016,7 @@ func (h *Hub) sweepStaleVoiceStates() {
 			"user_id", s.userID, "channel_id", s.channelID)
 		h.BroadcastToAll(buildVoiceLeave(s.channelID, s.userID))
 		if h.livekit != nil {
-			_ = h.livekit.RemoveParticipant(s.channelID, s.userID, s.joinedAt)
+			_ = h.livekit.RemoveParticipant(ctx, s.channelID, s.userID, s.joinedAt)
 		}
 	}
 }

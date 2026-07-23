@@ -147,7 +147,7 @@ func TouchForTest(c *Client) {
 
 // RollbackVoiceJoinForTest exposes Hub.rollbackVoiceJoin for external tests.
 func (h *Hub) RollbackVoiceJoinForTest(c *Client, channelID int64) {
-	h.rollbackVoiceJoin(c, channelID, true)
+	h.rollbackVoiceJoin(context.Background(), c, channelID, true)
 }
 
 // LeaveVoiceChannelWithRetryForTest exposes leaveVoiceChannelWithRetry for external tests.
@@ -194,29 +194,29 @@ func (h *Hub) PubSubForTest() *PubSub {
 // Defaults to replay_source="none" since most callers test the fresh-connect
 // path; tests that care about the resume tier can call buildAuthOK directly.
 func (h *Hub) BuildAuthOKForTest(user *db.User, roleName string) []byte {
-	return h.buildAuthOK(user, roleName, "none")
+	return h.buildAuthOK(context.Background(), user, roleName, "none")
 }
 
 // BuildReadyForTest exposes Hub.buildReady for external tests.
 // Passes nil role so no channels are visible (fail-closed, BUG-094).
 func (h *Hub) BuildReadyForTest(database *db.DB, userID int64) ([]byte, error) {
-	return h.buildReady(database, userID, nil)
+	return h.buildReady(context.Background(), database, userID, nil)
 }
 
 // BuildReadyWithRoleForTest exposes Hub.buildReady with a role for external tests.
 func (h *Hub) BuildReadyWithRoleForTest(database *db.DB, userID int64, role *db.Role) ([]byte, error) {
-	return h.buildReady(database, userID, role)
+	return h.buildReady(context.Background(), database, userID, role)
 }
 
 // ComputeAllowedChannelsForTest exposes Hub.computeAllowedChannels for external
 // tests (the REST/WS channel-visibility agreement test).
 func (h *Hub) ComputeAllowedChannelsForTest(database *db.DB, user *db.User) (map[int64]bool, error) {
-	return h.computeAllowedChannels(database, user)
+	return h.computeAllowedChannels(context.Background(), database, user)
 }
 
 // GetCachedSettingsForTest exposes Hub.getCachedSettings for external tests.
 func (h *Hub) GetCachedSettingsForTest() (string, string) {
-	return h.getCachedSettings()
+	return h.getCachedSettings(context.Background())
 }
 
 // GetClientVoiceChIDForTest exposes Client.getVoiceChID for external tests.
@@ -316,5 +316,5 @@ func (h *Hub) MustFullResyncForTest(lastSeq uint64) bool {
 
 // HasChannelPermForTest exposes Hub.hasChannelPerm for external tests.
 func (h *Hub) HasChannelPermForTest(c *Client, channelID, perm int64) bool {
-	return h.hasChannelPerm(c, channelID, perm)
+	return h.hasChannelPerm(context.Background(), c, channelID, perm)
 }

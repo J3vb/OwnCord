@@ -2,6 +2,7 @@ package admin_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -160,14 +161,14 @@ func openAdminTestDB(t *testing.T) *db.DB {
 func createAdminUser(t *testing.T, database *db.DB) string {
 	t.Helper()
 	// Owner role has permissions = 2147483647 (includes ADMINISTRATOR bit 0x40000000)
-	uid, err := database.CreateUser("adminuser", "$2a$12$placeholder", 1)
+	uid, err := database.CreateUser(context.Background(), "adminuser", "$2a$12$placeholder", 1)
 	if err != nil {
 		t.Fatalf("CreateUser admin: %v", err)
 	}
 
 	token := "test-admin-token-" + t.Name()
 	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(uid, tokenHash, "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), uid, tokenHash, "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	return token
@@ -177,14 +178,14 @@ func createAdminUser(t *testing.T, database *db.DB) string {
 func createMemberUser(t *testing.T, database *db.DB) string {
 	t.Helper()
 	// Member role (id=3) has limited permissions, not ADMINISTRATOR
-	uid, err := database.CreateUser("memberuser", "$2a$12$placeholder", 3)
+	uid, err := database.CreateUser(context.Background(), "memberuser", "$2a$12$placeholder", 3)
 	if err != nil {
 		t.Fatalf("CreateUser member: %v", err)
 	}
 
 	token := "test-member-token-" + t.Name()
 	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(uid, tokenHash, "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), uid, tokenHash, "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	return token
@@ -322,7 +323,7 @@ func TestAdminAPI_PatchUser_BanHierarchy(t *testing.T) {
 	ownerToken := createAdminUser(t, database) // Owner role (pos 100)
 
 	// A second owner-rank user: equal position, cannot be banned.
-	peerUID, err := database.CreateUser("peerowner", "$2a$12$placeholder", 1)
+	peerUID, err := database.CreateUser(context.Background(), "peerowner", "$2a$12$placeholder", 1)
 	if err != nil {
 		t.Fatalf("CreateUser peerowner: %v", err)
 	}
@@ -331,27 +332,27 @@ func TestAdminAPI_PatchUser_BanHierarchy(t *testing.T) {
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("equal-rank ban: status = %d, want 403; body: %s", w.Code, w.Body.String())
 	}
-	if u, _ := database.GetUserByID(peerUID); u.Banned {
+	if u, _ := database.GetUserByID(context.Background(), peerUID); u.Banned {
 		t.Fatal("equal-rank target must not be banned")
 	}
 
 	// A lower-positioned role that still holds ADMINISTRATOR (panel access):
 	// its holder must not be able to ban the higher-ranked owner.
-	if _, err := database.Exec(
+	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO roles (id, name, permissions, position, is_default) VALUES (9, 'JuniorAdmin', ?, 50, 0)`,
 		permissions.Administrator,
 	); err != nil {
 		t.Fatalf("inserting junior admin role: %v", err)
 	}
-	juniorUID, err := database.CreateUser("junioradmin", "$2a$12$placeholder", 9)
+	juniorUID, err := database.CreateUser(context.Background(), "junioradmin", "$2a$12$placeholder", 9)
 	if err != nil {
 		t.Fatalf("CreateUser junioradmin: %v", err)
 	}
 	juniorToken := "junior-token-" + t.Name()
-	if _, err := database.CreateSession(juniorUID, auth.HashToken(juniorToken), "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), juniorUID, auth.HashToken(juniorToken), "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession junior: %v", err)
 	}
-	ownerUser, err := database.GetUserByUsername("adminuser")
+	ownerUser, err := database.GetUserByUsername(context.Background(), "adminuser")
 	if err != nil || ownerUser == nil {
 		t.Fatalf("GetUserByUsername adminuser: %v", err)
 	}
@@ -360,12 +361,12 @@ func TestAdminAPI_PatchUser_BanHierarchy(t *testing.T) {
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("junior bans owner: status = %d, want 403; body: %s", w.Code, w.Body.String())
 	}
-	if u, _ := database.GetUserByID(ownerUser.ID); u.Banned {
+	if u, _ := database.GetUserByID(context.Background(), ownerUser.ID); u.Banned {
 		t.Fatal("owner must not be banned by a lower rank")
 	}
 
 	// Downward ban still works: junior admin (pos 50) bans a member (pos 40).
-	memberUID, err := database.CreateUser("banme", "$2a$12$placeholder", 3)
+	memberUID, err := database.CreateUser(context.Background(), "banme", "$2a$12$placeholder", 3)
 	if err != nil {
 		t.Fatalf("CreateUser banme: %v", err)
 	}
@@ -374,7 +375,7 @@ func TestAdminAPI_PatchUser_BanHierarchy(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("junior bans member: status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
-	if u, _ := database.GetUserByID(memberUID); !u.Banned {
+	if u, _ := database.GetUserByID(context.Background(), memberUID); !u.Banned {
 		t.Fatal("member should be banned by higher-ranked actor")
 	}
 }
@@ -385,7 +386,7 @@ func TestAdminAPI_PatchUser_BanUser(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	// Create a target user
-	targetUID, _ := database.CreateUser("target", "hash", 3)
+	targetUID, _ := database.CreateUser(context.Background(), "target", "hash", 3)
 
 	body := map[string]any{
 		"banned":     true,
@@ -398,7 +399,7 @@ func TestAdminAPI_PatchUser_BanUser(t *testing.T) {
 	}
 
 	// Verify user is banned in DB
-	user, err := database.GetUserByID(targetUID)
+	user, err := database.GetUserByID(context.Background(), targetUID)
 	if err != nil {
 		t.Fatalf("GetUserByID: %v", err)
 	}
@@ -412,7 +413,7 @@ func TestAdminAPI_PatchUser_ChangeRole(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	targetUID, _ := database.CreateUser("rolechange", "hash", 3)
+	targetUID, _ := database.CreateUser(context.Background(), "rolechange", "hash", 3)
 
 	body := map[string]any{
 		"role_id": float64(2),
@@ -423,7 +424,7 @@ func TestAdminAPI_PatchUser_ChangeRole(t *testing.T) {
 		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 
-	user, _ := database.GetUserByID(targetUID)
+	user, _ := database.GetUserByID(context.Background(), targetUID)
 	if user.RoleID != 2 {
 		t.Errorf("RoleID = %d, want 2", user.RoleID)
 	}
@@ -461,8 +462,8 @@ func TestAdminAPI_ForceLogout_OK(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	targetUID, _ := database.CreateUser("logoutme", "hash", 3)
-	_, _ = database.CreateSession(targetUID, "victim-token-hash", "web", "1.2.3.4")
+	targetUID, _ := database.CreateUser(context.Background(), "logoutme", "hash", 3)
+	_, _ = database.CreateSession(context.Background(), targetUID, "victim-token-hash", "web", "1.2.3.4")
 
 	w := doRequest(t, handler, http.MethodDelete, "/users/"+itoa(targetUID)+"/sessions", token, nil)
 
@@ -470,7 +471,7 @@ func TestAdminAPI_ForceLogout_OK(t *testing.T) {
 		t.Errorf("status = %d, want 204", w.Code)
 	}
 
-	sessions, _ := database.GetUserSessions(targetUID)
+	sessions, _ := database.GetUserSessions(context.Background(), targetUID)
 	if len(sessions) != 0 {
 		t.Errorf("expected 0 sessions after force logout, got %d", len(sessions))
 	}
@@ -494,7 +495,7 @@ func TestAdminAPI_ListChannels_OK(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	_, _ = database.AdminCreateChannel("general", "text", "", "", 0)
+	_, _ = database.AdminCreateChannel(context.Background(), "general", "text", "", "", 0)
 
 	w := doRequest(t, handler, http.MethodGet, "/channels", token, nil)
 
@@ -562,7 +563,7 @@ func TestAdminAPI_UpdateChannel_OK(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	chID, _ := database.AdminCreateChannel("old", "text", "", "", 0)
+	chID, _ := database.AdminCreateChannel(context.Background(), "old", "text", "", "", 0)
 
 	body := map[string]any{
 		"name":      "updated",
@@ -598,7 +599,7 @@ func TestAdminAPI_DeleteChannel_OK(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	chID, _ := database.AdminCreateChannel("del-me", "text", "", "", 0)
+	chID, _ := database.AdminCreateChannel(context.Background(), "del-me", "text", "", "", 0)
 
 	w := doRequest(t, handler, http.MethodDelete, "/channels/"+itoa(chID), token, nil)
 
@@ -626,8 +627,8 @@ func TestAdminAPI_AuditLog_OK(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	uid, _ := database.CreateUser("actor", "hash", 1)
-	_ = database.LogAudit(uid, "TEST_ACTION", "user", uid, "detail")
+	uid, _ := database.CreateUser(context.Background(), "actor", "hash", 1)
+	_ = database.LogAudit(context.Background(), uid, "TEST_ACTION", "user", uid, "detail")
 
 	w := doRequest(t, handler, http.MethodGet, "/audit-log?limit=10&offset=0", token, nil)
 
@@ -702,7 +703,7 @@ func TestAdminAPI_PatchSettings_OK(t *testing.T) {
 	}
 
 	// Verify the change was persisted
-	val, err := database.GetSetting("server_name")
+	val, err := database.GetSetting(context.Background(), "server_name")
 	if err != nil {
 		t.Fatalf("GetSetting: %v", err)
 	}
@@ -733,9 +734,9 @@ func TestAdminAPI_Backup_RequiresOwner(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
 	// Admin (role 2) can authenticate but is not Owner (role 1, position 100)
-	adminUID, _ := database.CreateUser("adminonly", "hash", 2)
+	adminUID, _ := database.CreateUser(context.Background(), "adminonly", "hash", 2)
 	token := "admin-only-token"
-	_, _ = database.CreateSession(adminUID, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), adminUID, auth.HashToken(token), "test", "127.0.0.1")
 
 	w := doRequest(t, handler, http.MethodPost, "/backup", token, nil)
 
@@ -768,7 +769,7 @@ func TestAdminAPI_ActorFromContext_AuditEntry(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	// Create a target user to act on.
-	targetUID, _ := database.CreateUser("ctxtarget", "hash", 3)
+	targetUID, _ := database.CreateUser(context.Background(), "ctxtarget", "hash", 3)
 
 	body := map[string]any{"banned": true, "ban_reason": "context test"}
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
@@ -779,7 +780,7 @@ func TestAdminAPI_ActorFromContext_AuditEntry(t *testing.T) {
 
 	// The audit log should have a non-zero actor_id showing the actor was
 	// resolved (not 0, which would indicate a failed context lookup).
-	entries, err := database.GetAuditLog(10, 0)
+	entries, err := database.GetAuditLog(context.Background(), 10, 0)
 	if err != nil {
 		t.Fatalf("GetAuditLog: %v", err)
 	}
@@ -801,8 +802,8 @@ func TestAdminAPI_ActorFromContext_ForceLogout(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	targetUID, _ := database.CreateUser("logoutctx", "hash", 3)
-	_, _ = database.CreateSession(targetUID, "victim-hash-ctx", "web", "1.2.3.4")
+	targetUID, _ := database.CreateUser(context.Background(), "logoutctx", "hash", 3)
+	_, _ = database.CreateSession(context.Background(), targetUID, "victim-hash-ctx", "web", "1.2.3.4")
 
 	w := doRequest(t, handler, http.MethodDelete, "/users/"+itoa(targetUID)+"/sessions", token, nil)
 
@@ -810,7 +811,7 @@ func TestAdminAPI_ActorFromContext_ForceLogout(t *testing.T) {
 		t.Fatalf("status = %d, want 204; body: %s", w.Code, w.Body.String())
 	}
 
-	entries, err := database.GetAuditLog(10, 0)
+	entries, err := database.GetAuditLog(context.Background(), 10, 0)
 	if err != nil {
 		t.Fatalf("GetAuditLog: %v", err)
 	}
@@ -870,7 +871,7 @@ func TestAdminAPI_PatchSettings_RejectsMixedKeys(t *testing.T) {
 	}
 
 	// The valid key must NOT have been written because the request was rejected.
-	val, err := database.GetSetting("server_name")
+	val, err := database.GetSetting(context.Background(), "server_name")
 	if err != nil {
 		t.Fatalf("GetSetting: %v", err)
 	}
@@ -953,7 +954,7 @@ func TestAdminAPI_PatchSettings_AllowsRequire2FAWhenAllUsersEnrolledAndRegistrat
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	if _, err := database.Exec(`UPDATE users SET totp_secret = ? WHERE id = 1`, "JBSWY3DPEHPK3PXP"); err != nil {
+	if _, err := database.ExecContext(context.Background(), `UPDATE users SET totp_secret = ? WHERE id = 1`, "JBSWY3DPEHPK3PXP"); err != nil {
 		t.Fatalf("enroll admin user: %v", err)
 	}
 
@@ -993,7 +994,7 @@ func TestAdminAPI_ListUsers_NoPasswordHash(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	// Create a second user so the list is non-trivial.
-	_, _ = database.CreateUser("plainuser", "supersecretbcrypthash", 3)
+	_, _ = database.CreateUser(context.Background(), "plainuser", "supersecretbcrypthash", 3)
 
 	w := doRequest(t, handler, http.MethodGet, "/users", token, nil)
 
@@ -1067,7 +1068,7 @@ func TestAdminAPI_PatchUser_NoPasswordHash(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	targetUID, _ := database.CreateUser("patchvictim", "topsecretbcrypt", 3)
+	targetUID, _ := database.CreateUser(context.Background(), "patchvictim", "topsecretbcrypt", 3)
 
 	body := map[string]any{
 		"banned":     true,
@@ -1095,7 +1096,7 @@ func TestAdminAPI_PatchUser_NoTOTPSecret(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	targetUID, _ := database.CreateUser("patchtotp", "hash", 3)
+	targetUID, _ := database.CreateUser(context.Background(), "patchtotp", "hash", 3)
 
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, map[string]any{
 		"banned": false,
@@ -1210,7 +1211,7 @@ func TestAdminAPI_UpdateChannel_BroadcastsChannelUpdate(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	chID, _ := database.AdminCreateChannel("before", "text", "", "", 0)
+	chID, _ := database.AdminCreateChannel(context.Background(), "before", "text", "", "", 0)
 
 	body := map[string]any{"name": "after"}
 	w := doRequest(t, handler, http.MethodPatch, "/channels/"+itoa(chID), token, body)
@@ -1231,7 +1232,7 @@ func TestAdminAPI_UpdateChannel_NilHubDoesNotPanic(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	chID, _ := database.AdminCreateChannel("patchme", "text", "", "", 0)
+	chID, _ := database.AdminCreateChannel(context.Background(), "patchme", "text", "", "", 0)
 	body := map[string]any{"name": "patched"}
 	w := doRequest(t, handler, http.MethodPatch, "/channels/"+itoa(chID), token, body)
 
@@ -1246,7 +1247,7 @@ func TestAdminAPI_DeleteChannel_BroadcastsChannelDelete(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	chID, _ := database.AdminCreateChannel("delete-me", "text", "", "", 0)
+	chID, _ := database.AdminCreateChannel(context.Background(), "delete-me", "text", "", "", 0)
 
 	w := doRequest(t, handler, http.MethodDelete, "/channels/"+itoa(chID), token, nil)
 
@@ -1266,7 +1267,7 @@ func TestAdminAPI_DeleteChannel_NilHubDoesNotPanic(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	chID, _ := database.AdminCreateChannel("del-no-hub", "text", "", "", 0)
+	chID, _ := database.AdminCreateChannel(context.Background(), "del-no-hub", "text", "", "", 0)
 	w := doRequest(t, handler, http.MethodDelete, "/channels/"+itoa(chID), token, nil)
 
 	if w.Code != http.StatusNoContent {

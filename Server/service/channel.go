@@ -40,13 +40,13 @@ func (s *ChannelService) ListVisibleChannels(ctx context.Context, userID int64) 
 			telemetry.String("method", "ListVisibleChannels"))
 		span.End()
 	}()
-	all, err := s.st.ListChannels()
+	all, err := s.st.ListChannels(ctx)
 	if err != nil {
 		slog.Error("ChannelService.ListVisibleChannels", "err", err)
 		return nil, fmt.Errorf("%w: failed to list channels", ErrInternal)
 	}
 
-	role, err := s.perms.GetRoleForUser(userID)
+	role, err := s.perms.GetRoleForUser(ctx, userID)
 	if err != nil || role == nil {
 		slog.Error("ChannelService.ListVisibleChannels GetRoleForUser", "err", err, "user_id", userID)
 		return nil, fmt.Errorf("%w: failed to get role", ErrInternal)
@@ -55,7 +55,7 @@ func (s *ChannelService) ListVisibleChannels(ctx context.Context, userID int64) 
 	// Admins skip the override fetch (they bypass all channel checks anyway).
 	var overrides map[int64]db.ChannelOverride
 	if !permissions.HasAdmin(role.Permissions) {
-		overrides, err = s.st.GetAllChannelPermissionsForRole(role.ID)
+		overrides, err = s.st.GetAllChannelPermissionsForRole(ctx, role.ID)
 		if err != nil {
 			// Fail closed — an empty map would return every denied channel.
 			slog.Error("ChannelService.ListVisibleChannels GetAllChannelPermissionsForRole", "err", err, "user_id", userID, "role_id", role.ID)
@@ -96,7 +96,7 @@ func permOverrides(overrides map[int64]db.ChannelOverride) map[int64]permissions
 // HandleTyping processes a typing start event for a channel.
 // Returns the channel so callers can build broadcast events.
 // Silent errors are returned as nil (typing indicators are best-effort).
-func (s *ChannelService) HandleTyping(userID, channelID int64, limiter interface {
+func (s *ChannelService) HandleTyping(ctx context.Context, userID, channelID int64, limiter interface {
 	Allow(key string, limit int, window time.Duration) bool
 },
 ) (*db.Channel, error) {
@@ -110,17 +110,17 @@ func (s *ChannelService) HandleTyping(userID, channelID int64, limiter interface
 		return nil, nil
 	}
 
-	ch, err := s.st.GetChannel(channelID)
+	ch, err := s.st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
 		return nil, nil //nolint:nilerr // typing indicators are best-effort; errors silently dropped
 	}
 
 	if ch.Type == "dm" {
-		ok, dmErr := s.st.IsDMParticipant(userID, channelID)
+		ok, dmErr := s.st.IsDMParticipant(ctx, userID, channelID)
 		if dmErr != nil || !ok {
 			return nil, nil //nolint:nilerr // typing indicators are best-effort; errors silently dropped
 		}
-	} else if !s.perms.HasChannelPerm(userID, channelID, permissions.ReadMessages) {
+	} else if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages) {
 		return nil, nil // silent drop
 	}
 
@@ -129,12 +129,12 @@ func (s *ChannelService) HandleTyping(userID, channelID int64, limiter interface
 
 // GetDMParticipantIDs returns the participant IDs for a DM channel.
 // Convenience method for handlers building DM events.
-func (s *ChannelService) GetDMParticipantIDs(channelID int64) ([]int64, error) {
-	return s.st.GetDMParticipantIDs(channelID)
+func (s *ChannelService) GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error) {
+	return s.st.GetDMParticipantIDs(ctx, channelID)
 }
 
 // HandlePresenceUpdate validates and persists a presence status change.
-func (s *ChannelService) HandlePresenceUpdate(userID int64, status string, limiter interface {
+func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64, status string, limiter interface {
 	Allow(key string, limit int, window time.Duration) bool
 },
 ) error {
@@ -151,7 +151,7 @@ func (s *ChannelService) HandlePresenceUpdate(userID int64, status string, limit
 		return fmt.Errorf("%w: invalid status", ErrBadRequest)
 	}
 
-	if err := s.st.UpdateUserStatus(userID, status); err != nil {
+	if err := s.st.UpdateUserStatus(ctx, userID, status); err != nil {
 		slog.Error("ChannelService.HandlePresenceUpdate", "err", err, "user_id", userID)
 		return fmt.Errorf("%w: failed to update status", ErrInternal)
 	}
@@ -161,29 +161,29 @@ func (s *ChannelService) HandlePresenceUpdate(userID int64, status string, limit
 
 // HandleChannelFocus processes a channel focus event and updates read state.
 // Returns the channel for callers to set client state.
-func (s *ChannelService) HandleChannelFocus(userID, channelID int64) (*db.Channel, error) {
+func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channelID int64) (*db.Channel, error) {
 	if channelID <= 0 {
 		return nil, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
 	}
 
-	ch, err := s.st.GetChannel(channelID)
+	ch, err := s.st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
 
 	if ch.Type == "dm" {
-		ok, err := s.st.IsDMParticipant(userID, channelID)
+		ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
 		if err != nil || !ok {
 			return nil, fmt.Errorf("%w: access denied", ErrForbidden)
 		}
-	} else if !s.perms.HasChannelPerm(userID, channelID, permissions.ReadMessages) {
+	} else if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages) {
 		return nil, fmt.Errorf("%w: access denied", ErrForbidden)
 	}
 
 	// Mark channel as read.
-	latestID, err := s.st.GetLatestMessageID(channelID)
+	latestID, err := s.st.GetLatestMessageID(ctx, channelID)
 	if err == nil && latestID > 0 {
-		_ = s.st.UpdateReadState(userID, channelID, latestID)
+		_ = s.st.UpdateReadState(ctx, userID, channelID, latestID)
 	}
 
 	slog.Debug("channel_focus", "user_id", userID, "channel_id", channelID)

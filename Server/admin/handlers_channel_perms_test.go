@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -31,7 +32,7 @@ func TestGetChannelPermissions_ReturnsAllRoles(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	chID, err := database.CreateChannel("secret", "text", "", "", 0)
+	chID, err := database.CreateChannel(context.Background(), "secret", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
@@ -80,7 +81,7 @@ func TestGetChannelPermissions_DMRejected(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	chID, err := database.CreateChannel("dm-chan", "dm", "", "", 0)
+	chID, err := database.CreateChannel(context.Background(), "dm-chan", "dm", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel dm: %v", err)
 	}
@@ -101,7 +102,7 @@ func TestPutChannelPermission_PersistsAndPropagates(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	chID, err := database.CreateChannel("secret", "text", "", "", 0)
+	chID, err := database.CreateChannel(context.Background(), "secret", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
@@ -114,7 +115,7 @@ func TestPutChannelPermission_PersistsAndPropagates(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 
-	allow, deny, err := database.GetChannelPermissions(chID, 3)
+	allow, deny, err := database.GetChannelPermissions(context.Background(), chID, 3)
 	if err != nil {
 		t.Fatalf("GetChannelPermissions: %v", err)
 	}
@@ -129,7 +130,7 @@ func TestPutChannelPermission_PersistsAndPropagates(t *testing.T) {
 		t.Errorf("RefreshChannelVisibility not called for channel %d", chID)
 	}
 
-	entries, err := database.GetAuditLog(10, 0)
+	entries, err := database.GetAuditLog(context.Background(), 10, 0)
 	if err != nil {
 		t.Fatalf("GetAuditLog: %v", err)
 	}
@@ -149,7 +150,7 @@ func TestPutChannelPermission_MasksUnknownBits(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	chID, err := database.CreateChannel("secret2", "text", "", "", 0)
+	chID, err := database.CreateChannel(context.Background(), "secret2", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
@@ -162,7 +163,7 @@ func TestPutChannelPermission_MasksUnknownBits(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 
-	allow, deny, err := database.GetChannelPermissions(chID, 3)
+	allow, deny, err := database.GetChannelPermissions(context.Background(), chID, 3)
 	if err != nil {
 		t.Fatalf("GetChannelPermissions: %v", err)
 	}
@@ -179,7 +180,7 @@ func TestPutChannelPermission_UnknownRole(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	chID, err := database.CreateChannel("secret3", "text", "", "", 0)
+	chID, err := database.CreateChannel(context.Background(), "secret3", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
@@ -197,7 +198,7 @@ func TestPutChannelPermission_NonAdminForbidden(t *testing.T) {
 	_ = createAdminUser(t, database)
 	memberToken := createMemberUser(t, database)
 
-	chID, err := database.CreateChannel("secret4", "text", "", "", 0)
+	chID, err := database.CreateChannel(context.Background(), "secret4", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
@@ -218,11 +219,11 @@ func TestDeleteChannelPermission_ClearsOverride(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, inv, newTestModService(database))
 	token := createAdminUser(t, database)
 
-	chID, err := database.CreateChannel("secret5", "text", "", "", 0)
+	chID, err := database.CreateChannel(context.Background(), "secret5", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
-	if err := database.UpsertChannelOverride(chID, 3, 0, permissions.ReadMessages); err != nil {
+	if err := database.UpsertChannelOverride(context.Background(), chID, 3, 0, permissions.ReadMessages); err != nil {
 		t.Fatalf("UpsertChannelOverride: %v", err)
 	}
 
@@ -232,7 +233,7 @@ func TestDeleteChannelPermission_ClearsOverride(t *testing.T) {
 		t.Fatalf("status = %d, want 204; body: %s", w.Code, w.Body.String())
 	}
 
-	allow, deny, err := database.GetChannelPermissions(chID, 3)
+	allow, deny, err := database.GetChannelPermissions(context.Background(), chID, 3)
 	if err != nil {
 		t.Fatalf("GetChannelPermissions: %v", err)
 	}

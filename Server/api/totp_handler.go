@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,7 +82,7 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 			return
 		}
 
-		user, err := database.GetUserByID(challenge.UserID)
+		user, err := database.GetUserByID(r.Context(), challenge.UserID)
 		if err != nil || user == nil || user.TOTPSecret == nil {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
 				Error:   "UNAUTHORIZED",
@@ -111,7 +112,7 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 			return
 		}
 
-		limiter.Reset(totpRateLimitKey)
+		limiter.Reset(r.Context(), totpRateLimitKey)
 
 		if _, ok := partialStore.Consume(partialToken); !ok {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{
@@ -121,7 +122,7 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 			return
 		}
 
-		token, err := issueSession(database, user.ID, challenge.Device, challenge.IP)
+		token, err := issueSession(r.Context(), database, user.ID, challenge.Device, challenge.IP)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL_ERROR",
@@ -131,7 +132,7 @@ func handleVerifyTOTP(database *db.DB, partialStore *auth.PartialAuthStore, limi
 		}
 
 		slog.Info("totp verified", "user_id", user.ID, "ip", challenge.IP)
-		db.WriteAudit(database, user.ID, "totp_verified", "user", user.ID,
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, user.ID, "totp_verified", "user", user.ID,
 			"two-factor verification completed from "+challenge.IP)
 
 		writeJSON(w, http.StatusOK, authSuccessResponse{
@@ -182,7 +183,7 @@ func handleEnableTOTP(pendingStore *auth.PendingTOTPStore, limiter *auth.RateLim
 		failKey := fmt.Sprintf("pw_confirm_fail:%d", user.ID)
 		if err := requirePasswordConfirmation(user, req.Password); err != nil {
 			if !limiter.Allow(failKey, pwConfirmFailureThreshold, pwConfirmFailureWindow) {
-				limiter.Lockout(lockKey, pwConfirmLockoutDuration)
+				limiter.Lockout(r.Context(), lockKey, pwConfirmLockoutDuration)
 			}
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error:   "INVALID_INPUT",
@@ -190,7 +191,7 @@ func handleEnableTOTP(pendingStore *auth.PendingTOTPStore, limiter *auth.RateLim
 			})
 			return
 		}
-		limiter.Reset(failKey)
+		limiter.Reset(r.Context(), failKey)
 
 		secret, err := auth.GenerateTOTPSecret()
 		if err != nil {
@@ -241,7 +242,7 @@ func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, use
 		failKey := fmt.Sprintf("pw_confirm_fail:%d", user.ID)
 		if err := requirePasswordConfirmation(user, req.Password); err != nil {
 			if !limiter.Allow(failKey, pwConfirmFailureThreshold, pwConfirmFailureWindow) {
-				limiter.Lockout(lockKey, pwConfirmLockoutDuration)
+				limiter.Lockout(r.Context(), lockKey, pwConfirmLockoutDuration)
 			}
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error:   "INVALID_INPUT",
@@ -249,7 +250,7 @@ func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, use
 			})
 			return
 		}
-		limiter.Reset(failKey)
+		limiter.Reset(r.Context(), failKey)
 
 		secret, ok := pendingStore.Lookup(user.ID)
 		if !ok {
@@ -278,7 +279,7 @@ func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, use
 			return
 		}
 
-		if err := database.UpdateUserTOTPSecret(user.ID, &encryptedSecret); err != nil {
+		if err := database.UpdateUserTOTPSecret(r.Context(), user.ID, &encryptedSecret); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL_ERROR",
 				Message: "failed to enable two-factor authentication",
@@ -289,14 +290,16 @@ func handleConfirmTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, use
 
 		// BUG-108: Revoke all other sessions after 2FA state change.
 		if sess, ok := r.Context().Value(SessionKey).(*db.Session); ok && sess != nil {
-			n, _ := database.DeleteOtherSessions(user.ID, sess.ID)
+			// Security tail of the 2FA change: once the secret update committed,
+			// revoking the other sessions must not be aborted by a dead request.
+			n, _ := database.DeleteOtherSessions(context.WithoutCancel(r.Context()), user.ID, sess.ID)
 			if n > 0 {
 				slog.Info("revoked other sessions after totp enable", "user_id", user.ID, "revoked", n)
 			}
 		}
 
 		slog.Info("totp enabled", "user_id", user.ID)
-		db.WriteAudit(database, user.ID, "totp_enabled", "user", user.ID,
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, user.ID, "totp_enabled", "user", user.ID,
 			"two-factor authentication enrolled")
 
 		w.WriteHeader(http.StatusNoContent)
@@ -335,7 +338,7 @@ func handleDisableTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, lim
 		failKey := fmt.Sprintf("pw_confirm_fail:%d", user.ID)
 		if err := requirePasswordConfirmation(user, req.Password); err != nil {
 			if !limiter.Allow(failKey, pwConfirmFailureThreshold, pwConfirmFailureWindow) {
-				limiter.Lockout(lockKey, pwConfirmLockoutDuration)
+				limiter.Lockout(r.Context(), lockKey, pwConfirmLockoutDuration)
 			}
 			writeJSON(w, http.StatusBadRequest, errorResponse{
 				Error:   "INVALID_INPUT",
@@ -343,9 +346,9 @@ func handleDisableTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, lim
 			})
 			return
 		}
-		limiter.Reset(failKey)
+		limiter.Reset(r.Context(), failKey)
 
-		require2FA, err := isRequire2FAEnabled(database)
+		require2FA, err := isRequire2FAEnabled(r.Context(), database)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL_ERROR",
@@ -362,7 +365,7 @@ func handleDisableTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, lim
 		}
 
 		pendingStore.Delete(user.ID)
-		if err := database.UpdateUserTOTPSecret(user.ID, nil); err != nil {
+		if err := database.UpdateUserTOTPSecret(r.Context(), user.ID, nil); err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
 				Error:   "INTERNAL_ERROR",
 				Message: "failed to disable two-factor authentication",
@@ -372,14 +375,16 @@ func handleDisableTOTP(database *db.DB, pendingStore *auth.PendingTOTPStore, lim
 
 		// BUG-108: Revoke all other sessions after 2FA state change.
 		if sess, ok := r.Context().Value(SessionKey).(*db.Session); ok && sess != nil {
-			n, _ := database.DeleteOtherSessions(user.ID, sess.ID)
+			// Security tail of the 2FA change: once the secret update committed,
+			// revoking the other sessions must not be aborted by a dead request.
+			n, _ := database.DeleteOtherSessions(context.WithoutCancel(r.Context()), user.ID, sess.ID)
 			if n > 0 {
 				slog.Info("revoked other sessions after totp disable", "user_id", user.ID, "revoked", n)
 			}
 		}
 
 		slog.Info("totp disabled", "user_id", user.ID)
-		db.WriteAudit(database, user.ID, "totp_disabled", "user", user.ID,
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, user.ID, "totp_disabled", "user", user.ID,
 			"two-factor authentication disabled")
 
 		w.WriteHeader(http.StatusNoContent)

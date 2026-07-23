@@ -1,6 +1,7 @@
 package ws_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -29,7 +30,7 @@ func channelFocusMsg(channelID int64) []byte {
 // specific role on a specific channel.
 func denyReadOnChannel(t *testing.T, database *db.DB, channelID, roleID int64) {
 	t.Helper()
-	_, err := database.Exec(
+	_, err := database.ExecContext(context.Background(),
 		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, ?, 0, ?)`,
 		channelID, roleID, permissions.ReadMessages,
 	)

@@ -1,6 +1,7 @@
 package ws_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"testing/fstest"
@@ -68,11 +69,11 @@ func newServeHub(t *testing.T) (*ws.Hub, *db.DB) {
 // seedServeUser inserts an Owner-role user and returns the full *db.User.
 func seedServeUser(t *testing.T, database *db.DB, username string) *db.User {
 	t.Helper()
-	_, err := database.CreateUser(username, "hash", 1)
+	_, err := database.CreateUser(context.Background(), username, "hash", 1)
 	if err != nil {
 		t.Fatalf("seedServeUser: %v", err)
 	}
-	user, err := database.GetUserByUsername(username)
+	user, err := database.GetUserByUsername(context.Background(), username)
 	if err != nil || user == nil {
 		t.Fatalf("seedServeUser GetUserByUsername: %v", err)
 	}
@@ -82,7 +83,7 @@ func seedServeUser(t *testing.T, database *db.DB, username string) *db.User {
 // ownerRole fetches the Owner role (ID=1) for permission-aware buildReady calls.
 func ownerRole(t *testing.T, database *db.DB) *db.Role {
 	t.Helper()
-	role, err := database.GetRoleByID(1)
+	role, err := database.GetRoleByID(context.Background(), 1)
 	if err != nil || role == nil {
 		t.Fatalf("ownerRole: %v", err)
 	}
@@ -253,7 +254,7 @@ func TestBuildReady_IncludesSeededChannel(t *testing.T) {
 	role := ownerRole(t, database)
 
 	// Seed a text channel.
-	chID, err := database.CreateChannel("general", "text", "", "", 0)
+	chID, err := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
@@ -293,7 +294,7 @@ func TestBuildReady_TextChannelHasUnreadCount(t *testing.T) {
 	user := seedServeUser(t, database, "ready-user4")
 	role := ownerRole(t, database)
 
-	_, err := database.CreateChannel("unread-chan", "text", "", "", 0)
+	_, err := database.CreateChannel(context.Background(), "unread-chan", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
@@ -365,7 +366,7 @@ func TestCollectAllVoiceStates_SkipsTextChannels(t *testing.T) {
 	user := seedServeUser(t, database, "collect-text-user")
 
 	// Only text channels — no voice states should be collected.
-	_, err := database.CreateChannel("text-only", "text", "", "", 0)
+	_, err := database.CreateChannel(context.Background(), "text-only", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
@@ -395,16 +396,16 @@ func TestCollectAllVoiceStates_IncludesVoiceParticipants(t *testing.T) {
 	user2 := seedServeUser(t, database, "collect-voice-u2")
 	requester := seedServeUser(t, database, "collect-voice-req")
 
-	chID, err := database.CreateChannel("voice-room", "voice", "", "", 0)
+	chID, err := database.CreateChannel(context.Background(), "voice-room", "voice", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
 
 	// Insert voice states for user1 and user2.
-	if err := database.JoinVoiceChannel(user1.ID, chID); err != nil {
+	if err := database.JoinVoiceChannel(context.Background(), user1.ID, chID); err != nil {
 		t.Fatalf("JoinVoiceChannel user1: %v", err)
 	}
-	if err := database.JoinVoiceChannel(user2.ID, chID); err != nil {
+	if err := database.JoinVoiceChannel(context.Background(), user2.ID, chID); err != nil {
 		t.Fatalf("JoinVoiceChannel user2: %v", err)
 	}
 
@@ -439,31 +440,31 @@ func TestBuildReady_VoiceStatesFilteredByVisibility(t *testing.T) {
 	hub, database := newServeHub(t)
 
 	// Create a member user (role 4, permissions=1635, includes ReadMessages).
-	_, err := database.CreateUser("vs-member", "hash", 4)
+	_, err := database.CreateUser(context.Background(), "vs-member", "hash", 4)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	member, err := database.GetUserByUsername("vs-member")
+	member, err := database.GetUserByUsername(context.Background(), "vs-member")
 	if err != nil || member == nil {
 		t.Fatalf("GetUserByUsername: %v", err)
 	}
-	memberRole, err := database.GetRoleByID(4)
+	memberRole, err := database.GetRoleByID(context.Background(), 4)
 	if err != nil || memberRole == nil {
 		t.Fatalf("GetRoleByID: %v", err)
 	}
 
 	// Create two voice channels: one visible, one denied.
-	visibleCh, err := database.CreateChannel("public-voice", "voice", "", "", 0)
+	visibleCh, err := database.CreateChannel(context.Background(), "public-voice", "voice", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel visible: %v", err)
 	}
-	hiddenCh, err := database.CreateChannel("hidden-voice", "voice", "", "", 1)
+	hiddenCh, err := database.CreateChannel(context.Background(), "hidden-voice", "voice", "", "", 1)
 	if err != nil {
 		t.Fatalf("CreateChannel hidden: %v", err)
 	}
 
 	// Deny READ_MESSAGES on the hidden channel for Member role (role 4).
-	_, err = database.Exec(
+	_, err = database.ExecContext(context.Background(),
 		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, 4, 0, 2)`,
 		hiddenCh,
 	)
@@ -474,10 +475,10 @@ func TestBuildReady_VoiceStatesFilteredByVisibility(t *testing.T) {
 	// Create users in both voice channels.
 	u1 := seedServeUser(t, database, "vs-visible-user")
 	u2 := seedServeUser(t, database, "vs-hidden-user")
-	if err := database.JoinVoiceChannel(u1.ID, visibleCh); err != nil {
+	if err := database.JoinVoiceChannel(context.Background(), u1.ID, visibleCh); err != nil {
 		t.Fatalf("JoinVoiceChannel visible: %v", err)
 	}
-	if err := database.JoinVoiceChannel(u2.ID, hiddenCh); err != nil {
+	if err := database.JoinVoiceChannel(context.Background(), u2.ID, hiddenCh); err != nil {
 		t.Fatalf("JoinVoiceChannel hidden: %v", err)
 	}
 
@@ -539,7 +540,7 @@ func TestGetCachedSettings_ReflectsDBValues(t *testing.T) {
 
 	// Verify the default settings were loaded correctly from the seeded DB.
 	var name string
-	if err := database.QueryRow("SELECT value FROM settings WHERE key='server_name'").Scan(&name); err != nil {
+	if err := database.QueryRowContext(context.Background(), "SELECT value FROM settings WHERE key='server_name'").Scan(&name); err != nil {
 		t.Fatalf("query server_name: %v", err)
 	}
 	if name != "OwnCord Server" {
@@ -804,7 +805,7 @@ func TestGetCachedSettings_CacheMiss_RefreshesFromDB(t *testing.T) {
 	hub, database := newServeHub(t)
 
 	// Update the DB settings value so we can detect a refresh.
-	_, err := database.Exec("UPDATE settings SET value='Refreshed Server' WHERE key='server_name'")
+	_, err := database.ExecContext(context.Background(), "UPDATE settings SET value='Refreshed Server' WHERE key='server_name'")
 	if err != nil {
 		t.Fatalf("UPDATE settings: %v", err)
 	}
@@ -888,7 +889,7 @@ func TestBuildReady_NoVoiceChannels_EmptyVoiceStates(t *testing.T) {
 	user := seedServeUser(t, database, "ready-novch")
 
 	// Create only a text channel — voice_states list must still be non-nil.
-	_, err := database.CreateChannel("text-chan", "text", "", "", 0)
+	_, err := database.CreateChannel(context.Background(), "text-chan", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}

@@ -42,7 +42,7 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			}
 
 			hash := auth.HashToken(token)
-			sess, err := database.GetSessionByTokenHash(hash)
+			sess, err := database.GetSessionByTokenHash(r.Context(), hash)
 			if err != nil || sess == nil {
 				writeJSON(w, http.StatusUnauthorized, errorResponse{
 					Error:   "UNAUTHORIZED",
@@ -54,8 +54,11 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			// Check expiry.
 			if auth.IsSessionExpired(sess.ExpiresAt) {
 				// Clean up expired session in background to prevent accumulation.
+				// The request ctx is cancelled as soon as the 401 below is
+				// written, so detach cancellation: the deletion must complete.
+				cleanupCtx := context.WithoutCancel(r.Context())
 				go func(h string) {
-					_ = database.DeleteSession(h)
+					_ = database.DeleteSession(cleanupCtx, h)
 				}(hash)
 				writeJSON(w, http.StatusUnauthorized, errorResponse{
 					Error:   "UNAUTHORIZED",
@@ -65,7 +68,7 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			}
 
 			// Load user.
-			user, err := database.GetUserByID(sess.UserID)
+			user, err := database.GetUserByID(r.Context(), sess.UserID)
 			if err != nil || user == nil {
 				writeJSON(w, http.StatusUnauthorized, errorResponse{
 					Error:   "UNAUTHORIZED",
@@ -87,7 +90,7 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			// A dangling role_id returns (nil, nil) from GetRoleByID, so the nil
 			// check is load-bearing: without it a nil role reaches the context
 			// and every downstream permission check has to re-guard it.
-			role, err := database.GetRoleByID(user.RoleID)
+			role, err := database.GetRoleByID(r.Context(), user.RoleID)
 			if err != nil || role == nil {
 				writeJSON(w, http.StatusUnauthorized, errorResponse{
 					Error:   "UNAUTHORIZED",
@@ -97,7 +100,7 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			}
 
 			// Touch session in background — non-fatal if it fails.
-			if err := database.TouchSession(hash); err != nil {
+			if err := database.TouchSession(r.Context(), hash); err != nil {
 				slog.Warn("failed to touch session", "error", err, "user_id", user.ID)
 			}
 

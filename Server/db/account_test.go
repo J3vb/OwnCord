@@ -83,7 +83,7 @@ func TestDeleteAccount_AnonymisesUsername(t *testing.T) {
 		t.Fatalf("DeleteAccount: %v", err)
 	}
 
-	user, err := database.GetUserByID(userID)
+	user, err := database.GetUserByID(context.Background(), userID)
 	if err != nil {
 		t.Fatalf("GetUserByID after delete: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestDeleteAccount_ClearsPassword(t *testing.T) {
 
 	database.DeleteAccount(context.Background(), userID) //nolint:errcheck
 
-	user, _ := database.GetUserByID(userID)
+	user, _ := database.GetUserByID(context.Background(), userID)
 	if user.PasswordHash != "" {
 		t.Errorf("PasswordHash = %q, want empty", user.PasswordHash)
 	}
@@ -111,11 +111,11 @@ func TestDeleteAccount_ClearsAvatarAndTOTP(t *testing.T) {
 	userID := seedUser(t, database, "charlie")
 
 	// Set avatar and TOTP before deletion.
-	database.Exec("UPDATE users SET avatar = 'pic.png', totp_secret = 'SECRET' WHERE id = ?", userID) //nolint:errcheck
+	database.ExecContext(context.Background(), "UPDATE users SET avatar = 'pic.png', totp_secret = 'SECRET' WHERE id = ?", userID) //nolint:errcheck
 
 	database.DeleteAccount(context.Background(), userID) //nolint:errcheck
 
-	user, _ := database.GetUserByID(userID)
+	user, _ := database.GetUserByID(context.Background(), userID)
 	if user.Avatar != nil {
 		t.Errorf("Avatar = %v, want nil", user.Avatar)
 	}
@@ -130,7 +130,7 @@ func TestDeleteAccount_SetsBannedAndOffline(t *testing.T) {
 
 	database.DeleteAccount(context.Background(), userID) //nolint:errcheck
 
-	user, _ := database.GetUserByID(userID)
+	user, _ := database.GetUserByID(context.Background(), userID)
 	if !user.Banned {
 		t.Error("Banned should be true after deletion")
 	}
@@ -146,7 +146,7 @@ func TestDeleteAccount_DeletesSessions(t *testing.T) {
 	userID := seedUser(t, database, "eve")
 
 	// Insert a session directly.
-	database.Exec(
+	database.ExecContext(context.Background(),
 		"INSERT INTO sessions (user_id, token, expires_at) VALUES (?, 'tok123', datetime('now', '+1 day'))",
 		userID,
 	) //nolint:errcheck
@@ -154,7 +154,7 @@ func TestDeleteAccount_DeletesSessions(t *testing.T) {
 	database.DeleteAccount(context.Background(), userID) //nolint:errcheck
 
 	var count int
-	database.QueryRow("SELECT COUNT(*) FROM sessions WHERE user_id = ?", userID).Scan(&count) //nolint:errcheck
+	database.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM sessions WHERE user_id = ?", userID).Scan(&count) //nolint:errcheck
 	if count != 0 {
 		t.Errorf("sessions count = %d, want 0", count)
 	}
@@ -165,11 +165,11 @@ func TestDeleteAccount_SoftDeletesMessages(t *testing.T) {
 	userID := seedUser(t, database, "frank")
 	chID := seedChannel(t, database, "general")
 
-	msgID, _ := database.CreateMessage(chID, userID, "hello world", nil)
+	msgID, _ := database.CreateMessage(context.Background(), chID, userID, "hello world", nil)
 
 	database.DeleteAccount(context.Background(), userID) //nolint:errcheck
 
-	msg, err := database.GetMessage(msgID)
+	msg, err := database.GetMessage(context.Background(), msgID)
 	if err != nil {
 		t.Fatalf("GetMessage after delete: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestDeleteAccount_NonexistentUser(t *testing.T) {
 
 func setRole(t *testing.T, database *db.DB, userID, roleID int64) {
 	t.Helper()
-	if _, err := database.Exec("UPDATE users SET role_id = ? WHERE id = ?", roleID, userID); err != nil {
+	if _, err := database.ExecContext(context.Background(), "UPDATE users SET role_id = ? WHERE id = ?", roleID, userID); err != nil {
 		t.Fatalf("setRole(%d, %d): %v", userID, roleID, err)
 	}
 }

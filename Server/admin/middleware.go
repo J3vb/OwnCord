@@ -31,7 +31,7 @@ func adminAuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			}
 
 			hash := auth.HashToken(token)
-			sess, err := database.GetSessionByTokenHash(hash)
+			sess, err := database.GetSessionByTokenHash(r.Context(), hash)
 			if err != nil || sess == nil {
 				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session")
 				return
@@ -42,13 +42,13 @@ func adminAuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 				return
 			}
 
-			user, err := database.GetUserByID(sess.UserID)
+			user, err := database.GetUserByID(r.Context(), sess.UserID)
 			if err != nil || user == nil {
 				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "user not found")
 				return
 			}
 
-			role, err := database.GetRoleByID(user.RoleID)
+			role, err := database.GetRoleByID(r.Context(), user.RoleID)
 			if err != nil || role == nil {
 				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "role not found")
 				return
@@ -77,7 +77,7 @@ func ownerOnlyMiddleware(database *db.DB, next http.Handler) http.Handler {
 			return
 		}
 
-		role, err := database.GetRoleByID(user.RoleID)
+		role, err := database.GetRoleByID(r.Context(), user.RoleID)
 		if err != nil || role == nil {
 			writeErr(w, http.StatusForbidden, "FORBIDDEN", "role not found")
 			return

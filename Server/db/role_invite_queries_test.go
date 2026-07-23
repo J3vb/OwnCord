@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"context"
 	"testing"
 )
 
@@ -9,7 +10,7 @@ import (
 func TestGetRoleByID_Found(t *testing.T) {
 	database := newTestDB(t)
 
-	role, err := database.GetRoleByID(4) // Member — inserted by migration
+	role, err := database.GetRoleByID(context.Background(), 4) // Member — inserted by migration
 	if err != nil {
 		t.Fatalf("GetRoleByID: %v", err)
 	}
@@ -27,7 +28,7 @@ func TestGetRoleByID_Found(t *testing.T) {
 func TestGetRoleByID_NotFound(t *testing.T) {
 	database := newTestDB(t)
 
-	role, err := database.GetRoleByID(9999)
+	role, err := database.GetRoleByID(context.Background(), 9999)
 	if err != nil {
 		t.Fatalf("GetRoleByID(not found): %v", err)
 	}
@@ -39,7 +40,7 @@ func TestGetRoleByID_NotFound(t *testing.T) {
 func TestGetRoleByID_OwnerHasAllPermissions(t *testing.T) {
 	database := newTestDB(t)
 
-	role, err := database.GetRoleByID(1) // Owner
+	role, err := database.GetRoleByID(context.Background(), 1) // Owner
 	if err != nil {
 		t.Fatalf("GetRoleByID Owner: %v", err)
 	}
@@ -55,8 +56,8 @@ func TestGetRoleByID_OwnerHasAllPermissions(t *testing.T) {
 func TestGetRoleByID_IsDefaultField(t *testing.T) {
 	database := newTestDB(t)
 
-	owner, _ := database.GetRoleByID(1)
-	member, _ := database.GetRoleByID(4)
+	owner, _ := database.GetRoleByID(context.Background(), 1)
+	member, _ := database.GetRoleByID(context.Background(), 4)
 
 	if owner.IsDefault {
 		t.Error("Owner.IsDefault = true, want false")
@@ -72,7 +73,7 @@ func TestGetRoleByID_IsDefaultField(t *testing.T) {
 func TestListRoles_ReturnsFourDefaultRoles(t *testing.T) {
 	database := newTestDB(t)
 
-	roles, err := database.ListRoles()
+	roles, err := database.ListRoles(context.Background())
 	if err != nil {
 		t.Fatalf("ListRoles: %v", err)
 	}
@@ -84,7 +85,7 @@ func TestListRoles_ReturnsFourDefaultRoles(t *testing.T) {
 func TestListRoles_OrderedByPositionDesc(t *testing.T) {
 	database := newTestDB(t)
 
-	roles, err := database.ListRoles()
+	roles, err := database.ListRoles(context.Background())
 	if err != nil {
 		t.Fatalf("ListRoles: %v", err)
 	}
@@ -101,12 +102,12 @@ func TestListRoles_OrderedByPositionDesc(t *testing.T) {
 
 func TestGetUserWithRole_Found(t *testing.T) {
 	database := newTestDB(t)
-	uid, err := database.CreateUser("joinuser", "hash", 4) // Member role
+	uid, err := database.CreateUser(context.Background(), "joinuser", "hash", 4) // Member role
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	user, role, err := database.GetUserWithRole(uid)
+	user, role, err := database.GetUserWithRole(context.Background(), uid)
 	if err != nil {
 		t.Fatalf("GetUserWithRole: %v", err)
 	}
@@ -133,7 +134,7 @@ func TestGetUserWithRole_Found(t *testing.T) {
 func TestGetUserWithRole_NotFound(t *testing.T) {
 	database := newTestDB(t)
 
-	user, role, err := database.GetUserWithRole(9999)
+	user, role, err := database.GetUserWithRole(context.Background(), 9999)
 	if err != nil {
 		t.Fatalf("GetUserWithRole(not found): %v", err)
 	}
@@ -144,9 +145,9 @@ func TestGetUserWithRole_NotFound(t *testing.T) {
 
 func TestGetUserWithRole_BoolConversions(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("booluser", "hash", 4)
+	uid, _ := database.CreateUser(context.Background(), "booluser", "hash", 4)
 
-	user, role, err := database.GetUserWithRole(uid)
+	user, role, err := database.GetUserWithRole(context.Background(), uid)
 	if err != nil {
 		t.Fatalf("GetUserWithRole: %v", err)
 	}
@@ -165,7 +166,7 @@ func TestGetUserWithRole_BoolConversions(t *testing.T) {
 func TestListInvites_Empty(t *testing.T) {
 	database := newTestDB(t)
 
-	invites, err := database.ListInvites()
+	invites, err := database.ListInvites(context.Background())
 	if err != nil {
 		t.Fatalf("ListInvites empty: %v", err)
 	}
@@ -176,13 +177,13 @@ func TestListInvites_Empty(t *testing.T) {
 
 func TestListInvites_Multiple(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("listowner", "hash", 4)
+	uid, _ := database.CreateUser(context.Background(), "listowner", "hash", 4)
 
-	_, _ = database.CreateInvite(uid, 1, nil)
-	_, _ = database.CreateInvite(uid, 5, nil)
-	_, _ = database.CreateInvite(uid, 0, nil)
+	_, _ = database.CreateInvite(context.Background(), uid, 1, nil)
+	_, _ = database.CreateInvite(context.Background(), uid, 5, nil)
+	_, _ = database.CreateInvite(context.Background(), uid, 0, nil)
 
-	invites, err := database.ListInvites()
+	invites, err := database.ListInvites(context.Background())
 	if err != nil {
 		t.Fatalf("ListInvites multiple: %v", err)
 	}
@@ -193,13 +194,13 @@ func TestListInvites_Multiple(t *testing.T) {
 
 func TestListInvites_IncludesRevokedInvites(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("revokelistowner", "hash", 4)
+	uid, _ := database.CreateUser(context.Background(), "revokelistowner", "hash", 4)
 
-	code, _ := database.CreateInvite(uid, 1, nil)
-	_ = database.RevokeInvite(code)
-	_, _ = database.CreateInvite(uid, 0, nil) // active
+	code, _ := database.CreateInvite(context.Background(), uid, 1, nil)
+	_ = database.RevokeInvite(context.Background(), code)
+	_, _ = database.CreateInvite(context.Background(), uid, 0, nil) // active
 
-	invites, err := database.ListInvites()
+	invites, err := database.ListInvites(context.Background())
 	if err != nil {
 		t.Fatalf("ListInvites with revoked: %v", err)
 	}

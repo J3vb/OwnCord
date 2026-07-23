@@ -1,6 +1,7 @@
 package permissions
 
 import (
+	"context"
 	"errors"
 	"fmt"
 )
@@ -32,8 +33,8 @@ type ChannelRef struct {
 // DB is the minimal database interface the Checker needs.
 // Defined at the consumer (per Go convention: accept interfaces, return structs).
 type DB interface {
-	GetChannelPermissions(channelID, roleID int64) (allow, deny int64, err error)
-	IsDMParticipant(userID, channelID int64) (bool, error)
+	GetChannelPermissions(ctx context.Context, channelID, roleID int64) (allow, deny int64, err error)
+	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
 }
 
 // ─── Checker ────────────────────────────────────────────────────────────────
@@ -53,11 +54,11 @@ func NewChecker(db DB) *Checker {
 // has all the given permission bits on the specified channel. Administrator
 // roles bypass all checks. Channel overrides (allow/deny) are fetched from the
 // database per call.
-func (ck *Checker) HasChannelPerm(rolePerms int64, roleID, channelID, perm int64) bool {
+func (ck *Checker) HasChannelPerm(ctx context.Context, rolePerms int64, roleID, channelID, perm int64) bool {
 	if HasAdmin(rolePerms) {
 		return true
 	}
-	allow, deny, err := ck.db.GetChannelPermissions(channelID, roleID)
+	allow, deny, err := ck.db.GetChannelPermissions(ctx, channelID, roleID)
 	if err != nil {
 		return false
 	}
@@ -105,9 +106,9 @@ func (ck *Checker) VisibleChannelIDs(rolePerms int64, channels []ChannelRef, ove
 // role-based permissions via HasChannelPerm.
 //
 // Returns nil on success, or a descriptive error on failure.
-func (ck *Checker) RequireChannelAccess(userID, rolePerms, roleID int64, channelType string, channelID, perm int64) error {
+func (ck *Checker) RequireChannelAccess(ctx context.Context, userID, rolePerms, roleID int64, channelType string, channelID, perm int64) error {
 	if channelType == "dm" {
-		ok, err := ck.db.IsDMParticipant(userID, channelID)
+		ok, err := ck.db.IsDMParticipant(ctx, userID, channelID)
 		if err != nil {
 			return fmt.Errorf("checking DM participation: %w", err)
 		}
@@ -117,7 +118,7 @@ func (ck *Checker) RequireChannelAccess(userID, rolePerms, roleID int64, channel
 		return nil
 	}
 
-	if !ck.HasChannelPerm(rolePerms, roleID, channelID, perm) {
+	if !ck.HasChannelPerm(ctx, rolePerms, roleID, channelID, perm) {
 		return ErrPermissionDenied
 	}
 	return nil

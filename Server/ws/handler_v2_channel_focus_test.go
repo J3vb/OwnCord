@@ -23,11 +23,11 @@ func newFocusTestDeps(t *testing.T) (PresenceDeps, int64, int64) {
 	}
 	t.Cleanup(func() { database.Close() })
 
-	userID, err := database.CreateUser("focuser", "hash", 1) // Owner role
+	userID, err := database.CreateUser(context.Background(), "focuser", "hash", 1) // Owner role
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	chID, err := database.CreateChannel("focus-chan", "text", "", "", 0)
+	chID, err := database.CreateChannel(context.Background(), "focus-chan", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
@@ -98,11 +98,11 @@ func TestChannelFocusV2_NoPermission_ReturnsForbidden(t *testing.T) {
 	t.Cleanup(func() { database.Close() })
 
 	// Use Member role (id=4) and create a channel with a deny override.
-	userID, _ := database.CreateUser("noperm", "hash", 4)
-	chID, _ := database.CreateChannel("restricted", "text", "", "", 0)
+	userID, _ := database.CreateUser(context.Background(), "noperm", "hash", 4)
+	chID, _ := database.CreateChannel(context.Background(), "restricted", "text", "", "", 0)
 
 	// Deny READ_MESSAGES for Member role on this channel via raw SQL.
-	_, err = database.Exec(
+	_, err = database.ExecContext(context.Background(),
 		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, 4, 0, ?)`,
 		chID, permissions.ReadMessages,
 	)

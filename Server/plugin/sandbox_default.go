@@ -24,7 +24,7 @@ func (r *Registry) activateWithRuntime(_ context.Context, _ any, _ *Instance) er
 }
 
 // platformDeactivate is called from Close on each plugin; a no-op here.
-func (r *Registry) platformDeactivate(_ *Instance) {}
+func (r *Registry) platformDeactivate(_ context.Context, _ *Instance) {}
 
 // invokeCommand returns an error result instructing the operator to enable
 // the wazero build tag. Default build only.

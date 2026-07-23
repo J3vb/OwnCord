@@ -73,7 +73,7 @@ func TestHandleLogStream_BackfillStopsAfterSessionRevocation(t *testing.T) {
 	logBuf.Write(LogEntry{Timestamp: "2026-03-29T10:00:00Z", Level: "info", Message: "first", Source: "test"})
 	logBuf.Write(LogEntry{Timestamp: "2026-03-29T10:00:01Z", Level: "info", Message: "second", Source: "test"})
 
-	userID, err := database.CreateUser("owner", "hash", 1)
+	userID, err := database.CreateUser(context.Background(), "owner", "hash", 1)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestHandleLogStream_BackfillStopsAfterSessionRevocation(t *testing.T) {
 		t.Fatalf("GenerateToken: %v", err)
 	}
 	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(userID, tokenHash, "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -99,7 +99,7 @@ func TestHandleLogStream_BackfillStopsAfterSessionRevocation(t *testing.T) {
 	writer := &revokingSSEWriter{
 		header: make(http.Header),
 		revoke: func() {
-			_ = database.DeleteSession(tokenHash)
+			_ = database.DeleteSession(context.Background(), tokenHash)
 		},
 		cancel: cancel,
 	}

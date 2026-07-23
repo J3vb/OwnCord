@@ -40,12 +40,12 @@ func (s *BlockService) BlockUser(ctx context.Context, blockerID, targetID int64)
 		return fmt.Errorf("%w: cannot block yourself", ErrBadRequest)
 	}
 
-	target, err := s.st.GetUserByID(targetID)
+	target, err := s.st.GetUserByID(ctx, targetID)
 	if err != nil || target == nil {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 
-	if err := s.st.BlockUser(blockerID, targetID); err != nil {
+	if err := s.st.BlockUser(ctx, blockerID, targetID); err != nil {
 		return fmt.Errorf("%w: failed to block user", ErrInternal)
 	}
 
@@ -54,11 +54,11 @@ func (s *BlockService) BlockUser(ctx context.Context, blockerID, targetID int64)
 }
 
 // UnblockUser removes a block on a target user.
-func (s *BlockService) UnblockUser(blockerID, targetID int64) error {
+func (s *BlockService) UnblockUser(ctx context.Context, blockerID, targetID int64) error {
 	if targetID <= 0 {
 		return fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
 	}
-	if err := s.st.UnblockUser(blockerID, targetID); err != nil {
+	if err := s.st.UnblockUser(ctx, blockerID, targetID); err != nil {
 		return fmt.Errorf("%w: failed to unblock user", ErrInternal)
 	}
 	slog.Info("user unblocked", "blocker_id", blockerID, "target_id", targetID)
@@ -66,8 +66,8 @@ func (s *BlockService) UnblockUser(blockerID, targetID int64) error {
 }
 
 // ListBlocked returns all user IDs blocked by the given user.
-func (s *BlockService) ListBlocked(blockerID int64) ([]int64, error) {
-	ids, err := s.st.ListBlockedUsers(blockerID)
+func (s *BlockService) ListBlocked(ctx context.Context, blockerID int64) ([]int64, error) {
+	ids, err := s.st.ListBlockedUsers(ctx, blockerID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to list blocked users", ErrInternal)
 	}

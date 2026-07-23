@@ -36,8 +36,8 @@ type DMUser struct {
 // The entire lookup+create is wrapped in a single IMMEDIATE transaction to
 // prevent a TOCTOU race where two concurrent requests both see ErrNoRows and
 // each create a separate DM channel for the same user pair.
-func (d *DB) GetOrCreateDMChannel(user1ID, user2ID int64) (*Channel, bool, error) {
-	tx, err := d.sqlDB.BeginTx(context.Background(), &sql.TxOptions{
+func (d *DB) GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (*Channel, bool, error) {
+	tx, err := d.sqlDB.BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelSerializable,
 	})
 	if err != nil {
@@ -66,7 +66,7 @@ func (d *DB) GetOrCreateDMChannel(user1ID, user2ID int64) (*Channel, bool, error
 		if commitErr := tx.Commit(); commitErr != nil {
 			return nil, false, fmt.Errorf("GetOrCreateDMChannel commit existing: %w", commitErr)
 		}
-		ch, getErr := d.GetChannel(existingID)
+		ch, getErr := d.GetChannel(ctx, existingID)
 		if getErr != nil {
 			return nil, false, fmt.Errorf("GetOrCreateDMChannel fetch existing: %w", getErr)
 		}
@@ -120,7 +120,7 @@ func (d *DB) GetOrCreateDMChannel(user1ID, user2ID int64) (*Channel, bool, error
 		return nil, false, fmt.Errorf("GetOrCreateDMChannel commit: %w", err)
 	}
 
-	ch, err := d.GetChannel(channelID)
+	ch, err := d.GetChannel(ctx, channelID)
 	if err != nil {
 		return nil, false, fmt.Errorf("GetOrCreateDMChannel fetch new: %w", err)
 	}
@@ -136,8 +136,8 @@ func (d *DB) GetOrCreateDMChannel(user1ID, user2ID int64) (*Channel, bool, error
 // (dm_open_state only contains rows for DM channels), and the explicit
 // "c.type = 'dm'" predicate in the JOIN provides a defensive second check.
 // No additional channel-type validation is needed at the Go layer.
-func (d *DB) GetUserDMChannels(userID int64) ([]DMChannelInfo, error) {
-	rows, err := d.sqlDB.Query(
+func (d *DB) GetUserDMChannels(ctx context.Context, userID int64) ([]DMChannelInfo, error) {
+	rows, err := d.sqlDB.QueryContext(ctx,
 		`SELECT
 		    c.id                                          AS channel_id,
 		    u.id                                          AS recipient_id,
@@ -203,8 +203,8 @@ func (d *DB) GetUserDMChannels(userID int64) ([]DMChannelInfo, error) {
 // ─── OpenDM / CloseDM ──────────────────────────────────────────────────────
 
 // OpenDM adds a DM channel to a user's open list (idempotent).
-func (d *DB) OpenDM(userID, channelID int64) error {
-	if err := d.q.OpenDM(dbCtx(), dbgen.OpenDMParams{
+func (d *DB) OpenDM(ctx context.Context, userID, channelID int64) error {
+	if err := d.q.OpenDM(ctx, dbgen.OpenDMParams{
 		UserID:    userID,
 		ChannelID: channelID,
 	}); err != nil {
@@ -214,8 +214,8 @@ func (d *DB) OpenDM(userID, channelID int64) error {
 }
 
 // CloseDM removes a DM channel from a user's open list.
-func (d *DB) CloseDM(userID, channelID int64) error {
-	if err := d.q.CloseDM(dbCtx(), dbgen.CloseDMParams{
+func (d *DB) CloseDM(ctx context.Context, userID, channelID int64) error {
+	if err := d.q.CloseDM(ctx, dbgen.CloseDMParams{
 		UserID:    userID,
 		ChannelID: channelID,
 	}); err != nil {
@@ -227,8 +227,8 @@ func (d *DB) CloseDM(userID, channelID int64) error {
 // ─── Participant helpers ────────────────────────────────────────────────────
 
 // IsDMParticipant checks if a user is a participant in a DM channel.
-func (d *DB) IsDMParticipant(userID, channelID int64) (bool, error) {
-	_, err := d.q.IsDMParticipant(dbCtx(), dbgen.IsDMParticipantParams{
+func (d *DB) IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error) {
+	_, err := d.q.IsDMParticipant(ctx, dbgen.IsDMParticipantParams{
 		UserID:    userID,
 		ChannelID: channelID,
 	})
@@ -242,8 +242,8 @@ func (d *DB) IsDMParticipant(userID, channelID int64) (bool, error) {
 }
 
 // GetDMParticipantIDs returns all participant user IDs for a DM channel.
-func (d *DB) GetDMParticipantIDs(channelID int64) ([]int64, error) {
-	ids, err := d.q.GetDMParticipantIDs(dbCtx(), channelID)
+func (d *DB) GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error) {
+	ids, err := d.q.GetDMParticipantIDs(ctx, channelID)
 	if err != nil {
 		return nil, fmt.Errorf("GetDMParticipantIDs: %w", err)
 	}
@@ -251,9 +251,9 @@ func (d *DB) GetDMParticipantIDs(channelID int64) ([]int64, error) {
 }
 
 // GetDMRecipient returns the other participant in a DM channel.
-func (d *DB) GetDMRecipient(channelID, requestingUserID int64) (*User, error) {
+func (d *DB) GetDMRecipient(ctx context.Context, channelID, requestingUserID int64) (*User, error) {
 	var recipientID int64
-	err := d.sqlDB.QueryRow(
+	err := d.sqlDB.QueryRowContext(ctx,
 		`SELECT user_id FROM dm_participants
 		 WHERE channel_id = ? AND user_id != ?
 		 LIMIT 1`,
@@ -265,5 +265,5 @@ func (d *DB) GetDMRecipient(channelID, requestingUserID int64) (*User, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GetDMRecipient lookup: %w", err)
 	}
-	return d.GetUserByID(recipientID)
+	return d.GetUserByID(ctx, recipientID)
 }

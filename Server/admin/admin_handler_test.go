@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -159,9 +160,9 @@ func TestOwnerOnlyMiddleware_AdminDenied(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
 
 	// Create admin user (role_id=2, position=80)
-	adminUID, _ := database.CreateUser("middlewareadmin", "hash", 2)
+	adminUID, _ := database.CreateUser(context.Background(), "middlewareadmin", "hash", 2)
 	token := "mw-admin-token"
-	_, _ = database.CreateSession(adminUID, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), adminUID, auth.HashToken(token), "test", "127.0.0.1")
 
 	w := doRequest(t, handler, http.MethodPost, "/backup", token, nil)
 

@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -27,9 +28,9 @@ func buildInviteRouter(database *db.DB, limiter *auth.RateLimiter) http.Handler 
 func loginAndGetToken(t *testing.T, _ http.Handler, database *db.DB, username string, roleID int) string {
 	t.Helper()
 	hash, _ := auth.HashPassword("Password1!")
-	uid, _ := database.CreateUser(username, hash, roleID)
+	uid, _ := database.CreateUser(context.Background(), username, hash, roleID)
 	token, _ := auth.GenerateToken()
-	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1")
 	return token
 }
 
@@ -104,11 +105,11 @@ func TestCreateInvite_ChannelAllowOverrideDoesNotGrant(t *testing.T) {
 
 	token := loginAndGetToken(t, router, database, "overrideuser", 4)
 
-	if _, err := database.Exec(
+	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO channels (id, name, type) VALUES (1, 'general', 'text')`); err != nil {
 		t.Fatalf("insert channel: %v", err)
 	}
-	if _, err := database.Exec(
+	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (1, 4, ?, 0)`,
 		permissions.ManageInvites,
 	); err != nil {
@@ -176,7 +177,7 @@ func TestCreateInvite_CreateInviteFailure(t *testing.T) {
 	router := buildInviteRouter(database, limiter)
 	token := loginAndGetToken(t, router, database, "invitecreatefail", 2)
 
-	if _, err := database.Exec(`DROP TABLE invites`); err != nil {
+	if _, err := database.ExecContext(context.Background(), `DROP TABLE invites`); err != nil {
 		t.Fatalf("drop invites table: %v", err)
 	}
 
@@ -200,7 +201,7 @@ func TestCreateInvite_GetInviteFailure(t *testing.T) {
 	router := buildInviteRouter(database, limiter)
 	token := loginAndGetToken(t, router, database, "invitegetfail", 2)
 
-	if _, err := database.Exec(`
+	if _, err := database.ExecContext(context.Background(), `
 		CREATE TRIGGER delete_invite_after_insert
 		AFTER INSERT ON invites
 		BEGIN
@@ -222,7 +223,7 @@ func TestCreateInvite_GetInviteFailure(t *testing.T) {
 	if resp["message"] != "an internal error occurred" {
 		t.Errorf("message = %v, want an internal error occurred", resp["message"])
 	}
-	if _, err := database.Exec(`DROP TRIGGER delete_invite_after_insert`); err != nil {
+	if _, err := database.ExecContext(context.Background(), `DROP TRIGGER delete_invite_after_insert`); err != nil {
 		t.Fatalf("drop trigger: %v", err)
 	}
 }
@@ -331,7 +332,7 @@ func TestRevokeInvite_Success(t *testing.T) {
 	}
 
 	// Verify invite is revoked.
-	inv, _ := database.GetInvite(code)
+	inv, _ := database.GetInvite(context.Background(), code)
 	if inv == nil || !inv.Revoked {
 		t.Error("Invite not revoked in database after DELETE")
 	}
@@ -397,7 +398,7 @@ func TestRevokeInvite_RevokeFailure(t *testing.T) {
 	}
 	code := created["code"].(string)
 
-	if _, err := database.Exec(`
+	if _, err := database.ExecContext(context.Background(), `
 		CREATE TRIGGER block_revoke_invite
 		BEFORE UPDATE OF revoked ON invites
 		BEGIN

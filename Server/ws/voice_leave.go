@@ -46,7 +46,7 @@ func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
 
 	// Remove from LiveKit (best-effort).
 	if h.livekit != nil {
-		if err := h.livekit.RemoveParticipant(oldChID, c.userID, oldJoinToken); err != nil { //nolint:contextcheck // TODO: propagate context through this call path
+		if err := h.livekit.RemoveParticipant(ctx, oldChID, c.userID, oldJoinToken); err != nil {
 			slog.Warn("handleVoiceLeave RemoveParticipant failed (may already be gone)",
 				"err", err, "user_id", c.userID, "channel_id", oldChID)
 		}
@@ -73,22 +73,23 @@ func leaveVoiceChannelWithRetry(ctx context.Context, h *Hub, userID int64, chann
 	}
 
 	// Synchronous first attempt — channel-conditional delete.
-	if _, err := h.db.LeaveVoiceChannelIfMatch(userID, channelID, joinToken); err != nil {
+	if _, err := h.db.LeaveVoiceChannelIfMatch(ctx, userID, channelID, joinToken); err != nil {
 		slog.Warn("LeaveVoiceChannelIfMatch failed, retrying in background",
 			"err", err, "user_id", userID, "channel_id", channelID,
 			"attempt", 1, "max_retries", 3)
 
-		// Background retries — cancellable via ctx or hub stop.
+		// Background retries — cancellable via hub stop only. The caller's ctx
+		// is detached: on the webhook path it dies the moment the handler
+		// returns, and on the voice_leave path it dies with the connection —
+		// either would kill retry 2 before it ever ran, leaving a ghost
+		// voice_states row holding a capacity slot until the 60s sweep.
 		go func() {
+			retryCtx := context.WithoutCancel(ctx)
 			const maxRetries = 3
 			delay := 200 * time.Millisecond
 
 			for attempt := 2; attempt <= maxRetries; attempt++ {
 				select {
-				case <-ctx.Done():
-					slog.Info("LeaveVoiceChannelIfMatch retry cancelled (context)",
-						"user_id", userID, "channel_id", channelID, "attempt", attempt)
-					return
 				case <-h.stop:
 					slog.Info("LeaveVoiceChannelIfMatch retry cancelled (hub stop)",
 						"user_id", userID, "channel_id", channelID, "attempt", attempt)
@@ -97,7 +98,7 @@ func leaveVoiceChannelWithRetry(ctx context.Context, h *Hub, userID int64, chann
 				}
 				delay *= 2
 
-				if _, retryErr := h.db.LeaveVoiceChannelIfMatch(userID, channelID, joinToken); retryErr != nil {
+				if _, retryErr := h.db.LeaveVoiceChannelIfMatch(retryCtx, userID, channelID, joinToken); retryErr != nil {
 					slog.Warn("LeaveVoiceChannelIfMatch retry failed",
 						"err", retryErr, "user_id", userID, "channel_id", channelID,
 						"attempt", attempt, "max_retries", maxRetries)

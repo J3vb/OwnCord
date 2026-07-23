@@ -18,13 +18,13 @@ func registerPresenceHandlers(r *HandlerRegistry, deps PresenceDeps) {
 // handleTypingV2 is the V2 handler for typing_start messages.
 // It validates the channel, checks permissions, and returns events to broadcast
 // the typing indicator to channel members (excluding the sender).
-func handleTypingV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+func handleTypingV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(PresenceDeps)
 	typingCmd := cmd.(TypingStartCmd)
 	channelID := typingCmd.ChannelID()
 	userID := info.UserID
 
-	ch, err := d.ChannelSvc.HandleTyping(userID, channelID, d.Limiter)
+	ch, err := d.ChannelSvc.HandleTyping(ctx, userID, channelID, d.Limiter)
 	if err != nil || ch == nil {
 		return Result{} // silently drop
 	}
@@ -32,7 +32,7 @@ func handleTypingV2(_ context.Context, cmd Command, info ClientInfo, deps any) R
 	payload := buildTypingMsg(channelID, userID, info.Username)
 
 	if ch.Type == "dm" {
-		participantIDs, pErr := d.ChannelSvc.GetDMParticipantIDs(channelID)
+		participantIDs, pErr := d.ChannelSvc.GetDMParticipantIDs(ctx, channelID)
 		if pErr != nil {
 			return Result{}
 		}
@@ -62,13 +62,13 @@ func handleTypingV2(_ context.Context, cmd Command, info ClientInfo, deps any) R
 
 // handlePresenceV2 is the V2 handler for presence_update messages.
 // It validates the status, updates the DB, and broadcasts to all clients.
-func handlePresenceV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+func handlePresenceV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(PresenceDeps)
 	presenceCmd := cmd.(PresenceUpdateCmd)
 	userID := info.UserID
 	status := presenceCmd.Status()
 
-	if err := d.ChannelSvc.HandlePresenceUpdate(userID, status, d.Limiter); err != nil {
+	if err := d.ChannelSvc.HandlePresenceUpdate(ctx, userID, status, d.Limiter); err != nil {
 		return serviceErrorToResult(err)
 	}
 
@@ -82,12 +82,12 @@ func handlePresenceV2(_ context.Context, cmd Command, info ClientInfo, deps any)
 // handleChannelFocusV2 is the V2 handler for channel_focus messages.
 // It validates permissions, signals the client's focused channel via SetChannelID,
 // and marks the channel as read.
-func handleChannelFocusV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+func handleChannelFocusV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(PresenceDeps)
 	focusCmd := cmd.(ChannelFocusCmd)
 	chID := focusCmd.ChannelID()
 
-	_, err := d.ChannelSvc.HandleChannelFocus(info.UserID, chID)
+	_, err := d.ChannelSvc.HandleChannelFocus(ctx, info.UserID, chID)
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) {
 			return Result{Error: ClientError{Code: ErrCodeForbidden, Message: "access denied"}}

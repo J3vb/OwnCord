@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"context"
 	"testing"
 )
 
@@ -8,17 +9,17 @@ import (
 
 func TestUpdateUserProfile_UsernameAndAvatar(t *testing.T) {
 	database := newTestDB(t)
-	id, err := database.CreateUser("profileuser", "hash", 4)
+	id, err := database.CreateUser(context.Background(), "profileuser", "hash", 4)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
 	avatar := "https://example.com/avatar.png"
-	if err := database.UpdateUserProfile(id, "newname", &avatar); err != nil {
+	if err := database.UpdateUserProfile(context.Background(), id, "newname", &avatar); err != nil {
 		t.Fatalf("UpdateUserProfile: %v", err)
 	}
 
-	user, err := database.GetUserByID(id)
+	user, err := database.GetUserByID(context.Background(), id)
 	if err != nil {
 		t.Fatalf("GetUserByID: %v", err)
 	}
@@ -32,13 +33,13 @@ func TestUpdateUserProfile_UsernameAndAvatar(t *testing.T) {
 
 func TestUpdateUserProfile_UsernameOnly(t *testing.T) {
 	database := newTestDB(t)
-	id, _ := database.CreateUser("keepavatar", "hash", 4)
+	id, _ := database.CreateUser(context.Background(), "keepavatar", "hash", 4)
 
-	if err := database.UpdateUserProfile(id, "renamed", nil); err != nil {
+	if err := database.UpdateUserProfile(context.Background(), id, "renamed", nil); err != nil {
 		t.Fatalf("UpdateUserProfile: %v", err)
 	}
 
-	user, _ := database.GetUserByID(id)
+	user, _ := database.GetUserByID(context.Background(), id)
 	if user.Username != "renamed" {
 		t.Errorf("Username = %q, want %q", user.Username, "renamed")
 	}
@@ -49,10 +50,10 @@ func TestUpdateUserProfile_UsernameOnly(t *testing.T) {
 
 func TestUpdateUserProfile_DuplicateUsername(t *testing.T) {
 	database := newTestDB(t)
-	database.CreateUser("existing", "hash", 4)
-	id2, _ := database.CreateUser("changeme", "hash", 4)
+	database.CreateUser(context.Background(), "existing", "hash", 4)
+	id2, _ := database.CreateUser(context.Background(), "changeme", "hash", 4)
 
-	err := database.UpdateUserProfile(id2, "existing", nil)
+	err := database.UpdateUserProfile(context.Background(), id2, "existing", nil)
 	if err == nil {
 		t.Error("UpdateUserProfile with duplicate username should return error")
 	}
@@ -60,7 +61,7 @@ func TestUpdateUserProfile_DuplicateUsername(t *testing.T) {
 
 func TestUpdateUserProfile_NonExistentUser(t *testing.T) {
 	database := newTestDB(t)
-	err := database.UpdateUserProfile(99999, "ghost", nil)
+	err := database.UpdateUserProfile(context.Background(), 99999, "ghost", nil)
 	if err == nil {
 		t.Error("UpdateUserProfile for non-existent user should return error")
 	}
@@ -70,13 +71,13 @@ func TestUpdateUserProfile_NonExistentUser(t *testing.T) {
 
 func TestUpdateUserPassword_Success(t *testing.T) {
 	database := newTestDB(t)
-	id, _ := database.CreateUser("pwuser", "oldhash", 4)
+	id, _ := database.CreateUser(context.Background(), "pwuser", "oldhash", 4)
 
-	if err := database.UpdateUserPassword(id, "newhash"); err != nil {
+	if err := database.UpdateUserPassword(context.Background(), id, "newhash"); err != nil {
 		t.Fatalf("UpdateUserPassword: %v", err)
 	}
 
-	user, _ := database.GetUserByID(id)
+	user, _ := database.GetUserByID(context.Background(), id)
 	if user.PasswordHash != "newhash" {
 		t.Errorf("PasswordHash = %q, want %q", user.PasswordHash, "newhash")
 	}
@@ -86,12 +87,12 @@ func TestUpdateUserPassword_Success(t *testing.T) {
 
 func TestListUserSessions_ReturnsSessions(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("sessuser", "hash", 4)
+	uid, _ := database.CreateUser(context.Background(), "sessuser", "hash", 4)
 
-	database.CreateSession(uid, "tok1", "Chrome", "1.2.3.4")
-	database.CreateSession(uid, "tok2", "Firefox", "5.6.7.8")
+	database.CreateSession(context.Background(), uid, "tok1", "Chrome", "1.2.3.4")
+	database.CreateSession(context.Background(), uid, "tok2", "Firefox", "5.6.7.8")
 
-	sessions, err := database.ListUserSessions(uid)
+	sessions, err := database.ListUserSessions(context.Background(), uid)
 	if err != nil {
 		t.Fatalf("ListUserSessions: %v", err)
 	}
@@ -102,9 +103,9 @@ func TestListUserSessions_ReturnsSessions(t *testing.T) {
 
 func TestListUserSessions_EmptyArray(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("nosess", "hash", 4)
+	uid, _ := database.CreateUser(context.Background(), "nosess", "hash", 4)
 
-	sessions, err := database.ListUserSessions(uid)
+	sessions, err := database.ListUserSessions(context.Background(), uid)
 	if err != nil {
 		t.Fatalf("ListUserSessions: %v", err)
 	}
@@ -118,13 +119,13 @@ func TestListUserSessions_EmptyArray(t *testing.T) {
 
 func TestListUserSessions_DoesNotReturnOtherUsers(t *testing.T) {
 	database := newTestDB(t)
-	uid1, _ := database.CreateUser("user1", "hash", 4)
-	uid2, _ := database.CreateUser("user2", "hash", 4)
+	uid1, _ := database.CreateUser(context.Background(), "user1", "hash", 4)
+	uid2, _ := database.CreateUser(context.Background(), "user2", "hash", 4)
 
-	database.CreateSession(uid1, "tok-u1", "Chrome", "1.2.3.4")
-	database.CreateSession(uid2, "tok-u2", "Firefox", "5.6.7.8")
+	database.CreateSession(context.Background(), uid1, "tok-u1", "Chrome", "1.2.3.4")
+	database.CreateSession(context.Background(), uid2, "tok-u2", "Firefox", "5.6.7.8")
 
-	sessions, _ := database.ListUserSessions(uid1)
+	sessions, _ := database.ListUserSessions(context.Background(), uid1)
 	if len(sessions) != 1 {
 		t.Errorf("len(sessions) = %d, want 1", len(sessions))
 	}
@@ -134,16 +135,16 @@ func TestListUserSessions_DoesNotReturnOtherUsers(t *testing.T) {
 
 func TestDeleteSessionByID_Success(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("delsess", "hash", 4)
-	sessID, _ := database.CreateSession(uid, "deltok", "Chrome", "1.2.3.4")
+	uid, _ := database.CreateUser(context.Background(), "delsess", "hash", 4)
+	sessID, _ := database.CreateSession(context.Background(), uid, "deltok", "Chrome", "1.2.3.4")
 
-	err := database.DeleteSessionByID(sessID, uid)
+	err := database.DeleteSessionByID(context.Background(), sessID, uid)
 	if err != nil {
 		t.Fatalf("DeleteSessionByID: %v", err)
 	}
 
 	// Session should be gone.
-	sess, _ := database.GetSessionByTokenHash("deltok")
+	sess, _ := database.GetSessionByTokenHash(context.Background(), "deltok")
 	if sess != nil {
 		t.Error("session should have been deleted")
 	}
@@ -151,11 +152,11 @@ func TestDeleteSessionByID_Success(t *testing.T) {
 
 func TestDeleteSessionByID_WrongOwner(t *testing.T) {
 	database := newTestDB(t)
-	uid1, _ := database.CreateUser("owner1", "hash", 4)
-	uid2, _ := database.CreateUser("owner2", "hash", 4)
-	sessID, _ := database.CreateSession(uid1, "ownertok", "Chrome", "1.2.3.4")
+	uid1, _ := database.CreateUser(context.Background(), "owner1", "hash", 4)
+	uid2, _ := database.CreateUser(context.Background(), "owner2", "hash", 4)
+	sessID, _ := database.CreateSession(context.Background(), uid1, "ownertok", "Chrome", "1.2.3.4")
 
-	err := database.DeleteSessionByID(sessID, uid2)
+	err := database.DeleteSessionByID(context.Background(), sessID, uid2)
 	if err == nil {
 		t.Error("DeleteSessionByID should fail when user does not own the session")
 	}
@@ -163,9 +164,9 @@ func TestDeleteSessionByID_WrongOwner(t *testing.T) {
 
 func TestDeleteSessionByID_NotFound(t *testing.T) {
 	database := newTestDB(t)
-	uid, _ := database.CreateUser("delnf", "hash", 4)
+	uid, _ := database.CreateUser(context.Background(), "delnf", "hash", 4)
 
-	err := database.DeleteSessionByID(99999, uid)
+	err := database.DeleteSessionByID(context.Background(), 99999, uid)
 	if err == nil {
 		t.Error("DeleteSessionByID should fail for non-existent session")
 	}
