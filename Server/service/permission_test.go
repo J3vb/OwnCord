@@ -190,3 +190,75 @@ func TestHasChannelPerm_UnknownUserReturnsFalse(t *testing.T) {
 		t.Fatal("expected false for unknown user")
 	}
 }
+
+// raceHookStore wraps a real *db.DB and fires a hook right after the role read
+// inside getOrPopulate, letting a test deterministically inject a concurrent
+// invalidation into the populate's read→store window.
+type raceHookStore struct {
+	*db.DB
+	onGetRole func()
+}
+
+func (s *raceHookStore) GetRoleForUser(userID int64) (*db.Role, error) {
+	r, err := s.DB.GetRoleForUser(userID)
+	if s.onGetRole != nil {
+		s.onGetRole()
+	}
+	return r, err
+}
+
+// TestGetOrPopulate_InvalidationDuringPopulateNotLost locks F6: an invalidation
+// that races a populate (landing after the DB read but before the cache store)
+// must not be silently overwritten by the stale snapshot. Otherwise a just-revoked
+// permission keeps being served for up to permCacheTTL (30s). All three
+// invalidation entry points bump the generation, so each is locked separately.
+func TestGetOrPopulate_InvalidationDuringPopulateNotLost(t *testing.T) {
+	cases := []struct {
+		name       string
+		invalidate func(*PermissionService)
+	}{
+		{"InvalidateUser", func(s *PermissionService) { s.InvalidateUser(1) }},
+		{"InvalidateChannel", func(s *PermissionService) { s.InvalidateChannel(10) }},
+		{"InvalidateAll", func(s *PermissionService) { s.InvalidateAll() }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			database := newTestDB(t)
+			seedRole(t, database, &db.Role{
+				ID:          permissions.MemberRoleID,
+				Name:        "member",
+				Permissions: permissions.SendMessages | permissions.ReadMessages,
+				Position:    1,
+			})
+			seedUserRole(t, database, 1, permissions.MemberRoleID)
+			seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+
+			store := &raceHookStore{DB: database}
+			svc := NewPermissionService(store, permissions.NewChecker(database))
+
+			fired := false
+			store.onGetRole = func() {
+				if fired {
+					return
+				}
+				fired = true
+				// Admin demotes the role (removes SendMessages) and invalidates,
+				// racing this populate between its role read and its cache store.
+				if _, err := database.Exec(`UPDATE roles SET permissions = ? WHERE id = ?`,
+					permissions.ReadMessages, permissions.MemberRoleID); err != nil {
+					t.Errorf("demote role: %v", err)
+				}
+				tc.invalidate(svc)
+			}
+
+			// This populate reads the pre-demotion perms; the racing invalidation
+			// must stop that stale snapshot from being cached.
+			svc.HasChannelPerm(1, 10, permissions.SendMessages)
+
+			// A fresh check must re-read the DB and see the revoked permission.
+			if svc.HasChannelPerm(1, 10, permissions.SendMessages) {
+				t.Fatal("revoked SendMessages served from a stale snapshot; a populate that races an invalidation must not be cached")
+			}
+		})
+	}
+}

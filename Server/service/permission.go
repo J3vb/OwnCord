@@ -31,6 +31,10 @@ type PermissionService struct {
 
 	mu    sync.RWMutex
 	cache map[int64]*cachedPerms // keyed by userID
+	// gen is bumped by every Invalidate* call. getOrPopulate snapshots it before
+	// its DB read and refuses to cache if it changed, so an invalidation that
+	// races a populate can't be lost (F6).
+	gen uint64
 }
 
 // NewPermissionService creates a PermissionService backed by the given DB.
@@ -101,6 +105,7 @@ func (s *PermissionService) GetRoleForUser(userID int64) (*db.Role, error) {
 func (s *PermissionService) InvalidateUser(userID int64) {
 	s.mu.Lock()
 	delete(s.cache, userID)
+	s.gen++
 	s.mu.Unlock()
 }
 
@@ -110,6 +115,7 @@ func (s *PermissionService) InvalidateUser(userID int64) {
 func (s *PermissionService) InvalidateChannel(_ int64) {
 	s.mu.Lock()
 	s.cache = make(map[int64]*cachedPerms)
+	s.gen++
 	s.mu.Unlock()
 }
 
@@ -117,6 +123,7 @@ func (s *PermissionService) InvalidateChannel(_ int64) {
 func (s *PermissionService) InvalidateAll() {
 	s.mu.Lock()
 	s.cache = make(map[int64]*cachedPerms)
+	s.gen++
 	s.mu.Unlock()
 }
 
@@ -135,6 +142,7 @@ func (s *PermissionService) getOrPopulate(userID int64) *cachedPerms {
 		s.mu.RUnlock()
 		return cp
 	}
+	startGen := s.gen
 	s.mu.RUnlock()
 
 	// Populate.
@@ -156,7 +164,13 @@ func (s *PermissionService) getOrPopulate(userID int64) *cachedPerms {
 	}
 
 	s.mu.Lock()
-	s.cache[userID] = cp
+	// F6: only cache if no invalidation raced our DB read. If gen moved, an
+	// InvalidateUser/InvalidateChannel/InvalidateAll landed after we snapshotted
+	// it, so this snapshot may already be stale — return it for this one request
+	// but don't poison the cache with it for permCacheTTL.
+	if s.gen == startGen {
+		s.cache[userID] = cp
+	}
 	s.mu.Unlock()
 	return cp
 }
