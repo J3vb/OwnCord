@@ -10,11 +10,12 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 )
 
 // setupDiagnosticsRouter creates a full router with an authenticated user for
 // diagnostics testing.
-func setupDiagnosticsRouter(t *testing.T) (http.Handler, string) {
+func setupDiagnosticsRouter(t *testing.T) (http.Handler, string, *db.DB) {
 	t.Helper()
 
 	database, err := db.Open(":memory:")
@@ -46,11 +47,11 @@ func setupDiagnosticsRouter(t *testing.T) (http.Handler, string) {
 		uid, hash,
 	)
 
-	return handler, token
+	return handler, token, database
 }
 
 func TestDiagnosticsConnectivity_ReturnsData(t *testing.T) {
-	router, token := setupDiagnosticsRouter(t)
+	router, token, _ := setupDiagnosticsRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/diagnostics/connectivity", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -82,7 +83,7 @@ func TestDiagnosticsConnectivity_ReturnsData(t *testing.T) {
 }
 
 func TestDiagnosticsConnectivity_Unauthenticated(t *testing.T) {
-	router, _ := setupDiagnosticsRouter(t)
+	router, _, _ := setupDiagnosticsRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/diagnostics/connectivity", nil)
 	req.RemoteAddr = "127.0.0.1:9999"
@@ -91,6 +92,37 @@ func TestDiagnosticsConnectivity_Unauthenticated(t *testing.T) {
 
 	if rr.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", rr.Code)
+	}
+}
+
+// TestDiagnosticsConnectivity_MemberForbidden locks the RequirePermission gate
+// on the route. Without it, only 200-for-owner and 401-unauthenticated were
+// covered, so deleting the ADMINISTRATOR gate broke no test while exposing the
+// server's network topology to every member.
+func TestDiagnosticsConnectivity_MemberForbidden(t *testing.T) {
+	router, _, database := setupDiagnosticsRouter(t)
+
+	uid, err := database.CreateUser("diagmember", "$2a$12$fake", int(permissions.MemberRoleID))
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token := "diagtest-member-token"
+	if _, err := database.Exec(
+		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at)
+		 VALUES (?, ?, 'test', '127.0.0.1', '2099-01-01T00:00:00Z')`,
+		uid, auth.HashToken(token),
+	); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/diagnostics/connectivity", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403; body: %s", rr.Code, rr.Body.String())
 	}
 }
 

@@ -84,8 +84,11 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			}
 
 			// Load role for permission checks.
+			// A dangling role_id returns (nil, nil) from GetRoleByID, so the nil
+			// check is load-bearing: without it a nil role reaches the context
+			// and every downstream permission check has to re-guard it.
 			role, err := database.GetRoleByID(user.RoleID)
-			if err != nil {
+			if err != nil || role == nil {
 				writeJSON(w, http.StatusUnauthorized, errorResponse{
 					Error:   "UNAUTHORIZED",
 					Message: "role not found",
@@ -106,9 +109,20 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 	}
 }
 
-// RequirePermission returns middleware that checks the authenticated user's
-// role permissions. Returns 403 if the user lacks the required permission.
-// The ADMINISTRATOR bit (0x40000000) bypasses all checks.
+// RequirePermission returns middleware gating a route on SERVER-WIDE role
+// permissions. Returns 403 if the user lacks them.
+//
+// Scope contract — this is the whole reason the middleware and the service
+// layer look like two permission systems:
+//   - It consults the role bitfield only. Channel overrides are NOT applied,
+//     because a route reaching this middleware has no channel id to resolve
+//     them against, and a per-channel allow must never open a server-wide gate.
+//   - Anything channel-scoped belongs in the service layer behind
+//     permissions.Checker (via svc.Permissions), which resolves overrides.
+//   - ADMINISTRATOR bypasses; multi-bit masks require ALL bits.
+//
+// The rule itself lives in permissions.HasServerPerm so no call site can
+// re-derive it.
 func RequirePermission(perm int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -121,13 +135,7 @@ func RequirePermission(perm int64) func(http.Handler) http.Handler {
 				return
 			}
 
-			// ADMINISTRATOR bypasses all permission checks.
-			if permissions.HasAdmin(role.Permissions) {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			if role.Permissions&perm == 0 {
+			if !permissions.HasServerPerm(role.Permissions, perm) {
 				writeJSON(w, http.StatusForbidden, errorResponse{
 					Error:   "FORBIDDEN",
 					Message: "insufficient permissions",

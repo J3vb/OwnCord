@@ -35,8 +35,7 @@ func (s *ModerationService) requireBanPermission(actorID int64) error {
 	if err != nil || actorRole == nil {
 		return fmt.Errorf("%w: failed to load actor role", ErrForbidden)
 	}
-	if !permissions.HasAdmin(actorRole.Permissions) &&
-		!permissions.HasPerm(actorRole.Permissions, permissions.BanMembers) {
+	if !permissions.HasServerPerm(actorRole.Permissions, permissions.BanMembers) {
 		return fmt.Errorf("%w: missing BAN_MEMBERS permission", ErrForbidden)
 	}
 	return nil

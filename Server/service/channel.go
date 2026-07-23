@@ -57,7 +57,9 @@ func (s *ChannelService) ListVisibleChannels(ctx context.Context, userID int64) 
 	if !permissions.HasAdmin(role.Permissions) {
 		overrides, err = s.st.GetAllChannelPermissionsForRole(role.ID)
 		if err != nil {
-			overrides = make(map[int64]db.ChannelOverride)
+			// Fail closed — an empty map would return every denied channel.
+			slog.Error("ChannelService.ListVisibleChannels GetAllChannelPermissionsForRole", "err", err, "user_id", userID, "role_id", role.ID)
+			return nil, fmt.Errorf("%w: failed to fetch channel overrides", ErrInternal)
 		}
 	}
 

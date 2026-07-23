@@ -636,31 +636,21 @@ func (s *MessageService) GetAccessibleChannelIDs(userID int64) ([]int64, error) 
 		return nil, fmt.Errorf("%w: failed to get role", ErrInternal)
 	}
 
-	isAdmin := permissions.HasAdmin(role.Permissions)
 	var overrides map[int64]db.ChannelOverride
-	if !isAdmin {
+	if !permissions.HasAdmin(role.Permissions) {
 		var overrideErr error
 		overrides, overrideErr = s.st.GetAllChannelPermissionsForRole(role.ID)
 		if overrideErr != nil {
 			return nil, fmt.Errorf("%w: failed to fetch channel overrides", ErrInternal)
 		}
-		if overrides == nil {
-			overrides = make(map[int64]db.ChannelOverride)
-		}
 	}
 
+	// Single visibility predicate shared with REST ListVisibleChannels and the
+	// ws ready payload, so no site can drift.
+	visibleIDs := s.perms.Checker().VisibleChannelIDs(role.Permissions, channelRefs(channels), permOverrides(overrides))
 	var ids []int64
 	for i := range channels {
-		if channels[i].Type == "dm" {
-			continue
-		}
-		if isAdmin {
-			ids = append(ids, channels[i].ID)
-			continue
-		}
-		o := overrides[channels[i].ID]
-		effective := permissions.EffectivePerms(role.Permissions, o.Allow, o.Deny)
-		if effective&permissions.ReadMessages == permissions.ReadMessages {
+		if visibleIDs[channels[i].ID] {
 			ids = append(ids, channels[i].ID)
 		}
 	}
