@@ -89,12 +89,6 @@ func parseParticipantIdentity(identity string) (int64, string, error) {
 	return userID, joinToken, nil
 }
 
-// parseIdentity extracts a user ID from a LiveKit participant identity.
-func parseIdentity(identity string) (int64, error) {
-	userID, _, err := parseParticipantIdentity(identity)
-	return userID, err
-}
-
 // parseRoomChannelID extracts a channel ID from a LiveKit room name
 // formatted as "channel-{id}".
 func parseRoomChannelID(roomName string) (int64, error) {

@@ -83,92 +83,6 @@ func (c *Client) GetTokenHash() string {
 	return c.tokenHash
 }
 
-// NewTestClient creates a client with a caller-supplied send channel.
-// Intended for unit tests only — conn is nil.
-func NewTestClient(hub *Hub, userID int64, send chan []byte) *Client {
-	return &Client{
-		hub:      hub,
-		ctx:      context.Background(),
-		userID:   userID,
-		send:     send,
-		sendHigh: send, // unified for test observability
-		sendLow:  send,
-	}
-}
-
-// NewTestClientWithChannel creates a test client subscribed to a specific channel.
-func NewTestClientWithChannel(hub *Hub, userID, channelID int64, send chan []byte) *Client {
-	return &Client{
-		hub:       hub,
-		ctx:       context.Background(),
-		userID:    userID,
-		channelID: channelID,
-		send:      send,
-		sendHigh:  send, // unified for test observability
-		sendLow:   send,
-	}
-}
-
-// NewTestClientWithUser creates a test client with an authenticated user record set.
-// Use this when tests need the client to pass permission checks.
-func NewTestClientWithUser(hub *Hub, user *db.User, channelID int64, send chan []byte) *Client {
-	return &Client{
-		hub:       hub,
-		ctx:       context.Background(),
-		userID:    user.ID,
-		user:      user,
-		channelID: channelID,
-		send:      send,
-		sendHigh:  send, // unified for test observability
-		sendLow:   send,
-	}
-}
-
-// SetClientVoiceChID sets the voiceChID field on a client. For test use only.
-func SetClientVoiceChID(c *Client, channelID int64) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	c.voiceChID = channelID
-	if channelID == 0 {
-		c.voiceJoinToken = ""
-	}
-}
-
-// SetClientVoiceStateForTest sets both the voice channel and join token.
-// For test use only.
-func SetClientVoiceStateForTest(c *Client, channelID int64, joinToken string) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	c.voiceChID = channelID
-	c.voiceJoinToken = joinToken
-}
-
-// SetClientE2EEPubKeyForTest sets the E2EE public key on a client. For test use only.
-func SetClientE2EEPubKeyForTest(c *Client, key string) {
-	c.setE2EEPubKey(key)
-}
-
-// GetClientE2EEPubKeyForTest returns the E2EE public key from a client. For test use only.
-func GetClientE2EEPubKeyForTest(c *Client) string {
-	return c.getE2EEPubKey()
-}
-
-// NewTestClientWithTokenHash creates a test client that carries a session token
-// hash. Use this when tests need to exercise the periodic session-expiry check.
-func NewTestClientWithTokenHash(hub *Hub, user *db.User, tokenHash string, channelID int64, send chan []byte) *Client {
-	return &Client{
-		hub:       hub,
-		ctx:       context.Background(),
-		userID:    user.ID,
-		user:      user,
-		tokenHash: tokenHash,
-		channelID: channelID,
-		send:      send,
-		sendHigh:  send, // unified for test observability
-		sendLow:   send,
-	}
-}
-
 // touch updates the last activity timestamp and increments the received counter.
 func (c *Client) touch() {
 	c.mu.Lock()
@@ -198,26 +112,10 @@ func (c *Client) getVoiceChID() int64 {
 	return c.voiceChID
 }
 
-func (c *Client) getVoiceJoinToken() string {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	return c.voiceJoinToken
-}
-
 func (c *Client) getVoiceState() (int64, string) {
 	c.voiceMu.Lock()
 	defer c.voiceMu.Unlock()
 	return c.voiceChID, c.voiceJoinToken
-}
-
-// setVoiceChID sets the voice channel ID atomically.
-func (c *Client) setVoiceChID(chID int64) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	c.voiceChID = chID
-	if chID == 0 {
-		c.voiceJoinToken = ""
-	}
 }
 
 func (c *Client) setVoiceState(chID int64, joinToken string) {

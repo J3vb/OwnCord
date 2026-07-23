@@ -375,12 +375,6 @@ func SecurityHeadersWithTLS(tlsMode string) func(http.Handler) http.Handler {
 	}
 }
 
-// SecurityHeaders is a convenience wrapper for SecurityHeadersWithTLS with TLS
-// disabled (no HSTS header). Kept for backwards compatibility with tests.
-func SecurityHeaders(next http.Handler) http.Handler {
-	return SecurityHeadersWithTLS("")(next)
-}
-
 // MaxBodySize wraps r.Body with http.MaxBytesReader so that reads beyond
 // maxBytes return an error. This prevents clients from exhausting server memory
 // by sending arbitrarily large request bodies.

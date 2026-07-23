@@ -115,33 +115,6 @@ func TestNewHandler_WithUpdater(t *testing.T) {
 	}
 }
 
-// ─── Handler (deprecated) ────────────────────────────────────────────────────
-
-// TestHandler_ReturnsNonNil verifies the deprecated Handler() function returns
-// a non-nil http.Handler (it serves the embedded static files).
-func TestHandler_ReturnsNonNil(t *testing.T) {
-	h := admin.Handler()
-	if h == nil {
-		t.Fatal("Handler() returned nil")
-	}
-}
-
-// TestHandler_ServesEmbeddedFiles verifies that the deprecated Handler() serves
-// a response (the embedded static FS) without panicking.
-func TestHandler_ServesEmbeddedFiles(t *testing.T) {
-	h := admin.Handler()
-
-	req := httptest.NewRequest(http.MethodGet, "/index.html", nil)
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-
-	// http.FileServer returns 200 for a found file or 301/404 for others;
-	// the important thing is it doesn't panic and returns a valid HTTP status.
-	if w.Code == 0 {
-		t.Error("Handler() response has zero status code")
-	}
-}
-
 // ─── ownerOnlyMiddleware (tested via API endpoints that use it) ───────────────
 
 // TestOwnerOnlyMiddleware_OwnerAllowed verifies that a user with Owner role
