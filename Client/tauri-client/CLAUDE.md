@@ -1,6 +1,6 @@
 # OwnCord Client (Tauri v2)
 
-TypeScript frontend (Vite, vanilla TS — no React/Vue) + minimal Rust backend in `src-tauri/` (native APIs only). LiveKit for voice/video, zod for validation.
+TypeScript frontend (Vite, vanilla TS — no React/Vue) + minimal Rust backend in `src-tauri/` (native APIs only). LiveKit for voice/video.
 
 ## Layout
 
