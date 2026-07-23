@@ -201,6 +201,106 @@ export function createCertFirstUseModal(options: CertFirstUseModalOptions): Moun
   return { mount, destroy };
 }
 
+export interface IdentityMismatchModalOptions {
+  readonly username: string;
+  /** The peer's newly-delivered identity-key fingerprint (safety number) for
+   *  out-of-band verification before re-pinning; null when it can't be computed. */
+  readonly fingerprint: string | null;
+  readonly onAccept: () => void;
+  readonly onReject: () => void;
+}
+
+/**
+ * createIdentityMismatchModal — the E2EE-identity analogue of the cert-mismatch
+ * modal (F3 TOFU). A peer's voice identity key no longer matches the pinned one:
+ * either a legitimate key rotation (reinstall / new device / wiped keyring) or a
+ * server MITM swapping the key. Accepting re-pins the new key (recovery), the
+ * identity-key analogue of "Accept New Certificate". Reuses the .cert-* CSS and
+ * buildRow helper so the two TOFU trust-prompts stay visually identical.
+ */
+export function createIdentityMismatchModal(
+  options: IdentityMismatchModalOptions,
+): MountableComponent {
+  const { username, fingerprint, onAccept, onReject } = options;
+  let overlay: HTMLDivElement | null = null;
+  const ac = new AbortController();
+
+  function mount(container: Element): void {
+    overlay = createElement("div", { class: "modal-overlay visible" });
+    const modal = createElement("div", { class: "modal" });
+
+    const header = createElement("div", { class: "modal-header" });
+    const title = createElement("h3", {}, "Identity Warning");
+    const closeBtn = createElement("button", { class: "modal-close", type: "button" });
+    closeBtn.textContent = "";
+    closeBtn.appendChild(createIcon("x", 14));
+    closeBtn.addEventListener("click", onReject, { signal: ac.signal });
+    appendChildren(header, title, closeBtn);
+
+    const body = createElement("div", { class: "modal-body" });
+
+    const warning = createElement("div", { class: "cert-warning" });
+    warning.appendChild(createIcon("shield-alert", 24));
+
+    const certTitle = createElement("div", { class: "cert-title" });
+    setText(certTitle, "Identity Key Changed");
+
+    const desc = createElement("div", { class: "cert-desc" });
+    setText(
+      desc,
+      "This participant's end-to-end encryption identity key no longer matches " +
+        "the one pinned on first contact. This usually means they reinstalled or " +
+        "switched device, but it could also indicate that the server swapped their " +
+        "key. Verify the new key out-of-band before trusting it.",
+    );
+
+    const details = createElement("div", { class: "cert-details" });
+    details.appendChild(buildRow("Participant", username, false));
+    // Only when the new key's fingerprint is available — a null one would render
+    // a misleading blank "Unknown" row and defeats the out-of-band check.
+    if (fingerprint !== null) {
+      details.appendChild(buildRow("New key", fingerprint, true));
+    }
+
+    appendChildren(body, warning, certTitle, desc, details);
+
+    const footer = createElement("div", { class: "modal-footer" });
+
+    const rejectBtn = createElement("button", { class: "btn-ghost", type: "button" });
+    setText(rejectBtn, "Cancel");
+    rejectBtn.addEventListener("click", onReject, { signal: ac.signal });
+
+    const acceptBtn = createElement("button", { class: "btn-danger", type: "button" });
+    setText(acceptBtn, "Trust New Key");
+    acceptBtn.addEventListener("click", onAccept, { signal: ac.signal });
+
+    appendChildren(footer, rejectBtn, acceptBtn);
+
+    appendChildren(modal, header, body, footer);
+    overlay.appendChild(modal);
+
+    overlay.addEventListener(
+      "click",
+      (e) => {
+        if (e.target === overlay) onReject();
+      },
+      { signal: ac.signal },
+    );
+
+    container.appendChild(overlay);
+  }
+
+  function destroy(): void {
+    ac.abort();
+    if (overlay !== null) {
+      overlay.remove();
+      overlay = null;
+    }
+  }
+
+  return { mount, destroy };
+}
+
 function buildRow(label: string, value: string, isFingerprint: boolean): HTMLDivElement {
   const row = createElement("div", { class: "cert-row" });
   const labelEl = createElement("span", { class: "cert-label" });

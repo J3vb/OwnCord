@@ -40,6 +40,9 @@ const ALL_ICON_NAMES: IconName[] = [
   "arrow-right",
   "hash",
   "triangle-alert",
+  "shield",
+  "shield-check",
+  "shield-alert",
 ];
 
 describe("createIcon", () => {
