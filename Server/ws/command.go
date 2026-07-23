@@ -198,14 +198,19 @@ func (c VoiceScreenshareCmd) UserID() int64 { return c.userID }
 func (c VoiceScreenshareCmd) Enabled() bool { return c.enabled }
 
 // VoiceE2EEAnnounceCmd represents a voice_e2ee_announce message.
+// signature is the ECDSA identity-key signature over the ephemeral public key
+// (F3 TOFU); optional at the protocol level — legacy clients omit it and the
+// receiving client enforces the fail-closed posture.
 type VoiceE2EEAnnounceCmd struct {
 	userID    int64
 	publicKey string
+	signature string
 }
 
 func (c VoiceE2EEAnnounceCmd) Type() string      { return MsgTypeVoiceE2EEAnnounce }
 func (c VoiceE2EEAnnounceCmd) UserID() int64     { return c.userID }
 func (c VoiceE2EEAnnounceCmd) PublicKey() string { return c.publicKey }
+func (c VoiceE2EEAnnounceCmd) Signature() string { return c.signature }
 
 // ChatCommandCmd represents a chat_command (plugin slash command) message.
 type ChatCommandCmd struct {
@@ -468,11 +473,12 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 	MsgTypeVoiceE2EEAnnounce: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
 		var p struct {
 			PublicKey string `json:"public_key"`
+			Signature string `json:"signature"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_e2ee_announce payload: %w", err)
 		}
-		return VoiceE2EEAnnounceCmd{userID: userID, publicKey: p.PublicKey}, nil
+		return VoiceE2EEAnnounceCmd{userID: userID, publicKey: p.PublicKey, signature: p.Signature}, nil
 	},
 
 	MsgTypeChatCommand: func(userID int64, reqID string, raw json.RawMessage) (Command, error) {

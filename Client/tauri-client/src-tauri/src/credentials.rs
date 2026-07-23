@@ -130,6 +130,76 @@ pub fn delete_credential(host: String) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
+// Identity-key commands (F3: voice E2EE TOFU long-term identity keypair)
+// ---------------------------------------------------------------------------
+//
+// Mirrors save/load/delete_credential, but the secret is a single opaque
+// key blob (base64 PKCS8 private key) rather than a JSON credential struct,
+// and it is stored under account `identity:{host}` to keep it distinct from
+// the login credential entry (account `{host}`) in the same keyring service.
+
+/// Save the long-term identity private key for `host` to the system credential
+/// store, under account `identity:{host}`.
+#[tauri::command]
+pub fn save_identity_key(host: String, key: String) -> Result<(), String> {
+    if host.is_empty() {
+        return Err("host must not be empty".into());
+    }
+    if key.is_empty() {
+        return Err("key must not be empty".into());
+    }
+
+    let account = format!("identity:{host}");
+    let entry =
+        Entry::new(SERVICE, &account).map_err(|e| format!("keyring entry error: {e}"))?;
+    entry
+        .set_password(&key)
+        .map_err(|e| format!("save_identity_key failed: {e}"))?;
+
+    Ok(())
+}
+
+/// Load the identity private key for `host`.
+///
+/// Returns `None` when no identity key exists for the given host.
+#[tauri::command]
+pub fn load_identity_key(host: String) -> Result<Option<String>, String> {
+    if host.is_empty() {
+        return Err("host must not be empty".into());
+    }
+
+    let account = format!("identity:{host}");
+    let entry =
+        Entry::new(SERVICE, &account).map_err(|e| format!("keyring entry error: {e}"))?;
+
+    match entry.get_password() {
+        Ok(s) => Ok(Some(s)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("load_identity_key failed: {e}")),
+    }
+}
+
+/// Delete the identity private key for `host`.
+///
+/// Deleting a non-existent key is not treated as an error.
+#[tauri::command]
+pub fn delete_identity_key(host: String) -> Result<(), String> {
+    if host.is_empty() {
+        return Err("host must not be empty".into());
+    }
+
+    let account = format!("identity:{host}");
+    let entry =
+        Entry::new(SERVICE, &account).map_err(|e| format!("keyring entry error: {e}"))?;
+
+    match entry.delete_credential() {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("delete_identity_key failed: {e}")),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -168,6 +238,34 @@ mod tests {
     #[test]
     fn delete_credential_rejects_empty_host() {
         let result = delete_credential("".into());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("host must not be empty"));
+    }
+
+    #[test]
+    fn save_identity_key_rejects_empty_host() {
+        let result = save_identity_key("".into(), "key".into());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("host must not be empty"));
+    }
+
+    #[test]
+    fn save_identity_key_rejects_empty_key() {
+        let result = save_identity_key("host".into(), "".into());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("key must not be empty"));
+    }
+
+    #[test]
+    fn load_identity_key_rejects_empty_host() {
+        let result = load_identity_key("".into());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("host must not be empty"));
+    }
+
+    #[test]
+    fn delete_identity_key_rejects_empty_host() {
+        let result = delete_identity_key("".into());
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("host must not be empty"));
     }

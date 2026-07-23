@@ -118,8 +118,21 @@ func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, 
 		return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "public_key is not valid base64"}}
 	}
 
-	msg := buildVoiceE2EEAnnounce(userID, pubKey)
-	return Result{
+	// signature (F3 TOFU) is optional — legacy clients omit it and the
+	// receiving client enforces the fail-closed posture. When present it is
+	// validated and carried verbatim: the server relays, never verifies.
+	sig := announceCmd.Signature()
+	if sig != "" {
+		if len(sig) > 128 {
+			return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "signature too large"}}
+		}
+		if err := validateBase64Loose(sig); err != nil {
+			return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "signature is not valid base64"}}
+		}
+	}
+
+	msg := buildVoiceE2EEAnnounce(userID, pubKey, sig)
+	result := Result{
 		SetE2EEPubKey: &pubKey,
 		Events: []Event{VoiceE2EEAnnounceEvent{
 			voiceChannelID: voiceChID,
@@ -127,6 +140,10 @@ func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, 
 			payload:        msg,
 		}},
 	}
+	if sig != "" {
+		result.SetE2EESignature = &sig
+	}
+	return result
 }
 
 // handleVoiceE2EEOfferV2 is the V2 (pure) handler for voice_e2ee_offer.
@@ -233,22 +250,24 @@ func (h *Hub) sendToVoiceChannelExcept(channelID int64, excludeUserID int64, msg
 	}
 }
 
-// getClientE2EEPubKey returns the stored ECDH public key for a connected user.
-// I-6 fix: Copy the public key value while h.mu.RLock is still held so the
-// client cannot be garbage collected between the lookup and the key read.
-func (h *Hub) getClientE2EEPubKey(userID int64) string {
+// getClientE2EEPubKey returns the stored ECDH public key and its identity
+// signature ("" for legacy announces) for a connected user.
+// I-6 fix: Copy the values while h.mu.RLock is still held so the client
+// cannot be garbage collected between the lookup and the key read.
+func (h *Hub) getClientE2EEPubKey(userID int64) (string, string) {
 	h.mu.RLock()
 	c, ok := h.clients[userID]
 	if !ok {
 		h.mu.RUnlock()
-		return ""
+		return "", ""
 	}
-	key := c.getE2EEPubKey()
+	key, sig := c.getE2EEPubKey()
 	h.mu.RUnlock()
-	return key
+	return key, sig
 }
 
 // GetClientE2EEPubKeyForTest is an exported wrapper for tests.
 func (h *Hub) GetClientE2EEPubKeyForTest(userID int64) string {
-	return h.getClientE2EEPubKey(userID)
+	key, _ := h.getClientE2EEPubKey(userID)
+	return key
 }

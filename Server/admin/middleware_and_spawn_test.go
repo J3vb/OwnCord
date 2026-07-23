@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS users (
     last_seen   TEXT,
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
-    ban_expires TEXT
+    ban_expires TEXT,
+    identity_public_key TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,

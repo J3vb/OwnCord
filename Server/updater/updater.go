@@ -314,47 +314,53 @@ func (u *Updater) ValidateDownloadURL(url string) error {
 // executable; on Linux it is a tar.gz archive containing a "chatserver"
 // binary, which is extracted to destPath. On verification failure the
 // downloaded file is removed.
-func (u *Updater) DownloadAndVerify(ctx context.Context, latestVersion, downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL, destPath string) error {
+//
+// It returns the hex SHA256 of the staged binary at destPath, derived from
+// the signed release manifest (on Linux, computed over the extracted bytes of
+// the manifest-verified archive). Callers that later execute the staged file
+// must re-verify it against this hash through an open handle
+// (OpenVerifiedBinary), never by path.
+func (u *Updater) DownloadAndVerify(ctx context.Context, latestVersion, downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL, destPath string) (string, error) {
 	if err := u.ValidateDownloadURL(downloadURL); err != nil {
-		return err
+		return "", err
 	}
 	if err := u.ValidateDownloadURL(checksumURL); err != nil {
-		return fmt.Errorf("validating checksum URL: %w", err)
+		return "", fmt.Errorf("validating checksum URL: %w", err)
 	}
 	if err := u.ValidateDownloadURL(signatureURL); err != nil {
-		return fmt.Errorf("validating signature URL: %w", err)
+		return "", fmt.Errorf("validating signature URL: %w", err)
 	}
 	if err := u.ValidateDownloadURL(manifestURL); err != nil {
-		return fmt.Errorf("validating manifest URL: %w", err)
+		return "", fmt.Errorf("validating manifest URL: %w", err)
 	}
 	if err := u.ValidateDownloadURL(manifestSignatureURL); err != nil {
-		return fmt.Errorf("validating manifest signature URL: %w", err)
+		return "", fmt.Errorf("validating manifest signature URL: %w", err)
 	}
 
 	checksumData, err := u.fetchBody(ctx, checksumURL)
 	if err != nil {
-		return fmt.Errorf("fetching checksums: %w", err)
+		return "", fmt.Errorf("fetching checksums: %w", err)
 	}
 	signatureData, err := u.fetchBody(ctx, signatureURL)
 	if err != nil {
-		return fmt.Errorf("fetching signature: %w", err)
+		return "", fmt.Errorf("fetching signature: %w", err)
 	}
 	manifestData, err := u.fetchBody(ctx, manifestURL)
 	if err != nil {
-		return fmt.Errorf("fetching release manifest: %w", err)
+		return "", fmt.Errorf("fetching release manifest: %w", err)
 	}
 	manifestSignatureData, err := u.fetchBody(ctx, manifestSignatureURL)
 	if err != nil {
-		return fmt.Errorf("fetching release manifest signature: %w", err)
+		return "", fmt.Errorf("fetching release manifest signature: %w", err)
 	}
 
 	assetFilename, err := assetFilenameFromURL(downloadURL)
 	if err != nil {
-		return fmt.Errorf("determining asset filename: %w", err)
+		return "", fmt.Errorf("determining asset filename: %w", err)
 	}
 	manifest, err := u.VerifyReleaseManifest(manifestData, manifestSignatureData, latestVersion, assetFilename)
 	if err != nil {
-		return err
+		return "", err
 	}
 	names := checksumEntryNamesForGOOS(runtime.GOOS)
 	if len(names) == 0 {
@@ -362,11 +368,16 @@ func (u *Updater) DownloadAndVerify(ctx context.Context, latestVersion, download
 	}
 	expectedHash, err := u.parseChecksumFileAny(checksumData, names...)
 	if err != nil {
-		return fmt.Errorf("parsing checksum file: %w", err)
+		return "", fmt.Errorf("parsing checksum file: %w", err)
 	}
 	if !strings.EqualFold(expectedHash, manifest.SHA256) {
-		return fmt.Errorf("release manifest checksum mismatch for %s", assetFilename)
+		return "", fmt.Errorf("release manifest checksum mismatch for %s", assetFilename)
 	}
+
+	// Clear a stale staged binary from a previous aborted attempt. Staging is
+	// O_EXCL, so anything recreated at this path afterwards fails the download
+	// instead of being written through (TOCTOU).
+	_ = os.Remove(destPath)
 
 	goos := runtime.GOOS
 	switch goos {
@@ -375,60 +386,80 @@ func (u *Updater) DownloadAndVerify(ctx context.Context, latestVersion, download
 	case "linux":
 		return u.downloadLinuxTarballAndVerify(ctx, downloadURL, destPath, expectedHash)
 	default:
-		return fmt.Errorf("server auto-update is not supported on %s", goos)
+		return "", fmt.Errorf("server auto-update is not supported on %s", goos)
 	}
 }
 
-func (u *Updater) downloadWindowsBinaryAndVerify(ctx context.Context, downloadURL, destPath, expectedHash string, signatureData []byte) error {
+func (u *Updater) downloadWindowsBinaryAndVerify(ctx context.Context, downloadURL, destPath, expectedHash string, signatureData []byte) (string, error) {
 	if err := u.downloadFile(ctx, downloadURL, destPath); err != nil {
-		return fmt.Errorf("downloading binary: %w", err)
+		return "", fmt.Errorf("downloading binary: %w", err)
 	}
 
 	if err := u.VerifySignature(destPath, signatureData); err != nil {
 		_ = os.Remove(destPath)
-		return err
+		return "", err
 	}
 
 	// Verify hash.
 	if err := u.VerifyChecksum(destPath, expectedHash); err != nil {
 		// Remove the invalid file.
 		_ = os.Remove(destPath)
-		return err
+		return "", err
 	}
-	return nil
+	// The asset is the binary itself, so the manifest-bound hash is the
+	// staged binary's trusted hash.
+	return expectedHash, nil
 }
 
-func (u *Updater) downloadLinuxTarballAndVerify(ctx context.Context, downloadURL, destPath, expectedHash string) error {
+func (u *Updater) downloadLinuxTarballAndVerify(ctx context.Context, downloadURL, destPath, expectedHash string) (string, error) {
 	tarPath := destPath + ".tar.gz.partial"
+	_ = os.Remove(tarPath) // clear a stale partial; download stages O_EXCL
 	defer func() { _ = os.Remove(tarPath) }()
 
 	if err := u.downloadFile(ctx, downloadURL, tarPath); err != nil {
-		return fmt.Errorf("downloading archive: %w", err)
-	}
-	if err := u.VerifyChecksum(tarPath, expectedHash); err != nil {
-		return err
+		return "", fmt.Errorf("downloading archive: %w", err)
 	}
 
+	// Open the archive once and do both the checksum and the extraction
+	// through this one handle, so the bytes verified are the bytes extracted
+	// even if the path is swapped in between (TOCTOU).
 	f, err := os.Open(tarPath)
 	if err != nil {
-		return fmt.Errorf("opening archive: %w", err)
+		return "", fmt.Errorf("opening archive: %w", err)
 	}
 	defer f.Close() //nolint:errcheck
 
-	if err := extractChatserverFromTarGz(f, destPath); err != nil {
+	actual, err := readerSHA256(f)
+	if err != nil {
+		return "", fmt.Errorf("hashing archive: %w", err)
+	}
+	if !strings.EqualFold(actual, expectedHash) {
+		return "", fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHash, actual)
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("rewinding archive: %w", err)
+	}
+
+	binaryHash, err := extractChatserverFromTarGz(f, destPath)
+	if err != nil {
 		_ = os.Remove(destPath)
-		return fmt.Errorf("extracting archive: %w", err)
+		return "", fmt.Errorf("extracting archive: %w", err)
 	}
 	if err := os.Chmod(destPath, 0o755); err != nil { //nolint:gosec // G302: binary must be world-executable to run
-		return fmt.Errorf("chmod binary: %w", err)
+		return "", fmt.Errorf("chmod binary: %w", err)
 	}
-	return nil
+	return binaryHash, nil
 }
 
-func extractChatserverFromTarGz(r io.Reader, destPath string) error {
+// extractChatserverFromTarGz extracts the "chatserver" entry from a tar.gz
+// stream to destPath and returns the hex SHA256 of the bytes it wrote, so the
+// caller gets a trusted hash of the staged binary without a path re-read.
+// destPath is created O_EXCL: a pre-existing file (attacker-planted staging
+// path) fails the extraction instead of being written through.
+func extractChatserverFromTarGz(r io.Reader, destPath string) (string, error) {
 	gr, err := gzip.NewReader(r)
 	if err != nil {
-		return fmt.Errorf("gzip: %w", err)
+		return "", fmt.Errorf("gzip: %w", err)
 	}
 	defer gr.Close() //nolint:errcheck
 
@@ -436,10 +467,10 @@ func extractChatserverFromTarGz(r io.Reader, destPath string) error {
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
-			return fmt.Errorf("archive contains no file named chatserver")
+			return "", fmt.Errorf("archive contains no file named chatserver")
 		}
 		if err != nil {
-			return fmt.Errorf("tar: %w", err)
+			return "", fmt.Errorf("tar: %w", err)
 		}
 		skipBody := func() error {
 			if _, err := io.Copy(io.Discard, io.LimitReader(tr, hdr.Size)); err != nil {
@@ -449,42 +480,43 @@ func extractChatserverFromTarGz(r io.Reader, destPath string) error {
 		}
 		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
 			if err := skipBody(); err != nil {
-				return err
+				return "", err
 			}
 			continue
 		}
 		if strings.Contains(hdr.Name, "..") {
 			if err := skipBody(); err != nil {
-				return err
+				return "", err
 			}
 			continue
 		}
 		if filepath.Base(hdr.Name) != "chatserver" {
 			if err := skipBody(); err != nil {
-				return err
+				return "", err
 			}
 			continue
 		}
 
-		out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+		out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 		if err != nil {
-			return err
+			return "", err
 		}
-		n, copyErr := io.Copy(out, io.LimitReader(tr, hdr.Size))
+		h := sha256.New()
+		n, copyErr := io.Copy(io.MultiWriter(out, h), io.LimitReader(tr, hdr.Size))
 		closeErr := out.Close()
 		if copyErr != nil {
 			_ = os.Remove(destPath)
-			return fmt.Errorf("writing binary: %w", copyErr)
+			return "", fmt.Errorf("writing binary: %w", copyErr)
 		}
 		if closeErr != nil {
 			_ = os.Remove(destPath)
-			return closeErr
+			return "", closeErr
 		}
 		if n != hdr.Size {
 			_ = os.Remove(destPath)
-			return fmt.Errorf("incomplete tar entry (%d of %d bytes)", n, hdr.Size)
+			return "", fmt.Errorf("incomplete tar entry (%d of %d bytes)", n, hdr.Size)
 		}
-		return nil
+		return hex.EncodeToString(h.Sum(nil)), nil
 	}
 }
 
@@ -643,27 +675,30 @@ func assetFilenameFromURL(rawURL string) (string, error) {
 	return filename, nil
 }
 
-// FileSHA256 returns the hex-encoded SHA256 of the file at path. Exported so
-// callers that snapshot a verified binary (the admin update TOCTOU re-check)
-// share this exact hashing instead of duplicating it.
-func FileSHA256(path string) (string, error) {
+// readerSHA256 returns the hex-encoded SHA256 of everything read from r.
+func readerSHA256(r io.Reader) (string, error) {
+	h := sha256.New()
+	if _, err := io.Copy(h, r); err != nil {
+		return "", fmt.Errorf("computing checksum: %w", err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// fileSHA256 returns the hex-encoded SHA256 of the file at path.
+func fileSHA256(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("opening file for checksum: %w", err)
 	}
 	defer f.Close() //nolint:errcheck
 
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", fmt.Errorf("computing checksum: %w", err)
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return readerSHA256(f)
 }
 
 // VerifyChecksum computes the SHA256 hash of the file at filePath and
 // compares it (case-insensitive) against expectedHash.
 func (u *Updater) VerifyChecksum(filePath, expectedHash string) error {
-	actual, err := FileSHA256(filePath)
+	actual, err := fileSHA256(filePath)
 	if err != nil {
 		return err
 	}
@@ -671,6 +706,82 @@ func (u *Updater) VerifyChecksum(filePath, expectedHash string) error {
 		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHash, actual)
 	}
 	return nil
+}
+
+// StagedBinary is an open handle to a staged update binary whose contents
+// were verified through that same handle. Because the hash check and Commit's
+// same-file check use one open file, a swap of the on-disk path between
+// verification and rename is detected instead of silently executed (the
+// update TOCTOU window, W3-3).
+type StagedBinary struct {
+	f      *os.File
+	closed bool
+}
+
+// OpenVerifiedBinary opens stagedPath exactly once and verifies the SHA256 of
+// its contents through that handle against expectedHash (hex,
+// case-insensitive). On success the returned StagedBinary keeps the handle
+// open for Commit; the caller must Close it.
+func OpenVerifiedBinary(stagedPath, expectedHash string) (*StagedBinary, error) {
+	f, err := os.Open(stagedPath)
+	if err != nil {
+		return nil, fmt.Errorf("opening staged binary: %w", err)
+	}
+	actual, err := readerSHA256(f)
+	if err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("hashing staged binary: %w", err)
+	}
+	if !strings.EqualFold(actual, expectedHash) {
+		_ = f.Close()
+		return nil, fmt.Errorf("staged binary checksum mismatch: expected %s, got %s", expectedHash, actual)
+	}
+	return &StagedBinary{f: f}, nil
+}
+
+// Commit renames the staged file to destPath and confirms the file now at
+// destPath is the very file the hash was verified through (os.SameFile
+// against the verification handle's identity). If the staged path was swapped
+// after verification, the rename moves the impostor, the same-file check
+// fails, and Commit returns an error; the caller must then treat destPath as
+// unverified and restore or remove it.
+func (s *StagedBinary) Commit(destPath string) error {
+	verified, err := s.f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat of verified handle: %w", err)
+	}
+	if runtime.GOOS == "windows" {
+		// Windows cannot rename a file Go holds open (os.Open does not share
+		// delete) — until here that lock itself blocks swaps of the staged
+		// path. The stat captured above carries the NTFS file ID, which
+		// travels with the file across the rename, so the same-file check
+		// below still detects a swap in the close→rename window.
+		if err := s.Close(); err != nil {
+			return fmt.Errorf("closing verified handle: %w", err)
+		}
+	}
+	// On Unix the handle stays open through the rename: a held fd also pins
+	// the verified inode, so its number cannot be reused by another file.
+	if err := os.Rename(s.f.Name(), destPath); err != nil {
+		return fmt.Errorf("renaming staged binary: %w", err)
+	}
+	committed, err := os.Lstat(destPath)
+	if err != nil {
+		return fmt.Errorf("stat of committed binary: %w", err)
+	}
+	if !os.SameFile(verified, committed) {
+		return fmt.Errorf("staged binary was replaced after verification (refusing to run it)")
+	}
+	return nil
+}
+
+// Close releases the verification handle. Safe to call more than once.
+func (s *StagedBinary) Close() error {
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	return s.f.Close()
 }
 
 // ParseChecksumFile parses a sha256sum-format checksum file (lines of
@@ -879,7 +990,10 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error 
 		return fmt.Errorf("HTTP %d downloading %s", resp.StatusCode, url)
 	}
 
-	f, err := os.Create(destPath)
+	// O_EXCL: staging paths are predictable (exe + ".new"), so refuse to
+	// write through a pre-created file or symlink (TOCTOU). Callers remove
+	// stale staged files before downloading.
+	f, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("creating destination file: %w", err)
 	}

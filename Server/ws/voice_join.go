@@ -212,10 +212,11 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 			continue
 		}
 		c.sendMsg(buildVoiceState(vs))
-		// Send existing participant's ECDH public key so the joiner can
-		// participate in the client-side E2EE key exchange.
-		if pubKey := h.getClientE2EEPubKey(vs.UserID); pubKey != "" {
-			c.sendMsg(buildVoiceE2EEAnnounce(vs.UserID, pubKey))
+		// Send existing participant's ECDH public key (and its identity
+		// signature, F3 TOFU) so the joiner can participate in the
+		// client-side E2EE key exchange.
+		if pubKey, sig := h.getClientE2EEPubKey(vs.UserID); pubKey != "" {
+			c.sendMsg(buildVoiceE2EEAnnounce(vs.UserID, pubKey, sig))
 		}
 	}
 

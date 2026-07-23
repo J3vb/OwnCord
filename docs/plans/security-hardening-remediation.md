@@ -1,8 +1,22 @@
 # Plan: Remediate security-hardening review regressions
 
-**Status:** mostly landed — verified 2026-07-23 (deletion audit): every item
-except **W2-4** and **W3-3** has been implemented or superseded. This doc is
-the tracker of record for those two; close it when they land.
+**Status:** COMPLETE — verified 2026-07-23 (branch `feat/e2ee-identity-tofu`): every item
+has been implemented or superseded. W2-4 and both halves of W3-3 are the last to land.
+**W2-4:** DONE 2026-07-23 — `Server/db/attachment_queries.go:111`
+`LinkAttachmentsToMessage` links atomically and skips (not fails) already-linked,
+non-owned, and missing ids; legacy `uploader_id IS NULL` rows claimable. Locked by
+`TestLinkAttachmentsToMessage_SkipsAlreadyLinked` and
+`TestLinkAttachmentsToMessage_OwnershipGuard` (`Server/db/attachment_queries_test.go`).
+**W3-3:** DONE 2026-07-23 — two halves. (a) **XFF CIDR pre-parse:** `trustedCIDRs` parsed
+once at middleware construction into `[]*net.IPNet`; `clientIPWithProxies` takes the parsed
+form, `isTrustedProxy` deleted (callers use `ipInNets`), invalid entries warn at startup not
+per request. Locked by `TestRateLimitMiddleware_InvalidCIDRWarnsAtConstructionNotPerRequest`;
+leftmost-valid XFF fallback + `AdminIPRestrict` fail-closed unchanged. (b) **Update TOCTOU:**
+`DownloadAndVerify` returns the trusted hash; new `updater.OpenVerifiedBinary`/`Commit`
+verify through one open handle and confirm via `os.SameFile` that the renamed file is the one
+verified; O_EXCL 0600 staging refuses pre-planted paths. Locked by
+`TestOpenVerifiedBinary_SwapAfterVerifyDetectedAtCommit` + `TestDownloadFile_RefusesPreExistingDest`
+(Linux fd/tarball path is CI-verified). Server `-race` + `-tags deadlock` green.
 **Owner:** TBD
 **Tracks:** code review of branch `fix/security-hardening-review` (2026-07-17)
 **Estimated effort:** 2–4 focused days

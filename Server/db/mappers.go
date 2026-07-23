@@ -59,18 +59,19 @@ func strToNullPtr(s string) *string {
 // userFromGen maps a generated user row to the domain User model.
 func userFromGen(u dbgen.User) *User {
 	return &User{
-		ID:           u.ID,
-		Username:     u.Username,
-		PasswordHash: u.Password,
-		Avatar:       u.Avatar,
-		RoleID:       u.RoleID,
-		TOTPSecret:   u.TotpSecret,
-		Status:       u.Status,
-		CreatedAt:    u.CreatedAt,
-		LastSeen:     u.LastSeen,
-		Banned:       u.Banned != 0,
-		BanReason:    u.BanReason,
-		BanExpires:   u.BanExpires,
+		ID:                u.ID,
+		Username:          u.Username,
+		PasswordHash:      u.Password,
+		Avatar:            u.Avatar,
+		RoleID:            u.RoleID,
+		TOTPSecret:        u.TotpSecret,
+		Status:            u.Status,
+		CreatedAt:         u.CreatedAt,
+		LastSeen:          u.LastSeen,
+		Banned:            u.Banned != 0,
+		BanReason:         u.BanReason,
+		BanExpires:        u.BanExpires,
+		IdentityPublicKey: u.IdentityPublicKey,
 	}
 }
 

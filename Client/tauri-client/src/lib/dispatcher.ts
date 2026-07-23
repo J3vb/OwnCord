@@ -63,6 +63,7 @@ import {
   isVoiceConnected,
 } from "@lib/livekitSession";
 import { notifyIncomingMessage } from "./notifications";
+import { ensureIdentityKeyPublished } from "@lib/identity";
 import { createLogger } from "./logger";
 import { ServerMessageType as S } from "./protocolTypes";
 
@@ -107,7 +108,7 @@ export function wireConnectionStatus(ws: Pick<WsClient, "onStateChange">): () =>
  */
 export function wireDispatcher(
   ws: WsClient,
-  api?: Pick<ApiClient, "listBlocks">,
+  api?: Pick<ApiClient, "listBlocks"> & Partial<Pick<ApiClient, "updateProfile" | "getConfig">>,
 ): DispatcherCleanup {
   const unsubs: Array<() => void> = [];
 
@@ -147,6 +148,22 @@ export function wireDispatcher(
         log.warn("Stale voice state detected in ready payload — sending voice_leave");
         ws.send({ type: "voice_leave", payload: {} });
         leaveVoiceChannel();
+      }
+
+      // F3: publish our long-term identity public key so peers can pin+verify
+      // us in voice. Idempotent (no PATCH when the server copy already matches)
+      // and fire-and-forget — never block the ready flow. Username is required
+      // by the server's profile update, so it rides along with the key.
+      const self = payload.members.find((m) => m.id === currentUserId);
+      const host = api?.getConfig?.().host;
+      if (self !== undefined && currentUserId !== 0 && host && api?.updateProfile) {
+        const updateProfile = api.updateProfile;
+        void ensureIdentityKeyPublished(
+          host,
+          self.username,
+          self.identity_public_key ?? null,
+          (data) => updateProfile(data),
+        );
       }
 
       // Auto-select the first text channel if none is active
@@ -359,7 +376,12 @@ export function wireDispatcher(
   unsubs.push(
     ws.on(S.USER_UPDATE, (payload) => {
       log.info("User profile updated", { userId: payload.user_id, username: payload.username });
-      updateMemberProfile(payload.user_id, payload.username, payload.avatar);
+      updateMemberProfile(
+        payload.user_id,
+        payload.username,
+        payload.avatar,
+        payload.identity_public_key,
+      );
 
       // Update auth store if the current user changed their own profile.
       const currentUser = authStore.getState().user;
@@ -428,7 +450,7 @@ export function wireDispatcher(
 
   unsubs.push(
     ws.on(S.VOICE_E2EE_ANNOUNCE, (payload) => {
-      void handleE2EEAnnounce(payload.user_id, payload.public_key);
+      void handleE2EEAnnounce(payload.user_id, payload.public_key, payload.signature);
     }),
   );
 

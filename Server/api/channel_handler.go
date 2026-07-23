@@ -31,9 +31,10 @@ func isInvalidSearchQueryError(err error) bool {
 }
 
 func searchRateLimitMiddleware(limiter *auth.RateLimiter, limit int, window time.Duration, trustedProxies []string) func(http.Handler) http.Handler {
+	proxyNets := parseCIDRList(trustedProxies) // W3-3a: parse once at construction
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := clientIPWithProxies(r, trustedProxies)
+			ip := clientIPWithProxies(r, proxyNets)
 			if !limiter.Allow("search:"+ip, limit, window) {
 				w.Header().Set("Retry-After", strconv.Itoa(int(window.Seconds())))
 				writeJSON(w, http.StatusTooManyRequests, errorResponse{

@@ -34,6 +34,16 @@ const HKDF_SALT = new Uint8Array([
 const HKDF_INFO = new Uint8Array([114, 111, 111, 109, 45, 107, 101, 121, 45, 119, 114, 97, 112]);
 const ROOM_KEY_BYTES = 32; // 256-bit AES key for LiveKit SFrame
 
+// ── Long-term identity keys (F3: voice E2EE TOFU) ──────────────────────────
+// ECDSA P-256 (same curve family as the ECDH exchange; works in all three
+// webviews — Ed25519 is unreliable on WKWebView/WebKitGTK; zero new deps).
+const ECDSA_CURVE = "P-256";
+// Domain-separation prefix signed with the identity key when announcing an
+// ephemeral key: UTF-8 bytes of "owncord-voice-e2ee-announce-v1". Binding the
+// prefix + userId stops the server re-attributing a valid announce to a
+// different user or reusing the signature in another context.
+const ANNOUNCE_DOMAIN = new TextEncoder().encode("owncord-voice-e2ee-announce-v1");
+
 // ── Key pair generation ─────────────────────────────────────────────────────
 
 /** Generate an ephemeral ECDH P-256 keypair. */
@@ -59,6 +69,11 @@ export async function importPublicKey(base64: string): Promise<CryptoKey> {
  * Compute a human-readable fingerprint of a public key for out-of-band
  * verification (safety numbers). Returns a hex string of the SHA-256 hash
  * of the raw key bytes, formatted as "AB12 CD34 …" groups.
+ *
+ * For the F3 safety number, feed the *stable* identity public key (the ECDSA
+ * key that persists across calls), NOT the per-call ephemeral ECDH key — the
+ * fingerprint only makes sense out-of-band if it stays constant for a peer.
+ * The raw-byte hash is algorithm-agnostic, so it works on either key type.
  */
 export async function computeKeyFingerprint(publicKey: CryptoKey): Promise<string> {
   const raw = await crypto.subtle.exportKey("raw", publicKey);
@@ -69,6 +84,110 @@ export async function computeKeyFingerprint(publicKey: CryptoKey): Promise<strin
   // Format as 8 groups of 4 hex chars: "AB12 CD34 EF56 ..."
   const groups = hex.match(/.{1,4}/g) ?? [];
   return groups.slice(0, 8).join(" ");
+}
+
+// ── Identity keypair (sign/verify ephemeral announces) ─────────────────────
+
+/** Generate a long-term ECDSA P-256 identity keypair. */
+export async function generateIdentityKeyPair(): Promise<CryptoKeyPair> {
+  return crypto.subtle.generateKey({ name: "ECDSA", namedCurve: ECDSA_CURVE }, true, [
+    "sign",
+    "verify",
+  ]);
+}
+
+/**
+ * Sign an ephemeral-key announce with the long-term identity private key.
+ * The signed message is ANNOUNCE_DOMAIN ‖ myUserId ‖ ephemeralPubRaw, so a
+ * receiver knows this exact ephemeral key was announced by this exact user.
+ * Returns the base64 signature to carry in the `voice_e2ee_announce` payload.
+ */
+export async function signEphemeralKey(
+  identityPrivateKey: CryptoKey,
+  myUserId: string | number,
+  ephemeralPubRaw: Uint8Array,
+): Promise<string> {
+  const message = buildAnnounceMessage(myUserId, ephemeralPubRaw);
+  const sig = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    identityPrivateKey,
+    message,
+  );
+  return uint8ToBase64(new Uint8Array(sig));
+}
+
+/**
+ * Verify an ephemeral-key announce against a peer's pinned identity public key.
+ * Returns false (never throws) on any tamper — bad base64, wrong userId, wrong
+ * ephemeral key, or wrong/forged signature — so callers can reject a MITM.
+ */
+export async function verifyEphemeralKeySignature(
+  identityPublicKey: CryptoKey,
+  userId: string | number,
+  ephemeralPubRaw: Uint8Array,
+  signatureBase64: string,
+): Promise<boolean> {
+  let signature: Uint8Array<ArrayBuffer>;
+  try {
+    signature = base64ToUint8(signatureBase64);
+  } catch {
+    return false;
+  }
+  const message = buildAnnounceMessage(userId, ephemeralPubRaw);
+  try {
+    return await crypto.subtle.verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      identityPublicKey,
+      signature,
+      message,
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Import a base64 raw P-256 identity public key for signature verification. */
+export async function importIdentityPublicKey(base64: string): Promise<CryptoKey> {
+  const raw = base64ToUint8(base64);
+  return crypto.subtle.importKey("raw", raw, { name: "ECDSA", namedCurve: ECDSA_CURVE }, true, [
+    "verify",
+  ]);
+}
+
+/**
+ * Serialize an identity keypair for OS-keyring storage. Exports the private
+ * key as JWK (base64-encoded JSON) — the JWK carries both the private scalar
+ * `d` and the public point `x`/`y`, so both keys are recoverable on load.
+ */
+export async function exportIdentityKeyPair(privateKey: CryptoKey): Promise<string> {
+  const jwk = await crypto.subtle.exportKey("jwk", privateKey);
+  return btoa(JSON.stringify(jwk));
+}
+
+/** Inverse of exportIdentityKeyPair: recover both keys from the keyring blob. */
+export async function importIdentityKeyPair(blobBase64: string): Promise<CryptoKeyPair> {
+  const jwk = JSON.parse(atob(blobBase64)) as JsonWebKey;
+  const alg = { name: "ECDSA", namedCurve: ECDSA_CURVE };
+  const privateKey = await crypto.subtle.importKey("jwk", jwk, alg, true, ["sign"]);
+  // Strip the private scalar to import the matching public key.
+  const pubJwk: JsonWebKey = { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y };
+  const publicKey = await crypto.subtle.importKey("jwk", pubJwk, alg, true, ["verify"]);
+  return { privateKey, publicKey };
+}
+
+/** Build the byte string signed/verified for an ephemeral-key announce. */
+function buildAnnounceMessage(
+  userId: string | number,
+  ephemeralPubRaw: Uint8Array,
+): Uint8Array<ArrayBuffer> {
+  const userIdBytes = new TextEncoder().encode(String(userId));
+  const message = new Uint8Array(
+    ANNOUNCE_DOMAIN.length + userIdBytes.length + ephemeralPubRaw.length,
+  );
+  message.set(ANNOUNCE_DOMAIN, 0);
+  message.set(userIdBytes, ANNOUNCE_DOMAIN.length);
+  message.set(ephemeralPubRaw, ANNOUNCE_DOMAIN.length + userIdBytes.length);
+  return message;
 }
 
 // ── Room key generation ─────────────────────────────────────────────────────
