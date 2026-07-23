@@ -187,14 +187,14 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http
 		failKey := fmt.Sprintf("pw_confirm_fail:%d", user.ID)
 		if !auth.CheckPassword(user.PasswordHash, req.OldPassword) {
 			if !limiter.Allow(failKey, pwConfirmFailureThreshold, pwConfirmFailureWindow) {
-				limiter.Lockout(lockKey, pwConfirmLockoutDuration)
+				limiter.Lockout(r.Context(), lockKey, pwConfirmLockoutDuration)
 			}
 			writeJSON(w, http.StatusForbidden, errorResponse{
 				Error: "FORBIDDEN", Message: "incorrect password",
 			})
 			return
 		}
-		limiter.Reset(failKey)
+		limiter.Reset(r.Context(), failKey)
 
 		// Reject same old/new password.
 		if req.OldPassword == req.NewPassword {
@@ -228,7 +228,7 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http
 			keepSessionID = sess.ID
 		}
 
-		res, err := svc.Users.ChangePassword(user.ID, hash, keepSessionID)
+		res, err := svc.Users.ChangePassword(r.Context(), user.ID, hash, keepSessionID)
 		if err != nil {
 			// Only reachable when the password itself failed to commit.
 			writeServiceError(w, err)
@@ -268,7 +268,7 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		sessions, err := svc.Users.ListSessions(user.ID)
+		sessions, err := svc.Users.ListSessions(r.Context(), user.ID)
 		if err != nil {
 			writeServiceError(w, err)
 			return
@@ -308,7 +308,7 @@ func handleRevokeSession(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		if err := svc.Users.RevokeSession(user.ID, sessionID); err != nil {
+		if err := svc.Users.RevokeSession(r.Context(), user.ID, sessionID); err != nil {
 			writeServiceError(w, err)
 			return
 		}

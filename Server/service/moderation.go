@@ -26,17 +26,16 @@ func NewModerationService(st Store, perms *PermissionService) *ModerationService
 // Administrator bypass). It deliberately takes no target: it runs before any
 // target lookup so an actor without ban authority always sees Forbidden and
 // never NotFound — the ban path cannot be used to enumerate user ids.
-func (s *ModerationService) requireBanPermission(actorID int64) error {
+func (s *ModerationService) requireBanPermission(ctx context.Context, actorID int64) error {
 	if s.perms == nil {
 		// No permission service wired — fail closed rather than allow unchecked bans.
 		return fmt.Errorf("%w: permission service unavailable", ErrForbidden)
 	}
-	actorRole, err := s.perms.GetRoleForUser(actorID)
+	actorRole, err := s.perms.GetRoleForUser(ctx, actorID)
 	if err != nil || actorRole == nil {
 		return fmt.Errorf("%w: failed to load actor role", ErrForbidden)
 	}
-	if !permissions.HasAdmin(actorRole.Permissions) &&
-		!permissions.HasPerm(actorRole.Permissions, permissions.BanMembers) {
+	if !permissions.HasServerPerm(actorRole.Permissions, permissions.BanMembers) {
 		return fmt.Errorf("%w: missing BAN_MEMBERS permission", ErrForbidden)
 	}
 	return nil
@@ -47,12 +46,12 @@ func (s *ModerationService) requireBanPermission(actorID int64) error {
 // (e.g. the owner) — mirroring the position-based hierarchy used elsewhere.
 // Runs after requireBanPermission and the existence check, so only callers
 // that already hold ban authority reach it.
-func (s *ModerationService) requireOutranks(actorID, targetID int64) error {
-	actorRole, err := s.perms.GetRoleForUser(actorID)
+func (s *ModerationService) requireOutranks(ctx context.Context, actorID, targetID int64) error {
+	actorRole, err := s.perms.GetRoleForUser(ctx, actorID)
 	if err != nil || actorRole == nil {
 		return fmt.Errorf("%w: failed to load actor role", ErrForbidden)
 	}
-	targetRole, err := s.perms.GetRoleForUser(targetID)
+	targetRole, err := s.perms.GetRoleForUser(ctx, targetID)
 	if err != nil || targetRole == nil {
 		return fmt.Errorf("%w: failed to load target role", ErrForbidden)
 	}
@@ -85,50 +84,52 @@ func (s *ModerationService) BanUser(ctx context.Context, actorID, targetID int64
 
 	// Authorization before existence: an actor without ban authority learns
 	// nothing about which user ids exist.
-	if err := s.requireBanPermission(actorID); err != nil {
+	if err := s.requireBanPermission(ctx, actorID); err != nil {
 		return err
 	}
-	target, err := s.st.GetUserByID(targetID)
+	target, err := s.st.GetUserByID(ctx, targetID)
 	if err != nil || target == nil {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
 	}
-	if err := s.requireOutranks(actorID, targetID); err != nil {
+	if err := s.requireOutranks(ctx, actorID, targetID); err != nil {
 		return err
 	}
 
-	if err := s.st.BanUser(targetID, reason, expires); err != nil {
+	if err := s.st.BanUser(ctx, targetID, reason, expires); err != nil {
 		return fmt.Errorf("%w: failed to ban user", ErrInternal)
 	}
 
-	db.WriteAudit(s.st, actorID, "user_ban", "user", targetID, reason)
+	// Audit rows must survive a request canceled after the ban committed.
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_ban", "user", targetID, reason)
 
 	slog.Info("user banned", "actor_id", actorID, "target_id", targetID, "reason", reason)
 	return nil
 }
 
 // UnbanUser removes a ban on a target user.
-func (s *ModerationService) UnbanUser(_ context.Context, actorID, targetID int64) error {
+func (s *ModerationService) UnbanUser(ctx context.Context, actorID, targetID int64) error {
 	if targetID <= 0 {
 		return fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
 	}
 
 	// Authorization before existence — see BanUser.
-	if err := s.requireBanPermission(actorID); err != nil {
+	if err := s.requireBanPermission(ctx, actorID); err != nil {
 		return err
 	}
-	target, err := s.st.GetUserByID(targetID)
+	target, err := s.st.GetUserByID(ctx, targetID)
 	if err != nil || target == nil {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
 	}
-	if err := s.requireOutranks(actorID, targetID); err != nil {
+	if err := s.requireOutranks(ctx, actorID, targetID); err != nil {
 		return err
 	}
 
-	if err := s.st.UnbanUser(targetID); err != nil {
+	if err := s.st.UnbanUser(ctx, targetID); err != nil {
 		return fmt.Errorf("%w: failed to unban user", ErrInternal)
 	}
 
-	db.WriteAudit(s.st, actorID, "user_unban", "user", targetID, "")
+	// Audit rows must survive a request canceled after the unban committed.
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_unban", "user", targetID, "")
 
 	slog.Info("user unbanned", "actor_id", actorID, "target_id", targetID)
 	return nil

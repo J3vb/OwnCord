@@ -342,17 +342,3 @@ func (q *Queries) UpdateVoiceScreenshare(ctx context.Context, arg UpdateVoiceScr
 	_, err := q.db.ExecContext(ctx, updateVoiceScreenshare, arg.Screenshare, arg.UserID)
 	return err
 }
-
-const updateVoiceSpeaking = `-- name: UpdateVoiceSpeaking :exec
-UPDATE voice_states SET speaking = ? WHERE user_id = ?
-`
-
-type UpdateVoiceSpeakingParams struct {
-	Speaking int64 `json:"speaking"`
-	UserID   int64 `json:"userId"`
-}
-
-func (q *Queries) UpdateVoiceSpeaking(ctx context.Context, arg UpdateVoiceSpeakingParams) error {
-	_, err := q.db.ExecContext(ctx, updateVoiceSpeaking, arg.Speaking, arg.UserID)
-	return err
-}

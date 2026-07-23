@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -104,8 +105,8 @@ func TestRegister_Success(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	// Create an invite first.
-	ownerID, _ := database.CreateUser("owner", "hash", 1)
-	code, _ := database.CreateInvite(ownerID, 1, nil)
+	ownerID, _ := database.CreateUser(context.Background(), "owner", "hash", 1)
+	code, _ := database.CreateInvite(context.Background(), ownerID, 1, nil)
 
 	rr := postJSON(t, router, "/api/v1/auth/register", map[string]string{
 		"username":    "newuser",
@@ -132,12 +133,12 @@ func TestRegister_RegistrationClosed(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 	router := buildAuthRouter(database, limiter)
 
-	if _, err := database.Exec(`UPDATE settings SET value = '0' WHERE key = 'registration_open'`); err != nil {
+	if _, err := database.ExecContext(context.Background(), `UPDATE settings SET value = '0' WHERE key = 'registration_open'`); err != nil {
 		t.Fatalf("close registration: %v", err)
 	}
 
-	ownerID, _ := database.CreateUser("owner", "hash", 1)
-	code, _ := database.CreateInvite(ownerID, 1, nil)
+	ownerID, _ := database.CreateUser(context.Background(), "owner", "hash", 1)
+	code, _ := database.CreateInvite(context.Background(), ownerID, 1, nil)
 
 	rr := postJSON(t, router, "/api/v1/auth/register", map[string]string{
 		"username":    "closeduser",
@@ -171,8 +172,8 @@ func TestRegister_WeakPassword(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 	router := buildAuthRouter(database, limiter)
 
-	ownerID, _ := database.CreateUser("owner2", "hash", 1)
-	code, _ := database.CreateInvite(ownerID, 1, nil)
+	ownerID, _ := database.CreateUser(context.Background(), "owner2", "hash", 1)
+	code, _ := database.CreateInvite(context.Background(), ownerID, 1, nil)
 
 	rr := postJSON(t, router, "/api/v1/auth/register", map[string]string{
 		"username":    "newuser",
@@ -190,8 +191,8 @@ func TestRegister_InviteUsedUp(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 	router := buildAuthRouter(database, limiter)
 
-	ownerID, _ := database.CreateUser("owner3", "hash", 1)
-	code, _ := database.CreateInvite(ownerID, 1, nil) // max 1 use
+	ownerID, _ := database.CreateUser(context.Background(), "owner3", "hash", 1)
+	code, _ := database.CreateInvite(context.Background(), ownerID, 1, nil) // max 1 use
 
 	// First registration should succeed.
 	postJSON(t, router, "/api/v1/auth/register", map[string]string{
@@ -217,9 +218,9 @@ func TestRegister_DuplicateUsername_DoesNotConsumeInvite(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 	router := buildAuthRouter(database, limiter)
 
-	ownerID, _ := database.CreateUser("owner4", "hash", 1)
-	_, _ = database.CreateUser("takenuser", "hash", 4)
-	code, _ := database.CreateInvite(ownerID, 1, nil)
+	ownerID, _ := database.CreateUser(context.Background(), "owner4", "hash", 1)
+	_, _ = database.CreateUser(context.Background(), "takenuser", "hash", 4)
+	code, _ := database.CreateInvite(context.Background(), ownerID, 1, nil)
 
 	duplicate := postJSON(t, router, "/api/v1/auth/register", map[string]string{
 		"username":    "takenuser",
@@ -277,7 +278,7 @@ func TestLogin_Success(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	_, _ = database.CreateUser("loginuser", hash, 4)
+	_, _ = database.CreateUser(context.Background(), "loginuser", hash, 4)
 
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
 		"username": "loginuser",
@@ -301,7 +302,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	_, _ = database.CreateUser("loginuser2", hash, 4)
+	_, _ = database.CreateUser(context.Background(), "loginuser2", hash, 4)
 
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
 		"username": "loginuser2",
@@ -361,7 +362,7 @@ func TestLogin_UsernameLockoutAcrossDifferentIPs(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	_, _ = database.CreateUser("lockoutuser", hash, 4)
+	_, _ = database.CreateUser(context.Background(), "lockoutuser", hash, 4)
 
 	for i := 0; i < 10; i++ {
 		rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
@@ -388,7 +389,7 @@ func TestLogin_UsernameLockoutBlocksCorrectPasswordFromFreshIP(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	_, _ = database.CreateUser("lockoutcorrect", hash, 4)
+	_, _ = database.CreateUser(context.Background(), "lockoutcorrect", hash, 4)
 
 	for i := 0; i < 10; i++ {
 		rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
@@ -409,13 +410,47 @@ func TestLogin_UsernameLockoutBlocksCorrectPasswordFromFreshIP(t *testing.T) {
 	}
 }
 
+// TestLogin_UsernameLockoutIgnoresCasing locks F1: the per-username lockout key
+// must be case-folded so it matches the DB's COLLATE NOCASE username lookup.
+// Otherwise an attacker splits the 9-attempt lockout budget across case variants
+// of one account (admin, Admin, ADMIN, …), all of which authenticate the same row.
+func TestLogin_UsernameLockoutIgnoresCasing(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	_, _ = database.CreateUser(context.Background(), "casehunt", hash, 4)
+
+	// Trip the per-username lockout using the lowercase spelling, from many IPs
+	// so the per-IP limiter is never the binding cap.
+	for i := 0; i < 10; i++ {
+		rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
+			"username": "casehunt",
+			"password": "wrongpassword",
+		}, fmt.Sprintf("198.51.100.%d", i+1))
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("setup attempt %d status = %d, want 401; body = %s", i+1, rr.Code, rr.Body.String())
+		}
+	}
+
+	// A different casing of the SAME account must land in the same lockout bucket.
+	rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
+		"username": "CASEHUNT",
+		"password": "wrongpassword",
+	}, "198.51.100.250")
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("case-variant username bypassed the per-username lockout: status = %d, want 429; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestLogin_SuccessResetsUsernameFailureCounter(t *testing.T) {
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	_, _ = database.CreateUser("resetuser", hash, 4)
+	_, _ = database.CreateUser(context.Background(), "resetuser", hash, 4)
 
 	for i := 0; i < 8; i++ {
 		rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
@@ -469,8 +504,8 @@ func TestLogin_RequiresTOTPChallenge(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	userID, _ := database.CreateUser("totpuser", hash, 4)
-	if _, err := database.Exec(`UPDATE users SET totp_secret = ? WHERE id = ?`, "JBSWY3DPEHPK3PXP", userID); err != nil {
+	userID, _ := database.CreateUser(context.Background(), "totpuser", hash, 4)
+	if _, err := database.ExecContext(context.Background(), `UPDATE users SET totp_secret = ? WHERE id = ?`, "JBSWY3DPEHPK3PXP", userID); err != nil {
 		t.Fatalf("set totp secret: %v", err)
 	}
 
@@ -504,8 +539,8 @@ func TestLogin_UsernameLockoutBlocksTOTPChallenge(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	userID, _ := database.CreateUser("totplocked", hash, 4)
-	if _, err := database.Exec(`UPDATE users SET totp_secret = ? WHERE id = ?`, "JBSWY3DPEHPK3PXP", userID); err != nil {
+	userID, _ := database.CreateUser(context.Background(), "totplocked", hash, 4)
+	if _, err := database.ExecContext(context.Background(), `UPDATE users SET totp_secret = ? WHERE id = ?`, "JBSWY3DPEHPK3PXP", userID); err != nil {
 		t.Fatalf("set totp secret: %v", err)
 	}
 
@@ -542,9 +577,9 @@ func TestVerifyTotp_Success(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	userID, _ := database.CreateUser("totpverify", hash, 4)
+	userID, _ := database.CreateUser(context.Background(), "totpverify", hash, 4)
 	secret := "JBSWY3DPEHPK3PXP"
-	if _, err := database.Exec(`UPDATE users SET totp_secret = ? WHERE id = ?`, secret, userID); err != nil {
+	if _, err := database.ExecContext(context.Background(), `UPDATE users SET totp_secret = ? WHERE id = ?`, secret, userID); err != nil {
 		t.Fatalf("set totp secret: %v", err)
 	}
 
@@ -592,9 +627,9 @@ func TestEnableConfirmDisableTotp(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	userID, _ := database.CreateUser("enrolltotp", hash, 4)
+	userID, _ := database.CreateUser(context.Background(), "enrolltotp", hash, 4)
 	token, _ := auth.GenerateToken()
-	if _, err := database.CreateSession(userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -612,7 +647,7 @@ func TestEnableConfirmDisableTotp(t *testing.T) {
 		t.Fatal("expected qr_uri from enable response")
 	}
 
-	userBeforeConfirm, err := database.GetUserByID(userID)
+	userBeforeConfirm, err := database.GetUserByID(context.Background(), userID)
 	if err != nil {
 		t.Fatalf("GetUserByID before confirm: %v", err)
 	}
@@ -638,7 +673,7 @@ func TestEnableConfirmDisableTotp(t *testing.T) {
 		t.Fatalf("confirm status = %d, want 204; body = %s", confirm.Code, confirm.Body.String())
 	}
 
-	userAfterConfirm, err := database.GetUserByID(userID)
+	userAfterConfirm, err := database.GetUserByID(context.Background(), userID)
 	if err != nil {
 		t.Fatalf("GetUserByID after confirm: %v", err)
 	}
@@ -660,7 +695,7 @@ func TestEnableConfirmDisableTotp(t *testing.T) {
 		t.Fatalf("disable status = %d, want 204; body = %s", deleteRec.Code, deleteRec.Body.String())
 	}
 
-	userAfterDelete, err := database.GetUserByID(userID)
+	userAfterDelete, err := database.GetUserByID(context.Background(), userID)
 	if err != nil {
 		t.Fatalf("GetUserByID after delete: %v", err)
 	}
@@ -675,9 +710,9 @@ func TestTOTPManagement_RequiresPasswordConfirmation(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	userID, _ := database.CreateUser("totppassword", hash, 4)
+	userID, _ := database.CreateUser(context.Background(), "totppassword", hash, 4)
 	token, _ := auth.GenerateToken()
-	if _, err := database.CreateSession(userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -686,7 +721,7 @@ func TestTOTPManagement_RequiresPasswordConfirmation(t *testing.T) {
 		t.Fatalf("enable status = %d, want 400; body = %s", enable.Code, enable.Body.String())
 	}
 
-	userAfterEnable, err := database.GetUserByID(userID)
+	userAfterEnable, err := database.GetUserByID(context.Background(), userID)
 	if err != nil {
 		t.Fatalf("GetUserByID after failed enable: %v", err)
 	}
@@ -715,9 +750,9 @@ func TestVerifyTotp_ConsumesChallengeAfterRepeatedFailures(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	userID, _ := database.CreateUser("totplockout", hash, 4)
+	userID, _ := database.CreateUser(context.Background(), "totplockout", hash, 4)
 	secret := "JBSWY3DPEHPK3PXP"
-	if _, err := database.Exec(`UPDATE users SET totp_secret = ? WHERE id = ?`, secret, userID); err != nil {
+	if _, err := database.ExecContext(context.Background(), `UPDATE users SET totp_secret = ? WHERE id = ?`, secret, userID); err != nil {
 		t.Fatalf("set totp secret: %v", err)
 	}
 
@@ -760,15 +795,15 @@ func TestLogin_Require2FASettingRejectsUsersWithoutEnrollment(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 	router := buildAuthRouter(database, limiter)
 
-	if _, err := database.Exec(`UPDATE settings SET value = 'true' WHERE key = 'require_2fa'`); err != nil {
+	if _, err := database.ExecContext(context.Background(), `UPDATE settings SET value = 'true' WHERE key = 'require_2fa'`); err != nil {
 		t.Fatalf("enable require_2fa: %v", err)
 	}
-	if _, err := database.Exec(`UPDATE settings SET value = 'false' WHERE key = 'registration_open'`); err != nil {
+	if _, err := database.ExecContext(context.Background(), `UPDATE settings SET value = 'false' WHERE key = 'registration_open'`); err != nil {
 		t.Fatalf("disable registration_open: %v", err)
 	}
 
 	hash, _ := auth.HashPassword("correctPass1")
-	_, _ = database.CreateUser("needsenrollment", hash, 4)
+	_, _ = database.CreateUser(context.Background(), "needsenrollment", hash, 4)
 
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
 		"username": "needsenrollment",
@@ -786,8 +821,8 @@ func TestLogin_BannedUser(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	id, _ := database.CreateUser("banned", hash, 4)
-	_ = database.BanUser(id, "violated rules", nil)
+	id, _ := database.CreateUser(context.Background(), "banned", hash, 4)
+	_ = database.BanUser(context.Background(), id, "violated rules", nil)
 
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
 		"username": "banned",
@@ -818,10 +853,10 @@ func TestLogout_Success(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	uid, _ := database.CreateUser("logoutuser", hash, 4)
+	uid, _ := database.CreateUser(context.Background(), "logoutuser", hash, 4)
 	token, _ := auth.GenerateToken()
 	tokenHash := auth.HashToken(token)
-	_, _ = database.CreateSession(uid, tokenHash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, tokenHash, "test", "127.0.0.1")
 
 	rr := postJSONWithToken(t, router, "/api/v1/auth/logout", token, nil)
 
@@ -830,7 +865,7 @@ func TestLogout_Success(t *testing.T) {
 	}
 
 	// Session should be gone.
-	sess, _ := database.GetSessionByTokenHash(tokenHash)
+	sess, _ := database.GetSessionByTokenHash(context.Background(), tokenHash)
 	if sess != nil {
 		t.Error("Session still exists after logout")
 	}
@@ -859,9 +894,9 @@ func TestMe_Success(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	uid, _ := database.CreateUser("meuser", hash, 4)
+	uid, _ := database.CreateUser(context.Background(), "meuser", hash, 4)
 	token, _ := auth.GenerateToken()
-	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1")
 
 	rr := getWithToken(t, router, "/api/v1/auth/me", token)
 
@@ -906,7 +941,7 @@ func TestLogin_PasswordWithLeadingSpaceIsPreserved(t *testing.T) {
 
 	// Hash the password WITH the leading space — this is what was registered.
 	hash, _ := auth.HashPassword(" securePass1")
-	_, _ = database.CreateUser("spacepassuser", hash, 4)
+	_, _ = database.CreateUser(context.Background(), "spacepassuser", hash, 4)
 
 	// Login with the exact same password (including space) must succeed.
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
@@ -928,7 +963,7 @@ func TestLogin_PasswordWithLeadingSpaceTrimmedFails(t *testing.T) {
 
 	// Register with password that has a leading space.
 	hash, _ := auth.HashPassword(" securePass1")
-	_, _ = database.CreateUser("spacepassuser2", hash, 4)
+	_, _ = database.CreateUser(context.Background(), "spacepassuser2", hash, 4)
 
 	// Login without the leading space must fail.
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
@@ -949,7 +984,7 @@ func TestLogin_PasswordWithTrailingSpaceIsPreserved(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("securePass1 ")
-	_, _ = database.CreateUser("trailingspaceuser", hash, 4)
+	_, _ = database.CreateUser(context.Background(), "trailingspaceuser", hash, 4)
 
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
 		"username": "trailingspaceuser",
@@ -969,7 +1004,7 @@ func TestLogin_UsernameIsStillTrimmed(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	_, _ = database.CreateUser("trimuser", hash, 4)
+	_, _ = database.CreateUser(context.Background(), "trimuser", hash, 4)
 
 	// Username with surrounding spaces should resolve to "trimuser".
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
@@ -989,12 +1024,12 @@ func TestRegister_RateLimit(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 	router := buildAuthRouter(database, limiter)
 
-	ownerID, _ := database.CreateUser("rl_owner", "hash", 1)
+	ownerID, _ := database.CreateUser(context.Background(), "rl_owner", "hash", 1)
 
 	// Attempt register 4 times (limit=3) — 4th should be rate-limited.
 	var lastCode int
 	for i := range 4 {
-		code, _ := database.CreateInvite(ownerID, 1, nil)
+		code, _ := database.CreateInvite(context.Background(), ownerID, 1, nil)
 		rr := postJSON(t, router, "/api/v1/auth/register", map[string]string{
 			"username":    "rl_user" + string(rune('0'+i)),
 			"password":    "securePass1",
@@ -1030,10 +1065,10 @@ func TestDeleteAccount_Success(t *testing.T) {
 
 	hash, _ := auth.HashPassword("correctPass1")
 	// Create as Member (role_id=4) so the last-admin check does not block deletion.
-	uid, _ := database.CreateUser("deleteuser", hash, 4)
+	uid, _ := database.CreateUser(context.Background(), "deleteuser", hash, 4)
 	token, _ := auth.GenerateToken()
 	tokenHash := auth.HashToken(token)
-	_, _ = database.CreateSession(uid, tokenHash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, tokenHash, "test", "127.0.0.1")
 
 	rr := deleteJSONWithToken(t, router, "/api/v1/auth/account", token, map[string]string{
 		"password": "correctPass1",
@@ -1044,7 +1079,7 @@ func TestDeleteAccount_Success(t *testing.T) {
 	}
 
 	// User should be anonymised (banned, username changed).
-	user, err := database.GetUserByID(uid)
+	user, err := database.GetUserByID(context.Background(), uid)
 	if err != nil {
 		t.Fatalf("GetUserByID after delete: %v", err)
 	}
@@ -1059,7 +1094,7 @@ func TestDeleteAccount_Success(t *testing.T) {
 	}
 
 	// Session should be gone.
-	sess, _ := database.GetSessionByTokenHash(tokenHash)
+	sess, _ := database.GetSessionByTokenHash(context.Background(), tokenHash)
 	if sess != nil {
 		t.Error("session should be deleted after account deletion")
 	}
@@ -1071,9 +1106,9 @@ func TestDeleteAccount_MissingPassword(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	uid, _ := database.CreateUser("delnopass", hash, 4)
+	uid, _ := database.CreateUser(context.Background(), "delnopass", hash, 4)
 	token, _ := auth.GenerateToken()
-	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1")
 
 	rr := deleteJSONWithToken(t, router, "/api/v1/auth/account", token, map[string]string{})
 
@@ -1088,9 +1123,9 @@ func TestDeleteAccount_WrongPassword(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	uid, _ := database.CreateUser("delwrong", hash, 4)
+	uid, _ := database.CreateUser(context.Background(), "delwrong", hash, 4)
 	token, _ := auth.GenerateToken()
-	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1")
 
 	rr := deleteJSONWithToken(t, router, "/api/v1/auth/account", token, map[string]string{
 		"password": "wrongPassword1",
@@ -1101,7 +1136,7 @@ func TestDeleteAccount_WrongPassword(t *testing.T) {
 	}
 
 	// Verify user is NOT deleted.
-	user, _ := database.GetUserByID(uid)
+	user, _ := database.GetUserByID(context.Background(), uid)
 	if user == nil || user.Banned {
 		t.Error("user should not be deleted after wrong password")
 	}
@@ -1114,9 +1149,9 @@ func TestDeleteAccount_LastAdmin(t *testing.T) {
 
 	hash, _ := auth.HashPassword("correctPass1")
 	// Create as Owner (role_id=1) — the only admin-class user.
-	uid, _ := database.CreateUser("lastadmin", hash, 1)
+	uid, _ := database.CreateUser(context.Background(), "lastadmin", hash, 1)
 	token, _ := auth.GenerateToken()
-	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1")
 
 	rr := deleteJSONWithToken(t, router, "/api/v1/auth/account", token, map[string]string{
 		"password": "correctPass1",
@@ -1127,7 +1162,7 @@ func TestDeleteAccount_LastAdmin(t *testing.T) {
 	}
 
 	// User should still be intact.
-	user, _ := database.GetUserByID(uid)
+	user, _ := database.GetUserByID(context.Background(), uid)
 	if user == nil || user.Banned {
 		t.Error("last admin should not be deleted")
 	}
@@ -1155,9 +1190,9 @@ func TestDeleteAccount_LockoutAfterRepeatedFailures(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	uid, _ := database.CreateUser("dellockout", hash, 4)
+	uid, _ := database.CreateUser(context.Background(), "dellockout", hash, 4)
 	token, _ := auth.GenerateToken()
-	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1")
 
 	// 3 failures should trigger lockout on the 4th attempt.
 	for i := 0; i < 4; i++ {
@@ -1184,9 +1219,9 @@ func TestConfirmTOTP_InvalidCode(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	uid, _ := database.CreateUser("totpbadcode", hash, 4)
+	uid, _ := database.CreateUser(context.Background(), "totpbadcode", hash, 4)
 	token, _ := auth.GenerateToken()
-	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1")
 
 	// Enable TOTP first to get a pending secret.
 	enable := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token, map[string]string{"password": "correctPass1"})
@@ -1205,7 +1240,7 @@ func TestConfirmTOTP_InvalidCode(t *testing.T) {
 	}
 
 	// Secret should NOT be persisted.
-	user, _ := database.GetUserByID(uid)
+	user, _ := database.GetUserByID(context.Background(), uid)
 	if user.TOTPSecret != nil {
 		t.Error("TOTP secret should not be persisted after invalid code")
 	}
@@ -1217,9 +1252,9 @@ func TestConfirmTOTP_NoPendingSecret(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	uid, _ := database.CreateUser("totpnopending", hash, 4)
+	uid, _ := database.CreateUser(context.Background(), "totpnopending", hash, 4)
 	token, _ := auth.GenerateToken()
-	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1")
 
 	// Confirm without enabling first — no pending secret.
 	confirm := postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", token, map[string]string{
@@ -1238,9 +1273,9 @@ func TestConfirmTOTP_MissingPassword(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	uid, _ := database.CreateUser("totpnoconfirmpass", hash, 4)
+	uid, _ := database.CreateUser(context.Background(), "totpnoconfirmpass", hash, 4)
 	token, _ := auth.GenerateToken()
-	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1")
 
 	// Enable TOTP first.
 	postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token, map[string]string{"password": "correctPass1"})
@@ -1261,9 +1296,9 @@ func TestConfirmTOTP_WrongPassword(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	uid, _ := database.CreateUser("totpwrongconfirm", hash, 4)
+	uid, _ := database.CreateUser(context.Background(), "totpwrongconfirm", hash, 4)
 	token, _ := auth.GenerateToken()
-	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1")
 
 	// Enable TOTP first.
 	postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token, map[string]string{"password": "correctPass1"})
@@ -1303,12 +1338,12 @@ func TestDisableTOTP_WrongPassword(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	uid, _ := database.CreateUser("disabletotpwrong", hash, 4)
+	uid, _ := database.CreateUser(context.Background(), "disabletotpwrong", hash, 4)
 	token, _ := auth.GenerateToken()
-	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1")
 
 	// Set TOTP secret directly.
-	if _, err := database.Exec(`UPDATE users SET totp_secret = 'JBSWY3DPEHPK3PXP' WHERE id = ?`, uid); err != nil {
+	if _, err := database.ExecContext(context.Background(), `UPDATE users SET totp_secret = 'JBSWY3DPEHPK3PXP' WHERE id = ?`, uid); err != nil {
 		t.Fatalf("set totp secret: %v", err)
 	}
 
@@ -1325,7 +1360,7 @@ func TestDisableTOTP_WrongPassword(t *testing.T) {
 	}
 
 	// TOTP should still be enabled.
-	user, _ := database.GetUserByID(uid)
+	user, _ := database.GetUserByID(context.Background(), uid)
 	if user.TOTPSecret == nil {
 		t.Error("TOTP secret should still be set after wrong password")
 	}
@@ -1337,17 +1372,17 @@ func TestDisableTOTP_Require2FABlocksDisable(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	// Enable require_2fa setting.
-	if _, err := database.Exec(`UPDATE settings SET value = 'true' WHERE key = 'require_2fa'`); err != nil {
+	if _, err := database.ExecContext(context.Background(), `UPDATE settings SET value = 'true' WHERE key = 'require_2fa'`); err != nil {
 		t.Fatalf("enable require_2fa: %v", err)
 	}
 
 	hash, _ := auth.HashPassword("correctPass1")
-	uid, _ := database.CreateUser("disabletotpreq", hash, 4)
+	uid, _ := database.CreateUser(context.Background(), "disabletotpreq", hash, 4)
 	token, _ := auth.GenerateToken()
-	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1")
 
 	// Set TOTP secret directly.
-	if _, err := database.Exec(`UPDATE users SET totp_secret = 'JBSWY3DPEHPK3PXP' WHERE id = ?`, uid); err != nil {
+	if _, err := database.ExecContext(context.Background(), `UPDATE users SET totp_secret = 'JBSWY3DPEHPK3PXP' WHERE id = ?`, uid); err != nil {
 		t.Fatalf("set totp secret: %v", err)
 	}
 
@@ -1364,7 +1399,7 @@ func TestDisableTOTP_Require2FABlocksDisable(t *testing.T) {
 	}
 
 	// TOTP should still be enabled.
-	user, _ := database.GetUserByID(uid)
+	user, _ := database.GetUserByID(context.Background(), uid)
 	if user.TOTPSecret == nil {
 		t.Error("TOTP secret should still be set when require_2fa is enabled")
 	}
@@ -1406,10 +1441,10 @@ func TestLogout_SessionGoneAfterLogout(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	uid, _ := database.CreateUser("logoutsess", hash, 4)
+	uid, _ := database.CreateUser(context.Background(), "logoutsess", hash, 4)
 	token, _ := auth.GenerateToken()
 	tokenHash := auth.HashToken(token)
-	_, _ = database.CreateSession(uid, tokenHash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, tokenHash, "test", "127.0.0.1")
 
 	// First logout should succeed.
 	rr := postJSONWithToken(t, router, "/api/v1/auth/logout", token, nil)
@@ -1432,9 +1467,9 @@ func TestMe_ReturnsCorrectUserFields(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 
 	hash, _ := auth.HashPassword("correctPass1")
-	uid, _ := database.CreateUser("medetailed", hash, 4)
+	uid, _ := database.CreateUser(context.Background(), "medetailed", hash, 4)
 	token, _ := auth.GenerateToken()
-	_, _ = database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1")
 
 	rr := getWithToken(t, router, "/api/v1/auth/me", token)
 
@@ -1492,9 +1527,9 @@ func containsStr(s, sub string) bool {
 func expiredInviteDB(t *testing.T) (*db.DB, string) {
 	t.Helper()
 	database := newAuthTestDB(t)
-	ownerID, _ := database.CreateUser("expowner", "hash", 1)
+	ownerID, _ := database.CreateUser(context.Background(), "expowner", "hash", 1)
 	past := time.Now().Add(-time.Hour)
-	code, _ := database.CreateInvite(ownerID, 0, &past)
+	code, _ := database.CreateInvite(context.Background(), ownerID, 0, &past)
 	return database, code
 }
 

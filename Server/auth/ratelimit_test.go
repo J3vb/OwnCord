@@ -1,6 +1,7 @@
 package auth_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -69,7 +70,7 @@ func TestRateLimiter_DifferentKeysIndependent(t *testing.T) {
 
 func TestRateLimiter_LockoutEnforced(t *testing.T) {
 	rl := auth.NewRateLimiter()
-	rl.Lockout("keyLock", time.Hour)
+	rl.Lockout(context.Background(), "keyLock", time.Hour)
 	if !rl.IsLockedOut("keyLock") {
 		t.Error("IsLockedOut() = false after Lockout(), want true")
 	}
@@ -77,7 +78,7 @@ func TestRateLimiter_LockoutEnforced(t *testing.T) {
 
 func TestRateLimiter_LockoutExpires(t *testing.T) {
 	rl := auth.NewRateLimiter()
-	rl.Lockout("keyExp", 30*time.Millisecond)
+	rl.Lockout(context.Background(), "keyExp", 30*time.Millisecond)
 	time.Sleep(50 * time.Millisecond)
 	if rl.IsLockedOut("keyExp") {
 		t.Error("IsLockedOut() = true after lockout expired, want false")
@@ -95,7 +96,7 @@ func TestRateLimiter_Reset(t *testing.T) {
 	rl := auth.NewRateLimiter()
 	rl.Allow("keyR", 1, time.Second)
 	rl.Allow("keyR", 1, time.Second) // now blocked
-	rl.Reset("keyR")
+	rl.Reset(context.Background(), "keyR")
 	if !rl.Allow("keyR", 1, time.Second) {
 		t.Error("Allow() = false after Reset(), want true")
 	}
@@ -103,7 +104,7 @@ func TestRateLimiter_Reset(t *testing.T) {
 
 func TestRateLimiter_LockoutBlocksAllow(t *testing.T) {
 	rl := auth.NewRateLimiter()
-	rl.Lockout("keyLB", time.Hour)
+	rl.Lockout(context.Background(), "keyLB", time.Hour)
 	// Even under normal limit, lockout should block
 	if rl.Allow("keyLB", 100, time.Second) {
 		t.Error("Allow() = true for locked-out key, want false")
@@ -161,7 +162,7 @@ func TestRateLimiter_Check_AtLimit(t *testing.T) {
 
 func TestRateLimiter_Check_RespectsLockout(t *testing.T) {
 	rl := auth.NewRateLimiter()
-	rl.Lockout("checkLocked", time.Hour)
+	rl.Lockout(context.Background(), "checkLocked", time.Hour)
 	if rl.Check("checkLocked", 100, time.Second) {
 		t.Error("Check() = true for locked-out key, want false")
 	}
@@ -169,7 +170,7 @@ func TestRateLimiter_Check_RespectsLockout(t *testing.T) {
 
 func TestRateLimiter_Check_LockoutExpired(t *testing.T) {
 	rl := auth.NewRateLimiter()
-	rl.Lockout("checkExpLock", 10*time.Millisecond)
+	rl.Lockout(context.Background(), "checkExpLock", 10*time.Millisecond)
 	time.Sleep(30 * time.Millisecond)
 	if !rl.Check("checkExpLock", 5, time.Second) {
 		t.Error("Check() = false after lockout expired, want true")
@@ -221,11 +222,11 @@ func TestRateLimiter_ConcurrentHammering(t *testing.T) {
 
 func TestRateLimiter_ResetClearsLockout(t *testing.T) {
 	rl := auth.NewRateLimiter()
-	rl.Lockout("resetLock", time.Hour)
+	rl.Lockout(context.Background(), "resetLock", time.Hour)
 	if !rl.IsLockedOut("resetLock") {
 		t.Fatal("precondition: key should be locked out")
 	}
-	rl.Reset("resetLock")
+	rl.Reset(context.Background(), "resetLock")
 	if rl.IsLockedOut("resetLock") {
 		t.Error("Reset() should clear lockout, but key is still locked out")
 	}

@@ -37,20 +37,6 @@ func (q *Queries) AdminUpdateChannel(ctx context.Context, arg AdminUpdateChannel
 	return err
 }
 
-const archiveChannel = `-- name: ArchiveChannel :exec
-UPDATE channels SET archived = ? WHERE id = ?
-`
-
-type ArchiveChannelParams struct {
-	Archived int64 `json:"archived"`
-	ID       int64 `json:"id"`
-}
-
-func (q *Queries) ArchiveChannel(ctx context.Context, arg ArchiveChannelParams) error {
-	_, err := q.db.ExecContext(ctx, archiveChannel, arg.Archived, arg.ID)
-	return err
-}
-
 const createChannel = `-- name: CreateChannel :execresult
 INSERT INTO channels (name, type, category, topic, position) VALUES (?, ?, ?, ?, ?)
 `
@@ -260,20 +246,6 @@ func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
 	return items, nil
 }
 
-const setChannelMixingThreshold = `-- name: SetChannelMixingThreshold :exec
-UPDATE channels SET mixing_threshold = ? WHERE id = ?
-`
-
-type SetChannelMixingThresholdParams struct {
-	MixingThreshold *int64 `json:"mixingThreshold"`
-	ID              int64  `json:"id"`
-}
-
-func (q *Queries) SetChannelMixingThreshold(ctx context.Context, arg SetChannelMixingThresholdParams) error {
-	_, err := q.db.ExecContext(ctx, setChannelMixingThreshold, arg.MixingThreshold, arg.ID)
-	return err
-}
-
 const setChannelSlowMode = `-- name: SetChannelSlowMode :exec
 UPDATE channels SET slow_mode = ? WHERE id = ?
 `
@@ -299,34 +271,6 @@ type SetChannelVoiceMaxUsersParams struct {
 
 func (q *Queries) SetChannelVoiceMaxUsers(ctx context.Context, arg SetChannelVoiceMaxUsersParams) error {
 	_, err := q.db.ExecContext(ctx, setChannelVoiceMaxUsers, arg.VoiceMaxUsers, arg.ID)
-	return err
-}
-
-const setChannelVoiceMaxVideo = `-- name: SetChannelVoiceMaxVideo :exec
-UPDATE channels SET voice_max_video = ? WHERE id = ?
-`
-
-type SetChannelVoiceMaxVideoParams struct {
-	VoiceMaxVideo int64 `json:"voiceMaxVideo"`
-	ID            int64 `json:"id"`
-}
-
-func (q *Queries) SetChannelVoiceMaxVideo(ctx context.Context, arg SetChannelVoiceMaxVideoParams) error {
-	_, err := q.db.ExecContext(ctx, setChannelVoiceMaxVideo, arg.VoiceMaxVideo, arg.ID)
-	return err
-}
-
-const setChannelVoiceQuality = `-- name: SetChannelVoiceQuality :exec
-UPDATE channels SET voice_quality = ? WHERE id = ?
-`
-
-type SetChannelVoiceQualityParams struct {
-	VoiceQuality *string `json:"voiceQuality"`
-	ID           int64   `json:"id"`
-}
-
-func (q *Queries) SetChannelVoiceQuality(ctx context.Context, arg SetChannelVoiceQualityParams) error {
-	_, err := q.db.ExecContext(ctx, setChannelVoiceQuality, arg.VoiceQuality, arg.ID)
 	return err
 }
 

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,7 +16,7 @@ import (
 
 func handleGetSettings(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		settings, err := database.GetAllSettings()
+		settings, err := database.GetAllSettings(r.Context())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get settings")
 			return
@@ -48,7 +49,7 @@ func handlePatchSettings(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		if err := validateRequire2FAUpdate(database, normalizedUpdates); err != nil {
+		if err := validateRequire2FAUpdate(r.Context(), database, normalizedUpdates); err != nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 			return
 		}
@@ -57,13 +58,13 @@ func handlePatchSettings(database *db.DB) http.HandlerFunc {
 
 		// Apply all settings atomically so a mid-loop failure doesn't leave
 		// partial updates.
-		tx, err := database.Begin()
+		tx, err := database.BeginTx(r.Context(), nil)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to start transaction")
 			return
 		}
 		for key, value := range normalizedUpdates {
-			if _, txErr := tx.Exec(
+			if _, txErr := tx.ExecContext(r.Context(),
 				`INSERT INTO settings (key, value) VALUES (?, ?)
 				 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
 				key, value,
@@ -79,11 +80,11 @@ func handlePatchSettings(database *db.DB) http.HandlerFunc {
 		}
 		for key := range normalizedUpdates {
 			slog.Info("setting changed", "actor_id", actor, "key", key)
-			db.WriteAudit(database, actor, "setting_change", "setting", 0,
+			db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "setting_change", "setting", 0,
 				fmt.Sprintf("%s updated", key))
 		}
 
-		settings, err := database.GetAllSettings()
+		settings, err := database.GetAllSettings(r.Context())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch settings")
 			return
@@ -112,8 +113,8 @@ func normalizeSettingUpdates(updates map[string]string) (map[string]string, erro
 	return normalized, nil
 }
 
-func validateRequire2FAUpdate(database *db.DB, updates map[string]string) error {
-	targetRequire2FA, err := targetBoolSetting(database, updates, "require_2fa")
+func validateRequire2FAUpdate(ctx context.Context, database *db.DB, updates map[string]string) error {
+	targetRequire2FA, err := targetBoolSetting(ctx, database, updates, "require_2fa")
 	if err != nil {
 		return err
 	}
@@ -121,7 +122,7 @@ func validateRequire2FAUpdate(database *db.DB, updates map[string]string) error 
 		return nil
 	}
 
-	registrationOpen, err := targetBoolSetting(database, updates, "registration_open")
+	registrationOpen, err := targetBoolSetting(ctx, database, updates, "registration_open")
 	if err != nil {
 		return err
 	}
@@ -129,7 +130,7 @@ func validateRequire2FAUpdate(database *db.DB, updates map[string]string) error 
 		return fmt.Errorf("require_2fa cannot be enabled while registration is open")
 	}
 
-	count, err := database.CountUsersWithoutTOTP()
+	count, err := database.CountUsersWithoutTOTP(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to validate 2FA enrollment")
 	}
@@ -139,11 +140,11 @@ func validateRequire2FAUpdate(database *db.DB, updates map[string]string) error 
 	return nil
 }
 
-func targetBoolSetting(database *db.DB, updates map[string]string, key string) (bool, error) {
+func targetBoolSetting(ctx context.Context, database *db.DB, updates map[string]string, key string) (bool, error) {
 	if value, ok := updates[key]; ok {
 		return parseBooleanSettingValue(value)
 	}
-	value, err := database.GetSetting(key)
+	value, err := database.GetSetting(ctx, key)
 	if errors.Is(err, db.ErrNotFound) {
 		return false, nil
 	}

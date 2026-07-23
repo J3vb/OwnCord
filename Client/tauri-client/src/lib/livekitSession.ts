@@ -1687,7 +1687,6 @@ owncordNs.lkDebug = session.getSessionDebugInfo.bind(session);
 export const setWsClient = session.setWsClient.bind(session);
 export const setServerHost = session.setServerHost.bind(session);
 export const setOnError = session.setOnError.bind(session);
-export const clearOnError = session.clearOnError.bind(session);
 export const setOnRemoteVideo = session.setOnRemoteVideo.bind(session);
 export const setOnRemoteVideoRemoved = session.setOnRemoteVideoRemoved.bind(session);
 export const clearOnRemoteVideo = session.clearOnRemoteVideo.bind(session);

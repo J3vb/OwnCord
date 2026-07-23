@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"strings"
@@ -16,7 +17,7 @@ type fakeAuditor struct {
 	called bool
 }
 
-func (f *fakeAuditor) LogAudit(_ int64, _, _ string, _ int64, _ string) error {
+func (f *fakeAuditor) LogAudit(_ context.Context, _ int64, _, _ string, _ int64, _ string) error {
 	f.called = true
 	return f.err
 }
@@ -39,7 +40,7 @@ func TestWriteAudit_LogsFailureButDoesNotPropagate(t *testing.T) {
 	// WriteAudit returns nothing, so "never propagated" is structural — the
 	// call simply must not panic and must record the failure.
 	out := captureLogs(t, func() {
-		db.WriteAudit(a, 7, "user_ban", "user", 42, "spam")
+		db.WriteAudit(context.Background(), a, 7, "user_ban", "user", 42, "spam")
 	})
 
 	if !a.called {
@@ -67,7 +68,7 @@ func TestWriteAudit_SuccessLogsNothing(t *testing.T) {
 	a := &fakeAuditor{err: nil}
 
 	out := captureLogs(t, func() {
-		db.WriteAudit(a, 1, "user_login", "user", 1, "")
+		db.WriteAudit(context.Background(), a, 1, "user_login", "user", 1, "")
 	})
 
 	if !a.called {

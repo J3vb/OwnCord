@@ -172,6 +172,38 @@ func TestHasAdmin_OwnerRolePermsHasBit(t *testing.T) {
 	}
 }
 
+// ─── HasServerPerm tests ──────────────────────────────────────────────────────
+
+// TestHasServerPerm locks the contract api.RequirePermission inherits: admin
+// bypass, and ALL-of semantics for multi-bit masks (a raw `perms&mask != 0`
+// test would make them any-of).
+func TestHasServerPerm(t *testing.T) {
+	tests := []struct {
+		name      string
+		rolePerms int64
+		perm      int64
+		want      bool
+	}{
+		{"admin bypasses a bit it lacks", permissions.Administrator, permissions.ManageInvites, true},
+		// Deliberately UNLIKE HasPerm(Administrator, 0) == false: the admin
+		// bypass short-circuits before the zero-mask guard.
+		{"admin with zero mask", permissions.Administrator, 0, true},
+		{"exact bit held", permissions.ManageInvites, permissions.ManageInvites, true},
+		{"bit not held", permissions.SendMessages, permissions.ManageInvites, false},
+		{"non-admin with zero mask", permissions.SendMessages, 0, false},
+		{"multi-bit mask partially held", permissions.SendMessages, permissions.SendMessages | permissions.ManageRoles, false},
+		{"multi-bit mask fully held", permissions.SendMessages | permissions.ManageRoles, permissions.SendMessages | permissions.ManageRoles, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := permissions.HasServerPerm(tt.rolePerms, tt.perm); got != tt.want {
+				t.Errorf("HasServerPerm() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // ─── EffectivePerms tests ─────────────────────────────────────────────────────
 
 // EffectivePerms(rolePerm, allow, deny) = (rolePerm & ^deny) | allow

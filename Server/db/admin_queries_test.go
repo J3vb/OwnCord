@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -87,7 +88,7 @@ func newAdminTestDB(t *testing.T) *db.DB {
 func TestGetServerStats_EmptyDB(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	stats, err := database.GetServerStats()
+	stats, err := database.GetServerStats(context.Background())
 	if err != nil {
 		t.Fatalf("GetServerStats() error: %v", err)
 	}
@@ -114,17 +115,17 @@ func TestGetServerStats_EmptyDB(t *testing.T) {
 func TestGetServerStats_WithData(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	_, err := database.CreateUser("statuser", "hash", 4)
+	_, err := database.CreateUser(context.Background(), "statuser", "hash", 4)
 	if err != nil {
 		t.Fatalf("CreateUser error: %v", err)
 	}
 
-	_, err = database.CreateChannel("general", "text", "", "", 0)
+	_, err = database.CreateChannel(context.Background(), "general", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel error: %v", err)
 	}
 
-	stats, err := database.GetServerStats()
+	stats, err := database.GetServerStats(context.Background())
 	if err != nil {
 		t.Fatalf("GetServerStats() error: %v", err)
 	}
@@ -141,7 +142,7 @@ func TestGetServerStats_WithData(t *testing.T) {
 func TestListAllUsers_Empty(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	users, err := database.ListAllUsers(50, 0)
+	users, err := database.ListAllUsers(context.Background(), 50, 0)
 	if err != nil {
 		t.Fatalf("ListAllUsers() error: %v", err)
 	}
@@ -153,12 +154,12 @@ func TestListAllUsers_Empty(t *testing.T) {
 func TestListAllUsers_WithRoleName(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	_, err := database.CreateUser("alice", "hash", 4)
+	_, err := database.CreateUser(context.Background(), "alice", "hash", 4)
 	if err != nil {
 		t.Fatalf("CreateUser error: %v", err)
 	}
 
-	users, err := database.ListAllUsers(50, 0)
+	users, err := database.ListAllUsers(context.Background(), 50, 0)
 	if err != nil {
 		t.Fatalf("ListAllUsers() error: %v", err)
 	}
@@ -178,7 +179,7 @@ func TestListAllUsers_Pagination(t *testing.T) {
 	database := newAdminTestDB(t)
 
 	for i := range 5 {
-		_, err := database.CreateUser(
+		_, err := database.CreateUser(context.Background(),
 			strings.Repeat("u", i+1),
 			"hash",
 			4,
@@ -188,7 +189,7 @@ func TestListAllUsers_Pagination(t *testing.T) {
 		}
 	}
 
-	page1, err := database.ListAllUsers(3, 0)
+	page1, err := database.ListAllUsers(context.Background(), 3, 0)
 	if err != nil {
 		t.Fatalf("ListAllUsers page1 error: %v", err)
 	}
@@ -196,7 +197,7 @@ func TestListAllUsers_Pagination(t *testing.T) {
 		t.Errorf("page1 len = %d, want 3", len(page1))
 	}
 
-	page2, err := database.ListAllUsers(3, 3)
+	page2, err := database.ListAllUsers(context.Background(), 3, 3)
 	if err != nil {
 		t.Fatalf("ListAllUsers page2 error: %v", err)
 	}
@@ -207,9 +208,9 @@ func TestListAllUsers_Pagination(t *testing.T) {
 
 func TestListAllUsers_ZeroLimit(t *testing.T) {
 	database := newAdminTestDB(t)
-	_, _ = database.CreateUser("zerotest", "hash", 4)
+	_, _ = database.CreateUser(context.Background(), "zerotest", "hash", 4)
 
-	users, err := database.ListAllUsers(0, 0)
+	users, err := database.ListAllUsers(context.Background(), 0, 0)
 	if err != nil {
 		t.Fatalf("ListAllUsers(0, 0) error: %v", err)
 	}
@@ -224,16 +225,16 @@ func TestListAllUsers_ZeroLimit(t *testing.T) {
 func TestUpdateUserRole(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	uid, err := database.CreateUser("roleuser", "hash", 4)
+	uid, err := database.CreateUser(context.Background(), "roleuser", "hash", 4)
 	if err != nil {
 		t.Fatalf("CreateUser error: %v", err)
 	}
 
-	if err := database.UpdateUserRole(uid, 2); err != nil {
+	if err := database.UpdateUserRole(context.Background(), uid, 2); err != nil {
 		t.Fatalf("UpdateUserRole() error: %v", err)
 	}
 
-	user, err := database.GetUserByID(uid)
+	user, err := database.GetUserByID(context.Background(), uid)
 	if err != nil {
 		t.Fatalf("GetUserByID error: %v", err)
 	}
@@ -246,7 +247,7 @@ func TestUpdateUserRole_NonexistentUser(t *testing.T) {
 	database := newAdminTestDB(t)
 
 	// UPDATE with no matching rows is not an error
-	err := database.UpdateUserRole(99999, 2)
+	err := database.UpdateUserRole(context.Background(), 99999, 2)
 	if err != nil {
 		t.Errorf("UpdateUserRole() for nonexistent user returned unexpected error: %v", err)
 	}
@@ -257,15 +258,15 @@ func TestUpdateUserRole_NonexistentUser(t *testing.T) {
 func TestForceLogoutUser_DeletesSessions(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	uid, err := database.CreateUser("logoutuser", "hash", 4)
+	uid, err := database.CreateUser(context.Background(), "logoutuser", "hash", 4)
 	if err != nil {
 		t.Fatalf("CreateUser error: %v", err)
 	}
 
-	_, _ = database.CreateSession(uid, "token1hash", "device1", "127.0.0.1")
-	_, _ = database.CreateSession(uid, "token2hash", "device2", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, "token1hash", "device1", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, "token2hash", "device2", "127.0.0.1")
 
-	sessions, err := database.GetUserSessions(uid)
+	sessions, err := database.GetUserSessions(context.Background(), uid)
 	if err != nil {
 		t.Fatalf("GetUserSessions error: %v", err)
 	}
@@ -273,11 +274,11 @@ func TestForceLogoutUser_DeletesSessions(t *testing.T) {
 		t.Fatalf("expected 2 sessions before logout, got %d", len(sessions))
 	}
 
-	if err := database.ForceLogoutUser(uid); err != nil {
+	if err := database.ForceLogoutUser(context.Background(), uid); err != nil {
 		t.Fatalf("ForceLogoutUser() error: %v", err)
 	}
 
-	sessions, err = database.GetUserSessions(uid)
+	sessions, err = database.GetUserSessions(context.Background(), uid)
 	if err != nil {
 		t.Fatalf("GetUserSessions after logout error: %v", err)
 	}
@@ -289,12 +290,12 @@ func TestForceLogoutUser_DeletesSessions(t *testing.T) {
 func TestForceLogoutUser_NoSessions(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	uid, err := database.CreateUser("nosessions", "hash", 4)
+	uid, err := database.CreateUser(context.Background(), "nosessions", "hash", 4)
 	if err != nil {
 		t.Fatalf("CreateUser error: %v", err)
 	}
 
-	if err := database.ForceLogoutUser(uid); err != nil {
+	if err := database.ForceLogoutUser(context.Background(), uid); err != nil {
 		t.Errorf("ForceLogoutUser() on user with no sessions returned error: %v", err)
 	}
 }
@@ -304,12 +305,12 @@ func TestForceLogoutUser_NoSessions(t *testing.T) {
 func TestGetUserSessions_Empty(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	uid, err := database.CreateUser("sessionuser", "hash", 4)
+	uid, err := database.CreateUser(context.Background(), "sessionuser", "hash", 4)
 	if err != nil {
 		t.Fatalf("CreateUser error: %v", err)
 	}
 
-	sessions, err := database.GetUserSessions(uid)
+	sessions, err := database.GetUserSessions(context.Background(), uid)
 	if err != nil {
 		t.Fatalf("GetUserSessions() error: %v", err)
 	}
@@ -321,14 +322,14 @@ func TestGetUserSessions_Empty(t *testing.T) {
 func TestGetUserSessions_IsolatedByUser(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	uid1, _ := database.CreateUser("user1sess", "hash", 4)
-	uid2, _ := database.CreateUser("user2sess", "hash", 4)
+	uid1, _ := database.CreateUser(context.Background(), "user1sess", "hash", 4)
+	uid2, _ := database.CreateUser(context.Background(), "user2sess", "hash", 4)
 
-	_, _ = database.CreateSession(uid1, "u1t1", "web", "1.2.3.4")
-	_, _ = database.CreateSession(uid1, "u1t2", "mobile", "1.2.3.5")
-	_, _ = database.CreateSession(uid2, "u2t1", "web", "1.2.3.6")
+	_, _ = database.CreateSession(context.Background(), uid1, "u1t1", "web", "1.2.3.4")
+	_, _ = database.CreateSession(context.Background(), uid1, "u1t2", "mobile", "1.2.3.5")
+	_, _ = database.CreateSession(context.Background(), uid2, "u2t1", "web", "1.2.3.6")
 
-	sessions, err := database.GetUserSessions(uid1)
+	sessions, err := database.GetUserSessions(context.Background(), uid1)
 	if err != nil {
 		t.Fatalf("GetUserSessions() error: %v", err)
 	}
@@ -347,7 +348,7 @@ func TestGetUserSessions_IsolatedByUser(t *testing.T) {
 func TestAdminCreateChannel(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	id, err := database.AdminCreateChannel("announce", "text", "General", "Announcements", 1)
+	id, err := database.AdminCreateChannel(context.Background(), "announce", "text", "General", "Announcements", 1)
 	if err != nil {
 		t.Fatalf("AdminCreateChannel() error: %v", err)
 	}
@@ -355,7 +356,7 @@ func TestAdminCreateChannel(t *testing.T) {
 		t.Errorf("AdminCreateChannel() id = %d, want > 0", id)
 	}
 
-	ch, err := database.GetChannel(id)
+	ch, err := database.GetChannel(context.Background(), id)
 	if err != nil {
 		t.Fatalf("GetChannel() error: %v", err)
 	}
@@ -382,12 +383,12 @@ func TestAdminCreateChannel(t *testing.T) {
 func TestAdminCreateChannel_EmptyOptionals(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	id, err := database.AdminCreateChannel("simple", "voice", "", "", 0)
+	id, err := database.AdminCreateChannel(context.Background(), "simple", "voice", "", "", 0)
 	if err != nil {
 		t.Fatalf("AdminCreateChannel() error: %v", err)
 	}
 
-	ch, err := database.GetChannel(id)
+	ch, err := database.GetChannel(context.Background(), id)
 	if err != nil {
 		t.Fatalf("GetChannel() error: %v", err)
 	}
@@ -404,16 +405,16 @@ func TestAdminCreateChannel_EmptyOptionals(t *testing.T) {
 func TestAdminUpdateChannel(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	id, err := database.AdminCreateChannel("old-name", "text", "", "", 0)
+	id, err := database.AdminCreateChannel(context.Background(), "old-name", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("AdminCreateChannel() error: %v", err)
 	}
 
-	if err := database.AdminUpdateChannel(id, "new-name", "new topic", 5, 2, true); err != nil {
+	if err := database.AdminUpdateChannel(context.Background(), id, "new-name", "new topic", 5, 2, true); err != nil {
 		t.Fatalf("AdminUpdateChannel() error: %v", err)
 	}
 
-	ch, err := database.GetChannel(id)
+	ch, err := database.GetChannel(context.Background(), id)
 	if err != nil {
 		t.Fatalf("GetChannel() error: %v", err)
 	}
@@ -437,17 +438,17 @@ func TestAdminUpdateChannel(t *testing.T) {
 func TestAdminUpdateChannel_Unarchive(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	id, _ := database.AdminCreateChannel("arch-ch", "text", "", "", 0)
-	_ = database.AdminUpdateChannel(id, "arch-ch", "", 0, 0, true)
+	id, _ := database.AdminCreateChannel(context.Background(), "arch-ch", "text", "", "", 0)
+	_ = database.AdminUpdateChannel(context.Background(), id, "arch-ch", "", 0, 0, true)
 
-	ch, _ := database.GetChannel(id)
+	ch, _ := database.GetChannel(context.Background(), id)
 	if !ch.Archived {
 		t.Fatal("channel should be archived")
 	}
 
 	// Unarchive
-	_ = database.AdminUpdateChannel(id, "arch-ch", "", 0, 0, false)
-	ch, _ = database.GetChannel(id)
+	_ = database.AdminUpdateChannel(context.Background(), id, "arch-ch", "", 0, 0, false)
+	ch, _ = database.GetChannel(context.Background(), id)
 	if ch.Archived {
 		t.Error("Archived = true after unarchiving, want false")
 	}
@@ -458,16 +459,16 @@ func TestAdminUpdateChannel_Unarchive(t *testing.T) {
 func TestAdminDeleteChannel(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	id, err := database.AdminCreateChannel("to-delete", "text", "", "", 0)
+	id, err := database.AdminCreateChannel(context.Background(), "to-delete", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("AdminCreateChannel() error: %v", err)
 	}
 
-	if err := database.AdminDeleteChannel(id); err != nil {
+	if err := database.AdminDeleteChannel(context.Background(), id); err != nil {
 		t.Fatalf("AdminDeleteChannel() error: %v", err)
 	}
 
-	ch, err := database.GetChannel(id)
+	ch, err := database.GetChannel(context.Background(), id)
 	if err != nil {
 		t.Fatalf("GetChannel() after delete error: %v", err)
 	}
@@ -480,7 +481,7 @@ func TestAdminDeleteChannel_NonExistent(t *testing.T) {
 	database := newAdminTestDB(t)
 
 	// Deleting nonexistent channel should not error
-	if err := database.AdminDeleteChannel(99999); err != nil {
+	if err := database.AdminDeleteChannel(context.Background(), 99999); err != nil {
 		t.Errorf("AdminDeleteChannel(nonexistent) error: %v", err)
 	}
 }
@@ -490,16 +491,16 @@ func TestAdminDeleteChannel_NonExistent(t *testing.T) {
 func TestLogAudit_AndRetrieve(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	uid, err := database.CreateUser("auditor", "hash", 1)
+	uid, err := database.CreateUser(context.Background(), "auditor", "hash", 1)
 	if err != nil {
 		t.Fatalf("CreateUser error: %v", err)
 	}
 
-	if err := database.LogAudit(uid, "USER_BANNED", "user", 42, "banned for spam"); err != nil {
+	if err := database.LogAudit(context.Background(), uid, "USER_BANNED", "user", 42, "banned for spam"); err != nil {
 		t.Fatalf("LogAudit() error: %v", err)
 	}
 
-	entries, err := database.GetAuditLog(10, 0)
+	entries, err := database.GetAuditLog(context.Background(), 10, 0)
 	if err != nil {
 		t.Fatalf("GetAuditLog() error: %v", err)
 	}
@@ -534,7 +535,7 @@ func TestLogAudit_AndRetrieve(t *testing.T) {
 func TestGetAuditLog_Empty(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	entries, err := database.GetAuditLog(10, 0)
+	entries, err := database.GetAuditLog(context.Background(), 10, 0)
 	if err != nil {
 		t.Fatalf("GetAuditLog() error: %v", err)
 	}
@@ -546,12 +547,12 @@ func TestGetAuditLog_Empty(t *testing.T) {
 func TestGetAuditLog_Pagination(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	uid, _ := database.CreateUser("auditpager", "hash", 1)
+	uid, _ := database.CreateUser(context.Background(), "auditpager", "hash", 1)
 	for i := range 5 {
-		_ = database.LogAudit(uid, "ACTION", "target", int64(i), "detail")
+		_ = database.LogAudit(context.Background(), uid, "ACTION", "target", int64(i), "detail")
 	}
 
-	page1, err := database.GetAuditLog(3, 0)
+	page1, err := database.GetAuditLog(context.Background(), 3, 0)
 	if err != nil {
 		t.Fatalf("GetAuditLog page1 error: %v", err)
 	}
@@ -559,7 +560,7 @@ func TestGetAuditLog_Pagination(t *testing.T) {
 		t.Errorf("page1 len = %d, want 3", len(page1))
 	}
 
-	page2, err := database.GetAuditLog(3, 3)
+	page2, err := database.GetAuditLog(context.Background(), 3, 3)
 	if err != nil {
 		t.Fatalf("GetAuditLog page2 error: %v", err)
 	}
@@ -571,11 +572,11 @@ func TestGetAuditLog_Pagination(t *testing.T) {
 func TestGetAuditLog_NewestFirst(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	uid, _ := database.CreateUser("auditorder", "hash", 1)
-	_ = database.LogAudit(uid, "FIRST", "", 0, "")
-	_ = database.LogAudit(uid, "SECOND", "", 0, "")
+	uid, _ := database.CreateUser(context.Background(), "auditorder", "hash", 1)
+	_ = database.LogAudit(context.Background(), uid, "FIRST", "", 0, "")
+	_ = database.LogAudit(context.Background(), uid, "SECOND", "", 0, "")
 
-	entries, err := database.GetAuditLog(10, 0)
+	entries, err := database.GetAuditLog(context.Background(), 10, 0)
 	if err != nil {
 		t.Fatalf("GetAuditLog() error: %v", err)
 	}
@@ -592,7 +593,7 @@ func TestGetAuditLog_NewestFirst(t *testing.T) {
 func TestGetSetting_Exists(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	val, err := database.GetSetting("server_name")
+	val, err := database.GetSetting(context.Background(), "server_name")
 	if err != nil {
 		t.Fatalf("GetSetting() error: %v", err)
 	}
@@ -604,7 +605,7 @@ func TestGetSetting_Exists(t *testing.T) {
 func TestGetSetting_NotFound(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	_, err := database.GetSetting("nonexistent_key_xyz")
+	_, err := database.GetSetting(context.Background(), "nonexistent_key_xyz")
 	if err == nil {
 		t.Error("GetSetting() for nonexistent key should return error")
 	}
@@ -613,11 +614,11 @@ func TestGetSetting_NotFound(t *testing.T) {
 func TestSetSetting_NewKey(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	if err := database.SetSetting("custom_key", "custom_val"); err != nil {
+	if err := database.SetSetting(context.Background(), "custom_key", "custom_val"); err != nil {
 		t.Fatalf("SetSetting() error: %v", err)
 	}
 
-	val, err := database.GetSetting("custom_key")
+	val, err := database.GetSetting(context.Background(), "custom_key")
 	if err != nil {
 		t.Fatalf("GetSetting() after SetSetting error: %v", err)
 	}
@@ -629,11 +630,11 @@ func TestSetSetting_NewKey(t *testing.T) {
 func TestSetSetting_UpdateExisting(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	if err := database.SetSetting("server_name", "My Custom Server"); err != nil {
+	if err := database.SetSetting(context.Background(), "server_name", "My Custom Server"); err != nil {
 		t.Fatalf("SetSetting() update error: %v", err)
 	}
 
-	val, err := database.GetSetting("server_name")
+	val, err := database.GetSetting(context.Background(), "server_name")
 	if err != nil {
 		t.Fatalf("GetSetting() error: %v", err)
 	}
@@ -645,7 +646,7 @@ func TestSetSetting_UpdateExisting(t *testing.T) {
 func TestGetAllSettings_ReturnsMap(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	settings, err := database.GetAllSettings()
+	settings, err := database.GetAllSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetAllSettings() error: %v", err)
 	}
@@ -660,9 +661,9 @@ func TestGetAllSettings_ReturnsMap(t *testing.T) {
 func TestGetAllSettings_AfterClearing(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	_, _ = database.Exec("DELETE FROM settings")
+	_, _ = database.ExecContext(context.Background(), "DELETE FROM settings")
 
-	settings, err := database.GetAllSettings()
+	settings, err := database.GetAllSettings(context.Background())
 	if err != nil {
 		t.Fatalf("GetAllSettings() after clearing error: %v", err)
 	}
@@ -693,7 +694,7 @@ func TestBackupToSafe_AdminQueries(t *testing.T) {
 	backupDir := filepath.Join(tmpDir, "backups")
 	_ = os.MkdirAll(backupDir, 0o755)
 	backupPath := filepath.Join(backupDir, "backup.db")
-	if err := database.BackupToSafe(backupPath, backupDir); err != nil {
+	if err := database.BackupToSafe(context.Background(), backupPath, backupDir); err != nil {
 		t.Fatalf("BackupToSafe() error: %v", err)
 	}
 
@@ -725,7 +726,7 @@ func TestBackupToSafe_CreatesDirectoryFile(t *testing.T) {
 	_ = os.MkdirAll(backupDir, 0o755)
 	backupPath := filepath.Join(backupDir, "chatserver_20260314_120000.db")
 
-	if err := database.BackupToSafe(backupPath, backupDir); err != nil {
+	if err := database.BackupToSafe(context.Background(), backupPath, backupDir); err != nil {
 		t.Fatalf("BackupToSafe() error: %v", err)
 	}
 
@@ -739,7 +740,7 @@ func TestBackupToSafe_CreatesDirectoryFile(t *testing.T) {
 func TestUserCount_Empty(t *testing.T) {
 	database := newAdminTestDB(t)
 
-	count, err := database.UserCount()
+	count, err := database.UserCount(context.Background())
 	if err != nil {
 		t.Fatalf("UserCount() error: %v", err)
 	}
@@ -752,7 +753,7 @@ func TestUserCount_WithUsers(t *testing.T) {
 	database := newAdminTestDB(t)
 
 	for i := range 3 {
-		_, err := database.CreateUser(
+		_, err := database.CreateUser(context.Background(),
 			fmt.Sprintf("countuser%d", i),
 			"hash",
 			4,
@@ -762,7 +763,7 @@ func TestUserCount_WithUsers(t *testing.T) {
 		}
 	}
 
-	count, err := database.UserCount()
+	count, err := database.UserCount(context.Background())
 	if err != nil {
 		t.Fatalf("UserCount() error: %v", err)
 	}
@@ -793,7 +794,7 @@ func TestBackupToSafe_DirectCall(t *testing.T) {
 	backupDir := filepath.Join(tmpDir, "backups")
 	_ = os.MkdirAll(backupDir, 0o755)
 	backupPath := filepath.Join(backupDir, "backup_direct.db")
-	if err := database.BackupToSafe(backupPath, backupDir); err != nil {
+	if err := database.BackupToSafe(context.Background(), backupPath, backupDir); err != nil {
 		t.Fatalf("BackupToSafe() error: %v", err)
 	}
 
@@ -825,7 +826,7 @@ func TestBackupToSafe_RejectsTraversal(t *testing.T) {
 	_ = os.MkdirAll(safeRoot, 0o755)
 	unsafePath := filepath.Join(tmpDir, "outside", "evil.db")
 
-	err = database.BackupToSafe(unsafePath, safeRoot)
+	err = database.BackupToSafe(context.Background(), unsafePath, safeRoot)
 	if err == nil {
 		t.Error("BackupToSafe should reject path outside safe root")
 	}

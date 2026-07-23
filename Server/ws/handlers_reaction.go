@@ -15,7 +15,7 @@ func registerReactionHandlers(r *HandlerRegistry, deps ReactionDeps) {
 // reactionV2Handler returns a V2 handler for reaction_add (add=true) or
 // reaction_remove (add=false). Both share identical validation and routing.
 func reactionV2Handler(add bool) HandlerV2 {
-	return func(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+	return func(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 		d := deps.(ReactionDeps)
 		userID := info.UserID
 
@@ -34,9 +34,9 @@ func reactionV2Handler(add bool) HandlerV2 {
 		var result *service.ReactionResult
 		var err error
 		if add {
-			result, err = d.MessageSvc.AddReaction(userID, msgID, emoji)
+			result, err = d.MessageSvc.AddReaction(ctx, userID, msgID, emoji)
 		} else {
-			result, err = d.MessageSvc.RemoveReaction(userID, msgID, emoji)
+			result, err = d.MessageSvc.RemoveReaction(ctx, userID, msgID, emoji)
 		}
 		if err != nil {
 			return serviceErrorToResult(err)

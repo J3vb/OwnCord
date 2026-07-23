@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -47,21 +48,21 @@ func channelFromFields(f channelFields) Channel {
 }
 
 // ListChannels returns all channels ordered by position.
-func (d *DB) ListChannels() ([]Channel, error) {
-	rows, err := d.q.ListChannels(dbCtx())
+func (d *DB) ListChannels(ctx context.Context) ([]Channel, error) {
+	rows, err := d.q.ListChannels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ListChannels: %w", err)
 	}
 	channels := make([]Channel, 0, len(rows))
-	for _, r := range rows {
-		channels = append(channels, channelFromFields(channelFields(r)))
+	for i := range rows {
+		channels = append(channels, channelFromFields(channelFields(rows[i])))
 	}
 	return channels, nil
 }
 
 // GetChannel returns the channel with the given id, or nil if not found.
-func (d *DB) GetChannel(id int64) (*Channel, error) {
-	r, err := d.q.GetChannel(dbCtx(), id)
+func (d *DB) GetChannel(ctx context.Context, id int64) (*Channel, error) {
+	r, err := d.q.GetChannel(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -73,8 +74,8 @@ func (d *DB) GetChannel(id int64) (*Channel, error) {
 }
 
 // CreateChannel inserts a new channel and returns the assigned ID.
-func (d *DB) CreateChannel(name, chanType, category, topic string, position int) (int64, error) {
-	res, err := d.q.CreateChannel(dbCtx(), dbgen.CreateChannelParams{
+func (d *DB) CreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error) {
+	res, err := d.q.CreateChannel(ctx, dbgen.CreateChannelParams{
 		Name:     name,
 		Type:     chanType,
 		Category: strToNullPtr(category),
@@ -88,8 +89,8 @@ func (d *DB) CreateChannel(name, chanType, category, topic string, position int)
 }
 
 // UpdateChannel modifies name, topic, and slow_mode for the given channel.
-func (d *DB) UpdateChannel(id int64, name, topic string, slowMode int) error {
-	if err := d.q.UpdateChannel(dbCtx(), dbgen.UpdateChannelParams{
+func (d *DB) UpdateChannel(ctx context.Context, id int64, name, topic string, slowMode int) error {
+	if err := d.q.UpdateChannel(ctx, dbgen.UpdateChannelParams{
 		Name:     name,
 		Topic:    strToNullPtr(topic),
 		SlowMode: int64(slowMode),
@@ -101,8 +102,8 @@ func (d *DB) UpdateChannel(id int64, name, topic string, slowMode int) error {
 }
 
 // SetChannelSlowMode updates only the slow_mode field for the given channel.
-func (d *DB) SetChannelSlowMode(id int64, slowMode int) error {
-	if err := d.q.SetChannelSlowMode(dbCtx(), dbgen.SetChannelSlowModeParams{
+func (d *DB) SetChannelSlowMode(ctx context.Context, id int64, slowMode int) error {
+	if err := d.q.SetChannelSlowMode(ctx, dbgen.SetChannelSlowModeParams{
 		SlowMode: int64(slowMode),
 		ID:       id,
 	}); err != nil {
@@ -112,8 +113,8 @@ func (d *DB) SetChannelSlowMode(id int64, slowMode int) error {
 }
 
 // SetChannelVoiceMaxUsers updates the voice_max_users field for the given channel.
-func (d *DB) SetChannelVoiceMaxUsers(id int64, maxUsers int) error {
-	if err := d.q.SetChannelVoiceMaxUsers(dbCtx(), dbgen.SetChannelVoiceMaxUsersParams{
+func (d *DB) SetChannelVoiceMaxUsers(ctx context.Context, id int64, maxUsers int) error {
+	if err := d.q.SetChannelVoiceMaxUsers(ctx, dbgen.SetChannelVoiceMaxUsersParams{
 		VoiceMaxUsers: int64(maxUsers),
 		ID:            id,
 	}); err != nil {
@@ -123,8 +124,8 @@ func (d *DB) SetChannelVoiceMaxUsers(id int64, maxUsers int) error {
 }
 
 // DeleteChannel removes the channel row (cascades to messages, overrides, etc.).
-func (d *DB) DeleteChannel(id int64) error {
-	if err := d.q.DeleteChannel(dbCtx(), id); err != nil {
+func (d *DB) DeleteChannel(ctx context.Context, id int64) error {
+	if err := d.q.DeleteChannel(ctx, id); err != nil {
 		return fmt.Errorf("DeleteChannel: %w", err)
 	}
 	return nil
@@ -132,8 +133,8 @@ func (d *DB) DeleteChannel(id int64) error {
 
 // GetChannelPermissions returns the allow/deny override bits for a role on a
 // channel. Returns (0, 0, nil) when no override exists.
-func (d *DB) GetChannelPermissions(channelID, roleID int64) (allow, deny int64, err error) {
-	r, scanErr := d.q.GetChannelPermission(dbCtx(), dbgen.GetChannelPermissionParams{
+func (d *DB) GetChannelPermissions(ctx context.Context, channelID, roleID int64) (allow, deny int64, err error) {
+	r, scanErr := d.q.GetChannelPermission(ctx, dbgen.GetChannelPermissionParams{
 		ChannelID: channelID,
 		RoleID:    roleID,
 	})
@@ -155,8 +156,8 @@ type ChannelOverride struct {
 // GetAllChannelPermissionsForRole returns all channel permission overrides for
 // a role in a single query, keyed by channel ID. Eliminates N+1 queries when
 // filtering channels by permission.
-func (d *DB) GetAllChannelPermissionsForRole(roleID int64) (map[int64]ChannelOverride, error) {
-	rows, err := d.q.GetRoleChannelPermissions(dbCtx(), roleID)
+func (d *DB) GetAllChannelPermissionsForRole(ctx context.Context, roleID int64) (map[int64]ChannelOverride, error) {
+	rows, err := d.q.GetRoleChannelPermissions(ctx, roleID)
 	if err != nil {
 		return nil, fmt.Errorf("GetAllChannelPermissionsForRole: %w", err)
 	}
@@ -169,8 +170,8 @@ func (d *DB) GetAllChannelPermissionsForRole(roleID int64) (map[int64]ChannelOve
 
 // UpsertChannelOverride inserts or updates the allow/deny permission override
 // for a role on a channel.
-func (d *DB) UpsertChannelOverride(channelID, roleID, allow, deny int64) error {
-	if err := d.q.UpsertChannelPermission(dbCtx(), dbgen.UpsertChannelPermissionParams{
+func (d *DB) UpsertChannelOverride(ctx context.Context, channelID, roleID, allow, deny int64) error {
+	if err := d.q.UpsertChannelPermission(ctx, dbgen.UpsertChannelPermissionParams{
 		ChannelID: channelID,
 		RoleID:    roleID,
 		Allow:     allow,
@@ -183,8 +184,8 @@ func (d *DB) UpsertChannelOverride(channelID, roleID, allow, deny int64) error {
 
 // DeleteChannelOverride removes the permission override for a role on a
 // channel. Deleting a non-existent override is a no-op.
-func (d *DB) DeleteChannelOverride(channelID, roleID int64) error {
-	if err := d.q.DeleteChannelPermission(dbCtx(), dbgen.DeleteChannelPermissionParams{
+func (d *DB) DeleteChannelOverride(ctx context.Context, channelID, roleID int64) error {
+	if err := d.q.DeleteChannelPermission(ctx, dbgen.DeleteChannelPermissionParams{
 		ChannelID: channelID,
 		RoleID:    roleID,
 	}); err != nil {
@@ -208,8 +209,8 @@ type ChannelRoleOverride struct {
 // ListChannelRoleOverrides returns every role together with its override bits
 // on the given channel (zero allow/deny when no override row exists), ordered
 // by role position descending.
-func (d *DB) ListChannelRoleOverrides(channelID int64) ([]ChannelRoleOverride, error) {
-	rows, err := d.sqlDB.Query(
+func (d *DB) ListChannelRoleOverrides(ctx context.Context, channelID int64) ([]ChannelRoleOverride, error) {
+	rows, err := d.sqlDB.QueryContext(ctx,
 		`SELECT r.id, r.name, r.position, r.permissions,
 		        COALESCE(o.allow, 0), COALESCE(o.deny, 0)
 		 FROM roles r
@@ -243,7 +244,7 @@ func (d *DB) ListChannelRoleOverrides(channelID int64) ([]ChannelRoleOverride, e
 
 // GetChannelTypes returns a map of channel ID → type string for the given IDs
 // in a single query, avoiding N+1 lookups.
-func (d *DB) GetChannelTypes(ids []int64) (map[int64]string, error) {
+func (d *DB) GetChannelTypes(ctx context.Context, ids []int64) (map[int64]string, error) {
 	if len(ids) == 0 {
 		return map[int64]string{}, nil
 	}
@@ -261,7 +262,7 @@ func (d *DB) GetChannelTypes(ids []int64) (map[int64]string, error) {
 		strings.Join(placeholders, ","),
 	)
 
-	rows, err := d.sqlDB.Query(query, args...)
+	rows, err := d.sqlDB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetChannelTypes query: %w", err)
 	}

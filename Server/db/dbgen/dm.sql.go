@@ -7,7 +7,6 @@ package dbgen
 
 import (
 	"context"
-	"database/sql"
 )
 
 const closeDM = `-- name: CloseDM :exec
@@ -22,27 +21,6 @@ type CloseDMParams struct {
 func (q *Queries) CloseDM(ctx context.Context, arg CloseDMParams) error {
 	_, err := q.db.ExecContext(ctx, closeDM, arg.UserID, arg.ChannelID)
 	return err
-}
-
-const findExistingDMChannel = `-- name: FindExistingDMChannel :one
-SELECT dp1.channel_id
-FROM dm_participants dp1
-JOIN dm_participants dp2 ON dp1.channel_id = dp2.channel_id
-JOIN channels c ON c.id = dp1.channel_id
-WHERE dp1.user_id = ? AND dp2.user_id = ? AND c.type = 'dm'
-LIMIT 1
-`
-
-type FindExistingDMChannelParams struct {
-	UserID   int64 `json:"userId"`
-	UserID_2 int64 `json:"userId2"`
-}
-
-func (q *Queries) FindExistingDMChannel(ctx context.Context, arg FindExistingDMChannelParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, findExistingDMChannel, arg.UserID, arg.UserID_2)
-	var channel_id int64
-	err := row.Scan(&channel_id)
-	return channel_id, err
 }
 
 const getDMParticipantIDs = `-- name: GetDMParticipantIDs :many
@@ -147,56 +125,6 @@ func (q *Queries) GetUserDMChannels(ctx context.Context, arg GetUserDMChannelsPa
 		return nil, err
 	}
 	return items, nil
-}
-
-const insertDMChannel = `-- name: InsertDMChannel :execresult
-INSERT INTO channels (name, type) VALUES ('', 'dm')
-`
-
-func (q *Queries) InsertDMChannel(ctx context.Context) (sql.Result, error) {
-	return q.db.ExecContext(ctx, insertDMChannel)
-}
-
-const insertDMOpenState = `-- name: InsertDMOpenState :exec
-INSERT OR IGNORE INTO dm_open_state (user_id, channel_id) VALUES (?, ?), (?, ?)
-`
-
-type InsertDMOpenStateParams struct {
-	UserID      int64 `json:"userId"`
-	ChannelID   int64 `json:"channelId"`
-	UserID_2    int64 `json:"userId2"`
-	ChannelID_2 int64 `json:"channelId2"`
-}
-
-func (q *Queries) InsertDMOpenState(ctx context.Context, arg InsertDMOpenStateParams) error {
-	_, err := q.db.ExecContext(ctx, insertDMOpenState,
-		arg.UserID,
-		arg.ChannelID,
-		arg.UserID_2,
-		arg.ChannelID_2,
-	)
-	return err
-}
-
-const insertDMParticipants = `-- name: InsertDMParticipants :exec
-INSERT INTO dm_participants (channel_id, user_id) VALUES (?, ?), (?, ?)
-`
-
-type InsertDMParticipantsParams struct {
-	ChannelID   int64 `json:"channelId"`
-	UserID      int64 `json:"userId"`
-	ChannelID_2 int64 `json:"channelId2"`
-	UserID_2    int64 `json:"userId2"`
-}
-
-func (q *Queries) InsertDMParticipants(ctx context.Context, arg InsertDMParticipantsParams) error {
-	_, err := q.db.ExecContext(ctx, insertDMParticipants,
-		arg.ChannelID,
-		arg.UserID,
-		arg.ChannelID_2,
-		arg.UserID_2,
-	)
-	return err
 }
 
 const isDMParticipant = `-- name: IsDMParticipant :one

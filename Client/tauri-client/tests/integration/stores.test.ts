@@ -67,7 +67,9 @@ function createMockWsClient(): MockWsClient {
       return () => {};
     },
 
-    onCertFirstTrust(): () => void {
+    async startCertListener(): Promise<void> {},
+
+    onCertFirstUse(): () => void {
       return () => {};
     },
 

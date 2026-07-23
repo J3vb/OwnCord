@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -28,7 +29,7 @@ func buildProfileRouter(database *db.DB) http.Handler {
 // profileCreateToken creates a user and session, returning the raw token.
 func profileCreateToken(t *testing.T, database *db.DB, username string, roleID int) string {
 	t.Helper()
-	uid, err := database.CreateUser(username, mustHash(t), roleID)
+	uid, err := database.CreateUser(context.Background(), username, mustHash(t), roleID)
 	if err != nil {
 		t.Fatalf("CreateUser(%s): %v", username, err)
 	}
@@ -37,7 +38,7 @@ func profileCreateToken(t *testing.T, database *db.DB, username string, roleID i
 		t.Fatalf("GenerateToken: %v", err)
 	}
 	expiresAt := time.Now().Add(24 * time.Hour).UTC().Format("2006-01-02T15:04:05Z")
-	_, err = database.Exec(
+	_, err = database.ExecContext(context.Background(),
 		"INSERT INTO sessions (user_id, token, device, ip_address, expires_at) VALUES (?, ?, ?, ?, ?)",
 		uid, auth.HashToken(token), "TestAgent", "127.0.0.1", expiresAt,
 	)
@@ -183,12 +184,12 @@ func TestChangePassword_RevokesOtherSessions(t *testing.T) {
 
 	// Create user with two sessions.
 	token1 := profileCreateToken(t, database, "pw-revoke", 4)
-	user, _ := database.GetUserByUsername("pw-revoke")
+	user, _ := database.GetUserByUsername(context.Background(), "pw-revoke")
 
 	// Create a second session for the same user.
 	token2, _ := auth.GenerateToken()
 	expiresAt := time.Now().Add(24 * time.Hour).UTC().Format("2006-01-02T15:04:05Z")
-	_, _ = database.Exec(
+	_, _ = database.ExecContext(context.Background(),
 		"INSERT INTO sessions (user_id, token, device, ip_address, expires_at) VALUES (?, ?, ?, ?, ?)",
 		user.ID, auth.HashToken(token2), "OtherDevice", "10.0.0.1", expiresAt,
 	)
@@ -203,13 +204,13 @@ func TestChangePassword_RevokesOtherSessions(t *testing.T) {
 	}
 
 	// token1 (current session) should still work.
-	sess1, _ := database.GetSessionByTokenHash(auth.HashToken(token1))
+	sess1, _ := database.GetSessionByTokenHash(context.Background(), auth.HashToken(token1))
 	if sess1 == nil {
 		t.Error("current session should survive password change")
 	}
 
 	// token2 (other session) should be revoked.
-	sess2, _ := database.GetSessionByTokenHash(auth.HashToken(token2))
+	sess2, _ := database.GetSessionByTokenHash(context.Background(), auth.HashToken(token2))
 	if sess2 != nil {
 		t.Error("other session should be revoked after password change")
 	}
@@ -314,8 +315,8 @@ func TestRevokeSession_Success(t *testing.T) {
 	token := profileCreateToken(t, database, "revoke", 4)
 
 	// Create a second session to revoke.
-	user, _ := database.GetUserByUsername("revoke")
-	secondSessID, _ := database.CreateSession(user.ID, auth.HashToken("second-tok"), "Firefox", "1.2.3.4")
+	user, _ := database.GetUserByUsername(context.Background(), "revoke")
+	secondSessID, _ := database.CreateSession(context.Background(), user.ID, auth.HashToken("second-tok"), "Firefox", "1.2.3.4")
 
 	rr := profileDelete(t, router, fmt.Sprintf("/api/v1/users/me/sessions/%d", secondSessID), token)
 
@@ -342,8 +343,8 @@ func TestRevokeSession_OtherUsersSession(t *testing.T) {
 	token := profileCreateToken(t, database, "revokeother", 4)
 
 	// Create another user with a session.
-	otherUID, _ := database.CreateUser("victim", mustHash(t), 4)
-	otherSessID, _ := database.CreateSession(otherUID, auth.HashToken("victim-tok"), "Safari", "9.8.7.6")
+	otherUID, _ := database.CreateUser(context.Background(), "victim", mustHash(t), 4)
+	otherSessID, _ := database.CreateSession(context.Background(), otherUID, auth.HashToken("victim-tok"), "Safari", "9.8.7.6")
 
 	rr := profileDelete(t, router, fmt.Sprintf("/api/v1/users/me/sessions/%d", otherSessID), token)
 
@@ -358,8 +359,8 @@ func TestRevokeSession_CurrentSession(t *testing.T) {
 	token := profileCreateToken(t, database, "revokeself", 4)
 
 	// Find the current session ID.
-	user, _ := database.GetUserByUsername("revokeself")
-	sessions, _ := database.ListUserSessions(user.ID)
+	user, _ := database.GetUserByUsername(context.Background(), "revokeself")
+	sessions, _ := database.ListUserSessions(context.Background(), user.ID)
 	if len(sessions) == 0 {
 		t.Fatal("expected at least 1 session")
 	}

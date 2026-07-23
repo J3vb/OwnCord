@@ -21,10 +21,10 @@ import (
 
 func seedVisibilityUser(t *testing.T, database *db.DB, username string, roleID int) *db.User {
 	t.Helper()
-	if _, err := database.CreateUser(username, "hash", roleID); err != nil {
+	if _, err := database.CreateUser(context.Background(), username, "hash", roleID); err != nil {
 		t.Fatalf("CreateUser(%s): %v", username, err)
 	}
-	user, err := database.GetUserByUsername(username)
+	user, err := database.GetUserByUsername(context.Background(), username)
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByUsername(%s): %v", username, err)
 	}
@@ -55,19 +55,19 @@ func TestChannelVisibility_RESTWSAgreement(t *testing.T) {
 	svc := service.New(database, limiter)
 
 	// Seed one channel of each server type plus a dm channel (never visible).
-	textID, err := database.CreateChannel("general", "text", "", "", 0)
+	textID, err := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel text: %v", err)
 	}
-	annID, err := database.CreateChannel("announce", "announcement", "", "", 1)
+	annID, err := database.CreateChannel(context.Background(), "announce", "announcement", "", "", 1)
 	if err != nil {
 		t.Fatalf("CreateChannel announcement: %v", err)
 	}
-	voiceID, err := database.CreateChannel("voice", "voice", "", "", 2)
+	voiceID, err := database.CreateChannel(context.Background(), "voice", "voice", "", "", 2)
 	if err != nil {
 		t.Fatalf("CreateChannel voice: %v", err)
 	}
-	dmID, err := database.CreateChannel("dm", "dm", "", "", 3)
+	dmID, err := database.CreateChannel(context.Background(), "dm", "dm", "", "", 3)
 	if err != nil {
 		t.Fatalf("CreateChannel dm: %v", err)
 	}
@@ -81,12 +81,12 @@ func TestChannelVisibility_RESTWSAgreement(t *testing.T) {
 	)
 
 	// Member is denied READ on the announcement channel only.
-	if err := database.UpsertChannelOverride(annID, roleMember, 0, permissions.ReadMessages); err != nil {
+	if err := database.UpsertChannelOverride(context.Background(), annID, roleMember, 0, permissions.ReadMessages); err != nil {
 		t.Fatalf("UpsertChannelOverride member/announcement: %v", err)
 	}
 	// Moderator is denied READ on every server channel → sees nothing.
 	for _, chID := range []int64{textID, annID, voiceID} {
-		if err := database.UpsertChannelOverride(chID, roleModerator, 0, permissions.ReadMessages); err != nil {
+		if err := database.UpsertChannelOverride(context.Background(), chID, roleModerator, 0, permissions.ReadMessages); err != nil {
 			t.Fatalf("UpsertChannelOverride moderator/%d: %v", chID, err)
 		}
 	}
@@ -104,7 +104,7 @@ func TestChannelVisibility_RESTWSAgreement(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			user := seedVisibilityUser(t, database, "vis-"+tc.name, tc.roleID)
-			role, err := database.GetRoleByID(user.RoleID)
+			role, err := database.GetRoleByID(context.Background(), user.RoleID)
 			if err != nil || role == nil {
 				t.Fatalf("GetRoleByID: %v", err)
 			}

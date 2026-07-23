@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,7 +16,7 @@ import (
 
 func handleGetStats(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		stats, err := database.GetServerStats()
+		stats, err := database.GetServerStats(r.Context())
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get stats")
 			return
@@ -32,7 +33,7 @@ func handleListUsers(database *db.DB) http.HandlerFunc {
 		limit := queryInt(r, "limit", 50, 1)
 		offset := queryInt(r, "offset", 0, 0)
 
-		users, err := database.ListAllUsers(limit, offset)
+		users, err := database.ListAllUsers(r.Context(), limit, offset)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list users")
 			return
@@ -81,7 +82,7 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 			return
 		}
 
-		user, err := database.GetUserByID(id)
+		user, err := database.GetUserByID(r.Context(), id)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch user")
 			return
@@ -131,7 +132,7 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 		}
 
 		if req.RoleID != nil {
-			if _, err := database.Exec(`UPDATE users SET role_id = ? WHERE id = ?`, *req.RoleID, id); err != nil {
+			if _, err := database.ExecContext(r.Context(), `UPDATE users SET role_id = ? WHERE id = ?`, *req.RoleID, id); err != nil {
 				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update role")
 				return
 			}
@@ -139,21 +140,21 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 			if permInvalidator != nil {
 				permInvalidator.InvalidateUser(id)
 			}
-			db.WriteAudit(database, actor, "role_change", "user", id,
+			db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "role_change", "user", id,
 				fmt.Sprintf("changed %s role to %d", user.Username, *req.RoleID))
-			if role, err := database.GetRoleByID(*req.RoleID); err == nil && role != nil {
+			if role, err := database.GetRoleByID(r.Context(), *req.RoleID); err == nil && role != nil {
 				if hub != nil {
 					hub.BroadcastMemberUpdate(id, role.Name)
 				}
 			}
 		}
 
-		updated, err := database.GetUserByID(id)
+		updated, err := database.GetUserByID(r.Context(), id)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch updated user")
 			return
 		}
-		writeJSON(w, http.StatusOK, toAdminUserResponseFromUser(database, updated))
+		writeJSON(w, http.StatusOK, toAdminUserResponseFromUser(r.Context(), database, updated))
 	}
 }
 
@@ -165,13 +166,13 @@ func handleForceLogout(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		if err := database.ForceLogoutUser(id); err != nil {
+		if err := database.ForceLogoutUser(r.Context(), id); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to logout user")
 			return
 		}
 		actor := actorFromContext(r)
 		slog.Info("force logout", "actor_id", actor, "target_user_id", id)
-		db.WriteAudit(database, actor, "force_logout", "user", id, "all sessions terminated")
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "force_logout", "user", id, "all sessions terminated")
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

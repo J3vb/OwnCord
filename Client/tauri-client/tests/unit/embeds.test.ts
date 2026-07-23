@@ -509,6 +509,19 @@ describe("parseOgTags", () => {
     const meta = parseOgTags(html);
     expect(meta.title).toBe("Spaced Title");
   });
+
+  it("ignores meta-like strings inside comments and scripts (F7: real HTML parsing, not backtracking regex)", () => {
+    // A real HTML tokenizer treats these as a comment node and script text, not
+    // <meta> elements — so attacker-controlled preview HTML can neither smuggle a
+    // fake OG tag nor drive a polynomial-backtracking regex. A string-matching
+    // regex would (wrongly) pick up "Commented Out".
+    const html = `<html><head>
+      <!-- <meta property="og:title" content="Commented Out"> -->
+      <script>var s = '<meta property="og:title" content="In Script">';</script>
+    </head></html>`;
+    const meta = parseOgTags(html);
+    expect(meta.title).toBeNull();
+  });
 });
 
 describe("applyOgMeta", () => {

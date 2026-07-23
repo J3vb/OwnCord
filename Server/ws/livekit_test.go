@@ -391,10 +391,10 @@ func TestWebhook_ParticipantLeft_NoDoubleBroadcast_AfterFreshCleanup(t *testing.
 
 	// Insert the matching DB row first so the simulated client carries the
 	// same join token production would have persisted and handed to LiveKit.
-	if err := database.JoinVoiceChannel(user.ID, chanID); err != nil {
+	if err := database.JoinVoiceChannel(context.Background(), user.ID, chanID); err != nil {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
-	vs, err := database.GetVoiceState(user.ID)
+	vs, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil || vs == nil {
 		t.Fatalf("GetVoiceState: %v (nil=%v)", err, vs == nil)
 	}
@@ -407,7 +407,7 @@ func TestWebhook_ParticipantLeft_NoDoubleBroadcast_AfterFreshCleanup(t *testing.
 
 	// --- Simulate what serve.go fresh-cleanup does (lines 150-172) ---
 	// 1. Delete the DB row.
-	deleted, err := database.LeaveVoiceChannelIfMatch(user.ID, chanID, vs.JoinedAt)
+	deleted, err := database.LeaveVoiceChannelIfMatch(context.Background(), user.ID, chanID, vs.JoinedAt)
 	if err != nil || !deleted {
 		t.Fatalf("LeaveVoiceChannelIfMatch: err=%v deleted=%v", err, deleted)
 	}
@@ -459,18 +459,18 @@ func TestWebhook_ParticipantLeft_OldToken_DoesNotTeardownReplacement(t *testing.
 
 	// Create an old same-channel voice session, then rejoin the same channel so
 	// the DB carries a replacement join token like production would.
-	if err := database.JoinVoiceChannel(user.ID, chanID); err != nil {
+	if err := database.JoinVoiceChannel(context.Background(), user.ID, chanID); err != nil {
 		t.Fatalf("JoinVoiceChannel(old): %v", err)
 	}
-	oldState, err := database.GetVoiceState(user.ID)
+	oldState, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil || oldState == nil {
 		t.Fatalf("GetVoiceState(old): %v (nil=%v)", err, oldState == nil)
 	}
 
-	if err := database.JoinVoiceChannel(user.ID, chanID); err != nil {
+	if err := database.JoinVoiceChannel(context.Background(), user.ID, chanID); err != nil {
 		t.Fatalf("JoinVoiceChannel(new): %v", err)
 	}
-	newState, err := database.GetVoiceState(user.ID)
+	newState, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil || newState == nil {
 		t.Fatalf("GetVoiceState(new): %v (nil=%v)", err, newState == nil)
 	}
@@ -504,7 +504,7 @@ func TestWebhook_ParticipantLeft_OldToken_DoesNotTeardownReplacement(t *testing.
 	}
 
 	// DB row should still exist.
-	vs, err := database.GetVoiceState(user.ID)
+	vs, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}

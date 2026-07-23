@@ -60,9 +60,6 @@ UPDATE voice_states SET muted = ? WHERE user_id = ?;
 -- name: UpdateVoiceDeafen :exec
 UPDATE voice_states SET deafened = ? WHERE user_id = ?;
 
--- name: UpdateVoiceSpeaking :exec
-UPDATE voice_states SET speaking = ? WHERE user_id = ?;
-
 -- name: UpdateVoiceCamera :exec
 UPDATE voice_states SET camera = ? WHERE user_id = ?;
 

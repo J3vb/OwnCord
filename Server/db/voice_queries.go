@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -27,8 +28,8 @@ func newVoiceJoinToken() string {
 // joined_at doubles as an opaque join-instance token so stale cleanup can
 // target one specific voice session even if the user later rejoins the same
 // channel.
-func (d *DB) JoinVoiceChannel(userID, channelID int64) error {
-	if err := d.q.JoinVoiceChannel(dbCtx(), dbgen.JoinVoiceChannelParams{
+func (d *DB) JoinVoiceChannel(ctx context.Context, userID, channelID int64) error {
+	if err := d.q.JoinVoiceChannel(ctx, dbgen.JoinVoiceChannelParams{
 		UserID:    userID,
 		ChannelID: channelID,
 		JoinedAt:  newVoiceJoinToken(),
@@ -42,8 +43,8 @@ func (d *DB) JoinVoiceChannel(userID, channelID int64) error {
 // channel has fewer than maxUsers participants. Returns ErrChannelFull when
 // the channel is at capacity. This prevents the TOCTOU race where two
 // concurrent joins both observe capacity and both succeed.
-func (d *DB) JoinVoiceChannelIfCapacity(userID, channelID int64, maxUsers int) error {
-	res, err := d.q.JoinVoiceChannelIfCapacity(dbCtx(), dbgen.JoinVoiceChannelIfCapacityParams{
+func (d *DB) JoinVoiceChannelIfCapacity(ctx context.Context, userID, channelID int64, maxUsers int) error {
+	res, err := d.q.JoinVoiceChannelIfCapacity(ctx, dbgen.JoinVoiceChannelIfCapacityParams{
 		UserID:      userID,
 		ChannelID:   channelID,
 		JoinedAt:    newVoiceJoinToken(),
@@ -62,8 +63,8 @@ func (d *DB) JoinVoiceChannelIfCapacity(userID, channelID int64, maxUsers int) e
 
 // LeaveVoiceChannel removes the user's voice state entirely.
 // It is safe to call when the user is not in any voice channel.
-func (d *DB) LeaveVoiceChannel(userID int64) error {
-	if err := d.q.LeaveVoiceChannel(dbCtx(), userID); err != nil {
+func (d *DB) LeaveVoiceChannel(ctx context.Context, userID int64) error {
+	if err := d.q.LeaveVoiceChannel(ctx, userID); err != nil {
 		return fmt.Errorf("LeaveVoiceChannel: %w", err)
 	}
 	return nil
@@ -72,8 +73,8 @@ func (d *DB) LeaveVoiceChannel(userID int64) error {
 // LeaveVoiceChannelIfMatch removes the user's voice state only if the row
 // still points at expectedChannelID and matches the expected join token.
 // Returns true if a row was deleted.
-func (d *DB) LeaveVoiceChannelIfMatch(userID, expectedChannelID int64, expectedJoinedAt string) (bool, error) {
-	result, err := d.q.LeaveVoiceChannelIfMatch(dbCtx(), dbgen.LeaveVoiceChannelIfMatchParams{
+func (d *DB) LeaveVoiceChannelIfMatch(ctx context.Context, userID, expectedChannelID int64, expectedJoinedAt string) (bool, error) {
+	result, err := d.q.LeaveVoiceChannelIfMatch(ctx, dbgen.LeaveVoiceChannelIfMatchParams{
 		UserID:    userID,
 		ChannelID: expectedChannelID,
 		JoinedAt:  expectedJoinedAt,
@@ -87,8 +88,8 @@ func (d *DB) LeaveVoiceChannelIfMatch(userID, expectedChannelID int64, expectedJ
 
 // GetVoiceState returns the current voice state for the given user,
 // or nil if the user is not in any voice channel.
-func (d *DB) GetVoiceState(userID int64) (*VoiceState, error) {
-	r, err := d.q.GetUserVoiceState(dbCtx(), userID)
+func (d *DB) GetVoiceState(ctx context.Context, userID int64) (*VoiceState, error) {
+	r, err := d.q.GetUserVoiceState(ctx, userID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -111,8 +112,8 @@ func (d *DB) GetVoiceState(userID int64) (*VoiceState, error) {
 
 // GetChannelVoiceStates returns all voice states for users currently in the
 // given voice channel.
-func (d *DB) GetChannelVoiceStates(channelID int64) ([]VoiceState, error) {
-	rows, err := d.q.GetChannelVoiceStates(dbCtx(), channelID)
+func (d *DB) GetChannelVoiceStates(ctx context.Context, channelID int64) ([]VoiceState, error) {
+	rows, err := d.q.GetChannelVoiceStates(ctx, channelID)
 	if err != nil {
 		return nil, fmt.Errorf("GetChannelVoiceStates: %w", err)
 	}
@@ -135,8 +136,8 @@ func (d *DB) GetChannelVoiceStates(channelID int64) ([]VoiceState, error) {
 
 // GetAllVoiceStates returns voice states across all voice channels in a single
 // query. Used at startup to build the ready payload without N+1 per-channel queries.
-func (d *DB) GetAllVoiceStates() ([]VoiceState, error) {
-	rows, err := d.q.GetAllVoiceStates(dbCtx())
+func (d *DB) GetAllVoiceStates(ctx context.Context) ([]VoiceState, error) {
+	rows, err := d.q.GetAllVoiceStates(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("GetAllVoiceStates: %w", err)
 	}
@@ -159,8 +160,8 @@ func (d *DB) GetAllVoiceStates() ([]VoiceState, error) {
 
 // UpdateVoiceMute sets the muted field for the given user's voice state.
 // It is safe to call when the user is not in any channel (no-op).
-func (d *DB) UpdateVoiceMute(userID int64, muted bool) error {
-	if err := d.q.UpdateVoiceMute(dbCtx(), dbgen.UpdateVoiceMuteParams{
+func (d *DB) UpdateVoiceMute(ctx context.Context, userID int64, muted bool) error {
+	if err := d.q.UpdateVoiceMute(ctx, dbgen.UpdateVoiceMuteParams{
 		Muted:  b2i64(muted),
 		UserID: userID,
 	}); err != nil {
@@ -171,8 +172,8 @@ func (d *DB) UpdateVoiceMute(userID int64, muted bool) error {
 
 // UpdateVoiceDeafen sets the deafened field for the given user's voice state.
 // It is safe to call when the user is not in any channel (no-op).
-func (d *DB) UpdateVoiceDeafen(userID int64, deafened bool) error {
-	if err := d.q.UpdateVoiceDeafen(dbCtx(), dbgen.UpdateVoiceDeafenParams{
+func (d *DB) UpdateVoiceDeafen(ctx context.Context, userID int64, deafened bool) error {
+	if err := d.q.UpdateVoiceDeafen(ctx, dbgen.UpdateVoiceDeafenParams{
 		Deafened: b2i64(deafened),
 		UserID:   userID,
 	}); err != nil {
@@ -183,8 +184,8 @@ func (d *DB) UpdateVoiceDeafen(userID int64, deafened bool) error {
 
 // ClearVoiceState removes a user's voice state on disconnect.
 // Equivalent to LeaveVoiceChannel but named to clarify the disconnect use case.
-func (d *DB) ClearVoiceState(userID int64) error {
-	if err := d.q.ClearVoiceState(dbCtx(), userID); err != nil {
+func (d *DB) ClearVoiceState(ctx context.Context, userID int64) error {
+	if err := d.q.ClearVoiceState(ctx, userID); err != nil {
 		return fmt.Errorf("ClearVoiceState: %w", err)
 	}
 	return nil
@@ -192,8 +193,8 @@ func (d *DB) ClearVoiceState(userID int64) error {
 
 // ClearAllVoiceStates removes all voice state rows. Called on server startup
 // to clear stale state from a previous run.
-func (d *DB) ClearAllVoiceStates() error {
-	if err := d.q.ClearAllVoiceStates(dbCtx()); err != nil {
+func (d *DB) ClearAllVoiceStates(ctx context.Context) error {
+	if err := d.q.ClearAllVoiceStates(ctx); err != nil {
 		return fmt.Errorf("ClearAllVoiceStates: %w", err)
 	}
 	return nil
@@ -202,8 +203,8 @@ func (d *DB) ClearAllVoiceStates() error {
 // CountActiveCameras returns the number of users with camera enabled in the
 // given voice channel. Uses the DB as source of truth (race-free via SQLite
 // serialization) rather than querying LiveKit.
-func (d *DB) CountActiveCameras(channelID int64) (int, error) {
-	count, err := d.q.CountActiveCameras(dbCtx(), channelID)
+func (d *DB) CountActiveCameras(ctx context.Context, channelID int64) (int, error) {
+	count, err := d.q.CountActiveCameras(ctx, channelID)
 	if err != nil {
 		return 0, fmt.Errorf("CountActiveCameras: %w", err)
 	}
@@ -211,8 +212,8 @@ func (d *DB) CountActiveCameras(channelID int64) (int, error) {
 }
 
 // UpdateVoiceCamera sets the camera field for the given user's voice state.
-func (d *DB) UpdateVoiceCamera(userID int64, camera bool) error {
-	if err := d.q.UpdateVoiceCamera(dbCtx(), dbgen.UpdateVoiceCameraParams{
+func (d *DB) UpdateVoiceCamera(ctx context.Context, userID int64, camera bool) error {
+	if err := d.q.UpdateVoiceCamera(ctx, dbgen.UpdateVoiceCameraParams{
 		Camera: b2i64(camera),
 		UserID: userID,
 	}); err != nil {
@@ -224,8 +225,8 @@ func (d *DB) UpdateVoiceCamera(userID int64, camera bool) error {
 // EnableCameraIfUnderLimit atomically enables a user's camera only if the
 // channel has not yet reached maxVideo active cameras. Returns true if the
 // camera was enabled, false if the limit was already reached.
-func (d *DB) EnableCameraIfUnderLimit(userID, channelID int64, maxVideo int) (bool, error) {
-	res, err := d.q.EnableCameraIfUnderLimit(dbCtx(), dbgen.EnableCameraIfUnderLimitParams{
+func (d *DB) EnableCameraIfUnderLimit(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error) {
+	res, err := d.q.EnableCameraIfUnderLimit(ctx, dbgen.EnableCameraIfUnderLimitParams{
 		UserID:      userID,
 		ChannelID:   channelID,
 		ChannelID_2: channelID,
@@ -242,8 +243,8 @@ func (d *DB) EnableCameraIfUnderLimit(userID, channelID int64, maxVideo int) (bo
 }
 
 // UpdateVoiceScreenshare sets the screenshare field for the given user's voice state.
-func (d *DB) UpdateVoiceScreenshare(userID int64, screenshare bool) error {
-	if err := d.q.UpdateVoiceScreenshare(dbCtx(), dbgen.UpdateVoiceScreenshareParams{
+func (d *DB) UpdateVoiceScreenshare(ctx context.Context, userID int64, screenshare bool) error {
+	if err := d.q.UpdateVoiceScreenshare(ctx, dbgen.UpdateVoiceScreenshareParams{
 		Screenshare: b2i64(screenshare),
 		UserID:      userID,
 	}); err != nil {
@@ -254,9 +255,9 @@ func (d *DB) UpdateVoiceScreenshare(userID int64, screenshare bool) error {
 
 // CountChannelVoiceUsers returns the number of users currently in the given
 // voice channel.
-func (d *DB) CountChannelVoiceUsers(channelID int64) (int, error) {
+func (d *DB) CountChannelVoiceUsers(ctx context.Context, channelID int64) (int, error) {
 	var count int
-	err := d.sqlDB.QueryRow(
+	err := d.sqlDB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM voice_states WHERE channel_id = ?`,
 		channelID,
 	).Scan(&count)

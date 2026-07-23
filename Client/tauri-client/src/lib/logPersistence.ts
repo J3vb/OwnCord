@@ -5,7 +5,7 @@
 // Rotation: keeps the most recent MAX_LOG_FILES days of logs.
 
 import { appLogDir, join } from "@tauri-apps/api/path";
-import { mkdir, writeTextFile, readDir, remove, exists, readTextFile } from "@tauri-apps/plugin-fs";
+import { mkdir, writeTextFile, readDir, remove, exists } from "@tauri-apps/plugin-fs";
 import { type LogEntry, addLogListener, createLogger } from "./logger";
 
 const log = createLogger("logPersistence");
@@ -165,35 +165,10 @@ export async function flushLogs(): Promise<void> {
 }
 
 /**
- * Get the log directory path (for use in debug bundle export).
- * Returns null if persistence hasn't been initialized.
+ * Get the log directory path. Production-unused but exported as the test
+ * suite's observability point for persistence state.
+ * @public
  */
 export function getLogDir(): string | null {
   return logDir;
-}
-
-/**
- * Read all persisted log files and return their combined content.
- * Intended for on-demand export only (reads all files into memory).
- */
-export async function readAllPersistedLogs(): Promise<string> {
-  if (!logDir) return "";
-  try {
-    const entries = await readDir(logDir);
-    const jsonlFiles = entries
-      .filter((e) => e.name?.endsWith(".jsonl") && !e.isDirectory)
-      .map((e) => e.name)
-      .toSorted((a, b) => a.localeCompare(b));
-
-    const parts: string[] = [];
-    for (const file of jsonlFiles) {
-      // oxlint-disable-next-line no-await-in-loop -- files must be read in sorted order for correct log concatenation
-      const content = await readTextFile(`${logDir}/${file}`);
-      parts.push(content);
-    }
-    return parts.join("");
-  } catch (err) {
-    log.warn("readAllPersistedLogs failed", err);
-    return "";
-  }
 }

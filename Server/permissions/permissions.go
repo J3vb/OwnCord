@@ -47,13 +47,6 @@ const (
 // operations reserved for the owner.
 const OwnerRolePosition = 100
 
-// IsOwnerRole reports whether the given role ID is the built-in owner role.
-// Use this as an explicit guard in role-modification handlers to prevent
-// non-owners from escalating to owner privileges.
-func IsOwnerRole(roleID int64) bool {
-	return roleID == OwnerRoleID
-}
-
 // ─── Permission helper functions ─────────────────────────────────────────────
 
 // HasPerm reports whether rolePerms contains all bits in requiredPerm.
@@ -69,6 +62,14 @@ func HasPerm(rolePerms, requiredPerm int64) bool {
 // grants unconditional access to all operations.
 func HasAdmin(rolePerms int64) bool {
 	return rolePerms&Administrator != 0
+}
+
+// HasServerPerm reports whether a role holds a SERVER-WIDE permission.
+// Administrator bypasses. Channel overrides are deliberately NOT consulted —
+// use Checker.HasChannelPerm/HasChannelPermBatch whenever a channel id exists.
+// Multi-bit masks are ALL-of (every bit must be present), matching HasPerm.
+func HasServerPerm(rolePerms, perm int64) bool {
+	return HasAdmin(rolePerms) || HasPerm(rolePerms, perm)
 }
 
 // EffectivePerms computes the resolved permission set for a channel override.

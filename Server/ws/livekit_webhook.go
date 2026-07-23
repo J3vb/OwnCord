@@ -89,12 +89,6 @@ func parseParticipantIdentity(identity string) (int64, string, error) {
 	return userID, joinToken, nil
 }
 
-// parseIdentity extracts a user ID from a LiveKit participant identity.
-func parseIdentity(identity string) (int64, error) {
-	userID, _, err := parseParticipantIdentity(identity)
-	return userID, err
-}
-
 // parseRoomChannelID extracts a channel ID from a LiveKit room name
 // formatted as "channel-{id}".
 func parseRoomChannelID(roomName string) (int64, error) {
@@ -104,7 +98,7 @@ func parseRoomChannelID(roomName string) (int64, error) {
 	return strconv.ParseInt(roomName[8:], 10, 64)
 }
 
-func (h *Hub) handleWebhookParticipantJoined(_ context.Context, event *livekit.WebhookEvent) {
+func (h *Hub) handleWebhookParticipantJoined(ctx context.Context, event *livekit.WebhookEvent) {
 	p := event.GetParticipant()
 	room := event.GetRoom()
 	if p == nil || room == nil {
@@ -134,12 +128,12 @@ func (h *Hub) handleWebhookParticipantJoined(_ context.Context, event *livekit.W
 	// A replayed token from a previous session will not have a matching row,
 	// so we remove the rogue participant from LiveKit.
 	if h.db != nil {
-		state, stateErr := h.db.GetVoiceState(userID)
+		state, stateErr := h.db.GetVoiceState(ctx, userID)
 		if stateErr != nil || state == nil || state.ChannelID != channelID {
 			slog.Warn("livekit webhook: rogue participant_joined — no matching voice state, removing",
 				"user_id", userID, "channel_id", channelID)
 			if h.livekit != nil {
-				if rmErr := h.livekit.RemoveParticipant(channelID, userID, joinToken); rmErr != nil { //nolint:contextcheck // RemoveParticipant manages its own timeout context
+				if rmErr := h.livekit.RemoveParticipant(ctx, channelID, userID, joinToken); rmErr != nil {
 					slog.Error("livekit webhook: failed to remove rogue participant",
 						"error", rmErr, "user_id", userID, "channel_id", channelID)
 				}
@@ -152,7 +146,7 @@ func (h *Hub) handleWebhookParticipantJoined(_ context.Context, event *livekit.W
 				"user_id", userID, "channel_id", channelID,
 				"expected_token", state.JoinedAt, "got_token", joinToken)
 			if h.livekit != nil {
-				if rmErr := h.livekit.RemoveParticipant(channelID, userID, joinToken); rmErr != nil { //nolint:contextcheck // RemoveParticipant manages its own timeout context
+				if rmErr := h.livekit.RemoveParticipant(ctx, channelID, userID, joinToken); rmErr != nil {
 					slog.Error("livekit webhook: failed to remove stale participant",
 						"error", rmErr, "user_id", userID, "channel_id", channelID)
 				}
@@ -216,7 +210,7 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 		} else if h.db != nil {
 			// Client has voiceChID=0 or moved to a different channel (e.g.
 			// after F5 reload), or this webhook is for an older join instance.
-			deleted, dbErr := h.db.LeaveVoiceChannelIfMatch(userID, channelID, joinToken)
+			deleted, dbErr := h.db.LeaveVoiceChannelIfMatch(ctx, userID, channelID, joinToken)
 			if dbErr != nil {
 				slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed (stale DB row)",
 					"error", dbErr, "user_id", userID, "channel_id", channelID)
@@ -229,7 +223,7 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 	} else if h.db != nil {
 		// Client already disconnected from WS — use channel-conditional delete
 		// to avoid wiping a newer row if the user reconnected and rejoined.
-		deleted, dbErr := h.db.LeaveVoiceChannelIfMatch(userID, channelID, joinToken)
+		deleted, dbErr := h.db.LeaveVoiceChannelIfMatch(ctx, userID, channelID, joinToken)
 		if dbErr != nil {
 			slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed (client gone)",
 				"error", dbErr, "user_id", userID, "channel_id", channelID)

@@ -119,10 +119,16 @@ sequenceDiagram
 chi's `middleware.RealIP` is deliberately omitted — client IP is resolved via
 `clientIPWithProxies` against configured trusted proxies instead, so spoofed
 `X-Real-IP`/`X-Forwarded-For` headers are not trusted by default. Authentication
-is bearer-token (SHA-256-hashed opaque tokens); authorization is enforced
-inconsistently — sometimes as `RequirePermission` middleware at mount time,
-sometimes in-handler through `svc.Permissions` (an audit finding). The shaded
-region marks the two documented bypass paths of the domain layer.
+is bearer-token (SHA-256-hashed opaque tokens); authorization is enforced at two
+deliberate scopes (D13): `RequirePermission` middleware gates the two
+channel-less routes on server-wide role permissions via
+`permissions.HasServerPerm` (channel overrides deliberately not consulted — a
+per-channel allow must never open a server-wide gate), while anything
+channel-scoped is checked in the service layer through `svc.Permissions` /
+`permissions.Checker`, which resolves overrides and fails closed if they cannot
+be fetched. The shaded region marks the two documented bypass paths of the
+domain layer.
 
 **Source of truth:** `Server/api/router.go`, `Server/api/middleware.go`,
-`Server/api/auth_handler.go`, `Server/admin/middleware.go`, `Server/service/`.
+`Server/api/auth_handler.go`, `Server/admin/middleware.go`,
+`Server/permissions/`, `Server/service/`.

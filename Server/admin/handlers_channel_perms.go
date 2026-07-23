@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -27,7 +28,7 @@ func getPermChannel(database *db.DB, w http.ResponseWriter, r *http.Request) *db
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid channel id")
 		return nil
 	}
-	ch, err := database.GetChannel(id)
+	ch, err := database.GetChannel(r.Context(), id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch channel")
 		return nil
@@ -55,7 +56,7 @@ func handleGetChannelPermissions(database *db.DB) http.HandlerFunc {
 		if ch == nil {
 			return
 		}
-		overrides, err := database.ListChannelRoleOverrides(ch.ID)
+		overrides, err := database.ListChannelRoleOverrides(r.Context(), ch.ID)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channel permissions")
 			return
@@ -81,7 +82,7 @@ func handlePutChannelPermission(database *db.DB, hub HubBroadcaster, permInvalid
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid role id")
 			return
 		}
-		role, err := database.GetRoleByID(roleID)
+		role, err := database.GetRoleByID(r.Context(), roleID)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch role")
 			return
@@ -100,7 +101,7 @@ func handlePutChannelPermission(database *db.DB, hub HubBroadcaster, permInvalid
 		allow := req.Allow & permissions.AllPerms
 		deny := req.Deny & permissions.AllPerms
 
-		if err := database.UpsertChannelOverride(ch.ID, roleID, allow, deny); err != nil {
+		if err := database.UpsertChannelOverride(r.Context(), ch.ID, roleID, allow, deny); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save channel permission")
 			return
 		}
@@ -108,7 +109,7 @@ func handlePutChannelPermission(database *db.DB, hub HubBroadcaster, permInvalid
 		actor := actorFromContext(r)
 		slog.Info("channel permissions updated", "actor_id", actor, "channel_id", ch.ID,
 			"role_id", roleID, "allow", allow, "deny", deny)
-		db.WriteAudit(database, actor, "channel_perms_update", "channel", ch.ID,
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "channel_perms_update", "channel", ch.ID,
 			fmt.Sprintf("set overrides for role %s on #%s (allow=%#x deny=%#x)", role.Name, ch.Name, allow, deny))
 
 		if permInvalidator != nil {
@@ -140,14 +141,14 @@ func handleDeleteChannelPermission(database *db.DB, hub HubBroadcaster, permInva
 			return
 		}
 
-		if err := database.DeleteChannelOverride(ch.ID, roleID); err != nil {
+		if err := database.DeleteChannelOverride(r.Context(), ch.ID, roleID); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete channel permission")
 			return
 		}
 
 		actor := actorFromContext(r)
 		slog.Info("channel permissions cleared", "actor_id", actor, "channel_id", ch.ID, "role_id", roleID)
-		db.WriteAudit(database, actor, "channel_perms_clear", "channel", ch.ID,
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "channel_perms_clear", "channel", ch.ID,
 			fmt.Sprintf("cleared overrides for role %d on #%s", roleID, ch.Name))
 
 		if permInvalidator != nil {

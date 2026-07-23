@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"testing"
@@ -20,7 +21,7 @@ type pwStore struct {
 	audits      []string
 }
 
-func (f *pwStore) DeleteOtherSessions(_, _ int64) (int64, error) {
+func (f *pwStore) DeleteOtherSessions(_ context.Context, _, _ int64) (int64, error) {
 	f.revokeCalls++
 	if f.revokeCalls <= f.failRevokes {
 		return 0, errors.New("session table locked")
@@ -28,7 +29,7 @@ func (f *pwStore) DeleteOtherSessions(_, _ int64) (int64, error) {
 	return 2, nil
 }
 
-func (f *pwStore) LogAudit(_ int64, action, _ string, _ int64, _ string) error {
+func (f *pwStore) LogAudit(_ context.Context, _ int64, action, _ string, _ int64, _ string) error {
 	f.audits = append(f.audits, action)
 	return nil
 }
@@ -43,14 +44,14 @@ func TestChangePassword_RevokeFailureIsPartialSuccess(t *testing.T) {
 	fs := &pwStore{DB: database, failRevokes: 99}
 	svc := NewUserService(fs)
 
-	res, err := svc.ChangePassword(7, "newhash", 1)
+	res, err := svc.ChangePassword(context.Background(), 7, "newhash", 1)
 	if err != nil {
 		t.Fatalf("committed password change must not return an error: %v", err)
 	}
 	if !res.RevokeFailed {
 		t.Fatal("RevokeFailed should be set when revocation keeps failing")
 	}
-	if u, _ := database.GetUserByID(7); u.PasswordHash != "newhash" {
+	if u, _ := database.GetUserByID(context.Background(), 7); u.PasswordHash != "newhash" {
 		t.Fatal("password should be committed")
 	}
 	if !slices.Contains(fs.audits, "password_change") {
@@ -66,7 +67,7 @@ func TestChangePassword_RetryRecoversRevocation(t *testing.T) {
 	fs := &pwStore{DB: database, failRevokes: 1}
 	svc := NewUserService(fs)
 
-	res, err := svc.ChangePassword(7, "newhash", 1)
+	res, err := svc.ChangePassword(context.Background(), 7, "newhash", 1)
 	if err != nil {
 		t.Fatalf("ChangePassword: %v", err)
 	}

@@ -577,99 +577,6 @@ describe("log persistence", () => {
   });
 
   // -----------------------------------------------------------------------
-  // readAllPersistedLogs
-  // -----------------------------------------------------------------------
-  describe("readAllPersistedLogs", () => {
-    it("returns empty string when not initialized (logDir is null)", async () => {
-      const { readAllPersistedLogs } = await freshImport();
-      const result = await readAllPersistedLogs();
-      expect(result).toBe("");
-    });
-
-    it("reads and concatenates all jsonl files in sorted order", async () => {
-      captureListener();
-      const { initLogPersistence, readAllPersistedLogs } = await freshImport();
-      await initLogPersistence();
-
-      mockReadDir.mockResolvedValueOnce([
-        { name: "2025-06-14.jsonl", isDirectory: false },
-        { name: "2025-06-15.jsonl", isDirectory: false },
-        { name: "2025-06-13.jsonl", isDirectory: false },
-      ]);
-
-      mockReadTextFile
-        .mockResolvedValueOnce('{"day":"13"}\n')
-        .mockResolvedValueOnce('{"day":"14"}\n')
-        .mockResolvedValueOnce('{"day":"15"}\n');
-
-      const result = await readAllPersistedLogs();
-
-      // Files should be read in sorted order: 13, 14, 15
-      expect(mockReadTextFile).toHaveBeenCalledTimes(3);
-      expect(mockReadTextFile.mock.calls[0]![0]).toContain("2025-06-13");
-      expect(mockReadTextFile.mock.calls[1]![0]).toContain("2025-06-14");
-      expect(mockReadTextFile.mock.calls[2]![0]).toContain("2025-06-15");
-
-      expect(result).toBe('{"day":"13"}\n{"day":"14"}\n{"day":"15"}\n');
-    });
-
-    it("filters out directories and non-jsonl entries", async () => {
-      captureListener();
-      const { initLogPersistence, readAllPersistedLogs } = await freshImport();
-      await initLogPersistence();
-
-      mockReadDir.mockResolvedValueOnce([
-        { name: "2025-06-15.jsonl", isDirectory: false },
-        { name: "subdir", isDirectory: true },
-        { name: "readme.txt", isDirectory: false },
-      ]);
-
-      mockReadTextFile.mockResolvedValueOnce('{"msg":"only"}\n');
-
-      const result = await readAllPersistedLogs();
-
-      expect(mockReadTextFile).toHaveBeenCalledTimes(1);
-      expect(result).toBe('{"msg":"only"}\n');
-    });
-
-    it("returns empty string when directory has no jsonl files", async () => {
-      captureListener();
-      const { initLogPersistence, readAllPersistedLogs } = await freshImport();
-      await initLogPersistence();
-
-      mockReadDir.mockResolvedValueOnce([{ name: "notes.txt", isDirectory: false }]);
-
-      const result = await readAllPersistedLogs();
-      expect(result).toBe("");
-      expect(mockReadTextFile).not.toHaveBeenCalled();
-    });
-
-    it("returns empty string on readDir failure", async () => {
-      captureListener();
-      const { initLogPersistence, readAllPersistedLogs } = await freshImport();
-      await initLogPersistence();
-
-      mockReadDir.mockRejectedValueOnce(new Error("no access"));
-
-      const result = await readAllPersistedLogs();
-      expect(result).toBe("");
-    });
-
-    it("returns empty string on readTextFile failure", async () => {
-      captureListener();
-      const { initLogPersistence, readAllPersistedLogs } = await freshImport();
-      await initLogPersistence();
-
-      mockReadDir.mockResolvedValueOnce([{ name: "2025-06-15.jsonl", isDirectory: false }]);
-      mockReadTextFile.mockRejectedValueOnce(new Error("corrupt file"));
-
-      const result = await readAllPersistedLogs();
-      // The entire function returns "" on any error
-      expect(result).toBe("");
-    });
-  });
-
-  // -----------------------------------------------------------------------
   // JSONL format
   // -----------------------------------------------------------------------
   describe("JSONL format", () => {
@@ -778,21 +685,6 @@ describe("log persistence", () => {
 
       // Should not crash, and should not try to remove undefined entries
       expect(mockRemove).not.toHaveBeenCalled();
-    });
-
-    it("handles entries with undefined name in readAllPersistedLogs", async () => {
-      captureListener();
-      const { initLogPersistence, readAllPersistedLogs } = await freshImport();
-      await initLogPersistence();
-
-      mockReadDir.mockResolvedValueOnce([
-        { name: undefined, isDirectory: false },
-        { name: "2025-06-15.jsonl", isDirectory: false },
-      ]);
-      mockReadTextFile.mockResolvedValueOnce('{"msg":"ok"}\n');
-
-      const result = await readAllPersistedLogs();
-      expect(result).toBe('{"msg":"ok"}\n');
     });
 
     it("multiple rapid entries reuse the same debounce timer", async () => {

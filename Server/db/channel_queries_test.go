@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/owncord/server/db"
@@ -21,7 +22,7 @@ func openMigratedMemory(t *testing.T) *db.DB {
 func TestListChannels_Empty(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	channels, err := database.ListChannels()
+	channels, err := database.ListChannels(context.Background())
 	if err != nil {
 		t.Fatalf("ListChannels() error: %v", err)
 	}
@@ -33,14 +34,14 @@ func TestListChannels_Empty(t *testing.T) {
 func TestListChannels_ReturnsAll(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	if _, err := database.CreateChannel("general", "text", "", "General chat", 0); err != nil {
+	if _, err := database.CreateChannel(context.Background(), "general", "text", "", "General chat", 0); err != nil {
 		t.Fatalf("CreateChannel general: %v", err)
 	}
-	if _, err := database.CreateChannel("announcements", "text", "", "", 1); err != nil {
+	if _, err := database.CreateChannel(context.Background(), "announcements", "text", "", "", 1); err != nil {
 		t.Fatalf("CreateChannel announcements: %v", err)
 	}
 
-	channels, err := database.ListChannels()
+	channels, err := database.ListChannels(context.Background())
 	if err != nil {
 		t.Fatalf("ListChannels() error: %v", err)
 	}
@@ -54,7 +55,7 @@ func TestListChannels_ReturnsAll(t *testing.T) {
 func TestGetChannel_NotFound(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	ch, err := database.GetChannel(9999)
+	ch, err := database.GetChannel(context.Background(), 9999)
 	if err != nil {
 		t.Fatalf("GetChannel() error: %v", err)
 	}
@@ -66,12 +67,12 @@ func TestGetChannel_NotFound(t *testing.T) {
 func TestGetChannel_Found(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	id, err := database.CreateChannel("general", "text", "Public", "hello", 0)
+	id, err := database.CreateChannel(context.Background(), "general", "text", "Public", "hello", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
 
-	ch, err := database.GetChannel(id)
+	ch, err := database.GetChannel(context.Background(), id)
 	if err != nil {
 		t.Fatalf("GetChannel: %v", err)
 	}
@@ -100,7 +101,7 @@ func TestGetChannel_Found(t *testing.T) {
 func TestCreateChannel_ReturnsID(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	id, err := database.CreateChannel("test", "text", "", "", 0)
+	id, err := database.CreateChannel(context.Background(), "test", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
@@ -112,8 +113,8 @@ func TestCreateChannel_ReturnsID(t *testing.T) {
 func TestCreateChannel_UniqueIDs(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	id1, _ := database.CreateChannel("ch1", "text", "", "", 0)
-	id2, _ := database.CreateChannel("ch2", "text", "", "", 1)
+	id1, _ := database.CreateChannel(context.Background(), "ch1", "text", "", "", 0)
+	id2, _ := database.CreateChannel(context.Background(), "ch2", "text", "", "", 1)
 	if id1 == id2 {
 		t.Error("expected different IDs for different channels")
 	}
@@ -122,11 +123,11 @@ func TestCreateChannel_UniqueIDs(t *testing.T) {
 func TestCreateChannel_EmptyCategory(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	id, err := database.CreateChannel("nocategory", "text", "", "", 0)
+	id, err := database.CreateChannel(context.Background(), "nocategory", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel with empty category: %v", err)
 	}
-	ch, _ := database.GetChannel(id)
+	ch, _ := database.GetChannel(context.Background(), id)
 	if ch.Category != "" {
 		t.Errorf("Category = %q, want ''", ch.Category)
 	}
@@ -137,13 +138,13 @@ func TestCreateChannel_EmptyCategory(t *testing.T) {
 func TestUpdateChannel_ChangesNameAndTopic(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	id, _ := database.CreateChannel("old", "text", "", "old topic", 0)
+	id, _ := database.CreateChannel(context.Background(), "old", "text", "", "old topic", 0)
 
-	if err := database.UpdateChannel(id, "new", "new topic", 5); err != nil {
+	if err := database.UpdateChannel(context.Background(), id, "new", "new topic", 5); err != nil {
 		t.Fatalf("UpdateChannel: %v", err)
 	}
 
-	ch, _ := database.GetChannel(id)
+	ch, _ := database.GetChannel(context.Background(), id)
 	if ch.Name != "new" {
 		t.Errorf("Name = %q, want 'new'", ch.Name)
 	}
@@ -158,7 +159,7 @@ func TestUpdateChannel_ChangesNameAndTopic(t *testing.T) {
 func TestUpdateChannel_NonExistent(t *testing.T) {
 	database := openMigratedMemory(t)
 	// Should not error even for non-existent row (0 rows affected is still ok).
-	err := database.UpdateChannel(9999, "x", "y", 0)
+	err := database.UpdateChannel(context.Background(), 9999, "x", "y", 0)
 	if err != nil {
 		t.Errorf("UpdateChannel non-existent should not error: %v", err)
 	}
@@ -169,13 +170,13 @@ func TestUpdateChannel_NonExistent(t *testing.T) {
 func TestDeleteChannel_RemovesChannel(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	id, _ := database.CreateChannel("todelete", "text", "", "", 0)
+	id, _ := database.CreateChannel(context.Background(), "todelete", "text", "", "", 0)
 
-	if err := database.DeleteChannel(id); err != nil {
+	if err := database.DeleteChannel(context.Background(), id); err != nil {
 		t.Fatalf("DeleteChannel: %v", err)
 	}
 
-	ch, err := database.GetChannel(id)
+	ch, err := database.GetChannel(context.Background(), id)
 	if err != nil {
 		t.Fatalf("GetChannel after delete: %v", err)
 	}
@@ -186,7 +187,7 @@ func TestDeleteChannel_RemovesChannel(t *testing.T) {
 
 func TestDeleteChannel_NonExistent(t *testing.T) {
 	database := openMigratedMemory(t)
-	err := database.DeleteChannel(9999)
+	err := database.DeleteChannel(context.Background(), 9999)
 	if err != nil {
 		t.Errorf("DeleteChannel non-existent should not error: %v", err)
 	}
@@ -197,10 +198,10 @@ func TestDeleteChannel_NonExistent(t *testing.T) {
 func TestGetChannelPermissions_Default(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	chID, _ := database.CreateChannel("perms", "text", "", "", 0)
+	chID, _ := database.CreateChannel(context.Background(), "perms", "text", "", "", 0)
 
 	// No override set — should return 0, 0.
-	allow, deny, err := database.GetChannelPermissions(chID, 4)
+	allow, deny, err := database.GetChannelPermissions(context.Background(), chID, 4)
 	if err != nil {
 		t.Fatalf("GetChannelPermissions: %v", err)
 	}
@@ -212,9 +213,9 @@ func TestGetChannelPermissions_Default(t *testing.T) {
 func TestGetChannelPermissions_WithOverride(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	chID, _ := database.CreateChannel("perms2", "text", "", "", 0)
+	chID, _ := database.CreateChannel(context.Background(), "perms2", "text", "", "", 0)
 	// Insert an override directly.
-	_, err := database.Exec(
+	_, err := database.ExecContext(context.Background(),
 		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, ?, ?, ?)`,
 		chID, 4, int64(0x400), int64(0x200),
 	)
@@ -222,7 +223,7 @@ func TestGetChannelPermissions_WithOverride(t *testing.T) {
 		t.Fatalf("insert override: %v", err)
 	}
 
-	allow, deny, err := database.GetChannelPermissions(chID, 4)
+	allow, deny, err := database.GetChannelPermissions(context.Background(), chID, 4)
 	if err != nil {
 		t.Fatalf("GetChannelPermissions: %v", err)
 	}
@@ -238,12 +239,12 @@ func TestGetChannelPermissions_WithOverride(t *testing.T) {
 
 func TestUpsertChannelOverride_InsertAndUpdate(t *testing.T) {
 	database := openMigratedMemory(t)
-	chID, _ := database.CreateChannel("private", "text", "", "", 0)
+	chID, _ := database.CreateChannel(context.Background(), "private", "text", "", "", 0)
 
-	if err := database.UpsertChannelOverride(chID, 4, 0, 0x202); err != nil {
+	if err := database.UpsertChannelOverride(context.Background(), chID, 4, 0, 0x202); err != nil {
 		t.Fatalf("UpsertChannelOverride insert: %v", err)
 	}
-	allow, deny, err := database.GetChannelPermissions(chID, 4)
+	allow, deny, err := database.GetChannelPermissions(context.Background(), chID, 4)
 	if err != nil {
 		t.Fatalf("GetChannelPermissions: %v", err)
 	}
@@ -252,10 +253,10 @@ func TestUpsertChannelOverride_InsertAndUpdate(t *testing.T) {
 	}
 
 	// Upsert again with different bits — must update, not duplicate.
-	if err := database.UpsertChannelOverride(chID, 4, 0x2, 0x200); err != nil {
+	if err := database.UpsertChannelOverride(context.Background(), chID, 4, 0x2, 0x200); err != nil {
 		t.Fatalf("UpsertChannelOverride update: %v", err)
 	}
-	allow, deny, err = database.GetChannelPermissions(chID, 4)
+	allow, deny, err = database.GetChannelPermissions(context.Background(), chID, 4)
 	if err != nil {
 		t.Fatalf("GetChannelPermissions: %v", err)
 	}
@@ -266,15 +267,15 @@ func TestUpsertChannelOverride_InsertAndUpdate(t *testing.T) {
 
 func TestDeleteChannelOverride(t *testing.T) {
 	database := openMigratedMemory(t)
-	chID, _ := database.CreateChannel("private2", "text", "", "", 0)
+	chID, _ := database.CreateChannel(context.Background(), "private2", "text", "", "", 0)
 
-	if err := database.UpsertChannelOverride(chID, 4, 0, 0x202); err != nil {
+	if err := database.UpsertChannelOverride(context.Background(), chID, 4, 0, 0x202); err != nil {
 		t.Fatalf("UpsertChannelOverride: %v", err)
 	}
-	if err := database.DeleteChannelOverride(chID, 4); err != nil {
+	if err := database.DeleteChannelOverride(context.Background(), chID, 4); err != nil {
 		t.Fatalf("DeleteChannelOverride: %v", err)
 	}
-	allow, deny, err := database.GetChannelPermissions(chID, 4)
+	allow, deny, err := database.GetChannelPermissions(context.Background(), chID, 4)
 	if err != nil {
 		t.Fatalf("GetChannelPermissions: %v", err)
 	}
@@ -283,20 +284,20 @@ func TestDeleteChannelOverride(t *testing.T) {
 	}
 
 	// Deleting again is a no-op.
-	if err := database.DeleteChannelOverride(chID, 4); err != nil {
+	if err := database.DeleteChannelOverride(context.Background(), chID, 4); err != nil {
 		t.Errorf("DeleteChannelOverride non-existent should not error: %v", err)
 	}
 }
 
 func TestListChannelRoleOverrides(t *testing.T) {
 	database := openMigratedMemory(t)
-	chID, _ := database.CreateChannel("private3", "text", "", "", 0)
+	chID, _ := database.CreateChannel(context.Background(), "private3", "text", "", "", 0)
 
-	if err := database.UpsertChannelOverride(chID, 4, 0, 0x202); err != nil {
+	if err := database.UpsertChannelOverride(context.Background(), chID, 4, 0, 0x202); err != nil {
 		t.Fatalf("UpsertChannelOverride: %v", err)
 	}
 
-	overrides, err := database.ListChannelRoleOverrides(chID)
+	overrides, err := database.ListChannelRoleOverrides(context.Background(), chID)
 	if err != nil {
 		t.Fatalf("ListChannelRoleOverrides: %v", err)
 	}
@@ -328,13 +329,13 @@ func TestListChannelRoleOverrides(t *testing.T) {
 
 func TestSetChannelSlowMode(t *testing.T) {
 	database := openMigratedMemory(t)
-	chID, _ := database.CreateChannel("slowch", "text", "", "", 0)
+	chID, _ := database.CreateChannel(context.Background(), "slowch", "text", "", "", 0)
 
-	if err := database.SetChannelSlowMode(chID, 10); err != nil {
+	if err := database.SetChannelSlowMode(context.Background(), chID, 10); err != nil {
 		t.Fatalf("SetChannelSlowMode: %v", err)
 	}
 
-	ch, _ := database.GetChannel(chID)
+	ch, _ := database.GetChannel(context.Background(), chID)
 	if ch.SlowMode != 10 {
 		t.Errorf("SlowMode = %d, want 10", ch.SlowMode)
 	}
@@ -342,12 +343,12 @@ func TestSetChannelSlowMode(t *testing.T) {
 
 func TestSetChannelSlowMode_Zero(t *testing.T) {
 	database := openMigratedMemory(t)
-	chID, _ := database.CreateChannel("slowch2", "text", "", "", 0)
+	chID, _ := database.CreateChannel(context.Background(), "slowch2", "text", "", "", 0)
 
-	_ = database.SetChannelSlowMode(chID, 30)
-	_ = database.SetChannelSlowMode(chID, 0)
+	_ = database.SetChannelSlowMode(context.Background(), chID, 30)
+	_ = database.SetChannelSlowMode(context.Background(), chID, 0)
 
-	ch, _ := database.GetChannel(chID)
+	ch, _ := database.GetChannel(context.Background(), chID)
 	if ch.SlowMode != 0 {
 		t.Errorf("SlowMode = %d, want 0 (disabled)", ch.SlowMode)
 	}
@@ -357,13 +358,13 @@ func TestSetChannelSlowMode_Zero(t *testing.T) {
 
 func TestSetChannelVoiceMaxUsers(t *testing.T) {
 	database := openMigratedMemory(t)
-	chID, _ := database.CreateChannel("voicech", "voice", "", "", 0)
+	chID, _ := database.CreateChannel(context.Background(), "voicech", "voice", "", "", 0)
 
-	if err := database.SetChannelVoiceMaxUsers(chID, 25); err != nil {
+	if err := database.SetChannelVoiceMaxUsers(context.Background(), chID, 25); err != nil {
 		t.Fatalf("SetChannelVoiceMaxUsers: %v", err)
 	}
 
-	ch, _ := database.GetChannel(chID)
+	ch, _ := database.GetChannel(context.Background(), chID)
 	if ch.VoiceMaxUsers != 25 {
 		t.Errorf("VoiceMaxUsers = %d, want 25", ch.VoiceMaxUsers)
 	}
@@ -371,12 +372,12 @@ func TestSetChannelVoiceMaxUsers(t *testing.T) {
 
 func TestSetChannelVoiceMaxUsers_Unlimited(t *testing.T) {
 	database := openMigratedMemory(t)
-	chID, _ := database.CreateChannel("voicech2", "voice", "", "", 0)
+	chID, _ := database.CreateChannel(context.Background(), "voicech2", "voice", "", "", 0)
 
-	_ = database.SetChannelVoiceMaxUsers(chID, 10)
-	_ = database.SetChannelVoiceMaxUsers(chID, 0)
+	_ = database.SetChannelVoiceMaxUsers(context.Background(), chID, 10)
+	_ = database.SetChannelVoiceMaxUsers(context.Background(), chID, 0)
 
-	ch, _ := database.GetChannel(chID)
+	ch, _ := database.GetChannel(context.Background(), chID)
 	if ch.VoiceMaxUsers != 0 {
 		t.Errorf("VoiceMaxUsers = %d, want 0 (unlimited)", ch.VoiceMaxUsers)
 	}

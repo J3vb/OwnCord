@@ -54,8 +54,9 @@ work changes that; only moving the fetch out of the renderer does.
 
 Not consumers, checked and excluded: `src/lib/gifProvider.ts` hits
 `https://api.klipy.com` with the **webview's** `fetch`, not the plugin (so it is
-governed by CSP `connect-src`, not by this capability); `updater.ts` and
-`pluginBridge.ts` make no HTTP calls; the Rust side (`http_proxy.rs`,
+governed by CSP `connect-src`, not by this capability); `updater.ts` makes no
+HTTP calls (`pluginBridge.ts`, also checked then, was deleted as dead code
+2026-07-23); the Rust side (`http_proxy.rs`,
 `ws_proxy.rs`, `livekit_proxy.rs`, `update_commands.rs`) uses reqwest/rustls
 directly and is not subject to plugin capabilities at all.
 

@@ -25,11 +25,6 @@ type DB struct {
 	q     *dbgen.Queries
 }
 
-// dbCtx is the context used for delegated dbgen calls. The public db.DB API is
-// context-free today; callers that need cancellation use the *Context helpers
-// directly. Using Background here preserves the existing behavior exactly.
-func dbCtx() context.Context { return context.Background() }
-
 // Open opens (or creates) a SQLite database at path, enables WAL mode and
 // foreign key enforcement, and returns a ready-to-use DB.
 func Open(path string) (*DB, error) {
@@ -104,19 +99,9 @@ func (d *DB) Close() error {
 	return d.sqlDB.Close()
 }
 
-// QueryRow executes a query that returns at most one row.
-func (d *DB) QueryRow(query string, args ...any) *sql.Row {
-	return d.sqlDB.QueryRow(query, args...)
-}
-
 // QueryRowContext executes a query that returns at most one row, with context.
 func (d *DB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
 	return d.sqlDB.QueryRowContext(ctx, query, args...)
-}
-
-// Exec executes a query that doesn't return rows.
-func (d *DB) Exec(query string, args ...any) (sql.Result, error) {
-	return d.sqlDB.Exec(query, args...)
 }
 
 // ExecContext executes a query that doesn't return rows, with context.
@@ -124,19 +109,9 @@ func (d *DB) ExecContext(ctx context.Context, query string, args ...any) (sql.Re
 	return d.sqlDB.ExecContext(ctx, query, args...)
 }
 
-// Query executes a query that returns multiple rows.
-func (d *DB) Query(query string, args ...any) (*sql.Rows, error) {
-	return d.sqlDB.Query(query, args...)
-}
-
 // QueryContext executes a query that returns multiple rows, with context.
 func (d *DB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	return d.sqlDB.QueryContext(ctx, query, args...)
-}
-
-// Begin starts a database transaction.
-func (d *DB) Begin() (*sql.Tx, error) {
-	return d.sqlDB.Begin()
 }
 
 // BeginTx starts a database transaction with context and options.

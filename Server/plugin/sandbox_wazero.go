@@ -159,13 +159,14 @@ func (r *Registry) activateWithRuntime(ctx context.Context, platform any, inst *
 
 // platformDeactivate closes the wazero module held by inst without touching
 // the shared runtime. Safe to call on an instance that was never activated.
-// Called from DisablePlugin and Close.
-func (r *Registry) platformDeactivate(inst *Instance) {
+// Called from DisablePlugin and Close. Module teardown must run to completion
+// once started, so the caller's cancellation is detached (WithoutCancel).
+func (r *Registry) platformDeactivate(ctx context.Context, inst *Instance) {
 	if inst == nil || inst.module == nil {
 		return
 	}
 	if mod, ok := inst.module.(api.Module); ok {
-		_ = mod.Close(context.Background())
+		_ = mod.Close(context.WithoutCancel(ctx))
 	}
 	inst.module = nil
 }
@@ -185,6 +186,16 @@ func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, ch
 	if inst == nil {
 		return nil, false
 	}
+	// F2: serialize all guest interaction for this instance. wazero's
+	// Function.Call is not goroutine-safe, and concurrent allocate/mem.Write/
+	// command_dispatch/mem.Read on the shared module tear its linear-memory
+	// slice header. A per-Instance lock (not r.mu — that would serialize every
+	// plugin in the registry and be held across a full CPU budget) confines
+	// contention to concurrent invocations of the SAME plugin, and also makes the
+	// lazy re-activation below atomic so two overruns can't double-instantiate.
+	inst.invokeMu.Lock()
+	defer inst.invokeMu.Unlock()
+
 	r.mu.RLock()
 	moduleAny := inst.module
 	enabled := inst.Enabled

@@ -83,7 +83,6 @@ func TestEventTypes(t *testing.T) {
 		{"ReactionChannelEvent", ReactionChannelEvent{}, MsgTypeReactionUpdate},
 		{"ReactionDMEvent", ReactionDMEvent{}, MsgTypeReactionUpdate},
 		{"VoiceStateEvent", VoiceStateEvent{}, MsgTypeVoiceState},
-		{"VoiceLeaveEvent", VoiceLeaveEvent{}, MsgTypeVoiceLeaveBC},
 		{"VoiceE2EEAnnounceEvent", VoiceE2EEAnnounceEvent{}, MsgTypeVoiceE2EEAnnounceBC},
 		{"VoiceE2EEOfferGuardedEvent", VoiceE2EEOfferGuardedEvent{}, MsgTypeVoiceE2EEOfferRelay},
 		{"DMChannelOpenEvent", DMChannelOpenEvent{}, MsgTypeDMChannelOpen},
@@ -207,7 +206,6 @@ func TestBroadcastAllEventInterface(t *testing.T) {
 	}{
 		{"PresenceEvent", PresenceEvent{payload: []byte("p")}},
 		{"VoiceStateEvent", VoiceStateEvent{payload: []byte("vs")}},
-		{"VoiceLeaveEvent", VoiceLeaveEvent{payload: []byte("vl")}},
 	}
 	for _, tt := range events {
 		t.Run(tt.name, func(t *testing.T) {

@@ -26,7 +26,7 @@ import { createLogger } from "@lib/logger";
 import { initLogPersistence, flushLogs } from "@lib/logPersistence";
 import { saveCredential, loadCredential, deleteCredential } from "@lib/credentials";
 import { initWindowState } from "@lib/window-state";
-import { createCertMismatchModal } from "@components/CertMismatchModal";
+import { createCertMismatchModal, createCertFirstUseModal } from "@components/CertMismatchModal";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import type { CertTofuEvent } from "@lib/ws";
 
@@ -105,37 +105,49 @@ let dispatcherCleanup: (() => void) | null = null;
 let connectedOverlay: ConnectedOverlayControl | null = null;
 let lastConnectHost = "";
 let lastConnectToken = "";
+// Re-run the connect page's health checks (set while the connect page is
+// mounted, cleared otherwise) — refreshes a server's status after its
+// certificate is trusted for the first time.
+let rerunConnectHealth: (() => void) | null = null;
 
-// Certificate first-trust notification (BUG-133).
-// Show a brief banner so the user is aware a new server cert was pinned.
-ws.onCertFirstTrust((evt: CertTofuEvent) => {
-  log.warn("TOFU: first-use certificate pinned", {
+// Shared guard so the first-use and mismatch cert modals never stack.
+let certModalActive = false;
+
+// First-use certificate confirmation (F4/F8). The Rust proxy REJECTS the first
+// connection to a server until the user confirms its fingerprint, so no
+// credential is ever sent to an unconfirmed host. This fires during the connect
+// page's health check (the first TLS contact), before login.
+ws.onCertFirstUse((evt: CertTofuEvent) => {
+  if (certModalActive) return;
+  certModalActive = true;
+
+  const modal = createCertFirstUseModal({
     host: evt.host,
     fingerprint: evt.fingerprint,
+    onAccept: () => {
+      modal.destroy?.();
+      certModalActive = false;
+      void (async () => {
+        try {
+          await ws.acceptCertFingerprint(evt.host, evt.fingerprint);
+          // Refresh server health so the now-trusted host becomes reachable,
+          // and resume a pending connect if one was in flight.
+          rerunConnectHealth?.();
+          if (lastConnectHost && lastConnectToken) {
+            ws.connect({ host: lastConnectHost, token: lastConnectToken });
+          }
+        } catch (err) {
+          log.error("Failed to trust first-use certificate", err);
+        }
+      })();
+    },
+    onReject: () => {
+      modal.destroy?.();
+      certModalActive = false;
+    },
   });
-  const banner = document.createElement("div");
-  Object.assign(banner.style, {
-    position: "fixed",
-    top: "12px",
-    left: "50%",
-    transform: "translateX(-50%)",
-    background: "#2d5a27",
-    color: "#e0e0e0",
-    padding: "10px 20px",
-    borderRadius: "8px",
-    fontSize: "13px",
-    zIndex: "10000",
-    boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
-    cursor: "default",
-  });
-  banner.textContent = `New server certificate trusted for ${evt.host}`;
-  banner.title = `SHA-256: ${evt.fingerprint}`;
-  document.body.appendChild(banner);
-  setTimeout(() => banner.remove(), 8000);
+  modal.mount(document.body);
 });
-
-// Certificate mismatch modal handler
-let certModalActive = false;
 ws.onCertMismatch((evt: CertTofuEvent) => {
   if (certModalActive) return;
   certModalActive = true;
@@ -168,6 +180,10 @@ ws.onCertMismatch((evt: CertTofuEvent) => {
   });
   modal.mount(document.body);
 });
+
+// Register the global cert-tofu listener now so first-use / mismatch prompts
+// are received during the connect page's health checks, before any WS connect.
+void ws.startCertListener();
 
 // Current page component reference for cleanup
 let currentPage: { destroy?(): void } | null = null;
@@ -224,6 +240,8 @@ function renderPage(pageId: "connect" | "main"): void {
   currentPage?.destroy?.();
   currentPage = null;
   appEl!.textContent = "";
+  // Only valid while the connect page is mounted (re-set in its render branch).
+  rerunConnectHealth = null;
 
   // Shared helper for post-auth WS connect + overlay flow
   function wirePostAuth(
@@ -432,6 +450,10 @@ function renderPage(pageId: "connect" | "main"): void {
         connectPage.destroy?.();
       },
     };
+
+    // Expose a health-refresh hook so trusting a first-use certificate can
+    // re-check the now-reachable server without a full page navigation.
+    rerunConnectHealth = () => runHealthChecks(connectPage, getProfileList());
 
     // Load saved profiles and kick off health checks
     void (async () => {

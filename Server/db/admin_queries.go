@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -13,8 +14,8 @@ import (
 // ─── Setup ───────────────────────────────────────────────────────────────────
 
 // UserCount returns the total number of registered users.
-func (d *DB) UserCount() (int64, error) {
-	count, err := d.q.UserCount(dbCtx())
+func (d *DB) UserCount(ctx context.Context) (int64, error) {
+	count, err := d.q.UserCount(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("UserCount: %w", err)
 	}
@@ -26,20 +27,20 @@ func (d *DB) UserCount() (int64, error) {
 // GetServerStats returns aggregate counts for the admin dashboard.
 // DBSizeBytes is 0 for in-memory databases (page_count * page_size returns
 // a meaningful value only for file-backed databases).
-func (d *DB) GetServerStats() (*ServerStats, error) {
+func (d *DB) GetServerStats(ctx context.Context) (*ServerStats, error) {
 	stats := &ServerStats{}
 	var err error
 
-	if stats.UserCount, err = d.q.CountUsers(dbCtx()); err != nil {
+	if stats.UserCount, err = d.q.CountUsers(ctx); err != nil {
 		return nil, fmt.Errorf("GetServerStats users: %w", err)
 	}
-	if stats.MessageCount, err = d.q.CountActiveMessages(dbCtx()); err != nil {
+	if stats.MessageCount, err = d.q.CountActiveMessages(ctx); err != nil {
 		return nil, fmt.Errorf("GetServerStats messages: %w", err)
 	}
-	if stats.ChannelCount, err = d.q.CountChannels(dbCtx()); err != nil {
+	if stats.ChannelCount, err = d.q.CountChannels(ctx); err != nil {
 		return nil, fmt.Errorf("GetServerStats channels: %w", err)
 	}
-	if stats.InviteCount, err = d.q.CountActiveInvites(dbCtx()); err != nil {
+	if stats.InviteCount, err = d.q.CountActiveInvites(ctx); err != nil {
 		return nil, fmt.Errorf("GetServerStats invites: %w", err)
 	}
 
@@ -47,10 +48,10 @@ func (d *DB) GetServerStats() (*ServerStats, error) {
 	// expressible as sqlc queries, so they stay on the raw connection.
 	// For :memory: databases this still works (returns the in-memory size).
 	var pageCount, pageSize int64
-	if err := d.sqlDB.QueryRow(`PRAGMA page_count`).Scan(&pageCount); err != nil {
+	if err := d.sqlDB.QueryRowContext(ctx, `PRAGMA page_count`).Scan(&pageCount); err != nil {
 		return nil, fmt.Errorf("GetServerStats page_count: %w", err)
 	}
-	if err := d.sqlDB.QueryRow(`PRAGMA page_size`).Scan(&pageSize); err != nil {
+	if err := d.sqlDB.QueryRowContext(ctx, `PRAGMA page_size`).Scan(&pageSize); err != nil {
 		return nil, fmt.Errorf("GetServerStats page_size: %w", err)
 	}
 	stats.DBSizeBytes = pageCount * pageSize
@@ -62,8 +63,8 @@ func (d *DB) GetServerStats() (*ServerStats, error) {
 
 // ListAllUsers returns users joined with their role name, ordered by ID.
 // limit=0 returns no rows.
-func (d *DB) ListAllUsers(limit, offset int) ([]UserWithRole, error) {
-	rows, err := d.q.ListAllUsers(dbCtx(), dbgen.ListAllUsersParams{
+func (d *DB) ListAllUsers(ctx context.Context, limit, offset int) ([]UserWithRole, error) {
+	rows, err := d.q.ListAllUsers(ctx, dbgen.ListAllUsersParams{
 		Limit:  int64(limit),
 		Offset: int64(offset),
 	})
@@ -92,8 +93,8 @@ func (d *DB) ListAllUsers(limit, offset int) ([]UserWithRole, error) {
 }
 
 // UpdateUserRole changes the role_id of a user.
-func (d *DB) UpdateUserRole(userID, roleID int64) error {
-	if err := d.q.UpdateUserRole(dbCtx(), dbgen.UpdateUserRoleParams{
+func (d *DB) UpdateUserRole(ctx context.Context, userID, roleID int64) error {
+	if err := d.q.UpdateUserRole(ctx, dbgen.UpdateUserRoleParams{
 		RoleID: roleID,
 		ID:     userID,
 	}); err != nil {
@@ -103,16 +104,16 @@ func (d *DB) UpdateUserRole(userID, roleID int64) error {
 }
 
 // ForceLogoutUser deletes all sessions for the given user ID.
-func (d *DB) ForceLogoutUser(userID int64) error {
-	if err := d.q.ForceLogoutUser(dbCtx(), userID); err != nil {
+func (d *DB) ForceLogoutUser(ctx context.Context, userID int64) error {
+	if err := d.q.ForceLogoutUser(ctx, userID); err != nil {
 		return fmt.Errorf("ForceLogoutUser: %w", err)
 	}
 	return nil
 }
 
 // GetUserSessions returns all active sessions for the given user ID.
-func (d *DB) GetUserSessions(userID int64) ([]Session, error) {
-	rows, err := d.q.GetUserSessions(dbCtx(), userID)
+func (d *DB) GetUserSessions(ctx context.Context, userID int64) ([]Session, error) {
+	rows, err := d.q.GetUserSessions(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("GetUserSessions: %w", err)
 	}
@@ -127,8 +128,8 @@ func (d *DB) GetUserSessions(userID int64) ([]Session, error) {
 
 // AdminCreateChannel creates a channel with full field control including position.
 // No sqlc query covers this exact INSERT shape, so it stays on raw SQL.
-func (d *DB) AdminCreateChannel(name, chanType, category, topic string, position int) (int64, error) {
-	res, err := d.sqlDB.Exec(
+func (d *DB) AdminCreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error) {
+	res, err := d.sqlDB.ExecContext(ctx,
 		`INSERT INTO channels (name, type, category, topic, position)
 		 VALUES (?, ?, ?, ?, ?)`,
 		name, chanType, strToNullPtr(category), strToNullPtr(topic), position,
@@ -140,8 +141,8 @@ func (d *DB) AdminCreateChannel(name, chanType, category, topic string, position
 }
 
 // AdminUpdateChannel updates all mutable channel fields.
-func (d *DB) AdminUpdateChannel(id int64, name, topic string, slowMode, position int, archived bool) error {
-	if err := d.q.AdminUpdateChannel(dbCtx(), dbgen.AdminUpdateChannelParams{
+func (d *DB) AdminUpdateChannel(ctx context.Context, id int64, name, topic string, slowMode, position int, archived bool) error {
+	if err := d.q.AdminUpdateChannel(ctx, dbgen.AdminUpdateChannelParams{
 		Name:     name,
 		Topic:    strToNullPtr(topic),
 		SlowMode: int64(slowMode),
@@ -155,8 +156,8 @@ func (d *DB) AdminUpdateChannel(id int64, name, topic string, slowMode, position
 }
 
 // AdminDeleteChannel removes a channel by ID (cascades to messages, etc.).
-func (d *DB) AdminDeleteChannel(id int64) error {
-	if err := d.q.DeleteChannel(dbCtx(), id); err != nil {
+func (d *DB) AdminDeleteChannel(ctx context.Context, id int64) error {
+	if err := d.q.DeleteChannel(ctx, id); err != nil {
 		return fmt.Errorf("AdminDeleteChannel: %w", err)
 	}
 	return nil
@@ -165,8 +166,8 @@ func (d *DB) AdminDeleteChannel(id int64) error {
 // ─── Audit Log ────────────────────────────────────────────────────────────────
 
 // LogAudit inserts an audit log entry.
-func (d *DB) LogAudit(actorID int64, action, targetType string, targetID int64, detail string) error {
-	if err := d.q.LogAudit(dbCtx(), dbgen.LogAuditParams{
+func (d *DB) LogAudit(ctx context.Context, actorID int64, action, targetType string, targetID int64, detail string) error {
+	if err := d.q.LogAudit(ctx, dbgen.LogAuditParams{
 		ActorID:    actorID,
 		Action:     action,
 		TargetType: targetType,
@@ -179,8 +180,8 @@ func (d *DB) LogAudit(actorID int64, action, targetType string, targetID int64, 
 }
 
 // GetAuditLog returns audit log entries ordered newest-first with pagination.
-func (d *DB) GetAuditLog(limit, offset int) ([]AuditEntry, error) {
-	rows, err := d.q.GetAuditLog(dbCtx(), dbgen.GetAuditLogParams{
+func (d *DB) GetAuditLog(ctx context.Context, limit, offset int) ([]AuditEntry, error) {
+	rows, err := d.q.GetAuditLog(ctx, dbgen.GetAuditLogParams{
 		Limit:  int64(limit),
 		Offset: int64(offset),
 	})
@@ -207,8 +208,8 @@ func (d *DB) GetAuditLog(limit, offset int) ([]AuditEntry, error) {
 
 // GetSetting returns the value for the given settings key.
 // Returns an error (wrapping sql.ErrNoRows) when the key does not exist.
-func (d *DB) GetSetting(key string) (string, error) {
-	value, err := d.q.GetSetting(dbCtx(), key)
+func (d *DB) GetSetting(ctx context.Context, key string) (string, error) {
+	value, err := d.q.GetSetting(ctx, key)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", fmt.Errorf("GetSetting: key %q: %w", key, ErrNotFound)
 	}
@@ -219,8 +220,8 @@ func (d *DB) GetSetting(key string) (string, error) {
 }
 
 // SetSetting upserts a setting value for the given key.
-func (d *DB) SetSetting(key, value string) error {
-	if err := d.q.SetSetting(dbCtx(), dbgen.SetSettingParams{
+func (d *DB) SetSetting(ctx context.Context, key, value string) error {
+	if err := d.q.SetSetting(ctx, dbgen.SetSettingParams{
 		Key:   key,
 		Value: value,
 	}); err != nil {
@@ -230,8 +231,8 @@ func (d *DB) SetSetting(key, value string) error {
 }
 
 // GetAllSettings returns all settings as a key→value map.
-func (d *DB) GetAllSettings() (map[string]string, error) {
-	rows, err := d.q.GetAllSettings(dbCtx())
+func (d *DB) GetAllSettings(ctx context.Context) (map[string]string, error) {
+	rows, err := d.q.GetAllSettings(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("GetAllSettings: %w", err)
 	}
@@ -244,8 +245,8 @@ func (d *DB) GetAllSettings() (map[string]string, error) {
 
 // CountUsersWithoutTOTP returns the number of non-banned users that do not
 // currently have a confirmed TOTP secret.
-func (d *DB) CountUsersWithoutTOTP() (int, error) {
-	count, err := d.q.CountUsersWithoutTOTP(dbCtx())
+func (d *DB) CountUsersWithoutTOTP(ctx context.Context) (int, error) {
+	count, err := d.q.CountUsersWithoutTOTP(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("CountUsersWithoutTOTP: %w", err)
 	}
@@ -266,13 +267,13 @@ func (d *DB) CountUsersWithoutTOTP() (int, error) {
 //
 // The caller in handleBackup constructs the path from a hardcoded directory
 // and a timestamp — no user input reaches this function.
-func (d *DB) BackupTo(path string) error {
-	return d.BackupToSafe(path, filepath.Join("data", "backups"))
+func (d *DB) BackupTo(ctx context.Context, path string) error {
+	return d.BackupToSafe(ctx, path, filepath.Join("data", "backups"))
 }
 
 // BackupToSafe is the internal implementation that accepts an explicit safe
 // root directory. Exported for testing with isolated directories.
-func (d *DB) BackupToSafe(path, safeRoot string) error {
+func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 	clean := filepath.Clean(path)
 
 	absRoot, err := filepath.Abs(safeRoot)
@@ -310,7 +311,7 @@ func (d *DB) BackupToSafe(path, safeRoot string) error {
 		return fmt.Errorf("BackupToSafe: path contains forbidden sequence %q", "--")
 	}
 
-	_, err = d.sqlDB.Exec(fmt.Sprintf("VACUUM INTO '%s'", absClean))
+	_, err = d.sqlDB.ExecContext(ctx, fmt.Sprintf("VACUUM INTO '%s'", absClean))
 	if err != nil {
 		return fmt.Errorf("BackupToSafe: %w", err)
 	}

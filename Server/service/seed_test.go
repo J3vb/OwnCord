@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"strconv"
 	"testing"
 
@@ -34,7 +35,7 @@ func newTestDB(t *testing.T) *db.DB {
 // collides with one of the migration-seeded defaults).
 func seedRole(t *testing.T, database *db.DB, r *db.Role) {
 	t.Helper()
-	_, err := database.Exec(
+	_, err := database.ExecContext(context.Background(),
 		`INSERT INTO roles (id, name, color, permissions, position, is_default)
 		 VALUES (?, ?, ?, ?, ?, 0)
 		 ON CONFLICT(id) DO UPDATE SET
@@ -54,7 +55,7 @@ func seedRole(t *testing.T, database *db.DB, r *db.Role) {
 // seedUser call and only writes role_id.
 func seedUserRole(t *testing.T, database *db.DB, userID, roleID int64) {
 	t.Helper()
-	_, err := database.Exec(
+	_, err := database.ExecContext(context.Background(),
 		`INSERT INTO users (id, username, password, role_id)
 		 VALUES (?, ?, '', ?)
 		 ON CONFLICT(id) DO UPDATE SET role_id=excluded.role_id`,
@@ -89,7 +90,7 @@ func seedUser(t *testing.T, database *db.DB, u *db.User) {
 	if u.Banned {
 		banned = 1
 	}
-	_, err := database.Exec(
+	_, err := database.ExecContext(context.Background(),
 		`INSERT INTO users (id, username, password, avatar, status, banned, ban_reason)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
@@ -113,7 +114,7 @@ func seedChannel(t *testing.T, database *db.DB, ch *db.Channel) {
 	if ctype == "" {
 		ctype = "text"
 	}
-	_, err := database.Exec(
+	_, err := database.ExecContext(context.Background(),
 		`INSERT INTO channels (id, name, type, category, topic, position)
 		 VALUES (?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
@@ -132,7 +133,7 @@ func seedChannel(t *testing.T, database *db.DB, ch *db.Channel) {
 // seedChannelOverride sets a per-channel permission override for a role.
 func seedChannelOverride(t *testing.T, database *db.DB, roleID, channelID, allow, deny int64) {
 	t.Helper()
-	_, err := database.Exec(
+	_, err := database.ExecContext(context.Background(),
 		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny)
 		 VALUES (?, ?, ?, ?)
 		 ON CONFLICT(channel_id, role_id) DO UPDATE SET
@@ -148,7 +149,7 @@ func seedChannelOverride(t *testing.T, database *db.DB, roleID, channelID, allow
 // seedDMParticipant adds a user as a participant of a DM channel.
 func seedDMParticipant(t *testing.T, database *db.DB, channelID, userID int64) {
 	t.Helper()
-	_, err := database.Exec(
+	_, err := database.ExecContext(context.Background(),
 		`INSERT OR IGNORE INTO dm_participants (channel_id, user_id) VALUES (?, ?)`,
 		channelID, userID,
 	)
@@ -160,7 +161,7 @@ func seedDMParticipant(t *testing.T, database *db.DB, channelID, userID int64) {
 // seedBlock records that blockerID has blocked blockedID.
 func seedBlock(t *testing.T, database *db.DB, blockerID, blockedID int64) {
 	t.Helper()
-	_, err := database.Exec(
+	_, err := database.ExecContext(context.Background(),
 		`INSERT OR IGNORE INTO user_blocks (blocker_id, blocked_id) VALUES (?, ?)`,
 		blockerID, blockedID,
 	)

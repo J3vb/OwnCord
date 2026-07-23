@@ -9,25 +9,6 @@ import (
 	"context"
 )
 
-const getDefaultRole = `-- name: GetDefaultRole :one
-SELECT id, name, color, permissions, position, is_default
-FROM roles WHERE is_default = 1 LIMIT 1
-`
-
-func (q *Queries) GetDefaultRole(ctx context.Context) (Role, error) {
-	row := q.db.QueryRowContext(ctx, getDefaultRole)
-	var i Role
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Color,
-		&i.Permissions,
-		&i.Position,
-		&i.IsDefault,
-	)
-	return i, err
-}
-
 const getRoleByID = `-- name: GetRoleByID :one
 SELECT id, name, color, permissions, position, is_default
 FROM roles WHERE id = ?
