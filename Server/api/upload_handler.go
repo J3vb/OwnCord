@@ -186,7 +186,7 @@ func handleUpload(database *db.DB, store *storage.Storage, limiter *auth.RateLim
 		// Insert attachment record in DB (unlinked — message_id is NULL).
 		user, _ = r.Context().Value(UserKey).(*db.User)
 		safeFilename := sanitizeUploadFilename(header.Filename)
-		if err := database.CreateAttachment(fileID, user.ID, safeFilename, fileID, mime, writtenBytes, width, height); err != nil {
+		if err := database.CreateAttachment(r.Context(), fileID, user.ID, safeFilename, fileID, mime, writtenBytes, width, height); err != nil {
 			// Clean up stored file on DB failure.
 			_ = store.Delete(fileID)
 			slog.Error("failed to create attachment record", "error", err)
@@ -223,7 +223,7 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 		role, _ := r.Context().Value(RoleKey).(*db.Role)
 
 		// Look up attachment metadata with channel context.
-		aa, err := database.GetAttachmentWithChannel(fileID)
+		aa, err := database.GetAttachmentWithChannel(r.Context(), fileID)
 		if err != nil {
 			slog.Error("failed to look up attachment", "id", fileID, "error", err)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{
@@ -269,7 +269,7 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 						})
 						return
 					}
-					ok, dmErr := database.IsDMParticipant(user.ID, *aa.ChannelID)
+					ok, dmErr := database.IsDMParticipant(r.Context(), user.ID, *aa.ChannelID)
 					if dmErr != nil || !ok {
 						writeJSON(w, http.StatusForbidden, errorResponse{
 							Error:   "FORBIDDEN",
@@ -277,7 +277,7 @@ func handleServeFile(database *db.DB, store *storage.Storage, allowedOrigins []s
 						})
 						return
 					}
-				} else if user == nil || !permSvc.HasChannelPerm(user.ID, *aa.ChannelID, permissions.ReadMessages) {
+				} else if user == nil || !permSvc.HasChannelPerm(r.Context(), user.ID, *aa.ChannelID, permissions.ReadMessages) {
 					writeJSON(w, http.StatusForbidden, errorResponse{
 						Error:   "FORBIDDEN",
 						Message: "you do not have access to this file",

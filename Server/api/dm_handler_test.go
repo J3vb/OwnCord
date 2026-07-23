@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -154,13 +155,13 @@ func (m *mockBroadcaster) SendToUser(userID int64, msg []byte) bool {
 // dmCreateToken creates a user+session and returns the plaintext token.
 func dmCreateToken(t *testing.T, database *db.DB, username string, roleID int) string {
 	t.Helper()
-	_, err := database.CreateUser(username, "$2a$12$fake", roleID)
+	_, err := database.CreateUser(context.Background(), username, "$2a$12$fake", roleID)
 	if err != nil {
 		t.Fatalf("CreateUser %q: %v", username, err)
 	}
 	token := "dmtest-token-" + username
 	hash := auth.HashToken(token)
-	_, err = database.Exec(
+	_, err = database.ExecContext(context.Background(),
 		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at)
 		 SELECT id, ?, 'test', '127.0.0.1', '2099-01-01T00:00:00Z' FROM users WHERE username = ?`,
 		hash, username,
@@ -225,7 +226,7 @@ func TestCreateDM_Success_NewDM(t *testing.T) {
 
 	tokenAlice := dmCreateToken(t, database, "alice", 4)
 	_ = dmCreateToken(t, database, "bob", 4)
-	bob, _ := database.GetUserByUsername("bob")
+	bob, _ := database.GetUserByUsername(context.Background(), "bob")
 
 	rr := dmPost(t, router, "/api/v1/dms", tokenAlice, map[string]any{
 		"recipient_id": bob.ID,
@@ -256,7 +257,7 @@ func TestCreateDM_Success_ExistingDM(t *testing.T) {
 
 	tokenAlice := dmCreateToken(t, database, "alice2", 4)
 	_ = dmCreateToken(t, database, "bob2", 4)
-	bob, _ := database.GetUserByUsername("bob2")
+	bob, _ := database.GetUserByUsername(context.Background(), "bob2")
 
 	// First call creates the DM.
 	rr1 := dmPost(t, router, "/api/v1/dms", tokenAlice, map[string]any{
@@ -328,7 +329,7 @@ func TestCreateDM_BadRequest_SelfDM(t *testing.T) {
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, nil)
 	token := dmCreateToken(t, database, "selfuser", 4)
-	self, _ := database.GetUserByUsername("selfuser")
+	self, _ := database.GetUserByUsername(context.Background(), "selfuser")
 
 	rr := dmPost(t, router, "/api/v1/dms", token, map[string]any{
 		"recipient_id": self.ID,
@@ -372,7 +373,7 @@ func TestListDMs_ReturnsOpenDMs(t *testing.T) {
 
 	tokenAlice := dmCreateToken(t, database, "list_alice", 4)
 	_ = dmCreateToken(t, database, "list_bob", 4)
-	bob, _ := database.GetUserByUsername("list_bob")
+	bob, _ := database.GetUserByUsername(context.Background(), "list_bob")
 
 	// Create a DM.
 	rr1 := dmPost(t, router, "/api/v1/dms", tokenAlice, map[string]any{
@@ -436,7 +437,7 @@ func TestCloseDM_Success(t *testing.T) {
 
 	tokenAlice := dmCreateToken(t, database, "close_alice", 4)
 	_ = dmCreateToken(t, database, "close_bob", 4)
-	bob, _ := database.GetUserByUsername("close_bob")
+	bob, _ := database.GetUserByUsername(context.Background(), "close_bob")
 
 	// Create a DM.
 	rr1 := dmPost(t, router, "/api/v1/dms", tokenAlice, map[string]any{
@@ -468,7 +469,7 @@ func TestCloseDM_Success_VerifyRemovedFromList(t *testing.T) {
 
 	tokenAlice := dmCreateToken(t, database, "closelist_alice", 4)
 	_ = dmCreateToken(t, database, "closelist_bob", 4)
-	bob, _ := database.GetUserByUsername("closelist_bob")
+	bob, _ := database.GetUserByUsername(context.Background(), "closelist_bob")
 
 	// Create a DM.
 	rr1 := dmPost(t, router, "/api/v1/dms", tokenAlice, map[string]any{
@@ -502,7 +503,7 @@ func TestCloseDM_Forbidden_NotParticipant(t *testing.T) {
 	tokenAlice := dmCreateToken(t, database, "forbid_alice", 4)
 	_ = dmCreateToken(t, database, "forbid_bob", 4)
 	tokenCharlie := dmCreateToken(t, database, "forbid_charlie", 4)
-	bob, _ := database.GetUserByUsername("forbid_bob")
+	bob, _ := database.GetUserByUsername(context.Background(), "forbid_bob")
 
 	// Alice creates DM with Bob.
 	rr1 := dmPost(t, router, "/api/v1/dms", tokenAlice, map[string]any{
@@ -549,7 +550,7 @@ func TestCloseDM_NilBroadcaster(t *testing.T) {
 
 	token := dmCreateToken(t, database, "nilbc_alice", 4)
 	_ = dmCreateToken(t, database, "nilbc_bob", 4)
-	bob, _ := database.GetUserByUsername("nilbc_bob")
+	bob, _ := database.GetUserByUsername(context.Background(), "nilbc_bob")
 
 	// Create a DM.
 	rr1 := dmPost(t, router, "/api/v1/dms", token, map[string]any{

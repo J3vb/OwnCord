@@ -1,14 +1,15 @@
 package db
 
 import (
+	"context"
 	"time"
 
 	"github.com/owncord/server/db/dbgen"
 )
 
 // UpsertLockout inserts or replaces a rate-limit lockout entry.
-func (d *DB) UpsertLockout(key string, expiresAt time.Time) error {
-	return d.q.UpsertLockout(dbCtx(), dbgen.UpsertLockoutParams{
+func (d *DB) UpsertLockout(ctx context.Context, key string, expiresAt time.Time) error {
+	return d.q.UpsertLockout(ctx, dbgen.UpsertLockoutParams{
 		Key:       key,
 		ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
 	})
@@ -16,8 +17,8 @@ func (d *DB) UpsertLockout(key string, expiresAt time.Time) error {
 
 // LoadActiveLockouts returns all lockouts that have not yet expired as
 // parallel slices of keys and expiry times.
-func (d *DB) LoadActiveLockouts() (keys []string, expiresAt []time.Time, err error) {
-	rows, err := d.q.LoadActiveLockouts(dbCtx(), time.Now().UTC().Format(time.RFC3339))
+func (d *DB) LoadActiveLockouts(ctx context.Context) (keys []string, expiresAt []time.Time, err error) {
+	rows, err := d.q.LoadActiveLockouts(ctx, time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -33,11 +34,11 @@ func (d *DB) LoadActiveLockouts() (keys []string, expiresAt []time.Time, err err
 }
 
 // CleanupExpiredLockouts removes lockout rows whose expiry has passed.
-func (d *DB) CleanupExpiredLockouts() error {
-	return d.q.CleanupExpiredLockouts(dbCtx(), time.Now().UTC().Format(time.RFC3339))
+func (d *DB) CleanupExpiredLockouts(ctx context.Context) error {
+	return d.q.CleanupExpiredLockouts(ctx, time.Now().UTC().Format(time.RFC3339))
 }
 
 // DeleteLockout removes a single lockout entry.
-func (d *DB) DeleteLockout(key string) error {
-	return d.q.DeleteLockout(dbCtx(), key)
+func (d *DB) DeleteLockout(ctx context.Context, key string) error {
+	return d.q.DeleteLockout(ctx, key)
 }

@@ -52,10 +52,10 @@ func withBearer(req *http.Request, token string) *http.Request {
 
 func TestAuthMiddleware_ValidToken(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser("alice", "hash", 4)
+	uid, _ := database.CreateUser(context.Background(), "alice", "hash", 4)
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
-	_, _ = database.CreateSession(uid, hash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
 	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -100,13 +100,13 @@ func TestAuthMiddleware_InvalidToken(t *testing.T) {
 
 func TestAuthMiddleware_ExpiredSession(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser("bob", "hash", 4)
+	uid, _ := database.CreateUser(context.Background(), "bob", "hash", 4)
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
 
 	// Insert an already-expired session.
 	pastTime := time.Now().Add(-time.Hour).UTC().Format("2006-01-02 15:04:05")
-	_, _ = database.Exec(
+	_, _ = database.ExecContext(context.Background(),
 		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at) VALUES (?, ?, ?, ?, ?)`,
 		uid, hash, "test", "127.0.0.1", pastTime,
 	)
@@ -155,21 +155,21 @@ func TestAuthMiddleware_DanglingRoleUnauthorized(t *testing.T) {
 	// users.role_id has a FK to roles(id), so the dangling row can only be
 	// created with FK enforcement momentarily off (db.Open pins the pool to a
 	// single connection, so the pragma applies to the inserts that follow).
-	if _, err := database.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+	if _, err := database.ExecContext(context.Background(), `PRAGMA foreign_keys=OFF`); err != nil {
 		t.Fatalf("disable foreign keys: %v", err)
 	}
-	res, err := database.Exec(
+	res, err := database.ExecContext(context.Background(),
 		`INSERT INTO users (username, password, role_id) VALUES ('dangling', '$2a$12$fake', 999)`)
 	if err != nil {
 		t.Fatalf("insert dangling user: %v", err)
 	}
 	uid, _ := res.LastInsertId()
-	if _, err := database.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+	if _, err := database.ExecContext(context.Background(), `PRAGMA foreign_keys=ON`); err != nil {
 		t.Fatalf("re-enable foreign keys: %v", err)
 	}
 
 	token, _ := auth.GenerateToken()
-	if _, err := database.Exec(
+	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at)
 		 VALUES (?, ?, 'test', '127.0.0.1', '2099-01-01T00:00:00Z')`,
 		uid, auth.HashToken(token),
@@ -193,10 +193,10 @@ func TestAuthMiddleware_DanglingRoleUnauthorized(t *testing.T) {
 
 func TestRequirePermission_Allowed(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser("carol", "hash", 4) // Member role = 0x663
+	uid, _ := database.CreateUser(context.Background(), "carol", "hash", 4) // Member role = 0x663
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
-	_, _ = database.CreateSession(uid, hash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
 	h := api.AuthMiddleware(database)(
 		api.RequirePermission(permissions.SendMessages)(http.HandlerFunc(ok)),
@@ -214,10 +214,10 @@ func TestRequirePermission_Allowed(t *testing.T) {
 
 func TestRequirePermission_Forbidden(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser("dave", "hash", 4) // Member role = 0x663
+	uid, _ := database.CreateUser(context.Background(), "dave", "hash", 4) // Member role = 0x663
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
-	_, _ = database.CreateSession(uid, hash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
 	h := api.AuthMiddleware(database)(
 		api.RequirePermission(permissions.ManageRoles)(http.HandlerFunc(ok)),
@@ -236,10 +236,10 @@ func TestRequirePermission_Forbidden(t *testing.T) {
 func TestRequirePermission_Administrator_Bypass(t *testing.T) {
 	database := newAPITestDB(t)
 	// Owner role (id=1) has permissions 0x7FFFFFFF which includes ADMINISTRATOR (0x40000000)
-	uid, _ := database.CreateUser("owner", "hash", 1)
+	uid, _ := database.CreateUser(context.Background(), "owner", "hash", 1)
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
-	_, _ = database.CreateSession(uid, hash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
 	// Any permission should pass for ADMINISTRATOR
 	h := api.AuthMiddleware(database)(
@@ -262,10 +262,10 @@ func TestRequirePermission_Administrator_Bypass(t *testing.T) {
 // Member holds SendMessages, which was enough to make the mask non-zero.
 func TestRequirePermission_MultiBitRequiresAllBits(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser("multibit", "hash", 4) // Member role = 1635, has SendMessages, not ManageRoles
+	uid, _ := database.CreateUser(context.Background(), "multibit", "hash", 4) // Member role = 1635, has SendMessages, not ManageRoles
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
-	_, _ = database.CreateSession(uid, hash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
 	h := api.AuthMiddleware(database)(
 		api.RequirePermission(permissions.SendMessages | permissions.ManageRoles)(http.HandlerFunc(ok)),
@@ -411,11 +411,11 @@ func TestRateLimitMiddleware_XRealIPHonouredFromTrustedProxy(t *testing.T) {
 // with no expiry cannot pass the auth middleware.
 func TestAuthMiddleware_BannedUserBlocked(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser("banneduser", "hash", 4)
-	_ = database.BanUser(uid, "rule violation", nil) // permanent ban
+	uid, _ := database.CreateUser(context.Background(), "banneduser", "hash", 4)
+	_ = database.BanUser(context.Background(), uid, "rule violation", nil) // permanent ban
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
-	_, _ = database.CreateSession(uid, hash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
 	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -433,15 +433,15 @@ func TestAuthMiddleware_BannedUserBlocked(t *testing.T) {
 // expired in the past can pass the auth middleware.
 func TestAuthMiddleware_ExpiredBanAllowed(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser("expbanned", "hash", 4)
+	uid, _ := database.CreateUser(context.Background(), "expbanned", "hash", 4)
 
 	// Set ban with an expiry time in the past.
 	past := time.Now().UTC().Add(-time.Hour)
-	_ = database.BanUser(uid, "temp ban", &past)
+	_ = database.BanUser(context.Background(), uid, "temp ban", &past)
 
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
-	_, _ = database.CreateSession(uid, hash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
 	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -459,15 +459,15 @@ func TestAuthMiddleware_ExpiredBanAllowed(t *testing.T) {
 // temporary ban whose expiry is in the future is still blocked.
 func TestAuthMiddleware_ActiveTemporaryBanBlocked(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser("tempbanned", "hash", 4)
+	uid, _ := database.CreateUser(context.Background(), "tempbanned", "hash", 4)
 
 	// Set ban with an expiry time in the future.
 	future := time.Now().UTC().Add(time.Hour)
-	_ = database.BanUser(uid, "temp ban", &future)
+	_ = database.BanUser(context.Background(), uid, "temp ban", &future)
 
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
-	_, _ = database.CreateSession(uid, hash, "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
 	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

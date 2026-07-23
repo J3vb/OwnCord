@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -136,9 +137,9 @@ func TestAdminAPI_ApplyUpdate_RequiresOwner(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
 
 	// Create admin user (not owner - role 2)
-	adminUID, _ := database.CreateUser("adminonly2", "hash", 2)
+	adminUID, _ := database.CreateUser(context.Background(), "adminonly2", "hash", 2)
 	token := "admin-role-token"
-	_, _ = database.CreateSession(adminUID, auth.HashToken(token), "test", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), adminUID, auth.HashToken(token), "test", "127.0.0.1")
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
 	if w.Code != http.StatusForbidden {

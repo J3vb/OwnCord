@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"io"
@@ -59,7 +60,7 @@ func TestWALModeEnabled(t *testing.T) {
 	database := openMemory(t)
 
 	var journalMode string
-	err := database.QueryRow("PRAGMA journal_mode;").Scan(&journalMode)
+	err := database.QueryRowContext(context.Background(), "PRAGMA journal_mode;").Scan(&journalMode)
 	if err != nil {
 		t.Fatalf("PRAGMA journal_mode query error: %v", err)
 	}
@@ -82,7 +83,7 @@ func TestWALModeEnabledOnFile(t *testing.T) {
 	defer database.Close() //nolint:errcheck
 
 	var journalMode string
-	if err := database.QueryRow("PRAGMA journal_mode;").Scan(&journalMode); err != nil {
+	if err := database.QueryRowContext(context.Background(), "PRAGMA journal_mode;").Scan(&journalMode); err != nil {
 		t.Fatalf("PRAGMA journal_mode query error: %v", err)
 	}
 	if journalMode != "wal" {
@@ -94,7 +95,7 @@ func TestForeignKeysEnabled(t *testing.T) {
 	database := openMemory(t)
 
 	var fkEnabled int
-	if err := database.QueryRow("PRAGMA foreign_keys;").Scan(&fkEnabled); err != nil {
+	if err := database.QueryRowContext(context.Background(), "PRAGMA foreign_keys;").Scan(&fkEnabled); err != nil {
 		t.Fatalf("PRAGMA foreign_keys query error: %v", err)
 	}
 	if fkEnabled != 1 {
@@ -118,7 +119,7 @@ func TestMigrateCreatesAllTables(t *testing.T) {
 	for _, table := range expectedTables {
 		t.Run(table, func(t *testing.T) {
 			var name string
-			err := database.QueryRow(
+			err := database.QueryRowContext(context.Background(),
 				"SELECT name FROM sqlite_master WHERE type='table' AND name=?",
 				table,
 			).Scan(&name)
@@ -139,7 +140,7 @@ func TestMigrateCreatesFTSTable(t *testing.T) {
 	}
 
 	var name string
-	err := database.QueryRow(
+	err := database.QueryRowContext(context.Background(),
 		"SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts'",
 	).Scan(&name)
 	if err == sql.ErrNoRows {
@@ -169,7 +170,7 @@ func TestMigrateInsertsDefaultRoles(t *testing.T) {
 	}
 
 	var count int
-	if err := database.QueryRow("SELECT COUNT(*) FROM roles").Scan(&count); err != nil {
+	if err := database.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM roles").Scan(&count); err != nil {
 		t.Fatalf("COUNT roles error: %v", err)
 	}
 	if count < 4 {
@@ -185,7 +186,7 @@ func TestMigrateInsertsDefaultSettings(t *testing.T) {
 	}
 
 	var value string
-	err := database.QueryRow("SELECT value FROM settings WHERE key='registration_open'").Scan(&value)
+	err := database.QueryRowContext(context.Background(), "SELECT value FROM settings WHERE key='registration_open'").Scan(&value)
 	if err != nil {
 		t.Fatalf("settings query error: %v", err)
 	}
@@ -211,7 +212,7 @@ func TestMigrateCreatesIndexes(t *testing.T) {
 	for _, idx := range expectedIndexes {
 		t.Run(idx, func(t *testing.T) {
 			var name string
-			err := database.QueryRow(
+			err := database.QueryRowContext(context.Background(),
 				"SELECT name FROM sqlite_master WHERE type='index' AND name=?",
 				idx,
 			).Scan(&name)
@@ -244,7 +245,7 @@ func TestQueryRow(t *testing.T) {
 
 	// Verify we can run a simple query via the exposed DB.
 	var schemaVersion string
-	err := database.QueryRow("SELECT value FROM settings WHERE key='schema_version'").Scan(&schemaVersion)
+	err := database.QueryRowContext(context.Background(), "SELECT value FROM settings WHERE key='schema_version'").Scan(&schemaVersion)
 	if err != nil {
 		t.Fatalf("QueryRow error: %v", err)
 	}
@@ -261,13 +262,13 @@ func TestExec(t *testing.T) {
 	}
 
 	// Insert a settings row using Exec.
-	_, err := database.Exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "test_key", "test_val")
+	_, err := database.ExecContext(context.Background(), "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "test_key", "test_val")
 	if err != nil {
 		t.Fatalf("Exec() error: %v", err)
 	}
 
 	var val string
-	if err := database.QueryRow("SELECT value FROM settings WHERE key='test_key'").Scan(&val); err != nil {
+	if err := database.QueryRowContext(context.Background(), "SELECT value FROM settings WHERE key='test_key'").Scan(&val); err != nil {
 		t.Fatalf("QueryRow after Exec error: %v", err)
 	}
 	if val != "test_val" {
@@ -282,7 +283,7 @@ func TestQuery(t *testing.T) {
 		t.Fatalf("Migrate() error: %v", err)
 	}
 
-	rows, err := database.Query("SELECT key FROM settings")
+	rows, err := database.QueryContext(context.Background(), "SELECT key FROM settings")
 	if err != nil {
 		t.Fatalf("Query() error: %v", err)
 	}
@@ -308,7 +309,7 @@ func TestBegin(t *testing.T) {
 		t.Fatalf("Migrate() error: %v", err)
 	}
 
-	tx, err := database.Begin()
+	tx, err := database.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Begin() error: %v", err)
 	}
@@ -325,7 +326,7 @@ func TestBegin(t *testing.T) {
 
 	// After rollback, tx_key should not exist.
 	var val string
-	err = database.QueryRow("SELECT value FROM settings WHERE key='tx_key'").Scan(&val)
+	err = database.QueryRowContext(context.Background(), "SELECT value FROM settings WHERE key='tx_key'").Scan(&val)
 	if err == nil {
 		t.Error("tx_key should not exist after rollback")
 	}
@@ -433,7 +434,7 @@ func TestMigrateFSSkipsNonSQL(t *testing.T) {
 
 	// The table from the .sql file should exist.
 	var name string
-	if err := database.QueryRow(
+	if err := database.QueryRowContext(context.Background(),
 		"SELECT name FROM sqlite_master WHERE type='table' AND name='test_skip'",
 	).Scan(&name); err != nil {
 		t.Error("table test_skip not found after MigrateFS")
@@ -465,7 +466,7 @@ func TestMigrateWALAndFKOnFile(t *testing.T) {
 
 	// Tables should exist.
 	var name string
-	if err := database.QueryRow(
+	if err := database.QueryRowContext(context.Background(),
 		"SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
 	).Scan(&name); err != nil {
 		t.Errorf("users table not found after migration on file db: %v", err)

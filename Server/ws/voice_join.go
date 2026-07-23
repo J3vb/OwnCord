@@ -58,13 +58,13 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		return
 	}
 
-	if !h.requireChannelPerm(c, channelID, permissions.ConnectVoice, "CONNECT_VOICE") {
+	if !h.requireChannelPerm(ctx, c, channelID, permissions.ConnectVoice, "CONNECT_VOICE") {
 		return
 	}
 
 	// Validate the target channel exists before any state changes (leaving
 	// the current voice channel, persisting join, etc.).
-	ch, err := h.db.GetChannel(channelID)
+	ch, err := h.db.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
 		c.sendMsg(buildErrorMsg(ErrCodeNotFound, "channel not found"))
 		return
@@ -111,7 +111,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		// background), the old row persists and JoinVoiceChannelIfCapacity's
 		// COUNT(*) may produce an incorrect result. Fail the switch so the
 		// user can retry cleanly.
-		vs, err := h.db.GetVoiceState(c.userID)
+		vs, err := h.db.GetVoiceState(ctx, c.userID)
 		if err != nil {
 			slog.Warn("handleVoiceJoin: could not verify voice state cleared",
 				"user_id", c.userID, "err", err)
@@ -131,7 +131,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	// Check channel capacity and persist to DB atomically.
 	maxUsers := ch.VoiceMaxUsers
 	if maxUsers > 0 {
-		if err := h.db.JoinVoiceChannelIfCapacity(c.userID, channelID, maxUsers); err != nil {
+		if err := h.db.JoinVoiceChannelIfCapacity(ctx, c.userID, channelID, maxUsers); err != nil {
 			if errors.Is(err, db.ErrChannelFull) {
 				c.sendMsg(buildErrorMsg(ErrCodeChannelFull, "voice channel is full"))
 				return
@@ -142,7 +142,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		}
 	} else {
 		// No capacity limit — use standard join.
-		if err := h.db.JoinVoiceChannel(c.userID, channelID); err != nil {
+		if err := h.db.JoinVoiceChannel(ctx, c.userID, channelID); err != nil {
 			slog.Error("ws handleVoiceJoin JoinVoiceChannel", "err", err, "user_id", c.userID)
 			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to join voice channel"))
 			return
@@ -151,10 +151,10 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 
 	// Load the persisted row immediately so later cleanup can target this exact
 	// join instance even if the user rejoins the same channel.
-	state, err := h.db.GetVoiceState(c.userID)
+	state, err := h.db.GetVoiceState(ctx, c.userID)
 	if err != nil || state == nil {
 		slog.Error("ws handleVoiceJoin GetVoiceState", "err", err, "user_id", c.userID)
-		h.rollbackVoiceJoin(c, channelID, false)
+		h.rollbackVoiceJoin(ctx, c, channelID, false)
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to join voice channel"))
 		return
 	}
@@ -167,14 +167,14 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	if h.livekit != nil {
 		// Derive publish permissions from role — prevents SFU-level bypass
 		// when client connects directly via direct_url (BUG-128).
-		canPublish := h.hasChannelPerm(c, channelID, permissions.SpeakVoice)
+		canPublish := h.hasChannelPerm(ctx, c, channelID, permissions.SpeakVoice)
 		canSubscribe := true
-		canVideo := h.hasChannelPerm(c, channelID, permissions.UseVideo)
-		canScreenShare := h.hasChannelPerm(c, channelID, permissions.ShareScreen)
+		canVideo := h.hasChannelPerm(ctx, c, channelID, permissions.UseVideo)
+		canScreenShare := h.hasChannelPerm(ctx, c, channelID, permissions.ShareScreen)
 		token, tokenErr := h.livekit.GenerateToken(c.userID, c.user.Username, channelID, state.JoinedAt, canPublish, canSubscribe, canVideo, canScreenShare)
 		if tokenErr != nil {
 			slog.Error("ws handleVoiceJoin GenerateToken", "err", tokenErr, "user_id", c.userID)
-			h.rollbackVoiceJoin(c, channelID, false)
+			h.rollbackVoiceJoin(ctx, c, channelID, false)
 			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to generate voice token"))
 			return
 		}
@@ -202,7 +202,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	h.BroadcastToAll(buildVoiceState(*state))
 
 	// Send existing channel voice states to the joiner.
-	existing, err := h.db.GetChannelVoiceStates(channelID)
+	existing, err := h.db.GetChannelVoiceStates(ctx, channelID)
 	if err != nil {
 		slog.Error("ws handleVoiceJoin GetChannelVoiceStates", "err", err)
 		return
@@ -251,7 +251,7 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 
 // handleVoiceTokenRefreshV2 is the V2 (pure) handler for voice_token_refresh.
 // It generates a fresh LiveKit token for a client already in a voice channel.
-func handleVoiceTokenRefreshV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	userID := info.UserID
 	channelID := info.VoiceChannelID
@@ -269,15 +269,15 @@ func handleVoiceTokenRefreshV2(_ context.Context, cmd Command, info ClientInfo, 
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "voice not configured"}}
 	}
 
-	canPublish := hasPerm(d.DB, d.Permissions, userID, channelID, permissions.SpeakVoice)
+	canPublish := hasPerm(ctx, d.DB, d.Permissions, userID, channelID, permissions.SpeakVoice)
 	canSubscribe := true
-	canVideo := hasPerm(d.DB, d.Permissions, userID, channelID, permissions.UseVideo)
-	canScreenShare := hasPerm(d.DB, d.Permissions, userID, channelID, permissions.ShareScreen)
+	canVideo := hasPerm(ctx, d.DB, d.Permissions, userID, channelID, permissions.UseVideo)
+	canScreenShare := hasPerm(ctx, d.DB, d.Permissions, userID, channelID, permissions.ShareScreen)
 
 	joinToken := info.VoiceJoinToken
 	var result Result
 	if joinToken == "" {
-		state, stateErr := d.DB.GetVoiceState(userID)
+		state, stateErr := d.DB.GetVoiceState(ctx, userID)
 		if stateErr != nil || state == nil {
 			slog.Error("ws handleVoiceTokenRefreshV2 GetVoiceState", "err", stateErr, "user_id", userID)
 			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to refresh voice token"}}
@@ -305,9 +305,11 @@ func handleVoiceTokenRefreshV2(_ context.Context, cmd Command, info ClientInfo, 
 // rollbackVoiceJoin undoes a partially-completed voice join: clears the
 // client's voice channel ID, removes the DB voice state row, and broadcasts
 // voice_leave so other clients don't see a ghost participant.
-func (h *Hub) rollbackVoiceJoin(c *Client, channelID int64, broadcast bool) {
+func (h *Hub) rollbackVoiceJoin(ctx context.Context, c *Client, channelID int64, broadcast bool) {
 	c.clearVoiceChID()
-	if err := h.db.LeaveVoiceChannel(c.userID); err != nil {
+	// The compensating delete must run even when the join failed BECAUSE the
+	// connection died — that cancellation is the most common rollback trigger.
+	if err := h.db.LeaveVoiceChannel(context.WithoutCancel(ctx), c.userID); err != nil {
 		slog.Error("ws rollbackVoiceJoin LeaveVoiceChannel", "err", err,
 			"user_id", c.userID, "channel_id", channelID)
 	}

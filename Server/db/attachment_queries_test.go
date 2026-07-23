@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"context"
 	"testing"
 )
 
@@ -9,7 +10,7 @@ import (
 func TestGetAttachmentByID_NotFound(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	att, err := database.GetAttachmentByID("nonexistent-id")
+	att, err := database.GetAttachmentByID(context.Background(), "nonexistent-id")
 	if err != nil {
 		t.Errorf("GetAttachmentByID for nonexistent ID should return nil error, got %v", err)
 	}
@@ -22,7 +23,7 @@ func TestGetAttachmentByID_Found(t *testing.T) {
 	database := openMigratedMemory(t)
 
 	// Insert an attachment directly.
-	_, err := database.Exec(
+	_, err := database.ExecContext(context.Background(),
 		`INSERT INTO attachments (id, filename, stored_as, mime_type, size)
 		 VALUES (?, ?, ?, ?, ?)`,
 		"att-001", "photo.png", "stored-photo.png", "image/png", 12345,
@@ -31,7 +32,7 @@ func TestGetAttachmentByID_Found(t *testing.T) {
 		t.Fatalf("inserting attachment: %v", err)
 	}
 
-	att, err := database.GetAttachmentByID("att-001")
+	att, err := database.GetAttachmentByID(context.Background(), "att-001")
 	if err != nil {
 		t.Fatalf("GetAttachmentByID: %v", err)
 	}
@@ -57,7 +58,7 @@ func TestGetAttachmentByID_Found(t *testing.T) {
 func TestLinkAttachmentsToMessage_Empty(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	n, err := database.LinkAttachmentsToMessage(1, 1, nil)
+	n, err := database.LinkAttachmentsToMessage(context.Background(), 1, 1, nil)
 	if err != nil {
 		t.Fatalf("LinkAttachmentsToMessage(nil): %v", err)
 	}
@@ -70,11 +71,11 @@ func TestLinkAttachmentsToMessage_LinksUnlinked(t *testing.T) {
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "linkuser")
 	chID := seedChannel(t, database, "linkchan")
-	msgID, _ := database.CreateMessage(chID, userID, "with attachment", nil)
+	msgID, _ := database.CreateMessage(context.Background(), chID, userID, "with attachment", nil)
 
 	// Insert two unlinked attachments.
 	for _, id := range []string{"att-a", "att-b"} {
-		_, err := database.Exec(
+		_, err := database.ExecContext(context.Background(),
 			`INSERT INTO attachments (id, filename, stored_as, mime_type, size)
 			 VALUES (?, ?, ?, ?, ?)`,
 			id, "file.txt", "stored.txt", "text/plain", 100,
@@ -84,7 +85,7 @@ func TestLinkAttachmentsToMessage_LinksUnlinked(t *testing.T) {
 		}
 	}
 
-	n, err := database.LinkAttachmentsToMessage(msgID, userID, []string{"att-a", "att-b"})
+	n, err := database.LinkAttachmentsToMessage(context.Background(), msgID, userID, []string{"att-a", "att-b"})
 	if err != nil {
 		t.Fatalf("LinkAttachmentsToMessage: %v", err)
 	}
@@ -93,7 +94,7 @@ func TestLinkAttachmentsToMessage_LinksUnlinked(t *testing.T) {
 	}
 
 	// Verify linkage.
-	att, _ := database.GetAttachmentByID("att-a")
+	att, _ := database.GetAttachmentByID(context.Background(), "att-a")
 	if att.MessageID == nil || *att.MessageID != msgID {
 		t.Errorf("att-a MessageID = %v, want %d", att.MessageID, msgID)
 	}
@@ -103,17 +104,17 @@ func TestLinkAttachmentsToMessage_SkipsAlreadyLinked(t *testing.T) {
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "linkuser2")
 	chID := seedChannel(t, database, "linkchan2")
-	msg1, _ := database.CreateMessage(chID, userID, "msg1", nil)
-	msg2, _ := database.CreateMessage(chID, userID, "msg2", nil)
+	msg1, _ := database.CreateMessage(context.Background(), chID, userID, "msg1", nil)
+	msg2, _ := database.CreateMessage(context.Background(), chID, userID, "msg2", nil)
 
-	_, _ = database.Exec(
+	_, _ = database.ExecContext(context.Background(),
 		`INSERT INTO attachments (id, filename, stored_as, mime_type, size, message_id)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		"att-linked", "file.txt", "stored.txt", "text/plain", 100, msg1,
 	)
 
 	// Try to re-link to a different message — should skip (WHERE message_id IS NULL).
-	n, err := database.LinkAttachmentsToMessage(msg2, userID, []string{"att-linked"})
+	n, err := database.LinkAttachmentsToMessage(context.Background(), msg2, userID, []string{"att-linked"})
 	if err != nil {
 		t.Fatalf("LinkAttachmentsToMessage: %v", err)
 	}
@@ -131,23 +132,23 @@ func TestLinkAttachmentsToMessage_OwnershipGuard(t *testing.T) {
 	owner := seedUser(t, database, "att-owner")
 	other := seedUser(t, database, "att-other")
 	chID := seedChannel(t, database, "att-owner-ch")
-	msgID, _ := database.CreateMessage(chID, owner, "attachment carrier", nil)
+	msgID, _ := database.CreateMessage(context.Background(), chID, owner, "attachment carrier", nil)
 
-	if err := database.CreateAttachment("att-owned", owner, "o.txt", "s-o.txt", "text/plain", 1, nil, nil); err != nil {
+	if err := database.CreateAttachment(context.Background(), "att-owned", owner, "o.txt", "s-o.txt", "text/plain", 1, nil, nil); err != nil {
 		t.Fatalf("CreateAttachment att-owned: %v", err)
 	}
-	if err := database.CreateAttachment("att-foreign", other, "f.txt", "s-f.txt", "text/plain", 1, nil, nil); err != nil {
+	if err := database.CreateAttachment(context.Background(), "att-foreign", other, "f.txt", "s-f.txt", "text/plain", 1, nil, nil); err != nil {
 		t.Fatalf("CreateAttachment att-foreign: %v", err)
 	}
 	// Legacy row from before uploader tracking: uploader_id IS NULL.
-	if _, err := database.Exec(
+	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO attachments (id, filename, stored_as, mime_type, size)
 		 VALUES ('att-legacy', 'l.txt', 's-l.txt', 'text/plain', 1)`,
 	); err != nil {
 		t.Fatalf("inserting legacy attachment: %v", err)
 	}
 
-	n, err := database.LinkAttachmentsToMessage(msgID, owner,
+	n, err := database.LinkAttachmentsToMessage(context.Background(), msgID, owner,
 		[]string{"att-owned", "att-foreign", "att-legacy", "att-missing"})
 	if err != nil {
 		t.Fatalf("LinkAttachmentsToMessage: %v", err)
@@ -155,13 +156,13 @@ func TestLinkAttachmentsToMessage_OwnershipGuard(t *testing.T) {
 	if n != 2 {
 		t.Errorf("expected 2 linked (owned + legacy), got %d", n)
 	}
-	if att, _ := database.GetAttachmentByID("att-owned"); att.MessageID == nil || *att.MessageID != msgID {
+	if att, _ := database.GetAttachmentByID(context.Background(), "att-owned"); att.MessageID == nil || *att.MessageID != msgID {
 		t.Error("owner's unlinked attachment should link")
 	}
-	if att, _ := database.GetAttachmentByID("att-foreign"); att.MessageID != nil {
+	if att, _ := database.GetAttachmentByID(context.Background(), "att-foreign"); att.MessageID != nil {
 		t.Error("another user's attachment must never link (IDOR guard)")
 	}
-	if att, _ := database.GetAttachmentByID("att-legacy"); att.MessageID == nil {
+	if att, _ := database.GetAttachmentByID(context.Background(), "att-legacy"); att.MessageID == nil {
 		t.Error("legacy NULL-uploader attachment should be claimable")
 	}
 }
@@ -171,7 +172,7 @@ func TestLinkAttachmentsToMessage_OwnershipGuard(t *testing.T) {
 func TestGetAttachmentsByMessageIDs_Empty(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	result, err := database.GetAttachmentsByMessageIDs(nil)
+	result, err := database.GetAttachmentsByMessageIDs(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("GetAttachmentsByMessageIDs(nil): %v", err)
 	}
@@ -184,8 +185,8 @@ func TestGetAttachmentsByMessageIDs_GroupsByMessage(t *testing.T) {
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "attuser")
 	chID := seedChannel(t, database, "attchan")
-	msg1, _ := database.CreateMessage(chID, userID, "msg1", nil)
-	msg2, _ := database.CreateMessage(chID, userID, "msg2", nil)
+	msg1, _ := database.CreateMessage(context.Background(), chID, userID, "msg1", nil)
+	msg2, _ := database.CreateMessage(context.Background(), chID, userID, "msg2", nil)
 
 	// Two attachments on msg1, one on msg2.
 	for _, row := range []struct {
@@ -196,7 +197,7 @@ func TestGetAttachmentsByMessageIDs_GroupsByMessage(t *testing.T) {
 		{"att-1b", msg1},
 		{"att-2a", msg2},
 	} {
-		_, err := database.Exec(
+		_, err := database.ExecContext(context.Background(),
 			`INSERT INTO attachments (id, filename, stored_as, mime_type, size, message_id)
 			 VALUES (?, ?, ?, ?, ?, ?)`,
 			row.id, "f.txt", "s.txt", "text/plain", 50, row.msgID,
@@ -206,7 +207,7 @@ func TestGetAttachmentsByMessageIDs_GroupsByMessage(t *testing.T) {
 		}
 	}
 
-	result, err := database.GetAttachmentsByMessageIDs([]int64{msg1, msg2})
+	result, err := database.GetAttachmentsByMessageIDs(context.Background(), []int64{msg1, msg2})
 	if err != nil {
 		t.Fatalf("GetAttachmentsByMessageIDs: %v", err)
 	}

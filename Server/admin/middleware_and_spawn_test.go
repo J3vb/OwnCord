@@ -157,23 +157,23 @@ func TestOwnerOnlyMiddleware_RoleNotFound(t *testing.T) {
 
 	// Create a user initially with a valid role, then mutate role_id to a
 	// nonexistent value (disabling FK checks temporarily so SQLite allows it).
-	uid, err := database.CreateUser("orphanuser", "$2a$12$x", 1)
+	uid, err := database.CreateUser(context.Background(), "orphanuser", "$2a$12$x", 1)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	user, err := database.GetUserByID(uid)
+	user, err := database.GetUserByID(context.Background(), uid)
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByID: %v", err)
 	}
 
 	// Disable FK enforcement, update role_id, re-enable.
-	if _, err := database.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+	if _, err := database.ExecContext(context.Background(), `PRAGMA foreign_keys=OFF`); err != nil {
 		t.Fatalf("disable FK: %v", err)
 	}
-	if _, err := database.Exec(`UPDATE users SET role_id = 9999 WHERE id = ?`, uid); err != nil {
+	if _, err := database.ExecContext(context.Background(), `UPDATE users SET role_id = 9999 WHERE id = ?`, uid); err != nil {
 		t.Fatalf("UPDATE role_id: %v", err)
 	}
-	if _, err := database.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+	if _, err := database.ExecContext(context.Background(), `PRAGMA foreign_keys=ON`); err != nil {
 		t.Fatalf("re-enable FK: %v", err)
 	}
 	user.RoleID = 9999 // mirror the DB value in our in-memory struct
@@ -213,11 +213,11 @@ func TestOwnerOnlyMiddleware_RoleNotFound(t *testing.T) {
 func TestOwnerOnlyMiddleware_OwnerPassesThrough(t *testing.T) {
 	database := openWhiteboxTestDB(t)
 
-	uid, err := database.CreateUser("ownerpass", "$2a$12$x", 1)
+	uid, err := database.CreateUser(context.Background(), "ownerpass", "$2a$12$x", 1)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	user, err := database.GetUserByID(uid)
+	user, err := database.GetUserByID(context.Background(), uid)
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByID: %v", err)
 	}
@@ -251,23 +251,23 @@ func TestAdminAuthMiddleware_RoleNotFound(t *testing.T) {
 	database := openWhiteboxTestDB(t)
 	handler := NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, nil)
 
-	uid, err := database.CreateUser("noroleuser", "$2a$12$x", 1)
+	uid, err := database.CreateUser(context.Background(), "noroleuser", "$2a$12$x", 1)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	token := "norole-token"
-	if _, err := database.CreateSession(uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
 	// Disable FK enforcement, assign a non-existent role_id, re-enable.
-	if _, err := database.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+	if _, err := database.ExecContext(context.Background(), `PRAGMA foreign_keys=OFF`); err != nil {
 		t.Fatalf("disable FK: %v", err)
 	}
-	if _, err := database.Exec(`UPDATE users SET role_id = 9999 WHERE id = ?`, uid); err != nil {
+	if _, err := database.ExecContext(context.Background(), `UPDATE users SET role_id = 9999 WHERE id = ?`, uid); err != nil {
 		t.Fatalf("UPDATE role_id: %v", err)
 	}
-	if _, err := database.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+	if _, err := database.ExecContext(context.Background(), `PRAGMA foreign_keys=ON`); err != nil {
 		t.Fatalf("re-enable FK: %v", err)
 	}
 

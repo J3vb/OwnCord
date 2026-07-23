@@ -1,6 +1,7 @@
 package ws_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -291,8 +292,8 @@ func TestHandleVoiceScreenshare_NotInVoice2(t *testing.T) {
 func TestHandleVoiceMute_BadPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "mute-bad-payload")
-	chanID, _ := database.CreateChannel("mute-bp-ch", "voice", "", "", 0)
-	_ = database.JoinVoiceChannel(user.ID, chanID)
+	chanID, _ := database.CreateChannel(context.Background(), "mute-bp-ch", "voice", "", "", 0)
+	_ = database.JoinVoiceChannel(context.Background(), user.ID, chanID)
 
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
@@ -322,8 +323,8 @@ func TestHandleVoiceMute_BadPayload(t *testing.T) {
 func TestHandleVoiceDeafen_BadPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "deafen-bad-payload")
-	chanID, _ := database.CreateChannel("deafen-bp-ch", "voice", "", "", 0)
-	_ = database.JoinVoiceChannel(user.ID, chanID)
+	chanID, _ := database.CreateChannel(context.Background(), "deafen-bp-ch", "voice", "", "", 0)
+	_ = database.JoinVoiceChannel(context.Background(), user.ID, chanID)
 
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
@@ -355,8 +356,8 @@ func TestHandleVoiceDeafen_BadPayload(t *testing.T) {
 func TestHandleVoiceCamera_BadPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "cam-bad-payload")
-	chanID, _ := database.CreateChannel("cam-bp-ch", "voice", "", "", 0)
-	_ = database.JoinVoiceChannel(user.ID, chanID)
+	chanID, _ := database.CreateChannel(context.Background(), "cam-bp-ch", "voice", "", "", 0)
+	_ = database.JoinVoiceChannel(context.Background(), user.ID, chanID)
 
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
@@ -389,8 +390,8 @@ func TestHandleVoiceCamera_BadPayload(t *testing.T) {
 func TestHandleVoiceScreenshare_BadPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "share-bad-payload")
-	chanID, _ := database.CreateChannel("share-bp-ch", "voice", "", "", 0)
-	_ = database.JoinVoiceChannel(user.ID, chanID)
+	chanID, _ := database.CreateChannel(context.Background(), "share-bp-ch", "voice", "", "", 0)
+	_ = database.JoinVoiceChannel(context.Background(), user.ID, chanID)
 
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)

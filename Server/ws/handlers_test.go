@@ -1,6 +1,7 @@
 package ws_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -85,11 +86,11 @@ func newHandlerHub(t *testing.T) (*ws.Hub, *db.DB) {
 // includes MANAGE_MESSAGES bit 0x10000).
 func seedModUser(t *testing.T, database *db.DB, username string) *db.User {
 	t.Helper()
-	_, err := database.CreateUser(username, "hash", 3) // roleID=3 → Moderator
+	_, err := database.CreateUser(context.Background(), username, "hash", 3) // roleID=3 → Moderator
 	if err != nil {
 		t.Fatalf("seedModUser CreateUser: %v", err)
 	}
-	user, err := database.GetUserByUsername(username)
+	user, err := database.GetUserByUsername(context.Background(), username)
 	if err != nil || user == nil {
 		t.Fatalf("seedModUser GetUserByUsername: %v", err)
 	}
@@ -100,11 +101,11 @@ func seedModUser(t *testing.T, database *db.DB, username string) *db.User {
 // does NOT have MANAGE_MESSAGES (0x10000=65536).
 func seedMemberUser(t *testing.T, database *db.DB, username string) *db.User {
 	t.Helper()
-	_, err := database.CreateUser(username, "hash", 4) // roleID=4 → Member
+	_, err := database.CreateUser(context.Background(), username, "hash", 4) // roleID=4 → Member
 	if err != nil {
 		t.Fatalf("seedMemberUser CreateUser: %v", err)
 	}
-	user, err := database.GetUserByUsername(username)
+	user, err := database.GetUserByUsername(context.Background(), username)
 	if err != nil || user == nil {
 		t.Fatalf("seedMemberUser GetUserByUsername: %v", err)
 	}
@@ -115,12 +116,12 @@ func seedMemberUser(t *testing.T, database *db.DB, username string) *db.User {
 // given seconds value, then returns the channel ID.
 func seedChannelWithSlowMode(t *testing.T, database *db.DB, name string, slowModeSecs int) int64 {
 	t.Helper()
-	chID, err := database.CreateChannel(name, "text", "", "", 0)
+	chID, err := database.CreateChannel(context.Background(), name, "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("seedChannelWithSlowMode CreateChannel: %v", err)
 	}
 	if slowModeSecs > 0 {
-		if err := database.SetChannelSlowMode(chID, slowModeSecs); err != nil {
+		if err := database.SetChannelSlowMode(context.Background(), chID, slowModeSecs); err != nil {
 			t.Fatalf("seedChannelWithSlowMode SetChannelSlowMode: %v", err)
 		}
 	}
@@ -194,7 +195,7 @@ func TestSessionExpiry_ValidSessionAllowsMessages(t *testing.T) {
 		t.Fatalf("GenerateToken: %v", err)
 	}
 	hash := auth.HashToken(token)
-	if _, err := database.CreateSession(user.ID, hash, "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), user.ID, hash, "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -228,11 +229,11 @@ func TestSessionExpiry_ExpiredSessionClosesConnection(t *testing.T) {
 		t.Fatalf("GenerateToken: %v", err)
 	}
 	hash := auth.HashToken(token)
-	if _, err := database.CreateSession(user.ID, hash, "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), user.ID, hash, "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	// Delete the session to simulate it being expired/revoked.
-	if err := database.DeleteSession(hash); err != nil {
+	if err := database.DeleteSession(context.Background(), hash); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
 	}
 
@@ -501,7 +502,7 @@ func chatSendMsgWithAttachments(channelID int64, content string, attachmentIDs [
 // denyAttachOnChannel inserts a channel_override that denies ATTACH_FILES.
 func denyAttachOnChannel(t *testing.T, database *db.DB, channelID, roleID int64) {
 	t.Helper()
-	_, err := database.Exec(
+	_, err := database.ExecContext(context.Background(),
 		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, ?, 0, ?)`,
 		channelID, roleID, permissions.AttachFiles,
 	)
@@ -536,7 +537,7 @@ func TestChatSend_AttachmentsDeniedNoMessageCreated(t *testing.T) {
 
 	// Verify no message was persisted in the database.
 	var count int
-	err := database.QueryRow("SELECT COUNT(*) FROM messages WHERE channel_id = ?", chID).Scan(&count)
+	err := database.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM messages WHERE channel_id = ?", chID).Scan(&count)
 	if err != nil {
 		t.Fatalf("count query: %v", err)
 	}
@@ -739,7 +740,7 @@ func TestChatSend_SuccessWithReplyTo(t *testing.T) {
 	hub, database := newHandlerHub(t)
 	user := seedOwnerUser(t, database, "send-reply1")
 	chID := seedTestChannel(t, database, "send-reply-chan")
-	parentMsgID, err := database.CreateMessage(chID, user.ID, "parent message", nil)
+	parentMsgID, err := database.CreateMessage(context.Background(), chID, user.ID, "parent message", nil)
 	if err != nil {
 		t.Fatalf("CreateMessage parent: %v", err)
 	}
@@ -851,7 +852,7 @@ func TestPresence_RateLimit_ReturnsError(t *testing.T) {
 // and returns its ID.
 func seedMessage(t *testing.T, database *db.DB, channelID, userID int64, content string) int64 {
 	t.Helper()
-	id, err := database.CreateMessage(channelID, userID, content, nil)
+	id, err := database.CreateMessage(context.Background(), channelID, userID, content, nil)
 	if err != nil {
 		t.Fatalf("seedMessage CreateMessage: %v", err)
 	}
@@ -1277,7 +1278,7 @@ func TestChatEdit_DeletedMessage_ReturnsForbidden(t *testing.T) {
 	msgID := seedMessage(t, database, chID, user.ID, "to be deleted")
 
 	// Soft-delete the message.
-	if err := database.DeleteMessage(msgID, user.ID, false); err != nil {
+	if err := database.DeleteMessage(context.Background(), msgID, user.ID, false); err != nil {
 		t.Fatalf("DeleteMessage: %v", err)
 	}
 
@@ -1331,7 +1332,7 @@ func TestReaction_RemoveReaction_BroadcastsReactionUpdate(t *testing.T) {
 	msgID := seedMessage(t, database, chID, user.ID, "react to me 2")
 
 	// Pre-seed the reaction so removal has something to remove.
-	if err := database.AddReaction(msgID, user.ID, "❤️"); err != nil {
+	if err := database.AddReaction(context.Background(), msgID, user.ID, "❤️"); err != nil {
 		t.Fatalf("seedReaction: %v", err)
 	}
 
@@ -1524,7 +1525,7 @@ func TestReaction_DeletedMessage_ReturnsBadRequest(t *testing.T) {
 	msgID := seedMessage(t, database, chID, user.ID, "to be deleted")
 
 	// Soft-delete the message.
-	if err := database.DeleteMessage(msgID, user.ID, false); err != nil {
+	if err := database.DeleteMessage(context.Background(), msgID, user.ID, false); err != nil {
 		t.Fatalf("DeleteMessage: %v", err)
 	}
 
@@ -1960,12 +1961,12 @@ func TestHandleMessage_BannedUser_GetKickedAfterSessionCheck(t *testing.T) {
 		t.Fatalf("GenerateToken: %v", err)
 	}
 	hash := auth.HashToken(token)
-	if _, err := database.CreateSession(user.ID, hash, "test", "127.0.0.1"); err != nil {
+	if _, err := database.CreateSession(context.Background(), user.ID, hash, "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
 	// Ban the user in the database (permanent ban, no expiry).
-	if _, err := database.Exec(
+	if _, err := database.ExecContext(context.Background(),
 		`UPDATE users SET banned=1, ban_reason='test ban', ban_expires=NULL WHERE id=?`,
 		user.ID,
 	); err != nil {

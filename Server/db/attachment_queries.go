@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -33,8 +34,8 @@ type AttachmentAccess struct {
 // CreateAttachment inserts a new attachment record (initially unlinked to any message).
 // uploaderID records who uploaded the file for ownership checks on unlinked files.
 // width and height are optional image dimensions (pass nil for non-image files).
-func (d *DB) CreateAttachment(id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error {
-	if err := d.q.CreateAttachment(dbCtx(), dbgen.CreateAttachmentParams{
+func (d *DB) CreateAttachment(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error {
+	if err := d.q.CreateAttachment(ctx, dbgen.CreateAttachmentParams{
 		ID:         id,
 		UploaderID: &uploaderID,
 		Filename:   filename,
@@ -50,8 +51,8 @@ func (d *DB) CreateAttachment(id string, uploaderID int64, filename, storedAs, m
 }
 
 // GetAttachmentByID returns the attachment with the given ID, or nil if not found.
-func (d *DB) GetAttachmentByID(id string) (*Attachment, error) {
-	r, err := d.q.GetAttachmentByID(dbCtx(), id)
+func (d *DB) GetAttachmentByID(ctx context.Context, id string) (*Attachment, error) {
+	r, err := d.q.GetAttachmentByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -74,8 +75,8 @@ func (d *DB) GetAttachmentByID(id string) (*Attachment, error) {
 // (channel ID and type) for access-control checks. Returns nil if the
 // attachment does not exist. ChannelID/ChannelType are nil/empty when the
 // attachment is unlinked or its message/channel was deleted.
-func (d *DB) GetAttachmentWithChannel(id string) (*AttachmentAccess, error) {
-	r, err := d.q.GetAttachmentWithChannel(dbCtx(), id)
+func (d *DB) GetAttachmentWithChannel(ctx context.Context, id string) (*AttachmentAccess, error) {
+	r, err := d.q.GetAttachmentWithChannel(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -107,7 +108,7 @@ func (d *DB) GetAttachmentWithChannel(id string) (*AttachmentAccess, error) {
 // is the atomic attachment-IDOR guard for message sends: ownership is
 // enforced in the same statement that links, so there is no check-then-link
 // race. Returns the number of rows updated.
-func (d *DB) LinkAttachmentsToMessage(messageID, uploaderID int64, attachmentIDs []string) (int64, error) {
+func (d *DB) LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) (int64, error) {
 	if len(attachmentIDs) == 0 {
 		return 0, nil
 	}
@@ -127,7 +128,7 @@ func (d *DB) LinkAttachmentsToMessage(messageID, uploaderID int64, attachmentIDs
 		   AND (uploader_id = ? OR uploader_id IS NULL)`,
 		strings.Join(placeholders, ","),
 	)
-	res, err := d.sqlDB.Exec(query, args...)
+	res, err := d.sqlDB.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("LinkAttachmentsToMessage: %w", err)
 	}
@@ -135,7 +136,7 @@ func (d *DB) LinkAttachmentsToMessage(messageID, uploaderID int64, attachmentIDs
 }
 
 // GetAttachmentsByMessageIDs returns attachments grouped by message ID.
-func (d *DB) GetAttachmentsByMessageIDs(msgIDs []int64) (map[int64][]AttachmentInfo, error) {
+func (d *DB) GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (map[int64][]AttachmentInfo, error) {
 	if len(msgIDs) == 0 {
 		return map[int64][]AttachmentInfo{}, nil
 	}
@@ -152,7 +153,7 @@ func (d *DB) GetAttachmentsByMessageIDs(msgIDs []int64) (map[int64][]AttachmentI
 		 FROM attachments WHERE message_id IN (%s)`,
 		strings.Join(placeholders, ","),
 	)
-	rows, err := d.sqlDB.Query(query, args...)
+	rows, err := d.sqlDB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetAttachmentsByMessageIDs: %w", err)
 	}
@@ -184,8 +185,8 @@ func (d *DB) GetAttachmentsByMessageIDs(msgIDs []int64) (map[int64][]AttachmentI
 // BUG-132: Uses DELETE ... RETURNING to make select+delete atomic,
 // preventing a race where an attachment linked between SELECT and DELETE
 // would have its file deleted while the DB row survives.
-func (d *DB) DeleteOrphanedAttachments(cutoff string) ([]string, error) {
-	files, err := d.q.DeleteOrphanedAttachments(dbCtx(), cutoff)
+func (d *DB) DeleteOrphanedAttachments(ctx context.Context, cutoff string) ([]string, error) {
+	files, err := d.q.DeleteOrphanedAttachments(ctx, cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("DeleteOrphanedAttachments: %w", err)
 	}

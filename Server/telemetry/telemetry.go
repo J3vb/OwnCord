@@ -58,6 +58,9 @@ func String(k, v string) Attr { return Attr{Key: k, Value: v} }
 // Int64 constructs an int64 attribute.
 func Int64(k string, v int64) Attr { return Attr{Key: k, Value: v} }
 
+// Float64 constructs a float64 attribute.
+func Float64(k string, v float64) Attr { return Attr{Key: k, Value: v} }
+
 // Span is a single tracing span.
 type Span interface {
 	End()

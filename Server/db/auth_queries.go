@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -14,8 +15,8 @@ import (
 // ─── User Operations ──────────────────────────────────────────────────────────
 
 // CreateUser inserts a new user record and returns the assigned ID.
-func (d *DB) CreateUser(username, passwordHash string, roleID int) (int64, error) {
-	res, err := d.sqlDB.Exec(
+func (d *DB) CreateUser(ctx context.Context, username, passwordHash string, roleID int) (int64, error) {
+	res, err := d.sqlDB.ExecContext(ctx,
 		`INSERT INTO users (username, password, role_id) VALUES (?, ?, ?)`,
 		username, passwordHash, roleID,
 	)
@@ -28,8 +29,8 @@ func (d *DB) CreateUser(username, passwordHash string, roleID int) (int64, error
 // CreateOwnerIfEmpty atomically checks that no users exist and inserts the
 // first owner in a single transaction. Returns ErrConflict if any user already
 // exists, closing the TOCTOU race in the setup endpoint (BUG-119).
-func (d *DB) CreateOwnerIfEmpty(username, passwordHash string, roleID int) (int64, error) {
-	tx, err := d.sqlDB.Begin()
+func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash string, roleID int) (int64, error) {
+	tx, err := d.sqlDB.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("CreateOwnerIfEmpty begin: %w", err)
 	}
@@ -70,8 +71,8 @@ func (d *DB) CreateOwnerIfEmpty(username, passwordHash string, roleID int) (int6
 
 // CreateUserWithInvite atomically consumes an invite and creates the user in
 // the same transaction so a failed registration does not burn the invite.
-func (d *DB) CreateUserWithInvite(username, passwordHash string, roleID int, inviteCode string) (int64, error) {
-	tx, err := d.sqlDB.Begin()
+func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode string) (int64, error) {
+	tx, err := d.sqlDB.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("CreateUserWithInvite begin: %w", err)
 	}
@@ -120,8 +121,8 @@ func (d *DB) CreateUserWithInvite(username, passwordHash string, roleID int, inv
 
 // GetUserByUsername returns the user with the given username (case-insensitive),
 // or nil if not found.
-func (d *DB) GetUserByUsername(username string) (*User, error) {
-	u, err := d.q.GetUserByUsername(dbCtx(), username)
+func (d *DB) GetUserByUsername(ctx context.Context, username string) (*User, error) {
+	u, err := d.q.GetUserByUsername(ctx, username)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -132,8 +133,8 @@ func (d *DB) GetUserByUsername(username string) (*User, error) {
 }
 
 // GetUserByID returns the user with the given ID, or nil if not found.
-func (d *DB) GetUserByID(id int64) (*User, error) {
-	u, err := d.q.GetUserByID(dbCtx(), id)
+func (d *DB) GetUserByID(ctx context.Context, id int64) (*User, error) {
+	u, err := d.q.GetUserByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -144,8 +145,8 @@ func (d *DB) GetUserByID(id int64) (*User, error) {
 }
 
 // UpdateUserStatus sets the status column for the given user ID.
-func (d *DB) UpdateUserStatus(id int64, status string) error {
-	if err := d.q.UpdateUserStatus(dbCtx(), dbgen.UpdateUserStatusParams{
+func (d *DB) UpdateUserStatus(ctx context.Context, id int64, status string) error {
+	if err := d.q.UpdateUserStatus(ctx, dbgen.UpdateUserStatusParams{
 		Status: status,
 		ID:     id,
 	}); err != nil {
@@ -155,8 +156,8 @@ func (d *DB) UpdateUserStatus(id int64, status string) error {
 }
 
 // UpdateUserTOTPSecret sets or clears the TOTP secret for a user.
-func (d *DB) UpdateUserTOTPSecret(id int64, secret *string) error {
-	if err := d.q.UpdateUserTOTPSecret(dbCtx(), dbgen.UpdateUserTOTPSecretParams{
+func (d *DB) UpdateUserTOTPSecret(ctx context.Context, id int64, secret *string) error {
+	if err := d.q.UpdateUserTOTPSecret(ctx, dbgen.UpdateUserTOTPSecretParams{
 		TotpSecret: secret,
 		ID:         id,
 	}); err != nil {
@@ -167,8 +168,8 @@ func (d *DB) UpdateUserTOTPSecret(id int64, secret *string) error {
 
 // ResetAllUserStatuses sets all users to "offline". Called on server startup
 // to clear stale statuses from a previous run or crash.
-func (d *DB) ResetAllUserStatuses() error {
-	if err := d.q.ResetAllUserStatuses(dbCtx()); err != nil {
+func (d *DB) ResetAllUserStatuses(ctx context.Context) error {
+	if err := d.q.ResetAllUserStatuses(ctx); err != nil {
 		return fmt.Errorf("ResetAllUserStatuses: %w", err)
 	}
 	return nil
@@ -176,14 +177,14 @@ func (d *DB) ResetAllUserStatuses() error {
 
 // BanUser marks a user as banned with an optional expiry. Pass nil for a
 // permanent ban.
-func (d *DB) BanUser(id int64, reason string, expires *time.Time) error {
+func (d *DB) BanUser(ctx context.Context, id int64, reason string, expires *time.Time) error {
 	var expiresStr *string
 	if expires != nil {
 		s := expires.UTC().Format("2006-01-02T15:04:05Z")
 		expiresStr = &s
 	}
 	reasonCopy := reason
-	if err := d.q.BanUser(dbCtx(), dbgen.BanUserParams{
+	if err := d.q.BanUser(ctx, dbgen.BanUserParams{
 		BanReason:  &reasonCopy,
 		BanExpires: expiresStr,
 		ID:         id,
@@ -194,8 +195,8 @@ func (d *DB) BanUser(id int64, reason string, expires *time.Time) error {
 }
 
 // UnbanUser removes the ban from a user.
-func (d *DB) UnbanUser(id int64) error {
-	if err := d.q.UnbanUser(dbCtx(), id); err != nil {
+func (d *DB) UnbanUser(ctx context.Context, id int64) error {
+	if err := d.q.UnbanUser(ctx, id); err != nil {
 		return fmt.Errorf("UnbanUser: %w", err)
 	}
 	return nil
@@ -212,16 +213,16 @@ const maxSessionsPerUser = 25
 // tokenHash must already be hashed (never store plaintext tokens).
 // H-6: Enforces a per-user session cap by evicting the oldest session when
 // the limit is reached.
-func (d *DB) CreateSession(userID int64, tokenHash, device, ip string) (int64, error) {
+func (d *DB) CreateSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error) {
 	// Evict oldest sessions if at or above the cap.
-	_ = d.q.EvictOldestSessions(dbCtx(), dbgen.EvictOldestSessionsParams{
+	_ = d.q.EvictOldestSessions(ctx, dbgen.EvictOldestSessionsParams{
 		UserID: userID,
 		Offset: maxSessionsPerUser - 1,
 	})
 
 	expiresAt := time.Now().Add(sessionTTL).UTC().Format("2006-01-02T15:04:05Z")
 	deviceCopy, ipCopy := device, ip
-	res, err := d.q.InsertSession(dbCtx(), dbgen.InsertSessionParams{
+	res, err := d.q.InsertSession(ctx, dbgen.InsertSessionParams{
 		UserID:    userID,
 		Token:     tokenHash,
 		Device:    &deviceCopy,
@@ -236,8 +237,8 @@ func (d *DB) CreateSession(userID int64, tokenHash, device, ip string) (int64, e
 
 // GetSessionByTokenHash retrieves a session by its hashed token, or nil if
 // not found.
-func (d *DB) GetSessionByTokenHash(tokenHash string) (*Session, error) {
-	s, err := d.q.GetSessionByTokenHash(dbCtx(), tokenHash)
+func (d *DB) GetSessionByTokenHash(ctx context.Context, tokenHash string) (*Session, error) {
+	s, err := d.q.GetSessionByTokenHash(ctx, tokenHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -259,8 +260,8 @@ type SessionWithBanStatus struct {
 
 // GetSessionWithBanStatus returns the session joined with the user's ban
 // status in a single query. Returns nil, nil when not found.
-func (d *DB) GetSessionWithBanStatus(tokenHash string) (*SessionWithBanStatus, error) {
-	row, err := d.q.GetSessionWithBanStatus(dbCtx(), tokenHash)
+func (d *DB) GetSessionWithBanStatus(ctx context.Context, tokenHash string) (*SessionWithBanStatus, error) {
+	row, err := d.q.GetSessionWithBanStatus(ctx, tokenHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -285,8 +286,8 @@ func (d *DB) GetSessionWithBanStatus(tokenHash string) (*SessionWithBanStatus, e
 }
 
 // DeleteSession removes the session with the given token hash.
-func (d *DB) DeleteSession(tokenHash string) error {
-	if err := d.q.DeleteSessionByToken(dbCtx(), tokenHash); err != nil {
+func (d *DB) DeleteSession(ctx context.Context, tokenHash string) error {
+	if err := d.q.DeleteSessionByToken(ctx, tokenHash); err != nil {
 		return fmt.Errorf("DeleteSession: %w", err)
 	}
 	return nil
@@ -295,8 +296,8 @@ func (d *DB) DeleteSession(tokenHash string) error {
 // DeleteOtherSessions removes all sessions for the given user except the one
 // with keepSessionID. Used after password change or 2FA state change to
 // invalidate all other sessions (BUG-108).
-func (d *DB) DeleteOtherSessions(userID, keepSessionID int64) (int64, error) {
-	result, err := d.q.DeleteOtherSessions(dbCtx(), dbgen.DeleteOtherSessionsParams{
+func (d *DB) DeleteOtherSessions(ctx context.Context, userID, keepSessionID int64) (int64, error) {
+	result, err := d.q.DeleteOtherSessions(ctx, dbgen.DeleteOtherSessionsParams{
 		UserID: userID,
 		ID:     keepSessionID,
 	})
@@ -309,16 +310,16 @@ func (d *DB) DeleteOtherSessions(userID, keepSessionID int64) (int64, error) {
 
 // DeleteExpiredSessions removes all sessions whose expires_at is in the past.
 // Compares using strftime to handle both ISO-8601 and SQLite datetime formats.
-func (d *DB) DeleteExpiredSessions() error {
-	if err := d.q.DeleteExpiredSessions(dbCtx()); err != nil {
+func (d *DB) DeleteExpiredSessions(ctx context.Context) error {
+	if err := d.q.DeleteExpiredSessions(ctx); err != nil {
 		return fmt.Errorf("DeleteExpiredSessions: %w", err)
 	}
 	return nil
 }
 
 // TouchSession updates last_used for the session with the given token hash.
-func (d *DB) TouchSession(tokenHash string) error {
-	if err := d.q.TouchSession(dbCtx(), tokenHash); err != nil {
+func (d *DB) TouchSession(ctx context.Context, tokenHash string) error {
+	if err := d.q.TouchSession(ctx, tokenHash); err != nil {
 		return fmt.Errorf("TouchSession: %w", err)
 	}
 	return nil
@@ -328,7 +329,7 @@ func (d *DB) TouchSession(tokenHash string) error {
 
 // CreateInvite generates a random invite code, persists it, and returns the
 // code. maxUses=0 means unlimited. expiresAt=nil means never expires.
-func (d *DB) CreateInvite(createdBy int64, maxUses int, expiresAt *time.Time) (string, error) {
+func (d *DB) CreateInvite(ctx context.Context, createdBy int64, maxUses int, expiresAt *time.Time) (string, error) {
 	code, err := generateInviteCode()
 	if err != nil {
 		return "", fmt.Errorf("CreateInvite generate code: %w", err)
@@ -344,7 +345,7 @@ func (d *DB) CreateInvite(createdBy int64, maxUses int, expiresAt *time.Time) (s
 		expiresStr = &s
 	}
 
-	if err := d.q.CreateInvite(dbCtx(), dbgen.CreateInviteParams{
+	if err := d.q.CreateInvite(ctx, dbgen.CreateInviteParams{
 		Code:      code,
 		CreatedBy: createdBy,
 		MaxUses:   ptrItoI64(maxUsesVal),
@@ -356,8 +357,8 @@ func (d *DB) CreateInvite(createdBy int64, maxUses int, expiresAt *time.Time) (s
 }
 
 // GetInvite returns the invite for the given code, or nil if not found.
-func (d *DB) GetInvite(code string) (*Invite, error) {
-	r, err := d.q.GetInvite(dbCtx(), code)
+func (d *DB) GetInvite(ctx context.Context, code string) (*Invite, error) {
+	r, err := d.q.GetInvite(ctx, code)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -388,8 +389,8 @@ func (d *DB) GetInvite(code string) (*Invite, error) {
 //
 // If zero rows are affected the invite is missing, revoked, expired, or
 // exhausted — an error is returned in all such cases.
-func (d *DB) UseInviteAtomic(code string) error {
-	result, err := d.q.UseInviteAtomic(dbCtx(), code)
+func (d *DB) UseInviteAtomic(ctx context.Context, code string) error {
+	result, err := d.q.UseInviteAtomic(ctx, code)
 	if err != nil {
 		return fmt.Errorf("UseInviteAtomic: %w", err)
 	}
@@ -404,8 +405,8 @@ func (d *DB) UseInviteAtomic(code string) error {
 }
 
 // RevokeInvite marks an invite as revoked.
-func (d *DB) RevokeInvite(code string) error {
-	if err := d.q.RevokeInvite(dbCtx(), code); err != nil {
+func (d *DB) RevokeInvite(ctx context.Context, code string) error {
+	if err := d.q.RevokeInvite(ctx, code); err != nil {
 		return fmt.Errorf("RevokeInvite: %w", err)
 	}
 	return nil
@@ -424,8 +425,8 @@ type MemberSummary struct {
 
 // ListMembers returns non-banned users as lightweight summaries.
 // M-12: Limited to 1000 rows to prevent unbounded result sets on large servers.
-func (d *DB) ListMembers() ([]MemberSummary, error) {
-	rows, err := d.q.ListMembers(dbCtx())
+func (d *DB) ListMembers(ctx context.Context) ([]MemberSummary, error) {
+	rows, err := d.q.ListMembers(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ListMembers: %w", err)
 	}

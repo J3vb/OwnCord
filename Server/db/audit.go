@@ -1,13 +1,16 @@
 package db
 
-import "log/slog"
+import (
+	"context"
+	"log/slog"
+)
 
 // Auditor is the minimal audit-write surface WriteAudit needs. *DB satisfies
 // it directly, and the service layer's Store interface does too, so every
 // caller — api, admin, ws, service — can route its audit writes through this
 // one helper regardless of whether it holds a *DB or a narrower interface.
 type Auditor interface {
-	LogAudit(actorID int64, action, targetType string, targetID int64, detail string) error
+	LogAudit(ctx context.Context, actorID int64, action, targetType string, targetID int64, detail string) error
 }
 
 // WriteAudit records an audit entry best-effort.
@@ -19,8 +22,8 @@ type Auditor interface {
 // gap is visible in the logs. The detail string is intentionally not logged;
 // it can carry request-specific or sensitive text and the structured fields
 // already identify what was attempted.
-func WriteAudit(a Auditor, actorID int64, action, targetType string, targetID int64, detail string) {
-	if err := a.LogAudit(actorID, action, targetType, targetID, detail); err != nil {
+func WriteAudit(ctx context.Context, a Auditor, actorID int64, action, targetType string, targetID int64, detail string) {
+	if err := a.LogAudit(ctx, actorID, action, targetType, targetID, detail); err != nil {
 		slog.Error("audit log write failed",
 			"action", action,
 			"actor_id", actorID,

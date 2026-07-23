@@ -159,13 +159,14 @@ func (r *Registry) activateWithRuntime(ctx context.Context, platform any, inst *
 
 // platformDeactivate closes the wazero module held by inst without touching
 // the shared runtime. Safe to call on an instance that was never activated.
-// Called from DisablePlugin and Close.
-func (r *Registry) platformDeactivate(inst *Instance) {
+// Called from DisablePlugin and Close. Module teardown must run to completion
+// once started, so the caller's cancellation is detached (WithoutCancel).
+func (r *Registry) platformDeactivate(ctx context.Context, inst *Instance) {
 	if inst == nil || inst.module == nil {
 		return
 	}
 	if mod, ok := inst.module.(api.Module); ok {
-		_ = mod.Close(context.Background())
+		_ = mod.Close(context.WithoutCancel(ctx))
 	}
 	inst.module = nil
 }

@@ -4,6 +4,7 @@ package ws_test
 // to push the ws package above 80%.
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"strings"
@@ -100,11 +101,11 @@ func newCoverageHub(t *testing.T) (*ws.Hub, *db.DB) {
 
 func seedCoverageOwner(t *testing.T, database *db.DB, username string) *db.User {
 	t.Helper()
-	_, err := database.CreateUser(username, "hash", 1)
+	_, err := database.CreateUser(context.Background(), username, "hash", 1)
 	if err != nil {
 		t.Fatalf("seedCoverageOwner CreateUser: %v", err)
 	}
-	user, err := database.GetUserByUsername(username)
+	user, err := database.GetUserByUsername(context.Background(), username)
 	if err != nil || user == nil {
 		t.Fatalf("seedCoverageOwner GetUserByUsername: %v", err)
 	}
@@ -488,20 +489,20 @@ func TestHandleMessage_Ping_ReturnsPong(t *testing.T) {
 func TestBuildReady_VoiceChannelWithParticipants(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "ready-voice-user")
-	role, rErr := database.GetRoleByID(1)
+	role, rErr := database.GetRoleByID(context.Background(), 1)
 	if rErr != nil || role == nil {
 		t.Fatalf("GetRoleByID: %v", rErr)
 	}
 
 	// Create a voice channel.
-	vcID, err := database.CreateChannel("voice-room", "voice", "", "", 0)
+	vcID, err := database.CreateChannel(context.Background(), "voice-room", "voice", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel voice: %v", err)
 	}
 
 	// Create another user and join them to voice.
 	other := seedCoverageOwner(t, database, "ready-voice-other")
-	if err := database.JoinVoiceChannel(other.ID, vcID); err != nil {
+	if err := database.JoinVoiceChannel(context.Background(), other.ID, vcID); err != nil {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
 
@@ -529,17 +530,17 @@ func TestBuildReady_VoiceChannelWithParticipants(t *testing.T) {
 func TestBuildReady_MultipleChannelTypes(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "ready-multi-user")
-	role, rErr := database.GetRoleByID(1)
+	role, rErr := database.GetRoleByID(context.Background(), 1)
 	if rErr != nil || role == nil {
 		t.Fatalf("GetRoleByID: %v", rErr)
 	}
 
 	// Create text and voice channels.
-	_, err := database.CreateChannel("text-chan", "text", "General", "", 0)
+	_, err := database.CreateChannel(context.Background(), "text-chan", "text", "General", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel text: %v", err)
 	}
-	_, err = database.CreateChannel("voice-chan", "voice", "General", "", 1)
+	_, err = database.CreateChannel(context.Background(), "voice-chan", "voice", "General", "", 1)
 	if err != nil {
 		t.Fatalf("CreateChannel voice: %v", err)
 	}
@@ -695,7 +696,7 @@ func TestHandleVoiceCamera_NotInVoice(t *testing.T) {
 func TestHandleVoiceCamera_InvalidPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vc-bad-payload")
-	vcID, err := database.CreateChannel("cam-vc", "voice", "", "", 0)
+	vcID, err := database.CreateChannel(context.Background(), "cam-vc", "voice", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
@@ -746,7 +747,7 @@ func TestHandleVoiceScreenshare_NotInVoice(t *testing.T) {
 func TestHandleVoiceScreenshare_InvalidPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vs-bad-payload")
-	vcID, err := database.CreateChannel("screen-vc", "voice", "", "", 0)
+	vcID, err := database.CreateChannel(context.Background(), "screen-vc", "voice", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
@@ -947,11 +948,11 @@ func TestSendToUser_FullBuffer_ReturnsFalse(t *testing.T) {
 func TestHandleChatSend_WithAttachments_NoPermission(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	// Use a member user.
-	_, err := database.CreateUser("attach-noperm-user", "hash", 4)
+	_, err := database.CreateUser(context.Background(), "attach-noperm-user", "hash", 4)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	user, err := database.GetUserByUsername("attach-noperm-user")
+	user, err := database.GetUserByUsername(context.Background(), "attach-noperm-user")
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByUsername: %v", err)
 	}
@@ -959,7 +960,7 @@ func TestHandleChatSend_WithAttachments_NoPermission(t *testing.T) {
 	chID := seedTestChannel(t, database, "attach-noperm-chan")
 
 	// Deny ATTACH_FILES (0x0020) on this channel for Member role (id=4).
-	_, err = database.Exec("INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, 4, 0, 32)", chID)
+	_, err = database.ExecContext(context.Background(), "INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, 4, 0, 32)", chID)
 	if err != nil {
 		t.Fatalf("INSERT channel_overrides: %v", err)
 	}
@@ -1026,21 +1027,21 @@ func TestHandleChatSend_WithAttachments_Success(t *testing.T) {
 
 func TestHandleChatSend_SlowMode_EnforcedForMember(t *testing.T) {
 	hub, database := newCoverageHub(t)
-	_, err := database.CreateUser("slow-member-user", "hash", 4)
+	_, err := database.CreateUser(context.Background(), "slow-member-user", "hash", 4)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	user, err := database.GetUserByUsername("slow-member-user")
+	user, err := database.GetUserByUsername(context.Background(), "slow-member-user")
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByUsername: %v", err)
 	}
 
 	// Create channel with slow mode.
-	chID, err := database.CreateChannel("slow-chan", "text", "", "", 0)
+	chID, err := database.CreateChannel(context.Background(), "slow-chan", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
-	if err := database.SetChannelSlowMode(chID, 60); err != nil {
+	if err := database.SetChannelSlowMode(context.Background(), chID, 60); err != nil {
 		t.Fatalf("SetChannelSlowMode: %v", err)
 	}
 
@@ -1323,7 +1324,7 @@ func TestHandleChannelFocus_UpdatesReadState(t *testing.T) {
 	chID := seedTestChannel(t, database, "cf-readstate-chan")
 
 	// Insert a message so there's a latest_message_id.
-	_, err := database.CreateMessage(chID, user.ID, "test message", nil)
+	_, err := database.CreateMessage(context.Background(), chID, user.ID, "test message", nil)
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
@@ -1404,7 +1405,7 @@ func drainChanTimeout(ch <-chan []byte, d time.Duration) [][]byte {
 
 func seedVoiceChannel(t *testing.T, database *db.DB, name string) int64 {
 	t.Helper()
-	id, err := database.CreateChannel(name, "voice", "", "", 0)
+	id, err := database.CreateChannel(context.Background(), name, "voice", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel voice: %v", err)
 	}
@@ -1532,11 +1533,11 @@ func TestHandleVoiceJoin_SwitchChannels(t *testing.T) {
 
 func TestHandleVoiceJoin_ChannelFull(t *testing.T) {
 	hub, database := newCoverageHub(t)
-	vcID, err := database.CreateChannel("full-vc", "voice", "", "", 0)
+	vcID, err := database.CreateChannel(context.Background(), "full-vc", "voice", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
-	_, err = database.Exec("UPDATE channels SET voice_max_users = 1 WHERE id = ?", vcID)
+	_, err = database.ExecContext(context.Background(), "UPDATE channels SET voice_max_users = 1 WHERE id = ?", vcID)
 	if err != nil {
 		t.Fatalf("UPDATE channels: %v", err)
 	}
@@ -1740,11 +1741,11 @@ func TestHandleVoiceJoin_WithQualityOverride(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vj-quality-user")
 
-	vcID, err := database.CreateChannel("quality-vc", "voice", "", "", 0)
+	vcID, err := database.CreateChannel(context.Background(), "quality-vc", "voice", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
-	_, err = database.Exec("UPDATE channels SET voice_quality = 'high' WHERE id = ?", vcID)
+	_, err = database.ExecContext(context.Background(), "UPDATE channels SET voice_quality = 'high' WHERE id = ?", vcID)
 	if err != nil {
 		t.Fatalf("UPDATE: %v", err)
 	}
@@ -2043,11 +2044,11 @@ func TestBuildAuthOK_NonNilAvatar(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "authok-avatar-user")
 	// Set a non-nil avatar.
-	_, err := database.Exec("UPDATE users SET avatar = 'https://example.com/pic.png' WHERE id = ?", user.ID)
+	_, err := database.ExecContext(context.Background(), "UPDATE users SET avatar = 'https://example.com/pic.png' WHERE id = ?", user.ID)
 	if err != nil {
 		t.Fatalf("UPDATE avatar: %v", err)
 	}
-	user, err = database.GetUserByUsername("authok-avatar-user")
+	user, err = database.GetUserByUsername(context.Background(), "authok-avatar-user")
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByUsername: %v", err)
 	}
@@ -2072,12 +2073,12 @@ func TestHandleChatSend_WithNonNilAvatar(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "avatar-user")
 	// Set a non-nil avatar on the user.
-	_, err := database.Exec("UPDATE users SET avatar = 'https://example.com/avatar.png' WHERE id = ?", user.ID)
+	_, err := database.ExecContext(context.Background(), "UPDATE users SET avatar = 'https://example.com/avatar.png' WHERE id = ?", user.ID)
 	if err != nil {
 		t.Fatalf("UPDATE avatar: %v", err)
 	}
 	// Reload user to get updated avatar.
-	user, err = database.GetUserByUsername("avatar-user")
+	user, err = database.GetUserByUsername(context.Background(), "avatar-user")
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByUsername: %v", err)
 	}
@@ -2218,11 +2219,11 @@ func TestHandleVoiceJoin_InvalidQualityFallsBackToMedium(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vj-badquality-user")
 
-	vcID, err := database.CreateChannel("badquality-vc", "voice", "", "", 0)
+	vcID, err := database.CreateChannel(context.Background(), "badquality-vc", "voice", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
-	_, err = database.Exec("UPDATE channels SET voice_quality = 'garbage' WHERE id = ?", vcID)
+	_, err = database.ExecContext(context.Background(), "UPDATE channels SET voice_quality = 'garbage' WHERE id = ?", vcID)
 	if err != nil {
 		t.Fatalf("UPDATE: %v", err)
 	}
@@ -2434,7 +2435,7 @@ func TestRollbackVoiceJoin_ClearsVoiceStateAndBroadcasts(t *testing.T) {
 	hub.Register(c)
 	time.Sleep(20 * time.Millisecond)
 
-	if err := database.JoinVoiceChannel(user.ID, vcID); err != nil {
+	if err := database.JoinVoiceChannel(context.Background(), user.ID, vcID); err != nil {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
 	ws.SetVoiceChIDForTest(c, vcID)
@@ -2446,7 +2447,7 @@ func TestRollbackVoiceJoin_ClearsVoiceStateAndBroadcasts(t *testing.T) {
 		t.Fatalf("voiceChID after rollback = %d, want 0", got)
 	}
 
-	state, _ := database.GetVoiceState(user.ID)
+	state, _ := database.GetVoiceState(context.Background(), user.ID)
 	if state != nil {
 		t.Fatal("voice state should be nil after rollback")
 	}
@@ -2489,11 +2490,11 @@ func TestLeaveVoiceChannelWithRetry_SuccessOnFirstAttempt(t *testing.T) {
 	user := seedCoverageOwner(t, database, "lvcr-ok")
 	vcID := seedVoiceChannel(t, database, "lvcr-ok-vc")
 
-	if err := database.JoinVoiceChannel(user.ID, vcID); err != nil {
+	if err := database.JoinVoiceChannel(context.Background(), user.ID, vcID); err != nil {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
 
-	state, _ := database.GetVoiceState(user.ID)
+	state, _ := database.GetVoiceState(context.Background(), user.ID)
 	if state == nil {
 		t.Fatal("voice state should exist before leave")
 	}
@@ -2503,7 +2504,7 @@ func TestLeaveVoiceChannelWithRetry_SuccessOnFirstAttempt(t *testing.T) {
 		t.Fatalf("leaveVoiceChannelWithRetry returned error: %v", err)
 	}
 
-	state, _ = database.GetVoiceState(user.ID)
+	state, _ = database.GetVoiceState(context.Background(), user.ID)
 	if state != nil {
 		t.Fatal("voice state should be nil after successful leave")
 	}
@@ -2535,10 +2536,10 @@ func TestCleanupVoiceForChannel_WithClientsInChannel(t *testing.T) {
 	hub.Register(c2)
 	time.Sleep(20 * time.Millisecond)
 
-	if err := database.JoinVoiceChannel(user1.ID, vcID); err != nil {
+	if err := database.JoinVoiceChannel(context.Background(), user1.ID, vcID); err != nil {
 		t.Fatalf("JoinVoiceChannel u1: %v", err)
 	}
-	if err := database.JoinVoiceChannel(user2.ID, vcID); err != nil {
+	if err := database.JoinVoiceChannel(context.Background(), user2.ID, vcID); err != nil {
 		t.Fatalf("JoinVoiceChannel u2: %v", err)
 	}
 	ws.SetVoiceChIDForTest(c1, vcID)
@@ -2554,7 +2555,7 @@ func TestCleanupVoiceForChannel_WithClientsInChannel(t *testing.T) {
 		t.Errorf("c2 voiceChID = %d, want 0", got)
 	}
 
-	states, _ := database.GetChannelVoiceStates(vcID)
+	states, _ := database.GetChannelVoiceStates(context.Background(), vcID)
 	if len(states) != 0 {
 		t.Errorf("expected 0 voice states after cleanup, got %d", len(states))
 	}
@@ -2567,7 +2568,7 @@ func TestCleanupVoiceForChannel_EmptyChannel(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// After cleanup of an empty channel, voice states should still be empty.
-	states, err := database.GetChannelVoiceStates(vcID)
+	states, err := database.GetChannelVoiceStates(context.Background(), vcID)
 	if err != nil {
 		t.Fatalf("GetChannelVoiceStates: %v", err)
 	}
@@ -2581,14 +2582,14 @@ func TestCleanupVoiceForChannel_DBStateButNoClient(t *testing.T) {
 	user := seedCoverageOwner(t, database, "cvfc-noclient")
 	vcID := seedVoiceChannel(t, database, "cvfc-noclient-vc")
 
-	if err := database.JoinVoiceChannel(user.ID, vcID); err != nil {
+	if err := database.JoinVoiceChannel(context.Background(), user.ID, vcID); err != nil {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
 
 	hub.CleanupVoiceForChannel(vcID)
 	time.Sleep(50 * time.Millisecond)
 
-	state, _ := database.GetVoiceState(user.ID)
+	state, _ := database.GetVoiceState(context.Background(), user.ID)
 	if state != nil {
 		t.Error("voice state should be nil after cleanup")
 	}
@@ -2602,12 +2603,12 @@ func TestSweepStaleVoiceStates_RemovesGhostState(t *testing.T) {
 	vcID := seedVoiceChannel(t, database, "sweep-ghost-vc")
 
 	// Put user in voice in DB but don't register a client — ghost state.
-	if err := database.JoinVoiceChannel(user.ID, vcID); err != nil {
+	if err := database.JoinVoiceChannel(context.Background(), user.ID, vcID); err != nil {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
 
 	// Verify it exists.
-	state, _ := database.GetVoiceState(user.ID)
+	state, _ := database.GetVoiceState(context.Background(), user.ID)
 	if state == nil {
 		t.Fatal("voice state should exist before sweep")
 	}
@@ -2616,7 +2617,7 @@ func TestSweepStaleVoiceStates_RemovesGhostState(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Ghost state should be removed.
-	state, _ = database.GetVoiceState(user.ID)
+	state, _ = database.GetVoiceState(context.Background(), user.ID)
 	if state != nil {
 		t.Error("ghost voice state should be nil after sweep")
 	}
@@ -2633,7 +2634,7 @@ func TestSweepStaleVoiceStates_PreservesActiveClientState(t *testing.T) {
 	hub.Register(c)
 	time.Sleep(20 * time.Millisecond)
 
-	if err := database.JoinVoiceChannel(user.ID, vcID); err != nil {
+	if err := database.JoinVoiceChannel(context.Background(), user.ID, vcID); err != nil {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
 	ws.SetVoiceChIDForTest(c, vcID)
@@ -2642,7 +2643,7 @@ func TestSweepStaleVoiceStates_PreservesActiveClientState(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Active client's state should be preserved.
-	state, _ := database.GetVoiceState(user.ID)
+	state, _ := database.GetVoiceState(context.Background(), user.ID)
 	if state == nil {
 		t.Error("active client's voice state should be preserved after sweep")
 	}
@@ -2656,7 +2657,7 @@ func TestSweepStaleVoiceStates_NoStatesNoPanic(t *testing.T) {
 	// With no voice states in the DB, sweep should leave the system clean.
 	// Verify by checking a known user has no voice state.
 	user := seedCoverageOwner(t, database, "sweep-no-states")
-	state, err := database.GetVoiceState(user.ID)
+	state, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
@@ -2677,7 +2678,7 @@ func TestSweepStaleVoiceStates_MismatchedChannelIsGhost(t *testing.T) {
 	hub.Register(c)
 	time.Sleep(20 * time.Millisecond)
 
-	if err := database.JoinVoiceChannel(user.ID, vc2); err != nil {
+	if err := database.JoinVoiceChannel(context.Background(), user.ID, vc2); err != nil {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
 	ws.SetVoiceChIDForTest(c, vc1) // Client thinks vc1, DB says vc2 — mismatch.
@@ -2686,7 +2687,7 @@ func TestSweepStaleVoiceStates_MismatchedChannelIsGhost(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Mismatched state should be removed from DB.
-	state, _ := database.GetVoiceState(user.ID)
+	state, _ := database.GetVoiceState(context.Background(), user.ID)
 	if state != nil {
 		t.Error("mismatched voice state should be removed after sweep")
 	}

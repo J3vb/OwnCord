@@ -153,11 +153,11 @@ func (c *LiveKitClient) URL() string {
 const lkTimeout = 5 * time.Second
 
 // RemoveParticipant forcefully disconnects a participant from a room.
-func (c *LiveKitClient) RemoveParticipant(channelID int64, userID int64, voiceJoinToken string) error {
+func (c *LiveKitClient) RemoveParticipant(ctx context.Context, channelID int64, userID int64, voiceJoinToken string) error {
 	roomName := RoomName(channelID)
 	identity := participantIdentity(userID, voiceJoinToken)
 
-	ctx, cancel := context.WithTimeout(context.Background(), lkTimeout)
+	ctx, cancel := context.WithTimeout(ctx, lkTimeout)
 	defer cancel()
 	_, err := c.roomSvc.RemoveParticipant(ctx, &livekit.RoomParticipantIdentity{
 		Room:     roomName,

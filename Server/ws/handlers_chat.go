@@ -78,11 +78,11 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 }
 
 // handleChatEditV2 processes a chat_edit command via the MessageService.
-func handleChatEditV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+func handleChatEditV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ChatDeps)
 	editCmd := cmd.(ChatEditCmd)
 
-	result, err := d.MessageSvc.EditMessage(info.UserID, editCmd.MessageID(), editCmd.Content())
+	result, err := d.MessageSvc.EditMessage(ctx, info.UserID, editCmd.MessageID(), editCmd.Content())
 	if err != nil {
 		return serviceErrorToResult(err)
 	}
@@ -102,11 +102,11 @@ func handleChatEditV2(_ context.Context, cmd Command, info ClientInfo, deps any)
 }
 
 // handleChatDeleteV2 processes a chat_delete command via the MessageService.
-func handleChatDeleteV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+func handleChatDeleteV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ChatDeps)
 	deleteCmd := cmd.(ChatDeleteCmd)
 
-	result, err := d.MessageSvc.DeleteMessage(info.UserID, deleteCmd.MessageID())
+	result, err := d.MessageSvc.DeleteMessage(ctx, info.UserID, deleteCmd.MessageID())
 	if err != nil {
 		return serviceErrorToResult(err)
 	}

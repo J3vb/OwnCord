@@ -37,7 +37,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	c.mu.Unlock()
 
 	if shouldCheck && c.tokenHash != "" {
-		result, dbErr := h.db.GetSessionWithBanStatus(c.tokenHash)
+		result, dbErr := h.db.GetSessionWithBanStatus(c.ctx, c.tokenHash)
 		if dbErr != nil || result == nil || auth.IsSessionExpired(result.ExpiresAt) {
 			slog.Info("ws session expired, closing connection", "user_id", c.userID)
 			h.kickClient(c)
@@ -200,19 +200,19 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 // connection — including the SPEAK/VIDEO grants baked into a freshly minted
 // LiveKit token — instead of persisting until the user reconnects. This mirrors
 // the V2 handlers, which already resolve the live role (deps.go).
-func (h *Hub) hasChannelPerm(c *Client, channelID int64, perm int64) bool {
-	role, err := h.db.GetRoleForUser(c.userID)
+func (h *Hub) hasChannelPerm(ctx context.Context, c *Client, channelID int64, perm int64) bool {
+	role, err := h.db.GetRoleForUser(ctx, c.userID)
 	if err != nil || role == nil {
 		return false
 	}
-	return h.permChecker.HasChannelPerm(role.Permissions, role.ID, channelID, perm)
+	return h.permChecker.HasChannelPerm(ctx, role.Permissions, role.ID, channelID, perm)
 }
 
 // requireChannelPerm checks whether the client has the given permission on the
 // channel. If not, it sends a FORBIDDEN error to the client and returns false.
 // The permLabel should be the human-readable permission name (e.g. "SEND_MESSAGES").
-func (h *Hub) requireChannelPerm(c *Client, channelID int64, perm int64, permLabel string) bool {
-	if h.hasChannelPerm(c, channelID, perm) {
+func (h *Hub) requireChannelPerm(ctx context.Context, c *Client, channelID int64, perm int64, permLabel string) bool {
+	if h.hasChannelPerm(ctx, c, channelID, perm) {
 		return true
 	}
 	slog.Warn("ws permission denied", "user_id", c.userID, "channel_id", channelID, "perm", permLabel)

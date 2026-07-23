@@ -9,7 +9,7 @@ import (
 )
 
 // handleVoiceMuteV2 processes a voice_mute command.
-func handleVoiceMuteV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+func handleVoiceMuteV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	muteCmd := cmd.(VoiceMuteCmd)
 	userID := info.UserID
@@ -23,17 +23,17 @@ func handleVoiceMuteV2(_ context.Context, cmd Command, info ClientInfo, deps any
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
 	}
 
-	if err := d.DB.UpdateVoiceMute(userID, muteCmd.Muted()); err != nil {
+	if err := d.DB.UpdateVoiceMute(ctx, userID, muteCmd.Muted()); err != nil {
 		slog.Error("ws handleVoiceMuteV2 UpdateVoiceMute", "err", err, "user_id", userID)
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update mute state"}}
 	}
 	slog.Debug("voice mute changed", "user_id", userID, "muted", muteCmd.Muted(), "channel_id", info.VoiceChannelID)
 
-	return voiceStateBroadcast(d, userID)
+	return voiceStateBroadcast(ctx, d, userID)
 }
 
 // handleVoiceDeafenV2 processes a voice_deafen command.
-func handleVoiceDeafenV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+func handleVoiceDeafenV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	deafenCmd := cmd.(VoiceDeafenCmd)
 	userID := info.UserID
@@ -47,17 +47,17 @@ func handleVoiceDeafenV2(_ context.Context, cmd Command, info ClientInfo, deps a
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
 	}
 
-	if err := d.DB.UpdateVoiceDeafen(userID, deafenCmd.Deafened()); err != nil {
+	if err := d.DB.UpdateVoiceDeafen(ctx, userID, deafenCmd.Deafened()); err != nil {
 		slog.Error("ws handleVoiceDeafenV2 UpdateVoiceDeafen", "err", err, "user_id", userID)
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update deafen state"}}
 	}
 	slog.Debug("voice deafen changed", "user_id", userID, "deafened", deafenCmd.Deafened(), "channel_id", info.VoiceChannelID)
 
-	return voiceStateBroadcast(d, userID)
+	return voiceStateBroadcast(ctx, d, userID)
 }
 
 // handleVoiceCameraV2 processes a voice_camera command.
-func handleVoiceCameraV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+func handleVoiceCameraV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	cameraCmd := cmd.(VoiceCameraCmd)
 	userID := info.UserID
@@ -73,7 +73,7 @@ func handleVoiceCameraV2(_ context.Context, cmd Command, info ClientInfo, deps a
 	}
 
 	// Permission check.
-	if r := requirePerm(d.DB, d.Permissions, userID, voiceChID, permissions.UseVideo, "USE_VIDEO"); r != nil {
+	if r := requirePerm(ctx, d.DB, d.Permissions, userID, voiceChID, permissions.UseVideo, "USE_VIDEO"); r != nil {
 		return *r
 	}
 
@@ -81,9 +81,9 @@ func handleVoiceCameraV2(_ context.Context, cmd Command, info ClientInfo, deps a
 
 	// Enforce MaxVideo limit when enabling camera using an atomic check-and-update.
 	if enabled {
-		ch, chErr := d.DB.GetChannel(voiceChID)
+		ch, chErr := d.DB.GetChannel(ctx, voiceChID)
 		if chErr == nil && ch != nil && ch.VoiceMaxVideo > 0 {
-			ok, limitErr := d.DB.EnableCameraIfUnderLimit(userID, voiceChID, ch.VoiceMaxVideo)
+			ok, limitErr := d.DB.EnableCameraIfUnderLimit(ctx, userID, voiceChID, ch.VoiceMaxVideo)
 			if limitErr != nil {
 				slog.Error("handleVoiceCameraV2 EnableCameraIfUnderLimit", "err", limitErr, "channel_id", voiceChID)
 				return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check video limit"}}
@@ -95,24 +95,24 @@ func handleVoiceCameraV2(_ context.Context, cmd Command, info ClientInfo, deps a
 				}}
 			}
 		} else {
-			if err := d.DB.UpdateVoiceCamera(userID, true); err != nil {
+			if err := d.DB.UpdateVoiceCamera(ctx, userID, true); err != nil {
 				slog.Error("ws handleVoiceCameraV2 UpdateVoiceCamera", "err", err, "user_id", userID)
 				return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update camera state"}}
 			}
 		}
 	} else {
-		if err := d.DB.UpdateVoiceCamera(userID, false); err != nil {
+		if err := d.DB.UpdateVoiceCamera(ctx, userID, false); err != nil {
 			slog.Error("ws handleVoiceCameraV2 UpdateVoiceCamera", "err", err, "user_id", userID)
 			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update camera state"}}
 		}
 	}
 	slog.Debug("voice camera changed", "user_id", userID, "enabled", enabled, "channel_id", voiceChID)
 
-	return voiceStateBroadcast(d, userID)
+	return voiceStateBroadcast(ctx, d, userID)
 }
 
 // handleVoiceScreenshareV2 processes a voice_screenshare command.
-func handleVoiceScreenshareV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+func handleVoiceScreenshareV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	ssCmd := cmd.(VoiceScreenshareCmd)
 	userID := info.UserID
@@ -128,23 +128,23 @@ func handleVoiceScreenshareV2(_ context.Context, cmd Command, info ClientInfo, d
 	}
 
 	// Permission check.
-	if r := requirePerm(d.DB, d.Permissions, userID, voiceChID, permissions.ShareScreen, "SHARE_SCREEN"); r != nil {
+	if r := requirePerm(ctx, d.DB, d.Permissions, userID, voiceChID, permissions.ShareScreen, "SHARE_SCREEN"); r != nil {
 		return *r
 	}
 
-	if err := d.DB.UpdateVoiceScreenshare(userID, ssCmd.Enabled()); err != nil {
+	if err := d.DB.UpdateVoiceScreenshare(ctx, userID, ssCmd.Enabled()); err != nil {
 		slog.Error("ws handleVoiceScreenshareV2 UpdateVoiceScreenshare", "err", err, "user_id", userID)
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update screenshare state"}}
 	}
 	slog.Debug("voice screenshare changed", "user_id", userID, "enabled", ssCmd.Enabled(), "channel_id", voiceChID)
 
-	return voiceStateBroadcast(d, userID)
+	return voiceStateBroadcast(ctx, d, userID)
 }
 
 // voiceStateBroadcast reads the current voice state from DB and returns a
 // BroadcastAll event. Shared by all voice control V2 handlers.
-func voiceStateBroadcast(d VoiceDeps, userID int64) Result {
-	state, err := d.DB.GetVoiceState(userID)
+func voiceStateBroadcast(ctx context.Context, d VoiceDeps, userID int64) Result {
+	state, err := d.DB.GetVoiceState(ctx, userID)
 	if err != nil {
 		slog.Error("ws voiceStateBroadcast GetVoiceState", "err", err, "user_id", userID)
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to broadcast voice state update"}}

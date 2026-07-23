@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -14,12 +15,12 @@ func TestVoice_JoinVoiceChannelIfCapacity_UnderLimit(t *testing.T) {
 	u1 := seedVoiceUser(t, database, "cap-u1")
 	chanID := seedVoiceChannel(t, database, "cap-ch")
 
-	err := database.JoinVoiceChannelIfCapacity(u1, chanID, 2)
+	err := database.JoinVoiceChannelIfCapacity(context.Background(), u1, chanID, 2)
 	if err != nil {
 		t.Fatalf("JoinVoiceChannelIfCapacity: %v", err)
 	}
 
-	state, err := database.GetVoiceState(u1)
+	state, err := database.GetVoiceState(context.Background(), u1)
 	if err != nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
@@ -39,15 +40,15 @@ func TestVoice_JoinVoiceChannelIfCapacity_AtLimit(t *testing.T) {
 	chanID := seedVoiceChannel(t, database, "cap-full-ch")
 
 	// Fill channel to capacity (max 2).
-	if err := database.JoinVoiceChannelIfCapacity(u1, chanID, 2); err != nil {
+	if err := database.JoinVoiceChannelIfCapacity(context.Background(), u1, chanID, 2); err != nil {
 		t.Fatalf("first join: %v", err)
 	}
-	if err := database.JoinVoiceChannelIfCapacity(u2, chanID, 2); err != nil {
+	if err := database.JoinVoiceChannelIfCapacity(context.Background(), u2, chanID, 2); err != nil {
 		t.Fatalf("second join: %v", err)
 	}
 
 	// Third join should fail with ErrChannelFull.
-	err := database.JoinVoiceChannelIfCapacity(u3, chanID, 2)
+	err := database.JoinVoiceChannelIfCapacity(context.Background(), u3, chanID, 2)
 	if err == nil {
 		t.Fatal("expected ErrChannelFull, got nil")
 	}
@@ -63,14 +64,14 @@ func TestVoice_JoinVoiceChannelIfCapacity_ReplacesOwnState(t *testing.T) {
 	ch2 := seedVoiceChannel(t, database, "cap-ch2")
 
 	// Join ch1, then join ch2 with capacity check — should replace.
-	if err := database.JoinVoiceChannelIfCapacity(u1, ch1, 5); err != nil {
+	if err := database.JoinVoiceChannelIfCapacity(context.Background(), u1, ch1, 5); err != nil {
 		t.Fatalf("join ch1: %v", err)
 	}
-	if err := database.JoinVoiceChannelIfCapacity(u1, ch2, 5); err != nil {
+	if err := database.JoinVoiceChannelIfCapacity(context.Background(), u1, ch2, 5); err != nil {
 		t.Fatalf("join ch2: %v", err)
 	}
 
-	state, _ := database.GetVoiceState(u1)
+	state, _ := database.GetVoiceState(context.Background(), u1)
 	if state == nil || state.ChannelID != ch2 {
 		t.Errorf("expected channel %d, got %v", ch2, state)
 	}
@@ -81,7 +82,7 @@ func TestVoice_JoinVoiceChannelIfCapacity_ReplacesOwnState(t *testing.T) {
 func TestVoice_GetAllVoiceStates_Empty(t *testing.T) {
 	database := newVoiceTestDB(t)
 
-	states, err := database.GetAllVoiceStates()
+	states, err := database.GetAllVoiceStates(context.Background())
 	if err != nil {
 		t.Fatalf("GetAllVoiceStates: %v", err)
 	}
@@ -98,11 +99,11 @@ func TestVoice_GetAllVoiceStates_MultipleChannels(t *testing.T) {
 	ch1 := seedVoiceChannel(t, database, "all-vs-ch1")
 	ch2 := seedVoiceChannel(t, database, "all-vs-ch2")
 
-	_ = database.JoinVoiceChannel(u1, ch1)
-	_ = database.JoinVoiceChannel(u2, ch1)
-	_ = database.JoinVoiceChannel(u3, ch2)
+	_ = database.JoinVoiceChannel(context.Background(), u1, ch1)
+	_ = database.JoinVoiceChannel(context.Background(), u2, ch1)
+	_ = database.JoinVoiceChannel(context.Background(), u3, ch2)
 
-	states, err := database.GetAllVoiceStates()
+	states, err := database.GetAllVoiceStates(context.Background())
 	if err != nil {
 		t.Fatalf("GetAllVoiceStates: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestVoice_CountActiveCameras_Zero(t *testing.T) {
 	database := newVoiceTestDB(t)
 	chanID := seedVoiceChannel(t, database, "cam-count-empty")
 
-	count, err := database.CountActiveCameras(chanID)
+	count, err := database.CountActiveCameras(context.Background(), chanID)
 	if err != nil {
 		t.Fatalf("CountActiveCameras: %v", err)
 	}
@@ -133,15 +134,15 @@ func TestVoice_CountActiveCameras_SomeCameras(t *testing.T) {
 	u3 := seedVoiceUser(t, database, "cam-cnt-u3")
 	chanID := seedVoiceChannel(t, database, "cam-cnt-ch")
 
-	_ = database.JoinVoiceChannel(u1, chanID)
-	_ = database.JoinVoiceChannel(u2, chanID)
-	_ = database.JoinVoiceChannel(u3, chanID)
+	_ = database.JoinVoiceChannel(context.Background(), u1, chanID)
+	_ = database.JoinVoiceChannel(context.Background(), u2, chanID)
+	_ = database.JoinVoiceChannel(context.Background(), u3, chanID)
 
-	_ = database.UpdateVoiceCamera(u1, true)
-	_ = database.UpdateVoiceCamera(u2, true)
+	_ = database.UpdateVoiceCamera(context.Background(), u1, true)
+	_ = database.UpdateVoiceCamera(context.Background(), u2, true)
 	// u3 camera stays off.
 
-	count, err := database.CountActiveCameras(chanID)
+	count, err := database.CountActiveCameras(context.Background(), chanID)
 	if err != nil {
 		t.Fatalf("CountActiveCameras: %v", err)
 	}
@@ -157,9 +158,9 @@ func TestVoice_EnableCameraIfUnderLimit_Success(t *testing.T) {
 	u1 := seedVoiceUser(t, database, "cam-limit-ok")
 	chanID := seedVoiceChannel(t, database, "cam-limit-ch")
 
-	_ = database.JoinVoiceChannel(u1, chanID)
+	_ = database.JoinVoiceChannel(context.Background(), u1, chanID)
 
-	ok, err := database.EnableCameraIfUnderLimit(u1, chanID, 2)
+	ok, err := database.EnableCameraIfUnderLimit(context.Background(), u1, chanID, 2)
 	if err != nil {
 		t.Fatalf("EnableCameraIfUnderLimit: %v", err)
 	}
@@ -167,7 +168,7 @@ func TestVoice_EnableCameraIfUnderLimit_Success(t *testing.T) {
 		t.Error("expected camera to be enabled")
 	}
 
-	state, _ := database.GetVoiceState(u1)
+	state, _ := database.GetVoiceState(context.Background(), u1)
 	if state == nil || !state.Camera {
 		t.Error("camera should be true after enable")
 	}
@@ -180,16 +181,16 @@ func TestVoice_EnableCameraIfUnderLimit_AtLimit(t *testing.T) {
 	u3 := seedVoiceUser(t, database, "cam-lim-u3")
 	chanID := seedVoiceChannel(t, database, "cam-lim-ch")
 
-	_ = database.JoinVoiceChannel(u1, chanID)
-	_ = database.JoinVoiceChannel(u2, chanID)
-	_ = database.JoinVoiceChannel(u3, chanID)
+	_ = database.JoinVoiceChannel(context.Background(), u1, chanID)
+	_ = database.JoinVoiceChannel(context.Background(), u2, chanID)
+	_ = database.JoinVoiceChannel(context.Background(), u3, chanID)
 
 	// Enable cameras for u1 and u2 (max is 2).
-	_, _ = database.EnableCameraIfUnderLimit(u1, chanID, 2)
-	_, _ = database.EnableCameraIfUnderLimit(u2, chanID, 2)
+	_, _ = database.EnableCameraIfUnderLimit(context.Background(), u1, chanID, 2)
+	_, _ = database.EnableCameraIfUnderLimit(context.Background(), u2, chanID, 2)
 
 	// u3 should be denied.
-	ok, err := database.EnableCameraIfUnderLimit(u3, chanID, 2)
+	ok, err := database.EnableCameraIfUnderLimit(context.Background(), u3, chanID, 2)
 	if err != nil {
 		t.Fatalf("EnableCameraIfUnderLimit: %v", err)
 	}
@@ -207,12 +208,12 @@ func TestSearchMessagesInChannels_FindsInAllowedChannels(t *testing.T) {
 	ch2 := seedChannel(t, database, "srch-ch2")
 	ch3 := seedChannel(t, database, "srch-ch3")
 
-	_, _ = database.CreateMessage(ch1, userID, "alpha keyword here", nil)
-	_, _ = database.CreateMessage(ch2, userID, "beta keyword here", nil)
-	_, _ = database.CreateMessage(ch3, userID, "gamma keyword here", nil)
+	_, _ = database.CreateMessage(context.Background(), ch1, userID, "alpha keyword here", nil)
+	_, _ = database.CreateMessage(context.Background(), ch2, userID, "beta keyword here", nil)
+	_, _ = database.CreateMessage(context.Background(), ch3, userID, "gamma keyword here", nil)
 
 	// Search only in ch1 and ch2.
-	results, err := database.SearchMessagesInChannels("keyword", []int64{ch1, ch2}, 10)
+	results, err := database.SearchMessagesInChannels(context.Background(), "keyword", []int64{ch1, ch2}, 10)
 	if err != nil {
 		t.Fatalf("SearchMessagesInChannels: %v", err)
 	}
@@ -229,7 +230,7 @@ func TestSearchMessagesInChannels_FindsInAllowedChannels(t *testing.T) {
 func TestSearchMessagesInChannels_EmptyQuery(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	results, err := database.SearchMessagesInChannels("", []int64{1}, 10)
+	results, err := database.SearchMessagesInChannels(context.Background(), "", []int64{1}, 10)
 	if err != nil {
 		t.Fatalf("SearchMessagesInChannels: %v", err)
 	}
@@ -241,7 +242,7 @@ func TestSearchMessagesInChannels_EmptyQuery(t *testing.T) {
 func TestSearchMessagesInChannels_EmptyChannelIDs(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	results, err := database.SearchMessagesInChannels("test", nil, 10)
+	results, err := database.SearchMessagesInChannels(context.Background(), "test", nil, 10)
 	if err != nil {
 		t.Fatalf("SearchMessagesInChannels: %v", err)
 	}
@@ -256,10 +257,10 @@ func TestSearchMessagesInChannels_LimitRespected(t *testing.T) {
 	ch1 := seedChannel(t, database, "srch-lim-ch")
 
 	for range 5 {
-		_, _ = database.CreateMessage(ch1, userID, "findme content here", nil)
+		_, _ = database.CreateMessage(context.Background(), ch1, userID, "findme content here", nil)
 	}
 
-	results, err := database.SearchMessagesInChannels("findme", []int64{ch1}, 2)
+	results, err := database.SearchMessagesInChannels(context.Background(), "findme", []int64{ch1}, 2)
 	if err != nil {
 		t.Fatalf("SearchMessagesInChannels: %v", err)
 	}
@@ -271,7 +272,7 @@ func TestSearchMessagesInChannels_LimitRespected(t *testing.T) {
 func TestSearchMessagesInChannels_ZeroLimit(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	results, err := database.SearchMessagesInChannels("test", []int64{1}, 0)
+	results, err := database.SearchMessagesInChannels(context.Background(), "test", []int64{1}, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -287,7 +288,7 @@ func TestGetPinnedMessages_Empty(t *testing.T) {
 	userID := seedUser(t, database, "pin-empty-u")
 	chID := seedChannel(t, database, "pin-empty")
 
-	msgs, err := database.GetPinnedMessages(chID, userID)
+	msgs, err := database.GetPinnedMessages(context.Background(), chID, userID)
 	if err != nil {
 		t.Fatalf("GetPinnedMessages: %v", err)
 	}
@@ -301,11 +302,11 @@ func TestGetPinnedMessages_ReturnsPinnedOnly(t *testing.T) {
 	userID := seedUser(t, database, "pin-user")
 	chID := seedChannel(t, database, "pin-ch")
 
-	id1, _ := database.CreateMessage(chID, userID, "pinned msg", nil)
-	_, _ = database.CreateMessage(chID, userID, "not pinned", nil)
-	_ = database.SetMessagePinned(id1, true)
+	id1, _ := database.CreateMessage(context.Background(), chID, userID, "pinned msg", nil)
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "not pinned", nil)
+	_ = database.SetMessagePinned(context.Background(), id1, true)
 
-	msgs, err := database.GetPinnedMessages(chID, userID)
+	msgs, err := database.GetPinnedMessages(context.Background(), chID, userID)
 	if err != nil {
 		t.Fatalf("GetPinnedMessages: %v", err)
 	}
@@ -327,13 +328,13 @@ func TestSetMessagePinned_Pin(t *testing.T) {
 	userID := seedUser(t, database, "setpin-u")
 	chID := seedChannel(t, database, "setpin-ch")
 
-	id, _ := database.CreateMessage(chID, userID, "to pin", nil)
+	id, _ := database.CreateMessage(context.Background(), chID, userID, "to pin", nil)
 
-	if err := database.SetMessagePinned(id, true); err != nil {
+	if err := database.SetMessagePinned(context.Background(), id, true); err != nil {
 		t.Fatalf("SetMessagePinned(true): %v", err)
 	}
 
-	msg, _ := database.GetMessage(id)
+	msg, _ := database.GetMessage(context.Background(), id)
 	if msg == nil || !msg.Pinned {
 		t.Error("message should be pinned")
 	}
@@ -344,13 +345,13 @@ func TestSetMessagePinned_Unpin(t *testing.T) {
 	userID := seedUser(t, database, "unpin-u")
 	chID := seedChannel(t, database, "unpin-ch")
 
-	id, _ := database.CreateMessage(chID, userID, "to unpin", nil)
-	_ = database.SetMessagePinned(id, true)
-	if err := database.SetMessagePinned(id, false); err != nil {
+	id, _ := database.CreateMessage(context.Background(), chID, userID, "to unpin", nil)
+	_ = database.SetMessagePinned(context.Background(), id, true)
+	if err := database.SetMessagePinned(context.Background(), id, false); err != nil {
 		t.Fatalf("SetMessagePinned(false): %v", err)
 	}
 
-	msg, _ := database.GetMessage(id)
+	msg, _ := database.GetMessage(context.Background(), id)
 	if msg == nil || msg.Pinned {
 		t.Error("message should not be pinned")
 	}
@@ -359,7 +360,7 @@ func TestSetMessagePinned_Unpin(t *testing.T) {
 func TestSetMessagePinned_NotFound(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	err := database.SetMessagePinned(99999, true)
+	err := database.SetMessagePinned(context.Background(), 99999, true)
 	if err == nil {
 		t.Error("expected error for non-existent message")
 	}
@@ -370,10 +371,10 @@ func TestSetMessagePinned_DeletedMessage(t *testing.T) {
 	userID := seedUser(t, database, "pin-del-u")
 	chID := seedChannel(t, database, "pin-del-ch")
 
-	id, _ := database.CreateMessage(chID, userID, "deleted", nil)
-	_ = database.DeleteMessage(id, userID, false)
+	id, _ := database.CreateMessage(context.Background(), chID, userID, "deleted", nil)
+	_ = database.DeleteMessage(context.Background(), id, userID, false)
 
-	err := database.SetMessagePinned(id, true)
+	err := database.SetMessagePinned(context.Background(), id, true)
 	if err == nil {
 		t.Error("expected error when pinning deleted message")
 	}
@@ -385,12 +386,12 @@ func TestCreateAttachment_Success(t *testing.T) {
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "att-uploader")
 
-	err := database.CreateAttachment("att-001", userID, "photo.png", "stored-001.png", "image/png", 12345, nil, nil)
+	err := database.CreateAttachment(context.Background(), "att-001", userID, "photo.png", "stored-001.png", "image/png", 12345, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateAttachment: %v", err)
 	}
 
-	att, err := database.GetAttachmentByID("att-001")
+	att, err := database.GetAttachmentByID(context.Background(), "att-001")
 	if err != nil {
 		t.Fatalf("GetAttachmentByID: %v", err)
 	}
@@ -413,12 +414,12 @@ func TestCreateAttachment_WithDimensions(t *testing.T) {
 	userID := seedUser(t, database, "att-dim-uploader")
 
 	w, h := 1920, 1080
-	err := database.CreateAttachment("att-dim", userID, "photo.jpg", "stored-dim.jpg", "image/jpeg", 54321, &w, &h)
+	err := database.CreateAttachment(context.Background(), "att-dim", userID, "photo.jpg", "stored-dim.jpg", "image/jpeg", 54321, &w, &h)
 	if err != nil {
 		t.Fatalf("CreateAttachment with dims: %v", err)
 	}
 
-	att, _ := database.GetAttachmentByID("att-dim")
+	att, _ := database.GetAttachmentByID(context.Background(), "att-dim")
 	if att == nil {
 		t.Fatal("expected attachment")
 	}
@@ -431,10 +432,10 @@ func TestDeleteOrphanedAttachments_RemovesOrphans(t *testing.T) {
 	userID := seedUser(t, database, "orphan-uploader")
 
 	// Create an unlinked attachment (message_id IS NULL).
-	_ = database.CreateAttachment("orphan-1", userID, "file.txt", "stored-orphan.txt", "text/plain", 100, nil, nil)
+	_ = database.CreateAttachment(context.Background(), "orphan-1", userID, "file.txt", "stored-orphan.txt", "text/plain", 100, nil, nil)
 
 	// Use a cutoff far in the future so the attachment is considered old.
-	files, err := database.DeleteOrphanedAttachments("2099-01-01T00:00:00Z")
+	files, err := database.DeleteOrphanedAttachments(context.Background(), "2099-01-01T00:00:00Z")
 	if err != nil {
 		t.Fatalf("DeleteOrphanedAttachments: %v", err)
 	}
@@ -446,7 +447,7 @@ func TestDeleteOrphanedAttachments_RemovesOrphans(t *testing.T) {
 	}
 
 	// Should be removed from DB.
-	att, _ := database.GetAttachmentByID("orphan-1")
+	att, _ := database.GetAttachmentByID(context.Background(), "orphan-1")
 	if att != nil {
 		t.Error("orphaned attachment should be deleted from DB")
 	}
@@ -458,11 +459,11 @@ func TestDeleteOrphanedAttachments_KeepsLinked(t *testing.T) {
 	chID := seedChannel(t, database, "orphan-linked-ch")
 
 	// Create attachment and link it to a message.
-	_ = database.CreateAttachment("linked-1", userID, "file.txt", "stored-linked.txt", "text/plain", 100, nil, nil)
-	msgID, _ := database.CreateMessage(chID, userID, "with attachment", nil)
-	_, _ = database.LinkAttachmentsToMessage(msgID, userID, []string{"linked-1"})
+	_ = database.CreateAttachment(context.Background(), "linked-1", userID, "file.txt", "stored-linked.txt", "text/plain", 100, nil, nil)
+	msgID, _ := database.CreateMessage(context.Background(), chID, userID, "with attachment", nil)
+	_, _ = database.LinkAttachmentsToMessage(context.Background(), msgID, userID, []string{"linked-1"})
 
-	files, err := database.DeleteOrphanedAttachments("2099-01-01T00:00:00Z")
+	files, err := database.DeleteOrphanedAttachments(context.Background(), "2099-01-01T00:00:00Z")
 	if err != nil {
 		t.Fatalf("DeleteOrphanedAttachments: %v", err)
 	}
@@ -475,10 +476,10 @@ func TestDeleteOrphanedAttachments_CutoffRespected(t *testing.T) {
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "cutoff-uploader")
 
-	_ = database.CreateAttachment("future-1", userID, "file.txt", "stored-future.txt", "text/plain", 100, nil, nil)
+	_ = database.CreateAttachment(context.Background(), "future-1", userID, "file.txt", "stored-future.txt", "text/plain", 100, nil, nil)
 
 	// Cutoff in the past — newly created attachment should NOT be deleted.
-	files, err := database.DeleteOrphanedAttachments("2000-01-01T00:00:00Z")
+	files, err := database.DeleteOrphanedAttachments(context.Background(), "2000-01-01T00:00:00Z")
 	if err != nil {
 		t.Fatalf("DeleteOrphanedAttachments: %v", err)
 	}
@@ -492,7 +493,7 @@ func TestDeleteOrphanedAttachments_CutoffRespected(t *testing.T) {
 func TestGetAllChannelPermissionsForRole_Empty(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	result, err := database.GetAllChannelPermissionsForRole(4)
+	result, err := database.GetAllChannelPermissionsForRole(context.Background(), 4)
 	if err != nil {
 		t.Fatalf("GetAllChannelPermissionsForRole: %v", err)
 	}
@@ -504,20 +505,20 @@ func TestGetAllChannelPermissionsForRole_Empty(t *testing.T) {
 func TestGetAllChannelPermissionsForRole_WithOverrides(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	ch1, _ := database.CreateChannel("perm-ch1", "text", "", "", 0)
-	ch2, _ := database.CreateChannel("perm-ch2", "text", "", "", 0)
+	ch1, _ := database.CreateChannel(context.Background(), "perm-ch1", "text", "", "", 0)
+	ch2, _ := database.CreateChannel(context.Background(), "perm-ch2", "text", "", "", 0)
 
 	// Insert overrides for role 4.
-	_, _ = database.Exec(
+	_, _ = database.ExecContext(context.Background(),
 		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, ?, ?, ?)`,
 		ch1, 4, int64(0x100), int64(0x200),
 	)
-	_, _ = database.Exec(
+	_, _ = database.ExecContext(context.Background(),
 		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, ?, ?, ?)`,
 		ch2, 4, int64(0x300), int64(0),
 	)
 
-	result, err := database.GetAllChannelPermissionsForRole(4)
+	result, err := database.GetAllChannelPermissionsForRole(context.Background(), 4)
 	if err != nil {
 		t.Fatalf("GetAllChannelPermissionsForRole: %v", err)
 	}
@@ -534,7 +535,7 @@ func TestGetAllChannelPermissionsForRole_WithOverrides(t *testing.T) {
 func TestGetChannelTypes_Empty(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	result, err := database.GetChannelTypes(nil)
+	result, err := database.GetChannelTypes(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("GetChannelTypes: %v", err)
 	}
@@ -546,10 +547,10 @@ func TestGetChannelTypes_Empty(t *testing.T) {
 func TestGetChannelTypes_ReturnsTypes(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	ch1, _ := database.CreateChannel("type-text", "text", "", "", 0)
-	ch2, _ := database.CreateChannel("type-voice", "voice", "", "", 0)
+	ch1, _ := database.CreateChannel(context.Background(), "type-text", "text", "", "", 0)
+	ch2, _ := database.CreateChannel(context.Background(), "type-voice", "voice", "", "", 0)
 
-	result, err := database.GetChannelTypes([]int64{ch1, ch2})
+	result, err := database.GetChannelTypes(context.Background(), []int64{ch1, ch2})
 	if err != nil {
 		t.Fatalf("GetChannelTypes: %v", err)
 	}
@@ -564,7 +565,7 @@ func TestGetChannelTypes_ReturnsTypes(t *testing.T) {
 func TestGetChannelTypes_NonExistentIDs(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	result, err := database.GetChannelTypes([]int64{99999})
+	result, err := database.GetChannelTypes(context.Background(), []int64{99999})
 	if err != nil {
 		t.Fatalf("GetChannelTypes: %v", err)
 	}
@@ -577,10 +578,10 @@ func TestGetChannelTypes_NonExistentIDs(t *testing.T) {
 
 func TestCountUsersWithoutTOTP_AllWithout(t *testing.T) {
 	database := openMigratedMemory(t)
-	_, _ = database.CreateUser("totp-u1", "hash", 4)
-	_, _ = database.CreateUser("totp-u2", "hash", 4)
+	_, _ = database.CreateUser(context.Background(), "totp-u1", "hash", 4)
+	_, _ = database.CreateUser(context.Background(), "totp-u2", "hash", 4)
 
-	count, err := database.CountUsersWithoutTOTP()
+	count, err := database.CountUsersWithoutTOTP(context.Background())
 	if err != nil {
 		t.Fatalf("CountUsersWithoutTOTP: %v", err)
 	}
@@ -591,13 +592,13 @@ func TestCountUsersWithoutTOTP_AllWithout(t *testing.T) {
 
 func TestCountUsersWithoutTOTP_WithTOTPSetup(t *testing.T) {
 	database := openMigratedMemory(t)
-	uid, _ := database.CreateUser("totp-with", "hash", 4)
-	_, _ = database.CreateUser("totp-without", "hash", 4)
+	uid, _ := database.CreateUser(context.Background(), "totp-with", "hash", 4)
+	_, _ = database.CreateUser(context.Background(), "totp-without", "hash", 4)
 
 	secret := "JBSWY3DPEHPK3PXP"
-	_ = database.UpdateUserTOTPSecret(uid, &secret)
+	_ = database.UpdateUserTOTPSecret(context.Background(), uid, &secret)
 
-	count, err := database.CountUsersWithoutTOTP()
+	count, err := database.CountUsersWithoutTOTP(context.Background())
 	if err != nil {
 		t.Fatalf("CountUsersWithoutTOTP: %v", err)
 	}
@@ -610,14 +611,14 @@ func TestCountUsersWithoutTOTP_WithTOTPSetup(t *testing.T) {
 
 func TestUpdateUserTOTPSecret_Set(t *testing.T) {
 	database := openMigratedMemory(t)
-	uid, _ := database.CreateUser("totp-set", "hash", 4)
+	uid, _ := database.CreateUser(context.Background(), "totp-set", "hash", 4)
 
 	secret := "JBSWY3DPEHPK3PXP"
-	if err := database.UpdateUserTOTPSecret(uid, &secret); err != nil {
+	if err := database.UpdateUserTOTPSecret(context.Background(), uid, &secret); err != nil {
 		t.Fatalf("UpdateUserTOTPSecret(set): %v", err)
 	}
 
-	user, _ := database.GetUserByID(uid)
+	user, _ := database.GetUserByID(context.Background(), uid)
 	if user == nil || user.TOTPSecret == nil || *user.TOTPSecret != secret {
 		t.Error("TOTP secret should be set")
 	}
@@ -625,15 +626,15 @@ func TestUpdateUserTOTPSecret_Set(t *testing.T) {
 
 func TestUpdateUserTOTPSecret_Clear(t *testing.T) {
 	database := openMigratedMemory(t)
-	uid, _ := database.CreateUser("totp-clear", "hash", 4)
+	uid, _ := database.CreateUser(context.Background(), "totp-clear", "hash", 4)
 
 	secret := "JBSWY3DPEHPK3PXP"
-	_ = database.UpdateUserTOTPSecret(uid, &secret)
-	if err := database.UpdateUserTOTPSecret(uid, nil); err != nil {
+	_ = database.UpdateUserTOTPSecret(context.Background(), uid, &secret)
+	if err := database.UpdateUserTOTPSecret(context.Background(), uid, nil); err != nil {
 		t.Fatalf("UpdateUserTOTPSecret(clear): %v", err)
 	}
 
-	user, _ := database.GetUserByID(uid)
+	user, _ := database.GetUserByID(context.Background(), uid)
 	if user == nil || user.TOTPSecret != nil {
 		t.Error("TOTP secret should be nil after clear")
 	}
@@ -644,14 +645,14 @@ func TestUpdateUserTOTPSecret_Clear(t *testing.T) {
 func TestCreateUserWithInvite_Success(t *testing.T) {
 	database := openMigratedMemory(t)
 	// Create a user who will create the invite.
-	creatorID, _ := database.CreateUser("invite-creator", "hash", 2)
+	creatorID, _ := database.CreateUser(context.Background(), "invite-creator", "hash", 2)
 
-	code, err := database.CreateInvite(creatorID, 5, nil)
+	code, err := database.CreateInvite(context.Background(), creatorID, 5, nil)
 	if err != nil {
 		t.Fatalf("CreateInvite: %v", err)
 	}
 
-	uid, err := database.CreateUserWithInvite("newuser", "hash", 4, code)
+	uid, err := database.CreateUserWithInvite(context.Background(), "newuser", "hash", 4, code)
 	if err != nil {
 		t.Fatalf("CreateUserWithInvite: %v", err)
 	}
@@ -660,7 +661,7 @@ func TestCreateUserWithInvite_Success(t *testing.T) {
 	}
 
 	// Verify invite use count incremented.
-	inv, _ := database.GetInvite(code)
+	inv, _ := database.GetInvite(context.Background(), code)
 	if inv == nil || inv.Uses != 1 {
 		t.Errorf("invite uses = %v, want 1", inv)
 	}
@@ -669,7 +670,7 @@ func TestCreateUserWithInvite_Success(t *testing.T) {
 func TestCreateUserWithInvite_InvalidCode(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	_, err := database.CreateUserWithInvite("baduser", "hash", 4, "nonexistent-code")
+	_, err := database.CreateUserWithInvite(context.Background(), "baduser", "hash", 4, "nonexistent-code")
 	if err == nil {
 		t.Error("expected error for invalid invite code")
 	}
@@ -677,12 +678,12 @@ func TestCreateUserWithInvite_InvalidCode(t *testing.T) {
 
 func TestCreateUserWithInvite_RevokedInvite(t *testing.T) {
 	database := openMigratedMemory(t)
-	creatorID, _ := database.CreateUser("inv-revoke-creator", "hash", 2)
+	creatorID, _ := database.CreateUser(context.Background(), "inv-revoke-creator", "hash", 2)
 
-	code, _ := database.CreateInvite(creatorID, 0, nil)
-	_ = database.RevokeInvite(code)
+	code, _ := database.CreateInvite(context.Background(), creatorID, 0, nil)
+	_ = database.RevokeInvite(context.Background(), code)
 
-	_, err := database.CreateUserWithInvite("revokeduser", "hash", 4, code)
+	_, err := database.CreateUserWithInvite(context.Background(), "revokeduser", "hash", 4, code)
 	if err == nil {
 		t.Error("expected error for revoked invite")
 	}
@@ -690,13 +691,13 @@ func TestCreateUserWithInvite_RevokedInvite(t *testing.T) {
 
 func TestCreateUserWithInvite_ExpiredInvite(t *testing.T) {
 	database := openMigratedMemory(t)
-	creatorID, _ := database.CreateUser("inv-expire-creator", "hash", 2)
+	creatorID, _ := database.CreateUser(context.Background(), "inv-expire-creator", "hash", 2)
 
 	// Create an invite that expires in the past.
 	pastTime := time.Now().Add(-1 * time.Hour)
-	code, _ := database.CreateInvite(creatorID, 0, &pastTime)
+	code, _ := database.CreateInvite(context.Background(), creatorID, 0, &pastTime)
 
-	_, err := database.CreateUserWithInvite("expireduser", "hash", 4, code)
+	_, err := database.CreateUserWithInvite(context.Background(), "expireduser", "hash", 4, code)
 	if err == nil {
 		t.Error("expected error for expired invite")
 	}
@@ -707,7 +708,7 @@ func TestCreateUserWithInvite_ExpiredInvite(t *testing.T) {
 func TestListInvites_DB_Empty(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	invites, err := database.ListInvites()
+	invites, err := database.ListInvites(context.Background())
 	if err != nil {
 		t.Fatalf("ListInvites: %v", err)
 	}
@@ -718,12 +719,12 @@ func TestListInvites_DB_Empty(t *testing.T) {
 
 func TestListInvites_DB_ReturnsAll(t *testing.T) {
 	database := openMigratedMemory(t)
-	creatorID, _ := database.CreateUser("list-inv-creator", "hash", 2)
+	creatorID, _ := database.CreateUser(context.Background(), "list-inv-creator", "hash", 2)
 
-	_, _ = database.CreateInvite(creatorID, 5, nil)
-	_, _ = database.CreateInvite(creatorID, 0, nil)
+	_, _ = database.CreateInvite(context.Background(), creatorID, 5, nil)
+	_, _ = database.CreateInvite(context.Background(), creatorID, 0, nil)
 
-	invites, err := database.ListInvites()
+	invites, err := database.ListInvites(context.Background())
 	if err != nil {
 		t.Fatalf("ListInvites: %v", err)
 	}
@@ -735,7 +736,7 @@ func TestListInvites_DB_ReturnsAll(t *testing.T) {
 func TestUseInviteAtomic_NonExistent(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	err := database.UseInviteAtomic("does-not-exist")
+	err := database.UseInviteAtomic(context.Background(), "does-not-exist")
 	if err == nil {
 		t.Error("expected error for non-existent invite")
 	}
@@ -746,7 +747,7 @@ func TestUseInviteAtomic_NonExistent(t *testing.T) {
 func TestSearchMessages_EmptyQuery(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	results, err := database.SearchMessages("", nil, 10)
+	results, err := database.SearchMessages(context.Background(), "", nil, 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -758,7 +759,7 @@ func TestSearchMessages_EmptyQuery(t *testing.T) {
 func TestSearchMessages_ZeroLimit(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	results, err := database.SearchMessages("test", nil, 0)
+	results, err := database.SearchMessages(context.Background(), "test", nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -772,10 +773,10 @@ func TestSearchMessages_SpecialCharsStripped(t *testing.T) {
 	userID := seedUser(t, database, "srch-special")
 	chID := seedChannel(t, database, "srch-special-ch")
 
-	_, _ = database.CreateMessage(chID, userID, "hello world content", nil)
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "hello world content", nil)
 
 	// FTS special chars should be stripped, leaving a valid query.
-	results, err := database.SearchMessages("hello* \"world\"", nil, 10)
+	results, err := database.SearchMessages(context.Background(), "hello* \"world\"", nil, 10)
 	if err != nil {
 		t.Fatalf("SearchMessages with special chars: %v", err)
 	}

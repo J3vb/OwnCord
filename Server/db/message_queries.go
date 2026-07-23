@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -46,8 +47,8 @@ func sanitizeFTSQuery(q string) string {
 
 // CreateMessage inserts a new message and returns the assigned ID.
 // Content should already be sanitized before calling this function.
-func (d *DB) CreateMessage(channelID, userID int64, content string, replyTo *int64) (int64, error) {
-	res, err := d.q.CreateMessage(dbCtx(), dbgen.CreateMessageParams{
+func (d *DB) CreateMessage(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (int64, error) {
+	res, err := d.q.CreateMessage(ctx, dbgen.CreateMessageParams{
 		ChannelID: channelID,
 		UserID:    userID,
 		Content:   content,
@@ -61,8 +62,8 @@ func (d *DB) CreateMessage(channelID, userID int64, content string, replyTo *int
 
 // GetMessage returns the message with the given ID, or nil if not found.
 // Soft-deleted messages are returned so callers can broadcast the deletion event.
-func (d *DB) GetMessage(id int64) (*Message, error) {
-	m, err := d.q.GetMessage(dbCtx(), id)
+func (d *DB) GetMessage(ctx context.Context, id int64) (*Message, error) {
+	m, err := d.q.GetMessage(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -74,13 +75,13 @@ func (d *DB) GetMessage(id int64) (*Message, error) {
 
 // GetMessages returns up to limit messages in a channel, ordered newest-first.
 // When before > 0 only messages with id < before are returned (pagination).
-func (d *DB) GetMessages(channelID, before int64, limit int) ([]MessageWithUser, error) {
+func (d *DB) GetMessages(ctx context.Context, channelID, before int64, limit int) ([]MessageWithUser, error) {
 	var (
 		rows *sql.Rows
 		err  error
 	)
 	if before > 0 {
-		rows, err = d.sqlDB.Query(
+		rows, err = d.sqlDB.QueryContext(ctx,
 			`SELECT m.id, m.channel_id, m.user_id, m.content, m.reply_to,
 			        m.edited_at, m.deleted, m.pinned, m.timestamp,
 			        u.username, u.avatar
@@ -90,7 +91,7 @@ func (d *DB) GetMessages(channelID, before int64, limit int) ([]MessageWithUser,
 			channelID, before, limit,
 		)
 	} else {
-		rows, err = d.sqlDB.Query(
+		rows, err = d.sqlDB.QueryContext(ctx,
 			`SELECT m.id, m.channel_id, m.user_id, m.content, m.reply_to,
 			        m.edited_at, m.deleted, m.pinned, m.timestamp,
 			        u.username, u.avatar
@@ -124,8 +125,8 @@ func (d *DB) GetMessages(channelID, before int64, limit int) ([]MessageWithUser,
 
 // EditMessage updates the content and sets edited_at on the message.
 // Returns an error if the message does not exist or userID does not match the owner.
-func (d *DB) EditMessage(id, userID int64, content string) error {
-	msg, err := d.GetMessage(id)
+func (d *DB) EditMessage(ctx context.Context, id, userID int64, content string) error {
+	msg, err := d.GetMessage(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -136,7 +137,7 @@ func (d *DB) EditMessage(id, userID int64, content string) error {
 		return fmt.Errorf("EditMessage: user %d does not own message %d: %w", userID, id, ErrForbidden)
 	}
 
-	if err := d.q.EditMessageContent(dbCtx(), dbgen.EditMessageContentParams{
+	if err := d.q.EditMessageContent(ctx, dbgen.EditMessageContentParams{
 		Content: content,
 		ID:      id,
 	}); err != nil {
@@ -147,8 +148,8 @@ func (d *DB) EditMessage(id, userID int64, content string) error {
 
 // DeleteMessage performs a soft delete (sets deleted=1) on the message.
 // The calling user must be the message owner or ismod must be true.
-func (d *DB) DeleteMessage(id, userID int64, ismod bool) error {
-	msg, err := d.GetMessage(id)
+func (d *DB) DeleteMessage(ctx context.Context, id, userID int64, ismod bool) error {
+	msg, err := d.GetMessage(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -159,15 +160,15 @@ func (d *DB) DeleteMessage(id, userID int64, ismod bool) error {
 		return fmt.Errorf("DeleteMessage: user %d does not own message %d: %w", userID, id, ErrForbidden)
 	}
 
-	if err := d.q.SoftDeleteMessage(dbCtx(), id); err != nil {
+	if err := d.q.SoftDeleteMessage(ctx, id); err != nil {
 		return fmt.Errorf("DeleteMessage: %w", err)
 	}
 	return nil
 }
 
 // AddReaction inserts a reaction. Returns an error on duplicate (same user+emoji+message).
-func (d *DB) AddReaction(messageID, userID int64, emoji string) error {
-	if err := d.q.AddReaction(dbCtx(), dbgen.AddReactionParams{
+func (d *DB) AddReaction(ctx context.Context, messageID, userID int64, emoji string) error {
+	if err := d.q.AddReaction(ctx, dbgen.AddReactionParams{
 		MessageID: messageID,
 		UserID:    userID,
 		Emoji:     emoji,
@@ -178,8 +179,8 @@ func (d *DB) AddReaction(messageID, userID int64, emoji string) error {
 }
 
 // RemoveReaction deletes a reaction. Returns an error if it does not exist.
-func (d *DB) RemoveReaction(messageID, userID int64, emoji string) error {
-	res, err := d.q.RemoveReaction(dbCtx(), dbgen.RemoveReactionParams{
+func (d *DB) RemoveReaction(ctx context.Context, messageID, userID int64, emoji string) error {
+	res, err := d.q.RemoveReaction(ctx, dbgen.RemoveReactionParams{
 		MessageID: messageID,
 		UserID:    userID,
 		Emoji:     emoji,
@@ -196,8 +197,8 @@ func (d *DB) RemoveReaction(messageID, userID int64, emoji string) error {
 
 // GetReactions returns aggregated reaction counts for a message.
 // MeReacted is always false here (caller passes requesting userID if needed).
-func (d *DB) GetReactions(messageID int64) ([]ReactionCount, error) {
-	rows, err := d.q.GetReactionCounts(dbCtx(), messageID)
+func (d *DB) GetReactions(ctx context.Context, messageID int64) ([]ReactionCount, error) {
+	rows, err := d.q.GetReactionCounts(ctx, messageID)
 	if err != nil {
 		return nil, fmt.Errorf("GetReactions: %w", err)
 	}
@@ -211,7 +212,7 @@ func (d *DB) GetReactions(messageID int64) ([]ReactionCount, error) {
 // SearchMessages performs a full-text search against the messages_fts virtual table.
 // When channelID is non-nil the search is scoped to that channel.
 // Deleted messages are excluded from results.
-func (d *DB) SearchMessages(query string, channelID *int64, limit int) ([]MessageSearchResult, error) {
+func (d *DB) SearchMessages(ctx context.Context, query string, channelID *int64, limit int) ([]MessageSearchResult, error) {
 	if query == "" {
 		return []MessageSearchResult{}, nil
 	}
@@ -229,7 +230,7 @@ func (d *DB) SearchMessages(query string, channelID *int64, limit int) ([]Messag
 	)
 
 	if channelID != nil {
-		rows, err = d.sqlDB.Query(
+		rows, err = d.sqlDB.QueryContext(ctx,
 			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content, m.timestamp
 			 FROM messages_fts f
 			 JOIN messages m ON f.rowid = m.id
@@ -240,7 +241,7 @@ func (d *DB) SearchMessages(query string, channelID *int64, limit int) ([]Messag
 			query, *channelID, limit,
 		)
 	} else {
-		rows, err = d.sqlDB.Query(
+		rows, err = d.sqlDB.QueryContext(ctx,
 			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content, m.timestamp
 			 FROM messages_fts f
 			 JOIN messages m ON f.rowid = m.id
@@ -278,7 +279,7 @@ func (d *DB) SearchMessages(query string, channelID *int64, limit int) ([]Messag
 // SearchMessagesInChannels performs a full-text search scoped to the given
 // channel IDs. This prevents information leakage by filtering at the DB level
 // rather than post-filtering in application code.
-func (d *DB) SearchMessagesInChannels(query string, channelIDs []int64, limit int) ([]MessageSearchResult, error) {
+func (d *DB) SearchMessagesInChannels(ctx context.Context, query string, channelIDs []int64, limit int) ([]MessageSearchResult, error) {
 	if query == "" || len(channelIDs) == 0 {
 		return []MessageSearchResult{}, nil
 	}
@@ -300,7 +301,7 @@ func (d *DB) SearchMessagesInChannels(query string, channelIDs []int64, limit in
 	}
 	args = append(args, limit)
 
-	rows, err := d.sqlDB.Query(
+	rows, err := d.sqlDB.QueryContext(ctx,
 		fmt.Sprintf(
 			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content, m.timestamp
 			 FROM messages_fts f
@@ -338,13 +339,13 @@ func (d *DB) SearchMessagesInChannels(query string, channelIDs []int64, limit in
 
 // GetMessagesForAPI returns messages in the API.md response shape, including
 // user object, reactions (with me flag), and attachments.
-func (d *DB) GetMessagesForAPI(channelID, before int64, limit int, requestingUserID int64) ([]MessageAPIResponse, error) {
+func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, limit int, requestingUserID int64) ([]MessageAPIResponse, error) {
 	var (
 		rows *sql.Rows
 		err  error
 	)
 	if before > 0 {
-		rows, err = d.sqlDB.Query(
+		rows, err = d.sqlDB.QueryContext(ctx,
 			`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
 			        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp
 			 FROM messages m JOIN users u ON m.user_id = u.id
@@ -353,7 +354,7 @@ func (d *DB) GetMessagesForAPI(channelID, before int64, limit int, requestingUse
 			channelID, before, limit,
 		)
 	} else {
-		rows, err = d.sqlDB.Query(
+		rows, err = d.sqlDB.QueryContext(ctx,
 			`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
 			        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp
 			 FROM messages m JOIN users u ON m.user_id = u.id
@@ -367,11 +368,11 @@ func (d *DB) GetMessagesForAPI(channelID, before int64, limit int, requestingUse
 	}
 	defer rows.Close() //nolint:errcheck
 
-	return d.scanAndEnrichMessages(rows, requestingUserID)
+	return d.scanAndEnrichMessages(ctx, rows, requestingUserID)
 }
 
 // getReactionsBatch returns aggregated reactions for multiple messages.
-func (d *DB) getReactionsBatch(msgIDs []int64, requestingUserID int64) (map[int64][]ReactionInfo, error) {
+func (d *DB) getReactionsBatch(ctx context.Context, msgIDs []int64, requestingUserID int64) (map[int64][]ReactionInfo, error) {
 	if len(msgIDs) == 0 {
 		return map[int64][]ReactionInfo{}, nil
 	}
@@ -399,7 +400,7 @@ func (d *DB) getReactionsBatch(msgIDs []int64, requestingUserID int64) (map[int6
 	)
 	args = append([]any{requestingUserID}, args...)
 
-	rows, err := d.sqlDB.Query(query, args...)
+	rows, err := d.sqlDB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("getReactionsBatch: %w", err)
 	}
@@ -423,8 +424,8 @@ func (d *DB) getReactionsBatch(msgIDs []int64, requestingUserID int64) (map[int6
 }
 
 // UpdateReadState upserts the read state for a user in a channel.
-func (d *DB) UpdateReadState(userID, channelID, lastReadMessageID int64) error {
-	if err := d.q.UpdateReadState(dbCtx(), dbgen.UpdateReadStateParams{
+func (d *DB) UpdateReadState(ctx context.Context, userID, channelID, lastReadMessageID int64) error {
+	if err := d.q.UpdateReadState(ctx, dbgen.UpdateReadStateParams{
 		UserID:        userID,
 		ChannelID:     channelID,
 		LastMessageID: lastReadMessageID,
@@ -436,8 +437,8 @@ func (d *DB) UpdateReadState(userID, channelID, lastReadMessageID int64) error {
 
 // GetChannelUnreadCounts returns per-channel unread counts and last message IDs
 // for a given user. Only text channels with at least one message are included.
-func (d *DB) GetChannelUnreadCounts(userID int64) (map[int64]ChannelUnread, error) {
-	rows, err := d.sqlDB.Query(
+func (d *DB) GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]ChannelUnread, error) {
+	rows, err := d.sqlDB.QueryContext(ctx,
 		`SELECT c.id,
 		        COALESCE(MAX(m.id), 0) AS last_msg_id,
 		        COUNT(CASE WHEN m.id > COALESCE(rs.last_message_id, 0) AND m.deleted = 0 THEN 1 END) AS unread
@@ -469,9 +470,9 @@ func (d *DB) GetChannelUnreadCounts(userID int64) (map[int64]ChannelUnread, erro
 }
 
 // GetLatestMessageID returns the highest message ID in a channel, or 0 if empty.
-func (d *DB) GetLatestMessageID(channelID int64) (int64, error) {
+func (d *DB) GetLatestMessageID(ctx context.Context, channelID int64) (int64, error) {
 	var id int64
-	err := d.sqlDB.QueryRow(
+	err := d.sqlDB.QueryRowContext(ctx,
 		`SELECT COALESCE(MAX(id), 0) FROM messages WHERE channel_id = ? AND deleted = 0`,
 		channelID,
 	).Scan(&id)
@@ -483,8 +484,8 @@ func (d *DB) GetLatestMessageID(channelID int64) (int64, error) {
 
 // GetPinnedMessages returns all pinned messages in a channel in the API response shape,
 // including user object, reactions (with me flag), and attachments.
-func (d *DB) GetPinnedMessages(channelID int64, requestingUserID int64) ([]MessageAPIResponse, error) {
-	rows, err := d.sqlDB.Query(
+func (d *DB) GetPinnedMessages(ctx context.Context, channelID int64, requestingUserID int64) ([]MessageAPIResponse, error) {
+	rows, err := d.sqlDB.QueryContext(ctx,
 		`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
 		        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp
 		 FROM messages m JOIN users u ON m.user_id = u.id
@@ -497,12 +498,12 @@ func (d *DB) GetPinnedMessages(channelID int64, requestingUserID int64) ([]Messa
 	}
 	defer rows.Close() //nolint:errcheck
 
-	return d.scanAndEnrichMessages(rows, requestingUserID)
+	return d.scanAndEnrichMessages(ctx, rows, requestingUserID)
 }
 
 // scanAndEnrichMessages scans rows into MessageAPIResponse slice and
 // batch-fetches reactions and attachments. Caller must defer rows.Close().
-func (d *DB) scanAndEnrichMessages(rows *sql.Rows, requestingUserID int64) ([]MessageAPIResponse, error) {
+func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requestingUserID int64) ([]MessageAPIResponse, error) {
 	var msgs []MessageAPIResponse
 	var msgIDs []int64
 	for rows.Next() {
@@ -529,7 +530,7 @@ func (d *DB) scanAndEnrichMessages(rows *sql.Rows, requestingUserID int64) ([]Me
 	}
 
 	// Batch-fetch reactions for all message IDs.
-	reactMap, err := d.getReactionsBatch(msgIDs, requestingUserID)
+	reactMap, err := d.getReactionsBatch(ctx, msgIDs, requestingUserID)
 	if err != nil {
 		return nil, fmt.Errorf("scanAndEnrichMessages reactions: %w", err)
 	}
@@ -540,7 +541,7 @@ func (d *DB) scanAndEnrichMessages(rows *sql.Rows, requestingUserID int64) ([]Me
 	}
 
 	// Batch-fetch attachments for all message IDs.
-	attMap, err := d.GetAttachmentsByMessageIDs(msgIDs)
+	attMap, err := d.GetAttachmentsByMessageIDs(ctx, msgIDs)
 	if err != nil {
 		return nil, fmt.Errorf("scanAndEnrichMessages attachments: %w", err)
 	}
@@ -555,8 +556,8 @@ func (d *DB) scanAndEnrichMessages(rows *sql.Rows, requestingUserID int64) ([]Me
 
 // SetMessagePinned updates the pinned column on a message.
 // Returns ErrNotFound if the message does not exist.
-func (d *DB) SetMessagePinned(id int64, pinned bool) error {
-	res, err := d.q.SetMessagePinned(dbCtx(), dbgen.SetMessagePinnedParams{
+func (d *DB) SetMessagePinned(ctx context.Context, id int64, pinned bool) error {
+	res, err := d.q.SetMessagePinned(ctx, dbgen.SetMessagePinnedParams{
 		Pinned: b2i64(pinned),
 		ID:     id,
 	})
