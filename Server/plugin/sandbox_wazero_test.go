@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -320,6 +321,50 @@ func TestWazeroCPUBudgetOverrunDoesNotBrickPlugin(t *testing.T) {
 	if !inst.Enabled {
 		t.Fatal("overrun must not disable the plugin")
 	}
+}
+
+// TestWazeroConcurrentDispatchRace locks F2: concurrent invocations of the same
+// plugin command must be serialized per Instance. Without a per-Instance lock,
+// two goroutines drive one shared wazero module (allocate / mem.Write /
+// command_dispatch / mem.Read) with no synchronization, racing on its linear
+// memory. Run under -race: without the fix the detector reports a data race;
+// with it the run is clean.
+func TestWazeroConcurrentDispatchRace(t *testing.T) {
+	dir := t.TempDir()
+	manifest := `{"name":"spinner","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"spin"}]}`
+	writeTestPlugin(t, dir, "spinner", manifest, spinWASM)
+
+	reg, mem := newWazeroTestRegistry(t, dir)
+	ctx := context.Background()
+	if err := reg.LoadAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := mem.ListPlugins(ctx)
+	if err := reg.EnablePlugin(ctx, rows[0].ID); err != nil {
+		t.Fatalf("EnablePlugin: %v", err)
+	}
+	reg.mu.RLock()
+	inst := reg.plugins[rows[0].ID]
+	reg.mu.RUnlock()
+	if err := reg.RegisterCommand("spin", inst); err != nil {
+		t.Fatalf("RegisterCommand: %v", err)
+	}
+
+	const goroutines = 8
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 20; j++ {
+				reg.DispatchCommand(ctx, 1, 2, "spin", nil)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
 }
 
 func TestWazeroInvalidWASMFailsActivation(t *testing.T) {

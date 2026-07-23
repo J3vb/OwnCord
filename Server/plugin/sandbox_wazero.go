@@ -185,6 +185,16 @@ func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, ch
 	if inst == nil {
 		return nil, false
 	}
+	// F2: serialize all guest interaction for this instance. wazero's
+	// Function.Call is not goroutine-safe, and concurrent allocate/mem.Write/
+	// command_dispatch/mem.Read on the shared module tear its linear-memory
+	// slice header. A per-Instance lock (not r.mu — that would serialize every
+	// plugin in the registry and be held across a full CPU budget) confines
+	// contention to concurrent invocations of the SAME plugin, and also makes the
+	// lazy re-activation below atomic so two overruns can't double-instantiate.
+	inst.invokeMu.Lock()
+	defer inst.invokeMu.Unlock()
+
 	r.mu.RLock()
 	moduleAny := inst.module
 	enabled := inst.Enabled
