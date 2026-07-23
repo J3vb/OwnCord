@@ -8,6 +8,12 @@ import {
   unwrapRoomKey,
   computeKeyFingerprint,
   roomKeyToBase64,
+  generateIdentityKeyPair,
+  signEphemeralKey,
+  verifyEphemeralKeySignature,
+  importIdentityPublicKey,
+  exportIdentityKeyPair,
+  importIdentityKeyPair,
 } from "@lib/e2eeCrypto";
 
 vi.mock("@lib/logger", () => ({
@@ -143,6 +149,136 @@ describe("e2eeCrypto", () => {
       expect(typeof encoded).toBe("string");
       expect(encoded.length).toBeGreaterThan(0);
       expect(() => atob(encoded)).not.toThrow();
+    });
+  });
+
+  // ── Identity sign / verify (F3 TOFU) ───────────────────────────────────────
+
+  describe("signEphemeralKey / verifyEphemeralKeySignature", () => {
+    const userId = 42;
+
+    async function fixture() {
+      const identity = await generateIdentityKeyPair();
+      const ephemeral = await generateECDHKeyPair();
+      const ephemeralRaw = new Uint8Array(
+        await crypto.subtle.exportKey("raw", ephemeral.publicKey),
+      );
+      const signature = await signEphemeralKey(identity.privateKey, userId, ephemeralRaw);
+      return { identity, ephemeralRaw, signature };
+    }
+
+    it("round-trips: a valid signature verifies against the identity public key", async () => {
+      const { identity, ephemeralRaw, signature } = await fixture();
+      const ok = await verifyEphemeralKeySignature(
+        identity.publicKey,
+        userId,
+        ephemeralRaw,
+        signature,
+      );
+      expect(ok).toBe(true);
+    });
+
+    it("verifies against a public key re-imported from its base64 raw form", async () => {
+      const { identity, ephemeralRaw, signature } = await fixture();
+      const pubBase64 = await exportPublicKey(identity.publicKey);
+      const reimported = await importIdentityPublicKey(pubBase64);
+      const ok = await verifyEphemeralKeySignature(reimported, userId, ephemeralRaw, signature);
+      expect(ok).toBe(true);
+    });
+
+    it("fails when the userId is tampered (server re-attribution)", async () => {
+      const { identity, ephemeralRaw, signature } = await fixture();
+      const ok = await verifyEphemeralKeySignature(
+        identity.publicKey,
+        userId + 1,
+        ephemeralRaw,
+        signature,
+      );
+      expect(ok).toBe(false);
+    });
+
+    it("fails when the ephemeral key is substituted (server MITM)", async () => {
+      const { identity, signature } = await fixture();
+      const other = await generateECDHKeyPair();
+      const otherRaw = new Uint8Array(await crypto.subtle.exportKey("raw", other.publicKey));
+      const ok = await verifyEphemeralKeySignature(identity.publicKey, userId, otherRaw, signature);
+      expect(ok).toBe(false);
+    });
+
+    it("fails when the signature bytes are tampered", async () => {
+      const { identity, ephemeralRaw, signature } = await fixture();
+      const bytes = Uint8Array.from(atob(signature), (c) => c.charCodeAt(0));
+      bytes[0] = bytes[0]! ^ 0xff;
+      const tampered = btoa(String.fromCharCode(...bytes));
+      const ok = await verifyEphemeralKeySignature(
+        identity.publicKey,
+        userId,
+        ephemeralRaw,
+        tampered,
+      );
+      expect(ok).toBe(false);
+    });
+
+    it("returns false (not throw) on malformed base64 signature", async () => {
+      const { identity, ephemeralRaw } = await fixture();
+      const ok = await verifyEphemeralKeySignature(
+        identity.publicKey,
+        userId,
+        ephemeralRaw,
+        "not valid base64 !!!",
+      );
+      expect(ok).toBe(false);
+    });
+
+    it("fails against a different identity key (wrong signer)", async () => {
+      const { ephemeralRaw, signature } = await fixture();
+      const attacker = await generateIdentityKeyPair();
+      const ok = await verifyEphemeralKeySignature(
+        attacker.publicKey,
+        userId,
+        ephemeralRaw,
+        signature,
+      );
+      expect(ok).toBe(false);
+    });
+  });
+
+  // ── Identity keypair persistence (keyring blob round-trip) ──────────────────
+
+  describe("exportIdentityKeyPair / importIdentityKeyPair", () => {
+    it("round-trips a keypair through the JWK blob and can still sign+verify", async () => {
+      const original = await generateIdentityKeyPair();
+      const blob = await exportIdentityKeyPair(original.privateKey);
+      const restored = await importIdentityKeyPair(blob);
+
+      const ephemeral = await generateECDHKeyPair();
+      const ephemeralRaw = new Uint8Array(
+        await crypto.subtle.exportKey("raw", ephemeral.publicKey),
+      );
+
+      // Sign with the restored private key, verify with the restored public key.
+      const sig = await signEphemeralKey(restored.privateKey, 7, ephemeralRaw);
+      expect(await verifyEphemeralKeySignature(restored.publicKey, 7, ephemeralRaw, sig)).toBe(
+        true,
+      );
+
+      // Public key survives the round-trip identically (safety-number stability).
+      const fpOriginal = await computeKeyFingerprint(original.publicKey);
+      const fpRestored = await computeKeyFingerprint(restored.publicKey);
+      expect(fpRestored).toBe(fpOriginal);
+    });
+  });
+
+  // ── Identity fingerprint stability (safety number repoint) ──────────────────
+
+  describe("computeKeyFingerprint on identity keys", () => {
+    it("is stable across export/import of the identity public key", async () => {
+      const identity = await generateIdentityKeyPair();
+      const base64 = await exportPublicKey(identity.publicKey);
+      const reimported = await importIdentityPublicKey(base64);
+      expect(await computeKeyFingerprint(reimported)).toBe(
+        await computeKeyFingerprint(identity.publicKey),
+      );
     });
   });
 });

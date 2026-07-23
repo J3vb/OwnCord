@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS users (
     last_seen   TEXT,
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
-    ban_expires TEXT
+    ban_expires TEXT,
+    identity_public_key TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -727,5 +728,88 @@ func TestListMembers_SortedByUsername(t *testing.T) {
 	}
 	if members[2].Username != "zeta_user" {
 		t.Errorf("last member = %q, want 'zeta_user' (sorted)", members[2].Username)
+	}
+}
+
+// ─── Identity key (F3 voice E2EE TOFU) ───────────────────────────────────────
+
+func TestUpdateUserIdentityKey_RoundTrip(t *testing.T) {
+	database := newTestDB(t)
+	id, err := database.CreateUser(context.Background(), "idkey_user", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	key := "BAsE64iDeNtItYkEy+/=="
+	if err := database.UpdateUserIdentityKey(context.Background(), id, &key); err != nil {
+		t.Fatalf("UpdateUserIdentityKey: %v", err)
+	}
+
+	u, err := database.GetUserByID(context.Background(), id)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if u.IdentityPublicKey == nil || *u.IdentityPublicKey != key {
+		t.Errorf("IdentityPublicKey = %v, want %q", u.IdentityPublicKey, key)
+	}
+}
+
+func TestUpdateUserIdentityKey_LastWriteWins(t *testing.T) {
+	database := newTestDB(t)
+	id, err := database.CreateUser(context.Background(), "idkey_rotate", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	first := "Zmlyc3RrZXk="
+	second := "c2Vjb25ka2V5"
+	if err := database.UpdateUserIdentityKey(context.Background(), id, &first); err != nil {
+		t.Fatalf("UpdateUserIdentityKey(first): %v", err)
+	}
+	if err := database.UpdateUserIdentityKey(context.Background(), id, &second); err != nil {
+		t.Fatalf("UpdateUserIdentityKey(second): %v", err)
+	}
+
+	u, err := database.GetUserByID(context.Background(), id)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if u.IdentityPublicKey == nil || *u.IdentityPublicKey != second {
+		t.Errorf("IdentityPublicKey = %v, want %q (last write wins)", u.IdentityPublicKey, second)
+	}
+}
+
+func TestListMembers_IncludesIdentityKey(t *testing.T) {
+	database := newTestDB(t)
+	id, err := database.CreateUser(context.Background(), "idkey_member", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	key := "bWVtYmVya2V5"
+	if err := database.UpdateUserIdentityKey(context.Background(), id, &key); err != nil {
+		t.Fatalf("UpdateUserIdentityKey: %v", err)
+	}
+	// A user who never published a key must come back with a nil key.
+	if _, err := database.CreateUser(context.Background(), "idkey_none", "hash", 4); err != nil {
+		t.Fatalf("CreateUser(none): %v", err)
+	}
+
+	members, err := database.ListMembers(context.Background())
+	if err != nil {
+		t.Fatalf("ListMembers: %v", err)
+	}
+	if len(members) != 2 {
+		t.Fatalf("ListMembers() = %d, want 2", len(members))
+	}
+	byName := map[string]db.MemberSummary{}
+	for _, m := range members {
+		byName[m.Username] = m
+	}
+	got := byName["idkey_member"].IdentityPublicKey
+	if got == nil || *got != key {
+		t.Errorf("idkey_member IdentityPublicKey = %v, want %q", got, key)
+	}
+	if byName["idkey_none"].IdentityPublicKey != nil {
+		t.Errorf("idkey_none IdentityPublicKey = %v, want nil", *byName["idkey_none"].IdentityPublicKey)
 	}
 }

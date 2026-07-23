@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 | `014_events_table.sql` | Adds `events` — persistent broadcast log for reconnect cold-tier replay |
 | `015_plugins.sql` | Adds `plugins` and `plugin_kv` for the WASM plugin runtime |
 | `016_announcement_channel_type.sql` | Recreates the channel-type triggers to allow `announcement` |
+| `017_user_identity_key.sql` | Adds `users.identity_public_key` (long-term E2EE identity key for voice TOFU) |
 
 ---
 
@@ -105,11 +106,16 @@ CREATE TABLE users (
     last_seen   TEXT,
     banned      INTEGER NOT NULL DEFAULT 0,
     ban_reason  TEXT,
-    ban_expires TEXT
+    ban_expires TEXT,
+    identity_public_key TEXT
 );
 ```
 
 Valid status values: `online`, `idle`, `dnd`, `offline`. All statuses are reset to `offline` on server startup.
+
+`identity_public_key` (added in migration 017) is the user's long-term E2EE
+identity public key (base64 ECDSA P-256) used for TOFU pinning of voice E2EE
+announces; `NULL` = not published (legacy client).
 
 ---
 

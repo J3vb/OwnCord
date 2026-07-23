@@ -59,6 +59,7 @@ type Store interface {
 	UpdateUserPassword(ctx context.Context, userID int64, newPasswordHash string) error
 	UpdateUserStatus(ctx context.Context, id int64, status string) error
 	UpdateUserTOTPSecret(ctx context.Context, id int64, secret *string) error
+	UpdateUserIdentityKey(ctx context.Context, id int64, key *string) error
 	UpdateUserRole(ctx context.Context, userID, roleID int64) error
 	ResetAllUserStatuses(ctx context.Context) error
 	DeleteAccount(ctx context.Context, userID int64) error

@@ -484,8 +484,13 @@ func TestExtractChatserverFromTarGz(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	dest := filepath.Join(tmpDir, "chatserver")
-	if err := extractChatserverFromTarGz(bytes.NewReader(gzbuf.Bytes()), dest); err != nil {
+	gotHash, err := extractChatserverFromTarGz(bytes.NewReader(gzbuf.Bytes()), dest)
+	if err != nil {
 		t.Fatalf("extractChatserverFromTarGz: %v", err)
+	}
+	innerSum := sha256.Sum256(inner)
+	if gotHash != hex.EncodeToString(innerSum[:]) {
+		t.Errorf("extracted hash = %q, want hash of written bytes", gotHash)
 	}
 	got, err := os.ReadFile(dest)
 	if err != nil {
@@ -703,9 +708,12 @@ func testDownloadAndVerifySuccessWindows(t *testing.T) {
 		Transport: &rewriteTransport{srv.URL},
 	}
 
-	err := u.DownloadAndVerify(context.Background(), "v1.0.0", downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL, dest)
+	stagedHash, err := u.DownloadAndVerify(context.Background(), "v1.0.0", downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL, dest)
 	if err != nil {
 		t.Fatalf("DownloadAndVerify: %v", err)
+	}
+	if stagedHash != checksumHex {
+		t.Errorf("staged hash = %q, want manifest-bound hash %q", stagedHash, checksumHex)
 	}
 
 	got, _ := os.ReadFile(dest)
@@ -759,9 +767,13 @@ func testDownloadAndVerifySuccessLinux(t *testing.T) {
 		Transport: &rewriteTransport{srv.URL},
 	}
 
-	err := u.DownloadAndVerify(context.Background(), "v1.0.0", downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL, dest)
+	stagedHash, err := u.DownloadAndVerify(context.Background(), "v1.0.0", downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL, dest)
 	if err != nil {
 		t.Fatalf("DownloadAndVerify: %v", err)
+	}
+	innerSum := sha256.Sum256(inner)
+	if stagedHash != hex.EncodeToString(innerSum[:]) {
+		t.Errorf("staged hash = %q, want hash of extracted binary", stagedHash)
 	}
 
 	got, err := os.ReadFile(dest)
@@ -801,7 +813,7 @@ func mustBuildChatserverTarGz(t *testing.T, inner []byte) []byte {
 
 func TestDownloadAndVerify_InvalidDownloadURL(t *testing.T) {
 	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
-	err := u.DownloadAndVerify(context.Background(), "v1.0.0", "https://evil.com/file", "https://evil.com/sum", "https://evil.com/file.sig", "https://evil.com/manifest.json", "https://evil.com/manifest.json.sig", "/tmp/out")
+	_, err := u.DownloadAndVerify(context.Background(), "v1.0.0", "https://evil.com/file", "https://evil.com/sum", "https://evil.com/file.sig", "https://evil.com/manifest.json", "https://evil.com/manifest.json.sig", "/tmp/out")
 	if err == nil {
 		t.Error("DownloadAndVerify should reject invalid download URL")
 	}
@@ -810,7 +822,7 @@ func TestDownloadAndVerify_InvalidDownloadURL(t *testing.T) {
 func TestDownloadAndVerify_InvalidChecksumURL(t *testing.T) {
 	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
 	downloadURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe"
-	err := u.DownloadAndVerify(context.Background(), "v1.0.0", downloadURL, "https://evil.com/sum", "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe.sig", "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json", "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json.sig", "/tmp/out")
+	_, err := u.DownloadAndVerify(context.Background(), "v1.0.0", downloadURL, "https://evil.com/sum", "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe.sig", "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json", "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json.sig", "/tmp/out")
 	if err == nil {
 		t.Error("DownloadAndVerify should reject invalid checksum URL")
 	}
@@ -867,7 +879,7 @@ func testDownloadAndVerifyChecksumMismatchWindows(t *testing.T) {
 	manifestURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json"
 	manifestSignatureURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json.sig"
 
-	err := u.DownloadAndVerify(context.Background(), "v1.0.0", downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL, dest)
+	_, err := u.DownloadAndVerify(context.Background(), "v1.0.0", downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL, dest)
 	if err == nil {
 		t.Error("DownloadAndVerify should fail on checksum mismatch")
 	}
@@ -917,7 +929,7 @@ func testDownloadAndVerifyChecksumMismatchLinux(t *testing.T) {
 	manifestURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json"
 	manifestSignatureURL := "https://github.com/J3vb/OwnCord/releases/download/v1.0.0/server-update-manifest.json.sig"
 
-	err := u.DownloadAndVerify(context.Background(), "v1.0.0", downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL, dest)
+	_, err := u.DownloadAndVerify(context.Background(), "v1.0.0", downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL, dest)
 	if err == nil {
 		t.Error("DownloadAndVerify should fail on checksum mismatch")
 	}
@@ -956,7 +968,7 @@ func TestDownloadAndVerify_MissingSignature(t *testing.T) {
 
 	u.httpClient = &http.Client{Transport: &rewriteTransport{srv.URL}}
 
-	err := u.DownloadAndVerify(
+	_, err := u.DownloadAndVerify(
 		context.Background(),
 		"v1.0.0",
 		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe",
@@ -1004,7 +1016,7 @@ func TestDownloadAndVerify_InvalidSignature(t *testing.T) {
 	dest := filepath.Join(tmpDir, "chatserver.exe")
 
 	u.httpClient = &http.Client{Transport: &rewriteTransport{srv.URL}}
-	err := u.DownloadAndVerify(
+	_, err := u.DownloadAndVerify(
 		context.Background(),
 		"v1.0.0",
 		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe",
@@ -1053,7 +1065,7 @@ func TestDownloadAndVerify_MalformedSignature(t *testing.T) {
 	dest := filepath.Join(tmpDir, "chatserver.exe")
 
 	u.httpClient = &http.Client{Transport: &rewriteTransport{srv.URL}}
-	err := u.DownloadAndVerify(
+	_, err := u.DownloadAndVerify(
 		context.Background(),
 		"v1.0.0",
 		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe",
@@ -1101,7 +1113,7 @@ func TestDownloadAndVerify_ManifestVersionMismatch(t *testing.T) {
 
 	dest := filepath.Join(t.TempDir(), "chatserver.exe")
 	u.httpClient = &http.Client{Transport: &rewriteTransport{srv.URL}}
-	err := u.DownloadAndVerify(
+	_, err := u.DownloadAndVerify(
 		context.Background(),
 		"v1.0.0",
 		"https://github.com/J3vb/OwnCord/releases/download/v1.0.0/chatserver.exe",
@@ -1163,5 +1175,128 @@ func TestVerifySignature_TauriBase64WrappedFormat(t *testing.T) {
 	}
 	if err := u.VerifySignature(otherPath, wrappedSig); err == nil {
 		t.Error("wrapped signature must not verify tampered content")
+	}
+}
+
+// ─── Staged-binary TOCTOU guard (W3-3) ───────────────────────────────────────
+
+// TestOpenVerifiedBinary_CommitHappyPath: verify-through-handle then commit
+// moves the exact verified file to the destination.
+func TestOpenVerifiedBinary_CommitHappyPath(t *testing.T) {
+	dir := t.TempDir()
+	stagedPath := filepath.Join(dir, "app.new")
+	content := []byte("verified update bytes")
+	if err := os.WriteFile(stagedPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(content)
+
+	staged, err := OpenVerifiedBinary(stagedPath, hex.EncodeToString(sum[:]))
+	if err != nil {
+		t.Fatalf("OpenVerifiedBinary: %v", err)
+	}
+	defer staged.Close() //nolint:errcheck
+
+	destPath := filepath.Join(dir, "app")
+	if err := staged.Commit(destPath); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	got, err := os.ReadFile(destPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, content) {
+		t.Errorf("committed content mismatch")
+	}
+	if _, err := os.Lstat(stagedPath); !os.IsNotExist(err) {
+		t.Errorf("staged path should be gone after commit")
+	}
+}
+
+func TestOpenVerifiedBinary_WrongHash(t *testing.T) {
+	stagedPath := filepath.Join(t.TempDir(), "app.new")
+	if err := os.WriteFile(stagedPath, []byte("some bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wrong := "0000000000000000000000000000000000000000000000000000000000000000"
+	if _, err := OpenVerifiedBinary(stagedPath, wrong); err == nil {
+		t.Fatal("OpenVerifiedBinary must reject a hash mismatch")
+	}
+}
+
+// TestOpenVerifiedBinary_SwapAfterVerifyDetectedAtCommit locks the W3-3
+// invariant: hash verification and the rename commit operate on the same
+// file. The old path-based flow (VerifyChecksum(path) then os.Rename(path))
+// silently renamed — and would have spawned — whatever was swapped in at the
+// staged path after verification. Now either the swap itself is blocked by
+// the held verification handle (Windows) or Commit detects the swapped file
+// and refuses (Unix); unverified bytes must never land at the destination.
+func TestOpenVerifiedBinary_SwapAfterVerifyDetectedAtCommit(t *testing.T) {
+	dir := t.TempDir()
+	stagedPath := filepath.Join(dir, "app.new")
+	good := []byte("good verified bytes")
+	if err := os.WriteFile(stagedPath, good, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(good)
+
+	staged, err := OpenVerifiedBinary(stagedPath, hex.EncodeToString(sum[:]))
+	if err != nil {
+		t.Fatalf("OpenVerifiedBinary: %v", err)
+	}
+	defer staged.Close() //nolint:errcheck
+
+	// Attacker tries to win the race: replace the staged path after
+	// verification but before the rename.
+	evilPath := filepath.Join(dir, "evil")
+	if err := os.WriteFile(evilPath, []byte("malicious payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	swapErr := os.Rename(evilPath, stagedPath)
+
+	destPath := filepath.Join(dir, "app")
+	commitErr := staged.Commit(destPath)
+	switch {
+	case swapErr == nil && commitErr == nil:
+		t.Fatal("staged binary was swapped after verification and Commit did not detect it")
+	case swapErr != nil && commitErr != nil:
+		t.Fatalf("swap was blocked (%v) but Commit still failed: %v", swapErr, commitErr)
+	case commitErr == nil:
+		// Swap blocked by the held verification handle (Windows): the
+		// committed file must be the verified bytes.
+		got, err := os.ReadFile(destPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, good) {
+			t.Errorf("committed content is not the verified bytes")
+		}
+	}
+}
+
+// TestDownloadFile_RefusesPreExistingDest locks the O_EXCL staging invariant:
+// the download must refuse to write through a path an attacker pre-created.
+func TestDownloadFile_RefusesPreExistingDest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("downloaded content"))
+	}))
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "staged.bin")
+	planted := []byte("attacker planted file")
+	if err := os.WriteFile(dest, planted, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	u := newTestUpdater(srv.URL, "1.0.0")
+	if err := u.downloadFile(context.Background(), srv.URL+"/binary", dest); err == nil {
+		t.Fatal("downloadFile must refuse a pre-existing staging path")
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, planted) {
+		t.Errorf("pre-existing file must be left untouched")
 	}
 }

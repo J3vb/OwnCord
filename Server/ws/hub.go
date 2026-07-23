@@ -647,9 +647,9 @@ func (h *Hub) DisconnectUser(userID int64) {
 }
 
 // BroadcastUserUpdate sends a user_update message to all connected clients
-// when a user changes their profile (username, avatar).
-func (h *Hub) BroadcastUserUpdate(userID int64, username string, avatar *string) {
-	h.BroadcastToAll(buildUserUpdate(userID, username, avatar))
+// when a user changes their profile (username, avatar, identity key).
+func (h *Hub) BroadcastUserUpdate(userID int64, username string, avatar *string, identityPublicKey *string) {
+	h.BroadcastToAll(buildUserUpdate(userID, username, avatar, identityPublicKey))
 }
 
 // BroadcastMemberUpdate sends a member_update message to all connected clients.

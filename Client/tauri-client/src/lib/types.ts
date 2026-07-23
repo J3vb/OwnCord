@@ -61,6 +61,9 @@ export interface MessageUser {
 export interface UserWithRole extends MessageUser {
   readonly role: string;
   readonly totp_enabled?: boolean;
+  /** Long-term E2EE identity public key (base64), pinned by peers on first
+   *  sight (F3 TOFU). Omitted/null when the user has not published one. */
+  readonly identity_public_key?: string | null;
 }
 
 /** Attachment on a chat message. */
@@ -110,6 +113,8 @@ export interface ReadyMember {
   readonly avatar: string | null;
   readonly role: string;
   readonly status: UserStatus;
+  /** Long-term E2EE identity public key (base64) for voice TOFU (F3). */
+  readonly identity_public_key?: string | null;
 }
 
 /** Voice state object in the ready payload. */
@@ -298,6 +303,9 @@ export interface VoiceTokenPayload {
 export interface VoiceE2EEAnnouncePayload {
   readonly user_id: number;
   readonly public_key: string;
+  /** Sender's identity-key signature over the ephemeral key (F3 TOFU).
+   *  Omitted for legacy clients that have not published an identity key. */
+  readonly signature?: string;
 }
 
 /** Server→Client relay of an encrypted room key from the key holder. */
@@ -324,6 +332,9 @@ export interface UserUpdatePayload {
   readonly user_id: number;
   readonly username: string;
   readonly avatar: string | null;
+  /** Updated E2EE identity public key (base64) — lets peers detect an
+   *  identity-key change (TOFU mismatch) as it happens (F3). */
+  readonly identity_public_key?: string | null;
 }
 
 export interface MemberBanPayload {
@@ -501,7 +512,9 @@ export type ClientMessage =
   | (WsEnvelope<VoiceCameraPayload> & { readonly type: "voice_camera" })
   | (WsEnvelope<VoiceScreensharePayload> & { readonly type: "voice_screenshare" })
   | (WsEnvelope<Record<string, never>> & { readonly type: "voice_token_refresh" })
-  | (WsEnvelope<{ public_key: string }> & { readonly type: "voice_e2ee_announce" })
+  | (WsEnvelope<{ public_key: string; signature?: string }> & {
+      readonly type: "voice_e2ee_announce";
+    })
   | (WsEnvelope<{ target_user_id: number; encrypted_key: string; iv: string }> & {
       readonly type: "voice_e2ee_offer";
     });

@@ -36,6 +36,11 @@ type memberUserPayload struct {
 	Username string  `json:"username"`
 	Avatar   *string `json:"avatar"`
 	Role     string  `json:"role"`
+	// IdentityPublicKey is the user's long-term E2EE identity public key
+	// (base64), pinned by peers on first sight (F3 TOFU). Omitted when the
+	// user has not published one (legacy client) and in payloads that do not
+	// carry it (e.g. chat_message).
+	IdentityPublicKey *string `json:"identity_public_key,omitempty"`
 }
 
 type memberJoinPayload struct {
@@ -63,6 +68,9 @@ type userUpdatePayload struct {
 	UserID   int64   `json:"user_id"`
 	Username string  `json:"username"`
 	Avatar   *string `json:"avatar"`
+	// IdentityPublicKey mirrors memberUserPayload — carried so peers can
+	// detect an identity-key change (TOFU mismatch) as it happens.
+	IdentityPublicKey *string `json:"identity_public_key,omitempty"`
 }
 
 type memberBanPayload struct {
@@ -132,9 +140,12 @@ type voiceTokenPayload struct {
 // ── Voice E2EE (client-side ECDH key exchange) ─────────────────────────────
 
 // voiceE2EEAnnounceBroadcast is the server→client relay with user_id added.
+// Signature is the sender's identity-key signature over the ephemeral key
+// (F3 TOFU) — relayed verbatim, omitted for legacy announces without one.
 type voiceE2EEAnnounceBroadcast struct {
 	UserID    int64  `json:"user_id"`
 	PublicKey string `json:"public_key"`
+	Signature string `json:"signature,omitempty"`
 }
 
 // voiceE2EEOfferRelay is the server→client relay with from_user_id.
@@ -254,10 +265,11 @@ func buildMemberJoin(user *db.User, roleName string) []byte {
 		Type: MsgTypeMemberJoin,
 		Payload: memberJoinPayload{
 			User: memberUserPayload{
-				ID:       user.ID,
-				Username: user.Username,
-				Avatar:   user.Avatar,
-				Role:     roleName,
+				ID:                user.ID,
+				Username:          user.Username,
+				Avatar:            user.Avatar,
+				Role:              roleName,
+				IdentityPublicKey: user.IdentityPublicKey,
 			},
 		},
 	})
@@ -299,10 +311,15 @@ func buildMemberUpdate(userID int64, roleName string) []byte {
 }
 
 // buildUserUpdate constructs a user_update broadcast for profile changes.
-func buildUserUpdate(userID int64, username string, avatar *string) []byte {
+func buildUserUpdate(userID int64, username string, avatar *string, identityPublicKey *string) []byte {
 	return buildJSON(wsMsg{
-		Type:    MsgTypeUserUpdate,
-		Payload: userUpdatePayload{UserID: userID, Username: username, Avatar: avatar},
+		Type: MsgTypeUserUpdate,
+		Payload: userUpdatePayload{
+			UserID:            userID,
+			Username:          username,
+			Avatar:            avatar,
+			IdentityPublicKey: identityPublicKey,
+		},
 	})
 }
 
@@ -420,12 +437,14 @@ func buildVoiceToken(channelID int64, token string, proxyPath string, directURL 
 }
 
 // buildVoiceE2EEAnnounce constructs a voice_e2ee_announce server→client relay.
-func buildVoiceE2EEAnnounce(userID int64, publicKey string) []byte {
+// signature may be "" (legacy announce) — the field is then omitted.
+func buildVoiceE2EEAnnounce(userID int64, publicKey, signature string) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeVoiceE2EEAnnounceBC,
 		Payload: voiceE2EEAnnounceBroadcast{
 			UserID:    userID,
 			PublicKey: publicKey,
+			Signature: signature,
 		},
 	})
 }

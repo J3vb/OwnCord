@@ -1,7 +1,7 @@
 use serde_json::Value;
 use tauri_plugin_store::StoreExt;
 
-use crate::constants::{CERTS_STORE, SETTINGS_STORE};
+use crate::constants::{CERTS_STORE, IDENTITY_PINS_STORE, SETTINGS_STORE};
 
 /// Maximum length for a settings key to prevent denial-of-service.
 const MAX_SETTINGS_KEY_LEN: usize = 128;
@@ -147,6 +147,102 @@ pub fn get_cert_fingerprint(
 }
 
 // ---------------------------------------------------------------------------
+// Voice E2EE identity-key pin commands (TOFU)
+// ---------------------------------------------------------------------------
+//
+// Near-verbatim mirror of the cert-fingerprint commands above, but the store is
+// keyed on `{host}:{userId}` and the value is a peer's base64 identity public
+// key (opaque here — the JS side parses it) instead of a SHA-256 fingerprint.
+
+/// Max length for a base64 identity public key (DoS guard). A raw P-256 key is
+/// 65 bytes (~88 base64 chars); an SPKI-wrapped one ~124. 512 is generous.
+const MAX_IDENTITY_PIN_LEN: usize = 512;
+
+/// Store key for a peer's identity pin. A mismatch here (wrong separator, etc.)
+/// would make pins silently fail to match and accept a MITM'd key, so it is a
+/// pure, testable helper shared by both commands.
+fn identity_pin_key(host: &str, user_id: &str) -> String {
+    format!("{host}:{user_id}")
+}
+
+#[tauri::command]
+pub fn store_identity_pin(
+    app: tauri::AppHandle,
+    host: String,
+    user_id: String,
+    pin: String,
+) -> Result<(), String> {
+    if host.is_empty() || host.len() > 253 {
+        return Err("host must be 1-253 characters".into());
+    }
+    // Validate host format: alphanumeric, dots, hyphens, colons (port), brackets (IPv6)
+    if !host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']')) {
+        return Err("host contains invalid characters".into());
+    }
+    if user_id.is_empty() || user_id.len() > 64 {
+        return Err("user_id must be 1-64 characters".into());
+    }
+    if !user_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')) {
+        return Err("user_id contains invalid characters".into());
+    }
+    if pin.is_empty() || pin.len() > MAX_IDENTITY_PIN_LEN {
+        return Err("pin must be 1-512 characters".into());
+    }
+    // Base64 charset (standard + url-safe + padding). Guards against garbage/DoS;
+    // the actual key parsing/verification happens on the JS side.
+    if !pin.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=' | '-' | '_')) {
+        return Err("pin contains invalid characters".into());
+    }
+
+    let store = app
+        .store(IDENTITY_PINS_STORE)
+        .map_err(|e| format!("failed to open identity pins store: {e}"))?;
+
+    let store_key = identity_pin_key(&host, &user_id);
+    // Capture old value before mutating so we can restore it if save fails.
+    let old_value = store.get(&store_key);
+    store.set(&store_key, Value::String(pin));
+    if let Err(e) = store.save() {
+        // Restore previous in-memory state so a failed save during a re-pin
+        // doesn't silently drop the previously trusted identity key.
+        match old_value {
+            Some(v) => { store.set(&store_key, v); }
+            None    => { let _ = store.delete(&store_key); }
+        }
+        return Err(format!("failed to persist identity pin: {e}"));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_identity_pin(
+    app: tauri::AppHandle,
+    host: String,
+    user_id: String,
+) -> Result<Option<String>, String> {
+    if host.is_empty() {
+        return Err("host must not be empty".into());
+    }
+    if user_id.is_empty() {
+        return Err("user_id must not be empty".into());
+    }
+
+    let store = app
+        .store(IDENTITY_PINS_STORE)
+        .map_err(|e| format!("failed to open identity pins store: {e}"))?;
+
+    let value = store.get(&identity_pin_key(&host, &user_id)).and_then(|v| {
+        if let Value::String(s) = v {
+            Some(s)
+        } else {
+            None
+        }
+    });
+
+    Ok(value)
+}
+
+// ---------------------------------------------------------------------------
 // DevTools command
 // ---------------------------------------------------------------------------
 
@@ -223,5 +319,11 @@ mod tests {
     fn fingerprint_validation_rejects_wrong_length() {
         let short = "aa:bb:cc";
         assert_ne!(short.len(), 95);
+    }
+
+    #[test]
+    fn identity_pin_key_combines_host_and_user() {
+        assert_eq!(identity_pin_key("chat.example.com", "42"), "chat.example.com:42");
+        assert_eq!(identity_pin_key("192.168.1.10:8443", "u_7"), "192.168.1.10:8443:u_7");
     }
 }

@@ -246,7 +246,7 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 **dm_channels[]:** `channel_id`, `recipient` (user object with `id`, `username`, `avatar`, `status`), `last_message_id`, `last_message`, `last_message_at`, `unread_count`
 
-**members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`
+**members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`, `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU)
 
 **voice_states[]:** All users currently in any voice channel: `channel_id`, `user_id`, `muted`, `deafened`
 
@@ -531,11 +531,15 @@ Sent when a user first connects (fresh connection, not reconnect replay).
       "id": 5,
       "username": "newuser",
       "avatar": null,
-      "role": "member"
+      "role": "member",
+      "identity_public_key": "base64-identity-pubkey"
     }
   }
 }
 ```
+
+`identity_public_key` is the user's long-term E2EE identity public key (see
+voice E2EE TOFU); omitted when the user has not published one.
 
 ### member_update (Server -> Client, broadcast)
 
@@ -565,7 +569,7 @@ Triggered when an admin changes a user's role.
 ### user_update (Server -> Client, broadcast)
 
 Broadcast when a user changes their own profile via `PATCH /api/v1/users/me`
-(username and/or avatar).
+(username, avatar and/or identity key).
 
 ```json
 {
@@ -574,12 +578,15 @@ Broadcast when a user changes their own profile via `PATCH /api/v1/users/me`
   "payload": {
     "user_id": 5,
     "username": "newname",
-    "avatar": "uuid.png"
+    "avatar": "uuid.png",
+    "identity_public_key": "base64-identity-pubkey"
   }
 }
 ```
 
-`avatar` may be `null` when unset.
+`avatar` may be `null` when unset. `identity_public_key` carries the user's
+current long-term E2EE identity key and is omitted when none is published;
+peers that pinned a different key must surface a TOFU mismatch.
 
 ### member_leave (reserved)
 
@@ -739,24 +746,50 @@ the room key so departed members cannot decrypt future media.
 Both E2EE message types are rate limited at 5 per second per user. Key
 material must be standard-alphabet base64 (padded or unpadded).
 
+**Identity keys + TOFU:** each client holds a long-term ECDSA P-256 identity
+keypair, published via `PATCH /api/v1/users/me` (`identity_public_key`) and
+distributed in the `ready` / `member_join` / `user_update` member payloads.
+Peers pin the key on first sight (trust-on-first-use) and verify each
+announce's `signature` against the pin, so a malicious server cannot swap
+`user_id ↔ ephemeral pubkey` after first contact. A later key change is
+surfaced to the user as a TOFU mismatch.
+
 ### voice_e2ee_announce (Client -> Server)
 
-Announce this participant's ECDH public key to the channel.
+Announce this participant's ephemeral ECDH public key to the channel.
+`signature` is the ECDSA P-256 signature by the sender's long-term identity
+key over `"owncord-voice-e2ee-announce-v1" ‖ userId ‖ ephemeral-pubkey-raw`
+(TOFU — see above). It is optional at the protocol level: legacy clients omit
+it, and receiving clients enforce the fail-closed posture (peer has a
+published identity key but the signature is missing/invalid → reject).
 
 ```json
-{ "type": "voice_e2ee_announce", "payload": { "public_key": "base64-ecdh-pubkey" } }
+{
+  "type": "voice_e2ee_announce",
+  "payload": {
+    "public_key": "base64-ecdh-pubkey",
+    "signature": "base64-ecdsa-signature"
+  }
+}
 ```
+
+The server validates `signature` like `public_key` (standard-alphabet base64,
+max 128 chars) and stores it alongside the key, but never verifies it — only
+clients hold the pinned identity keys.
 
 ### voice_e2ee_announce (Server -> Client, broadcast to voice channel)
 
-Relayed to the other participants with the sender's user ID attached:
+Relayed to the other participants with the sender's user ID attached. Also
+replayed to late joiners from the stored key+signature. `signature` is
+omitted when the announcing client did not send one:
 
 ```json
 {
   "type": "voice_e2ee_announce",
   "payload": {
     "user_id": 1,
-    "public_key": "base64-ecdh-pubkey"
+    "public_key": "base64-ecdh-pubkey",
+    "signature": "base64-ecdsa-signature"
   }
 }
 ```

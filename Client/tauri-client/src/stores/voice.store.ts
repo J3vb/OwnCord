@@ -39,6 +39,21 @@ export interface VoiceConfig {
   readonly max_users: number;
 }
 
+/** Per-peer E2EE identity verification result (F3 TOFU), surfaced so the voice
+ *  panel can show a verified/unverified badge and the out-of-band safety number.
+ *  Written from livekitSession.ts as each peer's announce is verified.
+ *   - "verified":   announce signature checked against the peer's pinned key.
+ *   - "unverified": peer published no identity key (legacy) — pin-pending.
+ *   - "mismatch":   the delivered identity key differs from the pinned one
+ *                   (possible server MITM); the peer is blocked until re-pin. */
+export interface PeerVerification {
+  readonly userId: number;
+  readonly status: "verified" | "unverified" | "mismatch";
+  /** Safety number (identity-key fingerprint) for out-of-band verification;
+   *  null for legacy/unverified/mismatch peers. */
+  readonly safetyNumber: string | null;
+}
+
 export interface VoiceState {
   readonly currentChannelId: number | null;
   readonly voiceUsers: ReadonlyMap<number, ReadonlyMap<number, VoiceUser>>; // channelId -> userId -> VoiceUser
@@ -54,6 +69,10 @@ export interface VoiceState {
   /** Voice-session lifecycle status (drives the widget's connecting/securing/
    *  secured indicators). Written from livekitSession.ts. */
   readonly voiceStatus: VoiceStatus;
+  /** Per-peer E2EE identity verification (F3 TOFU), keyed by userId. The store
+   *  always sets it; optional only so the many inline VoiceState test fixtures
+   *  need not restate it. */
+  readonly peerVerifications?: ReadonlyMap<number, PeerVerification>;
 }
 
 const INITIAL_STATE: VoiceState = {
@@ -67,6 +86,7 @@ const INITIAL_STATE: VoiceState = {
   joinedAt: null,
   listenOnly: false,
   voiceStatus: "idle",
+  peerVerifications: new Map(),
 };
 
 export const voiceStore = createStore<VoiceState>(INITIAL_STATE);
@@ -84,6 +104,7 @@ export function resetVoiceStore(): void {
     joinedAt: null,
     listenOnly: false,
     voiceStatus: "idle",
+    peerVerifications: new Map(),
   }));
 }
 
@@ -328,6 +349,38 @@ export function setSpeakers(payload: VoiceSpeakersPayload): void {
     nextChannels.set(payload.channel_id, nextUsers);
     return { ...prev, voiceUsers: nextChannels };
   });
+}
+
+/** Record a peer's E2EE identity verification result (F3 TOFU). Written from
+ *  livekitSession.ts as each peer's ephemeral-key announce is verified. */
+export function setPeerVerification(v: PeerVerification): void {
+  voiceStore.setState((prev) => {
+    const next = new Map(prev.peerVerifications);
+    next.set(v.userId, v);
+    return { ...prev, peerVerifications: next };
+  });
+}
+
+/** Drop a single peer's verification (e.g. when they leave the channel). */
+export function clearPeerVerification(userId: number): void {
+  voiceStore.setState((prev) => {
+    if (!prev.peerVerifications?.has(userId)) return prev;
+    const next = new Map(prev.peerVerifications);
+    next.delete(userId);
+    return { ...prev, peerVerifications: next };
+  });
+}
+
+/** Drop all peer verifications (on voice leave). */
+export function clearPeerVerifications(): void {
+  voiceStore.setState((prev) =>
+    (prev.peerVerifications?.size ?? 0) === 0 ? prev : { ...prev, peerVerifications: new Map() },
+  );
+}
+
+/** Selector: a peer's verification result, or null if not yet resolved. */
+export function getPeerVerification(userId: number): PeerVerification | null {
+  return voiceStore.select((s) => s.peerVerifications?.get(userId) ?? null);
 }
 
 /** Selector: get all voice users in a specific channel. */
