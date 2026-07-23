@@ -1,20 +1,3 @@
--- name: InsertDMChannel :execresult
-INSERT INTO channels (name, type) VALUES ('', 'dm');
-
--- name: InsertDMParticipants :exec
-INSERT INTO dm_participants (channel_id, user_id) VALUES (?, ?), (?, ?);
-
--- name: InsertDMOpenState :exec
-INSERT OR IGNORE INTO dm_open_state (user_id, channel_id) VALUES (?, ?), (?, ?);
-
--- name: FindExistingDMChannel :one
-SELECT dp1.channel_id
-FROM dm_participants dp1
-JOIN dm_participants dp2 ON dp1.channel_id = dp2.channel_id
-JOIN channels c ON c.id = dp1.channel_id
-WHERE dp1.user_id = ? AND dp2.user_id = ? AND c.type = 'dm'
-LIMIT 1;
-
 -- name: OpenDM :exec
 INSERT OR IGNORE INTO dm_open_state (user_id, channel_id) VALUES (?, ?);
 

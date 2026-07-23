@@ -5,42 +5,12 @@ INSERT INTO messages (channel_id, user_id, content, reply_to) VALUES (?, ?, ?, ?
 SELECT id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp
 FROM messages WHERE id = ?;
 
--- name: GetMessagesByChannelBeforeCursor :many
-SELECT m.id, m.channel_id, m.user_id, m.content, m.reply_to,
-       m.edited_at, m.deleted, m.pinned, m.timestamp,
-       u.username, u.avatar
-FROM messages m JOIN users u ON m.user_id = u.id
-WHERE m.channel_id = ? AND m.id < ? AND m.deleted = 0
-ORDER BY m.id DESC LIMIT ?;
-
--- name: GetMessagesByChannel :many
-SELECT m.id, m.channel_id, m.user_id, m.content, m.reply_to,
-       m.edited_at, m.deleted, m.pinned, m.timestamp,
-       u.username, u.avatar
-FROM messages m JOIN users u ON m.user_id = u.id
-WHERE m.channel_id = ? AND m.deleted = 0
-ORDER BY m.id DESC LIMIT ?;
-
--- name: GetMessagesForAPIBeforeCursor :many
-SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
-       m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp
-FROM messages m JOIN users u ON m.user_id = u.id
-WHERE m.channel_id = ? AND m.id < ? AND m.deleted = 0
-ORDER BY m.id DESC LIMIT ?;
-
 -- name: GetMessagesForAPI :many
 SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp
 FROM messages m JOIN users u ON m.user_id = u.id
 WHERE m.channel_id = ? AND m.deleted = 0
 ORDER BY m.id DESC LIMIT ?;
-
--- name: GetPinnedMessageRows :many
-SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
-       m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp
-FROM messages m JOIN users u ON m.user_id = u.id
-WHERE m.channel_id = ? AND m.pinned = 1 AND m.deleted = 0
-ORDER BY m.id DESC;
 
 -- name: EditMessageContent :exec
 UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ?;

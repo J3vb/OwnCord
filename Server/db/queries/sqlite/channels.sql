@@ -28,18 +28,6 @@ UPDATE channels SET slow_mode = ? WHERE id = ?;
 -- name: SetChannelVoiceMaxUsers :exec
 UPDATE channels SET voice_max_users = ? WHERE id = ?;
 
--- name: SetChannelVoiceMaxVideo :exec
-UPDATE channels SET voice_max_video = ? WHERE id = ?;
-
--- name: SetChannelVoiceQuality :exec
-UPDATE channels SET voice_quality = ? WHERE id = ?;
-
--- name: SetChannelMixingThreshold :exec
-UPDATE channels SET mixing_threshold = ? WHERE id = ?;
-
--- name: ArchiveChannel :exec
-UPDATE channels SET archived = ? WHERE id = ?;
-
 -- name: DeleteChannel :exec
 DELETE FROM channels WHERE id = ?;
 
