@@ -13,7 +13,6 @@ import (
 type Querier interface {
 	AddReaction(ctx context.Context, arg AddReactionParams) error
 	AdminUpdateChannel(ctx context.Context, arg AdminUpdateChannelParams) error
-	ArchiveChannel(ctx context.Context, arg ArchiveChannelParams) error
 	BanUser(ctx context.Context, arg BanUserParams) error
 	BlockUser(ctx context.Context, arg BlockUserParams) error
 	CleanupExpiredLockouts(ctx context.Context, expiresAt string) error
@@ -31,7 +30,6 @@ type Querier interface {
 	CreateInvite(ctx context.Context, arg CreateInviteParams) error
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (sql.Result, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (sql.Result, error)
-	DeleteAttachment(ctx context.Context, id string) error
 	DeleteChannel(ctx context.Context, id int64) error
 	DeleteChannelPermission(ctx context.Context, arg DeleteChannelPermissionParams) error
 	DeleteExpiredSessions(ctx context.Context) error
@@ -45,7 +43,6 @@ type Querier interface {
 	EnableCameraIfUnderLimit(ctx context.Context, arg EnableCameraIfUnderLimitParams) (sql.Result, error)
 	EnablePlugin(ctx context.Context, id int64) error
 	EvictOldestSessions(ctx context.Context, arg EvictOldestSessionsParams) error
-	FindExistingDMChannel(ctx context.Context, arg FindExistingDMChannelParams) (int64, error)
 	ForceLogoutUser(ctx context.Context, userID int64) error
 	GetAllSettings(ctx context.Context) ([]Setting, error)
 	GetAllVoiceStates(ctx context.Context) ([]GetAllVoiceStatesRow, error)
@@ -57,19 +54,12 @@ type Querier interface {
 	GetChannelUnreadCounts(ctx context.Context, userID int64) ([]GetChannelUnreadCountsRow, error)
 	GetChannelVoiceStates(ctx context.Context, channelID int64) ([]GetChannelVoiceStatesRow, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
-	GetDefaultRole(ctx context.Context) (Role, error)
 	GetEventsSince(ctx context.Context, arg GetEventsSinceParams) ([]GetEventsSinceRow, error)
 	GetInvite(ctx context.Context, code string) (GetInviteRow, error)
 	GetLatestMessageID(ctx context.Context, channelID int64) (interface{}, error)
 	GetMaxEventSeq(ctx context.Context) (int64, error)
 	GetMessage(ctx context.Context, id int64) (Message, error)
-	GetMessagesByChannel(ctx context.Context, arg GetMessagesByChannelParams) ([]GetMessagesByChannelRow, error)
-	GetMessagesByChannelBeforeCursor(ctx context.Context, arg GetMessagesByChannelBeforeCursorParams) ([]GetMessagesByChannelBeforeCursorRow, error)
 	GetMessagesForAPI(ctx context.Context, arg GetMessagesForAPIParams) ([]GetMessagesForAPIRow, error)
-	GetMessagesForAPIBeforeCursor(ctx context.Context, arg GetMessagesForAPIBeforeCursorParams) ([]GetMessagesForAPIBeforeCursorRow, error)
-	GetPinnedMessageRows(ctx context.Context, channelID int64) ([]GetPinnedMessageRowsRow, error)
-	GetPlugin(ctx context.Context, id int64) (Plugin, error)
-	GetPluginByName(ctx context.Context, name string) (Plugin, error)
 	GetReactionCounts(ctx context.Context, messageID int64) ([]GetReactionCountsRow, error)
 	GetRoleByID(ctx context.Context, id int64) (Role, error)
 	GetRoleChannelPermissions(ctx context.Context, roleID int64) ([]GetRoleChannelPermissionsRow, error)
@@ -83,9 +73,6 @@ type Querier interface {
 	GetUserSessions(ctx context.Context, userID int64) ([]Session, error)
 	GetUserVoiceState(ctx context.Context, userID int64) (GetUserVoiceStateRow, error)
 	GetUserWithRole(ctx context.Context, id int64) (GetUserWithRoleRow, error)
-	InsertDMChannel(ctx context.Context) (sql.Result, error)
-	InsertDMOpenState(ctx context.Context, arg InsertDMOpenStateParams) error
-	InsertDMParticipants(ctx context.Context, arg InsertDMParticipantsParams) error
 	InsertSession(ctx context.Context, arg InsertSessionParams) (sql.Result, error)
 	InstallPlugin(ctx context.Context, arg InstallPluginParams) (sql.Result, error)
 	IsBlocked(ctx context.Context, arg IsBlockedParams) (int64, error)
@@ -95,7 +82,6 @@ type Querier interface {
 	JoinVoiceChannelIfCapacity(ctx context.Context, arg JoinVoiceChannelIfCapacityParams) (sql.Result, error)
 	LeaveVoiceChannel(ctx context.Context, userID int64) error
 	LeaveVoiceChannelIfMatch(ctx context.Context, arg LeaveVoiceChannelIfMatchParams) (sql.Result, error)
-	LinkAttachmentToMessage(ctx context.Context, arg LinkAttachmentToMessageParams) (sql.Result, error)
 	ListAllUsers(ctx context.Context, arg ListAllUsersParams) ([]ListAllUsersRow, error)
 	ListBlockedUsers(ctx context.Context, blockerID int64) ([]int64, error)
 	ListChannels(ctx context.Context) ([]ListChannelsRow, error)
@@ -116,11 +102,8 @@ type Querier interface {
 	RemoveReaction(ctx context.Context, arg RemoveReactionParams) (sql.Result, error)
 	ResetAllUserStatuses(ctx context.Context) error
 	RevokeInvite(ctx context.Context, code string) error
-	SetChannelMixingThreshold(ctx context.Context, arg SetChannelMixingThresholdParams) error
 	SetChannelSlowMode(ctx context.Context, arg SetChannelSlowModeParams) error
 	SetChannelVoiceMaxUsers(ctx context.Context, arg SetChannelVoiceMaxUsersParams) error
-	SetChannelVoiceMaxVideo(ctx context.Context, arg SetChannelVoiceMaxVideoParams) error
-	SetChannelVoiceQuality(ctx context.Context, arg SetChannelVoiceQualityParams) error
 	SetMessagePinned(ctx context.Context, arg SetMessagePinnedParams) (sql.Result, error)
 	SetSetting(ctx context.Context, arg SetSettingParams) error
 	SoftDeleteMessage(ctx context.Context, id int64) error
@@ -139,7 +122,6 @@ type Querier interface {
 	UpdateVoiceDeafen(ctx context.Context, arg UpdateVoiceDeafenParams) error
 	UpdateVoiceMute(ctx context.Context, arg UpdateVoiceMuteParams) error
 	UpdateVoiceScreenshare(ctx context.Context, arg UpdateVoiceScreenshareParams) error
-	UpdateVoiceSpeaking(ctx context.Context, arg UpdateVoiceSpeakingParams) error
 	UpsertChannelPermission(ctx context.Context, arg UpsertChannelPermissionParams) error
 	UpsertLockout(ctx context.Context, arg UpsertLockoutParams) error
 	UseInviteAtomic(ctx context.Context, code string) (sql.Result, error)

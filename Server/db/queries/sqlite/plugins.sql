@@ -11,12 +11,6 @@ UPDATE plugins SET enabled = 0 WHERE id = ?;
 -- name: UninstallPlugin :exec
 DELETE FROM plugins WHERE id = ?;
 
--- name: GetPlugin :one
-SELECT id, name, version, enabled, manifest_json, installed_at FROM plugins WHERE id = ?;
-
--- name: GetPluginByName :one
-SELECT id, name, version, enabled, manifest_json, installed_at FROM plugins WHERE name = ?;
-
 -- name: ListPlugins :many
 SELECT id, name, version, enabled, manifest_json, installed_at FROM plugins ORDER BY name;
 

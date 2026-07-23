@@ -14,11 +14,6 @@ LEFT JOIN messages m ON m.id = a.message_id
 LEFT JOIN channels c ON c.id = m.channel_id
 WHERE a.id = ?;
 
--- name: LinkAttachmentToMessage :execresult
-UPDATE attachments SET message_id = ? WHERE id = ? AND message_id IS NULL;
-
 -- name: DeleteOrphanedAttachments :many
 DELETE FROM attachments WHERE message_id IS NULL AND uploaded_at < ? RETURNING stored_as;
 
--- name: DeleteAttachment :exec
-DELETE FROM attachments WHERE id = ?;

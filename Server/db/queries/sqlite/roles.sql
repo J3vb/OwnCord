@@ -21,6 +21,3 @@ FROM users u
 JOIN roles r ON r.id = u.role_id
 WHERE u.id = ?;
 
--- name: GetDefaultRole :one
-SELECT id, name, color, permissions, position, is_default
-FROM roles WHERE is_default = 1 LIMIT 1;
