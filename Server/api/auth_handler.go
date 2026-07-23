@@ -287,7 +287,11 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 		}
 
 		// BUG-110: Also check per-username lockout to prevent distributed brute force.
-		userLockKey := "login_user_lock:" + req.Username
+		// F1: canonicalize the username the same way GetUserByUsername does (COLLATE
+		// NOCASE) before keying the lockout, so case variants of one account
+		// (admin/Admin/ADMIN) share a single bucket instead of each getting its own.
+		unameKey := strings.ToLower(req.Username)
+		userLockKey := "login_user_lock:" + unameKey
 		if limiter.IsLockedOut(userLockKey) {
 			writeJSON(w, http.StatusTooManyRequests, errorResponse{
 				Error:   "RATE_LIMITED",
@@ -316,7 +320,7 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 		}
 
 		failKey := "login_fail:" + ip
-		userFailKey := "login_user_fail:" + req.Username
+		userFailKey := "login_user_fail:" + unameKey
 		// Always run the password check — with an empty hash when the user does
 		// not exist. auth.CheckPassword performs a dummy bcrypt comparison for an
 		// empty hash, so bcrypt executes on every path and response time stays
