@@ -58,6 +58,8 @@ export interface LoginFormApi {
   setHost(host: string): void;
   /** Set credentials (called for auto-fill from profile or credential store). */
   setCredentials(username: string, password?: string): void;
+  /** Pre-fill + switch to register mode from an owncord:// invite deep link. */
+  applyInviteLink(code: string, host?: string): void;
   /** Get host input value (for guard checks). */
   getHost(): string;
   /** Focus the host input. */
@@ -682,6 +684,20 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
         passwordInput.value = password;
         rememberPasswordCheckbox.checked = true;
       }
+    },
+
+    /**
+     * Pre-fill the register form from an owncord:// invite deep link and switch
+     * to register mode. Host is optional — the link may carry only the code, in
+     * which case the user still needs to enter the server address.
+     */
+    applyInviteLink(code: string, host?: string): void {
+      if (host) hostInput.value = host;
+      if (formMode !== "register") handleToggleMode();
+      inviteInput.value = code;
+      // Focus the first field the user still has to fill in.
+      if (host) usernameInput.focus();
+      else hostInput.focus();
     },
 
     getHost(): string {

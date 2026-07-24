@@ -26,6 +26,7 @@ import { createLogger } from "@lib/logger";
 import { initLogPersistence, flushLogs } from "@lib/logPersistence";
 import { saveCredential, loadCredential, deleteCredential } from "@lib/credentials";
 import { initWindowState } from "@lib/window-state";
+import { initDeepLinks } from "@lib/deep-link";
 import { createCertMismatchModal, createCertFirstUseModal } from "@components/CertMismatchModal";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import type { CertTofuEvent } from "@lib/ws";
@@ -109,6 +110,10 @@ let lastConnectToken = "";
 // mounted, cleared otherwise) — refreshes a server's status after its
 // certificate is trusted for the first time.
 let rerunConnectHealth: (() => void) | null = null;
+// Set while the connect page is mounted so an owncord:// deep link can pre-fill
+// its register form; the pending value covers links that arrive before it mounts.
+let applyInviteToConnectPage: ((code: string, host?: string) => void) | null = null;
+let pendingInviteLink: { code: string; host?: string } | null = null;
 
 // Shared guard so the first-use and mismatch cert modals never stack.
 let certModalActive = false;
@@ -242,6 +247,7 @@ function renderPage(pageId: "connect" | "main"): void {
   appEl!.textContent = "";
   // Only valid while the connect page is mounted (re-set in its render branch).
   rerunConnectHealth = null;
+  applyInviteToConnectPage = null;
 
   // Shared helper for post-auth WS connect + overlay flow
   function wirePostAuth(
@@ -455,6 +461,14 @@ function renderPage(pageId: "connect" | "main"): void {
     // re-check the now-reachable server without a full page navigation.
     rerunConnectHealth = () => runHealthChecks(connectPage, getProfileList());
 
+    // Route deep-link invites into this connect page. Apply any that arrived
+    // before it mounted.
+    applyInviteToConnectPage = (code, host) => connectPage.applyInviteLink(code, host);
+    if (pendingInviteLink !== null) {
+      connectPage.applyInviteLink(pendingInviteLink.code, pendingInviteLink.host);
+      pendingInviteLink = null;
+    }
+
     // Load saved profiles and kick off health checks
     void (async () => {
       try {
@@ -558,6 +572,21 @@ renderPage(router.getCurrentPage());
 
 // Initialize window state persistence (fire-and-forget)
 void initWindowState();
+
+// Route owncord:// invite deep links into the register form. OwnCord invites
+// are registration invites, so a link can only pre-fill + open the register
+// form — it can't complete a join by itself.
+function handleInviteDeepLink(code: string, host?: string): void {
+  pendingInviteLink = { code, host };
+  router.navigate("connect");
+  // If the connect page was already mounted, navigate() may not re-render it —
+  // apply directly. Otherwise the connect render branch consumes the pending link.
+  if (pendingInviteLink !== null && applyInviteToConnectPage !== null) {
+    applyInviteToConnectPage(code, host);
+    pendingInviteLink = null;
+  }
+}
+void initDeepLinks(handleInviteDeepLink);
 
 // Initialize log persistence to disk (fire-and-forget)
 void initLogPersistence();
