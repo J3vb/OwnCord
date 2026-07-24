@@ -51,14 +51,14 @@ type APIToken struct {
 // APITokenListItem is one row of the admin/CLI token listing. It carries the
 // owning user's name for display and deliberately omits the hash.
 type APITokenListItem struct {
-	ID        int64
-	UserID    int64
-	Username  string
-	Label     string
-	CreatedAt string
-	LastUsed  *string
-	ExpiresAt *string
-	RevokedAt *string
+	ID        int64   `json:"id"`
+	UserID    int64   `json:"user_id"`
+	Username  string  `json:"username"`
+	Label     string  `json:"label"`
+	CreatedAt string  `json:"created_at"`
+	LastUsed  *string `json:"last_used"`
+	ExpiresAt *string `json:"expires_at"`
+	RevokedAt *string `json:"revoked_at"`
 }
 
 // Invite represents a row in the invites table.
