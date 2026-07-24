@@ -107,10 +107,20 @@ async function openIdentityMismatchModal(
     fingerprint,
     onAccept: () => {
       closeIdentityModal();
+      // Pin the EXACT key whose fingerprint we displayed and the user verified
+      // out-of-band (captured above), NOT a fresh membersStore re-read — a
+      // malicious server could mutate the store (user_update) during the human
+      // verification window and get its key pinned instead (TOCTOU).
+      //
+      // Only pin a key whose fingerprint was actually SHOWN: publishedKey null
+      // means the server stripped the key, and fingerprint null means it could
+      // not be computed (malformed key). In both cases the user saw nothing to
+      // verify, so pinning would be a blind accept — refuse it.
+      if (publishedKey === null || fingerprint === null) return;
       // Surface keyring/IO failures instead of dropping them — this re-pins a
       // trust anchor, so a silent failure would leave the user believing they
       // recovered when they did not.
-      void rePinPeerIdentity(userId).catch((err: unknown) => {
+      void rePinPeerIdentity(userId, publishedKey).catch((err: unknown) => {
         log.error("E2EE: failed to re-pin peer identity", err);
       });
     },

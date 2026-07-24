@@ -39,6 +39,7 @@ import { voiceStore, updateVoiceState } from "../../src/stores/voice.store";
 import type { PeerVerification } from "../../src/stores/voice.store";
 import { membersStore } from "../../src/stores/members.store";
 import type { ReadyChannel } from "../../src/lib/types";
+import { computeKeyFingerprint } from "@lib/e2eeCrypto";
 
 function resetStores(): void {
   channelsStore.setState(() => ({
@@ -1488,8 +1489,22 @@ describe("ChannelSidebar voice identity badge", () => {
     });
   });
 
-  it("re-pins the peer when the mismatch modal's Trust button is clicked", async () => {
+  it("re-pins the displayed key when the mismatch modal's Trust button is clicked", async () => {
     addVoiceUser(VOICE_CH, 10, "Alice");
+    // The peer must have a published key so its fingerprint is shown and there
+    // is a concrete verified key to re-pin.
+    membersStore.setState((prev) => {
+      const members = new Map(prev.members);
+      members.set(10, {
+        id: 10,
+        username: "Alice",
+        avatar: null,
+        role: "member",
+        status: "online",
+        identityPublicKey: "alice-published-key-b64",
+      });
+      return { ...prev, members };
+    });
     setPeerVerif(10, "mismatch", null);
     sidebar.mount(container);
 
@@ -1501,7 +1516,40 @@ describe("ChannelSidebar voice identity badge", () => {
     });
     trustBtn.click();
 
-    expect(mockRePinPeerIdentity).toHaveBeenCalledWith(10);
+    // Pins the exact key whose fingerprint was displayed, not a bare userId.
+    expect(mockRePinPeerIdentity).toHaveBeenCalledWith(10, "alice-published-key-b64");
+    expect(document.body.querySelector(".modal-overlay")).toBeNull();
+  });
+
+  it("does not re-pin when the fingerprint could not be computed (no blind accept)", async () => {
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    membersStore.setState((prev) => {
+      const members = new Map(prev.members);
+      members.set(10, {
+        id: 10,
+        username: "Alice",
+        avatar: null,
+        role: "member",
+        status: "online",
+        identityPublicKey: "alice-published-key-b64",
+      });
+      return { ...prev, members };
+    });
+    setPeerVerif(10, "mismatch", null);
+    // The changed key's fingerprint cannot be computed → the modal shows no
+    // fingerprint, so Trust must not pin a key the user never got to verify.
+    (computeKeyFingerprint as any).mockRejectedValueOnce(new Error("bad key"));
+    sidebar.mount(container);
+
+    (badgeFor(10) as HTMLElement).click();
+    const trustBtn = await vi.waitFor(() => {
+      const btn = document.body.querySelector(".modal-overlay .btn-danger") as HTMLButtonElement;
+      expect(btn).not.toBeNull();
+      return btn;
+    });
+    trustBtn.click();
+
+    expect(mockRePinPeerIdentity).not.toHaveBeenCalled();
     expect(document.body.querySelector(".modal-overlay")).toBeNull();
   });
 
