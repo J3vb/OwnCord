@@ -8,6 +8,17 @@ import (
 	"time"
 )
 
+type ApiToken struct {
+	ID         int64   `json:"id"`
+	UserID     int64   `json:"userId"`
+	TokenHash  string  `json:"tokenHash"`
+	Label      string  `json:"label"`
+	CreatedAt  string  `json:"createdAt"`
+	LastUsedAt *string `json:"lastUsedAt"`
+	ExpiresAt  *string `json:"expiresAt"`
+	RevokedAt  *string `json:"revokedAt"`
+}
+
 type Attachment struct {
 	ID         string `json:"id"`
 	MessageID  *int64 `json:"messageId"`

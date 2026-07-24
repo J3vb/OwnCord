@@ -86,6 +86,58 @@ func TestAuthMiddleware_MissingToken(t *testing.T) {
 	}
 }
 
+func TestAuthMiddleware_ValidAPIToken(t *testing.T) {
+	database := newAPITestDB(t)
+	uid, _ := database.CreateUser(context.Background(), "botuser", "hash", 4)
+	token, _ := auth.GenerateToken()
+	if _, err := database.CreateAPIToken(context.Background(), uid, auth.HashToken(token), "ci", nil); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	var gotUserID int64
+	h := api.AuthMiddleware(database)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if u, ok := r.Context().Value(api.UserKey).(*db.User); ok && u != nil {
+			gotUserID = u.ID
+		}
+		// An API-token principal has no login session: SessionKey must be nil.
+		if s, ok := r.Context().Value(api.SessionKey).(*db.Session); ok && s != nil {
+			t.Errorf("expected nil session for API-token principal, got %+v", s)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := withBearer(httptest.NewRequest(http.MethodGet, "/", nil), token)
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("API token status = %d, want 200", rr.Code)
+	}
+	if gotUserID != uid {
+		t.Errorf("API token authenticated as user %d, want %d", gotUserID, uid)
+	}
+}
+
+func TestAuthMiddleware_RevokedAPIToken(t *testing.T) {
+	database := newAPITestDB(t)
+	uid, _ := database.CreateUser(context.Background(), "botuser2", "hash", 4)
+	token, _ := auth.GenerateToken()
+	id, _ := database.CreateAPIToken(context.Background(), uid, auth.HashToken(token), "ci", nil)
+	if _, err := database.RevokeAPIToken(context.Background(), id); err != nil {
+		t.Fatalf("RevokeAPIToken: %v", err)
+	}
+
+	h := api.AuthMiddleware(database)(http.HandlerFunc(ok))
+	req := withBearer(httptest.NewRequest(http.MethodGet, "/", nil), token)
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("revoked API token status = %d, want 401", rr.Code)
+	}
+}
+
 func TestAuthMiddleware_InvalidToken(t *testing.T) {
 	database := newAPITestDB(t)
 
@@ -1030,6 +1082,17 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash   TEXT    NOT NULL UNIQUE,
+    label        TEXT    NOT NULL DEFAULT '',
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    last_used_at TEXT,
+    expires_at   TEXT,
+    revoked_at   TEXT
+);
 
 CREATE TABLE IF NOT EXISTS invites (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

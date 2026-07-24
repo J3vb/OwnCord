@@ -34,6 +34,12 @@ import (
 var version = "dev"
 
 func main() {
+	// `server token ...` is a direct-to-DB CLI (mint/list/revoke API tokens) —
+	// handled before any server/logging setup so it stays quiet and standalone.
+	if len(os.Args) > 1 && os.Args[1] == "token" {
+		os.Exit(runTokenCLI(os.Args[2:]))
+	}
+
 	// Create ring buffer for admin log viewer, then build a multi-handler
 	// that tees log records to both stdout (INFO+) and the ring buffer (DEBUG+).
 	logBuf := admin.NewRingBuffer(2000)

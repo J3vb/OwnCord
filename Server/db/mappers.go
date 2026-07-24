@@ -75,6 +75,20 @@ func userFromGen(u dbgen.User) *User {
 	}
 }
 
+// apiTokenFromGen maps a generated api_tokens row to the domain APIToken model.
+func apiTokenFromGen(t dbgen.ApiToken) *APIToken {
+	return &APIToken{
+		ID:        t.ID,
+		UserID:    t.UserID,
+		TokenHash: t.TokenHash,
+		Label:     t.Label,
+		CreatedAt: t.CreatedAt,
+		LastUsed:  t.LastUsedAt,
+		ExpiresAt: t.ExpiresAt,
+		RevokedAt: t.RevokedAt,
+	}
+}
+
 // sessionFromGen maps a generated session row to the domain Session model.
 func sessionFromGen(s dbgen.Session) Session {
 	return Session{

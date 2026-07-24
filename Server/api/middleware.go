@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -42,25 +43,13 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			}
 
 			hash := auth.HashToken(token)
-			sess, err := database.GetSessionByTokenHash(r.Context(), hash)
-			if err != nil || sess == nil {
-				if err != nil {
-					// A DB error here is an outage, not a bad token — log it so
-					// it's distinguishable from ordinary invalid-token 401s.
-					slog.ErrorContext(r.Context(), "auth: session lookup failed", "error", err)
-				}
-				writeJSON(w, http.StatusUnauthorized, errorResponse{
-					Error:   "UNAUTHORIZED",
-					Message: "invalid or expired session",
-				})
-				return
-			}
-
-			// Check expiry.
-			if auth.IsSessionExpired(sess.ExpiresAt) {
-				// Clean up expired session in background to prevent accumulation.
-				// The request ctx is cancelled as soon as the 401 below is
-				// written, so detach cancellation: the deletion must complete.
+			// Resolve the bearer token to a principal. A login session is matched
+			// first (existing behavior unchanged); an API token is the fallback.
+			user, role, sess, err := auth.ResolveTokenHash(r.Context(), database, hash)
+			switch {
+			case errors.Is(err, auth.ErrTokenExpired):
+				// Clean up the expired login session in the background. The request
+				// ctx is cancelled once the 401 is written, so detach cancellation.
 				cleanupCtx := context.WithoutCancel(r.Context())
 				go func(h string) {
 					if err := database.DeleteSession(cleanupCtx, h); err != nil {
@@ -72,17 +61,27 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 					Message: "session has expired",
 				})
 				return
-			}
-
-			// Load user.
-			user, err := database.GetUserByID(r.Context(), sess.UserID)
-			if err != nil || user == nil {
-				if err != nil {
-					slog.ErrorContext(r.Context(), "auth: user lookup failed", "error", err, "user_id", sess.UserID)
-				}
+			case errors.Is(err, auth.ErrUserNotFound):
 				writeJSON(w, http.StatusUnauthorized, errorResponse{
 					Error:   "UNAUTHORIZED",
 					Message: "user not found",
+				})
+				return
+			case errors.Is(err, auth.ErrRoleNotFound):
+				writeJSON(w, http.StatusUnauthorized, errorResponse{
+					Error:   "UNAUTHORIZED",
+					Message: "role not found",
+				})
+				return
+			case err != nil:
+				// ErrTokenNotFound or a wrapped DB error. A DB outage is not a bad
+				// token — log it so it's distinguishable from ordinary 401s.
+				if !errors.Is(err, auth.ErrTokenNotFound) {
+					slog.ErrorContext(r.Context(), "auth: token resolution failed", "error", err)
+				}
+				writeJSON(w, http.StatusUnauthorized, errorResponse{
+					Error:   "UNAUTHORIZED",
+					Message: "invalid or expired session",
 				})
 				return
 			}
@@ -96,29 +95,24 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Load role for permission checks.
-			// A dangling role_id returns (nil, nil) from GetRoleByID, so the nil
-			// check is load-bearing: without it a nil role reaches the context
-			// and every downstream permission check has to re-guard it.
-			role, err := database.GetRoleByID(r.Context(), user.RoleID)
-			if err != nil || role == nil {
-				if err != nil {
-					slog.ErrorContext(r.Context(), "auth: role lookup failed", "error", err, "user_id", user.ID, "role_id", user.RoleID)
+			// Touch last-used — non-fatal. A login session is touched inline as
+			// before; an API-token principal (sess == nil) is touched off the hot
+			// path so it never adds latency to bot/CI traffic.
+			if sess != nil {
+				if err := database.TouchSession(r.Context(), hash); err != nil {
+					slog.Warn("failed to touch session", "error", err, "user_id", user.ID)
 				}
-				writeJSON(w, http.StatusUnauthorized, errorResponse{
-					Error:   "UNAUTHORIZED",
-					Message: "role not found",
-				})
-				return
-			}
-
-			// Touch session in background — non-fatal if it fails.
-			if err := database.TouchSession(r.Context(), hash); err != nil {
-				slog.Warn("failed to touch session", "error", err, "user_id", user.ID)
+			} else {
+				touchCtx := context.WithoutCancel(r.Context())
+				go func(h string) {
+					if err := database.TouchAPIToken(touchCtx, h); err != nil {
+						slog.WarnContext(touchCtx, "failed to touch api token", "error", err)
+					}
+				}(hash)
 			}
 
 			ctx := context.WithValue(r.Context(), UserKey, user)
-			ctx = context.WithValue(ctx, SessionKey, sess)
+			ctx = context.WithValue(ctx, SessionKey, sess) // nil for API-token principals; consumers guard nil
 			ctx = context.WithValue(ctx, RoleKey, role)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
