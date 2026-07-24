@@ -241,7 +241,7 @@ pub fn get_identity_pin(
         .store(IDENTITY_PINS_STORE)
         .map_err(|e| format!("failed to open identity pins store: {e}"))?;
 
-    let value = store.get(&identity_pin_key(&host, &user_id)).and_then(|v| {
+    let value = store.get(identity_pin_key(&host, &user_id)).and_then(|v| {
         if let Value::String(s) = v {
             Some(s)
         } else {
