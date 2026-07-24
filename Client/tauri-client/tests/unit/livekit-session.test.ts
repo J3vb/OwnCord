@@ -2328,6 +2328,39 @@ describe("LiveKitSession", () => {
       expect((session as any)._e2eeEpoch).toBe(epochBefore);
     });
 
+    it("defers a keyed-peer leave rotation instead of dropping it when one is in flight", async () => {
+      seedPeer("peer-identity-b64");
+      const ws = { send: vi.fn() };
+      await joinAsKeyHolder(ws);
+      await session.handleE2EEAnnounce(PEER_ID, "cGVlcg==", "sig"); // peer holds the room key
+      (mockVoiceState as any).voiceUsers = new Map([[1, new Map([[1, {}]])]]);
+      // A rotation is already in flight (e.g. an earlier peer's leave).
+      (session as any)._rotatingKey = true;
+      const epochBefore = (session as any)._e2eeEpoch;
+
+      await session.handleParticipantLeft(PEER_ID);
+
+      // Not dropped by the _rotatingKey guard: the rekey is queued and no second
+      // rotation ran underneath the in-flight one.
+      expect((session as any)._rotationPending).toBe(true);
+      expect((session as any)._e2eeEpoch).toBe(epochBefore);
+    });
+
+    it("runs the deferred rotation once the in-flight one completes", async () => {
+      const ws = { send: vi.fn() };
+      await joinAsKeyHolder(ws);
+      (mockVoiceState as any).voiceUsers = new Map([[1, new Map([[1, {}]])]]);
+      // A keyed-peer leave was deferred while a rotation was in flight.
+      (session as any)._rotationPending = true;
+      const epochBefore = (session as any)._e2eeEpoch;
+
+      // The completing rotation must drain the pending one (excludes the leaver).
+      await (session as any).rotateKeyPeriodically();
+
+      expect((session as any)._e2eeEpoch).toBe(epochBefore + 2);
+      expect((session as any)._rotationPending).toBe(false);
+    });
+
     it("verifies a server-substituted key when drained from the pending queue", async () => {
       seedPeer("peer-identity-b64");
       (verifyEphemeralKeySignature as any).mockResolvedValue(false);
