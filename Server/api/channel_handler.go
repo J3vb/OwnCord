@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -134,7 +135,7 @@ func handleGetMessages(svc *service.Services) http.HandlerFunc {
 
 		msgs, hasMore, err := svc.Messages.GetMessages(r.Context(), user.ID, channelID, before, limit)
 		if err != nil {
-			writeServiceError(w, err)
+			writeServiceError(r.Context(), w, err)
 			return
 		}
 
@@ -200,7 +201,7 @@ func handleSearch(svc *service.Services) http.HandlerFunc {
 				})
 				return
 			}
-			writeServiceError(w, err)
+			writeServiceError(r.Context(), w, err)
 			return
 		}
 		if results == nil {
@@ -232,7 +233,7 @@ func handleGetPins(svc *service.Services) http.HandlerFunc {
 
 		msgs, err := svc.Messages.GetPinnedMessages(r.Context(), user.ID, channelID)
 		if err != nil {
-			writeServiceError(w, err)
+			writeServiceError(r.Context(), w, err)
 			return
 		}
 
@@ -265,7 +266,7 @@ func handleSetPinned(svc *service.Services, pinned bool) http.HandlerFunc {
 		}
 
 		if err := svc.Messages.SetMessagePinned(r.Context(), user.ID, channelID, messageID, pinned); err != nil {
-			writeServiceError(w, err)
+			writeServiceError(r.Context(), w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -273,7 +274,7 @@ func handleSetPinned(svc *service.Services, pinned bool) http.HandlerFunc {
 }
 
 // writeServiceError maps a service-layer error to an HTTP response.
-func writeServiceError(w http.ResponseWriter, err error) {
+func writeServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrRateLimited):
 		writeJSON(w, http.StatusTooManyRequests, errorResponse{Error: "RATE_LIMITED", Message: err.Error()})
@@ -286,10 +287,12 @@ func writeServiceError(w http.ResponseWriter, err error) {
 	case errors.Is(err, service.ErrConflict):
 		writeJSON(w, http.StatusConflict, errorResponse{Error: "CONFLICT", Message: err.Error()})
 	case errors.Is(err, service.ErrInternal):
-		slog.Error("service error", "err", err)
+		// ErrorContext so the enriching handler attaches req_id/trace_id,
+		// linking this 500 to its request log line and trace.
+		slog.ErrorContext(ctx, "service error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "INTERNAL_ERROR", Message: "an internal error occurred"})
 	default:
-		slog.Error("service error", "err", err)
+		slog.ErrorContext(ctx, "service error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "INTERNAL_ERROR", Message: "internal error"})
 	}
 }

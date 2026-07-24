@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -226,10 +227,18 @@ func (h *Hub) sendToUserIfInVoiceChannel(voiceChannelID, targetUserID int64, msg
 
 	target, ok := h.clients[targetUserID]
 	if !ok {
-		return // target not connected — silently drop
+		// Undeliverable key offer can leave the peer unable to decrypt — the
+		// payload is dropped, but log (IDs only, never the encrypted key) so
+		// the failure is diagnosable rather than silent.
+		slog.Debug("e2ee: key offer dropped, target not connected",
+			"target_user_id", targetUserID, "voice_channel_id", voiceChannelID)
+		return
 	}
 	if target.getVoiceChID() != voiceChannelID {
-		return // target not in expected voice channel — silently drop
+		slog.Debug("e2ee: key offer dropped, target not in expected voice channel",
+			"target_user_id", targetUserID, "voice_channel_id", voiceChannelID,
+			"target_voice_channel_id", target.getVoiceChID())
+		return
 	}
 	target.sendMsg(msg)
 }

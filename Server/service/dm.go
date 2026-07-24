@@ -55,7 +55,7 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 
 	blocked, err := s.st.IsEitherBlocked(ctx, userID, recipientID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to check block status", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to check block status: %v", ErrInternal, err)
 	}
 	if blocked {
 		return nil, fmt.Errorf("%w: cannot create DM — user is blocked", ErrForbidden)
@@ -78,7 +78,7 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 func (s *DMService) ListDMs(ctx context.Context, userID int64) ([]db.DMChannelInfo, error) {
 	dms, err := s.st.GetUserDMChannels(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list DMs", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to list DMs: %v", ErrInternal, err)
 	}
 	return dms, nil
 }
@@ -95,7 +95,7 @@ func (s *DMService) CloseDM(ctx context.Context, userID, channelID int64) error 
 	}
 
 	if err := s.st.CloseDM(ctx, userID, channelID); err != nil {
-		return fmt.Errorf("%w: failed to close DM", ErrInternal)
+		return fmt.Errorf("%w: failed to close DM: %v", ErrInternal, err)
 	}
 
 	slog.Debug("DM closed", "user_id", userID, "channel_id", channelID)

@@ -171,7 +171,7 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) 
 
 		updated, err := svc.Users.UpdateProfile(r.Context(), user.ID, req.Username, req.Avatar)
 		if err != nil {
-			writeServiceError(w, err)
+			writeServiceError(r.Context(), w, err)
 			return
 		}
 
@@ -275,7 +275,7 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http
 		res, err := svc.Users.ChangePassword(r.Context(), user.ID, hash, keepSessionID)
 		if err != nil {
 			// Only reachable when the password itself failed to commit.
-			writeServiceError(w, err)
+			writeServiceError(r.Context(), w, err)
 			return
 		}
 		if res.RevokeFailed {
@@ -314,7 +314,7 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 
 		sessions, err := svc.Users.ListSessions(r.Context(), user.ID)
 		if err != nil {
-			writeServiceError(w, err)
+			writeServiceError(r.Context(), w, err)
 			return
 		}
 
@@ -353,7 +353,7 @@ func handleRevokeSession(svc *service.Services) http.HandlerFunc {
 		}
 
 		if err := svc.Users.RevokeSession(r.Context(), user.ID, sessionID); err != nil {
-			writeServiceError(w, err)
+			writeServiceError(r.Context(), w, err)
 			return
 		}
 
