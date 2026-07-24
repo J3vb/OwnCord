@@ -503,6 +503,11 @@ func authenticateConn(parent context.Context, conn *websocket.Conn, database *db
 	sess, err := database.GetSessionByTokenHash(ctx, hash)
 	if err != nil || sess == nil {
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("invalid token"))
+		if err != nil {
+			// DB outage, not a bad token — carry the cause so the caller's log
+			// distinguishes it from an ordinary invalid-token rejection.
+			return nil, "", 0, fmt.Errorf("auth: session lookup failed: %w", err)
+		}
 		return nil, "", 0, fmt.Errorf("auth: invalid session")
 	}
 
@@ -514,6 +519,9 @@ func authenticateConn(parent context.Context, conn *websocket.Conn, database *db
 	user, err := database.GetUserByID(ctx, sess.UserID)
 	if err != nil || user == nil {
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("user not found"))
+		if err != nil {
+			return nil, "", 0, fmt.Errorf("auth: user lookup failed: %w", err)
+		}
 		return nil, "", 0, fmt.Errorf("auth: user not found")
 	}
 

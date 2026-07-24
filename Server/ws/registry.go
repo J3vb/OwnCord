@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"runtime"
+
+	"github.com/owncord/server/stackutil"
 )
 
 // handlerV2Entry pairs a V2 handler with its domain-specific dependency struct.
@@ -47,15 +48,13 @@ func (r *HandlerRegistry) DispatchV2(ctx context.Context, cmd Command, info Clie
 	}
 	defer func() {
 		if rec := recover(); rec != nil {
-			buf := make([]byte, 4096)
-			n := runtime.Stack(buf, false)
-			// TODO: stack trace may contain sensitive function arguments
-			// (e.g. encrypted keys). Consider scrubbing or limiting frames.
+			// stackutil.Capture omits argument values, which for E2EE
+			// handlers can include encrypted key material.
 			slog.Error("DispatchV2 panic recovered",
 				"type", cmd.Type(),
 				"user_id", info.UserID,
 				"panic", rec,
-				"stack", string(buf[:n]),
+				"stack", stackutil.Capture(),
 			)
 			result = Result{Error: ClientError{Code: ErrCodeInternal, Message: "internal error"}}
 			ok = true

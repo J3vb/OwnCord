@@ -178,6 +178,16 @@ func (p *otelProvider) HTTPMiddleware(next http.Handler) http.Handler {
 // exporter registry.
 func (p *otelProvider) PrometheusHandler() http.Handler { return p.promHandler }
 
+// TraceIDFromContext returns the active trace ID as a hex string, or "" when no
+// span is recording in ctx. Used to stamp log records with trace_id so logs
+// correlate with traces.
+func TraceIDFromContext(ctx context.Context) string {
+	if sc := trace.SpanContextFromContext(ctx); sc.HasTraceID() {
+		return sc.TraceID().String()
+	}
+	return ""
+}
+
 // ── Tracer / Span adapters ─────────────────────────────────────────────────
 
 type otelTracer struct{ inner trace.Tracer }

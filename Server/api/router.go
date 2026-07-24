@@ -18,6 +18,7 @@ import (
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/plugin"
 	"github.com/owncord/server/service"
+	"github.com/owncord/server/stackutil"
 	"github.com/owncord/server/storage"
 	"github.com/owncord/server/telemetry"
 	"github.com/owncord/server/updater"
@@ -39,7 +40,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// NOTE: middleware.RealIP is intentionally omitted — trusting X-Real-IP from
 	// any source allows IP spoofing for rate-limit bypass. IP header trust is now
 	// handled explicitly in clientIPWithProxies using the trusted_proxies config.
-	r.Use(middleware.Recoverer)
+	r.Use(recoverer)     // slog-routing panic recovery (replaces chi's stderr-only Recoverer)
 	r.Use(requestLogger) // structured request/response logging
 	// Phase B Step 8 — OpenTelemetry HTTP tracing. No-op when telemetry is
 	// disabled or the otel build tag is not set, so this is safe to mount
@@ -359,6 +360,44 @@ func setRequestIDHeader(next http.Handler) http.Handler {
 		if requestID != "" {
 			w.Header().Set("X-Request-Id", requestID)
 		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// recoverer recovers from panics in HTTP handlers and logs them through slog —
+// so they reach the admin log stream and are structured — unlike chi's default
+// middleware.Recoverer, which writes an unstructured stack to stderr only. The
+// stack is captured via stackutil so it never embeds argument values (which on
+// auth/upload paths can carry tokens or passwords).
+func recoverer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Capture correlation IDs before dispatch so the recovery closure makes
+		// no context calls (which trip contextcheck inside a defer), while the
+		// panic log still carries req_id/trace_id.
+		reqID := middleware.GetReqID(r.Context())
+		traceID := telemetry.TraceIDFromContext(r.Context())
+		defer func() {
+			if rec := recover(); rec != nil {
+				// Preserve chi's behaviour of not swallowing the abort sentinel.
+				if rec == http.ErrAbortHandler {
+					panic(rec)
+				}
+				attrs := []any{
+					"method", r.Method,
+					"path", r.URL.Path,
+					"panic", rec,
+					"stack", stackutil.Capture(),
+				}
+				if reqID != "" {
+					attrs = append(attrs, "req_id", reqID)
+				}
+				if traceID != "" {
+					attrs = append(attrs, "trace_id", traceID)
+				}
+				slog.Error("http handler panic recovered", attrs...)
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+		}()
 		next.ServeHTTP(w, r)
 	})
 }

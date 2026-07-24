@@ -20,3 +20,7 @@ func Init(_ context.Context, cfg config.TelemetryConfig) (ShutdownFunc, error) {
 	SetGlobal(noopProvider{})
 	return func(context.Context) error { return nil }, nil
 }
+
+// TraceIDFromContext returns the active trace ID as a hex string, or "" when no
+// span is active. The default build has no tracing, so it always returns "".
+func TraceIDFromContext(_ context.Context) string { return "" }
