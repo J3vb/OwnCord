@@ -510,9 +510,9 @@ func validateYAML(raw []byte) error {
 //	tls_cert_file      -> tls.cert_file
 //	upload_max_size_mb -> upload.max_size_mb
 func envKeyToKoanf(s string) string {
-	idx := strings.Index(s, "_")
-	if idx < 0 {
+	before, after, ok := strings.Cut(s, "_")
+	if !ok {
 		return s
 	}
-	return s[:idx] + "." + s[idx+1:]
+	return before + "." + after
 }

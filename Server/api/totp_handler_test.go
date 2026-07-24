@@ -35,7 +35,7 @@ func TestVerifyTOTP_Success(t *testing.T) {
 		t.Fatalf("login status = %d, want 200; body = %s", rr.Code, rr.Body.String())
 	}
 
-	var loginResp map[string]interface{}
+	var loginResp map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&loginResp)
 	if loginResp["requires_2fa"] != true {
 		t.Fatal("expected requires_2fa=true in login response")
@@ -57,7 +57,7 @@ func TestVerifyTOTP_Success(t *testing.T) {
 		t.Errorf("verify-totp status = %d, want 200; body = %s", rr.Code, rr.Body.String())
 	}
 
-	var verifyResp map[string]interface{}
+	var verifyResp map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&verifyResp)
 	if verifyResp["token"] == nil {
 		t.Error("verify-totp response missing session token")
@@ -79,7 +79,7 @@ func TestVerifyTOTP_InvalidCode(t *testing.T) {
 		"username": "totpuser2",
 		"password": "Password1!",
 	})
-	var loginResp map[string]interface{}
+	var loginResp map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&loginResp)
 	partialToken := loginResp["partial_token"].(string)
 
@@ -130,7 +130,7 @@ func TestVerifyTOTP_MalformedBody(t *testing.T) {
 		"username": "totpuser3",
 		"password": "Password1!",
 	})
-	var loginResp map[string]interface{}
+	var loginResp map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&loginResp)
 	partialToken := loginResp["partial_token"].(string)
 
@@ -165,7 +165,7 @@ func TestVerifyTOTP_ReplayProtection(t *testing.T) {
 		"username": "totpuser4",
 		"password": "Password1!",
 	})
-	var resp1 map[string]interface{}
+	var resp1 map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&resp1)
 	token1 := resp1["partial_token"].(string)
 
@@ -180,7 +180,7 @@ func TestVerifyTOTP_ReplayProtection(t *testing.T) {
 		"username": "totpuser4",
 		"password": "Password1!",
 	})
-	var resp2 map[string]interface{}
+	var resp2 map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&resp2)
 	token2 := resp2["partial_token"].(string)
 
@@ -207,7 +207,7 @@ func TestEnableTOTP_Success(t *testing.T) {
 		t.Errorf("enable-totp status = %d, want 200; body = %s", rr.Code, rr.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&resp)
 	if resp["qr_uri"] == nil || resp["qr_uri"] == "" {
 		t.Error("enable-totp response missing qr_uri")
@@ -256,7 +256,7 @@ func TestConfirmTOTP_Success(t *testing.T) {
 		t.Fatalf("enable: status = %d; body = %s", rr.Code, rr.Body.String())
 	}
 
-	var enableResp map[string]interface{}
+	var enableResp map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&enableResp)
 	qrURI, _ := enableResp["qr_uri"].(string)
 
@@ -344,7 +344,7 @@ func TestDisableTOTP_Success(t *testing.T) {
 	// Enable and confirm TOTP first.
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token,
 		map[string]string{"password": "Password1!"})
-	var enableResp map[string]interface{}
+	var enableResp map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&enableResp)
 	secret := extractSecretFromURI(t, enableResp["qr_uri"].(string))
 	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())

@@ -55,9 +55,7 @@ type Client struct {
 // wsConn is the subset of github.com/coder/websocket.Conn used by writePump/readPump.
 // Defining it as an interface lets us avoid importing github.com/coder/websocket here,
 // keeping the core hub logic free from that dependency during unit tests.
-type wsConn interface {
-	// intentionally empty — methods used only in serve.go/client_pump.go
-}
+type wsConn any
 
 // newClient creates a real client wrapping a WebSocket connection (set by serve.go).
 func newClient(hub *Hub, conn wsConn, user *db.User, tokenHash string, lastSeq uint64, ctx context.Context) *Client {

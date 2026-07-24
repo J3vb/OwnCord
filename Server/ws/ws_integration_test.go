@@ -485,7 +485,7 @@ func TestServeWS_DuplicateLogin_KeepsUserOnline(t *testing.T) {
 		if writeErr := conn.Write(ctx, websocket.MessageText, raw); writeErr != nil {
 			t.Fatalf("write auth: %v", writeErr)
 		}
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			if _, _, readErr := conn.Read(ctx); readErr != nil {
 				t.Fatalf("read handshake message %d: %v", i, readErr)
 			}
@@ -575,7 +575,7 @@ func TestServeWS_Reconnect_PreservesVoiceState(t *testing.T) {
 			t.Fatalf("write auth: %v", writeErr)
 		}
 		// Read auth_ok + ready
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			if _, _, readErr := conn.Read(ctx); readErr != nil {
 				t.Fatalf("read handshake message %d: %v", i, readErr)
 			}
@@ -731,7 +731,7 @@ func TestServeWS_Reconnect_AuthorizedVoiceClientKeepsChannelStream(t *testing.T)
 			t.Fatalf("write auth: %v", writeErr)
 		}
 		// Read auth_ok + first following message.
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			if _, _, readErr := conn.Read(ctx); readErr != nil {
 				t.Fatalf("read handshake message %d: %v", i, readErr)
 			}
@@ -884,7 +884,7 @@ func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
 			t.Fatalf("write auth: %v", writeErr)
 		}
 		// Read auth_ok + ready
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			if _, _, readErr := conn.Read(ctx); readErr != nil {
 				t.Fatalf("read handshake message %d: %v", i, readErr)
 			}
@@ -1085,7 +1085,7 @@ func TestServeWS_writePump_MessageDelivered(t *testing.T) {
 	_ = conn.Write(ctx, websocket.MessageText, raw)
 
 	// Drain auth_ok and ready.
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		_, _, err := conn.Read(ctx)
 		if err != nil {
 			t.Fatalf("drain initial messages: %v", err)
@@ -1197,7 +1197,7 @@ func TestIntegration_MessageRoundTrip(t *testing.T) {
 			t.Fatalf("%s write auth: %v", label, writeErr)
 		}
 		// Drain auth_ok + ready.
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			if _, _, readErr := conn.Read(ctx); readErr != nil {
 				t.Fatalf("%s drain initial msg %d: %v", label, i, readErr)
 			}
@@ -1325,7 +1325,7 @@ func TestIntegration_SequenceNumbers(t *testing.T) {
 		t.Fatalf("write auth: %v", err)
 	}
 	// Drain auth_ok and ready (these are direct writes, not broadcasts).
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if _, _, err := conn.Read(ctx); err != nil {
 			t.Fatalf("drain msg %d: %v", i, err)
 		}
@@ -1342,7 +1342,7 @@ func TestIntegration_SequenceNumbers(t *testing.T) {
 	var seqs []float64
 	readCtx, readCancel := context.WithTimeout(ctx, 3*time.Second)
 	defer readCancel()
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_, raw, readErr := conn.Read(readCtx)
 		if readErr != nil {
 			break

@@ -236,7 +236,7 @@ func TestAdminAPI_AuditLog_Pagination(t *testing.T) {
 
 	// Create several audit entries.
 	uid, _ := database.CreateUser(context.Background(), "auditpager", "hash", 1)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		_ = database.LogAudit(context.Background(), uid, "TEST", "test", int64(i), "")
 	}
 

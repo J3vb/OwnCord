@@ -105,8 +105,7 @@ func TestRunPruneErrorDoesNotPanic(t *testing.T) {
 
 func TestStartEventPrunerNilStoreIsNoop(t *testing.T) {
 	// Should not spawn a goroutine, should not panic.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	StartEventPruner(ctx, nil, time.Hour, time.Hour)
 	// If the nil check were missing, calling PruneEventsOlderThan on nil
 	// would panic inside the goroutine — but since we don't spawn one,
@@ -145,8 +144,7 @@ func TestStartEventPrunerStartupDelayBoundedByInterval(t *testing.T) {
 	// Copilot-review fix caps the startup delay at min(interval, 1min),
 	// so with interval=20ms the first prune happens within ~20ms.
 	s := &fakeEventStore{pruneSignal: make(chan struct{})}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	start := time.Now()
 	StartEventPruner(ctx, s, time.Hour, 20*time.Millisecond)

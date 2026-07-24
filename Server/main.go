@@ -327,7 +327,7 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 	go func() {
 		log.Info("server starting", "addr", addr, "tls", tlsCfg != nil, "version", version)
 
-		for attempt := 0; attempt < 20; attempt++ {
+		for attempt := range 20 {
 			var listenErr error
 			if tlsCfg != nil {
 				listenErr = srv.ListenAndServeTLS("", "")

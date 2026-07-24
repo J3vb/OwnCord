@@ -81,7 +81,7 @@ func TestVoiceE2EEOfferV2_RotationBurstNotRateLimited(t *testing.T) {
 	// Spamming a single victim is still limited: 2 offers spent above, the
 	// per-target budget is 5/sec, so within 4 more attempts one must trip.
 	var limited bool
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: validEncKey, iv: validIV}
 		if result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps); result.Error != nil {
 			limited = true

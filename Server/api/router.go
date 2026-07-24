@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -272,11 +273,8 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	)
 
 	// Issue 15: Warn if AllowedOrigins contains wildcard.
-	for _, o := range cfg.Server.AllowedOrigins {
-		if o == "*" {
-			slog.Warn("AllowedOrigins contains wildcard '*' — consider restricting to specific origins for production use")
-			break
-		}
+	if slices.Contains(cfg.Server.AllowedOrigins, "*") {
+		slog.Warn("AllowedOrigins contains wildcard '*' — consider restricting to specific origins for production use")
 	}
 
 	cleanup := func() {

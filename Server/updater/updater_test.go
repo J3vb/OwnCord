@@ -364,7 +364,7 @@ func TestUpdateChecksum_SHA256MatchesChecksumsFile(t *testing.T) {
 
 			// Same line shape as release workflow: sha256sum prints "<hash>  <path>".
 			primaryPath := names[0]
-			checksumData := []byte(fmt.Sprintf("%s  %s\n", expectedHex, primaryPath))
+			checksumData := fmt.Appendf(nil, "%s  %s\n", expectedHex, primaryPath)
 
 			parsed, err := u.parseChecksumFileAny(checksumData, names...)
 			if err != nil {
@@ -393,7 +393,7 @@ func TestUpdateChecksum_FallbackChecksumLine(t *testing.T) {
 	sum := sha256.Sum256(asset)
 	expectedHex := hex.EncodeToString(sum[:])
 	// Only "chatserver.exe", no windows/ prefix — second entry in list must match.
-	checksumData := []byte(fmt.Sprintf("%s  chatserver.exe\n", expectedHex))
+	checksumData := fmt.Appendf(nil, "%s  chatserver.exe\n", expectedHex)
 
 	names := checksumEntryNamesForGOOS("windows")
 	parsed, err := u.parseChecksumFileAny(checksumData, names...)

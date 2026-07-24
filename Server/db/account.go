@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -64,13 +65,7 @@ func (d *DB) DeleteAccount(ctx context.Context, userID int64) error {
 			return fmt.Errorf("DeleteAccount fetch role: %w", err)
 		}
 
-		isAdminClass := false
-		for _, rid := range adminRoleIDs {
-			if userRoleID == rid {
-				isAdminClass = true
-				break
-			}
-		}
+		isAdminClass := slices.Contains(adminRoleIDs, userRoleID)
 
 		if isAdminClass {
 			// Build IN clause dynamically for the admin role IDs.

@@ -13,6 +13,7 @@ linters:
     - unparam        # finds unused function parameters
     - wastedassign   # finds wasted assignments
     - staticcheck    # advanced static analysis (correctness, performance, deprecation)
+    - modernize      # flags outdated idioms (slices/maps/min/max, range-over-int, any, fmt.Appendf)
 
   settings:
     staticcheck:

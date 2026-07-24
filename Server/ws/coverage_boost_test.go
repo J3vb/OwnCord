@@ -2833,7 +2833,7 @@ func TestBroadcastToChannel_DropsWhenFull(t *testing.T) {
 	hub, _ := newCoverageHub(t)
 	// Don't start Run() — broadcast channel will fill up.
 	// The broadcast channel capacity is 256.
-	for i := 0; i < 260; i++ {
+	for range 260 {
 		hub.BroadcastToChannel(1, []byte(`{"type":"test"}`))
 	}
 	// With no Run() loop draining, some messages are dropped.
@@ -2846,7 +2846,7 @@ func TestBroadcastToChannel_DropsWhenFull(t *testing.T) {
 
 func TestBroadcastToAll_DropsWhenFull(t *testing.T) {
 	hub, _ := newCoverageHub(t)
-	for i := 0; i < 260; i++ {
+	for range 260 {
 		hub.BroadcastToAll([]byte(`{"type":"test"}`))
 	}
 	// Hub should still be functional after overflow — verify hub state is intact.

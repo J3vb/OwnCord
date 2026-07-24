@@ -3,6 +3,7 @@ package permissions
 import (
 	"context"
 	"errors"
+	"maps"
 	"testing"
 )
 
@@ -121,9 +122,7 @@ func TestHasChannelPerm(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db := newMockDB()
 			db.chanErr = tt.chanErr
-			for k, v := range tt.overrides {
-				db.channelPerms[k] = v
-			}
+			maps.Copy(db.channelPerms, tt.overrides)
 			ck := NewChecker(db)
 
 			got := ck.HasChannelPerm(context.Background(), tt.rolePerms, tt.roleID, tt.channelID, tt.perm)

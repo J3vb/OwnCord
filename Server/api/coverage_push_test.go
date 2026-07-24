@@ -83,7 +83,7 @@ func TestEnableTOTP_AlreadyEnabled(t *testing.T) {
 		t.Fatalf("enable: status = %d; body = %s", rr.Code, rr.Body.String())
 	}
 
-	var enableResp map[string]interface{}
+	var enableResp map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&enableResp)
 	secret := extractSecretFromURI(t, enableResp["qr_uri"].(string))
 
@@ -1157,7 +1157,7 @@ func TestSearch_RateLimit(t *testing.T) {
 
 	// Make many rapid search requests to trigger rate limiting.
 	var lastCode int
-	for i := 0; i < 25; i++ {
+	for range 25 {
 		rr := chGet(t, router, "/api/v1/search?q=ratelimittest", token)
 		lastCode = rr.Code
 		if lastCode == http.StatusTooManyRequests {

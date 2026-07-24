@@ -145,7 +145,7 @@ func handleCloseDM(svc *service.Services, broadcaster DMBroadcaster) http.Handle
 
 		// Notify via WebSocket so sidebar updates immediately.
 		if broadcaster != nil {
-			closeMsg := []byte(fmt.Sprintf(`{"type":"dm_channel_close","payload":{"channel_id":%d}}`, channelID))
+			closeMsg := fmt.Appendf(nil, `{"type":"dm_channel_close","payload":{"channel_id":%d}}`, channelID)
 			if ok := broadcaster.SendToUser(user.ID, closeMsg); !ok {
 				slog.Debug("handleCloseDM: user not connected", "user_id", user.ID, "channel_id", channelID)
 			}

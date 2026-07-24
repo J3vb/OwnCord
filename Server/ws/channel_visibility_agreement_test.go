@@ -9,7 +9,7 @@ package ws_test
 import (
 	"context"
 	"encoding/json"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/owncord/server/auth"
@@ -44,7 +44,7 @@ func sortedKeys(m map[int64]bool) []int64 {
 	for id := range m {
 		out = append(out, id)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	slices.Sort(out)
 	return out
 }
 

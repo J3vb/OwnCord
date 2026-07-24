@@ -33,10 +33,7 @@ func StartEventPruner(ctx context.Context, s EventStore, retention, interval tim
 	}
 	// Bound the startup delay by the interval so short test intervals
 	// (e.g. 100ms in event_pruner_test.go) don't wait a full minute.
-	startupDelayDuration := maxStartupDelay
-	if interval < startupDelayDuration {
-		startupDelayDuration = interval
-	}
+	startupDelayDuration := min(interval, maxStartupDelay)
 	go func() {
 		// Run once shortly after startup so a tiny dataset stays small.
 		startupDelay := time.NewTimer(startupDelayDuration)

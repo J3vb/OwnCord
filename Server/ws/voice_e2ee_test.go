@@ -455,12 +455,12 @@ func TestE2EE_ConcurrentPubKeyAccess(t *testing.T) {
 	// Concurrent set/get of e2eePubKey should not race.
 	done := make(chan struct{})
 	go func() {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			ws.SetClientE2EEPubKeyForTest(c, "key-"+string(rune('A'+i%26)))
 		}
 		close(done)
 	}()
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		_ = ws.GetClientE2EEPubKeyForTest(c)
 	}
 	<-done

@@ -335,7 +335,7 @@ func TestLogin_LockoutUsesTrustedForwardedIP(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 	router := buildAuthRouterWithProxies(database, limiter, []string{"127.0.0.0/8"})
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader([]byte(`{"username":"nobody","password":"wrongpass123"}`)))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Forwarded-For", "198.51.100.10")
@@ -365,7 +365,7 @@ func TestLogin_UsernameLockoutAcrossDifferentIPs(t *testing.T) {
 	hash, _ := auth.HashPassword("correctPass1")
 	_, _ = database.CreateUser(context.Background(), "lockoutuser", hash, 4)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
 			"username": "lockoutuser",
 			"password": "wrongpassword",
@@ -392,7 +392,7 @@ func TestLogin_UsernameLockoutBlocksCorrectPasswordFromFreshIP(t *testing.T) {
 	hash, _ := auth.HashPassword("correctPass1")
 	_, _ = database.CreateUser(context.Background(), "lockoutcorrect", hash, 4)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
 			"username": "lockoutcorrect",
 			"password": "wrongpassword",
@@ -425,7 +425,7 @@ func TestLogin_UsernameLockoutIgnoresCasing(t *testing.T) {
 
 	// Trip the per-username lockout using the lowercase spelling, from many IPs
 	// so the per-IP limiter is never the binding cap.
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
 			"username": "casehunt",
 			"password": "wrongpassword",
@@ -515,7 +515,7 @@ func TestLogin_NineFailuresThenCorrectPasswordSucceeds(t *testing.T) {
 	hash, _ := auth.HashPassword("correctPass1")
 	_, _ = database.CreateUser(context.Background(), "boundaryuser", hash, 4)
 
-	for i := 0; i < 9; i++ {
+	for i := range 9 {
 		rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
 			"username": "boundaryuser",
 			"password": "wrongpassword",
@@ -542,7 +542,7 @@ func TestLogin_SuccessResetsUsernameFailureCounter(t *testing.T) {
 	hash, _ := auth.HashPassword("correctPass1")
 	_, _ = database.CreateUser(context.Background(), "resetuser", hash, 4)
 
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
 			"username": "resetuser",
 			"password": "wrongpassword",
@@ -560,7 +560,7 @@ func TestLogin_SuccessResetsUsernameFailureCounter(t *testing.T) {
 		t.Fatalf("success status = %d, want 200; body = %s", rr.Code, rr.Body.String())
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		rr = postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
 			"username": "resetuser",
 			"password": "wrongpassword",
@@ -634,7 +634,7 @@ func TestLogin_UsernameLockoutBlocksTOTPChallenge(t *testing.T) {
 		t.Fatalf("set totp secret: %v", err)
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
 			"username": "totplocked",
 			"password": "wrongpassword",
@@ -863,7 +863,7 @@ func TestVerifyTotp_ConsumesChallengeAfterRepeatedFailures(t *testing.T) {
 		t.Fatal("expected partial_token from login")
 	}
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		verify := postJSONWithToken(t, router, "/api/v1/auth/verify-totp", partialToken, map[string]string{"code": "000000"})
 		if verify.Code != http.StatusUnauthorized {
 			t.Fatalf("attempt %d status = %d, want 401; body = %s", i+1, verify.Code, verify.Body.String())
@@ -1285,7 +1285,7 @@ func TestDeleteAccount_LockoutAfterRepeatedFailures(t *testing.T) {
 	_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1")
 
 	// 3 failures should trigger lockout on the 4th attempt.
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		deleteJSONWithToken(t, router, "/api/v1/auth/account", token, map[string]string{
 			"password": "wrongPassword1",
 		})

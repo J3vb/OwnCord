@@ -33,7 +33,7 @@ func TestPush_SingleEntry(t *testing.T) {
 func TestPush_MultipleInOrder(t *testing.T) {
 	rb := ws.NewEventRingBuffer(8)
 	for i := uint64(1); i <= 5; i++ {
-		rb.Push(i, 0, []byte(fmt.Sprintf("msg-%d", i)))
+		rb.Push(i, 0, fmt.Appendf(nil, "msg-%d", i))
 	}
 
 	// afterSeq == oldestSeq (1) → nil (BUG-085: conservative boundary).
@@ -60,7 +60,7 @@ func TestPush_WrapsAround(t *testing.T) {
 
 	// Push 6 events into a buffer with capacity 4 — first two are evicted.
 	for i := uint64(1); i <= 6; i++ {
-		rb.Push(i, 0, []byte(fmt.Sprintf("e%d", i)))
+		rb.Push(i, 0, fmt.Appendf(nil, "e%d", i))
 	}
 
 	got := rb.EventsSince(0)
@@ -139,7 +139,7 @@ func TestEventsSince_EmptyBuffer(t *testing.T) {
 func TestEventsSince_AfterSpecificSeq(t *testing.T) {
 	rb := ws.NewEventRingBuffer(8)
 	for i := uint64(1); i <= 5; i++ {
-		rb.Push(i, 0, []byte(fmt.Sprintf("m%d", i)))
+		rb.Push(i, 0, fmt.Appendf(nil, "m%d", i))
 	}
 
 	got := rb.EventsSince(3)
@@ -185,7 +185,7 @@ func TestEventsSince_WraparoundOrder(t *testing.T) {
 
 	// Fill past capacity to force wrap.
 	for i := uint64(1); i <= 7; i++ {
-		rb.Push(i, 0, []byte(fmt.Sprintf("v%d", i)))
+		rb.Push(i, 0, fmt.Appendf(nil, "v%d", i))
 	}
 
 	// afterSeq == oldestSeq (4) → nil (BUG-085).
@@ -211,7 +211,7 @@ func TestEventsSince_AfterSeqZero_ReturnsBehavior(t *testing.T) {
 	// the server can't confirm the buffer covers everything the client missed.
 	rb := ws.NewEventRingBuffer(8)
 	for i := uint64(1); i <= 3; i++ {
-		rb.Push(i, 0, []byte(fmt.Sprintf("a%d", i)))
+		rb.Push(i, 0, fmt.Appendf(nil, "a%d", i))
 	}
 
 	got := rb.EventsSince(0)
@@ -250,7 +250,7 @@ func TestEventsSince_AfterSeqEqualsOldest_ReturnsNil(t *testing.T) {
 
 	// Push 6 events: buffer holds seq 3,4,5,6. Oldest = 3.
 	for i := uint64(1); i <= 6; i++ {
-		rb.Push(i, 0, []byte(fmt.Sprintf("e%d", i)))
+		rb.Push(i, 0, fmt.Appendf(nil, "e%d", i))
 	}
 
 	if oldest := rb.OldestSeq(); oldest != 3 {
@@ -317,26 +317,24 @@ func TestConcurrent_PushAndEventsSince(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Concurrent writers.
-	for w := 0; w < writers; w++ {
+	for w := range writers {
 		wg.Add(1)
 		go func(base uint64) {
 			defer wg.Done()
-			for i := uint64(0); i < pushes; i++ {
+			for i := range uint64(pushes) {
 				rb.Push(base+i, 0, []byte("data"))
 			}
 		}(uint64(w) * pushes)
 	}
 
 	// Concurrent readers.
-	for r := 0; r < readers; r++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < reads; i++ {
+	for range readers {
+		wg.Go(func() {
+			for range reads {
 				_ = rb.EventsSince(0)
 				_ = rb.OldestSeq()
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -438,7 +436,7 @@ func TestEventsSince_CapacityBoundaries(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			rb := ws.NewEventRingBuffer(tc.cap)
 			for i := 1; i <= tc.pushes; i++ {
-				rb.Push(uint64(i), 0, []byte(fmt.Sprintf("e%d", i)))
+				rb.Push(uint64(i), 0, fmt.Appendf(nil, "e%d", i))
 			}
 
 			got := rb.EventsSince(tc.afterSeq)
