@@ -178,7 +178,7 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) 
 		if req.IdentityPublicKey != nil {
 			updated, err = svc.Users.UpdateIdentityKey(r.Context(), user.ID, *req.IdentityPublicKey)
 			if err != nil {
-				writeServiceError(w, err)
+				writeServiceError(r.Context(), w, err)
 				return
 			}
 		}
