@@ -169,6 +169,10 @@ export class LiveKitSession {
   private _roomKeyRejector: ((err: Error) => void) | null = null;
   /** Guard: true while a key rotation is in progress (prevents concurrent rotations). */
   private _rotatingKey = false;
+  /** Set when a keyed-peer leave coincides with an in-flight rotation: the rekey
+   *  is deferred (not dropped) and re-run when the current rotation finishes, so
+   *  a member that left mid-rotation is excluded from the fresh room key. */
+  private _rotationPending = false;
   /** Monotonic counter incremented on every key rotation. handleE2EEOffer captures the
    *  epoch before async work and discards the result if epoch changed (stale offer). */
   private _e2eeEpoch = 0;
@@ -1550,16 +1554,26 @@ export class LiveKitSession {
         log.error("E2EE: failed to rotate room key", err);
       } finally {
         this._rotatingKey = false;
-        this.startKeyRotationTimer();
       }
+      // If a keyed peer left while this become-holder rotation was in flight, its
+      // rekey was deferred (not dropped) — run it now so the departed member is
+      // excluded from the fresh key; otherwise re-arm the periodic timer.
+      await this.drainPendingRotationOrArmTimer();
     } else if (wasKeyHolder && hadPeerKey) {
       // Membership forward secrecy: I remain the key holder and a peer that held
       // the room key left, so rotate + redistribute to the CURRENT peer set
       // (which already excludes the leaver, deleted above) — otherwise the
       // departed member keeps a valid room key against the untrusted SFU until
-      // the next periodic rotation. rotateKeyPeriodically self-guards on
-      // _isKeyHolder / _rotatingKey.
-      await this.rotateKeyPeriodically();
+      // the next periodic rotation.
+      if (this._rotatingKey) {
+        // A rotation is already in flight and may already have sent the current
+        // key to this leaver before they left. Don't DROP the rekey (that would
+        // leave the departed member holding a live key) — defer it so it re-runs
+        // when the in-flight rotation completes, excluding them.
+        this._rotationPending = true;
+      } else {
+        await this.rotateKeyPeriodically();
+      }
     }
   }
 
@@ -1621,7 +1635,20 @@ export class LiveKitSession {
       this._rotatingKey = false;
     }
 
-    // Re-arm the timer for the next rotation.
+    // Re-arm the periodic timer, or run a rotation deferred by a keyed-peer leave
+    // that coincided with this one.
+    await this.drainPendingRotationOrArmTimer();
+  }
+
+  /** After a rotation completes: if a keyed-peer leave coincided with it (its
+   *  rekey was deferred, not dropped), run one more rotation to exclude the
+   *  departed member; otherwise re-arm the periodic rotation timer. */
+  private async drainPendingRotationOrArmTimer(): Promise<void> {
+    if (this._rotationPending) {
+      this._rotationPending = false;
+      await this.rotateKeyPeriodically();
+      return;
+    }
     this.startKeyRotationTimer();
   }
 
@@ -1635,6 +1662,7 @@ export class LiveKitSession {
     clearPeerVerifications();
     this._isKeyHolder = false;
     this._rotatingKey = false;
+    this._rotationPending = false;
     this._e2eeEpoch = 0;
     this._pendingAnnounces.length = 0;
     this.clearKeyRotationTimer();
