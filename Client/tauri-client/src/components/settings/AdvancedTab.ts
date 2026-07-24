@@ -56,6 +56,9 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
     section.appendChild(row);
   }
 
+  // Launch on login — OS-level state via the autostart plugin, not a stored pref.
+  section.appendChild(buildAutostartRow(signal));
+
   // ---- Separator -------------------------------------------------------------
 
   const sep = createElement("div", { class: "settings-separator" });
@@ -216,6 +219,59 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * "Launch on login" toggle. Autostart is OS state, so the value is read from and
+ * written to `tauri-plugin-autostart` rather than the localStorage pref store.
+ * Outside Tauri (dev browser / tests) the plugin is unavailable and the row
+ * removes itself so it isn't misleading.
+ */
+function buildAutostartRow(signal: AbortSignal): HTMLDivElement {
+  const row = createElement("div", { class: "setting-row" });
+  const info = createElement("div", {});
+  const label = createElement("div", { class: "setting-label" }, "Launch on Login");
+  const desc = createElement(
+    "div",
+    { class: "setting-desc" },
+    "Start OwnCord automatically when you sign in to your computer",
+  );
+  appendChildren(info, label, desc);
+
+  // Starts off; corrected to the real OS state once the plugin answers.
+  let enabled = false;
+  const toggle = createToggle(false, {
+    signal,
+    onChange: (nowOn) => {
+      void (async () => {
+        try {
+          const { enable, disable } = await import("@tauri-apps/plugin-autostart");
+          if (nowOn) await enable();
+          else await disable();
+          enabled = nowOn;
+        } catch (err) {
+          // The OS change didn't take — revert the visual state.
+          toggle.classList.toggle("on", enabled);
+          toggle.setAttribute("aria-checked", String(enabled));
+          log.warn("Failed to change autostart", { error: String(err) });
+        }
+      })();
+    },
+  });
+  appendChildren(row, info, toggle);
+
+  void (async () => {
+    try {
+      const { isEnabled } = await import("@tauri-apps/plugin-autostart");
+      enabled = await isEnabled();
+      toggle.classList.toggle("on", enabled);
+      toggle.setAttribute("aria-checked", String(enabled));
+    } catch {
+      row.remove();
+    }
+  })();
+
+  return row;
+}
 
 function buildCacheRow(
   label: string,
