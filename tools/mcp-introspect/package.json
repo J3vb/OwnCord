@@ -1,0 +1,17 @@
+{
+  "name": "owncord-mcp-introspect",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local MCP server to introspect a running OwnCord instance (dev tool for Claude Code).",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.23.8"
+  }
+}

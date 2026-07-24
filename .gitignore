@@ -65,8 +65,11 @@ node_modules/
 .rust-review-results/
 .claude/worktrees/
 
-# Internal dev tools
-tools/
+# Internal dev tools (e.g. tools/livekit-server.exe) are ignored, but the
+# owncord-introspect MCP server is a committed, shared dev tool.
+tools/*
+!tools/mcp-introspect/
+tools/mcp-introspect/node_modules/
 .cache/
 
 # Internal dev files (root-level scratch only; .claude/skills/ and CLAUDE.md are committed)

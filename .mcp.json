@@ -7,6 +7,13 @@
     "context7": {
       "type": "http",
       "url": "https://mcp.context7.com/mcp"
+    },
+    "owncord-introspect": {
+      "command": "node",
+      "args": ["tools/mcp-introspect/index.mjs"],
+      "env": {
+        "OWNCORD_API_TOKEN": "${OWNCORD_API_TOKEN}"
+      }
     }
   }
 }
