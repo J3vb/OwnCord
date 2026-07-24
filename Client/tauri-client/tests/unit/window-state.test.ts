@@ -10,11 +10,7 @@ vi.mock("@lib/logger", () => ({
   }),
 }));
 
-// Mock Tauri APIs as unavailable by default
-vi.mock("@tauri-apps/api/core", () => {
-  throw new Error("Not in Tauri");
-});
-
+// Tauri window API unavailable (non-Tauri context, e.g. dev browser).
 vi.mock("@tauri-apps/api/window", () => {
   throw new Error("Not in Tauri");
 });
@@ -24,11 +20,8 @@ describe("window-state", () => {
     vi.resetModules();
   });
 
-  it("initWindowState returns a cleanup function when Tauri unavailable", async () => {
+  it("initWindowState resolves without throwing when Tauri is unavailable", async () => {
     const { initWindowState } = await import("@lib/window-state");
-    const cleanup = await initWindowState();
-    expect(typeof cleanup).toBe("function");
-    // Should be a no-op
-    cleanup();
+    await expect(initWindowState()).resolves.toBeUndefined();
   });
 });

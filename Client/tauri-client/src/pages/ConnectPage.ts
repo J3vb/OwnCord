@@ -58,6 +58,8 @@ export function createConnectPage(
   refreshProfiles(profiles: readonly SimpleProfile[]): void;
   /** Pre-select a server by host — fills the login form and loads saved credentials. */
   selectServer(host: string, username?: string): void;
+  /** Pre-fill + switch to register mode from an owncord:// invite deep link. */
+  applyInviteLink(code: string, host?: string): void;
 } {
   let container: Element | null = null;
   let root: HTMLDivElement;
@@ -283,6 +285,9 @@ export function createConnectPage(
           // Credential loading is best-effort; user can type manually
         }
       })();
+    },
+    applyInviteLink(code: string, host?: string): void {
+      loginForm.applyInviteLink(code, host);
     },
   };
 }

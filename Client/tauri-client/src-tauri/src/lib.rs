@@ -9,9 +9,28 @@ mod tray;
 mod update_commands;
 mod ws_proxy;
 
+// Only used by the desktop-only single-instance closure below.
+#[cfg(desktop)]
+use tauri::Manager;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    match tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // The single-instance plugin MUST be registered first: a second launch is
+    // forwarded to the running instance (which we focus) instead of opening a
+    // duplicate window with a second WS connection / tray icon. With its
+    // "deep-link" feature this also routes an owncord:// link to the running app.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }));
+
+    let builder = builder
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_http::init())
@@ -19,7 +38,21 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_process::init());
+
+    // Desktop-only convenience plugins. window-state auto-saves/restores window
+    // geometry (off-screen correction lives in the frontend); autostart backs
+    // the "launch on login" toggle; deep-link registers the owncord:// scheme.
+    #[cfg(desktop)]
+    let builder = builder
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None::<Vec<&'static str>>,
+        ))
+        .plugin(tauri_plugin_deep_link::init());
+
+    match builder
         .manage(ws_proxy::WsState::new())
         .manage(livekit_proxy::LiveKitProxyState::new())
         .manage(http_proxy::HttpProxyState::new())
