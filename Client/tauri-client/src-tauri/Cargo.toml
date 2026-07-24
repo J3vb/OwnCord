@@ -52,6 +52,15 @@ env_logger = "0.11"
 keyring = "3"
 rfd = { version = "0.16", default-features = false }
 
+# Desktop-only plugins (no mobile bundle target). single-instance carries the
+# "deep-link" feature so an owncord:// link fired at a running app is forwarded
+# to it instead of spawning a duplicate window.
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+tauri-plugin-window-state = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-deep-link = "2"
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = ["Win32_UI_Input_KeyboardAndMouse"] }
 
