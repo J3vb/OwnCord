@@ -38,11 +38,11 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, username 
 		if db.IsUniqueConstraintError(err) {
 			return nil, fmt.Errorf("%w: username is already taken", ErrConflict)
 		}
-		return nil, fmt.Errorf("%w: failed to update profile", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to update profile: %v", ErrInternal, err)
 	}
 	user, err := s.st.GetUserByID(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to fetch updated user", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to fetch updated user: %v", ErrInternal, err)
 	}
 	// Audit rows must survive a request canceled after the write committed.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "profile_update", "user", userID,
@@ -82,7 +82,7 @@ type ChangePasswordResult struct {
 // ChangePassword updates the user's password and revokes other sessions.
 func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPasswordHash string, keepSessionID int64) (ChangePasswordResult, error) {
 	if err := s.st.UpdateUserPassword(ctx, userID, newPasswordHash); err != nil {
-		return ChangePasswordResult{}, fmt.Errorf("%w: failed to update password", ErrInternal)
+		return ChangePasswordResult{}, fmt.Errorf("%w: failed to update password: %v", ErrInternal, err)
 	}
 
 	// The password is committed from here on: every path below reports
@@ -114,7 +114,7 @@ func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPassw
 func (s *UserService) ListSessions(ctx context.Context, userID int64) ([]db.Session, error) {
 	sessions, err := s.st.ListUserSessions(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list sessions", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to list sessions: %v", ErrInternal, err)
 	}
 	return sessions, nil
 }
@@ -125,7 +125,7 @@ func (s *UserService) RevokeSession(ctx context.Context, userID, sessionID int64
 		if errors.Is(err, db.ErrNotFound) {
 			return fmt.Errorf("%w: session not found", ErrNotFound)
 		}
-		return fmt.Errorf("%w: failed to revoke session", ErrInternal)
+		return fmt.Errorf("%w: failed to revoke session: %v", ErrInternal, err)
 	}
 	// Audit rows must survive a request canceled after the delete committed.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "session_revoke", "session", sessionID, "session revoked")

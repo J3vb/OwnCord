@@ -220,7 +220,9 @@ export function createWsClient() {
     try {
       parsed = JSON.parse(raw) as { type?: string; payload?: unknown; id?: string; seq?: number };
     } catch {
-      log.warn("Failed to parse WS message", { data: raw });
+      // Log the size only — `raw` is the decrypted frame (chat plaintext,
+      // usernames) and this line is persisted to the on-disk log.
+      log.warn("Failed to parse WS message", { bytes: raw.length });
       return;
     }
 
@@ -489,8 +491,11 @@ export function createWsClient() {
       if (msg.includes("channel full")) {
         // Outbound channel is saturated — surface the drop to listeners so an
         // optimistic row fails with retry instead of silently losing the send.
+        // Log id + size only — a slice of `json` can contain the auth
+        // envelope's bearer token, and this line is persisted to disk.
         log.warn("ws_send: outbound channel full, message dropped (backpressure)", {
-          messagePreview: json.slice(0, 120),
+          id,
+          bytes: json.length,
         });
         notifySendFailure(id, "NETWORK");
       } else {

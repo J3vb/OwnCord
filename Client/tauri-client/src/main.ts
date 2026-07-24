@@ -226,7 +226,10 @@ function runHealthChecks(
           version: health.version ?? null,
           onlineUsers: health.online_users ?? null,
         });
-      } catch {
+      } catch (err) {
+        // Record why the check failed (TLS/cert-pin/network) — otherwise a
+        // "can't connect" report has no logged cause to diagnose.
+        log.warn("health check failed", { host: profile.host, error: String(err) });
         connectPage.updateHealthStatus(profile.host, {
           status: "offline",
           latencyMs: null,

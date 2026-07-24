@@ -48,7 +48,10 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 webpki-roots = "1"
 ring = "0.17"
 log = "0.4"
-env_logger = "0.11"
+# Writes Rust logs to a rotating file under the OS app-log dir (alongside the
+# TS client-logs) so a shipped user can retrieve them — a release build detaches
+# the console, so stdout/stderr logging is otherwise unreachable.
+tauri-plugin-log = "2"
 keyring = "3"
 rfd = { version = "0.16", default-features = false }
 

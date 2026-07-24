@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/plugin"
 	"github.com/owncord/server/service"
+	"github.com/owncord/server/stackutil"
 	"github.com/owncord/server/syncutil"
 )
 
@@ -276,12 +276,10 @@ func (h *Hub) Run() {
 					}
 					panicCount++
 
-					buf := make([]byte, 4096)
-					n := runtime.Stack(buf, false)
 					slog.Error("hub: panic recovered",
 						"panic", r,
 						"panic_count", panicCount,
-						"stack", string(buf[:n]))
+						"stack", stackutil.Capture())
 
 					if panicCount >= 3 {
 						slog.Error("hub: too many panics in 60s, stopping")

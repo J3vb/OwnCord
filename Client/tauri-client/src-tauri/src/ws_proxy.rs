@@ -307,13 +307,17 @@ pub fn accept_cert_fingerprint<R: Runtime>(
         return Err("fingerprint must be SHA-256 colon-hex format (e.g. aa:bb:cc:...)".into());
     }
 
-    let store = app
-        .store(CERTS_STORE)
-        .map_err(|e| format!("failed to open certs store: {e}"))?;
+    let store = app.store(CERTS_STORE).map_err(|e| {
+        log::warn!("[ws_proxy] accept_cert_fingerprint: failed to open certs store: {e}");
+        format!("failed to open certs store: {e}")
+    })?;
 
     // Capture old value before mutating so we can restore it if save fails.
     let old_value = store.get(&host);
-    store.set(&host, Value::String(fingerprint));
+    // A pin that replaces a *different* existing fingerprint is security-
+    // significant (cert rotation — or a MITM the user just accepted).
+    let changed = matches!(&old_value, Some(Value::String(s)) if *s != fingerprint);
+    store.set(&host, Value::String(fingerprint.clone()));
     if let Err(e) = store.save() {
         // Restore previous in-memory state: put back old fingerprint if one
         // existed, or delete if there was none. Without this, the new
@@ -323,7 +327,14 @@ pub fn accept_cert_fingerprint<R: Runtime>(
             Some(v) => { store.set(&host, v); }
             None    => { let _ = store.delete(&host); }
         }
+        log::warn!("[ws_proxy] accept_cert_fingerprint: failed to persist pin for {host}: {e}");
         return Err(format!("failed to persist cert fingerprint: {e}"));
+    }
+    // Fingerprints are public cert hashes — safe to log; this is the TOFU audit trail.
+    if changed {
+        log::warn!("[ws_proxy] cert pin CHANGED for {host} -> {fingerprint}");
+    } else {
+        log::info!("[ws_proxy] cert pin accepted for {host} -> {fingerprint}");
     }
     Ok(())
 }

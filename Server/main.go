@@ -23,6 +23,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/logctx"
 	"github.com/owncord/server/plugin"
 	"github.com/owncord/server/storage"
 	"github.com/owncord/server/telemetry"
@@ -36,12 +37,18 @@ func main() {
 	// Create ring buffer for admin log viewer, then build a multi-handler
 	// that tees log records to both stdout (INFO+) and the ring buffer (DEBUG+).
 	logBuf := admin.NewRingBuffer(2000)
-	stdoutHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+	// levelVar controls the stdout handler's threshold. It starts at INFO (the
+	// zero value) so early-startup logs are captured, then run() raises/lowers
+	// it once config.yaml / OWNCORD_LOGGING_LEVEL is loaded.
+	levelVar := new(slog.LevelVar)
+	stdoutHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: levelVar})
 	multiHandler := admin.NewMultiHandler(stdoutHandler, logBuf, slog.LevelDebug)
-	log := slog.New(multiHandler)
+	// logctx enriches records logged with a request/trace context (the
+	// ...Context slog variants) with req_id and, under -tags otel, trace_id.
+	log := slog.New(logctx.New(multiHandler))
 	slog.SetDefault(log)
 
-	if err := run(log, logBuf); err != nil {
+	if err := run(log, logBuf, levelVar); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "\n  [ERROR] %v\n\n", err)
 		log.Error("server exited with error", "error", err)
 		os.Exit(1)
@@ -49,7 +56,7 @@ func main() {
 }
 
 // run is the real entrypoint — separated for testability.
-func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
+func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) error {
 	// bgCtx is a cancellable context shared by all background goroutines
 	// (event persister, event pruner, plugin loader, maintenance loop).
 	// It is cancelled early in the shutdown sequence so in-flight DB
@@ -76,6 +83,14 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer) error {
 	cfg, err := config.Load("config.yaml")
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
+	}
+
+	// Apply the configured stdout log level. The ring buffer keeps capturing
+	// DEBUG regardless, so the admin panel's live log view is unaffected.
+	if lvl, ok := config.ParseLevel(cfg.Logging.Level); ok {
+		levelVar.Set(lvl)
+	} else {
+		log.Warn("unknown logging.level, keeping info", "value", cfg.Logging.Level)
 	}
 
 	// ── 2. Ensure data directory exists ────────────────────────────────────
@@ -366,7 +381,7 @@ func isAddrInUse(err error) bool {
 }
 
 // printBanner writes the startup banner to stderr (so it doesn't mix with
-// JSON-structured log output on stdout).
+// the structured log output on stdout).
 func printBanner(cfg *config.Config, ver string, tls bool) {
 	scheme := "http"
 	if tls {

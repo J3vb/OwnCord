@@ -75,7 +75,7 @@ func handleCreateInvite(svc *service.Services) http.HandlerFunc {
 
 		inv, err := svc.Invites.CreateInvite(r.Context(), user.ID, req.MaxUses, req.ExpiresInHours)
 		if err != nil {
-			writeServiceError(w, err)
+			writeServiceError(r.Context(), w, err)
 			return
 		}
 		writeJSON(w, http.StatusCreated, toInviteResponse(inv))
@@ -87,7 +87,7 @@ func handleListInvites(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		invites, err := svc.Invites.ListInvites(r.Context())
 		if err != nil {
-			writeServiceError(w, err)
+			writeServiceError(r.Context(), w, err)
 			return
 		}
 
@@ -104,7 +104,7 @@ func handleRevokeInvite(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		code := chi.URLParam(r, "code")
 		if err := svc.Invites.RevokeInvite(r.Context(), code); err != nil {
-			writeServiceError(w, err)
+			writeServiceError(r.Context(), w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
