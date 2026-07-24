@@ -9,6 +9,26 @@ mod tray;
 mod update_commands;
 mod ws_proxy;
 
+/// Map the RUST_LOG env var to a global level filter for the log plugin.
+/// ponytail: only the simple global form is honoured ("debug", "info", …);
+/// per-module directives like "ws_proxy=debug" fall back to Info. Add a real
+/// parser only if per-module control is actually needed.
+fn log_level_from_env() -> log::LevelFilter {
+    match std::env::var("RUST_LOG")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "trace" => log::LevelFilter::Trace,
+        "debug" => log::LevelFilter::Debug,
+        "warn" => log::LevelFilter::Warn,
+        "error" => log::LevelFilter::Error,
+        "off" => log::LevelFilter::Off,
+        _ => log::LevelFilter::Info,
+    }
+}
+
 // Only used by the desktop-only single-instance closure below.
 #[cfg(desktop)]
 use tauri::Manager;
@@ -31,6 +51,24 @@ pub fn run() {
     }));
 
     let builder = builder
+        // Log plugin registered early so logging is available to everything
+        // after it. Writes to stdout (dev) and a rotating file in the OS
+        // app-log dir so a shipped user — whose release build has no console —
+        // can retrieve logs.
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Stdout,
+                ))
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("owncord-client".into()),
+                    },
+                ))
+                .level(log_level_from_env())
+                .max_file_size(10_000_000) // 10 MB rolling file (default 40 KB is too small)
+                .build(),
+        )
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_http::init())
@@ -88,14 +126,7 @@ pub fn run() {
             commands::open_devtools,
         ])
         .setup(|app| {
-            // Initialize Rust logging (controlled by RUST_LOG env var, defaults to info).
-            // try_init avoids panic if another logger (e.g. a Tauri plugin) registered first.
-            let _ = env_logger::Builder::from_env(
-                env_logger::Env::default().default_filter_or("info"),
-            )
-            .format_timestamp_millis()
-            .try_init();
-
+            // Rust logging is initialized by tauri_plugin_log (registered above).
             tray::create_tray(app.handle())?;
             Ok(())
         })

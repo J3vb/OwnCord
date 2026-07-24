@@ -6,7 +6,7 @@
 
 import { appLogDir, join } from "@tauri-apps/api/path";
 import { mkdir, writeTextFile, readDir, remove, exists } from "@tauri-apps/plugin-fs";
-import { type LogEntry, addLogListener, createLogger } from "./logger";
+import { type LogEntry, addLogListener, createLogger, getLogBuffer } from "./logger";
 
 const log = createLogger("logPersistence");
 const MAX_LOG_FILES = 5;
@@ -131,7 +131,18 @@ export async function initLogPersistence(): Promise<() => void> {
     currentDate = today();
     initialized = true;
 
+    // Persist entries logged before this listener attached (the bootstrap
+    // window) so a startup-time problem lands on disk, not just in the
+    // in-memory ring. Runs synchronously right before addLogListener, so there
+    // is no gap and no double-capture.
+    for (const entry of getLogBuffer()) {
+      buffer.push(JSON.stringify(entry));
+    }
+
     const removeListener = addLogListener(onLogEntry);
+    if (buffer.length > 0) {
+      scheduleFlush();
+    }
 
     return () => {
       removeListener(); // stop receiving new entries first

@@ -44,6 +44,11 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			hash := auth.HashToken(token)
 			sess, err := database.GetSessionByTokenHash(r.Context(), hash)
 			if err != nil || sess == nil {
+				if err != nil {
+					// A DB error here is an outage, not a bad token — log it so
+					// it's distinguishable from ordinary invalid-token 401s.
+					slog.ErrorContext(r.Context(), "auth: session lookup failed", "error", err)
+				}
 				writeJSON(w, http.StatusUnauthorized, errorResponse{
 					Error:   "UNAUTHORIZED",
 					Message: "invalid or expired session",
@@ -58,7 +63,9 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 				// written, so detach cancellation: the deletion must complete.
 				cleanupCtx := context.WithoutCancel(r.Context())
 				go func(h string) {
-					_ = database.DeleteSession(cleanupCtx, h)
+					if err := database.DeleteSession(cleanupCtx, h); err != nil {
+						slog.WarnContext(cleanupCtx, "expired session cleanup failed", "error", err)
+					}
 				}(hash)
 				writeJSON(w, http.StatusUnauthorized, errorResponse{
 					Error:   "UNAUTHORIZED",
@@ -70,6 +77,9 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			// Load user.
 			user, err := database.GetUserByID(r.Context(), sess.UserID)
 			if err != nil || user == nil {
+				if err != nil {
+					slog.ErrorContext(r.Context(), "auth: user lookup failed", "error", err, "user_id", sess.UserID)
+				}
 				writeJSON(w, http.StatusUnauthorized, errorResponse{
 					Error:   "UNAUTHORIZED",
 					Message: "user not found",
@@ -92,6 +102,9 @@ func AuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			// and every downstream permission check has to re-guard it.
 			role, err := database.GetRoleByID(r.Context(), user.RoleID)
 			if err != nil || role == nil {
+				if err != nil {
+					slog.ErrorContext(r.Context(), "auth: role lookup failed", "error", err, "user_id", user.ID, "role_id", user.RoleID)
+				}
 				writeJSON(w, http.StatusUnauthorized, errorResponse{
 					Error:   "UNAUTHORIZED",
 					Message: "role not found",

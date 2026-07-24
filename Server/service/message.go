@@ -559,7 +559,7 @@ func (s *MessageService) SearchMessages(ctx context.Context, userID int64, query
 		}
 		results, err := s.st.SearchMessages(ctx, query, channelID, limit)
 		if err != nil {
-			return nil, fmt.Errorf("%w: search failed", ErrInternal)
+			return nil, fmt.Errorf("%w: search failed: %v", ErrInternal, err)
 		}
 		return results, nil
 	}
@@ -575,7 +575,7 @@ func (s *MessageService) SearchMessages(ctx context.Context, userID int64, query
 
 	results, err := s.st.SearchMessagesInChannels(ctx, query, accessibleIDs, limit)
 	if err != nil {
-		return nil, fmt.Errorf("%w: search failed", ErrInternal)
+		return nil, fmt.Errorf("%w: search failed: %v", ErrInternal, err)
 	}
 	return results, nil
 }
@@ -599,7 +599,7 @@ func (s *MessageService) GetPinnedMessages(ctx context.Context, userID, channelI
 	}
 	msgs, err := s.st.GetPinnedMessages(ctx, channelID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to fetch pinned messages", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to fetch pinned messages: %v", ErrInternal, err)
 	}
 	return msgs, nil
 }
@@ -633,12 +633,12 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 func (s *MessageService) GetAccessibleChannelIDs(ctx context.Context, userID int64) ([]int64, error) {
 	channels, err := s.st.ListChannels(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list channels", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to list channels: %v", ErrInternal, err)
 	}
 
 	role, err := s.perms.GetRoleForUser(ctx, userID)
 	if err != nil || role == nil {
-		return nil, fmt.Errorf("%w: failed to get role", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to get role: %v", ErrInternal, err)
 	}
 
 	var overrides map[int64]db.ChannelOverride
@@ -646,7 +646,7 @@ func (s *MessageService) GetAccessibleChannelIDs(ctx context.Context, userID int
 		var overrideErr error
 		overrides, overrideErr = s.st.GetAllChannelPermissionsForRole(ctx, role.ID)
 		if overrideErr != nil {
-			return nil, fmt.Errorf("%w: failed to fetch channel overrides", ErrInternal)
+			return nil, fmt.Errorf("%w: failed to fetch channel overrides: %v", ErrInternal, overrideErr)
 		}
 	}
 
@@ -693,7 +693,7 @@ func (s *MessageService) checkSendPermission(ctx context.Context, userID, channe
 	if isDM {
 		ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
 		if err != nil {
-			return fmt.Errorf("%w: failed to check DM participation", ErrInternal)
+			return fmt.Errorf("%w: failed to check DM participation: %v", ErrInternal, err)
 		}
 		if !ok {
 			return fmt.Errorf("%w: not a participant in this DM", ErrForbidden)
@@ -702,7 +702,7 @@ func (s *MessageService) checkSendPermission(ctx context.Context, userID, channe
 		if err == nil && recipient != nil {
 			blocked, blkErr := s.st.IsEitherBlocked(ctx, userID, recipient.ID)
 			if blkErr != nil {
-				return fmt.Errorf("%w: failed to check block status", ErrInternal)
+				return fmt.Errorf("%w: failed to check block status: %v", ErrInternal, blkErr)
 			}
 			if blocked {
 				return fmt.Errorf("%w: cannot send messages — user is blocked", ErrBlocked)

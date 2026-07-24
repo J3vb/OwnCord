@@ -107,12 +107,21 @@ pub async fn start_http_proxy<R: Runtime>(
         .port();
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-    tokio::spawn(run_proxy_loop(
+    let loop_handle = tokio::spawn(run_proxy_loop(
         app.clone(),
         listener,
         remote_host.clone(),
         shutdown_rx,
     ));
+    // Watch the loop so a panic is logged instead of vanishing silently (which
+    // would leave JS with a stale cached port and no error).
+    tokio::spawn(async move {
+        match loop_handle.await {
+            Ok(()) => info!("[http_proxy] proxy loop exited"),
+            Err(e) if e.is_panic() => error!("[http_proxy] proxy loop panicked: {e:?}"),
+            Err(e) => warn!("[http_proxy] proxy loop join error: {e:?}"),
+        }
+    });
 
     info!(
         "[http_proxy] tunnel started on 127.0.0.1:{} → {}",

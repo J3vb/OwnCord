@@ -96,7 +96,7 @@ func (s *ModerationService) BanUser(ctx context.Context, actorID, targetID int64
 	}
 
 	if err := s.st.BanUser(ctx, targetID, reason, expires); err != nil {
-		return fmt.Errorf("%w: failed to ban user", ErrInternal)
+		return fmt.Errorf("%w: failed to ban user: %v", ErrInternal, err)
 	}
 
 	// Audit rows must survive a request canceled after the ban committed.
@@ -125,7 +125,7 @@ func (s *ModerationService) UnbanUser(ctx context.Context, actorID, targetID int
 	}
 
 	if err := s.st.UnbanUser(ctx, targetID); err != nil {
-		return fmt.Errorf("%w: failed to unban user", ErrInternal)
+		return fmt.Errorf("%w: failed to unban user: %v", ErrInternal, err)
 	}
 
 	// Audit rows must survive a request canceled after the unban committed.

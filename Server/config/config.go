@@ -30,6 +30,36 @@ type Config struct {
 	Telemetry        TelemetryConfig        `koanf:"telemetry"`
 	Plugins          PluginsConfig          `koanf:"plugins"`
 	GIF              GIFConfig              `koanf:"gif"`
+	Logging          LoggingConfig          `koanf:"logging"`
+}
+
+// LoggingConfig controls server log verbosity. The in-memory ring buffer that
+// backs the admin panel's live log view always captures DEBUG regardless of
+// this setting — Level only gates what is written to stdout.
+type LoggingConfig struct {
+	// Level is the minimum level written to stdout: "debug" | "info" | "warn" |
+	// "error". Override at runtime without editing config.yaml via the
+	// OWNCORD_LOGGING_LEVEL environment variable.
+	Level string `koanf:"level"`
+}
+
+// ParseLevel maps a config log-level string to a slog.Level. It is
+// case-insensitive and treats "" as info. The bool is false for an
+// unrecognised value (in which case slog.LevelInfo is returned and the caller
+// should warn) so a typo doesn't silently disable logging.
+func ParseLevel(s string) (slog.Level, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "debug":
+		return slog.LevelDebug, true
+	case "", "info":
+		return slog.LevelInfo, true
+	case "warn", "warning":
+		return slog.LevelWarn, true
+	case "error":
+		return slog.LevelError, true
+	default:
+		return slog.LevelInfo, false
+	}
 }
 
 // GIFConfig holds the credentials for the server-side GIF (Klipy) proxy.
@@ -221,6 +251,9 @@ func defaults() Config {
 			CPUBudgetMs:   100,
 			HTTPAllowlist: []string{},
 		},
+		Logging: LoggingConfig{
+			Level: "info",
+		},
 	}
 }
 
@@ -305,6 +338,12 @@ voice:
 # Get a key at https://partner.klipy.com
 # gif:
 #   api_key: ""
+
+# Logging. "level" gates what is written to stdout; the admin panel's live log
+# view always captures debug regardless. Override without editing this file via
+# the OWNCORD_LOGGING_LEVEL environment variable.
+# logging:
+#   level: "info"             # debug | info | warn | error
 `
 
 // Load reads configuration from the given YAML file path, merging with

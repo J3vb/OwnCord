@@ -50,12 +50,12 @@ func (s *InviteService) CreateInvite(ctx context.Context, createdBy int64, maxUs
 
 	code, err := s.st.CreateInvite(ctx, createdBy, maxUses, expiresAt)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to create invite", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to create invite: %v", ErrInternal, err)
 	}
 
 	invite, err := s.st.GetInvite(ctx, code)
 	if err != nil || invite == nil {
-		return nil, fmt.Errorf("%w: failed to retrieve invite", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to retrieve invite: %v", ErrInternal, err)
 	}
 	return invite, nil
 }
@@ -64,7 +64,7 @@ func (s *InviteService) CreateInvite(ctx context.Context, createdBy int64, maxUs
 func (s *InviteService) ListInvites(ctx context.Context) ([]*db.Invite, error) {
 	invites, err := s.st.ListInvites(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list invites", ErrInternal)
+		return nil, fmt.Errorf("%w: failed to list invites: %v", ErrInternal, err)
 	}
 	return invites, nil
 }
@@ -76,7 +76,7 @@ func (s *InviteService) RevokeInvite(ctx context.Context, code string) error {
 		return fmt.Errorf("%w: invite not found", ErrNotFound)
 	}
 	if err := s.st.RevokeInvite(ctx, code); err != nil {
-		return fmt.Errorf("%w: failed to revoke invite", ErrInternal)
+		return fmt.Errorf("%w: failed to revoke invite: %v", ErrInternal, err)
 	}
 	return nil
 }

@@ -75,7 +75,7 @@ func handleCreateDM(svc *service.Services) http.HandlerFunc {
 
 		result, err := svc.DMs.CreateDM(r.Context(), user.ID, req.RecipientID)
 		if err != nil {
-			writeServiceError(w, err)
+			writeServiceError(r.Context(), w, err)
 			return
 		}
 
@@ -115,7 +115,7 @@ func handleListDMs(svc *service.Services) http.HandlerFunc {
 
 		channels, err := svc.DMs.ListDMs(r.Context(), user.ID)
 		if err != nil {
-			writeServiceError(w, err)
+			writeServiceError(r.Context(), w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, listDMsResponse{DMChannels: channels})
@@ -139,7 +139,7 @@ func handleCloseDM(svc *service.Services, broadcaster DMBroadcaster) http.Handle
 		}
 
 		if err := svc.DMs.CloseDM(r.Context(), user.ID, channelID); err != nil {
-			writeServiceError(w, err)
+			writeServiceError(r.Context(), w, err)
 			return
 		}
 
@@ -170,7 +170,7 @@ func handleBlockUser(svc *service.Services) http.HandlerFunc {
 		}
 
 		if err := svc.Blocks.BlockUser(r.Context(), user.ID, targetID); err != nil {
-			writeServiceError(w, err)
+			writeServiceError(r.Context(), w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"message": "user blocked"})
@@ -192,7 +192,7 @@ func handleUnblockUser(svc *service.Services) http.HandlerFunc {
 		}
 
 		if err := svc.Blocks.UnblockUser(r.Context(), user.ID, targetID); err != nil {
-			writeServiceError(w, err)
+			writeServiceError(r.Context(), w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"message": "user unblocked"})
@@ -210,7 +210,7 @@ func handleListBlocks(svc *service.Services) http.HandlerFunc {
 
 		ids, err := svc.Blocks.ListBlocked(r.Context(), user.ID)
 		if err != nil {
-			writeServiceError(w, err)
+			writeServiceError(r.Context(), w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"blocked_user_ids": ids})

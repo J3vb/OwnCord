@@ -129,6 +129,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         status: res.status,
         code: err.error,
         message: err.message,
+        // Server echoes its request ID in this header — logging it lets a
+        // client-side failure be matched to the server's log line for it.
+        reqId: res.headers.get("x-request-id") ?? undefined,
       });
       throw new ApiClientError(res.status, err.error, err.message);
     }

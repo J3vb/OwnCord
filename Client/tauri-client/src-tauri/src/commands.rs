@@ -47,6 +47,13 @@ pub fn get_settings(app: tauri::AppHandle) -> Result<Value, String> {
     Ok(Value::Object(map))
 }
 
+/// Log a command failure Rust-side — so it lands in the retrievable log file —
+/// and return the same message unchanged to the JS caller.
+fn log_cmd_err(cmd: &str, msg: String) -> String {
+    log::warn!("{cmd}: {msg}");
+    msg
+}
+
 #[tauri::command]
 pub fn save_settings(app: tauri::AppHandle, key: String, value: Value) -> Result<(), String> {
     if !is_settings_key_allowed(&key) {
@@ -55,12 +62,12 @@ pub fn save_settings(app: tauri::AppHandle, key: String, value: Value) -> Result
 
     let store = app
         .store(SETTINGS_STORE)
-        .map_err(|e| format!("failed to open settings store: {e}"))?;
+        .map_err(|e| log_cmd_err("save_settings", format!("failed to open settings store: {e}")))?;
 
     store.set(&key, value);
     store
         .save()
-        .map_err(|e| format!("failed to persist settings: {e}"))?;
+        .map_err(|e| log_cmd_err("save_settings", format!("failed to persist settings: {e}")))?;
     Ok(())
 }
 
@@ -102,9 +109,9 @@ pub fn store_cert_fingerprint(
         }
     }
 
-    let store = app
-        .store(CERTS_STORE)
-        .map_err(|e| format!("failed to open certs store: {e}"))?;
+    let store = app.store(CERTS_STORE).map_err(|e| {
+        log_cmd_err("store_cert_fingerprint", format!("failed to open certs store: {e}"))
+    })?;
 
     // Capture old value before mutating so we can restore it if save fails.
     let old_value = store.get(&host);
@@ -117,7 +124,10 @@ pub fn store_cert_fingerprint(
             Some(v) => { store.set(&host, v); }
             None    => { let _ = store.delete(&host); }
         }
-        return Err(format!("failed to persist cert fingerprint: {e}"));
+        return Err(log_cmd_err(
+            "store_cert_fingerprint",
+            format!("failed to persist cert fingerprint: {e}"),
+        ));
     }
     Ok(())
 }
@@ -231,7 +241,7 @@ pub fn get_identity_pin(
         .store(IDENTITY_PINS_STORE)
         .map_err(|e| format!("failed to open identity pins store: {e}"))?;
 
-    let value = store.get(&identity_pin_key(&host, &user_id)).and_then(|v| {
+    let value = store.get(identity_pin_key(&host, &user_id)).and_then(|v| {
         if let Value::String(s) = v {
             Some(s)
         } else {
