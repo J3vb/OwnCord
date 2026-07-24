@@ -2263,8 +2263,9 @@ describe("LiveKitSession", () => {
       );
 
       // User accepts the new key (analogous to accepting a changed TLS cert):
-      // re-pin overwrites the stored pin and clears the mismatch block.
-      const recovered = await session.rePinPeerIdentity(PEER_ID);
+      // re-pin overwrites the stored pin with the verified key and clears the
+      // mismatch block.
+      const recovered = await session.rePinPeerIdentity(PEER_ID, "new-identity-b64");
       expect(recovered).toBe(true);
       expect(storeIdentityPin).toHaveBeenCalledWith(HOST, String(PEER_ID), "new-identity-b64");
 
@@ -2279,6 +2280,52 @@ describe("LiveKitSession", () => {
       );
       expect((session as any)._peerPublicKeys.has(PEER_ID)).toBe(true);
       expect(offerSends(ws)).toHaveLength(1);
+    });
+
+    it("re-pins the verified key, not a store re-read a malicious server mutated (TOCTOU)", async () => {
+      // The store holds whatever the server most recently pushed. If re-pin
+      // re-read the store it would pin the attacker's swapped-in key; it must
+      // instead pin the exact key it was handed — the one whose fingerprint the
+      // user verified out-of-band.
+      seedPeer("attacker-swapped-key-b64");
+      const ws = { send: vi.fn() };
+      await joinAsKeyHolder(ws);
+
+      const pinned = await session.rePinPeerIdentity(PEER_ID, "verified-key-b64");
+
+      expect(pinned).toBe(true);
+      expect(storeIdentityPin).toHaveBeenCalledWith(HOST, String(PEER_ID), "verified-key-b64");
+      expect(storeIdentityPin).not.toHaveBeenCalledWith(
+        HOST,
+        String(PEER_ID),
+        "attacker-swapped-key-b64",
+      );
+    });
+
+    it("rotates the room key when a keyed peer leaves while I stay key holder (forward secrecy)", async () => {
+      seedPeer("peer-identity-b64");
+      const ws = { send: vi.fn() };
+      await joinAsKeyHolder(ws); // I hold the key for channel 1
+      await session.handleE2EEAnnounce(PEER_ID, "cGVlcg==", "sig"); // peer now holds the room key
+      // A participant remains, so the leave handler proceeds past the empty check.
+      (mockVoiceState as any).voiceUsers = new Map([[1, new Map([[1, {}]])]]);
+      const epochBefore = (session as any)._e2eeEpoch;
+
+      await session.handleParticipantLeft(PEER_ID);
+
+      // Room key rotated (epoch advanced) so the departed peer's copy is dead.
+      expect((session as any)._e2eeEpoch).toBe(epochBefore + 1);
+    });
+
+    it("does not rotate the room key when the leaver never held it", async () => {
+      const ws = { send: vi.fn() };
+      await joinAsKeyHolder(ws);
+      (mockVoiceState as any).voiceUsers = new Map([[1, new Map([[1, {}]])]]);
+      const epochBefore = (session as any)._e2eeEpoch;
+
+      await session.handleParticipantLeft(999); // 999 never announced → held no key
+
+      expect((session as any)._e2eeEpoch).toBe(epochBefore);
     });
 
     it("verifies a server-substituted key when drained from the pending queue", async () => {

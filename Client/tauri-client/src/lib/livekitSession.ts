@@ -1296,23 +1296,28 @@ export class LiveKitSession {
   }
 
   /**
-   * F3 TOFU re-pin recovery (finding #4). Accept the peer's CURRENT published
-   * identity key, overwriting the stored pin for {host,userId} and clearing the
-   * mismatch block — the identity-key analogue of accepting a changed TLS cert.
-   * A legitimate key rotation (reinstall / new device / wiped keyring) is thus
-   * recoverable instead of a permanent lockout; the next announce re-verifies
-   * against the new pin. Returns false when there is no host or no published key
-   * to pin. The voice-panel mismatch confirm should call this.
+   * F3 TOFU re-pin recovery (finding #4). Pin the EXACT identity key
+   * `verifiedKey` — the bytes whose fingerprint the caller displayed and the
+   * user confirmed out-of-band — overwriting the stored pin for {host,userId}
+   * and clearing the mismatch block (the identity-key analogue of accepting a
+   * changed TLS cert). A legitimate key rotation (reinstall / new device /
+   * wiped keyring) is thus recoverable instead of a permanent lockout; the next
+   * announce re-verifies against the new pin.
+   *
+   * The verified key MUST be passed in, never re-read from membersStore here:
+   * the store is server-writable (a `user_update` mutates it), so re-reading it
+   * would let a malicious server swap in an attacker key during the human
+   * out-of-band verification window and have us pin THAT — a TOCTOU that
+   * silently defeats the mismatch prompt. Returns false when there is no host
+   * or no key to pin.
    */
-  async rePinPeerIdentity(userId: number): Promise<boolean> {
+  async rePinPeerIdentity(userId: number, verifiedKey: string): Promise<boolean> {
     const host = this.serverHost;
-    const publishedIdentity =
-      membersStore.getState().members.get(userId)?.identityPublicKey ?? null;
-    if (!host || !publishedIdentity) {
-      log.warn("E2EE: cannot re-pin peer without a host and published identity key", { userId });
+    if (!host || !verifiedKey) {
+      log.warn("E2EE: cannot re-pin peer without a host and the verified identity key", { userId });
       return false;
     }
-    await storeIdentityPin(host, String(userId), publishedIdentity);
+    await storeIdentityPin(host, String(userId), verifiedKey);
     clearPeerVerification(userId);
     log.info("E2EE: re-pinned peer identity key (TOFU recovery)", { userId });
     return true;
@@ -1454,13 +1459,17 @@ export class LiveKitSession {
 
   /**
    * Handle a participant leaving the voice channel. If we become the new key
-   * holder, rotate the room key and distribute to remaining peers.
+   * holder, rotate the room key and distribute to remaining peers. If we are
+   * ALREADY the key holder and a peer that held the room key left, we also
+   * rotate — so the departed member's copy can no longer decrypt future audio
+   * against the untrusted SFU (membership forward secrecy).
    *
    * Key holder election: the participant with the lowest user ID among remaining
    * participants is elected. This is deterministic and does not depend on Map
    * insertion order (which is not guaranteed to match server join order).
    */
   async handleParticipantLeft(userId: number): Promise<void> {
+    const hadPeerKey = this._peerPublicKeys.has(userId);
     this._peerPublicKeys.delete(userId);
     clearPeerVerification(userId);
 
@@ -1543,6 +1552,14 @@ export class LiveKitSession {
         this._rotatingKey = false;
         this.startKeyRotationTimer();
       }
+    } else if (wasKeyHolder && hadPeerKey) {
+      // Membership forward secrecy: I remain the key holder and a peer that held
+      // the room key left, so rotate + redistribute to the CURRENT peer set
+      // (which already excludes the leaver, deleted above) — otherwise the
+      // departed member keeps a valid room key against the untrusted SFU until
+      // the next periodic rotation. rotateKeyPeriodically self-guards on
+      // _isKeyHolder / _rotatingKey.
+      await this.rotateKeyPeriodically();
     }
   }
 

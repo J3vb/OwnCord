@@ -1488,8 +1488,22 @@ describe("ChannelSidebar voice identity badge", () => {
     });
   });
 
-  it("re-pins the peer when the mismatch modal's Trust button is clicked", async () => {
+  it("re-pins the displayed key when the mismatch modal's Trust button is clicked", async () => {
     addVoiceUser(VOICE_CH, 10, "Alice");
+    // The peer must have a published key so its fingerprint is shown and there
+    // is a concrete verified key to re-pin.
+    membersStore.setState((prev) => {
+      const members = new Map(prev.members);
+      members.set(10, {
+        id: 10,
+        username: "Alice",
+        avatar: null,
+        role: "member",
+        status: "online",
+        identityPublicKey: "alice-published-key-b64",
+      });
+      return { ...prev, members };
+    });
     setPeerVerif(10, "mismatch", null);
     sidebar.mount(container);
 
@@ -1501,7 +1515,8 @@ describe("ChannelSidebar voice identity badge", () => {
     });
     trustBtn.click();
 
-    expect(mockRePinPeerIdentity).toHaveBeenCalledWith(10);
+    // Pins the exact key whose fingerprint was displayed, not a bare userId.
+    expect(mockRePinPeerIdentity).toHaveBeenCalledWith(10, "alice-published-key-b64");
     expect(document.body.querySelector(".modal-overlay")).toBeNull();
   });
 
