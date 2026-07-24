@@ -134,7 +134,15 @@ pub async fn start_livekit_proxy<R: Runtime>(
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let host = remote_host.clone();
-    tokio::spawn(run_proxy_loop(listener, host, fingerprint, shutdown_rx));
+    let loop_handle = tokio::spawn(run_proxy_loop(listener, host, fingerprint, shutdown_rx));
+    // Watch the loop so a panic is logged instead of vanishing silently.
+    tokio::spawn(async move {
+        match loop_handle.await {
+            Ok(()) => info!("[livekit_proxy] proxy loop exited"),
+            Err(e) if e.is_panic() => error!("[livekit_proxy] proxy loop panicked: {e:?}"),
+            Err(e) => warn!("[livekit_proxy] proxy loop join error: {e:?}"),
+        }
+    });
 
     info!("[livekit_proxy] proxy started on 127.0.0.1:{} → {}", port, remote_host);
 
