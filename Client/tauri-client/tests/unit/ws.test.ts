@@ -42,6 +42,7 @@ vi.spyOn(console, "error").mockImplementation(() => {});
 
 // Import after mocks are set up
 import { createWsClient, toConnectionStatus } from "../../src/lib/ws";
+import { addLogListener, type LogEntry } from "../../src/lib/logger";
 
 /** Simulate Tauri emitting an event to JS */
 function emitTauriEvent(event: string, payload: unknown): void {
@@ -289,6 +290,23 @@ describe("WebSocket Client (Tauri proxy)", () => {
 
     emitTauriEvent("ws-message", "not-json{{{");
     expect(messages).toHaveLength(0);
+  });
+
+  it("does not log raw frame content on parse failure (no plaintext leak)", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    const entries: LogEntry[] = [];
+    const remove = addLogListener((e) => entries.push(e));
+    const secret = "SUPER_SECRET_eyJhbGciOiJIUzI1NiJ9";
+    emitTauriEvent("ws-message", secret + " not-json{{{");
+    remove();
+
+    // The decrypted frame must never reach the (on-disk-persisted) log...
+    expect(JSON.stringify(entries)).not.toContain(secret);
+    // ...but the parse failure is still recorded so it stays debuggable.
+    expect(entries.some((e) => e.message.includes("Failed to parse WS message"))).toBe(true);
   });
 
   it("disconnect prevents reconnect", async () => {

@@ -13,6 +13,7 @@ const {
   mockRemove,
   mockReadTextFile,
   mockAddLogListener,
+  mockGetLogBuffer,
 } = vi.hoisted(() => ({
   mockAppLogDir: vi.fn().mockResolvedValue("/mock/logs"),
   mockJoin: vi.fn((...parts: string[]) => parts.join("/")),
@@ -23,6 +24,7 @@ const {
   mockRemove: vi.fn().mockResolvedValue(undefined),
   mockReadTextFile: vi.fn().mockResolvedValue(""),
   mockAddLogListener: vi.fn(),
+  mockGetLogBuffer: vi.fn(() => [] as unknown[]),
 }));
 
 vi.mock("@tauri-apps/api/path", () => ({
@@ -41,6 +43,7 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
 
 vi.mock("@lib/logger", () => ({
   addLogListener: mockAddLogListener,
+  getLogBuffer: mockGetLogBuffer,
   createLogger: () => ({
     debug: vi.fn(),
     info: vi.fn(),
@@ -102,6 +105,7 @@ describe("log persistence", () => {
     mockRemove.mockReset().mockResolvedValue(undefined);
     mockReadTextFile.mockReset().mockResolvedValue("");
     mockAddLogListener.mockReset();
+    mockGetLogBuffer.mockReset().mockReturnValue([]);
   });
 
   afterEach(() => {
@@ -146,6 +150,20 @@ describe("log persistence", () => {
 
       expect(mockAddLogListener).toHaveBeenCalledTimes(1);
       expect(typeof mockAddLogListener.mock.calls[0]![0]).toBe("function");
+    });
+
+    it("persists entries buffered before init (bootstrap drain)", async () => {
+      mockGetLogBuffer.mockReturnValue([makeEntry({ message: "bootstrap-line" })]);
+      const { initLogPersistence } = await freshImport();
+      captureListener();
+      await initLogPersistence();
+
+      // The drain scheduled a flush; advance past the 2000ms debounce.
+      await vi.advanceTimersByTimeAsync(2500);
+
+      expect(mockWriteTextFile).toHaveBeenCalled();
+      const written = mockWriteTextFile.mock.calls.map((c) => String(c[1])).join("");
+      expect(written).toContain("bootstrap-line");
     });
 
     it("returns a no-op cleanup if already initialized", async () => {
