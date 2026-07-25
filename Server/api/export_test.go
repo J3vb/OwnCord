@@ -3,14 +3,27 @@ package api
 import (
 	"context"
 	"net/http"
+
+	"github.com/owncord/server/ws"
 )
 
 // HandleMetricsForTest exposes handleMetrics for use in external tests.
 var HandleMetricsForTest = handleMetrics
 
-// HandleLiveKitHealthForTest exposes handleLiveKitHealth for use in external tests.
+// LiveKitHealthHandlerForTest exposes the real handleLiveKitHealth. Prefer it
+// over HandleLiveKitHealthForTest, which only re-implements the same shape.
+func LiveKitHealthHandlerForTest(hub *ws.Hub) http.HandlerFunc {
+	return handleLiveKitHealth(hub)
+}
+
+// HandleLiveKitHealthForTest re-implements handleLiveKitHealth against a
+// caller-supplied health check.
+//
+// It does NOT exercise the production handler — the body below is a copy, so
+// the two can drift and every test built on this hook would keep passing.
+// It survives only because its callers predate LiveKitHealthHandlerForTest;
+// new tests should use that instead, and these callers should migrate.
 func HandleLiveKitHealthForTest(healthCheck func(context.Context) (bool, error)) http.HandlerFunc {
-	// Inline the logic since handleLiveKitHealth requires a *ws.Hub.
 	return func(w http.ResponseWriter, r *http.Request) {
 		ok, err := healthCheck(r.Context())
 		if ok {
