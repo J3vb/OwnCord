@@ -545,7 +545,7 @@ mod tests {
             assert_eq!(keycode_to_vk(&keycode), vk, "keycode_to_vk failed for {keycode:?}");
             assert_eq!(
                 vk_to_keycode(vk),
-                Some(keycode.clone()),
+                Some(keycode),
                 "vk_to_keycode failed for vk={vk:#04x}"
             );
         }

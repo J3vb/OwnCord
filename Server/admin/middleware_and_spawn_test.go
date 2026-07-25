@@ -406,23 +406,47 @@ func (m *mockHubWB) BroadcastMemberUpdate(userID int64, roleName string)    {}
 func (m *mockHubWB) RefreshChannelVisibility(ch *db.Channel)                {}
 func (m *mockHubWB) ClientCount() int                                       { return 0 }
 
+// isolateSpawnedTestBinary makes it safe for a test to re-exec the test binary
+// itself.
+//
+// Two things leak from parent to child otherwise, and both corrupt the coverage
+// report for the whole package:
+//
+//  1. GOCOVERDIR is inherited, so the coverage-instrumented child writes its own
+//     (near-empty) counter set into the parent's coverage directory. The result
+//     is that `go test ./... -coverprofile` reported `admin  coverage: 0.3% of
+//     statements` instead of ~71%, and CI's uploaded coverage.out was wrong for
+//     this package.
+//  2. SpawnDetached wires the child's stdout to the parent's, so anything the
+//     child's testing framework prints lands in the stream `go test` parses.
+//     "-test.run=^$" makes it print "testing: warning: no tests to run", which
+//     `go test` reported as "[no tests to run]" for the parent run.
+//
+// Point the child's counters at a throwaway directory (t.Setenv restores the
+// old value automatically), and use "-test.list" rather than "-test.run" so the
+// child exits without printing anything.
+func isolateSpawnedTestBinary(t *testing.T) []string {
+	t.Helper()
+	t.Setenv("GOCOVERDIR", t.TempDir())
+	return []string{"-test.list=^$"}
+}
+
 // TestSpawnDetached_ValidExecutable verifies that spawnDetached can start a
 // real executable (the Go test binary itself) with a flag that causes immediate
 // exit. The test only checks that cmd.Start() returns without error; it does
 // not wait for the child process to finish.
 func TestSpawnDetached_ValidExecutable(t *testing.T) {
 	// Use the current test binary as the spawned executable so we don't depend
-	// on any external tool being available.
-	//
-	// os.Args[0] is the test binary itself. We pass "-test.run=^$" so the child
-	// immediately exits with 0 (no tests match). This avoids infinite recursion
-	// and any visible side effects.
+	// on any external tool being available. See isolateSpawnedTestBinary for
+	// why the child needs its own GOCOVERDIR and a silent exit flag.
+	args := isolateSpawnedTestBinary(t)
+
 	selfExe, err := filepath.Abs(os.Args[0])
 	if err != nil {
 		t.Fatalf("abs path of test binary: %v", err)
 	}
 
-	err = updater.SpawnDetached(selfExe, []string{"-test.run=^$"})
+	err = updater.SpawnDetached(selfExe, args)
 	if err != nil {
 		t.Errorf("spawnDetached returned error: %v", err)
 	}
@@ -445,13 +469,15 @@ func TestSpawnDetached_SetsWindowsFlags(t *testing.T) {
 		t.Skip("SysProcAttr Windows-specific flag test only runs on Windows")
 	}
 
+	args := isolateSpawnedTestBinary(t)
+
 	selfExe, err := filepath.Abs(os.Args[0])
 	if err != nil {
 		t.Fatalf("abs path: %v", err)
 	}
 
 	// Just verify it doesn't panic when setting the Windows creation flag.
-	err = updater.SpawnDetached(selfExe, []string{"-test.run=^$"})
+	err = updater.SpawnDetached(selfExe, args)
 	if err != nil {
 		t.Errorf("spawnDetached on Windows returned error: %v", err)
 	}
