@@ -35,7 +35,7 @@
     "@stryker-mutator/api": "^9.6.0",
     "@stryker-mutator/core": "^9.6.0",
     "@stryker-mutator/typescript-checker": "^9.6.0",
-    "@stryker-mutator/vitest-runner": "^9.6.0",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@tauri-apps/cli": "^2",
     "@vitest/browser": "^3.2.4",
     "@vitest/coverage-v8": "^3",
