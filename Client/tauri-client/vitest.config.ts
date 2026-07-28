@@ -13,6 +13,8 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    // Restores `localStorage`, which Node 26 shadows out of the jsdom global.
+    setupFiles: ["./tests/setup.ts"],
     // Both the `tests/**/*.test.ts` suite and component-local
     // `src/**/*.test.ts` files are picked up.
     include: ["tests/**/*.test.ts", "src/**/*.test.ts"],
