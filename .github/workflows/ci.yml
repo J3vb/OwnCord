@@ -178,6 +178,7 @@ jobs:
   rust-tests:
     name: Rust Unit Tests
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: Client/tauri-client/src-tauri/
@@ -212,15 +213,24 @@ jobs:
       - name: Rust unit tests
         run: cargo test --lib
 
-  # Playwright e2e against the mocked-Tauri dev server. Non-blocking for now
-  # (backlog #10): the suite has never run in CI, so it gets a soak period
-  # before it becomes a gate. Remove continue-on-error to promote it.
+  # Playwright e2e against the mocked-Tauri dev server. Non-blocking, and it
+  # will very likely be RED at first: the suite has never run in CI, and a
+  # local run of the 255 web tests on `main` itself fails ~229 of them, all
+  # cascading from the shared login helper in tests/e2e/helpers.ts
+  # (navigateToMainPage never sees [data-testid='app-layout']). That breakage
+  # predates this PR — it reproduces on a clean 70caa6c worktree.
+  #
+  # The job is wired up anyway so the breakage is visible instead of invisible,
+  # but it MUST stay continue-on-error until the suite is repaired, and
+  # timeout-minutes caps the minutes it can burn while it is failing.
+  # See docs/audit-test-coverage-2026-07-25.md T-2026-07-25-21.
   # The native config (playwright.config.native.ts) is deliberately not wired
   # up — it needs a real server and a built desktop binary.
   client-e2e:
     name: Client E2E (Playwright, non-blocking)
     runs-on: ubuntu-latest
     continue-on-error: true
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: Client/tauri-client/

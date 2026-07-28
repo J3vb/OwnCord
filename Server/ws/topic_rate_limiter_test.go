@@ -73,8 +73,15 @@ func TestTopicRateLimiter_Allow_EnforcesQuotaThenRefills(t *testing.T) {
 	trl := NewTopicRateLimiter(2, 50*time.Millisecond)
 	topic := Topic("channel:1")
 
-	if !trl.Allow(topic) || !trl.Allow(topic) {
-		t.Fatal("the first two messages were rejected despite a quota of 2")
+	// Kept as two statements rather than `a || b`: `||` short-circuits, so a
+	// failing first call would skip the second and leave a token unspent —
+	// the third Allow below would then be within quota and the test would
+	// report the wrong thing.
+	if !trl.Allow(topic) {
+		t.Fatal("the first message was rejected despite a quota of 2")
+	}
+	if !trl.Allow(topic) {
+		t.Fatal("the second message was rejected despite a quota of 2")
 	}
 	if trl.Allow(topic) {
 		t.Error("a third message was allowed within the same window")
