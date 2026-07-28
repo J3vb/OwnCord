@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -60,7 +61,10 @@ func TestLiveKitProxy_WebSocket_RoundTrip(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc", nil)
+	conn, dialResp, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc", nil)
+	if dialResp != nil && dialResp.Body != nil {
+		defer dialResp.Body.Close() //nolint:errcheck // best-effort close in test
+	}
 	if err != nil {
 		t.Fatalf("dial through proxy: %v", err)
 	}
@@ -87,7 +91,10 @@ func TestLiveKitProxy_WebSocket_ForwardsBinary(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc", nil)
+	conn, dialResp, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc", nil)
+	if dialResp != nil && dialResp.Body != nil {
+		defer dialResp.Body.Close() //nolint:errcheck // best-effort close in test
+	}
 	if err != nil {
 		t.Fatalf("dial through proxy: %v", err)
 	}
@@ -102,7 +109,7 @@ func TestLiveKitProxy_WebSocket_ForwardsBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if typ != websocket.MessageBinary || string(got) != string(payload) {
+	if typ != websocket.MessageBinary || !bytes.Equal(got, payload) {
 		t.Errorf("echo = (%v, %v), want (binary, %v)", typ, got, payload)
 	}
 }
@@ -126,7 +133,10 @@ func TestLiveKitProxy_WebSocket_PreservesQueryString(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc?access_token=abc", nil)
+	conn, dialResp, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc?access_token=abc", nil)
+	if dialResp != nil && dialResp.Body != nil {
+		defer dialResp.Body.Close() //nolint:errcheck // best-effort close in test
+	}
 	if err != nil {
 		t.Fatalf("dial through proxy: %v", err)
 	}
