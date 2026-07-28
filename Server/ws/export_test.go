@@ -310,6 +310,25 @@ func (h *Hub) HandleWebhookParticipantLeftForTest(userID int64, channelID int64,
 	h.handleWebhookParticipantLeft(context.Background(), event)
 }
 
+// HandleWebhookParticipantJoinedForTest exposes handleWebhookParticipantJoined
+// for external tests. identity and roomName are passed raw so a test can feed
+// malformed values through the same parse path a hostile webhook would.
+func (h *Hub) HandleWebhookParticipantJoinedForTest(identity, roomName string) {
+	event := &livekit.WebhookEvent{
+		Event:       "participant_joined",
+		Participant: &livekit.ParticipantInfo{Identity: identity},
+		Room:        &livekit.Room{Name: roomName},
+	}
+	h.handleWebhookParticipantJoined(context.Background(), event)
+}
+
+// HandleWebhookParticipantJoinedEventForTest exposes
+// handleWebhookParticipantJoined with a caller-built event so tests can cover
+// the nil-participant and nil-room guards.
+func (h *Hub) HandleWebhookParticipantJoinedEventForTest(event *livekit.WebhookEvent) {
+	h.handleWebhookParticipantJoined(context.Background(), event)
+}
+
 // MustFullResyncForTest exposes mustFullResync for external tests.
 func (h *Hub) MustFullResyncForTest(lastSeq uint64) bool {
 	return h.mustFullResync(lastSeq)

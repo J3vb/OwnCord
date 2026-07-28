@@ -282,6 +282,23 @@ pub async fn ws_disconnect(state: tauri::State<'_, WsState>) -> Result<(), Strin
     Ok(())
 }
 
+/// Whether `fingerprint` is a SHA-256 digest in colon-hex form:
+/// `XX:XX:XX:...`, 32 hex pairs separated by colons (95 chars total).
+///
+/// Split out of `accept_cert_fingerprint` so the format check — the guard on
+/// the only code path that writes a cert pin — is reachable from unit tests
+/// without a Tauri runtime.
+pub(crate) fn is_valid_cert_fingerprint(fingerprint: &str) -> bool {
+    fingerprint.len() == 95
+        && fingerprint.bytes().enumerate().all(|(i, b)| {
+            if (i + 1) % 3 == 0 {
+                b == b':'
+            } else {
+                b.is_ascii_hexdigit()
+            }
+        })
+}
+
 /// Accept a certificate fingerprint for a host — the ONLY path that writes a pin.
 /// Called after the user acknowledges a first-use or cert-mismatch prompt.
 #[tauri::command]
@@ -294,16 +311,7 @@ pub fn accept_cert_fingerprint<R: Runtime>(
         return Err("host and fingerprint must not be empty".into());
     }
 
-    // Validate SHA-256 colon-hex format: XX:XX:XX:... (32 pairs = 95 chars)
-    let valid = fingerprint.len() == 95
-        && fingerprint.bytes().enumerate().all(|(i, b)| {
-            if (i + 1) % 3 == 0 {
-                b == b':'
-            } else {
-                b.is_ascii_hexdigit()
-            }
-        });
-    if !valid {
+    if !is_valid_cert_fingerprint(&fingerprint) {
         return Err("fingerprint must be SHA-256 colon-hex format (e.g. aa:bb:cc:...)".into());
     }
 
@@ -337,4 +345,82 @@ pub fn accept_cert_fingerprint<R: Runtime>(
         log::info!("[ws_proxy] cert pin accepted for {host} -> {fingerprint}");
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Tests (pure logic only — no Tauri runtime required)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A well-formed SHA-256 colon-hex fingerprint (32 pairs, 95 chars).
+    const VALID: &str = "e3:b0:c4:42:98:fc:1c:14:9a:fb:f4:c8:99:6f:b9:24:\
+27:ae:41:e4:64:9b:93:4c:a4:95:99:1b:78:52:b8:55";
+
+    #[test]
+    fn valid_fingerprint_is_accepted() {
+        assert_eq!(VALID.len(), 95, "test constant must be 95 chars");
+        assert!(is_valid_cert_fingerprint(VALID));
+    }
+
+    #[test]
+    fn uppercase_hex_is_accepted() {
+        assert!(is_valid_cert_fingerprint(&VALID.to_uppercase()));
+    }
+
+    #[test]
+    fn empty_fingerprint_is_rejected() {
+        assert!(!is_valid_cert_fingerprint(""));
+    }
+
+    #[test]
+    fn wrong_length_is_rejected() {
+        // One pair short, and one pair too many.
+        assert!(!is_valid_cert_fingerprint(&VALID[..92]));
+        assert!(!is_valid_cert_fingerprint(&format!("{VALID}:00")));
+    }
+
+    #[test]
+    fn non_hex_characters_are_rejected() {
+        // 'z' is not a hex digit; length still 95.
+        let bad = VALID.replacen('e', "z", 1);
+        assert_eq!(bad.len(), 95);
+        assert!(!is_valid_cert_fingerprint(&bad));
+    }
+
+    #[test]
+    fn wrong_separator_is_rejected() {
+        // Dashes instead of colons — same length, same hex digits.
+        let bad = VALID.replace(':', "-");
+        assert_eq!(bad.len(), 95);
+        assert!(!is_valid_cert_fingerprint(&bad));
+    }
+
+    #[test]
+    fn misplaced_separator_is_rejected() {
+        // Swap a colon with an adjacent hex digit so the colons land off-grid
+        // while the length and character set stay legal.
+        let mut bytes = VALID.as_bytes().to_vec();
+        bytes.swap(2, 3);
+        let bad = String::from_utf8(bytes).unwrap();
+        assert_eq!(bad.len(), 95);
+        assert!(!is_valid_cert_fingerprint(&bad));
+    }
+
+    #[test]
+    fn whitespace_padding_is_rejected() {
+        // A pasted fingerprint with surrounding whitespace must not slip
+        // through — it would be stored verbatim and never match a real cert.
+        assert!(!is_valid_cert_fingerprint(&format!(" {VALID}")));
+        assert!(!is_valid_cert_fingerprint(&format!("{VALID} ")));
+    }
+
+    #[test]
+    fn non_ascii_of_correct_byte_length_is_rejected() {
+        // Guards the byte-indexed validator against multi-byte input.
+        let bad = format!("é{}", &VALID[..93]);
+        assert!(!is_valid_cert_fingerprint(&bad));
+    }
 }

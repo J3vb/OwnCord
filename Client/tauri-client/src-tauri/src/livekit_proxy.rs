@@ -69,6 +69,78 @@ impl LiveKitProxyState {
 use crate::tofu;
 
 // ---------------------------------------------------------------------------
+// Pure helpers
+//
+// Split out of the command / connection-handling functions so the parts that
+// decide what reaches the remote server — host validation, header rewriting and
+// TLS server-name selection — are reachable from unit tests without a Tauri
+// runtime or a live socket.
+// ---------------------------------------------------------------------------
+
+/// Reject `remote_host` values that could inject headers or are not plausible
+/// host:port strings.
+pub(crate) fn validate_remote_host(remote_host: &str) -> Result<(), String> {
+    // CRLF or NUL would let a caller append arbitrary headers in the rewriting
+    // logic below.
+    if remote_host.contains('\r') || remote_host.contains('\n') || remote_host.contains('\0') {
+        return Err("remote_host contains invalid characters".into());
+    }
+    // Basic hostname format: alphanumeric, dots, hyphens, colons (port), brackets (IPv6)
+    if !remote_host
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
+    {
+        return Err("remote_host contains unexpected characters".into());
+    }
+    Ok(())
+}
+
+/// Rewrite the `Host` and `Origin` headers of a proxied HTTP request so the
+/// remote server's WebSocket origin check accepts a connection that the
+/// LiveKit SDK opened against `127.0.0.1`.
+///
+/// Every other line is passed through byte-for-byte, including the request
+/// line and the trailing blank line that terminates the header block.
+pub(crate) fn rewrite_proxy_headers(request: &str, remote_host: &str) -> String {
+    let mut modified = String::with_capacity(request.len() + 128);
+    for (i, line) in request.split("\r\n").enumerate() {
+        if i > 0 {
+            modified.push_str("\r\n");
+        }
+        let lower = line.to_lowercase();
+        if lower.starts_with("host:") {
+            modified.push_str("Host: ");
+            modified.push_str(remote_host);
+        } else if lower.starts_with("origin:") {
+            modified.push_str("Origin: https://");
+            modified.push_str(remote_host);
+        } else {
+            modified.push_str(line);
+        }
+    }
+    modified
+}
+
+/// Extract the TLS server name from a `host[:port]` string.
+///
+/// IPv6 literals arrive bracketed (`[::1]:8443`); the brackets are stripped and
+/// an IP literal becomes `ServerName::IpAddress` rather than a DNS name, since
+/// rustls will not accept an address as a DNS name.
+pub(crate) fn parse_server_name(remote_host: &str) -> Result<ServerName<'static>, String> {
+    // Default to port 443 (standard HTTPS) when no port is specified — the
+    // server is typically behind a reverse proxy (nginx) on the standard port.
+    let (raw_hostname, _port) = remote_host.rsplit_once(':').unwrap_or((remote_host, "443"));
+    let hostname = raw_hostname.trim_start_matches('[').trim_end_matches(']');
+
+    if let Ok(ip) = hostname.parse::<IpAddr>() {
+        Ok(ServerName::IpAddress(ip.into()))
+    } else {
+        ServerName::try_from(hostname.to_string())
+            .map_err(|e| format!("invalid server name '{hostname}': {e}"))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tauri commands
 // ---------------------------------------------------------------------------
 
@@ -84,15 +156,7 @@ pub async fn start_livekit_proxy<R: Runtime>(
     state: tauri::State<'_, LiveKitProxyState>,
     remote_host: String,
 ) -> Result<u16, String> {
-    // Reject remote_host values containing CRLF or null bytes to prevent
-    // HTTP header injection in the proxy's header rewriting logic.
-    if remote_host.contains('\r') || remote_host.contains('\n') || remote_host.contains('\0') {
-        return Err("remote_host contains invalid characters".into());
-    }
-    // Basic hostname format: alphanumeric, dots, hyphens, colons (port), brackets (IPv6)
-    if !remote_host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']')) {
-        return Err("remote_host contains unexpected characters".into());
-    }
+    validate_remote_host(&remote_host)?;
 
     let mut inner = state.inner.lock().await;
 
@@ -266,22 +330,7 @@ async fn handle_connection(
 
     // ── 2. Rewrite Host and Origin headers ───────────────────────────────
     let request = String::from_utf8_lossy(&buf);
-    let mut modified = String::with_capacity(buf.len() + 128);
-    for (i, line) in request.split("\r\n").enumerate() {
-        if i > 0 {
-            modified.push_str("\r\n");
-        }
-        let lower = line.to_lowercase();
-        if lower.starts_with("host:") {
-            modified.push_str("Host: ");
-            modified.push_str(remote_host);
-        } else if lower.starts_with("origin:") {
-            modified.push_str("Origin: https://");
-            modified.push_str(remote_host);
-        } else {
-            modified.push_str(line);
-        }
-    }
+    let modified = rewrite_proxy_headers(&request, remote_host);
 
     // ── 3. Connect to remote over TLS ────────────────────────────────────
     let tls_config = rustls::ClientConfig::builder()
@@ -293,20 +342,7 @@ async fn handle_connection(
 
     let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
 
-    // Parse hostname (strip brackets for IPv6, e.g. "[::1]:8443").
-    // Default to port 443 (standard HTTPS) when no port is specified — the
-    // server is typically behind a reverse proxy (nginx) on the standard port.
-    let (raw_hostname, _port) = remote_host.rsplit_once(':').unwrap_or((remote_host, "443"));
-    let hostname = raw_hostname
-        .trim_start_matches('[')
-        .trim_end_matches(']');
-
-    let server_name = if let Ok(ip) = hostname.parse::<IpAddr>() {
-        ServerName::IpAddress(ip.into())
-    } else {
-        ServerName::try_from(hostname.to_string())
-            .map_err(|e| format!("invalid server name '{hostname}': {e}"))?
-    };
+    let server_name = parse_server_name(remote_host)?;
 
     debug!("[livekit_proxy] connecting TCP to {}", remote_host);
     let tcp = TcpStream::connect(remote_host).await?;
@@ -330,3 +366,196 @@ async fn handle_connection(
 }
 
 // cert_store_key is covered by unit tests in the shared `tofu` module.
+
+// ---------------------------------------------------------------------------
+// Tests (pure logic only — no Tauri runtime or live socket required)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── validate_remote_host ────────────────────────────────────────────────
+
+    #[test]
+    fn accepts_plain_hostnames_and_ports() {
+        for host in [
+            "example.com",
+            "example.com:8443",
+            "sub.domain.example.com",
+            "my-server.example.com:443",
+            "127.0.0.1:8443",
+            "[::1]:8443",
+            "localhost",
+        ] {
+            assert!(validate_remote_host(host).is_ok(), "should accept {host}");
+        }
+    }
+
+    #[test]
+    fn rejects_crlf_injection() {
+        // The classic header-injection payload: everything after the CRLF
+        // would land in the rewritten request as attacker-chosen headers.
+        for host in [
+            "example.com\r\nX-Injected: 1",
+            "example.com\nX-Injected: 1",
+            "example.com\r",
+        ] {
+            assert!(validate_remote_host(host).is_err(), "should reject {host:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_nul_bytes() {
+        assert!(validate_remote_host("example.com\0").is_err());
+    }
+
+    #[test]
+    fn rejects_unexpected_characters() {
+        for host in [
+            "example.com/path",
+            "user@example.com",
+            "example.com?q=1",
+            "example com",
+            "exa mple.com:443",
+            "example.com;evil",
+        ] {
+            assert!(validate_remote_host(host).is_err(), "should reject {host:?}");
+        }
+    }
+
+    #[test]
+    fn accepts_empty_host() {
+        // Empty passes the character checks; the subsequent TCP connect is what
+        // fails. Pinned so a future tightening is a deliberate change.
+        assert!(validate_remote_host("").is_ok());
+    }
+
+    // ── rewrite_proxy_headers ───────────────────────────────────────────────
+
+    #[test]
+    fn rewrites_host_and_origin() {
+        let request = "GET /rtc HTTP/1.1\r\n\
+                       Host: 127.0.0.1:54321\r\n\
+                       Origin: http://127.0.0.1:54321\r\n\
+                       Upgrade: websocket\r\n\r\n";
+
+        let got = rewrite_proxy_headers(request, "chat.example.com:8443");
+
+        assert!(got.contains("Host: chat.example.com:8443"));
+        assert!(got.contains("Origin: https://chat.example.com:8443"));
+        assert!(!got.contains("127.0.0.1:54321"));
+    }
+
+    #[test]
+    fn preserves_the_request_line_and_other_headers() {
+        let request = "GET /rtc?access_token=abc HTTP/1.1\r\n\
+                       Host: 127.0.0.1:1\r\n\
+                       Upgrade: websocket\r\n\
+                       Connection: Upgrade\r\n\
+                       Sec-WebSocket-Key: dGhlIHNhbXBsZQ==\r\n\r\n";
+
+        let got = rewrite_proxy_headers(request, "example.com");
+
+        // The token lives in the query string; losing it turns every voice
+        // join into an auth failure.
+        assert!(got.starts_with("GET /rtc?access_token=abc HTTP/1.1\r\n"));
+        assert!(got.contains("Upgrade: websocket"));
+        assert!(got.contains("Connection: Upgrade"));
+        assert!(got.contains("Sec-WebSocket-Key: dGhlIHNhbXBsZQ=="));
+    }
+
+    #[test]
+    fn matches_header_names_case_insensitively() {
+        let request = "GET / HTTP/1.1\r\nhOsT: 127.0.0.1\r\nORIGIN: http://x\r\n\r\n";
+
+        let got = rewrite_proxy_headers(request, "example.com");
+
+        assert!(got.contains("Host: example.com"));
+        assert!(got.contains("Origin: https://example.com"));
+        assert!(!got.contains("hOsT"));
+        assert!(!got.contains("ORIGIN"));
+    }
+
+    #[test]
+    fn preserves_the_terminating_blank_line() {
+        let request = "GET / HTTP/1.1\r\nHost: x\r\n\r\n";
+
+        let got = rewrite_proxy_headers(request, "example.com");
+
+        // Without the trailing CRLFCRLF the remote server keeps waiting for
+        // more headers and the handshake hangs.
+        assert!(got.ends_with("\r\n\r\n"), "got: {got:?}");
+    }
+
+    #[test]
+    fn does_not_rewrite_headers_that_merely_contain_host_or_origin() {
+        let request =
+            "GET / HTTP/1.1\r\nHost: x\r\nX-Forwarded-Host: keep.me\r\nReferer: http://o\r\n\r\n";
+
+        let got = rewrite_proxy_headers(request, "example.com");
+
+        assert!(got.contains("X-Forwarded-Host: keep.me"));
+        assert!(got.contains("Referer: http://o"));
+    }
+
+    #[test]
+    fn adds_no_headers_when_none_are_present() {
+        let request = "GET / HTTP/1.1\r\nUpgrade: websocket\r\n\r\n";
+
+        let got = rewrite_proxy_headers(request, "example.com");
+
+        // The rewriter only replaces; it never synthesises a Host header.
+        assert_eq!(got, request);
+    }
+
+    #[test]
+    fn rewrites_every_occurrence() {
+        let request = "GET / HTTP/1.1\r\nHost: a\r\nHost: b\r\n\r\n";
+
+        let got = rewrite_proxy_headers(request, "example.com");
+
+        assert_eq!(got.matches("Host: example.com").count(), 2);
+    }
+
+    // ── parse_server_name ───────────────────────────────────────────────────
+
+    #[test]
+    fn parses_a_dns_name_without_a_port() {
+        let got = parse_server_name("example.com").expect("should parse");
+        assert!(matches!(got, ServerName::DnsName(_)));
+    }
+
+    #[test]
+    fn parses_a_dns_name_with_a_port() {
+        let got = parse_server_name("example.com:8443").expect("should parse");
+        match got {
+            ServerName::DnsName(d) => assert_eq!(d.as_ref(), "example.com"),
+            other => panic!("expected DnsName, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_an_ipv4_literal_as_an_address() {
+        // rustls rejects an IP supplied as a DNS name, so the branch matters.
+        let got = parse_server_name("127.0.0.1:8443").expect("should parse");
+        assert!(matches!(got, ServerName::IpAddress(_)));
+    }
+
+    #[test]
+    fn parses_a_bracketed_ipv6_literal_as_an_address() {
+        let got = parse_server_name("[::1]:8443").expect("should parse");
+        assert!(matches!(got, ServerName::IpAddress(_)));
+    }
+
+    #[test]
+    fn parses_a_bare_ipv4_literal() {
+        let got = parse_server_name("10.0.0.5").expect("should parse");
+        assert!(matches!(got, ServerName::IpAddress(_)));
+    }
+
+    #[test]
+    fn rejects_an_invalid_dns_name() {
+        assert!(parse_server_name("not a hostname").is_err());
+    }
+}
