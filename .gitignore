@@ -62,6 +62,8 @@ node_modules/
 .gstack/
 .claude-flow/
 .superpowers/
+.rust-review-results/
+.claude/worktrees/
 
 # Internal dev tools
 tools/
