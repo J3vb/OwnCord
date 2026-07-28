@@ -29,6 +29,18 @@ updates:
       - dependencies
       - npm
     open-pull-requests-limit: 10
+    # These families version-lock their own packages with exact peer pins
+    # (e.g. typescript-checker@9.6.0 requires core@9.6.0, not ^9.6.0), so a
+    # PR-per-package split guarantees an ERESOLVE failure whenever only some
+    # of them are merged. Group each family into a single PR.
+    groups:
+      stryker:
+        patterns:
+          - "@stryker-mutator/*"
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
