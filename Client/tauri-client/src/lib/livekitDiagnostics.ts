@@ -38,8 +38,7 @@ export function logIceConnectionInfo(room: Room | null): void {
   // LiveKit exposes the PeerConnection via room.engine.subscriber/publisher.
   try {
     const engine = (room as unknown as Record<string, unknown>).engine as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     if (!engine) return;
 
     const subscriber = engine.subscriber as Record<string, unknown> | undefined;
@@ -99,8 +98,7 @@ export function getIceConnectionState(room: Room | null): Record<string, unknown
   if (room === null) return null;
   try {
     const engine = (room as unknown as Record<string, unknown>).engine as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     if (!engine) return null;
     const subscriber = engine.subscriber as Record<string, unknown> | undefined;
     const publisher = engine.publisher as Record<string, unknown> | undefined;

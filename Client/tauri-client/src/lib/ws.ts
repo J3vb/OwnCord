@@ -14,8 +14,8 @@ let wsGeneration = 0;
 // Tauri IPC imports — resolved at runtime in Tauri context
 let tauriInvoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null = null;
 let tauriListen:
-  | ((event: string, handler: (e: { payload: unknown }) => void) => Promise<() => void>)
-  | null = null;
+  ((event: string, handler: (e: { payload: unknown }) => void) => Promise<() => void>) | null =
+  null;
 
 // Dynamically load Tauri APIs (avoids import errors in test/browser env)
 async function ensureTauriApis(): Promise<void> {
@@ -31,11 +31,7 @@ async function ensureTauriApis(): Promise<void> {
 }
 
 export type ConnectionState =
-  | "disconnected"
-  | "connecting"
-  | "authenticating"
-  | "connected"
-  | "reconnecting";
+  "disconnected" | "connecting" | "authenticating" | "connected" | "reconnecting";
 
 /** The UX-facing 3-state status stored in ui.store.connectionStatus. */
 export type ConnectionStatus = "connected" | "reconnecting" | "disconnected";
