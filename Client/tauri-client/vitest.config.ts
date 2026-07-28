@@ -19,15 +19,21 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],
+      // Keep this list minimal and justified. An unexplained entry hides a
+      // real gap: window-state.ts, credentials.ts, updater.ts and
+      // UpdateNotifier.ts each sat here while having (or gaining) tests, so
+      // their coverage never showed up in any report.
       exclude: [
-        "src/main.ts",
         "src/**/*.d.ts",
-        "src/lib/window-state.ts",
-        "src/lib/credentials.ts",
-        "src/lib/noise-suppression.ts",
-        "src/lib/updater.ts",
+        // App bootstrap: wires the DOM, router and stores together at startup.
+        // Has no seam to test below the e2e level; covered by tests/e2e.
+        "src/main.ts",
+        // Top-level page orchestrator, likewise covered at the e2e level.
+        // Tracked for unit coverage — remove this entry once it has tests.
         "src/pages/MainPage.ts",
-        "src/components/UpdateNotifier.ts",
+        // RNNoise AudioWorklet host: needs a real AudioContext/WASM runtime
+        // that jsdom cannot provide. Exercised by tests/browser and e2e.
+        "src/lib/noise-suppression.ts",
       ],
       thresholds: {
         statements: 70,
