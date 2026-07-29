@@ -574,3 +574,67 @@ func TestSendMessage_HTMLSanitized(t *testing.T) {
 		t.Fatal("expected safe text to remain in content")
 	}
 }
+
+// TestSetMessagePinned_DeniedReadCannotPin locks the same channel-lockout
+// invariant as TestDeleteMessage_DeniedReadCannotDelete, on the pin sink: an
+// admin unchecking "Can access" writes deny = READ_MESSAGES|CONNECT_VOICE and
+// leaves MANAGE_MESSAGES intact, so the pin gate must require READ_MESSAGES
+// too — otherwise a locked-out moderator can mutate the pin list the real
+// members see, and use the success/not-found split as a message-ID oracle.
+func TestSetMessagePinned_DeniedReadCannotPin(t *testing.T) {
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
+		ID:          permissions.ModeratorRoleID,
+		Name:        "moderator",
+		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.ManageMessages,
+		Position:    10,
+	})
+	seedRole(t, database, &db.Role{
+		ID:          permissions.MemberRoleID,
+		Name:        "member",
+		Permissions: permissions.SendMessages | permissions.ReadMessages,
+		Position:    1,
+	})
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "mod_bob"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedUserRole(t, database, 2, permissions.ModeratorRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "staff-private", Type: "text"})
+
+	permSvc := NewPermissionService(database, permissions.NewChecker(database))
+	svc := NewMessageService(database, permSvc, nil)
+
+	sent, err := svc.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 10, UserID: 1, Username: "alice", Content: "announcement",
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	// While the moderator can still read the channel, pinning works.
+	if err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID, true); err != nil {
+		t.Fatalf("moderator with READ_MESSAGES must be able to pin: %v", err)
+	}
+
+	denyPrivate := permissions.ReadMessages | permissions.ConnectVoice
+	seedChannelOverride(t, database, permissions.ModeratorRoleID, 10, 0, denyPrivate)
+	permSvc.InvalidateChannel(10)
+
+	if err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID, false); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("moderator denied READ_MESSAGES must not unpin: got %v", err)
+	}
+	// The existence oracle is closed with it: an id that is not in this channel
+	// is refused by the same permission check, not by a distinguishable
+	// not-found answer.
+	if err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID+999, true); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("denied role must not learn which message ids exist: got %v", err)
+	}
+
+	pinned, err := database.GetPinnedMessages(context.Background(), 10, 1)
+	if err != nil {
+		t.Fatalf("GetPinnedMessages: %v", err)
+	}
+	if len(pinned) != 1 {
+		t.Fatalf("pin state must survive the locked-out unpin attempt, got %d pinned", len(pinned))
+	}
+}

@@ -626,7 +626,11 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 		if err != nil || !ok {
 			return fmt.Errorf("%w: access denied", ErrNotFound)
 		}
-	} else if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ManageMessages) {
+	} else if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages|permissions.ManageMessages) {
+		// Require READ_MESSAGES alongside MANAGE_MESSAGES so a role locked out
+		// of a private channel cannot mutate its pins — the admin panel's
+		// "Can access" toggle denies READ_MESSAGES|CONNECT_VOICE and leaves
+		// MANAGE_MESSAGES intact. Mirrors handleReaction and checkSendPermission.
 		return fmt.Errorf("%w: missing MANAGE_MESSAGES permission", ErrForbidden)
 	}
 	// Verify message belongs to this channel.
