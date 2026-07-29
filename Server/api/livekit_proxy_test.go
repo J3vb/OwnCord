@@ -1,8 +1,11 @@
 package api
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -221,6 +224,43 @@ func TestLiveKitProxy_DoesNotBlockUserMetrics(t *testing.T) {
 	// "/user-metrics" splits to ["", "user-metrics"] so "user-metrics" != "metrics". Should pass.
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200 for /user-metrics (not an exact segment match), got %d", w.Code)
+	}
+}
+
+// TestProxyWebSocket_DialFailureDoesNotLogAccessToken locks the credential out
+// of the log stream: websocket.Dial wraps a *url.Error carrying the full
+// backend URL, so a dial failure (LiveKit down, restarting, refused) used to
+// print the caller's live room-join JWT at Warn level — replayable inside its
+// 5-minute TTL by anyone reading stdout or the admin panel's log ring buffer.
+func TestProxyWebSocket_DialFailureDoesNotLogAccessToken(t *testing.T) {
+	const token = "eyJhbGciOiJIUzI1NiJ9.SECRET-LIVEKIT-JWT-PAYLOAD.c2lnbmF0dXJl"
+
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	// Port 1 on loopback refuses connections, which is the exact branch where
+	// the wrapped *url.Error carries the query string.
+	proxy := NewLiveKitProxy("http://127.0.0.1:1", []string{"*"})
+	r := httptest.NewRequest("GET", "/rtc?access_token="+token, nil)
+	r.Header.Set("Connection", "Upgrade")
+	r.Header.Set("Upgrade", "websocket")
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 when the backend refuses the dial, got %d", w.Code)
+	}
+	out := logs.String()
+	if out == "" {
+		t.Fatal("expected the dial failure to be logged at all")
+	}
+	if strings.Contains(out, token) {
+		t.Fatalf("the LiveKit access token leaked into the log stream:\n%s", out)
+	}
+	if !strings.Contains(out, "backend dial failed") {
+		t.Errorf("the failure must still be diagnosable, got:\n%s", out)
 	}
 }
 
