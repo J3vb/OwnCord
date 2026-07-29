@@ -82,7 +82,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     };
 
     statusPicker = createStatusPicker({
-      currentStatus: "online" as UserStatus,
+      currentStatus: "online",
       onStatusChange: (status: UserStatus) => {
         const ws = options?.ws;
         if (ws !== null && ws !== undefined && canSetStatus()) {

@@ -72,7 +72,7 @@ export function addMember(payload: MemberJoinPayload): void {
       username: payload.user.username,
       avatar: payload.user.avatar,
       role: payload.user.role,
-      status: "online" as UserStatus,
+      status: "online",
       identityPublicKey: payload.user.identity_public_key ?? null,
     });
     return { ...prev, members: next };
