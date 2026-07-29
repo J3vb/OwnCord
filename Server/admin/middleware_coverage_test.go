@@ -49,6 +49,31 @@ func TestAdminAuthMiddleware_ExpiredSession(t *testing.T) {
 	}
 }
 
+// TestAdminAuthMiddleware_BannedAdmin verifies that a banned administrator's
+// still-valid session is rejected with 403 — a ban must revoke admin-panel
+// access immediately, not only when the session expires.
+func TestAdminAuthMiddleware_BannedAdmin(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
+	token := createAdminUser(t, database)
+
+	if w := doRequest(t, handler, http.MethodGet, "/stats", token, nil); w.Code != http.StatusOK {
+		t.Fatalf("pre-ban status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE users SET banned = 1 WHERE username = 'adminuser'`,
+	); err != nil {
+		t.Fatalf("UPDATE users banned: %v", err)
+	}
+
+	w := doRequest(t, handler, http.MethodGet, "/stats", token, nil)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("banned admin status = %d, want 403; body: %s", w.Code, w.Body.String())
+	}
+}
+
 // TestAdminAuthMiddleware_MissingBearer verifies that a request with no
 // Authorization header returns 401.
 func TestAdminAuthMiddleware_MissingBearer(t *testing.T) {
