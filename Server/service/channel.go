@@ -120,6 +120,12 @@ func (s *ChannelService) HandleTyping(ctx context.Context, userID, channelID int
 		if dmErr != nil || !ok {
 			return nil, nil //nolint:nilerr // typing indicators are best-effort; errors silently dropped
 		}
+		// A blocked user must not be able to keep poking the blocker with
+		// typing indicators. Same gate as the other DM sinks; silently dropped
+		// here because typing is best-effort.
+		if blkErr := requireDMNotBlocked(ctx, s.st, userID, channelID); blkErr != nil {
+			return nil, nil //nolint:nilerr // best-effort: a blocked or unreadable DM emits nothing
+		}
 	} else if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages) {
 		return nil, nil // silent drop
 	}

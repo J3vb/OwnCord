@@ -40,3 +40,41 @@ func TestListVisibleChannels_OverrideFetchErrorFailsClosed(t *testing.T) {
 		t.Fatalf("ListVisibleChannels returned %d channels on override fetch failure, want none", len(got))
 	}
 }
+
+// TestHandleTyping_BlockedInDMEmitsNothing completes the DM-block sweep: a
+// blocked user could still drive a repeatable typing indicator at the blocker,
+// because HandleTyping authorized on DM participation alone. Typing is
+// best-effort, so the refusal is a silent nil rather than an error.
+func TestHandleTyping_BlockedInDMEmitsNothing(t *testing.T) {
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
+		ID:          permissions.MemberRoleID,
+		Name:        "member",
+		Permissions: permissions.SendMessages | permissions.ReadMessages,
+		Position:    1,
+	})
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedUserRole(t, database, 2, permissions.MemberRoleID)
+	seedChannel(t, database, &db.Channel{ID: 50, Name: "dm-1-2", Type: "dm"})
+	seedDMParticipant(t, database, 50, 1)
+	seedDMParticipant(t, database, 50, 2)
+
+	svc := NewChannelService(database, NewPermissionService(database, permissions.NewChecker(database)))
+
+	ch, err := svc.HandleTyping(context.Background(), 1, 50, nil)
+	if err != nil || ch == nil {
+		t.Fatalf("unblocked DM typing must resolve the channel: ch=%v err=%v", ch, err)
+	}
+
+	seedBlock(t, database, 2, 1) // bob blocks alice
+
+	ch, err = svc.HandleTyping(context.Background(), 1, 50, nil)
+	if err != nil {
+		t.Fatalf("typing is best-effort, expected a silent drop, got err=%v", err)
+	}
+	if ch != nil {
+		t.Fatal("blocked user must not produce a typing broadcast")
+	}
+}

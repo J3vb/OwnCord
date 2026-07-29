@@ -290,6 +290,9 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		if dmErr != nil || !ok {
 			return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 		}
+		if blkErr := requireDMNotBlocked(ctx, s.st, userID, msg.ChannelID); blkErr != nil {
+			return nil, blkErr
+		}
 	} else if !s.perms.HasChannelPerm(ctx, userID, msg.ChannelID, permissions.SendMessages) {
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 	}
@@ -453,6 +456,9 @@ func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64
 		ok, dmErr := s.st.IsDMParticipant(ctx, userID, msg.ChannelID)
 		if dmErr != nil || !ok {
 			return nil, fmt.Errorf("%w: not a DM participant", ErrBadRequest)
+		}
+		if blkErr := requireDMNotBlocked(ctx, s.st, userID, msg.ChannelID); blkErr != nil {
+			return nil, blkErr
 		}
 	} else if !s.perms.HasChannelPerm(ctx, userID, msg.ChannelID, permissions.ReadMessages|permissions.AddReactions) {
 		// Require READ_MESSAGES in addition to ADD_REACTIONS so a user cannot
@@ -626,6 +632,9 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 		if err != nil || !ok {
 			return fmt.Errorf("%w: access denied", ErrNotFound)
 		}
+		if blkErr := requireDMNotBlocked(ctx, s.st, userID, channelID); blkErr != nil {
+			return blkErr
+		}
 	} else if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages|permissions.ManageMessages) {
 		// Require READ_MESSAGES alongside MANAGE_MESSAGES so a role locked out
 		// of a private channel cannot mutate its pins — the admin panel's
@@ -710,17 +719,7 @@ func (s *MessageService) checkSendPermission(ctx context.Context, userID, channe
 		if !ok {
 			return fmt.Errorf("%w: not a participant in this DM", ErrForbidden)
 		}
-		recipient, err := s.st.GetDMRecipient(ctx, channelID, userID)
-		if err == nil && recipient != nil {
-			blocked, blkErr := s.st.IsEitherBlocked(ctx, userID, recipient.ID)
-			if blkErr != nil {
-				return fmt.Errorf("%w: failed to check block status: %v", ErrInternal, blkErr)
-			}
-			if blocked {
-				return fmt.Errorf("%w: cannot send messages — user is blocked", ErrBlocked)
-			}
-		}
-		return nil
+		return requireDMNotBlocked(ctx, s.st, userID, channelID)
 	}
 	if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages|permissions.SendMessages) {
 		return fmt.Errorf("%w: missing SEND_MESSAGES permission", ErrForbidden)
@@ -729,6 +728,39 @@ func (s *MessageService) checkSendPermission(ctx context.Context, userID, channe
 	// messages, even though everyone with READ_MESSAGES can view them.
 	if chanType == "announcement" && !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ManageMessages) {
 		return fmt.Errorf("%w: announcement channels require MANAGE_MESSAGES to post", ErrForbidden)
+	}
+	return nil
+}
+
+// requireDMNotBlocked reports ErrBlocked when userID and the other participant
+// of DM channelID have blocked each other in either direction.
+//
+// It is the single block-check implementation, called from every DM
+// interaction sink — send, edit, react, pin and typing. Enforcing it on the
+// send path alone left a blocked user an open channel to the blocker: editing
+// an already-sent message fans MessageEditedDMEvent out to every participant,
+// so arbitrary new text still reached the person who blocked them, and
+// reactions and typing indicators did the same.
+//
+// Callers keep their own IsDMParticipant check. Its failure mode is
+// deliberately different per sink (ErrForbidden for edit, ErrBadRequest for
+// reactions, ErrNotFound for pins so a foreign DM's existence stays hidden)
+// and flattening them here would change client-visible status codes.
+//
+// A GetDMRecipient lookup failure or a DM with no other participant is treated
+// as "not blocked", carrying over the posture the send path has always had
+// rather than newly failing closed on all five sinks at once.
+func requireDMNotBlocked(ctx context.Context, st Store, userID, channelID int64) error {
+	recipient, err := st.GetDMRecipient(ctx, channelID, userID)
+	if err != nil || recipient == nil {
+		return nil //nolint:nilerr // carries over checkSendPermission's posture: a lookup failure or a DM with no other participant is not a block
+	}
+	blocked, blkErr := st.IsEitherBlocked(ctx, userID, recipient.ID)
+	if blkErr != nil {
+		return fmt.Errorf("%w: failed to check block status: %v", ErrInternal, blkErr)
+	}
+	if blocked {
+		return fmt.Errorf("%w: user is blocked", ErrBlocked)
 	}
 	return nil
 }

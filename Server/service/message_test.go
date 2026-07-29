@@ -638,3 +638,69 @@ func TestSetMessagePinned_DeniedReadCannotPin(t *testing.T) {
 		t.Fatalf("pin state must survive the locked-out unpin attempt, got %d pinned", len(pinned))
 	}
 }
+
+// TestDMBlock_EnforcedOnEveryInteractionSink locks the block invariant across
+// all DM verbs, not just send. Blocking used to be checked only in
+// checkSendPermission, so a blocked user kept a live channel to the blocker:
+// editing an already-sent message fans chat_edited out to both participants, so
+// arbitrary new text still arrived, and reactions and pins did the same.
+func TestDMBlock_EnforcedOnEveryInteractionSink(t *testing.T) {
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
+		ID:          permissions.MemberRoleID,
+		Name:        "member",
+		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AddReactions,
+		Position:    1,
+	})
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedUserRole(t, database, 2, permissions.MemberRoleID)
+	seedChannel(t, database, &db.Channel{ID: 50, Name: "dm-1-2", Type: "dm"})
+	seedDMParticipant(t, database, 50, 1)
+	seedDMParticipant(t, database, 50, 2)
+
+	permSvc := NewPermissionService(database, permissions.NewChecker(database))
+	svc := NewMessageService(database, permSvc, nil)
+
+	sent, err := svc.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi bob",
+	})
+	if err != nil {
+		t.Fatalf("send before block: %v", err)
+	}
+
+	seedBlock(t, database, 2, 1) // bob blocks alice
+
+	// Send — the one path that was already enforced.
+	if _, err := svc.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "let me back in",
+	}); !errors.Is(err, ErrBlocked) {
+		t.Fatalf("blocked send must be refused: got %v", err)
+	}
+
+	// Edit — the finding's primary sink.
+	if _, err := svc.EditMessage(context.Background(), 1, sent.MessageID, "abusive replacement"); !errors.Is(err, ErrBlocked) {
+		t.Fatalf("blocked edit must be refused: got %v", err)
+	}
+	msg, err := database.GetMessage(context.Background(), sent.MessageID)
+	if err != nil || msg == nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.Content != "hi bob" {
+		t.Fatalf("content must be unchanged after a blocked edit, got %q", msg.Content)
+	}
+
+	// Reactions and pins are the same class of repeatable notification.
+	if _, err := svc.AddReaction(context.Background(), 1, sent.MessageID, "👋"); !errors.Is(err, ErrBlocked) {
+		t.Fatalf("blocked reaction must be refused: got %v", err)
+	}
+	if err := svc.SetMessagePinned(context.Background(), 1, 50, sent.MessageID, true); !errors.Is(err, ErrBlocked) {
+		t.Fatalf("blocked pin must be refused: got %v", err)
+	}
+
+	// The block is symmetric, matching the pre-existing send-path semantics.
+	if _, err := svc.EditMessage(context.Background(), 2, sent.MessageID, "bob edits"); !errors.Is(err, ErrBlocked) {
+		t.Fatalf("blocker is equally refused, matching IsEitherBlocked: got %v", err)
+	}
+}
