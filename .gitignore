@@ -80,3 +80,9 @@ Client/CLIENT-REVIEW.md
 
 # Client env (holds API keys - never commit)
 Client/tauri-client/.env
+
+# Rust review output
+.rust-review-results/
+
+# Claude Code worktrees (local scratch, never commit)
+.claude/worktrees/
