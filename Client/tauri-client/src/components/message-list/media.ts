@@ -143,7 +143,7 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&format=json`;
     tauriFetch(oembedUrl, {
       signal: AbortSignal.timeout(5000),
-    } as RequestInit)
+    })
       .then((res) => (res.ok ? (res.json() as Promise<{ title?: string } | null>) : null))
       .then((data) => {
         if (generation !== mediaCacheGeneration) {

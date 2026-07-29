@@ -48,6 +48,14 @@ func adminAuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 				return
 			}
 
+			// Reject effectively-banned users before any further processing, as
+			// api.AuthMiddleware does: a ban must revoke admin-panel access
+			// immediately, not only once the session expires.
+			if auth.IsEffectivelyBanned(user) {
+				writeErr(w, http.StatusForbidden, "FORBIDDEN", "your account has been suspended")
+				return
+			}
+
 			role, err := database.GetRoleByID(r.Context(), user.RoleID)
 			if err != nil || role == nil {
 				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "role not found")

@@ -2,6 +2,9 @@ package db
 
 import (
 	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"strings"
 )
@@ -120,9 +123,35 @@ func (d *DB) DeleteAccount(ctx context.Context, userID int64) error {
 	}
 
 	// ── Anonymise user row ───────────────────────────────────────────────
-	anonUsername := fmt.Sprintf("[deleted-%d]", userID)
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE users
+	// users.username is UNIQUE COLLATE NOCASE, so a third party holding
+	// "[deleted-<userID>]" would make this UPDATE fail, roll the whole
+	// transaction back, and deny the victim their own account deletion
+	// indefinitely. auth.ValidateUsername now reserves that namespace, but the
+	// erasure path must not depend on it: on a collision, fall back to a random
+	// suffix and retry. A SQLite constraint violation rolls back the statement,
+	// not the enclosing transaction, so retrying in place is safe.
+	if err := anonymiseUser(ctx, tx, userID); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("DeleteAccount commit: %w", err)
+	}
+	return nil
+}
+
+// anonymiseUserAttempts is how many names anonymiseUser will try: the canonical
+// "[deleted-<id>]" plus randomly suffixed variants. Exhausting it means the
+// generator collided repeatedly, which is not something an attacker can force.
+const anonymiseUserAttempts = 4
+
+// anonymiseUser strips the user's credentials and personal fields and renames
+// the row out of the way. The first candidate is the canonical
+// "[deleted-<id>]"; if that name is taken, later candidates append a random
+// suffix so no third party can pin the account in place by squatting a
+// predictable string.
+func anonymiseUser(ctx context.Context, tx *sql.Tx, userID int64) error {
+	const anonymise = `UPDATE users
 		 SET username    = ?,
 		     password    = '',
 		     avatar      = NULL,
@@ -130,14 +159,25 @@ func (d *DB) DeleteAccount(ctx context.Context, userID int64) error {
 		     status      = 'offline',
 		     banned      = 1,
 		     ban_reason  = 'account deleted'
-		 WHERE id = ?`,
-		anonUsername, userID,
-	); err != nil {
-		return fmt.Errorf("DeleteAccount anonymise: %w", err)
-	}
+		 WHERE id = ?`
 
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("DeleteAccount commit: %w", err)
+	var lastErr error
+	for attempt := range anonymiseUserAttempts {
+		name := fmt.Sprintf("[deleted-%d]", userID)
+		if attempt > 0 {
+			suffix := make([]byte, 6)
+			if _, err := rand.Read(suffix); err != nil {
+				return fmt.Errorf("DeleteAccount anonymise suffix: %w", err)
+			}
+			name = fmt.Sprintf("[deleted-%d-%s]", userID, hex.EncodeToString(suffix))
+		}
+		_, lastErr = tx.ExecContext(ctx, anonymise, name, userID)
+		if lastErr == nil {
+			return nil
+		}
+		if !IsUniqueConstraintError(lastErr) {
+			return fmt.Errorf("DeleteAccount anonymise: %w", lastErr)
+		}
 	}
-	return nil
+	return fmt.Errorf("DeleteAccount anonymise: %w", lastErr)
 }

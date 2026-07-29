@@ -671,6 +671,144 @@ func TestServeWS_Reconnect_PreservesVoiceState(t *testing.T) {
 	}
 }
 
+// TestServeWS_Reconnect_AuthorizedVoiceClientKeepsChannelStream verifies the
+// authorized half of the voice-subscription gate end to end: the reconnect
+// handshake passes the user's READ_MESSAGES set to registerNow, so a user who
+// may read the channel they are in voice on keeps live message delivery without
+// re-sending channel_focus (the desktop client does not re-send it on auth_ok).
+func TestServeWS_Reconnect_AuthorizedVoiceClientKeepsChannelStream(t *testing.T) {
+	database := openServeTestDB(t)
+	limiter := auth.NewRateLimiter()
+	hub := ws.NewHub(database, limiter, nil)
+	go hub.Run()
+	defer hub.Stop()
+
+	// roleID 1 = Owner: holds READ_MESSAGES on every channel.
+	userID, err := database.CreateUser(context.Background(), "ws-voice-read-allowed", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	tokenHash := auth.HashToken(token)
+	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	chID, err := database.CreateChannel(context.Background(), "voice-read-allowed", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+
+	handler := ws.ServeWS(hub, database, []string{"*"})
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dialAndAuth := func(lastSeq uint64) *websocket.Conn {
+		t.Helper()
+		conn, dialResp, dialErr := websocket.Dial(ctx, wsURL, nil)
+		if dialResp != nil && dialResp.Body != nil {
+			dialResp.Body.Close()
+		}
+		if dialErr != nil {
+			t.Fatalf("websocket.Dial: %v", dialErr)
+		}
+		authMsg := map[string]any{
+			"type":    "auth",
+			"payload": map[string]any{"token": token, "last_seq": lastSeq},
+		}
+		raw, marshalErr := json.Marshal(authMsg)
+		if marshalErr != nil {
+			t.Fatalf("marshal auth: %v", marshalErr)
+		}
+		if writeErr := conn.Write(ctx, websocket.MessageText, raw); writeErr != nil {
+			t.Fatalf("write auth: %v", writeErr)
+		}
+		// Read auth_ok + first following message.
+		for i := 0; i < 2; i++ {
+			if _, _, readErr := conn.Read(ctx); readErr != nil {
+				t.Fatalf("read handshake message %d: %v", i, readErr)
+			}
+		}
+		return conn
+	}
+
+	conn1 := dialAndAuth(0)
+	defer func() { _ = conn1.Close(websocket.StatusNormalClosure, "") }()
+
+	var originalClient *ws.Client
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		originalClient = hub.GetClient(userID)
+		if originalClient != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if originalClient == nil {
+		t.Fatal("expected first client to be registered")
+	}
+
+	// Join voice on the channel AFTER conn1 is established (see the
+	// PreservesVoiceState test: setting it earlier is cleaned up on connect).
+	if err := database.JoinVoiceChannel(context.Background(), userID, chID); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	vs, err := database.GetVoiceState(context.Background(), userID)
+	if err != nil || vs == nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	ws.SetClientVoiceStateForTest(originalClient, chID, vs.JoinedAt)
+
+	// Reconnect (lastSeq > 0) — voice state transfers to the replacement client,
+	// which has no focused channel of its own.
+	conn2 := dialAndAuth(2)
+	defer func() { _ = conn2.Close(websocket.StatusNormalClosure, "") }()
+
+	var replacementClient *ws.Client
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		replacementClient = hub.GetClient(userID)
+		if replacementClient != nil && ws.GetClientVoiceChIDForTest(replacementClient) == chID {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if replacementClient == nil || ws.GetClientVoiceChIDForTest(replacementClient) != chID {
+		t.Fatal("expected replacement client with transferred voice state")
+	}
+	// The topic subscription lands just after the client enters the hub map.
+	time.Sleep(100 * time.Millisecond)
+
+	hub.BroadcastToChannel(chID, []byte(`{"type":"chat_message","payload":{"content":"still-visible"}}`))
+
+	readDeadline := time.Now().Add(3 * time.Second)
+	for {
+		if time.Now().After(readDeadline) {
+			t.Fatal("authorized voice client stopped receiving the channel message stream after reconnect")
+		}
+		readCtx, readCancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		_, raw, readErr := conn2.Read(readCtx)
+		readCancel()
+		if readErr != nil {
+			continue
+		}
+		var msg map[string]any
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			continue
+		}
+		if msg["type"] == "chat_message" {
+			return
+		}
+	}
+}
+
 // TestServeWS_FreshReconnect_CleansStaleVoiceState verifies that when a user
 // presses F5 (fresh connection, lastSeq = 0) while in voice, the server:
 //  1. cleans the DB voice_state row before building ready

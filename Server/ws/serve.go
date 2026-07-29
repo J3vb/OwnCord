@@ -173,7 +173,7 @@ func (h *Hub) handleReconnect(
 	// the write window are queued in the client's send buffer instead of
 	// being lost (BUG-123). writePump hasn't started yet, so queued messages
 	// will be drained once the pumps begin.
-	h.registerNow(c)
+	h.registerNow(c, allowedChannelIDs)
 
 	// Replay succeeded — send auth_ok then missed events. The replay tier
 	// is included in the payload so the client can attribute reconnect
@@ -261,7 +261,7 @@ func (h *Hub) handleFreshConnect(
 		if _, delErr := database.LeaveVoiceChannelIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
 			slog.Warn("ws fresh connect: LeaveVoiceChannelIfMatch failed", "err", delErr)
 		}
-		h.BroadcastToAll(buildVoiceLeave(vs.ChannelID, c.userID))
+		h.broadcastVoiceEvent(ctx, vs.ChannelID, buildVoiceLeave(vs.ChannelID, c.userID))
 		if h.livekit != nil {
 			// BUG-089: Capture stale join token so the goroutine only removes
 			// the exact stale participant. The identity includes joinedAt, so
@@ -299,7 +299,22 @@ func (h *Hub) handleFreshConnect(
 	// the write window are queued in the client's send buffer instead of
 	// being lost (BUG-123). writePump hasn't started yet, so queued messages
 	// will be drained once the pumps begin.
-	h.registerNow(c)
+	//
+	// Only the replay-failure fallback (lastSeq > 0) can inherit voice state
+	// from the previous connection, so that is the only case where registerNow
+	// needs the read-permission set. Fail closed on error: nil denies the
+	// inherited voice-channel subscription.
+	var allowedChannelIDs map[int64]bool
+	if c.lastSeq > 0 {
+		allowed, allowedErr := h.computeAllowedChannels(ctx, database, c.user)
+		if allowedErr != nil {
+			slog.Warn("ws handleFreshConnect: computeAllowedChannels failed, skipping voice channel subscription",
+				"user_id", c.userID, "err", allowedErr)
+		} else {
+			allowedChannelIDs = allowed
+		}
+	}
+	h.registerNow(c, allowedChannelIDs)
 
 	// Fresh connection or replay fallback: full auth_ok + ready flow.
 	slog.Info("ws sending auth_ok", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)

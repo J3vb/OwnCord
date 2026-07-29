@@ -93,6 +93,56 @@ func TestVoiceE2EEOfferV2_RotationBurstNotRateLimited(t *testing.T) {
 	}
 }
 
+// TestVoiceE2EEOfferV2_RejectedOffersAllocateNoLimiterState locks the fix for
+// the unbounded-map defect: the limiter key interpolated the client-supplied
+// target_user_id and ran before every validation, so one authenticated socket —
+// not in voice, not a key holder — could insert a fresh entry into the shared
+// process-wide RateLimiter on every frame. Entries live ~20 minutes, so the
+// spray was a memory-exhaustion lever against the whole server.
+func TestVoiceE2EEOfferV2_RejectedOffersAllocateNoLimiterState(t *testing.T) {
+	limiter := auth.NewRateLimiter()
+
+	// (a) Not in a voice channel at all — the cheapest rejection.
+	deps := offerDeps(false)
+	deps.Limiter = limiter
+	info := ClientInfo{UserID: 1, VoiceChannelID: 0}
+	for target := int64(1); target <= 500; target++ {
+		cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: target, encryptedKey: validEncKey, iv: validIV}
+		if result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps); result.Error == nil {
+			t.Fatalf("offer from a client not in voice must be rejected (target %d)", target)
+		}
+	}
+	if windows, _ := limiter.Len(); windows != 0 {
+		t.Fatalf("a client not in voice allocated %d limiter entries, want 0", windows)
+	}
+
+	// (b) In voice but not the key holder — rejected later, still allocates nothing.
+	info = ClientInfo{UserID: 1, VoiceChannelID: 100}
+	for target := int64(1); target <= 500; target++ {
+		cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: target, encryptedKey: validEncKey, iv: validIV}
+		if result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps); result.Error == nil {
+			t.Fatalf("offer from a non-key-holder must be rejected (target %d)", target)
+		}
+	}
+	if windows, _ := limiter.Len(); windows != 0 {
+		t.Fatalf("a non-key-holder allocated %d limiter entries, want 0", windows)
+	}
+
+	// (c) A real key holder is still budgeted, and its entries are bounded by
+	// the channel-keyed outer budget rather than by attacker-chosen target ids.
+	holderDeps := offerDeps(true)
+	holderDeps.Limiter = limiter
+	for target := int64(1); target <= 500; target++ {
+		cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: target, encryptedKey: validEncKey, iv: validIV}
+		handleVoiceE2EEOfferV2(context.Background(), cmd, info, holderDeps)
+	}
+	windows, _ := limiter.Len()
+	if windows > voiceE2EEOfferRateLimit+1 {
+		t.Fatalf("key holder spraying 500 target ids allocated %d limiter entries, want at most %d",
+			windows, voiceE2EEOfferRateLimit+1)
+	}
+}
+
 func TestVoiceE2EEOfferV2_NotInVoiceChannel(t *testing.T) {
 	deps := offerDeps(true)
 	cmd := VoiceE2EEOfferCmd{userID: 1, targetUserID: 2, encryptedKey: validEncKey, iv: validIV}

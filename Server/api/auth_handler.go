@@ -323,6 +323,26 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 
 		failKey := "login_fail:" + ip
 		userFailKey := "login_user_fail:" + unameKey
+		// F3: atomically reserve this attempt BEFORE the bcrypt compare. The
+		// read-only IsLockedOut gates above are check-then-act: N concurrent
+		// requests all pass them before any failure is recorded below, so the
+		// per-username cap — the only cross-IP brute-force defence — bound
+		// only sequential attackers. Allow records the attempt under the
+		// limiter's lock, capping a concurrent burst at the same budget a
+		// sequential attacker gets. Sized at threshold+1 so the sequential
+		// accepted-input set is unchanged: failures 1–10 still land, the 10th
+		// still trips the lockout (via the Check below), and a correct
+		// password on attempt 10 still succeeds — successful logins reset
+		// both counters. The reservation sits after the DB-error return above
+		// so a transient DB outage still does not consume attempts.
+		if !limiter.Allow(failKey, loginFailureThreshold+1, loginFailureWindow) ||
+			!limiter.Allow(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
+			writeJSON(w, http.StatusTooManyRequests, errorResponse{
+				Error:   "RATE_LIMITED",
+				Message: "account temporarily locked due to too many failed attempts",
+			})
+			return
+		}
 		// Always run the password check — with an empty hash when the user does
 		// not exist. auth.CheckPassword performs a dummy bcrypt comparison for an
 		// empty hash, so bcrypt executes on every path and response time stays
@@ -334,12 +354,15 @@ func handleLogin(database *db.DB, limiter *auth.RateLimiter, partialStore *auth.
 			storedHash = user.PasswordHash
 		}
 		if !auth.CheckPassword(storedHash, req.Password) {
-			// Track failures per-IP; lockout on threshold.
-			if !limiter.Allow(failKey, loginFailureThreshold, loginFailureWindow) {
+			// The attempt was already recorded atomically up-front (F3); here
+			// only decide the lockouts, at the same boundary as before: the
+			// 10th in-window failure locks the key. Check is read-only, so
+			// the reservation is not double-counted.
+			if !limiter.Check(failKey, loginFailureThreshold+1, loginFailureWindow) {
 				limiter.Lockout(r.Context(), lockKey, loginLockoutDuration)
 			}
-			// BUG-110: Track failures per-username; lockout on threshold.
-			if !limiter.Allow(userFailKey, loginUserFailureThreshold, loginUserFailureWindow) {
+			// BUG-110: per-username lockout on threshold.
+			if !limiter.Check(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
 				limiter.Lockout(r.Context(), userLockKey, loginUserLockoutDuration)
 			}
 			slog.Info("login failed", "ip", ip, "username_len", len(req.Username))

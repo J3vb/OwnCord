@@ -596,7 +596,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       } else if (typeof err === "string") {
         message = err;
       } else if (err !== null && typeof err === "object" && "message" in err) {
-        message = String((err as { message: unknown }).message);
+        message = String(err.message);
       } else {
         message = String(err);
       }

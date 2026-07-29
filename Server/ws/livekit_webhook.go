@@ -202,7 +202,7 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 					}
 				}
 
-				h.BroadcastToAll(buildVoiceLeave(channelID, userID))
+				h.broadcastVoiceEvent(ctx, channelID, buildVoiceLeave(channelID, userID))
 				slog.Info("livekit webhook: cleaned up stale voice state",
 					"user_id", userID,
 					"channel_id", channelID)
@@ -215,7 +215,7 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 				slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed (stale DB row)",
 					"error", dbErr, "user_id", userID, "channel_id", channelID)
 			} else if deleted {
-				h.BroadcastToAll(buildVoiceLeave(channelID, userID))
+				h.broadcastVoiceEvent(ctx, channelID, buildVoiceLeave(channelID, userID))
 				slog.Info("livekit webhook: cleaned stale DB voice row after reconnect",
 					"user_id", userID, "channel_id", channelID)
 			}
@@ -228,7 +228,7 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 			slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed (client gone)",
 				"error", dbErr, "user_id", userID, "channel_id", channelID)
 		} else if deleted {
-			h.BroadcastToAll(buildVoiceLeave(channelID, userID))
+			h.broadcastVoiceEvent(ctx, channelID, buildVoiceLeave(channelID, userID))
 		}
 	}
 }

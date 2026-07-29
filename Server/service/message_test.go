@@ -484,6 +484,65 @@ func TestDeleteMessage_ModCanDeleteOthersMessage(t *testing.T) {
 	}
 }
 
+// TestDeleteMessage_DeniedReadCannotDelete locks the channel-lockout invariant:
+// when an admin unchecks "Can access" for a role, the panel writes
+// deny = READ_MESSAGES|CONNECT_VOICE and leaves MANAGE_MESSAGES intact, so the
+// delete gate must also require READ_MESSAGES — otherwise a moderator excluded
+// from a private channel could soft-delete every message in it by enumerating
+// message IDs. Mirrors api/channel_authz_test.go's denyReadMessages helper.
+func TestDeleteMessage_DeniedReadCannotDelete(t *testing.T) {
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
+		ID:          permissions.ModeratorRoleID,
+		Name:        "moderator",
+		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.ManageMessages,
+		Position:    10,
+	})
+	seedRole(t, database, &db.Role{
+		ID:          permissions.MemberRoleID,
+		Name:        "member",
+		Permissions: permissions.SendMessages | permissions.ReadMessages,
+		Position:    1,
+	})
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "mod_bob"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedUserRole(t, database, 2, permissions.ModeratorRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "staff-private", Type: "text"})
+
+	permSvc := NewPermissionService(database, permissions.NewChecker(database))
+	svc := NewMessageService(database, permSvc, nil)
+
+	sent, err := svc.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 10, UserID: 1, Username: "alice", Content: "private discussion",
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	// Admin unchecks "Can access" for both roles: READ_MESSAGES and
+	// CONNECT_VOICE are denied, MANAGE_MESSAGES survives the deny mask.
+	denyPrivate := permissions.ReadMessages | permissions.ConnectVoice
+	seedChannelOverride(t, database, permissions.ModeratorRoleID, 10, 0, denyPrivate)
+	seedChannelOverride(t, database, permissions.MemberRoleID, 10, 0, denyPrivate)
+	permSvc.InvalidateChannel(10)
+
+	if _, err := svc.DeleteMessage(context.Background(), 2, sent.MessageID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("moderator denied READ_MESSAGES must not delete: got %v", err)
+	}
+	if _, err := svc.DeleteMessage(context.Background(), 1, sent.MessageID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("author denied READ_MESSAGES must not delete: got %v", err)
+	}
+
+	msg, err := database.GetMessage(context.Background(), sent.MessageID)
+	if err != nil || msg == nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.Deleted {
+		t.Fatal("message must survive delete attempts from a locked-out role")
+	}
+}
+
 func TestDeleteMessage_InvalidMessageID(t *testing.T) {
 	svc, _ := newTestMessageService(t)
 
@@ -513,5 +572,135 @@ func TestSendMessage_HTMLSanitized(t *testing.T) {
 	}
 	if !strings.Contains(result.Content, "hello") {
 		t.Fatal("expected safe text to remain in content")
+	}
+}
+
+// TestSetMessagePinned_DeniedReadCannotPin locks the same channel-lockout
+// invariant as TestDeleteMessage_DeniedReadCannotDelete, on the pin sink: an
+// admin unchecking "Can access" writes deny = READ_MESSAGES|CONNECT_VOICE and
+// leaves MANAGE_MESSAGES intact, so the pin gate must require READ_MESSAGES
+// too — otherwise a locked-out moderator can mutate the pin list the real
+// members see, and use the success/not-found split as a message-ID oracle.
+func TestSetMessagePinned_DeniedReadCannotPin(t *testing.T) {
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
+		ID:          permissions.ModeratorRoleID,
+		Name:        "moderator",
+		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.ManageMessages,
+		Position:    10,
+	})
+	seedRole(t, database, &db.Role{
+		ID:          permissions.MemberRoleID,
+		Name:        "member",
+		Permissions: permissions.SendMessages | permissions.ReadMessages,
+		Position:    1,
+	})
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "mod_bob"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedUserRole(t, database, 2, permissions.ModeratorRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "staff-private", Type: "text"})
+
+	permSvc := NewPermissionService(database, permissions.NewChecker(database))
+	svc := NewMessageService(database, permSvc, nil)
+
+	sent, err := svc.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 10, UserID: 1, Username: "alice", Content: "announcement",
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	// While the moderator can still read the channel, pinning works.
+	if err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID, true); err != nil {
+		t.Fatalf("moderator with READ_MESSAGES must be able to pin: %v", err)
+	}
+
+	denyPrivate := permissions.ReadMessages | permissions.ConnectVoice
+	seedChannelOverride(t, database, permissions.ModeratorRoleID, 10, 0, denyPrivate)
+	permSvc.InvalidateChannel(10)
+
+	if err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID, false); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("moderator denied READ_MESSAGES must not unpin: got %v", err)
+	}
+	// The existence oracle is closed with it: an id that is not in this channel
+	// is refused by the same permission check, not by a distinguishable
+	// not-found answer.
+	if err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID+999, true); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("denied role must not learn which message ids exist: got %v", err)
+	}
+
+	pinned, err := database.GetPinnedMessages(context.Background(), 10, 1)
+	if err != nil {
+		t.Fatalf("GetPinnedMessages: %v", err)
+	}
+	if len(pinned) != 1 {
+		t.Fatalf("pin state must survive the locked-out unpin attempt, got %d pinned", len(pinned))
+	}
+}
+
+// TestDMBlock_EnforcedOnEveryInteractionSink locks the block invariant across
+// all DM verbs, not just send. Blocking used to be checked only in
+// checkSendPermission, so a blocked user kept a live channel to the blocker:
+// editing an already-sent message fans chat_edited out to both participants, so
+// arbitrary new text still arrived, and reactions and pins did the same.
+func TestDMBlock_EnforcedOnEveryInteractionSink(t *testing.T) {
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
+		ID:          permissions.MemberRoleID,
+		Name:        "member",
+		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AddReactions,
+		Position:    1,
+	})
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedUserRole(t, database, 2, permissions.MemberRoleID)
+	seedChannel(t, database, &db.Channel{ID: 50, Name: "dm-1-2", Type: "dm"})
+	seedDMParticipant(t, database, 50, 1)
+	seedDMParticipant(t, database, 50, 2)
+
+	permSvc := NewPermissionService(database, permissions.NewChecker(database))
+	svc := NewMessageService(database, permSvc, nil)
+
+	sent, err := svc.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi bob",
+	})
+	if err != nil {
+		t.Fatalf("send before block: %v", err)
+	}
+
+	seedBlock(t, database, 2, 1) // bob blocks alice
+
+	// Send — the one path that was already enforced.
+	if _, err := svc.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "let me back in",
+	}); !errors.Is(err, ErrBlocked) {
+		t.Fatalf("blocked send must be refused: got %v", err)
+	}
+
+	// Edit — the finding's primary sink.
+	if _, err := svc.EditMessage(context.Background(), 1, sent.MessageID, "abusive replacement"); !errors.Is(err, ErrBlocked) {
+		t.Fatalf("blocked edit must be refused: got %v", err)
+	}
+	msg, err := database.GetMessage(context.Background(), sent.MessageID)
+	if err != nil || msg == nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.Content != "hi bob" {
+		t.Fatalf("content must be unchanged after a blocked edit, got %q", msg.Content)
+	}
+
+	// Reactions and pins are the same class of repeatable notification.
+	if _, err := svc.AddReaction(context.Background(), 1, sent.MessageID, "👋"); !errors.Is(err, ErrBlocked) {
+		t.Fatalf("blocked reaction must be refused: got %v", err)
+	}
+	if err := svc.SetMessagePinned(context.Background(), 1, 50, sent.MessageID, true); !errors.Is(err, ErrBlocked) {
+		t.Fatalf("blocked pin must be refused: got %v", err)
+	}
+
+	// The block is symmetric, matching the pre-existing send-path semantics.
+	if _, err := svc.EditMessage(context.Background(), 2, sent.MessageID, "bob edits"); !errors.Is(err, ErrBlocked) {
+		t.Fatalf("blocker is equally refused, matching IsEitherBlocked: got %v", err)
 	}
 }

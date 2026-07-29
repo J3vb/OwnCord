@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/owncord/server/db"
@@ -187,6 +188,45 @@ func TestDeleteAccount_NonexistentUser(t *testing.T) {
 	err := database.DeleteAccount(context.Background(), 999999)
 	if err == nil {
 		t.Error("DeleteAccount(nonexistent) should return error")
+	}
+}
+
+// TestDeleteAccount_SquattedAnonNameStillDeletes locks the erasure path against
+// a targeted denial of service: users.username is UNIQUE COLLATE NOCASE, so an
+// attacker who renamed themselves to the victim's "[deleted-<id>]" made the
+// anonymising UPDATE fail, rolled the whole transaction back, and left the
+// victim permanently unable to delete their own account. auth.ValidateUsername
+// now reserves the namespace, but DeleteAccount must survive a squatted name on
+// its own — including one already in the database from before the rule existed.
+func TestDeleteAccount_SquattedAnonNameStillDeletes(t *testing.T) {
+	database := openMigratedMemory(t)
+	victimID := seedUser(t, database, "victim")
+	squatterID := seedUser(t, database, "squatter")
+
+	squatted := fmt.Sprintf("[deleted-%d]", victimID)
+	if _, err := database.ExecContext(context.Background(),
+		"UPDATE users SET username = ? WHERE id = ?", squatted, squatterID,
+	); err != nil {
+		t.Fatalf("squat username: %v", err)
+	}
+
+	if err := database.DeleteAccount(context.Background(), victimID); err != nil {
+		t.Fatalf("DeleteAccount must not be blockable by a squatted name: %v", err)
+	}
+
+	victim, err := database.GetUserByID(context.Background(), victimID)
+	if err != nil || victim == nil {
+		t.Fatalf("GetUserByID after delete: %v", err)
+	}
+	if strings.EqualFold(victim.Username, squatted) {
+		t.Fatalf("victim kept the squatted name %q", victim.Username)
+	}
+	if !strings.HasPrefix(victim.Username, fmt.Sprintf("[deleted-%d-", victimID)) {
+		t.Errorf("Username = %q, want a suffixed [deleted-%d-…] fallback", victim.Username, victimID)
+	}
+	// The erasure itself must still have happened.
+	if !victim.Banned || victim.PasswordHash != "" {
+		t.Errorf("account not anonymised: banned=%v password=%q", victim.Banned, victim.PasswordHash)
 	}
 }
 

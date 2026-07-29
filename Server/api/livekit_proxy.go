@@ -141,7 +141,17 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL, all
 		defer dialResp.Body.Close() //nolint:errcheck // best-effort close
 	}
 	if err != nil {
-		slog.Warn("livekit proxy: backend dial failed", "host", backendURL.Host, "path", backendURL.Path, "err", err)
+		// websocket.Dial wraps a *url.Error, which embeds the full request URL —
+		// including the access_token query parameter, a live LiveKit room-join
+		// JWT. Anyone with log access (stdout, a shipper, or the admin panel's
+		// live view, whose ring buffer captures DEBUG+ regardless of the
+		// configured stdout level) could replay it inside its 5-minute TTL as
+		// the victim's participant identity. Strip the credential before the
+		// error reaches slog: the raw query blob first, so an encoded form is
+		// caught too, then the decoded token.
+		safeErr := redactKey(err.Error(), backendURL.RawQuery)
+		safeErr = redactKey(safeErr, backendURL.Query().Get("access_token"))
+		slog.Warn("livekit proxy: backend dial failed", "host", backendURL.Host, "path", backendURL.Path, "err", safeErr)
 		writeJSON(w, http.StatusBadGateway, errorResponse{
 			Error:   "BAD_GATEWAY",
 			Message: "backend unavailable",
