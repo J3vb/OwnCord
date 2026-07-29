@@ -2,7 +2,18 @@
 name = "owncord-client"
 version = "1.1.0-alpha.2"
 edition = "2021"
+# Effective minimum: tauri 2.11 declares rust-version = "1.77.2", so the crate
+# cannot build below it. Declaring it here enables Cargo's MSRV-aware resolver
+# warning instead of silently following whatever toolchain is installed.
+rust-version = "1.77.2"
 description = "OwnCord Desktop Client"
+
+# Crate-level lint policy so hardening ships with every build, not only the CI
+# `cargo clippy -- -D warnings` gate (which downstream/local builds don't run).
+# Enables the allow-by-default rustc lints governing the Win32 FFI unsafe path.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unused_unsafe = "warn"
 
 [lib]
 name = "owncord_client_lib"

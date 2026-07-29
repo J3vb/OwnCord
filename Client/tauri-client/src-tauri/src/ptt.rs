@@ -9,21 +9,23 @@
 //! This ensures the stored integer is consistent on both Windows and Linux.
 
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Runtime};
 
 /// Virtual key code for the PTT key. 0 = disabled.
 static PTT_VKEY: AtomicI32 = AtomicI32::new(0);
-/// Whether the polling loop is running (intent flag, kept for backwards compat).
-static PTT_RUNNING: AtomicBool = AtomicBool::new(false);
-/// Shutdown signal sent into the polling thread. Separate from PTT_RUNNING so
-/// that "stop the loop now" and "should a loop be running" are distinct.
-static PTT_SHUTDOWN: AtomicBool = AtomicBool::new(false);
-/// Handle to the polling thread. `Some` means a thread is alive; `None` means
-/// no thread exists. This Mutex is the authoritative critical section that
-/// prevents duplicate thread spawns.
-static PTT_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
+/// The polling thread paired with its OWN shutdown flag. `Some` means a thread
+/// is registered; `None` means none exists. This Mutex is the authoritative
+/// critical section that prevents duplicate spawns.
+///
+/// The shutdown flag is per-generation, not global: each `ptt_start` mints a
+/// fresh `Arc<AtomicBool>` and moves a clone into its thread. A later start can
+/// therefore never reset the stop signal that an earlier thread's `join()` is
+/// still waiting on — the lost-signal race (ATOMICRACE-001) that a single
+/// shared flag allowed.
+static PTT_THREAD: Mutex<Option<(Arc<AtomicBool>, std::thread::JoinHandle<()>)>> =
+    Mutex::new(None);
 
 /// Returns true if a VK code is allowed for global capture in ptt_listen_for_key.
 ///
@@ -303,8 +305,9 @@ mod linux {
 /// Start the PTT polling loop. Emits `ptt-state` (bool) events.
 ///
 /// Uses `PTT_THREAD`'s Mutex as the critical section to prevent duplicate
-/// thread spawns. The `PTT_SHUTDOWN` flag is passed into the thread loop so
-/// it can be stopped cleanly from `ptt_stop` or `ptt_stop_internal`.
+/// thread spawns. Each spawned thread owns a private `Arc<AtomicBool>` shutdown
+/// flag, so `ptt_stop`/`ptt_stop_internal` signal exactly the thread they are
+/// tearing down and a concurrent restart cannot clobber that signal.
 #[tauri::command]
 pub fn ptt_start<R: Runtime>(app: AppHandle<R>) {
     let mut guard = PTT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
@@ -312,19 +315,19 @@ pub fn ptt_start<R: Runtime>(app: AppHandle<R>) {
         return; // thread already alive — Mutex is the authoritative check
     }
 
-    // Reset the shutdown flag before spawning so the loop doesn't exit
-    // immediately if a previous ptt_stop set it.
-    PTT_SHUTDOWN.store(false, Ordering::SeqCst);
-    PTT_RUNNING.store(true, Ordering::SeqCst);
+    // Per-generation shutdown flag: only this thread ever reads it, so a later
+    // ptt_start cannot reset it out from under a pending join of a prior thread.
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let thread_shutdown = Arc::clone(&shutdown);
 
     let handle = std::thread::spawn(move || {
         // Wrap the entire loop body in catch_unwind so that panics from
-        // is_key_down (unsafe FFI) or app.emit do not leave PTT_RUNNING
-        // stuck at true with no way to recover.
+        // is_key_down (unsafe FFI) or app.emit do not wedge the thread slot
+        // at `Some` with no way to recover.
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut was_pressed = false;
 
-            while !PTT_SHUTDOWN.load(Ordering::SeqCst) {
+            while !thread_shutdown.load(Ordering::SeqCst) {
                 let vk = PTT_VKEY.load(Ordering::SeqCst);
                 if vk != 0 {
                     let pressed = is_key_down(vk);
@@ -337,12 +340,16 @@ pub fn ptt_start<R: Runtime>(app: AppHandle<R>) {
             }
         }));
 
-        // Clear the thread handle slot so ptt_start can spawn a replacement.
-        // Use unwrap_or_else to handle a poisoned Mutex defensively, matching
-        // the pattern used in ptt_stop_internal.
+        // Self-cleanup, but ONLY if the slot still registers THIS generation.
+        // A normal stop already took the handle out (slot is None, or a newer
+        // ptt_start has re-registered), so this exists purely so a *panicked*
+        // thread doesn't leave the slot stuck at `Some` and block future starts
+        // — without a finishing thread ever clearing a newer thread's slot (the
+        // handle-slot corruption in ATOMICRACE-001).
         let mut g = PTT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
-        *g = None;
-        PTT_RUNNING.store(false, Ordering::SeqCst);
+        if matches!(g.as_ref(), Some((flag, _)) if Arc::ptr_eq(flag, &thread_shutdown)) {
+            *g = None;
+        }
 
         if result.is_err() {
             log::error!("PTT polling thread panicked — PTT is no longer active");
@@ -351,7 +358,7 @@ pub fn ptt_start<R: Runtime>(app: AppHandle<R>) {
         }
     });
 
-    *guard = Some(handle);
+    *guard = Some((shutdown, handle));
 }
 
 /// Stop the PTT polling loop (IPC-callable command).
@@ -367,21 +374,21 @@ pub fn ptt_stop() {
 /// process tears down, preventing the `AppHandle` from being used against
 /// a half-torn-down runtime.
 pub fn ptt_stop_internal() {
-    // Signal the thread to exit.
-    PTT_SHUTDOWN.store(true, Ordering::SeqCst);
-    PTT_RUNNING.store(false, Ordering::SeqCst);
-
-    // Take the handle out of the Mutex so we can join it outside the lock,
-    // avoiding a potential deadlock if the thread itself tries to lock
-    // PTT_THREAD on exit.
-    let handle = {
+    // Take this generation's (flag, handle) out under the lock, then signal and
+    // join OUTSIDE the lock — the thread locks PTT_THREAD on exit, so joining
+    // while holding it would deadlock. Taking first (slot -> None) also lets a
+    // concurrent ptt_start register a fresh generation without racing us.
+    let taken = {
         let mut guard = PTT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
         guard.take()
     };
 
-    if let Some(h) = handle {
+    if let Some((shutdown, handle)) = taken {
+        // Signal only the thread we just unregistered; its flag is private, so
+        // this can never disturb a newer generation.
+        shutdown.store(true, Ordering::SeqCst);
         // Best-effort join — ignore if the thread already exited or panicked.
-        let _ = h.join();
+        let _ = handle.join();
     }
 }
 
@@ -500,6 +507,20 @@ mod tests {
         assert!(ptt_set_key(-1).is_err());
         assert!(ptt_set_key(255).is_err());
         assert!(ptt_set_key(300).is_err());
+    }
+
+    // Stop with no thread registered must be a clean no-op: it must not panic,
+    // hang on take()/join of an empty slot, or leave the slot in a bad state.
+    // Guards the empty-slot path of the ATOMICRACE-001 fix. (The threaded
+    // start/stop race itself needs a Tauri runtime and is covered in CI /
+    // manual testing — no other unit test touches PTT_THREAD, so this stays
+    // deterministic under parallel test execution.)
+    #[test]
+    fn ptt_stop_is_noop_when_not_running() {
+        ptt_stop_internal();
+        ptt_stop_internal(); // idempotent
+        let g = PTT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(g.is_none(), "slot must stay empty when nothing was running");
     }
 
     #[test]
