@@ -484,6 +484,65 @@ func TestDeleteMessage_ModCanDeleteOthersMessage(t *testing.T) {
 	}
 }
 
+// TestDeleteMessage_DeniedReadCannotDelete locks the channel-lockout invariant:
+// when an admin unchecks "Can access" for a role, the panel writes
+// deny = READ_MESSAGES|CONNECT_VOICE and leaves MANAGE_MESSAGES intact, so the
+// delete gate must also require READ_MESSAGES — otherwise a moderator excluded
+// from a private channel could soft-delete every message in it by enumerating
+// message IDs. Mirrors api/channel_authz_test.go's denyReadMessages helper.
+func TestDeleteMessage_DeniedReadCannotDelete(t *testing.T) {
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
+		ID:          permissions.ModeratorRoleID,
+		Name:        "moderator",
+		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.ManageMessages,
+		Position:    10,
+	})
+	seedRole(t, database, &db.Role{
+		ID:          permissions.MemberRoleID,
+		Name:        "member",
+		Permissions: permissions.SendMessages | permissions.ReadMessages,
+		Position:    1,
+	})
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "mod_bob"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedUserRole(t, database, 2, permissions.ModeratorRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "staff-private", Type: "text"})
+
+	permSvc := NewPermissionService(database, permissions.NewChecker(database))
+	svc := NewMessageService(database, permSvc, nil)
+
+	sent, err := svc.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 10, UserID: 1, Username: "alice", Content: "private discussion",
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	// Admin unchecks "Can access" for both roles: READ_MESSAGES and
+	// CONNECT_VOICE are denied, MANAGE_MESSAGES survives the deny mask.
+	denyPrivate := permissions.ReadMessages | permissions.ConnectVoice
+	seedChannelOverride(t, database, permissions.ModeratorRoleID, 10, 0, denyPrivate)
+	seedChannelOverride(t, database, permissions.MemberRoleID, 10, 0, denyPrivate)
+	permSvc.InvalidateChannel(10)
+
+	if _, err := svc.DeleteMessage(context.Background(), 2, sent.MessageID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("moderator denied READ_MESSAGES must not delete: got %v", err)
+	}
+	if _, err := svc.DeleteMessage(context.Background(), 1, sent.MessageID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("author denied READ_MESSAGES must not delete: got %v", err)
+	}
+
+	msg, err := database.GetMessage(context.Background(), sent.MessageID)
+	if err != nil || msg == nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.Deleted {
+		t.Fatal("message must survive delete attempts from a locked-out role")
+	}
+}
+
 func TestDeleteMessage_InvalidMessageID(t *testing.T) {
 	svc, _ := newTestMessageService(t)
 

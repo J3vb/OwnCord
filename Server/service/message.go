@@ -353,21 +353,29 @@ func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64)
 	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
 	isDM := chErr == nil && ch != nil && ch.Type == "dm"
 
+	var isMod bool
 	if isDM {
 		ok, dmErr := s.st.IsDMParticipant(ctx, userID, msg.ChannelID)
 		if dmErr != nil || !ok {
 			return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 		}
 	} else {
+		// Require READ_MESSAGES alongside MANAGE_MESSAGES (and alongside
+		// SEND_MESSAGES on the author path) so a role explicitly denied access to
+		// a channel cannot delete messages in it. Mirrors handleReaction and
+		// checkSendPermission, which both require ReadMessages for non-DM channels.
 		isMsgOwner := msg.UserID == userID
-		canManage := s.perms.HasChannelPerm(ctx, userID, msg.ChannelID, permissions.ManageMessages)
-		canDelete := canManage || (isMsgOwner && s.perms.HasChannelPerm(ctx, userID, msg.ChannelID, permissions.SendMessages))
+		canManage := s.perms.HasChannelPerm(ctx, userID, msg.ChannelID, permissions.ReadMessages|permissions.ManageMessages)
+		canDelete := canManage || (isMsgOwner && s.perms.HasChannelPerm(ctx, userID, msg.ChannelID, permissions.ReadMessages|permissions.SendMessages))
 		if !canDelete {
 			return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 		}
+		// db.DeleteMessage skips the ownership check when ismod is true, so the
+		// moderation flag must reuse the decision made above rather than
+		// re-checking MANAGE_MESSAGES without READ_MESSAGES.
+		isMod = canManage
 	}
 
-	isMod := !isDM && s.perms.HasChannelPerm(ctx, userID, msg.ChannelID, permissions.ManageMessages)
 	if err := s.st.DeleteMessage(ctx, msgID, userID, isMod); err != nil {
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
