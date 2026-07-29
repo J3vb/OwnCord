@@ -261,7 +261,7 @@ func (h *Hub) handleFreshConnect(
 		if _, delErr := database.LeaveVoiceChannelIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
 			slog.Warn("ws fresh connect: LeaveVoiceChannelIfMatch failed", "err", delErr)
 		}
-		h.BroadcastToAll(buildVoiceLeave(vs.ChannelID, c.userID))
+		h.broadcastVoiceEvent(ctx, vs.ChannelID, buildVoiceLeave(vs.ChannelID, c.userID))
 		if h.livekit != nil {
 			// BUG-089: Capture stale join token so the goroutine only removes
 			// the exact stale participant. The identity includes joinedAt, so

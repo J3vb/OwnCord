@@ -23,6 +23,12 @@ import (
 type broadcastMsg struct {
 	channelID int64 // 0 = send to all connected clients
 	msg       []byte
+	// recipients, when non-nil, replaces topic fan-out with direct delivery to
+	// exactly these user IDs. Used by voice_state/voice_leave: they are global
+	// in scope (every sidebar shows them) but must not disclose a channel the
+	// recipient's role may not READ, and the audience is resolved off the hub
+	// goroutine so deliverBroadcast stays free of permission queries.
+	recipients []int64
 }
 
 // Hub manages all active WebSocket clients and routes messages between them.
@@ -395,7 +401,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 
 	// Broadcast voice_leave for each participant.
 	for _, vs := range states {
-		h.BroadcastToAll(buildVoiceLeave(channelID, vs.UserID))
+		h.broadcastVoiceEvent(ctx, channelID, buildVoiceLeave(channelID, vs.UserID))
 	}
 }
 
@@ -523,6 +529,70 @@ func (h *Hub) BroadcastToAll(msg []byte) {
 		slog.Warn("hub: broadcast channel full, dropping global message",
 			"msg_len", len(msg))
 	}
+}
+
+// broadcastVoiceEvent enqueues a voice_state / voice_leave message for the
+// connected clients whose current role may READ channelID.
+//
+// These events used to go out via BroadcastToAll, which handed every
+// authenticated client the membership and camera/mute state of voice channels
+// that channel_overrides hides from their role — while the equivalent read path
+// (buildReady) deliberately filters voice states to readable channels. Tagging
+// the event with its real channel id also makes reconnect replay filter it,
+// where a channelID of 0 was replayed unconditionally.
+//
+// The audience is resolved here, on the caller's goroutine, so the hub's
+// dispatch loop never blocks on permission lookups.
+func (h *Hub) broadcastVoiceEvent(ctx context.Context, channelID int64, msg []byte) {
+	bm := broadcastMsg{
+		channelID:  channelID,
+		msg:        msg,
+		recipients: h.voiceEventAudience(ctx, channelID),
+	}
+	select {
+	case h.broadcast <- bm:
+	default:
+		h.broadcastDrops.Add(1)
+		slog.Warn("hub: broadcast channel full, dropping voice event",
+			"channel_id", channelID, "msg_len", len(msg))
+	}
+}
+
+// voiceEventAudience returns the connected user IDs whose current role may READ
+// channelID. Always non-nil, so an empty result means "deliver to nobody"
+// rather than "no filter". Roles are resolved per client (an admin may have
+// reassigned one mid-session) and the channel verdict is memoised per role, so
+// the cost is one role lookup per connected client plus one override lookup per
+// distinct role. Fails closed: a client whose role cannot be resolved is left
+// out. Mirrors RefreshChannelVisibility, which resolves visibility the same way.
+func (h *Hub) voiceEventAudience(ctx context.Context, channelID int64) []int64 {
+	h.mu.RLock()
+	userIDs := make([]int64, 0, len(h.clients))
+	for uid := range h.clients {
+		userIDs = append(userIDs, uid)
+	}
+	h.mu.RUnlock()
+
+	audience := make([]int64, 0, len(userIDs))
+	if h.db == nil || h.permChecker == nil {
+		return audience
+	}
+	visibleByRole := make(map[int64]bool)
+	for _, uid := range userIDs {
+		role, err := h.db.GetRoleForUser(ctx, uid)
+		if err != nil || role == nil {
+			continue
+		}
+		visible, ok := visibleByRole[role.ID]
+		if !ok {
+			visible = h.permChecker.HasChannelPerm(ctx, role.Permissions, role.ID, channelID, permissions.ReadMessages)
+			visibleByRole[role.ID] = visible
+		}
+		if visible {
+			audience = append(audience, uid)
+		}
+	}
+	return audience
 }
 
 // BroadcastServerRestart sends a server_restart message to all connected clients.
@@ -1047,7 +1117,7 @@ func (h *Hub) sweepStaleVoiceStates() {
 		}
 		slog.Warn("sweepStaleVoiceStates: removed ghost voice state",
 			"user_id", s.userID, "channel_id", s.channelID)
-		h.BroadcastToAll(buildVoiceLeave(s.channelID, s.userID))
+		h.broadcastVoiceEvent(ctx, s.channelID, buildVoiceLeave(s.channelID, s.userID))
 		if h.livekit != nil {
 			_ = h.livekit.RemoveParticipant(ctx, s.channelID, s.userID, s.joinedAt)
 		}
@@ -1081,10 +1151,16 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		sink.Dispatch(context.Background(), eventType, msg)
 	}
 
-	if bm.channelID == 0 {
+	switch {
+	case bm.recipients != nil:
+		// Visibility-filtered fan-out: the audience was resolved by the caller.
+		for _, userID := range bm.recipients {
+			h.SendToUser(userID, msg)
+		}
+	case bm.channelID == 0:
 		// Global broadcast — deliver to every connected client.
 		h.pubsub.PublishGlobal(msg)
-	} else {
+	default:
 		// Channel-scoped broadcast — deliver to subscribers of the channel topic.
 		topic := ChannelTopic(bm.channelID)
 		if !h.topicLimiter.Allow(topic) {

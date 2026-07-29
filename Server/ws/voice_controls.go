@@ -152,5 +152,8 @@ func voiceStateBroadcast(ctx context.Context, d VoiceDeps, userID int64) Result 
 	if state == nil {
 		return Result{} // not in voice — nothing to broadcast
 	}
-	return Result{Events: []Event{VoiceStateEvent{payload: buildVoiceState(*state)}}}
+	return Result{Events: []Event{VoiceStateEvent{
+		voiceChannelID: state.ChannelID,
+		payload:        buildVoiceState(*state),
+	}}}
 }

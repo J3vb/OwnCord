@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -166,7 +167,7 @@ func TestEmitEvents_ChannelEvent_CallsBroadcastToChannel(t *testing.T) {
 	go h.Run()
 	defer h.Stop()
 
-	h.EmitEvents(events)
+	h.EmitEvents(context.Background(), events)
 
 	// Give the hub loop time to deliver.
 	msgs := drainChan(send1, 100*time.Millisecond)
@@ -183,7 +184,7 @@ func TestEmitEvents_ExcludeSenderEvent(t *testing.T) {
 	payload := []byte(`{"type":"typing"}`)
 	events := []Event{stubExcludeSenderEvent{channelID: 42, excludeUserID: 1, payload: payload}}
 
-	h.EmitEvents(events)
+	h.EmitEvents(context.Background(), events)
 
 	// broadcastExcludeLow is synchronous — check immediately.
 	senderMsgs := drainChan(sendSender, 50*time.Millisecond)
@@ -210,7 +211,7 @@ func TestEmitEvents_SequencedDMEvent(t *testing.T) {
 		payload:        payload,
 	}}
 
-	h.EmitEvents(events)
+	h.EmitEvents(context.Background(), events)
 
 	msgs1 := drainChan(send1, 50*time.Millisecond)
 	msgs2 := drainChan(send2, 50*time.Millisecond)
@@ -235,7 +236,7 @@ func TestEmitEvents_UserTargetedEvent(t *testing.T) {
 	payload := []byte(`{"type":"targeted"}`)
 	events := []Event{stubUserTargetedEvent{targetUserID: 2, payload: payload}}
 
-	h.EmitEvents(events)
+	h.EmitEvents(context.Background(), events)
 
 	msgs1 := drainChan(send1, 50*time.Millisecond)
 	msgs2 := drainChan(send2, 50*time.Millisecond)
@@ -260,7 +261,7 @@ func TestEmitEvents_BroadcastAllEvent(t *testing.T) {
 	go h.Run()
 	defer h.Stop()
 
-	h.EmitEvents(events)
+	h.EmitEvents(context.Background(), events)
 
 	msgs1 := drainChan(send1, 100*time.Millisecond)
 	msgs2 := drainChan(send2, 100*time.Millisecond)
@@ -286,7 +287,7 @@ func TestEmitEvents_VoiceChannelEvent(t *testing.T) {
 		payload:        payload,
 	}}
 
-	h.EmitEvents(events)
+	h.EmitEvents(context.Background(), events)
 
 	senderMsgs := drainChan(sendSender, 50*time.Millisecond)
 	otherMsgs := drainChan(sendOther, 50*time.Millisecond)
@@ -319,7 +320,7 @@ func TestEmitEvents_VoiceChannelGuardedEvent(t *testing.T) {
 		payload:        payload,
 	}}
 
-	h.EmitEvents(events)
+	h.EmitEvents(context.Background(), events)
 
 	targetMsgs := drainChan(sendTarget, 50*time.Millisecond)
 	otherMsgs := drainChan(sendOther, 50*time.Millisecond)
@@ -348,7 +349,7 @@ func TestEmitEvents_VoiceChannelGuardedEvent_TargetNotInChannel(t *testing.T) {
 		payload:        payload,
 	}}
 
-	h.EmitEvents(events)
+	h.EmitEvents(context.Background(), events)
 
 	targetMsgs := drainChan(sendTarget, 50*time.Millisecond)
 	if len(targetMsgs) != 0 {
@@ -361,8 +362,8 @@ func TestEmitEvents_EmptyEvents_NoOp(t *testing.T) {
 	_ = registerEmitTestClient(h, 1, 42)
 
 	// Should not panic or block.
-	h.EmitEvents(nil)
-	h.EmitEvents([]Event{})
+	h.EmitEvents(context.Background(), nil)
+	h.EmitEvents(context.Background(), []Event{})
 }
 
 func TestEmitEvents_MixedEventTypes_AllRouted(t *testing.T) {
@@ -379,7 +380,7 @@ func TestEmitEvents_MixedEventTypes_AllRouted(t *testing.T) {
 		stubUserTargetedEvent{targetUserID: 2, payload: []byte(`{"e":2}`)},
 	}
 
-	h.EmitEvents(events)
+	h.EmitEvents(context.Background(), events)
 
 	chMsgs := drainChan(sendCh, 100*time.Millisecond)
 	targetMsgs := drainChan(sendTarget, 100*time.Millisecond)
@@ -397,5 +398,5 @@ func TestEmitEvents_UnknownType_LogsWarning(t *testing.T) {
 	_ = registerEmitTestClient(h, 1, 42)
 
 	// Should not panic; logs a warning (we verify no crash, not log content).
-	h.EmitEvents([]Event{stubUnknownEvent{}})
+	h.EmitEvents(context.Background(), []Event{stubUnknownEvent{}})
 }

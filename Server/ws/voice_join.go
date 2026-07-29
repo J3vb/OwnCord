@@ -198,8 +198,8 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	// Update key holder map now that this client's voice state is set.
 	h.updateKeyHolder(channelID)
 
-	// Broadcast the joiner's state to all connected clients.
-	h.BroadcastToAll(buildVoiceState(*state))
+	// Broadcast the joiner's state to the clients allowed to see this channel.
+	h.broadcastVoiceEvent(ctx, channelID, buildVoiceState(*state))
 
 	// Send existing channel voice states to the joiner.
 	existing, err := h.db.GetChannelVoiceStates(ctx, channelID)
@@ -329,6 +329,6 @@ func (h *Hub) rollbackVoiceJoin(ctx context.Context, c *Client, channelID int64,
 			"user_id", c.userID, "channel_id", channelID)
 	}
 	if broadcast {
-		h.BroadcastToAll(buildVoiceLeave(channelID, c.userID))
+		h.broadcastVoiceEvent(ctx, channelID, buildVoiceLeave(channelID, c.userID))
 	}
 }

@@ -1453,6 +1453,78 @@ func TestHandleVoiceJoin_FullFlow(t *testing.T) {
 	}
 }
 
+// TestVoiceState_NotDeliveredToRolesDeniedRead locks the visibility invariant
+// for voice metadata: voice_state / voice_leave used to go out via
+// BroadcastToAll, so every authenticated client learned the membership and
+// camera/mute state of voice channels that channel_overrides hides from their
+// role — even though the ready payload deliberately filters them out. A member
+// who can read the channel must still receive them.
+func TestVoiceState_NotDeliveredToRolesDeniedRead(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	joiner := seedCoverageOwner(t, database, "vs-joiner")
+	vcID := seedVoiceChannel(t, database, "vs-private-vc")
+
+	// Two plain members (role 4). One is locked out of the channel with the
+	// override the admin panel writes when "Can access" is unchecked.
+	newMember := func(name string) *db.User {
+		t.Helper()
+		if _, err := database.CreateUser(context.Background(), name, "hash", 4); err != nil {
+			t.Fatalf("CreateUser %s: %v", name, err)
+		}
+		u, err := database.GetUserByUsername(context.Background(), name)
+		if err != nil || u == nil {
+			t.Fatalf("GetUserByUsername %s: %v", name, err)
+		}
+		return u
+	}
+	insider := newMember("vs-insider")
+	outsiderRole := int64(3) // Moderator: a distinct role so the deny is role-scoped
+	outsider := newMember("vs-outsider")
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE users SET role_id = ? WHERE id = ?`, outsiderRole, outsider.ID,
+	); err != nil {
+		t.Fatalf("reassign outsider role: %v", err)
+	}
+	if err := database.UpsertChannelOverride(context.Background(), vcID, outsiderRole, 0,
+		permissions.ReadMessages|permissions.ConnectVoice); err != nil {
+		t.Fatalf("UpsertChannelOverride: %v", err)
+	}
+
+	insiderSend := make(chan []byte, 64)
+	outsiderSend := make(chan []byte, 64)
+	hub.Register(ws.NewTestClientWithUser(hub, insider, 0, insiderSend))
+	hub.Register(ws.NewTestClientWithUser(hub, outsider, 0, outsiderSend))
+
+	joinerSend := make(chan []byte, 64)
+	jc := ws.NewTestClientWithUser(hub, joiner, 0, joinerSend)
+	hub.Register(jc)
+	time.Sleep(30 * time.Millisecond)
+
+	raw, _ := json.Marshal(map[string]any{
+		"type":    "voice_join",
+		"payload": map[string]any{"channel_id": vcID},
+	})
+	hub.HandleMessageForTest(jc, raw)
+	time.Sleep(150 * time.Millisecond)
+
+	countVoiceState := func(ch <-chan []byte) int {
+		n := 0
+		for _, msg := range drainChanTimeout(ch, 300*time.Millisecond) {
+			var env map[string]any
+			if json.Unmarshal(msg, &env) == nil && env["type"] == "voice_state" {
+				n++
+			}
+		}
+		return n
+	}
+	if got := countVoiceState(insiderSend); got == 0 {
+		t.Error("a member who may READ the channel must still receive voice_state")
+	}
+	if got := countVoiceState(outsiderSend); got != 0 {
+		t.Errorf("a role denied READ received %d voice_state events, want 0", got)
+	}
+}
+
 func TestHandleVoiceJoin_AlreadyInSameChannel(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vj-same-user")
