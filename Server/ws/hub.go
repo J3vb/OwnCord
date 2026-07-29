@@ -980,6 +980,31 @@ func (h *Hub) sweepStaleVoiceStates() {
 	}
 	// Hub run-loop sweeper — no request tie.
 	ctx := context.Background()
+
+	// Revocation must evict a live session, not merely block the next join.
+	// Nothing else in ws re-validates voice permissions for a connection that
+	// stays open, so a user stripped of CONNECT_VOICE kept their SFU session
+	// until they disconnected. Checked once a minute, and only for the handful
+	// of clients actually in voice.
+	h.mu.RLock()
+	inVoice := make([]*Client, 0, len(h.clients))
+	for _, c := range h.clients {
+		if c.getVoiceChID() != 0 {
+			inVoice = append(inVoice, c)
+		}
+	}
+	h.mu.RUnlock()
+	for _, c := range inVoice {
+		chID := c.getVoiceChID()
+		if chID == 0 || h.hasChannelPerm(ctx, c, chID, permissions.ConnectVoice) {
+			continue
+		}
+		slog.Warn("sweepStaleVoiceStates: evicting participant whose CONNECT_VOICE was revoked",
+			"user_id", c.userID, "channel_id", chID)
+		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "missing CONNECT_VOICE permission"))
+		h.handleVoiceLeave(ctx, c)
+	}
+
 	allStates, err := h.db.GetAllVoiceStates(ctx)
 	if err != nil {
 		slog.Warn("sweepStaleVoiceStates: GetAllVoiceStates failed", "err", err)

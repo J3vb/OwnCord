@@ -270,6 +270,20 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "voice not configured"}}
 	}
 
+	// Re-check CONNECT_VOICE where the credential is minted. The channel comes
+	// from the client's own session state, and voice_join (voice_join.go:61) was
+	// the only place this bit was ever checked — so a user whose CONNECT_VOICE
+	// was revoked mid-session kept minting fresh SFU room-join grants. Refusing
+	// alone would leave the live session in place, so the refusal also evicts:
+	// LeaveVoice runs handleVoiceLeave, which clears the client's voice state,
+	// deletes the voice_states row and removes the LiveKit participant.
+	if !hasPerm(ctx, d.DB, d.Permissions, userID, channelID, permissions.ConnectVoice) {
+		return Result{
+			Error:      ClientError{Code: ErrCodeForbidden, Message: "missing CONNECT_VOICE permission"},
+			LeaveVoice: true,
+		}
+	}
+
 	canPublish := hasPerm(ctx, d.DB, d.Permissions, userID, channelID, permissions.SpeakVoice)
 	canSubscribe := true
 	canVideo := hasPerm(ctx, d.DB, d.Permissions, userID, channelID, permissions.UseVideo)

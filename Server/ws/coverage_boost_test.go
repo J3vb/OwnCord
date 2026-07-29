@@ -15,6 +15,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/service"
 	"github.com/owncord/server/ws"
 )
@@ -2407,9 +2408,14 @@ func TestHandleVoiceTokenRefresh_InVoice_ReturnsToken(t *testing.T) {
 }
 
 func TestHandleVoiceTokenRefresh_NilUser(t *testing.T) {
-	hub, _ := newCoverageHub(t)
+	hub, database := newCoverageHub(t)
+	// The client deliberately carries no *db.User — that is what this test
+	// covers — but the row must exist so the CONNECT_VOICE re-check can resolve
+	// a role. Without it the handler stops at FORBIDDEN and never reaches the
+	// missing-voice-state branch under test.
+	user := seedCoverageOwner(t, database, "vtr-nil-user")
 	send := make(chan []byte, 16)
-	c := ws.NewTestClient(hub, 1, send)
+	c := ws.NewTestClient(hub, user.ID, send)
 	hub.Register(c)
 	time.Sleep(20 * time.Millisecond)
 
@@ -2690,6 +2696,62 @@ func TestSweepStaleVoiceStates_MismatchedChannelIsGhost(t *testing.T) {
 	state, _ := database.GetVoiceState(context.Background(), user.ID)
 	if state != nil {
 		t.Error("mismatched voice state should be removed after sweep")
+	}
+}
+
+// TestSweepStaleVoiceStates_EvictsRevokedConnectVoice locks the revocation half
+// of the voice-permission invariant: nothing in ws re-validated CONNECT_VOICE
+// for a connection that stays open, so stripping the bit blocked future joins
+// but left the offender in the room. The sweep must now evict them — DB row
+// gone and the client's own voice state cleared.
+func TestSweepStaleVoiceStates_EvictsRevokedConnectVoice(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	// Member role (id 4), not Owner: admins bypass every channel check.
+	if _, err := database.CreateUser(context.Background(), "sweep-revoked", "hash", 4); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	user, err := database.GetUserByUsername(context.Background(), "sweep-revoked")
+	if err != nil || user == nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	vcID := seedVoiceChannel(t, database, "sweep-revoked-vc")
+
+	send := make(chan []byte, 64)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	if joinErr := database.JoinVoiceChannel(context.Background(), user.ID, vcID); joinErr != nil {
+		t.Fatalf("JoinVoiceChannel: %v", joinErr)
+	}
+	vs, err := database.GetVoiceState(context.Background(), user.ID)
+	if err != nil || vs == nil {
+		t.Fatalf("GetVoiceState after join: %v", err)
+	}
+	ws.SetClientVoiceStateForTest(c, vcID, vs.JoinedAt)
+
+	// Still permitted → the sweep leaves them alone.
+	hub.SweepStaleVoiceStatesForTest()
+	time.Sleep(100 * time.Millisecond)
+	if state, _ := database.GetVoiceState(context.Background(), user.ID); state == nil {
+		t.Fatal("a permitted participant must survive the sweep")
+	}
+
+	// Moderator revokes CONNECT_VOICE on this channel for the Member role.
+	if permErr := database.UpsertChannelOverride(
+		context.Background(), vcID, 4, 0, permissions.ConnectVoice,
+	); permErr != nil {
+		t.Fatalf("UpsertChannelOverride: %v", permErr)
+	}
+
+	hub.SweepStaleVoiceStatesForTest()
+	time.Sleep(200 * time.Millisecond)
+
+	if state, _ := database.GetVoiceState(context.Background(), user.ID); state != nil {
+		t.Error("revoked participant's voice state must be deleted by the sweep")
+	}
+	if chID := ws.GetClientVoiceChIDForTest(c); chID != 0 {
+		t.Errorf("revoked participant's client voice state must be cleared, got channel %d", chID)
 	}
 }
 
