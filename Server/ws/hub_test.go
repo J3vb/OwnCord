@@ -261,7 +261,11 @@ func TestHub_BroadcastToChannel_SkipsUnfocusedClient(t *testing.T) {
 	assertNotReceived(t, s2, "unfocused client must NOT receive channel broadcast")
 }
 
-func TestHub_BroadcastToChannel_DeliversToVoiceClient(t *testing.T) {
+// Voice membership is gated on CONNECT_VOICE only, so it must never on its own
+// subscribe a client to a channel's message stream — that route requires
+// READ_MESSAGES (channel_focus). Registration without a READ_MESSAGES set must
+// therefore deliver nothing.
+func TestHub_BroadcastToChannel_NotDeliveredOnVoiceMembershipAlone(t *testing.T) {
 	hub, database := newTestHub(t)
 	go hub.Run()
 	defer hub.Stop()
@@ -280,7 +284,58 @@ func TestHub_BroadcastToChannel_DeliversToVoiceClient(t *testing.T) {
 	hub.BroadcastToChannel(chID, msg)
 	time.Sleep(20 * time.Millisecond)
 
-	assertReceived(t, s1, msg, "voice client should receive channel broadcast")
+	assertNotReceived(t, s1, "voice membership alone must NOT deliver the channel message stream")
+}
+
+// The inherited voice-channel subscription follows the handshake's
+// READ_MESSAGES set: a reconnecting client that may read the channel keeps live
+// delivery (it never re-sends channel_focus), one that may not gets nothing.
+func TestHub_RegisterNow_VoiceChannelSubscriptionFollowsReadPermission(t *testing.T) {
+	tests := []struct {
+		name     string
+		slug     string
+		readable func(chID int64) map[int64]bool
+		want     bool
+	}{
+		{
+			name:     "READ_MESSAGES on the voice channel keeps the stream",
+			slug:     "readable",
+			readable: func(chID int64) map[int64]bool { return map[int64]bool{chID: true} },
+			want:     true,
+		},
+		{
+			name:     "READ_MESSAGES only elsewhere denies the stream",
+			slug:     "unreadable",
+			readable: func(chID int64) map[int64]bool { return map[int64]bool{chID + 1000: true} },
+			want:     false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			hub, database := newTestHub(t)
+			go hub.Run()
+			defer hub.Stop()
+
+			chID := seedTestChannel(t, database, "voice-text-"+tc.slug)
+			u1 := seedTestUser(t, database, "voiceuser-"+tc.slug)
+
+			s1 := make(chan []byte, 4)
+			c1 := ws.NewTestClient(hub, u1, s1) // channelID == 0 (no channel_focus yet)
+			ws.SetClientVoiceChID(c1, chID)
+			hub.RegisterNowWithReadableForTest(c1, tc.readable(chID))
+
+			msg := []byte(`{"type":"chat_message","payload":{"content":"hello"}}`)
+			hub.BroadcastToChannel(chID, msg)
+			time.Sleep(20 * time.Millisecond)
+
+			if tc.want {
+				assertReceived(t, s1, msg, "voice client with READ_MESSAGES")
+			} else {
+				assertNotReceived(t, s1, "voice client without READ_MESSAGES")
+			}
+		})
+	}
 }
 
 func TestHub_BroadcastToAll_StillDeliversToUnfocusedClient(t *testing.T) {

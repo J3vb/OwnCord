@@ -15,6 +15,11 @@ import (
 const (
 	voiceE2EERateLimit = 5
 	voiceE2EEWindow    = time.Second
+	// voiceE2EEOfferRateLimit budgets a whole key rotation, which is a burst of
+	// one offer per peer fired on join/leave and on the periodic re-key. It is
+	// therefore sized well above any realistic voice channel rather than at
+	// voiceE2EERateLimit, which suits announces (one frame per rotation).
+	voiceE2EEOfferRateLimit = 64
 )
 
 // validateBase64Loose checks that s is valid padded (StdEncoding) or unpadded
@@ -165,20 +170,6 @@ func handleVoiceE2EEOfferV2(_ context.Context, cmd Command, info ClientInfo, dep
 	offerCmd := cmd.(VoiceE2EEOfferCmd)
 	voiceChID := info.VoiceChannelID
 
-	// A legitimate rotation is a burst of one offer per peer (fired on
-	// join/leave and the periodic re-key), so the budget must not depend on
-	// channel size — keyed per sender alone, the 6th+ peer's offer was
-	// silently rate-limited and that peer could never decrypt audio again.
-	// Keying per (sender, target) admits any single rotation regardless of
-	// participant count while still capping repeated offers at one victim —
-	// the abuse this limit exists for, since an offer can force the target to
-	// re-key or disconnect. Cross-target spray stays bounded per victim and
-	// requires holding key-holder status in that channel.
-	ratKey := fmt.Sprintf("voice_e2ee_offer:%d:%d", info.UserID, offerCmd.TargetUserID())
-	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceE2EERateLimit, voiceE2EEWindow) {
-		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many e2ee offers"}}
-	}
-
 	if voiceChID == 0 {
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "not in a voice channel"}}
 	}
@@ -205,6 +196,29 @@ func handleVoiceE2EEOfferV2(_ context.Context, cmd Command, info ClientInfo, dep
 	}
 	if !d.KeyHolder.IsVoiceKeyHolder(voiceChID, info.UserID) {
 		return Result{Error: ClientError{Code: ErrCodeNotKeyHolder, Message: "only the key holder may send key offers"}}
+	}
+
+	// Rate limit last, and let no unvalidated client input allocate limiter
+	// state. RateLimiter.Allow inserts a live map entry per distinct key, reaped
+	// only ~20 minutes later, and the key used to interpolate target_user_id —
+	// attacker-controlled JSON — before any check ran. One authenticated socket
+	// that was neither in voice nor a key holder could therefore spray unbounded
+	// entries into the process-wide limiter until the server ran out of memory.
+	//
+	// The outer budget is keyed on (sender, voice channel), server-held state
+	// only, and sized for a whole rotation. Passing it is now the precondition
+	// for creating any per-target entry, so limiter growth is bounded by real,
+	// permission-checked voice joins rather than by attacker-chosen integers.
+	ratKey := fmt.Sprintf("voice_e2ee_offer:%d:%d", info.UserID, voiceChID)
+	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceE2EEOfferRateLimit, voiceE2EEWindow) {
+		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many e2ee offers"}}
+	}
+	// Inner budget keeps the W1-2 per-victim cap: an offer can force the target
+	// to re-key or disconnect, so repeated offers at one peer stay capped even
+	// though a full rotation across many peers passes.
+	targetKey := fmt.Sprintf("voice_e2ee_offer:%d:%d:%d", info.UserID, voiceChID, targetUserID)
+	if d.Limiter != nil && !d.Limiter.Allow(targetKey, voiceE2EERateLimit, voiceE2EEWindow) {
+		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many e2ee offers"}}
 	}
 
 	msg := buildVoiceE2EEOffer(info.UserID, encKey, iv)

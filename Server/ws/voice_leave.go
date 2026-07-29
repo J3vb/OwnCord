@@ -35,7 +35,7 @@ func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
 		c.sendMsg(buildErrorMsg(ErrCodeInternal, "voice leave failed — please rejoin if issues persist"))
 	}
 
-	h.BroadcastToAll(buildVoiceLeave(oldChID, c.userID))
+	h.broadcastVoiceEvent(ctx, oldChID, buildVoiceLeave(oldChID, c.userID))
 
 	// Re-elect key holder now that this user has left the channel.
 	h.updateKeyHolder(oldChID)

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -441,6 +442,95 @@ func TestLogin_UsernameLockoutIgnoresCasing(t *testing.T) {
 	}, "198.51.100.250")
 	if rr.Code != http.StatusTooManyRequests {
 		t.Fatalf("case-variant username bypassed the per-username lockout: status = %d, want 429; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestLogin_ConcurrentBurstCannotExceedUsernameBudget locks F3: the
+// per-username failure cap (the only cross-IP brute-force defence) must bind
+// concurrent attackers, not just sequential ones. Before the fix the lockout
+// was a read-only check followed by a post-bcrypt record, so N concurrent
+// requests all passed the stale check and landed N guesses; a distributed
+// burst must now land at most the same 10-attempt budget a sequential
+// attacker gets.
+func TestLogin_ConcurrentBurstCannotExceedUsernameBudget(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	_, _ = database.CreateUser(context.Background(), "bursttarget", hash, 4)
+
+	const burst = 40
+	start := make(chan struct{})
+	codes := make([]int, burst)
+	var wg sync.WaitGroup
+	for i := range burst {
+		wg.Go(func() {
+			raw, _ := json.Marshal(map[string]string{
+				"username": "bursttarget",
+				"password": "wrongpassword",
+			})
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(raw))
+			req.Header.Set("Content-Type", "application/json")
+			// Unique IP per request so only the per-username limiter binds.
+			req.RemoteAddr = fmt.Sprintf("203.0.113.%d:9999", i+1)
+			rr := httptest.NewRecorder()
+			<-start
+			router.ServeHTTP(rr, req)
+			codes[i] = rr.Code
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	landed, limited := 0, 0
+	for i, code := range codes {
+		switch code {
+		case http.StatusUnauthorized:
+			landed++
+		case http.StatusTooManyRequests:
+			limited++
+		default:
+			t.Fatalf("request %d: unexpected status %d", i, code)
+		}
+	}
+	// Sequential budget is 10 landed guesses (9 recorded + the one that trips
+	// the lockout); a concurrent burst must not exceed it.
+	if landed > 10 {
+		t.Fatalf("concurrent burst landed %d password guesses (%d rate-limited), want at most 10", landed, limited)
+	}
+}
+
+// TestLogin_NineFailuresThenCorrectPasswordSucceeds pins the sequential
+// accepted-input boundary that the F3 fix must not move: after 9 wrong
+// guesses the account owner's correct password still logs in (attempt 10 is
+// inside the budget). A fix that reserves attempts pre-compare at the
+// original threshold would return 429 here and hand attackers a 9-request
+// victim lockout.
+func TestLogin_NineFailuresThenCorrectPasswordSucceeds(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	_, _ = database.CreateUser(context.Background(), "boundaryuser", hash, 4)
+
+	for i := 0; i < 9; i++ {
+		rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
+			"username": "boundaryuser",
+			"password": "wrongpassword",
+		}, fmt.Sprintf("198.51.100.%d", i+1))
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("setup attempt %d status = %d, want 401; body = %s", i+1, rr.Code, rr.Body.String())
+		}
+	}
+
+	rr := postJSONFromIP(t, router, "/api/v1/auth/login", map[string]string{
+		"username": "boundaryuser",
+		"password": "correctPass1",
+	}, "198.51.100.250")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("correct password on attempt 10 status = %d, want 200; body = %s", rr.Code, rr.Body.String())
 	}
 }
 

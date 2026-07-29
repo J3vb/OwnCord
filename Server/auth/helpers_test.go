@@ -327,6 +327,39 @@ func TestValidateUsername_ValidNames(t *testing.T) {
 	}
 }
 
+// TestValidateUsername_ReservedDeletedNamespace locks the anonymisation
+// namespace shut. db.DeleteAccount renames a deleted account to
+// "[deleted-<id>]" in a UNIQUE COLLATE NOCASE column, so while the name was
+// registrable a member could take a chosen victim's and make every subsequent
+// account-deletion attempt fail on the unique index.
+func TestValidateUsername_ReservedDeletedNamespace(t *testing.T) {
+	reserved := []string{
+		"[deleted-42]",        // the exact anonymised form
+		"[DELETED-42]",        // UNIQUE is COLLATE NOCASE, so case must not help
+		"[Deleted-1]",         // mixed case
+		"[deleted-42-a3f19c]", // the collision-fallback form
+		"[deleted-]",          // the namespace, not just the numeric form
+	}
+	for _, name := range reserved {
+		if err := auth.ValidateUsername(name); err == nil {
+			t.Errorf("ValidateUsername(%q) = nil, want error for reserved namespace", name)
+		}
+	}
+
+	// Names that merely resemble it stay available.
+	allowed := []string{
+		"[deleted",        // no closing bracket
+		"deleted-42]",     // no opening bracket
+		"[not-deleted-1]", // different namespace
+		"[cool]",          // ordinary bracketed name
+	}
+	for _, name := range allowed {
+		if err := auth.ValidateUsername(name); err != nil {
+			t.Errorf("ValidateUsername(%q) = %v, want nil", name, err)
+		}
+	}
+}
+
 func TestValidateUsername_TooShort(t *testing.T) {
 	cases := []string{
 		"",  // empty

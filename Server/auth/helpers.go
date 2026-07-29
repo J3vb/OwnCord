@@ -13,10 +13,21 @@ import (
 // ValidateUsername checks that a (pre-trimmed) username meets naming rules:
 //   - Length 2-32 runes (after trim)
 //   - Only printable characters (no control chars, no zero-width chars)
+//   - Not inside the "[deleted-…]" namespace reserved for anonymised accounts
 //
 // Returns a descriptive error on failure, nil on success.
 func ValidateUsername(username string) error {
 	username = strings.TrimSpace(username)
+	// db.DeleteAccount anonymises an account by renaming it to "[deleted-<id>]",
+	// and users.username is UNIQUE COLLATE NOCASE. With the namespace
+	// unreserved, anyone could rename themselves to "[deleted-<victimID>]" and
+	// make the victim's own account deletion fail on the unique index for as
+	// long as they held the name. Reserve the whole namespace, not just the
+	// exact "[deleted-<digits>]" form, so the collision-fallback names
+	// DeleteAccount generates are unavailable too.
+	if lower := strings.ToLower(username); strings.HasPrefix(lower, "[deleted-") && strings.HasSuffix(lower, "]") {
+		return fmt.Errorf("username is reserved")
+	}
 	n := len([]rune(username))
 	if n < minUsernameLength {
 		return fmt.Errorf("username must be at least %d characters", minUsernameLength)

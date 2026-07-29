@@ -362,6 +362,11 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 			if userErr != nil || user == nil {
 				return false
 			}
+			// A ban mid-stream must cut the stream, same as adminAuthMiddleware
+			// rejects a banned user on the request path.
+			if auth.IsEffectivelyBanned(user) {
+				return false
+			}
 			role, roleErr := database.GetRoleByID(ctx, user.RoleID)
 			if roleErr != nil || role == nil {
 				return false

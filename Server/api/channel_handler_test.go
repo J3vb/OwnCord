@@ -690,6 +690,16 @@ func newPinTestDB(t *testing.T) *db.DB {
 			opened_at  TEXT    NOT NULL DEFAULT (datetime('now')),
 			PRIMARY KEY (user_id, channel_id)
 		);
+		-- Mirrors migration 012. DM pin authorization consults the block list
+		-- (a blocked user must not mutate the blocker's pins), so this fixture
+		-- needs the table or the lookup fails closed with a 500.
+		CREATE TABLE IF NOT EXISTS user_blocks (
+			blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+			PRIMARY KEY (blocker_id, blocked_id),
+			CHECK (blocker_id != blocked_id)
+		);
 	`)
 	if err != nil {
 		t.Fatalf("create dm_participants: %v", err)

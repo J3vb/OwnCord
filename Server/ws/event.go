@@ -98,6 +98,16 @@ type BroadcastAllEvent interface {
 	Payload() []byte
 }
 
+// VoiceVisibilityEvent routes to Hub.broadcastVoiceEvent: server-wide in scope,
+// but delivered only to clients whose role may READ the named channel, and
+// tagged with it so reconnect replay filters it the same way. MUST be checked
+// before BroadcastAllEvent, which it would otherwise satisfy.
+type VoiceVisibilityEvent interface {
+	Event
+	VisibleChannelID() int64
+	Payload() []byte
+}
+
 // VoiceChannelEvent routes to Hub.sendToVoiceChannelExcept (ephemeral,
 // targets voice channel participants excluding sender).
 type VoiceChannelEvent interface {
@@ -256,13 +266,16 @@ func (e ReactionDMEvent) ParticipantIDs() []int64 {
 }
 func (e ReactionDMEvent) Payload() []byte { return e.payload }
 
-// VoiceStateEvent is a voice state broadcast to all connected clients.
+// VoiceStateEvent is a voice state update fanned out to the clients whose role
+// may READ the voice channel it describes. Satisfies VoiceVisibilityEvent.
 type VoiceStateEvent struct {
-	payload []byte
+	voiceChannelID int64
+	payload        []byte
 }
 
-func (e VoiceStateEvent) EventType() string { return MsgTypeVoiceState }
-func (e VoiceStateEvent) Payload() []byte   { return e.payload }
+func (e VoiceStateEvent) EventType() string       { return MsgTypeVoiceState }
+func (e VoiceStateEvent) VisibleChannelID() int64 { return e.voiceChannelID }
+func (e VoiceStateEvent) Payload() []byte         { return e.payload }
 
 // PluginBroadcastEvent is a plugin slash-command result broadcast to a channel
 // (sequenced, replayable). Emitted by the chat_command handler after the

@@ -15,6 +15,7 @@ import (
 	"github.com/owncord/server/auth"
 	"github.com/owncord/server/config"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/service"
 	"github.com/owncord/server/ws"
 )
@@ -1452,6 +1453,78 @@ func TestHandleVoiceJoin_FullFlow(t *testing.T) {
 	}
 }
 
+// TestVoiceState_NotDeliveredToRolesDeniedRead locks the visibility invariant
+// for voice metadata: voice_state / voice_leave used to go out via
+// BroadcastToAll, so every authenticated client learned the membership and
+// camera/mute state of voice channels that channel_overrides hides from their
+// role — even though the ready payload deliberately filters them out. A member
+// who can read the channel must still receive them.
+func TestVoiceState_NotDeliveredToRolesDeniedRead(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	joiner := seedCoverageOwner(t, database, "vs-joiner")
+	vcID := seedVoiceChannel(t, database, "vs-private-vc")
+
+	// Two plain members (role 4). One is locked out of the channel with the
+	// override the admin panel writes when "Can access" is unchecked.
+	newMember := func(name string) *db.User {
+		t.Helper()
+		if _, err := database.CreateUser(context.Background(), name, "hash", 4); err != nil {
+			t.Fatalf("CreateUser %s: %v", name, err)
+		}
+		u, err := database.GetUserByUsername(context.Background(), name)
+		if err != nil || u == nil {
+			t.Fatalf("GetUserByUsername %s: %v", name, err)
+		}
+		return u
+	}
+	insider := newMember("vs-insider")
+	outsiderRole := int64(3) // Moderator: a distinct role so the deny is role-scoped
+	outsider := newMember("vs-outsider")
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE users SET role_id = ? WHERE id = ?`, outsiderRole, outsider.ID,
+	); err != nil {
+		t.Fatalf("reassign outsider role: %v", err)
+	}
+	if err := database.UpsertChannelOverride(context.Background(), vcID, outsiderRole, 0,
+		permissions.ReadMessages|permissions.ConnectVoice); err != nil {
+		t.Fatalf("UpsertChannelOverride: %v", err)
+	}
+
+	insiderSend := make(chan []byte, 64)
+	outsiderSend := make(chan []byte, 64)
+	hub.Register(ws.NewTestClientWithUser(hub, insider, 0, insiderSend))
+	hub.Register(ws.NewTestClientWithUser(hub, outsider, 0, outsiderSend))
+
+	joinerSend := make(chan []byte, 64)
+	jc := ws.NewTestClientWithUser(hub, joiner, 0, joinerSend)
+	hub.Register(jc)
+	time.Sleep(30 * time.Millisecond)
+
+	raw, _ := json.Marshal(map[string]any{
+		"type":    "voice_join",
+		"payload": map[string]any{"channel_id": vcID},
+	})
+	hub.HandleMessageForTest(jc, raw)
+	time.Sleep(150 * time.Millisecond)
+
+	countVoiceState := func(ch <-chan []byte) int {
+		n := 0
+		for _, msg := range drainChanTimeout(ch, 300*time.Millisecond) {
+			var env map[string]any
+			if json.Unmarshal(msg, &env) == nil && env["type"] == "voice_state" {
+				n++
+			}
+		}
+		return n
+	}
+	if got := countVoiceState(insiderSend); got == 0 {
+		t.Error("a member who may READ the channel must still receive voice_state")
+	}
+	if got := countVoiceState(outsiderSend); got != 0 {
+		t.Errorf("a role denied READ received %d voice_state events, want 0", got)
+	}
+}
+
 func TestHandleVoiceJoin_AlreadyInSameChannel(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vj-same-user")
@@ -2407,9 +2480,14 @@ func TestHandleVoiceTokenRefresh_InVoice_ReturnsToken(t *testing.T) {
 }
 
 func TestHandleVoiceTokenRefresh_NilUser(t *testing.T) {
-	hub, _ := newCoverageHub(t)
+	hub, database := newCoverageHub(t)
+	// The client deliberately carries no *db.User — that is what this test
+	// covers — but the row must exist so the CONNECT_VOICE re-check can resolve
+	// a role. Without it the handler stops at FORBIDDEN and never reaches the
+	// missing-voice-state branch under test.
+	user := seedCoverageOwner(t, database, "vtr-nil-user")
 	send := make(chan []byte, 16)
-	c := ws.NewTestClient(hub, 1, send)
+	c := ws.NewTestClient(hub, user.ID, send)
 	hub.Register(c)
 	time.Sleep(20 * time.Millisecond)
 
@@ -2690,6 +2768,62 @@ func TestSweepStaleVoiceStates_MismatchedChannelIsGhost(t *testing.T) {
 	state, _ := database.GetVoiceState(context.Background(), user.ID)
 	if state != nil {
 		t.Error("mismatched voice state should be removed after sweep")
+	}
+}
+
+// TestSweepStaleVoiceStates_EvictsRevokedConnectVoice locks the revocation half
+// of the voice-permission invariant: nothing in ws re-validated CONNECT_VOICE
+// for a connection that stays open, so stripping the bit blocked future joins
+// but left the offender in the room. The sweep must now evict them — DB row
+// gone and the client's own voice state cleared.
+func TestSweepStaleVoiceStates_EvictsRevokedConnectVoice(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	// Member role (id 4), not Owner: admins bypass every channel check.
+	if _, err := database.CreateUser(context.Background(), "sweep-revoked", "hash", 4); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	user, err := database.GetUserByUsername(context.Background(), "sweep-revoked")
+	if err != nil || user == nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	vcID := seedVoiceChannel(t, database, "sweep-revoked-vc")
+
+	send := make(chan []byte, 64)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	time.Sleep(20 * time.Millisecond)
+
+	if joinErr := database.JoinVoiceChannel(context.Background(), user.ID, vcID); joinErr != nil {
+		t.Fatalf("JoinVoiceChannel: %v", joinErr)
+	}
+	vs, err := database.GetVoiceState(context.Background(), user.ID)
+	if err != nil || vs == nil {
+		t.Fatalf("GetVoiceState after join: %v", err)
+	}
+	ws.SetClientVoiceStateForTest(c, vcID, vs.JoinedAt)
+
+	// Still permitted → the sweep leaves them alone.
+	hub.SweepStaleVoiceStatesForTest()
+	time.Sleep(100 * time.Millisecond)
+	if state, _ := database.GetVoiceState(context.Background(), user.ID); state == nil {
+		t.Fatal("a permitted participant must survive the sweep")
+	}
+
+	// Moderator revokes CONNECT_VOICE on this channel for the Member role.
+	if permErr := database.UpsertChannelOverride(
+		context.Background(), vcID, 4, 0, permissions.ConnectVoice,
+	); permErr != nil {
+		t.Fatalf("UpsertChannelOverride: %v", permErr)
+	}
+
+	hub.SweepStaleVoiceStatesForTest()
+	time.Sleep(200 * time.Millisecond)
+
+	if state, _ := database.GetVoiceState(context.Background(), user.ID); state != nil {
+		t.Error("revoked participant's voice state must be deleted by the sweep")
+	}
+	if chID := ws.GetClientVoiceChIDForTest(c); chID != 0 {
+		t.Errorf("revoked participant's client voice state must be cleared, got channel %d", chID)
 	}
 }
 

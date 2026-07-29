@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -35,17 +36,31 @@ type uploadResponse struct {
 	Height   *int   `json:"height,omitempty"`
 }
 
-// sanitizeUploadFilename cleans an upload filename: strips control characters,
-// removes path separators, and truncates to a safe length.
+// sanitizeUploadFilename cleans an upload filename: strips control and
+// invisible formatting characters, removes path separators, and truncates to a
+// safe length.
 func sanitizeUploadFilename(name string) string {
 	// Strip path components — use only the base name.
 	name = filepath.Base(name)
-	// Remove control characters.
+	// filepath.Base only understands the *server* OS's separator, so a
+	// backslash survives on a Linux server and is then a path separator on the
+	// victim's Windows client, where the name is pre-filled into a save dialog.
+	if i := strings.LastIndexByte(name, '\\'); i >= 0 {
+		name = name[i+1:]
+	}
+	// Remove control characters and invisible formatting characters.
 	var sb strings.Builder
 	for _, r := range name {
-		if r >= 32 && r != 127 { // exclude control chars and DEL
-			sb.WriteRune(r)
+		// unicode.Cf covers the bidi overrides (U+202A–U+202E, U+2066–U+2069):
+		// invisible characters that reorder how the name renders, so an
+		// attachment can display a harmless-looking extension to every other
+		// member of the channel while really being an executable script — and
+		// the same string is what the native save dialog pre-fills. This is the
+		// rule auth.ValidateUsername already applies to usernames.
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+			continue
 		}
+		sb.WriteRune(r)
 	}
 	name = strings.TrimSpace(sb.String())
 	// Truncate to 255 characters (filesystem limit).
