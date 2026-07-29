@@ -295,7 +295,10 @@ func (h *Hub) Run() {
 					return
 				case ev := <-h.clientEvents:
 					if ev.add {
-						h.registerNow(ev.c)
+						// No handshake permission set on this path (and no DB
+						// call allowed on the hub goroutine) — nil denies the
+						// inherited voice-channel subscription.
+						h.registerNow(ev.c, nil)
 					} else {
 						h.unregisterNow(ev.c)
 					}
@@ -430,7 +433,12 @@ type clientEvent struct {
 	add bool
 }
 
-func (h *Hub) registerNow(c *Client) {
+// registerNow adds c to the hub and subscribes it to its topics.
+//
+// readableChannelIDs is the set of channels the user holds READ_MESSAGES on,
+// as computed by the handshake (serve.go). It gates the inherited voice-channel
+// subscription only; a nil set denies it (fail closed).
+func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 	h.mu.Lock()
 	if old, exists := h.clients[c.userID]; exists {
 		oldVoiceChID, oldVoiceJoinToken := old.clearVoiceState()
@@ -468,10 +476,12 @@ func (h *Hub) registerNow(c *Client) {
 	if chID := c.getChannelID(); chID != 0 {
 		h.pubsub.Subscribe(c, ChannelTopic(chID))
 	}
-	// If the client is already in a voice channel (e.g. reconnect or test setup),
-	// subscribe to that channel's topic so voice-scoped and channel-scoped
-	// broadcasts reach them.
-	if voiceChID := c.getVoiceChID(); voiceChID != 0 {
+	// If the client is already in a voice channel (e.g. reconnect), re-subscribe
+	// to that channel's topic so the message stream keeps flowing without a new
+	// channel_focus. Voice membership is gated on CONNECT_VOICE alone, so it must
+	// not by itself grant a channel's message stream: subscribe only when the
+	// handshake confirmed READ_MESSAGES on that channel.
+	if voiceChID := c.getVoiceChID(); voiceChID != 0 && readableChannelIDs[voiceChID] {
 		h.pubsub.Subscribe(c, ChannelTopic(voiceChID))
 	}
 }

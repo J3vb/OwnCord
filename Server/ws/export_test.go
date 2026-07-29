@@ -273,9 +273,16 @@ func WsToHTTPForTest(wsURL string) string {
 }
 
 // RegisterNowForTest exposes registerNow for external tests so clients are
-// visible immediately (no channel round-trip through hub.Run).
+// visible immediately (no channel round-trip through hub.Run). No channels are
+// readable, matching the hub-loop registration path.
 func (h *Hub) RegisterNowForTest(c *Client) {
-	h.registerNow(c)
+	h.registerNow(c, nil)
+}
+
+// RegisterNowWithReadableForTest exposes registerNow with an explicit
+// READ_MESSAGES channel set, as the handshake paths in serve.go supply it.
+func (h *Hub) RegisterNowWithReadableForTest(c *Client, readableChannelIDs map[int64]bool) {
+	h.registerNow(c, readableChannelIDs)
 }
 
 // ClearVoiceStateForTest exposes clearVoiceState for external tests.
