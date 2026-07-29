@@ -615,7 +615,7 @@ func TestSearch_TrustedProxyRateLimitUsesForwardedIP(t *testing.T) {
 	api.MountChannelRoutes(r, database, svc, limiter, []string{"127.0.0.0/8"})
 	token := chTestCreateToken(t, database, "proxysearch", 1)
 
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/search?q=test", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("X-Forwarded-For", fmt.Sprintf("198.51.100.%d", i+1))

@@ -44,12 +44,10 @@ func TestFetchTextAssetCachedCoalescesConcurrentMisses(t *testing.T) {
 	start := make(chan struct{})
 
 	for i := range callers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start // release all goroutines together to force a real burst
 			results[i], errs[i] = u.FetchTextAssetCached(context.Background(), srv.URL+"/asset")
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()

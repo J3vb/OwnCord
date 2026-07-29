@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/owncord/server/db"
@@ -49,10 +50,8 @@ func validateCategoryType(channelType, category string) string {
 		return ""
 	}
 	allowed := allowedChannelTypes(category)
-	for _, t := range allowed {
-		if t == channelType {
-			return ""
-		}
+	if slices.Contains(allowed, channelType) {
+		return ""
 	}
 	if isVoiceCategory(category) {
 		return "only voice channels can be created under a voice category"

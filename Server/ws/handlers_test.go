@@ -1228,7 +1228,7 @@ func TestChatEdit_RateLimit_ReturnsError(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// Exhaust the rate limit (chatRateLimit = 10 per second).
-	for i := 0; i < 11; i++ {
+	for i := range 11 {
 		hub.HandleMessageForTest(c, chatEditMsg(msgID, fmt.Sprintf("edit-%d", i)))
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -1822,7 +1822,6 @@ func TestPresence_InvalidStatus_ReturnsBadRequest(t *testing.T) {
 func TestPresence_ValidStatus_Broadcasts(t *testing.T) {
 	validStatuses := []string{"online", "idle", "dnd", "offline"}
 	for _, status := range validStatuses {
-		status := status
 		t.Run(status, func(t *testing.T) {
 			hub, database := newHandlerHub(t)
 			user := seedOwnerUser(t, database, "presence-valid-"+status)

@@ -80,7 +80,7 @@ func TestReconnect_BufferMiss_FallsBackToDBTier(t *testing.T) {
 	eventStore := openEventStoreDB(t)
 	bgCtx := context.Background()
 	for seq := int64(501); seq <= 600; seq++ {
-		payload := []byte(fmt.Sprintf(`{"seq":%d,"type":"broadcast"}`, seq))
+		payload := fmt.Appendf(nil, `{"seq":%d,"type":"broadcast"}`, seq)
 		if err := eventStore.PersistEvent(bgCtx, seq, "broadcast", 0, payload); err != nil {
 			t.Fatalf("PersistEvent seq=%d: %v", seq, err)
 		}

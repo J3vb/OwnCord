@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/owncord/server/auth"
@@ -31,34 +32,33 @@ func adminAuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			}
 
 			hash := auth.HashToken(token)
-			sess, err := database.GetSessionByTokenHash(r.Context(), hash)
-			if err != nil || sess == nil {
-				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session")
+			// Resolve the bearer token: login session first, then API token. An
+			// API token whose user carries the ADMINISTRATOR bit authenticates
+			// here too, so /admin/api/* works for headless clients.
+			user, role, sess, err := auth.ResolveTokenHash(r.Context(), database, hash)
+			if err != nil {
+				switch {
+				case errors.Is(err, auth.ErrTokenExpired):
+					writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "session has expired")
+				case errors.Is(err, auth.ErrUserNotFound):
+					writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "user not found")
+				case errors.Is(err, auth.ErrRoleNotFound):
+					writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "role not found")
+				default:
+					// ErrTokenNotFound or a wrapped DB error.
+					writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session")
+				}
 				return
 			}
 
-			if auth.IsSessionExpired(sess.ExpiresAt) {
-				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "session has expired")
-				return
-			}
-
-			user, err := database.GetUserByID(r.Context(), sess.UserID)
-			if err != nil || user == nil {
-				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "user not found")
-				return
-			}
-
-			// Reject effectively-banned users before any further processing, as
-			// api.AuthMiddleware does: a ban must revoke admin-panel access
-			// immediately, not only once the session expires.
+			// F1: reject effectively-banned users before any further processing,
+			// as api.AuthMiddleware does — a ban must revoke admin-panel access
+			// immediately, not only once the session expires. Deliberately placed
+			// AFTER ResolveTokenHash so it also covers the API-token path this
+			// commit introduces; gating only the session branch would let a
+			// banned administrator keep working through a bot token.
 			if auth.IsEffectivelyBanned(user) {
 				writeErr(w, http.StatusForbidden, "FORBIDDEN", "your account has been suspended")
-				return
-			}
-
-			role, err := database.GetRoleByID(r.Context(), user.RoleID)
-			if err != nil || role == nil {
-				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "role not found")
 				return
 			}
 
@@ -68,7 +68,7 @@ func adminAuthMiddleware(database *db.DB) func(http.Handler) http.Handler {
 			}
 
 			ctx := context.WithValue(r.Context(), adminUserKey, user)
-			ctx = context.WithValue(ctx, adminSessionKey, sess)
+			ctx = context.WithValue(ctx, adminSessionKey, sess) // nil for API-token principals; consumers guard nil
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

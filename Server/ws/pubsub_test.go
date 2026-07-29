@@ -2,7 +2,7 @@ package ws
 
 import (
 	"bytes"
-	"sort"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -222,7 +222,7 @@ func TestPubSub_TopicsForClient(t *testing.T) {
 	ps.Subscribe(c, UserTopic(1))
 
 	topics := ps.TopicsForClient(1)
-	sort.Slice(topics, func(i, j int) bool { return topics[i] < topics[j] })
+	slices.Sort(topics)
 
 	expected := []Topic{"channel:10", TopicGlobal, UserTopic(1)}
 	if len(topics) != len(expected) {
@@ -264,7 +264,7 @@ func TestPubSub_ConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(N * 3) // subscribe + publish + unsubscribe
 
-	for i := 0; i < N; i++ {
+	for i := range N {
 		c := makeTestClient(int64(i))
 		go func() {
 			defer wg.Done()

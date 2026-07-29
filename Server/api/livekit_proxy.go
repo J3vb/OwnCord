@@ -64,7 +64,7 @@ func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 		// blocked/admin endpoint simply by sending an Upgrade header.
 
 		// Block sensitive LiveKit endpoints (exact segment match).
-		for _, seg := range strings.Split(strings.ToLower(r.URL.Path), "/") {
+		for seg := range strings.SplitSeq(strings.ToLower(r.URL.Path), "/") {
 			if blockedSegments[seg] {
 				writeJSON(w, http.StatusForbidden, errorResponse{
 					Error:   "FORBIDDEN",

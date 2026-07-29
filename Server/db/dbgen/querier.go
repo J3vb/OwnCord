@@ -25,6 +25,7 @@ type Querier interface {
 	CountChannels(ctx context.Context) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CountUsersWithoutTOTP(ctx context.Context) (int64, error)
+	CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (sql.Result, error)
 	CreateAttachment(ctx context.Context, arg CreateAttachmentParams) error
 	CreateChannel(ctx context.Context, arg CreateChannelParams) (sql.Result, error)
 	CreateInvite(ctx context.Context, arg CreateInviteParams) error
@@ -44,6 +45,10 @@ type Querier interface {
 	EnablePlugin(ctx context.Context, id int64) error
 	EvictOldestSessions(ctx context.Context, arg EvictOldestSessionsParams) error
 	ForceLogoutUser(ctx context.Context, userID int64) error
+	// Auth-hot lookup: returns the token only if it is neither revoked nor expired,
+	// so a resolved row is always usable. Matches the sessions never-expiring
+	// convention (expires_at IS NULL).
+	GetActiveAPIToken(ctx context.Context, tokenHash string) (ApiToken, error)
 	GetAllSettings(ctx context.Context) ([]Setting, error)
 	GetAllVoiceStates(ctx context.Context) ([]GetAllVoiceStatesRow, error)
 	GetAttachmentByID(ctx context.Context, id string) (GetAttachmentByIDRow, error)
@@ -60,6 +65,14 @@ type Querier interface {
 	GetMaxEventSeq(ctx context.Context) (int64, error)
 	GetMessage(ctx context.Context, id int64) (Message, error)
 	GetMessagesForAPI(ctx context.Context, arg GetMessagesForAPIParams) ([]GetMessagesForAPIRow, error)
+	// The highest-privilege account (role with the greatest position), used as the
+	// default identity for `token create`. FROM is users-only (role position is a
+	// correlated subquery, not a join) so the row maps through userFromGen exactly
+	// like GetUserByID, so keep this SELECT list identical to GetUserByID's.
+	// A :one query already reads a single row via QueryRow, so no LIMIT is needed
+	// (and an explicit LIMIT 1 is mis-emitted by sqlc here). ORDER BY puts the
+	// highest-position role first, so that first row is the owner.
+	GetOwnerUser(ctx context.Context) (User, error)
 	GetReactionCounts(ctx context.Context, messageID int64) ([]GetReactionCountsRow, error)
 	GetRoleByID(ctx context.Context, id int64) (Role, error)
 	GetRoleChannelPermissions(ctx context.Context, roleID int64) ([]GetRoleChannelPermissionsRow, error)
@@ -82,6 +95,9 @@ type Querier interface {
 	JoinVoiceChannelIfCapacity(ctx context.Context, arg JoinVoiceChannelIfCapacityParams) (sql.Result, error)
 	LeaveVoiceChannel(ctx context.Context, userID int64) error
 	LeaveVoiceChannelIfMatch(ctx context.Context, arg LeaveVoiceChannelIfMatchParams) (sql.Result, error)
+	// Admin/CLI listing. Never selects token_hash (unrecoverable; only the raw
+	// token shown at creation is usable).
+	ListAPITokens(ctx context.Context) ([]ListAPITokensRow, error)
 	ListAllUsers(ctx context.Context, arg ListAllUsersParams) ([]ListAllUsersRow, error)
 	ListBlockedUsers(ctx context.Context, blockerID int64) ([]int64, error)
 	ListChannels(ctx context.Context) ([]ListChannelsRow, error)
@@ -101,12 +117,15 @@ type Querier interface {
 	PruneEventsOlderThan(ctx context.Context, createdAt time.Time) (int64, error)
 	RemoveReaction(ctx context.Context, arg RemoveReactionParams) (sql.Result, error)
 	ResetAllUserStatuses(ctx context.Context) error
+	RevokeAPIToken(ctx context.Context, id int64) (sql.Result, error)
+	RevokeAPITokenByLabel(ctx context.Context, label string) (sql.Result, error)
 	RevokeInvite(ctx context.Context, code string) error
 	SetChannelSlowMode(ctx context.Context, arg SetChannelSlowModeParams) error
 	SetChannelVoiceMaxUsers(ctx context.Context, arg SetChannelVoiceMaxUsersParams) error
 	SetMessagePinned(ctx context.Context, arg SetMessagePinnedParams) (sql.Result, error)
 	SetSetting(ctx context.Context, arg SetSettingParams) error
 	SoftDeleteMessage(ctx context.Context, id int64) error
+	TouchAPIToken(ctx context.Context, tokenHash string) error
 	TouchSession(ctx context.Context, token string) error
 	UnbanUser(ctx context.Context, id int64) error
 	UnblockUser(ctx context.Context, arg UnblockUserParams) error

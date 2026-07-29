@@ -74,7 +74,7 @@ func TestHandleVoiceLeaveV2_RateLimited(t *testing.T) {
 
 	// voiceLeaveRateLimit (5) per voiceLeaveWindow (1s) — the 6th is rejected.
 	var limited bool
-	for i := 0; i < voiceLeaveRateLimit+1; i++ {
+	for range voiceLeaveRateLimit + 1 {
 		res := handleVoiceLeaveV2(context.Background(), cmd, info, deps)
 		if res.Error != nil {
 			ce, ok := res.Error.(ClientError)

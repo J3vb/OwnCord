@@ -2,6 +2,7 @@ package ws
 
 import (
 	"log/slog"
+	"slices"
 
 	"github.com/coder/websocket"
 )
@@ -23,11 +24,9 @@ func OriginAcceptOptions(allowedOrigins []string) *websocket.AcceptOptions {
 		return &websocket.AcceptOptions{InsecureSkipVerify: false}
 	}
 
-	for _, o := range allowedOrigins {
-		if o == "*" {
-			slog.Warn("ws: allowed_origins contains wildcard '*' — accepting connections from ANY origin (insecure)")
-			return &websocket.AcceptOptions{InsecureSkipVerify: true}
-		}
+	if slices.Contains(allowedOrigins, "*") {
+		slog.Warn("ws: allowed_origins contains wildcard '*' — accepting connections from ANY origin (insecure)")
+		return &websocket.AcceptOptions{InsecureSkipVerify: true}
 	}
 
 	return &websocket.AcceptOptions{

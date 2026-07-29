@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 | `015_plugins.sql` | Adds `plugins` and `plugin_kv` for the WASM plugin runtime |
 | `016_announcement_channel_type.sql` | Recreates the channel-type triggers to allow `announcement` |
 | `017_user_identity_key.sql` | Adds `users.identity_public_key` (long-term E2EE identity key for voice TOFU) |
+| `018_api_tokens.sql` | Adds `api_tokens` — long-lived, revocable bearer tokens for headless clients (bot/service auth) |
 
 ---
 
@@ -135,6 +136,30 @@ CREATE TABLE sessions (
 ```
 
 Session TTL: 30 days. Token is stored as SHA-256 hash.
+
+---
+
+### api_tokens
+
+```sql
+CREATE TABLE api_tokens (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash   TEXT    NOT NULL UNIQUE,
+    label        TEXT    NOT NULL DEFAULT '',
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    last_used_at TEXT,
+    expires_at   TEXT,
+    revoked_at   TEXT
+);
+```
+
+Long-lived, revocable bearer tokens for headless clients (bots, CI, the introspection
+MCP tool). A token authenticates as `user_id`, inheriting that user's role/permissions,
+and is resolved by the same middleware as sessions (see `auth.ResolveTokenHash`). Only the
+SHA-256 hash is stored; the raw token is shown once at creation. `expires_at` NULL = never
+expires; `revoked_at` NULL = active. Mint/list/revoke via `server token …`. Separate from
+`sessions` so bulk logout and the per-user session cap never affect these.
 
 ---
 

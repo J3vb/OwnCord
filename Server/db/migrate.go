@@ -235,7 +235,7 @@ func splitStatements(raw string) []string {
 	var buf strings.Builder
 	depth := 0
 
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		trimmed := strings.TrimSpace(line)
 
 		// Track BEGIN...END depth for trigger bodies.
@@ -310,7 +310,7 @@ func splitStatements(raw string) []string {
 
 // isCommentOnly returns true if every line is a SQL comment or blank.
 func isCommentOnly(s string) bool {
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" && !strings.HasPrefix(line, "--") {
 			return false

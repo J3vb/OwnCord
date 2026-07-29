@@ -34,6 +34,33 @@ type Session struct {
 	ExpiresAt string
 }
 
+// APIToken represents a row in the api_tokens table — a long-lived, revocable
+// bearer token that authenticates as UserID with that user's role/permissions.
+// Raw tokens are never stored; TokenHash is the SHA-256 hex, like Session.
+type APIToken struct {
+	ID        int64
+	UserID    int64
+	TokenHash string `json:"-"`
+	Label     string
+	CreatedAt string
+	LastUsed  *string
+	ExpiresAt *string // nil = never expires
+	RevokedAt *string // nil = active
+}
+
+// APITokenListItem is one row of the admin/CLI token listing. It carries the
+// owning user's name for display and deliberately omits the hash.
+type APITokenListItem struct {
+	ID        int64   `json:"id"`
+	UserID    int64   `json:"user_id"`
+	Username  string  `json:"username"`
+	Label     string  `json:"label"`
+	CreatedAt string  `json:"created_at"`
+	LastUsed  *string `json:"last_used"`
+	ExpiresAt *string `json:"expires_at"`
+	RevokedAt *string `json:"revoked_at"`
+}
+
 // Invite represents a row in the invites table.
 type Invite struct {
 	ID        int64

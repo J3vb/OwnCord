@@ -227,9 +227,6 @@ func TestIsSessionExpired_ExactlyNow(t *testing.T) {
 
 // ─── IsEffectivelyBanned ──────────────────────────────────────────────────────
 
-// ptr is a helper to get a pointer to a string literal.
-func ptr(s string) *string { return &s }
-
 func TestIsEffectivelyBanned_NotBanned(t *testing.T) {
 	u := &db.User{Banned: false}
 	if auth.IsEffectivelyBanned(u) {
@@ -248,7 +245,7 @@ func TestIsEffectivelyBanned_BannedNilExpiry(t *testing.T) {
 func TestIsEffectivelyBanned_BannedFutureExpiry(t *testing.T) {
 	// Banned with an expiry in the future — still banned.
 	future := time.Now().UTC().Add(time.Hour).Format("2006-01-02 15:04:05")
-	u := &db.User{Banned: true, BanExpires: ptr(future)}
+	u := &db.User{Banned: true, BanExpires: new(future)}
 	if !auth.IsEffectivelyBanned(u) {
 		t.Error("IsEffectivelyBanned(Banned=true, future expiry) = false, want true")
 	}
@@ -257,7 +254,7 @@ func TestIsEffectivelyBanned_BannedFutureExpiry(t *testing.T) {
 func TestIsEffectivelyBanned_BannedPastExpiry(t *testing.T) {
 	// Banned but the ban expired in the past — should be treated as NOT banned.
 	past := time.Now().UTC().Add(-time.Hour).Format("2006-01-02 15:04:05")
-	u := &db.User{Banned: true, BanExpires: ptr(past)}
+	u := &db.User{Banned: true, BanExpires: new(past)}
 	if auth.IsEffectivelyBanned(u) {
 		t.Error("IsEffectivelyBanned(Banned=true, past expiry) = true, want false")
 	}
@@ -266,7 +263,7 @@ func TestIsEffectivelyBanned_BannedPastExpiry(t *testing.T) {
 func TestIsEffectivelyBanned_BannedExpiredISO8601(t *testing.T) {
 	// ISO-8601 format for BanExpires past — should be treated as NOT banned.
 	past := time.Now().UTC().Add(-time.Minute).Format("2006-01-02T15:04:05Z")
-	u := &db.User{Banned: true, BanExpires: ptr(past)}
+	u := &db.User{Banned: true, BanExpires: new(past)}
 	if auth.IsEffectivelyBanned(u) {
 		t.Error("IsEffectivelyBanned(Banned=true, ISO-8601 past expiry) = true, want false")
 	}
@@ -275,7 +272,7 @@ func TestIsEffectivelyBanned_BannedExpiredISO8601(t *testing.T) {
 func TestIsEffectivelyBanned_BannedFutureISO8601(t *testing.T) {
 	// ISO-8601 format for BanExpires in future — still banned.
 	future := time.Now().UTC().Add(time.Hour).Format("2006-01-02T15:04:05Z")
-	u := &db.User{Banned: true, BanExpires: ptr(future)}
+	u := &db.User{Banned: true, BanExpires: new(future)}
 	if !auth.IsEffectivelyBanned(u) {
 		t.Error("IsEffectivelyBanned(Banned=true, ISO-8601 future expiry) = false, want true")
 	}
@@ -283,7 +280,7 @@ func TestIsEffectivelyBanned_BannedFutureISO8601(t *testing.T) {
 
 func TestIsEffectivelyBanned_BannedUnparsableExpiry(t *testing.T) {
 	// Unparseable expiry string — fail-safe: treat as still banned.
-	u := &db.User{Banned: true, BanExpires: ptr("not-a-date")}
+	u := &db.User{Banned: true, BanExpires: new("not-a-date")}
 	if !auth.IsEffectivelyBanned(u) {
 		t.Error("IsEffectivelyBanned(Banned=true, unparseable expiry) = false, want true (fail-safe)")
 	}
@@ -292,7 +289,7 @@ func TestIsEffectivelyBanned_BannedUnparsableExpiry(t *testing.T) {
 func TestIsEffectivelyBanned_NotBannedIgnoresExpiry(t *testing.T) {
 	// Banned=false even with a future expiry field — should be false.
 	future := time.Now().UTC().Add(time.Hour).Format("2006-01-02 15:04:05")
-	u := &db.User{Banned: false, BanExpires: ptr(future)}
+	u := &db.User{Banned: false, BanExpires: new(future)}
 	if auth.IsEffectivelyBanned(u) {
 		t.Error("IsEffectivelyBanned(Banned=false, future expiry) = true, want false")
 	}

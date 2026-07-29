@@ -50,6 +50,17 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.Put("/channels/{id}/permissions/{roleId}", handlePutChannelPermission(database, hub, permInvalidator))
 		r.Delete("/channels/{id}/permissions/{roleId}", handleDeleteChannelPermission(database, hub, permInvalidator))
 		r.Get("/audit-log", handleGetAuditLog(database))
+		// API tokens — Owner-only. Minting a network-reachable, revocation-
+		// surviving bearer credential is gated like backups/updates.
+		r.Get("/tokens", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			ownerOnlyMiddleware(database, handleListAPITokens(database)).ServeHTTP(w, req)
+		}))
+		r.Post("/tokens", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			ownerOnlyMiddleware(database, handleCreateAPIToken(database)).ServeHTTP(w, req)
+		}))
+		r.Delete("/tokens/{id}", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			ownerOnlyMiddleware(database, handleRevokeAPIToken(database)).ServeHTTP(w, req)
+		}))
 		r.Get("/settings", handleGetSettings(database))
 		r.Patch("/settings", handlePatchSettings(database))
 		r.Post("/backup", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

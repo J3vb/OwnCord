@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -196,10 +197,8 @@ func validateRelativePath(p string) error {
 	if cleaned == "." {
 		return fmt.Errorf("path %q refers to the current directory", p)
 	}
-	for _, seg := range strings.Split(cleaned, "/") {
-		if seg == ".." {
-			return fmt.Errorf("path %q contains parent traversal", p)
-		}
+	if slices.Contains(strings.Split(cleaned, "/"), "..") {
+		return fmt.Errorf("path %q contains parent traversal", p)
 	}
 	return nil
 }

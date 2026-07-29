@@ -787,8 +787,8 @@ func (s *StagedBinary) Close() error {
 // ParseChecksumFile parses a sha256sum-format checksum file (lines of
 // "<hash>  <filename>") and returns the hash for the given filename.
 func (u *Updater) ParseChecksumFile(data []byte, filename string) (string, error) {
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(string(data), "\n")
+	for line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

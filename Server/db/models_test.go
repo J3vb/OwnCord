@@ -71,7 +71,7 @@ func TestRole_NilColor(t *testing.T) {
 	role := db.Role{ID: 1, Name: "member"}
 	data, _ := json.Marshal(role)
 
-	var raw map[string]interface{}
+	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}

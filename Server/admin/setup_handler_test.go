@@ -156,7 +156,7 @@ func TestSetup_ConcurrentRace(t *testing.T) {
 
 	// Launch goroutines simultaneously.
 	start := make(chan struct{})
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(n int) {
 			<-start // wait for the gate
 			rr := doRequest(t, handler, "POST", "/setup", "", map[string]string{
@@ -169,7 +169,7 @@ func TestSetup_ConcurrentRace(t *testing.T) {
 	close(start) // release all goroutines at once
 
 	created := 0
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		code := <-results
 		switch code {
 		case http.StatusCreated:

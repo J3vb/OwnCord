@@ -372,6 +372,7 @@ const NAV=[
   {sep:true},
   {section:'Configuration'},
   {id:'audit',label:'Audit Log',icon:I.audit},
+  {id:'tokens',label:'API Tokens',icon:I.lock},
   {id:'logs',label:'Server Logs',icon:I.logs},
   {id:'settings',label:'Settings',icon:I.settings,unsaved:()=>state.settingsChanged},
   {id:'backups',label:'Backups',icon:I.backup},
@@ -408,7 +409,7 @@ function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEven
 /* ═══ Content Router ═══ */
 function renderContent(){
   const c=document.getElementById('content');if(!c)return;c.scrollTop=0;
-  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,audit:renderAudit,logs:renderLogs,settings:renderSettings,backups:renderBackups,updates:renderUpdates};
+  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,audit:renderAudit,tokens:renderTokens,logs:renderLogs,settings:renderSettings,backups:renderBackups,updates:renderUpdates};
   c.innerHTML='<div class="page-title">Loading...</div>';
   const fn=r[state.section];
   if(typeof fn!=='function'){console.error('[Admin] No render function for section: '+state.section);c.innerHTML='<div class="page-title">Error</div><p style="color:var(--red)">Unknown section: '+esc(state.section)+'</p><button class="btn btn-accent" onclick="navigateTo(\'dashboard\')">Back to Dashboard</button>';return}
@@ -860,6 +861,68 @@ async function confirmRestore(name){
 
 async function confirmDeleteBackup(name){
   try{await fetch('/admin/api/backups/'+encodeURIComponent(name),{method:'DELETE',headers:{'Authorization':'Bearer '+state.token}});showToast('Backup deleted');renderContent()}catch(e){showToast(e.message,'error')}
+}
+
+/* ═══ API Tokens ═══ */
+function tokenStatus(t){
+  if(t.revoked_at)return'<span class="badge badge-red">Revoked</span>';
+  if(t.expires_at&&new Date(t.expires_at)<new Date())return'<span class="badge badge-yellow">Expired</span>';
+  return'<span class="badge badge-green">Active</span>';
+}
+async function renderTokens(){
+  let tokens;
+  try{tokens=await api('GET','/tokens')}catch(e){return'<div class="page-title">API Tokens</div><p style="color:var(--red)">'+esc(e.message)+'</p>'}
+  let html='<div class="page-title">API Tokens</div><div class="page-desc">Long-lived bearer tokens for bots, CI, and the introspection MCP tool. A token authenticates as its bound user. Owner only.</div>';
+  html+='<div style="margin-bottom:16px"><button class="btn btn-accent" onclick="openCreateTokenModal()">'+I.plus+' Create Token</button></div>';
+  html+='<div class="section-card"><div class="section-card-header"><h3>Tokens</h3></div><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Label</th><th>User</th><th>Created</th><th>Last Used</th><th>Expires</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
+  if(!tokens||!tokens.length)html+='<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:24px">No API tokens</td></tr>';
+  else tokens.forEach(t=>{
+    const revoked=!!t.revoked_at;
+    html+='<tr><td>'+esc(t.label||'—')+'</td><td>'+esc(t.username)+'</td>';
+    html+='<td>'+(t.created_at?new Date(t.created_at).toLocaleString():'')+'</td>';
+    html+='<td>'+(t.last_used?new Date(t.last_used).toLocaleString():'<span style="color:var(--text-faint)">never</span>')+'</td>';
+    html+='<td>'+(t.expires_at?new Date(t.expires_at).toLocaleString():'<span style="color:var(--text-faint)">never</span>')+'</td>';
+    html+='<td>'+tokenStatus(t)+'</td>';
+    html+='<td><div class="act-group" style="justify-content:flex-end">'+(revoked?'':'<button class="act-btn danger" title="Revoke" onclick="confirmRevokeToken('+t.id+',\''+jsq(t.label)+'\')">'+I.trash+'</button>')+'</div></td></tr>';
+  });
+  html+='</tbody></table></div></div>';
+  return html;
+}
+
+function openCreateTokenModal(){
+  openModal('<div class="modal-header"><h3>Create API Token</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>'+
+    '<div class="modal-body"><div class="form-group"><label class="form-label">Label</label><input id="tokLabel" class="form-input" placeholder="ci-bot" autofocus></div>'+
+    '<div class="form-group"><label class="form-label">User <span style="color:var(--text-faint)">(optional)</span></label><input id="tokUser" class="form-input" placeholder="owner (default)"></div>'+
+    '<div class="form-group"><label class="form-label">Expires in hours <span style="color:var(--text-faint)">(0 = never)</span></label><input id="tokExpires" class="form-input" type="number" min="0" value="0"></div></div>'+
+    '<div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="createToken()">Create</button></div>');
+}
+
+async function createToken(){
+  const label=document.getElementById('tokLabel').value.trim();
+  const user=document.getElementById('tokUser').value.trim();
+  const expires=parseInt(document.getElementById('tokExpires').value,10)||0;
+  if(!label){showToast('Label is required','error');return}
+  try{
+    const d=await api('POST','/tokens',{label,username:user,expires_hours:expires});
+    showTokenOnceModal(d);
+  }catch(e){showToast(e.message,'error')}
+}
+
+// The raw token is shown exactly once here — it is never recoverable afterward.
+function showTokenOnceModal(d){
+  openModal('<div class="modal-header"><h3>Token Created</h3><button class="modal-close" onclick="closeModal();renderContent()">&times;</button></div>'+
+    '<div class="modal-body"><p style="color:var(--text-muted)">Store this token now — it is shown only once and cannot be recovered. Bound to <strong style="color:white">'+esc(d.user)+'</strong>.</p>'+
+    '<div style="display:flex;gap:8px;margin-top:12px"><code style="flex:1;font-family:var(--font-mono);font-size:12px;background:var(--bg-active);padding:10px;border-radius:var(--radius-sm);word-break:break-all">'+esc(d.token)+'</code>'+
+    '<button class="btn btn-ghost" onclick="copyToken(\''+jsq(d.token)+'\')">Copy</button></div></div>'+
+    '<div class="modal-footer"><button class="btn btn-accent" onclick="closeModal();renderContent()">Done</button></div>');
+}
+function copyToken(t){navigator.clipboard.writeText(t).then(()=>showToast('Copied!','info'))}
+
+function confirmRevokeToken(id,label){
+  openModal('<div class="modal-header"><h3>Revoke Token</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Revoke <strong style="color:white">'+esc(label||('#'+id))+'</strong>? Any client using it will immediately lose access. This cannot be undone.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="revokeToken('+id+')">Revoke</button></div>');
+}
+async function revokeToken(id){
+  try{await api('DELETE','/tokens/'+id);closeModal();showToast('Token revoked');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
 /* ═══ Updates ═══ */

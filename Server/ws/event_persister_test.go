@@ -37,7 +37,7 @@ func TestEventPersisterFlushesBatch(t *testing.T) {
 	p.Start(ctx)
 	t.Cleanup(func() { p.Stop(ctx) })
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		p.Enqueue(int64(i+1), "broadcast", 0, []byte(`{"type":"x"}`))
 	}
 
@@ -77,7 +77,7 @@ func TestEventPersisterDropsOnFullQueue(t *testing.T) {
 	// flusher won't drain fast enough.
 	p := NewEventPersister(mem, 2, 1024, time.Hour)
 	// NB: Start is intentionally NOT called so the queue stays full.
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		p.Enqueue(int64(i+1), "broadcast", 0, []byte(`{}`))
 	}
 	// Stop without Start — must not deadlock.
@@ -95,7 +95,7 @@ func TestEventPersisterStopDrains(t *testing.T) {
 	p := NewEventPersister(mem, 256, 100, time.Hour)
 	p.Start(context.Background())
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		p.Enqueue(int64(i+1), "broadcast", 0, []byte(`{}`))
 	}
 

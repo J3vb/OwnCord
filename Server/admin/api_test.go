@@ -130,6 +130,17 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash   TEXT    NOT NULL UNIQUE,
+    label        TEXT    NOT NULL DEFAULT '',
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    last_used_at TEXT,
+    expires_at   TEXT,
+    revoked_at   TEXT
+);
+
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -1273,6 +1284,138 @@ func TestAdminAPI_DeleteChannel_NilHubDoesNotPanic(t *testing.T) {
 
 	if w.Code != http.StatusNoContent {
 		t.Errorf("status = %d, want 204", w.Code)
+	}
+}
+
+// ─── API tokens: /admin/api/tokens ───────────────────────────────────────────
+
+func TestAdminAPI_CreateAPIToken_OK(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
+	token := createAdminUser(t, database) // Owner role
+
+	w := doRequest(t, handler, http.MethodPost, "/tokens", token, map[string]any{"label": "ci-bot"})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	raw, _ := resp["token"].(string)
+	if raw == "" {
+		t.Fatal("response missing raw token")
+	}
+	// The minted token must actually authenticate as the owner it was bound to.
+	user, _, _, err := auth.ResolveTokenHash(context.Background(), database, auth.HashToken(raw))
+	if err != nil || user == nil {
+		t.Fatalf("minted token does not resolve: user=%v err=%v", user, err)
+	}
+	// And it must be listed, without any hash leaking.
+	tokens, _ := database.ListAPITokens(context.Background())
+	if len(tokens) != 1 || tokens[0].Label != "ci-bot" {
+		t.Fatalf("expected 1 token labelled ci-bot, got %+v", tokens)
+	}
+}
+
+func TestAdminAPI_CreateAPIToken_MissingLabel(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
+	token := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodPost, "/tokens", token, map[string]any{"label": "  "})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAdminAPI_ListAPITokens_OK(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
+	token := createAdminUser(t, database)
+
+	hash := auth.HashToken("raw-secret-value")
+	if _, err := database.CreateAPIToken(context.Background(), 1, hash, "seeded", nil); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	w := doRequest(t, handler, http.MethodGet, "/tokens", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), hash) {
+		t.Error("GET /tokens leaked the token hash")
+	}
+	var tokens []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &tokens); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(tokens) != 1 {
+		t.Fatalf("expected 1 token, got %d", len(tokens))
+	}
+	if _, ok := tokens[0]["created_at"]; !ok {
+		t.Error("token row missing snake_case 'created_at' field")
+	}
+}
+
+func TestAdminAPI_RevokeAPIToken_OK(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
+	token := createAdminUser(t, database)
+
+	hash := auth.HashToken("revoke-me")
+	id, err := database.CreateAPIToken(context.Background(), 1, hash, "doomed", nil)
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	w := doRequest(t, handler, http.MethodDelete, "/tokens/"+itoa(id), token, nil)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body: %s", w.Code, w.Body.String())
+	}
+	// A revoked token must no longer authenticate.
+	active, _ := database.GetActiveAPIToken(context.Background(), hash)
+	if active != nil {
+		t.Error("token still active after revoke")
+	}
+}
+
+func TestAdminAPI_RevokeAPIToken_NotFound(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
+	token := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodDelete, "/tokens/99999", token, nil)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+// TestAdminAPI_Tokens_RequiresOwner locks the Owner gate: a non-Owner admin can
+// authenticate to /admin/api but must not mint API tokens (the credential that
+// survives password change + bulk logout).
+func TestAdminAPI_Tokens_RequiresOwner(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
+
+	adminUID, _ := database.CreateUser(context.Background(), "adminonly", "hash", 2) // Admin, not Owner
+	token := "admin-only-token"
+	_, _ = database.CreateSession(context.Background(), adminUID, auth.HashToken(token), "test", "127.0.0.1")
+
+	w := doRequest(t, handler, http.MethodPost, "/tokens", token, map[string]any{"label": "nope"})
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAdminAPI_Tokens_Unauthenticated(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
+
+	w := doRequest(t, handler, http.MethodGet, "/tokens", "", nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", w.Code)
 	}
 }
 
