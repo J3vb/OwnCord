@@ -618,6 +618,77 @@ func TestUpload_SanitizesReservedFilenameToUnnamed(t *testing.T) {
 	}
 }
 
+// TestUpload_StripsBidiOverrideAndForeignSeparator locks the two gaps in
+// sanitizeUploadFilename. The sanitizer filtered ASCII control bytes only, so
+// U+202E RIGHT-TO-LEFT OVERRIDE survived into attachments.filename and was
+// reflected to every other member of the channel — and into the native save
+// dialog the client pre-fills — making a script display as though it ended in
+// ".txt". Separately, filepath.Base only strips the server OS's separator, so a
+// backslash survived on a Linux server and is a path separator on the victim's
+// Windows client.
+func TestUpload_StripsBidiOverrideAndForeignSeparator(t *testing.T) {
+	// Escaped rather than embedded: a literal U+202E would reorder this source
+	// file in every editor and terminal that renders it — which is the whole
+	// primitive under test.
+	const rtlOverride = "\u202e"
+
+	cases := []struct {
+		name     string
+		upload   string
+		wantName string
+	}{
+		{
+			name:     "bidi override removed",
+			upload:   "Q3_Report" + rtlOverride + "txt.bat",
+			wantName: "Q3_Reporttxt.bat",
+		},
+		{
+			name:     "other invisible formatting characters removed",
+			upload:   "in\u200bvoice\u2066.pdf", // ZERO WIDTH SPACE, LEFT-TO-RIGHT ISOLATE
+			wantName: "invoice.pdf",
+		},
+		{
+			name:     "backslash path stripped regardless of server OS",
+			upload:   `..\..\Windows\evil.bat`,
+			wantName: "evil.bat",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			database := newUploadTestDB(t)
+			store := newUploadTestStorage(t)
+			router := buildUploadRouter(database, store, nil)
+			token := uploadCreateToken(t, database, "bidi"+strings.ReplaceAll(tc.name, " ", ""), 1)
+
+			rr := doUpload(t, router, token, "file", tc.upload, []byte("@echo off\r\n"))
+			if rr.Code != http.StatusCreated {
+				t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
+			}
+			var resp map[string]any
+			if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			got, _ := resp["filename"].(string)
+			if got != tc.wantName {
+				t.Errorf("filename = %q, want %q", got, tc.wantName)
+			}
+
+			// The stored record must match — it is what every other client renders.
+			att, err := database.GetAttachmentByID(context.Background(), resp["id"].(string))
+			if err != nil || att == nil {
+				t.Fatalf("GetAttachmentByID: %v", err)
+			}
+			if att.Filename != tc.wantName {
+				t.Errorf("DB filename = %q, want %q", att.Filename, tc.wantName)
+			}
+			if strings.ContainsAny(att.Filename, "\\/") {
+				t.Errorf("stored filename %q still contains a path separator", att.Filename)
+			}
+		})
+	}
+}
+
 func TestUpload_SuccessfulUploadCreatesDBRecord(t *testing.T) {
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
