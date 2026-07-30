@@ -1,8 +1,12 @@
 name: CI
 
 on:
+  # dev is deliberately not a push trigger: while a dev -> main PR is open every
+  # push to dev already fires pull_request(synchronize), so listing it here ran
+  # the whole suite twice for one push. Use workflow_dispatch for a dev branch
+  # with no PR open yet.
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
     branches: [main, dev]
   workflow_dispatch:
