@@ -544,28 +544,36 @@ func (h *Hub) BroadcastToAll(msg []byte) {
 // The audience is resolved here, on the caller's goroutine, so the hub's
 // dispatch loop never blocks on permission lookups.
 func (h *Hub) broadcastVoiceEvent(ctx context.Context, channelID int64, msg []byte) {
+	h.broadcastChannelScoped(ctx, channelID, msg, "voice event")
+}
+
+// broadcastChannelScoped enqueues msg for exactly the connected clients whose
+// current role may READ channelID, tagged with that channel id so reconnect
+// replay filters it too (EventsSinceFiltered replays a channelID of 0
+// unconditionally). kind only labels the drop warning.
+func (h *Hub) broadcastChannelScoped(ctx context.Context, channelID int64, msg []byte, kind string) {
 	bm := broadcastMsg{
 		channelID:  channelID,
 		msg:        msg,
-		recipients: h.voiceEventAudience(ctx, channelID),
+		recipients: h.channelReadAudience(ctx, channelID),
 	}
 	select {
 	case h.broadcast <- bm:
 	default:
 		h.broadcastDrops.Add(1)
-		slog.Warn("hub: broadcast channel full, dropping voice event",
+		slog.Warn("hub: broadcast channel full, dropping "+kind,
 			"channel_id", channelID, "msg_len", len(msg))
 	}
 }
 
-// voiceEventAudience returns the connected user IDs whose current role may READ
+// channelReadAudience returns the connected user IDs whose current role may READ
 // channelID. Always non-nil, so an empty result means "deliver to nobody"
 // rather than "no filter". Roles are resolved per client (an admin may have
 // reassigned one mid-session) and the channel verdict is memoised per role, so
 // the cost is one role lookup per connected client plus one override lookup per
 // distinct role. Fails closed: a client whose role cannot be resolved is left
 // out. Mirrors RefreshChannelVisibility, which resolves visibility the same way.
-func (h *Hub) voiceEventAudience(ctx context.Context, channelID int64) []int64 {
+func (h *Hub) channelReadAudience(ctx context.Context, channelID int64) []int64 {
 	h.mu.RLock()
 	userIDs := make([]int64, 0, len(h.clients))
 	for uid := range h.clients {
@@ -602,17 +610,34 @@ func (h *Hub) BroadcastServerRestart(reason string, delaySeconds int) {
 	h.BroadcastToAll(buildServerRestartMsg(reason, delaySeconds))
 }
 
-// BroadcastChannelCreate sends a channel_create message to all connected clients.
+// BroadcastChannelCreate sends a channel_create message to the connected
+// clients whose current role may READ ch. It used to go out via BroadcastToAll,
+// which handed every authenticated client the name, category and topic of a
+// channel that channel_overrides hides from their role — metadata the ready
+// payload (buildReady/VisibleChannelIDs) deliberately withholds.
+//
+// The admin HubBroadcaster interface carries no context, so — like
+// RefreshChannelVisibility — the audience is resolved against Background: the
+// fan-out must complete regardless of the triggering request.
 func (h *Hub) BroadcastChannelCreate(ch *db.Channel) {
-	h.BroadcastToAll(buildChannelCreate(ch))
+	h.broadcastChannelScoped(context.Background(), ch.ID, buildChannelCreate(ch), "channel_create")
 }
 
-// BroadcastChannelUpdate sends a channel_update message to all connected clients.
+// BroadcastChannelUpdate sends a channel_update message to the connected
+// clients whose current role may READ ch. Same disclosure as
+// BroadcastChannelCreate; same filtered fan-out.
 func (h *Hub) BroadcastChannelUpdate(ch *db.Channel) {
-	h.BroadcastToAll(buildChannelUpdate(ch))
+	h.broadcastChannelScoped(context.Background(), ch.ID, buildChannelUpdate(ch), "channel_update")
 }
 
 // BroadcastChannelDelete sends a channel_delete message to all connected clients.
+//
+// Deliberately unfiltered: the payload is the bare channel id, with none of the
+// metadata create/update carry, and by the time the admin handler calls this the
+// channel row — and with it the ON DELETE CASCADE'd channel_overrides — is
+// already gone, so a permission check here would answer from base role perms
+// and could drop the delete for exactly the users who saw the channel via a
+// positive override, stranding it in their sidebar.
 func (h *Hub) BroadcastChannelDelete(channelID int64) {
 	h.BroadcastToAll(buildChannelDelete(channelID))
 }
