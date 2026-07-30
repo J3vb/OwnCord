@@ -31,7 +31,7 @@ flowchart LR
     end
 
     LK["LiveKit server<br/>(managed subprocess<br/>or external)"]
-    REL["OwnCord-releases<br/>(GitHub, minisign-signed)"]
+    REL["OwnCord releases<br/>(GitHub, minisign-signed)"]
 
     WV -->|"HTTPS REST<br/>⚠ accepts any cert<br/>(no pinning)"| RTR
     WSP -->|"WSS, fingerprint-pinned"| HUB

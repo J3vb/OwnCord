@@ -230,7 +230,7 @@ func defaults() Config {
 		},
 		GitHub: GitHubConfig{
 			Owner: "J3vb",
-			Repo:  "OwnCord-releases",
+			Repo:  "OwnCord",
 		},
 		EventPersistence: EventPersistenceConfig{
 			Enabled:               true,

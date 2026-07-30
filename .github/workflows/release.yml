@@ -421,6 +421,11 @@ jobs:
         shell: bash
         run: npx changelogen --output CHANGELOG.md
 
+      # Sole publish target. This repo is public, so its own Releases page both
+      # satisfies AGPL source availability (via the owncord-src snapshot below)
+      # and serves as the publicly-readable feed that deployed servers and
+      # clients poll for updates. The former mirror step to a separate public
+      # releases repo existed only to work around this repo being private.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -428,31 +433,5 @@ jobs:
           mapfile -t assets < <(find windows linux -type f)
           assets+=(checksums.sha256 owncord-src-*.tar.gz)
           gh release create "${{ github.ref_name }}" \
-            --notes-file CHANGELOG.md \
-            "${assets[@]}"
-
-      # The public releases repo is what deployed servers and clients poll for
-      # updates, and it carries the AGPL source snapshot while the source repo
-      # is private. Publishing there must never be skipped silently once the
-      # source repo is private.
-      - name: Publish to public releases repo
-        shell: bash
-        env:
-          RELEASES_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
-          SOURCE_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if [ -z "$RELEASES_TOKEN" ]; then
-            PRIVATE=$(GH_TOKEN="$SOURCE_REPO_TOKEN" gh api "repos/$GITHUB_REPOSITORY" --jq .private)
-            if [ "$PRIVATE" = "true" ]; then
-              echo "::error::Source repo is private and RELEASES_REPO_TOKEN is unset — binaries would ship with no public source or update feed (AGPL violation, broken updater)."
-              exit 1
-            fi
-            echo "::warning::RELEASES_REPO_TOKEN not set — skipping publish to J3vb/OwnCord-releases."
-            exit 0
-          fi
-          mapfile -t assets < <(find windows linux -type f)
-          assets+=(checksums.sha256 owncord-src-*.tar.gz)
-          GH_TOKEN="$RELEASES_TOKEN" gh release create "${{ github.ref_name }}" \
-            --repo J3vb/OwnCord-releases \
             --notes-file CHANGELOG.md \
             "${assets[@]}"

@@ -7,7 +7,7 @@ There are no backports.
 
 | Version | Supported |
 | ------- | --------- |
-| Latest release (see [OwnCord-releases](https://github.com/J3vb/OwnCord-releases/releases)) | Yes |
+| Latest release (see [Releases](https://github.com/J3vb/OwnCord/releases)) | Yes |
 | Anything older | No |
 
 ## Reporting a vulnerability
@@ -15,9 +15,9 @@ There are no backports.
 **Do not open a public issue for security bugs.**
 
 Report vulnerabilities privately via GitHub Security Advisories on the
-[OwnCord-releases](https://github.com/J3vb/OwnCord-releases/security/advisories/new)
-repository ("Report a vulnerability"). This channel works even while the
-source repository is private.
+[OwnCord](https://github.com/J3vb/OwnCord/security/advisories/new)
+repository ("Report a vulnerability"). Advisories stay private until
+published, so this channel is safe even though the repository is public.
 
 Please include:
 

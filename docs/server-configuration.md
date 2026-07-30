@@ -74,7 +74,7 @@ For LiveKit options OwnCord does not model, you can take ownership of the auto-s
 |-----|------|---------|-------------|
 | `github.token` | string | `""` | Optional GitHub API token for higher rate limits on update checks (5000 req/hr vs 60) |
 | `github.owner` | string | `"J3vb"` | Owner of the GitHub repository server and client updates are fetched from |
-| `github.repo` | string | `"OwnCord-releases"` | Public releases repository. Must stay publicly readable — both the server self-update and the client auto-update chain fetch release assets from it |
+| `github.repo` | string | `"OwnCord"` | Repository whose releases carry update assets. Must stay publicly readable — both the server self-update and the client auto-update chain fetch release assets from it |
 
 ### Event Persistence (`event_persistence`)
 
@@ -208,7 +208,7 @@ voice:
 github:
   token: ""                        # optional GitHub PAT for update check rate limits
   owner: "J3vb"                    # update source repo owner
-  repo: "OwnCord-releases"         # public releases repo (binaries + source snapshots)
+  repo: "OwnCord"                  # repo holding release assets (binaries + source snapshots)
 
 # Event persistence (tiered reconnect replay)
 event_persistence:

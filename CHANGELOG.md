@@ -9,9 +9,9 @@ behavioural changes operators must know about.
 
 > **Project reset note:** OwnCord has re-entered alpha. The `v1.0.0` release is
 > superseded; versioning continues forward as `v1.1.0-alpha.N` so deployed
-> servers and clients keep receiving updates. Releases are published to the
-> public [`OwnCord-releases`](https://github.com/J3vb/OwnCord-releases)
-> repository, including a full source snapshot with every release.
+> servers and clients keep receiving updates. Releases are published to this
+> repository's [Releases](https://github.com/J3vb/OwnCord/releases) page,
+> including a full source snapshot with every release.
 
 ### Phase B — Acceleration
 
