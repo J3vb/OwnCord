@@ -38,8 +38,13 @@ const (
 
 	// maxFetchBytes caps the response body read for checksum/signature files.
 	// Prevents a malicious or corrupted release asset from exhausting memory.
-	maxFetchBytes    = config.MaxMessageBytes
-	errorCacheTTL    = 5 * time.Minute
+	maxFetchBytes = config.MaxMessageBytes
+	errorCacheTTL = 5 * time.Minute
+	// fetchTimeout bounds an outbound metadata fetch once it has been detached
+	// from the caller's context (see detachFetch). It matches the http.Client
+	// timeout NewUpdater sets, so a caller that stays connected sees the same
+	// effective deadline as before.
+	fetchTimeout     = 30 * time.Second
 	checksumAsset    = "checksums.sha256"
 	signatureAsset   = windowsServerBinary + ".sig"
 	manifestAsset    = "server-update-manifest.json"
@@ -182,9 +187,29 @@ func (u *Updater) apiBaseURL() string {
 	return defaultBaseURL
 }
 
+// detachFetch returns a context carrying ctx's values but not its
+// cancellation, bounded by fetchTimeout.
+//
+// The release and text-asset caches are process-wide and shared by the
+// unauthenticated client-update endpoint and the owner-only admin update
+// handlers, so the outcome of one caller's fetch is replayed to every other
+// caller. Driving the fetch from the caller's own context let an
+// unauthenticated client abort its request and have the resulting
+// context.Canceled stored as a cached failure for errorCacheTTL, blocking
+// update checks for everyone. Detaching the fetch means only upstream-derived
+// errors (dial failure, non-200 status, decode failure, or this timeout) can
+// ever reach the cache — those stay cached exactly as before — and a fetch
+// already in flight completes and fills the success cache even if the caller
+// that started it walks away.
+func detachFetch(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), fetchTimeout)
+}
+
 // CheckForUpdate queries GitHub for the latest release and compares it
 // against the current version. Results are cached for cacheTTL; errors
-// are cached for errorCacheTTL to avoid spamming the GitHub API.
+// are cached for errorCacheTTL to avoid spamming the GitHub API. The outbound
+// fetch is detached from ctx (see detachFetch), so cancelling ctx does not
+// abort it or write a failure into the shared cache.
 func (u *Updater) CheckForUpdate(ctx context.Context) (UpdateInfo, error) {
 	now := time.Now()
 	u.mu.Lock()
@@ -200,7 +225,10 @@ func (u *Updater) CheckForUpdate(ctx context.Context) (UpdateInfo, error) {
 	}
 	u.mu.Unlock()
 
-	info, err := u.fetchLatestRelease(ctx)
+	fetchCtx, cancel := detachFetch(ctx)
+	defer cancel()
+
+	info, err := u.fetchLatestRelease(fetchCtx)
 	if err != nil {
 		u.mu.Lock()
 		u.cachedErr = err
@@ -917,16 +945,19 @@ func (u *Updater) FetchTextAssetCached(ctx context.Context, url string) (string,
 	// would otherwise issue its own outbound fetch. One flight per URL runs and
 	// the rest wait on its result.
 	//
-	// ponytail: the leader's ctx drives the fetch, so a cancelled leader fails
-	// its followers too. Acceptable here — callers are the unauthenticated
-	// client-update endpoint, and the outcome is cached either way.
+	// The flight is detached from the leader's ctx (see detachFetch): callers
+	// are the unauthenticated client-update endpoint, so a leader that aborts
+	// its request must not fail its followers or write its own
+	// context.Canceled into the shared negative cache.
 	v, err, _ := u.textAssetSF.Do(url, func() (any, error) {
 		now := time.Now()
 		// Re-check: another flight may have filled the cache while we queued.
 		if entry, ok := u.lookupTextAsset(url, now); ok {
 			return entry.content, entry.err
 		}
-		content, fetchErr := u.FetchTextAsset(ctx, url)
+		fetchCtx, cancel := detachFetch(ctx)
+		defer cancel()
+		content, fetchErr := u.FetchTextAsset(fetchCtx, url)
 		u.storeTextAsset(url, content, fetchErr, now)
 		return content, fetchErr
 	})
