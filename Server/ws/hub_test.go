@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -1036,6 +1037,116 @@ func TestRefreshChannelVisibility_ForcesFullResyncForStaleResumes(t *testing.T) 
 	// Clients that saw sequenced traffic after the change may replay.
 	if hub.MustFullResyncForTest(42) {
 		t.Error("expected replay allowed for lastSeq after the watermark")
+	}
+}
+
+// ─── BroadcastMemberUpdate (role reassignment) ────────────────────────────────
+
+// A role change must drop the live channel topics the new role cannot READ —
+// the subscription is created once, at channel_focus, and otherwise outlives
+// the authorization it was granted under. DM topics are membership-gated, not
+// role-gated, so they must survive.
+func TestBroadcastMemberUpdate_RevokesUnreadableSubscriptions(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+	ctx := context.Background()
+
+	chID := seedTestChannel(t, database, "role-room")
+	dmID, err := database.CreateChannel(ctx, "dm-room", "dm", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel(dm): %v", err)
+	}
+
+	// Connect as Owner (reads everything) with the text channel focused.
+	user := seedOwnerUser(t, database, "demote-me")
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO dm_participants (channel_id, user_id) VALUES (?, ?)`, dmID, user.ID,
+	); err != nil {
+		t.Fatalf("insert dm_participants: %v", err)
+	}
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	time.Sleep(30 * time.Millisecond)
+	// The user is a participant of this DM but has closed it (no dm_open_state
+	// row), so the topic is held while being absent from the allowed set.
+	hub.PubSubForTest().Subscribe(c, ws.ChannelTopic(dmID))
+
+	// Demote to Member, with READ_MESSAGES denied to that role on the channel.
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, 4, 0, 2)`, chID,
+	); err != nil {
+		t.Fatalf("insert override: %v", err)
+	}
+	if err := database.UpdateUserRole(ctx, user.ID, 4); err != nil {
+		t.Fatalf("UpdateUserRole: %v", err)
+	}
+
+	hub.SeedSeq(41)
+	hub.BroadcastMemberUpdate(user.ID, "member")
+
+	msg := drainForMsgType(t, send, "channel_delete")
+	payload, _ := msg["payload"].(map[string]any)
+	id, _ := payload["id"].(float64)
+	if int64(id) != chID {
+		t.Errorf("channel_delete id = %v, want %d", payload["id"], chID)
+	}
+
+	// The socket stays up; only the unreadable topic is gone.
+	if got := hub.ClientCount(); got != 1 {
+		t.Fatalf("ClientCount = %d, want 1 (socket must stay up)", got)
+	}
+	topics := hub.PubSubForTest().TopicsForClient(user.ID)
+	if slices.Contains(topics, ws.ChannelTopic(chID)) {
+		t.Error("still subscribed to the revoked channel topic")
+	}
+	if !slices.Contains(topics, ws.ChannelTopic(dmID)) {
+		t.Error("DM topic revoked by a role change (DM access is membership-gated)")
+	}
+
+	// The impact itself: channel traffic no longer reaches the demoted socket.
+	hub.BroadcastToChannel(chID, []byte(`{"type":"chat_message"}`))
+	time.Sleep(30 * time.Millisecond)
+	assertNoMsgType(t, send, "chat_message")
+
+	// A resume across the change must take the full-ready path.
+	if !hub.MustFullResyncForTest(41) {
+		t.Error("expected forced full resync for a resume at the change watermark")
+	}
+}
+
+// When the new visibility cannot be resolved (DB hiccup), the socket is closed
+// rather than left half-revoked: the client reconnects and rebuilds from a
+// ready payload computed with the new role.
+func TestBroadcastMemberUpdate_ClosesSocketWhenVisibilityUnresolved(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+	ctx := context.Background()
+
+	chID := seedTestChannel(t, database, "hiccup-room")
+	uid := seedTestUser(t, database, "hiccup-user")
+	user, err := database.GetUserByID(ctx, uid)
+	if err != nil || user == nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	send := make(chan []byte, 16)
+	hub.Register(ws.NewTestClientWithUser(hub, user, chID, send))
+	time.Sleep(30 * time.Millisecond)
+
+	// Break the override lookup computeAllowedChannels depends on.
+	if _, err := database.ExecContext(ctx, `DROP TABLE channel_overrides`); err != nil {
+		t.Fatalf("drop channel_overrides: %v", err)
+	}
+
+	hub.BroadcastMemberUpdate(uid, "member")
+
+	if got := hub.ClientCount(); got != 0 {
+		t.Errorf("ClientCount = %d, want 0 (socket must close when visibility is unresolved)", got)
+	}
+	if topics := hub.PubSubForTest().TopicsForClient(uid); len(topics) != 0 {
+		t.Errorf("TopicsForClient = %v, want none", topics)
 	}
 }
 

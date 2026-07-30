@@ -2,6 +2,8 @@ package ws
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -20,6 +22,20 @@ const TopicGlobal Topic = "global"
 // ChannelTopic returns the topic for a text channel.
 func ChannelTopic(channelID int64) Topic {
 	return Topic(fmt.Sprintf("channel:%d", channelID))
+}
+
+// channelTopicID is the inverse of ChannelTopic: it returns the channel ID
+// encoded in t, or 0 if t is not a text-channel topic.
+func channelTopicID(t Topic) int64 {
+	rest, ok := strings.CutPrefix(string(t), "channel:")
+	if !ok {
+		return 0
+	}
+	id, err := strconv.ParseInt(rest, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return id
 }
 
 // VoiceTopic returns the topic for a voice channel.

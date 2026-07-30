@@ -730,9 +730,98 @@ func (h *Hub) BroadcastUserUpdate(userID int64, username string, avatar *string,
 	h.BroadcastToAll(buildUserUpdate(userID, username, avatar, identityPublicKey))
 }
 
-// BroadcastMemberUpdate sends a member_update message to all connected clients.
+// BroadcastMemberUpdate sends a member_update message to all connected clients
+// and re-evaluates the reassigned user's live channel subscriptions.
 func (h *Hub) BroadcastMemberUpdate(userID int64, roleName string) {
 	h.BroadcastToAll(buildMemberUpdate(userID, roleName))
+	h.revokeUnreadableChannels(userID)
+}
+
+// revokeUnreadableChannels drops the channel-topic subscriptions the user's new
+// role may no longer READ. READ_MESSAGES is checked once, at channel_focus, and
+// then becomes a durable pub/sub subscription, so without this a demoted user
+// keeps receiving every chat_message / chat_edited / reaction_update posted in
+// the channels their old role could read for as long as the socket stays open.
+//
+// The per-client work mirrors RefreshChannelVisibility, the channel_overrides
+// equivalent: targeted, unsequenced channel_delete + Unsubscribe (a replayed
+// channel_delete would be filtered by the allowed set computed at replay time),
+// then a visibilityChangeSeq bump so a client resuming across this change takes
+// the full-ready path instead of replay.
+//
+// Only the topics the socket actually holds are examined — a blanket sweep over
+// every channel would disclose the full channel-ID list to a demoted user.
+func (h *Hub) revokeUnreadableChannels(userID int64) {
+	// Stored after the targeted sends (as in RefreshChannelVisibility) so a
+	// concurrent seq advance errs toward re-syncing more clients. Deferred
+	// because it must cover the early returns too: a user who is offline, or
+	// whose socket is closed below, converges via the full-ready path.
+	defer h.visibilityChangeSeq.Store(atomic.LoadUint64(&h.seq))
+
+	if h.db == nil {
+		return
+	}
+	h.mu.RLock()
+	c, ok := h.clients[userID]
+	h.mu.RUnlock()
+	if !ok || c.user == nil {
+		return
+	}
+
+	// Called via the admin HubBroadcaster interface, which carries no context;
+	// the re-evaluation must complete regardless of the triggering request.
+	ctx := context.Background()
+
+	// c.user is a connect-time snapshot and the role just changed, so resolve
+	// the current user — and through it the current role — from the DB.
+	var allowed map[int64]bool
+	user, err := h.db.GetUserByID(ctx, userID)
+	if err == nil && user != nil {
+		// Same predicate as the ready payload and reconnect replay filtering.
+		allowed, err = h.computeAllowedChannels(ctx, h.db, user)
+	}
+	if err != nil || user == nil {
+		// Visibility unresolved. Keeping the old subscriptions would leak, and
+		// revoking them all would hollow out a sidebar the user may still be
+		// entitled to, so close the socket instead: the client reconnects and
+		// rebuilds from a ready payload computed with the new role. kickClient
+		// rather than DisconnectUser — the latter sends a BANNED error, which
+		// makes the client clear its credentials instead of reconnecting.
+		slog.Warn("hub: role change visibility unresolved, closing socket",
+			"user_id", userID, "err", err)
+		h.kickClient(c)
+		return
+	}
+
+	for _, topic := range h.pubsub.TopicsForClient(userID) {
+		chID := channelTopicID(topic)
+		if chID == 0 || allowed[chID] {
+			continue
+		}
+		// DM access is gated on dm_participants, which no role change can
+		// alter, while allowed sources DMs from dm_open_state — a DM the user
+		// has closed (or every DM, if the DM lookup inside
+		// computeAllowedChannels failed) is missing from allowed even though
+		// its subscription is still legitimate. Never revoke a DM topic here;
+		// on a lookup error close the socket rather than guess.
+		ch, chErr := h.db.GetChannel(ctx, chID)
+		if chErr != nil {
+			slog.Warn("hub: role change channel lookup failed, closing socket",
+				"user_id", userID, "channel_id", chID, "err", chErr)
+			h.kickClient(c)
+			return
+		}
+		if ch != nil && ch.Type == "dm" {
+			continue
+		}
+		c.sendMsg(buildChannelDelete(chID))
+		h.pubsub.Unsubscribe(c, topic)
+		c.mu.Lock()
+		if c.channelID == chID {
+			c.channelID = 0
+		}
+		c.mu.Unlock()
+	}
 }
 
 // SendToUser delivers msg directly to the client identified by userID.
