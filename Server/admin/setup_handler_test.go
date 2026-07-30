@@ -1,10 +1,12 @@
 package admin_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/owncord/server/admin"
@@ -192,5 +194,60 @@ func TestSetup_ConcurrentRace(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("user count = %d, want 1", count)
+	}
+}
+
+// A freshly generated config leaves allowed_origins empty, and browsers send an
+// Origin header on same-origin POSTs. Before isSameOrigin existed, that pairing
+// made first-run setup fail on every new install with "cross-origin setup
+// request blocked". These two tests pin both halves: same-origin gets through
+// on an empty allowlist, and a foreign origin still does not.
+func TestSetup_SameOriginAllowedWithEmptyAllowlist(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
+
+	body, err := json.Marshal(map[string]string{"username": "owner", "password": "correct-horse"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req := httptest.NewRequest("POST", "/setup", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	// httptest.NewRequest sets Host to example.com; the browser would send the
+	// matching Origin for a page served from this same server.
+	req.Header.Set("Origin", "https://"+req.Host)
+
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("POST /setup with same-origin Origin = %d, want 201; body: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSetup_ForeignOriginStillBlocked(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestModService(database))
+
+	body, err := json.Marshal(map[string]string{"username": "owner", "password": "correct-horse"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req := httptest.NewRequest("POST", "/setup", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://evil.example")
+
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("POST /setup from a foreign origin = %d, want 403", rr.Code)
+	}
+
+	count, err := database.UserCount(context.Background())
+	if err != nil {
+		t.Fatalf("UserCount: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("owner account created from a foreign origin: user count = %d, want 0", count)
 	}
 }

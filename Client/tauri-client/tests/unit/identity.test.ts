@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
+const { invokeMock, logMock } = vi.hoisted(() => ({
+  invokeMock: vi.fn(),
+  logMock: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => ({ createLogger: () => logMock }));
 
 import {
   saveIdentityKey,
@@ -14,6 +15,7 @@ import {
   storeIdentityPin,
   getIdentityPin,
   getOrCreateIdentityKeyPair,
+  resetIdentityKeyPairCache,
   publishIdentityKey,
   ensureIdentityKeyPublished,
 } from "@lib/identity";
@@ -21,6 +23,11 @@ import { generateIdentityKeyPair, exportPublicKey } from "@lib/e2eeCrypto";
 
 beforeEach(() => {
   invokeMock.mockReset();
+  logMock.error.mockReset();
+  logMock.warn.mockReset();
+  // The keypair memo is process-wide by design; without this, one case's
+  // cached pair would satisfy the next case's keyring assertions.
+  resetIdentityKeyPairCache();
 });
 
 describe("identity keyring wrappers", () => {
@@ -110,6 +117,9 @@ describe("getOrCreateIdentityKeyPair", () => {
     const firstPub = await exportPublicKey(first.publicKey);
 
     // Second login: keyring returns the saved blob → same public key, no save.
+    // Drop the memo first, or this asserts nothing about the keyring — a new
+    // login is a new process, which is exactly what the reload path is for.
+    resetIdentityKeyPairCache();
     invokeMock.mockReset();
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "load_identity_key") return Promise.resolve(savedBlob);
@@ -128,6 +138,68 @@ describe("getOrCreateIdentityKeyPair", () => {
     const kp = await getOrCreateIdentityKeyPair("chat.example");
     expect(kp.publicKey).toBeDefined();
     expect(invokeMock.mock.calls.some((c) => c[0] === "save_identity_key")).toBe(true);
+  });
+
+  it("hands every caller the same keypair when the keyring never persists", async () => {
+    // A store that accepts the write and returns nothing on the next read.
+    // Before the memo, the ready hook (publishes the public half) and the voice
+    // session (signs announces with the private half) each generated their own
+    // keypair here — so the published key was never the key that signed, and
+    // peers rejected every announce as a forged signature.
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_identity_key") return Promise.resolve(null);
+      return Promise.resolve(undefined);
+    });
+
+    const [publishPair, signingPair] = await Promise.all([
+      getOrCreateIdentityKeyPair("chat.example"),
+      getOrCreateIdentityKeyPair("chat.example"),
+    ]);
+    const laterPair = await getOrCreateIdentityKeyPair("chat.example");
+
+    expect(signingPair).toBe(publishPair);
+    expect(laterPair).toBe(publishPair);
+    // One generation, not one per caller.
+    expect(invokeMock.mock.calls.filter((c) => c[0] === "save_identity_key")).toHaveLength(1);
+  });
+
+  it("keeps the memo per host", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_identity_key") return Promise.resolve(null);
+      return Promise.resolve(undefined);
+    });
+    const a = await getOrCreateIdentityKeyPair("chat.example");
+    const b = await getOrCreateIdentityKeyPair("other.example");
+    expect(await exportPublicKey(b.publicKey)).not.toBe(await exportPublicKey(a.publicKey));
+  });
+
+  it("reports a credential store that accepts the write but drops the value", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_identity_key") return Promise.resolve(null);
+      return Promise.resolve(undefined); // save_identity_key "succeeds"
+    });
+
+    await getOrCreateIdentityKeyPair("chat.example");
+
+    expect(logMock.error).toHaveBeenCalledWith(expect.stringContaining("did not persist"), {
+      host: "chat.example",
+    });
+  });
+
+  it("stays quiet when the store round-trips the key", async () => {
+    let savedBlob: string | undefined;
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "load_identity_key") return Promise.resolve(savedBlob ?? null);
+      if (cmd === "save_identity_key") {
+        savedBlob = args!.key as string;
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await getOrCreateIdentityKeyPair("chat.example");
+
+    expect(logMock.error).not.toHaveBeenCalled();
   });
 });
 

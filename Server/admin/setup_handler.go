@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -57,10 +58,10 @@ func handleSetupStatus(database *db.DB) http.HandlerFunc {
 func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// CSRF protection: reject cross-origin requests (BUG-097).
-		// If Origin is present and doesn't match allowed origins, deny.
-		// No Origin header = same-origin or non-browser client (allow).
+		// A request is accepted when it is same-origin, or when its Origin is
+		// explicitly allowlisted. Absent Origin = non-browser client (allow).
 		if origin := r.Header.Get("Origin"); origin != "" {
-			if !isSetupOriginAllowed(origin, allowedOrigins) {
+			if !isSameOrigin(origin, r.Host) && !isSetupOriginAllowed(origin, allowedOrigins) {
 				writeErr(w, http.StatusForbidden, "FORBIDDEN", "cross-origin setup request blocked")
 				return
 			}
@@ -163,6 +164,34 @@ func handleSetup(database *db.DB, limiter *auth.RateLimiter, allowedOrigins []st
 			InviteCode: inviteCode,
 		})
 	}
+}
+
+// isSameOrigin reports whether a browser-supplied Origin names this same
+// server, by comparing its host:port against the request's Host header.
+//
+// Browsers send Origin on same-origin POSTs too (Chrome and Edge always,
+// Firefox since 70), so the admin panel's own first-run setup call arrives
+// carrying one. Without this check it is measured against allowed_origins,
+// which is empty in a freshly generated config — so setup failed with
+// "cross-origin setup request blocked" on every new install.
+//
+// Scheme is deliberately not compared. Nothing in this server derives the
+// external scheme (there is no r.TLS or X-Forwarded-Proto handling anywhere),
+// so a TLS-terminating proxy in front would make a scheme check reject
+// legitimate requests. Matching host:port is enough: forging it requires
+// already serving content on this exact host and port, at which point the
+// origin is not the attacker's to borrow. Cross-site attackers cannot set
+// Origin at all — the browser does.
+func isSameOrigin(origin, host string) bool {
+	if host == "" {
+		return false
+	}
+	u, err := url.Parse(origin)
+	// Require a scheme so a schemeless "//host:port" cannot pass as same-origin.
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return false
+	}
+	return strings.EqualFold(u.Host, host)
 }
 
 // isSetupOriginAllowed checks if the given origin is permitted by the
