@@ -47,8 +47,12 @@ fn emit_ws_state<R: Runtime>(app: &AppHandle<R>, state: &str) {
     let _ = app.emit("ws-state", state);
 }
 
-/// Single call site for cert-tofu events — keeps tauri-typegen from generating duplicates.
-fn emit_cert_tofu<R: Runtime>(app: &AppHandle<R>, payload: serde_json::Value) {
+/// The one and only call site for cert-tofu events, crate-wide: tauri-typegen
+/// emits an `onCertTofu` binding per `emit("cert-tofu", ..)` it finds, and more
+/// than one makes the generated events.ts redeclare it (TS2323/TS2393), which
+/// breaks `tauri build`. http_proxy routes its three TOFU outcomes through here
+/// for that reason — do not call `emit("cert-tofu", ..)` anywhere else.
+pub(crate) fn emit_cert_tofu<R: Runtime>(app: &AppHandle<R>, payload: serde_json::Value) {
     let _ = app.emit("cert-tofu", payload);
 }
 

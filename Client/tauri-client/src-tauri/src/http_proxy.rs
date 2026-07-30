@@ -33,7 +33,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 use rustls::pki_types::ServerName;
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Runtime};
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
@@ -325,8 +325,8 @@ async fn handle_connection<R: Runtime>(
     let store_key = tofu::cert_store_key(remote_host);
     match tofu::evaluate(&app, &store_key, &fingerprint)? {
         TofuOutcome::Trusted => {
-            let _ = app.emit(
-                "cert-tofu",
+            crate::ws_proxy::emit_cert_tofu(
+                &app,
                 serde_json::json!({
                     "host": store_key,
                     "fingerprint": fingerprint,
@@ -340,8 +340,8 @@ async fn handle_connection<R: Runtime>(
         // sent. The connect page's health check triggers this before login.
         TofuOutcome::FirstUse => {
             info!("[http_proxy] first-use cert for {} — awaiting user confirmation", store_key);
-            let _ = app.emit(
-                "cert-tofu",
+            crate::ws_proxy::emit_cert_tofu(
+                &app,
                 serde_json::json!({
                     "host": store_key,
                     "fingerprint": fingerprint,
@@ -364,8 +364,8 @@ async fn handle_connection<R: Runtime>(
                 "[http_proxy] TOFU check FAILED for {} — certificate fingerprint mismatch",
                 store_key
             );
-            let _ = app.emit(
-                "cert-tofu",
+            crate::ws_proxy::emit_cert_tofu(
+                &app,
                 serde_json::json!({
                     "host": store_key,
                     "fingerprint": fingerprint,
