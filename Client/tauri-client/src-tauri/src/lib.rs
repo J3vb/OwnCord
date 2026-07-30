@@ -1,9 +1,12 @@
 mod commands;
 mod constants;
 mod credentials;
+#[cfg(windows)]
+mod dpapi;
 mod http_proxy;
 mod livekit_proxy;
 mod ptt;
+mod secret_store;
 mod tofu;
 mod tray;
 mod update_commands;
@@ -111,6 +114,7 @@ pub fn run() {
             credentials::save_identity_key,
             credentials::load_identity_key,
             credentials::delete_identity_key,
+            credentials::probe_credential_store,
             update_commands::check_client_update,
             update_commands::download_and_install_update,
             ptt::ptt_start,
@@ -127,6 +131,9 @@ pub fn run() {
         ])
         .setup(|app| {
             // Rust logging is initialized by tauri_plugin_log (registered above).
+            // Record the credential backend first: if this build has no
+            // persistent store, every later credential symptom follows from it.
+            secret_store::log_compiled_backend();
             tray::create_tray(app.handle())?;
             Ok(())
         })

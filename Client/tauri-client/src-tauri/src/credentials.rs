@@ -1,7 +1,7 @@
-use keyring::Entry;
 use serde::Serialize;
+use tauri::AppHandle;
 
-const SERVICE: &str = "com.owncord.client";
+use crate::secret_store::{self, Backend};
 
 /// Data returned from `load_credential`.
 #[derive(Serialize, Clone)]
@@ -25,6 +25,35 @@ impl std::fmt::Debug for CredentialData {
 }
 
 // ---------------------------------------------------------------------------
+// Account naming
+// ---------------------------------------------------------------------------
+//
+// Both secrets live in the same credential-store service
+// (`secret_store::SERVICE`) and are told apart by their account name. Changing
+// either function orphans every credential already stored under the old name,
+// so they are pure and covered by tests.
+
+/// Account holding the login credential for `host`.
+fn login_account(host: &str) -> String {
+    host.to_string()
+}
+
+/// Account holding the voice-E2EE identity private key for `host`.
+///
+/// The `identity:` prefix keeps it distinct from the login credential for the
+/// same host; a collision would make one secret overwrite the other.
+fn identity_account(host: &str) -> String {
+    format!("identity:{host}")
+}
+
+fn require_non_empty(value: &str, field: &str) -> Result<(), String> {
+    if value.is_empty() {
+        return Err(format!("{field} must not be empty"));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Tauri commands
 // ---------------------------------------------------------------------------
 
@@ -36,23 +65,20 @@ impl std::fmt::Debug for CredentialData {
 ///
 /// On Windows the secret is protected by DPAPI via Windows Credential Manager.
 /// On Linux it is stored in the Secret Service (GNOME Keyring / KWallet).
-/// On macOS it is stored in the system Keychain.
+/// On macOS it is stored in the system Keychain. The write is read back before
+/// this returns — see [`crate::secret_store`] for what happens when it does not
+/// come back.
 #[tauri::command]
 pub fn save_credential(
+    app: AppHandle,
     host: String,
     username: String,
     token: String,
     password: Option<String>,
 ) -> Result<(), String> {
-    if host.is_empty() {
-        return Err("host must not be empty".into());
-    }
-    if token.is_empty() {
-        return Err("token must not be empty".into());
-    }
-    if username.is_empty() {
-        return Err("username must not be empty".into());
-    }
+    require_non_empty(&host, "host")?;
+    require_non_empty(&token, "token")?;
+    require_non_empty(&username, "username")?;
 
     let mut payload = serde_json::json!({
         "username": username,
@@ -62,12 +88,8 @@ pub fn save_credential(
         payload["password"] = serde_json::Value::String(pw.clone());
     }
 
-    let entry =
-        Entry::new(SERVICE, &host).map_err(|e| format!("keyring entry error: {e}"))?;
-    entry
-        .set_password(&payload.to_string())
+    secret_store::set(&app, &login_account(&host), &payload.to_string())
         .map_err(|e| format!("save_credential failed: {e}"))?;
-
     Ok(())
 }
 
@@ -75,21 +97,24 @@ pub fn save_credential(
 ///
 /// Returns `None` when no credential exists for the given host.
 #[tauri::command]
-pub fn load_credential(host: String) -> Result<Option<CredentialData>, String> {
-    if host.is_empty() {
-        return Err("host must not be empty".into());
-    }
+pub fn load_credential(app: AppHandle, host: String) -> Result<Option<CredentialData>, String> {
+    require_non_empty(&host, "host")?;
 
-    let entry =
-        Entry::new(SERVICE, &host).map_err(|e| format!("keyring entry error: {e}"))?;
-
-    let json_str = match entry.get_password() {
-        Ok(s) => s,
-        Err(keyring::Error::NoEntry) => return Ok(None),
-        Err(e) => return Err(format!("load_credential failed: {e}")),
+    let Some(json_str) = secret_store::get(&app, &login_account(&host))
+        .map_err(|e| format!("load_credential failed: {e}"))?
+    else {
+        return Ok(None);
     };
 
-    let parsed: serde_json::Value = serde_json::from_str(&json_str)
+    parse_credential_blob(&json_str).map(Some)
+}
+
+/// Parse the stored credential JSON blob.
+///
+/// Split out from the command so the blob contract is testable without a
+/// credential store.
+fn parse_credential_blob(json_str: &str) -> Result<CredentialData, String> {
+    let parsed: serde_json::Value = serde_json::from_str(json_str)
         .map_err(|e| format!("credential blob is not valid JSON: {e}"))?;
 
     let username = parsed
@@ -107,26 +132,21 @@ pub fn load_credential(host: String) -> Result<Option<CredentialData>, String> {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    Ok(Some(CredentialData { username, token, password }))
+    Ok(CredentialData {
+        username,
+        token,
+        password,
+    })
 }
 
 /// Delete a credential from the system credential store.
 ///
 /// Deleting a non-existent credential is not treated as an error.
 #[tauri::command]
-pub fn delete_credential(host: String) -> Result<(), String> {
-    if host.is_empty() {
-        return Err("host must not be empty".into());
-    }
-
-    let entry =
-        Entry::new(SERVICE, &host).map_err(|e| format!("keyring entry error: {e}"))?;
-
-    match entry.delete_credential() {
-        Ok(()) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("delete_credential failed: {e}")),
-    }
+pub fn delete_credential(app: AppHandle, host: String) -> Result<(), String> {
+    require_non_empty(&host, "host")?;
+    secret_store::delete(&app, &login_account(&host))
+        .map_err(|e| format!("delete_credential failed: {e}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -134,28 +154,23 @@ pub fn delete_credential(host: String) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 //
 // Mirrors save/load/delete_credential, but the secret is a single opaque
-// key blob (base64 PKCS8 private key) rather than a JSON credential struct,
+// key blob (base64 JWK private key) rather than a JSON credential struct,
 // and it is stored under account `identity:{host}` to keep it distinct from
-// the login credential entry (account `{host}`) in the same keyring service.
+// the login credential entry (account `{host}`) in the same service.
 
-/// Save the long-term identity private key for `host` to the system credential
-/// store, under account `identity:{host}`.
+/// Save the long-term identity private key for `host`.
+///
+/// The write is read back before this returns. A machine whose credential store
+/// accepts writes without keeping them falls through to the DPAPI file; if that
+/// is also unavailable this returns an error rather than reporting a success
+/// that would leave peers rejecting the user's voice announce after a restart.
 #[tauri::command]
-pub fn save_identity_key(host: String, key: String) -> Result<(), String> {
-    if host.is_empty() {
-        return Err("host must not be empty".into());
-    }
-    if key.is_empty() {
-        return Err("key must not be empty".into());
-    }
+pub fn save_identity_key(app: AppHandle, host: String, key: String) -> Result<(), String> {
+    require_non_empty(&host, "host")?;
+    require_non_empty(&key, "key")?;
 
-    let account = format!("identity:{host}");
-    let entry =
-        Entry::new(SERVICE, &account).map_err(|e| format!("keyring entry error: {e}"))?;
-    entry
-        .set_password(&key)
+    secret_store::set(&app, &identity_account(&host), &key)
         .map_err(|e| format!("save_identity_key failed: {e}"))?;
-
     Ok(())
 }
 
@@ -163,39 +178,81 @@ pub fn save_identity_key(host: String, key: String) -> Result<(), String> {
 ///
 /// Returns `None` when no identity key exists for the given host.
 #[tauri::command]
-pub fn load_identity_key(host: String) -> Result<Option<String>, String> {
-    if host.is_empty() {
-        return Err("host must not be empty".into());
-    }
-
-    let account = format!("identity:{host}");
-    let entry =
-        Entry::new(SERVICE, &account).map_err(|e| format!("keyring entry error: {e}"))?;
-
-    match entry.get_password() {
-        Ok(s) => Ok(Some(s)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("load_identity_key failed: {e}")),
-    }
+pub fn load_identity_key(app: AppHandle, host: String) -> Result<Option<String>, String> {
+    require_non_empty(&host, "host")?;
+    secret_store::get(&app, &identity_account(&host))
+        .map_err(|e| format!("load_identity_key failed: {e}"))
 }
 
 /// Delete the identity private key for `host`.
 ///
 /// Deleting a non-existent key is not treated as an error.
 #[tauri::command]
-pub fn delete_identity_key(host: String) -> Result<(), String> {
-    if host.is_empty() {
-        return Err("host must not be empty".into());
+pub fn delete_identity_key(app: AppHandle, host: String) -> Result<(), String> {
+    require_non_empty(&host, "host")?;
+    secret_store::delete(&app, &identity_account(&host))
+        .map_err(|e| format!("delete_identity_key failed: {e}"))
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics
+// ---------------------------------------------------------------------------
+
+/// Result of [`probe_credential_store`].
+#[derive(Serialize, Debug)]
+pub struct CredentialStoreProbe {
+    /// Whether a write/read/delete cycle completed with the value intact.
+    pub ok: bool,
+    /// Which store served the probe, when it succeeded.
+    pub backend: Option<Backend>,
+    /// Failure detail, for the log and the support bundle.
+    pub error: Option<String>,
+}
+
+/// Write, read back and delete a throwaway secret to prove the credential store
+/// works on this machine.
+///
+/// This is the check to run when a user reports peers rejecting their voice
+/// announce: it distinguishes "the credential store is fine" from "writes are
+/// accepted and dropped" without touching any real credential. The probe
+/// account is removed again whatever the outcome.
+#[tauri::command]
+pub fn probe_credential_store(app: AppHandle) -> CredentialStoreProbe {
+    // Underscores are not legal in DNS hostnames, so this cannot collide with a
+    // real `{host}` or `identity:{host}` account.
+    const PROBE_ACCOUNT: &str = "__diagnostic_probe__";
+    const PROBE_SECRET: &str = "owncord-credential-store-probe";
+
+    let result = secret_store::set(&app, PROBE_ACCOUNT, PROBE_SECRET).and_then(|backend| {
+        match secret_store::get(&app, PROBE_ACCOUNT)? {
+            Some(ref got) if got == PROBE_SECRET => Ok(backend),
+            Some(_) => Err("read back a different value than was written".into()),
+            None => Err("the store reported a successful write but returned no entry".into()),
+        }
+    });
+
+    // Always clean up, including when the probe failed part-way through.
+    if let Err(e) = secret_store::delete(&app, PROBE_ACCOUNT) {
+        log::warn!("failed to remove credential store probe entry: {e}");
     }
 
-    let account = format!("identity:{host}");
-    let entry =
-        Entry::new(SERVICE, &account).map_err(|e| format!("keyring entry error: {e}"))?;
-
-    match entry.delete_credential() {
-        Ok(()) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("delete_identity_key failed: {e}")),
+    match result {
+        Ok(backend) => {
+            log::info!("credential store probe succeeded (backend: {backend:?})");
+            CredentialStoreProbe {
+                ok: true,
+                backend: Some(backend),
+                error: None,
+            }
+        }
+        Err(e) => {
+            log::error!("credential store probe failed: {e}");
+            CredentialStoreProbe {
+                ok: false,
+                backend: None,
+                error: Some(e),
+            }
+        }
     }
 }
 
@@ -208,66 +265,70 @@ mod tests {
     use super::*;
 
     #[test]
-    fn save_credential_rejects_empty_host() {
-        let result = save_credential("".into(), "user".into(), "tok".into(), None);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("host must not be empty"));
+    fn require_non_empty_rejects_empty_and_names_the_field() {
+        let err = require_non_empty("", "host").unwrap_err();
+        assert_eq!(err, "host must not be empty");
+        assert_eq!(
+            require_non_empty("", "token").unwrap_err(),
+            "token must not be empty"
+        );
+        assert_eq!(
+            require_non_empty("", "username").unwrap_err(),
+            "username must not be empty"
+        );
+        assert_eq!(
+            require_non_empty("", "key").unwrap_err(),
+            "key must not be empty"
+        );
     }
 
     #[test]
-    fn save_credential_rejects_empty_token() {
-        let result = save_credential("host".into(), "user".into(), "".into(), None);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("token must not be empty"));
+    fn require_non_empty_accepts_a_value() {
+        assert!(require_non_empty("chat.example.com", "host").is_ok());
     }
 
     #[test]
-    fn save_credential_rejects_empty_username() {
-        let result = save_credential("host".into(), "".into(), "tok".into(), None);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("username must not be empty"));
+    fn login_and_identity_accounts_never_collide() {
+        // Both secrets share one credential-store service, so a collision would
+        // silently overwrite one with the other.
+        let host = "chat.example.com";
+        assert_eq!(login_account(host), "chat.example.com");
+        assert_eq!(identity_account(host), "identity:chat.example.com");
+        assert_ne!(login_account(host), identity_account(host));
     }
 
     #[test]
-    fn load_credential_rejects_empty_host() {
-        let result = load_credential("".into());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("host must not be empty"));
+    fn account_names_keep_the_port_that_distinguishes_hosts() {
+        // Two servers on one machine differ only by port; dropping it would
+        // make them share an identity key.
+        assert_ne!(login_account("localhost:8443"), login_account("localhost:9443"));
+        assert_eq!(identity_account("localhost:8443"), "identity:localhost:8443");
     }
 
     #[test]
-    fn delete_credential_rejects_empty_host() {
-        let result = delete_credential("".into());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("host must not be empty"));
+    fn parse_credential_blob_reads_all_fields() {
+        let data =
+            parse_credential_blob(r#"{"username":"alice","token":"tok","password":"pw"}"#).unwrap();
+        assert_eq!(data.username, "alice");
+        assert_eq!(data.token, "tok");
+        assert_eq!(data.password.as_deref(), Some("pw"));
     }
 
     #[test]
-    fn save_identity_key_rejects_empty_host() {
-        let result = save_identity_key("".into(), "key".into());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("host must not be empty"));
+    fn parse_credential_blob_allows_missing_password() {
+        let data = parse_credential_blob(r#"{"username":"alice","token":"tok"}"#).unwrap();
+        assert_eq!(data.password, None);
     }
 
     #[test]
-    fn save_identity_key_rejects_empty_key() {
-        let result = save_identity_key("host".into(), "".into());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("key must not be empty"));
-    }
-
-    #[test]
-    fn load_identity_key_rejects_empty_host() {
-        let result = load_identity_key("".into());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("host must not be empty"));
-    }
-
-    #[test]
-    fn delete_identity_key_rejects_empty_host() {
-        let result = delete_identity_key("".into());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("host must not be empty"));
+    fn parse_credential_blob_rejects_malformed_input() {
+        assert!(parse_credential_blob("not json").unwrap_err().contains("not valid JSON"));
+        assert!(parse_credential_blob(r#"{"token":"tok"}"#)
+            .unwrap_err()
+            .contains("missing 'username'"));
+        assert!(parse_credential_blob(r#"{"username":"alice"}"#)
+            .unwrap_err()
+            .contains("missing 'token'"));
     }
 
     #[test]
