@@ -70,5 +70,8 @@
     "@tauri-apps/plugin-opener": "^2.5.3",
     "@tauri-apps/plugin-process": "^2.3.1",
     "livekit-client": "^2.21.0"
+  },
+  "overrides": {
+    "qs": "^6.15.3"
   }
 }
