@@ -2,14 +2,12 @@
 .env
 Server/.env
 
-# Claude Code — shared project config (CLAUDE.md, .claude/settings.json,
-# .claude/skills/, .claude/hooks/, .mcp.json) is committed; local-only
-# state and overrides are not.
-.claude/settings.local.json
-.claude/*.local.json
+# Claude Code — local-only, never committed. A slashless pattern matches at any
+# depth, so these also cover Server/CLAUDE.md, Client/**/CLAUDE.md and nested
+# .claude/ dirs. .mcp.json stays tracked (MCP server list, no secrets in it).
+.claude/
+CLAUDE.md
 CLAUDE.local.md
-Client/.claude/
-Server/.claude/
 
 # GitHub Copilot instructions (internal)
 .github/copilot-instructions.md
@@ -72,7 +70,7 @@ tools/*
 tools/mcp-introspect/node_modules/
 .cache/
 
-# Internal dev files (root-level scratch only; .claude/skills/ and CLAUDE.md are committed)
+# Internal dev files (root-level scratch only)
 /SKILL.md
 TODOS.md
 DESIGN.md
