@@ -8,25 +8,15 @@
 
 # OwnCord
 
-The gaming chat platform you actually own.
+A self-hosted chat app I build for me and my friends — text channels, voice and video, and a server you actually own.
 
-
-> **Early Alpha / Work in Progress**
-> OwnCord is in active development and is not production-ready. Expect rough edges, rapid changes, and occasional breaking behavior.
+> **Alpha, and a hobby project.**
+> This is something I build for fun and run for a small group of friends. It isn't a product, there's no support, and it isn't production-ready. Expect rough edges, rapid changes, and the occasional breaking change.
 >
-> Do not use it for sensitive communications yet.
+> Don't use it for anything sensitive.
 
-## Development Model
-
-OwnCord is built with an AI-first development workflow.
-Most implementation is generated through autonomous AI tooling, with quality validated primarily through automated checks (CI, tests, linting) and real-world feedback during alpha.
-
-This approach enables fast iteration, but it also means behavior may change quickly between releases.
-
-
-
-OwnCord is a self-hosted chat stack with a Go server and a Tauri desktop client.
-It includes real-time messaging, voice/video via LiveKit, file sharing, and a web admin panel.
+It's a Go server plus a Tauri desktop client: real-time messaging, voice/video via LiveKit, file sharing, and a web admin panel.
+Run the server on a spare box or a VPS, hand your friends an invite code, and that's the whole thing.
 
 <p align="center">
   <img src=".github/images/Client.png" alt="OwnCord Client" width="700">
@@ -37,14 +27,19 @@ It includes real-time messaging, voice/video via LiveKit, file sharing, and a we
   <img src=".github/images/Admin_Panel.png" alt="Admin Panel" width="340">
 </p>
 
-## Current Project Status
+## How it's built
+
+Most of the implementation is generated with AI tooling, with quality held up by automated checks — CI, tests, linting — and by me and my friends actually using it.
+That keeps iteration fast, and it also means behaviour can change quickly between releases.
+
+## What works right now
 
 | Area | Status |
 | ---- | ------ |
 | Core chat flow | Working in alpha |
 | Voice/video | Working in alpha |
 | Admin panel | Working in alpha |
-| Security hardening | First full review pass landed in v1.1.0-alpha.2; ongoing |
+| Security hardening | First full review pass landed in v1.1.0-alpha.2; further review passes since; ongoing |
 
 ## Platform Support (Current Releases)
 
