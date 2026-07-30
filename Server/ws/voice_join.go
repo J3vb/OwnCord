@@ -58,7 +58,10 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 		return
 	}
 
-	if !h.requireChannelPerm(ctx, c, channelID, permissions.ConnectVoice, "CONNECT_VOICE") {
+	// channel_id is attacker-controlled, so the gate must be channel-TYPE aware:
+	// a role-only check passes for any DM channel id (DMs have no overrides), and
+	// the token minted below carries RoomJoin+CanSubscribe for that DM's room.
+	if !h.requireChannelAccess(ctx, c, channelID, permissions.ConnectVoice, "CONNECT_VOICE") {
 		return
 	}
 
@@ -277,7 +280,10 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 	// alone would leave the live session in place, so the refusal also evicts:
 	// LeaveVoice runs handleVoiceLeave, which clears the client's voice state,
 	// deletes the voice_states row and removes the LiveKit participant.
-	if !hasPerm(ctx, d.DB, d.Permissions, userID, channelID, permissions.ConnectVoice) {
+	// Channel-type aware, like the voice_join gate: this mints the same
+	// RoomJoin+CanSubscribe credential, so a role-only check here would keep
+	// re-issuing one for a DM the user is not a participant of.
+	if !hasChannelAccess(ctx, d.DB, d.Permissions, userID, channelID, permissions.ConnectVoice) {
 		return Result{
 			Error:      ClientError{Code: ErrCodeForbidden, Message: "missing CONNECT_VOICE permission"},
 			LeaveVoice: true,

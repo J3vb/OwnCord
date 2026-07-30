@@ -129,6 +129,59 @@ func hasPerm(ctx context.Context, database *db.DB, perms *permissions.Checker, u
 	return perms.HasChannelPerm(ctx, role.Permissions, role.ID, channelID, perm)
 }
 
+// hasChannelAccess is the gate to use when the channel id comes from the client:
+// it is hasPerm plus the channel-type branch that role bits cannot express.
+//
+// A DM channel carries no channel_overrides rows, so a default Member's base
+// bits satisfy hasPerm for ANY dm channel id — including a conversation the
+// caller is not part of. permissions.Checker.RequireChannelAccess is the shared
+// definition of channel access (service.PermissionService.RequireChannelAccess
+// mirrors it for the REST/service paths) and supplies the IsDMParticipant
+// branch, so the DM membership rule keeps exactly one implementation. Group DMs
+// need no special case: dm_participants holds one row per participant and
+// IsDMParticipant is a lookup on (user_id, channel_id).
+//
+// The role bit is still required on top, which RequireChannelAccess waives for
+// DMs. Voice has always demanded CONNECT_VOICE and sweepStaleVoiceStates keeps
+// re-checking it per role for every live participant, so keeping it here means
+// this check can only ever narrow access — never hand someone a grant the old
+// role-only check refused, and never let the sweeper evict a client the join
+// gate admitted.
+//
+// Blocking is deliberately not consulted here: it is the message paths' rule
+// (service.requireDMNotBlocked), it is two-party only, and a blocked user is
+// still a participant, so it is orthogonal to the non-participant hole this
+// closes.
+func hasChannelAccess(ctx context.Context, database *db.DB, perms *permissions.Checker, userID, channelID, perm int64) bool {
+	if database == nil || perms == nil {
+		return false
+	}
+	role, err := database.GetRoleForUser(ctx, userID)
+	if err != nil || role == nil {
+		return false
+	}
+	if !perms.HasChannelPerm(ctx, role.Permissions, role.ID, channelID, perm) {
+		return false
+	}
+	ch, err := database.GetChannel(ctx, channelID)
+	if err != nil {
+		// Fail closed: an unknown type would silently take the non-DM path.
+		slog.Error("ws: hasChannelAccess GetChannel failed, denying",
+			"user_id", userID, "channel_id", channelID, "err", err)
+		return false
+	}
+	channelType := ""
+	if ch != nil {
+		channelType = ch.Type
+	}
+	// A missing channel row leaves channelType empty, i.e. the role verdict
+	// above stands: there is no DM there to join, and callers keep reporting a
+	// deleted channel the way they always have. For every non-DM type this call
+	// just re-runs the role check above; the repeated lookup is the price of one
+	// shared definition of the rule, on a per-user rate-limited path.
+	return perms.RequireChannelAccess(ctx, userID, role.Permissions, role.ID, channelType, channelID, perm) == nil
+}
+
 // ── V2 handler type ─────────────────────────────────────────────────────────
 
 // HandlerV2 is the function signature for new-style (pure-ish) handlers.

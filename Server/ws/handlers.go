@@ -218,11 +218,16 @@ func (h *Hub) hasChannelPerm(ctx context.Context, c *Client, channelID int64, pe
 	return h.permChecker.HasChannelPerm(ctx, role.Permissions, role.ID, channelID, perm)
 }
 
-// requireChannelPerm checks whether the client has the given permission on the
-// channel. If not, it sends a FORBIDDEN error to the client and returns false.
-// The permLabel should be the human-readable permission name (e.g. "SEND_MESSAGES").
-func (h *Hub) requireChannelPerm(ctx context.Context, c *Client, channelID int64, perm int64, permLabel string) bool {
-	if h.hasChannelPerm(ctx, c, channelID, perm) {
+// requireChannelAccess checks whether the client may act on the channel with the
+// given permission. If not, it sends a FORBIDDEN error to the client and returns
+// false. The permLabel should be the human-readable permission name (e.g.
+// "SEND_MESSAGES").
+//
+// Unlike hasChannelPerm it is channel-type aware (see hasChannelAccess), which
+// is what a channel id taken straight from a client frame requires: role bits
+// alone let any member through to a DM they are not a participant of.
+func (h *Hub) requireChannelAccess(ctx context.Context, c *Client, channelID int64, perm int64, permLabel string) bool {
+	if hasChannelAccess(ctx, h.db, h.permChecker, c.userID, channelID, perm) {
 		return true
 	}
 	slog.Warn("ws permission denied", "user_id", c.userID, "channel_id", channelID, "perm", permLabel)
