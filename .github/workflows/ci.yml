@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
     branches: [main, dev]
   workflow_dispatch:
@@ -263,8 +263,11 @@ jobs:
             Client/tauri-client/test-results/
           retention-days: 7
 
+  # Image build is verification only, so it is skipped on dev to keep day-to-day
+  # work on the fast check suite. Runs for main pushes and PRs targeting main.
   server-docker-build:
     name: Server Docker Build (verify)
+    if: github.ref_name == 'main' || github.base_ref == 'main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
