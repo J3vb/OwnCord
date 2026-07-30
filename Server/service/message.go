@@ -283,7 +283,11 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 
 	// Channel type for DM-aware permissions.
 	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
-	isDM := chErr == nil && ch != nil && ch.Type == "dm"
+	chanType := ""
+	if chErr == nil && ch != nil {
+		chanType = ch.Type
+	}
+	isDM := chanType == "dm"
 
 	if isDM {
 		ok, dmErr := s.st.IsDMParticipant(ctx, userID, msg.ChannelID)
@@ -293,7 +297,17 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		if blkErr := requireDMNotBlocked(ctx, s.st, userID, msg.ChannelID); blkErr != nil {
 			return nil, blkErr
 		}
-	} else if !s.perms.HasChannelPerm(ctx, userID, msg.ChannelID, permissions.SendMessages) {
+	} else if permErr := s.checkSendPermission(ctx, userID, msg.ChannelID, chanType); permErr != nil {
+		// An edit injects new text into the channel and is fanned out to every
+		// reader, so it must clear the same gate as a send rather than
+		// SEND_MESSAGES alone: READ_MESSAGES so a role locked out of a private
+		// channel (the panel's "Can access" toggle denies
+		// READ_MESSAGES|CONNECT_VOICE and leaves SEND_MESSAGES intact) cannot
+		// rewrite its old posts, and the announcement rule so a demoted
+		// moderator cannot rewrite a trusted broadcast. Mirrors DeleteMessage,
+		// SetMessagePinned and handleReaction, which already require
+		// READ_MESSAGES. The reason is collapsed into this sink's single opaque
+		// error so the reply stays an ownership/permission non-oracle.
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 	}
 

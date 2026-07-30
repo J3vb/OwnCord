@@ -386,6 +386,86 @@ func TestEditMessage_EmptyContentFails(t *testing.T) {
 	}
 }
 
+// TestEditMessage_DeniedReadCannotEdit locks the channel-lockout invariant on
+// the edit sink, alongside TestDeleteMessage_DeniedReadCannotDelete and
+// TestSetMessagePinned_DeniedReadCannotPin. Editing fans new text out to every
+// reader of the channel, so it must clear the send gate: unchecking "Can
+// access" writes deny = READ_MESSAGES|CONNECT_VOICE and leaves SEND_MESSAGES
+// intact, and an announcement channel accepts new text only from
+// MANAGE_MESSAGES — so a demoted moderator must not be able to rewrite the
+// broadcast they posted while privileged.
+func TestEditMessage_DeniedReadCannotEdit(t *testing.T) {
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{
+		ID:          permissions.MemberRoleID,
+		Name:        "member",
+		Permissions: permissions.SendMessages | permissions.ReadMessages,
+		Position:    1,
+	})
+	seedRole(t, database, &db.Role{
+		ID:          permissions.ModeratorRoleID,
+		Name:        "moderator",
+		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.ManageMessages,
+		Position:    10,
+	})
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "mod_bob"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedUserRole(t, database, 2, permissions.ModeratorRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "staff-private", Type: "text"})
+	seedChannel(t, database, &db.Channel{ID: 11, Name: "announcements", Type: "announcement"})
+
+	permSvc := NewPermissionService(database, permissions.NewChecker(database))
+	svc := NewMessageService(database, permSvc, nil)
+
+	sent, err := svc.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 10, UserID: 1, Username: "alice", Content: "private discussion",
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	announced, err := svc.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 11, UserID: 2, Username: "mod_bob", Content: "payroll is on the 1st",
+	})
+	if err != nil {
+		t.Fatalf("send announcement: %v", err)
+	}
+
+	// Admin unchecks "Can access" for the member role: READ_MESSAGES and
+	// CONNECT_VOICE are denied, SEND_MESSAGES survives the deny mask.
+	seedChannelOverride(t, database, permissions.MemberRoleID, 10, 0, permissions.ReadMessages|permissions.ConnectVoice)
+	permSvc.InvalidateChannel(10)
+
+	if _, err := svc.EditMessage(context.Background(), 1, sent.MessageID, "payroll moved to http://evil/"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("author denied READ_MESSAGES must not edit: got %v", err)
+	}
+
+	// The moderator is demoted to member: MANAGE_MESSAGES is gone, so the
+	// announcement they authored is no longer theirs to rewrite.
+	seedUserRole(t, database, 2, permissions.MemberRoleID)
+	permSvc.InvalidateUser(2)
+
+	if _, err := svc.EditMessage(context.Background(), 2, announced.MessageID, "payroll moved to http://evil/"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("demoted author must not edit an announcement: got %v", err)
+	}
+
+	for _, tc := range []struct {
+		id   int64
+		want string
+	}{
+		{sent.MessageID, "private discussion"},
+		{announced.MessageID, "payroll is on the 1st"},
+	} {
+		msg, err := database.GetMessage(context.Background(), tc.id)
+		if err != nil || msg == nil {
+			t.Fatalf("GetMessage(%d): %v", tc.id, err)
+		}
+		if msg.Content != tc.want {
+			t.Fatalf("message %d must survive the refused edit: got %q", tc.id, msg.Content)
+		}
+	}
+}
+
 func TestDeleteMessage_OwnerCanDelete(t *testing.T) {
 	svc, _ := newTestMessageService(t)
 
