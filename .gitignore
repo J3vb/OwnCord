@@ -4,10 +4,11 @@ Server/.env
 
 # Claude Code — local-only, never committed. A slashless pattern matches at any
 # depth, so these also cover Server/CLAUDE.md, Client/**/CLAUDE.md and nested
-# .claude/ dirs. .mcp.json stays tracked (MCP server list, no secrets in it).
+# .claude/ dirs.
 .claude/
 CLAUDE.md
 CLAUDE.local.md
+.mcp.json
 
 # GitHub Copilot instructions (internal)
 .github/copilot-instructions.md
