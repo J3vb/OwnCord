@@ -367,6 +367,84 @@ func TestWazeroConcurrentDispatchRace(t *testing.T) {
 	wg.Wait()
 }
 
+// noMemWASM exports the command ABI but declares NO memory section, so
+// api.Module.Memory() returns nil for it:
+//
+//	(module
+//	  (func (export "list_commands") (result i32 i32) i32.const 0 i32.const 0)
+//	  (func (export "allocate") (param i32) (result i32) i32.const 0)
+//	  (func (export "command_dispatch") (param i32 i32) (result i32 i32)
+//	    i32.const 0 i32.const 0))
+var noMemWASM = []byte{
+	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // \0asm v1
+	// type section: ()->(i32,i32), (i32)->i32, (i32,i32)->(i32,i32)
+	0x01, 0x12, 0x03,
+	0x60, 0x00, 0x02, 0x7f, 0x7f,
+	0x60, 0x01, 0x7f, 0x01, 0x7f,
+	0x60, 0x02, 0x7f, 0x7f, 0x02, 0x7f, 0x7f,
+	// function section: 3 funcs using types 0,1,2
+	0x03, 0x04, 0x03, 0x00, 0x01, 0x02,
+	// (no memory section — this is the point of the fixture)
+	// export section: list_commands, allocate, command_dispatch
+	0x07, 0x2f, 0x03,
+	0x0d, 0x6c, 0x69, 0x73, 0x74, 0x5f, 0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x73, 0x00, 0x00,
+	0x08, 0x61, 0x6c, 0x6c, 0x6f, 0x63, 0x61, 0x74, 0x65, 0x00, 0x01,
+	0x10, 0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x5f, 0x64, 0x69, 0x73, 0x70, 0x61, 0x74, 0x63, 0x68, 0x00, 0x02,
+	// code section
+	0x0a, 0x14, 0x03,
+	0x06, 0x00, 0x41, 0x00, 0x41, 0x00, 0x0b, // list_commands: (0,0)
+	0x04, 0x00, 0x41, 0x00, 0x0b, // allocate: 0
+	0x06, 0x00, 0x41, 0x00, 0x41, 0x00, 0x0b, // command_dispatch: (0,0)
+}
+
+// TestWazeroMemorylessModuleDoesNotPanic locks the nil-memory guard: a guest
+// that exports the command ABI but declares no memory section must be handled
+// as a bad plugin, not dereferenced. Both host paths that touch guest memory
+// are covered — activation (list_commands) and dispatch (command_dispatch) —
+// because a panic on the activation path aborts server startup for every
+// subsequent restart while the plugin row stays enabled.
+func TestWazeroMemorylessModuleDoesNotPanic(t *testing.T) {
+	dir := t.TempDir()
+	manifest := `{"name":"nomem","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"noop"}]}`
+	writeTestPlugin(t, dir, "nomem", manifest, noMemWASM)
+
+	reg, mem := newWazeroTestRegistry(t, dir)
+	ctx := context.Background()
+	if err := reg.LoadAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := mem.ListPlugins(ctx)
+	// Activation calls list_commands, which used to nil-deref the guest memory.
+	if err := reg.EnablePlugin(ctx, rows[0].ID); err != nil {
+		t.Fatalf("EnablePlugin: %v", err)
+	}
+	reg.mu.RLock()
+	inst := reg.plugins[rows[0].ID]
+	reg.mu.RUnlock()
+	if inst == nil || inst.module == nil {
+		t.Fatal("expected the module to activate")
+	}
+	// No command may bind: the name list is unreadable without memory.
+	reg.mu.RLock()
+	_, bound := reg.commands["noop"]
+	reg.mu.RUnlock()
+	if bound {
+		t.Fatal("memoryless module must not auto-bind commands")
+	}
+
+	// The dispatch path must report a diagnostic instead of writing into nil.
+	if err := reg.RegisterCommand("noop", inst); err != nil {
+		t.Fatalf("RegisterCommand: %v", err)
+	}
+	result, ok := reg.DispatchCommand(ctx, 1, 2, "noop", nil)
+	if !ok || result == nil {
+		t.Fatalf("expected a dispatch result: ok=%v result=%+v", ok, result)
+	}
+	if !strings.Contains(result.Reply, "no exported memory") {
+		t.Fatalf("expected a missing-memory diagnostic, got %q", result.Reply)
+	}
+}
+
 func TestWazeroInvalidWASMFailsActivation(t *testing.T) {
 	dir := t.TempDir()
 	manifest := `{"name":"brokey","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"]}`

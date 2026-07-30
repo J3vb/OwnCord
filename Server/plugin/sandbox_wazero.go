@@ -38,6 +38,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 
@@ -48,6 +49,25 @@ import (
 
 // wazeroPageBytes is the size of a single WASM linear-memory page (64 KiB).
 const wazeroPageBytes = 65536
+
+// guestMemory returns the module's linear memory, or nil when the guest
+// declared none. It exists because api.Module.Memory() is NOT safe to
+// dereference blindly: wazero returns its *wasm.MemoryInstance field as-is, and
+// that field is only populated for a module with a memory section — so a
+// memoryless guest yields a non-nil api.Memory interface wrapping a nil
+// pointer, and every method on it (Read, Write, Size) panics. A plain
+// `mem == nil` check does not catch that, hence the pointer-level check here.
+// Every host access to guest memory must go through this helper.
+func guestMemory(mod api.Module) api.Memory {
+	mem := mod.Memory()
+	if mem == nil {
+		return nil
+	}
+	if v := reflect.ValueOf(mem); v.Kind() == reflect.Ptr && v.IsNil() {
+		return nil
+	}
+	return mem
+}
 
 // platformInit stands up the shared wazero runtime for this Registry. The
 // runtime is the top-level handle that owns compiled modules, host modules,
@@ -237,6 +257,15 @@ func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, ch
 			Reply: fmt.Sprintf("plugin %s: missing allocate export (required for command dispatch)", inst.Manifest.Name),
 		}, true
 	}
+	// A guest that declares no linear memory has no usable JSON ABI. Checked
+	// here, with the other ABI preconditions and before any guest call, rather
+	// than dereferenced blindly further down.
+	mem := guestMemory(mod)
+	if mem == nil {
+		return &CommandResult{
+			Reply: fmt.Sprintf("plugin %s: no exported memory (required for command dispatch)", inst.Manifest.Name),
+		}, true
+	}
 
 	type dispatchPayload struct {
 		UserID    int64    `json:"user_id"`
@@ -287,7 +316,6 @@ func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, ch
 	}
 	ptr := ptrs[0]
 
-	mem := mod.Memory()
 	if !mem.Write(uint32(ptr), payload) {
 		return &CommandResult{Reply: fmt.Sprintf("plugin %s: memory write at %d failed", inst.Manifest.Name, ptr)}, true
 	}
@@ -350,8 +378,9 @@ func (r *Registry) releaseClosedModule(inst *Instance, mod api.Module) {
 
 // listExportedCommands calls the plugin's optional `list_commands` export
 // which returns (ptr u32, len u32) pointing to a JSON array of command name
-// strings. If the export is absent or returns invalid JSON, an empty slice
-// is returned and no command bindings are created.
+// strings. If the export is absent, the module declares no linear memory, or
+// the result is invalid JSON, an empty slice is returned and no command
+// bindings are created.
 func listExportedCommands(ctx context.Context, mod api.Module) []string {
 	fn := mod.ExportedFunction("list_commands")
 	if fn == nil {
@@ -361,8 +390,14 @@ func listExportedCommands(ctx context.Context, mod api.Module) []string {
 	if err != nil || len(results) < 2 {
 		return nil
 	}
+	// A guest with no memory section has no memory to read the name list from
+	// (and its api.Memory must not be touched — see guestMemory).
+	mem := guestMemory(mod)
+	if mem == nil {
+		return nil
+	}
 	ptr, length := uint32(results[0]), uint32(results[1])
-	raw, ok := mod.Memory().Read(ptr, length)
+	raw, ok := mem.Read(ptr, length)
 	if !ok {
 		return nil
 	}
