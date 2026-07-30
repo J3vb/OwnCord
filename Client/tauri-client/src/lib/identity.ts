@@ -120,11 +120,52 @@ export async function getIdentityPin(host: string, userId: string): Promise<stri
 // ── High-level lifecycle ───────────────────────────────────────────────────
 
 /**
+ * One identity keypair per host, shared by every caller in this process.
+ *
+ * The keypair has two independent consumers: the ready hook publishes its
+ * public half (`ensureIdentityKeyPublished`) and the voice session signs
+ * announces with its private half (`livekitSession.ensureIdentityKeyPair`).
+ * They must be the SAME pair — peers verify the announce signature against the
+ * published key. Without this memo each consumer calls the loader separately,
+ * so on a machine where the OS credential store does not round-trip (the write
+ * reports success, the next read returns nothing) each call mints a fresh
+ * keypair: the published key is then never the key that signed, every peer
+ * rejects the announce as a forged/MITM signature, and no amount of re-pinning
+ * helps because the pin records the published key, not the signer.
+ *
+ * The promise is cached (not the resolved value) so concurrent first callers
+ * share one generation instead of racing to create two.
+ */
+const identityKeyPairCache = new Map<string, Promise<CryptoKeyPair>>();
+
+/**
  * Load this host's identity keypair from the keyring, generating and saving a
  * fresh one on first login (or when the stored blob is corrupt). In non-Tauri
  * environments the keypair is in-memory only (not persisted).
+ *
+ * Stable for the lifetime of the process: repeat callers get the same keypair
+ * even when the keyring is unavailable (see `identityKeyPairCache`).
  */
-export async function getOrCreateIdentityKeyPair(host: string): Promise<CryptoKeyPair> {
+export function getOrCreateIdentityKeyPair(host: string): Promise<CryptoKeyPair> {
+  let pending = identityKeyPairCache.get(host);
+  if (pending === undefined) {
+    // A rejected load must not be cached, or the host is poisoned for the
+    // rest of the session; drop it so the next caller can retry.
+    pending = loadOrGenerateIdentityKeyPair(host).catch((err: unknown) => {
+      identityKeyPairCache.delete(host);
+      throw err;
+    });
+    identityKeyPairCache.set(host, pending);
+  }
+  return pending;
+}
+
+/** Test-only: drop the per-host keypair memo so each case starts clean. */
+export function resetIdentityKeyPairCache(): void {
+  identityKeyPairCache.clear();
+}
+
+async function loadOrGenerateIdentityKeyPair(host: string): Promise<CryptoKeyPair> {
   const stored = await loadIdentityKey(host);
   if (stored) {
     try {
@@ -134,7 +175,20 @@ export async function getOrCreateIdentityKeyPair(host: string): Promise<CryptoKe
     }
   }
   const keyPair = await generateIdentityKeyPair();
-  await saveIdentityKey(host, await exportIdentityKeyPair(keyPair.privateKey));
+  const blob = await exportIdentityKeyPair(keyPair.privateKey);
+  if (await saveIdentityKey(host, blob)) {
+    // The store reported success — verify it actually kept the value. Windows
+    // can accept a CredWrite and persist nothing (Credential Manager disabled,
+    // or the "do not allow storage of passwords and credentials" policy), which
+    // otherwise surfaces to the user only as peers flagging them as a MITM.
+    if ((await loadIdentityKey(host)) !== blob) {
+      log.error(
+        "Identity key did not persist — the credential store accepted the write but did not return it. " +
+          "This session works, but peers will see a new identity (and prompt to re-verify) every restart.",
+        { host },
+      );
+    }
+  }
   return keyPair;
 }
 
