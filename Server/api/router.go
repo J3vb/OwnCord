@@ -36,6 +36,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	r := chi.NewRouter()
 
 	// Middleware stack.
+	r.Use(boundRequestID) // must precede RequestID — it reads the header verbatim
 	r.Use(middleware.RequestID)
 	r.Use(setRequestIDHeader) // echo request ID into response header
 	// NOTE: middleware.RealIP is intentionally omitted — trusting X-Real-IP from
@@ -351,6 +352,49 @@ func handleLiveKitHealth(hub *ws.Hub) http.HandlerFunc {
 	}
 }
 
+// boundRequestID drops a client-supplied X-Request-Id that is over
+// maxRequestIDLen bytes or is not plain printable ASCII, so the
+// middleware.RequestID mounted straight after it generates a server-side id
+// instead. Without this, chi adopts the header verbatim and the value is
+// retained by the admin ring buffer (2000 entries) and echoed back in the
+// response header — a one-shot burst of ~1 MiB ids pins hundreds of MB of heap.
+//
+// The value is dropped rather than truncated: a truncated id is not the
+// client's id, so it correlates with nothing while still parking
+// attacker-chosen bytes in the log. The request is served either way, and the
+// server-generated id is still returned in the X-Request-Id response header.
+func boundRequestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if id := r.Header.Get(middleware.RequestIDHeader); id != "" && !validRequestID(id) {
+			r.Header.Del(middleware.RequestIDHeader)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// validRequestID reports whether id is short enough and printable enough to
+// carry through logs and the response header.
+func validRequestID(id string) bool {
+	if len(id) > maxRequestIDLen {
+		return false
+	}
+	for i := range len(id) {
+		if id[i] < '!' || id[i] > '~' {
+			return false
+		}
+	}
+	return true
+}
+
+// truncateForLog bounds a client-controlled string before it becomes a log
+// attribute, so it cannot inflate the retained ring-buffer entries.
+func truncateForLog(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "...(truncated)"
+}
+
 // setRequestIDHeader copies the request ID from context into the response header.
 func setRequestIDHeader(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -382,7 +426,7 @@ func recoverer(next http.Handler) http.Handler {
 				}
 				attrs := []any{
 					"method", r.Method,
-					"path", r.URL.Path,
+					"path", truncateForLog(r.URL.Path, maxLoggedPathLen),
 					"panic", rec,
 					"stack", stackutil.Capture(),
 				}
@@ -415,7 +459,7 @@ func requestLogger(next http.Handler) http.Handler {
 		reqID := middleware.GetReqID(r.Context())
 		attrs := []any{
 			"method", r.Method,
-			"path", path,
+			"path", truncateForLog(path, maxLoggedPathLen),
 			"status", status,
 			"duration_ms", elapsed.Milliseconds(),
 			"bytes", ww.BytesWritten(),

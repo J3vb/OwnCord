@@ -147,4 +147,19 @@ const (
 
 	// maxAvatarURLLen is the maximum length of a user avatar URL.
 	maxAvatarURLLen = 512
+
+	// maxRequestIDLen bounds a client-supplied X-Request-Id. chi's
+	// middleware.RequestID adopts that header verbatim, and the value then
+	// reaches every log record for the request (logctx, requestLogger,
+	// recoverer) and the echoed response header — while the admin ring buffer
+	// retains 2000 records, so an unbounded id becomes long-lived heap.
+	// 128 bytes fits every common correlation-id format (UUID, 32-hex,
+	// W3C traceparent, chi's own "host/prefix-000001").
+	maxRequestIDLen = 128
+
+	// maxLoggedPathLen bounds the request path attached to a log record. The
+	// URL is client-controlled and net/http accepts one up to MaxHeaderBytes
+	// (~1 MiB), so an unbounded path fills the ring buffer the same way an
+	// unbounded request id does. Well past the longest real route.
+	maxLoggedPathLen = 256
 )
