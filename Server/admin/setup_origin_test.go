@@ -90,3 +90,91 @@ func TestIsSetupOriginAllowed(t *testing.T) {
 		})
 	}
 }
+
+// isSameOrigin is what lets the admin panel's own setup call through on a
+// default config, where allowed_origins is empty. It must not become a hole:
+// only an Origin naming this exact host:port may pass.
+func TestIsSameOrigin(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin string
+		host   string
+		want   bool
+	}{
+		{
+			name:   "admin panel on the default port is same-origin",
+			origin: "https://localhost:8443",
+			host:   "localhost:8443",
+			want:   true,
+		},
+		{
+			name:   "host comparison is case-insensitive",
+			origin: "https://LocalHost:8443",
+			host:   "localhost:8443",
+			want:   true,
+		},
+		{
+			name:   "plain http against a proxied host still matches",
+			origin: "http://chat.example",
+			host:   "chat.example",
+			want:   true,
+		},
+		{
+			name:   "a different host is not same-origin",
+			origin: "https://evil.example",
+			host:   "localhost:8443",
+			want:   false,
+		},
+		{
+			name:   "a different port is not same-origin",
+			origin: "https://localhost:9999",
+			host:   "localhost:8443",
+			want:   false,
+		},
+		{
+			name:   "loopback by IP does not match loopback by name",
+			origin: "https://127.0.0.1:8443",
+			host:   "localhost:8443",
+			want:   false,
+		},
+		{
+			name:   "a suffix of the host is not same-origin",
+			origin: "https://evil-localhost:8443",
+			host:   "localhost:8443",
+			want:   false,
+		},
+		{
+			name:   "schemeless origin cannot pass as same-origin",
+			origin: "//localhost:8443",
+			host:   "localhost:8443",
+			want:   false,
+		},
+		{
+			name:   "opaque origin (sandboxed iframe) is denied",
+			origin: "null",
+			host:   "localhost:8443",
+			want:   false,
+		},
+		{
+			name:   "empty origin is denied",
+			origin: "",
+			host:   "localhost:8443",
+			want:   false,
+		},
+		{
+			name:   "empty host denies rather than matching an empty origin host",
+			origin: "https://localhost:8443",
+			host:   "",
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isSameOrigin(tt.origin, tt.host); got != tt.want {
+				t.Errorf("isSameOrigin(%q, %q) = %v, want %v",
+					tt.origin, tt.host, got, tt.want)
+			}
+		})
+	}
+}
