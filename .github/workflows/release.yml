@@ -135,6 +135,29 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build -- --bundles appimage,deb
 
+      # linuxdeploy bundles the runner's libwayland-* into the AppImage, which
+      # breaks Mesa EGL init on newer hosts (white window on Arch/Fedora —
+      # EGL_BAD_PARAMETER). Strip them and regenerate the updater artifact +
+      # signatures for the patched image.
+      - name: Strip host-incompatible libs from AppImage and re-sign
+        working-directory: Client/tauri-client
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          BUNDLE_DIR="src-tauri/target/release/bundle/appimage"
+          APPIMAGE=$(find "$BUNDLE_DIR" -name "*.AppImage" ! -name "*.sig" | head -1)
+          bash scripts/strip-appimage-bundled-libs.sh "$APPIMAGE"
+          TARBALL="$APPIMAGE.tar.gz"
+          rm -f "$TARBALL" "$APPIMAGE.sig" "$TARBALL.sig"
+          tar czf "$TARBALL" -C "$(dirname "$APPIMAGE")" "$(basename "$APPIMAGE")"
+          KEY_PATH=$(mktemp)
+          printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > "$KEY_PATH"
+          trap 'rm -f "$KEY_PATH"' EXIT
+          npx tauri signer sign -f "$KEY_PATH" -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$APPIMAGE"
+          npx tauri signer sign -f "$KEY_PATH" -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$TARBALL"
+
       - name: Stage Linux release assets
         shell: bash
         run: |
@@ -265,6 +288,26 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build -- --bundles appimage,deb
+
+      # Same strip + re-sign as the x86_64 job — see the comment there.
+      - name: Strip host-incompatible libs from AppImage and re-sign
+        working-directory: Client/tauri-client
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          BUNDLE_DIR="src-tauri/target/release/bundle/appimage"
+          APPIMAGE=$(find "$BUNDLE_DIR" -name "*.AppImage" ! -name "*.sig" | head -1)
+          bash scripts/strip-appimage-bundled-libs.sh "$APPIMAGE"
+          TARBALL="$APPIMAGE.tar.gz"
+          rm -f "$TARBALL" "$APPIMAGE.sig" "$TARBALL.sig"
+          tar czf "$TARBALL" -C "$(dirname "$APPIMAGE")" "$(basename "$APPIMAGE")"
+          KEY_PATH=$(mktemp)
+          printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > "$KEY_PATH"
+          trap 'rm -f "$KEY_PATH"' EXIT
+          npx tauri signer sign -f "$KEY_PATH" -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$APPIMAGE"
+          npx tauri signer sign -f "$KEY_PATH" -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$TARBALL"
 
       - name: Stage Linux ARM64 release assets
         shell: bash
