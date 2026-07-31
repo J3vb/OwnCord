@@ -211,6 +211,28 @@ func TestSaveVoiceCredentialsOnlyWhenEmpty(t *testing.T) {
 	})
 }
 
+func TestSaveVoiceAutoDownloadBool(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+	loadNoEnv(t, cfgPath) // generated default file has auto_download_livekit: true
+
+	if err := config.Save(cfgPath, config.Patch{VoiceAutoDownload: new(false)}); err != nil {
+		t.Fatalf("Save() returned error: %v", err)
+	}
+	cfg := loadNoEnv(t, cfgPath)
+	if cfg.Voice.AutoDownloadLiveKit {
+		t.Error("Voice.AutoDownloadLiveKit = true, want false after patch")
+	}
+
+	if err := config.Save(cfgPath, config.Patch{VoiceAutoDownload: new(true)}); err != nil {
+		t.Fatalf("Save() returned error: %v", err)
+	}
+	cfg = loadNoEnv(t, cfgPath)
+	if !cfg.Voice.AutoDownloadLiveKit {
+		t.Error("Voice.AutoDownloadLiveKit = false, want true after re-patch")
+	}
+}
+
 func TestSaveYAMLInjectionIsInert(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")

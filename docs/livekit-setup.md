@@ -57,13 +57,24 @@ When running OwnCord via `docker compose`, LiveKit runs as a separate container 
 
 ### 1. Get the LiveKit Binary
 
-Download `livekit-server` for your platform from one of:
+**You usually don't have to do anything.** With `voice.auto_download_livekit`
+enabled (the default in a freshly generated `config.yaml`, and offered as a
+toggle in the first-run setup wizard), OwnCord downloads a pinned
+`livekit-server` release from the official LiveKit GitHub releases in the
+background at startup, verifies it against the release's `checksums.txt`,
+stores it in `data/livekit/`, and manages it as the companion process. Pin a
+different release with `voice.livekit_version`.
+
+To provide the binary yourself instead, download `livekit-server` for your
+platform from one of:
 
 - **GitHub releases**: <https://github.com/livekit/livekit/releases>
-  - Grab the `livekit-server_*_windows_amd64.zip` asset
+  - Grab the `livekit_*_windows_amd64.zip` asset
 - **LiveKit website**: <https://livekit.io/> (Docs > Self Hosting)
 
-Extract the binary somewhere permanent (e.g. `C:\livekit\livekit-server.exe`).
+Extract the binary somewhere permanent (e.g. `C:\livekit\livekit-server.exe`)
+and set `voice.livekit_binary` to that path — a configured path always wins
+over auto-download.
 
 ---
 
@@ -85,7 +96,9 @@ voice:
 | `livekit_api_key` | Shared API key between OwnCord and LiveKit | `"devkey"` |
 | `livekit_api_secret` | Shared secret for JWT signing (min 32 chars) | `"owncord-dev-secret-key-min-32chars"` |
 | `livekit_url` | LiveKit WebSocket URL | `ws://localhost:7880` |
-| `livekit_binary` | Path to `livekit-server` binary. Empty = assume externally managed | `""` (disabled) |
+| `livekit_binary` | Path to `livekit-server` binary. Empty + auto-download off = assume externally managed | `""` |
+| `auto_download_livekit` | Download and manage a pinned `livekit-server` release automatically when `livekit_binary` is empty | `true` in generated config |
+| `livekit_version` | Override the pinned auto-download release (e.g. `"1.13.5"`) | `""` (built-in pin) |
 | `node_ip` | Public IP for WebRTC ICE candidates (remote users behind NAT) | `""` (auto-detect) |
 | `advertise_internal_ip` | Also advertise LAN IPs — enable on dual-homed servers (LAN + public IP) so local clients can connect | `false` |
 | `quality` | Default voice quality preset | `"medium"` |
@@ -118,7 +131,7 @@ When `livekit_binary` is set, OwnCord manages LiveKit as a companion process:
 4. **Health checks**: `GET http://localhost:7880/` verifies LiveKit is responding
 5. **Graceful shutdown**: Stops the process when OwnCord shuts down (5s timeout before kill)
 
-If `livekit_binary` is empty, OwnCord assumes LiveKit is managed externally (e.g. Docker, systemd, or manual start).
+If `livekit_binary` is empty and `auto_download_livekit` is off, OwnCord assumes LiveKit is managed externally (e.g. Docker, systemd, or manual start).
 
 ---
 

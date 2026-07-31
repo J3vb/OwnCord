@@ -388,7 +388,8 @@ function wizInit(defaults){
     tls_mode:d.tls_mode||'self_signed',
     tls_domain:d.tls_domain||'',
     upload_max_size_mb:d.upload_max_size_mb||100,
-    voice_quality:d.voice_quality||'medium'};
+    voice_quality:d.voice_quality||'medium',
+    voice_auto_download:d.voice_auto_download!==undefined?!!d.voice_auto_download:true};
   renderWizard();
 }
 
@@ -439,6 +440,7 @@ function renderWizard(){
       h+='<h2>Uploads &amp; voice</h2>'
         +'<p class="wiz-sub">Limits for file sharing and voice chat quality.</p>'
         +wizField('wizUpload','Max upload size (MB)','<input class="form-input" id="wizUpload" type="number" min="1" max="10240" value="'+esc(d.upload_max_size_mb)+'"><div class="wiz-hint">The largest file anyone can share. 100 MB suits most servers.</div>')
+        +'<div class="wiz-toggle-row"><div><div class="lbl">Voice chat</div><div class="wiz-hint" style="margin-top:2px">Downloads the voice engine (LiveKit, ~40 MB, one time) from the official LiveKit project and manages it for you. Turn off only if you run your own LiveKit server.</div></div><button class="toggle'+(d.voice_auto_download?' on':'')+'" id="wizVoiceDl" onclick="this.classList.toggle(\'on\')"></button></div>'
         +wizField('wizVoice','Voice quality','<select class="filter-select" id="wizVoice" style="width:100%">'
           +'<option value="low"'+(d.voice_quality==='low'?' selected':'')+'>Low &mdash; least bandwidth, phone-call quality</option>'
           +'<option value="medium"'+(d.voice_quality==='medium'?' selected':'')+'>Medium &mdash; recommended balance</option>'
@@ -455,7 +457,7 @@ function renderWizard(){
       break;
     case 5:{
       const secLabel={self_signed:'Self-signed HTTPS',acme:'Let&#39;s Encrypt ('+esc(d.tls_domain)+')',manual:'Manual certificates',off:'No encryption'}[d.tls_mode]||esc(d.tls_mode);
-      const rows=[['Username',esc(d.username)],['Server name',esc(d.server_name)],['Port',esc(d.port)],['Security',secLabel],['Max upload',esc(d.upload_max_size_mb)+' MB'],['Voice quality',esc(d.voice_quality)],['Open registration',d.registration_open?'Yes':'No'],['Welcome message',esc(d.motd)||'&mdash;']];
+      const rows=[['Username',esc(d.username)],['Server name',esc(d.server_name)],['Port',esc(d.port)],['Security',secLabel],['Max upload',esc(d.upload_max_size_mb)+' MB'],['Voice chat',d.voice_auto_download?'Automatic (LiveKit downloaded for you)':'Self-managed / off'],['Voice quality',esc(d.voice_quality)],['Open registration',d.registration_open?'Yes':'No'],['Welcome message',esc(d.motd)||'&mdash;']];
       h+='<h2>Review &amp; finish</h2><p class="wiz-sub">Everything look right? You can change any of this later in the admin panel.</p>';
       rows.forEach(r=>{h+='<div class="wiz-review-row"><span class="k">'+r[0]+'</span><span class="v">'+r[1]+'</span></div>'});
       if(wizNeedsRestart())h+='<div class="wiz-callout">The server will restart once to apply your connection settings, then point you to the right address.</div>';
@@ -481,7 +483,7 @@ function wizTLSChanged(){
 
 function wizNeedsRestart(){
   const f=wiz.defaults;if(!f)return false;const d=wiz.data;
-  return Number(d.port)!==f.port||d.tls_mode!==f.tls_mode||Number(d.upload_max_size_mb)!==f.upload_max_size_mb||d.voice_quality!==f.voice_quality||(d.tls_mode==='acme'&&d.tls_domain!==(f.tls_domain||''));
+  return Number(d.port)!==f.port||d.tls_mode!==f.tls_mode||Number(d.upload_max_size_mb)!==f.upload_max_size_mb||d.voice_quality!==f.voice_quality||d.voice_auto_download!==!!f.voice_auto_download||(d.tls_mode==='acme'&&d.tls_domain!==(f.tls_domain||''));
 }
 
 function wizCollect(){
@@ -490,7 +492,7 @@ function wizCollect(){
   switch(wiz.step){
     case 1:d.username=(g('wizUser')||'').trim();d.password=g('wizPass')||'';d.confirm=g('wizConfirm')||'';break;
     case 2:d.server_name=(g('wizName')||'').trim();d.port=g('wizPort');d.tls_mode=g('wizTLS')||d.tls_mode;d.tls_domain=(g('wizDomain')||'').trim();break;
-    case 3:d.upload_max_size_mb=g('wizUpload');d.voice_quality=g('wizVoice')||d.voice_quality;break;
+    case 3:{d.upload_max_size_mb=g('wizUpload');d.voice_quality=g('wizVoice')||d.voice_quality;const vd=document.getElementById('wizVoiceDl');if(vd)d.voice_auto_download=vd.classList.contains('on');break}
     case 4:{const t=document.getElementById('wizReg');if(t)d.registration_open=t.classList.contains('on');d.motd=(g('wizMotd')||'').trim();break}
   }
 }
@@ -539,7 +541,8 @@ async function wizFinish(){
   const body={username:d.username,password:d.password};
   if(!wiz.skip){
     body.wizard={server_name:d.server_name,motd:d.motd,registration_open:!!d.registration_open,
-      port:Number(d.port),tls_mode:d.tls_mode,upload_max_size_mb:Number(d.upload_max_size_mb),voice_quality:d.voice_quality};
+      port:Number(d.port),tls_mode:d.tls_mode,upload_max_size_mb:Number(d.upload_max_size_mb),
+      voice_quality:d.voice_quality,voice_auto_download:!!d.voice_auto_download};
     if(d.tls_mode==='acme')body.wizard.tls_domain=d.tls_domain;
   }
   try{

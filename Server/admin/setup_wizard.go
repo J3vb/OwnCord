@@ -45,20 +45,24 @@ type setupWizardRequest struct {
 	TLSDomain       *string `json:"tls_domain"`
 	UploadMaxSizeMB *int    `json:"upload_max_size_mb"`
 	VoiceQuality    *string `json:"voice_quality"`
+	// VoiceAutoDownload toggles voice.auto_download_livekit — download and
+	// run livekit-server automatically so voice works with zero setup.
+	VoiceAutoDownload *bool `json:"voice_auto_download"`
 }
 
 // setupDefaults is the prefill data the wizard shows. Exposed only while
 // needs_setup is true, and deliberately free of secrets, filesystem paths and
 // network ACLs.
 type setupDefaults struct {
-	ServerName       string `json:"server_name"`
-	Motd             string `json:"motd"`
-	RegistrationOpen bool   `json:"registration_open"`
-	Port             int    `json:"port"`
-	TLSMode          string `json:"tls_mode"`
-	TLSDomain        string `json:"tls_domain"`
-	UploadMaxSizeMB  int    `json:"upload_max_size_mb"`
-	VoiceQuality     string `json:"voice_quality"`
+	ServerName        string `json:"server_name"`
+	Motd              string `json:"motd"`
+	RegistrationOpen  bool   `json:"registration_open"`
+	Port              int    `json:"port"`
+	TLSMode           string `json:"tls_mode"`
+	TLSDomain         string `json:"tls_domain"`
+	UploadMaxSizeMB   int    `json:"upload_max_size_mb"`
+	VoiceQuality      string `json:"voice_quality"`
+	VoiceAutoDownload bool   `json:"voice_auto_download"`
 }
 
 // ─── Validation ──────────────────────────────────────────────────────────────
@@ -215,12 +219,13 @@ func applyWizardSettings(ctx context.Context, database *db.DB, wr *setupWizardRe
 // tokens across restarts (they are otherwise regenerated randomly each boot).
 func buildConfigPatch(wr *setupWizardRequest, running *config.Config) config.Patch {
 	p := config.Patch{
-		ServerPort:      wr.Port,
-		ServerName:      wr.ServerName,
-		TLSMode:         wr.TLSMode,
-		TLSDomain:       wr.TLSDomain,
-		UploadMaxSizeMB: wr.UploadMaxSizeMB,
-		VoiceQuality:    wr.VoiceQuality,
+		ServerPort:        wr.Port,
+		ServerName:        wr.ServerName,
+		TLSMode:           wr.TLSMode,
+		TLSDomain:         wr.TLSDomain,
+		UploadMaxSizeMB:   wr.UploadMaxSizeMB,
+		VoiceQuality:      wr.VoiceQuality,
+		VoiceAutoDownload: wr.VoiceAutoDownload,
 	}
 	if running != nil {
 		if key := running.Voice.LiveKitAPIKey; key != "" {
@@ -255,6 +260,9 @@ func patchedConfigKeys(wr *setupWizardRequest) string {
 	if wr.VoiceQuality != nil {
 		keys = append(keys, "voice.quality")
 	}
+	if wr.VoiceAutoDownload != nil {
+		keys = append(keys, "voice.auto_download_livekit")
+	}
 	keys = append(keys, "voice credentials (persisted if unset)")
 	return strings.Join(keys, ", ")
 }
@@ -276,6 +284,9 @@ func wizardChangesRunningConfig(wr *setupWizardRequest, running *config.Config) 
 		return true
 	}
 	if wr.VoiceQuality != nil && *wr.VoiceQuality != running.Voice.Quality {
+		return true
+	}
+	if wr.VoiceAutoDownload != nil && *wr.VoiceAutoDownload != running.Voice.AutoDownloadLiveKit {
 		return true
 	}
 	// A domain change only matters when certificates come from ACME.

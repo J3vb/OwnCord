@@ -72,13 +72,14 @@ func handleSetupStatus(database *db.DB, opts SetupOptions) http.HandlerFunc {
 		if resp.NeedsSetup && opts.RunningCfg != nil {
 			cfg := opts.RunningCfg
 			d := &setupDefaults{
-				ServerName:      cfg.Server.Name,
-				Motd:            "Welcome!",
-				Port:            cfg.Server.Port,
-				TLSMode:         cfg.TLS.Mode,
-				TLSDomain:       cfg.TLS.Domain,
-				UploadMaxSizeMB: cfg.Upload.MaxSizeMB,
-				VoiceQuality:    cfg.Voice.Quality,
+				ServerName:        cfg.Server.Name,
+				Motd:              "Welcome!",
+				Port:              cfg.Server.Port,
+				TLSMode:           cfg.TLS.Mode,
+				TLSDomain:         cfg.TLS.Domain,
+				UploadMaxSizeMB:   cfg.Upload.MaxSizeMB,
+				VoiceQuality:      cfg.Voice.Quality,
+				VoiceAutoDownload: cfg.Voice.AutoDownloadLiveKit,
 			}
 			// The settings table is authoritative for the values the app
 			// reads live; fall back to the config/seed values on error.

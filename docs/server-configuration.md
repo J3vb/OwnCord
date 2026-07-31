@@ -16,8 +16,8 @@ Configuration is loaded in three layers (later layers override earlier ones):
 
 The admin panel's first-time setup wizard (shown at `/admin` until the Owner
 account exists) writes a subset of these keys into `config.yaml` for you:
-`server.port`, `server.name`, `tls.mode`, `tls.domain`, `upload.max_size_mb`
-and `voice.quality`. It also persists the auto-generated
+`server.port`, `server.name`, `tls.mode`, `tls.domain`, `upload.max_size_mb`,
+`voice.quality` and `voice.auto_download_livekit`. It also persists the auto-generated
 `voice.livekit_api_key` / `voice.livekit_api_secret` (only when the file has
 none) so voice tokens survive restarts. The wizard patches the file in place —
 comments and hand-edited values it doesn't manage are preserved — and restarts
@@ -67,7 +67,9 @@ the server automatically when a startup-only value changed. Note that
 | `voice.livekit_api_key` | string | *(random per run)* | LiveKit API key. Set a stable value for persistent voice tokens. |
 | `voice.livekit_api_secret` | string | *(random per run)* | LiveKit API secret (min 32 chars). Set a stable value for persistent tokens. |
 | `voice.livekit_url` | string | `"ws://localhost:7880"` | LiveKit server WebSocket URL |
-| `voice.livekit_binary` | string | `""` | Path to `livekit-server` binary; empty = don't auto-start |
+| `voice.livekit_binary` | string | `""` | Path to an existing `livekit-server` binary; set to skip auto-download and run your own build |
+| `voice.auto_download_livekit` | bool | `false` (compiled) / `true` in the generated config | When no `livekit_binary` is set, download a pinned `livekit-server` release from the official LiveKit GitHub releases (verified against the release `checksums.txt`) into `data/livekit/` and run it automatically |
+| `voice.livekit_version` | string | `""` | Override the pinned `livekit-server` version used by auto-download (e.g. `"1.13.5"`); empty = built-in pin |
 | `voice.node_ip` | string | `""` | Public IP for WebRTC ICE candidates; empty = auto-detect. Required for remote users behind NAT. |
 | `voice.advertise_internal_ip` | bool | `false` | Also advertise internal (LAN) IPs as ICE candidates. Enable when the server is reachable via both a LAN IP and a public IP so local-network clients can connect to voice. |
 | `voice.quality` | string | `"medium"` | Voice quality preset: `low`, `medium`, `high` |

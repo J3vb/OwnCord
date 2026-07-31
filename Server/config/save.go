@@ -29,6 +29,9 @@ type Patch struct {
 	TLSDomain       *string
 	UploadMaxSizeMB *int
 	VoiceQuality    *string // low | medium | high
+	// VoiceAutoDownload toggles voice.auto_download_livekit (download and run
+	// livekit-server automatically when no livekit_binary is set).
+	VoiceAutoDownload *bool
 
 	// VoiceAPIKey/VoiceAPISecret are written ONLY when the file's
 	// corresponding value is absent or empty. This persists the
@@ -109,6 +112,9 @@ func applyPatch(root *goyaml.Node, p Patch) {
 	}
 	if p.VoiceQuality != nil {
 		setScalar(section(root, "voice"), "quality", *p.VoiceQuality, "!!str")
+	}
+	if p.VoiceAutoDownload != nil {
+		setScalar(section(root, "voice"), "auto_download_livekit", strconv.FormatBool(*p.VoiceAutoDownload), "!!bool")
 	}
 	if p.VoiceAPIKey != nil {
 		if cur := findValue(section(root, "voice"), "livekit_api_key"); cur == nil || cur.Value == "" {

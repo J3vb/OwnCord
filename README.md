@@ -84,7 +84,7 @@ The client uses TOFU (Trust On First Use) for self-signed certificates: it promp
 ## What OwnCord Already Has
 
 - Real-time channels and direct messages over WebSocket
-- Voice/video channels via LiveKit
+- Voice/video channels via LiveKit — the LiveKit server binary is downloaded and managed for you
 - Invite-only registration and role-based permissions
 - Web admin panel with logs, backups, and update tooling
 - File uploads and inline media rendering

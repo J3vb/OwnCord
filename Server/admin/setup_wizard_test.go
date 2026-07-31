@@ -63,13 +63,14 @@ func TestSetupWizard_FullFlow(t *testing.T) {
 		"username": "owner",
 		"password": "SecurePass123!",
 		"wizard": map[string]any{
-			"server_name":        "My Cool Server",
-			"motd":               "Welcome friends!",
-			"registration_open":  true,
-			"port":               9000,
-			"tls_mode":           "off",
-			"upload_max_size_mb": 250,
-			"voice_quality":      "high",
+			"server_name":         "My Cool Server",
+			"motd":                "Welcome friends!",
+			"registration_open":   true,
+			"port":                9000,
+			"tls_mode":            "off",
+			"upload_max_size_mb":  250,
+			"voice_quality":       "high",
+			"voice_auto_download": true,
 		},
 	})
 	if rr.Code != http.StatusCreated {
@@ -151,6 +152,9 @@ func TestSetupWizard_FullFlow(t *testing.T) {
 	}
 	if cfg.Voice.LiveKitAPISecret != "generated-secret-0123456789abcdef" {
 		t.Errorf("LiveKit secret = %q — the running credentials were not persisted", cfg.Voice.LiveKitAPISecret)
+	}
+	if !cfg.Voice.AutoDownloadLiveKit {
+		t.Error("config voice.auto_download_livekit = false, want true from wizard toggle")
 	}
 }
 

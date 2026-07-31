@@ -157,8 +157,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	} else {
 		hub.SetLiveKit(lk)
 
-		// Optionally start a companion LiveKit process.
-		if cfg.Voice.LiveKitBinaryPath != "" {
+		// Optionally start a companion LiveKit process — either from a
+		// configured binary or via checksum-verified auto-download (the
+		// download happens in the background inside Start).
+		if cfg.Voice.LiveKitBinaryPath != "" || cfg.Voice.AutoDownloadLiveKit {
 			proc := ws.NewLiveKitProcess(&cfg.Voice, &cfg.TLS, cfg.Server.DataDir)
 			if startErr := proc.Start(); startErr != nil {
 				slog.Error("failed to start LiveKit process", "error", startErr)
@@ -169,7 +171,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	}
 
 	// Warn if LiveKit is externally managed and webhook may be blocked by admin CIDRs.
-	if lkErr == nil && cfg.Voice.LiveKitBinaryPath == "" {
+	if lkErr == nil && cfg.Voice.LiveKitBinaryPath == "" && !cfg.Voice.AutoDownloadLiveKit {
 		lkHost := ""
 		if u, parseErr := url.Parse(cfg.Voice.LiveKitURL); parseErr == nil {
 			lkHost = u.Hostname()
