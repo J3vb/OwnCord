@@ -333,6 +333,63 @@ func TestGetSessionWithBanStatus_NotFound(t *testing.T) {
 	}
 }
 
+// The ws revoked-session sweep resolves every connected client in one
+// IN (...) query; missing hashes must be absent (revoked ⇒ kick) and ban
+// state must ride along per row.
+func TestGetSessionsWithBanStatusBatch(t *testing.T) {
+	database := newTestDB(t)
+	okUID, _ := database.CreateUser(context.Background(), "batch-ok", "hash", 4)
+	banUID, _ := database.CreateUser(context.Background(), "batch-banned", "hash", 4)
+	_, _ = database.CreateSession(context.Background(), okUID, "batchTokenOK", "GoTest/1.0", "127.0.0.1")
+	_, _ = database.CreateSession(context.Background(), banUID, "batchTokenBan", "GoTest/1.0", "127.0.0.1")
+	if err := database.BanUser(context.Background(), banUID, "rule violation", nil); err != nil {
+		t.Fatalf("BanUser: %v", err)
+	}
+
+	result, err := database.GetSessionsWithBanStatusBatch(context.Background(),
+		[]string{"batchTokenOK", "batchTokenBan", "batchTokenMissing"})
+	if err != nil {
+		t.Fatalf("GetSessionsWithBanStatusBatch: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("len(result) = %d, want 2 (missing hash must be absent)", len(result))
+	}
+
+	ok := result["batchTokenOK"]
+	if ok == nil || ok.UserID != okUID {
+		t.Fatalf("batchTokenOK row = %+v, want session for user %d", ok, okUID)
+	}
+	if ok.Banned {
+		t.Error("batchTokenOK: Banned = true, want false")
+	}
+	if ok.ExpiresAt == "" {
+		t.Error("batchTokenOK: ExpiresAt empty — the sweep's expiry check needs it")
+	}
+
+	banned := result["batchTokenBan"]
+	if banned == nil || !banned.Banned {
+		t.Fatalf("batchTokenBan row = %+v, want Banned = true", banned)
+	}
+	if banned.BanReason == nil || *banned.BanReason != "rule violation" {
+		t.Errorf("BanReason = %v, want 'rule violation'", banned.BanReason)
+	}
+
+	if _, found := result["batchTokenMissing"]; found {
+		t.Error("batchTokenMissing must not be in the result map")
+	}
+}
+
+func TestGetSessionsWithBanStatusBatch_Empty(t *testing.T) {
+	database := newTestDB(t)
+	result, err := database.GetSessionsWithBanStatusBatch(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("GetSessionsWithBanStatusBatch(nil): %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("len(result) = %d, want 0", len(result))
+	}
+}
+
 func TestDeleteSession(t *testing.T) {
 	database := newTestDB(t)
 	uid, _ := database.CreateUser(context.Background(), "leo", "hash", 4)

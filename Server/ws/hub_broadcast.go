@@ -67,10 +67,20 @@ func (h *Hub) broadcastVoiceEvent(ctx context.Context, channelID int64, msg []by
 // replay filters it too (EventsSinceFiltered replays a channelID of 0
 // unconditionally). kind only labels the drop warning.
 func (h *Hub) broadcastChannelScoped(ctx context.Context, channelID int64, msg []byte, kind string) {
+	h.broadcastChannelScopedTo(channelID, msg, h.channelReadAudience(ctx, channelID), kind)
+}
+
+// broadcastChannelScopedTo enqueues msg for a pre-resolved audience. Callers
+// that fan out several messages for the same channel in one operation
+// (CleanupVoiceForChannel) resolve the audience once via channelReadAudience
+// and reuse it here, instead of re-running the role/override lookups per
+// message. recipients is only read after enqueue, so sharing one slice across
+// messages is safe.
+func (h *Hub) broadcastChannelScopedTo(channelID int64, msg []byte, recipients []int64, kind string) {
 	bm := broadcastMsg{
 		channelID:  channelID,
 		msg:        msg,
-		recipients: h.channelReadAudience(ctx, channelID),
+		recipients: recipients,
 	}
 	select {
 	case h.broadcast <- bm:
@@ -84,10 +94,12 @@ func (h *Hub) broadcastChannelScoped(ctx context.Context, channelID int64, msg [
 // channelReadAudience returns the connected user IDs whose current role may READ
 // channelID. Always non-nil, so an empty result means "deliver to nobody"
 // rather than "no filter". Roles are resolved per client (an admin may have
-// reassigned one mid-session) and the channel verdict is memoised per role, so
-// the cost is one role lookup per connected client plus one override lookup per
-// distinct role. Fails closed: a client whose role cannot be resolved is left
-// out. Mirrors RefreshChannelVisibility, which resolves visibility the same way.
+// reassigned one mid-session) and both lookups are memoised for the duration
+// of the call — one GetRoleForUser per distinct connected user, one override
+// lookup per distinct role — deliberately NOT across calls: a cross-call cache
+// would delay revocation, which this path resolves live on purpose. Fails
+// closed: a client whose role cannot be resolved is left out. Mirrors
+// RefreshChannelVisibility, which resolves visibility the same way.
 func (h *Hub) channelReadAudience(ctx context.Context, channelID int64) []int64 {
 	h.mu.RLock()
 	userIDs := make([]int64, 0, len(h.clients))
@@ -408,48 +420,58 @@ func (h *Hub) sendSequencedToUsersHigh(channelID int64, userIDs []int64, msg []b
 // deliverBroadcast stamps bm.msg with a monotonic sequence number, stores it
 // in the replay buffer, and sends it to the appropriate clients via pub/sub.
 func (h *Hub) deliverBroadcast(bm broadcastMsg) {
-	h.seqMu.Lock()
-	defer h.seqMu.Unlock()
+	// The channel-broadcast debug log is emitted after seqMu is released
+	// (below) so a slow logging sink never extends the critical section that
+	// serializes every broadcast.
+	seq, delivered, channelSend := func() (seq uint64, delivered int, channelSend bool) {
+		h.seqMu.Lock()
+		defer h.seqMu.Unlock()
 
-	seq := h.nextSeq()
-	msg := wrapWithSeq(bm.msg, seq)
+		seq = h.nextSeq()
+		msg := wrapWithSeq(bm.msg, seq)
 
-	// Store in replay buffer for reconnection recovery.
-	h.replayBuf.Push(seq, bm.channelID, msg)
-	h.persistEvent(seq, bm.channelID, msg)
+		// Store in replay buffer for reconnection recovery.
+		h.replayBuf.Push(seq, bm.channelID, msg)
+		h.persistEvent(seq, bm.channelID, msg)
 
-	// Fan out to plugins subscribed to this event type (Phase C Step 9).
-	// Dispatch is a no-op in the default build; the wazero build calls into
-	// the WASM module. Dispatch is called outside seqMu after we release it
-	// conceptually — but since seqMu is still held here, the call MUST NOT
-	// re-enter the hub. The default build is safe; the wazero build should
-	// dispatch asynchronously once the runtime is real.
-	if sink := h.pluginSink.Load(); sink != nil {
-		eventType := extractEventType(msg)
-		if eventType == "" {
-			eventType = "broadcast"
+		// Fan out to plugins subscribed to this event type (Phase C Step 9).
+		// Dispatch is a no-op in the default build; the wazero build calls into
+		// the WASM module. Dispatch is called outside seqMu after we release it
+		// conceptually — but since seqMu is still held here, the call MUST NOT
+		// re-enter the hub. The default build is safe; the wazero build should
+		// dispatch asynchronously once the runtime is real.
+		if sink := h.pluginSink.Load(); sink != nil {
+			eventType := extractEventType(msg)
+			if eventType == "" {
+				eventType = "broadcast"
+			}
+			sink.Dispatch(context.Background(), eventType, msg)
 		}
-		sink.Dispatch(context.Background(), eventType, msg)
-	}
 
-	switch {
-	case bm.recipients != nil:
-		// Visibility-filtered fan-out: the audience was resolved by the caller.
-		for _, userID := range bm.recipients {
-			h.SendToUser(userID, msg)
+		switch {
+		case bm.recipients != nil:
+			// Visibility-filtered fan-out: the audience was resolved by the caller.
+			for _, userID := range bm.recipients {
+				h.SendToUser(userID, msg)
+			}
+		case bm.channelID == 0:
+			// Global broadcast — deliver to every connected client.
+			h.pubsub.PublishGlobal(msg)
+		default:
+			// Channel-scoped broadcast — deliver to subscribers of the channel topic.
+			topic := ChannelTopic(bm.channelID)
+			if !h.topicLimiter.Allow(topic) {
+				slog.Warn("hub: topic rate limit exceeded, dropping message",
+					"channel_id", bm.channelID, "seq", seq)
+				return seq, 0, false
+			}
+			delivered = h.pubsub.Publish(topic, msg, 0)
+			channelSend = true
 		}
-	case bm.channelID == 0:
-		// Global broadcast — deliver to every connected client.
-		h.pubsub.PublishGlobal(msg)
-	default:
-		// Channel-scoped broadcast — deliver to subscribers of the channel topic.
-		topic := ChannelTopic(bm.channelID)
-		if !h.topicLimiter.Allow(topic) {
-			slog.Warn("hub: topic rate limit exceeded, dropping message",
-				"channel_id", bm.channelID, "seq", seq)
-			return
-		}
-		delivered := h.pubsub.Publish(topic, msg, 0)
+		return seq, delivered, channelSend
+	}()
+
+	if channelSend {
 		slog.Debug("hub: channel broadcast",
 			"channel_id", bm.channelID, "delivered", delivered, "seq", seq)
 	}

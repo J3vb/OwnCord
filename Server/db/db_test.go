@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -207,6 +208,9 @@ func TestMigrateCreatesIndexes(t *testing.T) {
 		"idx_messages_channel",
 		"idx_invites_code",
 		"idx_audit_timestamp",
+		"idx_attachments_message",
+		"idx_channel_overrides_role",
+		"idx_messages_pinned",
 	}
 
 	for _, idx := range expectedIndexes {
@@ -222,6 +226,43 @@ func TestMigrateCreatesIndexes(t *testing.T) {
 				t.Errorf("query error for index %q: %v", idx, err)
 			}
 		})
+	}
+
+	// Migration 019 drops the duplicate of the channel_overrides UNIQUE
+	// auto-index.
+	t.Run("idx_channel_overrides_channel_role dropped", func(t *testing.T) {
+		var name string
+		err := database.QueryRowContext(context.Background(),
+			"SELECT name FROM sqlite_master WHERE type='index' AND name='idx_channel_overrides_channel_role'",
+		).Scan(&name)
+		if err == nil {
+			t.Error("idx_channel_overrides_channel_role still exists after migration 019")
+		} else if err != sql.ErrNoRows {
+			t.Errorf("query error: %v", err)
+		}
+	})
+}
+
+func TestMigrateScopesFTSUpdateTriggerToContent(t *testing.T) {
+	database := openMemory(t)
+
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("Migrate() error: %v", err)
+	}
+
+	// Migration 019 recreates messages_au as AFTER UPDATE OF content, so
+	// pin/soft-delete updates stop paying for a full FTS reindex. The trigger
+	// must exist and be scoped to content updates.
+	var sqlText string
+	err := database.QueryRowContext(context.Background(),
+		"SELECT sql FROM sqlite_master WHERE type='trigger' AND name='messages_au'",
+	).Scan(&sqlText)
+	if err != nil {
+		t.Fatalf("messages_au trigger not found after migration: %v", err)
+	}
+	upper := strings.ToUpper(sqlText)
+	if !strings.Contains(upper, "AFTER UPDATE OF CONTENT") {
+		t.Errorf("messages_au = %q, want AFTER UPDATE OF content scope", sqlText)
 	}
 }
 

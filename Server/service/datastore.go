@@ -19,10 +19,11 @@ import (
 type Store interface {
 	// ── Messages / reactions / read-state ──
 	CreateMessage(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (int64, error)
+	CreateMessageReturning(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (*db.Message, error)
 	GetMessage(ctx context.Context, id int64) (*db.Message, error)
 	GetMessages(ctx context.Context, channelID, before int64, limit int) ([]db.MessageWithUser, error)
 	GetMessagesForAPI(ctx context.Context, channelID, before int64, limit int, requestingUserID int64) ([]db.MessageAPIResponse, error)
-	EditMessage(ctx context.Context, id, userID int64, content string) error
+	EditMessage(ctx context.Context, id, userID int64, content string) (*db.Message, error)
 	DeleteMessage(ctx context.Context, id, userID int64, isMod bool) error
 	SearchMessages(ctx context.Context, query string, channelID *int64, limit int) ([]db.MessageSearchResult, error)
 	SearchMessagesInChannels(ctx context.Context, query string, channelIDs []int64, limit int) ([]db.MessageSearchResult, error)
@@ -112,6 +113,7 @@ type Store interface {
 	// ── Direct messages ──
 	GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (*db.Channel, bool, error)
 	GetUserDMChannels(ctx context.Context, userID int64) ([]db.DMChannelInfo, error)
+	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
 	OpenDM(ctx context.Context, userID, channelID int64) error
 	CloseDM(ctx context.Context, userID, channelID int64) error
 	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)

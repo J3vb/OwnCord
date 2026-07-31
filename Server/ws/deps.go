@@ -170,16 +170,19 @@ func hasChannelAccess(ctx context.Context, database *db.DB, perms *permissions.C
 			"user_id", userID, "channel_id", channelID, "err", err)
 		return false
 	}
-	channelType := ""
-	if ch != nil {
-		channelType = ch.Type
-	}
-	// A missing channel row leaves channelType empty, i.e. the role verdict
+	// A missing channel row takes the non-DM branch, i.e. the role verdict
 	// above stands: there is no DM there to join, and callers keep reporting a
-	// deleted channel the way they always have. For every non-DM type this call
-	// just re-runs the role check above; the repeated lookup is the price of one
-	// shared definition of the rule, on a per-user rate-limited path.
-	return perms.RequireChannelAccess(ctx, userID, role.Permissions, role.ID, channelType, channelID, perm) == nil
+	// deleted channel the way they always have.
+	if ch == nil || ch.Type != "dm" {
+		// For every non-DM type, RequireChannelAccess is defined as exactly the
+		// HasChannelPerm call already made above, so re-invoking it would only
+		// repeat the same override lookup. The role verdict is the answer.
+		return true
+	}
+	// DM: the role bit above stays required on top; the membership rule keeps
+	// its single shared definition in RequireChannelAccess (IsDMParticipant),
+	// which waives the role check for DMs.
+	return perms.RequireChannelAccess(ctx, userID, role.Permissions, role.ID, ch.Type, channelID, perm) == nil
 }
 
 // ── V2 handler type ─────────────────────────────────────────────────────────

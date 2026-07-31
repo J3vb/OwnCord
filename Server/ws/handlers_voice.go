@@ -2,7 +2,8 @@ package ws
 
 import (
 	"context"
-	"fmt"
+
+	"github.com/owncord/server/auth"
 )
 
 // registerVoiceControlsV2 registers all voice V2 handlers: the control toggles,
@@ -40,7 +41,7 @@ func handleVoiceJoinV2(_ context.Context, _ Command, _ ClientInfo, _ any) Result
 // then hands off to the hub's handleVoiceLeave routine via the applier.
 func handleVoiceLeaveV2(_ context.Context, cmd Command, _ ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
-	ratKey := fmt.Sprintf("voice_leave:%d", cmd.UserID())
+	ratKey := auth.Key("voice_leave", cmd.UserID())
 	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceLeaveRateLimit, voiceLeaveWindow) {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many voice leave attempts"}}
 	}

@@ -3,9 +3,10 @@ package ws
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/owncord/server/auth"
 )
 
 // Voice E2EE rate limits. Both the announce and offer relays fan out to every
@@ -104,7 +105,7 @@ func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, 
 	userID := info.UserID
 	voiceChID := info.VoiceChannelID
 
-	ratKey := fmt.Sprintf("voice_e2ee_announce:%d", userID)
+	ratKey := auth.Key("voice_e2ee_announce", userID)
 	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceE2EERateLimit, voiceE2EEWindow) {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many e2ee announcements"}}
 	}
@@ -209,14 +210,14 @@ func handleVoiceE2EEOfferV2(_ context.Context, cmd Command, info ClientInfo, dep
 	// only, and sized for a whole rotation. Passing it is now the precondition
 	// for creating any per-target entry, so limiter growth is bounded by real,
 	// permission-checked voice joins rather than by attacker-chosen integers.
-	ratKey := fmt.Sprintf("voice_e2ee_offer:%d:%d", info.UserID, voiceChID)
+	ratKey := auth.Key(auth.Key("voice_e2ee_offer", info.UserID), voiceChID)
 	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceE2EEOfferRateLimit, voiceE2EEWindow) {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many e2ee offers"}}
 	}
 	// Inner budget keeps the W1-2 per-victim cap: an offer can force the target
 	// to re-key or disconnect, so repeated offers at one peer stay capped even
 	// though a full rotation across many peers passes.
-	targetKey := fmt.Sprintf("voice_e2ee_offer:%d:%d:%d", info.UserID, voiceChID, targetUserID)
+	targetKey := auth.Key(ratKey, targetUserID)
 	if d.Limiter != nil && !d.Limiter.Allow(targetKey, voiceE2EERateLimit, voiceE2EEWindow) {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many e2ee offers"}}
 	}
@@ -259,18 +260,15 @@ func (h *Hub) sendToUserIfInVoiceChannel(voiceChannelID, targetUserID int64, msg
 
 // sendToVoiceChannelExcept sends a message to all clients in the given voice
 // channel except the one identified by excludeUserID.
+//
+// Delivery goes through the voice pub/sub topic (joined at voice_join,
+// dropped at voice_leave/disconnect) rather than scanning every connected
+// client under h.mu: publishWithPriority snapshots the subscriber set and
+// sends outside the lock, so this costs O(participants) and never nests
+// h.mu with each client's own mutex. Key-offer delivery keeps the stricter
+// TOCTOU-guarded sendToUserIfInVoiceChannel path.
 func (h *Hub) sendToVoiceChannelExcept(channelID int64, excludeUserID int64, msg []byte) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	for uid, client := range h.clients {
-		if uid == excludeUserID {
-			continue
-		}
-		if client.getVoiceChID() == channelID {
-			client.sendMsg(msg)
-		}
-	}
+	h.pubsub.Publish(VoiceTopic(channelID), msg, excludeUserID)
 }
 
 // getClientE2EEPubKey returns the stored ECDH public key and its identity

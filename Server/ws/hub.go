@@ -66,6 +66,12 @@ type Hub struct {
 	// call fails loudly instead of racing the dispatch loop.
 	running atomic.Bool
 
+	// In-flight guards for the DB-heavy sweeps Run kicks off in their own
+	// goroutines (startSweep): a tick that arrives while the previous sweep
+	// is still running is skipped rather than stacked.
+	sessionSweepInFlight atomic.Bool
+	voiceSweepInFlight   atomic.Bool
+
 	// Phase B Step 7 — reconnection tier metrics. Incremented per resume.
 	reconnectTierBuf  atomic.Uint64
 	reconnectTierDB   atomic.Uint64
@@ -252,9 +258,12 @@ func (h *Hub) Run() {
 				case <-staleTicker.C:
 					h.sweepStaleClients()
 				case <-sessionSweepTicker.C:
-					h.sweepRevokedSessions()
+					// The revoked-session and stale-voice sweeps do per-client
+					// DB work, so they run off the dispatch goroutine — a slow
+					// sweep must not stall broadcast delivery.
+					h.startSweep(&h.sessionSweepInFlight, h.sweepRevokedSessions)
 				case <-voiceSweepTicker.C:
-					h.sweepStaleVoiceStates()
+					h.startSweep(&h.voiceSweepInFlight, h.sweepStaleVoiceStates)
 				}
 			}
 		}()

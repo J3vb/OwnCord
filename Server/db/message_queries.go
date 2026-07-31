@@ -48,16 +48,27 @@ func sanitizeFTSQuery(q string) string {
 // CreateMessage inserts a new message and returns the assigned ID.
 // Content should already be sanitized before calling this function.
 func (d *DB) CreateMessage(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (int64, error) {
-	res, err := d.q.CreateMessage(ctx, dbgen.CreateMessageParams{
+	m, err := d.CreateMessageReturning(ctx, channelID, userID, content, replyTo)
+	if err != nil {
+		return 0, err
+	}
+	return m.ID, nil
+}
+
+// CreateMessageReturning inserts a new message and returns the full inserted
+// row via RETURNING, so hot paths (the send fan-out needs the DB-assigned
+// timestamp) don't re-read the row they just wrote.
+func (d *DB) CreateMessageReturning(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (*Message, error) {
+	m, err := d.q.CreateMessage(ctx, dbgen.CreateMessageParams{
 		ChannelID: channelID,
 		UserID:    userID,
 		Content:   content,
 		ReplyTo:   replyTo,
 	})
 	if err != nil {
-		return 0, fmt.Errorf("CreateMessage: %w", err)
+		return nil, fmt.Errorf("CreateMessage: %w", err)
 	}
-	return res.LastInsertId()
+	return messageFromGen(m), nil
 }
 
 // GetMessage returns the message with the given ID, or nil if not found.
@@ -123,27 +134,29 @@ func (d *DB) GetMessages(ctx context.Context, channelID, before int64, limit int
 	return msgs, nil
 }
 
-// EditMessage updates the content and sets edited_at on the message.
+// EditMessage updates the content and sets edited_at on the message, and
+// returns the updated row via RETURNING so callers don't re-read it.
 // Returns an error if the message does not exist or userID does not match the owner.
-func (d *DB) EditMessage(ctx context.Context, id, userID int64, content string) error {
+func (d *DB) EditMessage(ctx context.Context, id, userID int64, content string) (*Message, error) {
 	msg, err := d.GetMessage(ctx, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if msg == nil {
-		return fmt.Errorf("EditMessage: message %d: %w", id, ErrNotFound)
+		return nil, fmt.Errorf("EditMessage: message %d: %w", id, ErrNotFound)
 	}
 	if msg.UserID != userID {
-		return fmt.Errorf("EditMessage: user %d does not own message %d: %w", userID, id, ErrForbidden)
+		return nil, fmt.Errorf("EditMessage: user %d does not own message %d: %w", userID, id, ErrForbidden)
 	}
 
-	if err := d.q.EditMessageContent(ctx, dbgen.EditMessageContentParams{
+	updated, err := d.q.EditMessageContent(ctx, dbgen.EditMessageContentParams{
 		Content: content,
 		ID:      id,
-	}); err != nil {
-		return fmt.Errorf("EditMessage: %w", err)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("EditMessage: %w", err)
 	}
-	return nil
+	return messageFromGen(updated), nil
 }
 
 // DeleteMessage performs a soft delete (sets deleted=1) on the message.
@@ -436,17 +449,21 @@ func (d *DB) UpdateReadState(ctx context.Context, userID, channelID, lastReadMes
 }
 
 // GetChannelUnreadCounts returns per-channel unread counts and last message IDs
-// for a given user. Only text channels with at least one message are included.
+// for a given user. Text and announcement channels are included, with 0,0 for
+// channels that have no messages. Correlated subqueries range-scan
+// idx_messages_channel per channel instead of the old LEFT JOIN fan-out that
+// touched every message row on every WS connect.
 func (d *DB) GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]ChannelUnread, error) {
 	rows, err := d.sqlDB.QueryContext(ctx,
 		`SELECT c.id,
-		        COALESCE(MAX(m.id), 0) AS last_msg_id,
-		        COUNT(CASE WHEN m.id > COALESCE(rs.last_message_id, 0) AND m.deleted = 0 THEN 1 END) AS unread
+		        (SELECT COALESCE(MAX(m.id), 0) FROM messages m
+		          WHERE m.channel_id = c.id AND m.deleted = 0) AS last_msg_id,
+		        (SELECT COUNT(*) FROM messages m
+		          WHERE m.channel_id = c.id AND m.deleted = 0
+		            AND m.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
+		                                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)) AS unread
 		 FROM channels c
-		 LEFT JOIN messages m ON m.channel_id = c.id AND m.deleted = 0
-		 LEFT JOIN read_states rs ON rs.channel_id = c.id AND rs.user_id = ?
-		 WHERE c.type IN ('text', 'announcement')
-		 GROUP BY c.id`,
+		 WHERE c.type IN ('text', 'announcement')`,
 		userID,
 	)
 	if err != nil {

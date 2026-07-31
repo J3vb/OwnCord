@@ -136,6 +136,10 @@ func (d *DB) GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (
 // (dm_open_state only contains rows for DM channels), and the explicit
 // "c.type = 'dm'" predicate in the JOIN provides a defensive second check.
 // No additional channel-type validation is needed at the Go layer.
+//
+// The unread count is a correlated subquery range-scanning
+// idx_messages_channel per DM, replacing the old LEFT JOIN messages fan-out
+// that touched every message row in every open DM.
 func (d *DB) GetUserDMChannels(ctx context.Context, userID int64) ([]DMChannelInfo, error) {
 	rows, err := d.sqlDB.QueryContext(ctx,
 		`SELECT
@@ -147,8 +151,11 @@ func (d *DB) GetUserDMChannels(ctx context.Context, userID int64) ([]DMChannelIn
 		    lm.id                                         AS last_message_id,
 		    COALESCE(lm.content, '')                      AS last_message,
 		    COALESCE(lm.timestamp, '')                    AS last_message_at,
-		    COUNT(CASE WHEN m_unread.id > COALESCE(rs.last_message_id, 0)
-		               AND m_unread.deleted = 0 THEN 1 END) AS unread_count
+		    (SELECT COUNT(*) FROM messages mu
+		      WHERE mu.channel_id = c.id AND mu.deleted = 0
+		        AND mu.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
+		                               WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0)
+		    ) AS unread_count
 		 FROM dm_open_state dos
 		 JOIN channels c          ON c.id = dos.channel_id AND c.type = 'dm'
 		 JOIN dm_participants dp  ON dp.channel_id = c.id AND dp.user_id != ?
@@ -156,12 +163,9 @@ func (d *DB) GetUserDMChannels(ctx context.Context, userID int64) ([]DMChannelIn
 		 LEFT JOIN messages lm    ON lm.id = (
 		     SELECT MAX(id) FROM messages WHERE channel_id = c.id AND deleted = 0
 		 )
-		 LEFT JOIN messages m_unread ON m_unread.channel_id = c.id
-		 LEFT JOIN read_states rs ON rs.channel_id = c.id AND rs.user_id = ?
 		 WHERE dos.user_id = ?
-		 GROUP BY c.id
 		 ORDER BY COALESCE(lm.timestamp, dos.opened_at) DESC`,
-		userID, userID, userID,
+		userID, userID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("GetUserDMChannels: %w", err)
@@ -239,6 +243,18 @@ func (d *DB) IsDMParticipant(ctx context.Context, userID, channelID int64) (bool
 		return false, fmt.Errorf("IsDMParticipant: %w", err)
 	}
 	return true, nil
+}
+
+// GetUserDMChannelIDs returns the channel IDs of all DMs the user has open.
+// It reads only the dm_open_state primary key, so callers that just need the
+// ID set (access computation, search scoping) skip the recipient/preview/
+// unread work GetUserDMChannels pays for.
+func (d *DB) GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error) {
+	ids, err := d.q.GetUserDMChannelIDs(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("GetUserDMChannelIDs: %w", err)
+	}
+	return ids, nil
 }
 
 // GetDMParticipantIDs returns all participant user IDs for a DM channel.

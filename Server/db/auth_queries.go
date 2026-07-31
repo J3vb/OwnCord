@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/owncord/server/db/dbgen"
@@ -296,6 +297,69 @@ func (d *DB) GetSessionWithBanStatus(ctx context.Context, tokenHash string) (*Se
 		BanReason:  row.BanReason,
 		BanExpires: row.BanExpires,
 	}, nil
+}
+
+// GetSessionsWithBanStatusBatch returns session+ban rows for every token hash
+// in tokenHashes, keyed by token hash. Hashes with no session row are simply
+// absent from the map. Used by the ws revoked-session sweep so N connected
+// clients cost one query per sweep instead of N.
+func (d *DB) GetSessionsWithBanStatusBatch(ctx context.Context, tokenHashes []string) (map[string]*SessionWithBanStatus, error) {
+	result := make(map[string]*SessionWithBanStatus, len(tokenHashes))
+	// Chunk the IN list to stay far below SQLite's bound-parameter limit.
+	const chunkSize = 500
+	for start := 0; start < len(tokenHashes); start += chunkSize {
+		chunk := tokenHashes[start:min(start+chunkSize, len(tokenHashes))]
+
+		placeholders := make([]string, len(chunk))
+		args := make([]any, len(chunk))
+		for i, hash := range chunk {
+			placeholders[i] = "?"
+			args[i] = hash
+		}
+
+		query := fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
+			`SELECT s.id, s.user_id, s.token, s.device, s.ip_address,
+			        s.created_at, s.last_used, s.expires_at,
+			        u.banned, u.ban_reason, u.ban_expires
+			 FROM sessions s
+			 JOIN users u ON s.user_id = u.id
+			 WHERE s.token IN (%s)`,
+			strings.Join(placeholders, ","),
+		)
+		rows, err := d.sqlDB.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("GetSessionsWithBanStatusBatch: %w", err)
+		}
+		if err := scanSessionsWithBanStatus(rows, result); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+// scanSessionsWithBanStatus scans batch rows into result and closes rows.
+func scanSessionsWithBanStatus(rows *sql.Rows, result map[string]*SessionWithBanStatus) error {
+	defer rows.Close() //nolint:errcheck
+	for rows.Next() {
+		var s SessionWithBanStatus
+		var device, ip *string
+		var banned int
+		if err := rows.Scan(
+			&s.ID, &s.UserID, &s.TokenHash, &device, &ip,
+			&s.CreatedAt, &s.LastUsed, &s.ExpiresAt,
+			&banned, &s.BanReason, &s.BanExpires,
+		); err != nil {
+			return fmt.Errorf("GetSessionsWithBanStatusBatch scan: %w", err)
+		}
+		s.Device = derefString(device)
+		s.IP = derefString(ip)
+		s.Banned = banned != 0
+		result[s.TokenHash] = &s
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("GetSessionsWithBanStatusBatch rows: %w", err)
+	}
+	return nil
 }
 
 // DeleteSession removes the session with the given token hash.

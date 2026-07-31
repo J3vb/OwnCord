@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/owncord/server/auth"
@@ -26,6 +27,21 @@ func (h *Hub) kickClient(c *Client) {
 	h.mu.Unlock()
 	h.pubsub.UnsubscribeAll(c)
 	c.closeSend()
+}
+
+// startSweep runs sweep on its own goroutine so the hub dispatch loop never
+// blocks on the DB-heavy periodic sweeps (they already lock correctly for
+// concurrent execution with the hub). inFlight guarantees a sweep never runs
+// concurrently with itself: a tick arriving while the previous run is still
+// going is dropped, and the next tick retries.
+func (h *Hub) startSweep(inFlight *atomic.Bool, sweep func()) {
+	if !inFlight.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer inFlight.Store(false)
+		sweep()
+	}()
 }
 
 // sweepStaleClients iterates over all connected clients and kicks any that
@@ -68,9 +84,28 @@ func (h *Hub) sweepRevokedSessions() {
 	}
 	h.mu.RUnlock()
 
+	if len(snapshot) == 0 {
+		return
+	}
+
+	// One batched lookup for every connected client instead of a query per
+	// client per sweep.
+	hashes := make([]string, len(snapshot))
+	for i, c := range snapshot {
+		hashes[i] = c.tokenHash
+	}
+	sessions, err := h.db.GetSessionsWithBanStatusBatch(ctx, hashes)
+	if err != nil {
+		// A failed batch lookup says nothing about any individual session —
+		// kicking everyone on a transient DB error would be a mass disconnect.
+		// Skip this sweep; the next tick retries.
+		slog.Warn("session sweep: batch session lookup failed", "err", err)
+		return
+	}
+
 	for _, c := range snapshot {
-		result, err := h.db.GetSessionWithBanStatus(ctx, c.tokenHash)
-		if err != nil || result == nil || auth.IsSessionExpired(result.ExpiresAt) {
+		result := sessions[c.tokenHash]
+		if result == nil || auth.IsSessionExpired(result.ExpiresAt) {
 			slog.Info("session sweep: revoked/expired session, disconnecting",
 				"user_id", c.userID)
 			h.kickClient(c)
@@ -204,8 +239,10 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 		}
 	}
 
-	// Broadcast voice_leave for each participant.
+	// Broadcast voice_leave for each participant. All leaves target the same
+	// channel, so resolve the READ audience once and reuse it per message.
+	audience := h.channelReadAudience(ctx, channelID)
 	for _, vs := range states {
-		h.broadcastVoiceEvent(ctx, channelID, buildVoiceLeave(channelID, vs.UserID))
+		h.broadcastChannelScopedTo(channelID, buildVoiceLeave(channelID, vs.UserID), audience, "voice event")
 	}
 }

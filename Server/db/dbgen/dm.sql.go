@@ -50,6 +50,33 @@ func (q *Queries) GetDMParticipantIDs(ctx context.Context, channelID int64) ([]i
 	return items, nil
 }
 
+const getUserDMChannelIDs = `-- name: GetUserDMChannelIDs :many
+SELECT channel_id FROM dm_open_state WHERE user_id = ?
+`
+
+func (q *Queries) GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, getUserDMChannelIDs, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var channel_id int64
+		if err := rows.Scan(&channel_id); err != nil {
+			return nil, err
+		}
+		items = append(items, channel_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getUserDMChannels = `-- name: GetUserDMChannels :many
 SELECT
     c.id                                          AS channel_id,
@@ -60,8 +87,11 @@ SELECT
     lm.id                                         AS last_message_id,
     COALESCE(lm.content, '')                      AS last_message,
     COALESCE(lm.timestamp, '')                    AS last_message_at,
-    COUNT(CASE WHEN m_unread.id > COALESCE(rs.last_message_id, 0)
-               AND m_unread.deleted = 0 THEN 1 END) AS unread_count
+    (SELECT COUNT(*) FROM messages mu
+      WHERE mu.channel_id = c.id AND mu.deleted = 0
+        AND mu.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
+                               WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0)
+    ) AS unread_count
 FROM dm_open_state dos
 JOIN channels c          ON c.id = dos.channel_id AND c.type = 'dm'
 JOIN dm_participants dp  ON dp.channel_id = c.id AND dp.user_id != ?
@@ -69,17 +99,13 @@ JOIN users u             ON u.id = dp.user_id
 LEFT JOIN messages lm    ON lm.id = (
     SELECT MAX(id) FROM messages WHERE channel_id = c.id AND deleted = 0
 )
-LEFT JOIN messages m_unread ON m_unread.channel_id = c.id
-LEFT JOIN read_states rs ON rs.channel_id = c.id AND rs.user_id = ?
 WHERE dos.user_id = ?
-GROUP BY c.id
 ORDER BY COALESCE(lm.timestamp, dos.opened_at) DESC
 `
 
 type GetUserDMChannelsParams struct {
 	UserID   int64 `json:"userId"`
 	UserID_2 int64 `json:"userId2"`
-	UserID_3 int64 `json:"userId3"`
 }
 
 type GetUserDMChannelsRow struct {
@@ -95,7 +121,7 @@ type GetUserDMChannelsRow struct {
 }
 
 func (q *Queries) GetUserDMChannels(ctx context.Context, arg GetUserDMChannelsParams) ([]GetUserDMChannelsRow, error) {
-	rows, err := q.db.QueryContext(ctx, getUserDMChannels, arg.UserID, arg.UserID_2, arg.UserID_3)
+	rows, err := q.db.QueryContext(ctx, getUserDMChannels, arg.UserID, arg.UserID_2)
 	if err != nil {
 		return nil, err
 	}

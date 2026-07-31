@@ -85,14 +85,10 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		reqID = reqID[:64]
 	}
 
-	// Request-scoped logger with correlation context.
-	reqLog := slog.With(
-		"user_id", c.userID,
-		"msg_type", msgType,
-		"req_id", reqID,
-	)
-
-	reqLog.Debug("ws ← client message")
+	// Correlation attrs (user_id/msg_type/req_id) are inlined at each log site
+	// below rather than bound via slog.With — the With clone allocated a new
+	// handler chain per message even when nothing ended up being logged.
+	slog.Debug("ws ← client message", "user_id", c.userID, "msg_type", msgType, "req_id", reqID)
 
 	// ── Typed command dispatch ───────────────────────────────────────────
 	// Every message type parses through its constructor into a typed Command,
@@ -101,14 +97,14 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	// migration is complete.
 	ctor, ok := getCommandConstructor(env.Type)
 	if !ok {
-		reqLog.Warn("ws handleMessage unknown type")
+		slog.Warn("ws handleMessage unknown type", "user_id", c.userID, "msg_type", msgType, "req_id", reqID)
 		c.sendMsg(buildErrorMsg(ErrCodeUnknownType, fmt.Sprintf("unknown message type: %s", msgType)))
 		return
 	}
 
 	cmd, parseErr := ctor(c.userID, env.ID, env.Payload)
 	if parseErr != nil {
-		reqLog.Warn("ws command parse error", "err", parseErr)
+		slog.Warn("ws command parse error", "user_id", c.userID, "msg_type", msgType, "req_id", reqID, "err", parseErr)
 		c.sendMsg(buildErrorMsgWithID(ErrCodeBadRequest, "invalid payload", env.ID))
 		return
 	}
@@ -134,7 +130,8 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	if !dispatched {
 		// A registered constructor with no V2 handler is a wiring bug — the
 		// guard test (TestEveryConstructorHasV2Handler) locks this shut.
-		reqLog.Error("ws no V2 handler for constructed command", "type", env.Type)
+		slog.Error("ws no V2 handler for constructed command",
+			"user_id", c.userID, "msg_type", msgType, "req_id", reqID, "type", env.Type)
 		c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "internal error", env.ID))
 		return
 	}
@@ -142,7 +139,8 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		if ce, ok := result.Error.(ClientError); ok {
 			c.sendMsg(buildErrorMsgWithID(ce.Code, ce.Message, env.ID))
 		} else {
-			reqLog.Error("ws handler internal error", "err", result.Error)
+			slog.Error("ws handler internal error",
+				"user_id", c.userID, "msg_type", msgType, "req_id", reqID, "err", result.Error)
 			c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "internal error", env.ID))
 		}
 		// A rejection may still need to evict: voice_token_refresh returns

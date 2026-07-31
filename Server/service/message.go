@@ -130,7 +130,7 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	}()
 
 	// Rate limit.
-	ratKey := fmt.Sprintf("chat:%d", p.UserID)
+	ratKey := auth.Key("chat", p.UserID)
 	if s.limiter != nil && !s.limiter.Allow(ratKey, 10, time.Second) {
 		return nil, ErrRateLimited
 	}
@@ -153,7 +153,7 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 
 	// Slow mode (non-DM only).
 	if !isDM && ch.SlowMode > 0 && !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.ManageMessages) {
-		slowKey := fmt.Sprintf("slow:%d:%d", p.UserID, p.ChannelID)
+		slowKey := auth.Key(auth.Key("slow", p.UserID), p.ChannelID)
 		if s.limiter != nil && !s.limiter.Allow(slowKey, 1, time.Duration(ch.SlowMode)*time.Second) {
 			return nil, fmt.Errorf("%w: channel has %ds slow mode", ErrSlowMode, ch.SlowMode)
 		}
@@ -172,12 +172,14 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		}
 	}
 
-	// Persist message.
-	msgID, err := s.st.CreateMessage(ctx, p.ChannelID, p.UserID, content, p.ReplyTo)
+	// Persist message. RETURNING hands back the inserted row, so the DB-assigned
+	// timestamp the fan-out needs arrives with the insert instead of a re-read.
+	msg, err := s.st.CreateMessageReturning(ctx, p.ChannelID, p.UserID, content, p.ReplyTo)
 	if err != nil {
 		slog.Error("MessageService.SendMessage CreateMessage", "err", err)
 		return nil, fmt.Errorf("%w: failed to save message", ErrInternal)
 	}
+	msgID := msg.ID
 
 	// Link attachments. Ownership is enforced atomically inside the link
 	// UPDATE itself (uploader match + still unlinked), so another user's
@@ -207,15 +209,6 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 				attachments = attMap[msgID]
 			}
 		}
-	}
-
-	// Fetch message for timestamp. Post-commit: the message exists whether or
-	// not the sender is still connected, so the refetch that feeds the fan-out
-	// must not die with the sender's ctx.
-	msg, err := s.st.GetMessage(context.WithoutCancel(ctx), msgID)
-	if err != nil || msg == nil {
-		slog.Error("MessageService.SendMessage GetMessage after create", "err", err)
-		return nil, fmt.Errorf("%w: failed to retrieve message", ErrInternal)
 	}
 
 	result := &SendMessageResult{
@@ -258,7 +251,7 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 // EditMessage validates and persists a message edit.
 func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, rawContent string) (*EditMessageResult, error) {
 	// Rate limit.
-	ratKey := fmt.Sprintf("chat_edit:%d", userID)
+	ratKey := auth.Key("chat_edit", userID)
 	if s.limiter != nil && !s.limiter.Allow(ratKey, 10, time.Second) {
 		return nil, ErrRateLimited
 	}
@@ -311,17 +304,11 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 	}
 
-	// EditMessage checks ownership internally.
-	if err := s.st.EditMessage(ctx, msgID, userID, content); err != nil {
-		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
-	}
-
-	// Re-fetch for updated edited_at timestamp. Post-commit: must not die with
-	// the editor's ctx or the committed edit is never broadcast.
-	msg, err = s.st.GetMessage(context.WithoutCancel(ctx), msgID)
+	// EditMessage checks ownership internally and returns the updated row via
+	// RETURNING, so the edited_at the broadcast needs arrives with the write.
+	msg, err = s.st.EditMessage(ctx, msgID, userID, content)
 	if err != nil || msg == nil {
-		slog.Error("MessageService.EditMessage GetMessage after edit", "err", err, "msg_id", msgID)
-		return nil, fmt.Errorf("%w: edit saved but broadcast failed", ErrInternal)
+		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 	}
 
 	editedAt := ""
@@ -353,7 +340,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 // DeleteMessage validates and soft-deletes a message.
 func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64) (*DeleteMessageResult, error) {
 	// Rate limit.
-	ratKey := fmt.Sprintf("chat_delete:%d", userID)
+	ratKey := auth.Key("chat_delete", userID)
 	if s.limiter != nil && !s.limiter.Allow(ratKey, 10, time.Second) {
 		return nil, ErrRateLimited
 	}
@@ -433,7 +420,7 @@ func (s *MessageService) RemoveReaction(ctx context.Context, userID, msgID int64
 
 func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64, emoji string, add bool) (*ReactionResult, error) {
 	// Rate limit.
-	ratKey := fmt.Sprintf("reaction:%d", userID)
+	ratKey := auth.Key("reaction", userID)
 	if s.limiter != nil && !s.limiter.Allow(ratKey, 5, time.Second) {
 		return nil, ErrRateLimited
 	}
@@ -695,12 +682,11 @@ func (s *MessageService) GetAccessibleChannelIDs(ctx context.Context, userID int
 		}
 	}
 
-	// Also include DM channels the user participates in.
-	dmChannels, err := s.st.GetUserDMChannels(ctx, userID)
+	// Also include DM channels the user participates in. Only the IDs are
+	// needed here, so skip the full DM query's preview/unread work.
+	dmIDs, err := s.st.GetUserDMChannelIDs(ctx, userID)
 	if err == nil {
-		for _, dmc := range dmChannels {
-			ids = append(ids, dmc.ChannelID)
-		}
+		ids = append(ids, dmIDs...)
 	}
 
 	return ids, nil

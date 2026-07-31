@@ -211,8 +211,16 @@ func TestEditMessage_OwnerCanEdit(t *testing.T) {
 
 	id, _ := database.CreateMessage(context.Background(), chID, userID, "original", nil)
 
-	if err := database.EditMessage(context.Background(), id, userID, "updated"); err != nil {
+	updated, err := database.EditMessage(context.Background(), id, userID, "updated")
+	if err != nil {
 		t.Fatalf("EditMessage: %v", err)
+	}
+	// The RETURNING row must reflect the write without a re-read.
+	if updated == nil || updated.Content != "updated" {
+		t.Errorf("returned row Content = %+v, want 'updated'", updated)
+	}
+	if updated.EditedAt == nil {
+		t.Error("returned row EditedAt should be set after edit")
 	}
 
 	msg, _ := database.GetMessage(context.Background(), id)
@@ -232,7 +240,7 @@ func TestEditMessage_NonOwnerCannotEdit(t *testing.T) {
 
 	id, _ := database.CreateMessage(context.Background(), chID, ownerID, "original", nil)
 
-	err := database.EditMessage(context.Background(), id, otherID, "hacked")
+	_, err := database.EditMessage(context.Background(), id, otherID, "hacked")
 	if err == nil {
 		t.Error("EditMessage by non-owner should return error")
 	}
@@ -242,7 +250,7 @@ func TestEditMessage_NotFound(t *testing.T) {
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "kim")
 
-	err := database.EditMessage(context.Background(), 9999, userID, "x")
+	_, err := database.EditMessage(context.Background(), 9999, userID, "x")
 	if err == nil {
 		t.Error("EditMessage non-existent should return error")
 	}
@@ -504,6 +512,49 @@ func TestSearchMessages_DeletedNotReturned(t *testing.T) {
 	}
 }
 
+// Migration 019 narrows the messages_au trigger to AFTER UPDATE OF content;
+// an edit must still reindex the FTS table (old term gone, new term found).
+func TestSearchMessages_EditReindexes(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "edith")
+	chID := seedChannel(t, database, "ch")
+
+	id, _ := database.CreateMessage(context.Background(), chID, userID, "obsolete wording here", nil)
+	if _, err := database.EditMessage(context.Background(), id, userID, "fresh wording here"); err != nil {
+		t.Fatalf("EditMessage: %v", err)
+	}
+
+	stale, _ := database.SearchMessages(context.Background(), "obsolete", nil, 10)
+	if len(stale) != 0 {
+		t.Errorf("expected 0 results for pre-edit content, got %d", len(stale))
+	}
+	updated, _ := database.SearchMessages(context.Background(), "fresh", nil, 10)
+	if len(updated) != 1 {
+		t.Errorf("expected 1 result for post-edit content, got %d", len(updated))
+	}
+}
+
+// Pinning updates a non-content column, which the narrowed trigger must
+// ignore — the message stays searchable and the FTS index stays consistent.
+func TestSearchMessages_PinnedMessageStaysSearchable(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "pinny")
+	chID := seedChannel(t, database, "ch")
+
+	id, _ := database.CreateMessage(context.Background(), chID, userID, "pinworthy announcement", nil)
+	if err := database.SetMessagePinned(context.Background(), id, true); err != nil {
+		t.Fatalf("SetMessagePinned: %v", err)
+	}
+
+	results, err := database.SearchMessages(context.Background(), "pinworthy", nil, 10)
+	if err != nil {
+		t.Fatalf("SearchMessages: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected pinned message to remain searchable, got %d results", len(results))
+	}
+}
+
 // ─── UpdateReadState ──────────────────────────────────────────────────────────
 
 func TestUpdateReadState_Upsert(t *testing.T) {
@@ -669,6 +720,85 @@ func TestGetChannelUnreadCounts_WithUnreadMessages(t *testing.T) {
 	}
 	if cu.UnreadCount != 2 {
 		t.Errorf("UnreadCount = %d, want 2", cu.UnreadCount)
+	}
+}
+
+// A channel with no messages must still yield a 0,0 entry — the correlated
+// subquery rewrite must not silently drop empty channels from the ready
+// payload's unread map.
+func TestGetChannelUnreadCounts_ZeroMessageChannelYieldsZeros(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "unreadzero")
+	chID := seedChannel(t, database, "emptychan")
+
+	counts, err := database.GetChannelUnreadCounts(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("GetChannelUnreadCounts: %v", err)
+	}
+	cu, ok := counts[chID]
+	if !ok {
+		t.Fatalf("empty channel %d missing from unread counts", chID)
+	}
+	if cu.LastMessageID != 0 || cu.UnreadCount != 0 {
+		t.Errorf("empty channel = {last:%d unread:%d}, want {0 0}", cu.LastMessageID, cu.UnreadCount)
+	}
+}
+
+func TestGetChannelUnreadCounts_IncludesAnnouncementChannels(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "unreadann")
+	annID, err := database.CreateChannel(context.Background(), "announcements", "announcement", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel(announcement): %v", err)
+	}
+	voiceID, err := database.CreateChannel(context.Background(), "voicechan", "voice", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel(voice): %v", err)
+	}
+
+	msgID, _ := database.CreateMessage(context.Background(), annID, userID, "server news", nil)
+
+	counts, err := database.GetChannelUnreadCounts(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("GetChannelUnreadCounts: %v", err)
+	}
+	cu, ok := counts[annID]
+	if !ok {
+		t.Fatalf("announcement channel %d missing from unread counts", annID)
+	}
+	if cu.LastMessageID != msgID {
+		t.Errorf("LastMessageID = %d, want %d", cu.LastMessageID, msgID)
+	}
+	if cu.UnreadCount != 1 {
+		t.Errorf("UnreadCount = %d, want 1", cu.UnreadCount)
+	}
+	if _, ok := counts[voiceID]; ok {
+		t.Errorf("voice channel %d must not appear in unread counts", voiceID)
+	}
+}
+
+// Deleted messages count neither toward unread nor toward last_msg_id.
+func TestGetChannelUnreadCounts_ExcludesDeleted(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "unreaddel")
+	chID := seedChannel(t, database, "unreaddelchan")
+
+	keepID, _ := database.CreateMessage(context.Background(), chID, userID, "keep", nil)
+	delID, _ := database.CreateMessage(context.Background(), chID, userID, "gone", nil)
+	if err := database.DeleteMessage(context.Background(), delID, userID, false); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+
+	counts, err := database.GetChannelUnreadCounts(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("GetChannelUnreadCounts: %v", err)
+	}
+	cu := counts[chID]
+	if cu.LastMessageID != keepID {
+		t.Errorf("LastMessageID = %d, want %d (deleted excluded)", cu.LastMessageID, keepID)
+	}
+	if cu.UnreadCount != 1 {
+		t.Errorf("UnreadCount = %d, want 1 (deleted excluded)", cu.UnreadCount)
 	}
 }
 

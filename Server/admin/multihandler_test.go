@@ -260,6 +260,37 @@ func TestRingBuffer_Subscribe_SlowSubscriberDoesNotBlockWrites(t *testing.T) {
 	}
 }
 
+// ─── RingBuffer ring semantics ──────────────────────────────────────────────
+
+func TestRingBuffer_Snapshot_OldestFirstBeforeWrap(t *testing.T) {
+	buf := NewRingBuffer(4)
+	buf.Write(LogEntry{Message: "a"})
+	buf.Write(LogEntry{Message: "b"})
+
+	got := buf.Snapshot()
+	if len(got) != 2 || got[0].Message != "a" || got[1].Message != "b" {
+		t.Fatalf("Snapshot = %v, want [a b] in write order", got)
+	}
+}
+
+func TestRingBuffer_Snapshot_OldestFirstAfterWrap(t *testing.T) {
+	// Capacity 4, six writes: the ring keeps the newest four, oldest first.
+	buf := NewRingBuffer(4)
+	for _, m := range []string{"a", "b", "c", "d", "e", "f"} {
+		buf.Write(LogEntry{Message: m})
+	}
+
+	got := buf.Snapshot()
+	if len(got) != 4 {
+		t.Fatalf("Snapshot holds %d entries, want capacity 4", len(got))
+	}
+	for i, want := range []string{"c", "d", "e", "f"} {
+		if got[i].Message != want {
+			t.Errorf("Snapshot[%d] = %q, want %q (oldest-first after wrap)", i, got[i].Message, want)
+		}
+	}
+}
+
 // ─── categorizeSource ───────────────────────────────────────────────────────
 
 func TestCategorizeSource_NoPCIsServer(t *testing.T) {

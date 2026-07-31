@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/owncord/server/auth"
 	"github.com/owncord/server/permissions"
 )
 
@@ -14,7 +15,7 @@ func handleVoiceMuteV2(ctx context.Context, cmd Command, info ClientInfo, deps a
 	muteCmd := cmd.(VoiceMuteCmd)
 	userID := info.UserID
 
-	ratKey := fmt.Sprintf("voice_mute:%d", userID)
+	ratKey := auth.Key("voice_mute", userID)
 	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceMuteRateLimit, voiceMuteWindow) {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many mute toggles"}}
 	}
@@ -38,7 +39,7 @@ func handleVoiceDeafenV2(ctx context.Context, cmd Command, info ClientInfo, deps
 	deafenCmd := cmd.(VoiceDeafenCmd)
 	userID := info.UserID
 
-	ratKey := fmt.Sprintf("voice_deafen:%d", userID)
+	ratKey := auth.Key("voice_deafen", userID)
 	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceDeafenRateLimit, voiceDeafenWindow) {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many deafen toggles"}}
 	}
@@ -63,7 +64,7 @@ func handleVoiceCameraV2(ctx context.Context, cmd Command, info ClientInfo, deps
 	userID := info.UserID
 	voiceChID := info.VoiceChannelID
 
-	ratKey := fmt.Sprintf("voice_camera:%d", userID)
+	ratKey := auth.Key("voice_camera", userID)
 	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceCameraRateLimit, voiceCameraWindow) {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many camera toggles"}}
 	}
@@ -118,7 +119,7 @@ func handleVoiceScreenshareV2(ctx context.Context, cmd Command, info ClientInfo,
 	userID := info.UserID
 	voiceChID := info.VoiceChannelID
 
-	ratKey := fmt.Sprintf("voice_screenshare:%d", userID)
+	ratKey := auth.Key("voice_screenshare", userID)
 	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceScreenshareRateLimit, voiceScreenshareWindow) {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many screenshare toggles"}}
 	}

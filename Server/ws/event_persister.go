@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/owncord/server/db"
 	"github.com/owncord/server/telemetry"
 )
 
@@ -144,21 +145,35 @@ func (p *EventPersister) run(ctx context.Context) {
 	metrics := telemetry.NewAppMetrics()
 
 	batch := make([]pendingEvent, 0, p.batchSize)
+	// Scratch slice reused across flushes for the store's batch shape.
+	rows := make([]db.PersistedEvent, 0, p.batchSize)
 	flush := func() {
 		if len(batch) == 0 {
 			return
 		}
 		p.flushes.Add(1)
+		rows = rows[:0]
 		for _, evt := range batch {
-			if err := p.store.PersistEvent(ctx, evt.seq, evt.eventType, evt.channelID, evt.payload); err != nil {
-				p.errors.Add(1)
-				metrics.WSEventsPersistErrors.Add(ctx, 1)
-				slog.Warn("event persister: PersistEvent failed",
-					"seq", evt.seq, "event_type", evt.eventType, "channel_id", evt.channelID, "err", err)
-				continue
-			}
-			p.persisted.Add(1)
-			metrics.WSEventsPersisted.Add(ctx, 1)
+			rows = append(rows, db.PersistedEvent{
+				Seq:       evt.seq,
+				EventType: evt.eventType,
+				ChannelID: evt.channelID,
+				Payload:   evt.payload,
+			})
+		}
+		// One transaction per flush instead of one autocommit write per event.
+		// PersistEvents keeps the best-effort contract: on tx failure it retries
+		// per-row so a single bad event doesn't drop the batch.
+		persisted, err := p.store.PersistEvents(ctx, rows)
+		if persisted > 0 {
+			p.persisted.Add(uint64(persisted))
+			metrics.WSEventsPersisted.Add(ctx, int64(persisted))
+		}
+		if failed := len(batch) - persisted; failed > 0 {
+			p.errors.Add(uint64(failed)) //nolint:gosec // failed is non-negative
+			metrics.WSEventsPersistErrors.Add(ctx, int64(failed))
+			slog.Warn("event persister: flush lost events",
+				"failed", failed, "batch", len(batch), "err", err)
 		}
 		batch = batch[:0]
 	}

@@ -33,11 +33,11 @@ type Config struct {
 	Logging          LoggingConfig          `koanf:"logging"`
 }
 
-// LoggingConfig controls server log verbosity. The in-memory ring buffer that
-// backs the admin panel's live log view always captures DEBUG regardless of
-// this setting — Level only gates what is written to stdout.
+// LoggingConfig controls server log verbosity. Level gates both stdout and
+// the in-memory ring buffer that backs the admin panel's live log view, so
+// suppressed levels cost nothing anywhere on the hot path.
 type LoggingConfig struct {
-	// Level is the minimum level written to stdout: "debug" | "info" | "warn" |
+	// Level is the minimum level logged: "debug" | "info" | "warn" |
 	// "error". Override at runtime without editing config.yaml via the
 	// OWNCORD_LOGGING_LEVEL environment variable.
 	Level string `koanf:"level"`
@@ -339,9 +339,9 @@ voice:
 # gif:
 #   api_key: ""
 
-# Logging. "level" gates what is written to stdout; the admin panel's live log
-# view always captures debug regardless. Override without editing this file via
-# the OWNCORD_LOGGING_LEVEL environment variable.
+# Logging. "level" gates what is logged, to stdout and the admin panel's live
+# log view alike. Override without editing this file via the
+# OWNCORD_LOGGING_LEVEL environment variable.
 # logging:
 #   level: "info"             # debug | info | warn | error
 `

@@ -508,7 +508,7 @@ func handleDeleteAccount(database *db.DB, limiter *auth.RateLimiter) http.Handle
 		}
 
 		// Per-user lockout to prevent password brute-force on this destructive endpoint.
-		lockKey := fmt.Sprintf("delete_lock:%d", user.ID)
+		lockKey := auth.Key("delete_lock", user.ID)
 		if limiter.IsLockedOut(lockKey) {
 			writeJSON(w, http.StatusTooManyRequests, errorResponse{
 				Error:   "RATE_LIMITED",
@@ -535,7 +535,7 @@ func handleDeleteAccount(database *db.DB, limiter *auth.RateLimiter) http.Handle
 		}
 
 		// Verify the supplied password matches the stored hash.
-		failKey := fmt.Sprintf("delete_fail:%d", user.ID)
+		failKey := auth.Key("delete_fail", user.ID)
 		if !auth.CheckPassword(user.PasswordHash, req.Password) {
 			if !limiter.Allow(failKey, deleteAccountFailureThreshold, deleteAccountFailureWindow) {
 				limiter.Lockout(r.Context(), lockKey, deleteAccountLockoutDuration)
