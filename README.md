@@ -64,7 +64,7 @@ That keeps iteration fast, and it also means behaviour can change quickly betwee
 2. Run the server binary:
    - Windows: `chatserver.exe`
    - Linux: `./chatserver`
-3. Open `https://localhost:8443/admin` and create your Owner account.
+3. Open `https://localhost:8443/admin` and complete the setup wizard — it creates your Owner account and configures the server for you (settings are saved to `config.yaml` automatically).
 4. Generate invite codes in the admin panel and share them with friends.
 
 ### Option B: Docker (Linux server)
@@ -84,7 +84,7 @@ The client uses TOFU (Trust On First Use) for self-signed certificates: it promp
 ## What OwnCord Already Has
 
 - Real-time channels and direct messages over WebSocket
-- Voice/video channels via LiveKit
+- Voice/video channels via LiveKit — the LiveKit server binary is downloaded and managed for you
 - Invite-only registration and role-based permissions
 - Web admin panel with logs, backups, and update tooling
 - File uploads and inline media rendering

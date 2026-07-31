@@ -167,6 +167,22 @@
   .auth-box{background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-md);padding:32px;width:380px}
   .auth-box h2{font-size:20px;font-weight:700;color:white;margin-bottom:20px}
   .auth-error{color:var(--red);font-size:13px;margin-top:10px;min-height:20px}
+  .auth-box.wizard{width:560px;max-width:94vw;max-height:92vh;overflow-y:auto}
+  .wiz-steps{display:flex;gap:6px;margin-bottom:20px}
+  .wiz-dot{height:4px;flex:1;border-radius:2px;background:var(--border);transition:background .2s}
+  .wiz-dot.active{background:var(--accent)}
+  .wiz-dot.done{background:var(--accent);opacity:.45}
+  .wiz-sub{color:var(--text-muted);font-size:14px;margin-bottom:20px;line-height:1.5}
+  .wiz-hint{color:var(--text-faint);font-size:12px;margin-top:6px;line-height:1.4}
+  .wiz-nav{display:flex;justify-content:space-between;gap:8px;margin-top:24px}
+  .wiz-review-row{display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}
+  .wiz-review-row .k{color:var(--text-muted);white-space:nowrap}
+  .wiz-review-row .v{color:var(--text-normal);font-weight:600;text-align:right;word-break:break-word}
+  .wiz-callout{background:rgba(240,178,50,.1);border:1px solid rgba(240,178,50,.35);color:var(--yellow);font-size:13px;padding:10px 12px;border-radius:var(--radius-sm);margin-top:16px;line-height:1.45}
+  .wiz-skip{display:block;width:100%;text-align:center;margin-top:14px;color:var(--text-faint);font-size:12px;cursor:pointer;text-decoration:underline;background:none}
+  .wiz-skip:hover{color:var(--text-muted)}
+  .wiz-toggle-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+  .wiz-toggle-row .lbl{font-size:14px;color:var(--text-normal)}
 
   /* Log viewer */
   .log-toolbar{display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap}
@@ -199,17 +215,9 @@
 </head>
 <body>
 
-<!-- Auth: Setup -->
+<!-- Auth: Setup (first-run wizard; content rendered by renderWizard) -->
 <div class="auth-overlay" id="setupOverlay">
-  <div class="auth-box">
-    <h2>Welcome to OwnCord</h2>
-    <p style="color:var(--text-muted);font-size:14px;margin-bottom:20px">No accounts exist yet. Create the owner account to get started.</p>
-    <div class="form-group"><label class="form-label">Username</label><input class="form-input" id="setupUser" autocomplete="username" placeholder="Choose a username"></div>
-    <div class="form-group"><label class="form-label">Password</label><input class="form-input" id="setupPass" type="password" autocomplete="new-password" placeholder="Min 8 characters"></div>
-    <div class="form-group"><label class="form-label">Confirm Password</label><input class="form-input" id="setupConfirm" type="password" autocomplete="new-password" placeholder="Re-enter password"></div>
-    <button class="btn btn-accent" id="setupBtn" style="width:100%">Create Owner Account</button>
-    <div class="auth-error" id="setupErr"></div>
-  </div>
+  <div class="auth-box wizard" id="wizardBox"></div>
 </div>
 
 <!-- Auth: Setup Success -->
@@ -219,6 +227,12 @@
     <p style="color:var(--text-muted);font-size:14px;margin-bottom:16px">Your owner account has been created. Here's your invite code:</p>
     <div class="code-copy"><code id="inviteCode"></code><button class="btn btn-ghost" onclick="copyInvite()">Copy</button></div>
     <p style="color:var(--yellow);font-size:13px;margin:16px 0">Save this code! Share it with people you want to invite.</p>
+    <div id="setupWarnings"></div>
+    <div id="setupRestart" style="display:none">
+      <p style="color:var(--text-muted);font-size:14px;margin-bottom:8px"><span class="spinner" style="display:inline-block;width:13px;height:13px;border:2px solid var(--border-strong);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;vertical-align:-2px;margin-right:6px"></span>Applying your settings — the server is restarting…</p>
+      <p style="font-size:14px;margin-bottom:8px">When it's back, open: <a id="restartLink" href="#" style="color:var(--text-link);word-break:break-all"></a></p>
+      <p class="wiz-hint" id="restartHint">This can take a few seconds. If the page doesn't redirect on its own, click the link above. You may need to sign in again, and with a self-signed certificate your browser may show a one-time security warning — choose Advanced &rarr; Continue.</p>
+    </div>
     <button class="btn btn-accent" id="setupContinueBtn" style="width:100%">Continue to Admin Panel</button>
   </div>
 </div>
@@ -349,27 +363,220 @@ function showOverlay(id){hideAll();document.getElementById(id).classList.add('vi
 function showApp(){hideAll();document.getElementById('adminShell').classList.remove('hidden')}
 
 async function checkAuth(){
-  try{const r=await fetch('/admin/api/setup/status');const d=await r.json();if(d.needs_setup){showOverlay('setupOverlay');return}}catch(e){console.error('setup check:',e)}
+  try{const r=await fetch('/admin/api/setup/status');const d=await r.json();if(d.needs_setup){wizInit(d.defaults);showOverlay('setupOverlay');return}}catch(e){console.error('setup check:',e)}
   if(!state.token){showOverlay('loginOverlay');return}
   try{await api('GET','/stats');showApp();renderNav();renderContent()}catch(e){showOverlay('loginOverlay')}
 }
 
-document.getElementById('setupBtn').onclick=async()=>{
-  const btn=document.getElementById('setupBtn');
-  const u=document.getElementById('setupUser').value.trim(),p=document.getElementById('setupPass').value,c=document.getElementById('setupConfirm').value,err=document.getElementById('setupErr');
-  err.textContent='';
-  if(!u||!p){err.textContent='Username and password are required.';return}
-  if(p!==c){err.textContent='Passwords do not match.';return}
-  // In-flight guard: a second submit spends another attempt against the
-  // server's per-IP rate limit for nothing.
-  if(btn.disabled)return;
-  btn.disabled=true;
-  try{const r=await fetch('/admin/api/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});const d=await r.json();if(!r.ok)throw new Error(d.message||'Setup failed');
-    state.token=d.token;localStorage.setItem('admin_token',state.token);
-    document.getElementById('inviteCode').textContent=d.invite_code;showOverlay('setupSuccessOverlay');
-  }catch(e){err.textContent=e.message}
-  finally{btn.disabled=false}
-};
+/* ═══ First-Run Setup Wizard ═══ */
+/* Multi-step overlay shown while needs_setup is true. Collects the owner
+   account plus the basics (name, port, security, uploads, voice, access) and
+   submits everything as one POST /admin/api/setup — the server writes both
+   the settings table and config.yaml, and restarts itself if startup-only
+   values changed. "Skip" falls back to the legacy account-only payload. */
+const wiz={step:0,skip:false,defaults:null,data:{},busy:false};
+const WIZ_STEP_COUNT=6;
+
+function wizInit(defaults){
+  wiz.defaults=defaults||null;wiz.step=0;wiz.skip=false;wiz.busy=false;
+  const d=defaults||{};
+  wiz.data={username:'',password:'',confirm:'',
+    server_name:d.server_name||'OwnCord Server',
+    motd:(d.motd===undefined||d.motd===null)?'Welcome!':d.motd,
+    registration_open:!!d.registration_open,
+    port:d.port||8443,
+    tls_mode:d.tls_mode||'self_signed',
+    tls_domain:d.tls_domain||'',
+    upload_max_size_mb:d.upload_max_size_mb||100,
+    voice_quality:d.voice_quality||'medium',
+    voice_auto_download:d.voice_auto_download!==undefined?!!d.voice_auto_download:true};
+  renderWizard();
+}
+
+function wizDots(){
+  let h='<div class="wiz-steps">';
+  for(let i=0;i<WIZ_STEP_COUNT;i++)h+='<div class="wiz-dot '+(i===wiz.step?'active':i<wiz.step?'done':'')+'"></div>';
+  return h+'</div>';
+}
+
+function wizField(id,label,input){return '<div class="form-group"><label class="form-label" for="'+id+'">'+label+'</label>'+input+'</div>'}
+
+function renderWizard(){
+  const box=document.getElementById('wizardBox');
+  const d=wiz.data;
+  let h=wizDots();
+  const err='<div class="auth-error" id="wizErr"></div>';
+  const nav=nextLabel=>'<div class="wiz-nav"><button class="btn btn-ghost" onclick="wizBack()">Back</button><button class="btn btn-accent" id="wizNextBtn" onclick="wizNext()">'+nextLabel+'</button></div>';
+  switch(wiz.step){
+    case 0:
+      h+='<h2>Welcome to OwnCord</h2>'
+        +'<p class="wiz-sub">Your own private chat server is almost ready. This one-minute setup creates your admin account and configures the basics — no config files to edit, everything is saved for you.</p>'
+        +'<button class="btn btn-accent" style="width:100%" onclick="wizNext()">Get Started</button>'
+        +'<button class="wiz-skip" onclick="wizSkip()">Skip the questions — use recommended defaults</button>';
+      break;
+    case 1:
+      h+='<h2>Create your admin account</h2>'
+        +'<p class="wiz-sub">This is the owner account for managing the server. Pick a strong password — this account can do everything.</p>'
+        +wizField('wizUser','Username','<input class="form-input" id="wizUser" autocomplete="username" placeholder="Choose a username" value="'+esc(d.username)+'">')
+        +wizField('wizPass','Password','<input class="form-input" id="wizPass" type="password" autocomplete="new-password" placeholder="Min 8 characters">')
+        +wizField('wizConfirm','Confirm Password','<input class="form-input" id="wizConfirm" type="password" autocomplete="new-password" placeholder="Re-enter password">')
+        +err+nav(wiz.skip?'Create Owner Account':'Next');
+      break;
+    case 2:
+      h+='<h2>Server basics</h2>'
+        +'<p class="wiz-sub">How your server introduces itself, and how people connect to it.</p>'
+        +wizField('wizName','Server Name','<input class="form-input" id="wizName" maxlength="100" value="'+esc(d.server_name)+'">')
+        +wizField('wizPort','Port','<input class="form-input" id="wizPort" type="number" min="1" max="65535" value="'+esc(d.port)+'"><div class="wiz-hint">The network port people connect to. Keep the default unless it clashes with something else on this machine.</div>')
+        +wizField('wizTLS','Security','<select class="filter-select" id="wizTLS" style="width:100%" onchange="wizTLSChanged()">'
+          +'<option value="self_signed"'+(d.tls_mode==='self_signed'?' selected':'')+'>Self-signed HTTPS &mdash; recommended</option>'
+          +'<option value="acme"'+(d.tls_mode==='acme'?' selected':'')+'>Let&#39;s Encrypt certificate &mdash; needs a public domain</option>'
+          +'<option value="manual"'+(d.tls_mode==='manual'?' selected':'')+'>Manual certificates &mdash; advanced</option>'
+          +'<option value="off"'+(d.tls_mode==='off'?' selected':'')+'>No encryption &mdash; not recommended</option>'
+          +'</select><div class="wiz-hint" id="wizTLSHint"></div>')
+        +'<div class="form-group" id="wizDomainGroup" style="display:none"><label class="form-label" for="wizDomain">Domain</label><input class="form-input" id="wizDomain" placeholder="chat.example.com" value="'+esc(d.tls_domain)+'"><div class="wiz-hint">Must already point at this machine, with ports 80 and 443 reachable from the internet. If that isn&#39;t set up yet, pick self-signed for now — you can switch later.</div></div>'
+        +err+nav('Next');
+      break;
+    case 3:
+      h+='<h2>Uploads &amp; voice</h2>'
+        +'<p class="wiz-sub">Limits for file sharing and voice chat quality.</p>'
+        +wizField('wizUpload','Max upload size (MB)','<input class="form-input" id="wizUpload" type="number" min="1" max="10240" value="'+esc(d.upload_max_size_mb)+'"><div class="wiz-hint">The largest file anyone can share. 100 MB suits most servers.</div>')
+        +'<div class="wiz-toggle-row"><div><div class="lbl">Voice chat</div><div class="wiz-hint" style="margin-top:2px">Downloads the voice engine (LiveKit, ~40 MB, one time) from the official LiveKit project and manages it for you. Turn off only if you run your own LiveKit server.</div></div><button class="toggle'+(d.voice_auto_download?' on':'')+'" id="wizVoiceDl" onclick="this.classList.toggle(\'on\')"></button></div>'
+        +wizField('wizVoice','Voice quality','<select class="filter-select" id="wizVoice" style="width:100%">'
+          +'<option value="low"'+(d.voice_quality==='low'?' selected':'')+'>Low &mdash; least bandwidth, phone-call quality</option>'
+          +'<option value="medium"'+(d.voice_quality==='medium'?' selected':'')+'>Medium &mdash; recommended balance</option>'
+          +'<option value="high"'+(d.voice_quality==='high'?' selected':'')+'>High &mdash; best quality, most bandwidth</option>'
+          +'</select>')
+        +err+nav('Next');
+      break;
+    case 4:
+      h+='<h2>Who can join?</h2>'
+        +'<p class="wiz-sub">You&#39;ll get an invite code either way — these control what happens after that.</p>'
+        +'<div class="wiz-toggle-row"><div><div class="lbl">Open registration</div><div class="wiz-hint" style="margin-top:2px">Allow new people to create accounts using invite codes. Turn off to lock the server to existing members.</div></div><button class="toggle'+(d.registration_open?' on':'')+'" id="wizReg" onclick="this.classList.toggle(\'on\')"></button></div>'
+        +wizField('wizMotd','Welcome message','<input class="form-input" id="wizMotd" maxlength="500" value="'+esc(d.motd)+'" placeholder="Welcome!"><div class="wiz-hint">Shown to members when they connect.</div>')
+        +err+nav('Next');
+      break;
+    case 5:{
+      const secLabel={self_signed:'Self-signed HTTPS',acme:'Let&#39;s Encrypt ('+esc(d.tls_domain)+')',manual:'Manual certificates',off:'No encryption'}[d.tls_mode]||esc(d.tls_mode);
+      const rows=[['Username',esc(d.username)],['Server name',esc(d.server_name)],['Port',esc(d.port)],['Security',secLabel],['Max upload',esc(d.upload_max_size_mb)+' MB'],['Voice chat',d.voice_auto_download?'Automatic (LiveKit downloaded for you)':'Self-managed / off'],['Voice quality',esc(d.voice_quality)],['Open registration',d.registration_open?'Yes':'No'],['Welcome message',esc(d.motd)||'&mdash;']];
+      h+='<h2>Review &amp; finish</h2><p class="wiz-sub">Everything look right? You can change any of this later in the admin panel.</p>';
+      rows.forEach(r=>{h+='<div class="wiz-review-row"><span class="k">'+r[0]+'</span><span class="v">'+r[1]+'</span></div>'});
+      if(wizNeedsRestart())h+='<div class="wiz-callout">The server will restart once to apply your connection settings, then point you to the right address.</div>';
+      h+=err+nav('Finish Setup');
+      break;}
+  }
+  box.innerHTML=h;
+  if(wiz.step===2)wizTLSChanged();
+  box.querySelectorAll('input').forEach(el=>el.addEventListener('keydown',e=>{if(e.key==='Enter')wizNext()}));
+  const first=box.querySelector('input');if(first)first.focus();
+}
+
+function wizTLSChanged(){
+  const sel=document.getElementById('wizTLS');if(!sel)return;
+  const hints={
+    self_signed:'Works out of the box on your network. Browsers show a one-time security warning you can safely accept.',
+    acme:'A free, trusted certificate from Let’s Encrypt. Only choose this if you own a domain that points at this machine.',
+    manual:'Bring your own certificate files (data/cert.pem and data/key.pem).',
+    off:'Traffic is unencrypted. Only for testing, or behind a reverse proxy that handles HTTPS.'};
+  document.getElementById('wizTLSHint').textContent=hints[sel.value]||'';
+  document.getElementById('wizDomainGroup').style.display=sel.value==='acme'?'block':'none';
+}
+
+function wizNeedsRestart(){
+  const f=wiz.defaults;if(!f)return false;const d=wiz.data;
+  return Number(d.port)!==f.port||d.tls_mode!==f.tls_mode||Number(d.upload_max_size_mb)!==f.upload_max_size_mb||d.voice_quality!==f.voice_quality||d.voice_auto_download!==!!f.voice_auto_download||(d.tls_mode==='acme'&&d.tls_domain!==(f.tls_domain||''));
+}
+
+function wizCollect(){
+  const g=id=>{const el=document.getElementById(id);return el?el.value:undefined};
+  const d=wiz.data;
+  switch(wiz.step){
+    case 1:d.username=(g('wizUser')||'').trim();d.password=g('wizPass')||'';d.confirm=g('wizConfirm')||'';break;
+    case 2:d.server_name=(g('wizName')||'').trim();d.port=g('wizPort');d.tls_mode=g('wizTLS')||d.tls_mode;d.tls_domain=(g('wizDomain')||'').trim();break;
+    case 3:{d.upload_max_size_mb=g('wizUpload');d.voice_quality=g('wizVoice')||d.voice_quality;const vd=document.getElementById('wizVoiceDl');if(vd)d.voice_auto_download=vd.classList.contains('on');break}
+    case 4:{const t=document.getElementById('wizReg');if(t)d.registration_open=t.classList.contains('on');d.motd=(g('wizMotd')||'').trim();break}
+  }
+}
+
+function wizBack(){
+  if(wiz.busy)return;
+  wizCollect();
+  if(wiz.step===1)wiz.skip=false;
+  wiz.step=Math.max(0,wiz.step-1);
+  renderWizard();
+}
+
+function wizSkip(){wiz.skip=true;wiz.step=1;renderWizard()}
+
+function wizNext(){
+  if(wiz.busy)return;
+  wizCollect();
+  const d=wiz.data;
+  const fail=msg=>{const e=document.getElementById('wizErr');if(e)e.textContent=msg};
+  switch(wiz.step){
+    case 1:
+      if(!d.username||!d.password)return fail('Username and password are required.');
+      if(d.password.length<8)return fail('Password must be at least 8 characters.');
+      if(d.password!==d.confirm)return fail('Passwords do not match.');
+      if(wiz.skip)return wizFinish();
+      break;
+    case 2:{
+      if(!d.server_name)return fail('Server name is required.');
+      const p=Number(d.port);
+      if(!Number.isInteger(p)||p<1||p>65535)return fail('Port must be a number between 1 and 65535.');
+      if(d.tls_mode==='acme'&&!d.tls_domain)return fail('A domain is required for Let’s Encrypt.');
+      break;}
+    case 3:{
+      const u=Number(d.upload_max_size_mb);
+      if(!Number.isInteger(u)||u<1||u>10240)return fail('Max upload size must be between 1 and 10240 MB.');
+      break;}
+    case 5:return wizFinish();
+  }
+  wiz.step++;renderWizard();
+}
+
+async function wizFinish(){
+  if(wiz.busy)return;wiz.busy=true;
+  const btn=document.getElementById('wizNextBtn');if(btn){btn.disabled=true;btn.innerHTML='<div class="spinner"></div> Setting up…'}
+  const d=wiz.data;
+  const body={username:d.username,password:d.password};
+  if(!wiz.skip){
+    body.wizard={server_name:d.server_name,motd:d.motd,registration_open:!!d.registration_open,
+      port:Number(d.port),tls_mode:d.tls_mode,upload_max_size_mb:Number(d.upload_max_size_mb),
+      voice_quality:d.voice_quality,voice_auto_download:!!d.voice_auto_download};
+    if(d.tls_mode==='acme')body.wizard.tls_domain=d.tls_domain;
+  }
+  try{
+    const r=await fetch('/admin/api/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const resp=await r.json();if(!r.ok)throw new Error(resp.message||'Setup failed');
+    state.token=resp.token;localStorage.setItem('admin_token',state.token);
+    document.getElementById('inviteCode').textContent=resp.invite_code;
+    const warn=document.getElementById('setupWarnings');warn.innerHTML='';
+    (resp.warnings||[]).forEach(wm=>{const div=document.createElement('div');div.className='wiz-callout';div.style.marginBottom='12px';div.textContent=wm;warn.appendChild(div)});
+    showOverlay('setupSuccessOverlay');
+    if(resp.restart_required&&resp.restart_url)beginRestartWait(resp.restart_url);
+  }catch(e){
+    const err=document.getElementById('wizErr');if(err)err.textContent=e.message;
+    const b=document.getElementById('wizNextBtn');if(b){b.disabled=false;b.textContent=wiz.step===1?'Create Owner Account':'Finish Setup'}
+  }finally{wiz.busy=false}
+}
+
+/* Poll until the restarted server answers, then follow it. no-cors: an opaque
+   response resolving means "up" even across a port change; rejection means
+   still down. A self-signed cert the browser hasn't accepted yet keeps the
+   poll failing — the visible link is the primary path, this redirect is
+   best-effort sugar. */
+function beginRestartWait(url){
+  document.getElementById('setupContinueBtn').style.display='none';
+  document.getElementById('setupRestart').style.display='block';
+  const link=document.getElementById('restartLink');link.href=url;link.textContent=url;
+  let elapsed=0;
+  setTimeout(function poll(){
+    fetch(url+'/api/setup/status',{mode:'no-cors',cache:'no-store'})
+      .then(()=>{window.location=url})
+      .catch(()=>{elapsed+=2000;if(elapsed<60000)setTimeout(poll,2000)});
+  },4000);
+}
+
 document.getElementById('setupContinueBtn').onclick=()=>{showApp();renderNav();renderContent()};
 function copyInvite(){navigator.clipboard.writeText(document.getElementById('inviteCode').textContent).then(()=>showToast('Copied!','info')).catch(()=>showToast('Copy failed','error'))}
 
@@ -387,7 +594,7 @@ document.getElementById('loginBtn').onclick=async()=>{
   finally{btn.disabled=false}
 };
 
-['setupUser','setupPass','setupConfirm'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('setupBtn').click()}));
+/* Wizard inputs bind Enter dynamically in renderWizard(). */
 ['loginUser','loginPass'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('loginBtn').click()}));
 
 /* ═══ Nav ═══ */

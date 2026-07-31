@@ -31,7 +31,9 @@ Get OwnCord running with the fewest possible steps.
 	 - Windows: `chatserver.exe`
 	 - Linux: `./chatserver`
 3. Open `https://localhost:8443/admin`.
-4. Create the Owner account.
+4. Complete the setup wizard: it creates the Owner account and configures the
+   basics (server name, port, security, uploads, voice). Your choices are
+   written to `config.yaml` automatically — no manual editing needed.
 5. Create invite codes and share them.
 
 ## Option B: Docker (Linux server)
@@ -44,7 +46,7 @@ cp livekit.yaml.example livekit.yaml
 docker compose up -d
 ```
 
-Then open `https://localhost:8443/admin` and create the Owner account.
+Then open `https://localhost:8443/admin` and complete the setup wizard.
 
 Full Docker details: [Deployment Guide](deployment.md#docker-linux).
 

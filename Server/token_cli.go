@@ -24,7 +24,7 @@ func runTokenCLI(args []string) int {
 		return 2
 	}
 
-	cfg, err := config.Load("config.yaml")
+	cfg, err := config.Load(config.DefaultPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: load config: %v\n", err)
 		return 1
