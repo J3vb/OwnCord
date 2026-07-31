@@ -420,3 +420,71 @@ func TestPermissionBits_AreDistinctPowersOfTwo(t *testing.T) {
 		seen[b] = true
 	}
 }
+
+// ─── HasAnyPerm / AdminPerimeter / Name tests ────────────────────────────────
+
+func TestHasAnyPerm_AnyOfSemantics(t *testing.T) {
+	rolePerms := permissions.KickMembers | permissions.SendMessages
+	// One matching bit is enough, unlike HasPerm's ALL-of.
+	if !permissions.HasAnyPerm(rolePerms, permissions.KickMembers|permissions.ManageServer) {
+		t.Error("expected HasAnyPerm to match on KickMembers")
+	}
+	if permissions.HasPerm(rolePerms, permissions.KickMembers|permissions.ManageServer) {
+		t.Error("HasPerm must stay ALL-of")
+	}
+	if permissions.HasAnyPerm(rolePerms, permissions.ManageServer|permissions.ViewAuditLog) {
+		t.Error("expected HasAnyPerm to reject a disjoint mask")
+	}
+	if permissions.HasAnyPerm(rolePerms, 0) {
+		t.Error("a zero mask must never be satisfied")
+	}
+	if permissions.HasAnyPerm(0, permissions.AdminPerimeter) {
+		t.Error("a zero role must never satisfy the perimeter")
+	}
+}
+
+func TestAdminPerimeter_Membership(t *testing.T) {
+	admitted := []int64{
+		permissions.Administrator, permissions.ManageChannels, permissions.ManageRoles,
+		permissions.ManageServer, permissions.ViewAuditLog, permissions.KickMembers,
+		permissions.BanMembers, permissions.MuteMembers,
+	}
+	for _, p := range admitted {
+		if !permissions.HasAnyPerm(p, permissions.AdminPerimeter) {
+			t.Errorf("%s should admit to the admin perimeter", permissions.Name(p))
+		}
+	}
+	// Bits with no admin-panel route must not open the perimeter.
+	refused := []int64{
+		permissions.SendMessages, permissions.ReadMessages, permissions.ManageMessages,
+		permissions.ManageInvites, permissions.ConnectVoice,
+	}
+	for _, p := range refused {
+		if permissions.HasAnyPerm(p, permissions.AdminPerimeter) {
+			t.Errorf("%s must not admit to the admin perimeter", permissions.Name(p))
+		}
+	}
+	// The seeded Moderator role (migration 001) gets in.
+	if !permissions.HasAnyPerm(0x000FFFFF, permissions.AdminPerimeter) {
+		t.Error("the seeded Moderator mask should admit to the admin perimeter")
+	}
+	// The seeded Member role does not.
+	if permissions.HasAnyPerm(1635, permissions.AdminPerimeter) {
+		t.Error("the seeded Member mask must not admit to the admin perimeter")
+	}
+}
+
+func TestName_KnownAndUnknownBits(t *testing.T) {
+	if got := permissions.Name(permissions.ManageChannels); got != "MANAGE_CHANNELS" {
+		t.Errorf("Name(ManageChannels) = %q", got)
+	}
+	if got := permissions.Name(permissions.ViewAuditLog); got != "VIEW_AUDIT_LOG" {
+		t.Errorf("Name(ViewAuditLog) = %q", got)
+	}
+	// Zero, multi-bit and undefined values have no single name.
+	for _, bit := range []int64{0, permissions.KickMembers | permissions.BanMembers, 0x4} {
+		if got := permissions.Name(bit); got != "UNKNOWN" {
+			t.Errorf("Name(0x%X) = %q, want UNKNOWN", bit, got)
+		}
+	}
+}

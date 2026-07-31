@@ -2,6 +2,8 @@ package ws
 
 import (
 	"encoding/json"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/owncord/server/db"
@@ -437,6 +439,42 @@ func TestBuildChatDeleted_Payload(t *testing.T) {
 func TestBuildChatDeleted_ValidJSON(t *testing.T) {
 	if !json.Valid(buildChatDeleted(1, 2)) {
 		t.Error("buildChatDeleted output is not valid JSON")
+	}
+}
+
+// ─── buildChatBulkDeleted ─────────────────────────────────────────────────────
+
+func TestBuildChatBulkDeleted_TypeAndPayload(t *testing.T) {
+	msg := buildChatBulkDeleted(22, []int64{11, 10, 9})
+	var env struct {
+		Type    string `json:"type"`
+		Payload struct {
+			ChannelID int64   `json:"channel_id"`
+			IDs       []int64 `json:"ids"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Type != "chat_bulk_deleted" {
+		t.Errorf("type = %q, want chat_bulk_deleted", env.Type)
+	}
+	if env.Payload.ChannelID != 22 {
+		t.Errorf("payload.channel_id = %d, want 22", env.Payload.ChannelID)
+	}
+	if !slices.Equal(env.Payload.IDs, []int64{11, 10, 9}) {
+		t.Errorf("payload.ids = %v, want [11 10 9]", env.Payload.IDs)
+	}
+}
+
+func TestBuildChatBulkDeleted_NilIDsEncodesAsEmptyArray(t *testing.T) {
+	msg := buildChatBulkDeleted(5, nil)
+	if !json.Valid(msg) {
+		t.Fatal("buildChatBulkDeleted output is not valid JSON")
+	}
+	// Clients iterate ids unconditionally, so null would be a crash.
+	if !strings.Contains(string(msg), `"ids":[]`) {
+		t.Errorf("nil ids encoded as %s, want an empty array", msg)
 	}
 }
 

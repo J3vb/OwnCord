@@ -548,6 +548,51 @@ When `has_more` is `false`, you have reached the beginning of the channel histor
 
 ---
 
+### POST /api/v1/channels/{id}/messages/purge
+
+Bulk soft-delete the newest messages in a channel.
+
+**Auth:** Required
+**Permission:** `READ_MESSAGES` **and** `MANAGE_MESSAGES` on the channel (per-channel overrides apply)
+
+Not available in DM channels — a DM has no `MANAGE_MESSAGES` gate, so those
+requests are rejected with 403.
+
+#### Request Body
+
+```json
+{
+  "limit": 50,
+  "before": 1042
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `limit` | integer | Yes | How many messages to delete, 1--100. Values above 100 are clamped; 0 or negative is a 400. |
+| `before` | integer | No | Only delete messages with an id below this one. Omit or `0` to start from the newest. |
+
+#### Response 200 OK
+
+```json
+{
+  "channel_id": 5,
+  "ids": [1042, 1041, 1040],
+  "count": 3
+}
+```
+
+`ids` is newest-first and may hold fewer than `limit` entries when the channel
+has less history; already-deleted messages are skipped. Deletion is soft: the
+rows stay as tombstones, exactly as with a single delete. A single
+[`chat_bulk_deleted`](protocol.md#chat_bulk_deleted-server---client-broadcast)
+WebSocket event is broadcast to the channel (not one `chat_deleted` per
+message), and one `message_purge` audit entry is written.
+
+Rate limited to 5/sec per user.
+
+---
+
 ### GET /api/v1/channels/{id}/pins
 
 Get all pinned messages for a channel.
@@ -971,10 +1016,71 @@ Runtime server metrics. Restricted to admin-allowed CIDRs.
 
 ---
 
+## Admin API Authorization
+
+The admin panel API lives under `/admin/api` (not `/api/v1`) and takes the same
+`Authorization: Bearer {token}` header — a login session or an API token, which
+inherits its owning user's role.
+
+Authorization is two-layered:
+
+1. **Perimeter.** The request is rejected with `403 FORBIDDEN` unless the
+   principal's role holds at least one bit of `permissions.AdminPerimeter`
+   (`ADMINISTRATOR`, `MANAGE_CHANNELS`, `MANAGE_ROLES`, `MANAGE_SERVER`,
+   `VIEW_AUDIT_LOG`, `KICK_MEMBERS`, `BAN_MEMBERS`, `MUTE_MEMBERS`). Banned
+   users are rejected here even while their session is still valid.
+2. **Per-route bit.** Route groups then require the specific permission below.
+   `ADMINISTRATOR` bypasses every one of them; owner-only routes gate on role
+   *position* (`>= 100`) instead of on a bit, so not even `ADMINISTRATOR`
+   substitutes for being the owner.
+
+| Route | Requires |
+| ----- | -------- |
+| `GET /admin/api/me` | perimeter only |
+| `GET /admin/api/stats` | perimeter only |
+| `GET /admin/api/users` | perimeter only |
+| `PATCH /admin/api/users/{id}` | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
+| `DELETE /admin/api/users/{id}/sessions` | `KICK_MEMBERS` |
+| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions`) | `MANAGE_CHANNELS` |
+| `GET /admin/api/audit-log` | `VIEW_AUDIT_LOG` |
+| `GET/PATCH /admin/api/settings` | `MANAGE_SERVER` |
+| `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream` | `ADMINISTRATOR` |
+| `/api/v1/admin/plugins…` | `ADMINISTRATOR` |
+| `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…` | Owner role (position 100) |
+
+Moderation routes additionally enforce the **role hierarchy**: the actor must
+strictly outrank the target (`actor.position > target.position`), and a role
+assignment may only grant a role positioned strictly below the actor's own —
+so an admin cannot promote anyone to Owner, and a moderator cannot demote an
+admin. Violations return `403 FORBIDDEN`.
+
+### GET /admin/api/me
+
+Describes the calling principal so a panel can hide what the role cannot use.
+Every route still re-checks its bit server-side.
+
+#### Response 200 OK
+
+```json
+{
+  "id": 7,
+  "username": "mod",
+  "role_id": 3,
+  "role_name": "Moderator",
+  "role_position": 60,
+  "permissions": 1048575,
+  "is_owner": false
+}
+```
+
+---
+
 ## Plugin Administration
 
 Manage WASM plugins. These endpoints sit behind **both** the admin IP
-restriction (allowed CIDRs) **and** admin bearer-token authentication.
+restriction (allowed CIDRs) **and** admin bearer-token authentication, and
+require the `ADMINISTRATOR` bit specifically (the widened admin perimeter does
+not open them).
 Plugin execution additionally requires a server built with `-tags wazero`
 and `plugins.enabled: true` in config.
 

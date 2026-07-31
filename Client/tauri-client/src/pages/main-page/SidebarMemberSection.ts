@@ -151,12 +151,14 @@ export function createSidebarMemberSection(
   const memberList = createMemberList({
     currentUserRole: authStore.getState().user?.role ?? "member",
     ...(onMessageUser !== undefined ? { onMessageUser } : {}),
+    // "Force Logout", not "Kick": the endpoint revokes the target's sessions
+    // and nothing stops them signing back in — there is no membership to remove.
     onKick: async (userId, username) => {
       try {
         await api.adminKickMember(userId);
-        getToast()?.show(`Kicked ${username}`, "success");
+        getToast()?.show(`Forced ${username} to log out`, "success");
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Failed to kick member";
+        const msg = err instanceof Error ? err.message : "Failed to force logout";
         getToast()?.show(msg, "error");
       }
     },

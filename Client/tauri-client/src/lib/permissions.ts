@@ -59,6 +59,45 @@ export function isAdministrator(userPerms: number): boolean {
 }
 
 /**
+ * Permission mask for a role name, from the role list the server sends in
+ * `ready`. Returns null when that list has no matching entry (pre-`ready`, or
+ * an older server that sent none) so callers can distinguish "unknown role"
+ * from "role with no bits" and fall back instead of hiding everything.
+ */
+export function permissionsForRole(roleName: string): number | null {
+  const name = roleName.toLowerCase();
+  const role = channelsStore.getState().roles.find((r) => r.name.toLowerCase() === name);
+  return role?.permissions ?? null;
+}
+
+/**
+ * Legacy owner/admin name check. Only meaningful as a fallback for servers
+ * that send no role list; the permission mask is authoritative whenever one
+ * is available.
+ */
+export function isLegacyAdminRole(roleName: string): boolean {
+  const name = roleName.toLowerCase();
+  return name === "owner" || name === "admin";
+}
+
+/**
+ * Whether `roleName` grants `perm`, from the role list the server sends in
+ * `ready`. When that list has no matching entry (pre-`ready`, or an older
+ * server that sent none) the legacy owner/admin name check stands in — a mask
+ * of 0 would otherwise hide moderation from every actual admin.
+ *
+ * This is the single derivation every moderation affordance uses, so the
+ * member-list gates and the voice moderation menu cannot drift apart. Drives
+ * affordances only — the server is still the authority on every action, and
+ * enforces the rank rule the client cannot evaluate.
+ */
+export function roleHasPermission(roleName: string, perm: Permission): boolean {
+  const perms = permissionsForRole(roleName);
+  if (perms === null) return isLegacyAdminRole(roleName);
+  return hasPermission(perms, perm);
+}
+
+/**
  * Effective permission bits for the signed-in user, from the role list the
  * server sends in `ready`. Returns 0 when the role is unknown (pre-`ready`,
  * or a role the server didn't send) — deny by default.
@@ -66,10 +105,7 @@ export function isAdministrator(userPerms: number): boolean {
 export function currentUserPermissions(): number {
   const roleName = authStore.getState().user?.role;
   if (roleName === undefined || roleName === null) return 0;
-  const role = channelsStore
-    .getState()
-    .roles.find((r) => r.name.toLowerCase() === roleName.toLowerCase());
-  return role?.permissions ?? 0;
+  return permissionsForRole(roleName) ?? 0;
 }
 
 /**

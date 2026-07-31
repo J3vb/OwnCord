@@ -25,6 +25,7 @@ type Store interface {
 	GetMessagesForAPI(ctx context.Context, channelID, before int64, limit int, requestingUserID int64) ([]db.MessageAPIResponse, error)
 	EditMessage(ctx context.Context, id, userID int64, content string) (*db.Message, error)
 	DeleteMessage(ctx context.Context, id, userID int64, isMod bool) error
+	PurgeChannelMessages(ctx context.Context, channelID, before int64, limit int) ([]int64, error)
 	SearchMessages(ctx context.Context, query string, channelID *int64, limit int) ([]db.MessageSearchResult, error)
 	SearchMessagesInChannels(ctx context.Context, query string, channelIDs []int64, limit int) ([]db.MessageSearchResult, error)
 	GetPinnedMessages(ctx context.Context, channelID int64, requestingUserID int64) ([]db.MessageAPIResponse, error)

@@ -281,6 +281,15 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	h.visibilityChangeSeq.Store(atomic.LoadUint64(&h.seq))
 }
 
+// BroadcastChatBulkDeleted sends one chat_bulk_deleted message carrying every
+// purged message id to the subscribers of channelID, replacing the N separate
+// chat_deleted broadcasts a loop of single deletes would produce. Fan-out goes
+// through the ordinary sequenced channel path, so the event replays on
+// reconnect exactly like chat_deleted does.
+func (h *Hub) BroadcastChatBulkDeleted(channelID int64, messageIDs []int64) {
+	h.BroadcastToChannel(channelID, buildChatBulkDeleted(channelID, messageIDs))
+}
+
 // BroadcastMemberBan sends a member_ban message to all connected clients
 // and immediately disconnects the banned user's WebSocket connection (BUG-113).
 func (h *Hub) BroadcastMemberBan(userID int64) {

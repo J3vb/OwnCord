@@ -2,6 +2,8 @@ package db_test
 
 import (
 	"context"
+	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/owncord/server/db"
@@ -332,6 +334,149 @@ func TestDeleteMessage_NotFound(t *testing.T) {
 	err := database.DeleteMessage(context.Background(), 9999, userID, true)
 	if err == nil {
 		t.Error("DeleteMessage non-existent should return error")
+	}
+}
+
+// ─── PurgeChannelMessages ─────────────────────────────────────────────────────
+
+// purgeSeed inserts n messages into a fresh channel and returns the database,
+// the channel id, and the message ids in insertion (oldest-first) order.
+func purgeSeed(t *testing.T, n int) (*db.DB, int64, []int64) {
+	t.Helper()
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "purger")
+	chID := seedChannel(t, database, "purge-ch")
+	ids := make([]int64, 0, n)
+	for i := range n {
+		id, err := database.CreateMessage(context.Background(), chID, userID,
+			"msg"+strconv.Itoa(i), nil)
+		if err != nil {
+			t.Fatalf("CreateMessage %d: %v", i, err)
+		}
+		ids = append(ids, id)
+	}
+	return database, chID, ids
+}
+
+func TestPurgeChannelMessages_DeletesNewestFirst(t *testing.T) {
+	database, chID, ids := purgeSeed(t, 5)
+
+	got, err := database.PurgeChannelMessages(context.Background(), chID, 0, 2)
+	if err != nil {
+		t.Fatalf("PurgeChannelMessages: %v", err)
+	}
+	want := []int64{ids[4], ids[3]}
+	if !slices.Equal(got, want) {
+		t.Fatalf("purged ids = %v, want %v", got, want)
+	}
+	for _, id := range want {
+		msg, _ := database.GetMessage(context.Background(), id)
+		if msg == nil || !msg.Deleted {
+			t.Errorf("message %d should be soft-deleted", id)
+		}
+	}
+	for _, id := range ids[:3] {
+		msg, _ := database.GetMessage(context.Background(), id)
+		if msg == nil || msg.Deleted {
+			t.Errorf("message %d should be untouched", id)
+		}
+	}
+}
+
+func TestPurgeChannelMessages_PreservesTombstones(t *testing.T) {
+	database, chID, ids := purgeSeed(t, 3)
+
+	if _, err := database.PurgeChannelMessages(context.Background(), chID, 0, 3); err != nil {
+		t.Fatalf("PurgeChannelMessages: %v", err)
+	}
+
+	// The rows must survive with their content, so tombstones render and
+	// reply_to targets still resolve — exactly as a single soft delete.
+	for _, id := range ids {
+		msg, err := database.GetMessage(context.Background(), id)
+		if err != nil {
+			t.Fatalf("GetMessage(%d): %v", id, err)
+		}
+		if msg == nil {
+			t.Fatalf("message %d was hard-deleted", id)
+		}
+		if !msg.Deleted {
+			t.Errorf("message %d not marked deleted", id)
+		}
+		if msg.Content == "" {
+			t.Errorf("message %d lost its content", id)
+		}
+	}
+}
+
+func TestPurgeChannelMessages_SkipsAlreadyDeleted(t *testing.T) {
+	database, chID, ids := purgeSeed(t, 4)
+	if _, err := database.PurgeChannelMessages(context.Background(), chID, 0, 1); err != nil {
+		t.Fatalf("first purge: %v", err)
+	}
+
+	got, err := database.PurgeChannelMessages(context.Background(), chID, 0, 10)
+	if err != nil {
+		t.Fatalf("second purge: %v", err)
+	}
+	want := []int64{ids[2], ids[1], ids[0]}
+	if !slices.Equal(got, want) {
+		t.Fatalf("second purge ids = %v, want %v", got, want)
+	}
+}
+
+func TestPurgeChannelMessages_BeforeCursor(t *testing.T) {
+	database, chID, ids := purgeSeed(t, 5)
+
+	got, err := database.PurgeChannelMessages(context.Background(), chID, ids[2], 10)
+	if err != nil {
+		t.Fatalf("PurgeChannelMessages: %v", err)
+	}
+	want := []int64{ids[1], ids[0]}
+	if !slices.Equal(got, want) {
+		t.Fatalf("purged ids = %v, want %v", got, want)
+	}
+	for _, id := range ids[2:] {
+		msg, _ := database.GetMessage(context.Background(), id)
+		if msg.Deleted {
+			t.Errorf("message %d at/after the cursor should be untouched", id)
+		}
+	}
+}
+
+func TestPurgeChannelMessages_OtherChannelsUntouched(t *testing.T) {
+	database, chID, ids := purgeSeed(t, 2)
+	otherCh := seedChannel(t, database, "other")
+	otherID, _ := database.CreateMessage(context.Background(), otherCh, ids[0], "keep", nil)
+
+	if _, err := database.PurgeChannelMessages(context.Background(), chID, 0, 100); err != nil {
+		t.Fatalf("PurgeChannelMessages: %v", err)
+	}
+
+	msg, _ := database.GetMessage(context.Background(), otherID)
+	if msg == nil || msg.Deleted {
+		t.Error("a message in another channel was purged")
+	}
+}
+
+func TestPurgeChannelMessages_EmptyChannelAndZeroLimit(t *testing.T) {
+	database, chID, _ := purgeSeed(t, 1)
+
+	got, err := database.PurgeChannelMessages(context.Background(), chID, 0, 0)
+	if err != nil {
+		t.Fatalf("zero limit: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("zero limit purged %v, want none", got)
+	}
+
+	emptyCh := seedChannel(t, database, "empty")
+	got, err = database.PurgeChannelMessages(context.Background(), emptyCh, 0, 50)
+	if err != nil {
+		t.Fatalf("empty channel: %v", err)
+	}
+	if got == nil || len(got) != 0 {
+		t.Fatalf("empty channel returned %v, want empty non-nil slice", got)
 	}
 }
 

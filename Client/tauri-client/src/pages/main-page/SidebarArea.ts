@@ -20,7 +20,11 @@ import { createUserBar } from "@components/UserBar";
 import { createVoiceWidget } from "@components/VoiceWidget";
 import { createQuickSwitchOverlay } from "@components/QuickSwitchOverlay";
 import type { QuickSwitchProfile } from "@components/QuickSwitchOverlay";
-import { createVoiceWidgetCallbacks, createSidebarVoiceCallbacks } from "./VoiceCallbacks";
+import {
+  createVoiceWidgetCallbacks,
+  createSidebarVoiceCallbacks,
+  createVoiceModerationCallbacks,
+} from "./VoiceCallbacks";
 import { createSidebarMemberSection } from "./SidebarMemberSection";
 import { createInviteManagerController } from "./OverlayManagers";
 import {
@@ -186,6 +190,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     return createChannelSidebar({
       onVoiceJoin: sidebarVoice.onVoiceJoin,
       onVoiceLeave: sidebarVoice.onVoiceLeave,
+      onVoiceModerate: createVoiceModerationCallbacks(ws),
       onWatchStream: opts.onWatchStream,
       onCreateChannel: (category) => {
         if (activeModal !== null) return;
@@ -260,6 +265,22 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       onReorderChannel: (reorders) => {
         for (const r of reorders) {
           void api.adminUpdateChannel(r.channelId, { position: r.newPosition });
+        }
+      },
+      onPurgeChannel: async (channel, count) => {
+        try {
+          // The store is updated by the chat_bulk_deleted broadcast, so the
+          // response is only used for the toast's honest count.
+          const result = await api.purgeMessages(channel.id, count);
+          getToast()?.show(
+            result.count === 0
+              ? `No messages to purge in #${channel.name}`
+              : `Purged ${result.count} message${result.count === 1 ? "" : "s"} from #${channel.name}`,
+            result.count === 0 ? "info" : "success",
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Failed to purge messages";
+          getToast()?.show(msg, "error");
         }
       },
     });

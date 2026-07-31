@@ -124,6 +124,12 @@ vi.mock("../../src/pages/main-page/VoiceCallbacks", () => ({
     onVoiceJoin: vi.fn(),
     onVoiceLeave: vi.fn(),
   }),
+  createVoiceModerationCallbacks: vi.fn().mockReturnValue({
+    onServerMute: vi.fn(),
+    onServerDeafen: vi.fn(),
+    onMove: vi.fn(),
+    onDisconnect: vi.fn(),
+  }),
 }));
 
 vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
@@ -280,6 +286,7 @@ function defaultOpts(): SidebarAreaOptions {
       adminCreateChannel: vi.fn().mockResolvedValue(undefined),
       adminUpdateChannel: vi.fn().mockResolvedValue(undefined),
       adminDeleteChannel: vi.fn().mockResolvedValue(undefined),
+      purgeMessages: vi.fn().mockResolvedValue({ channel_id: 1, ids: [3, 2], count: 2 }),
       adminKickMember: vi.fn().mockResolvedValue(undefined),
       adminBanMember: vi.fn().mockResolvedValue(undefined),
       adminChangeRole: vi.fn().mockResolvedValue(undefined),
@@ -1478,6 +1485,7 @@ describe("SidebarArea", () => {
       expect(typeof callArgs.onEditChannel).toBe("function");
       expect(typeof callArgs.onDeleteChannel).toBe("function");
       expect(typeof callArgs.onReorderChannel).toBe("function");
+      expect(typeof callArgs.onPurgeChannel).toBe("function");
 
       cleanup(result);
     });
@@ -1527,6 +1535,38 @@ describe("SidebarArea", () => {
       callArgs.onDeleteChannel({ id: 1, name: "general" });
 
       expect(createDeleteChannelModal).toHaveBeenCalled();
+
+      cleanup(result);
+    });
+
+    it("onPurgeChannel calls the purge API and toasts the server's count", async () => {
+      const opts = defaultOpts();
+      const toast = { show: vi.fn() };
+      (opts.getToast as MockedFn).mockReturnValue(toast);
+      const result = createSidebarArea(opts);
+      container.appendChild(result.sidebarWrapper);
+
+      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+      await callArgs.onPurgeChannel({ id: 1, name: "general" }, 50);
+
+      expect(opts.api.purgeMessages).toHaveBeenCalledWith(1, 50);
+      expect(toast.show).toHaveBeenCalledWith("Purged 2 messages from #general", "success");
+
+      cleanup(result);
+    });
+
+    it("onPurgeChannel surfaces a failure as an error toast", async () => {
+      const opts = defaultOpts();
+      const toast = { show: vi.fn() };
+      (opts.getToast as MockedFn).mockReturnValue(toast);
+      (opts.api.purgeMessages as MockedFn).mockRejectedValue(new Error("forbidden"));
+      const result = createSidebarArea(opts);
+      container.appendChild(result.sidebarWrapper);
+
+      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+      await callArgs.onPurgeChannel({ id: 1, name: "general" }, 50);
+
+      expect(toast.show).toHaveBeenCalledWith("forbidden", "error");
 
       cleanup(result);
     });
@@ -1865,7 +1905,7 @@ describe("SidebarArea", () => {
       return calls[calls.length - 1]![0];
     }
 
-    it("onKick calls API and shows success toast", async () => {
+    it("onKick (Force Logout) calls API and shows success toast", async () => {
       const mockShow = vi.fn();
       const opts = defaultOpts();
       (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
@@ -1877,7 +1917,7 @@ describe("SidebarArea", () => {
       await callbacks.onKick(2, "Alice");
 
       expect(opts.api.adminKickMember).toHaveBeenCalledWith(2);
-      expect(mockShow).toHaveBeenCalledWith("Kicked Alice", "success");
+      expect(mockShow).toHaveBeenCalledWith("Forced Alice to log out", "success");
 
       cleanup(result);
     });
@@ -1911,7 +1951,7 @@ describe("SidebarArea", () => {
       const callbacks = getMemberListCallbacks();
       await callbacks.onKick(2, "Alice");
 
-      expect(mockShow).toHaveBeenCalledWith("Failed to kick member", "error");
+      expect(mockShow).toHaveBeenCalledWith("Failed to force logout", "error");
 
       cleanup(result);
     });

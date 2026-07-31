@@ -20,6 +20,7 @@ import {
   addMessage,
   editMessage,
   deleteMessage,
+  bulkDeleteMessages,
   updateReaction,
   confirmSend,
   markSendFailed,
@@ -59,6 +60,7 @@ import type { ApiClient } from "./api";
 import { notifyIncomingMessage } from "./notifications";
 import { ensureIdentityKeyPublished } from "@lib/identity";
 import { createLogger } from "./logger";
+import { showToast } from "./toast";
 import { ServerMessageType as S } from "./protocolTypes";
 
 const log = createLogger("dispatcher");
@@ -288,6 +290,12 @@ export function wireDispatcher(
   );
 
   unsubs.push(
+    ws.on(S.CHAT_BULK_DELETED, (payload) => {
+      bulkDeleteMessages(payload);
+    }),
+  );
+
+  unsubs.push(
     ws.on(S.CHAT_SEND_OK, (payload, id) => {
       if (id) {
         confirmSend(id, payload.message_id, payload.timestamp);
@@ -411,9 +419,49 @@ export function wireDispatcher(
       updateVoiceState(payload);
       // Auto-join voice channel if the event is for the current user
       const currentUserId = authStore.getState().user?.id ?? 0;
-      if (payload.user_id === currentUserId) {
-        joinVoiceChannel(payload.channel_id);
+      if (payload.user_id !== currentUserId) return;
+      joinVoiceChannel(payload.channel_id);
+      // Honor a moderator's mute/deafen locally. Mute is also enforced at the
+      // SFU, but deafen governs what WE play back, so the client is the only
+      // place it can take effect. Both apply through one lazy import so the
+      // two effects cannot land in different ticks.
+      const voice = voiceStore.getState();
+      const applyDeafen = payload.server_deafened === true && !voice.localDeafened;
+      const applyMute = payload.server_muted === true && !voice.localMuted;
+      if (applyDeafen || applyMute) {
+        void livekitSession().then(({ setDeafened, setMuted }) => {
+          if (applyDeafen) setDeafened(true);
+          if (applyMute) setMuted(true);
+        });
       }
+    }),
+  );
+
+  // A moderator moved this client: tear the media session down and re-join the
+  // destination through the ordinary join path (the server already removed us
+  // from the old room and broadcast voice_leave).
+  unsubs.push(
+    ws.on(S.VOICE_MOVED, (payload) => {
+      log.info("Moved to another voice channel by a moderator", {
+        toChannelId: payload.to_channel_id,
+      });
+      void livekitSession().then(({ leaveVoice }) => {
+        leaveVoice(false);
+        leaveVoiceChannel();
+        joinVoiceChannel(payload.to_channel_id);
+        ws.send({ type: "voice_join", payload: { channel_id: payload.to_channel_id } });
+      });
+    }),
+  );
+
+  // A moderator disconnected this client from voice. voice_leave has already
+  // cleared the store; this only surfaces the reason.
+  unsubs.push(
+    ws.on(S.VOICE_DISCONNECTED, (payload) => {
+      log.info("Disconnected from voice by a moderator", { channelId: payload.channel_id });
+      void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
+      leaveVoiceChannel();
+      showToast(payload.reason || "You were disconnected from voice", "error");
     }),
   );
 

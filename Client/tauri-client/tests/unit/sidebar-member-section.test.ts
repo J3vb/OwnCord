@@ -403,7 +403,7 @@ describe("SidebarMemberSection", () => {
       return calls[calls.length - 1]![0];
     }
 
-    it("kick: calls API and shows success toast", async () => {
+    it("force logout: calls API and shows success toast", async () => {
       const mockShow = vi.fn();
       const mockApi = {
         adminKickMember: vi.fn().mockResolvedValue(undefined),
@@ -422,12 +422,12 @@ describe("SidebarMemberSection", () => {
       await callbacks.onKick(2, "Alice");
 
       expect(mockApi.adminKickMember).toHaveBeenCalledWith(2);
-      expect(mockShow).toHaveBeenCalledWith("Kicked Alice", "success");
+      expect(mockShow).toHaveBeenCalledWith("Forced Alice to log out", "success");
 
       section.destroy();
     });
 
-    it("kick: shows error toast on API failure", async () => {
+    it("force logout: shows error toast on API failure", async () => {
       const mockShow = vi.fn();
       const mockApi = {
         adminKickMember: vi.fn().mockRejectedValue(new Error("Kick denied")),
@@ -450,7 +450,7 @@ describe("SidebarMemberSection", () => {
       section.destroy();
     });
 
-    it("kick: shows generic error for non-Error exceptions", async () => {
+    it("force logout: shows generic error for non-Error exceptions", async () => {
       const mockShow = vi.fn();
       const mockApi = {
         adminKickMember: vi.fn().mockRejectedValue("string error"),
@@ -468,7 +468,7 @@ describe("SidebarMemberSection", () => {
       const callbacks = getCapturedCallbacks();
       await callbacks.onKick(2, "Alice");
 
-      expect(mockShow).toHaveBeenCalledWith("Failed to kick member", "error");
+      expect(mockShow).toHaveBeenCalledWith("Failed to force logout", "error");
 
       section.destroy();
     });

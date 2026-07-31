@@ -23,6 +23,10 @@ const (
 	MsgTypeVoiceDeafen       = "voice_deafen"
 	MsgTypeVoiceCamera       = "voice_camera"
 	MsgTypeVoiceScreenshare  = "voice_screenshare"
+	MsgTypeVoiceModMute      = "voice_mod_mute"
+	MsgTypeVoiceModDeafen    = "voice_mod_deafen"
+	MsgTypeVoiceModMove      = "voice_mod_move"
+	MsgTypeVoiceModKick      = "voice_mod_kick"
 	MsgTypePing              = "ping"
 	MsgTypeVoiceTokenRefresh = "voice_token_refresh" //nolint:gosec // G101: false positive — message type constant, not a credential
 	MsgTypeVoiceE2EEAnnounce = "voice_e2ee_announce"
@@ -38,6 +42,7 @@ const (
 	MsgTypeChatSendOK          = "chat_send_ok"
 	MsgTypeChatEdited          = "chat_edited"
 	MsgTypeChatDeleted         = "chat_deleted"
+	MsgTypeChatBulkDeleted     = "chat_bulk_deleted"
 	MsgTypeReactionUpdate      = "reaction_update"
 	MsgTypeTyping              = "typing"
 	MsgTypePresence            = "presence"
@@ -49,6 +54,8 @@ const (
 	MsgTypeVoiceToken          = "voice_token"
 	MsgTypeVoiceSpeakers       = "voice_speakers"
 	MsgTypeVoiceLeaveBC        = "voice_leave" // broadcast (same string as client msg)
+	MsgTypeVoiceMoved          = "voice_moved"
+	MsgTypeVoiceDisconnected   = "voice_disconnected"
 	MsgTypeMemberJoin          = "member_join"
 	MsgTypeMemberLeave         = "member_leave"
 	MsgTypeMemberUpdate        = "member_update"

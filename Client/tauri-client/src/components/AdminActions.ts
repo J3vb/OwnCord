@@ -1,9 +1,10 @@
 /**
  * AdminActions — context menu helpers for admin operations on members and channels.
- * Provides confirmation steps for destructive actions (kick, ban, delete).
+ * Provides confirmation steps for destructive actions (force logout, ban, delete).
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { appendPurgeSection } from "./purge-prompt";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -16,9 +17,19 @@ export interface MemberContextMenuOptions {
   availableRoles: readonly string[];
   /** When false, only the non-admin actions (block/unblock) are rendered. */
   showAdminActions: boolean;
+  /**
+   * Per-action gates, each defaulting to `showAdminActions`. They mirror the
+   * server's KICK_MEMBERS / BAN_MEMBERS / MANAGE_ROLES bits so a moderator
+   * sees only the actions its role actually holds. canKick gates "Force
+   * Logout" — the KICK_MEMBERS bit buys session revocation, not removal.
+   */
+  canKick?: boolean;
+  canBan?: boolean;
+  canManageRoles?: boolean;
   /** Whether the local user currently blocks this member (labels the toggle). */
   isBlocked: boolean;
   onToggleBlock(): Promise<void>;
+  /** Revokes every session the target holds (the "Force Logout" item). */
   onKick(): Promise<void>;
   /**
    * The reason is stored and displayed by the server; empty means "no reason
@@ -43,6 +54,12 @@ export interface ChannelContextMenuOptions {
   onEdit(): void;
   onDelete(): Promise<void>;
   onCreate(): void;
+  /**
+   * Bulk-delete the newest `count` messages. Omitted when the local user's
+   * role lacks MANAGE_MESSAGES — the section is then not rendered at all,
+   * mirroring the server's gate.
+   */
+  onPurge?(count: number): Promise<void>;
 }
 
 interface ContextMenuResult {
@@ -77,7 +94,7 @@ const CONFIRM_TIMEOUT_MS = 4000;
  *
  * The armed state auto-disarms after a few seconds so a menu left open doesn't
  * turn a stray second click into a ban, and the item shows progress while the
- * request is running — a slow kick used to look like nothing happened.
+ * request is running — a slow force logout used to look like nothing happened.
  */
 function withConfirmation(
   item: HTMLDivElement,
@@ -188,7 +205,11 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
     );
   }
 
-  if (!options.showAdminActions) {
+  const canManageRoles = options.canManageRoles ?? options.showAdminActions;
+  const canKick = options.canKick ?? options.showAdminActions;
+  const canBan = options.canBan ?? options.showAdminActions;
+
+  if (!options.showAdminActions || (!canManageRoles && !canKick && !canBan)) {
     menu.appendChild(blockItem);
     return {
       element: menu,
@@ -200,65 +221,98 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
   }
 
   // Role submenu trigger
-  const roleItem = createElement(
-    "div",
-    {
-      class: "context-menu__item",
-    },
-    "Change Role",
-  );
-
-  const roleSub = createElement("div", { class: "context-menu__submenu" });
-  for (const role of options.availableRoles) {
-    const cls =
-      role === options.currentRole
-        ? "context-menu__item context-menu__item--active"
-        : "context-menu__item";
-    const roleOption = createMenuItem(
-      role,
-      cls,
-      () => {
-        if (role !== options.currentRole) {
-          void options.onChangeRole(role);
-        }
+  if (canManageRoles) {
+    const roleItem = createElement(
+      "div",
+      {
+        class: "context-menu__item",
       },
-      ac.signal,
+      "Change Role",
     );
-    roleSub.appendChild(roleOption);
+
+    const roleSub = createElement("div", { class: "context-menu__submenu" });
+    for (const role of options.availableRoles) {
+      const cls =
+        role === options.currentRole
+          ? "context-menu__item context-menu__item--active"
+          : "context-menu__item";
+      const roleOption = createMenuItem(
+        role,
+        cls,
+        () => {
+          if (role !== options.currentRole) {
+            void options.onChangeRole(role);
+          }
+        },
+        ac.signal,
+      );
+      roleSub.appendChild(roleOption);
+    }
+
+    roleItem.addEventListener(
+      "mouseenter",
+      () => {
+        roleSub.style.display = "";
+      },
+      { signal: ac.signal },
+    );
+    roleItem.addEventListener(
+      "mouseleave",
+      () => {
+        roleSub.style.display = "none";
+      },
+      { signal: ac.signal },
+    );
+
+    roleSub.style.display = "none";
+    appendChildren(roleItem, roleSub);
+    menu.appendChild(roleItem);
+
+    menu.appendChild(createSeparator());
   }
 
-  roleItem.addEventListener(
-    "mouseenter",
-    () => {
-      roleSub.style.display = "";
-    },
-    { signal: ac.signal },
-  );
-  roleItem.addEventListener(
-    "mouseleave",
-    () => {
-      roleSub.style.display = "none";
-    },
-    { signal: ac.signal },
-  );
+  // Force Logout with confirmation. Named for what it does: the server revokes
+  // the target's sessions (KICK_MEMBERS), it does not remove a membership —
+  // there is no membership model — so the user can sign straight back in.
+  if (canKick) {
+    const kickItem = createElement(
+      "div",
+      {
+        class: "context-menu__item context-menu__item--danger",
+        "data-testid": "force-logout",
+      },
+      "Force Logout",
+    );
+    withConfirmation(
+      kickItem,
+      "Log them out?",
+      () => options.onKick(),
+      ac.signal,
+      "Logging out...",
+    );
+    menu.appendChild(kickItem);
+  }
 
-  roleSub.style.display = "none";
-  appendChildren(roleItem, roleSub);
-  menu.appendChild(roleItem);
+  if (canBan) appendBanFlow(menu, options, ac.signal);
 
   menu.appendChild(createSeparator());
+  menu.appendChild(blockItem);
 
-  // Kick with confirmation
-  const kickItem = createElement(
-    "div",
-    {
-      class: "context-menu__item context-menu__item--danger",
-    },
-    "Kick",
-  );
-  withConfirmation(kickItem, "Are you sure?", () => options.onKick(), ac.signal, "Kicking...");
-  menu.appendChild(kickItem);
+  function destroy(): void {
+    ac.abort();
+    menu.remove();
+  }
 
+  return { element: menu, destroy };
+}
+
+/** Ban entry plus its reason/duration form. Split out so the member menu can
+ *  omit it wholesale for an actor without BAN_MEMBERS. */
+function appendBanFlow(
+  menu: HTMLDivElement,
+  options: MemberContextMenuOptions,
+  signal: AbortSignal,
+): void {
   // Ban — collects the reason the server stores and displays alongside the ban.
   const banItem = createElement(
     "div",
@@ -303,15 +357,15 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
       banReasonRow.style.display = "";
       banReasonInput.focus();
     },
-    { signal: ac.signal },
+    { signal },
   );
 
   // Typing a reason must not close the menu or trigger the outside-click guard.
-  banReasonInput.addEventListener("click", (e) => e.stopPropagation(), { signal: ac.signal });
-  banReasonInput.addEventListener("mousedown", (e) => e.stopPropagation(), { signal: ac.signal });
-  banDurationSelect.addEventListener("click", (e) => e.stopPropagation(), { signal: ac.signal });
+  banReasonInput.addEventListener("click", (e) => e.stopPropagation(), { signal });
+  banReasonInput.addEventListener("mousedown", (e) => e.stopPropagation(), { signal });
+  banDurationSelect.addEventListener("click", (e) => e.stopPropagation(), { signal });
   banDurationSelect.addEventListener("mousedown", (e) => e.stopPropagation(), {
-    signal: ac.signal,
+    signal,
   });
 
   let banRunning = false;
@@ -335,7 +389,7 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
       e.stopPropagation();
       submitBan();
     },
-    { signal: ac.signal },
+    { signal },
   );
   banReasonInput.addEventListener(
     "keydown",
@@ -345,20 +399,10 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
         submitBan();
       }
     },
-    { signal: ac.signal },
+    { signal },
   );
 
   appendChildren(menu, banItem, banReasonRow);
-
-  menu.appendChild(createSeparator());
-  menu.appendChild(blockItem);
-
-  function destroy(): void {
-    ac.abort();
-    menu.remove();
-  }
-
-  return { element: menu, destroy };
 }
 
 // ---------------------------------------------------------------------------
@@ -399,6 +443,17 @@ export function createChannelContextMenu(options: ChannelContextMenuOptions): Co
   );
   withConfirmation(deleteItem, "Are you sure?", () => options.onDelete(), ac.signal, "Deleting...");
   menu.appendChild(deleteItem);
+
+  const onPurge = options.onPurge;
+  if (onPurge !== undefined) {
+    appendPurgeSection(menu, {
+      itemClass: "context-menu__item",
+      dangerItemClass: "context-menu__item context-menu__item--danger",
+      separatorClass: "context-menu__separator",
+      onPurge: (count) => onPurge(count),
+      signal: ac.signal,
+    });
+  }
 
   function destroy(): void {
     ac.abort();

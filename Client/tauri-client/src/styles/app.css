@@ -1476,6 +1476,12 @@
 .context-menu-item.danger:hover { background: var(--red); color: white; }
 .context-menu-sep { height: 1px; background: var(--border); margin: 4px 0; }
 
+/* Submenu trigger inside the voice-user menu: anchors the absolutely
+   positioned .context-menu__submenu flyout to this row. */
+.context-menu-item--submenu { position: relative; }
+/* A moderator-imposed mute reads differently from a self-mute. */
+.vu-muted.vu-server-muted { color: var(--red); }
+
 /* AdminActions (member/channel menus) uses BEM names — these had no rules at
    all, so those menus rendered unstyled: no hover, no danger colour, and a
    "submenu" that pushed the menu open instead of flying out. */

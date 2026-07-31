@@ -471,6 +471,21 @@ describe("API Client", () => {
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/channels/7/pins/99");
       expect(fetchCallOpts().method).toBe("DELETE");
     });
+
+    it("purgeMessages posts the limit to /channels/{id}/messages/purge", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 7, ids: [3, 2], count: 2 }));
+      const result = await api.purgeMessages(7, 25);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/channels/7/messages/purge");
+      expect(fetchCallOpts().method).toBe("POST");
+      expect(JSON.parse(String(fetchCallOpts().body))).toEqual({ limit: 25 });
+      expect(result.count).toBe(2);
+    });
+
+    it("purgeMessages includes before only when supplied", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 7, ids: [], count: 0 }));
+      await api.purgeMessages(7, 10, { before: 42 });
+      expect(JSON.parse(String(fetchCallOpts().body))).toEqual({ limit: 10, before: 42 });
+    });
   });
 
   describe("search endpoint", () => {

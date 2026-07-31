@@ -33,6 +33,45 @@ const AllPerms = SendMessages | ReadMessages | AttachFiles | AddReactions |
 	ManageMessages | ManageChannels | KickMembers | BanMembers | MuteMembers |
 	ManageRoles | ManageServer | ManageInvites | ViewAuditLog | Administrator
 
+// AdminPerimeter is the set of bits that admits a principal to the /admin/api
+// surface. Holding ANY one of them is enough to pass the perimeter; each route
+// group then re-checks the specific bit it needs. ManageMessages and
+// ManageInvites are excluded: neither has an admin-panel route.
+const AdminPerimeter = Administrator | ManageChannels | ManageRoles |
+	ManageServer | ViewAuditLog | KickMembers | BanMembers | MuteMembers
+
+// bitNames maps each single permission bit to its SCHEMA.md name. Used for
+// authorization error messages so the wording lives in one place.
+var bitNames = map[int64]string{
+	SendMessages:   "SEND_MESSAGES",
+	ReadMessages:   "READ_MESSAGES",
+	AttachFiles:    "ATTACH_FILES",
+	AddReactions:   "ADD_REACTIONS",
+	ConnectVoice:   "CONNECT_VOICE",
+	SpeakVoice:     "SPEAK_VOICE",
+	UseVideo:       "USE_VIDEO",
+	ShareScreen:    "SHARE_SCREEN",
+	ManageMessages: "MANAGE_MESSAGES",
+	ManageChannels: "MANAGE_CHANNELS",
+	KickMembers:    "KICK_MEMBERS",
+	BanMembers:     "BAN_MEMBERS",
+	MuteMembers:    "MUTE_MEMBERS",
+	ManageRoles:    "MANAGE_ROLES",
+	ManageServer:   "MANAGE_SERVER",
+	ManageInvites:  "MANAGE_INVITES",
+	ViewAuditLog:   "VIEW_AUDIT_LOG",
+	Administrator:  "ADMINISTRATOR",
+}
+
+// Name returns the SCHEMA.md name of a single permission bit, or "UNKNOWN" for
+// a zero, multi-bit, or undefined value.
+func Name(bit int64) string {
+	if name, ok := bitNames[bit]; ok {
+		return name
+	}
+	return "UNKNOWN"
+}
+
 // ─── Role ID constants (default roles inserted on first run) ─────────────────
 
 const (
@@ -56,6 +95,17 @@ func HasPerm(rolePerms, requiredPerm int64) bool {
 		return false
 	}
 	return rolePerms&requiredPerm == requiredPerm
+}
+
+// HasAnyPerm reports whether rolePerms contains at least one bit of mask.
+// Unlike HasPerm (ALL-of) this is ANY-of; a zero mask is never satisfied.
+// Administrator is NOT implied — callers that want the bypass pass a mask
+// that already includes it (e.g. AdminPerimeter).
+func HasAnyPerm(rolePerms, mask int64) bool {
+	if mask == 0 {
+		return false
+	}
+	return rolePerms&mask != 0
 }
 
 // HasAdmin reports whether rolePerms includes the Administrator bit, which

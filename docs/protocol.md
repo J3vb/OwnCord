@@ -25,12 +25,13 @@ All client-server real-time communication happens over a single WebSocket connec
 13. [Channel Updates](#channel-updates)
 14. [Member Updates](#member-updates)
 15. [Voice Signaling](#voice-signaling)
-16. [Voice End-to-End Encryption](#voice-end-to-end-encryption)
-17. [Direct Messages](#direct-messages)
-18. [Server Restart](#server-restart)
-19. [Error Handling](#error-handling)
-20. [Rate Limits](#rate-limits)
-21. [Message Type Reference Table](#message-type-reference-table)
+16. [Voice Moderation](#voice-moderation)
+17. [Voice End-to-End Encryption](#voice-end-to-end-encryption)
+18. [Direct Messages](#direct-messages)
+19. [Server Restart](#server-restart)
+20. [Error Handling](#error-handling)
+21. [Rate Limits](#rate-limits)
+22. [Message Type Reference Table](#message-type-reference-table)
 
 ---
 
@@ -91,7 +92,7 @@ The sequence number system enables reconnection with state recovery.
 
 | Category | Has seq? | Examples |
 |----------|----------|---------|
-| Channel broadcasts | Yes | `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` |
+| Channel broadcasts | Yes | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update` |
 | Global broadcasts | Yes | `presence`, `member_join`, `member_leave`, `member_update`, `member_ban`, `voice_state`, `voice_leave`, `channel_create`, `channel_update`, `channel_delete`, `server_restart` |
 | Ephemeral | No | `typing` |
 | DM messages | No | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `dm_channel_open`, `dm_channel_close` |
@@ -248,7 +249,7 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 **members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`, `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU)
 
-**voice_states[]:** All users currently in any voice channel: `channel_id`, `user_id`, `muted`, `deafened`
+**voice_states[]:** All users currently in any voice channel: `channel_id`, `user_id`, `muted`, `deafened`, `server_muted`, `server_deafened`
 
 **roles[]:** All server roles with `id`, `name`, `color`, `permissions` (bitfield)
 
@@ -371,6 +372,25 @@ Moderators with `MANAGE_MESSAGES` can delete others' messages (non-DM channels o
   "payload": {
     "message_id": 1042,
     "channel_id": 5
+  }
+}
+```
+
+### chat_bulk_deleted (Server -> Client, broadcast)
+
+Emitted by the REST bulk delete (`POST /api/v1/channels/{id}/messages/purge`,
+gated on `READ_MESSAGES|MANAGE_MESSAGES`, non-DM channels only) instead of one
+`chat_deleted` per message. `ids` is newest-first and never null; the deletes
+are soft, so clients mark each id as a tombstone exactly as they do for
+`chat_deleted`.
+
+```json
+{
+  "seq": 45,
+  "type": "chat_bulk_deleted",
+  "payload": {
+    "channel_id": 5,
+    "ids": [1042, 1041, 1040]
   }
 }
 ```
@@ -696,10 +716,17 @@ already handle it. Reserved for active-speaker signaling.
     "deafened": false,
     "speaking": false,
     "camera": false,
-    "screenshare": false
+    "screenshare": false,
+    "server_muted": false,
+    "server_deafened": false
   }
 }
 ```
+
+`server_muted` / `server_deafened` are moderator-imposed (see [Voice
+Moderation](#voice-moderation)). `muted` / `deafened` are always set alongside
+them, so a client that ignores the two new fields still renders the user as
+silenced; they exist so the UI can show that the user may not lift it.
 
 ### voice_mute / voice_deafen (Client -> Server)
 
@@ -707,6 +734,11 @@ already handle it. Reserved for active-speaker signaling.
 { "type": "voice_mute", "payload": { "muted": true } }
 { "type": "voice_deafen", "payload": { "deafened": true } }
 ```
+
+Rate limited: 2/sec each. While the sender is `server_muted`, an unmute
+(`muted: false`) is refused with `SERVER_MUTED`; while `server_deafened`, an
+undeafen is refused with `SERVER_DEAFENED`. Muting or deafening oneself is
+always allowed.
 
 ### voice_camera (Client -> Server)
 
@@ -731,6 +763,91 @@ Rate limited: 2/sec. Requires `SHARE_SCREEN` permission.
 ```
 
 Rate limited: 1 per 60 seconds. Must be in a voice channel.
+
+---
+
+## Voice Moderation
+
+Four moderator commands act on another user's voice session. All four require
+`MUTE_MEMBERS` on the actor's role (`ADMINISTRATOR` bypasses the bit, never the
+hierarchy), the actor must strictly outrank the target by role position, and
+the target must currently be in a voice channel. Each is rate limited to 5/sec
+and written to the audit log (`voice_mod_mute`, `voice_mod_deafen`,
+`voice_mod_move`, `voice_mod_kick`, target type `user`).
+
+Failures: `FORBIDDEN` (missing bit, or target of equal/higher rank),
+`VOICE_ERROR` (target not in voice, not in the named channel, or not
+connected), `BAD_REQUEST` (self-target, non-voice destination),
+`NOT_FOUND` (unknown destination channel), `CHANNEL_FULL` (destination at
+capacity).
+
+### voice_mod_mute (Client -> Server)
+
+```json
+{ "type": "voice_mod_mute", "payload": { "channel_id": 10, "user_id": 7, "muted": true } }
+```
+
+`channel_id` is the channel the moderator believes the target is in; the action
+is refused when the target has since moved. Sets `server_muted` (and `muted`)
+and mutes the target's published audio track at the SFU, then broadcasts
+`voice_state`. Clearing it leaves `muted` as-is, so a user who was already
+self-muted stays muted until they unmute themselves.
+
+Server mute is scoped to the voice session: it survives a channel switch but
+not a leave and re-join, because the `voice_states` row is deleted on leave.
+
+### voice_mod_deafen (Client -> Server)
+
+```json
+{ "type": "voice_mod_deafen", "payload": { "channel_id": 10, "user_id": 7, "deafened": true } }
+```
+
+Sets `server_deafened` (and `deafened`) and broadcasts `voice_state`. Deafen has
+no SFU equivalent — it governs what the target plays back — so it is enforced by
+the target's client honoring the flag plus the server refusing their own
+undeafen. Deafening also applies a server mute, so a user who cannot hear the
+room cannot keep talking into it.
+
+### voice_mod_move (Client -> Server)
+
+```json
+{ "type": "voice_mod_move", "payload": { "user_id": 7, "to_channel_id": 12 } }
+```
+
+The destination is checked against the TARGET's `CONNECT_VOICE` (a move must not
+place someone where they could not go themselves) and against the destination's
+`voice_max_users`. The server then runs its voice-leave routine for the target —
+`voice_leave` is broadcast, the LiveKit participant is removed, the row deleted
+— and sends the target `voice_moved`. The target's client answers with an
+ordinary `voice_join` for the destination, so capacity, token minting and
+key-holder election keep their single implementation.
+
+### voice_moved (Server -> Client, direct)
+
+```json
+{ "type": "voice_moved", "payload": { "to_channel_id": 12 } }
+```
+
+Sent only to the moved user. The client tears down its LiveKit session and joins
+`to_channel_id`.
+
+### voice_mod_kick (Client -> Server)
+
+```json
+{ "type": "voice_mod_kick", "payload": { "user_id": 7 } }
+```
+
+Removes the target from the LiveKit room, deletes their `voice_states` row and
+broadcasts `voice_leave`, then sends them `voice_disconnected`.
+
+### voice_disconnected (Server -> Client, direct)
+
+```json
+{
+  "type": "voice_disconnected",
+  "payload": { "channel_id": 10, "reason": "You were disconnected from voice by a moderator" }
+}
+```
 
 ---
 
@@ -912,6 +1029,8 @@ All handlers that touch a channel check the channel type and branch to participa
 | `UNKNOWN_TYPE` | Unrecognized message type |
 | `SLOW_MODE` | Channel has slow mode enabled |
 | `CONFLICT` | Duplicate reaction or constraint violation |
+| `SERVER_MUTED` | Self-unmute refused: a moderator imposed the mute |
+| `SERVER_DEAFENED` | Self-undeafen refused: a moderator imposed the deafen |
 
 After 10 consecutive invalid JSON messages, the connection is forcibly closed.
 
@@ -933,6 +1052,7 @@ All rate limits are enforced server-side using a token bucket rate limiter.
 | Voice screenshare | 2 | 1 second | `RATE_LIMITED` error |
 | Voice token refresh | 1 | 60 seconds | `RATE_LIMITED` error |
 | Voice E2EE announce/offer | 5 | 1 second | `RATE_LIMITED` error |
+| Voice moderation (mute/deafen/move/kick) | 5 | 1 second | `RATE_LIMITED` error |
 
 ---
 
@@ -943,7 +1063,7 @@ from which the Go and TypeScript constant files are generated
 (`make protocol-generate` / verified in CI by `make protocol-verify`). The
 tables below add per-type behavioral notes.
 
-### Client -> Server (19 types)
+### Client -> Server (23 types)
 
 | Type | Rate Limit | Notes |
 |------|-----------|-------|
@@ -958,16 +1078,20 @@ tables below add per-type behavioral notes.
 | `presence_update` | 1/10sec | |
 | `voice_join` | None | |
 | `voice_leave` | None | Empty payload |
-| `voice_mute` | None | |
-| `voice_deafen` | None | |
+| `voice_mute` | 2/sec | Refused with `SERVER_MUTED` while server muted |
+| `voice_deafen` | 2/sec | Refused with `SERVER_DEAFENED` while server deafened |
 | `voice_camera` | 2/sec | Requires USE_VIDEO |
 | `voice_screenshare` | 2/sec | Requires SHARE_SCREEN |
+| `voice_mod_mute` | 5/sec | Requires MUTE_MEMBERS + outranks target |
+| `voice_mod_deafen` | 5/sec | Requires MUTE_MEMBERS + outranks target |
+| `voice_mod_move` | 5/sec | Requires MUTE_MEMBERS + outranks target |
+| `voice_mod_kick` | 5/sec | Requires MUTE_MEMBERS + outranks target |
 | `voice_token_refresh` | 1/60sec | Must be in voice |
 | `voice_e2ee_announce` | 5/sec | ECDH pubkey announce |
 | `voice_e2ee_offer` | 5/sec | Wrapped room key to target |
 | `ping` | None | Heartbeat |
 
-### Server -> Client (30 types)
+### Server -> Client (33 types)
 
 | Type | Has seq? | Delivery |
 |------|----------|----------|
@@ -978,6 +1102,7 @@ tables below add per-type behavioral notes.
 | `chat_send_ok` | No | Direct to sender |
 | `chat_edited` | Non-DM only | Channel or DM participants |
 | `chat_deleted` | Non-DM only | Channel or DM participants |
+| `chat_bulk_deleted` | Yes | Channel |
 | `reaction_update` | Non-DM only | Channel or DM participants |
 | `typing` | No | Channel (excl. sender) or DM |
 | `presence` | Yes | All clients |
@@ -986,6 +1111,8 @@ tables below add per-type behavioral notes.
 | `channel_delete` | Yes | All clients |
 | `voice_state` | Yes | All clients |
 | `voice_leave` | Yes | All clients |
+| `voice_moved` | No | Direct to moved user |
+| `voice_disconnected` | No | Direct to disconnected user |
 | `voice_config` | No | Direct to joiner |
 | `voice_token` | No | Direct to joiner |
 | `voice_speakers` | No | Reserved — not currently emitted |

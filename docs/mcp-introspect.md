@@ -213,9 +213,9 @@ All optional except the token (which only the two server-backed tools need).
 |---------|-------------|
 | `OWNCORD_API_TOKEN is not set` | Mint a token and set the env var; restart the shell/Claude Code so it's inherited. |
 | `OwnCord cert not found at …` | Start the server once to generate `Server/data/cert.pem`, or set `OWNCORD_CERT_PATH` / `OWNCORD_BASE_URL`. |
-| `api_request` returns `401` | Token missing/revoked/expired, or (for `/admin/*`) the token's user lacks ADMINISTRATOR. Mint a fresh owner-bound token. |
-| `api_request` returns `403` on `/admin/*` | The request didn't come from an allowed IP — the tool must run on the same host as the server (localhost is allowed by default). |
-| `server_logs` fails at the ticket step | The token can't reach `/admin/api/*` (needs ADMINISTRATOR), or the server isn't the current build. |
+| `api_request` returns `401` | Token missing/revoked/expired. Mint a fresh owner-bound token. |
+| `api_request` returns `403` on `/admin/*` | Either the request didn't come from an allowed IP (the tool must run on the same host as the server; localhost is allowed by default), or the token's user lacks the permission that route requires — see the route table in `docs/api.md`. |
+| `server_logs` fails at the ticket step | The log stream still needs ADMINISTRATOR (the widened `/admin/api/*` perimeter does not open it), or the server isn't the current build. |
 | `client_logs` → `found: false` | The desktop client hasn't run yet, or the path differs — set `OWNCORD_CLIENT_LOG`. |
 
 ---

@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS voice_states (
     muted      INTEGER NOT NULL DEFAULT 0,
     deafened   INTEGER NOT NULL DEFAULT 0,
     speaking   INTEGER NOT NULL DEFAULT 0,
+    server_muted    INTEGER NOT NULL DEFAULT 0,
+    server_deafened INTEGER NOT NULL DEFAULT 0,
     joined_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_voice_states_channel ON voice_states(channel_id);

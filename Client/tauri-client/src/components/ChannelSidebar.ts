@@ -17,16 +17,19 @@ import type { Channel } from "@stores/channels.store";
 import { authStore, getCurrentUser } from "@stores/auth.store";
 import { uiStore, toggleCategory, isCategoryCollapsed } from "@stores/ui.store";
 import { voiceStore, getChannelVoiceUsers, getPeerVerification } from "@stores/voice.store";
-import type { PeerVerification } from "@stores/voice.store";
+import type { PeerVerification, VoiceUser } from "@stores/voice.store";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import { attachStreamPreview, attachScrollCollapse } from "@lib/streamPreview";
 import { showUserVolumeMenu } from "./channel-sidebar/volume-menu";
+import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachChannelContextMenu } from "./channel-sidebar/context-menu";
 import { attachDragHandlers, releaseGlobalDragListeners } from "./channel-sidebar/drag-reorder";
 import { rePinPeerIdentity } from "@lib/livekitSession";
 import { createIdentityMismatchModal } from "./CertMismatchModal";
 import { createLogger } from "@lib/logger";
 import { membersStore } from "@stores/members.store";
+import { roleHasPermission } from "@lib/permissions";
+import { Permission } from "@lib/types";
 import { importIdentityPublicKey, computeKeyFingerprint } from "@lib/e2eeCrypto";
 
 const log = createLogger("ChannelSidebar");
@@ -139,9 +142,30 @@ export interface ChannelReorderData {
   readonly newPosition: number;
 }
 
+/** Moderator actions on another user's voice session. Supplied by the page,
+ *  which owns the WS socket; the sidebar only decides whether to offer them. */
+export interface VoiceModerationCallbacks {
+  readonly onServerMute: (channelId: number, userId: number, muted: boolean) => void;
+  readonly onServerDeafen: (channelId: number, userId: number, deafened: boolean) => void;
+  readonly onMove: (userId: number, toChannelId: number) => void;
+  readonly onDisconnect: (userId: number) => void;
+}
+
+/** Whether the signed-in user's role holds MUTE_MEMBERS. The server enforces
+ *  it (and the rank rule the client cannot evaluate); this only decides whether
+ *  the menu is worth offering. Derived through the same helper as the
+ *  member-list moderation gates so the two cannot disagree about who is a
+ *  moderator. */
+export function canModerateVoice(): boolean {
+  const role = getCurrentUser()?.role ?? "";
+  return roleHasPermission(role, Permission.MUTE_MEMBERS);
+}
+
 export interface ChannelSidebarOptions {
   readonly onVoiceJoin: (channelId: number) => void;
   readonly onVoiceLeave: () => void;
+  /** Voice moderation wiring; the moderation menu section is hidden without it. */
+  readonly onVoiceModerate?: VoiceModerationCallbacks;
   /** Called when the user clicks the "+" on a category header. */
   readonly onCreateChannel?: (category: string) => void;
   /** Called when the user right-clicks a channel and selects Edit. */
@@ -150,6 +174,8 @@ export interface ChannelSidebarOptions {
   readonly onDeleteChannel?: (channel: Channel) => void;
   /** Called when the user drags a channel to a new position. */
   readonly onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void;
+  /** Bulk-delete the newest `count` messages; gated on MANAGE_MESSAGES. */
+  readonly onPurgeChannel?: (channel: Channel, count: number) => Promise<void>;
   /** Called when the user clicks a voice user row to watch their stream. */
   readonly onWatchStream?: (userId: number) => void;
 }
@@ -207,12 +233,37 @@ function renderTextChannelItem(
   return item;
 }
 
+/** Moderation section for one participant row, or undefined when the local
+ *  user may not moderate voice (which hides the section entirely). Move targets
+ *  are the other voice channels; the server re-checks that the TARGET may
+ *  connect to the one picked. */
+function buildVoiceModOptions(
+  channelId: number,
+  user: VoiceUser,
+  cb?: VoiceModerationCallbacks,
+): VoiceModMenuOptions | undefined {
+  if (cb === undefined || !canModerateVoice()) return undefined;
+  const moveTargets = Array.from(channelsStore.getState().channels.values())
+    .filter((ch) => ch.type === "voice" && ch.id !== channelId)
+    .map((ch) => ({ id: ch.id, name: ch.name }));
+  return {
+    serverMuted: user.serverMuted === true,
+    serverDeafened: user.serverDeafened === true,
+    moveTargets,
+    onServerMute: (muted) => cb.onServerMute(channelId, user.userId, muted),
+    onServerDeafen: (deafened) => cb.onServerDeafen(channelId, user.userId, deafened),
+    onMove: (toChannelId) => cb.onMove(user.userId, toChannelId),
+    onDisconnect: () => cb.onDisconnect(user.userId),
+  };
+}
+
 function renderVoiceChannelItem(
   channel: Channel,
   signal: AbortSignal,
   onVoiceJoin: (channelId: number) => void,
   onVoiceLeave: () => void,
   onWatchStream?: (userId: number) => void,
+  onVoiceModerate?: VoiceModerationCallbacks,
 ): HTMLDivElement {
   const voiceState = voiceStore.getState();
   const isJoined = voiceState.currentChannelId === channel.id;
@@ -293,17 +344,26 @@ function renderVoiceChannelItem(
         row.appendChild(liveBadge);
       }
 
+      // A moderator-imposed mute/deafen gets its own class and tooltip: the
+      // same mic-off glyph would otherwise read as an ordinary self-mute.
       if (user.deafened) {
-        // Deafened: show both mic-off and headphones-off
-        const muteIcon = createElement("span", { class: "vu-muted" });
+        const muteIcon = createElement("span", {
+          class: user.serverMuted === true ? "vu-muted vu-server-muted" : "vu-muted",
+        });
+        if (user.serverMuted === true) muteIcon.title = "Muted by a moderator";
         muteIcon.appendChild(createIcon("mic-off", 14));
-        const deafIcon = createElement("span", { class: "vu-muted" });
+        const deafIcon = createElement("span", {
+          class: user.serverDeafened === true ? "vu-muted vu-server-muted" : "vu-muted",
+        });
+        if (user.serverDeafened === true) deafIcon.title = "Deafened by a moderator";
         deafIcon.appendChild(createIcon("headphones-off", 14));
         row.appendChild(muteIcon);
         row.appendChild(deafIcon);
       } else if (user.muted) {
-        // Muted only: show mic-off
-        const muteIcon = createElement("span", { class: "vu-muted" });
+        const muteIcon = createElement("span", {
+          class: user.serverMuted === true ? "vu-muted vu-server-muted" : "vu-muted",
+        });
+        if (user.serverMuted === true) muteIcon.title = "Muted by a moderator";
         muteIcon.appendChild(createIcon("mic-off", 14));
         row.appendChild(muteIcon);
       }
@@ -349,6 +409,7 @@ function renderVoiceChannelItem(
               e.clientX,
               e.clientY,
               signal,
+              buildVoiceModOptions(channel.id, user, onVoiceModerate),
             );
           },
           { signal },
@@ -419,14 +480,23 @@ function renderChannelItem(
   channels?: readonly Channel[],
   onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void,
   onWatchStream?: (userId: number) => void,
+  onVoiceModerate?: VoiceModerationCallbacks,
+  onPurgeChannel?: (channel: Channel, count: number) => Promise<void>,
 ): HTMLDivElement {
   let el: HTMLDivElement;
   if (channel.type === "voice") {
-    el = renderVoiceChannelItem(channel, signal, onVoiceJoin, onVoiceLeave, onWatchStream);
+    el = renderVoiceChannelItem(
+      channel,
+      signal,
+      onVoiceJoin,
+      onVoiceLeave,
+      onWatchStream,
+      onVoiceModerate,
+    );
   } else {
     el = renderTextChannelItem(channel, isActive, signal);
   }
-  attachChannelContextMenu(el, channel, signal, onEditChannel, onDeleteChannel);
+  attachChannelContextMenu(el, channel, signal, onEditChannel, onDeleteChannel, onPurgeChannel);
   if (containerEl !== undefined && channels !== undefined) {
     attachDragHandlers(el, channel, containerEl, channels, signal, onReorderChannel);
   }
@@ -445,6 +515,8 @@ function renderCategoryGroup(
   onDeleteChannel?: (channel: Channel) => void,
   onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void,
   onWatchStream?: (userId: number) => void,
+  onVoiceModerate?: VoiceModerationCallbacks,
+  onPurgeChannel?: (channel: Channel, count: number) => Promise<void>,
 ): HTMLDivElement {
   const group = createElement("div", {});
 
@@ -464,7 +536,10 @@ function renderCategoryGroup(
     if (onCreateChannel !== undefined) {
       const user = getCurrentUser();
       const role = user?.role?.toLowerCase() ?? "";
-      const canManageChannels = role === "owner" || role === "admin";
+      // MANAGE_CHANNELS is enforced server-side on /admin/api/channels*, so
+      // gate on the bit; the role-name check only stands in when the `ready`
+      // role list has no entry for this role.
+      const canManageChannels = roleHasPermission(role, Permission.MANAGE_CHANNELS);
 
       if (canManageChannels) {
         const addBtn = createElement(
@@ -514,6 +589,8 @@ function renderCategoryGroup(
             channels,
             onReorderChannel,
             onWatchStream,
+            onVoiceModerate,
+            onPurgeChannel,
           ),
         );
       }
@@ -536,6 +613,8 @@ function renderCategoryGroup(
           channels,
           onReorderChannel,
           onWatchStream,
+          onVoiceModerate,
+          onPurgeChannel,
         ),
       );
     }
@@ -554,6 +633,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     onDeleteChannel,
     onReorderChannel,
     onWatchStream,
+    onVoiceModerate,
+    onPurgeChannel,
   } = options;
   const ac = new AbortController();
   let root: HTMLDivElement | null = null;
@@ -613,6 +694,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
           onDeleteChannel,
           onReorderChannel,
           onWatchStream,
+          onVoiceModerate,
+          onPurgeChannel,
         ),
       );
     }
@@ -692,7 +775,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
             // Include the E2EE verification status so a verified↔unverified↔mismatch
             // flip re-renders the badge (it lives outside voiceUsers, in peerVerifications).
             const verif = state.peerVerifications?.get(uid);
-            structSig += `:${uid}${u.muted ? "m" : ""}${u.deafened ? "d" : ""}${u.camera ? "c" : ""}${u.screenshare ? "s" : ""}${verif ? `@${verif.status}` : ""}`;
+            structSig += `:${uid}${u.muted ? "m" : ""}${u.deafened ? "d" : ""}${u.camera ? "c" : ""}${u.screenshare ? "s" : ""}${u.serverMuted === true ? "M" : ""}${u.serverDeafened === true ? "D" : ""}${verif ? `@${verif.status}` : ""}`;
           }
         }
         return structSig;

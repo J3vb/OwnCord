@@ -21,7 +21,7 @@ var staticFiles embed.FS
 //
 // Routes:
 //
-//	/api/*  — admin REST API (all require ADMINISTRATOR permission)
+//	/api/*  — admin REST API (all require a moderation permission; see NewAdminAPI)
 //	/*      — embedded static files (SPA; index.html for unknown paths)
 func NewHandler(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, permInvalidator PermissionInvalidator, mod *service.ModerationService, opts ...SetupOptions) http.Handler {
 	r := chi.NewRouter()

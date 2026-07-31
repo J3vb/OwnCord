@@ -22,6 +22,12 @@ export interface VoiceUser {
   readonly speaking: boolean;
   readonly camera: boolean;
   readonly screenshare: boolean;
+  /** Moderator-imposed (MUTE_MEMBERS). muted/deafened are always set alongside
+   *  these, so they only change how the row is presented. The store always sets
+   *  them; optional only so the inline VoiceUser test fixtures need not restate
+   *  them (same convention as VoiceState.peerVerifications). */
+  readonly serverMuted?: boolean;
+  readonly serverDeafened?: boolean;
 }
 
 /** Observable voice-session lifecycle status, surfaced so the UI can
@@ -60,6 +66,11 @@ export interface VoiceState {
   readonly voiceConfigs: ReadonlyMap<number, VoiceConfig>; // channelId -> VoiceConfig
   readonly localMuted: boolean;
   readonly localDeafened: boolean;
+  /** Set from the local user's own voice_state: while true the widget refuses
+   *  to send an unmute, which the server would reject anyway. Always written by
+   *  the store; optional for the same fixture reason as peerVerifications. */
+  readonly localServerMuted?: boolean;
+  readonly localServerDeafened?: boolean;
   readonly localCamera: boolean;
   readonly localScreenshare: boolean;
   /** Epoch ms when the local user joined the current voice channel (for elapsed timer). */
@@ -81,6 +92,8 @@ const INITIAL_STATE: VoiceState = {
   voiceConfigs: new Map(),
   localMuted: false,
   localDeafened: false,
+  localServerMuted: false,
+  localServerDeafened: false,
   localCamera: false,
   localScreenshare: false,
   joinedAt: null,
@@ -99,6 +112,8 @@ export function resetVoiceStore(): void {
     voiceConfigs: new Map(),
     localMuted: false,
     localDeafened: false,
+    localServerMuted: false,
+    localServerDeafened: false,
     localCamera: false,
     localScreenshare: false,
     joinedAt: null,
@@ -127,6 +142,8 @@ export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
       speaking: false,
       camera: false,
       screenshare: false,
+      serverMuted: vs.server_muted ?? false,
+      serverDeafened: vs.server_deafened ?? false,
     });
   }
 
@@ -153,8 +170,13 @@ export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
   }));
 }
 
-/** Update or add a user's voice state from a voice_state event. */
+/** Update or add a user's voice state from a voice_state event. When the event
+ *  describes the signed-in user it also mirrors the moderator-imposed flags
+ *  into localServerMuted/localServerDeafened, which gate the widget controls. */
 export function updateVoiceState(payload: VoiceStatePayload): void {
+  const currentUserId = authStore.getState().user?.id ?? 0;
+  const serverMuted = payload.server_muted ?? false;
+  const serverDeafened = payload.server_deafened ?? false;
   voiceStore.setState((prev) => {
     const nextChannels = new Map(prev.voiceUsers);
     const existingChannel = prev.voiceUsers.get(payload.channel_id);
@@ -168,10 +190,20 @@ export function updateVoiceState(payload: VoiceStatePayload): void {
       speaking: payload.speaking,
       camera: payload.camera,
       screenshare: payload.screenshare,
+      serverMuted,
+      serverDeafened,
     });
 
     nextChannels.set(payload.channel_id, nextUsers);
-    return { ...prev, voiceUsers: nextChannels };
+    if (payload.user_id !== currentUserId) {
+      return { ...prev, voiceUsers: nextChannels };
+    }
+    return {
+      ...prev,
+      voiceUsers: nextChannels,
+      localServerMuted: serverMuted,
+      localServerDeafened: serverDeafened,
+    };
   });
 }
 
@@ -216,13 +248,21 @@ export function joinVoiceChannel(channelId: number): void {
 export function leaveVoiceChannel(): void {
   const currentUserId = authStore.getState().user?.id ?? 0;
   voiceStore.setState((prev) => {
+    const cleared = {
+      currentChannelId: null,
+      joinedAt: null,
+      voiceStatus: "idle" as const,
+      // Server mute lives with the voice session; a new session starts clean.
+      localServerMuted: false,
+      localServerDeafened: false,
+    };
     const channelId = prev.currentChannelId;
     if (channelId === null || currentUserId === 0) {
-      return { ...prev, currentChannelId: null, joinedAt: null, voiceStatus: "idle" };
+      return { ...prev, ...cleared };
     }
     const existingChannel = prev.voiceUsers.get(channelId);
     if (!existingChannel || !existingChannel.has(currentUserId)) {
-      return { ...prev, currentChannelId: null, joinedAt: null, voiceStatus: "idle" };
+      return { ...prev, ...cleared };
     }
     const nextChannels = new Map(prev.voiceUsers);
     const nextUsers = new Map(existingChannel);
@@ -232,13 +272,7 @@ export function leaveVoiceChannel(): void {
     } else {
       nextChannels.set(channelId, nextUsers);
     }
-    return {
-      ...prev,
-      currentChannelId: null,
-      joinedAt: null,
-      voiceStatus: "idle",
-      voiceUsers: nextChannels,
-    };
+    return { ...prev, ...cleared, voiceUsers: nextChannels };
   });
 }
 

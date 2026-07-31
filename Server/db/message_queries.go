@@ -179,6 +179,74 @@ func (d *DB) DeleteMessage(ctx context.Context, id, userID int64, ismod bool) er
 	return nil
 }
 
+// PurgeChannelMessages soft-deletes the newest limit non-deleted messages in a
+// channel and returns their IDs, newest first. When before > 0 only messages
+// with id < before are considered.
+//
+// Rows are marked deleted=1 and otherwise left intact, so the tombstones every
+// reader already renders (and the reply_to targets pointing at them) survive a
+// purge exactly as they do a single delete. Selection and update run in one
+// writer transaction so a concurrent single delete cannot make the reported id
+// set diverge from what was actually written.
+func (d *DB) PurgeChannelMessages(ctx context.Context, channelID, before int64, limit int) ([]int64, error) {
+	if limit < 1 {
+		return []int64{}, nil
+	}
+
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("PurgeChannelMessages begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	sel := `SELECT id FROM messages WHERE channel_id = ? AND deleted = 0 ORDER BY id DESC LIMIT ?`
+	args := []any{channelID, limit}
+	if before > 0 {
+		sel = `SELECT id FROM messages WHERE channel_id = ? AND id < ? AND deleted = 0 ORDER BY id DESC LIMIT ?`
+		args = []any{channelID, before, limit}
+	}
+
+	rows, err := tx.QueryContext(ctx, sel, args...)
+	if err != nil {
+		return nil, fmt.Errorf("PurgeChannelMessages select: %w", err)
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if scanErr := rows.Scan(&id); scanErr != nil {
+			rows.Close() //nolint:errcheck
+			return nil, fmt.Errorf("PurgeChannelMessages scan: %w", scanErr)
+		}
+		ids = append(ids, id)
+	}
+	rows.Close() //nolint:errcheck
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("PurgeChannelMessages rows: %w", rows.Err())
+	}
+	if len(ids) == 0 {
+		return []int64{}, nil
+	}
+
+	placeholders := make([]string, len(ids))
+	updateArgs := make([]any, 0, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		updateArgs = append(updateArgs, id)
+	}
+	if _, err := tx.ExecContext(ctx,
+		fmt.Sprintf(`UPDATE messages SET deleted = 1 WHERE id IN (%s)`, //nolint:gosec // G201: placeholder interpolation, not user input
+			strings.Join(placeholders, ",")),
+		updateArgs...,
+	); err != nil {
+		return nil, fmt.Errorf("PurgeChannelMessages update: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("PurgeChannelMessages commit: %w", err)
+	}
+	return ids, nil
+}
+
 // AddReaction inserts a reaction. Returns an error on duplicate (same user+emoji+message).
 func (d *DB) AddReaction(ctx context.Context, messageID, userID int64, emoji string) error {
 	if err := d.q.AddReaction(ctx, dbgen.AddReactionParams{

@@ -6,6 +6,7 @@ import {
   prependMessages,
   editMessage,
   deleteMessage,
+  bulkDeleteMessages,
   setMessagePinned,
   updateReaction,
   addPendingSend,
@@ -357,6 +358,43 @@ describe("messages store", () => {
       deleteMessage({ message_id: 999, channel_id: 99 });
       const after = messagesStore.getState();
       expect(before).toBe(after);
+    });
+  });
+
+  // 6b. bulkDeleteMessages (channel purge)
+  describe("bulkDeleteMessages", () => {
+    it("marks every id as deleted while keeping the rows", () => {
+      for (const id of [100, 101, 102]) {
+        addMessage(makeChatPayload({ id, channel_id: 1 }));
+      }
+
+      bulkDeleteMessages({ channel_id: 1, ids: [102, 101] });
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).toHaveLength(3);
+      expect(msgs.find((m) => m.id === 102)!.deleted).toBe(true);
+      expect(msgs.find((m) => m.id === 101)!.deleted).toBe(true);
+      expect(msgs.find((m) => m.id === 100)!.deleted).toBe(false);
+    });
+
+    it("ignores ids that are not loaded", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+
+      bulkDeleteMessages({ channel_id: 1, ids: [100, 999] });
+
+      expect(getChannelMessages(1)).toHaveLength(1);
+      expect(getChannelMessages(1)[0]!.deleted).toBe(true);
+    });
+
+    it("is a no-op for an unknown channel, an empty id list, and a repeat purge", () => {
+      addMessage(makeChatPayload({ id: 100, channel_id: 1 }));
+      bulkDeleteMessages({ channel_id: 1, ids: [100] });
+
+      const before = messagesStore.getState();
+      bulkDeleteMessages({ channel_id: 99, ids: [1] });
+      bulkDeleteMessages({ channel_id: 1, ids: [] });
+      bulkDeleteMessages({ channel_id: 1, ids: [100] });
+      expect(messagesStore.getState()).toBe(before);
     });
   });
 

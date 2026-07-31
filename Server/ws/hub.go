@@ -161,6 +161,7 @@ func NewHub(database *db.DB, limiter *auth.RateLimiter, svc *service.Services) *
 		LiveKit:     h.livekit,
 		TokenGen:    h, // Hub delegates to h.livekit at call time (set via SetLiveKit)
 		KeyHolder:   h,
+		Mod:         h,
 	})
 
 	h.refreshSettingsLocked(context.Background())

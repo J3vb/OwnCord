@@ -1,7 +1,7 @@
 /**
  * MemberList component — shows server members grouped by role with online status.
  * Subscribes to membersStore for reactive updates.
- * Right-click context menu for admin actions (kick, ban, role change).
+ * Right-click context menu for admin actions (force logout, ban, role change).
  */
 
 import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
@@ -16,11 +16,15 @@ import {
   createUserProfilePopup,
   type UserProfilePopupComponent,
 } from "@components/UserProfilePopup";
-import type { UserStatus } from "@lib/types";
+import { Permission, type UserStatus } from "@lib/types";
+import { roleHasPermission } from "@lib/permissions";
 
 /** Options for configuring admin action callbacks on the member list. */
 export interface MemberListOptions {
+  /** Role name of the signed-in user; resolved against the server's role list
+   *  to get the permission mask that gates the moderation menu items. */
   readonly currentUserRole: string;
+  /** Force logout: revokes the target's sessions (KICK_MEMBERS). */
   readonly onKick: (userId: number, username: string) => Promise<void>;
   readonly onBan: (
     userId: number,
@@ -47,6 +51,28 @@ function assignableRoleNames(): readonly string[] {
     .roles.map((r) => r.name.toLowerCase())
     .filter((name) => name !== "owner");
   return roles.length > 0 ? roles : FALLBACK_ASSIGNABLE_ROLES;
+}
+
+/** Which moderation menu items the signed-in user may see. */
+interface ModerationGates {
+  readonly canKick: boolean;
+  readonly canBan: boolean;
+  readonly canManageRoles: boolean;
+}
+
+/**
+ * Menu items the signed-in user's role permits, from the permission mask the
+ * server ships in `ready`. Administrator implies all three. When the role name
+ * has no match in that list (pre-`ready`, or an older server that sent none)
+ * the legacy owner/admin name check stands in — a mask of 0 would otherwise
+ * hide moderation from every actual admin.
+ */
+function moderationGates(roleName: string): ModerationGates {
+  return {
+    canKick: roleHasPermission(roleName, Permission.KICK_MEMBERS),
+    canBan: roleHasPermission(roleName, Permission.BAN_MEMBERS),
+    canManageRoles: roleHasPermission(roleName, Permission.MANAGE_ROLES),
+  };
 }
 
 interface RoleGroup {
@@ -215,9 +241,10 @@ function createMemberItem(
       const currentUserId = authStore.getState().user?.id ?? 0;
       if (member.id === currentUserId) return;
 
-      // Admin actions are role-gated; block/unblock is available to everyone.
-      const role = opts.currentUserRole.toLowerCase();
-      const showAdminActions = role === "owner" || role === "admin";
+      // Moderation actions are permission-gated per item (a role name told us
+      // nothing about what its bits allow); block/unblock is open to everyone.
+      const gates = moderationGates(opts.currentUserRole);
+      const showAdminActions = gates.canKick || gates.canBan || gates.canManageRoles;
 
       closeActiveMenu();
       document.removeEventListener("mousedown", handleOutsideClick);
@@ -234,6 +261,9 @@ function createMemberItem(
         currentRole: member.role.toLowerCase(),
         availableRoles,
         showAdminActions,
+        canKick: gates.canKick,
+        canBan: gates.canBan,
+        canManageRoles: gates.canManageRoles,
         isBlocked,
         onToggleBlock: () => opts.onToggleBlock(member.id, member.username, !isBlocked),
         onKick: () => opts.onKick(member.id, member.username),

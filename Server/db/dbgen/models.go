@@ -220,12 +220,14 @@ type UserBlock struct {
 }
 
 type VoiceState struct {
-	UserID      int64  `json:"userId"`
-	ChannelID   int64  `json:"channelId"`
-	Muted       int64  `json:"muted"`
-	Deafened    int64  `json:"deafened"`
-	Speaking    int64  `json:"speaking"`
-	JoinedAt    string `json:"joinedAt"`
-	Camera      int64  `json:"camera"`
-	Screenshare int64  `json:"screenshare"`
+	UserID         int64  `json:"userId"`
+	ChannelID      int64  `json:"channelId"`
+	Muted          int64  `json:"muted"`
+	Deafened       int64  `json:"deafened"`
+	Speaking       int64  `json:"speaking"`
+	JoinedAt       string `json:"joinedAt"`
+	Camera         int64  `json:"camera"`
+	Screenshare    int64  `json:"screenshare"`
+	ServerMuted    int64  `json:"serverMuted"`
+	ServerDeafened int64  `json:"serverDeafened"`
 }

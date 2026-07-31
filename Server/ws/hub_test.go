@@ -236,6 +236,58 @@ func TestHub_BroadcastToChannel_ZeroChannelSendsToAll(t *testing.T) {
 	assertReceived(t, s1, msg, "client")
 }
 
+// ─── BroadcastChatBulkDeleted ─────────────────────────────────────────────────
+
+// One chat_bulk_deleted carrying every purged id reaches the channel's
+// subscribers, and nobody else — a purge must not fan out N chat_deleted events
+// nor disclose ids to a client focused elsewhere.
+func TestHub_BroadcastChatBulkDeleted_OneEventToChannelMembers(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+
+	chID := seedTestChannel(t, database, "purged")
+	u1 := seedTestUser(t, database, "bulk1")
+	u2 := seedTestUser(t, database, "bulk2")
+
+	s1 := make(chan []byte, 4)
+	s2 := make(chan []byte, 4)
+	hub.Register(ws.NewTestClientWithChannel(hub, u1, chID, s1))
+	c2 := ws.NewTestClientWithChannel(hub, u2, 999, s2)
+	hub.Register(c2)
+	waitRegistered(t, hub, c2)
+
+	hub.BroadcastChatBulkDeleted(chID, []int64{7, 6, 5})
+
+	select {
+	case got := <-s1:
+		var env struct {
+			Type    string `json:"type"`
+			Payload struct {
+				ChannelID int64   `json:"channel_id"`
+				IDs       []int64 `json:"ids"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal(got, &env); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if env.Type != "chat_bulk_deleted" {
+			t.Errorf("type = %q, want chat_bulk_deleted", env.Type)
+		}
+		if env.Payload.ChannelID != chID {
+			t.Errorf("channel_id = %d, want %d", env.Payload.ChannelID, chID)
+		}
+		if !slices.Equal(env.Payload.IDs, []int64{7, 6, 5}) {
+			t.Errorf("ids = %v, want [7 6 5]", env.Payload.IDs)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("channel member did not receive chat_bulk_deleted")
+	}
+
+	assertNotReceived(t, s1, "channel member (second event)")
+	assertNotReceived(t, s2, "client focused on another channel")
+}
+
 // ─── BUG-122: Unfocused client must NOT receive channel-scoped broadcasts ────
 
 func TestHub_BroadcastToChannel_SkipsUnfocusedClient(t *testing.T) {

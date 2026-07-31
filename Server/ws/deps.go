@@ -55,6 +55,20 @@ type VoiceTokenGenerator interface {
 	URL() string
 }
 
+// VoiceModerator applies the effects of a voice moderation action that reach
+// past the acting connection: the SFU and the target's own socket. *Hub
+// implements it, and VoiceDeps carries the Hub itself so SetLiveKit's late
+// wiring is picked up at call time (same reason as VoiceTokenGenerator).
+type VoiceModerator interface {
+	// MuteParticipant mutes or unmutes the target's published audio at the SFU.
+	MuteParticipant(ctx context.Context, channelID, userID int64, voiceJoinToken string, muted bool) error
+	// DisconnectFromVoice runs the voice-leave routine for the target's
+	// connection. Reports false when the target has no connection on this node.
+	DisconnectFromVoice(ctx context.Context, userID int64) bool
+	// SendToUser delivers one server->client frame to the target.
+	SendToUser(userID int64, msg []byte) bool
+}
+
 // KeyHolderChecker reports whether a user is the E2EE key holder for a voice channel.
 type KeyHolderChecker interface {
 	IsVoiceKeyHolder(channelID, userID int64) bool
@@ -83,6 +97,7 @@ type VoiceDeps struct {
 	LiveKit   *LiveKitClient
 	TokenGen  VoiceTokenGenerator // used by voice_token_refresh V2
 	KeyHolder KeyHolderChecker    // used by voice_token_refresh V2
+	Mod       VoiceModerator      // used by the voice moderation handlers
 }
 
 // ── V2 permission helpers ───────────────────────────────────────────────────

@@ -79,6 +79,13 @@ type DeleteMessageResult struct {
 	ParticipantIDs []int64
 }
 
+// PurgeMessagesResult contains the output of a successful bulk delete.
+// MessageIDs is newest-first and is empty (never nil) when nothing matched.
+type PurgeMessagesResult struct {
+	ChannelID  int64
+	MessageIDs []int64
+}
+
 // ReactionResult contains the output of a reaction add/remove.
 type ReactionResult struct {
 	MessageID int64

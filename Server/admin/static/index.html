@@ -299,6 +299,7 @@ const I={
 /* ═══ State ═══ */
 const PAGE_SIZE=50;
 const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
+  me:null,
   usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditCache:[],settingsChanged:false,backupRunning:false,updateApplying:false,
   cachedStats:null,cachedUpdate:null,channelCache:{},pluginRuntime:'unknown',pluginBusy:false,
   logEntries:[],logLevels:{DEBUG:true,INFO:true,WARN:true,ERROR:true},
@@ -312,7 +313,7 @@ function handleSessionExpired(){
   state.logConnectSeq++;
   if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}
   if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}
-  state.token='';localStorage.removeItem('admin_token');
+  state.token='';state.me=null;localStorage.removeItem('admin_token');
   const err=document.getElementById('loginErr');if(err)err.textContent='Your session expired — sign in again.';
   showOverlay('loginOverlay');
 }
@@ -327,6 +328,23 @@ async function api(method,path,body){
   if(!res.ok)throw new Error(data.message||res.statusText);
   return data;
 }
+
+/* ═══ Permissions ═══ */
+/* The panel perimeter admits any role holding one moderation bit, so what a
+   principal may actually do varies. GET /admin/api/me reports the caller's
+   role mask; tabs and row actions hide what it cannot use. Hiding is an
+   affordance only — every route re-checks the bit server-side. */
+const PERM={MANAGE_CHANNELS:0x20000,KICK_MEMBERS:0x40000,BAN_MEMBERS:0x80000,
+  MUTE_MEMBERS:0x100000,MANAGE_ROLES:0x1000000,MANAGE_SERVER:0x2000000,
+  VIEW_AUDIT_LOG:0x8000000,ADMINISTRATOR:0x40000000};
+function can(bit){
+  const p=(state.me&&state.me.permissions)||0;
+  if((p&PERM.ADMINISTRATOR)!==0)return true;
+  return (p&bit)===bit;
+}
+/* Owner-only routes (tokens, backups, updates) gate on role position, not on
+   a bit, so the mask alone cannot answer this. */
+function isOwner(){return !!(state.me&&state.me.is_owner)}
 
 /* ═══ Utilities ═══ */
 function esc(s){if(s===null||s===undefined)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
@@ -365,7 +383,16 @@ function showApp(){hideAll();document.getElementById('adminShell').classList.rem
 async function checkAuth(){
   try{const r=await fetch('/admin/api/setup/status');const d=await r.json();if(d.needs_setup){wizInit(d.defaults);showOverlay('setupOverlay');return}}catch(e){console.error('setup check:',e)}
   if(!state.token){showOverlay('loginOverlay');return}
-  try{await api('GET','/stats');showApp();renderNav();renderContent()}catch(e){showOverlay('loginOverlay')}
+  try{await enterApp()}catch(e){showOverlay('loginOverlay')}
+}
+
+/* Loads the caller's permissions before the first render — the nav is built
+   from them, so rendering earlier would flash tabs the principal cannot open.
+   Throws on an unusable session so callers fall back to the login overlay. */
+async function enterApp(){
+  state.me=await api('GET','/me');
+  if(!sectionAllowed(state.section))state.section='dashboard';
+  showApp();renderNav();renderContent();
 }
 
 /* ═══ First-Run Setup Wizard ═══ */
@@ -577,7 +604,7 @@ function beginRestartWait(url){
   },4000);
 }
 
-document.getElementById('setupContinueBtn').onclick=()=>{showApp();renderNav();renderContent()};
+document.getElementById('setupContinueBtn').onclick=()=>{enterApp().catch(()=>showOverlay('loginOverlay'))};
 function copyInvite(){navigator.clipboard.writeText(document.getElementById('inviteCode').textContent).then(()=>showToast('Copied!','info')).catch(()=>showToast('Copy failed','error'))}
 
 document.getElementById('loginBtn').onclick=async()=>{
@@ -589,7 +616,7 @@ document.getElementById('loginBtn').onclick=async()=>{
   if(btn.disabled)return;
   btn.disabled=true;
   try{const r=await fetch('/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});const d=await r.json();if(!r.ok)throw new Error(d.message||'Login failed');
-    state.token=d.token;localStorage.setItem('admin_token',state.token);showApp();renderNav();renderContent();
+    state.token=d.token;localStorage.setItem('admin_token',state.token);await enterApp();
   }catch(e){err.textContent=e.message}
   finally{btn.disabled=false}
 };
@@ -598,26 +625,57 @@ document.getElementById('loginBtn').onclick=async()=>{
 ['loginUser','loginPass'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('loginBtn').click()}));
 
 /* ═══ Nav ═══ */
+/* `allowed` mirrors the server-side gate on each section's routes; omitted
+   means perimeter-level (any principal the panel let in). */
 const NAV=[
   {section:'Management'},
   {id:'dashboard',label:'Dashboard',icon:I.dashboard},
   {id:'users',label:'Users',icon:I.users},
-  {id:'channels',label:'Channels',icon:I.channels},
+  {id:'channels',label:'Channels',icon:I.channels,allowed:()=>can(PERM.MANAGE_CHANNELS)},
   {sep:true},
   {section:'Configuration'},
-  {id:'audit',label:'Audit Log',icon:I.audit},
-  {id:'tokens',label:'API Tokens',icon:I.lock},
-  {id:'plugins',label:'Plugins',icon:I.plugins},
-  {id:'logs',label:'Server Logs',icon:I.logs},
-  {id:'settings',label:'Settings',icon:I.settings,unsaved:()=>state.settingsChanged},
-  {id:'backups',label:'Backups',icon:I.backup},
-  {id:'updates',label:'Updates',icon:I.updates},
+  {id:'audit',label:'Audit Log',icon:I.audit,allowed:()=>can(PERM.VIEW_AUDIT_LOG)},
+  {id:'tokens',label:'API Tokens',icon:I.lock,allowed:isOwner},
+  {id:'plugins',label:'Plugins',icon:I.plugins,allowed:()=>can(PERM.ADMINISTRATOR)},
+  {id:'logs',label:'Server Logs',icon:I.logs,allowed:()=>can(PERM.ADMINISTRATOR)},
+  {id:'settings',label:'Settings',icon:I.settings,unsaved:()=>state.settingsChanged,allowed:()=>can(PERM.MANAGE_SERVER)},
+  {id:'backups',label:'Backups',icon:I.backup,allowed:isOwner},
+  {id:'updates',label:'Updates',icon:I.updates,allowed:isOwner},
   {sep:true},
   {id:'logout',label:'Sign Out',icon:I.logout,danger:true},
 ];
 
+/* True when the principal may open the section. Unknown ids are refused so a
+   stale localStorage/section value can't route into a hidden page. */
+function sectionAllowed(id){
+  const n=NAV.find(x=>x.id===id);
+  if(!n)return false;
+  return !n.allowed||n.allowed();
+}
+
+/* Drops section labels with no visible item under them and separators that
+   would end up leading, trailing, or doubled once entries are filtered out. */
+function visibleNav(){
+  const kept=NAV.filter(n=>n.section||n.sep||!n.allowed||n.allowed());
+  const out=[];
+  for(let i=0;i<kept.length;i++){
+    const n=kept[i];
+    if(n.section){
+      const next=kept[i+1];
+      if(!next||next.section||next.sep)continue;
+    }
+    if(n.sep){
+      const prev=out[out.length-1];
+      if(!prev||prev.sep)continue;
+    }
+    out.push(n);
+  }
+  while(out.length&&out[out.length-1].sep)out.pop();
+  return out;
+}
+
 function renderNav(){
-  document.getElementById('sidebarNav').innerHTML=NAV.map(n=>{
+  document.getElementById('sidebarNav').innerHTML=visibleNav().map(n=>{
     if(n.section)return'<div class="sidebar-label">'+n.section+'</div>';
     if(n.sep)return'<div class="sidebar-sep"></div>';
     const active=state.section===n.id?'active':'';
@@ -629,6 +687,7 @@ function renderNav(){
 }
 
 function navigateTo(id){
+  if(!sectionAllowed(id)){showToast('You do not have permission to open that section','error');return}
   try{
     if(state.section==='logs'&&id!=='logs'){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}}
     state.section=id;renderNav();renderContent();
@@ -639,7 +698,7 @@ function navigateTo(id){
   }
 }
 
-function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}state.token='';localStorage.removeItem('admin_token');showOverlay('loginOverlay')}
+function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}state.token='';state.me=null;localStorage.removeItem('admin_token');showOverlay('loginOverlay')}
 
 /* ═══ Content Router ═══ */
 function renderContent(){
@@ -666,7 +725,9 @@ function renderContent(){
 /* ═══ Dashboard ═══ */
 async function renderDashboard(){
   try{state.cachedStats=await api('GET','/stats')}catch(e){return'<div class="page-title">Dashboard</div><p style="color:var(--red)">Failed to load stats: '+esc(e.message)+'</p>'}
-  try{state.cachedUpdate=await api('GET','/updates')}catch(e){/* the banner is optional; the Updates page reports the failure */}
+  /* Update checks are owner-only; skip the call for everyone else instead of
+     spending a guaranteed 403 on every dashboard load. */
+  if(isOwner()){try{state.cachedUpdate=await api('GET','/updates')}catch(e){/* the banner is optional; the Updates page reports the failure */}}
   const s=state.cachedStats;const u=state.cachedUpdate;
   let html='<div class="page-title">Dashboard</div><div class="page-desc">Server overview and statistics</div>';
   if(u&&u.update_available)html+='<div class="update-card" style="border-color:var(--accent);margin-bottom:20px"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent)">'+I.updates+'</div><div class="update-info"><div class="update-ver">Update Available: '+esc(u.latest)+'</div><div class="update-notes">Current: '+esc(u.current)+' &mdash; <button class="btn btn-accent" style="margin-left:8px" onclick="navigateTo(\'updates\')">View Update</button></div></div></div>';
@@ -676,8 +737,8 @@ async function renderDashboard(){
   html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Channels</span><div class="stat-card-icon" style="background:rgba(240,178,50,.15);color:var(--yellow)">'+I.channels+'</div></div><div class="stat-card-value">'+(s.channel_count||0)+'</div><div class="stat-card-sub">active</div></div>';
   html+='<div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Database</span><div class="stat-card-icon" style="background:rgba(88,101,242,.15);color:var(--accent)">'+I.backup+'</div></div><div class="stat-card-value">'+fmtBytes(s.db_size_bytes||0)+'</div><div class="stat-card-sub">SQLite</div></div>';
   html+='</div>';
-  // Recent audit
-  try{
+  // Recent audit — VIEW_AUDIT_LOG only.
+  if(can(PERM.VIEW_AUDIT_LOG))try{
     const entries=await api('GET','/audit-log?limit=5&offset=0');
     if(entries&&entries.length){
       html+='<div class="section-card"><div class="section-card-header"><h3>Recent Activity</h3><button class="btn btn-ghost" onclick="navigateTo(\'audit\')">View All</button></div><div class="section-card-body">';
@@ -714,10 +775,12 @@ async function renderUsers(){
       :'<span class="badge badge-muted">No</span>';
     html+='<td>'+bannedCell+'</td>';
     html+='<td><div class="act-group" style="justify-content:flex-end">';
-    html+='<button class="act-btn" title="Edit role" onclick="openEditUser('+uid+',\''+jsq(uname)+'\','+rid+')">'+I.edit+'</button>';
-    html+='<button class="act-btn" title="Force logout" onclick="forceLogout('+uid+')">'+I.disconnect+'</button>';
-    if(banned)html+='<button class="act-btn" title="Unban" onclick="unbanUser('+uid+')">'+I.check+'</button>';
-    else html+='<button class="act-btn danger" title="Ban" onclick="openBanUser('+uid+',\''+jsq(uname)+'\')">'+I.ban+'</button>';
+    if(can(PERM.MANAGE_ROLES))html+='<button class="act-btn" title="Edit role" onclick="openEditUser('+uid+',\''+jsq(uname)+'\','+rid+')">'+I.edit+'</button>';
+    if(can(PERM.KICK_MEMBERS))html+='<button class="act-btn" title="Force Logout" onclick="forceLogout('+uid+')">'+I.disconnect+'</button>';
+    if(can(PERM.BAN_MEMBERS)){
+      if(banned)html+='<button class="act-btn" title="Unban" onclick="unbanUser('+uid+')">'+I.check+'</button>';
+      else html+='<button class="act-btn danger" title="Ban" onclick="openBanUser('+uid+',\''+jsq(uname)+'\')">'+I.ban+'</button>';
+    }
     html+='</div></td></tr>';
   });
   html+='</tbody></table></div></div>';
@@ -729,8 +792,17 @@ async function renderUsers(){
   return html;
 }
 
+/* Default roles with their hierarchy positions. The server refuses to assign a
+   role positioned at or above the actor's own, so anything higher is dropped
+   from the picker rather than offered as a guaranteed 403. The current role is
+   always listed so the select can show it. */
+const ROLE_CHOICES=[{id:1,name:'Owner',pos:100},{id:2,name:'Admin',pos:80},{id:3,name:'Moderator',pos:60},{id:4,name:'Member',pos:40}];
+
 function openEditUser(uid,uname,currentRole){
-  openModal('<div class="modal-header"><h3>Edit User</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><div style="display:flex;align-items:center;gap:12px;margin-bottom:20px"><div class="avatar" style="background:var(--accent);width:48px;height:48px;font-size:20px">'+uname[0].toUpperCase()+'</div><div style="font-size:16px;font-weight:700;color:white">'+esc(uname)+'</div></div><div class="form-group"><label class="form-label">Role</label><select class="form-input" id="editRoleSelect" style="appearance:auto"><option value="1" '+(currentRole===1?'selected':'')+'>Owner</option><option value="2" '+(currentRole===2?'selected':'')+'>Admin</option><option value="3" '+(currentRole===3?'selected':'')+'>Moderator</option><option value="4" '+(currentRole===4?'selected':'')+'>Member</option></select></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveUserRole('+uid+')">Save</button></div>');
+  const myPos=(state.me&&state.me.role_position)||0;
+  const opts=ROLE_CHOICES.filter(r=>r.pos<myPos||r.id===currentRole)
+    .map(r=>'<option value="'+r.id+'" '+(currentRole===r.id?'selected':'')+'>'+r.name+'</option>').join('');
+  openModal('<div class="modal-header"><h3>Edit User</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><div style="display:flex;align-items:center;gap:12px;margin-bottom:20px"><div class="avatar" style="background:var(--accent);width:48px;height:48px;font-size:20px">'+uname[0].toUpperCase()+'</div><div style="font-size:16px;font-weight:700;color:white">'+esc(uname)+'</div></div><div class="form-group"><label class="form-label">Role</label><select class="form-input" id="editRoleSelect" style="appearance:auto">'+opts+'</select></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-accent" onclick="saveUserRole('+uid+')">Save</button></div>');
 }
 
 async function saveUserRole(uid){
@@ -752,11 +824,11 @@ async function unbanUser(uid){
 }
 
 async function forceLogout(uid){
-  openModal('<div class="modal-header"><h3>Force Logout</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Terminate all sessions for this user?</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmForceLogout('+uid+')">Logout</button></div>');
+  openModal('<div class="modal-header"><h3>Force Logout</h3><button class="modal-close" onclick="closeModal()">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted)">Terminate all sessions for this user? They can sign back in immediately &mdash; this is not a removal.</p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmForceLogout('+uid+')">Force Logout</button></div>');
 }
 
 async function confirmForceLogout(uid){
-  try{await api('DELETE','/users/'+uid+'/sessions');closeModal();showToast('Sessions terminated');renderContent()}catch(e){showToast(e.message,'error')}
+  try{await api('DELETE','/users/'+uid+'/sessions');closeModal();showToast('Forced logout: all sessions terminated');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
 /* ═══ Channels ═══ */

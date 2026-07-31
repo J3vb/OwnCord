@@ -146,6 +146,9 @@ export interface ReadyVoiceState {
   readonly user_id: number;
   readonly muted: boolean;
   readonly deafened: boolean;
+  /** Moderator-imposed; optional so an older server's payload still parses. */
+  readonly server_muted?: boolean;
+  readonly server_deafened?: boolean;
 }
 
 /** Role object in the ready payload. */
@@ -241,6 +244,12 @@ export interface ChatDeletedPayload {
   readonly channel_id: number;
 }
 
+/** Bulk moderator delete (channel purge). `ids` is newest-first and never null. */
+export interface ChatBulkDeletedPayload {
+  readonly channel_id: number;
+  readonly ids: readonly number[];
+}
+
 export interface ReactionUpdatePayload {
   readonly message_id: number;
   readonly channel_id: number;
@@ -291,6 +300,21 @@ export interface VoiceStatePayload {
   readonly speaking: boolean;
   readonly camera: boolean;
   readonly screenshare: boolean;
+  /** Moderator-imposed; the user cannot lift these themselves. Optional so an
+   *  older server's payload still parses. */
+  readonly server_muted?: boolean;
+  readonly server_deafened?: boolean;
+}
+
+/** Server -> Client: a moderator moved this client to another voice channel. */
+export interface VoiceMovedPayload {
+  readonly to_channel_id: number;
+}
+
+/** Server -> Client: a moderator removed this client from voice. */
+export interface VoiceDisconnectedPayload {
+  readonly channel_id: number;
+  readonly reason: string;
 }
 
 export interface VoiceLeavePayload {
@@ -483,6 +507,29 @@ export interface VoiceScreensharePayload {
   readonly enabled: boolean;
 }
 
+/** Client -> Server: moderator sets another user's server mute. channel_id is
+ *  the channel the moderator sees them in; the server refuses a mismatch. */
+export interface VoiceModMutePayload {
+  readonly channel_id: number;
+  readonly user_id: number;
+  readonly muted: boolean;
+}
+
+export interface VoiceModDeafenPayload {
+  readonly channel_id: number;
+  readonly user_id: number;
+  readonly deafened: boolean;
+}
+
+export interface VoiceModMovePayload {
+  readonly user_id: number;
+  readonly to_channel_id: number;
+}
+
+export interface VoiceModKickPayload {
+  readonly user_id: number;
+}
+
 // -----------------------------------------------------------------------------
 // Discriminated Union: Server → Client Messages
 // -----------------------------------------------------------------------------
@@ -495,6 +542,7 @@ export type ServerMessage =
   | (WsEnvelope<ChatSendOkPayload> & { readonly type: "chat_send_ok" })
   | (WsEnvelope<ChatEditedPayload> & { readonly type: "chat_edited" })
   | (WsEnvelope<ChatDeletedPayload> & { readonly type: "chat_deleted" })
+  | (WsEnvelope<ChatBulkDeletedPayload> & { readonly type: "chat_bulk_deleted" })
   | (WsEnvelope<ReactionUpdatePayload> & { readonly type: "reaction_update" })
   | (WsEnvelope<TypingPayload> & { readonly type: "typing" })
   | (WsEnvelope<PresencePayload> & { readonly type: "presence" })
@@ -506,6 +554,8 @@ export type ServerMessage =
   | (WsEnvelope<VoiceConfigPayload> & { readonly type: "voice_config" })
   | (WsEnvelope<VoiceSpeakersPayload> & { readonly type: "voice_speakers" })
   | (WsEnvelope<VoiceTokenPayload> & { readonly type: "voice_token" })
+  | (WsEnvelope<VoiceMovedPayload> & { readonly type: "voice_moved" })
+  | (WsEnvelope<VoiceDisconnectedPayload> & { readonly type: "voice_disconnected" })
   | (WsEnvelope<VoiceE2EEAnnouncePayload> & { readonly type: "voice_e2ee_announce" })
   | (WsEnvelope<VoiceE2EEOfferPayload> & { readonly type: "voice_e2ee_offer" })
   | (WsEnvelope<MemberJoinPayload> & { readonly type: "member_join" })
@@ -538,6 +588,10 @@ export type ClientMessage =
   | (WsEnvelope<VoiceDeafenPayload> & { readonly type: "voice_deafen" })
   | (WsEnvelope<VoiceCameraPayload> & { readonly type: "voice_camera" })
   | (WsEnvelope<VoiceScreensharePayload> & { readonly type: "voice_screenshare" })
+  | (WsEnvelope<VoiceModMutePayload> & { readonly type: "voice_mod_mute" })
+  | (WsEnvelope<VoiceModDeafenPayload> & { readonly type: "voice_mod_deafen" })
+  | (WsEnvelope<VoiceModMovePayload> & { readonly type: "voice_mod_move" })
+  | (WsEnvelope<VoiceModKickPayload> & { readonly type: "voice_mod_kick" })
   | (WsEnvelope<Record<string, never>> & { readonly type: "voice_token_refresh" })
   | (WsEnvelope<{ public_key: string; signature?: string }> & {
       readonly type: "voice_e2ee_announce";
@@ -600,6 +654,13 @@ export interface MessageResponse {
 export interface MessagesResponse {
   readonly messages: readonly MessageResponse[];
   readonly has_more: boolean;
+}
+
+/** Result of a channel purge — the ids actually soft-deleted, newest-first. */
+export interface PurgeResponse {
+  readonly channel_id: number;
+  readonly ids: readonly number[];
+  readonly count: number;
 }
 
 /** Member object from REST API. */

@@ -179,16 +179,23 @@ type ReactionInfo struct {
 
 // VoiceState represents a row in the voice_states table.
 // It tracks which voice channel a user is in and their current audio state.
+//
+// ServerMuted/ServerDeafened are moderator-imposed and, unlike Muted/Deafened,
+// the user cannot clear them: while set, their own voice_mute/voice_deafen
+// unmute attempts are refused. They are scoped to the voice session — the row
+// is deleted on leave — but survive a channel switch.
 type VoiceState struct {
-	UserID      int64  `json:"user_id"`
-	ChannelID   int64  `json:"channel_id"`
-	Username    string `json:"username"`
-	Muted       bool   `json:"muted"`
-	Deafened    bool   `json:"deafened"`
-	Speaking    bool   `json:"speaking"`
-	Camera      bool   `json:"camera"`
-	Screenshare bool   `json:"screenshare"`
-	JoinedAt    string `json:"-"`
+	UserID         int64  `json:"user_id"`
+	ChannelID      int64  `json:"channel_id"`
+	Username       string `json:"username"`
+	Muted          bool   `json:"muted"`
+	Deafened       bool   `json:"deafened"`
+	Speaking       bool   `json:"speaking"`
+	Camera         bool   `json:"camera"`
+	Screenshare    bool   `json:"screenshare"`
+	ServerMuted    bool   `json:"server_muted"`
+	ServerDeafened bool   `json:"server_deafened"`
+	JoinedAt       string `json:"-"`
 }
 
 // ChannelUnread holds per-user unread data for a single channel.

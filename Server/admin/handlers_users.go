@@ -1,15 +1,13 @@
 package admin
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/permissions"
 	"github.com/owncord/server/service"
 )
 
@@ -151,16 +149,22 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 		}
 
 		if req.RoleID != nil {
-			if _, err := database.ExecContext(r.Context(), `UPDATE users SET role_id = ? WHERE id = ?`, *req.RoleID, id); err != nil {
-				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update role")
+			// Routed through ModerationService, which enforces MANAGE_ROLES,
+			// the actor-outranks-target rule, and the assign-below-own-rank
+			// rule (without it any admin could promote anyone to Owner), and
+			// writes the audit row.
+			if mod == nil {
+				// Fail closed rather than fall back to an unchecked UPDATE.
+				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
 				return
 			}
-			slog.Info("role changed", "actor_id", actor, "target_user", user.Username, "new_role_id", *req.RoleID)
+			if err := mod.ChangeUserRole(r.Context(), actor, id, *req.RoleID); err != nil {
+				writeModerationErr(w, err)
+				return
+			}
 			if permInvalidator != nil {
 				permInvalidator.InvalidateUser(id)
 			}
-			db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "role_change", "user", id,
-				fmt.Sprintf("changed %s role to %d", user.Username, *req.RoleID))
 			if role, err := database.GetRoleByID(r.Context(), *req.RoleID); err == nil && role != nil {
 				if hub != nil {
 					hub.BroadcastMemberUpdate(id, role.Name)
@@ -177,21 +181,49 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 	}
 }
 
-func handleForceLogout(database *db.DB) http.HandlerFunc {
+// handleForceLogout revokes every session of the target user. The route is
+// gated on KICK_MEMBERS; ModerationService additionally enforces the
+// actor-outranks-target hierarchy and writes the audit row.
+func handleForceLogout(mod *service.ModerationService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid user id")
 			return
 		}
-
-		if err := database.ForceLogoutUser(r.Context(), id); err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to logout user")
+		if mod == nil {
+			// Fail closed rather than cut sessions without a hierarchy check.
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
 			return
 		}
-		actor := actorFromContext(r)
-		slog.Info("force logout", "actor_id", actor, "target_user_id", id)
-		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "force_logout", "user", id, "all sessions terminated")
+
+		if err := mod.ForceLogout(r.Context(), actorFromContext(r), id); err != nil {
+			writeModerationErr(w, err)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// handleGetMe describes the calling principal so the admin panel can hide the
+// surfaces its role cannot use. Perimeter-level: every authenticated principal
+// may read its own permissions.
+func handleGetMe() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, userOK := r.Context().Value(adminUserKey).(*db.User)
+		role, roleOK := r.Context().Value(adminRoleKey).(*db.Role)
+		if !userOK || user == nil || !roleOK || role == nil {
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			return
+		}
+		writeJSON(w, http.StatusOK, adminMeResponse{
+			ID:           user.ID,
+			Username:     user.Username,
+			RoleID:       role.ID,
+			RoleName:     role.Name,
+			RolePosition: role.Position,
+			Permissions:  role.Permissions,
+			IsOwner:      role.Position >= permissions.OwnerRolePosition,
+		})
 	}
 }

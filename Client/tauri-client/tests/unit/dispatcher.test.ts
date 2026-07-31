@@ -29,6 +29,8 @@ vi.mock("@lib/livekitSession", () => ({
   leaveVoice: vi.fn(),
   cleanupAll: vi.fn(),
   isVoiceConnected: vi.fn(() => false),
+  setMuted: vi.fn(),
+  setDeafened: vi.fn(),
 }));
 // F3: the ready handler publishes our identity key. Mock the orchestrator so
 // the wiring is asserted without real keygen/keyring.
@@ -38,6 +40,8 @@ vi.mock("@lib/identity", () => ({
 
 import { ensureIdentityKeyPublished as _ensureIdentityKeyPublished } from "../../src/lib/identity";
 const mockEnsurePublished = vi.mocked(_ensureIdentityKeyPublished);
+
+import { setMuted as mockSetMuted, setDeafened as mockSetDeafened } from "@lib/livekitSession";
 
 // Suppress console output
 vi.spyOn(console, "info").mockImplementation(() => {});
@@ -483,6 +487,51 @@ describe("WS Dispatcher", () => {
     expect(found?.deleted).toBe(true);
   });
 
+  it("wires chat_bulk_deleted to messages store", () => {
+    for (const id of [100, 101, 102]) {
+      mock.dispatch("chat_message", {
+        id,
+        channel_id: 1,
+        user: { id: 1, username: "alex", avatar: null },
+        content: `spam ${id}`,
+        reply_to: null,
+        attachments: [],
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+    }
+
+    mock.dispatch("chat_bulk_deleted", { channel_id: 1, ids: [102, 101] });
+
+    const msgs = messagesStore.getState().messagesByChannel.get(1);
+    expect(msgs?.find((m) => m.id === 102)?.deleted).toBe(true);
+    expect(msgs?.find((m) => m.id === 101)?.deleted).toBe(true);
+    // Tombstones, not removals: the rows and their content survive.
+    expect(msgs).toHaveLength(3);
+    expect(msgs?.find((m) => m.id === 102)?.content).toBe("spam 102");
+    // An id outside the purge is untouched.
+    expect(msgs?.find((m) => m.id === 100)?.deleted).toBe(false);
+  });
+
+  it("ignores chat_bulk_deleted for an unloaded channel and an empty id list", () => {
+    mock.dispatch("chat_message", {
+      id: 200,
+      channel_id: 1,
+      user: { id: 1, username: "alex", avatar: null },
+      content: "keep",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+    const before = messagesStore.getState().messagesByChannel;
+
+    mock.dispatch("chat_bulk_deleted", { channel_id: 99, ids: [1, 2, 3] });
+    mock.dispatch("chat_bulk_deleted", { channel_id: 1, ids: [] });
+
+    // No-op dispatches must not churn the map identity (re-render trigger).
+    expect(messagesStore.getState().messagesByChannel).toBe(before);
+    expect(messagesStore.getState().messagesByChannel.get(1)?.[0]?.deleted).toBe(false);
+  });
+
   it("wires chat_send_ok without id does not crash", () => {
     expect(() => {
       mock.dispatch("chat_send_ok", { message_id: 500, timestamp: "2026-03-15T10:00:00Z" });
@@ -703,6 +752,86 @@ describe("WS Dispatcher", () => {
     });
 
     expect(voiceStore.getState().currentChannelId).toBe(3);
+  });
+
+  it("mirrors a moderator mute/deafen into the local flags and honors it", async () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+
+    mock.dispatch("voice_state", {
+      channel_id: 3,
+      user_id: 5,
+      username: "me",
+      muted: true,
+      deafened: true,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+      server_muted: true,
+      server_deafened: true,
+    });
+
+    const state = voiceStore.getState();
+    expect(state.localServerMuted).toBe(true);
+    expect(state.localServerDeafened).toBe(true);
+
+    // Deafen is client-enforced: the session must stop playing remote audio.
+    await vi.runAllTimersAsync();
+    expect(vi.mocked(mockSetDeafened)).toHaveBeenCalledWith(true);
+    expect(vi.mocked(mockSetMuted)).toHaveBeenCalledWith(true);
+  });
+
+  it("does not set the local moderator flags from another user's voice_state", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+
+    mock.dispatch("voice_state", {
+      channel_id: 3,
+      user_id: 99,
+      username: "other",
+      muted: true,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+      server_muted: true,
+    });
+
+    expect(voiceStore.getState().localServerMuted).not.toBe(true);
+    expect(voiceStore.getState().voiceUsers.get(3)?.get(99)?.serverMuted).toBe(true);
+  });
+
+  it("wires voice_moved to a leave + re-join of the destination channel", async () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
+
+    mock.dispatch("voice_moved", { to_channel_id: 7 });
+    await vi.runAllTimersAsync();
+
+    expect(voiceStore.getState().currentChannelId).toBe(7);
+    expect(mock.ws.send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "voice_join", payload: { channel_id: 7 } }),
+    );
+  });
+
+  it("wires voice_disconnected to clearing the local voice session", async () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
+
+    mock.dispatch("voice_disconnected", { channel_id: 3, reason: "kicked" });
+    await vi.runAllTimersAsync();
+
+    expect(voiceStore.getState().currentChannelId).toBeNull();
   });
 
   it("wires voice_config to voice store", () => {

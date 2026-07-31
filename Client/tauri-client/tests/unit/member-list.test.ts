@@ -5,7 +5,7 @@ import { membersStore, updatePresence, updateMemberRole } from "@stores/members.
 import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, setRoles } from "@stores/channels.store";
-import type { UserStatus } from "../../src/lib/types";
+import { Permission, type UserStatus } from "../../src/lib/types";
 
 function resetStore(): void {
   membersStore.setState(() => ({
@@ -317,6 +317,64 @@ describe("MemberList", () => {
     expect(labels).toEqual(["Block"]);
 
     document.body.querySelector(".context-menu")?.remove();
+  });
+
+  // The menu used to gate on the role NAME (owner/admin), so the seeded
+  // Moderator role — which holds KICK_MEMBERS and BAN_MEMBERS — got nothing,
+  // and a custom role holding those bits got nothing either.
+  describe("permission-driven moderation items", () => {
+    /** Mirrors the seeded Moderator mask (0x000FFFFF): MANAGE_MESSAGES,
+     *  MANAGE_CHANNELS, KICK_MEMBERS, BAN_MEMBERS — no MANAGE_ROLES. */
+    const MODERATOR_MASK = 0x000fffff;
+
+    function openMenuAs(roleName: string, permissions: number): string[] {
+      setRoles([{ id: 7, name: roleName, color: null, permissions }]);
+      setTestMembers(testMembers);
+      const opts: MemberListOptions = { ...defaultOpts(), currentUserRole: roleName };
+      memberList.destroy?.();
+      memberList = createMemberList(opts);
+      memberList.mount(container);
+
+      const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
+      memberItem.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      const menu = document.body.querySelector(".context-menu");
+      expect(menu).not.toBeNull();
+      // Submenu role options share the item class; only top-level items count.
+      return Array.from(menu!.children)
+        .filter((el) => el.classList.contains("context-menu__item"))
+        .map((el) => el.firstChild?.textContent ?? "");
+    }
+
+    afterEach(() => {
+      document.body.querySelector(".context-menu")?.remove();
+    });
+
+    it("shows Force Logout and Ban but not Change Role for a moderator mask", () => {
+      const labels = openMenuAs("moderator", MODERATOR_MASK);
+      expect(labels).toContain("Force Logout");
+      expect(labels).toContain("Ban");
+      expect(labels).not.toContain("Change Role");
+      expect(labels).toContain("Block");
+    });
+
+    it("shows Change Role only when MANAGE_ROLES is held", () => {
+      const labels = openMenuAs("staff", Permission.MANAGE_ROLES | Permission.KICK_MEMBERS);
+      expect(labels).toContain("Change Role");
+      expect(labels).toContain("Force Logout");
+      expect(labels).not.toContain("Ban");
+    });
+
+    it("shows every moderation item for the ADMINISTRATOR bit", () => {
+      const labels = openMenuAs("admin", Permission.ADMINISTRATOR);
+      expect(labels).toEqual(
+        expect.arrayContaining(["Change Role", "Force Logout", "Ban", "Block"]),
+      );
+    });
+
+    it("shows only Block for a role whose mask holds no moderation bits", () => {
+      const labels = openMenuAs("member", Permission.SEND_MESSAGES | Permission.READ_MESSAGES);
+      expect(labels).toEqual(["Block"]);
+    });
   });
 
   it("context menu does not appear when right-clicking yourself", () => {

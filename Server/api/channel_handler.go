@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -49,14 +50,22 @@ func searchRateLimitMiddleware(limiter *auth.RateLimiter, limit int, window time
 	}
 }
 
+// PurgeBroadcaster is the interface needed to fan a bulk delete out over
+// WebSocket from a REST handler. Satisfied by *ws.Hub.
+type PurgeBroadcaster interface {
+	BroadcastChatBulkDeleted(channelID int64, messageIDs []int64)
+}
+
 // MountChannelRoutes registers all channel-related routes onto r.
 // All routes require authentication. The limiter is used to rate-limit
-// expensive endpoints like search.
-func MountChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, limiter *auth.RateLimiter, trustedProxies []string) {
+// expensive endpoints like search. broadcaster may be nil, in which case a
+// purge still commits but no chat_bulk_deleted event is emitted.
+func MountChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, limiter *auth.RateLimiter, trustedProxies []string, broadcaster PurgeBroadcaster) {
 	r.Route("/api/v1/channels", func(r chi.Router) {
 		r.Use(AuthMiddleware(database))
 		r.Get("/", handleListChannels(svc))
 		r.Get("/{id}/messages", handleGetMessages(svc))
+		r.Post("/{id}/messages/purge", handlePurgeMessages(svc, broadcaster))
 		r.Get("/{id}/pins", handleGetPins(svc))
 		r.Post("/{id}/pins/{messageId}", handleSetPinned(svc, true))
 		r.Delete("/{id}/pins/{messageId}", handleSetPinned(svc, false))
@@ -144,6 +153,66 @@ func handleGetMessages(svc *service.Services) http.HandlerFunc {
 			HasMore  bool                    `json:"has_more"`
 		}
 		writeJSON(w, http.StatusOK, response{Messages: msgs, HasMore: hasMore})
+	}
+}
+
+// purgeRequest is the JSON body for POST /api/v1/channels/{id}/messages/purge.
+// Before is optional; 0 means "start from the newest message".
+type purgeRequest struct {
+	Limit  int   `json:"limit"`
+	Before int64 `json:"before"`
+}
+
+// purgeResponse reports what the purge actually deleted, which can be fewer
+// than Limit rows when the channel holds less history.
+type purgeResponse struct {
+	ChannelID int64   `json:"channel_id"`
+	IDs       []int64 `json:"ids"`
+	Count     int     `json:"count"`
+}
+
+// handlePurgeMessages bulk soft-deletes the newest messages in a channel and
+// broadcasts a single chat_bulk_deleted event.
+func handlePurgeMessages(svc *service.Services, broadcaster PurgeBroadcaster) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		channelID, ok := parseIDParam(w, r, "id")
+		if !ok {
+			return
+		}
+
+		user, _ := r.Context().Value(UserKey).(*db.User)
+		if user == nil {
+			writeJSON(w, http.StatusUnauthorized, errorResponse{
+				Error: "UNAUTHORIZED", Message: "authentication required",
+			})
+			return
+		}
+
+		var req purgeRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{
+				Error: "BAD_REQUEST", Message: "invalid request body",
+			})
+			return
+		}
+
+		result, err := svc.Messages.PurgeMessages(r.Context(), user.ID, channelID, req.Limit, req.Before)
+		if err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
+
+		// A purge that matched nothing is still a success, but there is no
+		// state change to announce.
+		if broadcaster != nil && len(result.MessageIDs) > 0 {
+			broadcaster.BroadcastChatBulkDeleted(result.ChannelID, result.MessageIDs)
+		}
+
+		writeJSON(w, http.StatusOK, purgeResponse{
+			ChannelID: result.ChannelID,
+			IDs:       result.MessageIDs,
+			Count:     len(result.MessageIDs),
+		})
 	}
 }
 

@@ -13,10 +13,14 @@ import (
 type Querier interface {
 	AddReaction(ctx context.Context, arg AddReactionParams) error
 	AdminUpdateChannel(ctx context.Context, arg AdminUpdateChannelParams) error
+	ApplyVoiceServerDeafen(ctx context.Context, userID int64) error
+	ApplyVoiceServerMute(ctx context.Context, userID int64) error
 	BanUser(ctx context.Context, arg BanUserParams) error
 	BlockUser(ctx context.Context, arg BlockUserParams) error
 	CleanupExpiredLockouts(ctx context.Context, expiresAt string) error
 	ClearAllVoiceStates(ctx context.Context) error
+	ClearVoiceServerDeafen(ctx context.Context, userID int64) error
+	ClearVoiceServerMute(ctx context.Context, userID int64) error
 	ClearVoiceState(ctx context.Context, userID int64) error
 	CloseDM(ctx context.Context, arg CloseDMParams) error
 	CountActiveCameras(ctx context.Context, channelID int64) (int64, error)
@@ -92,6 +96,10 @@ type Querier interface {
 	IsBlocked(ctx context.Context, arg IsBlockedParams) (int64, error)
 	IsDMParticipant(ctx context.Context, arg IsDMParticipantParams) (int64, error)
 	IsEitherBlocked(ctx context.Context, arg IsEitherBlockedParams) (int64, error)
+	// server_muted / server_deafened are deliberately absent from both upserts'
+	// reset lists: a moderator-imposed mute must survive a channel switch, which
+	// reaches the ON CONFLICT branch. It is scoped to the voice session:
+	// leaving voice deletes the row, so a rejoin starts clean.
 	JoinVoiceChannel(ctx context.Context, arg JoinVoiceChannelParams) error
 	JoinVoiceChannelIfCapacity(ctx context.Context, arg JoinVoiceChannelIfCapacityParams) (sql.Result, error)
 	LeaveVoiceChannel(ctx context.Context, userID int64) error

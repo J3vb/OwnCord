@@ -9,6 +9,7 @@ import type {
   ChatMessagePayload,
   ChatEditedPayload,
   ChatDeletedPayload,
+  ChatBulkDeletedPayload,
   ReactionUpdatePayload,
   MessageUser,
   Attachment,
@@ -379,6 +380,30 @@ export function deleteMessage(payload: ChatDeletedPayload): void {
 
     const updatedList = channelMessages.map((msg) =>
       msg.id === payload.message_id ? { ...msg, deleted: true } : msg,
+    );
+
+    const updatedMessages = new Map(prev.messagesByChannel);
+    updatedMessages.set(payload.channel_id, updatedList);
+    return { ...prev, messagesByChannel: updatedMessages };
+  });
+}
+
+/**
+ * Soft-delete every id in one purge. Renders exactly like a single delete —
+ * the rows stay as tombstones — but touches the channel's list once instead of
+ * once per message.
+ */
+export function bulkDeleteMessages(payload: ChatBulkDeletedPayload): void {
+  if (payload.ids.length === 0) return;
+  messagesStore.setState((prev) => {
+    const channelMessages = prev.messagesByChannel.get(payload.channel_id);
+    if (!channelMessages) return prev;
+
+    const purged = new Set(payload.ids);
+    if (!channelMessages.some((msg) => purged.has(msg.id) && !msg.deleted)) return prev;
+
+    const updatedList = channelMessages.map((msg) =>
+      purged.has(msg.id) ? { ...msg, deleted: true } : msg,
     );
 
     const updatedMessages = new Map(prev.messagesByChannel);

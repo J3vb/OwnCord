@@ -14,6 +14,10 @@ type adminContextKey int
 const (
 	// adminUserKey is the context key for the authenticated *db.User.
 	adminUserKey adminContextKey = iota
+	// adminRoleKey is the context key for the authenticated principal's
+	// *db.Role. Set by adminAuthMiddleware so requirePerm and the /me handler
+	// need no second query.
+	adminRoleKey
 	// adminSessionKey is the context key for the authenticated *db.Session.
 	adminSessionKey
 	// adminTokenHashKey is the context key for the hash (string) of the bearer
@@ -80,6 +84,23 @@ type adminUserResponse struct {
 	Banned     bool    `json:"banned"`
 	BanReason  *string `json:"ban_reason,omitempty"`
 	BanExpires *string `json:"ban_expires,omitempty"`
+}
+
+// ─── adminMeResponse ────────────────────────────────────────────────────────
+
+// adminMeResponse describes the calling principal to the admin panel so it can
+// hide the surfaces the principal's role cannot use. It is an affordance hint
+// only — every route re-checks the bit server-side.
+type adminMeResponse struct {
+	ID           int64  `json:"id"`
+	Username     string `json:"username"`
+	RoleID       int64  `json:"role_id"`
+	RoleName     string `json:"role_name"`
+	RolePosition int    `json:"role_position"`
+	Permissions  int64  `json:"permissions"`
+	// IsOwner mirrors ownerOnlyMiddleware: owner-only routes gate on position,
+	// not on a permission bit, so the panel cannot derive this from the mask.
+	IsOwner bool `json:"is_owner"`
 }
 
 // toAdminUserResponse converts a db.UserWithRole to the safe response shape.

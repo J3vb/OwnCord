@@ -17,6 +17,10 @@
     { "wire": "voice_deafen", "go": "MsgTypeVoiceDeafen", "ts": "VOICE_DEAFEN" },
     { "wire": "voice_camera", "go": "MsgTypeVoiceCamera", "ts": "VOICE_CAMERA" },
     { "wire": "voice_screenshare", "go": "MsgTypeVoiceScreenshare", "ts": "VOICE_SCREENSHARE" },
+    { "wire": "voice_mod_mute", "go": "MsgTypeVoiceModMute", "ts": "VOICE_MOD_MUTE" },
+    { "wire": "voice_mod_deafen", "go": "MsgTypeVoiceModDeafen", "ts": "VOICE_MOD_DEAFEN" },
+    { "wire": "voice_mod_move", "go": "MsgTypeVoiceModMove", "ts": "VOICE_MOD_MOVE" },
+    { "wire": "voice_mod_kick", "go": "MsgTypeVoiceModKick", "ts": "VOICE_MOD_KICK" },
     { "wire": "ping", "go": "MsgTypePing", "ts": "PING" },
     {
       "wire": "voice_token_refresh",
@@ -35,6 +39,7 @@
     { "wire": "chat_send_ok", "go": "MsgTypeChatSendOK", "ts": "CHAT_SEND_OK" },
     { "wire": "chat_edited", "go": "MsgTypeChatEdited", "ts": "CHAT_EDITED" },
     { "wire": "chat_deleted", "go": "MsgTypeChatDeleted", "ts": "CHAT_DELETED" },
+    { "wire": "chat_bulk_deleted", "go": "MsgTypeChatBulkDeleted", "ts": "CHAT_BULK_DELETED" },
     { "wire": "reaction_update", "go": "MsgTypeReactionUpdate", "ts": "REACTION_UPDATE" },
     { "wire": "typing", "go": "MsgTypeTyping", "ts": "TYPING" },
     { "wire": "presence", "go": "MsgTypePresence", "ts": "PRESENCE" },
@@ -51,6 +56,8 @@
       "ts": "VOICE_LEAVE",
       "note": "broadcast (same string as client msg)"
     },
+    { "wire": "voice_moved", "go": "MsgTypeVoiceMoved", "ts": "VOICE_MOVED" },
+    { "wire": "voice_disconnected", "go": "MsgTypeVoiceDisconnected", "ts": "VOICE_DISCONNECTED" },
     { "wire": "member_join", "go": "MsgTypeMemberJoin", "ts": "MEMBER_JOIN" },
     { "wire": "member_leave", "go": "MsgTypeMemberLeave", "ts": "MEMBER_LEAVE" },
     { "wire": "member_update", "go": "MsgTypeMemberUpdate", "ts": "MEMBER_UPDATE" },

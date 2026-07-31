@@ -61,6 +61,9 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 | `016_announcement_channel_type.sql` | Recreates the channel-type triggers to allow `announcement` |
 | `017_user_identity_key.sql` | Adds `users.identity_public_key` (long-term E2EE identity key for voice TOFU) |
 | `018_api_tokens.sql` | Adds `api_tokens` — long-lived, revocable bearer tokens for headless clients (bot/service auth) |
+| `019_perf_indexes.sql` | Adds hot-path indexes |
+| `020_drop_redundant_indexes.sql` | Drops indexes duplicating UNIQUE auto-indexes |
+| `021_voice_server_moderation.sql` | Adds `server_muted`, `server_deafened` to voice_states (moderator-imposed) |
 
 ---
 
@@ -346,9 +349,16 @@ CREATE TABLE voice_states (
     speaking    INTEGER NOT NULL DEFAULT 0,
     camera      INTEGER NOT NULL DEFAULT 0,
     screenshare INTEGER NOT NULL DEFAULT 0,
+    server_muted    INTEGER NOT NULL DEFAULT 0,
+    server_deafened INTEGER NOT NULL DEFAULT 0,
     joined_at   TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 ```
+
+`server_muted` / `server_deafened` are moderator-imposed (`MUTE_MEMBERS`) and,
+unlike `muted` / `deafened`, the user cannot clear them. They survive a channel
+switch (the join upsert does not reset them) but not a leave, which deletes the
+row.
 
 ---
 
@@ -558,17 +568,28 @@ Permissions are stored as an integer bitfield (31 bits used) in `roles.permissio
 | 11 | `0x800` | `USE_VIDEO` | Enable camera in voice channels |
 | 12 | `0x1000` | `SHARE_SCREEN` | Share screen in voice channels |
 | 16 | `0x10000` | `MANAGE_MESSAGES` | Delete others' messages, pin/unpin |
-| 17 | `0x20000` | `MANAGE_CHANNELS` | Create, edit, delete channels |
-| 18 | `0x40000` | `KICK_MEMBERS` | Kick users |
-| 19 | `0x80000` | `BAN_MEMBERS` | Ban/unban users |
-| 20 | `0x100000` | `MUTE_MEMBERS` | Server-side mute/deafen in voice |
-| 24 | `0x1000000` | `MANAGE_ROLES` | Create, edit, delete roles |
-| 25 | `0x2000000` | `MANAGE_SERVER` | Modify server settings |
+| 17 | `0x20000` | `MANAGE_CHANNELS` | Create, edit, delete channels, edit channel permission overrides (`/admin/api/channels*`) |
+| 18 | `0x40000` | `KICK_MEMBERS` | Force-logout a lower-ranked user (`DELETE /admin/api/users/{id}/sessions`) |
+| 19 | `0x80000` | `BAN_MEMBERS` | Ban/unban a lower-ranked user (`PATCH /admin/api/users/{id}`) |
+| 20 | `0x100000` | `MUTE_MEMBERS` | Server-side mute/deafen in voice — admits to the admin perimeter; no route enforces it yet |
+| 24 | `0x1000000` | `MANAGE_ROLES` | Assign a role below the actor's own rank to a lower-ranked user (`PATCH /admin/api/users/{id}`) |
+| 25 | `0x2000000` | `MANAGE_SERVER` | Read and modify server settings (`/admin/api/settings`) |
 | 26 | `0x4000000` | `MANAGE_INVITES` | Create and revoke invite codes |
-| 27 | `0x8000000` | `VIEW_AUDIT_LOG` | View the audit log |
+| 27 | `0x8000000` | `VIEW_AUDIT_LOG` | Read the audit log (`GET /admin/api/audit-log`) |
 | 30 | `0x40000000` | `ADMINISTRATOR` | Bypasses ALL permission checks |
 
 Bits 2-4, 7, 13-15, 21-23, 28-29, 31 are reserved.
+
+### Admin perimeter
+
+`permissions.AdminPerimeter` is the ANY-of mask that admits a principal to
+`/admin/api/*`: `ADMINISTRATOR | MANAGE_CHANNELS | MANAGE_ROLES |
+MANAGE_SERVER | VIEW_AUDIT_LOG | KICK_MEMBERS | BAN_MEMBERS | MUTE_MEMBERS`.
+Holding one bit only gets a principal through the door — each route group
+re-checks the specific bit it needs, so the seeded Moderator role can manage
+channels and ban members without reading settings or the audit log. Owner-only
+routes (backups, updates, API tokens) still gate on role *position*, not on a
+bit. See `docs/api.md` for the per-route mapping.
 
 ### Permission Checking Logic
 

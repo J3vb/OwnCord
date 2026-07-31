@@ -94,6 +94,11 @@ type chatDeletedPayload struct {
 	ChannelID int64 `json:"channel_id"`
 }
 
+type chatBulkDeletedPayload struct {
+	ChannelID int64   `json:"channel_id"`
+	IDs       []int64 `json:"ids"`
+}
+
 type reactionUpdatePayload struct {
 	MessageID int64  `json:"message_id"`
 	ChannelID int64  `json:"channel_id"`
@@ -117,6 +122,25 @@ type voiceStatePayload struct {
 	Speaking    bool   `json:"speaking"`
 	Camera      bool   `json:"camera"`
 	Screenshare bool   `json:"screenshare"`
+	// ServerMuted/ServerDeafened are moderator-imposed. Muted/Deafened are
+	// always set alongside them, so a client that ignores these two still
+	// renders the user as silenced; they exist so the UI can distinguish a
+	// self-mute from one the user may not lift.
+	ServerMuted    bool `json:"server_muted"`
+	ServerDeafened bool `json:"server_deafened"`
+}
+
+// voiceMovedPayload tells one client its moderator moved it to another voice
+// channel. The client tears down its LiveKit session and re-joins to_channel_id
+// through the normal voice_join path.
+type voiceMovedPayload struct {
+	ToChannelID int64 `json:"to_channel_id"`
+}
+
+// voiceDisconnectedPayload tells one client a moderator removed it from voice.
+type voiceDisconnectedPayload struct {
+	ChannelID int64  `json:"channel_id"`
+	Reason    string `json:"reason"`
 }
 
 type voiceConfigPayload struct {
@@ -365,6 +389,19 @@ func buildChatDeleted(msgID, channelID int64) []byte {
 	})
 }
 
+// buildChatBulkDeleted constructs a chat_bulk_deleted broadcast. ids is
+// emitted as an empty array rather than null when nothing was purged, so
+// clients can iterate it unconditionally.
+func buildChatBulkDeleted(channelID int64, ids []int64) []byte {
+	if ids == nil {
+		ids = []int64{}
+	}
+	return buildJSON(wsMsg{
+		Type:    MsgTypeChatBulkDeleted,
+		Payload: chatBulkDeletedPayload{ChannelID: channelID, IDs: ids},
+	})
+}
+
 // buildReactionUpdate constructs a reaction_update broadcast.
 func buildReactionUpdate(msgID, channelID, userID int64, emoji, action string) []byte {
 	return buildJSON(wsMsg{
@@ -404,7 +441,27 @@ func buildVoiceState(state db.VoiceState) []byte {
 			Speaking:    state.Speaking,
 			Camera:      state.Camera,
 			Screenshare: state.Screenshare,
+
+			ServerMuted:    state.ServerMuted,
+			ServerDeafened: state.ServerDeafened,
 		},
+	})
+}
+
+// buildVoiceMoved constructs a voice_moved message for the moved client.
+func buildVoiceMoved(toChannelID int64) []byte {
+	return buildJSON(wsMsg{
+		Type:    MsgTypeVoiceMoved,
+		Payload: voiceMovedPayload{ToChannelID: toChannelID},
+	})
+}
+
+// buildVoiceDisconnected constructs a voice_disconnected message for the
+// client a moderator removed from voice.
+func buildVoiceDisconnected(channelID int64, reason string) []byte {
+	return buildJSON(wsMsg{
+		Type:    MsgTypeVoiceDisconnected,
+		Payload: voiceDisconnectedPayload{ChannelID: channelID, Reason: reason},
 	})
 }
 

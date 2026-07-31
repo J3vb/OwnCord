@@ -9,6 +9,7 @@ import type {
   RegisterResponse,
   HealthResponse,
   MessagesResponse,
+  PurgeResponse,
   SearchResponse,
   ApiError,
   ChannelType,
@@ -333,6 +334,25 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         "GET",
         `/channels/${channelId}/messages${qs ? `?${qs}` : ""}`,
         undefined,
+        signal,
+      );
+    },
+
+    /**
+     * Bulk-delete the newest `limit` messages in a channel (1-100). Requires
+     * MANAGE_MESSAGES; the server broadcasts one chat_bulk_deleted event, so
+     * the local store is updated by the dispatcher rather than here.
+     */
+    purgeMessages(
+      channelId: number,
+      limit: number,
+      options?: { before?: number },
+      signal?: AbortSignal,
+    ): Promise<PurgeResponse> {
+      return request<PurgeResponse>(
+        "POST",
+        `/channels/${channelId}/messages/purge`,
+        { limit, ...(options?.before !== undefined ? { before: options.before } : {}) },
         signal,
       );
     },

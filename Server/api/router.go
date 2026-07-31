@@ -109,8 +109,8 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Invite management routes (require MANAGE_INVITES permission).
 	MountInviteRoutes(r, database, svc)
 
-	// Channel and message REST routes.
-	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies)
+	// Channel and message REST routes are mounted after hub creation (below)
+	// so the hub can fan a bulk delete out as one chat_bulk_deleted event.
 
 	// GIF proxy — keeps the Klipy API key server-side. Mounted unconditionally;
 	// with no key configured the endpoints answer 503 GIF_DISABLED so the
@@ -213,6 +213,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// DM (direct message) REST routes — mounted after hub creation so the
 	// hub can send real-time dm_channel_close events to WebSocket clients.
 	MountDMRoutes(r, database, svc, hub)
+
+	// Channel and message REST routes — mounted after hub creation so a
+	// message purge can broadcast chat_bulk_deleted to the channel.
+	MountChannelRoutes(r, database, svc, limiter, cfg.Server.TrustedProxies, hub)
 
 	// H-8: Connectivity diagnostics restricted to admin users only.
 	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.
