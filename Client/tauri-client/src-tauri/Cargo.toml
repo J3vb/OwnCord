@@ -117,3 +117,11 @@ windows-sys = { version = "0.60", features = [
 
 [target.'cfg(target_os = "linux")'.dependencies]
 device_query = "2"
+# Direct access to the WebKitGTK webview for voice/video support. WebKitGTK
+# denies getUserMedia/enumerateDevices permission requests by default (wry
+# installs no handler on Linux, unlike its macOS backend which auto-grants),
+# and ships with media-stream/WebRTC settings off — so microphones and cameras
+# are invisible to the webview without this hook. Version-pinned to match
+# wry's own `=2.0.2` pin so both link the same crate build; v2_38 gates the
+# enable-webrtc setting.
+webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
