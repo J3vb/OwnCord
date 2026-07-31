@@ -12,8 +12,19 @@ import (
 	"strings"
 	"time"
 
+	"syscall"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/owncord/server/db"
+	"github.com/owncord/server/updater"
+)
+
+const (
+	// restartGraceDelay lets the HTTP response and the server_restart
+	// broadcast reach clients before the process goes away.
+	restartGraceDelay = 2 * time.Second
+	// shutdownGraceDelay is how long SIGTERM gets before the os.Exit backstop.
+	shutdownGraceDelay = 10 * time.Second
 )
 
 // backupBaseDir is the directory for backup files, resolved to an absolute
@@ -168,9 +179,20 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 		// the restore proceeds regardless of client disconnect (Close/copyFile
 		// below are not ctx-aware), so the safety backup must not be skippable
 		// by a canceled request ctx.
-		preRestore := filepath.Join("data", "backups", "pre_restore_"+time.Now().UTC().Format("20060102_150405")+".db")
+		// backupBaseDir, not a cwd-relative path: the safety copy has to land in
+		// the same directory the rest of the backup handlers read and write, or
+		// a server started from another working directory writes it somewhere
+		// the operator will never find it.
+		preRestore := filepath.Join(backupBaseDir, "pre_restore_"+time.Now().UTC().Format("20060102_150405")+".db")
 		if err := database.BackupTo(context.WithoutCancel(r.Context()), preRestore); err != nil {
-			slog.Warn("pre-restore backup failed", "err", err)
+			// Fail closed. The admin panel promises "a pre-restore backup will
+			// be created" before an irreversible overwrite; proceeding without
+			// one takes away the safety net the operator was shown, exactly
+			// when they need it (restoring the wrong or a corrupt backup).
+			slog.Error("pre-restore backup failed — aborting restore", "err", err)
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR",
+				"could not create the pre-restore safety backup — restore aborted, database untouched")
+			return
 		}
 
 		// Notify clients that the server is restarting.
@@ -198,13 +220,54 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 			return
 		}
 
-		slog.Warn("database file replaced — server must restart to use restored data", "backup", name)
+		slog.Warn("database file replaced — restarting to load the restored data", "backup", name)
 
 		writeJSON(w, http.StatusOK, map[string]string{
 			"message": "database restored — server restarting",
 			"backup":  name,
 		})
+
+		// The database is closed and the file underneath it has been swapped:
+		// this process can serve nothing more. It used to stop here, leaving a
+		// live server answering every request against a closed DB while the
+		// response and the restart broadcast both claimed a restart was
+		// happening. Respawn for real, the same way applying an update does.
+		go restartSelf("backup_restore")
 	})
+}
+
+// restartSelf is the process-restart hook, swappable in tests (which must not
+// respawn or exit the test binary).
+var restartSelf = restartProcess
+
+// restartProcess spawns a fresh copy of this server and shuts the current one
+// down. Mirrors the update-apply path (update_handlers.go): SIGTERM first so
+// main.go's graceful shutdown runs, os.Exit as the backstop.
+func restartProcess(reason string) {
+	// Give the HTTP response and the restart broadcast a moment to flush.
+	time.Sleep(restartGraceDelay)
+
+	exePath, err := os.Executable()
+	if err != nil {
+		slog.Error("restart: cannot determine executable path — manual restart required",
+			"reason", reason, "error", err)
+		return
+	}
+	if resolved, symErr := filepath.EvalSymlinks(exePath); symErr == nil {
+		exePath = resolved
+	}
+	if err := updater.SpawnDetached(exePath, os.Args[1:]); err != nil {
+		slog.Error("restart: spawning the replacement process failed — manual restart required",
+			"reason", reason, "error", err)
+		return
+	}
+
+	slog.Info("restart: replacement process spawned, shutting down", "reason", reason)
+	if p, findErr := os.FindProcess(os.Getpid()); findErr == nil {
+		_ = p.Signal(syscall.SIGTERM)
+		time.Sleep(shutdownGraceDelay)
+	}
+	os.Exit(0) //nolint:gocritic // backstop if the SIGTERM handler didn't exit
 }
 
 // copyFile streams src to dst without loading the entire file into memory.

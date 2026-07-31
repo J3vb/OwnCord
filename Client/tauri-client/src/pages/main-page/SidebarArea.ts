@@ -12,7 +12,6 @@ import type { ApiClient } from "@lib/api";
 import type { RateLimiterSet } from "@lib/rate-limiter";
 import type { ToastContainer } from "@components/Toast";
 import { createChannelSidebar } from "@components/ChannelSidebar";
-import { createMemberList } from "@components/MemberList";
 import { createDmSidebar } from "@components/DmSidebar";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
 import { createEditChannelModal } from "@components/EditChannelModal";
@@ -22,6 +21,7 @@ import { createVoiceWidget } from "@components/VoiceWidget";
 import { createQuickSwitchOverlay } from "@components/QuickSwitchOverlay";
 import type { QuickSwitchProfile } from "@components/QuickSwitchOverlay";
 import { createVoiceWidgetCallbacks, createSidebarVoiceCallbacks } from "./VoiceCallbacks";
+import { createSidebarMemberSection } from "./SidebarMemberSection";
 import { createInviteManagerController } from "./OverlayManagers";
 import {
   selectDmConversation,
@@ -33,7 +33,7 @@ import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories } from "@stores/ui.store";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
-import { channelsStore, setActiveChannel, getRoleIdByName } from "@stores/channels.store";
+import { channelsStore, setActiveChannel } from "@stores/channels.store";
 import { dmStore, removeDmChannel } from "@stores/dm.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import type { ProfileManager } from "@lib/profiles";
@@ -495,145 +495,12 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       }
 
       // --- Member list (below DM section) ---
-      const memberListContainer = createElement("div", {
-        class: "sidebar-members-section",
-        "data-testid": "sidebar-members",
-      });
-
-      // Member header (styled like category headers)
-      const memberHeader = createElement("div", { class: "category sidebar-members-header" });
-      const memberArrow = createElement("span", { class: "category-arrow" }, "\u25BC");
-      const memberLabelEl = createElement("span", { class: "category-name" }, "MEMBERS");
-      appendChildren(memberHeader, memberArrow, memberLabelEl);
-      memberListContainer.appendChild(memberHeader);
-
-      // Resize handle
-      const resizeHandle = createElement("div", { class: "sidebar-resize-handle" });
-      memberListContainer.appendChild(resizeHandle);
-
-      // Restore saved height
-      const savedHeight = localStorage.getItem("owncord:member-list-height");
-      if (savedHeight !== null) {
-        memberListContainer.style.height = `${savedHeight}px`;
-      }
-
-      // Drag-to-resize logic
-      const resizeAbort = new AbortController();
-      let isDragging = false;
-      let startY = 0;
-      let startHeight = 0;
-
-      resizeHandle.addEventListener(
-        "mousedown",
-        (e: MouseEvent) => {
-          isDragging = true;
-          startY = e.clientY;
-          startHeight = memberListContainer.offsetHeight;
-          e.preventDefault();
-        },
-        { signal: resizeAbort.signal },
-      );
-
-      document.addEventListener(
-        "mousemove",
-        (e: MouseEvent) => {
-          if (!isDragging) return;
-          const delta = startY - e.clientY;
-          const maxH = window.innerHeight * 0.65;
-          const newHeight = Math.max(80, Math.min(startHeight + delta, maxH));
-          memberListContainer.style.height = `${newHeight}px`;
-        },
-        { signal: resizeAbort.signal },
-      );
-
-      document.addEventListener(
-        "mouseup",
-        () => {
-          if (!isDragging) return;
-          isDragging = false;
-          localStorage.setItem(
-            "owncord:member-list-height",
-            String(memberListContainer.offsetHeight),
-          );
-        },
-        { signal: resizeAbort.signal },
-      );
-
-      channelModeUnsubs.push(() => {
-        resizeAbort.abort();
-      });
-
-      // Restore collapsed state from localStorage
-      const savedCollapsed = localStorage.getItem("owncord:member-list-collapsed");
-      let membersCollapsed = savedCollapsed === "true";
-      const memberContent = createElement("div", { class: "sidebar-members-content" });
-
-      function applyMembersCollapsed(): void {
-        memberHeader.classList.toggle("collapsed", membersCollapsed);
-        memberArrow.textContent = membersCollapsed ? "\u25B6" : "\u25BC";
-        memberContent.style.display = membersCollapsed ? "none" : "";
-        resizeHandle.style.display = membersCollapsed ? "none" : "";
-        if (membersCollapsed) {
-          memberListContainer.style.height = "auto";
-        } else {
-          const h = localStorage.getItem("owncord:member-list-height");
-          if (h !== null) {
-            memberListContainer.style.height = `${h}px`;
-          } else {
-            memberListContainer.style.height = "";
-          }
-        }
-      }
-
-      // Apply initial state
-      applyMembersCollapsed();
-
-      memberHeader.addEventListener("click", () => {
-        membersCollapsed = !membersCollapsed;
-        localStorage.setItem("owncord:member-list-collapsed", String(membersCollapsed));
-        applyMembersCollapsed();
-      });
-
-      const memberList = createMemberList({
-        currentUserRole: authStore.getState().user?.role ?? "member",
-        onKick: async (userId, username) => {
-          try {
-            await api.adminKickMember(userId);
-            getToast()?.show(`Kicked ${username}`, "success");
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to kick member";
-            getToast()?.show(msg, "error");
-          }
-        },
-        onBan: async (userId, username, reason) => {
-          try {
-            await api.adminBanMember(userId, reason);
-            getToast()?.show(`Banned ${username}`, "success");
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to ban member";
-            getToast()?.show(msg, "error");
-          }
-        },
-        onChangeRole: async (userId, username, newRole) => {
-          const roleId = getRoleIdByName(newRole);
-          if (roleId === undefined) {
-            // No silent failures: the role vanished from the server's list.
-            getToast()?.show(`Unknown role "${newRole}" — try reconnecting`, "error");
-            return;
-          }
-          try {
-            await api.adminChangeRole(userId, roleId);
-            getToast()?.show(`Changed ${username}'s role to ${newRole}`, "success");
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to change role";
-            getToast()?.show(msg, "error");
-          }
-        },
-      });
-      memberList.mount(memberContent);
-      memberListContainer.appendChild(memberContent);
-      contentSlot.appendChild(memberListContainer);
-      channelModeExtras.push(memberList);
+      // Same wiring lives in SidebarMemberSection; this used to be a private
+      // copy of it, and a fix to one silently missed the other.
+      const memberSection = createSidebarMemberSection({ api, getToast });
+      contentSlot.appendChild(memberSection.element);
+      channelModeExtras.push(memberSection.memberListComponent);
+      channelModeUnsubs.push(memberSection.destroy);
     } else {
       const dmSidebar = buildDmSidebar();
       dmSidebar.mount(innerSlot);
