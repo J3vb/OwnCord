@@ -239,6 +239,7 @@ describe("Permission bitfield", () => {
     expect(P.KICK_MEMBERS).toBe(0x40000);
     expect(P.BAN_MEMBERS).toBe(0x80000);
     expect(P.MUTE_MEMBERS).toBe(0x100000);
+    expect(P.MENTION_EVERYONE).toBe(0x200000);
     expect(P.MANAGE_ROLES).toBe(0x1000000);
     expect(P.MANAGE_SERVER).toBe(0x2000000);
     expect(P.MANAGE_INVITES).toBe(0x4000000);

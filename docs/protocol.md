@@ -243,7 +243,12 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `unread_count` (text + announcement), `last_message_id` (text + announcement)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`), `category`, `topic`, `position`, `unread_count` (text + announcement), `last_message_id` (text + announcement), `mention_count` (text + announcement)
+
+`mention_count` is the number of unread messages that mention this user — a
+direct `@username` or an authorized `@everyone`/`@here` — in that channel. It is
+raised by the send that mentions them (never by an edit) and reset to 0 by
+`channel_focus`.
 
 **dm_channels[]:** `channel_id`, `recipient` (user object with `id`, `username`, `avatar`, `status`), `last_message_id`, `last_message`, `last_message_at`, `unread_count`
 
@@ -314,10 +319,24 @@ Direct response to sender (no seq):
     "timestamp": "2026-03-14T10:30:00Z",
     "attachments": [],
     "reactions": [],
-    "pinned": false
+    "pinned": false,
+    "mentions": [7, 9],
+    "mentions_everyone": true
   }
 }
 ```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `mentions` | number[] | User IDs the server resolved from `@username` tokens. Always present; empty when nothing resolved. |
+| `mentions_everyone` | bool | `true` when the message carried `@everyone` or `@here` **and** the author holds `MENTION_EVERYONE` on that channel. |
+
+Mentions are resolved server-side at send time against existing usernames
+(case-insensitive, whole-word, capped at 20 per message). An `@word` that
+matches no username, and an `@everyone`/`@here` from an author without
+`MENTION_EVERYONE`, resolve to nothing and stay plain text — clients must
+highlight from these fields rather than re-parsing the content. DMs never carry
+`mentions_everyone`.
 
 ### chat_edit (Client -> Server)
 
@@ -344,10 +363,17 @@ Own messages only. Max 4000 runes.
     "message_id": 1042,
     "channel_id": 5,
     "content": "Hello everyone! (edited)",
-    "edited_at": "2026-03-14T10:31:00Z"
+    "edited_at": "2026-03-14T10:31:00Z",
+    "mentions": [7],
+    "mentions_everyone": false
   }
 }
 ```
+
+`mentions`/`mentions_everyone` are re-resolved from the edited content and
+replace the stored set. Editing never raises anyone's `mention_count`: a badge
+is only ever raised by the original send, so re-adding an already-counted
+mention cannot double-count it.
 
 ### chat_delete (Client -> Server)
 
@@ -493,7 +519,7 @@ Valid values: `"online"`, `"idle"`, `"dnd"`, `"offline"`. Rate limited: 1 per 10
 { "type": "channel_focus", "payload": { "channel_id": 5 } }
 ```
 
-Tells the server which channel the user is currently viewing. Affects broadcast delivery and unread tracking.
+Tells the server which channel the user is currently viewing. Affects broadcast delivery and unread tracking: it advances the caller's read state to the channel's latest message and resets that channel's `mention_count` to 0.
 
 ---
 

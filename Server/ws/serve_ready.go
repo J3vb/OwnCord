@@ -159,9 +159,11 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 			if u, ok := unreadMap[visibleChannels[i].ID]; ok {
 				entry["unread_count"] = u.UnreadCount
 				entry["last_message_id"] = u.LastMessageID
+				entry["mention_count"] = u.MentionCount
 			} else {
 				entry["unread_count"] = 0
 				entry["last_message_id"] = 0
+				entry["mention_count"] = 0
 			}
 		}
 		channelPayloads = append(channelPayloads, entry)

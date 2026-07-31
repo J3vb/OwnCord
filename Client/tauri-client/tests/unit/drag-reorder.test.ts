@@ -45,6 +45,7 @@ function makeCh(id: number, position: number, name = `ch-${id}`): Channel {
     category: null,
     position,
     unreadCount: 0,
+    mentionCount: 0,
     lastMessageId: null,
     canSend: true,
     topic: "",

@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 | `019_perf_indexes.sql` | Adds hot-path indexes |
 | `020_drop_redundant_indexes.sql` | Drops indexes duplicating UNIQUE auto-indexes |
 | `021_voice_server_moderation.sql` | Adds `server_muted`, `server_deafened` to voice_states (moderator-imposed) |
+| `022_message_mentions.sql` | Adds `message_mentions` + `messages.mentions_everyone`, and grants `MENTION_EVERYONE` (bit 21) to the seeded Owner/Admin/Moderator roles |
 
 ---
 
@@ -225,11 +226,39 @@ CREATE TABLE messages (
     edited_at  TEXT,
     deleted    INTEGER NOT NULL DEFAULT 0,
     pinned     INTEGER NOT NULL DEFAULT 0,
-    timestamp  TEXT    NOT NULL DEFAULT (datetime('now'))
+    timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
+    mentions_everyone INTEGER NOT NULL DEFAULT 0
 );
 ```
 
 Messages are soft-deleted (`deleted = 1`), never physically removed by user action.
+
+`mentions_everyone` (migration 022) is set when the message carried `@everyone`
+or `@here` **and** the author held `MENTION_EVERYONE` on that channel. It is a
+column rather than a sentinel row in `message_mentions` so that table never
+holds a `mentioned_user_id` that is not a real user. The message row and its
+mention rows are written in one writer transaction, and an edit rewrites both.
+
+---
+
+### message_mentions
+
+```sql
+CREATE TABLE message_mentions (
+    message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    PRIMARY KEY (message_id, mentioned_user_id)
+);
+
+CREATE INDEX idx_message_mentions_user ON message_mentions(mentioned_user_id);
+```
+
+The user IDs a message resolved from its `@username` tokens, capped at 20 rows
+per message. Resolution is case-insensitive whole-word matching against
+`users.username` (which is `UNIQUE COLLATE NOCASE`); a token that matches no
+username is not stored and stays plain text. The primary key serves the
+per-message lookup that message history and search batch on; the index serves
+the per-user direction.
 
 ---
 
@@ -317,6 +346,14 @@ CREATE TABLE read_states (
     PRIMARY KEY (user_id, channel_id)
 );
 ```
+
+`mention_count` is incremented on message insert for every mentioned user who
+can read the channel, except the author and except users who have blocked the
+author. `@everyone` counts every reader; `@here` counts only readers whose
+`users.status` is not `offline`. Edits never increment it — a badge is only
+raised by the original send, so an edit cannot double-count a mention. The
+`channel_focus` read-state upsert resets it to 0, and the `ready` payload ships
+it per channel.
 
 ---
 
@@ -548,6 +585,7 @@ CREATE TABLE plugin_kv (
 | `idx_user_blocks_blocked` | user_blocks | `(blocked_id, blocker_id)` | Reverse block lookup |
 | `idx_events_channel_seq` | events | `(channel_id, seq)` | Cold-tier replay per channel |
 | `idx_events_created_at` | events | `(created_at)` | Retention pruning |
+| `idx_message_mentions_user` | message_mentions | `(mentioned_user_id)` | Per-user mention lookup |
 
 ---
 
@@ -572,13 +610,14 @@ Permissions are stored as an integer bitfield (31 bits used) in `roles.permissio
 | 18 | `0x40000` | `KICK_MEMBERS` | Force-logout a lower-ranked user (`DELETE /admin/api/users/{id}/sessions`) |
 | 19 | `0x80000` | `BAN_MEMBERS` | Ban/unban a lower-ranked user (`PATCH /admin/api/users/{id}`) |
 | 20 | `0x100000` | `MUTE_MEMBERS` | Server-side mute/deafen in voice — admits to the admin perimeter; no route enforces it yet |
+| 21 | `0x200000` | `MENTION_EVERYONE` | Give `@everyone`/`@here` real mention semantics (highlight + mention badge). Without it the token stays plain text |
 | 24 | `0x1000000` | `MANAGE_ROLES` | Assign a role below the actor's own rank to a lower-ranked user (`PATCH /admin/api/users/{id}`) |
 | 25 | `0x2000000` | `MANAGE_SERVER` | Read and modify server settings (`/admin/api/settings`) |
 | 26 | `0x4000000` | `MANAGE_INVITES` | Create and revoke invite codes |
 | 27 | `0x8000000` | `VIEW_AUDIT_LOG` | Read the audit log (`GET /admin/api/audit-log`) |
 | 30 | `0x40000000` | `ADMINISTRATOR` | Bypasses ALL permission checks |
 
-Bits 2-4, 7, 13-15, 21-23, 28-29, 31 are reserved.
+Bits 2-4, 7, 13-15, 22-23, 28-29, 31 are reserved.
 
 ### Admin perimeter
 
@@ -613,5 +652,5 @@ DM channels bypass role permissions entirely and use participant-based authoriza
 |------|-----|-------------|
 | Owner | `0x7FFFFFFF` | Everything including ADMINISTRATOR |
 | Admin | `0x3FFFFFFF` | Everything except ADMINISTRATOR |
-| Moderator | `0x000FFFFF` | All message + voice + moderation |
+| Moderator | `0x002FFFFF` | All message + voice + moderation, plus `MENTION_EVERYONE` (granted by migration 022) |
 | Member | `0x1E63` | Send, read, attach, react, voice, video, screen share |

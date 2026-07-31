@@ -50,6 +50,14 @@ export interface Message {
   readonly correlationId: string | null;
   /** Error code when status === "failed" (e.g. "SLOW_MODE", "FORBIDDEN"). */
   readonly errorCode: string | null;
+  /**
+   * Server-resolved mentioned user IDs. Optional so the many inline Message
+   * fixtures need not restate it; undefined means "the server didn't say",
+   * which sends rendering down the local @token resolution path.
+   */
+  readonly mentions?: readonly number[];
+  /** Whether an honoured @everyone/@here is present. Optional, as above. */
+  readonly mentionsEveryone?: boolean;
 }
 
 export interface MessagesState {
@@ -88,6 +96,8 @@ function chatPayloadToMessage(payload: ChatMessagePayload): Message {
     status: "sent",
     correlationId: null,
     errorCode: null,
+    mentions: payload.mentions,
+    mentionsEveryone: payload.mentions_everyone,
   };
 }
 
@@ -107,6 +117,8 @@ function messageResponseToMessage(response: MessageResponse): Message {
     status: "sent",
     correlationId: null,
     errorCode: null,
+    mentions: response.mentions,
+    mentionsEveryone: response.mentions_everyone,
   };
 }
 
@@ -362,7 +374,13 @@ export function editMessage(payload: ChatEditedPayload): void {
 
     const updatedList = channelMessages.map((msg) =>
       msg.id === payload.message_id
-        ? { ...msg, content: payload.content, editedAt: payload.edited_at }
+        ? {
+            ...msg,
+            content: payload.content,
+            editedAt: payload.edited_at,
+            mentions: payload.mentions,
+            mentionsEveryone: payload.mentions_everyone,
+          }
         : msg,
     );
 

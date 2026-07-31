@@ -77,6 +77,7 @@ function setVoiceConnected(screenshare = false): void {
           category: null,
           position: 0,
           unreadCount: 0,
+          mentionCount: 0,
           lastMessageId: null,
           canSend: true,
           topic: "",

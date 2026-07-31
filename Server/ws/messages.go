@@ -57,6 +57,11 @@ type chatMessagePayload struct {
 	Attachments []map[string]any  `json:"attachments"`
 	Reactions   []any             `json:"reactions"`
 	Pinned      bool              `json:"pinned"`
+	// Mentions carries the server-resolved user ids; MentionsEveryone reports
+	// an @everyone/@here that cleared MENTION_EVERYONE. Clients highlight from
+	// these instead of re-parsing the content.
+	Mentions         []int64 `json:"mentions"`
+	MentionsEveryone bool    `json:"mentions_everyone"`
 }
 
 type memberUpdatePayload struct {
@@ -87,6 +92,10 @@ type chatEditedPayload struct {
 	ChannelID int64  `json:"channel_id"`
 	Content   string `json:"content"`
 	EditedAt  string `json:"edited_at"`
+	// Mentions/MentionsEveryone are re-resolved from the edited content, so an
+	// edit that adds or drops a mention updates the highlight too.
+	Mentions         []int64 `json:"mentions"`
+	MentionsEveryone bool    `json:"mentions_everyone"`
 }
 
 type chatDeletedPayload struct {
@@ -303,29 +312,53 @@ func buildMemberJoin(user *db.User, roleName string) []byte {
 	})
 }
 
+// chatMessageArgs is the input to buildChatMessage. It is a struct rather than
+// a positional list because the payload has outgrown readable call sites.
+type chatMessageArgs struct {
+	MsgID            int64
+	ChannelID        int64
+	UserID           int64
+	Username         string
+	Avatar           *string
+	RoleName         string
+	Content          string
+	Timestamp        string
+	ReplyTo          *int64
+	Attachments      []map[string]any
+	Mentions         []int64
+	MentionsEveryone bool
+}
+
 // buildChatMessage constructs a chat_message broadcast envelope.
 // Includes role in user object and empty reactions array for consistency with REST API.
-func buildChatMessage(msgID, channelID, userID int64, username string, avatar *string, roleName string, content string, timestamp string, replyTo *int64, attachments []map[string]any) []byte {
+func buildChatMessage(a chatMessageArgs) []byte {
+	attachments := a.Attachments
 	if attachments == nil {
 		attachments = []map[string]any{}
+	}
+	mentions := a.Mentions
+	if mentions == nil {
+		mentions = []int64{}
 	}
 	return buildJSON(wsMsg{
 		Type: MsgTypeChatMessage,
 		Payload: chatMessagePayload{
-			ID:        msgID,
-			ChannelID: channelID,
+			ID:        a.MsgID,
+			ChannelID: a.ChannelID,
 			User: memberUserPayload{
-				ID:       userID,
-				Username: username,
-				Avatar:   avatar,
-				Role:     roleName,
+				ID:       a.UserID,
+				Username: a.Username,
+				Avatar:   a.Avatar,
+				Role:     a.RoleName,
 			},
-			Content:     content,
-			ReplyTo:     replyTo,
-			Timestamp:   timestamp,
-			Attachments: attachments,
-			Reactions:   []any{},
-			Pinned:      false,
+			Content:          a.Content,
+			ReplyTo:          a.ReplyTo,
+			Timestamp:        a.Timestamp,
+			Attachments:      attachments,
+			Reactions:        []any{},
+			Pinned:           false,
+			Mentions:         mentions,
+			MentionsEveryone: a.MentionsEveryone,
 		},
 	})
 }
@@ -369,14 +402,19 @@ func buildChatSendOK(requestID string, msgID int64, timestamp string) []byte {
 }
 
 // buildChatEdited constructs a chat_edited broadcast.
-func buildChatEdited(msgID, channelID int64, content, editedAt string) []byte {
+func buildChatEdited(msgID, channelID int64, content, editedAt string, mentions []int64, mentionsEveryone bool) []byte {
+	if mentions == nil {
+		mentions = []int64{}
+	}
 	return buildJSON(wsMsg{
 		Type: MsgTypeChatEdited,
 		Payload: chatEditedPayload{
-			MessageID: msgID,
-			ChannelID: channelID,
-			Content:   content,
-			EditedAt:  editedAt,
+			MessageID:        msgID,
+			ChannelID:        channelID,
+			Content:          content,
+			EditedAt:         editedAt,
+			Mentions:         mentions,
+			MentionsEveryone: mentionsEveryone,
 		},
 	})
 }

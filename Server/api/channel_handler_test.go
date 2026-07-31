@@ -93,8 +93,15 @@ CREATE TABLE IF NOT EXISTS messages (
     edited_at  TEXT,
     deleted    INTEGER NOT NULL DEFAULT 0,
     pinned     INTEGER NOT NULL DEFAULT 0,
-    timestamp  TEXT    NOT NULL DEFAULT (datetime('now'))
+    timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
+    mentions_everyone INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS message_mentions (
+    message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    PRIMARY KEY (message_id, mentioned_user_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, id DESC);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(

@@ -6,24 +6,25 @@ package permissions
 // ─── Permission bit constants (from SCHEMA.md) ───────────────────────────────
 
 const (
-	SendMessages   = int64(0x0001)     // bit 0
-	ReadMessages   = int64(0x0002)     // bit 1
-	AttachFiles    = int64(0x0020)     // bit 5
-	AddReactions   = int64(0x0040)     // bit 6
-	ConnectVoice   = int64(0x0200)     // bit 9
-	SpeakVoice     = int64(0x0400)     // bit 10
-	UseVideo       = int64(0x0800)     // bit 11
-	ShareScreen    = int64(0x1000)     // bit 12
-	ManageMessages = int64(0x10000)    // bit 16
-	ManageChannels = int64(0x20000)    // bit 17
-	KickMembers    = int64(0x40000)    // bit 18
-	BanMembers     = int64(0x80000)    // bit 19
-	MuteMembers    = int64(0x100000)   // bit 20
-	ManageRoles    = int64(0x1000000)  // bit 24
-	ManageServer   = int64(0x2000000)  // bit 25
-	ManageInvites  = int64(0x4000000)  // bit 26
-	ViewAuditLog   = int64(0x8000000)  // bit 27
-	Administrator  = int64(0x40000000) // bit 30 — bypasses all permission checks
+	SendMessages    = int64(0x0001)     // bit 0
+	ReadMessages    = int64(0x0002)     // bit 1
+	AttachFiles     = int64(0x0020)     // bit 5
+	AddReactions    = int64(0x0040)     // bit 6
+	ConnectVoice    = int64(0x0200)     // bit 9
+	SpeakVoice      = int64(0x0400)     // bit 10
+	UseVideo        = int64(0x0800)     // bit 11
+	ShareScreen     = int64(0x1000)     // bit 12
+	ManageMessages  = int64(0x10000)    // bit 16
+	ManageChannels  = int64(0x20000)    // bit 17
+	KickMembers     = int64(0x40000)    // bit 18
+	BanMembers      = int64(0x80000)    // bit 19
+	MuteMembers     = int64(0x100000)   // bit 20
+	MentionEveryone = int64(0x200000)   // bit 21
+	ManageRoles     = int64(0x1000000)  // bit 24
+	ManageServer    = int64(0x2000000)  // bit 25
+	ManageInvites   = int64(0x4000000)  // bit 26
+	ViewAuditLog    = int64(0x8000000)  // bit 27
+	Administrator   = int64(0x40000000) // bit 30 — bypasses all permission checks
 )
 
 // AllPerms is the union of every defined permission bit. Use it to mask
@@ -31,7 +32,8 @@ const (
 const AllPerms = SendMessages | ReadMessages | AttachFiles | AddReactions |
 	ConnectVoice | SpeakVoice | UseVideo | ShareScreen |
 	ManageMessages | ManageChannels | KickMembers | BanMembers | MuteMembers |
-	ManageRoles | ManageServer | ManageInvites | ViewAuditLog | Administrator
+	MentionEveryone | ManageRoles | ManageServer | ManageInvites | ViewAuditLog |
+	Administrator
 
 // AdminPerimeter is the set of bits that admits a principal to the /admin/api
 // surface. Holding ANY one of them is enough to pass the perimeter; each route
@@ -43,24 +45,25 @@ const AdminPerimeter = Administrator | ManageChannels | ManageRoles |
 // bitNames maps each single permission bit to its SCHEMA.md name. Used for
 // authorization error messages so the wording lives in one place.
 var bitNames = map[int64]string{
-	SendMessages:   "SEND_MESSAGES",
-	ReadMessages:   "READ_MESSAGES",
-	AttachFiles:    "ATTACH_FILES",
-	AddReactions:   "ADD_REACTIONS",
-	ConnectVoice:   "CONNECT_VOICE",
-	SpeakVoice:     "SPEAK_VOICE",
-	UseVideo:       "USE_VIDEO",
-	ShareScreen:    "SHARE_SCREEN",
-	ManageMessages: "MANAGE_MESSAGES",
-	ManageChannels: "MANAGE_CHANNELS",
-	KickMembers:    "KICK_MEMBERS",
-	BanMembers:     "BAN_MEMBERS",
-	MuteMembers:    "MUTE_MEMBERS",
-	ManageRoles:    "MANAGE_ROLES",
-	ManageServer:   "MANAGE_SERVER",
-	ManageInvites:  "MANAGE_INVITES",
-	ViewAuditLog:   "VIEW_AUDIT_LOG",
-	Administrator:  "ADMINISTRATOR",
+	SendMessages:    "SEND_MESSAGES",
+	ReadMessages:    "READ_MESSAGES",
+	AttachFiles:     "ATTACH_FILES",
+	AddReactions:    "ADD_REACTIONS",
+	ConnectVoice:    "CONNECT_VOICE",
+	SpeakVoice:      "SPEAK_VOICE",
+	UseVideo:        "USE_VIDEO",
+	ShareScreen:     "SHARE_SCREEN",
+	ManageMessages:  "MANAGE_MESSAGES",
+	ManageChannels:  "MANAGE_CHANNELS",
+	KickMembers:     "KICK_MEMBERS",
+	BanMembers:      "BAN_MEMBERS",
+	MuteMembers:     "MUTE_MEMBERS",
+	MentionEveryone: "MENTION_EVERYONE",
+	ManageRoles:     "MANAGE_ROLES",
+	ManageServer:    "MANAGE_SERVER",
+	ManageInvites:   "MANAGE_INVITES",
+	ViewAuditLog:    "VIEW_AUDIT_LOG",
+	Administrator:   "ADMINISTRATOR",
 }
 
 // Name returns the SCHEMA.md name of a single permission bit, or "UNKNOWN" for

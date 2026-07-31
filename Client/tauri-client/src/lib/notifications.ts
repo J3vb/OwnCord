@@ -8,6 +8,7 @@ import { loadUserStatus } from "./userStatus";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import type { ChatMessagePayload } from "./types";
+import { mentionsCurrentUser } from "./mentions";
 import { createLogger } from "./logger";
 
 const log = createLogger("notifications");
@@ -15,11 +16,6 @@ const log = createLogger("notifications");
 /** Check if the app window is currently focused. */
 function isWindowFocused(): boolean {
   return document.hasFocus();
-}
-
-/** Check if message content contains @everyone or @here. */
-function containsEveryone(content: string): boolean {
-  return content.includes("@everyone") || content.includes("@here");
 }
 
 /** Get the channel name for a given channel ID. */
@@ -47,8 +43,18 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   const activeChannelId = channelsStore.getState().activeChannelId;
   if (isWindowFocused() && payload.channel_id === activeChannelId) return;
 
-  // Check @everyone suppression
-  if (loadPref<boolean>("suppressEveryone", false) && containsEveryone(payload.content)) {
+  const mentionInfo = {
+    mentions: payload.mentions,
+    mentionsEveryone: payload.mentions_everyone,
+  };
+  const directMention = mentionsCurrentUser(payload.content, mentionInfo);
+  const everyoneMention = payload.mentions_everyone === true;
+
+  // "Suppress @everyone" now means exactly that: only a notification the
+  // @everyone/@here caused is dropped. A message that also names the user is
+  // theirs to see, and an @everyone the sender lacked the permission for never
+  // reached mention status in the first place, so it is not suppressed either.
+  if (loadPref<boolean>("suppressEveryone", false) && everyoneMention && !directMention) {
     return;
   }
 
@@ -66,7 +72,13 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
     return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + "..." : cleaned;
   }
 
-  const title = sanitizeNotif(`${payload.user.username} in #${channelName}`, 80);
+  const mentioned = directMention || everyoneMention;
+  const title = sanitizeNotif(
+    mentioned
+      ? `${payload.user.username} mentioned you in #${channelName}`
+      : `${payload.user.username} in #${channelName}`,
+    80,
+  );
   const body = sanitizeNotif(payload.content, 100);
 
   // Desktop notification

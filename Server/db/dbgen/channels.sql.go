@@ -129,6 +129,39 @@ func (q *Queries) GetChannel(ctx context.Context, id int64) (GetChannelRow, erro
 	return i, err
 }
 
+const getChannelOverrides = `-- name: GetChannelOverrides :many
+SELECT role_id, allow, deny FROM channel_overrides WHERE channel_id = ?
+`
+
+type GetChannelOverridesRow struct {
+	RoleID int64 `json:"roleId"`
+	Allow  int64 `json:"allow"`
+	Deny   int64 `json:"deny"`
+}
+
+func (q *Queries) GetChannelOverrides(ctx context.Context, channelID int64) ([]GetChannelOverridesRow, error) {
+	rows, err := q.db.QueryContext(ctx, getChannelOverrides, channelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetChannelOverridesRow{}
+	for rows.Next() {
+		var i GetChannelOverridesRow
+		if err := rows.Scan(&i.RoleID, &i.Allow, &i.Deny); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getChannelPermission = `-- name: GetChannelPermission :one
 SELECT allow, deny FROM channel_overrides WHERE channel_id = ? AND role_id = ?
 `

@@ -121,6 +121,7 @@ describe("notifyIncomingMessage", () => {
             category: null,
             position: 0,
             unreadCount: 0,
+            mentionCount: 0,
             lastMessageId: null,
             canSend: true,
             topic: "",
@@ -157,7 +158,10 @@ describe("notifyIncomingMessage", () => {
 
   it("suppresses @everyone when toggle is enabled", () => {
     testPrefs.set("suppressEveryone", true);
-    const payload = makePayload({ content: "Hey @everyone check this out" });
+    const payload = makePayload({
+      content: "Hey @everyone check this out",
+      mentions_everyone: true,
+    });
     notifyIncomingMessage(payload);
   });
 
@@ -175,7 +179,7 @@ describe("notifyIncomingMessage", () => {
 
   it("handles @here the same as @everyone", () => {
     testPrefs.set("suppressEveryone", true);
-    const payload = makePayload({ content: "Hey @here important update" });
+    const payload = makePayload({ content: "Hey @here important update", mentions_everyone: true });
     notifyIncomingMessage(payload);
   });
 
@@ -262,7 +266,7 @@ describe("notifyIncomingMessage", () => {
     testPrefs.set("desktopNotifications", true);
     testPrefs.set("flashTaskbar", true);
     testPrefs.set("notificationSounds", true);
-    const payload = makePayload({ content: "Hey @everyone look!" });
+    const payload = makePayload({ content: "Hey @everyone look!", mentions_everyone: true });
     // Should be suppressed before any notification fires
     notifyIncomingMessage(payload);
   });
@@ -699,8 +703,8 @@ describe("notifyIncomingMessage", () => {
     });
   });
 
-  describe("containsEveryone: OR logic and exact strings", () => {
-    it("suppresses message containing only @everyone (not @here)", async () => {
+  describe("suppressEveryone: driven by mentions_everyone, not substrings", () => {
+    it("suppresses an @everyone the server honoured", async () => {
       const { sendNotification } = await import("@tauri-apps/plugin-notification");
       (sendNotification as ReturnType<typeof vi.fn>).mockClear();
 
@@ -709,14 +713,14 @@ describe("notifyIncomingMessage", () => {
       testPrefs.set("flashTaskbar", false);
       testPrefs.set("notificationSounds", false);
 
-      notifyIncomingMessage(makePayload({ content: "ping @everyone" }));
+      notifyIncomingMessage(makePayload({ content: "ping @everyone", mentions_everyone: true }));
 
       await new Promise((r) => setTimeout(r, 50));
       // Should NOT have reached sendNotification
       expect(sendNotification).not.toHaveBeenCalled();
     });
 
-    it("suppresses message containing only @here (not @everyone)", async () => {
+    it("suppresses an @here the server honoured", async () => {
       const { sendNotification } = await import("@tauri-apps/plugin-notification");
       (sendNotification as ReturnType<typeof vi.fn>).mockClear();
 
@@ -725,10 +729,46 @@ describe("notifyIncomingMessage", () => {
       testPrefs.set("flashTaskbar", false);
       testPrefs.set("notificationSounds", false);
 
-      notifyIncomingMessage(makePayload({ content: "ping @here" }));
+      notifyIncomingMessage(makePayload({ content: "ping @here", mentions_everyone: true }));
 
       await new Promise((r) => setTimeout(r, 50));
       expect(sendNotification).not.toHaveBeenCalled();
+    });
+
+    it("does NOT suppress an @everyone the server did not honour", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+
+      testPrefs.set("suppressEveryone", true);
+      testPrefs.set("desktopNotifications", true);
+      testPrefs.set("flashTaskbar", false);
+      testPrefs.set("notificationSounds", false);
+
+      // Sender lacked MENTION_EVERYONE: the token is plain text.
+      notifyIncomingMessage(makePayload({ content: "ping @everyone", mentions_everyone: false }));
+
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalled();
+      });
+    });
+
+    it("does NOT suppress an @everyone that also names the user", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+
+      testPrefs.set("suppressEveryone", true);
+      testPrefs.set("desktopNotifications", true);
+      testPrefs.set("flashTaskbar", false);
+      testPrefs.set("notificationSounds", false);
+
+      notifyIncomingMessage(
+        makePayload({ content: "@everyone and @Me", mentions: [1], mentions_everyone: true }),
+      );
+
+      await vi.waitFor(() => {
+        const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+        expect(call.title).toBe("TestUser mentioned you in #general");
+      });
     });
 
     it("does NOT suppress message without @everyone or @here even with toggle on", async () => {
@@ -756,7 +796,7 @@ describe("notifyIncomingMessage", () => {
       testPrefs.set("flashTaskbar", false);
       testPrefs.set("notificationSounds", false);
 
-      notifyIncomingMessage(makePayload({ content: "Hey @everyone" }));
+      notifyIncomingMessage(makePayload({ content: "Hey @everyone", mentions_everyone: true }));
 
       await vi.waitFor(() => {
         expect(sendNotification).toHaveBeenCalled();
@@ -1177,6 +1217,61 @@ describe("notifyIncomingMessage", () => {
       expect(mockWebNotification).not.toHaveBeenCalled();
 
       (globalThis as Record<string, unknown>).Notification = originalNotification;
+    });
+  });
+  describe("mention titles", () => {
+    async function titleFor(payload: ChatMessagePayload): Promise<string> {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      testPrefs.set("desktopNotifications", true);
+      testPrefs.set("flashTaskbar", false);
+      testPrefs.set("notificationSounds", false);
+      notifyIncomingMessage(payload);
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalled();
+      });
+      return (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0]![0].title as string;
+    }
+
+    it("says 'mentioned you' when the server names the current user", async () => {
+      const title = await titleFor(makePayload({ content: "hi @Me", mentions: [1] }));
+      expect(title).toBe("TestUser mentioned you in #general");
+    });
+
+    it("says 'mentioned you' for an honoured @everyone", async () => {
+      const title = await titleFor(
+        makePayload({ content: "hi all @everyone", mentions_everyone: true }),
+      );
+      expect(title).toBe("TestUser mentioned you in #general");
+    });
+
+    it("uses the plain title when the mention names someone else", async () => {
+      const title = await titleFor(makePayload({ content: "hi @other", mentions: [7] }));
+      expect(title).toBe("TestUser in #general");
+    });
+
+    it("uses the plain title for an unhonoured @everyone", async () => {
+      const title = await titleFor(
+        makePayload({ content: "hi @everyone", mentions_everyone: false }),
+      );
+      expect(title).toBe("TestUser in #general");
+    });
+
+    it("falls back to name resolution when the server sent no list", async () => {
+      const title = await titleFor(makePayload({ content: "hi @Me" }));
+      expect(title).toBe("TestUser mentioned you in #general");
+    });
+
+    it("stays silent under Do Not Disturb even for a mention", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      testPrefs.set("userStatus", "dnd");
+      testPrefs.set("desktopNotifications", true);
+
+      notifyIncomingMessage(makePayload({ content: "hi @Me", mentions: [1] }));
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(sendNotification).not.toHaveBeenCalled();
     });
   });
 });

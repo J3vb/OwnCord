@@ -37,6 +37,17 @@ function resetStores(): void {
   }));
 }
 
+/** Seed the member list so @tokens resolve — unresolvable tokens stay plain text. */
+function seedMentionMembers(): void {
+  membersStore.setState((prev) => ({
+    ...prev,
+    members: new Map([
+      [10, { id: 10, username: "alice", avatar: null, role: "member", status: "online" as const }],
+      [11, { id: 11, username: "bob", avatar: null, role: "member", status: "online" as const }],
+    ]),
+  }));
+}
+
 function makeMessage(overrides: Partial<Message> = {}): Message {
   return {
     id: 1,
@@ -168,7 +179,8 @@ describe("renderers", () => {
   });
 
   describe("renderMentions", () => {
-    it("wraps @mentions in span with mention class", () => {
+    it("wraps resolvable @mentions in span with mention class", () => {
+      seedMentionMembers();
       const fragment = renderMentions("Hello @alice how are you?");
       container.appendChild(fragment);
 
@@ -186,6 +198,7 @@ describe("renderers", () => {
     });
 
     it("handles multiple mentions", () => {
+      seedMentionMembers();
       const fragment = renderMentions("@alice and @bob");
       container.appendChild(fragment);
 
@@ -740,6 +753,7 @@ describe("renderers", () => {
         user: { id: 0, username: "System", avatar: null },
         content: "@alice was promoted to admin",
       });
+      seedMentionMembers();
       const ac = new AbortController();
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
       container.appendChild(el);
@@ -1229,6 +1243,7 @@ describe("renderers", () => {
     });
 
     it("renders @mention at start of text", () => {
+      seedMentionMembers();
       const fragment = renderMentionSegment("@alice hello");
       container.appendChild(fragment);
       const mention = container.querySelector(".mention");
@@ -1258,6 +1273,7 @@ describe("renderers", () => {
     });
 
     it("renders mention inside non-code text", () => {
+      seedMentionMembers();
       const fragment = renderInlineContent("hello @alice and `code`");
       container.appendChild(fragment);
       expect(container.querySelector(".mention")).not.toBeNull();

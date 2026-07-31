@@ -217,6 +217,7 @@ describe("WS Dispatcher", () => {
         category: null,
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
@@ -237,6 +238,73 @@ describe("WS Dispatcher", () => {
 
     const ch = channelsStore.getState().channels.get(5);
     expect(ch?.unreadCount).toBe(1);
+  });
+
+  describe("mention counts", () => {
+    function seedChannel(): void {
+      channelsStore.setState((prev) => {
+        const ch = new Map(prev.channels);
+        ch.set(5, {
+          id: 5,
+          name: "off-topic",
+          type: "text" as const,
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          mentionCount: 0,
+          lastMessageId: null,
+          canSend: true,
+          topic: "",
+          slowMode: 0,
+        });
+        return { ...prev, channels: ch, activeChannelId: 1 };
+      });
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 1, username: "alex", avatar: null, role: "member" },
+      }));
+    }
+
+    function incoming(extra: Record<string, unknown>): void {
+      mock.dispatch("chat_message", {
+        id: 200,
+        channel_id: 5,
+        user: { id: 2, username: "bob", avatar: null },
+        content: "ping",
+        reply_to: null,
+        attachments: [],
+        timestamp: "2026-03-15T10:00:00Z",
+        ...extra,
+      });
+    }
+
+    it("increments when the message names the current user", () => {
+      seedChannel();
+      incoming({ content: "ping @alex", mentions: [1] });
+      const ch = channelsStore.getState().channels.get(5);
+      expect(ch?.mentionCount).toBe(1);
+      expect(ch?.unreadCount).toBe(1);
+    });
+
+    it("increments for an honoured @everyone", () => {
+      seedChannel();
+      incoming({ content: "@everyone", mentions_everyone: true });
+      expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(1);
+    });
+
+    it("does not increment for someone else's mention", () => {
+      seedChannel();
+      incoming({ content: "ping @bob", mentions: [2] });
+      const ch = channelsStore.getState().channels.get(5);
+      expect(ch?.mentionCount).toBe(0);
+      expect(ch?.unreadCount).toBe(1);
+    });
+
+    it("does not increment for an @everyone the sender could not send", () => {
+      seedChannel();
+      incoming({ content: "@everyone", mentions_everyone: false });
+      expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(0);
+    });
   });
 
   it("wires presence to members store", () => {
@@ -279,6 +347,7 @@ describe("WS Dispatcher", () => {
         category: null,
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
@@ -579,6 +648,7 @@ describe("WS Dispatcher", () => {
         category: null,
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
@@ -609,6 +679,7 @@ describe("WS Dispatcher", () => {
         category: null,
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
@@ -621,6 +692,7 @@ describe("WS Dispatcher", () => {
         category: null,
         position: 1,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
@@ -645,6 +717,7 @@ describe("WS Dispatcher", () => {
         category: null,
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
@@ -1041,6 +1114,7 @@ describe("WS Dispatcher", () => {
           lastMessage: "",
           lastMessageAt: "",
           unreadCount: 0,
+          mentionCount: 0,
         },
       ],
     }));
@@ -1188,6 +1262,7 @@ describe("WS Dispatcher", () => {
         category: null,
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
@@ -1221,6 +1296,7 @@ describe("WS Dispatcher", () => {
         category: null,
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
@@ -1252,6 +1328,7 @@ describe("WS Dispatcher", () => {
       lastMessage: "",
       lastMessageAt: "",
       unreadCount: 0,
+      mentionCount: 0,
     };
 
     beforeEach(() => {
@@ -1385,6 +1462,7 @@ describe("WS Dispatcher", () => {
             lastMessage: "",
             lastMessageAt: "",
             unreadCount: 0,
+            mentionCount: 0,
           },
         ],
       }));

@@ -39,15 +39,16 @@ Features where one side is already built and the other was never finished.
 
 ## Phase 3 — mentions done right
 
-The largest single messaging gap. `@word` is regex-highlighted with no
-resolution, no notification, no badge; `read_states.mention_count` is a dead
-column.
+The largest single messaging gap: `@word` was regex-highlighted with no
+resolution, no notification and no badge, and `read_states.mention_count` was a
+dead column. The server is now the authority on what a mention is — the client
+highlights and badges from the resolved fields rather than re-parsing content.
 
-- Server-side mention parsing to user IDs at send time; store per-message mentions.
-- Write `mention_count` on message insert, clear on `channel_focus`.
-- Red mention badges on channels + app badge; mention-aware desktop notifications.
-- `@everyone`/`@here` real semantics behind a permission; composer autocomplete.
-- Clickable `#channel` links; role mentions once role management exists.
+- **DONE (2026-07-31)** — Server-side mention resolution and storage. `MessageService.resolveMentions` parses `@token`s out of sanitized content with a word-boundary rule (`mentionTokenRe`) that refuses address-shaped text: `mail@example` and `@@name` never match, and `@bob@example.com` is rejected whole rather than half-matched. Tokens are lowercased, deduplicated, ordered by first appearance and resolved case-insensitively against `users.username` (`UNIQUE COLLATE NOCASE`), with a second spelling that drops trailing `.`/`-` so "@bob." resolves to bob when nobody is literally named "bob.". A token matching no username resolves to nothing and stays plain text. Two caps bound the work one send can cause: at most 60 distinct tokens are looked up (`maxMentionCandidates`) and at most 20 resolve (`maxMentionsPerMessage`). Resolved IDs land in the new `message_mentions` table (migration `022`, PK `(message_id, mentioned_user_id)` plus `idx_message_mentions_user` for the per-user direction), written in the same writer transaction as the message row and rewritten wholesale on edit. Resolution failures are logged and degrade to "no mentions" — a message is never rejected because its mention lookup failed. `mentions` and `mentions_everyone` now ride on the `chat_message` and `chat_edited` broadcasts, on `GET /channels/{id}/messages`, on pinned-message responses and on FTS search results; `mentions` is always present and empty rather than null. `buildChatMessage` took a `chatMessageArgs` struct in the process — the positional list had outgrown a readable call site.
+- **DONE (2026-07-31)** — `read_states.mention_count` is live. `applyMentionCounts` raises it on message insert for every mentioned user who can actually read the channel — the role walk applies channel overrides, and DMs skip it entirely since participation is membership, not permissions. The author is always excluded, and users who have blocked the author are dropped (fail-closed: a `ListBlockersOf` error skips the whole increment, because a badge from a blocked user is worse than no badge). Edits deliberately never increment: only the original send can raise a badge, which is the simplest rule that makes double-counting a re-added mention impossible. `channel_focus` resets the count to 0 via the `UpdateReadState` upsert, and the `ready` payload ships `mention_count` per channel. Because `GetChannelUnreadCounts` covers `text`/`announcement` channels, a DM mention badge is raised live by the dispatcher but starts at 0 on reconnect — DM unreads are surfaced separately in the DM sidebar.
+- **DONE (2026-07-31)** — Client rendering, badges and notifications. `@lib/mentions` is the single source of truth shared by the renderer, the badge path and the notification gate, so all three agree on what counts as a mention; its regex mirrors the server's, and the server's `mentions`/`mentions_everyone` decide the outcome whenever present (the local token parse only stands in for servers predating the fields). Resolved mentions render as a highlighted `.mention` span, with `.mention-self` when the mention is the current user; an unresolvable token renders as plain text. In the channel sidebar a red `.mention-badge` outranks the plain unread badge — only one shows, and it counts mentions rather than messages. Desktop notifications retitle to "{user} mentioned you in #{channel}", and "Suppress @everyone" now means exactly that: it drops only a notification the `@everyone`/`@here` alone caused, so a message that also names you still notifies, and an `@everyone` the sender lacked the bit for was never a mention to suppress. No OS dock/taskbar count badge was added — the existing taskbar *flash* is the only OS-level signal; a real badge count needs a Tauri-side API and is left for a later pass.
+- **DONE (2026-07-31)** — `@everyone`/`@here` behind a permission, plus composer autocomplete. New `MENTION_EVERYONE` bit (21, `0x200000`); migration `022` grants it to the seeded Owner/Admin/Moderator roles, moving the Moderator mask from `0x000FFFFF` to `0x002FFFFF`. Without the bit the token carries no mention semantics at all — no highlight, no badge, no notification — and DM channels have no `@everyone` semantics since there is no permission surface to answer to. `@here` narrows the fan-out to readers whose status is not `offline`; `@everyone` reaches every reader. The composer opens an inline member picker on `@` (`MentionAutocomplete`, max 10 rows) whose active-token rule mirrors the server's, so it never offers a completion for text a send would not resolve; `@everyone`/`@here` appear as rows only for users who hold the bit.
+- **DONE (2026-07-31)** — Clickable `#channel` links. `#name` tokens in message content resolve case-insensitively against the channel store (DM channels excluded — they have no user-visible `#name`) and render as links; unresolvable tokens stay plain text. Navigation funnels through the new `@lib/channel-navigation.navigateToChannel`, now the single entry point shared by the sidebar item and `#channel` links, so every affordance clears the same unread and mention badges. Role mentions remain out of scope by design — they need role management, which is phase 5.
 
 ## Phase 4 — markdown and message polish
 
@@ -85,8 +86,9 @@ slash commands (separate plan: `slash-commands.md`).
 
 ## Known dead code to reconcile as phases land
 
-- `read_states.mention_count` (phase 3), `emoji`/`sounds` tables (phase 6),
-  `voice_speakers` reserved WS type, `voice_config.bitrate` (sent, never
-  applied client-side), client `getEmoji`/`deleteEmoji`/`getSounds`/
-  `deleteSound` calling unregistered routes, "Friends" nav item, PTT stub on
-  macOS.
+- `emoji`/`sounds` tables (phase 6), `voice_speakers` reserved WS type,
+  `voice_config.bitrate` (sent, never applied client-side), client
+  `getEmoji`/`deleteEmoji`/`getSounds`/`deleteSound` calling unregistered
+  routes, "Friends" nav item, PTT stub on macOS.
+  (`read_states.mention_count` came off this list in phase 3 — it is now
+  written, shipped in `ready` and cleared by `channel_focus`.)

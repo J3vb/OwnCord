@@ -8,6 +8,10 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import { createEmojiPicker } from "@components/EmojiPicker";
 import { createGifPicker } from "@components/GifPicker";
+import {
+  createMentionAutocomplete,
+  type MentionAutocompleteComponent,
+} from "@components/MentionAutocomplete";
 import type { GifApi } from "@lib/gifProvider";
 
 export interface MessageInputOptions {
@@ -94,6 +98,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   let attachmentPreviewBar: HTMLDivElement | null = null;
   /** Set by mount() when file uploads are wired; backs openFilePicker(). */
   let openPicker: (() => void) | null = null;
+  let mentionPopup: MentionAutocompleteComponent | null = null;
+  /** Index of the "@" the open popup is completing; -1 when closed. */
+  let mentionStart = -1;
 
   /** Pending attachment IDs to send with the next message. */
   const pendingAttachments: { id: string; filename: string; readonly previewEl: HTMLDivElement }[] =
@@ -104,6 +111,67 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   let cleanupPickers: (() => void) | null = null;
   /** Timer IDs for cleanup on destroy. */
   const activeTimers: Set<ReturnType<typeof setTimeout>> = new Set();
+
+  /**
+   * The @token immediately before the caret, or null. The leading boundary
+   * mirrors the server's mention rule, so the popup never offers a completion
+   * for text ("mail@dom") that a send would not resolve as a mention.
+   */
+  function activeMentionToken(): { query: string; start: number } | null {
+    if (textarea === null) return null;
+    const caret = textarea.selectionStart;
+    const before = textarea.value.slice(0, caret);
+    const match = /(?:^|[^\p{L}\p{N}_@])@([\p{L}\p{N}_.-]{0,64})$/u.exec(before);
+    if (match === null) return null;
+    const query = match[1] ?? "";
+    return { query, start: caret - query.length - 1 };
+  }
+
+  function closeMentionPopup(): void {
+    if (mentionPopup === null) return;
+    mentionPopup.destroy();
+    mentionPopup = null;
+    mentionStart = -1;
+  }
+
+  /** Replace the token under the caret with "@token ". */
+  function insertMention(token: string): void {
+    if (textarea === null || mentionStart < 0) {
+      closeMentionPopup();
+      return;
+    }
+    const caret = textarea.selectionStart;
+    const before = textarea.value.slice(0, mentionStart);
+    const after = textarea.value.slice(caret);
+    const inserted = `@${token} `;
+    textarea.value = before + inserted + after;
+    const pos = before.length + inserted.length;
+    textarea.selectionStart = pos;
+    textarea.selectionEnd = pos;
+    closeMentionPopup();
+    autoResize();
+    textarea.focus();
+  }
+
+  /** Open, refilter, or close the popup for whatever is under the caret. */
+  function syncMentionPopup(): void {
+    const active = disabledReason === null ? activeMentionToken() : null;
+    if (active === null) {
+      closeMentionPopup();
+      return;
+    }
+    if (mentionPopup === null) {
+      mentionPopup = createMentionAutocomplete({
+        onSelect: insertMention,
+        onClose: closeMentionPopup,
+      });
+      root?.appendChild(mentionPopup.element);
+    }
+    mentionStart = active.start;
+    if (!mentionPopup.setQuery(active.query)) {
+      closeMentionPopup();
+    }
+  }
 
   function showReplyBar(username: string): void {
     if (replyBar === null || replyText === null) return;
@@ -479,12 +547,16 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       () => {
         autoResize();
         maybeEmitTyping();
+        syncMentionPopup();
       },
       { signal },
     );
     textarea.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
+        // The popup owns navigation keys while it is open, so Enter completes
+        // the mention instead of sending a half-typed message.
+        if (mentionPopup?.handleKeydown(e) === true) return;
         if (e.key === "Enter" && !e.shiftKey) {
           e.preventDefault();
           handleSend();
@@ -519,6 +591,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       },
       { signal },
     );
+
+    // Caret moves that aren't typing (click, blur) also decide the popup's fate.
+    textarea.addEventListener("click", syncMentionPopup, { signal });
+    textarea.addEventListener("blur", closeMentionPopup, { signal });
 
     sendBtn.addEventListener("click", handleSend, { signal });
 
@@ -649,6 +725,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     cleanupPickers = () => {
       closeEmojiPicker();
       closeGifPicker();
+      closeMentionPopup();
     };
 
     appendChildren(inputBox, attachBtn, textarea, emojiBtn, gifBtn, sendBtn);

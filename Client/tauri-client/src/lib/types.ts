@@ -127,6 +127,11 @@ export interface ReadyChannel {
    * slow-mode countdown; the server still enforces. Absent from older servers.
    */
   readonly slow_mode?: number;
+  /**
+   * Unread messages in this channel that mention the current user (directly or
+   * via @everyone/@here). Always ≤ unread_count. Absent from older servers.
+   */
+  readonly mention_count?: number;
 }
 
 /** Member object in the ready payload. */
@@ -177,6 +182,7 @@ export enum Permission {
   KICK_MEMBERS = 0x40000,
   BAN_MEMBERS = 0x80000,
   MUTE_MEMBERS = 0x100000,
+  MENTION_EVERYONE = 0x200000,
   MANAGE_ROLES = 0x1000000,
   MANAGE_SERVER = 0x2000000,
   MANAGE_INVITES = 0x4000000,
@@ -225,6 +231,18 @@ export interface ChatMessagePayload {
   readonly reply_to: number | null;
   readonly attachments: readonly Attachment[];
   readonly timestamp: string;
+  /**
+   * Server-resolved user IDs this message mentions, ordered by first
+   * appearance. Absent from older servers — callers fall back to resolving
+   * @tokens against the member list. Never contains @everyone/@here.
+   */
+  readonly mentions?: readonly number[];
+  /**
+   * Whether an @everyone/@here in the content cleared the sender's
+   * MENTION_EVERYONE gate. A token without the bit carries no mention
+   * semantics at all. Absent from older servers.
+   */
+  readonly mentions_everyone?: boolean;
 }
 
 export interface ChatSendOkPayload {
@@ -237,6 +255,9 @@ export interface ChatEditedPayload {
   readonly channel_id: number;
   readonly content: string;
   readonly edited_at: string;
+  /** Re-resolved mentions for the new content. An edit never re-notifies. */
+  readonly mentions?: readonly number[];
+  readonly mentions_everyone?: boolean;
 }
 
 export interface ChatDeletedPayload {
@@ -648,6 +669,9 @@ export interface MessageResponse {
   readonly edited_at: string | null;
   readonly deleted: boolean;
   readonly timestamp: string;
+  /** Server-resolved mentioned user IDs. Absent from older servers. */
+  readonly mentions?: readonly number[];
+  readonly mentions_everyone?: boolean;
 }
 
 /** Paginated messages response. */

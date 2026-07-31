@@ -362,7 +362,7 @@ func TestBuildMemberBan_ValidJSON(t *testing.T) {
 // ─── buildChatEdited ──────────────────────────────────────────────────────────
 
 func TestBuildChatEdited_Type(t *testing.T) {
-	msg := buildChatEdited(10, 20, "new content", "2024-01-01T00:00:00Z")
+	msg := buildChatEdited(10, 20, "new content", "2024-01-01T00:00:00Z", []int64{7}, true)
 	var env struct {
 		Type string `json:"type"`
 	}
@@ -375,13 +375,15 @@ func TestBuildChatEdited_Type(t *testing.T) {
 }
 
 func TestBuildChatEdited_Payload(t *testing.T) {
-	msg := buildChatEdited(10, 20, "new content", "2024-01-01T00:00:00Z")
+	msg := buildChatEdited(10, 20, "new content", "2024-01-01T00:00:00Z", []int64{7}, true)
 	var env struct {
 		Payload struct {
-			MessageID int64  `json:"message_id"`
-			ChannelID int64  `json:"channel_id"`
-			Content   string `json:"content"`
-			EditedAt  string `json:"edited_at"`
+			MessageID        int64   `json:"message_id"`
+			ChannelID        int64   `json:"channel_id"`
+			Content          string  `json:"content"`
+			EditedAt         string  `json:"edited_at"`
+			Mentions         []int64 `json:"mentions"`
+			MentionsEveryone bool    `json:"mentions_everyone"`
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal(msg, &env); err != nil {
@@ -399,6 +401,12 @@ func TestBuildChatEdited_Payload(t *testing.T) {
 	}
 	if p.EditedAt != "2024-01-01T00:00:00Z" {
 		t.Errorf("payload.edited_at = %q, want 2024-01-01T00:00:00Z", p.EditedAt)
+	}
+	if len(p.Mentions) != 1 || p.Mentions[0] != 7 {
+		t.Errorf("payload.mentions = %v, want [7]", p.Mentions)
+	}
+	if !p.MentionsEveryone {
+		t.Error("payload.mentions_everyone = false, want true")
 	}
 }
 

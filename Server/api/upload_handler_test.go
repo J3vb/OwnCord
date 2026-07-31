@@ -97,8 +97,15 @@ CREATE TABLE IF NOT EXISTS messages (
     content     TEXT    NOT NULL,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     edited_at   TEXT,
-    deleted     INTEGER NOT NULL DEFAULT 0
+    deleted     INTEGER NOT NULL DEFAULT 0,
+    mentions_everyone INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS message_mentions (
+    message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    PRIMARY KEY (message_id, mentioned_user_id)
+);
+
 CREATE TABLE IF NOT EXISTS attachments (
     id          TEXT    PRIMARY KEY,
     message_id  INTEGER,

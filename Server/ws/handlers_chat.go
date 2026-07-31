@@ -46,9 +46,20 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	}
 
 	reply := buildChatSendOK(info.ReqID, result.MessageID, result.Timestamp)
-	broadcast := buildChatMessage(result.MessageID, sendCmd.ChannelID(), info.UserID,
-		info.Username, info.Avatar, info.RoleName, result.Content, result.Timestamp,
-		sendCmd.ReplyTo(), attData)
+	broadcast := buildChatMessage(chatMessageArgs{
+		MsgID:            result.MessageID,
+		ChannelID:        sendCmd.ChannelID(),
+		UserID:           info.UserID,
+		Username:         info.Username,
+		Avatar:           info.Avatar,
+		RoleName:         info.RoleName,
+		Content:          result.Content,
+		Timestamp:        result.Timestamp,
+		ReplyTo:          sendCmd.ReplyTo(),
+		Attachments:      attData,
+		Mentions:         result.Mentions,
+		MentionsEveryone: result.MentionsEveryone,
+	})
 
 	if !result.IsDM {
 		return Result{
@@ -90,7 +101,8 @@ func handleChatEditV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		return serviceErrorToResult(err)
 	}
 
-	editedPayload := buildChatEdited(result.MessageID, result.ChannelID, result.Content, result.EditedAt)
+	editedPayload := buildChatEdited(result.MessageID, result.ChannelID, result.Content, result.EditedAt,
+		result.Mentions, result.MentionsEveryone)
 	if result.IsDM {
 		return Result{Events: []Event{MessageEditedDMEvent{
 			channelID:      result.ChannelID,

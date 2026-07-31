@@ -7,12 +7,8 @@
 import { createElement, setText, clearChildren, appendChildren } from "@lib/dom";
 import { createIcon, type IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
-import {
-  channelsStore,
-  getChannelsByCategory,
-  setActiveChannel,
-  clearUnread,
-} from "@stores/channels.store";
+import { channelsStore, getChannelsByCategory } from "@stores/channels.store";
+import { navigateToChannel } from "@lib/channel-navigation";
 import type { Channel } from "@stores/channels.store";
 import { authStore, getCurrentUser } from "@stores/auth.store";
 import { uiStore, toggleCategory, isCategoryCollapsed } from "@stores/ui.store";
@@ -199,6 +195,7 @@ function renderTextChannelItem(
     "channel-item",
     isActive ? "active" : "",
     channel.unreadCount > 0 ? "unread" : "",
+    channel.mentionCount > 0 ? "mentioned" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -216,19 +213,22 @@ function renderTextChannelItem(
 
   appendChildren(item, prefix, name);
 
-  if (channel.unreadCount > 0) {
+  // A mention badge outranks the plain unread badge: only one is shown, and
+  // it counts the mentions, not the messages.
+  if (channel.mentionCount > 0) {
+    const badge = createElement(
+      "span",
+      { class: "mention-badge", "data-testid": `channel-mentions-${channel.id}` },
+      String(channel.mentionCount),
+    );
+    badge.title = `${channel.mentionCount} mention${channel.mentionCount === 1 ? "" : "s"}`;
+    item.appendChild(badge);
+  } else if (channel.unreadCount > 0) {
     const badge = createElement("span", { class: "unread-badge" }, String(channel.unreadCount));
     item.appendChild(badge);
   }
 
-  item.addEventListener(
-    "click",
-    () => {
-      setActiveChannel(channel.id);
-      clearUnread(channel.id);
-    },
-    { signal },
-  );
+  item.addEventListener("click", () => navigateToChannel(channel.id), { signal });
 
   return item;
 }

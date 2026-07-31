@@ -71,6 +71,7 @@ export function addDmToChannelsStore(dmChannel: DmChannel): void {
     category: null,
     position: 0,
     unreadCount: dmChannel.unreadCount,
+    mentionCount: 0,
     lastMessageId: dmChannel.lastMessageId,
     // Channel-level permission is always true for DMs; block state is layered on
     // top by the composer via blocks.store (see ChannelController), not canSend.

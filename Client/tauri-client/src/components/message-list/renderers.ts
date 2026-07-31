@@ -49,6 +49,7 @@ export { setServerHost } from "./attachments";
 import { formatTime, formatFullDate, formatMessageTimestamp } from "./formatting";
 import { getUserRole, roleColorVar } from "./formatting";
 import { renderMentions, renderMessageContent } from "./content-parser";
+import { highlightsCurrentUser } from "@lib/mentions";
 import { renderUrlEmbeds } from "./media";
 import { renderAttachment } from "./attachments";
 import { renderReactions } from "./reactions";
@@ -136,8 +137,12 @@ export function renderMessage(
 
   const statusClass =
     msg.status === "pending" ? " pending" : msg.status === "failed" ? " failed" : "";
+  const mentionInfo = { mentions: msg.mentions, mentionsEveryone: msg.mentionsEveryone };
+  // A deleted row shows no content, so it must not keep the mention accent.
+  const mentionedClass =
+    !msg.deleted && highlightsCurrentUser(msg.content, mentionInfo) ? " mentioned" : "";
   const el = createElement("div", {
-    class: (isGrouped ? "message grouped" : "message") + statusClass,
+    class: (isGrouped ? "message grouped" : "message") + statusClass + mentionedClass,
     "data-testid": `message-${msg.id}`,
   });
 
@@ -193,7 +198,7 @@ export function renderMessage(
     setText(text, "[message deleted]");
     el.appendChild(text);
   } else {
-    el.appendChild(renderMessageContent(msg.content));
+    el.appendChild(renderMessageContent(msg.content, mentionInfo));
     if (msg.editedAt !== null) {
       el.appendChild(createElement("span", { class: "msg-edited" }, "(edited)"));
     }

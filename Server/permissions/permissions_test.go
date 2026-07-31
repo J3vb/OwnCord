@@ -488,3 +488,33 @@ func TestName_KnownAndUnknownBits(t *testing.T) {
 		}
 	}
 }
+
+// TestMentionEveryone_BitIsFreeAndNamed locks phase 3's new bit: 21 was
+// unassigned, it is part of AllPerms so an externally supplied mask keeps it,
+// and it stays out of the admin perimeter (mentioning is not moderation).
+func TestMentionEveryone_BitIsFreeAndNamed(t *testing.T) {
+	if permissions.MentionEveryone != 0x200000 {
+		t.Errorf("MentionEveryone = 0x%X, want 0x200000 (bit 21)", permissions.MentionEveryone)
+	}
+	for _, other := range []int64{
+		permissions.SendMessages, permissions.ReadMessages, permissions.AttachFiles,
+		permissions.AddReactions, permissions.ConnectVoice, permissions.SpeakVoice,
+		permissions.UseVideo, permissions.ShareScreen, permissions.ManageMessages,
+		permissions.ManageChannels, permissions.KickMembers, permissions.BanMembers,
+		permissions.MuteMembers, permissions.ManageRoles, permissions.ManageServer,
+		permissions.ManageInvites, permissions.ViewAuditLog, permissions.Administrator,
+	} {
+		if other&permissions.MentionEveryone != 0 {
+			t.Errorf("bit 21 collides with 0x%X", other)
+		}
+	}
+	if permissions.AllPerms&permissions.MentionEveryone == 0 {
+		t.Error("AllPerms must include MentionEveryone")
+	}
+	if permissions.AdminPerimeter&permissions.MentionEveryone != 0 {
+		t.Error("MentionEveryone must not admit to the admin perimeter")
+	}
+	if got := permissions.Name(permissions.MentionEveryone); got != "MENTION_EVERYONE" {
+		t.Errorf("Name(MentionEveryone) = %q", got)
+	}
+}

@@ -92,6 +92,33 @@ func (q *Queries) ListBlockedUsers(ctx context.Context, blockerID int64) ([]int6
 	return items, nil
 }
 
+const listBlockersOfUser = `-- name: ListBlockersOfUser :many
+SELECT blocker_id FROM user_blocks WHERE blocked_id = ?
+`
+
+func (q *Queries) ListBlockersOfUser(ctx context.Context, blockedID int64) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listBlockersOfUser, blockedID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var blocker_id int64
+		if err := rows.Scan(&blocker_id); err != nil {
+			return nil, err
+		}
+		items = append(items, blocker_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const unblockUser = `-- name: UnblockUser :exec
 DELETE FROM user_blocks WHERE blocker_id = ? AND blocked_id = ?
 `

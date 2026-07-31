@@ -111,6 +111,10 @@ type Message struct {
 	Deleted   bool
 	Pinned    bool
 	Timestamp string
+	// MentionsEveryone is set when the message resolved an @everyone or @here
+	// token and the author held MENTION_EVERYONE. Per-user mentions live in
+	// message_mentions.
+	MentionsEveryone bool
 }
 
 // MessageWithUser joins a Message with the author's public fields.
@@ -129,12 +133,14 @@ type ReactionCount struct {
 
 // MessageSearchResult is a row returned by the FTS5 message search.
 type MessageSearchResult struct {
-	MessageID   int64      `json:"message_id"`
-	ChannelID   int64      `json:"channel_id"`
-	ChannelName string     `json:"channel_name"`
-	User        UserPublic `json:"user"`
-	Content     string     `json:"content"`
-	Timestamp   string     `json:"timestamp"`
+	MessageID        int64      `json:"message_id"`
+	ChannelID        int64      `json:"channel_id"`
+	ChannelName      string     `json:"channel_name"`
+	User             UserPublic `json:"user"`
+	Content          string     `json:"content"`
+	Timestamp        string     `json:"timestamp"`
+	Mentions         []int64    `json:"mentions"`
+	MentionsEveryone bool       `json:"mentions_everyone"`
 }
 
 // UserPublic is the public-facing user shape for API responses.
@@ -157,6 +163,10 @@ type MessageAPIResponse struct {
 	EditedAt    *string          `json:"edited_at"`
 	Deleted     bool             `json:"deleted"`
 	Timestamp   string           `json:"timestamp"`
+	// Mentions is the resolved user ids the message mentions (never nil);
+	// MentionsEveryone reports an authorized @everyone/@here.
+	Mentions         []int64 `json:"mentions"`
+	MentionsEveryone bool    `json:"mentions_everyone"`
 }
 
 // AttachmentInfo is the attachment shape in API responses.
@@ -202,6 +212,10 @@ type VoiceState struct {
 type ChannelUnread struct {
 	LastMessageID int64 `json:"last_message_id"`
 	UnreadCount   int   `json:"unread_count"`
+	// MentionCount is read_states.mention_count: unread messages that mention
+	// this user directly or via an authorized @everyone/@here. Zeroed by
+	// channel_focus, never advanced by an edit.
+	MentionCount int `json:"mention_count"`
 }
 
 // ServerStats contains aggregate counts for the admin dashboard.

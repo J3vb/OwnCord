@@ -21,6 +21,12 @@ export interface Channel {
   readonly topic: string;
   readonly position: number;
   readonly unreadCount: number;
+  /**
+   * Unread messages here that mention the current user (directly or via
+   * @everyone/@here). Always a subset of unreadCount; drives the red mention
+   * badge, which outranks the plain unread badge.
+   */
+  readonly mentionCount: number;
   readonly lastMessageId: number | null;
   /** Whether the current user may post here (drives the composer affordance). */
   readonly canSend: boolean;
@@ -54,6 +60,7 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
       topic: ch.topic ?? "",
       position: ch.position,
       unreadCount: ch.unread_count ?? 0,
+      mentionCount: ch.mention_count ?? 0,
       lastMessageId: ch.last_message_id ?? null,
       // The current server always sends can_send; older servers omit it, in
       // which case we default permissive (no gating) rather than guessing.
@@ -91,6 +98,7 @@ export function addChannel(channel: ChannelCreatePayload): void {
       topic: channel.topic ?? "",
       position: channel.position,
       unreadCount: 0,
+      mentionCount: 0,
       lastMessageId: null,
       // Broadcasts carry no per-user data; default permissive. The next ready
       // payload delivers the authoritative can_send. Server enforces regardless.
@@ -148,17 +156,21 @@ export function removeChannel(id: number): void {
   });
 }
 
-/** Set the active channel by id (or null to deselect). Clears unread count for the activated channel. */
+/**
+ * Set the active channel by id (or null to deselect). Clears the unread and
+ * mention counts for the activated channel — the server's channel_focus does
+ * the same server-side, so the badges must not survive the visit locally.
+ */
 export function setActiveChannel(id: number | null): void {
   channelsStore.setState((prev) => {
     if (id === null) {
       return { ...prev, activeChannelId: null };
     }
     const existing = prev.channels.get(id);
-    if (existing === undefined || existing.unreadCount === 0) {
+    if (existing === undefined || (existing.unreadCount === 0 && existing.mentionCount === 0)) {
       return { ...prev, activeChannelId: id };
     }
-    const updated: Channel = { ...existing, unreadCount: 0 };
+    const updated: Channel = { ...existing, unreadCount: 0, mentionCount: 0 };
     const next = new Map(prev.channels);
     next.set(id, updated);
     return { ...prev, activeChannelId: id, channels: next };
@@ -216,7 +228,31 @@ export function incrementUnread(channelId: number): void {
   });
 }
 
-/** Clear unread count for a channel. */
+/**
+ * Increment the mention count for a channel, unless it is the active channel.
+ * Callers also call incrementUnread — a mention is always an unread too, and
+ * the two counters are kept independent so the badge can outrank.
+ */
+export function incrementMention(channelId: number): void {
+  channelsStore.setState((prev) => {
+    if (prev.activeChannelId === channelId) {
+      return prev;
+    }
+    const existing = prev.channels.get(channelId);
+    if (existing === undefined) {
+      return prev;
+    }
+    const updated: Channel = {
+      ...existing,
+      mentionCount: existing.mentionCount + 1,
+    };
+    const next = new Map(prev.channels);
+    next.set(channelId, updated);
+    return { ...prev, channels: next };
+  });
+}
+
+/** Clear the unread and mention counts for a channel — they clear together. */
 export function clearUnread(channelId: number): void {
   channelsStore.setState((prev) => {
     const existing = prev.channels.get(channelId);
@@ -226,6 +262,7 @@ export function clearUnread(channelId: number): void {
     const updated: Channel = {
       ...existing,
       unreadCount: 0,
+      mentionCount: 0,
     };
     const next = new Map(prev.channels);
     next.set(channelId, updated);

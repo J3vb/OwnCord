@@ -24,7 +24,7 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
     {
       key: "suppressEveryone",
       label: "Suppress @everyone",
-      desc: "Mute @everyone and @here mentions",
+      desc: "Mute @everyone and @here — messages that name you still notify",
       fallback: false,
     },
     {

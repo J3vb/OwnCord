@@ -529,12 +529,22 @@ Paginated message history for a channel.
       "pinned": false,
       "edited_at": null,
       "deleted": false,
-      "timestamp": "2026-03-14T10:30:00Z"
+      "timestamp": "2026-03-14T10:30:00Z",
+      "mentions": [7],
+      "mentions_everyone": false
     }
   ],
   "has_more": true
 }
 ```
+
+`mentions` is the server-resolved list of mentioned user IDs (always present,
+empty when the message mentions nobody) and `mentions_everyone` reports an
+`@everyone`/`@here` that cleared the `MENTION_EVERYONE` permission. Both are
+resolved at send time and re-resolved on edit; an `@word` that matches no
+username, or an `@everyone` from a user without the bit, carries no mention
+semantics and stays plain text. The same two fields appear on pinned-message
+responses and on the WebSocket `chat_message`/`chat_edited` payloads.
 
 #### Pagination
 
@@ -659,7 +669,9 @@ Full-text search across messages in channels the user can read. Uses SQLite FTS5
         "username": "alex"
       },
       "content": "...matched text...",
-      "timestamp": "2026-03-14T10:30:00Z"
+      "timestamp": "2026-03-14T10:30:00Z",
+      "mentions": [7],
+      "mentions_everyone": false
     }
   ]
 }

@@ -59,8 +59,9 @@ type Querier interface {
 	GetAttachmentWithChannel(ctx context.Context, id string) (GetAttachmentWithChannelRow, error)
 	GetAuditLog(ctx context.Context, arg GetAuditLogParams) ([]GetAuditLogRow, error)
 	GetChannel(ctx context.Context, id int64) (GetChannelRow, error)
+	GetChannelOverrides(ctx context.Context, channelID int64) ([]GetChannelOverridesRow, error)
 	GetChannelPermission(ctx context.Context, arg GetChannelPermissionParams) (GetChannelPermissionRow, error)
-	GetChannelUnreadCounts(ctx context.Context, userID int64) ([]GetChannelUnreadCountsRow, error)
+	GetChannelUnreadCounts(ctx context.Context, arg GetChannelUnreadCountsParams) ([]GetChannelUnreadCountsRow, error)
 	GetChannelVoiceStates(ctx context.Context, channelID int64) ([]GetChannelVoiceStatesRow, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
 	GetEventsSince(ctx context.Context, arg GetEventsSinceParams) ([]GetEventsSinceRow, error)
@@ -109,6 +110,7 @@ type Querier interface {
 	ListAPITokens(ctx context.Context) ([]ListAPITokensRow, error)
 	ListAllUsers(ctx context.Context, arg ListAllUsersParams) ([]ListAllUsersRow, error)
 	ListBlockedUsers(ctx context.Context, blockerID int64) ([]int64, error)
+	ListBlockersOfUser(ctx context.Context, blockedID int64) ([]int64, error)
 	ListChannels(ctx context.Context) ([]ListChannelsRow, error)
 	ListInvites(ctx context.Context) ([]ListInvitesRow, error)
 	ListMembers(ctx context.Context) ([]ListMembersRow, error)
@@ -140,6 +142,8 @@ type Querier interface {
 	UnblockUser(ctx context.Context, arg UnblockUserParams) error
 	UninstallPlugin(ctx context.Context, id int64) error
 	UpdateChannel(ctx context.Context, arg UpdateChannelParams) error
+	// Marking a channel read also clears its mention badge: channel_focus is the
+	// only caller, and a focused channel has no outstanding mentions by definition.
 	UpdateReadState(ctx context.Context, arg UpdateReadStateParams) error
 	UpdateUserIdentityKey(ctx context.Context, arg UpdateUserIdentityKeyParams) error
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error

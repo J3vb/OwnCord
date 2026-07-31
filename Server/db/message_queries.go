@@ -14,15 +14,16 @@ import (
 // messageFromGen maps a generated message row to the domain Message model.
 func messageFromGen(m dbgen.Message) *Message {
 	return &Message{
-		ID:        m.ID,
-		ChannelID: m.ChannelID,
-		UserID:    m.UserID,
-		Content:   m.Content,
-		ReplyTo:   m.ReplyTo,
-		EditedAt:  m.EditedAt,
-		Deleted:   m.Deleted != 0,
-		Pinned:    m.Pinned != 0,
-		Timestamp: m.Timestamp,
+		ID:               m.ID,
+		ChannelID:        m.ChannelID,
+		UserID:           m.UserID,
+		Content:          m.Content,
+		ReplyTo:          m.ReplyTo,
+		EditedAt:         m.EditedAt,
+		Deleted:          m.Deleted != 0,
+		Pinned:           m.Pinned != 0,
+		Timestamp:        m.Timestamp,
+		MentionsEveryone: m.MentionsEveryone != 0,
 	}
 }
 
@@ -312,7 +313,8 @@ func (d *DB) SearchMessages(ctx context.Context, query string, channelID *int64,
 
 	if channelID != nil {
 		rows, err = d.reader.QueryContext(ctx,
-			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content, m.timestamp
+			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content,
+			        m.timestamp, m.mentions_everyone
 			 FROM messages_fts f
 			 JOIN messages m ON f.rowid = m.id
 			 JOIN channels c ON m.channel_id = c.id
@@ -323,7 +325,8 @@ func (d *DB) SearchMessages(ctx context.Context, query string, channelID *int64,
 		)
 	} else {
 		rows, err = d.reader.QueryContext(ctx,
-			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content, m.timestamp
+			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content,
+			        m.timestamp, m.mentions_everyone
 			 FROM messages_fts f
 			 JOIN messages m ON f.rowid = m.id
 			 JOIN channels c ON m.channel_id = c.id
@@ -338,23 +341,11 @@ func (d *DB) SearchMessages(ctx context.Context, query string, channelID *int64,
 	}
 	defer rows.Close() //nolint:errcheck
 
-	var results []MessageSearchResult
-	for rows.Next() {
-		var r MessageSearchResult
-		if scanErr := rows.Scan(&r.MessageID, &r.ChannelID, &r.ChannelName,
-			&r.User.ID, &r.User.Username, &r.User.Avatar,
-			&r.Content, &r.Timestamp); scanErr != nil {
-			return nil, fmt.Errorf("SearchMessages scan: %w", scanErr)
-		}
-		results = append(results, r)
+	results, err := scanSearchResults(rows, "SearchMessages")
+	if err != nil {
+		return nil, err
 	}
-	if rows.Err() != nil {
-		return nil, fmt.Errorf("SearchMessages rows: %w", rows.Err())
-	}
-	if results == nil {
-		results = []MessageSearchResult{}
-	}
-	return results, nil
+	return d.attachSearchMentions(ctx, results)
 }
 
 // SearchMessagesInChannels performs a full-text search scoped to the given
@@ -384,7 +375,8 @@ func (d *DB) SearchMessagesInChannels(ctx context.Context, query string, channel
 
 	rows, err := d.reader.QueryContext(ctx,
 		fmt.Sprintf(
-			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content, m.timestamp
+			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content,
+			        m.timestamp, m.mentions_everyone
 			 FROM messages_fts f
 			 JOIN messages m ON f.rowid = m.id
 			 JOIN channels c ON m.channel_id = c.id
@@ -399,23 +391,11 @@ func (d *DB) SearchMessagesInChannels(ctx context.Context, query string, channel
 	}
 	defer rows.Close() //nolint:errcheck
 
-	var results []MessageSearchResult
-	for rows.Next() {
-		var r MessageSearchResult
-		if scanErr := rows.Scan(&r.MessageID, &r.ChannelID, &r.ChannelName,
-			&r.User.ID, &r.User.Username, &r.User.Avatar,
-			&r.Content, &r.Timestamp); scanErr != nil {
-			return nil, fmt.Errorf("SearchMessagesInChannels scan: %w", scanErr)
-		}
-		results = append(results, r)
+	results, err := scanSearchResults(rows, "SearchMessagesInChannels")
+	if err != nil {
+		return nil, err
 	}
-	if rows.Err() != nil {
-		return nil, fmt.Errorf("SearchMessagesInChannels rows: %w", rows.Err())
-	}
-	if results == nil {
-		results = []MessageSearchResult{}
-	}
-	return results, nil
+	return d.attachSearchMentions(ctx, results)
 }
 
 // GetMessagesForAPI returns messages in the API.md response shape, including
@@ -428,7 +408,8 @@ func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, lim
 	if before > 0 {
 		rows, err = d.reader.QueryContext(ctx,
 			`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
-			        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp
+			        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp,
+			        m.mentions_everyone
 			 FROM messages m JOIN users u ON m.user_id = u.id
 			 WHERE m.channel_id = ? AND m.id < ? AND m.deleted = 0
 			 ORDER BY m.id DESC LIMIT ?`,
@@ -437,7 +418,8 @@ func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, lim
 	} else {
 		rows, err = d.reader.QueryContext(ctx,
 			`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
-			        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp
+			        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp,
+			        m.mentions_everyone
 			 FROM messages m JOIN users u ON m.user_id = u.id
 			 WHERE m.channel_id = ? AND m.deleted = 0
 			 ORDER BY m.id DESC LIMIT ?`,
@@ -504,7 +486,8 @@ func (d *DB) getReactionsBatch(ctx context.Context, msgIDs []int64, requestingUs
 	return result, nil
 }
 
-// UpdateReadState upserts the read state for a user in a channel.
+// UpdateReadState upserts the read state for a user in a channel and clears
+// its mention badge — marking a channel read consumes its mentions.
 func (d *DB) UpdateReadState(ctx context.Context, userID, channelID, lastReadMessageID int64) error {
 	if err := d.q.UpdateReadState(ctx, dbgen.UpdateReadStateParams{
 		UserID:        userID,
@@ -529,10 +512,12 @@ func (d *DB) GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int6
 		        (SELECT COUNT(*) FROM messages m
 		          WHERE m.channel_id = c.id AND m.deleted = 0
 		            AND m.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
-		                                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)) AS unread
+		                                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)) AS unread,
+		        COALESCE((SELECT rs.mention_count FROM read_states rs
+		                   WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions
 		 FROM channels c
 		 WHERE c.type IN ('text', 'announcement')`,
-		userID,
+		userID, userID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("GetChannelUnreadCounts: %w", err)
@@ -543,7 +528,7 @@ func (d *DB) GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int6
 	for rows.Next() {
 		var chID int64
 		var cu ChannelUnread
-		if scanErr := rows.Scan(&chID, &cu.LastMessageID, &cu.UnreadCount); scanErr != nil {
+		if scanErr := rows.Scan(&chID, &cu.LastMessageID, &cu.UnreadCount, &cu.MentionCount); scanErr != nil {
 			return nil, fmt.Errorf("GetChannelUnreadCounts scan: %w", scanErr)
 		}
 		result[chID] = cu
@@ -572,7 +557,8 @@ func (d *DB) GetLatestMessageID(ctx context.Context, channelID int64) (int64, er
 func (d *DB) GetPinnedMessages(ctx context.Context, channelID int64, requestingUserID int64) ([]MessageAPIResponse, error) {
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
-		        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp
+		        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp,
+		        m.mentions_everyone
 		 FROM messages m JOIN users u ON m.user_id = u.id
 		 WHERE m.channel_id = ? AND m.pinned = 1 AND m.deleted = 0
 		 ORDER BY m.id DESC`,
@@ -593,17 +579,20 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 	var msgIDs []int64
 	for rows.Next() {
 		var m MessageAPIResponse
-		var deleted, pinned int
+		var deleted, pinned, everyone int
 		if scanErr := rows.Scan(
 			&m.ID, &m.ChannelID, &m.User.ID, &m.User.Username, &m.User.Avatar,
 			&m.Content, &m.ReplyTo, &m.EditedAt, &deleted, &pinned, &m.Timestamp,
+			&everyone,
 		); scanErr != nil {
 			return nil, fmt.Errorf("scanAndEnrichMessages scan: %w", scanErr)
 		}
 		m.Deleted = deleted != 0
 		m.Pinned = pinned != 0
+		m.MentionsEveryone = everyone != 0
 		m.Attachments = []AttachmentInfo{}
 		m.Reactions = []ReactionInfo{}
+		m.Mentions = []int64{}
 		msgs = append(msgs, m)
 		msgIDs = append(msgIDs, m.ID)
 	}
@@ -636,6 +625,17 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 		}
 	}
 
+	// Batch-fetch resolved mentions for all message IDs.
+	mentionMap, err := d.GetMentionsByMessageIDs(ctx, msgIDs)
+	if err != nil {
+		return nil, fmt.Errorf("scanAndEnrichMessages mentions: %w", err)
+	}
+	for i := range msgs {
+		if mIDs, ok := mentionMap[msgs[i].ID]; ok {
+			msgs[i].Mentions = mIDs
+		}
+	}
+
 	return msgs, nil
 }
 
@@ -657,6 +657,50 @@ func (d *DB) SetMessagePinned(ctx context.Context, id int64, pinned bool) error 
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
+
+// scanSearchResults scans FTS search rows. label names the calling query in
+// error messages. Never returns a nil slice.
+func scanSearchResults(rows *sql.Rows, label string) ([]MessageSearchResult, error) {
+	results := []MessageSearchResult{}
+	for rows.Next() {
+		var r MessageSearchResult
+		var everyone int
+		if scanErr := rows.Scan(&r.MessageID, &r.ChannelID, &r.ChannelName,
+			&r.User.ID, &r.User.Username, &r.User.Avatar,
+			&r.Content, &r.Timestamp, &everyone); scanErr != nil {
+			return nil, fmt.Errorf("%s scan: %w", label, scanErr)
+		}
+		r.MentionsEveryone = everyone != 0
+		r.Mentions = []int64{}
+		results = append(results, r)
+	}
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("%s rows: %w", label, rows.Err())
+	}
+	return results, nil
+}
+
+// attachSearchMentions fills in the resolved mention ids for search hits in one
+// batch query, mirroring how scanAndEnrichMessages enriches history rows.
+func (d *DB) attachSearchMentions(ctx context.Context, results []MessageSearchResult) ([]MessageSearchResult, error) {
+	if len(results) == 0 {
+		return results, nil
+	}
+	ids := make([]int64, len(results))
+	for i := range results {
+		ids[i] = results[i].MessageID
+	}
+	mentionMap, err := d.GetMentionsByMessageIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("attachSearchMentions: %w", err)
+	}
+	for i := range results {
+		if m, ok := mentionMap[results[i].MessageID]; ok {
+			results[i].Mentions = m
+		}
+	}
+	return results, nil
+}
 
 // scanMessageWithUser scans a MessageWithUser from *sql.Rows.
 func scanMessageWithUser(rows *sql.Rows) (MessageWithUser, error) {

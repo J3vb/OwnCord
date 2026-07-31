@@ -1049,3 +1049,65 @@ describe("messages store", () => {
     });
   });
 });
+
+describe("mention plumbing", () => {
+  it("carries mentions from a chat_message payload onto the store row", () => {
+    addMessage({
+      id: 1,
+      channel_id: 1,
+      user: TEST_USER,
+      content: "hi @bob @everyone",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+      mentions: [2],
+      mentions_everyone: true,
+    } as ChatMessagePayload);
+
+    const msg = messagesStore.getState().messagesByChannel.get(1)![0]!;
+    expect(msg.mentions).toEqual([2]);
+    expect(msg.mentionsEveryone).toBe(true);
+  });
+
+  it("leaves them undefined when an older server omits them", () => {
+    addMessage({
+      id: 1,
+      channel_id: 1,
+      user: TEST_USER,
+      content: "hi",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+    } as ChatMessagePayload);
+
+    const msg = messagesStore.getState().messagesByChannel.get(1)![0]!;
+    expect(msg.mentions).toBeUndefined();
+    expect(msg.mentionsEveryone).toBeUndefined();
+  });
+
+  it("replaces mentions on edit — an edit re-resolves but never re-notifies", () => {
+    addMessage({
+      id: 1,
+      channel_id: 1,
+      user: TEST_USER,
+      content: "hi @bob",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+      mentions: [2],
+      mentions_everyone: false,
+    } as ChatMessagePayload);
+
+    editMessage({
+      message_id: 1,
+      channel_id: 1,
+      content: "hi @carol",
+      edited_at: "2026-03-15T10:01:00Z",
+      mentions: [3],
+      mentions_everyone: false,
+    } as ChatEditedPayload);
+
+    const msg = messagesStore.getState().messagesByChannel.get(1)![0]!;
+    expect(msg.mentions).toEqual([3]);
+  });
+});

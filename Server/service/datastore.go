@@ -20,6 +20,7 @@ type Store interface {
 	// ── Messages / reactions / read-state ──
 	CreateMessage(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (int64, error)
 	CreateMessageReturning(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (*db.Message, error)
+	CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, mentionsEveryone bool) (*db.Message, error)
 	GetMessage(ctx context.Context, id int64) (*db.Message, error)
 	GetMessages(ctx context.Context, channelID, before int64, limit int) ([]db.MessageWithUser, error)
 	GetMessagesForAPI(ctx context.Context, channelID, before int64, limit int, requestingUserID int64) ([]db.MessageAPIResponse, error)
@@ -35,6 +36,15 @@ type Store interface {
 	GetReactions(ctx context.Context, messageID int64) ([]db.ReactionCount, error)
 	UpdateReadState(ctx context.Context, userID, channelID, lastReadMessageID int64) error
 	GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]db.ChannelUnread, error)
+
+	// ── Mentions ──
+	ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool) error
+	GetMentionsByMessageIDs(ctx context.Context, msgIDs []int64) (map[int64][]int64, error)
+	IncrementMentionCounts(ctx context.Context, channelID int64, userIDs []int64) error
+	GetUserIDsByUsernames(ctx context.Context, usernames []string) (map[string]int64, error)
+	ListMentionTargetsByRoles(ctx context.Context, roleIDs []int64) ([]db.MentionTarget, error)
+	ListBlockersOf(ctx context.Context, blockedID int64) ([]int64, error)
+	GetChannelOverrides(ctx context.Context, channelID int64) (map[int64]db.ChannelOverride, error)
 	GetLatestMessageID(ctx context.Context, channelID int64) (int64, error)
 	LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) (int64, error)
 	GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (map[int64][]db.AttachmentInfo, error)

@@ -46,6 +46,9 @@ ON CONFLICT(channel_id, role_id) DO UPDATE SET
 -- name: GetChannelPermission :one
 SELECT allow, deny FROM channel_overrides WHERE channel_id = ? AND role_id = ?;
 
+-- name: GetChannelOverrides :many
+SELECT role_id, allow, deny FROM channel_overrides WHERE channel_id = ?;
+
 -- name: GetRoleChannelPermissions :many
 SELECT channel_id, allow, deny FROM channel_overrides WHERE role_id = ?;
 

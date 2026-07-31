@@ -192,6 +192,30 @@ messages doesn't light every channel red.
 
 ---
 
+## 7b. Mentions
+
+The server resolves mentions at send time and ships `mentions` (user IDs) +
+`mentions_everyone` on `chat_message`, `chat_edited` and REST history, plus a
+per-channel `mention_count` in `ready`. The client treats those fields as
+authoritative and only falls back to parsing `@tokens` locally when an older
+server omits them.
+
+| Surface | Target UX |
+|---------|-----------|
+| `@username` | Highlighted **only** when it resolves — against the server's `mentions` list or `membersStore` (case-insensitive). An unresolvable `@nobody`, an email local part (`mail@example`) or an address-shaped `@bob@example.com` stays plain text |
+| `@everyone` / `@here` | Highlighted only when `mentions_everyone` is true; a sender without `MENTION_EVERYONE` produces ordinary text with no mention semantics anywhere in the client |
+| Mention of *you* | The `@token` gets `.mention-self` **and** the whole row gets `.mentioned` (left accent + tinted background) |
+| `#channel-name` | Rendered as a clickable chip when the name resolves in `channelsStore` (DM channels excluded); click / Enter routes through `navigateToChannel`, the same activation path the sidebar and quick switcher use |
+| Channel badge | `mentionCount` per channel, seeded from `ready`, incremented on an incoming `chat_message` that mentions you, cleared on activation alongside unread. The red `.mention-badge` replaces the plain unread badge — never both on one row |
+| Notification | "*X* mentioned you in #channel" for a direct mention or an honoured `@everyone`. The **Suppress @everyone** preference drops only `mentions_everyone`-driven notifications; a message that also names you still notifies. DND still silences the popup and the chime |
+| Composer | Typing `@` opens `MentionAutocomplete` (up/down/enter/tab/escape), filtered by username; `@everyone`/`@here` appear only when your role holds `MENTION_EVERYONE`. Selection inserts `@username ` and the popup owns Enter so a half-typed mention never sends |
+
+**Editing rule:** an edit re-resolves mentions (the row's highlight follows the
+new text) but never re-notifies and never re-increments a badge — that is
+enforced server-side and mirrored here by never incrementing off `chat_edited`.
+
+---
+
 ## 8. Slow-mode
 
 Server enforces per-channel slow-mode. **Target:** after a successful send in a
@@ -228,5 +252,8 @@ the same signal in future.
 (+ `message-input/`), `src/pages/main-page/ChannelController.ts`,
 `src/pages/main-page/MessageController.ts`, `src/pages/main-page/ReactionController.ts`,
 `src/stores/messages.store.ts`, `src/lib/dispatcher.ts`, `src/lib/ws.ts`,
-`src/components/SearchOverlay.ts`, `src/components/PinnedMessages.ts`;
-server `Server/service/message.go`, `Server/ws/handlers_chat.go`.
+`src/components/SearchOverlay.ts`, `src/components/PinnedMessages.ts`,
+`src/components/MentionAutocomplete.ts`, `src/lib/mentions.ts`,
+`src/lib/channel-navigation.ts`, `src/lib/notifications.ts`;
+server `Server/service/message.go`, `Server/service/mentions.go`,
+`Server/ws/handlers_chat.go`.

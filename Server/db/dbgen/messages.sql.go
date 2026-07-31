@@ -12,7 +12,8 @@ import (
 
 const createMessage = `-- name: CreateMessage :one
 INSERT INTO messages (channel_id, user_id, content, reply_to) VALUES (?, ?, ?, ?)
-RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp
+RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
+          mentions_everyone
 `
 
 type CreateMessageParams struct {
@@ -40,13 +41,15 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 		&i.Deleted,
 		&i.Pinned,
 		&i.Timestamp,
+		&i.MentionsEveryone,
 	)
 	return i, err
 }
 
 const editMessageContent = `-- name: EditMessageContent :one
 UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ?
-RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp
+RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
+          mentions_everyone
 `
 
 type EditMessageContentParams struct {
@@ -67,6 +70,7 @@ func (q *Queries) EditMessageContent(ctx context.Context, arg EditMessageContent
 		&i.Deleted,
 		&i.Pinned,
 		&i.Timestamp,
+		&i.MentionsEveryone,
 	)
 	return i, err
 }
@@ -78,19 +82,27 @@ SELECT c.id,
        (SELECT COUNT(*) FROM messages m
          WHERE m.channel_id = c.id AND m.deleted = 0
            AND m.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
-                                 WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)) AS unread
+                                 WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)) AS unread,
+       COALESCE((SELECT rs.mention_count FROM read_states rs
+                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions
 FROM channels c
 WHERE c.type IN ('text', 'announcement')
 `
+
+type GetChannelUnreadCountsParams struct {
+	UserID   int64 `json:"userId"`
+	UserID_2 int64 `json:"userId2"`
+}
 
 type GetChannelUnreadCountsRow struct {
 	ID        int64       `json:"id"`
 	LastMsgID interface{} `json:"lastMsgId"`
 	Unread    int64       `json:"unread"`
+	Mentions  interface{} `json:"mentions"`
 }
 
-func (q *Queries) GetChannelUnreadCounts(ctx context.Context, userID int64) ([]GetChannelUnreadCountsRow, error) {
-	rows, err := q.db.QueryContext(ctx, getChannelUnreadCounts, userID)
+func (q *Queries) GetChannelUnreadCounts(ctx context.Context, arg GetChannelUnreadCountsParams) ([]GetChannelUnreadCountsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getChannelUnreadCounts, arg.UserID, arg.UserID_2)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +110,12 @@ func (q *Queries) GetChannelUnreadCounts(ctx context.Context, userID int64) ([]G
 	items := []GetChannelUnreadCountsRow{}
 	for rows.Next() {
 		var i GetChannelUnreadCountsRow
-		if err := rows.Scan(&i.ID, &i.LastMsgID, &i.Unread); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.LastMsgID,
+			&i.Unread,
+			&i.Mentions,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -124,7 +141,8 @@ func (q *Queries) GetLatestMessageID(ctx context.Context, channelID int64) (inte
 }
 
 const getMessage = `-- name: GetMessage :one
-SELECT id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp
+SELECT id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
+       mentions_everyone
 FROM messages WHERE id = ?
 `
 
@@ -141,6 +159,7 @@ func (q *Queries) GetMessage(ctx context.Context, id int64) (Message, error) {
 		&i.Deleted,
 		&i.Pinned,
 		&i.Timestamp,
+		&i.MentionsEveryone,
 	)
 	return i, err
 }
@@ -230,9 +249,11 @@ func (q *Queries) SoftDeleteMessage(ctx context.Context, id int64) error {
 }
 
 const updateReadState = `-- name: UpdateReadState :exec
-INSERT INTO read_states (user_id, channel_id, last_message_id)
-VALUES (?, ?, ?)
-ON CONFLICT(user_id, channel_id) DO UPDATE SET last_message_id = excluded.last_message_id
+INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count)
+VALUES (?, ?, ?, 0)
+ON CONFLICT(user_id, channel_id) DO UPDATE SET
+    last_message_id = excluded.last_message_id,
+    mention_count = 0
 `
 
 type UpdateReadStateParams struct {
@@ -241,6 +262,8 @@ type UpdateReadStateParams struct {
 	LastMessageID int64 `json:"lastMessageId"`
 }
 
+// Marking a channel read also clears its mention badge: channel_focus is the
+// only caller, and a focused channel has no outstanding mentions by definition.
 func (q *Queries) UpdateReadState(ctx context.Context, arg UpdateReadStateParams) error {
 	_, err := q.db.ExecContext(ctx, updateReadState, arg.UserID, arg.ChannelID, arg.LastMessageID)
 	return err

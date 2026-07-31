@@ -56,6 +56,12 @@ type SendMessageResult struct {
 
 	// Attachment data for broadcast.
 	Attachments []db.AttachmentInfo
+
+	// Mentions is the resolved mentioned user ids (never nil) and
+	// MentionsEveryone an authorized @everyone/@here. Both are broadcast so
+	// clients highlight from server-resolved data instead of re-guessing.
+	Mentions         []int64
+	MentionsEveryone bool
 }
 
 // EditMessageResult contains the output of a successful message edit.
@@ -67,6 +73,10 @@ type EditMessageResult struct {
 	IsDM      bool
 	// DM-specific.
 	ParticipantIDs []int64
+
+	// Mentions/MentionsEveryone are re-resolved from the edited content.
+	Mentions         []int64
+	MentionsEveryone bool
 }
 
 // DeleteMessageResult contains the output of a successful message delete.

@@ -12,6 +12,7 @@ import {
   getActiveChannel,
   getChannelsByCategory,
   incrementUnread,
+  incrementMention,
   clearUnread,
 } from "../../src/stores/channels.store";
 import type { ReadyChannel, ChannelCreatePayload, ChannelUpdatePayload } from "../../src/lib/types";
@@ -72,6 +73,7 @@ describe("channels store", () => {
         category: "Text",
         position: 0,
         unreadCount: 3,
+        mentionCount: 0,
         lastMessageId: 100,
         canSend: true,
         topic: "",
@@ -86,6 +88,7 @@ describe("channels store", () => {
         category: "Voice",
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
@@ -125,6 +128,7 @@ describe("channels store", () => {
         category: "Text",
         position: 2,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: null,
         canSend: true,
         topic: "",
@@ -290,6 +294,7 @@ describe("channels store", () => {
         category: "Text",
         position: 0,
         unreadCount: 0,
+        mentionCount: 0,
         lastMessageId: 100,
         canSend: true,
         topic: "",
@@ -333,6 +338,75 @@ describe("channels store", () => {
     it("returns empty map when no channels", () => {
       const grouped = getChannelsByCategory();
       expect(grouped.size).toBe(0);
+    });
+  });
+
+  describe("mention counts", () => {
+    it("reads mention_count from the ready payload", () => {
+      setChannels([{ ...readyChannels[0]!, unread_count: 5, mention_count: 2 }]);
+      expect(channelsStore.getState().channels.get(1)?.mentionCount).toBe(2);
+    });
+
+    it("defaults to 0 when an older server omits mention_count", () => {
+      setChannels(readyChannels);
+      expect(channelsStore.getState().channels.get(1)?.mentionCount).toBe(0);
+    });
+
+    it("increments the mention count for a non-active channel", () => {
+      setChannels(readyChannels);
+
+      incrementMention(1);
+      incrementMention(1);
+
+      expect(channelsStore.getState().channels.get(1)?.mentionCount).toBe(2);
+    });
+
+    it("skips increment for the active channel", () => {
+      setChannels(readyChannels);
+      setActiveChannel(1);
+
+      incrementMention(1);
+
+      expect(channelsStore.getState().channels.get(1)?.mentionCount).toBe(0);
+    });
+
+    it("is a no-op for an unknown channel id", () => {
+      setChannels(readyChannels);
+      const before = channelsStore.getState();
+
+      incrementMention(999);
+
+      expect(channelsStore.getState()).toBe(before);
+    });
+
+    it("clears on activation alongside unread", () => {
+      setChannels([{ ...readyChannels[0]!, unread_count: 5, mention_count: 2 }]);
+
+      setActiveChannel(1);
+
+      const ch = channelsStore.getState().channels.get(1);
+      expect(ch?.mentionCount).toBe(0);
+      expect(ch?.unreadCount).toBe(0);
+    });
+
+    it("clears via clearUnread", () => {
+      setChannels([{ ...readyChannels[0]!, unread_count: 5, mention_count: 2 }]);
+
+      clearUnread(1);
+
+      const ch = channelsStore.getState().channels.get(1);
+      expect(ch?.mentionCount).toBe(0);
+      expect(ch?.unreadCount).toBe(0);
+    });
+
+    it("leaves a mention-only channel's badge clearing to activation", () => {
+      setChannels([{ ...readyChannels[0]!, unread_count: 0, mention_count: 3 }]);
+
+      // Previously setActiveChannel bailed early when unreadCount was 0; a
+      // mention-only channel must still have its badge cleared.
+      setActiveChannel(1);
+
+      expect(channelsStore.getState().channels.get(1)?.mentionCount).toBe(0);
     });
   });
 

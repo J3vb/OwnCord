@@ -14,6 +14,7 @@ import {
   updateChannel,
   removeChannel,
   incrementUnread,
+  incrementMention,
 } from "@stores/channels.store";
 import { channelsStore } from "@stores/channels.store";
 import {
@@ -58,6 +59,7 @@ import { setBlockedByMe, setUserBlockedByThem, clearBlockedByThem } from "@store
 import type { DmChannelPayload } from "./types";
 import type { ApiClient } from "./api";
 import { notifyIncomingMessage } from "./notifications";
+import { highlightsCurrentUser } from "./mentions";
 import { ensureIdentityKeyPublished } from "@lib/identity";
 import { createLogger } from "./logger";
 import { showToast } from "./toast";
@@ -253,6 +255,15 @@ export function wireDispatcher(
       // applied here for defence-in-depth.
       if (payload.channel_id !== activeId && !isOwnMessage && !ws.isReplaying()) {
         incrementUnread(payload.channel_id);
+        // A mention is an unread too — the mention badge just outranks it.
+        if (
+          highlightsCurrentUser(payload.content, {
+            mentions: payload.mentions,
+            mentionsEveryone: payload.mentions_everyone,
+          })
+        ) {
+          incrementMention(payload.channel_id);
+        }
       }
 
       // Update DM store last message if this message belongs to a DM channel.

@@ -114,15 +114,21 @@ type LoginAttempt struct {
 }
 
 type Message struct {
-	ID        int64   `json:"id"`
-	ChannelID int64   `json:"channelId"`
-	UserID    int64   `json:"userId"`
-	Content   string  `json:"content"`
-	ReplyTo   *int64  `json:"replyTo"`
-	EditedAt  *string `json:"editedAt"`
-	Deleted   int64   `json:"deleted"`
-	Pinned    int64   `json:"pinned"`
-	Timestamp string  `json:"timestamp"`
+	ID               int64   `json:"id"`
+	ChannelID        int64   `json:"channelId"`
+	UserID           int64   `json:"userId"`
+	Content          string  `json:"content"`
+	ReplyTo          *int64  `json:"replyTo"`
+	EditedAt         *string `json:"editedAt"`
+	Deleted          int64   `json:"deleted"`
+	Pinned           int64   `json:"pinned"`
+	Timestamp        string  `json:"timestamp"`
+	MentionsEveryone int64   `json:"mentionsEveryone"`
+}
+
+type MessageMention struct {
+	MessageID       int64 `json:"messageId"`
+	MentionedUserID int64 `json:"mentionedUserId"`
 }
 
 type MessagesFt struct {

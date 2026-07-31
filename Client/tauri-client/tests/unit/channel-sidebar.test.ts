@@ -301,6 +301,40 @@ describe("ChannelSidebar", () => {
     expect(badgeTexts).toContain("5");
   });
 
+  it("shows the red mention badge instead of the unread badge", () => {
+    setChannels([{ ...testChannels[0]!, unread_count: 7, mention_count: 2 }, testChannels[1]!]);
+    sidebar.mount(container);
+
+    const item = container.querySelector('[data-channel-id="1"]')!;
+    expect(item.classList.contains("mentioned")).toBe(true);
+    const mentionBadge = item.querySelector(".mention-badge");
+    expect(mentionBadge?.textContent).toBe("2");
+    // The mention badge wins outright — no double badge on one row.
+    expect(item.querySelector(".unread-badge")).toBeNull();
+  });
+
+  it("falls back to the unread badge when there are no mentions", () => {
+    setChannels([{ ...testChannels[0]!, unread_count: 7, mention_count: 0 }]);
+    sidebar.mount(container);
+
+    const item = container.querySelector('[data-channel-id="1"]')!;
+    expect(item.classList.contains("mentioned")).toBe(false);
+    expect(item.querySelector(".mention-badge")).toBeNull();
+    expect(item.querySelector(".unread-badge")?.textContent).toBe("7");
+  });
+
+  it("clears the mention badge when the channel is activated", () => {
+    setChannels([{ ...testChannels[0]!, unread_count: 7, mention_count: 2 }]);
+    sidebar.mount(container);
+
+    (container.querySelector('[data-channel-id="1"]') as HTMLElement).click();
+    channelsStore.flush();
+
+    expect(channelsStore.getState().channels.get(1)?.mentionCount).toBe(0);
+    expect(channelsStore.getState().activeChannelId).toBe(1);
+    expect(container.querySelector(".mention-badge")).toBeNull();
+  });
+
   it("marks active channel with active class", () => {
     setChannels(testChannels);
     setActiveChannel(2);
