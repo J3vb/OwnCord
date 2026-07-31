@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"syscall"
@@ -232,13 +233,25 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 		// live server answering every request against a closed DB while the
 		// response and the restart broadcast both claimed a restart was
 		// happening. Respawn for real, the same way applying an update does.
-		go restartSelf("backup_restore")
+		go requestRestart("backup_restore")
 	})
 }
 
 // restartSelf is the process-restart hook, swappable in tests (which must not
-// respawn or exit the test binary).
-var restartSelf = restartProcess
+// respawn or exit the test binary). Guarded because the swap happens on the
+// test goroutine while the restore handler reads it from its own.
+var (
+	restartMu   sync.Mutex
+	restartSelf = restartProcess
+)
+
+// requestRestart invokes the current restart hook.
+func requestRestart(reason string) {
+	restartMu.Lock()
+	fn := restartSelf
+	restartMu.Unlock()
+	fn(reason)
+}
 
 // restartProcess spawns a fresh copy of this server and shuts the current one
 // down. Mirrors the update-apply path (update_handlers.go): SIGTERM first so
