@@ -484,6 +484,18 @@ export function wireDispatcher(
         reason: payload.reason,
         delaySeconds: payload.delay_seconds,
       });
+      if (payload.reason === "shutdown") {
+        // GracefulStop broadcast: the server is going down, not briefly
+        // restarting in place. Kick back to the login screen instead of
+        // spinning the reconnect loop against a dead host. clearAuth also
+        // leaves voice — stopping any live camera/screenshare tracks and
+        // resetting their toggles to off. "server_shutdown" keeps the saved
+        // credential (the token is still valid), so auto-login can resume
+        // when the server comes back.
+        setTransientError("The server was shut down — you have been signed out.");
+        clearAuth("server_shutdown");
+        return;
+      }
       setTransientError(`Server is restarting: ${payload.reason ?? "maintenance"}`);
     }),
   );

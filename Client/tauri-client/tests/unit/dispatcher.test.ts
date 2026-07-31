@@ -763,6 +763,49 @@ describe("WS Dispatcher", () => {
     expect(error).toContain("maintenance");
   });
 
+  it("wires server_restart shutdown to sign-out and call-state reset", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      isAuthenticated: true,
+      user: { id: 1, username: "call-user", avatar: null, role: "member" },
+    }));
+    // Simulate a live call with webcam and screenshare on.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 42,
+      voiceStatus: "connected",
+      localCamera: true,
+      localScreenshare: true,
+    }));
+
+    mock.dispatch("server_restart", { reason: "shutdown", delay_seconds: 5 });
+
+    // Kicked back to login: auth cleared, reason preserved so the logout
+    // wiring keeps the saved credential.
+    expect(authStore.getState().isAuthenticated).toBe(false);
+    expect(authStore.getState().logoutReason).toBe("server_shutdown");
+    expect(uiStore.getState().transientError).toContain("shut down");
+
+    // Call settings reset to their normal state.
+    const voice = voiceStore.getState();
+    expect(voice.currentChannelId).toBeNull();
+    expect(voice.voiceStatus).toBe("idle");
+    expect(voice.localCamera).toBe(false);
+    expect(voice.localScreenshare).toBe(false);
+  });
+
+  it("keeps the session for non-shutdown server_restart reasons", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      isAuthenticated: true,
+      user: { id: 1, username: "stay-user", avatar: null, role: "member" },
+    }));
+
+    mock.dispatch("server_restart", { reason: "update", delay_seconds: 5 });
+
+    expect(authStore.getState().isAuthenticated).toBe(true);
+  });
+
   it("wires error BANNED to clear auth and show error", () => {
     authStore.setState((prev) => ({
       ...prev,

@@ -621,9 +621,11 @@ authStore.subscribeSelector(
       ws.disconnect();
       lastConnectToken = "";
       lastConnectHost = "";
-      // Clear stored credential on logout
+      // Clear stored credential on logout — but keep it when the server
+      // kicked us by shutting down: the token is still valid, and deleting
+      // the credential would break auto-login every time the server restarts.
       const host = api.getConfig().host;
-      if (host) {
+      if (host && authStore.getState().logoutReason !== "server_shutdown") {
         void deleteCredential(host);
       }
       router.navigate("connect");
