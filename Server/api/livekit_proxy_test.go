@@ -122,6 +122,41 @@ func TestIsOriginAllowed_MultipleAllowedOrigins(t *testing.T) {
 	}
 }
 
+// The desktop client's webview issues LiveKit signal/validate requests
+// directly (not via its Origin-stripping Rust proxy), so its fixed origins
+// must pass even on the default empty allowlist — otherwise voice 403s on
+// every fresh install for any client not on the server machine.
+func TestIsOriginAllowed_FirstPartyDesktopOrigins(t *testing.T) {
+	for _, origin := range []string{
+		"http://tauri.localhost",  // WebView2 (Windows)
+		"https://tauri.localhost", // WebView2, https variant
+		"tauri://localhost",       // WKWebView / WebKitGTK (macOS, Linux)
+		"HTTP://TAURI.LOCALHOST",  // case-insensitive
+	} {
+		r := httptest.NewRequest("GET", "/livekit/", nil)
+		r.Header.Set("Origin", origin)
+		if !isOriginAllowed(r, nil) {
+			t.Errorf("expected true for first-party desktop origin %q with empty allowlist", origin)
+		}
+	}
+}
+
+// A lookalike origin must NOT ride along with the first-party allowance.
+func TestIsOriginAllowed_FirstPartyLookalikesDenied(t *testing.T) {
+	for _, origin := range []string{
+		"http://tauri.localhost.evil.com",
+		"http://eviltauri.localhost",
+		"http://tauri.localhost:8080",
+		"tauri://evil",
+	} {
+		r := httptest.NewRequest("GET", "/livekit/", nil)
+		r.Header.Set("Origin", origin)
+		if isOriginAllowed(r, nil) {
+			t.Errorf("expected false for lookalike origin %q", origin)
+		}
+	}
+}
+
 // --- NewLiveKitProxy HTTP routing tests ---
 
 func TestLiveKitProxy_BlocksAdminPath(t *testing.T) {

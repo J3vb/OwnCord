@@ -102,14 +102,41 @@ func isWebSocketUpgrade(r *http.Request) bool {
 	return false
 }
 
-// isOriginAllowed checks whether the request's Origin header matches one of the
-// allowed origins. Requests with no Origin header (e.g. same-origin or non-browser)
-// are permitted. An empty allowedOrigins list denies all cross-origin requests
-// (require explicit "*" wildcard to allow all).
+// firstPartyClientOrigins are the fixed webview origins of OwnCord's own
+// desktop client (Tauri): WebView2 on Windows uses http(s)://tauri.localhost,
+// WKWebView/WebKitGTK use the tauri:// scheme. The client's chat connection
+// goes through its Rust proxy (which sends no Origin header), but the LiveKit
+// JS SDK's signal requests and validate probes are issued directly from the
+// webview and DO carry these origins — without this allowance, voice fails
+// with 403 on every default install (empty allowed_origins) for any client
+// not on the server machine.
+//
+// Allowing them matches the trust already extended to absent-Origin requests:
+// a remote website can never present these origins (browsers resolve
+// *.localhost to loopback per RFC 6761 semantics and the tauri:// scheme is
+// not reachable from web content), so this does not widen the CSRF surface —
+// only code running on the user's own machine could ever send them, which is
+// outside the web attacker model this check defends against.
+var firstPartyClientOrigins = []string{
+	"http://tauri.localhost",
+	"https://tauri.localhost",
+	"tauri://localhost",
+}
+
+// isOriginAllowed checks whether the request's Origin header matches one of
+// the allowed origins. Requests with no Origin header (e.g. same-origin or
+// non-browser) and the first-party desktop client's webview origins are
+// always permitted. Beyond those, an empty allowedOrigins list denies all
+// cross-origin requests (require explicit "*" wildcard to allow all).
 func isOriginAllowed(r *http.Request, allowedOrigins []string) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true // non-browser or same-origin requests
+	}
+	for _, firstParty := range firstPartyClientOrigins {
+		if strings.EqualFold(origin, firstParty) {
+			return true
+		}
 	}
 	if len(allowedOrigins) == 0 {
 		return false // no allowlist configured — deny cross-origin
