@@ -93,13 +93,19 @@ func (h *Hub) broadcastChannelScopedTo(channelID int64, msg []byte, recipients [
 
 // channelReadAudience returns the connected user IDs whose current role may READ
 // channelID. Always non-nil, so an empty result means "deliver to nobody"
-// rather than "no filter". Roles are resolved per client (an admin may have
-// reassigned one mid-session) and both lookups are memoised for the duration
-// of the call — one GetRoleForUser per distinct connected user, one override
-// lookup per distinct role — deliberately NOT across calls: a cross-call cache
-// would delay revocation, which this path resolves live on purpose. Fails
-// closed: a client whose role cannot be resolved is left out. Mirrors
-// RefreshChannelVisibility, which resolves visibility the same way.
+// rather than "no filter". Each user's verdict comes from the cached
+// PermissionService when the hub has one (one in-memory lookup per connected
+// user; a miss repopulates from the user's CURRENT role, so a mid-session
+// reassignment is still honored). Caching is safe here because revocation is
+// delivered synchronously at every mutation site: a role change calls
+// InvalidateUser (admin/handlers_users.go) and a channel-override change calls
+// InvalidateAll (admin/handlers_channel_perms.go) before the hub fan-out runs,
+// with the 30s cache TTL as a backstop; the F6 gen-counter guard in the service
+// prevents a populate racing an invalidation from caching stale data. Fails
+// closed: a client whose role cannot be resolved is left out. Bare test hubs
+// without a service fall back to live per-call lookups, memoised for the
+// duration of the call. Mirrors RefreshChannelVisibility, which resolves
+// visibility the same way.
 func (h *Hub) channelReadAudience(ctx context.Context, channelID int64) []int64 {
 	h.mu.RLock()
 	userIDs := make([]int64, 0, len(h.clients))
@@ -109,6 +115,14 @@ func (h *Hub) channelReadAudience(ctx context.Context, channelID int64) []int64 
 	h.mu.RUnlock()
 
 	audience := make([]int64, 0, len(userIDs))
+	if h.perms != nil {
+		for _, uid := range userIDs {
+			if h.perms.HasChannelPerm(ctx, uid, channelID, permissions.ReadMessages) {
+				audience = append(audience, uid)
+			}
+		}
+		return audience
+	}
 	if h.db == nil || h.permChecker == nil {
 		return audience
 	}
@@ -195,7 +209,13 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	// the targeted re-sync must complete regardless of the triggering request.
 	ctx := context.Background()
 
-	// Visibility is a function of the role, so resolve each role once.
+	// Visibility is resolved per user. With a PermissionService it comes from
+	// the per-user cache — safe because the admin handlers invalidate
+	// (InvalidateAll on override change, InvalidateUser on role change) before
+	// calling into the hub, so the lookups below repopulate from post-change
+	// data; the 30s TTL is only a backstop and the F6 gen-counter guard keeps
+	// a racing populate from caching stale rows. Without a service (bare test
+	// hubs) each role is resolved live, once.
 	visibleByRole := make(map[int64]bool)
 	roleVisible := func(roleID int64) bool {
 		if v, ok := visibleByRole[roleID]; ok {
@@ -217,16 +237,25 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		if c.user == nil {
 			continue
 		}
-		// c.user is a connect-time snapshot; an admin may have changed the
-		// user's role mid-session, so resolve the current role from the DB.
-		// Fail closed: on error send nothing rather than mis-target.
-		fresh, err := h.db.GetUserByID(ctx, c.user.ID)
-		if err != nil || fresh == nil {
-			slog.Warn("hub: RefreshChannelVisibility could not resolve user role",
-				"user_id", c.user.ID, "err", err)
-			continue
+		var visible bool
+		if h.perms != nil {
+			// The service resolves the user's CURRENT role internally (c.user
+			// is a connect-time snapshot), failing closed — an unresolvable
+			// role loses visibility rather than keeping a stale grant.
+			visible = h.perms.HasChannelPerm(ctx, c.user.ID, ch.ID, permissions.ReadMessages)
+		} else {
+			// c.user is a connect-time snapshot; an admin may have changed the
+			// user's role mid-session, so resolve the current role from the DB.
+			// Fail closed: on error send nothing rather than mis-target.
+			fresh, err := h.db.GetUserByID(ctx, c.user.ID)
+			if err != nil || fresh == nil {
+				slog.Warn("hub: RefreshChannelVisibility could not resolve user role",
+					"user_id", c.user.ID, "err", err)
+				continue
+			}
+			visible = roleVisible(fresh.RoleID)
 		}
-		if roleVisible(fresh.RoleID) {
+		if visible {
 			// Idempotent add on the client; also refreshes channel metadata.
 			c.sendMsg(buildChannelCreate(ch))
 			continue

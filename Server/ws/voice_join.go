@@ -169,17 +169,24 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 	// rollback does not broadcast a spurious voice_leave for an unannounced join.
 	if h.livekit != nil {
 		// Derive publish permissions from role — prevents SFU-level bypass
-		// when client connects directly via direct_url (BUG-128). The three
-		// bits are answered from one role fetch + one overrides fetch via
-		// HasChannelPermBatch instead of three hasChannelPerm round trips
-		// (each of which is a role lookup plus an override lookup). Fails
-		// closed like hasChannelPerm: an unresolved role or override map
+		// when client connects directly via direct_url (BUG-128). With a
+		// PermissionService the three bits come from the per-user cache; the
+		// bare-hub fallback answers them from one role fetch + one overrides
+		// fetch via HasChannelPermBatch instead of three hasChannelPerm round
+		// trips. Both branches fail closed: an unresolved role or override map
 		// yields no publish grants (admins bypass overrides, so an override
 		// fetch error cannot demote them).
 		var canPublish, canVideo, canScreenShare bool
 		canSubscribe := true
-		role, roleErr := h.db.GetRoleForUser(ctx, c.userID)
-		if roleErr == nil && role != nil {
+		if h.perms != nil {
+			// PermissionService answers all three bits from one cached
+			// role+overrides snapshot (populated by the CONNECT_VOICE gate
+			// above, so these are cache hits). Same fail-closed posture: an
+			// unresolved role or override map yields no publish grants.
+			canPublish = h.perms.HasChannelPerm(ctx, c.userID, channelID, permissions.SpeakVoice)
+			canVideo = h.perms.HasChannelPerm(ctx, c.userID, channelID, permissions.UseVideo)
+			canScreenShare = h.perms.HasChannelPerm(ctx, c.userID, channelID, permissions.ShareScreen)
+		} else if role, roleErr := h.db.GetRoleForUser(ctx, c.userID); roleErr == nil && role != nil {
 			// Admins bypass overrides, so skip the fetch for them (mirrors
 			// computeAllowedChannels); HasChannelPermBatch answers true from
 			// the role bits alone.
@@ -304,17 +311,20 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 	// Channel-type aware, like the voice_join gate: this mints the same
 	// RoomJoin+CanSubscribe credential, so a role-only check here would keep
 	// re-issuing one for a DM the user is not a participant of.
-	if !hasChannelAccess(ctx, d.DB, d.Permissions, userID, channelID, permissions.ConnectVoice) {
+	if !hasChannelAccess(ctx, d.DB, d.Permissions, d.PermSvc, userID, channelID, permissions.ConnectVoice) {
 		return Result{
 			Error:      ClientError{Code: ErrCodeForbidden, Message: "missing CONNECT_VOICE permission"},
 			LeaveVoice: true,
 		}
 	}
 
-	canPublish := hasPerm(ctx, d.DB, d.Permissions, userID, channelID, permissions.SpeakVoice)
+	// With a PermissionService these three are cache hits after the gate above
+	// populated the user's entry — the refresh drops from ~9 DB reads to at
+	// most one channel-row lookup.
+	canPublish := hasPerm(ctx, d.DB, d.Permissions, d.PermSvc, userID, channelID, permissions.SpeakVoice)
 	canSubscribe := true
-	canVideo := hasPerm(ctx, d.DB, d.Permissions, userID, channelID, permissions.UseVideo)
-	canScreenShare := hasPerm(ctx, d.DB, d.Permissions, userID, channelID, permissions.ShareScreen)
+	canVideo := hasPerm(ctx, d.DB, d.Permissions, d.PermSvc, userID, channelID, permissions.UseVideo)
+	canScreenShare := hasPerm(ctx, d.DB, d.Permissions, d.PermSvc, userID, channelID, permissions.ShareScreen)
 
 	joinToken := info.VoiceJoinToken
 	var result Result
