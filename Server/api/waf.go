@@ -62,7 +62,7 @@ func newCRSWAF(paranoiaLevel int, block bool, onMatch func(types.MatchedRule)) (
 	}
 	return coraza.NewWAF(
 		coraza.NewWAFConfig().
-			WithRootFS(coreruleset.FS).
+			WithRootFS(slashFS{coreruleset.FS}).
 			WithErrorCallback(onMatch).
 			WithDirectives(fmt.Sprintf(`
 				Include @coraza.conf-recommended
