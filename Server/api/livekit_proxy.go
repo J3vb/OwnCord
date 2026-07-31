@@ -76,6 +76,8 @@ func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 
 		// Validate Origin header (mirrors WS OriginPatterns).
 		if !isOriginAllowed(r, allowedOrigins) {
+			slog.Warn("livekit proxy: origin rejected",
+				"origin", r.Header.Get("Origin"), "path", r.URL.Path, "remote", r.RemoteAddr)
 			writeJSON(w, http.StatusForbidden, errorResponse{
 				Error:   "FORBIDDEN",
 				Message: "access denied",
@@ -132,6 +134,16 @@ func isOriginAllowed(r *http.Request, allowedOrigins []string) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true // non-browser or same-origin requests
+	}
+	// Browsers attach the page's own origin to every WebSocket handshake
+	// (fetch may omit it same-origin; WS never does). An Origin whose host
+	// matches the request's Host is a page this server itself served —
+	// same-origin, not cross-origin. This mirrors websocket.Accept's default
+	// policy, which the chat WS endpoint already applies; web content on
+	// another origin can never present it (the browser pins Origin), so it
+	// does not widen the CSRF surface.
+	if u, err := url.Parse(origin); err == nil && u.Host != "" && strings.EqualFold(u.Host, r.Host) {
+		return true
 	}
 	for _, firstParty := range firstPartyClientOrigins {
 		if strings.EqualFold(origin, firstParty) {
