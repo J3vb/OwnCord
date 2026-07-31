@@ -47,11 +47,12 @@ func (d *DB) GetServerStats(ctx context.Context) (*ServerStats, error) {
 	// page_count * page_size gives the database size in bytes. PRAGMAs are not
 	// expressible as sqlc queries, so they stay on the raw connection.
 	// For :memory: databases this still works (returns the in-memory size).
+	// Both values are DB-wide, so reading them on the reader pool is fine.
 	var pageCount, pageSize int64
-	if err := d.sqlDB.QueryRowContext(ctx, `PRAGMA page_count`).Scan(&pageCount); err != nil {
+	if err := d.reader.QueryRowContext(ctx, `PRAGMA page_count`).Scan(&pageCount); err != nil {
 		return nil, fmt.Errorf("GetServerStats page_count: %w", err)
 	}
-	if err := d.sqlDB.QueryRowContext(ctx, `PRAGMA page_size`).Scan(&pageSize); err != nil {
+	if err := d.reader.QueryRowContext(ctx, `PRAGMA page_size`).Scan(&pageSize); err != nil {
 		return nil, fmt.Errorf("GetServerStats page_size: %w", err)
 	}
 	stats.DBSizeBytes = pageCount * pageSize
@@ -129,7 +130,7 @@ func (d *DB) GetUserSessions(ctx context.Context, userID int64) ([]Session, erro
 // AdminCreateChannel creates a channel with full field control including position.
 // No sqlc query covers this exact INSERT shape, so it stays on raw SQL.
 func (d *DB) AdminCreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error) {
-	res, err := d.sqlDB.ExecContext(ctx,
+	res, err := d.writer.ExecContext(ctx,
 		`INSERT INTO channels (name, type, category, topic, position)
 		 VALUES (?, ?, ?, ?, ?)`,
 		name, chanType, strToNullPtr(category), strToNullPtr(topic), position,
@@ -213,7 +214,7 @@ func (d *DB) PersistAudits(ctx context.Context, entries []AuditEntry) (int, erro
 // persistAuditsTx inserts all entries inside one transaction; any failure
 // rolls the whole batch back.
 func (d *DB) persistAuditsTx(ctx context.Context, entries []AuditEntry) error {
-	tx, err := d.sqlDB.BeginTx(ctx, nil)
+	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("PersistAudits begin tx: %w", err)
 	}
@@ -369,7 +370,7 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 		return fmt.Errorf("BackupToSafe: path contains forbidden sequence %q", "--")
 	}
 
-	_, err = d.sqlDB.ExecContext(ctx, fmt.Sprintf("VACUUM INTO '%s'", absClean))
+	_, err = d.writer.ExecContext(ctx, fmt.Sprintf("VACUUM INTO '%s'", absClean))
 	if err != nil {
 		return fmt.Errorf("BackupToSafe: %w", err)
 	}

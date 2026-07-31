@@ -92,7 +92,7 @@ func (d *DB) GetMessages(ctx context.Context, channelID, before int64, limit int
 		err  error
 	)
 	if before > 0 {
-		rows, err = d.sqlDB.QueryContext(ctx,
+		rows, err = d.reader.QueryContext(ctx,
 			`SELECT m.id, m.channel_id, m.user_id, m.content, m.reply_to,
 			        m.edited_at, m.deleted, m.pinned, m.timestamp,
 			        u.username, u.avatar
@@ -102,7 +102,7 @@ func (d *DB) GetMessages(ctx context.Context, channelID, before int64, limit int
 			channelID, before, limit,
 		)
 	} else {
-		rows, err = d.sqlDB.QueryContext(ctx,
+		rows, err = d.reader.QueryContext(ctx,
 			`SELECT m.id, m.channel_id, m.user_id, m.content, m.reply_to,
 			        m.edited_at, m.deleted, m.pinned, m.timestamp,
 			        u.username, u.avatar
@@ -243,7 +243,7 @@ func (d *DB) SearchMessages(ctx context.Context, query string, channelID *int64,
 	)
 
 	if channelID != nil {
-		rows, err = d.sqlDB.QueryContext(ctx,
+		rows, err = d.reader.QueryContext(ctx,
 			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content, m.timestamp
 			 FROM messages_fts f
 			 JOIN messages m ON f.rowid = m.id
@@ -254,7 +254,7 @@ func (d *DB) SearchMessages(ctx context.Context, query string, channelID *int64,
 			query, *channelID, limit,
 		)
 	} else {
-		rows, err = d.sqlDB.QueryContext(ctx,
+		rows, err = d.reader.QueryContext(ctx,
 			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content, m.timestamp
 			 FROM messages_fts f
 			 JOIN messages m ON f.rowid = m.id
@@ -314,7 +314,7 @@ func (d *DB) SearchMessagesInChannels(ctx context.Context, query string, channel
 	}
 	args = append(args, limit)
 
-	rows, err := d.sqlDB.QueryContext(ctx,
+	rows, err := d.reader.QueryContext(ctx,
 		fmt.Sprintf(
 			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content, m.timestamp
 			 FROM messages_fts f
@@ -358,7 +358,7 @@ func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, lim
 		err  error
 	)
 	if before > 0 {
-		rows, err = d.sqlDB.QueryContext(ctx,
+		rows, err = d.reader.QueryContext(ctx,
 			`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
 			        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp
 			 FROM messages m JOIN users u ON m.user_id = u.id
@@ -367,7 +367,7 @@ func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, lim
 			channelID, before, limit,
 		)
 	} else {
-		rows, err = d.sqlDB.QueryContext(ctx,
+		rows, err = d.reader.QueryContext(ctx,
 			`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
 			        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp
 			 FROM messages m JOIN users u ON m.user_id = u.id
@@ -413,7 +413,7 @@ func (d *DB) getReactionsBatch(ctx context.Context, msgIDs []int64, requestingUs
 	)
 	args = append([]any{requestingUserID}, args...)
 
-	rows, err := d.sqlDB.QueryContext(ctx, query, args...)
+	rows, err := d.reader.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("getReactionsBatch: %w", err)
 	}
@@ -454,7 +454,7 @@ func (d *DB) UpdateReadState(ctx context.Context, userID, channelID, lastReadMes
 // idx_messages_channel per channel instead of the old LEFT JOIN fan-out that
 // touched every message row on every WS connect.
 func (d *DB) GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]ChannelUnread, error) {
-	rows, err := d.sqlDB.QueryContext(ctx,
+	rows, err := d.reader.QueryContext(ctx,
 		`SELECT c.id,
 		        (SELECT COALESCE(MAX(m.id), 0) FROM messages m
 		          WHERE m.channel_id = c.id AND m.deleted = 0) AS last_msg_id,
@@ -489,7 +489,7 @@ func (d *DB) GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int6
 // GetLatestMessageID returns the highest message ID in a channel, or 0 if empty.
 func (d *DB) GetLatestMessageID(ctx context.Context, channelID int64) (int64, error) {
 	var id int64
-	err := d.sqlDB.QueryRowContext(ctx,
+	err := d.reader.QueryRowContext(ctx,
 		`SELECT COALESCE(MAX(id), 0) FROM messages WHERE channel_id = ? AND deleted = 0`,
 		channelID,
 	).Scan(&id)
@@ -502,7 +502,7 @@ func (d *DB) GetLatestMessageID(ctx context.Context, channelID int64) (int64, er
 // GetPinnedMessages returns all pinned messages in a channel in the API response shape,
 // including user object, reactions (with me flag), and attachments.
 func (d *DB) GetPinnedMessages(ctx context.Context, channelID int64, requestingUserID int64) ([]MessageAPIResponse, error) {
-	rows, err := d.sqlDB.QueryContext(ctx,
+	rows, err := d.reader.QueryContext(ctx,
 		`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
 		        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp
 		 FROM messages m JOIN users u ON m.user_id = u.id
