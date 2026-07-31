@@ -4,6 +4,7 @@ import type { MemberListOptions } from "@components/MemberList";
 import { membersStore } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
+import { channelsStore, setRoles } from "@stores/channels.store";
 import type { UserStatus } from "../../src/lib/types";
 
 function resetStore(): void {
@@ -218,6 +219,38 @@ describe("MemberList", () => {
 
     expect(aliceDot.style.background).toBe("var(--green)");
     expect(bobDot.style.background).toBe("var(--red)");
+  });
+
+  it("offers the server's own roles in the Change Role submenu", () => {
+    // A hardcoded list left custom roles unassignable — and unresolvable to a
+    // role id, so choosing one silently did nothing.
+    setRoles([
+      { id: 1, name: "Owner", color: null, permissions: 0 },
+      { id: 2, name: "Staff", color: null, permissions: 0 },
+      { id: 3, name: "VIP", color: null, permissions: 0 },
+    ]);
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 99, username: "Admin", avatar: null, role: "admin" },
+      serverName: "Test",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    setTestMembers(testMembers);
+    memberList.mount(container);
+
+    const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
+    memberItem.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+
+    const submenu = document.body.querySelector(".context-menu__submenu");
+    expect(submenu).not.toBeNull();
+    const roleLabels = Array.from(submenu!.querySelectorAll(".context-menu__item")).map(
+      (i) => i.textContent,
+    );
+    // "owner" is not a context-menu action.
+    expect(roleLabels).toEqual(["staff", "vip"]);
+
+    document.body.querySelector(".context-menu")?.remove();
   });
 
   it("context menu does not appear for non-admin/non-owner roles", () => {

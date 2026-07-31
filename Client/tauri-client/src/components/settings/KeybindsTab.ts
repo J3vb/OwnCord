@@ -111,8 +111,8 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
 
   const navBinds: [string, string][] = [
     ["Quick Switcher", "Ctrl + K"],
-    ["Mark as Read", "Escape"],
     ["Search Messages", "Ctrl + F"],
+    ["Close Overlay / Cancel", "Escape"],
   ];
   for (const [label, shortcut] of navBinds) {
     const row = createElement("div", { class: "keybind-row" });
@@ -150,6 +150,16 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     );
     section.appendChild(row);
   }
+
+  section.appendChild(
+    createElement(
+      "div",
+      {
+        style: "font-size: 11px; color: var(--text-micro); margin: 4px 0 0 0; line-height: 1.4;",
+      },
+      "Voice shortcuts apply while you are connected to a voice channel.",
+    ),
+  );
 
   // ── Messages section ───────────────────────────────────────
   section.appendChild(createElement("div", { class: "settings-separator" }));

@@ -41,6 +41,7 @@ vi.mock("@stores/auth.store", () => ({
     getState: () => ({
       user: { id: 1, username: "testuser", totp_enabled: false },
     }),
+    subscribeSelector: vi.fn(() => () => {}),
   },
   updateUser: vi.fn(),
 }));
@@ -371,6 +372,63 @@ describe("SettingsOverlay", () => {
     changePwBtn.click();
 
     expect(defaultOptions.onChangePassword).not.toHaveBeenCalled();
+
+    overlay.destroy?.();
+  });
+
+  it("requires the current password before calling the server", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    const inputs = container.querySelectorAll("input[type='password']");
+    (inputs[0] as HTMLInputElement).value = "";
+    (inputs[1] as HTMLInputElement).value = "newpassword123";
+    (inputs[2] as HTMLInputElement).value = "newpassword123";
+
+    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+      (b) => b.textContent === "Change Password",
+    ) as HTMLElement;
+    changePwBtn.click();
+
+    // An empty current password is a guaranteed 403 — and each one counts
+    // against the server's lockout counter.
+    expect(defaultOptions.onChangePassword).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Enter your current password.");
+
+    overlay.destroy?.();
+  });
+
+  it("blocks a double submit while the password change is in flight", async () => {
+    let resolveChange: (() => void) | null = null;
+    const onChangePassword = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveChange = resolve;
+        }),
+    );
+    const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
+    overlay.mount(container);
+
+    const inputs = container.querySelectorAll("input[type='password']");
+    (inputs[0] as HTMLInputElement).value = "oldpass123";
+    (inputs[1] as HTMLInputElement).value = "newpassword123";
+    (inputs[2] as HTMLInputElement).value = "newpassword123";
+
+    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+      (b) => b.textContent === "Change Password",
+    ) as HTMLButtonElement;
+    changePwBtn.click();
+    expect(changePwBtn.disabled).toBe(true);
+    expect(changePwBtn.textContent).toBe("Changing...");
+
+    changePwBtn.click();
+    expect(onChangePassword).toHaveBeenCalledTimes(1);
+
+    resolveChange!();
+    await vi.waitFor(() => {
+      expect(changePwBtn.disabled).toBe(false);
+      expect(changePwBtn.textContent).toBe("Change Password");
+    });
 
     overlay.destroy?.();
   });
@@ -850,6 +908,49 @@ describe("SettingsOverlay", () => {
     expect(tabNames).toContain("Account");
 
     overlay.destroy?.();
+  });
+
+  // --- Reopen rebuilds live content ---
+
+  it("rebuilds the active tab when the panel is reopened", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    overlay.open();
+    const firstPane = container.querySelector(".settings-content .settings-pane");
+    expect(firstPane).not.toBeNull();
+
+    // Closing tears down the live parts of the tab (mic meter, camera preview,
+    // log listener) — reopening must build a fresh pane, not show the corpse.
+    overlay.close();
+    overlay.open();
+
+    const secondPane = container.querySelector(".settings-content .settings-pane");
+    expect(secondPane).not.toBeNull();
+    expect(secondPane).not.toBe(firstPane);
+    // Exactly one pane — the old one was replaced, not appended to.
+    expect(container.querySelectorAll(".settings-content .settings-pane").length).toBe(1);
+  });
+
+  it("re-reads preferences when reopened", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    overlay.open();
+    const appearanceTab = Array.from(
+      container.querySelectorAll(".settings-sidebar > button.settings-nav-item"),
+    ).find((b) => b.textContent === "Appearance") as HTMLElement;
+    appearanceTab.click();
+
+    let slider = container.querySelector(".settings-slider") as HTMLInputElement;
+    expect(slider.value).toBe("16");
+
+    overlay.close();
+    localStorage.setItem("owncord:settings:fontSize", JSON.stringify(20));
+    overlay.open();
+
+    slider = container.querySelector(".settings-slider") as HTMLInputElement;
+    expect(slider.value).toBe("20");
   });
 
   // --- Cleanup ---

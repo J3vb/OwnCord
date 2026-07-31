@@ -217,6 +217,7 @@ describe("WS Dispatcher", () => {
         unreadCount: 0,
         lastMessageId: null,
         canSend: true,
+        slowMode: 0,
       });
       return { ...prev, channels: ch, activeChannelId: 1 }; // active is channel 1
     });
@@ -277,6 +278,7 @@ describe("WS Dispatcher", () => {
         unreadCount: 0,
         lastMessageId: null,
         canSend: true,
+        slowMode: 0,
       });
       return { ...prev, channels: ch };
     });
@@ -530,6 +532,7 @@ describe("WS Dispatcher", () => {
         unreadCount: 0,
         lastMessageId: null,
         canSend: true,
+        slowMode: 0,
       });
       return { ...prev, channels: ch };
     });
@@ -558,6 +561,7 @@ describe("WS Dispatcher", () => {
         unreadCount: 0,
         lastMessageId: null,
         canSend: true,
+        slowMode: 0,
       });
       ch.set(20, {
         id: 20,
@@ -568,6 +572,7 @@ describe("WS Dispatcher", () => {
         unreadCount: 0,
         lastMessageId: null,
         canSend: true,
+        slowMode: 0,
       });
       return { ...prev, channels: ch, activeChannelId: 10 };
     });
@@ -590,6 +595,7 @@ describe("WS Dispatcher", () => {
         unreadCount: 0,
         lastMessageId: null,
         canSend: true,
+        slowMode: 0,
       });
       return { ...prev, channels: ch, activeChannelId: 10 };
     });
@@ -1004,6 +1010,7 @@ describe("WS Dispatcher", () => {
         unreadCount: 0,
         lastMessageId: null,
         canSend: true,
+        slowMode: 0,
       });
       return { ...prev, channels: ch, activeChannelId: 1 };
     });
@@ -1035,6 +1042,7 @@ describe("WS Dispatcher", () => {
         unreadCount: 0,
         lastMessageId: null,
         canSend: true,
+        slowMode: 0,
       });
       return { ...prev, channels: ch, activeChannelId: 1 };
     });

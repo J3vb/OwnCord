@@ -10,6 +10,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -124,6 +125,58 @@ func TestPluginsHandlerInstallHappyPath(t *testing.T) {
 	}
 }
 
+// The admin panel's empty state distinguishes "no plugins installed" from
+// "the runtime is off", which it can only do from this header.
+func TestPluginsHandlerListReportsRuntimeState(t *testing.T) {
+	off := NewPluginAdminHandler(nil, nil)
+	rec := httptest.NewRecorder()
+	off.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if got := rec.Header().Get("X-Plugin-Runtime"); got != "disabled" {
+		t.Fatalf("nil registry: X-Plugin-Runtime = %q, want %q", got, "disabled")
+	}
+
+	on := NewPluginAdminHandler(newTestPluginRegistry(t), openPluginTestDB(t))
+	rec = httptest.NewRecorder()
+	on.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if got := rec.Header().Get("X-Plugin-Runtime"); got != "enabled" {
+		t.Fatalf("live registry: X-Plugin-Runtime = %q, want %q", got, "enabled")
+	}
+}
+
+// The panel reads snake_case fields; without JSON tags these marshal as
+// Go field names and every column renders empty.
+func TestPluginsHandlerListUsesSnakeCaseJSON(t *testing.T) {
+	reg, mem := newTestPluginRegistryWithStore(t)
+	h := NewPluginAdminHandler(reg, mem)
+
+	body, contentType := buildZipUpload(t, validPluginZip(t))
+	req := httptest.NewRequest("POST", "/install", body)
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("install: got %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list: got %d, want 200", rec.Code)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &rows); err != nil {
+		t.Fatalf("list body is not JSON: %v (%s)", err, rec.Body.String())
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 plugin row, got %d", len(rows))
+	}
+	for _, key := range []string{"id", "name", "version", "enabled", "installed_at"} {
+		if _, ok := rows[0][key]; !ok {
+			t.Fatalf("missing %q in plugin row: %v", key, rows[0])
+		}
+	}
+}
+
 func TestPluginsHandlerEnableDisableUninstallReturn503WhenRegistryNil(t *testing.T) {
 	h := NewPluginAdminHandler(nil, nil)
 	for _, tc := range []struct{ method, path string }{
@@ -190,6 +243,15 @@ func TestHasZipMagic(t *testing.T) {
 
 func newTestPluginRegistry(t *testing.T) *plugin.Registry {
 	t.Helper()
+	reg, _ := newTestPluginRegistryWithStore(t)
+	return reg
+}
+
+// newTestPluginRegistryWithStore returns a registry alongside the database it
+// writes to, for tests that then read the rows back through the handler. The
+// two must be the same store, or the list is empty no matter what installed.
+func newTestPluginRegistryWithStore(t *testing.T) (*plugin.Registry, *db.DB) {
+	t.Helper()
 	dir := t.TempDir()
 	mem := openPluginTestDB(t)
 	reg, err := plugin.NewRegistry(plugin.Config{
@@ -200,7 +262,7 @@ func newTestPluginRegistry(t *testing.T) *plugin.Registry {
 		t.Fatalf("plugin.NewRegistry: %v", err)
 	}
 	t.Cleanup(func() { _ = reg.Close(context.Background()) })
-	return reg
+	return reg, mem
 }
 
 // validPluginZip returns a minimal but structurally valid plugin package:

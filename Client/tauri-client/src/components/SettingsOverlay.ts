@@ -127,8 +127,11 @@ export function createSettingsOverlay(
   let contentArea: HTMLDivElement | null = null;
   let pageTitle: HTMLHeadingElement | null = null;
   let activeTab: TabName = authenticated ? "Account" : "Appearance";
+  /** False once the active tab's content has been torn down by `hide()`. */
+  let contentLive = false;
   const tabButtons = new Map<TabName, HTMLButtonElement>();
   let unsubUi: (() => void) | null = null;
+  let unsubAuth: (() => void) | null = null;
 
   // Stateful tabs — create via factory for proper cleanup on tab switch
   const logsTab = createLogsTab(() => activeTab, ac.signal);
@@ -158,12 +161,21 @@ export function createSettingsOverlay(
     contentArea.appendChild(pageTitle);
     const builder = TAB_BUILDERS[activeTab];
     contentArea.appendChild(builder());
+    contentLive = true;
+  }
+
+  /** Release resources held by the tab currently on screen. */
+  function cleanupActiveTab(): void {
+    if (activeTab === "Voice & Audio") voiceTab.cleanup();
+    // The Logs tab keeps a live log listener pointed at its (now discarded)
+    // list element — drop it so it isn't re-rendering a detached tree.
+    if (activeTab === "Logs") logsTab.cleanup();
   }
 
   function setActiveTab(tab: TabName): void {
     if (tab === activeTab) return;
     // Clean up stateful tabs when switching away
-    if (activeTab === "Voice & Audio") voiceTab.cleanup();
+    cleanupActiveTab();
     activeTab = tab;
     for (const [name, btn] of tabButtons) {
       btn.classList.toggle("active", name === tab);
@@ -174,12 +186,17 @@ export function createSettingsOverlay(
 
   function show(): void {
     root?.classList.add("open");
+    // Closing tore down the live parts of the active tab (mic meter, camera
+    // preview, log listener). Rebuild it so a reopened panel shows live state
+    // instead of a frozen snapshot — and so every tab re-reads current prefs.
+    if (!contentLive) renderActiveTab();
   }
 
   function hide(): void {
     root?.classList.remove("open");
-    // Stop camera preview and mic meter when settings overlay closes
-    voiceTab.cleanup();
+    // Stop camera preview, mic meter, and the log listener when the overlay closes
+    cleanupActiveTab();
+    contentLive = false;
   }
 
   // ---- MountableComponent ---------------------------------------------------
@@ -219,6 +236,16 @@ export function createSettingsOverlay(
     appendChildren(profileInfo, profileName, editProfileLink);
     appendChildren(profileSection, avatarEl, profileInfo);
     sidebar.appendChild(profileSection);
+
+    // Keep the sidebar identity in step with the store — renaming yourself on
+    // the Account tab used to leave the old name sitting here until restart.
+    unsubAuth = authStore.subscribeSelector(
+      (s) => s.user?.username,
+      (name) => {
+        profileName.textContent = name ?? "Unknown";
+        avatarEl.textContent = (name ?? "U").charAt(0).toUpperCase();
+      },
+    );
 
     // "User Settings" category — only Account belongs here (hidden when not authenticated)
     if (authenticated) {
@@ -320,6 +347,9 @@ export function createSettingsOverlay(
 
     root.appendChild(panel);
     renderActiveTab();
+    // Content built while the panel is closed is only a placeholder: opening
+    // rebuilds it so the first view is as fresh as every later one.
+    contentLive = uiStore.getState().settingsOpen;
 
     // Subscribe to uiStore for open/close
     unsubUi = uiStore.subscribeSelector(
@@ -346,6 +376,10 @@ export function createSettingsOverlay(
     if (unsubUi !== null) {
       unsubUi();
       unsubUi = null;
+    }
+    if (unsubAuth !== null) {
+      unsubAuth();
+      unsubAuth = null;
     }
     logsTab.cleanup();
     voiceTab.cleanup();

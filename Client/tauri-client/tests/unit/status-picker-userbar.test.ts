@@ -3,6 +3,7 @@ import { authStore } from "@stores/auth.store";
 import { uiStore, setConnectionStatus } from "@stores/ui.store";
 
 import { createUserBar } from "@components/UserBar";
+import { loadUserStatus, saveUserStatus } from "@lib/userStatus";
 import type { WsClient } from "@lib/ws";
 
 function setAuthState(user: { username: string } | null, isAuthenticated: boolean): void {
@@ -49,6 +50,7 @@ describe("StatusPicker wired to UserBar", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     vi.clearAllMocks();
+    localStorage.clear();
     // The picker gates on the store-backed connection status (UX spec §3).
     setConnectionStatus("connected");
   });
@@ -128,6 +130,49 @@ describe("StatusPicker wired to UserBar", () => {
 
     expect(wrap.classList.contains("ub-status-picker--disabled")).toBe(true);
     expect(wrap.title).toBe("Offline");
+  });
+
+  it("starts from the stored status instead of always 'online'", () => {
+    setAuthState({ username: "alice" }, true);
+    saveUserStatus("dnd");
+    const ws = createMockWs("connected");
+    comp = createUserBar({ ws });
+    comp.mount(container);
+
+    const dot = container.querySelector(".status-picker-dot") as HTMLElement;
+    dot.click();
+    const checks = container.querySelectorAll(".status-picker-option-check");
+    // Third option is "Do Not Disturb" — only its checkmark is visible.
+    expect((checks[2] as HTMLElement).style.display).toBe("");
+    expect((checks[0] as HTMLElement).style.display).toBe("none");
+  });
+
+  it("persists the selected status so the settings panel agrees", () => {
+    setAuthState({ username: "alice" }, true);
+    const ws = createMockWs("connected");
+    comp = createUserBar({ ws });
+    comp.mount(container);
+
+    (container.querySelector(".status-picker-dot") as HTMLElement).click();
+    const options = container.querySelectorAll(".status-picker-option");
+    (options[1] as HTMLElement).click(); // "Idle"
+
+    expect(loadUserStatus()).toBe("idle");
+  });
+
+  it("follows a status change made elsewhere (settings Account tab)", () => {
+    setAuthState({ username: "alice" }, true);
+    const ws = createMockWs("connected");
+    comp = createUserBar({ ws });
+    comp.mount(container);
+
+    const dot = container.querySelector(".status-picker-dot") as HTMLElement;
+    dot.click();
+
+    saveUserStatus("dnd");
+
+    const checks = container.querySelectorAll(".status-picker-option-check");
+    expect((checks[2] as HTMLElement).style.display).toBe("");
   });
 
   it("status picker is disabled without a ws send path even when connected", () => {

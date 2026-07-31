@@ -30,6 +30,7 @@ import type { ReactionController } from "./ReactionController";
 import { updateChatHeaderForDm } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
 import { dmStore } from "@stores/dm.store";
+import { canManageMessages } from "@lib/permissions";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { membersStore } from "@stores/members.store";
 import { channelsStore } from "@stores/channels.store";
@@ -68,6 +69,8 @@ export interface ChannelController {
   readonly currentChannelId: number | null;
   /** Currently mounted message list (for scroll-to-message). */
   readonly messageList: MessageListComponent | null;
+  /** Open the composer's attachment picker (Ctrl+U). No-op with no composer. */
+  openFilePicker(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -322,6 +325,23 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       channelType === "dm"
         ? (dmStore.getState().channels.find((c) => c.channelId === channelId)?.recipient.id ?? null)
         : null;
+    // Slow mode as affordance: after an accepted send the composer disables
+    // itself for the channel's cooldown with a live countdown, instead of
+    // taking a message the server will bounce with SLOW_MODE (UX spec §5,
+    // "do not drop the drafted message" — the draft stays in the textarea).
+    let slowModeUntil = 0;
+    let slowModeTicker: ReturnType<typeof setInterval> | null = null;
+
+    const stopSlowModeTicker = (): void => {
+      if (slowModeTicker !== null) {
+        clearInterval(slowModeTicker);
+        slowModeTicker = null;
+      }
+    };
+
+    const slowModeRemaining = (): number =>
+      slowModeUntil === 0 ? 0 : Math.max(0, Math.ceil((slowModeUntil - Date.now()) / 1000));
+
     const computeComposerReason = (): string | null => {
       const status = uiStore.getState().connectionStatus;
       if (status === "reconnecting") return "Reconnecting…";
@@ -337,11 +357,52 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           ? "Only moderators can post in announcement channels"
           : "You don't have permission to send messages here";
       }
+      const remaining = slowModeRemaining();
+      if (remaining > 0) return `Slow mode — ${remaining}s`;
       return null;
     };
     const refreshComposerState = (): void => {
       messageInput?.setDisabled(computeComposerReason());
     };
+
+    /**
+     * Begin (or restart) the slow-mode cooldown for this channel. Moderators
+     * bypass slow mode server-side, so they never get gated here either.
+     */
+    const startSlowMode = (seconds: number): void => {
+      if (seconds <= 0 || canManageMessages()) return;
+      slowModeUntil = Date.now() + seconds * 1000;
+      refreshComposerState();
+      stopSlowModeTicker();
+      slowModeTicker = setInterval(() => {
+        if (slowModeRemaining() <= 0) {
+          slowModeUntil = 0;
+          stopSlowModeTicker();
+        }
+        refreshComposerState();
+      }, 1000);
+    };
+    composerGatingUnsubs.push(stopSlowModeTicker);
+
+    // The server accepted a message — the next one is subject to the cooldown.
+    composerGatingUnsubs.push(
+      ws.on("chat_send_ok", () => {
+        const ch = channelsStore.getState().channels.get(channelId);
+        if (ch !== undefined && ch.id === channelsStore.getState().activeChannelId) {
+          startSlowMode(ch.slowMode);
+        }
+      }),
+    );
+    // A refused send restarts the full window: the server's limiter is the
+    // authority on when the next one is allowed.
+    composerGatingUnsubs.push(
+      ws.on("error", (payload) => {
+        if (payload.code !== "SLOW_MODE") return;
+        const ch = channelsStore.getState().channels.get(channelId);
+        if (ch !== undefined) startSlowMode(ch.slowMode);
+      }),
+    );
+
     refreshComposerState();
     composerGatingUnsubs.push(
       uiStore.subscribeSelector(
@@ -407,6 +468,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   return {
     mountChannel,
     destroyChannel,
+    openFilePicker: () => messageInput?.openFilePicker(),
     get currentChannelId() {
       return _currentChannelId;
     },

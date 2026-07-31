@@ -18,12 +18,22 @@ import {
 } from "../../src/components/message-list/renderers";
 import type { Message } from "../../src/stores/messages.store";
 import { membersStore } from "../../src/stores/members.store";
+import { channelsStore, setRoles } from "../../src/stores/channels.store";
+import { authStore } from "../../src/stores/auth.store";
 import type { MessageListOptions } from "../../src/components/MessageList";
 
 function resetStores(): void {
   membersStore.setState(() => ({
     members: new Map(),
     typingUsers: new Map(),
+  }));
+  channelsStore.setState((prev) => ({ ...prev, roles: [] }));
+  authStore.setState(() => ({
+    token: null,
+    user: null,
+    serverName: null,
+    motd: null,
+    isAuthenticated: false,
   }));
 }
 
@@ -1030,6 +1040,49 @@ describe("renderers", () => {
       expect(container.querySelector("[data-testid='msg-react-1']")).not.toBeNull();
       expect(container.querySelector("[data-testid='msg-reply-1']")).not.toBeNull();
       expect(container.querySelector("[data-testid='msg-pin-1']")).not.toBeNull();
+
+      ac.abort();
+    });
+
+    it("offers delete on others' messages to a role with MANAGE_MESSAGES", () => {
+      // MANAGE_MESSAGES = 0x10000 (see lib/types Permission).
+      setRoles([{ id: 2, name: "moderator", color: null, permissions: 0x10000 }]);
+      authStore.setState(() => ({
+        token: "tok",
+        user: { id: 999, username: "Mod", avatar: null, role: "moderator" },
+        serverName: null,
+        motd: null,
+        isAuthenticated: true,
+      }));
+
+      const opts = makeOpts({ currentUserId: 999 });
+      const msg = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
+      const ac = new AbortController();
+      container.appendChild(renderMessage(msg, false, [msg], opts, ac.signal));
+
+      expect(container.querySelector("[data-testid='msg-delete-1']")).not.toBeNull();
+      // Editing someone else's message is still not a thing.
+      expect(container.querySelector("[data-testid='msg-edit-1']")).toBeNull();
+
+      ac.abort();
+    });
+
+    it("withholds delete from a role without MANAGE_MESSAGES", () => {
+      setRoles([{ id: 3, name: "member", color: null, permissions: 0 }]);
+      authStore.setState(() => ({
+        token: "tok",
+        user: { id: 999, username: "Nobody", avatar: null, role: "member" },
+        serverName: null,
+        motd: null,
+        isAuthenticated: true,
+      }));
+
+      const opts = makeOpts({ currentUserId: 999 });
+      const msg = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
+      const ac = new AbortController();
+      container.appendChild(renderMessage(msg, false, [msg], opts, ac.signal));
+
+      expect(container.querySelector("[data-testid='msg-delete-1']")).toBeNull();
 
       ac.abort();
     });

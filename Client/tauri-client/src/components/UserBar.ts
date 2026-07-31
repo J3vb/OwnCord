@@ -11,6 +11,7 @@ import { authStore } from "@stores/auth.store";
 import { openSettings, uiStore } from "@stores/ui.store";
 import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
 import type { UserStatus } from "@lib/types";
+import { loadUserStatus, onUserStatusChange, saveUserStatus } from "@lib/userStatus";
 import type { WsClient } from "@lib/ws";
 
 export interface UserBarOptions {
@@ -82,8 +83,11 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     };
 
     statusPicker = createStatusPicker({
-      currentStatus: "online",
+      // Start from the stored selection, not a hardcoded "online" — otherwise
+      // this picker and the settings Account tab show different statuses.
+      currentStatus: loadUserStatus(),
       onStatusChange: (status: UserStatus) => {
+        saveUserStatus(status);
         const ws = options?.ws;
         if (ws !== null && ws !== undefined && canSetStatus()) {
           ws.send({ type: "presence_update", payload: { status } } as never);
@@ -91,6 +95,13 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       },
     });
     statusPicker.mount(statusPickerWrap);
+
+    // Reflect status changes made on the settings Account tab.
+    disposable.addCleanup(
+      onUserStatusChange((status) => statusPicker?.setStatus(status), {
+        signal: disposable.signal,
+      }),
+    );
 
     // Disable picker (with a reason) when the connection is down
     const updatePickerDisabled = (): void => {

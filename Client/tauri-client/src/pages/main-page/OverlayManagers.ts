@@ -165,7 +165,12 @@ export function createInviteManagerController(opts: {
           }
         },
         onCopyLink: (code: string) => {
-          void navigator.clipboard.writeText(code);
+          // No silent success: a copy the user can't see is indistinguishable
+          // from a clipboard permission failure.
+          void navigator.clipboard.writeText(code).then(
+            () => showToast("Invite code copied", "success"),
+            () => showToast("Couldn't copy the invite code", "error"),
+          );
         },
         onClose: close,
         onError: (message: string) => {

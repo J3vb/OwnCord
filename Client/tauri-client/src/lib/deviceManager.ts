@@ -146,7 +146,20 @@ export class DeviceManager {
   }
 
   async switchOutputDevice(deviceId: string): Promise<void> {
-    if (this.room !== null) await this.room.switchActiveDevice("audiooutput", deviceId);
-    log.info("Switched output device", { deviceId });
+    if (this.room === null) {
+      log.debug("Skipping output device switch — no active voice session");
+      return;
+    }
+    // Mirrors switchInputDevice: switchActiveDevice rejects where setSinkId
+    // isn't available, and the settings tab fires this as a bare `void` call,
+    // so an unhandled rejection would leave the user staring at a selection
+    // that never took effect.
+    try {
+      await this.room.switchActiveDevice("audiooutput", deviceId);
+      log.info("Switched output device", { deviceId });
+    } catch (err) {
+      log.error("Failed to switch output device", err);
+      this.onErrorCallback?.("Failed to switch speaker");
+    }
   }
 }

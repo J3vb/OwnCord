@@ -46,6 +46,7 @@ vi.mock("@stores/auth.store", () => ({
     getState: () => ({
       user: { id: 1, username: "testuser", totp_enabled: mockTotpEnabled },
     }),
+    subscribeSelector: vi.fn(() => () => {}),
   },
   updateUser: vi.fn((patch: Record<string, unknown>) => {
     if ("totp_enabled" in patch) {
@@ -232,6 +233,46 @@ describe("TOTP Settings", () => {
       expect(backupCodeEl!.textContent).toContain("code1");
       expect(backupCodeEl!.textContent).toContain("code2");
       expect(backupCodeEl!.textContent).toContain("code3");
+
+      overlay.destroy?.();
+    });
+
+    it("warns the codes are shown once and offers a copy button", async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText },
+        configurable: true,
+      });
+
+      mockTotpEnabled = false;
+      const options = makeOptions();
+      const overlay = createSettingsOverlay(options);
+      overlay.mount(container);
+
+      (container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement).click();
+      (container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement).value =
+        "mypassword123";
+      (
+        Array.from(container.querySelectorAll(".ac-btn")).find(
+          (b) => b.textContent === "Submit",
+        ) as HTMLElement
+      ).click();
+
+      await vi.waitFor(() => {
+        expect(container.querySelector("[data-testid='totp-copy-backup-codes']")).not.toBeNull();
+      });
+
+      expect(container.textContent).toContain("you won't see them again");
+
+      const copyBtn = container.querySelector(
+        "[data-testid='totp-copy-backup-codes']",
+      ) as HTMLElement;
+      copyBtn.click();
+
+      expect(writeText).toHaveBeenCalledWith("code1\ncode2\ncode3");
+      await vi.waitFor(() => {
+        expect(copyBtn.textContent).toBe("Copied!");
+      });
 
       overlay.destroy?.();
     });

@@ -102,6 +102,8 @@ const { mockSetMessagePinned, mockAddOptimistic, mockMarkSendFailed, mockRemoveO
     mockRemoveOptimistic: vi.fn(),
   }));
 
+const { mockRole } = vi.hoisted(() => ({ mockRole: { value: "member" } }));
+
 vi.mock("@stores/messages.store", () => ({
   getChannelMessages: mockGetChannelMessages,
   setMessagePinned: mockSetMessagePinned,
@@ -112,7 +114,7 @@ vi.mock("@stores/messages.store", () => ({
 
 vi.mock("@stores/auth.store", () => ({
   authStore: {
-    getState: () => ({ user: { id: 1, username: "tester", avatar: null } }),
+    getState: () => ({ user: { id: 1, username: "tester", avatar: null, role: mockRole.value } }),
   },
 }));
 
@@ -172,6 +174,7 @@ vi.mock("@stores/blocks.store", () => ({
 import { createChannelController } from "../../src/pages/main-page/ChannelController";
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
+import { channelsStore, setChannels, setActiveChannel, setRoles } from "@stores/channels.store";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -191,6 +194,8 @@ function makeOpts(overrides: Partial<ChannelControllerOptions> = {}): ChannelCon
       send: vi.fn(),
       getState: vi.fn(() => "connected"),
       onStateChange: vi.fn(() => vi.fn()),
+      // The composer subscribes to chat_send_ok / error to drive slow mode.
+      on: vi.fn(() => vi.fn()),
     } as unknown as ChannelControllerOptions["ws"],
     api: {
       uploadFile: vi.fn().mockResolvedValue({ id: 1, url: "/f/1", filename: "f.txt" }),
@@ -862,6 +867,123 @@ describe("createChannelController", () => {
 
       expect(opts.chatHeaderName!.textContent).toBe("random");
       expect(mockUpdateChatHeaderForDm).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("slow mode", () => {
+    /** Pull a ws.on handler registered by the controller. */
+    function wsHandler(opts: ChannelControllerOptions, event: string): (payload: never) => void {
+      const calls = (opts.ws.on as ReturnType<typeof vi.fn>).mock.calls;
+      const entry = calls.find((c) => c[0] === event);
+      expect(entry).toBeDefined();
+      return entry![1] as (payload: never) => void;
+    }
+
+    function seedChannel(slowMode: number): void {
+      setChannels([
+        {
+          id: 42,
+          name: "general",
+          type: "text",
+          category: null,
+          position: 0,
+          can_send: true,
+          slow_mode: slowMode,
+        },
+      ]);
+      setActiveChannel(42);
+    }
+
+    beforeEach(() => {
+      mockRole.value = "member";
+      setRoles([{ id: 4, name: "member", color: null, permissions: 0 }]);
+      setConnectionStatus("connected");
+    });
+
+    it("disables the composer for the cooldown after an accepted send", () => {
+      vi.useFakeTimers();
+      try {
+        seedChannel(5);
+        const opts = makeOpts();
+        const ctrl = createChannelController(opts);
+        ctrl.mountChannel(42, "general");
+        expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+
+        wsHandler(opts, "chat_send_ok")({} as never);
+        expect(mockSetDisabled).toHaveBeenLastCalledWith("Slow mode — 5s");
+
+        vi.advanceTimersByTime(3000);
+        expect(mockSetDisabled).toHaveBeenLastCalledWith("Slow mode — 2s");
+
+        vi.advanceTimersByTime(2000);
+        expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("leaves the composer alone in a channel without slow mode", () => {
+      seedChannel(0);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      wsHandler(opts, "chat_send_ok")({} as never);
+
+      expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+    });
+
+    it("restarts the cooldown when the server refuses with SLOW_MODE", () => {
+      vi.useFakeTimers();
+      try {
+        seedChannel(10);
+        const opts = makeOpts();
+        const ctrl = createChannelController(opts);
+        ctrl.mountChannel(42, "general");
+
+        wsHandler(opts, "error")({ code: "SLOW_MODE", message: "slow mode" } as never);
+        expect(mockSetDisabled).toHaveBeenLastCalledWith("Slow mode — 10s");
+
+        // An unrelated error must not gate the composer.
+        vi.advanceTimersByTime(10_000);
+        mockSetDisabled.mockClear();
+        wsHandler(opts, "error")({ code: "FORBIDDEN", message: "nope" } as never);
+        expect(mockSetDisabled).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not gate a moderator, who bypasses slow mode server-side", () => {
+      seedChannel(5);
+      mockRole.value = "moderator";
+      setRoles([{ id: 3, name: "moderator", color: null, permissions: 0x10000 }]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      wsHandler(opts, "chat_send_ok")({} as never);
+
+      expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+    });
+
+    it("stops the countdown when the channel unmounts", () => {
+      vi.useFakeTimers();
+      try {
+        seedChannel(5);
+        const opts = makeOpts();
+        const ctrl = createChannelController(opts);
+        ctrl.mountChannel(42, "general");
+        wsHandler(opts, "chat_send_ok")({} as never);
+
+        ctrl.destroyChannel();
+        mockSetDisabled.mockClear();
+        vi.advanceTimersByTime(5000);
+
+        expect(mockSetDisabled).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

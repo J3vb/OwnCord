@@ -22,6 +22,8 @@ export interface Channel {
   readonly lastMessageId: number | null;
   /** Whether the current user may post here (drives the composer affordance). */
   readonly canSend: boolean;
+  /** Per-channel cooldown in seconds (0 = off). Drives the composer countdown. */
+  readonly slowMode: number;
 }
 
 export interface ChannelsState {
@@ -53,6 +55,7 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
       // The current server always sends can_send; older servers omit it, in
       // which case we default permissive (no gating) rather than guessing.
       canSend: ch.can_send ?? true,
+      slowMode: ch.slow_mode ?? 0,
     });
   }
   channelsStore.setState((prev) => ({
@@ -88,6 +91,7 @@ export function addChannel(channel: ChannelCreatePayload): void {
       // Broadcasts carry no per-user data; default permissive. The next ready
       // payload delivers the authoritative can_send. Server enforces regardless.
       canSend: true,
+      slowMode: channel.slow_mode ?? 0,
     });
     return { ...prev, channels: next };
   });
@@ -104,6 +108,7 @@ export function updateChannel(update: ChannelUpdatePayload): void {
       ...existing,
       ...(update.name !== undefined ? { name: update.name } : {}),
       ...(update.position !== undefined ? { position: update.position } : {}),
+      ...(update.slow_mode !== undefined ? { slowMode: update.slow_mode } : {}),
     };
     const next = new Map(prev.channels);
     next.set(update.id, updated);

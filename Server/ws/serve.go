@@ -688,6 +688,10 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 			// channels additionally require MANAGE_MESSAGES; admins bypass. The
 			// server remains the authority — this only pre-disables the UI.
 			"can_send": channelCanSend(role, overrides[visibleChannels[i].ID], visibleChannels[i].Type),
+			// Cooldown in seconds (0 = off). Lets the composer disable itself
+			// for the window instead of accepting a send the server refuses
+			// with SLOW_MODE. The server still enforces.
+			"slow_mode": visibleChannels[i].SlowMode,
 		}
 		if visibleChannels[i].Type == "text" || visibleChannels[i].Type == "announcement" {
 			if u, ok := unreadMap[visibleChannels[i].ID]; ok {

@@ -135,19 +135,40 @@ describe("VoiceAudioTab camera preview", () => {
 // ---------------------------------------------------------------------------
 
 describe("VoiceAudioTab UI structure", () => {
-  function stubNavigator(
-    devices: Array<{ kind: string; deviceId: string; label: string }> = [],
-  ): void {
+  /** Fires the `devicechange` listeners registered on the stubbed MediaDevices. */
+  let emitDeviceChange: () => void = () => {};
+
+  function stubNavigator(devices: Array<{ kind: string; deviceId: string; label: string }> = []): {
+    setDevices(next: Array<{ kind: string; deviceId: string; label: string }>): void;
+  } {
     const audioStream = {
       getTracks: () => [{ stop: vi.fn() }],
     } as unknown as MediaStream;
 
+    let current = devices;
+    const listeners = new Set<() => void>();
+    emitDeviceChange = () => {
+      for (const l of listeners) l();
+    };
+
     vi.stubGlobal("navigator", {
       mediaDevices: {
-        enumerateDevices: vi.fn().mockResolvedValue(devices),
+        enumerateDevices: vi.fn().mockImplementation(() => Promise.resolve(current)),
         getUserMedia: vi.fn().mockResolvedValue(audioStream),
+        addEventListener: (type: string, handler: () => void) => {
+          if (type === "devicechange") listeners.add(handler);
+        },
+        removeEventListener: (_type: string, handler: () => void) => {
+          listeners.delete(handler);
+        },
       },
     });
+
+    return {
+      setDevices(next) {
+        current = next;
+      },
+    };
   }
 
   beforeEach(() => {
@@ -270,6 +291,65 @@ describe("VoiceAudioTab UI structure", () => {
     const sliders = el.querySelectorAll('input[type="range"]') as NodeListOf<HTMLInputElement>;
     expect(sliders[1]!.value).toBe("60");
     ac.abort();
+  });
+
+  it("refreshes the device lists when hardware is plugged or unplugged", async () => {
+    const nav = stubNavigator([
+      { kind: "audioinput", deviceId: "mic-1", label: "Mic 1" },
+      { kind: "audiooutput", deviceId: "spk-1", label: "Speaker 1" },
+    ]);
+    localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("mic-1"));
+
+    const ac = new AbortController();
+    const tab = createVoiceAudioTab(ac.signal);
+    const el = tab.build();
+    document.body.appendChild(el);
+
+    const inputSelect = el.querySelectorAll("select")[0]!;
+    await vi.waitFor(() => {
+      expect(inputSelect.querySelectorAll("option").length).toBe(2);
+      expect(inputSelect.value).toBe("mic-1");
+    });
+
+    // Unplug mic-1, plug in mic-2. A stale list would keep offering a device
+    // that no longer exists.
+    nav.setDevices([
+      { kind: "audioinput", deviceId: "mic-2", label: "Mic 2" },
+      { kind: "audiooutput", deviceId: "spk-1", label: "Speaker 1" },
+    ]);
+    emitDeviceChange();
+
+    await vi.waitFor(() => {
+      const values = Array.from(inputSelect.querySelectorAll("option")).map((o) => o.value);
+      expect(values).toEqual(["", "mic-2"]);
+    });
+    // The saved device is gone — fall back to Default rather than a dead entry.
+    expect(inputSelect.value).toBe("");
+
+    ac.abort();
+  });
+
+  it("stops refreshing device lists once the tab is aborted", async () => {
+    const nav = stubNavigator([{ kind: "audioinput", deviceId: "mic-1", label: "Mic 1" }]);
+    const ac = new AbortController();
+    const tab = createVoiceAudioTab(ac.signal);
+    const el = tab.build();
+    document.body.appendChild(el);
+
+    const inputSelect = el.querySelectorAll("select")[0]!;
+    await vi.waitFor(() => {
+      expect(inputSelect.querySelectorAll("option").length).toBe(2);
+    });
+
+    ac.abort();
+    nav.setDevices([
+      { kind: "audioinput", deviceId: "mic-1", label: "Mic 1" },
+      { kind: "audioinput", deviceId: "mic-2", label: "Mic 2" },
+    ]);
+    emitDeviceChange();
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(inputSelect.querySelectorAll("option").length).toBe(2);
   });
 
   it("populates device lists from enumerateDevices", async () => {

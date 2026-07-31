@@ -271,6 +271,18 @@ describe("DeviceManager", () => {
       await dm.switchOutputDevice("device-1");
       expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audiooutput", "device-1");
     });
+
+    it("reports a failed switch instead of rejecting into the void", async () => {
+      // The settings tab calls this as a bare `void` — an unhandled rejection
+      // would leave the user with a selection that silently never applied.
+      const onError = vi.fn();
+      dm.setOnError(onError);
+      dm.setRoom(mockRoom);
+      mockRoom.switchActiveDevice.mockRejectedValueOnce(new Error("setSinkId unsupported"));
+
+      await expect(dm.switchOutputDevice("device-1")).resolves.toBeUndefined();
+      expect(onError).toHaveBeenCalledWith("Failed to switch speaker");
+    });
   });
 
   // -----------------------------------------------------------------------

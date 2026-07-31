@@ -54,7 +54,13 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
       }
       btn.classList.add("active");
       btn.setAttribute("aria-checked", "true");
-      if (!hasStoredAccent) {
+      if (hasStoredAccent) {
+        // applyThemeByName clears every inline custom property on <body>,
+        // which includes the accent override applyAccent puts there. Without
+        // re-applying it, a theme that sets --accent on its body class
+        // (neon-glow) silently reverts the user's accent until restart.
+        applyAccent(loadPref<string>("accentColor", getDefaultAccent(name)));
+      } else {
         syncDisplayedAccent(getDefaultAccent(name));
       }
     };

@@ -6,7 +6,9 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { loadPref } from "@components/settings/helpers";
+import { loadPref } from "@lib/preferences";
+import { canManageMessages } from "@lib/permissions";
+import { showToast } from "@lib/toast";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 
@@ -307,7 +309,8 @@ export function renderMessage(
       actionsBar.appendChild(editBtn);
     }
 
-    if (msg.user.id === opts.currentUserId) {
+    // Own message, or a moderator acting on someone else's.
+    if (msg.user.id === opts.currentUserId || canManageMessages()) {
       const deleteBtn = createElement("button", {
         "data-testid": `msg-delete-${msg.id}`,
         "aria-label": "Delete",
@@ -328,9 +331,12 @@ export function renderMessage(
       copyIdBtn.addEventListener(
         "click",
         () => {
-          void navigator.clipboard.writeText(String(msg.id)).catch(() => {
-            /* clipboard unavailable */
-          });
+          // No silent success: a copy with no feedback is indistinguishable
+          // from a clipboard that refused.
+          void navigator.clipboard.writeText(String(msg.id)).then(
+            () => showToast("Message ID copied", "success"),
+            () => showToast("Couldn't copy the message ID", "error"),
+          );
         },
         { signal },
       );

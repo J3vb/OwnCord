@@ -1476,6 +1476,33 @@
 .context-menu-item.danger:hover { background: var(--red); color: white; }
 .context-menu-sep { height: 1px; background: var(--border); margin: 4px 0; }
 
+/* AdminActions (member/channel menus) uses BEM names — these had no rules at
+   all, so those menus rendered unstyled: no hover, no danger colour, and a
+   "submenu" that pushed the menu open instead of flying out. */
+.context-menu__item {
+  position: relative;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: var(--radius-sm);
+  cursor: pointer; font-size: 13px; color: var(--text-normal);
+  background: transparent; width: 100%; text-align: left;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+.context-menu__item:hover { background: var(--accent); color: white; }
+.context-menu__item--active { color: var(--accent); font-weight: 600; }
+.context-menu__item--active:hover { color: white; }
+.context-menu__item--danger { color: var(--red); }
+.context-menu__item--danger:hover { background: var(--red); color: white; }
+.context-menu__item--pending { opacity: 0.7; cursor: default; pointer-events: none; }
+.context-menu__separator { height: 1px; background: var(--border); margin: 4px 0; }
+.context-menu__submenu {
+  position: absolute; left: 100%; top: 0;
+  background: var(--bg-primary); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 4px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5);
+  min-width: 140px; z-index: 1;
+}
+.context-menu__reason { display: flex; flex-direction: column; gap: 6px; }
+
 /* ── Toast Notification ── */
 .toast-container {
   position: fixed; bottom: 24px; left: 50%;
@@ -2412,6 +2439,15 @@
 }
 .invite-item__revoke:hover {
   background: rgba(242, 63, 67, 0.15);
+}
+.invite-item__revoke--confirming {
+  background: rgba(242, 63, 67, 0.2);
+  font-weight: 600;
+}
+.invite-item__revoke:disabled,
+.invite-manager__create:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 .invite-item__meta {
   font-size: 12px;
