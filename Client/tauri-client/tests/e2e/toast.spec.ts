@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import {
   mockTauriFullSession,
+  mockTauriFullSessionWithMessagesAndEcho,
   mockTauriFullSessionWithFailingMessages,
   navigateToMainPage,
   emitWsEvent,
@@ -11,35 +12,37 @@ import {
 // ---------------------------------------------------------------------------
 
 test.describe("Toast Notifications", () => {
-  test("toast appears when message load fails (500 response)", async ({ page }) => {
+  // Message-load failure no longer toasts: the app renders an inline
+  // section error + Retry in the message region instead (UX spec §2 — a
+  // toast would vanish and leave the region silently empty). See
+  // MessageController.loadMessages.
+  test("message load failure (500) shows inline error with Retry", async ({ page }) => {
     await mockTauriFullSessionWithFailingMessages(page);
     await page.goto("/");
     await navigateToMainPage(page);
 
-    // The toast container should exist in the DOM
-    const toastContainer = page.locator("[data-testid='toast-container']");
-    await expect(toastContainer).toBeAttached({ timeout: 5_000 });
+    const loadError = page.locator(".messages-load-error");
+    await expect(loadError).toBeVisible({ timeout: 10_000 });
+    await expect(loadError).toContainText(/couldn't load messages/i);
 
-    // An error toast should appear because /messages returns 500
-    const toast = page.locator("[data-testid='toast']");
-    await expect(toast.first()).toBeVisible({ timeout: 10_000 });
-
-    // Toast should have the error type class
-    await expect(toast.first()).toHaveClass(/toast-error/);
-
-    // Toast text should mention failure
-    const text = await toast.first().textContent();
-    expect(text).toMatch(/fail/i);
+    const retryBtn = page.locator("[data-testid='messages-retry']");
+    await expect(retryBtn).toBeVisible();
   });
 
   test("toast auto-dismisses after timeout", async ({ page }) => {
-    await mockTauriFullSessionWithFailingMessages(page);
+    // Trigger a real toast through the delete-confirmation flow: the first
+    // click on a message's Delete action shows the info toast
+    // "Click delete again to confirm".
+    await mockTauriFullSessionWithMessagesAndEcho(page);
     await page.goto("/");
     await navigateToMainPage(page);
 
-    // Wait for the error toast to appear
+    const ownMessage = page.locator("[data-testid='message-101']");
+    await ownMessage.hover();
+    await page.locator("[data-testid='msg-delete-101']").click();
+
     const toast = page.locator("[data-testid='toast']");
-    await expect(toast.first()).toBeVisible({ timeout: 10_000 });
+    await expect(toast.first()).toBeVisible({ timeout: 5_000 });
 
     // Default duration is 5000ms; toast gets .show removed then transitions out.
     // Wait for toast to disappear (5s timeout + 400ms fallback removal)

@@ -4,7 +4,11 @@
  * VoiceWidget shows connected users when in a voice channel.
  */
 import { test, expect } from "@playwright/test";
-import { mockTauriFullSessionWithVoice, navigateToMainPage } from "./helpers";
+import {
+  mockTauriFullSessionWithVoice,
+  navigateToMainPage,
+  joinVoiceChannelByName,
+} from "./helpers";
 
 test.describe("Voice Channel Items", () => {
   test.beforeEach(async ({ page }) => {
@@ -31,16 +35,20 @@ test.describe("Voice Channel Items", () => {
   });
 
   test("voice widget shows when connected", async ({ page }) => {
-    // VoiceWidget should be visible (mock connects user to voice channel)
+    // Join through the real click path — the ready payload can no longer
+    // pre-connect the local user (stale-voice cleanup would leave again).
+    await joinVoiceChannelByName(page);
     const widget = page.locator(".voice-widget.visible");
     await expect(widget).toBeVisible({ timeout: 5000 });
   });
 
   test("voice widget shows connected users", async ({ page }) => {
-    // Mock voice state has 2 users in channel 10 (Voice Chat)
+    // Two remote users (2, 3) are in channel 10 from the ready payload;
+    // joining adds the local user for a total of three.
+    await joinVoiceChannelByName(page);
     const voiceUsers = page.locator(".voice-user-item");
     await expect(voiceUsers.first()).toBeVisible({ timeout: 5000 });
-    await expect(voiceUsers).toHaveCount(2);
+    await expect(voiceUsers).toHaveCount(3);
   });
 
   test("voice user item shows avatar", async ({ page }) => {
@@ -55,16 +63,19 @@ test.describe("Voice Channel Items", () => {
   });
 
   test("voice widget shows channel name header", async ({ page }) => {
+    await joinVoiceChannelByName(page);
     const channelName = page.locator(".vw-channel");
     await expect(channelName).toContainText("Voice Chat");
   });
 
   test("voice widget has disconnect control", async ({ page }) => {
+    await joinVoiceChannelByName(page);
     const disconnectBtn = page.locator("button[aria-label='Disconnect']");
     await expect(disconnectBtn).toBeVisible({ timeout: 5000 });
   });
 
   test("mute button toggles active state on click", async ({ page }) => {
+    await joinVoiceChannelByName(page);
     const controls = page.locator(".vw-controls");
     await expect(controls).toBeVisible({ timeout: 5000 });
 
@@ -78,6 +89,7 @@ test.describe("Voice Channel Items", () => {
   });
 
   test("deafen button toggles active state on click", async ({ page }) => {
+    await joinVoiceChannelByName(page);
     const controls = page.locator(".vw-controls");
     await expect(controls).toBeVisible({ timeout: 5000 });
 
@@ -90,6 +102,7 @@ test.describe("Voice Channel Items", () => {
   });
 
   test("all five voice control buttons are present", async ({ page }) => {
+    await joinVoiceChannelByName(page);
     const controls = page.locator(".vw-controls");
     await expect(controls).toBeVisible({ timeout: 5000 });
 
