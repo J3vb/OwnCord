@@ -72,10 +72,16 @@ export class AudioElements {
     publication: RemoteTrackPublication,
     participant: RemoteParticipant,
   ): void {
-    // Guard: do not attach any remote audio while locally deafened.
+    // Guard: do not attach remote voice audio while locally deafened.
     // applyRemoteAudioSubscriptionState() only covers participants present at
     // the time of deafen — this guard catches participants who join afterward.
-    if (voiceStore.getState().localDeafened) {
+    // Screen-share/stream audio is exempt: muting or deafening yourself gates
+    // voices, not the content someone is streaming — that stays under its own
+    // per-tile mute/volume controls.
+    if (
+      voiceStore.getState().localDeafened &&
+      publication.source !== Track.Source.ScreenShareAudio
+    ) {
       publication.setSubscribed(false);
       return;
     }
@@ -157,6 +163,10 @@ export class AudioElements {
     if (this.room === null) return;
     for (const participant of this.room.remoteParticipants.values()) {
       for (const publication of participant.audioTrackPublications.values()) {
+        // Deafen gates voices only. Screen-share/stream audio keeps playing
+        // when the user mutes/deafens themselves — it has its own per-tile
+        // mute and volume controls.
+        if (publication.source === Track.Source.ScreenShareAudio) continue;
         publication.setSubscribed(!deafened);
       }
     }

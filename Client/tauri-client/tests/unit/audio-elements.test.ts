@@ -321,8 +321,8 @@ describe("AudioElements", () => {
       expect(() => elements.applyRemoteAudioSubscriptionState(true)).not.toThrow();
     });
 
-    it("unsubscribes all audio when deafened", () => {
-      const mockPub = { setSubscribed: vi.fn() };
+    it("unsubscribes voice audio when deafened", () => {
+      const mockPub = { source: "microphone", setSubscribed: vi.fn() };
       const mockParticipant = {
         audioTrackPublications: new Map([["pub-1", mockPub]]),
       };
@@ -336,8 +336,8 @@ describe("AudioElements", () => {
       expect(mockPub.setSubscribed).toHaveBeenCalledWith(false);
     });
 
-    it("re-subscribes all audio when undeafened", () => {
-      const mockPub = { setSubscribed: vi.fn() };
+    it("re-subscribes voice audio when undeafened", () => {
+      const mockPub = { source: "microphone", setSubscribed: vi.fn() };
       const mockParticipant = {
         audioTrackPublications: new Map([["pub-1", mockPub]]),
       };
@@ -349,6 +349,28 @@ describe("AudioElements", () => {
       elements.applyRemoteAudioSubscriptionState(false);
 
       expect(mockPub.setSubscribed).toHaveBeenCalledWith(true);
+    });
+
+    it("leaves screenshare audio subscribed when deafened", () => {
+      // Muting/deafening yourself gates voices, not the stream someone is
+      // sharing — its audio keeps playing under its own per-tile controls.
+      const micPub = { source: "microphone", setSubscribed: vi.fn() };
+      const streamPub = { source: "screenShareAudio", setSubscribed: vi.fn() };
+      const mockParticipant = {
+        audioTrackPublications: new Map([
+          ["pub-mic", micPub],
+          ["pub-stream", streamPub],
+        ]),
+      };
+      const mockRoom = {
+        remoteParticipants: new Map([["user-1", mockParticipant]]),
+      } as any;
+      elements.setRoom(mockRoom);
+
+      elements.applyRemoteAudioSubscriptionState(true);
+
+      expect(micPub.setSubscribed).toHaveBeenCalledWith(false);
+      expect(streamPub.setSubscribed).not.toHaveBeenCalled();
     });
   });
 
@@ -553,17 +575,19 @@ describe("AudioElements", () => {
       expect(publication.setSubscribed).toHaveBeenCalledWith(false);
     });
 
-    it("does not attach screenshare audio when locally deafened", () => {
+    it("attaches screenshare audio even when locally deafened", () => {
+      // Stream audio is exempt from the deafen gate: muting/deafening
+      // yourself silences voices, not the content someone is streaming.
       mockVoiceStoreState.localDeafened = true;
 
-      const { track, audioEl } = createMockTrack("audio", "track-deaf-ss");
+      const { track } = createMockTrack("audio", "track-deaf-ss");
       const publication = { source: "screenShareAudio", setSubscribed: vi.fn() };
       const participant = { identity: "user-42", setVolume: vi.fn() };
 
       elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
 
-      expect(track.attach).not.toHaveBeenCalled();
-      expect(publication.setSubscribed).toHaveBeenCalledWith(false);
+      expect(track.attach).toHaveBeenCalled();
+      expect(publication.setSubscribed).not.toHaveBeenCalled();
     });
 
     it("attaches mic audio normally when not deafened", () => {
