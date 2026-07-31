@@ -79,6 +79,7 @@ jobs:
             libgtk-3-dev \
             libayatana-appindicator3-dev \
             libsecret-1-dev \
+            libdbus-1-dev \
             libasound2-dev \
             libssl-dev \
             patchelf \
@@ -207,6 +208,7 @@ jobs:
             libgtk-3-dev \
             libayatana-appindicator3-dev \
             libsecret-1-dev \
+            libdbus-1-dev \
             libasound2-dev \
             libssl-dev \
             patchelf \

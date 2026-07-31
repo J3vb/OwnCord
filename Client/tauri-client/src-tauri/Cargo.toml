@@ -63,7 +63,37 @@ log = "0.4"
 # TS client-logs) so a shipped user can retrieve them — a release build detaches
 # the console, so stdout/stderr logging is otherwise unreachable.
 tauri-plugin-log = "2"
-keyring = "3"
+# The backend features are NOT optional extras — keyring 3.x declares no
+# `default` feature at all, and every platform arm in its lib.rs falls back to
+# `pub use mock as default` when its backend feature is off. A bare
+# `keyring = "3"` therefore compiles the in-memory mock store on Windows, macOS
+# AND Linux: `set_password` succeeds into a per-Entry cell that is dropped when
+# the Entry goes out of scope, and the next `Entry::new(..).get_password()`
+# returns NoEntry. Nothing ever reaches Credential Manager / Keychain /
+# Secret Service. Removing any of these silently reverts a platform to that
+# store — `secret_store::tests::compiled_keyring_backend_is_persistent` fails
+# the build if that happens.
+#   windows-native       -> Windows Credential Manager (DPAPI-backed)
+#   apple-native         -> macOS Keychain
+#   sync-secret-service  -> Secret Service (GNOME Keyring / KWallet) over libdbus.
+#                           Chosen over async-secret-service because our Tauri
+#                           commands are blocking `fn`s on Tauri's worker pool;
+#                           the async backend would need a nested runtime.
+#                           Build-time system dep: libdbus-1-dev.
+#   crypto-rust          -> pure-Rust session crypto for the Secret Service
+#                           transport (avoids linking OpenSSL for it).
+keyring = { version = "3", default-features = false, features = [
+    "windows-native",
+    "apple-native",
+    "sync-secret-service",
+    "crypto-rust",
+] }
+# Scrubs the plaintext secret copies that the DPAPI fallback has to materialize
+# as `Vec<u8>` for the Win32 call.
+zeroize = "1"
+# Encodes the DPAPI ciphertext for the JSON fallback store. Already in the tree
+# via the tauri/rustls stack, so this costs no extra build.
+base64 = "0.22"
 rfd = { version = "0.16", default-features = false }
 
 # Desktop-only plugins (no mobile bundle target). single-instance carries the
@@ -77,6 +107,13 @@ tauri-plugin-deep-link = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = ["Win32_UI_Input_KeyboardAndMouse"] }
+# DPAPI (CryptProtectData/CryptUnprotectData) for the last-resort credential
+# fallback in secret_store. Version tracks keyring's own windows-sys dep so the
+# two share one build of the crate.
+windows-sys = { version = "0.60", features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 device_query = "2"
