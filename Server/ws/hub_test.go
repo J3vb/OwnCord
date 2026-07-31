@@ -93,8 +93,8 @@ func TestHub_RunStops(t *testing.T) {
 		hub.Run()
 		close(done)
 	}()
-	// Give the goroutine a moment to start, then stop the hub.
-	time.Sleep(10 * time.Millisecond)
+	// Wait for the Run loop to start, then stop the hub.
+	waitFor(t, waitTimeout, hub.RunningForTest, "hub Run loop to start")
 	hub.Stop()
 	select {
 	case <-done:
@@ -115,7 +115,7 @@ func TestHub_RegisterIncrementsCount(t *testing.T) {
 	send := make(chan []byte, 4)
 	hub.Register(ws.NewTestClient(hub, userID, send))
 
-	time.Sleep(20 * time.Millisecond)
+	waitClientCount(t, hub, 1)
 	if hub.ClientCount() != 1 {
 		t.Errorf("ClientCount = %d, want 1", hub.ClientCount())
 	}
@@ -130,10 +130,10 @@ func TestHub_UnregisterDecrementsCount(t *testing.T) {
 	send := make(chan []byte, 4)
 	c := ws.NewTestClient(hub, userID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.Unregister(c)
-	time.Sleep(20 * time.Millisecond)
+	waitClientCount(t, hub, 0)
 	if hub.ClientCount() != 0 {
 		t.Errorf("ClientCount = %d, want 0", hub.ClientCount())
 	}
@@ -148,9 +148,12 @@ func TestHub_RegisterSameUserTwice(t *testing.T) {
 	userID := seedTestUser(t, database, "carol")
 	send1 := make(chan []byte, 4)
 	send2 := make(chan []byte, 4)
+	c2 := ws.NewTestClient(hub, userID, send2)
 	hub.Register(ws.NewTestClient(hub, userID, send1))
-	hub.Register(ws.NewTestClient(hub, userID, send2))
-	time.Sleep(30 * time.Millisecond)
+	hub.Register(c2)
+	// Client events are processed in order: once c2 is visible, the first
+	// registration has been replaced.
+	waitRegistered(t, hub, c2)
 
 	if hub.ClientCount() != 1 {
 		t.Errorf("ClientCount = %d after double register, want 1", hub.ClientCount())
@@ -168,13 +171,13 @@ func TestHub_BroadcastToAll_DeliversToAllClients(t *testing.T) {
 	u2 := seedTestUser(t, database, "eve")
 	s1 := make(chan []byte, 4)
 	s2 := make(chan []byte, 4)
+	c2 := ws.NewTestClient(hub, u2, s2)
 	hub.Register(ws.NewTestClient(hub, u1, s1))
-	hub.Register(ws.NewTestClient(hub, u2, s2))
-	time.Sleep(20 * time.Millisecond)
+	hub.Register(c2)
+	waitRegistered(t, hub, c2) // in-order events: both clients registered
 
 	msg := []byte(`{"type":"presence","payload":{}}`)
 	hub.BroadcastToAll(msg)
-	time.Sleep(20 * time.Millisecond)
 
 	assertReceived(t, s1, msg, "client 1")
 	assertReceived(t, s2, msg, "client 2")
@@ -207,11 +210,10 @@ func TestHub_BroadcastToChannel_OnlySendsToChannelMembers(t *testing.T) {
 
 	hub.Register(c1)
 	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c2)
 
 	msg := []byte(`{"type":"chat_message","payload":{}}`)
 	hub.BroadcastToChannel(chID, msg)
-	time.Sleep(20 * time.Millisecond)
 
 	assertReceived(t, s1, msg, "channel member")
 	assertNotReceived(t, s2, "non-member")
@@ -224,12 +226,12 @@ func TestHub_BroadcastToChannel_ZeroChannelSendsToAll(t *testing.T) {
 
 	u1 := seedTestUser(t, database, "henry")
 	s1 := make(chan []byte, 4)
-	hub.Register(ws.NewTestClient(hub, u1, s1))
-	time.Sleep(20 * time.Millisecond)
+	c1 := ws.NewTestClient(hub, u1, s1)
+	hub.Register(c1)
+	waitRegistered(t, hub, c1)
 
 	msg := []byte(`{"type":"presence","payload":{}}`)
 	hub.BroadcastToChannel(0, msg)
-	time.Sleep(20 * time.Millisecond)
 
 	assertReceived(t, s1, msg, "client")
 }
@@ -252,11 +254,10 @@ func TestHub_BroadcastToChannel_SkipsUnfocusedClient(t *testing.T) {
 
 	hub.Register(c1)
 	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c2)
 
 	msg := []byte(`{"type":"chat_message","payload":{"content":"secret"}}`)
 	hub.BroadcastToChannel(chID, msg)
-	time.Sleep(20 * time.Millisecond)
 
 	assertReceived(t, s1, msg, "focused client")
 	assertNotReceived(t, s2, "unfocused client must NOT receive channel broadcast")
@@ -279,11 +280,10 @@ func TestHub_BroadcastToChannel_NotDeliveredOnVoiceMembershipAlone(t *testing.T)
 	ws.SetClientVoiceChID(c1, chID)     // but in voice on this channel
 
 	hub.Register(c1)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c1)
 
 	msg := []byte(`{"type":"chat_message","payload":{"content":"hello"}}`)
 	hub.BroadcastToChannel(chID, msg)
-	time.Sleep(20 * time.Millisecond)
 
 	assertNotReceived(t, s1, "voice membership alone must NOT deliver the channel message stream")
 }
@@ -328,7 +328,6 @@ func TestHub_RegisterNow_VoiceChannelSubscriptionFollowsReadPermission(t *testin
 
 			msg := []byte(`{"type":"chat_message","payload":{"content":"hello"}}`)
 			hub.BroadcastToChannel(chID, msg)
-			time.Sleep(20 * time.Millisecond)
 
 			if tc.want {
 				assertReceived(t, s1, msg, "voice client with READ_MESSAGES")
@@ -349,11 +348,10 @@ func TestHub_BroadcastToAll_StillDeliversToUnfocusedClient(t *testing.T) {
 	c1 := ws.NewTestClient(hub, u1, s1) // channelID == 0 (unfocused)
 
 	hub.Register(c1)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c1)
 
 	msg := []byte(`{"type":"presence","payload":{"status":"online"}}`)
 	hub.BroadcastToAll(msg)
-	time.Sleep(20 * time.Millisecond)
 
 	assertReceived(t, s1, msg, "unfocused client must still receive global broadcasts")
 }
@@ -371,13 +369,12 @@ func TestHub_BroadcastToChannel_UnfocusedDoesNotReceiveAnyChannel(t *testing.T) 
 	c1 := ws.NewTestClient(hub, u1, s1) // unfocused
 
 	hub.Register(c1)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c1)
 
 	msg1 := []byte(`{"type":"chat_message","payload":{"channel":"1"}}`)
 	msg2 := []byte(`{"type":"chat_message","payload":{"channel":"2"}}`)
 	hub.BroadcastToChannel(ch1, msg1)
 	hub.BroadcastToChannel(ch2, msg2)
-	time.Sleep(20 * time.Millisecond)
 
 	assertNotReceived(t, s1, "unfocused client must NOT receive ch1 broadcast")
 }
@@ -391,15 +388,15 @@ func TestHub_SendToUser_ExistingClient(t *testing.T) {
 
 	userID := seedTestUser(t, database, "ivan")
 	send := make(chan []byte, 4)
-	hub.Register(ws.NewTestClient(hub, userID, send))
-	time.Sleep(20 * time.Millisecond)
+	c := ws.NewTestClient(hub, userID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
 
 	msg := []byte(`{"type":"chat_send_ok","payload":{}}`)
 	ok := hub.SendToUser(userID, msg)
 	if !ok {
 		t.Error("SendToUser returned false for existing client")
 	}
-	time.Sleep(20 * time.Millisecond)
 	assertReceived(t, send, msg, "target user")
 }
 
@@ -425,11 +422,10 @@ func TestHub_HandleMessage_UnknownType_SendsError(t *testing.T) {
 	send := make(chan []byte, 4)
 	c := ws.NewTestClient(hub, userID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw := []byte(`{"type":"totally_unknown","payload":{}}`)
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(20 * time.Millisecond)
 
 	select {
 	case got := <-send:
@@ -454,10 +450,9 @@ func TestHub_HandleMessage_InvalidJSON(t *testing.T) {
 	send := make(chan []byte, 4)
 	c := ws.NewTestClient(hub, userID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.HandleMessageForTest(c, []byte(`NOT JSON`))
-	time.Sleep(20 * time.Millisecond)
 
 	select {
 	case got := <-send:
@@ -485,7 +480,7 @@ func TestHub_ChatSend_RateLimit(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	payload := map[string]any{
 		"channel_id": chID,
@@ -500,9 +495,9 @@ func TestHub_ChatSend_RateLimit(t *testing.T) {
 	for range 12 {
 		hub.HandleMessageForTest(c, raw)
 	}
-	time.Sleep(100 * time.Millisecond)
 
-	// Drain all messages, count errors.
+	// Drain all messages, count errors — error replies are sent synchronously
+	// by handleMessage, so they are already buffered on the send channel.
 	errCount := 0
 drainLoop:
 	for {
@@ -540,17 +535,14 @@ func TestHub_ConcurrentRegisterUnregister(t *testing.T) {
 			send := make(chan []byte, 4)
 			c := ws.NewTestClient(hub, userID, send)
 			hub.Register(c)
-			time.Sleep(5 * time.Millisecond)
+			waitRegistered(t, hub, c)
 			hub.Unregister(c)
 		}(i)
 	}
 	wg.Wait()
 	// The hub loop drains register/unregister asynchronously; poll instead of
 	// a fixed sleep, which flakes under -race on slow runners.
-	deadline := time.Now().Add(5 * time.Second)
-	for hub.ClientCount() != 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitFor(t, 5*time.Second, func() bool { return hub.ClientCount() == 0 }, "churned clients to unregister")
 	if hub.ClientCount() != 0 {
 		t.Errorf("expected 0 clients after concurrent churn, got %d", hub.ClientCount())
 	}
@@ -565,7 +557,7 @@ func TestHub_GetClient(t *testing.T) {
 	hub.Register(client)
 	go hub.Run()
 	defer hub.Stop()
-	time.Sleep(10 * time.Millisecond)
+	waitRegistered(t, hub, client)
 
 	got := hub.GetClient(42)
 	if got == nil {
@@ -640,7 +632,7 @@ func TestHub_GracefulStop_StopsHub(t *testing.T) {
 		hub.Run()
 		close(done)
 	}()
-	time.Sleep(10 * time.Millisecond)
+	waitFor(t, waitTimeout, hub.RunningForTest, "hub Run loop to start")
 
 	hub.GracefulStop()
 
@@ -717,13 +709,13 @@ func TestHub_SweepStaleClients_RemovesInactiveClients(t *testing.T) {
 
 	hub.Register(c1)
 	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c2)
 
 	ws.SetClientLastActivityForTest(c1, time.Now().Add(-2*time.Minute))
 	ws.SetClientLastActivityForTest(c2, time.Now())
 
+	// sweepStaleClients kicks synchronously (kickClient) — no wait needed.
 	hub.SweepStaleClientsForTest()
-	time.Sleep(20 * time.Millisecond)
 
 	if hub.ClientCount() != 1 {
 		t.Errorf("ClientCount = %d after sweep, want 1", hub.ClientCount())
@@ -750,11 +742,11 @@ func TestHub_SweepStaleClients_AllFresh(t *testing.T) {
 	s1 := make(chan []byte, 4)
 	c1 := ws.NewTestClient(hub, u1, s1)
 	hub.Register(c1)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c1)
 
 	ws.SetClientLastActivityForTest(c1, time.Now())
+	// sweepStaleClients kicks synchronously — its effects are visible on return.
 	hub.SweepStaleClientsForTest()
-	time.Sleep(20 * time.Millisecond)
 
 	if hub.ClientCount() != 1 {
 		t.Errorf("ClientCount = %d after sweep of fresh clients, want 1", hub.ClientCount())
@@ -803,16 +795,15 @@ func TestHub_SweepRevokedSessions_KicksRevokedClient(t *testing.T) {
 
 	hub.Register(c1)
 	hub.Register(c2)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c2)
 
 	// Delete alice's session (simulating logout from another device).
 	if err := database.DeleteSession(context.Background(), hash1); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
 	}
 
-	// Run the session sweep.
+	// Run the session sweep — it kicks synchronously (kickClient).
 	hub.SweepRevokedSessionsForTest()
-	time.Sleep(20 * time.Millisecond)
 
 	// Alice should be kicked, Bob should remain.
 	if hub.GetClient(uid1) != nil {
@@ -848,14 +839,13 @@ func TestHub_SweepRevokedSessions_KicksBannedClient(t *testing.T) {
 	s := make(chan []byte, 4)
 	c := ws.NewTestClientWithTokenHash(hub, u, hash, 0, s)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	if err := database.BanUser(context.Background(), uid, "rule violation", nil); err != nil {
 		t.Fatalf("BanUser: %v", err)
 	}
 
 	hub.SweepRevokedSessionsForTest()
-	time.Sleep(20 * time.Millisecond)
 
 	if hub.GetClient(uid) != nil {
 		t.Error("banned client should have been kicked by the session sweep")
@@ -880,10 +870,9 @@ func TestHub_SweepRevokedSessions_EmptyTokenHashSkipped(t *testing.T) {
 	s := make(chan []byte, 4)
 	c := ws.NewTestClient(hub, uid, s)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	hub.SweepRevokedSessionsForTest()
-	time.Sleep(20 * time.Millisecond)
 
 	if hub.ClientCount() != 1 {
 		t.Errorf("ClientCount = %d, want 1 (client without token hash should survive)", hub.ClientCount())
@@ -941,8 +930,8 @@ func TestHub_VoiceSessionCount(t *testing.T) {
 					ws.SetClientVoiceChID(c, vch)
 				}
 				hub.Register(c)
+				waitRegistered(t, hub, c)
 			}
-			time.Sleep(30 * time.Millisecond)
 
 			got := hub.VoiceSessionCount()
 			if got != tc.wantCount {
@@ -1019,7 +1008,7 @@ func TestRefreshChannelVisibility_TargetedSends(t *testing.T) {
 	memberClient := ws.NewTestClientWithUser(hub, member, chID, memberSend)
 	hub.Register(ownerClient)
 	hub.Register(memberClient)
-	time.Sleep(30 * time.Millisecond)
+	waitRegistered(t, hub, memberClient)
 
 	// Hide the channel from the Member role (deny ReadMessages).
 	if _, err := database.ExecContext(context.Background(),
@@ -1104,7 +1093,7 @@ func TestBroadcastMemberUpdate_RevokesUnreadableSubscriptions(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(30 * time.Millisecond)
+	waitRegistered(t, hub, c)
 	// The user is a participant of this DM but has closed it (no dm_open_state
 	// row), so the topic is held while being absent from the allowed set.
 	hub.PubSubForTest().Subscribe(c, ws.ChannelTopic(dmID))
@@ -1142,6 +1131,8 @@ func TestBroadcastMemberUpdate_RevokesUnreadableSubscriptions(t *testing.T) {
 	}
 
 	// The impact itself: channel traffic no longer reaches the demoted socket.
+	// Absence assertion: bounded window for a wrongly-delivered message to
+	// arrive before checking the buffer.
 	hub.BroadcastToChannel(chID, []byte(`{"type":"chat_message"}`))
 	time.Sleep(30 * time.Millisecond)
 	assertNoMsgType(t, send, "chat_message")
@@ -1168,8 +1159,9 @@ func TestBroadcastMemberUpdate_ClosesSocketWhenVisibilityUnresolved(t *testing.T
 		t.Fatalf("GetUserByID: %v", err)
 	}
 	send := make(chan []byte, 16)
-	hub.Register(ws.NewTestClientWithUser(hub, user, chID, send))
-	time.Sleep(30 * time.Millisecond)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
 
 	// Break the override lookup computeAllowedChannels depends on.
 	if _, err := database.ExecContext(ctx, `DROP TABLE channel_overrides`); err != nil {

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -79,7 +80,8 @@ func TestAuthenticateConn_NoAuthMessage_ServerClosesConn(t *testing.T) {
 	// but closing immediately should cause a read error on the server side.
 	_ = conn.Close(websocket.StatusNormalClosure, "no auth")
 
-	// Give the server a moment to react.
+	// Absence assertion: give the server a bounded window in which a buggy
+	// registration would land before checking nothing appeared.
 	time.Sleep(50 * time.Millisecond)
 
 	// Hub should have no clients registered.
@@ -355,8 +357,8 @@ func TestServeWS_ValidAuth_FullHandshake(t *testing.T) {
 		t.Errorf("second response type = %q, want ready", readyMsg["type"])
 	}
 
-	// Give hub a moment to register the client.
-	time.Sleep(30 * time.Millisecond)
+	// Registration happens before the ready frame is written (serve.go), so
+	// having read ready implies the client is registered.
 	if hub.ClientCount() != 1 {
 		t.Errorf("ClientCount = %d after successful auth, want 1", hub.ClientCount())
 	}
@@ -784,7 +786,9 @@ func TestServeWS_Reconnect_AuthorizedVoiceClientKeepsChannelStream(t *testing.T)
 		t.Fatal("expected replacement client with transferred voice state")
 	}
 	// The topic subscription lands just after the client enters the hub map.
-	time.Sleep(100 * time.Millisecond)
+	waitFor(t, waitTimeout, func() bool {
+		return slices.Contains(hub.PubSubForTest().TopicsForClient(userID), ws.ChannelTopic(chID))
+	}, "reconnected client to be resubscribed to the voice channel topic")
 
 	hub.BroadcastToChannel(chID, []byte(`{"type":"chat_message","payload":{"content":"still-visible"}}`))
 
@@ -971,8 +975,13 @@ func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
 	conn2, readyMsg := dialAndReadReady(token)
 	defer func() { _ = conn2.Close(websocket.StatusNormalClosure, "") }()
 
-	// Wait for replacement to register fully and broadcasts to propagate.
-	time.Sleep(500 * time.Millisecond)
+	// The replacement registers before its ready frame is written; wait for
+	// the hub's client map to show the swap. Broadcast propagation is covered
+	// by the observer read loop's own timeout below.
+	waitFor(t, waitTimeout, func() bool {
+		c := hub.GetClient(userID)
+		return c != nil && c != originalClient
+	}, "replacement client to take over in the hub")
 
 	// Assert 1: replacement client voiceChID == 0
 	replacementClient := hub.GetClient(userID)
@@ -1092,8 +1101,8 @@ func TestServeWS_writePump_MessageDelivered(t *testing.T) {
 		}
 	}
 
-	// Wait for client to be registered and then broadcast a server_restart.
-	time.Sleep(50 * time.Millisecond)
+	// Having read ready implies registration completed (serve.go registers
+	// before writing ready) — broadcast immediately.
 	hub.BroadcastServerRestart("test", 0)
 
 	// The client should receive the broadcast via writePump.
@@ -1211,8 +1220,8 @@ func TestIntegration_MessageRoundTrip(t *testing.T) {
 	connB := connectAndAuth("clientB", tokenB)
 	defer func() { _ = connB.Close(websocket.StatusNormalClosure, "") }()
 
-	// Wait for both clients to be registered in the hub.
-	time.Sleep(50 * time.Millisecond)
+	// Both clients have read their ready frames, so both are registered
+	// (serve.go registers before writing ready).
 
 	// Client B focuses on the channel so it receives channel-scoped broadcasts.
 	focusMsg, _ := json.Marshal(map[string]any{
@@ -1224,7 +1233,9 @@ func TestIntegration_MessageRoundTrip(t *testing.T) {
 	if err := connB.Write(ctxB, websocket.MessageText, focusMsg); err != nil {
 		t.Fatalf("clientB write channel_focus: %v", err)
 	}
-	time.Sleep(30 * time.Millisecond)
+	waitFor(t, waitTimeout, func() bool {
+		return slices.Contains(hub.PubSubForTest().TopicsForClient(userIDB), ws.ChannelTopic(chID))
+	}, "clientB channel_focus subscription to land")
 
 	// Client A sends a chat message.
 	chatSend, _ := json.Marshal(map[string]any{
@@ -1331,8 +1342,8 @@ func TestIntegration_SequenceNumbers(t *testing.T) {
 		}
 	}
 
-	// Wait for registration.
-	time.Sleep(50 * time.Millisecond)
+	// Having read ready implies registration completed (serve.go registers
+	// before writing ready).
 
 	// Trigger two broadcasts.
 	hub.BroadcastServerRestart("test-seq-1", 10)

@@ -155,6 +155,13 @@ type ServerConfig struct {
 	AdminAllowedCIDRs []string `koanf:"admin_allowed_cidrs"`
 	WAFEnabled        bool     `koanf:"waf_enabled"`        // Enable Coraza WAF (default: false)
 	WAFParanoiaLevel  int      `koanf:"waf_paranoia_level"` // OWASP CRS paranoia level 1-4 (default: 2)
+	// WAFCRSMode selects the OWASP Core Rule Set layer mode when the WAF is
+	// enabled: "off" (inline rules only), "detect" (CRS evaluated, matches
+	// logged, never blocks) or "block" (CRS anomaly-scoring blocking).
+	// Defaults to "detect": chat traffic routinely contains SQL-ish/HTML-ish
+	// text the CRS false-positives on, so blocking needs tuning against real
+	// traffic first. Unknown values fall back to "detect".
+	WAFCRSMode string `koanf:"waf_crs_mode"`
 }
 
 // DatabaseConfig holds database settings.
@@ -209,6 +216,7 @@ func defaults() Config {
 				"192.168.0.0/16", // private class C
 				"fc00::/7",       // IPv6 unique local
 			},
+			WAFCRSMode: "detect",
 		},
 		Database: DatabaseConfig{
 			Type: "sqlite",
@@ -274,6 +282,10 @@ server:
   #   - "10.0.0.0/8"
   #   - "172.16.0.0/12"
   #   - "192.168.0.0/16"
+  # waf_enabled: false        # Coraza WAF (inline rules + OWASP Core Rule Set)
+  # waf_paranoia_level: 2     # OWASP CRS paranoia level 1-4
+  # waf_crs_mode: "detect"    # off | detect | block — CRS layer mode; "detect" logs
+  #                           # CRS matches without blocking (safe default for chat traffic)
 
 database:
   type: "sqlite"          # "sqlite" is the only supported backend

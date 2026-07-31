@@ -22,7 +22,7 @@ func TestHandleChatSend_EmptyContent(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_send",
@@ -32,7 +32,6 @@ func TestHandleChatSend_EmptyContent(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -47,7 +46,7 @@ func TestHandleChatSend_ContentTooLong(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Content over 4000 characters.
 	longContent := strings.Repeat("x", 4001)
@@ -59,7 +58,6 @@ func TestHandleChatSend_ContentTooLong(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -73,7 +71,7 @@ func TestHandleChatSend_InvalidChannelID(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_send",
@@ -83,7 +81,6 @@ func TestHandleChatSend_InvalidChannelID(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -97,7 +94,7 @@ func TestHandleChatSend_ChannelNotFound(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_send",
@@ -107,7 +104,6 @@ func TestHandleChatSend_ChannelNotFound(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "NOT_FOUND" {
@@ -121,14 +117,13 @@ func TestHandleChatSend_InvalidPayload(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type":    "chat_send",
 		"payload": "not-an-object",
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -142,7 +137,7 @@ func TestHandleChatSend_NegativeChannelID(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_send",
@@ -152,7 +147,6 @@ func TestHandleChatSend_NegativeChannelID(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -169,7 +163,7 @@ func TestHandleChatSend_WithReplyTo(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Send first message to get an ID.
 	raw1, _ := json.Marshal(map[string]any{
@@ -181,7 +175,6 @@ func TestHandleChatSend_WithReplyTo(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw1)
-	time.Sleep(50 * time.Millisecond)
 
 	// Drain to find the message ID from chat_send_ok.
 	var msgID float64
@@ -219,7 +212,6 @@ drainFirst:
 		},
 	})
 	hub.HandleMessageForTest(c, raw2)
-	time.Sleep(50 * time.Millisecond)
 
 	// Should get chat_send_ok for the reply.
 	found := false
@@ -269,7 +261,7 @@ func TestHandleChatSend_SlowMode_EnforcedForMember(t *testing.T) {
 	send := make(chan []byte, 64)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_send",
@@ -281,8 +273,7 @@ func TestHandleChatSend_SlowMode_EnforcedForMember(t *testing.T) {
 
 	// First message should succeed.
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
-	drainChanBuf(send)
+	drainChanTimeout(send, 50*time.Millisecond)
 
 	// Second message should be rate limited by slow mode.
 	raw2, _ := json.Marshal(map[string]any{
@@ -293,7 +284,6 @@ func TestHandleChatSend_SlowMode_EnforcedForMember(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw2)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "SLOW_MODE" {
@@ -309,14 +299,13 @@ func TestHandleChatEdit_InvalidPayload(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type":    "chat_edit",
 		"payload": "not-an-object",
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -330,7 +319,7 @@ func TestHandleChatEdit_InvalidMessageID(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_edit",
@@ -340,7 +329,6 @@ func TestHandleChatEdit_InvalidMessageID(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -354,7 +342,7 @@ func TestHandleChatEdit_EmptyContent(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_edit",
@@ -364,7 +352,6 @@ func TestHandleChatEdit_EmptyContent(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -380,14 +367,13 @@ func TestHandleChatDelete_InvalidPayload(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type":    "chat_delete",
 		"payload": "not-an-object",
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -401,7 +387,7 @@ func TestHandleChatDelete_InvalidMessageID(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_delete",
@@ -410,7 +396,6 @@ func TestHandleChatDelete_InvalidMessageID(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -424,7 +409,7 @@ func TestHandleChatDelete_MessageNotFound(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_delete",
@@ -433,7 +418,6 @@ func TestHandleChatDelete_MessageNotFound(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	// Handler returns FORBIDDEN (not NOT_FOUND) to prevent message-ID enumeration.
 	code := drainForErrorCode(send, 200*time.Millisecond)
@@ -450,14 +434,13 @@ func TestHandleReaction_InvalidPayload(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type":    "reaction_add",
 		"payload": "not-an-object",
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -471,7 +454,7 @@ func TestHandleReaction_EmptyEmoji(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "reaction_add",
@@ -481,7 +464,6 @@ func TestHandleReaction_EmptyEmoji(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -495,7 +477,7 @@ func TestHandleReaction_EmojiTooLong(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "reaction_add",
@@ -505,7 +487,6 @@ func TestHandleReaction_EmojiTooLong(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -519,7 +500,7 @@ func TestHandleReaction_ControlCharInEmoji(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "reaction_add",
@@ -529,7 +510,6 @@ func TestHandleReaction_ControlCharInEmoji(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -553,7 +533,7 @@ func TestHandleChannelFocus_UpdatesReadState(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "channel_focus",
@@ -562,7 +542,6 @@ func TestHandleChannelFocus_UpdatesReadState(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	// No error should be sent for a valid channel_focus with existing message.
 	code := drainForErrorCode(send, 100*time.Millisecond)
@@ -578,7 +557,7 @@ func TestHandleChatSend_WithNilAvatar(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_send",
@@ -589,7 +568,6 @@ func TestHandleChatSend_WithNilAvatar(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(100 * time.Millisecond)
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
 	found := false
@@ -623,7 +601,7 @@ func TestHandleChatSend_WithNonNilAvatar(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_send",
@@ -634,7 +612,6 @@ func TestHandleChatSend_WithNonNilAvatar(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(100 * time.Millisecond)
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
 	foundOK := false

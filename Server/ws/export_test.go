@@ -141,6 +141,16 @@ func NewTestClientWithTokenHash(hub *Hub, user *db.User, tokenHash string, chann
 	}
 }
 
+// RunningForTest reports whether the hub's Run loop has started.
+func (h *Hub) RunningForTest() bool {
+	return h.running.Load()
+}
+
+// ClientUserIDForTest returns the client's user ID for external tests.
+func ClientUserIDForTest(c *Client) int64 {
+	return c.userID
+}
+
 // TouchForTest exposes Client.touch for external tests.
 func TouchForTest(c *Client) {
 	c.touch()

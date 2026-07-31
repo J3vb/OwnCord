@@ -88,7 +88,7 @@ func TestGracefulStop_WithClientsHavingVoiceState(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Set voice channel ID on the client to simulate voice state.
 	ws.SetClientVoiceChID(c, 42)
@@ -100,8 +100,8 @@ func TestGracefulStop_WithClientsHavingVoiceState(t *testing.T) {
 		t.Fatalf("voiceChID before stop = %d, want 42", got)
 	}
 
+	// GracefulStop is synchronous — returning at all proves no deadlock.
 	hub.GracefulStop()
-	time.Sleep(20 * time.Millisecond)
 	// GracefulStop signals clients to close — test clients don't have real
 	// goroutines so they won't self-unregister, but verify the hub accepted
 	// the stop without deadlocking on voice-state cleanup.
@@ -116,15 +116,15 @@ func TestGracefulStop_MultipleClients(t *testing.T) {
 		c := ws.NewTestClientWithUser(hub, user, 0, send)
 		hub.Register(c)
 	}
-	time.Sleep(30 * time.Millisecond)
+	waitClientCount(t, hub, 5)
 
 	if count := hub.ClientCount(); count != 5 {
 		t.Fatalf("before GracefulStop: client count = %d, want 5", count)
 	}
 
+	// GracefulStop is synchronous — returning at all proves no deadlock on
+	// multiple clients.
 	hub.GracefulStop()
-	time.Sleep(20 * time.Millisecond)
-	// Verify GracefulStop completes without deadlock on multiple clients.
 }
 
 // ─── Ping message type (handlers.go — pong response) ─────────────────────────
@@ -135,11 +135,11 @@ func TestHandleMessage_Ping_ReturnsPong(t *testing.T) {
 	send := make(chan []byte, 4)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{"type": "ping"})
+	// The pong reply is sent synchronously by handleMessage.
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(20 * time.Millisecond)
 
 	select {
 	case msg := <-send:
@@ -251,7 +251,7 @@ func TestHandleChannelFocus_InvalidChannelID(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "channel_focus",
@@ -260,7 +260,6 @@ func TestHandleChannelFocus_InvalidChannelID(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(20 * time.Millisecond)
 
 	// V2 CommandConstructor rejects non-numeric channel_id with BAD_REQUEST.
 	code := drainForErrorCode(send, 100*time.Millisecond)
@@ -276,7 +275,7 @@ func TestHandleChannelFocus_ValidChannel(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "channel_focus",
@@ -285,7 +284,6 @@ func TestHandleChannelFocus_ValidChannel(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(20 * time.Millisecond)
 
 	// Valid channel focus should not produce an error message.
 	code := drainForErrorCode(send, 100*time.Millisecond)
@@ -302,7 +300,7 @@ func TestHandlePresence_InvalidStatus(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "presence_update",
@@ -311,7 +309,6 @@ func TestHandlePresence_InvalidStatus(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -325,14 +322,13 @@ func TestHandlePresence_InvalidPayload(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type":    "presence_update",
 		"payload": "not-an-object",
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -348,7 +344,7 @@ func TestHandleTyping_InvalidChannelID(t *testing.T) {
 	send := make(chan []byte, 16)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "typing_start",
@@ -357,7 +353,6 @@ func TestHandleTyping_InvalidChannelID(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "BAD_REQUEST" {
@@ -403,7 +398,7 @@ func TestSendToUser_FullBuffer_ReturnsFalse(t *testing.T) {
 	send := make(chan []byte, 1)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Fill the buffer.
 	send <- []byte(`{"type":"filler"}`)
@@ -440,7 +435,7 @@ func TestHandleChatSend_WithAttachments_NoPermission(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_send",
@@ -451,7 +446,6 @@ func TestHandleChatSend_WithAttachments_NoPermission(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "FORBIDDEN" {
@@ -466,7 +460,7 @@ func TestHandleChatSend_WithAttachments_Success(t *testing.T) {
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, user, chID, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_send",
@@ -478,7 +472,6 @@ func TestHandleChatSend_WithAttachments_Success(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(100 * time.Millisecond)
 
 	// Should still succeed (attachments that don't exist are silently skipped).
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
@@ -504,7 +497,7 @@ func TestHasChannelPerm_NilUser_DeniesPermission(t *testing.T) {
 	// Create a test client WITHOUT a user (user == nil).
 	c := ws.NewTestClient(hub, 1, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Try to send a chat message — should get FORBIDDEN due to nil user.
 	raw, _ := json.Marshal(map[string]any{
@@ -515,7 +508,6 @@ func TestHasChannelPerm_NilUser_DeniesPermission(t *testing.T) {
 		},
 	})
 	hub.HandleMessageForTest(c, raw)
-	time.Sleep(50 * time.Millisecond)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
 	if code != "FORBIDDEN" {
@@ -532,13 +524,15 @@ func TestDeliverBroadcast_FullBuffer_DropsMessage(t *testing.T) {
 	send := make(chan []byte, 1)
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.Register(c)
-	time.Sleep(20 * time.Millisecond)
+	waitRegistered(t, hub, c)
 
 	// Fill the buffer.
 	send <- []byte(`{"type":"filler"}`)
 
 	// Broadcasting should not block — message dropped.
 	hub.BroadcastToAll([]byte(`{"type":"should_be_dropped"}`))
+	// Absence assertion: bounded window for the hub loop to (wrongly) enqueue
+	// the dropped message before checking the buffer is unchanged.
 	time.Sleep(50 * time.Millisecond)
 
 	// Buffer should still contain only the filler message (dropped msg was not enqueued).
