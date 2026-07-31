@@ -244,7 +244,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     unsubscribers.push(
       ws.on("server_restart", (payload) => {
         try {
-          if (banner !== null) {
+          // A "shutdown" broadcast kicks back to the login screen (handled in
+          // the dispatcher) — no point starting a countdown on a page that is
+          // about to unmount.
+          if (banner !== null && payload.reason !== "shutdown") {
             banner.showRestart(payload.delay_seconds);
           }
         } catch (err) {

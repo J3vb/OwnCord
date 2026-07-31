@@ -11,12 +11,22 @@ import { createLogger } from "@lib/logger";
 
 const log = createLogger("auth.store");
 
+/** Why the session ended. "user" covers every locally-initiated or
+ *  invalid-token path (logout, 401, auth_error, ban); "server_shutdown" is a
+ *  server-initiated kick whose token is still valid — the logout wiring keeps
+ *  the saved credential in that case so auto-login works when the server
+ *  comes back. */
+export type LogoutReason = "user" | "server_shutdown";
+
 export interface AuthState {
   readonly token: string | null;
   readonly user: UserWithRole | null;
   readonly serverName: string | null;
   readonly motd: string | null;
   readonly isAuthenticated: boolean;
+  /** Set by clearAuth; cleared again on the next setAuth. Optional so the
+   *  many inline AuthState test fixtures need not restate it. */
+  readonly logoutReason?: LogoutReason | null;
 }
 
 const INITIAL_STATE: AuthState = {
@@ -41,9 +51,11 @@ export function setAuth(token: string, user: UserWithRole, serverName: string, m
 }
 
 /** Reset auth state (logout / disconnect). Also cleans up the voice
- *  session (WebRTC, AudioContext, streams) and clears voice store state.
- *  Safe to call even if no voice session is active — leaveVoice is idempotent. */
-export function clearAuth(): void {
+ *  session (WebRTC, AudioContext, streams) and clears voice store state —
+ *  including camera/screenshare, whose tracks leaveVoice stops and whose
+ *  toggles it resets. Safe to call even if no voice session is active —
+ *  leaveVoice is idempotent. */
+export function clearAuth(reason: LogoutReason = "user"): void {
   // livekitSession (and the ~1.3 MB livekit-client SDK behind it) is loaded
   // lazily so it stays out of the startup path. Only import it when there is
   // actually a voice session to leave — otherwise a text-only user who never
@@ -58,7 +70,7 @@ export function clearAuth(): void {
   }
   resetVoiceStore();
   cleanupNotificationAudio();
-  authStore.setState(() => ({ ...INITIAL_STATE }));
+  authStore.setState(() => ({ ...INITIAL_STATE, logoutReason: reason }));
 }
 
 /** Shorthand selector for the current token. */
