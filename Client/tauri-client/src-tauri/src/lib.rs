@@ -3,6 +3,8 @@ mod constants;
 mod credentials;
 #[cfg(windows)]
 mod dpapi;
+#[cfg(not(windows))]
+mod fallback_crypto;
 mod http_proxy;
 #[cfg(target_os = "linux")]
 mod linux_media;

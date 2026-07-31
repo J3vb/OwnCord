@@ -8,6 +8,11 @@ pub const IDENTITY_PINS_STORE: &str = "identity_pins.json";
 pub const SETTINGS_STORE: &str = "settings.json";
 
 /// Tauri store file for the degraded-mode credential fallback (see
-/// `secret_store`). Values are DPAPI ciphertext, never plaintext, and the file
-/// only exists on a machine whose OS credential store failed a round-trip.
+/// `secret_store`). Values are ciphertext (DPAPI on Windows, ChaCha20-Poly1305
+/// elsewhere), never plaintext, and the file only exists on a machine whose OS
+/// credential store failed a round-trip.
 pub const CREDENTIAL_FALLBACK_STORE: &str = "credential_fallback.json";
+
+/// Per-install key that seals the non-Windows credential fallback entries
+/// (see `fallback_crypto`). Written once, owner-only (0600).
+pub const CREDENTIAL_FALLBACK_KEY_FILE: &str = "credential_fallback.key";
