@@ -196,7 +196,7 @@ func extractChatserverFromTarGz(r io.Reader, destPath string) (string, error) {
 			}
 			return nil
 		}
-		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
+		if hdr.Typeflag != tar.TypeReg {
 			if err := skipBody(); err != nil {
 				return "", err
 			}
