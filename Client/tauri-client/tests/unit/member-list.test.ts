@@ -12,6 +12,9 @@ function resetStore(): void {
     members: new Map(),
     typingUsers: new Map(),
   }));
+  // Role list drives member-list grouping/colors — reset so tests that seed
+  // roles don't leak into the ones asserting the fallback groups.
+  setRoles([]);
 }
 
 function makeMember(overrides: Partial<Member> & { id: number; username: string }): Member {
@@ -46,6 +49,7 @@ function defaultOpts(): MemberListOptions {
     onKick: vi.fn().mockResolvedValue(undefined),
     onBan: vi.fn().mockResolvedValue(undefined),
     onChangeRole: vi.fn().mockResolvedValue(undefined),
+    onToggleBlock: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -253,13 +257,50 @@ describe("MemberList", () => {
     document.body.querySelector(".context-menu")?.remove();
   });
 
-  it("context menu does not appear for non-admin/non-owner roles", () => {
+  it("renders groups for custom server roles, colored by the server's role color", () => {
+    setRoles([
+      { id: 1, name: "Owner", color: "#E74C3C", permissions: 0 },
+      { id: 2, name: "Staff", color: "#00FF00", permissions: 0 },
+    ]);
+    setTestMembers([
+      makeMember({ id: 1, username: "Alice", role: "owner", status: "online" as UserStatus }),
+      makeMember({ id: 2, username: "Stan", role: "staff", status: "online" as UserStatus }),
+    ]);
+    memberList.mount(container);
+
+    const headers = Array.from(container.querySelectorAll(".member-role-group")).map(
+      (h) => h.textContent,
+    );
+    expect(headers[0]).toContain("OWNER");
+    expect(headers[1]).toContain("STAFF");
+
+    const stanName = container.querySelector('[data-testid="member-2"] .mi-name');
+    expect((stanName as HTMLSpanElement).style.color).toBe("rgb(0, 255, 0)");
+  });
+
+  it("members with a role missing from the server list still render", () => {
+    setRoles([{ id: 1, name: "Owner", color: null, permissions: 0 }]);
+    setTestMembers([
+      makeMember({ id: 1, username: "Alice", role: "owner", status: "online" as UserStatus }),
+      makeMember({ id: 2, username: "Ghost", role: "phantom", status: "online" as UserStatus }),
+    ]);
+    memberList.mount(container);
+
+    expect(container.querySelector('[data-testid="member-2"]')).not.toBeNull();
+    const headers = Array.from(container.querySelectorAll(".member-role-group")).map(
+      (h) => h.textContent,
+    );
+    expect(headers.some((h) => h?.includes("PHANTOM"))).toBe(true);
+  });
+
+  it("non-admin context menu shows only Block, no admin actions", () => {
     setTestMembers(testMembers);
     const opts: MemberListOptions = {
       currentUserRole: "member",
       onKick: vi.fn().mockResolvedValue(undefined),
       onBan: vi.fn().mockResolvedValue(undefined),
       onChangeRole: vi.fn().mockResolvedValue(undefined),
+      onToggleBlock: vi.fn().mockResolvedValue(undefined),
     };
     memberList.destroy?.();
     memberList = createMemberList(opts);
@@ -268,9 +309,14 @@ describe("MemberList", () => {
     const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
     memberItem.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
 
-    // No context menu should be appended to body
-    const contextMenu = document.body.querySelector(".admin-context-menu, .context-menu");
-    expect(contextMenu).toBeNull();
+    const contextMenu = document.body.querySelector(".context-menu");
+    expect(contextMenu).not.toBeNull();
+    const labels = Array.from(contextMenu!.querySelectorAll(".context-menu__item")).map(
+      (i) => i.textContent,
+    );
+    expect(labels).toEqual(["Block"]);
+
+    document.body.querySelector(".context-menu")?.remove();
   });
 
   it("context menu does not appear when right-clicking yourself", () => {
@@ -289,6 +335,7 @@ describe("MemberList", () => {
       onKick: vi.fn().mockResolvedValue(undefined),
       onBan: vi.fn().mockResolvedValue(undefined),
       onChangeRole: vi.fn().mockResolvedValue(undefined),
+      onToggleBlock: vi.fn().mockResolvedValue(undefined),
     };
     memberList.destroy?.();
     memberList = createMemberList(opts);

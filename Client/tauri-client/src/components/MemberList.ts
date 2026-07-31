@@ -9,16 +9,29 @@ import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
 import { membersStore, type Member, type MembersState } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
+import { blocksStore } from "@stores/blocks.store";
 import { channelsStore } from "@stores/channels.store";
 import { createMemberContextMenu } from "@components/AdminActions";
+import {
+  createUserProfilePopup,
+  type UserProfilePopupComponent,
+} from "@components/UserProfilePopup";
 import type { UserStatus } from "@lib/types";
 
 /** Options for configuring admin action callbacks on the member list. */
 export interface MemberListOptions {
   readonly currentUserRole: string;
   readonly onKick: (userId: number, username: string) => Promise<void>;
-  readonly onBan: (userId: number, username: string, reason: string) => Promise<void>;
+  readonly onBan: (
+    userId: number,
+    username: string,
+    reason: string,
+    durationHours: number,
+  ) => Promise<void>;
   readonly onChangeRole: (userId: number, username: string, newRole: string) => Promise<void>;
+  readonly onToggleBlock: (userId: number, username: string, block: boolean) => Promise<void>;
+  /** Start a DM with a user (wires the profile popup's Message button). */
+  readonly onMessageUser?: (userId: number) => void;
 }
 
 /** Roles offered in the "Change Role" submenu when the server hasn't sent any. */
@@ -36,17 +49,46 @@ function assignableRoleNames(): readonly string[] {
   return roles.length > 0 ? roles : FALLBACK_ASSIGNABLE_ROLES;
 }
 
-/** Ordered role groups with display names and CSS color variables. */
-const ROLE_GROUPS: readonly {
+interface RoleGroup {
   readonly role: string;
   readonly label: string;
   readonly colorVar: string;
-}[] = [
-  { role: "owner", label: "OWNER", colorVar: "var(--role-owner, #e74c3c)" },
-  { role: "admin", label: "ADMIN", colorVar: "var(--role-admin, #f39c12)" },
-  { role: "moderator", label: "MODERATOR", colorVar: "var(--role-mod, #2ecc71)" },
-  { role: "member", label: "MEMBER", colorVar: "var(--role-member, #949ba4)" },
+}
+
+/** Theme-variable fallbacks for the seeded roles (used when the server sends no color). */
+const FALLBACK_ROLE_COLORS: Record<string, string> = {
+  owner: "var(--role-owner, #e74c3c)",
+  admin: "var(--role-admin, #f39c12)",
+  moderator: "var(--role-mod, #2ecc71)",
+};
+
+const MEMBER_COLOR = "var(--role-member, #949ba4)";
+
+/** Ordered role groups used when the server hasn't sent a role list. */
+const FALLBACK_ROLE_GROUPS: readonly RoleGroup[] = [
+  { role: "owner", label: "OWNER", colorVar: FALLBACK_ROLE_COLORS["owner"]! },
+  { role: "admin", label: "ADMIN", colorVar: FALLBACK_ROLE_COLORS["admin"]! },
+  { role: "moderator", label: "MODERATOR", colorVar: FALLBACK_ROLE_COLORS["moderator"]! },
+  { role: "member", label: "MEMBER", colorVar: MEMBER_COLOR },
 ] as const;
+
+/**
+ * Role groups from the server's `ready` role list (already ordered by position,
+ * highest first), colored by the server's role color when set. A hardcoded
+ * list rendered custom roles nowhere and ignored `roles.color` entirely.
+ */
+function roleGroups(): readonly RoleGroup[] {
+  const roles = channelsStore.getState().roles;
+  if (roles.length === 0) return FALLBACK_ROLE_GROUPS;
+  return roles.map((r) => {
+    const key = r.name.toLowerCase();
+    return {
+      role: key,
+      label: r.name.toUpperCase(),
+      colorVar: r.color ?? FALLBACK_ROLE_COLORS[key] ?? MEMBER_COLOR,
+    };
+  });
+}
 
 /** Status priority for sorting: lower = higher priority (shown first). */
 function statusPriority(status: UserStatus): number {
@@ -80,11 +122,19 @@ function statusColor(status: UserStatus): string {
 }
 
 let activeMenu: { element: HTMLDivElement; destroy(): void } | null = null;
+let activePopup: UserProfilePopupComponent | null = null;
 
 function closeActiveMenu(): void {
   if (activeMenu !== null) {
     activeMenu.destroy();
     activeMenu = null;
+  }
+}
+
+function closeActivePopup(): void {
+  if (activePopup !== null) {
+    activePopup.destroy?.();
+    activePopup = null;
   }
 }
 
@@ -126,6 +176,35 @@ function createMemberItem(
 
   appendChildren(item, avatar, name);
 
+  // Left-click opens the profile popup (previously dead code — built and
+  // tested but never mounted from anywhere).
+  item.addEventListener(
+    "click",
+    (e) => {
+      closeActiveMenu();
+      closeActivePopup();
+      const currentUserId = authStore.getState().user?.id ?? 0;
+      const isSelf = member.id === currentUserId;
+      const onMessageUser = opts.onMessageUser;
+      activePopup = createUserProfilePopup({
+        user: {
+          id: member.id,
+          username: member.username,
+          avatar: member.avatar,
+          role: member.role,
+          status: member.status,
+        },
+        anchorX: e.clientX,
+        anchorY: e.clientY,
+        ...(isSelf || onMessageUser === undefined
+          ? {}
+          : { onMessage: (userId: number) => onMessageUser(userId) }),
+      });
+      activePopup.mount(document.body);
+    },
+    { signal },
+  );
+
   // Context menu for admin actions
   item.addEventListener(
     "contextmenu",
@@ -136,9 +215,9 @@ function createMemberItem(
       const currentUserId = authStore.getState().user?.id ?? 0;
       if (member.id === currentUserId) return;
 
-      // Only admins and owners can use admin actions
+      // Admin actions are role-gated; block/unblock is available to everyone.
       const role = opts.currentUserRole.toLowerCase();
-      if (role !== "owner" && role !== "admin") return;
+      const showAdminActions = role === "owner" || role === "admin";
 
       closeActiveMenu();
       document.removeEventListener("mousedown", handleOutsideClick);
@@ -147,14 +226,19 @@ function createMemberItem(
       // custom roles unreachable and, worse, unresolvable to a role id, so
       // picking one silently did nothing.
       const availableRoles = assignableRoleNames();
+      const isBlocked = blocksStore.getState().blockedByMe.has(member.id);
 
       activeMenu = createMemberContextMenu({
         userId: member.id,
         username: member.username,
         currentRole: member.role.toLowerCase(),
         availableRoles,
+        showAdminActions,
+        isBlocked,
+        onToggleBlock: () => opts.onToggleBlock(member.id, member.username, !isBlocked),
         onKick: () => opts.onKick(member.id, member.username),
-        onBan: (reason: string) => opts.onBan(member.id, member.username, reason),
+        onBan: (reason: string, durationHours: number) =>
+          opts.onBan(member.id, member.username, reason, durationHours),
         onChangeRole: (newRole: string) => opts.onChangeRole(member.id, member.username, newRole),
       });
 
@@ -208,25 +292,47 @@ function renderList(
     }
   }
 
-  for (const group of ROLE_GROUPS) {
-    const groupMembers = (buckets.get(group.role) ?? []).toSorted(
-      (a, b) => statusPriority(a.status) - statusPriority(b.status),
-    );
+  const groups = roleGroups();
+  const rendered = new Set<string>();
+  for (const group of groups) {
+    rendered.add(group.role);
+    appendGroup(root, group, buckets.get(group.role) ?? [], opts, signal, rowsByUserId);
+  }
 
-    if (groupMembers.length === 0) continue;
+  // Members whose role isn't in the server's role list (e.g. a role deleted
+  // mid-session) still render, in a gray group, instead of vanishing.
+  const leftovers = [...buckets.keys()].filter((role) => !rendered.has(role)).toSorted();
+  for (const role of leftovers) {
+    const group: RoleGroup = { role, label: role.toUpperCase(), colorVar: MEMBER_COLOR };
+    appendGroup(root, group, buckets.get(role) ?? [], opts, signal, rowsByUserId);
+  }
+}
 
-    const header = createElement(
-      "div",
-      { class: "member-role-group" },
-      `${group.label} \u2014 ${groupMembers.length}`,
-    );
-    root.appendChild(header);
+function appendGroup(
+  root: HTMLDivElement,
+  group: RoleGroup,
+  members: readonly Member[],
+  opts: MemberListOptions,
+  signal: AbortSignal,
+  rowsByUserId: Map<number, HTMLDivElement>,
+): void {
+  const groupMembers = members.toSorted(
+    (a, b) => statusPriority(a.status) - statusPriority(b.status),
+  );
 
-    for (const member of groupMembers) {
-      const item = createMemberItem(member, group.colorVar, opts, signal);
-      rowsByUserId.set(member.id, item);
-      root.appendChild(item);
-    }
+  if (groupMembers.length === 0) return;
+
+  const header = createElement(
+    "div",
+    { class: "member-role-group" },
+    `${group.label} \u2014 ${groupMembers.length}`,
+  );
+  root.appendChild(header);
+
+  for (const member of groupMembers) {
+    const item = createMemberItem(member, group.colorVar, opts, signal);
+    rowsByUserId.set(member.id, item);
+    root.appendChild(item);
   }
 }
 
@@ -310,6 +416,7 @@ export function createMemberList(opts: MemberListOptions): MountableComponent {
 
   function destroy(): void {
     closeActiveMenu();
+    closeActivePopup();
     document.removeEventListener("mousedown", handleOutsideClick);
     disposable.destroy();
     rowsByUserId.clear();

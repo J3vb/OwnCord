@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/owncord/server/db"
 	"github.com/owncord/server/service"
@@ -52,7 +53,15 @@ type patchUserRequest struct {
 	RoleID    *int64  `json:"role_id"`
 	Banned    *bool   `json:"banned"`
 	BanReason *string `json:"ban_reason"`
+	// BanDurationHours makes the ban temporary: it expires this many hours
+	// from now (login re-checks via IsEffectivelyBanned). Omitted or 0 =
+	// permanent. Only meaningful with banned=true.
+	BanDurationHours *int `json:"ban_duration_hours"`
 }
+
+// maxBanDurationHours caps temporary bans at one year; anything longer is
+// effectively permanent and should be issued as such.
+const maxBanDurationHours = 24 * 365
 
 // writeModerationErr maps ModerationService errors onto admin API responses.
 func writeModerationErr(w http.ResponseWriter, err error) {
@@ -116,9 +125,19 @@ func handlePatchUser(database *db.DB, hub HubBroadcaster, permInvalidator Permis
 			if req.BanReason != nil {
 				banReason = *req.BanReason
 			}
+			var banExpires *time.Time
+			if req.BanDurationHours != nil && *req.BanDurationHours != 0 {
+				hours := *req.BanDurationHours
+				if hours < 0 || hours > maxBanDurationHours {
+					writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "ban_duration_hours must be between 1 and 8760")
+					return
+				}
+				t := time.Now().Add(time.Duration(hours) * time.Hour)
+				banExpires = &t
+			}
 			var actionErr error
 			if *req.Banned {
-				actionErr = mod.BanUser(r.Context(), actor, id, banReason, nil)
+				actionErr = mod.BanUser(r.Context(), actor, id, banReason, banExpires)
 			} else {
 				actionErr = mod.UnbanUser(r.Context(), actor, id)
 			}

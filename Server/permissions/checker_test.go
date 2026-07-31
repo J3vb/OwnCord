@@ -200,7 +200,8 @@ func TestVisibleChannelIDs(t *testing.T) {
 		{ID: 1, Type: "text"},
 		{ID: 2, Type: "announcement"},
 		{ID: 3, Type: "voice"},
-		{ID: 4, Type: "dm"}, // always skipped
+		{ID: 4, Type: "dm"},                   // always skipped
+		{ID: 5, Type: "text", Archived: true}, // always skipped, even for admins
 	}
 
 	tests := []struct {
@@ -247,6 +248,9 @@ func TestVisibleChannelIDs(t *testing.T) {
 			got := ck.VisibleChannelIDs(tt.rolePerms, channels, tt.overrides)
 			if got[4] {
 				t.Errorf("dm channel 4 must never be visible, got %v", got)
+			}
+			if got[5] {
+				t.Errorf("archived channel 5 must never be visible, got %v", got)
 			}
 			if len(got) != len(tt.want) {
 				t.Fatalf("VisibleChannelIDs() = %v, want %v", got, tt.want)

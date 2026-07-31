@@ -3,6 +3,7 @@
  * Pure functions for timestamp parsing, display formatting, and role resolution.
  */
 
+import { channelsStore } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
 import { loadPref } from "@components/settings/helpers";
@@ -126,6 +127,14 @@ export function getUserRole(userId: number): string {
 export function roleColorVar(role: string): string {
   if (!roleColorsEnabled) {
     return "var(--role-member)";
+  }
+  // Prefer the server's role color (shipped in `ready`); the theme variables
+  // below are the fallback for the seeded roles when no color is set.
+  const serverRole = channelsStore
+    .getState()
+    .roles.find((r) => r.name.toLowerCase() === role.toLowerCase());
+  if (serverRole?.color != null && serverRole.color !== "") {
+    return serverRole.color;
   }
   switch (role) {
     case "owner":

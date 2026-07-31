@@ -14,11 +14,28 @@ export interface MemberContextMenuOptions {
   username: string;
   currentRole: string;
   availableRoles: readonly string[];
+  /** When false, only the non-admin actions (block/unblock) are rendered. */
+  showAdminActions: boolean;
+  /** Whether the local user currently blocks this member (labels the toggle). */
+  isBlocked: boolean;
+  onToggleBlock(): Promise<void>;
   onKick(): Promise<void>;
-  /** The reason is stored and displayed by the server; empty means "no reason given". */
-  onBan(reason: string): Promise<void>;
+  /**
+   * The reason is stored and displayed by the server; empty means "no reason
+   * given". durationHours 0 = permanent, otherwise the ban auto-expires.
+   */
+  onBan(reason: string, durationHours: number): Promise<void>;
   onChangeRole(newRole: string): Promise<void>;
 }
+
+/** Ban duration choices offered in the ban flow (label → hours; 0 = permanent). */
+const BAN_DURATIONS: readonly { readonly label: string; readonly hours: number }[] = [
+  { label: "Forever", hours: 0 },
+  { label: "1 hour", hours: 1 },
+  { label: "1 day", hours: 24 },
+  { label: "7 days", hours: 24 * 7 },
+  { label: "30 days", hours: 24 * 30 },
+] as const;
 
 export interface ChannelContextMenuOptions {
   channelId: number;
@@ -130,6 +147,58 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
   const ac = new AbortController();
   const menu = createElement("div", { class: "context-menu" });
 
+  // Block / Unblock — available to every member, not just admins. Blocking is
+  // disruptive (kills DMs both ways) so it confirms; unblocking is one click.
+  const blockItem = createElement(
+    "div",
+    {
+      class: options.isBlocked
+        ? "context-menu__item"
+        : "context-menu__item context-menu__item--danger",
+      "data-testid": "block-toggle",
+    },
+    options.isBlocked ? "Unblock" : "Block",
+  );
+  if (options.isBlocked) {
+    let unblockRunning = false;
+    blockItem.addEventListener(
+      "click",
+      (e) => {
+        e.stopPropagation();
+        if (unblockRunning) return;
+        unblockRunning = true;
+        setText(blockItem, "Unblocking...");
+        blockItem.classList.add("context-menu__item--pending");
+        const done = (): void => {
+          unblockRunning = false;
+          blockItem.classList.remove("context-menu__item--pending");
+          setText(blockItem, "Unblock");
+        };
+        void options.onToggleBlock().then(done, done);
+      },
+      { signal: ac.signal },
+    );
+  } else {
+    withConfirmation(
+      blockItem,
+      "Are you sure?",
+      () => options.onToggleBlock(),
+      ac.signal,
+      "Blocking...",
+    );
+  }
+
+  if (!options.showAdminActions) {
+    menu.appendChild(blockItem);
+    return {
+      element: menu,
+      destroy(): void {
+        ac.abort();
+        menu.remove();
+      },
+    };
+  }
+
   // Role submenu trigger
   const roleItem = createElement(
     "div",
@@ -210,12 +279,21 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
     "data-testid": "ban-reason-input",
     style: "width:100%;font-size:12px",
   });
+  const banDurationSelect = createElement("select", {
+    class: "form-input",
+    "data-testid": "ban-duration-select",
+    style: "width:100%;font-size:12px;margin-top:4px",
+  });
+  for (const d of BAN_DURATIONS) {
+    const opt = createElement("option", { value: String(d.hours) }, d.label);
+    banDurationSelect.appendChild(opt);
+  }
   const banConfirm = createElement(
     "div",
     { class: "context-menu__item context-menu__item--danger", "data-testid": "ban-confirm" },
     "Confirm Ban",
   );
-  appendChildren(banReasonRow, banReasonInput, banConfirm);
+  appendChildren(banReasonRow, banReasonInput, banDurationSelect, banConfirm);
 
   banItem.addEventListener(
     "click",
@@ -231,6 +309,10 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
   // Typing a reason must not close the menu or trigger the outside-click guard.
   banReasonInput.addEventListener("click", (e) => e.stopPropagation(), { signal: ac.signal });
   banReasonInput.addEventListener("mousedown", (e) => e.stopPropagation(), { signal: ac.signal });
+  banDurationSelect.addEventListener("click", (e) => e.stopPropagation(), { signal: ac.signal });
+  banDurationSelect.addEventListener("mousedown", (e) => e.stopPropagation(), {
+    signal: ac.signal,
+  });
 
   let banRunning = false;
   function submitBan(): void {
@@ -243,7 +325,8 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
       banConfirm.classList.remove("context-menu__item--pending");
       setText(banConfirm, "Confirm Ban");
     };
-    void options.onBan(banReasonInput.value.trim()).then(done, done);
+    const durationHours = Number.parseInt(banDurationSelect.value, 10) || 0;
+    void options.onBan(banReasonInput.value.trim(), durationHours).then(done, done);
   }
 
   banConfirm.addEventListener(
@@ -266,6 +349,9 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
   );
 
   appendChildren(menu, banItem, banReasonRow);
+
+  menu.appendChild(createSeparator());
+  menu.appendChild(blockItem);
 
   function destroy(): void {
     ac.abort();

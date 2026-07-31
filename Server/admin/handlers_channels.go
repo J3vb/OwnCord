@@ -181,6 +181,12 @@ func handlePatchChannel(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
 		}
 		if hub != nil {
 			hub.BroadcastChannelUpdate(updated)
+			// Archiving/unarchiving changes who sees the channel, not just its
+			// metadata — send targeted channel_create/channel_delete so
+			// connected clients re-sync without a reconnect.
+			if existing.Archived != updated.Archived {
+				hub.RefreshChannelVisibility(updated)
+			}
 		}
 		writeJSON(w, http.StatusOK, updated)
 	}

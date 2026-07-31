@@ -26,8 +26,9 @@ type ChannelOverride struct {
 // Declared here (not imported from db) so the permissions package stays free
 // of a db dependency; callers map their []db.Channel down to []ChannelRef.
 type ChannelRef struct {
-	ID   int64
-	Type string
+	ID       int64
+	Type     string
+	Archived bool
 }
 
 // DB is the minimal database interface the Checker needs.
@@ -91,6 +92,12 @@ func (ck *Checker) VisibleChannelIDs(rolePerms int64, channels []ChannelRef, ove
 	visible := make(map[int64]bool)
 	for _, ch := range channels {
 		if ch.Type == "dm" {
+			continue
+		}
+		// Archived channels are hidden from every client surface (admins
+		// included) — they stay manageable from the admin panel, which lists
+		// channels without this predicate.
+		if ch.Archived {
 			continue
 		}
 		if ck.HasChannelPermBatch(rolePerms, overrides, ch.ID, ReadMessages) {

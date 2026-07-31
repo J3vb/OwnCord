@@ -21,6 +21,9 @@ describe("AdminActions", () => {
         username: "TestUser",
         currentRole: "member",
         availableRoles: ["admin", "moderator", "member"],
+        showAdminActions: overrides?.showAdminActions ?? true,
+        isBlocked: overrides?.isBlocked ?? false,
+        onToggleBlock: overrides?.onToggleBlock ?? vi.fn(async () => {}),
         onKick: overrides?.onKick ?? vi.fn(async () => {}),
         onBan: overrides?.onBan ?? vi.fn(async () => {}),
         onChangeRole: overrides?.onChangeRole ?? vi.fn(async () => {}),
@@ -117,7 +120,29 @@ describe("AdminActions", () => {
       confirm.click();
 
       // The server stores and displays the reason, so it's trimmed, not raw.
-      expect(onBan).toHaveBeenCalledWith("spamming");
+      // Default duration is 0 (permanent).
+      expect(onBan).toHaveBeenCalledWith("spamming", 0);
+      result.destroy();
+    });
+
+    it("Ban passes the selected duration in hours", () => {
+      const onBan = vi.fn(async () => {});
+      const { result } = makeMenu({ onBan });
+
+      const banItem = Array.from(
+        result.element.querySelectorAll(".context-menu__item--danger"),
+      ).find((i) => i.textContent === "Ban") as HTMLDivElement;
+      banItem.click();
+
+      const durationSelect = result.element.querySelector(
+        "[data-testid='ban-duration-select']",
+      ) as HTMLSelectElement;
+      expect(durationSelect).not.toBeNull();
+      durationSelect.value = "24";
+
+      (result.element.querySelector("[data-testid='ban-confirm']") as HTMLDivElement).click();
+
+      expect(onBan).toHaveBeenCalledWith("", 24);
       result.destroy();
     });
 
@@ -131,7 +156,7 @@ describe("AdminActions", () => {
       banItem.click();
       (result.element.querySelector("[data-testid='ban-confirm']") as HTMLDivElement).click();
 
-      expect(onBan).toHaveBeenCalledWith("");
+      expect(onBan).toHaveBeenCalledWith("", 0);
       result.destroy();
     });
 
@@ -208,6 +233,44 @@ describe("AdminActions", () => {
       expect(container.querySelector(".context-menu")).not.toBeNull();
       result.destroy();
       expect(container.querySelector(".context-menu")).toBeNull();
+    });
+
+    it("renders only the Block item when showAdminActions is false", () => {
+      const { result } = makeMenu({ showAdminActions: false });
+      const items = result.element.querySelectorAll(".context-menu__item");
+      const texts = Array.from(items).map((i) => i.textContent);
+      expect(texts).toEqual(["Block"]);
+      result.destroy();
+    });
+
+    it("Block requires double-click confirmation", () => {
+      const onToggleBlock = vi.fn(async () => {});
+      const { result } = makeMenu({ showAdminActions: false, onToggleBlock });
+      const blockItem = result.element.querySelector<HTMLElement>('[data-testid="block-toggle"]');
+      expect(blockItem).not.toBeNull();
+      blockItem?.click();
+      expect(blockItem?.textContent).toBe("Are you sure?");
+      expect(onToggleBlock).not.toHaveBeenCalled();
+      blockItem?.click();
+      expect(onToggleBlock).toHaveBeenCalledOnce();
+      result.destroy();
+    });
+
+    it("Unblock fires on a single click when already blocked", () => {
+      const onToggleBlock = vi.fn(async () => {});
+      const { result } = makeMenu({ showAdminActions: false, isBlocked: true, onToggleBlock });
+      const blockItem = result.element.querySelector<HTMLElement>('[data-testid="block-toggle"]');
+      expect(blockItem?.textContent).toBe("Unblock");
+      blockItem?.click();
+      expect(onToggleBlock).toHaveBeenCalledOnce();
+      result.destroy();
+    });
+
+    it("admin menu also includes the Block item", () => {
+      const { result } = makeMenu();
+      const blockItem = result.element.querySelector('[data-testid="block-toggle"]');
+      expect(blockItem).not.toBeNull();
+      result.destroy();
     });
   });
 

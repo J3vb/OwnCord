@@ -14,14 +14,16 @@ export interface EditChannelModalOptions {
   readonly channelName: string;
   /** Current channel type (displayed, not editable). */
   readonly channelType: string;
+  /** Current channel topic ("" = none). */
+  readonly channelTopic?: string;
   /** Called when the user saves changes. */
-  readonly onSave: (data: { name: string }) => Promise<void>;
+  readonly onSave: (data: { name: string; topic: string }) => Promise<void>;
   /** Called when the modal is closed. */
   readonly onClose: () => void;
 }
 
 export function createEditChannelModal(options: EditChannelModalOptions): MountableComponent {
-  const { channelName, channelType, onSave, onClose } = options;
+  const { channelName, channelType, channelTopic, onSave, onClose } = options;
   const ac = new AbortController();
   let overlay: HTMLDivElement | null = null;
 
@@ -70,6 +72,19 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     nameInput.value = channelName;
     appendChildren(nameGroup, nameLabel, nameInput);
 
+    // Channel topic (optional, shown in the chat header)
+    const topicGroup = createElement("div", { class: "form-group" });
+    const topicLabel = createElement("label", { class: "form-label" }, "Topic");
+    const topicInput = createElement("input", {
+      class: "form-input",
+      type: "text",
+      placeholder: "What's this channel about? (optional)",
+      maxlength: "1024",
+      "data-testid": "edit-channel-topic-input",
+    });
+    topicInput.value = channelTopic ?? "";
+    appendChildren(topicGroup, topicLabel, topicInput);
+
     // Error display
     const errorEl = createElement("div", {
       class: "form-group",
@@ -77,7 +92,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       "data-testid": "edit-channel-error",
     });
 
-    appendChildren(body, typeGroup, nameGroup, errorEl);
+    appendChildren(body, typeGroup, nameGroup, topicGroup, errorEl);
 
     // Footer
     const footer = createElement("div", { class: "modal-footer" });
@@ -115,7 +130,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
         setText(saveBtn, "Saving...");
 
         try {
-          await onSave({ name });
+          await onSave({ name, topic: topicInput.value.trim() });
         } catch (err) {
           errorEl.style.display = "block";
           setText(errorEl, err instanceof Error ? err.message : "Failed to update channel");

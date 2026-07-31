@@ -1033,6 +1033,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          topic: "",
           slowMode: 0,
         });
         return { ...prev, channels: next, activeChannelId: 1 };
@@ -1063,6 +1064,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          topic: "",
           slowMode: 0,
         });
         return { ...prev, channels: next, activeChannelId: 50 };
@@ -1286,6 +1288,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          topic: "",
           slowMode: 0,
         });
         return { ...prev, channels: next, activeChannelId: 1 };
@@ -1324,6 +1327,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          topic: "",
           slowMode: 0,
         });
         next.set(2, {
@@ -1335,6 +1339,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          topic: "",
           slowMode: 0,
         });
         return { ...prev, channels: next };
@@ -1398,6 +1403,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          topic: "",
           slowMode: 0,
         });
         return { ...prev, channels: next, activeChannelId: 100 };
@@ -1803,6 +1809,7 @@ describe("SidebarArea", () => {
           unreadCount: 0,
           lastMessageId: null,
           canSend: true,
+          topic: "",
           slowMode: 0,
         });
         return { ...prev, channels: next };
@@ -1846,7 +1853,12 @@ describe("SidebarArea", () => {
     /** Extract callbacks passed to createMemberList */
     function getMemberListCallbacks(): {
       onKick: (userId: number, username: string) => Promise<void>;
-      onBan: (userId: number, username: string, reason: string) => Promise<void>;
+      onBan: (
+        userId: number,
+        username: string,
+        reason: string,
+        durationHours: number,
+      ) => Promise<void>;
       onChangeRole: (userId: number, username: string, newRole: string) => Promise<void>;
     } {
       const calls = (createMemberList as MockedFn).mock.calls;
@@ -1913,9 +1925,9 @@ describe("SidebarArea", () => {
       container.appendChild(result.sidebarWrapper);
 
       const callbacks = getMemberListCallbacks();
-      await callbacks.onBan(3, "Bob", "spamming");
+      await callbacks.onBan(3, "Bob", "spamming", 0);
 
-      expect(opts.api.adminBanMember).toHaveBeenCalledWith(3, "spamming");
+      expect(opts.api.adminBanMember).toHaveBeenCalledWith(3, "spamming", 0);
       expect(mockShow).toHaveBeenCalledWith("Banned Bob", "success");
 
       cleanup(result);
@@ -1931,7 +1943,7 @@ describe("SidebarArea", () => {
       container.appendChild(result.sidebarWrapper);
 
       const callbacks = getMemberListCallbacks();
-      await callbacks.onBan(3, "Bob", "");
+      await callbacks.onBan(3, "Bob", "", 0);
 
       expect(mockShow).toHaveBeenCalledWith("Ban denied", "error");
 
@@ -1948,7 +1960,7 @@ describe("SidebarArea", () => {
       container.appendChild(result.sidebarWrapper);
 
       const callbacks = getMemberListCallbacks();
-      await callbacks.onBan(3, "Bob", "");
+      await callbacks.onBan(3, "Bob", "", 0);
 
       expect(mockShow).toHaveBeenCalledWith("Failed to ban member", "error");
 

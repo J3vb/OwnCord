@@ -110,6 +110,8 @@ export interface ReadyChannel {
   readonly name: string;
   readonly type: ChannelType;
   readonly category: string | null;
+  /** Channel topic ("" = none). Absent from older servers. */
+  readonly topic?: string;
   readonly position: number;
   readonly unread_count?: number;
   readonly last_message_id?: number;
@@ -263,6 +265,7 @@ export interface ChannelCreatePayload {
   readonly name: string;
   readonly type: ChannelType;
   readonly category: string | null;
+  readonly topic?: string;
   readonly position: number;
   readonly slow_mode?: number;
 }
@@ -270,6 +273,7 @@ export interface ChannelCreatePayload {
 export interface ChannelUpdatePayload {
   readonly id: number;
   readonly name?: string;
+  readonly topic?: string;
   readonly position?: number;
   readonly slow_mode?: number;
 }

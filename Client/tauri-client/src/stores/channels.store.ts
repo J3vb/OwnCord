@@ -17,6 +17,8 @@ export interface Channel {
   readonly name: string;
   readonly type: ChannelType;
   readonly category: string | null;
+  /** Channel topic ("" = none). */
+  readonly topic: string;
   readonly position: number;
   readonly unreadCount: number;
   readonly lastMessageId: number | null;
@@ -49,6 +51,7 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
       name: ch.name,
       type: ch.type,
       category: ch.category,
+      topic: ch.topic ?? "",
       position: ch.position,
       unreadCount: ch.unread_count ?? 0,
       lastMessageId: ch.last_message_id ?? null,
@@ -85,6 +88,7 @@ export function addChannel(channel: ChannelCreatePayload): void {
       name: channel.name,
       type: channel.type,
       category: channel.category,
+      topic: channel.topic ?? "",
       position: channel.position,
       unreadCount: 0,
       lastMessageId: null,
@@ -107,6 +111,7 @@ export function updateChannel(update: ChannelUpdatePayload): void {
     const updated: Channel = {
       ...existing,
       ...(update.name !== undefined ? { name: update.name } : {}),
+      ...(update.topic !== undefined ? { topic: update.topic } : {}),
       ...(update.position !== undefined ? { position: update.position } : {}),
       ...(update.slow_mode !== undefined ? { slowMode: update.slow_mode } : {}),
     };

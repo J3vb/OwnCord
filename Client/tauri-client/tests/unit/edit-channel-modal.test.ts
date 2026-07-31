@@ -20,6 +20,7 @@ describe("EditChannelModal", () => {
       channelId: 1,
       channelName: "general",
       channelType: "text",
+      channelTopic: overrides?.channelTopic,
       onSave: overrides?.onSave ?? vi.fn(async () => {}),
       onClose: overrides?.onClose ?? vi.fn(),
     };
@@ -83,7 +84,27 @@ describe("EditChannelModal", () => {
     saveBtn.click();
 
     await vi.waitFor(() => {
-      expect(onSave).toHaveBeenCalledWith({ name: "renamed-channel" });
+      expect(onSave).toHaveBeenCalledWith({ name: "renamed-channel", topic: "" });
+    });
+    modal.destroy?.();
+  });
+
+  it("pre-fills the topic input and includes the edited topic in onSave", async () => {
+    const onSave = vi.fn(async () => {});
+    const { modal } = makeModal({ onSave, channelTopic: "old topic" });
+    const topicInput = container.querySelector(
+      "[data-testid='edit-channel-topic-input']",
+    ) as HTMLInputElement;
+    expect(topicInput.value).toBe("old topic");
+    topicInput.value = "  new topic  ";
+
+    const saveBtn = container.querySelector(
+      "[data-testid='edit-channel-submit']",
+    ) as HTMLButtonElement;
+    saveBtn.click();
+
+    await vi.waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith({ name: "general", topic: "new topic" });
     });
     modal.destroy?.();
   });

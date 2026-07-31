@@ -481,6 +481,16 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request<BlockedUsersResponse>("GET", "/blocks", undefined, signal);
     },
 
+    /** Block a user (prevents DMs in both directions). */
+    blockUser(userId: number, signal?: AbortSignal): Promise<void> {
+      return request<void>("PUT", `/blocks/${userId}`, undefined, signal);
+    },
+
+    /** Unblock a previously blocked user. */
+    unblockUser(userId: number, signal?: AbortSignal): Promise<void> {
+      return request<void>("DELETE", `/blocks/${userId}`, undefined, signal);
+    },
+
     // ── Voice ─────────────────────────────────────────────
 
     getVoiceCredentials(signal?: AbortSignal): Promise<VoiceCredentialsResponse> {
@@ -546,13 +556,22 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return adminRequest<void>("DELETE", `/users/${userId}/sessions`, undefined, signal);
     },
 
-    adminBanMember(userId: number, reason?: string, signal?: AbortSignal): Promise<void> {
+    adminBanMember(
+      userId: number,
+      reason?: string,
+      durationHours?: number,
+      signal?: AbortSignal,
+    ): Promise<void> {
       return adminRequest<void>(
         "PATCH",
         `/users/${userId}`,
         {
           banned: true,
           ban_reason: reason ?? "",
+          // Omitted/0 = permanent; otherwise the ban expires after this many hours.
+          ...(durationHours !== undefined && durationHours > 0
+            ? { ban_duration_hours: durationHours }
+            : {}),
         },
         signal,
       );

@@ -215,6 +215,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           channelId: channel.id,
           channelName: channel.name,
           channelType: channel.type,
+          channelTopic: channelsStore.getState().channels.get(channel.id)?.topic ?? "",
           onSave: async (data) => {
             try {
               await api.adminUpdateChannel(channel.id, data);
@@ -497,7 +498,13 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       // --- Member list (below DM section) ---
       // Same wiring lives in SidebarMemberSection; this used to be a private
       // copy of it, and a fix to one silently missed the other.
-      const memberSection = createSidebarMemberSection({ api, getToast });
+      const memberSection = createSidebarMemberSection({
+        api,
+        getToast,
+        onMessageUser: (userId) => {
+          void handleCreateDm(userId, dmDeps);
+        },
+      });
       contentSlot.appendChild(memberSection.element);
       channelModeExtras.push(memberSection.memberListComponent);
       channelModeUnsubs.push(memberSection.destroy);
