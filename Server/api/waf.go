@@ -118,7 +118,10 @@ func newCRSWAF(paranoiaLevel int, block bool, onMatch func(types.MatchedRule)) (
 	)
 }
 
-// logCRSMatch is the default CRS match logger.
+// logCRSMatch is the per-rule CRS match logger. It is used for the block-mode
+// default (blocked requests are rare and their per-rule detail is wanted) and
+// whenever a caller supplies it explicitly (tests). The default detect-mode
+// path does NOT use it — see logCRSMatchesAggregate.
 func logCRSMatch(mr types.MatchedRule) {
 	slog.Warn("waf: CRS rule matched",
 		"rule_id", mr.Rule().ID(),
@@ -127,6 +130,59 @@ func logCRSMatch(mr types.MatchedRule) {
 		"msg", mr.Message(),
 		"data", mr.Data(),
 	)
+}
+
+// logCRSMatchesAggregate emits at most ONE log line for a request that tripped
+// CRS detection rules, instead of one Warn per matched rule. In the default
+// detect mode ordinary chat prose routinely trips several CRS SQLi/XSS rules
+// per request (see TestWAFMiddleware_CRSBlockMode_FalsePositivesOnSQLishChatProse)
+// and anomaly scoring amplifies the count, so per-rule Warn logging on the
+// request goroutine is pure hot-path overhead (allocation + serialized log
+// I/O + log-volume amplification). This keeps the signal — how many rules
+// matched and the highest-severity one — on a single Warn and moves the full
+// rule-id list to Debug. It reads only per-request transaction state (no
+// shared/global state, no locks).
+func logCRSMatchesAggregate(tx types.Transaction) {
+	if tx == nil {
+		return
+	}
+	matched := tx.MatchedRules()
+	ids := make([]int, 0, len(matched))
+	var (
+		topRuleID int
+		topSev    types.RuleSeverity
+		topURI    string
+		topMsg    string
+	)
+	for _, mr := range matched {
+		// Internal bookkeeping rules (the setvar/ctl SecActions this package
+		// installs, and CRS setup actions) carry no message and are not
+		// detections; the per-rule callback skips them too (it only fires for
+		// rules with logging enabled), so keep them out of the count.
+		if mr.Message() == "" {
+			continue
+		}
+		ids = append(ids, mr.Rule().ID())
+		// Severity is inverted: 0 (emergency) is the most severe, 7 (debug)
+		// the least. The first detection seeds the max; smaller wins after.
+		if sev := mr.Rule().Severity(); len(ids) == 1 || sev < topSev {
+			topSev = sev
+			topRuleID = mr.Rule().ID()
+			topURI = mr.URI()
+			topMsg = mr.Message()
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	slog.Warn("waf: CRS detect-mode matches",
+		"matches", len(ids),
+		"top_rule_id", topRuleID,
+		"top_severity", topSev.String(),
+		"uri", topURI,
+		"top_msg", topMsg,
+	)
+	slog.Debug("waf: CRS detect-mode matched rule ids", "rule_ids", ids)
 }
 
 // NewWAFMiddleware creates a Coraza WAF middleware with OWASP CRS rules.
@@ -202,12 +258,29 @@ func newWAFMiddleware(paranoiaLevel int, crsMode string, onCRSMatch func(types.M
 	// exact blocking behavior in every CRS mode. If the CRS fails to load the
 	// server continues with the inline engine only (same failure philosophy
 	// as above).
+	//
+	// aggregateCRSLog collapses detect-mode match logging to one line per
+	// request (logCRSMatchesAggregate) instead of one Warn per matched rule.
+	// It applies ONLY to the default detect-mode path — the hot path for
+	// ordinary traffic. When a caller supplies its own onCRSMatch (tests) the
+	// per-rule callback is wired so every match stays observable; in block
+	// mode the per-rule logCRSMatch is kept (blocked requests are rare and the
+	// per-rule detail is wanted), leaving block-mode behavior exactly as-is.
+	aggregateCRSLog := false
 	var crsWAF coraza.WAF
 	if crsMode != CRSModeOff {
-		if onCRSMatch == nil {
-			onCRSMatch = logCRSMatch
+		crsCallback := onCRSMatch
+		if crsCallback == nil {
+			if crsMode == CRSModeDetect {
+				// Default detect mode: leave the engine error callback nil so
+				// nothing logs per rule on the request goroutine, and instead
+				// aggregate the transaction's matches after processing.
+				aggregateCRSLog = true
+			} else {
+				crsCallback = logCRSMatch
+			}
 		}
-		cw, crsErr := newCRSWAF(paranoiaLevel, crsMode == CRSModeBlock, onCRSMatch)
+		cw, crsErr := newCRSWAF(paranoiaLevel, crsMode == CRSModeBlock, crsCallback)
 		if crsErr != nil {
 			slog.Error("waf: failed to load OWASP CRS, continuing with inline rules only", "error", crsErr)
 		} else {
@@ -231,6 +304,12 @@ func newWAFMiddleware(paranoiaLevel int, crsMode string, onCRSMatch func(types.M
 			if crsWAF != nil {
 				crsTx = crsWAF.NewTransaction()
 				defer func() {
+					// One aggregated match log per request (detect-mode
+					// default only); reads per-request transaction state, so
+					// it must run before the transaction is closed.
+					if aggregateCRSLog {
+						logCRSMatchesAggregate(crsTx)
+					}
 					crsTx.ProcessLogging()
 					if err := crsTx.Close(); err != nil {
 						slog.Debug("waf: error closing CRS transaction", "error", err)

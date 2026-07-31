@@ -2,6 +2,7 @@ package api
 
 import (
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,18 @@ import (
 
 	"github.com/corazawaf/coraza/v3/types"
 )
+
+// captureSlog redirects the default slog logger to a buffer for the duration
+// of fn and returns everything it wrote (Debug and up).
+func captureSlog(t *testing.T, fn func()) string {
+	t.Helper()
+	var buf strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(prev)
+	fn()
+	return buf.String()
+}
 
 // matchRecorder captures CRS rule matches reported through the error
 // callback, which is how detect-mode (DetectionOnly) matches surface.
@@ -116,6 +129,70 @@ func TestWAFMiddleware_CRSDetectMode_DetectsPathTraversalProbe(t *testing.T) {
 	}
 	if !rec.matchedInRange(930000, 930999) {
 		t.Fatalf("expected a CRS LFI rule (930xxx) match, got rule ids %v", rec.ruleIDs)
+	}
+}
+
+// The default detect-mode path (no caller-supplied callback) must not log one
+// line per matched CRS rule on the request goroutine. An XSS probe trips
+// several 941xxx rules plus anomaly scoring; the middleware must collapse them
+// into a single aggregated Warn and never emit the per-rule "CRS rule matched"
+// line. Only the request itself is wrapped in the log capture so the one-time
+// "WAF enabled" startup log doesn't count.
+func TestWAFMiddleware_CRSDetectMode_AggregatesMatchLoggingPerRequest(t *testing.T) {
+	middleware := NewWAFMiddlewareCRS(2, CRSModeDetect)
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/channels?q=<script>alert(1)</script>", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+
+	out := captureSlog(t, func() {
+		handler.ServeHTTP(rr, req)
+	})
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
+	}
+	// Exactly one aggregated match line for the request...
+	if n := strings.Count(out, "waf: CRS detect-mode matches"); n != 1 {
+		t.Fatalf("want exactly 1 aggregated CRS match log, got %d\nlogs:\n%s", n, out)
+	}
+	// ...carrying the retained signal (count + highest-severity rule id)...
+	if !strings.Contains(out, "matches=") || !strings.Contains(out, "top_rule_id=") {
+		t.Fatalf("aggregated log missing count/top_rule_id signal:\n%s", out)
+	}
+	// ...and the per-rule hot-path logger must not fire in this default path.
+	if strings.Contains(out, "waf: CRS rule matched") {
+		t.Fatalf("per-rule CRS logging must not fire in default detect mode:\n%s", out)
+	}
+}
+
+// A caller-supplied callback (as tests use) keeps the per-rule callback wired
+// and turns aggregation off, so every match stays observable. This pins that
+// the aggregation change did not disturb the callback seam.
+func TestWAFMiddleware_CRSDetectMode_CustomCallbackStillPerRule(t *testing.T) {
+	rec := &matchRecorder{}
+	middleware := newWAFMiddleware(2, CRSModeDetect, rec.record)
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/channels?q=<script>alert(1)</script>", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+
+	out := captureSlog(t, func() {
+		handler.ServeHTTP(rr, req)
+	})
+
+	if !rec.matchedInRange(941000, 941999) {
+		t.Fatalf("custom callback must still see per-rule matches, got %v", rec.ruleIDs)
+	}
+	// With a custom callback wired, the default aggregation path is off.
+	if strings.Contains(out, "waf: CRS detect-mode matches") {
+		t.Fatalf("aggregation must be off when a callback is supplied:\n%s", out)
 	}
 }
 
