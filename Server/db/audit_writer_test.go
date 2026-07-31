@@ -131,7 +131,7 @@ func TestAuditWriter_DrainOnStop(t *testing.T) {
 	// be flushed by Stop's drain.
 	w := db.NewAuditWriter(store, 64, 50, time.Hour)
 	w.Start(context.Background())
-	for i := int64(0); i < 10; i++ {
+	for i := range int64(10) {
 		w.Enqueue(i, "drain_action", "user", i, "")
 	}
 	w.Stop(context.Background())
@@ -188,11 +188,11 @@ func TestAuditWriter_ConcurrentEnqueue(t *testing.T) {
 
 	const goroutines, perGoroutine = 8, 250
 	var wg sync.WaitGroup
-	for g := 0; g < goroutines; g++ {
+	for g := range goroutines {
 		wg.Add(1)
 		go func(g int) {
 			defer wg.Done()
-			for i := 0; i < perGoroutine; i++ {
+			for i := range perGoroutine {
 				w.Enqueue(int64(g), "concurrent_action", "user", int64(i), "")
 			}
 		}(g)

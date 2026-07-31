@@ -75,7 +75,7 @@ func TestFilePool_ForeignKeysOnReaderConnections(t *testing.T) {
 	}
 
 	// Sequential warm-up checks.
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		if err := checkFK(); err != nil {
 			t.Fatalf("sequential check %d: %v", i, err)
 		}
@@ -84,11 +84,9 @@ func TestFilePool_ForeignKeysOnReaderConnections(t *testing.T) {
 	// Parallel: 16 goroutines interleaving reads and PRAGMA checks so the
 	// pool opens multiple connections and the checks land on different ones.
 	var wg sync.WaitGroup
-	for g := 0; g < 16; g++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < 25; i++ {
+	for range 16 {
+		wg.Go(func() {
+			for range 25 {
 				var n int
 				if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&n); err != nil {
 					t.Errorf("read query: %v", err)
@@ -99,7 +97,7 @@ func TestFilePool_ForeignKeysOnReaderConnections(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -134,11 +132,11 @@ func TestFilePool_ConcurrentReadsAndWrites(t *testing.T) {
 
 	// Writers: CreateMessage exercises INSERT ... RETURNING via the dbtx
 	// router; PersistEvent exercises the plain ExecContext write path.
-	for w := 0; w < writers; w++ {
+	for w := range writers {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			for i := 0; i < perWriter; i++ {
+			for i := range perWriter {
 				if _, err := database.CreateMessage(ctx, channelID, userID, fmt.Sprintf("msg %d-%d", w, i), nil); err != nil {
 					t.Errorf("CreateMessage: %v", err)
 					return
@@ -153,11 +151,9 @@ func TestFilePool_ConcurrentReadsAndWrites(t *testing.T) {
 	}
 
 	// Readers: list messages and events while the writers run.
-	for r := 0; r < readers; r++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < perWriter; i++ {
+	for range readers {
+		wg.Go(func() {
+			for range perWriter {
 				if _, err := database.GetMessages(ctx, channelID, 0, 50); err != nil {
 					t.Errorf("GetMessages: %v", err)
 					return
@@ -167,7 +163,7 @@ func TestFilePool_ConcurrentReadsAndWrites(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

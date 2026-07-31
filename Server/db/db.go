@@ -218,7 +218,7 @@ type dbtx struct {
 	reader *sql.DB
 }
 
-func (t *dbtx) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+func (t *dbtx) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	return t.writer.ExecContext(ctx, query, args...)
 }
 
@@ -226,11 +226,11 @@ func (t *dbtx) PrepareContext(ctx context.Context, query string) (*sql.Stmt, err
 	return t.writer.PrepareContext(ctx, query)
 }
 
-func (t *dbtx) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
+func (t *dbtx) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	return t.pool(query).QueryContext(ctx, query, args...)
 }
 
-func (t *dbtx) QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row {
+func (t *dbtx) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
 	return t.pool(query).QueryRowContext(ctx, query, args...)
 }
 
@@ -273,7 +273,7 @@ func hasKeywordPrefix(s, keyword string) bool {
 		return true
 	}
 	c := s[len(keyword)]
-	return !(c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z')
+	return c != '_' && (c < '0' || c > '9') && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z')
 }
 
 // Migrate runs all SQL migration files from the embedded migrations FS in

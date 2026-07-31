@@ -114,7 +114,7 @@ func TestPermCache_SecondCheckServedFromCache(t *testing.T) {
 	c := ws.NewTestClientWithUser(hub, user, 0, send)
 	hub.RegisterNowForTest(c)
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		hub.HandleMessageForTest(c, voiceJoinRaw(chID))
 		if code := receiveErrorCode(send, 300*time.Millisecond); code == "FORBIDDEN" {
 			t.Fatalf("join %d: member with CONNECT_VOICE was denied the gate", i+1)
