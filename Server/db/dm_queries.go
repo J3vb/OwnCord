@@ -37,7 +37,7 @@ type DMUser struct {
 // prevent a TOCTOU race where two concurrent requests both see ErrNoRows and
 // each create a separate DM channel for the same user pair.
 func (d *DB) GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (*Channel, bool, error) {
-	tx, err := d.sqlDB.BeginTx(ctx, &sql.TxOptions{
+	tx, err := d.writer.BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelSerializable,
 	})
 	if err != nil {
@@ -141,7 +141,7 @@ func (d *DB) GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (
 // idx_messages_channel per DM, replacing the old LEFT JOIN messages fan-out
 // that touched every message row in every open DM.
 func (d *DB) GetUserDMChannels(ctx context.Context, userID int64) ([]DMChannelInfo, error) {
-	rows, err := d.sqlDB.QueryContext(ctx,
+	rows, err := d.reader.QueryContext(ctx,
 		`SELECT
 		    c.id                                          AS channel_id,
 		    u.id                                          AS recipient_id,
@@ -269,7 +269,7 @@ func (d *DB) GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64,
 // GetDMRecipient returns the other participant in a DM channel.
 func (d *DB) GetDMRecipient(ctx context.Context, channelID, requestingUserID int64) (*User, error) {
 	var recipientID int64
-	err := d.sqlDB.QueryRowContext(ctx,
+	err := d.reader.QueryRowContext(ctx,
 		`SELECT user_id FROM dm_participants
 		 WHERE channel_id = ? AND user_id != ?
 		 LIMIT 1`,

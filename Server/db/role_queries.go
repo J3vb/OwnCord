@@ -66,7 +66,7 @@ func (d *DB) GetRoleForUser(ctx context.Context, userID int64) (*Role, error) {
 // GetUserWithRole returns the user and their role in a single query.
 // Returns (nil, nil, nil) when the user is not found.
 func (d *DB) GetUserWithRole(ctx context.Context, userID int64) (*User, *Role, error) {
-	row := d.sqlDB.QueryRowContext(ctx,
+	row := d.reader.QueryRowContext(ctx,
 		`SELECT u.id, u.username, u.password, u.avatar, u.role_id,
 		        u.totp_secret, u.status, u.created_at, u.last_seen,
 		        u.banned, u.ban_reason, u.ban_expires,

@@ -1,5 +1,7 @@
 // Step 1.12 — Structured client-side logger
 
+import { readMigratedStringPref } from "./preferences";
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export interface LogEntry {
@@ -113,6 +115,35 @@ export function createLogger(component: string) {
  */
 export function setLogLevel(level: LogLevel): void {
   currentLevel = level;
+}
+
+const LOG_LEVELS: readonly LogLevel[] = ["debug", "info", "warn", "error"];
+
+/** Pref key for the minimum level persisted by the Logs settings tab. */
+const MIN_LEVEL_PREF_KEY = "logs_min_level";
+
+function readStoredLogLevel(): LogLevel | "" {
+  return readMigratedStringPref<LogLevel | "">(MIN_LEVEL_PREF_KEY, "", ["", ...LOG_LEVELS]);
+}
+
+/**
+ * Apply the minimum level persisted by the Logs settings tab ("logs_min_level"
+ * pref, including legacy-key migration), falling back to `fallback` when no
+ * level is stored. Call once at startup before anything logs.
+ */
+export function applyStoredLogLevel(fallback: LogLevel): void {
+  const stored = readStoredLogLevel();
+  currentLevel = stored === "" ? fallback : stored;
+}
+
+// Live updates: the Logs settings tab persists level changes via savePref,
+// which dispatches "owncord:pref-change" for same-window listeners.
+if (typeof window !== "undefined") {
+  window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>) => {
+    if (e.detail?.key !== MIN_LEVEL_PREF_KEY) return;
+    const stored = readStoredLogLevel();
+    if (stored !== "") currentLevel = stored;
+  }) as EventListener);
 }
 
 /**

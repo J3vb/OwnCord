@@ -12,66 +12,7 @@ vi.mock("@lib/themes", () => ({
   applyThemeByName: mockApplyThemeByName,
 }));
 
-vi.mock("@stores/ui.store", () => ({
-  uiStore: {
-    getState: () => ({ settingsOpen: false }),
-    subscribe: () => () => {},
-  },
-}));
-
-vi.mock("@stores/auth.store", () => ({
-  authStore: {
-    getState: () => ({ user: null }),
-  },
-}));
-
-vi.mock("@lib/icons", () => ({
-  createIcon: () => document.createElement("span"),
-}));
-
-vi.mock("@components/settings/AccountTab", () => ({
-  buildAccountTab: () => document.createElement("div"),
-}));
-
-vi.mock("@components/settings/AppearanceTab", () => ({
-  buildAppearanceTab: () => document.createElement("div"),
-}));
-
-vi.mock("@components/settings/NotificationsTab", () => ({
-  buildNotificationsTab: () => document.createElement("div"),
-}));
-
-vi.mock("@components/settings/TextImagesTab", () => ({
-  buildTextImagesTab: () => document.createElement("div"),
-}));
-
-vi.mock("@components/settings/AccessibilityTab", () => ({
-  buildAccessibilityTab: () => document.createElement("div"),
-}));
-
-vi.mock("@components/settings/VoiceAudioTab", () => ({
-  createVoiceAudioTab: () => ({
-    build: () => document.createElement("div"),
-    cleanup: () => {},
-  }),
-}));
-
-vi.mock("@components/settings/KeybindsTab", () => ({
-  buildKeybindsTab: () => document.createElement("div"),
-}));
-
-vi.mock("@components/settings/AdvancedTab", () => ({
-  buildAdvancedTab: () => document.createElement("div"),
-}));
-
-vi.mock("@components/settings/LogsTab", () => ({
-  createLogsTab: () => ({
-    build: () => document.createElement("div"),
-    cleanup: () => {},
-  }),
-}));
-
-import { applyStoredAppearance } from "@components/SettingsOverlay";
+import { applyStoredAppearance } from "@lib/appearance";
 
 describe("applyStoredAppearance", () => {
   beforeEach(() => {

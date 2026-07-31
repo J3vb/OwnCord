@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   createLogger,
   setLogLevel,
+  applyStoredLogLevel,
   addLogListener,
   getLogBuffer,
   clearLogBuffer,
@@ -161,5 +162,131 @@ describe("logger", () => {
 
     // The third argument should be "" (empty string fallback)
     expect(infoSpy).toHaveBeenCalledWith(expect.any(String), "no data", "");
+  });
+});
+
+describe("applyStoredLogLevel", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setLogLevel("debug");
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    setLogLevel("debug");
+  });
+
+  it("falls back to the given default when no pref is stored", () => {
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    applyStoredLogLevel("info");
+    const log = createLogger("test");
+    log.debug("filtered");
+    log.info("kept");
+
+    expect(debugSpy).not.toHaveBeenCalled();
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("honors the saved logs_min_level pref over the fallback", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    localStorage.setItem("owncord:settings:logs_min_level", JSON.stringify("error"));
+
+    applyStoredLogLevel("debug");
+    const log = createLogger("test");
+    log.warn("filtered");
+    log.error("kept");
+
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("migrates a legacy unprefixed logs_min_level key and honors it", () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // Legacy values were stored raw under the unprefixed key.
+    localStorage.setItem("logs_min_level", "warn");
+
+    applyStoredLogLevel("debug");
+    const log = createLogger("test");
+    log.info("filtered");
+    log.warn("kept");
+
+    expect(infoSpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    // The legacy value is migrated forward to the prefixed key.
+    expect(localStorage.getItem("owncord:settings:logs_min_level")).toBe('"warn"');
+  });
+
+  it("ignores invalid stored values and uses the fallback", () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    localStorage.setItem("owncord:settings:logs_min_level", JSON.stringify("verbose"));
+
+    applyStoredLogLevel("warn");
+    const log = createLogger("test");
+    log.info("filtered");
+
+    expect(infoSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("log level pref-change live updates", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setLogLevel("debug");
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    setLogLevel("debug");
+  });
+
+  it("applies a new logs_min_level when owncord:pref-change fires", () => {
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    localStorage.setItem("owncord:settings:logs_min_level", JSON.stringify("error"));
+
+    window.dispatchEvent(
+      new CustomEvent("owncord:pref-change", { detail: { key: "logs_min_level" } }),
+    );
+
+    const log = createLogger("test");
+    log.debug("filtered");
+    log.error("kept");
+
+    expect(debugSpy).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores pref-change events for other keys", () => {
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+    localStorage.setItem("owncord:settings:logs_min_level", JSON.stringify("error"));
+
+    window.dispatchEvent(
+      new CustomEvent("owncord:pref-change", { detail: { key: "compactMode" } }),
+    );
+
+    const log = createLogger("test");
+    log.debug("kept — level unchanged");
+
+    expect(debugSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the current level when the pref is cleared", () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    setLogLevel("info");
+
+    window.dispatchEvent(
+      new CustomEvent("owncord:pref-change", { detail: { key: "logs_min_level" } }),
+    );
+
+    const log = createLogger("test");
+    log.info("kept");
+
+    expect(infoSpy).toHaveBeenCalledTimes(1);
   });
 });

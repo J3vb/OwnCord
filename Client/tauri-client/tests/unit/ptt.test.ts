@@ -485,7 +485,10 @@ describe("ptt-state event listener", () => {
     expect(capturedCallback).not.toBeNull();
     capturedCallback!({ payload: true }); // key pressed
 
-    expect(mockSetMuted).toHaveBeenCalledWith(false);
+    // setMuted is reached via a dynamic import of livekitSession
+    await vi.waitFor(() => {
+      expect(mockSetMuted).toHaveBeenCalledWith(false);
+    });
   });
 
   it("calls setMuted(true) when PTT is released (payload false) and in a voice channel", async () => {
@@ -506,7 +509,10 @@ describe("ptt-state event listener", () => {
 
     capturedCallback!({ payload: false }); // key released
 
-    expect(mockSetMuted).toHaveBeenCalledWith(true);
+    // setMuted is reached via a dynamic import of livekitSession
+    await vi.waitFor(() => {
+      expect(mockSetMuted).toHaveBeenCalledWith(true);
+    });
   });
 
   it("does not call setMuted when not in a voice channel", async () => {
@@ -527,6 +533,9 @@ describe("ptt-state event listener", () => {
 
     capturedCallback!({ payload: true });
 
+    // Flush pending microtasks so a (wrong) dynamic-import path would have
+    // had the chance to call setMuted before we assert it never happens.
+    await new Promise((r) => setTimeout(r, 0));
     expect(mockSetMuted).not.toHaveBeenCalled();
   });
 });

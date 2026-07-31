@@ -11,7 +11,7 @@ import (
 // unchanged.
 
 func (d *DB) InstallPlugin(ctx context.Context, name, version, manifestJSON string) (int64, error) {
-	res, err := d.sqlDB.ExecContext(ctx,
+	res, err := d.writer.ExecContext(ctx,
 		`INSERT INTO plugins (name, version, enabled, manifest_json) VALUES (?, ?, 0, ?)
 		 ON CONFLICT(name) DO UPDATE SET version = excluded.version, manifest_json = excluded.manifest_json`,
 		name, version, manifestJSON,
@@ -22,7 +22,7 @@ func (d *DB) InstallPlugin(ctx context.Context, name, version, manifestJSON stri
 	id, err := res.LastInsertId()
 	if err != nil || id == 0 {
 		// On conflict path LastInsertId may be 0; look up by name.
-		row := d.sqlDB.QueryRowContext(ctx, `SELECT id FROM plugins WHERE name = ?`, name)
+		row := d.reader.QueryRowContext(ctx, `SELECT id FROM plugins WHERE name = ?`, name)
 		if scanErr := row.Scan(&id); scanErr != nil {
 			return 0, fmt.Errorf("InstallPlugin lookup: %w", scanErr)
 		}
@@ -31,22 +31,22 @@ func (d *DB) InstallPlugin(ctx context.Context, name, version, manifestJSON stri
 }
 
 func (d *DB) EnablePlugin(ctx context.Context, id int64) error {
-	_, err := d.sqlDB.ExecContext(ctx, `UPDATE plugins SET enabled = 1 WHERE id = ?`, id)
+	_, err := d.writer.ExecContext(ctx, `UPDATE plugins SET enabled = 1 WHERE id = ?`, id)
 	return err
 }
 
 func (d *DB) DisablePlugin(ctx context.Context, id int64) error {
-	_, err := d.sqlDB.ExecContext(ctx, `UPDATE plugins SET enabled = 0 WHERE id = ?`, id)
+	_, err := d.writer.ExecContext(ctx, `UPDATE plugins SET enabled = 0 WHERE id = ?`, id)
 	return err
 }
 
 func (d *DB) UninstallPlugin(ctx context.Context, id int64) error {
-	_, err := d.sqlDB.ExecContext(ctx, `DELETE FROM plugins WHERE id = ?`, id)
+	_, err := d.writer.ExecContext(ctx, `DELETE FROM plugins WHERE id = ?`, id)
 	return err
 }
 
 func (d *DB) GetPlugin(ctx context.Context, id int64) (*PluginRow, error) {
-	row := d.sqlDB.QueryRowContext(ctx,
+	row := d.reader.QueryRowContext(ctx,
 		`SELECT id, name, version, enabled, manifest_json, installed_at FROM plugins WHERE id = ?`,
 		id,
 	)
@@ -54,7 +54,7 @@ func (d *DB) GetPlugin(ctx context.Context, id int64) (*PluginRow, error) {
 }
 
 func (d *DB) GetPluginByName(ctx context.Context, name string) (*PluginRow, error) {
-	row := d.sqlDB.QueryRowContext(ctx,
+	row := d.reader.QueryRowContext(ctx,
 		`SELECT id, name, version, enabled, manifest_json, installed_at FROM plugins WHERE name = ?`,
 		name,
 	)
@@ -62,7 +62,7 @@ func (d *DB) GetPluginByName(ctx context.Context, name string) (*PluginRow, erro
 }
 
 func (d *DB) ListPlugins(ctx context.Context) ([]PluginRow, error) {
-	rows, err := d.sqlDB.QueryContext(ctx,
+	rows, err := d.reader.QueryContext(ctx,
 		`SELECT id, name, version, enabled, manifest_json, installed_at FROM plugins ORDER BY name`,
 	)
 	if err != nil {
@@ -85,7 +85,7 @@ func (d *DB) ListPlugins(ctx context.Context) ([]PluginRow, error) {
 }
 
 func (d *DB) PluginKVGet(ctx context.Context, pluginID int64, key string) ([]byte, error) {
-	row := d.sqlDB.QueryRowContext(ctx,
+	row := d.reader.QueryRowContext(ctx,
 		`SELECT value FROM plugin_kv WHERE plugin_id = ? AND key = ?`,
 		pluginID, key,
 	)
@@ -97,7 +97,7 @@ func (d *DB) PluginKVGet(ctx context.Context, pluginID int64, key string) ([]byt
 }
 
 func (d *DB) PluginKVSet(ctx context.Context, pluginID int64, key string, value []byte) error {
-	_, err := d.sqlDB.ExecContext(ctx,
+	_, err := d.writer.ExecContext(ctx,
 		`INSERT INTO plugin_kv (plugin_id, key, value) VALUES (?, ?, ?)
 		 ON CONFLICT(plugin_id, key) DO UPDATE SET value = excluded.value`,
 		pluginID, key, value,
@@ -106,7 +106,7 @@ func (d *DB) PluginKVSet(ctx context.Context, pluginID int64, key string, value 
 }
 
 func (d *DB) PluginKVDelete(ctx context.Context, pluginID int64, key string) error {
-	_, err := d.sqlDB.ExecContext(ctx,
+	_, err := d.writer.ExecContext(ctx,
 		`DELETE FROM plugin_kv WHERE plugin_id = ? AND key = ?`,
 		pluginID, key,
 	)
@@ -114,7 +114,7 @@ func (d *DB) PluginKVDelete(ctx context.Context, pluginID int64, key string) err
 }
 
 func (d *DB) PluginKVScan(ctx context.Context, pluginID int64, prefix string, limit int) (map[string][]byte, error) {
-	rows, err := d.sqlDB.QueryContext(ctx,
+	rows, err := d.reader.QueryContext(ctx,
 		`SELECT key, value FROM plugin_kv WHERE plugin_id = ? AND key LIKE ? ORDER BY key LIMIT ?`,
 		pluginID, prefix+"%", limit,
 	)

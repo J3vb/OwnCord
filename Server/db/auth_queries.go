@@ -17,7 +17,7 @@ import (
 
 // CreateUser inserts a new user record and returns the assigned ID.
 func (d *DB) CreateUser(ctx context.Context, username, passwordHash string, roleID int) (int64, error) {
-	res, err := d.sqlDB.ExecContext(ctx,
+	res, err := d.writer.ExecContext(ctx,
 		`INSERT INTO users (username, password, role_id) VALUES (?, ?, ?)`,
 		username, passwordHash, roleID,
 	)
@@ -31,7 +31,7 @@ func (d *DB) CreateUser(ctx context.Context, username, passwordHash string, role
 // first owner in a single transaction. Returns ErrConflict if any user already
 // exists, closing the TOCTOU race in the setup endpoint (BUG-119).
 func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash string, roleID int) (int64, error) {
-	tx, err := d.sqlDB.BeginTx(ctx, nil)
+	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("CreateOwnerIfEmpty begin: %w", err)
 	}
@@ -73,7 +73,7 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 // CreateUserWithInvite atomically consumes an invite and creates the user in
 // the same transaction so a failed registration does not burn the invite.
 func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode string) (int64, error) {
-	tx, err := d.sqlDB.BeginTx(ctx, nil)
+	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("CreateUserWithInvite begin: %w", err)
 	}
@@ -326,7 +326,7 @@ func (d *DB) GetSessionsWithBanStatusBatch(ctx context.Context, tokenHashes []st
 			 WHERE s.token IN (%s)`,
 			strings.Join(placeholders, ","),
 		)
-		rows, err := d.sqlDB.QueryContext(ctx, query, args...)
+		rows, err := d.reader.QueryContext(ctx, query, args...)
 		if err != nil {
 			return nil, fmt.Errorf("GetSessionsWithBanStatusBatch: %w", err)
 		}

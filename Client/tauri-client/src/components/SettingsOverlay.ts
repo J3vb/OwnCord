@@ -11,10 +11,6 @@ import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
 import { uiStore } from "@stores/ui.store";
 import { authStore } from "@stores/auth.store";
-import { loadPref, applyTheme, THEMES } from "./settings/helpers";
-import type { ThemeName } from "./settings/helpers";
-import { getActiveThemeName, restoreTheme } from "@lib/themes";
-import { syncOsMotionListener } from "@lib/os-motion";
 import { buildAccountTab } from "./settings/AccountTab";
 import { buildAppearanceTab } from "./settings/AppearanceTab";
 import { buildNotificationsTab } from "./settings/NotificationsTab";
@@ -65,54 +61,6 @@ const TAB_ICONS: Record<TabName, IconName> = {
   Advanced: "settings",
   Logs: "scroll-text",
 };
-
-// ---------------------------------------------------------------------------
-// Apply stored appearance (called at app startup)
-// ---------------------------------------------------------------------------
-
-/**
- * Apply stored appearance preferences (theme, font size, compact mode).
- * Call at app startup so the UI doesn't flash default styles.
- */
-export function applyStoredAppearance(): void {
-  const activeThemeName = getActiveThemeName();
-  if (activeThemeName in THEMES) {
-    applyTheme(activeThemeName as ThemeName);
-  } else {
-    restoreTheme();
-  }
-  try {
-    const rawAccent = localStorage.getItem("owncord:settings:accentColor");
-    if (rawAccent !== null) {
-      const accent = JSON.parse(rawAccent);
-      if (typeof accent === "string" && /^#[\da-fA-F]{3,8}$/.test(accent)) {
-        document.documentElement.style.setProperty("--accent", accent);
-        document.body.style.setProperty("--accent", accent);
-      }
-    }
-  } catch {
-    // Corrupted localStorage — keep the theme default accent.
-  }
-  document.documentElement.style.setProperty(
-    "--font-size",
-    `${loadPref<number>("fontSize", 16)}px`,
-  );
-  document.documentElement.classList.toggle(
-    "compact-mode",
-    loadPref<boolean>("compactMode", false),
-  );
-  document.documentElement.classList.toggle(
-    "reduced-motion",
-    loadPref<boolean>("reducedMotion", false),
-  );
-  document.documentElement.classList.toggle(
-    "high-contrast",
-    loadPref<boolean>("highContrast", false),
-  );
-  document.documentElement.classList.toggle("large-font", loadPref<boolean>("largeFont", false));
-
-  syncOsMotionListener(loadPref<boolean>("syncOsMotion", false));
-}
 
 // ---------------------------------------------------------------------------
 // Factory

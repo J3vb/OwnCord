@@ -9,7 +9,7 @@ import { applyThemeByName } from "@lib/themes";
 // it without importing from the component layer. Re-exported here so the
 // settings tabs keep a single import site — and, critically, so both layers
 // share one implementation (they used to be copy-pasted and had drifted).
-export { STORAGE_PREFIX, loadPref, savePref } from "@lib/preferences";
+export { STORAGE_PREFIX, loadPref, savePref, readMigratedStringPref } from "@lib/preferences";
 
 // ---------------------------------------------------------------------------
 // Constants

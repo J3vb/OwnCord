@@ -47,11 +47,12 @@ func (d *DB) GetServerStats(ctx context.Context) (*ServerStats, error) {
 	// page_count * page_size gives the database size in bytes. PRAGMAs are not
 	// expressible as sqlc queries, so they stay on the raw connection.
 	// For :memory: databases this still works (returns the in-memory size).
+	// Both values are DB-wide, so reading them on the reader pool is fine.
 	var pageCount, pageSize int64
-	if err := d.sqlDB.QueryRowContext(ctx, `PRAGMA page_count`).Scan(&pageCount); err != nil {
+	if err := d.reader.QueryRowContext(ctx, `PRAGMA page_count`).Scan(&pageCount); err != nil {
 		return nil, fmt.Errorf("GetServerStats page_count: %w", err)
 	}
-	if err := d.sqlDB.QueryRowContext(ctx, `PRAGMA page_size`).Scan(&pageSize); err != nil {
+	if err := d.reader.QueryRowContext(ctx, `PRAGMA page_size`).Scan(&pageSize); err != nil {
 		return nil, fmt.Errorf("GetServerStats page_size: %w", err)
 	}
 	stats.DBSizeBytes = pageCount * pageSize
@@ -129,7 +130,7 @@ func (d *DB) GetUserSessions(ctx context.Context, userID int64) ([]Session, erro
 // AdminCreateChannel creates a channel with full field control including position.
 // No sqlc query covers this exact INSERT shape, so it stays on raw SQL.
 func (d *DB) AdminCreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error) {
-	res, err := d.sqlDB.ExecContext(ctx,
+	res, err := d.writer.ExecContext(ctx,
 		`INSERT INTO channels (name, type, category, topic, position)
 		 VALUES (?, ?, ?, ?, ?)`,
 		name, chanType, strToNullPtr(category), strToNullPtr(topic), position,
@@ -175,6 +176,64 @@ func (d *DB) LogAudit(ctx context.Context, actorID int64, action, targetType str
 		Detail:     detail,
 	}); err != nil {
 		return fmt.Errorf("LogAudit: %w", err)
+	}
+	return nil
+}
+
+// PersistAudits inserts a batch of audit entries in a single transaction with
+// one prepared insert, so the audit writer's flush pays for one fsync instead
+// of one per entry. Only the LogAudit-shaped fields are written — ID, ActorName
+// and CreatedAt on the input rows are ignored (the id autoincrements, the
+// created_at column defaults, and actor_name is a join product).
+//
+// Best-effort semantics mirror PersistEvents: if the batched transaction fails,
+// it falls back to per-row inserts so the good rows still land. Returns the
+// number of rows persisted and, when any row was lost, the first per-row error.
+func (d *DB) PersistAudits(ctx context.Context, entries []AuditEntry) (int, error) {
+	if len(entries) == 0 {
+		return 0, nil
+	}
+	if err := d.persistAuditsTx(ctx, entries); err == nil {
+		return len(entries), nil
+	}
+	// Fallback: insert rows individually so one bad row doesn't drop the batch.
+	persisted := 0
+	var firstErr error
+	for _, e := range entries {
+		if err := d.LogAudit(ctx, e.ActorID, e.Action, e.TargetType, e.TargetID, e.Detail); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		persisted++
+	}
+	return persisted, firstErr
+}
+
+// persistAuditsTx inserts all entries inside one transaction; any failure
+// rolls the whole batch back.
+func (d *DB) persistAuditsTx(ctx context.Context, entries []AuditEntry) error {
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("PersistAudits begin tx: %w", err)
+	}
+	stmt, err := tx.PrepareContext(ctx,
+		`INSERT INTO audit_log (actor_id, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?)`,
+	)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("PersistAudits prepare: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+	for _, e := range entries {
+		if _, err := stmt.ExecContext(ctx, e.ActorID, e.Action, e.TargetType, e.TargetID, e.Detail); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("PersistAudits insert action %q: %w", e.Action, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("PersistAudits commit: %w", err)
 	}
 	return nil
 }
@@ -311,7 +370,7 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 		return fmt.Errorf("BackupToSafe: path contains forbidden sequence %q", "--")
 	}
 
-	_, err = d.sqlDB.ExecContext(ctx, fmt.Sprintf("VACUUM INTO '%s'", absClean))
+	_, err = d.writer.ExecContext(ctx, fmt.Sprintf("VACUUM INTO '%s'", absClean))
 	if err != nil {
 		return fmt.Errorf("BackupToSafe: %w", err)
 	}

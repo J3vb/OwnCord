@@ -232,6 +232,22 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 		}()
 	}
 
+	// ── 5d. Async audit writer ─────────────────────────────────────────────
+	// Moves audit-log INSERTs off the request path: once the writer is
+	// installed, WriteAudit enqueues here and a background goroutine batches
+	// the writes (same shape as the event persister above). Paths that never
+	// install a writer — the token CLI, tests — keep the synchronous
+	// behavior. This defer is registered after `defer database.Close()` so
+	// LIFO ordering drains the queue before the database is torn down.
+	auditWriter := db.NewAuditWriter(database, 1024, 50, 100*time.Millisecond)
+	auditWriter.Start(bgCtx)
+	database.SetAuditWriter(auditWriter)
+	defer func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stopCancel()
+		auditWriter.Stop(stopCtx)
+	}()
+
 	// ── 6. Start server ────────────────────────────────────────────────────
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	srv := &http.Server{

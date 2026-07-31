@@ -257,7 +257,7 @@ func (d *DB) UpdateVoiceScreenshare(ctx context.Context, userID int64, screensha
 // voice channel.
 func (d *DB) CountChannelVoiceUsers(ctx context.Context, channelID int64) (int, error) {
 	var count int
-	err := d.sqlDB.QueryRowContext(ctx,
+	err := d.reader.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM voice_states WHERE channel_id = ?`,
 		channelID,
 	).Scan(&count)

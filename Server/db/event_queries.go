@@ -19,7 +19,7 @@ import (
 // seq always matches the wrapped-payload seq, even if the persister drops
 // some events under load.
 func (d *DB) PersistEvent(ctx context.Context, seq int64, eventType string, channelID int64, payload []byte) error {
-	_, err := d.sqlDB.ExecContext(ctx,
+	_, err := d.writer.ExecContext(ctx,
 		`INSERT INTO events (seq, event_type, channel_id, payload) VALUES (?, ?, ?, ?)`,
 		seq, eventType, channelID, payload,
 	)
@@ -62,7 +62,7 @@ func (d *DB) PersistEvents(ctx context.Context, events []PersistedEvent) (int, e
 // persistEventsTx inserts all events inside one transaction; any failure
 // rolls the whole batch back.
 func (d *DB) persistEventsTx(ctx context.Context, events []PersistedEvent) error {
-	tx, err := d.sqlDB.BeginTx(ctx, nil)
+	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("PersistEvents begin tx: %w", err)
 	}
@@ -88,7 +88,7 @@ func (d *DB) persistEventsTx(ctx context.Context, events []PersistedEvent) error
 
 // GetEventsSince returns events with seq > afterSeq up to limit, ordered ASC.
 func (d *DB) GetEventsSince(ctx context.Context, afterSeq int64, limit int) ([]PersistedEvent, error) {
-	rows, err := d.sqlDB.QueryContext(ctx,
+	rows, err := d.reader.QueryContext(ctx,
 		`SELECT seq, event_type, channel_id, payload, created_at
 		   FROM events
 		  WHERE seq > ?
@@ -109,7 +109,7 @@ func (d *DB) GetEventsSinceForChannels(ctx context.Context, afterSeq int64, chan
 	// Build IN clause manually since database/sql does not expand slices.
 	if len(channelIDs) == 0 {
 		// Only global broadcasts.
-		rows, err := d.sqlDB.QueryContext(ctx,
+		rows, err := d.reader.QueryContext(ctx,
 			`SELECT seq, event_type, channel_id, payload, created_at
 			   FROM events
 			  WHERE seq > ? AND channel_id = 0
@@ -142,7 +142,7 @@ func (d *DB) GetEventsSinceForChannels(ctx context.Context, afterSeq int64, chan
 		  LIMIT ?`,
 		strings.Join(placeholders, ","),
 	)
-	rows, err := d.sqlDB.QueryContext(ctx, query, args...)
+	rows, err := d.reader.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetEventsSinceForChannels: %w", err)
 	}
@@ -153,7 +153,7 @@ func (d *DB) GetEventsSinceForChannels(ctx context.Context, afterSeq int64, chan
 // GetMaxEventSeq returns the largest seq in the events table, or 0 if empty.
 func (d *DB) GetMaxEventSeq(ctx context.Context) (int64, error) {
 	var maxSeq sql.NullInt64
-	err := d.sqlDB.QueryRowContext(ctx, `SELECT MAX(seq) FROM events`).Scan(&maxSeq)
+	err := d.reader.QueryRowContext(ctx, `SELECT MAX(seq) FROM events`).Scan(&maxSeq)
 	if err != nil {
 		return 0, fmt.Errorf("GetMaxEventSeq: %w", err)
 	}
@@ -165,7 +165,7 @@ func (d *DB) GetMaxEventSeq(ctx context.Context) (int64, error) {
 
 // PruneEventsOlderThan deletes events older than cutoff. Returns rows deleted.
 func (d *DB) PruneEventsOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
-	res, err := d.sqlDB.ExecContext(ctx,
+	res, err := d.writer.ExecContext(ctx,
 		`DELETE FROM events WHERE created_at < ?`,
 		cutoff.UTC().Format("2006-01-02 15:04:05"),
 	)
