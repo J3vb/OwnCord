@@ -238,16 +238,17 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 			continue
 		}
 		var visible bool
-		if ch.Archived {
+		switch {
+		case ch.Archived:
 			// Archived channels are hidden from every client regardless of
 			// permissions, mirroring VisibleChannelIDs.
 			visible = false
-		} else if h.perms != nil {
+		case h.perms != nil:
 			// The service resolves the user's CURRENT role internally (c.user
 			// is a connect-time snapshot), failing closed — an unresolvable
 			// role loses visibility rather than keeping a stale grant.
 			visible = h.perms.HasChannelPerm(ctx, c.user.ID, ch.ID, permissions.ReadMessages)
-		} else {
+		default:
 			// c.user is a connect-time snapshot; an admin may have changed the
 			// user's role mid-session, so resolve the current role from the DB.
 			// Fail closed: on error send nothing rather than mis-target.
