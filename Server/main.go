@@ -89,7 +89,7 @@ func run(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar) er
 	}
 
 	// ── 1. Load configuration ──────────────────────────────────────────────
-	cfg, err := config.Load("config.yaml")
+	cfg, err := config.Load(config.DefaultPath)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}

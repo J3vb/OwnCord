@@ -64,7 +64,7 @@ That keeps iteration fast, and it also means behaviour can change quickly betwee
 2. Run the server binary:
    - Windows: `chatserver.exe`
    - Linux: `./chatserver`
-3. Open `https://localhost:8443/admin` and create your Owner account.
+3. Open `https://localhost:8443/admin` and complete the setup wizard — it creates your Owner account and configures the server for you (settings are saved to `config.yaml` automatically).
 4. Generate invite codes in the admin panel and share them with friends.
 
 ### Option B: Docker (Linux server)

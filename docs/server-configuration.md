@@ -12,6 +12,18 @@ Configuration is loaded in three layers (later layers override earlier ones):
 2. **YAML file** (`config.yaml`)
 3. **Environment variables** (prefix: `OWNCORD_`)
 
+### First-run setup wizard
+
+The admin panel's first-time setup wizard (shown at `/admin` until the Owner
+account exists) writes a subset of these keys into `config.yaml` for you:
+`server.port`, `server.name`, `tls.mode`, `tls.domain`, `upload.max_size_mb`
+and `voice.quality`. It also persists the auto-generated
+`voice.livekit_api_key` / `voice.livekit_api_secret` (only when the file has
+none) so voice tokens survive restarts. The wizard patches the file in place —
+comments and hand-edited values it doesn't manage are preserved — and restarts
+the server automatically when a startup-only value changed. Note that
+`OWNCORD_*` environment variables still override anything the wizard writes.
+
 ## Config Key Reference
 
 ### Server (`server`)

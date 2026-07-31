@@ -346,7 +346,7 @@ func TestHandleGetSettings_DBError(t *testing.T) {
 // when the database query fails.
 func TestHandleSetupStatus_DBError(t *testing.T) {
 	database := openWhiteboxTestDB(t)
-	handler := handleSetupStatus(database)
+	handler := handleSetupStatus(database, SetupOptions{})
 
 	_ = database.Close()
 
