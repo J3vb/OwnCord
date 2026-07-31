@@ -423,9 +423,10 @@ describe("fetchImageAsDataUrl — network fetch failure", () => {
     });
 
     // A server URL is rewritten to the loopback proxy origin (path + query
-    // preserved) and carries no danger option — the proxy pins the cert.
+    // preserved) and carries no danger option — the proxy pins the cert. The
+    // bearer token rides along when a session exists (none in this test).
     await fetchImageAsDataUrl("https://myserver.local:8443/img.png");
-    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:9999/img.png");
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:9999/img.png", { headers: {} });
 
     fetchMock.mockReset();
     clearAttachmentCaches();
