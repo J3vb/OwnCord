@@ -45,7 +45,9 @@ const log = createLogger("main");
 // module is necessarily already loaded, so this import resolves from the
 // module cache in a microtask.
 function voiceSessionLeave(sendWsLeave: boolean): void {
-  void import("@lib/livekitSession").then(({ leaveVoice }) => leaveVoice(sendWsLeave));
+  void import("@lib/livekitSession")
+    .then(({ leaveVoice }) => leaveVoice(sendWsLeave))
+    .catch((e) => log.warn("Failed to leave voice session", e));
 }
 
 // Disable the default browser context menu globally.
@@ -116,6 +118,11 @@ const ws = createWsClient();
 wireConnectionStatus(ws);
 const profileManager = createProfileManager(createTauriBackend());
 let dispatcherCleanup: (() => void) | null = null;
+// Tears down the session-scoped WS listeners registered in wirePostAuth
+// (user_update, onStateChange, ready). dispatcherCleanup only clears
+// dispatcher-registered handlers, so these need their own teardown to avoid
+// accumulating across login/logout/retry cycles.
+let sessionCleanup: (() => void) | null = null;
 let connectedOverlay: ConnectedOverlayControl | null = null;
 let lastConnectHost = "";
 let lastConnectToken = "";
@@ -279,6 +286,15 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     rememberPassword = true,
   ): void {
     log.info("Post-auth wiring", { host, username });
+    // Tear down any prior session wiring so listeners and the connected
+    // overlay never stack across a retry (a second wirePostAuth without an
+    // intervening logout).
+    sessionCleanup?.();
+    sessionCleanup = null;
+    dispatcherCleanup?.();
+    dispatcherCleanup = null;
+    connectedOverlay?.destroy();
+    connectedOverlay = null;
     api.setConfig({ token });
     // Store token in authStore so the dispatcher's auth_ok handler has it
     authStore.setState((prev) => ({ ...prev, token }));
@@ -287,6 +303,10 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     ws.connect({ host, token });
     dispatcherCleanup = wireDispatcher(ws, api);
     log.info("Dispatcher wired, connecting WS");
+
+    // Session-scoped WS listeners — collected so they're all removed together
+    // on logout/disconnect (or the next wirePostAuth).
+    const sessionUnsubs: Array<() => void> = [];
 
     // BUG-135: Only persist credentials when the user opted in.
     if (rememberPassword) {
@@ -303,25 +323,31 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     }
 
     // Update saved credentials when the current user changes their username.
-    ws.on("user_update", (payload) => {
-      const currentUserId = authStore.getState().user?.id ?? 0;
-      if (payload.user_id === currentUserId) {
-        const currentToken = authStore.getState().token;
-        if (currentToken) {
-          void saveCredential(host, payload.username, currentToken);
+    sessionUnsubs.push(
+      ws.on("user_update", (payload) => {
+        const currentUserId = authStore.getState().user?.id ?? 0;
+        if (payload.user_id === currentUserId) {
+          const currentToken = authStore.getState().token;
+          if (currentToken) {
+            void saveCredential(host, payload.username, currentToken);
+          }
         }
-      }
-    });
+      }),
+    );
 
     const unsubState = ws.onStateChange((wsState) => {
       log.debug("WS state change", { state: wsState });
       if (wsState === "connected") {
+        // Stop listening once connected so a later transition can't fire this
+        // handler again (which would append a second overlay).
         unsubState();
         // Pre-warm the lazily-loaded MainPage chunk (and the LiveKit stack
         // behind it) so navigating past the connected overlay doesn't wait
         // on a dynamic import.
         void import("@pages/MainPage");
         const auth = authStore.getState();
+        // Ensure exactly one overlay exists at a time.
+        connectedOverlay?.destroy();
         connectedOverlay = createConnectedOverlay({
           serverName: auth.serverName ?? host,
           username: auth.user?.username ?? username,
@@ -339,8 +365,20 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           unsubReady();
           connectedOverlay?.markReady();
         });
+        sessionUnsubs.push(unsubReady);
+      } else if (wsState === "disconnected") {
+        // Terminal non-connected transition (auth_error, cert-mismatch reject,
+        // or intentional disconnect before ever connecting): drop the handler
+        // so it doesn't linger and fire on a later connect.
+        unsubState();
       }
     });
+    sessionUnsubs.push(unsubState);
+
+    sessionCleanup = () => {
+      for (const unsub of sessionUnsubs) unsub();
+      sessionUnsubs.length = 0;
+    };
   }
 
   // Track partial auth state for TOTP flow
@@ -578,6 +616,8 @@ authStore.subscribeSelector(
       }
       dispatcherCleanup?.();
       dispatcherCleanup = null;
+      sessionCleanup?.();
+      sessionCleanup = null;
       ws.disconnect();
       lastConnectToken = "";
       lastConnectHost = "";

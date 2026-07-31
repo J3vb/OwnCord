@@ -6,12 +6,14 @@ const {
   mockClearLogBuffer,
   mockAddLogListener,
   mockSetLogLevel,
+  mockGetLogLevel,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 } = vi.hoisted(() => ({
   mockGetLogBuffer: vi.fn<any>(),
   mockClearLogBuffer: vi.fn<any>(),
   mockAddLogListener: vi.fn<any>(),
   mockSetLogLevel: vi.fn<any>(),
+  mockGetLogLevel: vi.fn<any>(),
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -19,6 +21,7 @@ vi.mock("@lib/logger", () => ({
   clearLogBuffer: mockClearLogBuffer,
   addLogListener: mockAddLogListener,
   setLogLevel: mockSetLogLevel,
+  getLogLevel: mockGetLogLevel,
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
@@ -46,6 +49,7 @@ describe("LogsTab", () => {
     controller = new AbortController();
     mockGetLogBuffer.mockReturnValue([]);
     mockAddLogListener.mockReturnValue(() => {});
+    mockGetLogLevel.mockReturnValue("info");
   });
 
   afterEach(() => {
@@ -246,6 +250,20 @@ describe("LogsTab", () => {
 
     expect(filterSelect.value).toBe("warn");
     expect(localStorage.getItem("owncord:settings:logs_filter_level")).toBe('"warn"');
+  });
+
+  it("defaults min-level select to the effective runtime level when no pref is saved", () => {
+    mockGetLogBuffer.mockReturnValue([]);
+    localStorage.clear();
+    mockGetLogLevel.mockReturnValue("info");
+
+    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
+    const el = handle.build();
+    const levelSelect = el.querySelectorAll("select")[1]!;
+
+    // Reflects getLogLevel() rather than the first option (DEBUG); no save/apply.
+    expect(levelSelect.value).toBe("info");
+    expect(mockSetLogLevel).not.toHaveBeenCalled();
   });
 
   it("restores legacy unprefixed min level and migrates it", () => {

@@ -117,6 +117,16 @@ export function setLogLevel(level: LogLevel): void {
   currentLevel = level;
 }
 
+/**
+ * Get the current effective minimum log level (as applied by applyStoredLogLevel
+ * / setLogLevel). Reflects the real runtime level, which may differ from any
+ * saved "logs_min_level" pref when none is stored (dev defaults to debug,
+ * production to info).
+ */
+export function getLogLevel(): LogLevel {
+  return currentLevel;
+}
+
 const LOG_LEVELS: readonly LogLevel[] = ["debug", "info", "warn", "error"];
 
 /** Pref key for the minimum level persisted by the Logs settings tab. */

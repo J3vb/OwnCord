@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   createLogger,
   setLogLevel,
+  getLogLevel,
   applyStoredLogLevel,
   addLogListener,
   getLogBuffer,
@@ -152,6 +153,19 @@ describe("logger", () => {
 
     clearLogBuffer();
     expect(getLogBuffer().length).toBe(0);
+  });
+
+  it("getLogLevel reflects the current effective level", () => {
+    setLogLevel("warn");
+    expect(getLogLevel()).toBe("warn");
+    setLogLevel("error");
+    expect(getLogLevel()).toBe("error");
+  });
+
+  it("getLogLevel reflects the applyStoredLogLevel fallback when no pref is stored", () => {
+    localStorage.clear();
+    applyStoredLogLevel("info");
+    expect(getLogLevel()).toBe("info");
   });
 
   it("passes empty string instead of undefined when no data", () => {
