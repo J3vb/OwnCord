@@ -35,6 +35,17 @@ export function setBlockedByMe(userIds: readonly number[]): void {
   blocksStore.setState((prev) => ({ ...prev, blockedByMe: new Set(userIds) }));
 }
 
+/** Mark (or unmark) a user as blocked by the local user (after PUT/DELETE /blocks). */
+export function setUserBlockedByMe(userId: number, blocked: boolean): void {
+  blocksStore.setState((prev) => {
+    if (prev.blockedByMe.has(userId) === blocked) return prev;
+    const next = new Set(prev.blockedByMe);
+    if (blocked) next.add(userId);
+    else next.delete(userId);
+    return { ...prev, blockedByMe: next };
+  });
+}
+
 /** Mark (or unmark) a recipient as having refused our DM. */
 export function setUserBlockedByThem(userId: number, blocked: boolean): void {
   blocksStore.setState((prev) => {

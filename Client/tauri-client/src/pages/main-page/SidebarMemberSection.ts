@@ -8,6 +8,7 @@ import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { createMemberList } from "@components/MemberList";
 import { authStore } from "@stores/auth.store";
+import { setUserBlockedByMe } from "@stores/blocks.store";
 import { getRoleIdByName } from "@stores/channels.store";
 import type { ApiClient } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
@@ -26,6 +27,8 @@ const LS_KEY_COLLAPSED = "owncord:member-list-collapsed";
 export interface SidebarMemberSectionOptions {
   readonly api: ApiClient;
   readonly getToast: () => ToastContainer | null;
+  /** Start a DM with a user (profile popup's Message button). */
+  readonly onMessageUser?: (userId: number) => void;
 }
 
 export interface SidebarMemberSectionResult {
@@ -44,7 +47,7 @@ export interface SidebarMemberSectionResult {
 export function createSidebarMemberSection(
   opts: SidebarMemberSectionOptions,
 ): SidebarMemberSectionResult {
-  const { api, getToast } = opts;
+  const { api, getToast, onMessageUser } = opts;
   const unsubs: Array<() => void> = [];
 
   // --- Container ---
@@ -147,6 +150,7 @@ export function createSidebarMemberSection(
   // --- Member list component ---
   const memberList = createMemberList({
     currentUserRole: authStore.getState().user?.role ?? "member",
+    ...(onMessageUser !== undefined ? { onMessageUser } : {}),
     onKick: async (userId, username) => {
       try {
         await api.adminKickMember(userId);
@@ -156,12 +160,30 @@ export function createSidebarMemberSection(
         getToast()?.show(msg, "error");
       }
     },
-    onBan: async (userId, username, reason) => {
+    onBan: async (userId, username, reason, durationHours) => {
       try {
-        await api.adminBanMember(userId, reason);
-        getToast()?.show(`Banned ${username}`, "success");
+        await api.adminBanMember(userId, reason, durationHours);
+        getToast()?.show(
+          durationHours > 0 ? `Banned ${username} for ${durationHours}h` : `Banned ${username}`,
+          "success",
+        );
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed to ban member";
+        getToast()?.show(msg, "error");
+      }
+    },
+    onToggleBlock: async (userId, username, block) => {
+      try {
+        if (block) {
+          await api.blockUser(userId);
+        } else {
+          await api.unblockUser(userId);
+        }
+        setUserBlockedByMe(userId, block);
+        getToast()?.show(block ? `Blocked ${username}` : `Unblocked ${username}`, "success");
+      } catch (err) {
+        const fallback = block ? "Failed to block user" : "Failed to unblock user";
+        const msg = err instanceof Error ? err.message : fallback;
         getToast()?.show(msg, "error");
       }
     },

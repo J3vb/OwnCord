@@ -45,7 +45,7 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 	refs := make([]permissions.ChannelRef, len(channels))
 	for i := range channels {
-		refs[i] = permissions.ChannelRef{ID: channels[i].ID, Type: channels[i].Type}
+		refs[i] = permissions.ChannelRef{ID: channels[i].ID, Type: channels[i].Type, Archived: channels[i].Archived}
 	}
 	return refs
 }
@@ -142,6 +142,7 @@ func (h *Hub) buildReady(ctx context.Context, database *db.DB, userID int64, rol
 			"name":     visibleChannels[i].Name,
 			"type":     visibleChannels[i].Type,
 			"category": visibleChannels[i].Category,
+			"topic":    visibleChannels[i].Topic,
 			"position": visibleChannels[i].Position,
 			// can_send drives the client's composer affordance. It mirrors
 			// MessageService.checkSendPermission for non-DM channels: base role

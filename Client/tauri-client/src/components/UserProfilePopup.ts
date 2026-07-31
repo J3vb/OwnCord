@@ -14,6 +14,7 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
 import { isSafeUrl } from "./message-list/attachments";
+import { roleColorVar } from "./message-list/formatting";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -66,13 +67,6 @@ const STATUS_LABELS: Record<UserStatus, string> = {
   idle: "Idle",
   dnd: "Do Not Disturb",
   offline: "Offline",
-};
-
-const ROLE_COLORS: Record<string, string> = {
-  owner: "#e74c3c",
-  admin: "#f39c12",
-  moderator: "#2ecc71",
-  member: "#949ba4",
 };
 
 // ---------------------------------------------------------------------------
@@ -210,7 +204,7 @@ export function createUserProfilePopup(
     // Role badge
     const roleBadge = createElement("span", { class: "upp-role-badge" });
     const roleDot = createElement("span", { class: "upp-role-dot" });
-    roleDot.style.background = ROLE_COLORS[user.role] ?? ROLE_COLORS.member ?? "";
+    roleDot.style.background = roleColorVar(user.role.toLowerCase());
     const roleLabel = createElement(
       "span",
       {},
@@ -244,53 +238,54 @@ export function createUserProfilePopup(
     // Divider
     const divider = createElement("div", { class: "upp-divider" });
 
-    // Actions
+    // Actions — only render buttons that are actually wired up, so the popup
+    // never shows a dead control (e.g. Call before DM calls exist, or Message
+    // on your own profile).
     const actions = createElement("div", { class: "upp-actions" });
 
-    const messageBtn = createElement("button", {
-      class: "upp-action-btn",
-      "data-testid": "upp-message-btn",
-    });
-    messageBtn.appendChild(createIcon("send", 16));
-    messageBtn.appendChild(document.createTextNode(" Message"));
-    messageBtn.addEventListener(
-      "click",
-      () => {
-        options.onMessage?.(user.id);
-        close();
-      },
-      { signal },
-    );
+    if (options.onMessage !== undefined) {
+      const onMessage = options.onMessage;
+      const messageBtn = createElement("button", {
+        class: "upp-action-btn",
+        "data-testid": "upp-message-btn",
+      });
+      messageBtn.appendChild(createIcon("send", 16));
+      messageBtn.appendChild(document.createTextNode(" Message"));
+      messageBtn.addEventListener(
+        "click",
+        () => {
+          onMessage(user.id);
+          close();
+        },
+        { signal },
+      );
+      actions.appendChild(messageBtn);
+    }
 
-    const callBtn = createElement("button", {
-      class: "upp-action-btn",
-      "data-testid": "upp-call-btn",
-    });
-    callBtn.appendChild(createIcon("phone", 16));
-    callBtn.appendChild(document.createTextNode(" Call"));
-    callBtn.addEventListener(
-      "click",
-      () => {
-        options.onCall?.(user.id);
-        close();
-      },
-      { signal },
-    );
-
-    appendChildren(actions, messageBtn, callBtn);
+    if (options.onCall !== undefined) {
+      const onCall = options.onCall;
+      const callBtn = createElement("button", {
+        class: "upp-action-btn",
+        "data-testid": "upp-call-btn",
+      });
+      callBtn.appendChild(createIcon("phone", 16));
+      callBtn.appendChild(document.createTextNode(" Call"));
+      callBtn.addEventListener(
+        "click",
+        () => {
+          onCall(user.id);
+          close();
+        },
+        { signal },
+      );
+      actions.appendChild(callBtn);
+    }
 
     // Assemble popup
-    appendChildren(
-      popup,
-      avatar,
-      nameEl,
-      roleBadge,
-      statusLine,
-      aboutSection,
-      joinSection,
-      divider,
-      actions,
-    );
+    appendChildren(popup, avatar, nameEl, roleBadge, statusLine, aboutSection, joinSection);
+    if (actions.childElementCount > 0) {
+      appendChildren(popup, divider, actions);
+    }
 
     overlay.appendChild(popup);
     container.appendChild(overlay);

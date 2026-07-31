@@ -460,6 +460,15 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       if (chatHeaderName !== null) {
         setText(chatHeaderName, channelName);
       }
+      // Show the channel topic and keep it live across channel_update events.
+      const topicEl = chatHeaderRefs.topicEl;
+      setText(topicEl, channelsStore.getState().channels.get(channelId)?.topic ?? "");
+      composerGatingUnsubs.push(
+        channelsStore.subscribeSelector(
+          (s) => s.channels.get(channelId)?.topic ?? "",
+          (topic) => setText(topicEl, topic),
+        ),
+      );
     } else if (chatHeaderName !== null) {
       setText(chatHeaderName, channelName);
     }

@@ -74,6 +74,7 @@ describe("channels store", () => {
         unreadCount: 3,
         lastMessageId: 100,
         canSend: true,
+        topic: "",
         slowMode: 0,
       });
 
@@ -87,6 +88,7 @@ describe("channels store", () => {
         unreadCount: 0,
         lastMessageId: null,
         canSend: true,
+        topic: "",
         slowMode: 0,
       });
     });
@@ -125,6 +127,7 @@ describe("channels store", () => {
         unreadCount: 0,
         lastMessageId: null,
         canSend: true,
+        topic: "",
         slowMode: 0,
       });
     });
@@ -289,6 +292,7 @@ describe("channels store", () => {
         unreadCount: 0,
         lastMessageId: 100,
         canSend: true,
+        topic: "",
         slowMode: 0,
       });
     });

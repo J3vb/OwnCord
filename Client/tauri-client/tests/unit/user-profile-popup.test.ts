@@ -68,6 +68,8 @@ describe("UserProfilePopup", () => {
       user,
       anchorX: 100,
       anchorY: 100,
+      onMessage: () => {},
+      onCall: () => {},
     });
     popup.mount(container);
 
@@ -83,11 +85,25 @@ describe("UserProfilePopup", () => {
     const avatar = container.querySelector(".upp-avatar span");
     expect(avatar?.textContent).toBe("B");
 
-    // Message and Call buttons
+    // Message and Call buttons render when handlers are wired
     const msgBtn = container.querySelector('[data-testid="upp-message-btn"]');
     expect(msgBtn).not.toBeNull();
     const callBtn = container.querySelector('[data-testid="upp-call-btn"]');
     expect(callBtn).not.toBeNull();
+
+    popup.destroy?.();
+  });
+
+  it("omits action buttons that have no handler", () => {
+    const popup = createUserProfilePopup({
+      user: makeUser(),
+      anchorX: 100,
+      anchorY: 100,
+    });
+    popup.mount(container);
+
+    expect(container.querySelector('[data-testid="upp-message-btn"]')).toBeNull();
+    expect(container.querySelector('[data-testid="upp-call-btn"]')).toBeNull();
 
     popup.destroy?.();
   });

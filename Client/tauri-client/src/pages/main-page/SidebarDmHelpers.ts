@@ -76,6 +76,7 @@ export function addDmToChannelsStore(dmChannel: DmChannel): void {
     // top by the composer via blocks.store (see ChannelController), not canSend.
     canSend: true,
     slowMode: 0,
+    topic: "",
   };
   channelsStore.setState((prev) => {
     const next = new Map(prev.channels);

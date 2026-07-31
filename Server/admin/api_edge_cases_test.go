@@ -58,6 +58,48 @@ func TestAdminAPI_PatchUser_UnbanUser(t *testing.T) {
 	}
 }
 
+// TestAdminAPI_PatchUser_TempBan verifies that ban_duration_hours stores an
+// expiry so the ban lapses on its own.
+func TestAdminAPI_PatchUser_TempBan(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
+	token := createAdminUser(t, database)
+
+	targetUID, _ := database.CreateUser(context.Background(), "tempbanme", "hash", 3)
+
+	body := map[string]any{"banned": true, "ban_reason": "cooling off", "ban_duration_hours": 24}
+	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("temp ban status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	user, _ := database.GetUserByID(context.Background(), targetUID)
+	if !user.Banned {
+		t.Fatal("user should be banned")
+	}
+	if user.BanExpires == nil {
+		t.Fatal("ban_expires should be set for a temporary ban")
+	}
+}
+
+// TestAdminAPI_PatchUser_TempBanOutOfRange verifies duration bounds are enforced.
+func TestAdminAPI_PatchUser_TempBanOutOfRange(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestModService(database))
+	token := createAdminUser(t, database)
+
+	targetUID, _ := database.CreateUser(context.Background(), "toolongban", "hash", 3)
+
+	for _, hours := range []int{-1, 24*365 + 1} {
+		body := map[string]any{"banned": true, "ban_duration_hours": hours}
+		w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("ban_duration_hours=%d status = %d, want 400; body: %s", hours, w.Code, w.Body.String())
+		}
+	}
+}
+
 // TestAdminAPI_PatchUser_InvalidBody verifies that a non-JSON body returns 400.
 func TestAdminAPI_PatchUser_InvalidBody(t *testing.T) {
 	database := openAdminTestDB(t)
